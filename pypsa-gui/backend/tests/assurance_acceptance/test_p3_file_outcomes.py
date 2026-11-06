@@ -52,14 +52,55 @@ def test_a_netcdf_import_of_a_template_is_completed(baseline, harness):
     result = _stream(
         harness, "import_network_nc", {"bytes_b64": _b64(data), "filename": "t.nc"}
     )
-    rows = _n_rows(_live())
-    assert result["_outcome"] == {
-        "version": 1,
-        "outcome": "completed",
-        "reason": None,
-        "counts": {"requested": rows, "done": rows, "extra": 0, "allowed_extras": []},
-    }
+    out = result["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("completed", None)
+    # Only the rows the import had to change count (E2): the standard line and
+    # transformer types are already in every network, equal to the file's.
+    assert 0 < out["counts"]["requested"] == out["counts"]["done"] < _n_rows(_live())
+    assert out["counts"]["extra"] == 0 and out["counts"]["allowed_extras"] == []
     assert len(_live().snapshots) == 168
+
+
+def test_an_import_that_does_nothing_reads_failed(baseline, harness, monkeypatch):
+    # GK B (26) E2: an unchanged live state never reads partial.
+    import routers.io as io_router
+
+    async def nothing(file, db=None, session=None):
+        return {"buses": 0}
+
+    monkeypatch.setattr(io_router, "import_netcdf", nothing)
+    out = _stream(harness, "import_network_nc", {"bytes_b64": _b64(_template_bytes())})[
+        "_outcome"
+    ]
+    assert (out["outcome"], out["reason"]) == ("failed", None)
+
+
+def test_reimporting_the_live_network_reads_completed(baseline, harness):
+    # D5: an unchanged state that already is the file reads completed.
+    data = _template_bytes()
+    chat_tools.import_network_nc(_b64(data), "t.nc")
+    out = _stream(harness, "import_network_nc", {"bytes_b64": _b64(data)})["_outcome"]
+    assert out["outcome"] == "completed", out
+    assert out["counts"]["requested"] == 0
+
+
+def test_an_edit_between_import_and_read_back_reads_uncertain(
+    baseline, harness, monkeypatch
+):
+    # GK B (26) E3: the read-back's revision must equal the note's.
+    from services import dirty_state
+
+    real = outcomes.read_import
+
+    def bumped(note):
+        dirty_state.bump_revision(PyPSAService.get_active_context())
+        return real(note)
+
+    monkeypatch.setattr(outcomes, "read_import", bumped)
+    out = _stream(harness, "import_network_nc", {"bytes_b64": _b64(_template_bytes())})[
+        "_outcome"
+    ]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "revision_moved")
 
 
 def test_a_csv_bundle_import_of_a_template_is_completed(baseline, harness):
@@ -202,11 +243,18 @@ def test_a_refused_import_is_a_tool_error_with_no_outcome(baseline, harness):
 # ── Exports (X5) ─────────────────────────────────────────────────────────
 
 
-@pytest.fixture
-def template_in_project(baseline):
-    """The datacenter template in the bound baseline project, read as a load would."""
+@pytest.fixture(params=["loaded", "in_memory"])
+def template_in_project(baseline, request):
+    """The datacenter template in the bound baseline project: read as a load would,
+    or built in memory as a template or edit leaves it (GK B (26) E1)."""
+    from project_templates.eh_templates import build_eh_datacenter
+
     ctx = PyPSAService.get_active_context()
-    ctx.network = outcomes._load_netcdf(_template_bytes())
+    ctx.network = (
+        outcomes._load_netcdf(_template_bytes())
+        if request.param == "loaded"
+        else build_eh_datacenter()
+    )
     assert PyPSAService.get_loaded_project()
     return ctx
 
@@ -397,18 +445,30 @@ def test_match_reads_a_list_cell_it_cannot_order_as_uncomparable_or_false():
 # ── Pure classifiers ─────────────────────────────────────────────────────
 
 
-def _inote():
-    return {"tool": "import_network_nc", "format": "netcdf", "expected": object()}
+_NEED = [("Bus", "a"), ("Bus", "b"), ("Load", "l"), ("Generator", "g")]
+
+
+def _inote(**kw):
+    return {
+        "tool": "import_network_nc",
+        "format": "netcdf",
+        "expected": object(),
+        "revision": 3,
+        "digest_before": "before",
+        "need": _NEED,
+        "file_rows": 6,
+        **kw,
+    }
 
 
 def _iread(**kw):
     return {
         "revision_start": 3,
         "revision_end": 3,
-        "requested": 4,
-        "missing": 0,
+        "missing": [],
         "extras": [],
         "match": True,
+        "digest": "after",
         "user_ts": {},
         **kw,
     }
@@ -434,19 +494,48 @@ def _iread(**kw):
         (_inote(), {"error": "readback_failed"}, "uncertain", "readback_failed"),
         (_inote(), None, "uncertain", "readback_failed"),
         (_inote(), _iread(revision_end=4), "uncertain", "revision_moved"),
-        (_inote(), _iread(missing=1), "partial", "rows_missing"),
-        (_inote(), _iread(missing=1, extras=[("Bus", "z")]), "partial", "rows_missing"),
+        (
+            _inote(),
+            _iread(revision_start=4, revision_end=4),
+            "uncertain",
+            "revision_moved",
+        ),
+        (_inote(), _iread(missing=[("Bus", "a")]), "partial", "rows_missing"),
+        (_inote(), _iread(missing=[("LineType", "x")]), "partial", "rows_missing"),
+        (
+            _inote(),
+            _iread(missing=[("Bus", "a")], extras=[("Bus", "z")]),
+            "partial",
+            "rows_missing",
+        ),
         (_inote(), _iread(extras=[("Bus", "z")]), "partial", "extra_rows"),
-        (_inote(), _iread(missing=4), "uncertain", "not_as_file"),
+        (_inote(), _iread(missing=_NEED), "uncertain", "not_as_file"),
         (_inote(), _iread(match=False), "uncertain", "not_as_file"),
         (_inote(), _iread(match=None), "uncertain", "not_as_file"),
         (_inote(), _iread(user_ts={"Load": {}}), "uncertain", "not_as_file"),
         (_inote(), _iread(match=outcomes.UNCOMPARABLE), "uncertain", "not_comparable"),
+        # D5: nothing changed.
+        (_inote(), _iread(digest="before"), "completed", None),
+        (_inote(), _iread(digest="before", match=False), "failed", None),
+        (_inote(), _iread(digest="before", user_ts={"Load": {}}), "failed", None),
+        (
+            _inote(digest_before=outcomes.UNCOMPARABLE),
+            _iread(digest=outcomes.UNCOMPARABLE),
+            "completed",
+            None,
+        ),
     ],
 )
 def test_classify_import_table(note, read, outcome, reason):
     out = outcomes.classify_import(note, read)
     assert (out["outcome"], out["reason"]) == (outcome, reason)
+
+
+def test_classify_import_counts_only_rows_it_had_to_change():
+    out = outcomes.classify_import(
+        _inote(), _iread(missing=[("Bus", "a"), ("LineType", "x")])
+    )
+    assert out["counts"]["requested"] == 4 and out["counts"]["done"] == 3
 
 
 def test_classify_import_names_allowed_extras():
@@ -573,3 +662,111 @@ def test_an_export_that_drops_weightings_reads_uncertain(
     monkeypatch.setattr(io_router, name, changed)
     out = _stream(harness, tool, {})["_outcome"]
     assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")
+
+
+# ── GK B (26) E1/E4/E5 ───────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("tool", ["export_network_nc", "export_csv_bundle"])
+def test_an_export_after_an_edit_is_completed(template_in_project, harness, tool):
+    # E1: a created row holds None in object columns, which a file returns as NaN.
+    bus = _live().buses.index[0]
+    _stream(
+        harness,
+        "batch_create_components",
+        {
+            "component_class": "Generator",
+            "components": [{"name": "G_new", "bus": bus, "p_nom": 3}],
+        },
+    )
+    out = _stream(harness, tool, {})["_outcome"]
+    assert out == {"version": 1, "outcome": "completed", "reason": None}
+
+
+@pytest.mark.parametrize("tool", ["export_network_nc", "export_csv_bundle"])
+def test_an_export_after_topology_is_completed(template_in_project, harness, tool):
+    # E4: SubNetwork rows hold an object whose str carries a memory address.
+    _live().determine_network_topology()
+    assert not _live().sub_networks.empty
+    out = _stream(harness, tool, {})["_outcome"]
+    assert out == {"version": 1, "outcome": "completed", "reason": None}
+
+
+def test_the_digest_is_stable_across_loads_after_topology():
+    data = _template_bytes()
+    a, b = outcomes._load_netcdf(data), outcomes._load_netcdf(data)
+    a.determine_network_topology()
+    b.determine_network_topology()
+    assert outcomes.network_digest(a) == outcomes.network_digest(b)
+
+
+def test_the_digest_sees_meta():
+    # E5 / M14.
+    n = outcomes._load_netcdf(_template_bytes())
+    before = outcomes.network_digest(n)
+    n.meta = {**n.meta, "asset_params": {"x": 1}}
+    assert outcomes.network_digest(n) != before
+
+
+def test_an_export_landing_on_a_user_upload_reads_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # E5 / M12: the call's one upload is not an agent_export (a dedup onto a
+    # user upload of the same bytes), so there is no export file to read.
+    import functools
+
+    import routers.io as io_router
+    from services import upload_service
+    from services.assistant_tools import _project
+
+    cached = functools.cache(io_router._export_netcdf_bytes)
+    monkeypatch.setattr(io_router, "_export_netcdf_bytes", cached)
+    project, directory, _owner = _project()
+    upload_service.add_upload(
+        project.name,
+        cached(),
+        "mine.nc",
+        "application/x-netcdf",
+        kind="user_upload",
+        project_dir=directory,
+    )
+    out = _stream(harness, "export_network_nc", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "export_file_count")
+
+
+def test_stored_bytes_unlike_their_hash_read_uncertain(
+    template_in_project, harness, monkeypatch
+):
+    # E5 / M15: the read-back re-reads the stored blob and re-checks its sha256.
+    from services import upload_service
+    from services.assistant_tools import _project
+
+    real = chat_tools._save_agent_export
+
+    def tampered(data, filename, mime, **kw):
+        meta = real(data, filename, mime, **kw)
+        project, directory, _owner = _project()
+        path = upload_service.get_upload_path(
+            project.name, meta["file_id"], project_dir=directory
+        )
+        other = _template_bytes()  # a valid file of another network
+        path.write_bytes(other)
+        return meta
+
+    monkeypatch.setattr(chat_tools, "_save_agent_export", tampered)
+    out = _stream(harness, "export_network_nc", {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "readback_failed")
+
+
+def test_a_failed_handler_releases_the_upload_watch(
+    template_in_project, harness, monkeypatch
+):
+    # Rider: a raise stops the per-call watch.
+    from services import upload_service
+
+    def boom(*a, **k):
+        raise RuntimeError("disk")
+
+    monkeypatch.setattr(chat_tools, "_save_agent_export", boom)
+    _frames(harness, "export_network_nc", {})
+    assert upload_service._UPLOAD_WATCH.get() is None

@@ -540,6 +540,12 @@ def _meta_text(n) -> str:
     return json.dumps(n.meta, sort_keys=True, default=str)
 
 
+# Topology pypsa derives on demand (determine_network_topology): SubNetwork
+# rows hold a Python object whose str carries a memory address, and no file
+# format stores them, so they are never compared (GK B (26) E4).
+DERIVED_CLASSES = frozenset({"SubNetwork"})
+
+
 def network_digest(n) -> str | _Uncomparable:
     """A content hash of the network: snapshots, static and time-varying frames.
 
@@ -567,7 +573,7 @@ def network_digest(n) -> str | _Uncomparable:
         frame(h, "snapshot_weightings", n.snapshot_weightings)
         frame(h, "investment_period_weightings", n.investment_period_weightings)
         h.update(_meta_text(n).encode())
-        for cls in sorted(n.all_components):
+        for cls in sorted(set(n.all_components) - DERIVED_CLASSES):
             static = n.static(cls)
             if static.empty:
                 continue
@@ -650,6 +656,23 @@ def note_undo() -> dict:
     return note
 
 
+def release_note(note: dict | None) -> None:
+    """Stop the note's per-call watch, once; the loop calls it on the error path."""
+    if not isinstance(note, dict):
+        return
+    token = note.pop("watch", None)
+    if token is None:
+        return
+    if note.get("tool") == "undo_last":
+        from services import undo_service
+
+        undo_service.unwatch_pops(token)
+    else:
+        from services import upload_service
+
+        upload_service.unwatch_uploads(token)
+
+
 def read_undo(note: dict | None) -> dict:
     """An independent read of the whole live state after undo_last."""
     if not note or note.get("error"):
@@ -658,7 +681,7 @@ def read_undo(note: dict | None) -> dict:
     from services.pypsa_service import PyPSAService
     from services.user_timeseries import _serialize_user_ts
 
-    undo_service.unwatch_pops(note["watch"])
+    release_note(note)
     try:
         if _binding() != note["binding"]:
             return {"error": "other_context"}
@@ -784,27 +807,84 @@ def _read_file(fmt: str, data: bytes):
 def _rows(n) -> dict[str, set[str]]:
     return {
         cls: {str(x) for x in n.static(cls).index}
-        for cls in n.all_components
+        for cls in set(n.all_components) - DERIVED_CLASSES
         if not n.static(cls).empty
     }
+
+
+def _canon_col(s):
+    """A column as the formats carry it: numbers and flags as float, None as NaN,
+    and in a text column None, NaN and "" as one missing value."""
+    import numpy as np
+    import pandas as pd
+
+    if pd.api.types.is_bool_dtype(s) or pd.api.types.is_numeric_dtype(s):
+        return s.astype(float)
+    present = s.dropna()
+    if all(isinstance(v, (bool, int, float, np.number)) for v in present):
+        return s.astype(object).where(s.notna(), np.nan).astype(float)
+    # A file stores a missing string as "" (netcdf, csv): the two are one value.
+    return s.astype(object).where(s.notna() & (s != ""), None)
+
+
+def _eq_col(a, b, rtol: float):
+    """Elementwise equality of two canonical columns (`_canon_col`), as a bool array."""
+    import numpy as np
+
+    if a.dtype == float and b.dtype == float:
+        x, y = a.to_numpy(), b.to_numpy()
+        eq = (x == y) | (np.isnan(x) & np.isnan(y))
+        if rtol:
+            with np.errstate(invalid="ignore"):
+                eq |= np.isclose(x, y, rtol=rtol, atol=0)
+        return eq
+    if a.dtype == float:
+        a = a.astype(object).where(a.notna(), None)
+    if b.dtype == float:
+        b = b.astype(object).where(b.notna(), None)
+    # An array cell makes `bool(x == y)` raise ValueError: uncomparable.
+    return np.array(
+        [
+            x is y if x is None or y is None else bool(x == y)
+            for x, y in zip(a.tolist(), b.tolist())
+        ],
+        dtype=bool,
+    )
+
+
+def _eq_rows(a, b, rtol: float):
+    """Per-row equality of two frames over the same index, every column."""
+    import numpy as np
+    import pandas as pd
+
+    eq = np.ones(len(a), dtype=bool)
+    for col in set(a.columns) | set(b.columns):
+        ca = a[col] if col in a.columns else pd.Series(np.nan, index=a.index)
+        cb = b[col] if col in b.columns else pd.Series(np.nan, index=b.index)
+        eq &= _eq_col(_canon_col(ca), _canon_col(cb), rtol)
+    return eq
+
+
+def _same_frame(a, b, rtol: float) -> bool:
+    """Equal on what a file format carries (GK B (26) E1).
+
+    Index and column names, dtypes, and None against NaN are not compared; a
+    column one side lacks reads as all missing.
+    """
+    if set(a.index) != set(b.index):
+        return False
+    a = a.sort_index()
+    return bool(_eq_rows(a, b.sort_index().loc[a.index], rtol).all())
 
 
 def _match(live, expected, *, rtol: float = 0.0, drop=()) -> bool | _Uncomparable:
     """True when `live` (less the `drop` rows) holds `expected`'s snapshots, rows and series.
 
-    Order is ignored. Floats agree within `rtol` (0 is exact); anything else
-    compares exactly. A frame pandas cannot compare reads UNCOMPARABLE.
+    Compared on what a file format carries (`_same_frame`): order, dtypes,
+    index names and None/NaN are not. Floats agree within `rtol` (0 is
+    exact). A cell that cannot be compared reads UNCOMPARABLE.
     """
     import pandas as pd
-
-    def same(a, b) -> bool:
-        try:
-            pd.testing.assert_frame_equal(
-                a, b, check_like=True, check_exact=rtol == 0, rtol=rtol, atol=0
-            )
-        except AssertionError:
-            return False
-        return True
 
     dropped: dict[str, list[str]] = {}
     for cls, name in drop:
@@ -816,15 +896,18 @@ def _match(live, expected, *, rtol: float = 0.0, drop=()) -> bool | _Uncomparabl
             return False
         for attr in ("snapshot_weightings", "investment_period_weightings"):
             a, b = getattr(live, attr), getattr(expected, attr)
-            if not (a.empty and b.empty) and not same(a, b):
+            if not (a.empty and b.empty) and not _same_frame(a, b, rtol):
                 return False
-        for cls in sorted(set(live.all_components) | set(expected.all_components)):
+        classes = (
+            set(live.all_components) | set(expected.all_components)
+        ) - DERIVED_CLASSES
+        for cls in sorted(classes):
             gone = dropped.get(cls, [])
             a, b = live.static(cls), expected.static(cls)
             a = a.drop(index=[x for x in gone if x in a.index])
             if a.empty and b.empty:
                 continue
-            if not same(a, b):
+            if not _same_frame(a, b, rtol):
                 return False
             series_a, series_b = live.dynamic(cls), expected.dynamic(cls)
             for attr in sorted(set(series_a) | set(series_b)):
@@ -833,11 +916,27 @@ def _match(live, expected, *, rtol: float = 0.0, drop=()) -> bool | _Uncomparabl
                 db = series_b.get(attr, pd.DataFrame())
                 if da.empty and db.empty:
                     continue
-                if not same(da, db):
+                if not _same_frame(da, db, rtol):
                     return False
     except (TypeError, ValueError):
         return UNCOMPARABLE
     return True
+
+
+def _rows_already_equal(live, expected) -> list[tuple[str, str]]:
+    """The file's rows the live network already holds with equal static values."""
+    out = []
+    for cls, names in _rows(expected).items():
+        a, b = live.static(cls), expected.static(cls)
+        common = sorted(set(a.index) & set(b.index))
+        if not common:
+            continue
+        try:
+            eq = _eq_rows(a.loc[common], b.loc[common], 0.0)
+        except (TypeError, ValueError):
+            continue
+        out.extend((cls, str(name)) for name, same in zip(common, eq) if same)
+    return out
 
 
 def _import_bytes(tool: str, args: dict) -> tuple[str, bytes | None]:
@@ -860,16 +959,45 @@ def _import_bytes(tool: str, args: dict) -> tuple[str, bytes | None]:
 
 
 def note_import(tool: str, args: dict) -> dict:
-    """The network the call's file holds, read before the handler runs (X4)."""
+    """The file's network, and the live state it will replace, before the handler runs.
+
+    The prior state (digest, revision, the file's rows it already holds equal)
+    lets a no-op read failed, or completed when the prior state already was the
+    file (GK B (26) E2/E3).
+    """
+    from services import dirty_state
+    from services.pypsa_service import PyPSAService
+
     try:
         fmt, data = _import_bytes(tool, args)
         if data is None:
             return {"tool": tool, "pending": True}
         if fmt not in ("netcdf", "csv_bundle"):
             raise ValueError(fmt)
-        return {"tool": tool, "format": fmt, "expected": _read_file(fmt, data)}
+        expected = _read_file(fmt, data)
+        want = _rows(expected)
+        with PyPSAService.get_lock():
+            ctx = PyPSAService.get_active_context()
+            revision = dirty_state.revision(ctx)
+            digest = network_digest(ctx.network)
+            already = set(_rows_already_equal(ctx.network, expected))
     except Exception:  # noqa: BLE001 - no note reads uncertain later
         return {"tool": tool, "error": True}
+    return {
+        "tool": tool,
+        "format": fmt,
+        "expected": expected,
+        "revision": revision,
+        "digest_before": digest,
+        # The rows this import must change: the file's rows not already equal.
+        "need": sorted(
+            (cls, name)
+            for cls, names in want.items()
+            for name in names
+            if (cls, name) not in already
+        ),
+        "file_rows": sum(len(names) for names in want.values()),
+    }
 
 
 def read_import(note: dict | None) -> dict:
@@ -892,10 +1020,13 @@ def read_import(note: dict | None) -> dict:
                 for cls, names in have.items()
                 for name in names - want.get(cls, set())
             )
-            missing = sum(
-                len(names - have.get(cls, set())) for cls, names in want.items()
+            missing = sorted(
+                (cls, name)
+                for cls, names in want.items()
+                for name in names - have.get(cls, set())
             )
             match = _match(ctx.network, expected, drop=extras) if not missing else False
+            digest = network_digest(ctx.network)
             user_ts = _serialize_user_ts()
             end = dirty_state.revision(ctx)
     except Exception:  # noqa: BLE001 - an unreadable network reads uncertain
@@ -903,16 +1034,21 @@ def read_import(note: dict | None) -> dict:
     return {
         "revision_start": start,
         "revision_end": end,
-        "requested": sum(len(names) for names in want.values()),
         "missing": missing,
         "extras": extras,
         "match": match,
+        "digest": digest,
         "user_ts": user_ts,
     }
 
 
 def classify_import(note: dict | None, read: dict | None, allowed=None) -> dict:
-    """Pure: completed / partial / uncertain for one import call (X4)."""
+    """Pure: completed / partial / failed / uncertain for one import call (X4).
+
+    D5: an import that left the live state unchanged reads completed only when
+    that state already was the file, and failed otherwise. `requested` and
+    `done` count only the rows the import had to change.
+    """
     allowed = IMPORT_EXTRAS if allowed is None else allowed
 
     def out(outcome, reason=None, **extra):
@@ -924,25 +1060,37 @@ def classify_import(note: dict | None, read: dict | None, allowed=None) -> dict:
         return out("uncertain", "no_submission")
     if not isinstance(read, dict) or "error" in read:
         return out("uncertain", "readback_failed")
-    if read.get("revision_start") != read.get("revision_end"):
+    if (
+        read.get("revision_start") != note["revision"]
+        or read.get("revision_end") != note["revision"]
+    ):
         return out("uncertain", "revision_moved")
+    need = {tuple(x) for x in note.get("need") or []}
+    missing = {tuple(x) for x in read.get("missing") or []}
     extras = [tuple(x) for x in read.get("extras") or []]
     named = [f"{cls}/{name}" for cls, name in extras if (cls, name) in allowed]
-    other = [f"{cls}/{name}" for cls, name in extras if (cls, name) not in allowed]
-    requested = read.get("requested", 0)
+    unexpected = [f"{cls}/{name}" for cls, name in extras if (cls, name) not in allowed]
     counts = {
-        "requested": requested,
-        "done": requested - read.get("missing", 0),
-        "extra": len(other),
+        "requested": len(need),
+        "done": len(need - missing),
+        "extra": len(unexpected),
         "allowed_extras": named[:_MAX_PATHS],
     }
-    if read.get("missing") or other:
-        if counts["done"] == 0:
-            return out("uncertain", "not_as_file", counts=counts)
-        reason = "rows_missing" if read.get("missing") else "extra_rows"
-        return out("partial", reason, counts=counts, paths_extra=other[:_MAX_PATHS])
     if isinstance(read.get("match"), _Uncomparable):
         return out("uncertain", "not_comparable", counts=counts)
+    before = note.get("digest_before")
+    if isinstance(before, str) and before == read.get("digest"):
+        # Nothing changed: the import either was a no-op or did not land (D5).
+        if read.get("match") is True and not read.get("user_ts"):
+            return out("completed", counts=counts)
+        return out("failed", counts=counts)
+    if missing or unexpected:
+        if need and counts["done"] == 0:
+            return out("uncertain", "not_as_file", counts=counts)
+        reason = "rows_missing" if missing else "extra_rows"
+        return out(
+            "partial", reason, counts=counts, paths_extra=unexpected[:_MAX_PATHS]
+        )
     if read.get("match") is not True or read.get("user_ts"):
         # Values on the file's own rows differ, or user series survived the import.
         return out("uncertain", "not_as_file", counts=counts)
@@ -1012,7 +1160,7 @@ def read_export(note: dict | None) -> dict:
     from services import dirty_state, upload_service
     from services.pypsa_service import PyPSAService
 
-    upload_service.unwatch_uploads(note["watch"])
+    release_note(note)
     try:
         # The uploads THIS call added (a dedup hit included), still listed as
         # agent_export in the project's store: never another session's file.

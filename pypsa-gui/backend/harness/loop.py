@@ -1084,12 +1084,18 @@ _ADMISSION_ERRORS: dict[str, dict[str, str]] = {
 TURN_ORIGIN_KEY = "origin"  # services.run_intake.ORIGIN_KEY
 
 
-def _typed_by_user(session, continuation_job_id, continue_task_id, envelope_decision) -> bool:
+def _typed_by_user(
+    session, continuation_job_id, continue_task_id, envelope_decision
+) -> bool:
     """Whether this turn's `user` text is the person's own typing: not a
     continuation, a plan continue or an envelope decision (harness text), and
     not the runner's headless session (issue 21, D1)."""
-    return (continuation_job_id is None and continue_task_id is None and envelope_decision is None
-            and not str(session.session_id or "").startswith("run:"))
+    return (
+        continuation_job_id is None
+        and continue_task_id is None
+        and envelope_decision is None
+        and not str(session.session_id or "").startswith("run:")
+    )
 
 
 def _refuse_user_input(
@@ -1542,7 +1548,9 @@ def run_turn(
             # `typed_by_user=False` marks harness text the flags above cannot
             # see: a goal round, a replay (issue 21, D1).
             typed_by_user=typed_by_user
-            and _typed_by_user(session, continuation_job_id, continue_task_id, envelope_decision),
+            and _typed_by_user(
+                session, continuation_job_id, continue_task_id, envelope_decision
+            ),
         )
         try:
             for event, payload in body:
@@ -2097,7 +2105,9 @@ def _run_turn_body(
     requirements_block = _requirements_addendum(session)
     _eventlog.context(session, "requirements", requirements_block)
     if requirements_block:
-        ui_block = f"{ui_block}\n\n{requirements_block}" if ui_block else requirements_block
+        ui_block = (
+            f"{ui_block}\n\n{requirements_block}" if ui_block else requirements_block
+        )
     if session.assurance_turn is not None:
         assurance_block = session.assurance_turn.request_content()
         _eventlog.context(session, "checked_request", assurance_block)
@@ -3581,8 +3591,9 @@ def _dispatch_real_tool_call(
 
                         # Study harness issue 21 §4: a card write that answers
                         # the run's open data request goes on its freshness chain.
-                        with edit_cards.approved(edit_card["digest"]), run_envelope.answering(
-                            session, tool_use_id, edit_card
+                        with (
+                            edit_cards.approved(edit_card["digest"]),
+                            run_envelope.answering(session, tool_use_id, edit_card),
                         ):
                             out = invoke(session, tool_name, args or {}, handler)
                         if isinstance(out, dict):
@@ -3769,6 +3780,11 @@ def _dispatch_real_tool_call(
                 )
                 return
     except Exception as exc:  # noqa: BLE001 — surface as tool_error
+        if write_note is not None:
+            # Issue 04 S3: a raise or timeout reads no outcome; stop the note's watch.
+            from harness import outcomes as _write_outcomes
+
+            _write_outcomes.release_note(write_note)
         # v4-MAJOR-1 / v6-F1 + v4-MINOR-1: structured error_kind propagates
         # from the tool's HTTPException detail dict so the frontend can
         # render a project_exists / descendants_exist card with rename /

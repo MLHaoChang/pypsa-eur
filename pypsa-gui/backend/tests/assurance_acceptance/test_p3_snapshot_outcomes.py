@@ -395,14 +395,29 @@ def test_a_raising_write_is_a_tool_error_with_no_outcome(
     assert all("_outcome" not in str(c) for c in collector), collector
 
 
+def _import_args():
+    from tests.assurance_acceptance.test_p3_file_outcomes import _b64, _template_bytes
+
+    return {"bytes_b64": _b64(_template_bytes())}
+
+
+# GK B (26) rider: undo_last and an import time out the same way.
+@pytest.mark.parametrize(
+    "tool", ["bulk_update_components", "undo_last", "import_network_nc"]
+)
 def test_a_write_that_times_out_never_reads_completed_or_failed(
-    baseline, harness, monkeypatch
+    baseline, harness, monkeypatch, tool
 ):
     import threading
 
     from harness import budget as harness_budget
 
-    real = chat_tools.DISPATCHERS["bulk_update_components"]
+    args = {"bulk_update_components": _BULK, "undo_last": {}}.get(tool)
+    if tool == "undo_last":
+        _edit(harness)
+    if tool == "import_network_nc":
+        args = _import_args()
+    real = chat_tools.DISPATCHERS[tool]
     release, landed = threading.Event(), threading.Event()
 
     def late(**kw):
@@ -412,10 +427,10 @@ def test_a_write_that_times_out_never_reads_completed_or_failed(
         finally:
             landed.set()
 
-    monkeypatch.setitem(chat_tools.DISPATCHERS, "bulk_update_components", late)
+    monkeypatch.setitem(chat_tools.DISPATCHERS, tool, late)
     monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 0.2)
     try:
-        frames, collector = _frames(harness, "bulk_update_components", _BULK)
+        frames, collector = _frames(harness, tool, args)
     finally:
         release.set()
     assert landed.wait(10)

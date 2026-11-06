@@ -202,14 +202,14 @@ Named open rows (GK B (26) R1):
 |------|-------|------|
 | A3.6 extra edits by a row write (rows the call did not name) | S4 | S2's read-back covers only the named rows; W3 catches other writers only |
 | A3.4 saved/unsaved values | S3 (import/export part) done; saved project files: issue 11 | S3 reads the live network: an import lands as an unsaved draft with no saved copy; an export's file is compared with the live network, which is what it writes. A read-back of the project's saved files (save_project, autosave) is not an issue 04 tool; named for issue 11 (X7) |
-| csv_bundle export: float text precision | `_pending` (X5) | a csv bundle stores floats as text, so the export check allows `CSV_RTOL` = 1e-12 relative; a change smaller than that reads completed (test_a_csv_export_sees_no_change_below_its_float_tolerance) |
-| import_excel | `_pending` (X6) | no independent Excel reader; reads adapter_pending |
-| import_matpower | `_pending` (X6) | no independent MATPOWER reader; reads adapter_pending |
-| import_uploaded_network with format excel or matpower | `_pending` (X6) | as the two rows above |
-| export_excel | `_pending` (X6) | no independent Excel reader; reads adapter_pending |
-| export_matpower | `_pending` (X6) | no independent MATPOWER reader; reads adapter_pending |
-| export whose bytes equal a non-export upload (e.g. a user upload) | `_pending` (X5) | `add_upload` dedups onto that file, which is not agent_export, so an ordinary export reads `export_file_count` (fails safe) |
-| csv export: EH columns refilled on read | `_pending` (X5) | the read-back applies `normalise_eh_columns`, as the import route does; an EH column the export dropped is refilled with defaults and can match the live values |
+| AA04-P8 csv_bundle export: float text precision | `_pending` (X5) | a csv bundle stores floats as text, so the export check allows `CSV_RTOL` = 1e-12 relative; a change smaller than that reads completed (test_a_csv_export_sees_no_change_below_its_float_tolerance) |
+| AA04-P1 import_excel | `_pending` (X6) | no independent Excel reader; reads adapter_pending |
+| AA04-P2 import_matpower | `_pending` (X6) | no independent MATPOWER reader; reads adapter_pending |
+| AA04-P3 import_uploaded_network with format excel or matpower | `_pending` (X6) | as the two rows above |
+| AA04-P4 export_excel | `_pending` (X6) | no independent Excel reader; reads adapter_pending |
+| AA04-P5 export_matpower | `_pending` (X6) | no independent MATPOWER reader; reads adapter_pending |
+| AA04-P6 export whose bytes equal a non-export upload (e.g. a user upload) | `_pending` (X5) | `add_upload` dedups onto that file, which is not agent_export, so an ordinary export reads `export_file_count` (fails safe) |
+| AA04-P7 csv export: EH columns refilled on read | `_pending` (X5) | the read-back applies `normalise_eh_columns`, as the import route does; an EH column the export dropped is refilled with defaults and can match the live values |
 | R3: an outcome on the raise path for the four S2 tools and undo_last | S4 | GK B (26) chose (a): S3 keeps no `_outcome` on raise/timeout. S4 must keep: `failed` only when verified unchanged, never `failed` on a timeout. |
 
 GK B (26) S3 plan: GO WITH CHANGES, conditions X1–X8:
@@ -249,4 +249,14 @@ Import/export build (same branch):
 - Review (mp-code-review): the digest and `_match` now compare snapshot and investment-period weightings and `n.meta` (asset provenance), with mutant tests for import and export; `note_undo` reads the user series under the lock; a parity test pins the frontend FILE_TOOLS and import verbs to the backend sets.
 - X8 cost: `_match` 40–55 ms on the four EH templates and 43 ms on eh_ipp_hybrid (8760 snapshots); `network_digest` 20–24 ms.
 - Tests: `tests/assurance_acceptance/test_p3_file_outcomes.py` 63 passed; p3 file + snapshot + write 154 passed. Frontend: 2093 passed (src/components), ChatPanel.toolOutcome + toolOutcome 94 passed.
+
+### 2026-11-06 — S3 GK NOT OK @ce6007dd (GK B (26)) and fixes
+
+GK B (26) accepted the X5 reading (a per-call upload record, dedup hits included), X4 with an empty `IMPORT_EXTRAS`, and X7 owned by issue 11. Fixes for E1–E5:
+- E1: `_match` compares what a file format carries (`_canon_col` / `_eq_rows`). Dtypes and index names are ignored. Numbers and flags compare as float. None, NaN and, in text columns, "" are one missing value; netcdf stores a missing string as "". A column one side lacks reads as all missing. Tests: export after a `batch_create_components` edit, and export of an in-memory template (the export fixture is parametrised loaded / in_memory), both complete for nc and csv.
+- E2 and contract D5: `note_import` records, under the lock, the live digest, the revision, and the file's rows the live network already holds with equal static values. `requested` and `done` count only the rows the import had to change. A live state left unchanged reads completed when it already was the file, else failed; never partial. Tests: a handler that does nothing reads failed; re-importing the live file reads completed with requested 0.
+- E3: the read-back's revision must equal the note's at both reads (an import keeps the counter; measured). Test: a bump between handler and read-back reads revision_moved.
+- E4: `DERIVED_CLASSES = {"SubNetwork"}` is left out of the digest, rows and match. Tests: export after `determine_network_topology` completes; the digest is equal across two loads after topology.
+- E5: M12 (a dedup onto a user upload of the same bytes reads export_file_count), M14 (the digest sees `meta`) and M15 (a tampered stored blob reads readback_failed) each have a killing test, run as mutants.
+- Riders: `release_note` stops the note's watch in the loop's error branch (test: a raising export leaves no upload watch); the X3 timeout test is parametrised over bulk_update_components, undo_last and import_network_nc; the `_pending` rows carry ids AA04-P1..P8; the csv tolerance test stands as row AA04-P8. The X2 HTTP-route test is not added; the route pops through the same `undo_service.pop`, so it would test the same seam.
 
