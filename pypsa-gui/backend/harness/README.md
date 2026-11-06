@@ -20,6 +20,7 @@ harness/
   storage_costs.py  declared-basis direct StorageUnit discharge, holding and fixed costs
   durable.py      bounded network locks and cross-process owner-store transactions
   effects.py      exact confirmed input-write reservations, read-back and reconciliation
+  guards.py       issue 04 S4a: REQUIRED_GUARDS (a schema guard per write/destructive tool, fail closed), the confirmation's args fingerprint and the no-progress stop
   navigation.py   issued view actions and owner/project/turn/generation-bound browser ACKs
   reviewer.py     optional single bounded read-only review of qualitative interpretations
   publication.py  JSON/ZIP from the same validated answer, facts and evidence

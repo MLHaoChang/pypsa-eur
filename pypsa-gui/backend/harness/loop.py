@@ -843,7 +843,13 @@ def _dispatch_tool_uses(
         # The one per-call path (MCP build step 3): the allowlist refuses a
         # tool never on offer before the card and the dispatcher lookup, then
         # the guard, validators, card and handler run in order.
-        dispatched = yield from dispatch_tool_call(
+        # Issue 04 S4a (G7): a call that keeps failing on the same args is
+        # refused before dispatch; each dispatch is counted (harness/guards.py).
+        from harness import guards as _guards
+
+        if (yield from _guards.no_progress(session, tu, tool_results_for_next_turn)):
+            continue
+        dispatched = yield from _guards.observed(session, tu, dispatch_tool_call(
             session,
             tu,
             tool_results_for_next_turn,
@@ -851,7 +857,7 @@ def _dispatch_tool_uses(
             turn_ctx=turn_ctx,
             result_char_budget=char_budget,
             guided=guided,
-        )
+        ), tool_results_for_next_turn)
         if not dispatched:
             continue
         # If the agent just dispatched a rebinding tool (activate_project /
@@ -2077,6 +2083,9 @@ def _run_turn_body(
     session.turn_task_cap = harness_budget.task_cap(session)
     session.turn_single_edit_applied = False
     session.turn_redirects = {}
+    from harness import guards as _guards
+
+    _guards.start_turn(session)  # issue 04 S4a (G7): per-turn no-progress counts
     from harness.compose import _results_card_addendum
 
     card_block = _results_card_addendum(session)
@@ -3178,6 +3187,17 @@ def _dispatch_real_tool_call(
             )
             return
 
+    # Issue 04 S4a (G1/G2): the REQUIRED guards, unlike the advisory validator
+    # above: a missing or raising guard denies, before restrictions, admission,
+    # cards, the confirmation and every effect seam (harness/guards.py).
+    # External MCP tools are out of scope: their schema is a third party's.
+    from harness import guards
+
+    refusal = None if external else guards.check(tool_name, args, tier)
+    if refusal:
+        yield from guards.denied(tool_use_id, tool_name, *refusal, tool_results_collector)
+        return
+
     # #18 — per-tier auto-approve policy. The tool_request frame already fired
     # above (audit trail intact), so an auto-approved destructive tool is still
     # visible in the stream — it just SKIPS the issue_confirmation +
@@ -3374,6 +3394,8 @@ def _dispatch_real_tool_call(
     from harness import confirm as confirmation_gate
 
     policy_revision = confirmation_gate.confirmation_revision()
+    # G3: the approval binds the args the handler receives, after every rewrite.
+    bound_args = guards.fingerprint(args, guards.schema_for(tool_name))
     approved = yield from _confirm_destructive_tool(
         session,
         tool_use_id=tool_use_id,
@@ -3414,6 +3436,11 @@ def _dispatch_real_tool_call(
                 )
 
         require_current_confirmation()
+        if guards.fingerprint(args, guards.schema_for(tool_name)) != bound_args:
+            yield from guards.denied(tool_use_id, tool_name, guards.ARGS_CHANGED,
+                "The action's arguments changed after its confirmation; request "
+                "and review it again.", tool_results_collector)
+            return
         effect_fresh = True
         if session.assurance_turn is not None and tool_name == "update_component":
             from harness.effects import reserve

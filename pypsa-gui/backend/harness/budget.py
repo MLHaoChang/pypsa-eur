@@ -33,6 +33,14 @@ MAX_TOOL_CALLS_PER_TURN: int = 25
 MAX_TURNS_PER_SESSION: int = 100
 
 
+# Issue 04 S4a (G7): the bound on identical failing calls (same tool, same args
+# fingerprint, `harness/guards.py`), per turn and per run (the chat session,
+# across turns). The call that would reach a bound is refused `no_progress_stop`
+# before dispatch: the 3rd in a turn, the 5th in a run. A success resets both.
+NO_PROGRESS_PER_TURN: int = 3
+NO_PROGRESS_PER_RUN: int = 5
+
+
 MAX_OUTPUT_TOKENS_PER_SESSION: int = 200_000
 
 

@@ -338,11 +338,13 @@ def _deny(tool_use_id: str, tool_name: str, error_kind: str, message: str,
           ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """The refusal: a `tool_error` frame and the paired `is_error` result
     (Anthropic requires one result per `tool_use`)."""
+    from harness.outcomes import denied
     yield "tool_error", {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,
         "error_kind": error_kind,
         "message": message,
+        "_outcome": denied(error_kind),  # issue 04 S4a: refused before any effect
     }
     tool_results_collector.append({
         "type": "tool_result",
