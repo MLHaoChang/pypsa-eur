@@ -229,7 +229,21 @@ class FakeLoop:
 
 @pytest.fixture
 def loops(monkeypatch):
-    return FakeLoop(monkeypatch)
+    fake = FakeLoop(monkeypatch)
+    before = {t for t in threading.enumerate() if t.name.startswith("run-evidence-")}
+    yield fake
+    # A record left running, or ended with a status outside the terminal set
+    # (the `weird` test), keeps its `run-evidence-*` watcher polling for hours
+    # and trips later tests that count those threads. End every record and join
+    # the watchers this test started.
+    fake.release_all()
+    for record in fake.records:
+        record["thread"].join(5.0)
+        with PyPSAService.get_solver_state_lock():
+            record["status"] = "failed"
+    for t in threading.enumerate():
+        if t.name.startswith("run-evidence-") and t not in before:
+            t.join(5.0)
 
 
 def go_quickly(runner, path, task, timeout=30.0):
