@@ -513,3 +513,63 @@ def _eread(**kw):
 def test_classify_export_table(note, read, outcome, reason):
     out = outcomes.classify_export(note, read)
     assert (out["outcome"], out["reason"]) == (outcome, reason)
+
+
+def test_the_frontend_file_tool_lists_match_the_backend():
+    # review-gk.md (#1060): frontend copies of server sets carry a parity test.
+    import re
+
+    ts = (
+        pathlib.Path(__file__).parents[3] / "frontend/src/components/toolOutcome.ts"
+    ).read_text()
+    block = re.search(r"const FILE_TOOLS[^=]*= new Set\(\[(.*?)\]\)", ts, re.S).group(1)
+    assert (
+        set(re.findall(r"'(\w+)'", block))
+        == outcomes.IMPORT_TOOLS | outcomes.EXPORT_TOOLS
+    )
+    verbs = re.search(r"const WRITE_VERBS[^=]*= \{(.*?)\n\}", ts, re.S).group(1)
+    assert set(re.findall(r"(\w+): 'imported'", verbs)) == outcomes.IMPORT_TOOLS
+
+
+@pytest.mark.parametrize("change", ["weightings", "meta"])
+def test_network_level_state_unlike_the_file_reads_uncertain(
+    baseline, harness, monkeypatch, change
+):
+    # Spec review: snapshot weightings and `meta` are network state an import restores.
+    def bump(n):
+        if change == "weightings":
+            n.snapshot_weightings.iloc[0, 0] = 7.0
+        else:
+            n.meta = {**n.meta, "asset_params": {"x": 1}}
+
+    _route_also(monkeypatch, bump)
+    out = _stream(harness, "import_network_nc", {"bytes_b64": _b64(_template_bytes())})[
+        "_outcome"
+    ]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_file")
+
+
+@pytest.mark.parametrize("tool", ["export_network_nc", "export_csv_bundle"])
+def test_an_export_that_drops_weightings_reads_uncertain(
+    template_in_project, harness, monkeypatch, tool
+):
+    import routers.io as io_router
+
+    name = {
+        "export_network_nc": "_export_netcdf_bytes",
+        "export_csv_bundle": "_export_csv_zip_bytes",
+    }[tool]
+    real = getattr(io_router, name)
+
+    def changed():
+        w = PyPSAService.get_network().snapshot_weightings
+        keep = w.copy()
+        w.iloc[0, :] = 5.0
+        try:
+            return real()
+        finally:
+            w.iloc[:, :] = keep.to_numpy()
+
+    monkeypatch.setattr(io_router, name, changed)
+    out = _stream(harness, tool, {})["_outcome"]
+    assert (out["outcome"], out["reason"]) == ("uncertain", "not_as_network")

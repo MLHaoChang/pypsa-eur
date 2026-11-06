@@ -533,6 +533,13 @@ def project_write(note: dict | None) -> dict:
 # ── Issue 04 S3: snapshot read-backs (undo_last, network import/export) ────
 
 
+def _meta_text(n) -> str:
+    """The network's `meta` dict as canonical text (asset provenance lives there)."""
+    import json
+
+    return json.dumps(n.meta, sort_keys=True, default=str)
+
+
 def network_digest(n) -> str | _Uncomparable:
     """A content hash of the network: snapshots, static and time-varying frames.
 
@@ -556,6 +563,10 @@ def network_digest(n) -> str | _Uncomparable:
                 pd.Index(n.snapshots).to_frame(), index=False
             ).values.tobytes()
         )
+        # Network-level state an undo or import restores too (weightings, meta).
+        frame(h, "snapshot_weightings", n.snapshot_weightings)
+        frame(h, "investment_period_weightings", n.investment_period_weightings)
+        h.update(_meta_text(n).encode())
         for cls in sorted(n.all_components):
             static = n.static(cls)
             if static.empty:
@@ -630,8 +641,8 @@ def note_undo() -> dict:
                 "digest_before": network_digest(ctx.network),
                 "meta_before": growth_placeholders.snapshot_meta(),
                 "expected": expected,
+                "user_ts_before": _serialize_user_ts(),
             }
-        note["user_ts_before"] = _serialize_user_ts()
         # Last, so a failed note leaves no watch behind (X2: per call, not global).
         note["own_pops"], note["watch"] = undo_service.watch_pops()
     except Exception:  # noqa: BLE001 - no note reads uncertain later
@@ -801,6 +812,12 @@ def _match(live, expected, *, rtol: float = 0.0, drop=()) -> bool | _Uncomparabl
     try:
         if not pd.Index(live.snapshots).equals(pd.Index(expected.snapshots)):
             return False
+        if _meta_text(live) != _meta_text(expected):
+            return False
+        for attr in ("snapshot_weightings", "investment_period_weightings"):
+            a, b = getattr(live, attr), getattr(expected, attr)
+            if not (a.empty and b.empty) and not same(a, b):
+                return False
         for cls in sorted(set(live.all_components) | set(expected.all_components)):
             gone = dropped.get(cls, [])
             a, b = live.static(cls), expected.static(cls)
