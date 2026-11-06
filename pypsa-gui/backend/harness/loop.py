@@ -3703,11 +3703,13 @@ def _dispatch_real_tool_call(
                             "tool_use_id": tool_use_id,
                             "tool_name": tool_name,
                             "error_kind": "tool_not_started",
+                            # Shown to the user in Expert Details (S4b, UX (11)):
+                            # no tool id, no internal terms.
                             "message": (
-                                f"tool {tool_name!r} never started: all "
-                                f"{TOOL_EXECUTOR_MAX_WORKERS} chat-tool workers were "
-                                f"busy for {harness_budget.PER_TOOL_TIMEOUT_SECONDS:g}s. "
-                                f"It was cancelled rather than left queued to run later."
+                                f"It never started: all {TOOL_EXECUTOR_MAX_WORKERS} "
+                                f"tool slots were busy for "
+                                f"{harness_budget.PER_TOOL_TIMEOUT_SECONDS:g} s, so it "
+                                f"was cancelled rather than queued."
                             ),
                             **_timeout_outcome(timeout_effect, "tool_not_started"),
                         },
@@ -3802,9 +3804,12 @@ def _dispatch_real_tool_call(
                         "tool_use_id": tool_use_id,
                         "tool_name": tool_name,
                         "error_kind": "tool_timeout",
+                        # Shown to the user in Expert Details (S4b, UX (11)).
                         "message": (
-                            f"tool {tool_name!r} exceeded the "
-                            f"{harness_budget.PER_TOOL_TIMEOUT_SECONDS:g}s execution deadline"
+                            f"It ran longer than "
+                            f"{harness_budget.PER_TOOL_TIMEOUT_SECONDS:g} s and was "
+                            f"stopped"
+                            + ("; it may have changed the project." if timeout_effect else ".")
                         ),
                         **_timeout_outcome(timeout_effect, "tool_timeout"),
                     },

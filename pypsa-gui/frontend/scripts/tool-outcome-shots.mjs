@@ -93,11 +93,14 @@ const raised = (id: string, tool: string, outcome: string, reason: string | null
 }
 raised('r1', 'bulk_update_components', 'failed', null, 'Generator G9 not found')
 raised('r2', 'undo_last', 'uncertain', 'changed_before_error', 'the undo snapshot could not be saved')
-raised('r3', 'bulk_update_components', 'uncertain', 'tool_timeout', 'tool bulk_update_components exceeded the 30s execution deadline')
-raised('r4', 'delete_component', 'uncertain', 'tool_not_started', 'tool delete_component never started: all 8 chat-tool workers were busy for 30s. It was cancelled rather than left queued to run later.')
+raised('r3', 'bulk_update_components', 'uncertain', 'tool_timeout', 'It ran longer than 30 s and was stopped; it may have changed the project.')
+raised('r4', 'delete_component', 'uncertain', 'tool_not_started', 'It never started: all 8 tool slots were busy for 30 s, so it was cancelled rather than queued.')
 add('r5', 'bulk_update_components', 'uncertain', null, 16, 'not_as_requested', { requested: 1, done: 0 })
 useUIStore.setState({ currentProject: 'Demo', projectMismatch: null, assistantDockOpen: true, uiMode: mode } as any)
-useChatStore.setState({ sessionId: 'shot-session', messages, streaming: false, pending: null, error: null } as any)
+// ?only=s4b keeps the issue 04 S4b states (l*, x*, r*), so one shot per mode shows them all (UX (11)).
+const only = new URLSearchParams(location.search).get('only') === 's4b'
+const shown = only ? messages.filter(m => m.role === 'user' || /^[lxr]\\d/.test(m.tool_use_id ?? '')) : messages
+useChatStore.setState({ sessionId: 'shot-session', messages: shown, streaming: false, pending: null, error: null } as any)
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}>
   <div style={{display:'flex',height:'100vh'}}><ChatPanel/></div></QueryClientProvider>)
 `)
@@ -105,7 +108,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     server: { host: '127.0.0.1', port: 0 } })
   await server.listen()
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] })
-  for (const mode of ['guided', 'expert']) {
+  for (const [mode, only] of [['guided', ''], ['expert', ''], ['guided', 's4b'], ['expert', 's4b']]) {
     {
       const page = await browser.newPage({ viewport: { width: 420, height: 4400 }, deviceScaleFactor: 2 })
       await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -116,17 +119,24 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
           bound_project: 'Demo', history_gap: 0, pending_turn: null } })
         return route.fulfill({ json: {} })
       })
-      await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${entry}.html?mode=${mode}`)
+      await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${entry}.html?mode=${mode}${only ? '&only=' + only : ''}`)
       await page.getByText('Solve the network and check each job.').waitFor()
       // Open the refusal messages' Details (issue 04 S4a) so the shot shows them.
       await page.evaluate(() => document.querySelectorAll('[data-testid=chat-tool-details]').forEach(d => {
-        if (/did not run|arguments changed|rule you set|could not save|was not run|not found|deadline|never started|snapshot/.test(d.textContent ?? '')) d.open = true
+        if (/did not run|arguments changed|rule you set|could not save|was not run|not found|ran longer|never started|snapshot/.test(d.textContent ?? '')) d.open = true
       }))
       await page.waitForTimeout(500)
-      const file = path.join(out, `tool-outcome-${mode}.png`)
-      await page.screenshot({ path: file, fullPage: true })
+      const file = path.join(out, only ? `aa04-${only}-tool-outcome-${mode}.png` : `tool-outcome-${mode}.png`)
+      if (only) {
+        // Every S4b row fits in the panel; crop below the last one (all states, no empty panel).
+        const bottom = await page.evaluate(() => Math.max(...[...document.querySelectorAll('[data-testid=chat-message]')]
+          .map(e => e.getBoundingClientRect().bottom)))
+        await page.screenshot({ path: file, clip: { x: 0, y: 0, width: 420, height: Math.ceil(bottom) + 16 } })
+      } else {
+        await page.screenshot({ path: file, fullPage: true })
+      }
       console.log(file)
-      if (mode === 'guided') {
+      if (mode === 'guided' && !only) {
         // Issue 04 S4a: the rule-blocked line with its Access and approvals link.
         const row = page.getByTestId('chat-message').filter({ has: page.getByTestId('chat-tool-access-link') })
         const linkShot = path.join(out, 'user-restriction-link.png')

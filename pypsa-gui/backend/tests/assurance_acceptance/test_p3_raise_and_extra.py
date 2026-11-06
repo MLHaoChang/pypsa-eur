@@ -440,6 +440,10 @@ def test_a_slow_write_that_changed_nothing_still_reads_uncertain_on_timeout(
     finally:
         release.set()
     assert error["error_kind"] == "tool_timeout"
+    # UX (11): plain words in Expert Details, no tool id.
+    assert error["message"] == (
+        "It ran longer than 0.2 s and was stopped; it may have changed the project."
+    )
     assert error["_outcome"] == {
         "version": 1,
         "outcome": "uncertain",
@@ -463,6 +467,11 @@ def test_a_write_that_never_started_reads_uncertain(
     monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 0.3)
     error = _error(_frames(monkeypatch, "bulk_update_components", UPDATE)[0])
     assert error["error_kind"] == "tool_not_started"
+    assert "bulk_update_components" not in error["message"]
+    assert error["message"].startswith("It never started: all ")
+    assert error["message"].endswith(
+        "tool slots were busy for 0.3 s, so it was cancelled rather than queued."
+    )
     assert error["_outcome"] == {
         "version": 1,
         "outcome": "uncertain",
@@ -889,6 +898,29 @@ def test_a_timeout_in_a_checked_turn_gets_no_ordinary_outcome(
         release.set()
     errors = [d for e, d in frames if e == "tool_error"]
     assert errors and errors[0]["error_kind"] == "tool_timeout", frames
+    assert "_outcome" not in errors[0]
+
+
+def test_a_read_that_times_out_does_not_say_it_may_have_changed_the_project(
+    baseline, monkeypatch
+):
+    import threading
+
+    from harness import budget as harness_budget
+    from harness import catalogue
+
+    tool = "list_components"
+    assert catalogue.safety_tier_for(tool) not in ("write", "destructive")
+    release = threading.Event()
+    monkeypatch.setitem(chat_tools.DISPATCHERS, tool, lambda **_kw: release.wait(10))
+    monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 0.2)
+    try:
+        frames, _c = _frames(monkeypatch, tool, {"component_class": "Generator"})
+    finally:
+        release.set()
+    errors = [d for e, d in frames if e == "tool_error"]
+    assert errors and errors[0]["error_kind"] == "tool_timeout", frames
+    assert errors[0]["message"] == "It ran longer than 0.2 s and was stopped."
     assert "_outcome" not in errors[0]
 
 
