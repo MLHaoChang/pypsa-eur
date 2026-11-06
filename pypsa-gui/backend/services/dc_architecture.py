@@ -751,7 +751,9 @@ def compare(
             **price,
             "weighted_mean_per_mwh": _price_mean(w, facility_own, rate_t),
             "weighted_mean_basis": "weighted by this project's facility energy",
-            "time_mean_per_mwh": float(np.mean(np.asarray(rate_t)[in_basis])) if in_basis.any() else None,
+            "time_mean_per_mwh": float(np.mean(np.asarray(rate_t)[in_basis]))
+            if in_basis.any()
+            else None,
             "real": "held constant in real terms at the finance real rate",
             "not_valued": NOT_VALUED,
         },
@@ -845,9 +847,7 @@ def compare_project(
     raw = (meta.get("dc_load") or {}).get("spec")
     nc = d / "network.nc"
     if not nc.exists():
-        raise _err(
-            "Network: the project has no saved network", "no_spec", "network"
-        )
+        raise _err("Network: the project has no saved network", "no_spec", "network")
     n = pypsa.Network()
     with PyPSAService.get_netcdf_io_lock():
         n.import_from_netcdf(str(nc))
@@ -874,7 +874,9 @@ def compare_project(
     from models.finance import FinanceInputs
 
     # finance_rate has read the case already, so it validates here.
-    finance_currency = FinanceInputs.model_validate(finance).currency if finance else None
+    finance_currency = (
+        FinanceInputs.model_validate(finance).currency if finance else None
+    )
     plan = planning or tpl.NATIVE_PLANNING[tid]
     offered = None
     if isinstance(island, dict):

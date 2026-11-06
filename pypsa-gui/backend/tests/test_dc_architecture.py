@@ -513,7 +513,10 @@ def test_the_price_follows_the_projects_finance_currency():
     with pytest.raises(A.DcArchitectureError) as e:
         _compare(_net()[0], _spec(), finance_currency="USD")
     assert e.value.kind == "dc_architecture_currency_mismatch"
-    assert _compare(_net()[0], _spec(), finance_currency="EUR")["price"]["currency"] == "EUR"
+    assert (
+        _compare(_net()[0], _spec(), finance_currency="EUR")["price"]["currency"]
+        == "EUR"
+    )
 
 
 def test_an_unset_architecture_leaves_the_scorecard_as_before(tmp_path, monkeypatch):
@@ -532,10 +535,14 @@ def test_an_unset_architecture_leaves_the_scorecard_as_before(tmp_path, monkeypa
         return d, n
 
     d, n = card("unset", {})
-    unset = json.dumps(G.grid_readiness(d, n, "eu_rfg_dcc_ce"), sort_keys=True, default=str)
+    unset = json.dumps(
+        G.grid_readiness(d, n, "eu_rfg_dcc_ce"), sort_keys=True, default=str
+    )
     with monkeypatch.context() as mp:
         mp.setattr(G, "_arch_offer", lambda inp: None)
-        before = json.dumps(G.grid_readiness(d, n, "eu_rfg_dcc_ce"), sort_keys=True, default=str)
+        before = json.dumps(
+            G.grid_readiness(d, n, "eu_rfg_dcc_ce"), sort_keys=True, default=str
+        )
     assert unset == before
     d, n = card("sst", {"architecture": "sst"})
     rows = {r["id"]: r for r in G.grid_readiness(d, n, "eu_rfg_dcc_ce")["rows"]}
@@ -546,7 +553,9 @@ def test_without_a_tariff_or_a_price_the_screen_refuses():
     with pytest.raises(A.DcArchitectureError) as e:
         _compare(_net()[0], _spec(), energy_price_per_mwh=None)
     assert e.value.kind == "dc_architecture_no_energy_price"
-    assert str(e.value).startswith("Energy price: ") and "Enter a price per MWh" in str(e.value)
+    assert str(e.value).startswith("Energy price: ") and "Enter a price per MWh" in str(
+        e.value
+    )
 
 
 def test_the_screen_says_what_it_counts_and_why_a_peak_is_unknown():
@@ -604,7 +613,12 @@ def _tariff(items):
 def test_an_hour_no_energy_item_rates_is_refused_never_priced_at_zero():
     n, _ = _net(1.0)
     with pytest.raises(A.DcArchitectureError) as e:
-        _compare(n, _spec(), energy_price_per_mwh=None, commercial=_tariff(_energy_items((8, 20))))
+        _compare(
+            n,
+            _spec(),
+            energy_price_per_mwh=None,
+            commercial=_tariff(_energy_items((8, 20))),
+        )
     assert e.value.kind == "dc_architecture_no_energy_price"
     assert "for 12 of the 24 modelled hours" in str(e.value)
 
@@ -612,7 +626,10 @@ def test_an_hour_no_energy_item_rates_is_refused_never_priced_at_zero():
 def test_split_items_that_cover_every_hour_still_price_the_energy():
     n, _ = _net(1.0)
     out = _compare(
-        n, _spec(), energy_price_per_mwh=None, commercial=_tariff(_energy_items((0, 12), (12, 24)))
+        n,
+        _spec(),
+        energy_price_per_mwh=None,
+        commercial=_tariff(_energy_items((0, 12), (12, 24))),
     )
     assert out["price"]["time_mean_per_mwh"] == pytest.approx(100.0)
 
