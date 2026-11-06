@@ -479,7 +479,7 @@ def project_records(owner, project, live):
                       f"item{'s' if record['data_items'] != 1 else ''}); open it to see "
                       f"{'them' if record['data_items'] != 1 else 'it'}."
                       if 'data_items' in record else
-                      (f"The harness run completed; {record['gaps']} part{'s' if record['gaps'] != 1 else ''} "
+                      (f"The study run finished: {record['gaps']} part{'s' if record['gaps'] != 1 else ''} "
                        "of the request "
                        f"{'are' if record['gaps'] != 1 else 'is'} not covered, and its report names "
                        f"{'them' if record['gaps'] != 1 else 'it'}.")
