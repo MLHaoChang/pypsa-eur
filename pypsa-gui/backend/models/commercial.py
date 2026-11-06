@@ -772,6 +772,48 @@ class Co2Price(BaseModel):
 # ------------------------------------------------------------------ solver-config boundary
 
 
+# Reserve products (DC grid readiness 06): generic FCR / aFRR / mFRR-style shapes the
+# eligible backup storage may commit headroom to; prices are user Library series.
+# `models.reserve_products` re-exports these.
+ReserveKind = Literal["fast_symmetric", "secondary", "tertiary"]
+ReserveDirection = Literal["symmetric", "up", "down"]
+
+
+class ReserveProduct(BaseModel):
+    """One reserve product the eligible backup storage may commit to.
+
+    ``sustain_h`` is how long each committed MW must be deliverable (the
+    energy it reserves is MW × ``sustain_h``); there is no default, the user
+    states it. ``storages`` empty means every eligible storage."""
+
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
+    kind: ReserveKind
+    direction: ReserveDirection
+    sustain_h: float = Field(gt=0, le=24, allow_inf_nan=False)
+    capacity_price: PriceSeriesRef
+    max_commit_mw: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    storages: list[str] = Field(default_factory=list)
+    counterparty: str = Field(default="tso", min_length=1)
+
+    @model_validator(mode="after")
+    def _direction_fits_kind(self) -> "ReserveProduct":
+        if self.kind == "fast_symmetric" and self.direction != "symmetric":
+            raise ValueError("reserve product: a fast_symmetric product is symmetric")
+        if self.kind != "fast_symmetric" and self.direction == "symmetric":
+            raise ValueError(f"reserve product: a {self.kind} product is up or down, not symmetric")
+        if len(set(self.storages)) != len(self.storages):
+            raise ValueError("reserve product: a storage is named twice")
+        return self
+
+    @property
+    def up(self) -> bool:
+        return self.direction in ("symmetric", "up")
+
+    @property
+    def down(self) -> bool:
+        return self.direction in ("symmetric", "down")
+
+
 class CommercialConfig(BaseModel):
     """Typed boundary carried on ``SolverConfigSchema.commercial`` (plan WP1.3).
 
@@ -849,6 +891,9 @@ class CommercialConfig(BaseModel):
     # stored value only while that value still equals its `value`.
     provenance: dict[str, dict[str, Any]] = Field(default_factory=dict)
     co2_price: Co2Price | None = None
+    # Reserve products the backup storage may commit headroom to (DC grid readiness 06);
+    # bound like the contract reference prices (`ic_reserve_price`), read by the LP.
+    reserve_products: list[ReserveProduct] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -863,6 +908,15 @@ class CommercialConfig(BaseModel):
                 for c in data["contracts"]]}
         return data
 
+    @model_serializer(mode="wrap")
+    def _omit_no_reserve_products(self, handler, info):
+        # No products dumps as before the field existed (GK A R4), so every stored
+        # config, fingerprint and digest without reserve products equals master.
+        out = handler(self)
+        if isinstance(out, dict) and not self.reserve_products:
+            out.pop("reserve_products", None)
+        return out
+
     @model_validator(mode="after")
     def _unique_contract_ids(self) -> "CommercialConfig":
         loads = [r.load for r in self.reference_purchases]
@@ -872,6 +926,11 @@ class CommercialConfig(BaseModel):
         if len(ids) != len(set(ids)):
             # One `ic:contract:<id>` column per contract (WP2.2-0 review 0b #3).
             raise ValueError("contract ids must be unique")
+        rp = [p.id for p in self.reserve_products]
+        if len(rp) != len(set(rp)):
+            # One `ic:reserve:<id>` price column per product.
+            raise ValueError(f"reserve products: id(s) {sorted({i for i in rp if rp.count(i) > 1})} "
+                             "appear more than once")
         return self
 
     @model_validator(mode="after")

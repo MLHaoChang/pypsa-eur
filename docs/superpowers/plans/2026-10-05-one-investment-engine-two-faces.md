@@ -257,6 +257,9 @@ slack, and then left out of the case hash, so other cases keep their hash.
 `bind_commercial_on_context` gain the trailing optional keyword `currency: str | None = None` (the project's stated
 finance currency). With it, a Library tariff ref resolved in another currency is refused (409 `currency_mismatch`);
 omitting it binds as before.
+**Changes (2026-11-06, DC-06 flex revenue):** `commercial.binding.bind_commercial` gains the trailing optional keyword
+`series_meta: Callable[[object], dict] | None = None` (a Library series ref's meta, read for each reserve product's
+price-series currency); `CommercialConfig` gains `reserve_products`. Omitting both binds as before.
 
 ## 7. Coordination protocol
 

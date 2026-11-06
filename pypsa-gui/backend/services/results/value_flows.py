@@ -424,7 +424,7 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
     """Everything the ledger reads, from the solved network (None without a
     commercial config or before a solve)."""
     from services.commercial import billing as _billing
-    from services.results.billing import _retail, _solved, settlement_lines
+    from services.results.billing import _retail, _solved, reserve_lines, settlement_lines
     from services.results.physical_quantities import physical_quantities
 
     commercial = getattr(cfg, "commercial", None)
@@ -461,6 +461,8 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
     pq["result_df"] = result_df
     lines, contract_flags = settlement_lines(n, parsed, pq)
     settlement = [{**asdict(ln), "period": _key(ln.period)} for ln in lines]
+    reserve = [{**asdict(ln), "period": _key(ln.period)}
+               for ln in reserve_lines(n, cfg, parsed.site_party)[0]]
     unsettled = []
     unsettled_parties = {}
     by_id = {c.id: c for c in parsed.contracts}
@@ -508,7 +510,7 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
         input_flags=sorted(set(input_flags)), unsettled_contracts=unsettled,
         unsettled_parties=unsettled_parties,
         curtailment_penalty=_fin((cb or {}).get("curtailment_cost")),
-        external_ppa_assets=external_ppa, hub=_hub_inputs(n, parsed, vf, bill))
+        external_ppa_assets=external_ppa, hub=_hub_inputs(n, parsed, vf, bill), reserve=reserve)
 
 
 def value_flow_ledger(n, cfg, *, result_df, lost_load=None):

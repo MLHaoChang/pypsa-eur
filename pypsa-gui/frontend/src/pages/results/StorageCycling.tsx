@@ -16,6 +16,7 @@ import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import ResultState from '../../components/ResultState'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
+import ReserveCommitments from './ReserveCommitments'
 
 // ── Storage cycling result tab ──────────────────────────────────────────────
 // Per-storage-unit cycle count (Σ |p| × Δt ÷ (2 × p_nom_opt × max_hours))
@@ -92,7 +93,7 @@ export default function StorageCycling() {
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // storage-dispatch query below can be windowed before any payload exists.
   const { win, winValid, fetchRange } = useResultsWindow(currentProject)
-  const { data: storPowerTS } = useQuery({
+  const { data: storPowerTS, isFetched: dispatchFetched } = useQuery({
     queryKey: nk(currentProject, 'results', 'storage_dispatch', win.from, win.to),
     queryFn: () => resultsApi.getStorageDispatchResults(undefined, fetchRange),
     enabled: winValid,
@@ -294,9 +295,13 @@ export default function StorageCycling() {
   if (!storPowerTS || units.length === 0) {
     if (!unitsLoaded) return null
     return (
-      <div className="p-6">
+      <div className="p-6 flex flex-col gap-4">
         <ResultState state="not_run"
           reason="Cycles come from the solved storage dispatch. Run a solve to count them." />
+        {/* Reserve products on the backup storage (DC 06): their products and
+            "not solved" lines are known before a solve. While the dispatch
+            still loads this view is replaced, so a scroll request waits. */}
+        <ReserveCommitments settled={dispatchFetched || !winValid} />
       </div>
     )
   }
@@ -304,7 +309,9 @@ export default function StorageCycling() {
   const periodLabel = filter.selectedPeriod != null ? `period ${filter.selectedPeriod}` : 'horizon'
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-4 gap-4">
+    // [&>*]:shrink-0: the cards keep their height and the column scrolls (DC 06
+    // adds a tall reserve card; a shrinking card would clip its content).
+    <div className="flex flex-col h-full overflow-auto p-4 gap-4 [&>*]:shrink-0">
       {/* Truncated-window banner — see FIX 1 secondary in the
           results-tabs-window final review: a narrow-but-wide window can
           still hit the server's MAX_RESPONSE_VALUES cap. */}
@@ -345,6 +352,9 @@ export default function StorageCycling() {
       </section>
 
       <PerUnitCyclingSection units={units} />
+
+      {/* Reserve products on the backup storage (DC 06); nothing without them. */}
+      <ReserveCommitments />
 
     </div>
   )

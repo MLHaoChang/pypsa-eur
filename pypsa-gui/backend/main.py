@@ -98,6 +98,7 @@ from routers import (
     projects,
     report_jobs,
     reports,
+    reserves,
     results,
     simulation,
     snapshots,
@@ -1321,6 +1322,8 @@ app.include_router(spectrum.analysis_router, prefix="/api/spectrum", tags=["spec
 app.include_router(changelog.router, prefix="/api/changelog", tags=["changelog"])
 app.include_router(simulation.router, prefix="/api/simulation", tags=["simulation"])
 app.include_router(results.results_router, prefix="/api/results", tags=["results"])
+# Reserve products on backup storage (DC grid readiness 06): read-only.
+app.include_router(reserves.router, prefix="/api/results", tags=["results"])
 # Per-asset "Asset Detail" results (Phase 1). Mounted AFTER results_router so
 # the more specific /api/results/asset/... prefix registers without being
 # shadowed; the two routers don't share any literal path segments in practice

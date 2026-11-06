@@ -159,6 +159,7 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
 
     clash = tariff_currency_mismatch(cfg.import_tariff, currency)
     found = [("error", "commercial.currency_mismatch", "", "", clash)] if clash else []
+    found += _reserve_currency_findings(n, cfg, currency)
     try:
         return found + _warnings(n, cfg, adders, price, demand) \
             + _contract_warnings(n, cfg, dsr or {})
@@ -166,6 +167,26 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
         return found + [("warning", "commercial.preflight_incomplete", "", "",
                          f"Some commercial preflight checks could not run "
                          f"({type(exc).__name__}: {exc}); the solve applies its own checks.")]
+
+
+def _reserve_currency_findings(n, cfg, currency: str | None) -> list[tuple[str, str, str, str, str]]:
+    """A reserve price bound in another currency than the project's, e.g. after the
+    finance currency changed (DC grid readiness 06, GK B L2): the currency the
+    binding recorded on the network."""
+    from services.commercial.binding import reserve_price_currency_mismatch
+    from models import reserve_products as RP
+
+    if not currency or not cfg.reserve_products:
+        return []
+    bound = (getattr(n, "meta", None) or {}).get(RP.CURRENCY_META) or {}
+    out = []
+    for p in cfg.reserve_products:
+        if bound.get(p.id) is None:
+            continue  # unbound (the solve refuses it, `reserve_price_missing`) or not read
+        clash = reserve_price_currency_mismatch(p, bound[p.id], currency)
+        if clash:
+            out.append(("error", "commercial.currency_mismatch", "", "", clash))
+    return out
 
 
 def _connection_double_count(n, fee) -> list[tuple[str, str, str, str, str]]:

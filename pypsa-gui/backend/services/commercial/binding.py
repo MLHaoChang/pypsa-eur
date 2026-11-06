@@ -97,6 +97,29 @@ def tariff_currency_mismatch(tariff, currency: str | None) -> str | None:
             "change the project's currency.")
 
 
+def series_currency(meta: Mapping | None) -> str | None:
+    """The currency a Library price series is stored in, read from its meta `unit`
+    (`"EUR/MW/h"` → EUR). A series with no unit is the stored EUR default (the
+    export-series and template rule); a unit that names no currency gives None."""
+    unit = (meta or {}).get("unit") if isinstance(meta, Mapping) else None
+    if not unit:
+        return "EUR"
+    head = str(unit).strip().split("/", 1)[0].strip()
+    return head.upper() if len(head) == 3 and head.isalpha() else None
+
+
+def reserve_price_currency_mismatch(product, have: str | None, currency: str | None) -> str | None:
+    """Why reserve product `product`'s price series, stored in `have`, cannot price a
+    project in `currency` (GK B L2, the GS-01 rule), or None. Nothing is converted."""
+    if not currency or have == currency:
+        return None
+    what = f"is priced in {have}" if have else "states no currency in its unit"
+    return (f"Reserve product \u201c{product.id}\u201d: its price series "
+            f"\u201c{product.capacity_price.id}\u201d {what}; the project's finance inputs are "
+            f"in {currency}. Nothing is converted: use a {currency} series, or change the "
+            "project's currency.")
+
+
 def resolve_tariff_ref(commercial, resolve_item: Callable[[object], dict] | None):
     """`commercial` with its `import_tariff_ref` resolved into the inline
     `import_tariff` (P2 WP2.4a); unchanged without a ref."""
@@ -135,13 +158,17 @@ def resolve_tariff_ref(commercial, resolve_item: Callable[[object], dict] | None
 def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
                     resolve_ref: Callable[[object], pd.Series], lock=None,
                     resolve_item: Callable[[object], dict] | None = None,
-                    solver_cfg=None, currency: str | None = None) -> dict | None:
+                    solver_cfg=None, currency: str | None = None,
+                    series_meta: Callable[[object], dict] | None = None) -> dict | None:
     """Returns the plain dict stored on `SolverConfig.commercial` (None when
     clearing). `commercial` is a parsed `CommercialConfig` or None. A Library
     tariff ref is resolved first (`resolve_item`), so everything after checks
     the tariff the solve will use. `currency`: the project's stated currency; a
     Library tariff ref in another is refused (409 `currency_mismatch`). `solver_cfg` (the config the solve will
-    use) ranks an FCA's curtailment hours on the LP's scaled load (E2E 1b)."""
+    use) ranks an FCA's curtailment hours on the LP's scaled load (E2E 1b).
+    `series_meta`: a Library series ref's meta; each reserve product's price series
+    must be in `currency` (409 `currency_mismatch`, DC grid readiness 06 L2). A
+    stated currency with no `series_meta` to read is refused rather than unchecked."""
 
     def plan_registry(entry):
         try:
@@ -158,6 +185,7 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
             # A cleared config names no reference series (review 0b #4).
             SI.write_reference_series(n, {}, frame=SI.REF_PRICE_ATTR, keep=set())
             SI.write_reference_series(n, {}, frame=SI.CFE_ATTR, keep=set())
+            _write_reserve_prices(n, {}, {})
         if project_dir is not None:
             try:
                 conn.register_fca_entry(project_dir, None)
@@ -170,6 +198,7 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
         clash = tariff_currency_mismatch(commercial.import_tariff, currency)
         if clash:
             raise BindingRefusal(409, CURRENCY_MISMATCH, clash)
+    reserve_currency = _reserve_currencies(commercial, currency, series_meta)
     try:
         lp_bindings.validate_for_network(n, commercial, refuse_settlement_contracts=True)
     except lp_bindings.CommercialBindingError as exc:
@@ -214,6 +243,12 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
                                              c.reference_price)
                   for c in commercial.contracts
                   if getattr(c, "reference_price", None) is not None}
+    from models import reserve_products as RP
+
+    # Reserve capacity prices (DC grid readiness 06, GK B L3): fully covered only.
+    reserve_prices = {RP.price_column(p.id): (aligned(p.capacity_price, "reserve_price_coverage"),
+                                              p.capacity_price)
+                      for p in commercial.reserve_products}
     cfe = ({SI.CFE_COLUMN: (aligned(commercial.grid_cfe_share_ref, "grid_cfe_share_coverage"),
                             commercial.grid_cfe_share_ref)}
            if commercial.grid_cfe_share_ref is not None else {})
@@ -251,11 +286,49 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
         SI.write_reference_series(n, ref_prices, frame=SI.REF_PRICE_ATTR,
                                   keep=set(ref_prices))
         SI.write_reference_series(n, cfe, frame=SI.CFE_ATTR, keep=set(cfe))
+        _write_reserve_prices(n, reserve_prices, reserve_currency)
     if planned is not None:
         from services.adequacy import stress
 
         stress.save_scenarios(project_dir, planned)
     return commercial.model_dump(mode="json")
+
+
+def _reserve_currencies(commercial, currency: str | None,
+                        series_meta: Callable[[object], dict] | None) -> dict[str, str | None]:
+    """Each reserve product's price currency; refuses one the project's stated
+    `currency` does not match (409 `currency_mismatch`), before any write."""
+    out: dict[str, str | None] = {}
+    for p in commercial.reserve_products:
+        if series_meta is None:
+            if currency:
+                raise BindingRefusal(409, CURRENCY_MISMATCH, (
+                    f"Reserve product \u201c{p.id}\u201d: its price series' currency cannot be "
+                    f"read here, so it cannot be checked against the project's {currency}"))
+            out[p.id] = None
+            continue
+        # "" = the unit names no currency; None (above) = not read here.
+        have = series_currency(series_meta(p.capacity_price)) or ""
+        clash = reserve_price_currency_mismatch(p, have, currency)
+        if clash:
+            raise BindingRefusal(409, CURRENCY_MISMATCH, clash)
+        out[p.id] = have
+    return out
+
+
+def _write_reserve_prices(n, prices: dict, currencies: dict[str, str | None]) -> None:
+    """The reserve price frame holds exactly the config's products, and the network
+    records each price's currency for the preflight (`commercial.currency_mismatch`):
+    an ISO code, "" for a unit naming none, None when it was not read."""
+    from services.commercial import settlement_inputs as SI
+    from models import reserve_products as RP
+
+    SI.write_reference_series(n, prices, frame=RP.PRICE_FRAME, keep=set(prices))
+    meta = getattr(n, "meta", None)
+    if prices:
+        n.meta[RP.CURRENCY_META] = {k: v for k, v in sorted(currencies.items())}
+    elif isinstance(meta, dict):
+        meta.pop(RP.CURRENCY_META, None)
 
 
 # ── Binding on a project context (IC U1 follow-up, GS Q15) ─────────────────
@@ -286,36 +359,48 @@ def context_resolvers(ctx, user=None) -> tuple[Callable[[object], pd.Series],
     build seeds one org, and every project row takes the local user's org.
     No org at all is `library_org_unknown` (409), raised only when a ref is
     actually resolved, so a config with no refs binds on an unsaved network."""
-    from uuid import UUID
-
     from services.library import items as library_items
     from services.library import series_store
 
-    def resolver(read):
-        def resolve(ref):
-            from db.models import User
-            from db.session import SessionLocal
-            from services import library_acl
-
-            # The context carries the org id as a string (`org:uuid` registry key).
-            org = UUID(str(ctx.org_id)) if ctx.org_id else None
-            with SessionLocal() as db:
-                if org is None and isinstance(user, User):
-                    org = library_acl.org_of(db, user)
-                if org is None:
-                    raise BindingRefusal(
-                        409, "library_org_unknown",
-                        "save the project first: a Library ref resolves in the project's "
-                        "organization")
-                try:
-                    return read(db, org, ref)
-                except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
-                    raise BindingRefusal(409, "library_ref_stale", str(exc)) from exc
-        return resolve
-
     # Looked up at call time, so a patched store is the one used.
-    return (resolver(lambda db, org, ref: series_store.resolve(db, org, ref)),
-            resolver(lambda db, org, ref: library_items.resolve(db, org, ref)))
+    return (_in_org(ctx, user, lambda db, org, ref: series_store.resolve(db, org, ref)),
+            _in_org(ctx, user, lambda db, org, ref: library_items.resolve(db, org, ref)))
+
+
+def context_series_meta(ctx, user=None) -> Callable[[object], dict]:
+    """A Library series ref's meta (its `unit` names the currency), in `ctx`'s org
+    as `context_resolvers` resolves it."""
+    from services.library import series_store
+
+    return _in_org(ctx, user, lambda db, org, ref: series_store.series_meta(db, org, ref))
+
+
+def _in_org(ctx, user, read) -> Callable[[object], object]:
+    """`read(db, org, ref)` in the project's org (see `context_resolvers`)."""
+    from uuid import UUID
+
+    from services.library import series_store
+
+    def resolve(ref):
+        from db.models import User
+        from db.session import SessionLocal
+        from services import library_acl
+
+        # The context carries the org id as a string (`org:uuid` registry key).
+        org = UUID(str(ctx.org_id)) if ctx.org_id else None
+        with SessionLocal() as db:
+            if org is None and isinstance(user, User):
+                org = library_acl.org_of(db, user)
+            if org is None:
+                raise BindingRefusal(
+                    409, "library_org_unknown",
+                    "save the project first: a Library ref resolves in the project's "
+                    "organization")
+            try:
+                return read(db, org, ref)
+            except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
+                raise BindingRefusal(409, "library_ref_stale", str(exc)) from exc
+    return resolve
 
 
 def bind_commercial_on_context(ctx, commercial, *, user=None,
@@ -345,7 +430,7 @@ def bind_commercial_on_context(ctx, commercial, *, user=None,
     return bind_commercial(ctx.network, commercial, project_dir=project_dir,
                            resolve_ref=resolve, lock=ctx.mutation_lock,
                            resolve_item=resolve_item, solver_cfg=solver_cfg,
-                           currency=currency)
+                           currency=currency, series_meta=context_series_meta(ctx, user))
 
 
 # ── The commercial root: the site connection (IC U1 follow-up, item b) ─────

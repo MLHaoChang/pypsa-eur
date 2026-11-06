@@ -32,7 +32,7 @@ describe('SC-00 N UI contract anchors', () => {
     expect(typeof flowNavigation.openFlowTarget).toBe('function')
     expect(typeof flowNavigation.openFlowTargetInPlace).toBe('function')
     expect(typeof flowNavigation.showResultsTab).toBe('function')
-    expect(navigationSource).toMatch(/function withReturn\(target: FlowTarget \| null, jump: \(\) => void, fromSite3D = false\)/)
+    expect(navigationSource).toMatch(/function withReturn\(target: FlowTarget \| null, jump: \(\) => void, fromSite3D = false(, label\?: string)?\)/)
     expect(typeof flowNavigation.withReturnFromSite3D).toBe('function')
   })
 

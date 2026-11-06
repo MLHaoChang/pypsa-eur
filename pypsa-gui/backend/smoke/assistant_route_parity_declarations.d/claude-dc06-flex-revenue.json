@@ -1,0 +1,10 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/results/reserves",
+   "reason": "held-by-spec",
+   "issue": ".scratch/datacenter-grid-readiness/issues/20-dc-backup-chat-tool.md"
+  }
+ ]
+}

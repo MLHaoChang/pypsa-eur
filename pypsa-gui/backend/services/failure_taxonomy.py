@@ -29,6 +29,15 @@ _SUCCESS_STATUSES = {"ok", "optimal"}
 # Matched against a lowercased haystack built from condition (+ optional detail).
 _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
     (
+        ("reserve_refused",),
+        "reserve_refused",
+        "Reserve products refused before solving",
+        "The reserve products cannot be built on this network as configured: the "
+        "detail names the product or storage and the reason. Save Commercial & "
+        "parties again to pick up the price, restore the backup string's hold, or "
+        "remove the product, then run again.",
+    ),
+    (
         ("validation_failed",),
         "validation",
         "Validation failed before solving",

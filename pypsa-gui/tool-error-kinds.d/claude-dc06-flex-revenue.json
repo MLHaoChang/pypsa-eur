@@ -1,0 +1,28 @@
+{
+ "kinds": {
+  "reserve_storage_not_eligible": {
+   "surface": "inline",
+   "why": "run_simulation (POST /api/simulation/run) refuses before starting a solve: a reserve product names a storage that is not backup storage with a readable backup floor (a DC-03 string of a bess or hybrid project, or a ride-through UPS). The assistant names the storage and asks the user to drop it from the product or save the DC backup spec."
+  },
+  "reserve_floor_exceeds_energy": {
+   "surface": "inline",
+   "why": "run_simulation (POST /api/simulation/run) refuses before starting a solve: a backup storage's floor (its kept backup energy) is above its usable energy, so it cannot commit a reserve. The assistant names the storage and suggests reserve headroom hours in the DC backup or a smaller product."
+  },
+  "reserve_price_missing": {
+   "surface": "inline",
+   "why": "run_simulation (POST /api/simulation/run) refuses before starting a solve: a reserve product's capacity price is not bound to the network or has a gap. The assistant asks the user to re-save the commercial config so the price series binds, with a series that covers every snapshot."
+  },
+  "reserve_price_stale": {
+   "surface": "inline",
+   "why": "run_simulation (POST /api/simulation/run) refuses before starting a solve: a reserve product's capacity price series changed since it was bound. The assistant asks the user to re-save the commercial config to bind the current series."
+  },
+  "reserve_initial_soc_below_floor": {
+   "surface": "inline",
+   "why": "run_simulation (POST /api/simulation/run) refuses before starting a solve: a non-cyclic backup storage starts below its backup floor. The assistant names the storage and suggests raising state_of_charge_initial or making it cyclic."
+  },
+  "reserve_string_availability_edited": {
+   "surface": "inline",
+   "why": "run_simulation (POST /api/simulation/run) refuses before starting a solve: a DC-03 backup string's p_max_pu series is no longer the dispatch hold (0 in every snapshot), so its availability for a reserve is unknown. The assistant suggests restoring the hold by re-deriving the DC backup."
+  }
+ }
+}

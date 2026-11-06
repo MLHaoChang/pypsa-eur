@@ -16,7 +16,9 @@ the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
 `FinanceCase.campus`; and campus-IC 04 of 2026-10-23: `ExtraOwnerAsset.renewals`,
 `service_to` and `existing_renewal`; and grid-to-process 11 of 2026-10-29:
 `FinanceCase.product_shortfall`; and gridspine-library-eu 01 of 2026-11-06: the
-`currency` keyword of `bind_commercial` and `bind_commercial_on_context`).
+`currency` keyword of `bind_commercial` and `bind_commercial_on_context`; and DC-06 of
+2026-11-06: the `series_meta` keyword of `bind_commercial` and
+`CommercialConfig.reserve_products`).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -134,7 +136,8 @@ SIGNATURES: dict[str, str] = {
         "(n, commercial, *, project_dir: 'pathlib.Path | None', "
         "resolve_ref: 'Callable[[object], pd.Series]', lock=None, "
         "resolve_item: 'Callable[[object], dict] | None' = None, solver_cfg=None, "
-        "currency: 'str | None' = None) -> 'dict | None'",
+        "currency: 'str | None' = None, "
+        "series_meta: 'Callable[[object], dict] | None' = None) -> 'dict | None'",
     "services.library.series_store.resolve":
         "(db: 'DBSession', org_id: 'UUID', ref: 'PriceSeriesRef', *, root: 'Path | None' = None)"
         " -> 'pd.Series'",
@@ -290,7 +293,9 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
         # IPP ticket 07 (G7): the wholesale import price series.
         "import_price_ref",
         # Data-to-model slice 2: where a tariff or PPA value was read from (metadata, not LP).
-        "provenance"),
+        "provenance",
+        # DC-06 (2026-11-06): the reserve products and their price series.
+        "reserve_products"),
     "models.finance.FinanceInputs": (
         "acquisition_date", "analysis_years", "annualise", "capex_phasing", "cod_by_asset",
         "construction_months_by_asset", "construction_start", "contingency_share",

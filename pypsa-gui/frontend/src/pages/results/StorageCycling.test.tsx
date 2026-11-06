@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -29,10 +29,18 @@ vi.mock('../../api/network', async (importOriginal) => {
   }
 })
 
+// DC 06: the reserve section asks `/results/reserves`; 204 (null) by default.
+const reserves = vi.hoisted(() => ({ get: vi.fn() }))
+vi.mock('../../api/reserves', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/reserves')>()
+  return { ...actual, reservesApi: reserves }
+})
+
 afterEach(() => cleanup())
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
+  reserves.get.mockReset().mockResolvedValue(null)
   // pNom is rendered as u.pNom.toFixed(1) — a direct passthrough of the
   // mocked network row's own p_nom field, no aggregation involved.
   vi.mocked(resultsApi.getStorageDispatchResults).mockReset().mockResolvedValue({
@@ -372,5 +380,32 @@ describe('StorageCycling: says why there is nothing to cycle', () => {
     renderPage()
     expect(await screen.findByText('not built')).toBeTruthy()
     expect(screen.queryByText('0.00')).toBeNull()
+  })
+})
+
+describe('StorageCycling: reserve products (DC 06)', () => {
+  it('is unchanged without reserve products (204): no reserve section', async () => {
+    renderPage()
+    await screen.findByText('424.2')
+    await waitFor(() => expect(reserves.get).toHaveBeenCalled())
+    expect(screen.queryByText('Reserve products')).toBeNull()
+    expect(screen.queryByTestId('reserve-section')).toBeNull()
+  })
+
+  it('shows the reserve section when the project has reserve products', async () => {
+    reserves.get.mockResolvedValue({
+      products: [{ id: 'fcr', kind: 'fast_symmetric', direction: 'symmetric', sustain_h: 0.5, counterparty: 'tso', price_source: 'user' }],
+      snapshots: ['2026-01-01T00:00:00'],
+      storages: [{ name: 'Battery1', string: true, floor_mwh: 100, e_cap_mwh: 1696.96, soc_mwh: [400],
+        committed: { fcr: [10] } }],
+      lines: [{ period: null, contract_id: 'reserve:fcr', payer: 'tso', payee: 'site', value_stream: 'reserve_capacity',
+        quantity_mwh: null, amount: 500, flags: [] }],
+      flags: [], headroom_h_per_string: 0.5, currency: 'EUR', money_year: 2030, not_modelled: 'x',
+    })
+    renderPage()
+    expect(await screen.findByTestId('reserve-section')).toBeTruthy()
+    expect(screen.getByTestId('reserve-row-fcr')).toBeTruthy()
+    // A symmetric product carries no directional note.
+    expect(screen.queryByTestId('reserve-not-modelled')).toBeNull()
   })
 })

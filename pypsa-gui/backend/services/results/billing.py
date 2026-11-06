@@ -227,6 +227,65 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
     return lines, flags
 
 
+#: The settlement stream of a reserve product's capacity payment (DC 06); the
+#: ledger books it as `ancillary`.
+RESERVE_STREAM = "reserve_capacity"
+#: What a reserve line does not value (GK B L7).
+RESERVE_NOT_MODELLED = ("activation energy and its price, cycling wear and non-delivery "
+                        "penalties are not modelled: capacity payments only")
+
+
+def reserve_lines(n, cfg, site_party: str = "site", *,
+                  backup: tuple[dict, frozenset] | None = None) -> tuple[list[_K.Line], list[str]]:
+    """One capacity-payment line per reserve product and period (DC 06):
+    Σ hours × price × committed MW over that period's snapshots, hours from
+    `reserve_weights` (the LP's), never the period weight (the investment case
+    applies the years). The counterparty pays the site. A missing or stale
+    solve (the products or floors changed since) is an amount of None flagged
+    `reserve_not_solved`, never 0; a directional product is flagged
+    `activation_not_valued`. ``backup`` defaults to the project's floors.
+    No products: no lines."""
+    from services.solver import reserve_products as RP
+
+    products = RP.products_of(cfg)
+    if not products:
+        return [], []
+    floors, _strings = RP.project_backup(n) if backup is None else backup
+    frame, flags = RP.solved(n, RP.inputs_digest(products, floors))
+    hours, _period_w = RP.reserve_weights(n)
+    h = hours.to_numpy(dtype=float)
+    multi = isinstance(n.snapshots, pd.MultiIndex)
+    periods = list(n.snapshots.get_level_values(0).unique()) if multi else [None]
+    lines: list[_K.Line] = []
+    for prod in products:
+        price, price_flags = RP.bound_price(n, prod)
+        mw = None
+        if frame is not None:
+            cols = [c for c in frame.columns if c.rpartition(RP.SEP)[2] == prod.id]
+            mw = frame[cols].sum(axis=1).to_numpy(dtype=float) if cols else np.zeros(len(h))
+        base = [] if prod.direction == "symmetric" else ["activation_not_valued"]
+        for p in periods:
+            sel = (np.asarray(n.snapshots.get_level_values(0)) == p) if multi \
+                else np.ones(len(h), bool)
+            why = list(flags)
+            if mw is not None and price is None:
+                why += ["reserve_price_not_bound", *price_flags]
+            amount = None
+            if not why:
+                pr = price.to_numpy(dtype=float)[sel]
+                r = mw[sel]
+                if np.isfinite(pr).all() and np.isfinite(r).all():
+                    amount = float((h[sel] * pr * r).sum())
+                else:
+                    why.append("reserve_not_solved")
+            lines.append(_K.Line(period=None if p is None else int(p),
+                                 contract_id=f"reserve:{prod.id}", payer=prod.counterparty,
+                                 payee=site_party, value_stream=RESERVE_STREAM,
+                                 quantity_mwh=None, amount=amount,
+                                 flags=sorted(set(base + why))))
+    return lines, sorted(set(flags))
+
+
 def _committed_ppa(n, c, got, sel, w_all, frame) -> list[_K.Line]:
     """A dispatch PPA's energy line at the price the LP committed: Σ w × p_gen
     × `ic_ppa_price` over the period (the cost row's formula)."""
@@ -331,6 +390,7 @@ def compute_billing(n, cfg, *, state: dict | None = None,
         store_billing_frames(state, _billing.compact_frames(bill))
     record = _SI.contracts_record(parsed)
     per_period = {_key(p): _period_payload(r) for p, r in bill.per_period.items()}
+    reserve, reserve_flags = reserve_lines(n, cfg, parsed.site_party)
     # Summary first, detail last: a chat reads the head of the payload (F7).
     return _json({
         "summary": {k: (None if v is None else {"total": v["total"],
@@ -345,6 +405,10 @@ def compute_billing(n, cfg, *, state: dict | None = None,
         "per_period": per_period,
         "gap": gap,
         "provenance": {**bill.provenance, "contracts": record},
+        # Reserve capacity payments (DC 06): only when the config has products.
+        **({"reserve": {"lines": [asdict(ln) for ln in reserve],
+                        "flags": reserve_flags, "not_modelled": RESERVE_NOT_MODELLED}}
+           if reserve else {}),
     })
 
 
