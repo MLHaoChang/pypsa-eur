@@ -39,13 +39,15 @@ def _net():
     return PyPSAService.get_active_context().network
 
 
-def _frames(monkeypatch, tool, args):
-    """One ordinary-turn call through the real dispatch seam; the user approves."""
+def _frames(monkeypatch, tool, args, *, assurance_turn=None):
+    """One ordinary-turn call through the real dispatch seam; the user approves.
+    `assurance_turn` stands in for a checked turn's guard when given."""
     from harness.loop import dispatch_tool_call
     from harness.session import ChatSession
 
     monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_MODE", "disabled")
     session, collector, frames = ChatSession(), [], []
+    session.assurance_turn = assurance_turn
     for event, data in dispatch_tool_call(
         session,
         {"id": uuid.uuid4().hex, "name": tool, "input": args},
@@ -788,6 +790,15 @@ def test_an_export_that_also_edits_the_network_reads_partial_extra_edits(
     assert block["counts"]["extra"] == 1
 
 
+def test_an_export_with_an_uncomparable_state_is_never_completed(
+    baseline, monkeypatch
+):
+    """Mutant guard: the export's extras check needs a comparable map."""
+    monkeypatch.setattr(outcomes, "state_map", lambda *a: outcomes.UNCOMPARABLE)
+    block = _result(_frames(monkeypatch, "export_network_nc", {}))["_outcome"]
+    assert (block["outcome"], block["reason"]) == ("uncertain", "not_comparable")
+
+
 def test_a_plain_export_still_reads_completed(baseline, monkeypatch):
     block = _result(_frames(monkeypatch, "export_network_nc", {}))["_outcome"]
     assert block["outcome"] == "completed", block
@@ -816,6 +827,33 @@ def test_an_effect_tool_outside_the_write_set_times_out_uncertain(
     errors = [d for e, d in frames if e == "tool_error"]
     assert errors and errors[0]["error_kind"] == "tool_timeout", errors
     assert errors[0]["_outcome"]["reason"] == "tool_timeout"
+
+
+def test_a_timeout_in_a_checked_turn_gets_no_ordinary_outcome(
+    baseline, monkeypatch
+):
+    """H6 is for ordinary turns: a checked turn has its own projection, so
+    the loop adds no `_outcome` to its timeout frame."""
+    import threading
+    from types import SimpleNamespace
+
+    from harness import budget as harness_budget
+
+    release = threading.Event()
+    monkeypatch.setitem(
+        chat_tools.DISPATCHERS, "bulk_update_components", lambda **_kw: release.wait(10)
+    )
+    monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 0.2)
+    turn = SimpleNamespace(tool_guard=lambda *_a: True)
+    try:
+        frames, _c = _frames(
+            monkeypatch, "bulk_update_components", UPDATE, assurance_turn=turn
+        )
+    finally:
+        release.set()
+    errors = [d for e, d in frames if e == "tool_error"]
+    assert errors and errors[0]["error_kind"] == "tool_timeout", frames
+    assert "_outcome" not in errors[0]
 
 
 def test_timeout_outcome_by_tier():
@@ -1032,15 +1070,17 @@ def test_an_eh_flag_reads_missing_as_its_default_false(baseline):
     """normalise_eh_columns writes a missing flag as False: no change."""
     from services.adequacy.eh_columns import _all_columns, normalise_eh_columns
 
-    flag = next(c for c, k in _all_columns()["Generator"].items() if k == "bool")
+    # Generator has no bool EH column; Bus carries eh_poc and eh_critical.
+    flag = next(c for c, k in _all_columns()["Bus"].items() if k == "bool")
     n = _net()
-    n.generators[flag] = None
+    bus = n.buses.index[0]
+    n.buses[flag] = None
     before = outcomes.state_map(n, {})
     normalise_eh_columns(n)
     assert outcomes.changed_paths(before, outcomes.state_map(n, {})) == []
-    n.generators.at["G1", flag] = True
+    n.buses.at[bus, flag] = True
     assert outcomes.changed_paths(before, outcomes.state_map(n, {})) == [
-        f"/Generator/G1/{flag}"
+        f"/Bus/{bus}/{flag}"
     ]
 
 
