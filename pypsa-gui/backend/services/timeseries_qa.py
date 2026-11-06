@@ -65,6 +65,11 @@ def _finite_values(frame, column) -> np.ndarray | None:
     return finite if finite.size else None
 
 
+# Hours below this fraction of a series' 90th percentile do not count towards
+# the median the spike rule compares the peak with.
+NEAR_ZERO_FRACTION = 0.01
+
+
 def _check_column(component_class: str, name: str, attribute: str,
                   values: np.ndarray, zero_meaning: str) -> list:
     """The shape checks for one series. Order matters: most specific first."""
@@ -108,7 +113,15 @@ def _check_column(component_class: str, name: str, attribute: str,
                 f"{n_values} snapshots (min {values.min():g}). Availability is "
                 f"a fraction of nameplate and cannot be below zero."))
 
-    median = float(np.median(values))
+    # A solar series is near zero all night and a wind series in calm hours, so
+    # its plain median sits at the floor and any daytime value looks like a
+    # spike. The median is taken over the hours that are not near zero, where
+    # "near zero" is a fraction of the series' own 90th percentile (a single
+    # outlier cannot move that).
+    magnitude = np.abs(values)
+    floor = NEAR_ZERO_FRACTION * float(np.percentile(magnitude, 90))
+    active = values[magnitude > floor]
+    median = float(np.median(active)) if active.size else 0.0
     peak = float(values.max())
     if median > 0 and peak > median * SPIKE_MULTIPLE:
         out.append(Issue(

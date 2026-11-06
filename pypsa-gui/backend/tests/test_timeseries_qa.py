@@ -144,6 +144,30 @@ def test_an_ordinary_peaky_profile_is_not_a_spike():
     assert "timeseries_spike" not in _codes(Q.check_timeseries_quality(n))
 
 
+def _solar_day(days=60):
+    hours = np.arange(24 * days) % 24
+    return np.clip(np.sin((hours - 6) / 12 * np.pi), 0, None) ** 1.5 * 0.7
+
+
+def test_a_solar_profile_with_tiny_night_values_is_not_a_spike():
+    """RP-16: night values of ~6e-5 made the plain median 6e-5 and the noon
+    peak look 14000x out."""
+    n = _network(24 * 60)
+    values = _solar_day()
+    values[values == 0] = 5.9e-5
+    _profile(n, "generators_t", "p_max_pu", "G1", values)
+    assert "timeseries_spike" not in _codes(Q.check_timeseries_quality(n))
+
+
+def test_a_real_outlier_in_a_solar_profile_is_still_flagged():
+    n = _network(24 * 60)
+    values = _solar_day()
+    values[values == 0] = 5.9e-5
+    values[12] = 50.0
+    _profile(n, "generators_t", "p_max_pu", "G1", values)
+    assert _for(Q.check_timeseries_quality(n), "timeseries_spike", "G1")
+
+
 # ── Unit scale ─────────────────────────────────────────────────────────────
 
 
