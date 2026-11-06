@@ -29,4 +29,4 @@ for all" and restored by one undo; a series applied as "measured" is still never
 
 Was: `needs-triage`. Owner question Q-RP-14. How should a network-native series be told from an uploaded measured one? (1, Recommended) The import seeds a record with `provenance: network_native`, so `is_measured` stays strict and a measured upload is never replaced; it is a data-model change on the import path, but it is explicit. (2) An empty meta stops counting as measured: a one-line change, but an upload with lost meta could then be overwritten by 'Generate defaults'. (3) Leave it: the user clears the series by hand; no change. Once answered: ready-for-agent, Sonnet for (2) or Opus for (1), files `defaults.is_measured` and the import seeding, reviewer GK B.
 
-2026-11-06, owner answer Q-RP-14 (coordinator card): "Import seeds provenance (Recommended):". Role ready-for-agent.
+2026-11-06, owner answer Q-RP-14 (coordinator card): "Import seeds provenance (Recommended)": import stamps provenance network_native. Role ready-for-agent.

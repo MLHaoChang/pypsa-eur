@@ -26,4 +26,4 @@ snapshot's three hours; a run whose own step differs from the others is still re
 
 Was: `needs-triage`. Owner question Q-RP-15. Should RP-03 accept a constant step k inside each run of a sampled window? (1, Recommended) Yes: constant step per run, any gap between runs at least k hours, each snapshot takes the mean of its own k hours, a run with a different step is refused by name; it restores the two 3-hourly weeks case the plan promised. (2) No: keep `step_irregular`, document it and wait for a user who needs it. Once answered (1): ready-for-agent, Sonnet, files the RP-03 step-mean code in `pypsa-gui/backend/services/` profiles, reviewer GK B.
 
-2026-11-06, owner answer Q-RP-15 (coordinator card): "Accept constant step k (Recommended):". Role ready-for-agent.
+2026-11-06, owner answer Q-RP-15 (coordinator card): "Accept constant step k (Recommended)": a constant step k per run, gaps of at least k h. Role ready-for-agent.
