@@ -455,7 +455,7 @@ def test_the_screen_orders_own_first_and_states_its_assumptions_once():
     )
     assert out["price"]["source"] == "request (assumed)" and out["price"]["assumed"]
     assert "not valued" in out["price"]["not_valued"]
-    assert out["range_note"] == A.RANGE_NOTE and "held at their central values" in A.RANGE_NOTE
+    assert out["range_note"] == A.RANGE_NOTE
     sst = next(v for v in out["variants"] if v["architecture"] == "sst")
     assert sst["facility_mwh"] < out["variants"][0]["facility_mwh"]
     assert sst["verdicts"]["frequency_support"]["verdict"] == "warn"
@@ -581,6 +581,50 @@ def _tou(currency=None):
             "items": items,
         },
     }
+
+
+def _energy_items(*hour_spans):
+    return [
+        {
+            "id": f"e{k}",
+            "kind": "energy",
+            "unit": "per_kwh",
+            "periods": [{"name": f"p{k}", "rate": 0.1, "start_hour": a, "end_hour": b}],
+        }
+        for k, (a, b) in enumerate(hour_spans)
+    ]
+
+
+def _tariff(items):
+    c = _tou()
+    c["import_tariff"]["items"] = items
+    return c
+
+
+def test_an_hour_no_energy_item_rates_is_refused_never_priced_at_zero():
+    n, _ = _net(1.0)
+    with pytest.raises(A.DcArchitectureError) as e:
+        _compare(n, _spec(), energy_price_per_mwh=None, commercial=_tariff(_energy_items((8, 20))))
+    assert e.value.kind == "dc_architecture_no_energy_price"
+    assert "for 12 of the 24 modelled hours" in str(e.value)
+
+
+def test_split_items_that_cover_every_hour_still_price_the_energy():
+    n, _ = _net(1.0)
+    out = _compare(
+        n, _spec(), energy_price_per_mwh=None, commercial=_tariff(_energy_items((0, 12), (12, 24)))
+    )
+    assert out["price"]["time_mean_per_mwh"] == pytest.approx(100.0)
+
+
+def test_own_set_is_read_from_the_stored_spec():
+    assert A.is_set({}) is False and A.is_set({"pue_at_design": 1.3}) is False
+    assert A.is_set({"architecture": "ac"}) is True
+
+
+def test_the_range_note_names_what_stays_central():
+    assert "this project's own chain stays central" in A.RANGE_NOTE
+    assert "lifetime and fixed O&M stay at their central values" in A.RANGE_NOTE
 
 
 def test_a_tou_tariff_is_weighted_by_the_load_not_the_clock():

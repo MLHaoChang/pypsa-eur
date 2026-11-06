@@ -531,5 +531,5 @@
  "weighting": "generators",
  "years": 10,
  "energy_basis": "the modelled year",
- "range_note": "the cost ends range the overnight capex and the stage efficiencies; lifetime and fixed O&M are held at their central values"
+ "range_note": "the low and high ends vary the overnight capex and the other architectures' stage efficiencies; lifetime and fixed O&M stay at their central values, and this project's own chain stays central because its PUE is stated"
 }

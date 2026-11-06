@@ -126,7 +126,7 @@ describe('DcArchitectureSection', () => {
     await user.click(await screen.findByTestId('dc-architecture-compare'))
     expect(text(await screen.findByTestId('dc-architecture-price-used'))).toContain("per MWh, weighted by this project's facility energy (project tariff); held")
     expect(text(screen.getByTestId('dc-architecture-energy-basis'))).toBe('Energy per year: the final period, 2035 (full build-out).')
-    expect(text(screen.getByTestId('dc-architecture-range-note'))).toContain('lifetime and fixed O&M are held at their central values')
+    expect(text(screen.getByTestId('dc-architecture-range-note'))).toContain("this project's own chain stays central because its PUE is stated")
   })
 
   it('reads out of date when the stored spec changes after a compare', async () => {

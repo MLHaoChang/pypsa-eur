@@ -65,7 +65,9 @@ WEIGHTING = "generators"
 
 #: Which inputs the low and high cost ends range (GK B K4).
 RANGE_NOTE = (
-    "the cost ends range the overnight capex and the stage efficiencies; lifetime and fixed O&M are held at their central values"
+    "the low and high ends vary the overnight capex and the other architectures' stage "
+    "efficiencies; lifetime and fixed O&M stay at their central values, and this "
+    "project's own chain stays central because its PUE is stated"
 )
 
 #: What each architecture CAN offer the grid, in gridspine's SERVICES words:
@@ -356,10 +358,15 @@ def tariff_energy_rate(
     if cfg.timezone:
         local = local.tz_localize("UTC").tz_convert(cfg.timezone)
     rate = np.zeros(len(local))
+    covered = np.zeros(len(local), dtype=bool)
     for i in items:
-        rate += np.nan_to_num(period_rates(i.periods, local), nan=0.0)
+        r = np.asarray(period_rates(i.periods, local), dtype=float)
+        covered |= ~np.isnan(r)
+        rate += np.nan_to_num(r, nan=0.0)
     return {
         "rate": rate * 1000.0,
+        # An hour no energy item rates is unpriced, never priced at 0 (GK B K5).
+        "covered": covered,
         "source": f"tariff {tariff.id}: energy items "
         f"{', '.join(i.id for i in items)} (per kWh × 1000)",
         "currency": cur or finance_currency,
@@ -596,6 +603,15 @@ def compare(
             raise _err(
                 "Energy price: the project's tariff has no energy rate. Enter a price "
                 "per MWh above.",
+                "no_energy_price",
+                "energy_price_per_mwh",
+            )
+        uncovered = int(np.sum(~tr["covered"] & in_basis))
+        if uncovered:
+            raise _err(
+                f"Energy price: the project's tariff has no energy rate for {uncovered} "
+                f"of the {int(np.sum(in_basis))} modelled hours. Enter a price per MWh "
+                "above.",
                 "no_energy_price",
                 "energy_price_per_mwh",
             )
