@@ -1012,28 +1012,59 @@ RESTART_LEDGER = (
     "an island transition trips every process unit (assumed: no ride-through bridge; conservative)",
     "the island's pickup blocks order the restart after an island transition; after a grid dip the grid is back "
     "and the units are picked up one per step",
-    "the island's short-circuit power is its gensets' sum of s_mva / xd_pp (subtransient), divided by c_max; "
-    "grid-forming storage support is not counted (conservative)",
+    "the island's minimum short-circuit power is its gensets' sum of s_mva / xd_pp (subtransient) less the "
+    "genset_redundancy_n largest (N+k, as the firm genset MW), divided by c_min at the gensets' bus voltage; a "
+    "genset missing s_mva or xd_pp makes it unknown; grid-forming storage support is not counted (conservative)",
     "rate and mass pull come from the project network (rate_basis, mass_pull_basis); stores and loads on the "
     "product path are not branches (assumed)",
 )
 
 
 def _island_source(campus: Campus):
-    """``(island Source or None, pickup blocks or None)`` of a built campus: its gensets' S_k'' and the island
-    requirements' ``pickup_blocks``."""
+    """``(island Source or None, note, pickup blocks or None)`` of a built campus.
+
+    The island's minimum case is its genset fleet less the ``genset_redundancy_n`` units with the largest
+    S_k'' (the N+k rule of ``site_peak.firm_genset_mw``), each s_mva / xd_pp, given as ``sk_min_mva`` so
+    ``motor_start.short_circuit_power`` divides by c_min at the gensets' bus voltage. A genset missing s_mva or
+    xd_pp makes the source unknown: a partial sum is never used."""
     from gridspine.static import motor_start as ms
 
     req = (campus.island or {}).get("requirements") or {}
-    blocks = (req.get("values") or {}).get("pickup_blocks") or None
-    gensets = campus.units.index[campus.units["kind"] == "genset"]
+    values = req.get("values") or {}
+    blocks = values.get("pickup_blocks") or None
+    gensets = list(campus.units.index[campus.units["kind"] == "genset"])
+    if not gensets:
+        return None, "no genset on the island: its short-circuit power is unknown", blocks
     p = campus.params
-    sk = 0.0
+    sks, kvs = [], []
     for uid in gensets:
         xd = p.loc[(p["element"] == uid) & (p["param"] == "xd_pp"), "value"]
-        if len(xd) and float(xd.iloc[0]) > 0:
-            sk += float(campus.units.at[uid, "s_mva"]) / float(xd.iloc[0])
-    return (ms.Source(sk_mva=sk) if sk > 0 else None), blocks
+        s_mva = _num_or_none(campus.units.at[uid, "s_mva"])
+        x = _num_or_none(xd.iloc[0]) if len(xd) else None
+        if s_mva is None or s_mva <= 0 or x is None or x <= 0:
+            return None, f"genset {uid} has no s_mva or xd_pp: the island's short-circuit power is unknown", blocks
+        sks.append(s_mva / x)
+        bus = campus.units.at[uid, "bus"]
+        kv = campus.net.bus.loc[campus.net.bus["name"] == bus, "vn_kv"]
+        if len(kv):
+            kvs.append(float(kv.iloc[0]))
+    k = int(_num_or_none(values.get("genset_redundancy_n")) or 0)
+    kept = sorted(sks, reverse=True)[k:]
+    if not kept:
+        return None, f"genset N+{k} leaves no genset: the island's short-circuit power is unknown", blocks
+    # Several bus voltages: the highest, whose c_min (1.0 above 1 kV) gives the smaller S_sc.
+    vn = max(kvs) if kvs else None
+    note = (f"island: {len(kept)} of {len(sks)} gensets (N+{k}), S_k'' {sum(kept):g} MVA"
+            + ("" if vn is not None else "; no bus voltage, so c is 1.0"))
+    return ms.Source(sk_min_mva=sum(kept), vn_kv=vn), note, blocks
+
+
+def _num_or_none(v) -> float | None:
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
 
 
 def _stamp(df: pd.DataFrame, level: str, **cols) -> pd.DataFrame:
@@ -1069,7 +1100,7 @@ def restart_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> 
     pcc = campus["campus"]["pcc"]
     sk_source, typical = _sk_source(campus, n)
     poc_source = ms.Source(sk_min_mva=_pcc_sk_min(pcc), vn_kv=float(pcc["vn_kv"]))
-    island_source, blocks = _island_source(build_campus(campus))
+    island_source, island_note, blocks = _island_source(build_campus(campus))
 
     units = restart_units(n)
     bases = units.set_index("unit")[["rate_basis", "mass_pull_basis"]]
@@ -1092,6 +1123,10 @@ def restart_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> 
             no_curve = set(units.loc[units["ride_through_curve"].isna(), "unit"])
             table["note"] = [f"no ride-through curve: assumed to trip; {s}" if u in no_curve else s
                              for u, s in zip(table["unit"], table["note"])]
+            timeline["note"] = [f"{s} (assumed: no ride-through curve)" if u in no_curve and ev == "trip" else s
+                                for u, ev, s in zip(timeline["unit"], timeline["event"], timeline["note"])]
+        else:
+            table["note"] = [f"{island_note}; {s}" for s in table["note"]]
         src = sk_source if transition == "trip" else ("island gensets" if island_source else "none")
         assumed = limit_assumed or (typical if transition == "trip" else True)
         frames += [_stamp(table, "unit", transition=transition, sk_mva_source=src, assumed=assumed),

@@ -185,3 +185,62 @@ def test_a_product_output_with_no_tonne_factor_reads_unknown_not_dropped():
     n.links.loc[["flot_a", "flot_b"], "efficiency3"] = 1.0
     mp, basis = pc.mass_pull(n, "mill")
     assert mp is None and "2 product outputs" in basis
+
+
+# --- the island source (GK A on 12b-2: c_min, N+k, never a partial sum) ------
+
+def _island():
+    from gridspine.ingest.campus import build_campus
+    from tests.gridspine.test_campus_island import island_campus
+
+    return build_campus(island_campus())          # GEN1, GEN2: 12.5 MVA, xd_pp 0.15, on 20 kV; N+1
+
+
+def test_the_island_source_is_the_fleet_less_its_k_largest_at_c_min():
+    from gridspine.drivers.campus_study import _island_source
+    from gridspine.static import motor_start as ms
+
+    src, note, blocks = _island_source(_island())
+    assert src.sk_min_mva == pytest.approx(12.5 / 0.15) and src.vn_kv == 20.0 and src.sk_mva is None
+    assert "1 of 2 gensets (N+1)" in note and blocks == [25.0, 25.0]
+    s_sc, _, case, c, _ = ms.short_circuit_power(src)
+    assert case == "min" and c == 1.0 and s_sc == pytest.approx(12.5 / 0.15)
+
+
+def test_n_minus_k_changes_the_island_verdict():
+    from gridspine.drivers.campus_study import _island_source
+    from gridspine.static import motor_start as ms
+
+    campus = _island()
+    unit = pd.DataFrame([{"unit": "mill", "tier": "process_critical", "rated_mw": 1.0, "restart_time_h": 1.0,
+                          "rate_tph": 10.0, "mass_pull": 1.0, "motor_kw": 1200.0, "start_method": "soft"}])
+    n_plus_1, _, _ = _island_source(campus)
+    campus.island["requirements"]["values"]["genset_redundancy_n"] = 0
+    whole, _, _ = _island_source(campus)
+    # S_start 3 × 1.2 / 0.85 MVA at pf 0.35: ΔU 4.76 % on 83.3 MVA (fail), 2.38 % on the whole 166.7 (pass).
+    verdict = {k: rs.restart_sequence(unit, "island", island_source=src, limit_pct=3.0)[0].iloc[0]
+               for k, src in (("n+1", n_plus_1), ("whole", whole))}
+    assert verdict["n+1"]["start_verdict"] == "fail" and verdict["whole"]["start_verdict"] == "pass"
+    q = 3 * 1.2 / 0.85 * (1 - ms.START_PF["soft"] ** 2) ** 0.5
+    assert verdict["n+1"]["du_pct"] == pytest.approx(q / (12.5 / 0.15) * 100)
+
+
+def test_a_genset_missing_xd_pp_makes_the_island_source_unknown_never_partial():
+    from gridspine.drivers.campus_study import _island_source
+
+    campus = _island()
+    p = campus.params
+    campus.params = p[~((p["element"] == "GEN2") & (p["param"] == "xd_pp"))]
+    src, note, _ = _island_source(campus)
+    assert src is None and "GEN2" in note
+
+
+def test_assumed_to_trip_shows_on_the_unit_row_and_the_timeline(tmp_path):
+    run, _ = _run(tmp_path, _restart_hub())
+    _, restart = restart_campus(run)
+    trip = restart[restart["transition"] == "trip"]
+    unit = trip[(trip["level"] == "unit") & (trip["unit"] == "pump")].iloc[0]
+    event = trip[(trip["level"] == "event") & (trip["unit"] == "pump") & (trip["event"] == "trip")].iloc[0]
+    assert "assumed to trip" in unit["note"] and "assumed: no ride-through curve" in event["note"]
+    other = trip[(trip["level"] == "event") & (trip["unit"] == "compressor") & (trip["event"] == "trip")].iloc[0]
+    assert "assumed" not in other["note"]
