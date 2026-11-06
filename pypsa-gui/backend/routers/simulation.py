@@ -615,9 +615,16 @@ def update_solver_config(
             _check_site_connection(cfg.commercial, stored_commercial)
         from services.commercial.binding import project_currency
 
+        # The currency gate is for a ref this PUT attaches or changes: a client echoing the
+        # stored ref (saveCommercial, saveSiteConnection) after a finance-currency change
+        # must still save, and preflight's `commercial.currency_mismatch` flags it (GK B).
+        new_ref = cfg.commercial is not None and cfg.commercial.import_tariff_ref is not None \
+            and cfg.commercial.import_tariff_ref.model_dump(mode="json") != (
+                stored_commercial.get("import_tariff_ref")
+                if isinstance(stored_commercial, dict) else None)
         submitted["commercial"] = _bind_commercial(
             cfg.commercial, user, solver_view,
-            currency=project_currency(getattr(stored_cfg, "finance", None)))
+            currency=project_currency(getattr(stored_cfg, "finance", None)) if new_ref else None)
         rebound = submitted["commercial"] is not None
     rebind_fca = "commercial" not in submitted and scalers_changed \
         and _is_fca(stored_commercial)

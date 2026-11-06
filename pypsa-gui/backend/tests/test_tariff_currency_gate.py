@@ -389,6 +389,25 @@ def test_a_finance_currency_change_after_attach_is_caught_in_preflight(
     cfg.finance = {"currency": "GBP"}
     issues = {i.code: i for i in validate_for_run(ctx.network, cfg)}
     assert issues["commercial.currency_mismatch"].severity == "error"
+    # GK B: an unrelated commercial edit (saveCommercial echoes the stored ref) still
+    # saves; the unchanged ref is left to preflight.
+    echo = chat_tools.DISPATCHERS["get_solver_config"]()["commercial"]
+    echo.pop("value_flows", None)
+    out = chat_tools.DISPATCHERS["update_solver_config"](
+        partial={"commercial": {**echo, "timezone": "Europe/Berlin"}}
+    )
+    assert out["commercial"]["timezone"] == "Europe/Berlin"
+    assert (
+        out["commercial"]["import_tariff_ref"]["hash"] == common.PINNED[("tariff", HS)]
+    )
+    cfg = ctx.solver_state["solver_config"]
+    assert "commercial.currency_mismatch" in {
+        i.code for i in validate_for_run(ctx.network, cfg)
+    }
+    # A newly attached ref is still refused.
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.DISPATCHERS["attach_tariff"](name="nl-tennet-2026-ehs")
+    assert exc.value.detail["error_kind"] == "currency_mismatch"
 
 
 def test_a_no_op_echo_of_the_read_config_keeps_the_fingerprint(
