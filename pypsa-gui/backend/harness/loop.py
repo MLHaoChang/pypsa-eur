@@ -3769,6 +3769,11 @@ def _dispatch_real_tool_call(
                 )
                 return
     except Exception as exc:  # noqa: BLE001 — surface as tool_error
+        if write_note is not None:
+            # Issue 04 S3: a raise or timeout reads no outcome; stop the note's watch.
+            from harness import outcomes as _write_outcomes
+
+            _write_outcomes.release_note(write_note)
         # v4-MAJOR-1 / v6-F1 + v4-MINOR-1: structured error_kind propagates
         # from the tool's HTTPException detail dict so the frontend can
         # render a project_exists / descendants_exist card with rename /
@@ -4249,6 +4254,9 @@ def _dispatch_real_tool_call(
 
     from harness import outcomes
 
+    if tool_name in outcomes.WRITE_TOOLS and hasattr(result_for_model, "model_dump"):
+        # The import routes return an ImportSummary model; its outcome needs a dict.
+        result_for_model = result_for_model.model_dump(mode="json")
     if (
         session.assurance_turn is None
         and tool_name in outcomes.JOB_TOOLS | outcomes.WRITE_TOOLS

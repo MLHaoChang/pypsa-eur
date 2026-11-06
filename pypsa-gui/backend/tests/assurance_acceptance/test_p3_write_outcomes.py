@@ -318,7 +318,7 @@ def test_another_context_is_uncertain(baseline, monkeypatch):
     note = outcomes.note_write(
         "delete_component", {"component_class": "Load", "name": "L1"}
     )
-    note["ctx"] = -1
+    note["ctx"] = object()  # another context object (R2: compared with `is`)
     assert outcomes.project_write(note)["reason"] == "readback_failed"
 
 

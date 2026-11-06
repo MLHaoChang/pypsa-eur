@@ -160,6 +160,11 @@ describe('chat tool-line outcome marks', () => {
     ['bulk_update_components', 'update components'], ['batch_create_components', 'add components'],
     ['delete_component', 'delete a component'], ['batch_delete_components', 'delete components'],
     ['undo_last', 'undo the last change'],
+    ['import_network_nc', 'import a NetCDF network'], ['import_csv_bundle', 'import a CSV network bundle'],
+    ['import_excel', 'import an Excel network'], ['import_matpower', 'import a MATPOWER case'],
+    ['import_uploaded_network', 'import an uploaded network'], ['export_network_nc', 'export the network as NetCDF'],
+    ['export_csv_bundle', 'export the network as a CSV bundle'], ['export_excel', 'export the network as Excel'],
+    ['export_matpower', 'export the network as a MATPOWER case'],
   ])('gives %s a plain Guided phrase', (tool, phrase) => {
     expect(guidedToolPhrase(tool)).toBe(phrase)
   })

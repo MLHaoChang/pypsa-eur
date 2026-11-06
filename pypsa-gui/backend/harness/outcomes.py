@@ -238,7 +238,7 @@ def _reset_for_tests() -> None:
 # between two reads of the edit counter. `classify_write` is pure. The
 # handler's returned JSON is never read (GK B W1–W7).
 
-WRITE_TOOLS = frozenset(
+ROW_WRITE_TOOLS = frozenset(
     {
         "bulk_update_components",
         "batch_create_components",
@@ -246,6 +246,25 @@ WRITE_TOOLS = frozenset(
         "batch_delete_components",
     }
 )
+# Issue 04 S3: tools whose read-back compares the whole network with a snapshot.
+IMPORT_FORMATS = {
+    "import_network_nc": "netcdf",
+    "import_csv_bundle": "csv_bundle",
+    "import_excel": "excel",
+    "import_matpower": "matpower",
+}
+EXPORT_FORMATS = {
+    "export_network_nc": "netcdf",
+    "export_csv_bundle": "csv_bundle",
+    "export_excel": "excel",
+    "export_matpower": "matpower",
+}
+# import_uploaded_network names its format in `format`.
+IMPORT_TOOLS = frozenset(IMPORT_FORMATS) | {"import_uploaded_network"}
+EXPORT_TOOLS = frozenset(EXPORT_FORMATS)
+SNAPSHOT_TOOLS = frozenset({"undo_last"}) | IMPORT_TOOLS | EXPORT_TOOLS
+# Every tool that gets a write `_outcome`; the loop's projection reads this.
+WRITE_TOOLS = ROW_WRITE_TOOLS | SNAPSHOT_TOOLS
 _MAX_PATHS = 5
 
 
@@ -320,7 +339,13 @@ def _requested(tool: str, args: dict) -> tuple[str, list[dict]]:
 
 def note_write(tool: str, args: dict) -> dict | None:
     """The call's own request and the rows' prior presence, before the handler runs."""
-    if tool not in WRITE_TOOLS:
+    if tool == "undo_last":
+        return note_undo()
+    if tool in IMPORT_TOOLS:
+        return note_import(tool, args)
+    if tool in EXPORT_TOOLS:
+        return note_export(tool)
+    if tool not in ROW_WRITE_TOOLS:
         return None
     from services import dirty_state
     from services.pypsa_service import PyPSAService
@@ -339,7 +364,7 @@ def note_write(tool: str, args: dict) -> dict | None:
         return {"tool": tool, "error": True}
     return {
         "tool": tool,
-        "ctx": id(ctx),
+        "ctx": ctx,  # the object, compared with `is` (GK B (26) R2)
         "cls": cls,
         "items": items,
         "revision": revision,
@@ -355,7 +380,7 @@ def read_write(note: dict | None) -> dict:
 
     try:
         ctx = PyPSAService.get_active_context()
-        if id(ctx) != note["ctx"]:
+        if ctx is not note["ctx"]:
             return {"error": "other_context"}
         with PyPSAService.get_lock():
             start = dirty_state.revision(ctx)
@@ -496,4 +521,720 @@ def classify_write(note: dict | None, read: dict | None) -> dict:
 
 def project_write(note: dict | None) -> dict:
     """The `_outcome` block for one write tool result (ordinary turns)."""
+    if note and note.get("tool") == "undo_last":
+        return {"version": VERSION, **classify_undo(note, read_undo(note))}
+    if note and note.get("tool") in IMPORT_TOOLS:
+        return {"version": VERSION, **classify_import(note, read_import(note))}
+    if note and note.get("tool") in EXPORT_TOOLS:
+        return {"version": VERSION, **classify_export(note, read_export(note))}
     return {"version": VERSION, **classify_write(note, read_write(note))}
+
+
+# ── Issue 04 S3: snapshot read-backs (undo_last, network import/export) ────
+
+
+def _meta_text(n) -> str:
+    """The network's `meta` dict as canonical text (asset provenance lives there)."""
+    import json
+
+    return json.dumps(n.meta, sort_keys=True, default=str)
+
+
+# Topology pypsa derives on demand (determine_network_topology): SubNetwork
+# rows hold a Python object whose str carries a memory address, and no file
+# format stores them, so they are never compared (GK B (26) E4).
+DERIVED_CLASSES = frozenset({"SubNetwork"})
+
+
+def network_digest(n) -> str | _Uncomparable:
+    """A content hash of the network: snapshots, static and time-varying frames.
+
+    Rows and columns are sorted so order alone never reads as a change. A frame
+    pandas cannot hash (a list in a cell) makes the whole digest UNCOMPARABLE.
+    """
+    import hashlib
+
+    import pandas as pd
+
+    def frame(h, label: str, df) -> None:
+        df = df.sort_index().sort_index(axis=1)
+        h.update(label.encode())
+        h.update(repr(list(df.columns)).encode())
+        h.update(pd.util.hash_pandas_object(df, index=True).values.tobytes())
+
+    h = hashlib.sha256()
+    try:
+        h.update(
+            pd.util.hash_pandas_object(
+                pd.Index(n.snapshots).to_frame(), index=False
+            ).values.tobytes()
+        )
+        # Network-level state an undo or import restores too (weightings, meta).
+        frame(h, "snapshot_weightings", n.snapshot_weightings)
+        frame(h, "investment_period_weightings", n.investment_period_weightings)
+        h.update(_meta_text(n).encode())
+        for cls in sorted(set(n.all_components) - DERIVED_CLASSES):
+            static = n.static(cls)
+            if static.empty:
+                continue
+            frame(h, f"{cls}:static", static)
+            for attr, df in sorted(n.dynamic(cls).items()):
+                if not df.empty:
+                    frame(h, f"{cls}:{attr}", df)
+    except TypeError:
+        return UNCOMPARABLE
+    return h.hexdigest()
+
+
+_UNBOUND = (None, None)  # `_binding()` of a context no saved project owns
+
+
+def _binding() -> tuple:
+    """The project the active context is bound to. An undo re-imports into a new
+    context object (`reset_network(carry="same")`), so `id(ctx)` cannot be used."""
+    from services.pypsa_service import PyPSAService
+
+    return (
+        PyPSAService.get_active_context().project_uuid,
+        PyPSAService.get_loaded_project(),
+    )
+
+
+def _load_netcdf(data: bytes):
+    """A scratch Network read from snapshot bytes with the app's own reader."""
+    import pathlib
+    import tempfile
+
+    import pypsa
+
+    from services.pypsa_service import PyPSAService
+
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as handle:
+        path = pathlib.Path(handle.name)
+        handle.write(data)
+    try:
+        n = pypsa.Network()
+        with PyPSAService.get_netcdf_io_lock():
+            PyPSAService.import_network_from_netcdf(n, path)
+        return n
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def note_undo() -> dict:
+    """The entry undo_last should restore (W4/W5) and the state before it."""
+    from services import dirty_state, growth_placeholders, undo_service
+    from services.pypsa_service import PyPSAService
+    from services.user_timeseries import _serialize_user_ts
+
+    try:
+        top = undo_service.peek_entry()
+        expected = None
+        if top is not None:
+            sha, _pops, entry = top
+            expected = {
+                "sha": sha,
+                "digest": network_digest(_load_netcdf(entry["netcdf"])),
+                "user_ts": entry["user_ts"],
+                "template_meta": entry["template_meta"],
+            }
+        with PyPSAService.get_lock():
+            ctx = PyPSAService.get_active_context()
+            pops, depth = undo_service.pops_and_depth()
+            note = {
+                "tool": "undo_last",
+                "binding": _binding(),
+                "revision": dirty_state.revision(ctx),
+                "pops": pops,
+                "depth": depth,
+                "digest_before": network_digest(ctx.network),
+                "meta_before": growth_placeholders.snapshot_meta(),
+                "expected": expected,
+                "user_ts_before": _serialize_user_ts(),
+            }
+        # Last, so a failed note leaves no watch behind (X2: per call, not global).
+        note["own_pops"], note["watch"] = undo_service.watch_pops()
+    except Exception:  # noqa: BLE001 - no note reads uncertain later
+        return {"tool": "undo_last", "error": True}
+    return note
+
+
+def release_note(note: dict | None) -> None:
+    """Stop the note's per-call watch, once; the loop calls it on the error path."""
+    if not isinstance(note, dict):
+        return
+    token = note.pop("watch", None)
+    if token is None:
+        return
+    if note.get("tool") == "undo_last":
+        from services import undo_service
+
+        undo_service.unwatch_pops(token)
+    else:
+        from services import upload_service
+
+        upload_service.unwatch_uploads(token)
+
+
+def read_undo(note: dict | None) -> dict:
+    """An independent read of the whole live state after undo_last."""
+    if not note or note.get("error"):
+        return {"error": "no_note"}
+    from services import dirty_state, growth_placeholders, undo_service
+    from services.pypsa_service import PyPSAService
+    from services.user_timeseries import _serialize_user_ts
+
+    release_note(note)
+    try:
+        if _binding() != note["binding"]:
+            return {"error": "other_context"}
+        with PyPSAService.get_lock():
+            ctx = PyPSAService.get_active_context()
+            start = dirty_state.revision(ctx)
+            pops, depth = undo_service.pops_and_depth()
+            digest = network_digest(ctx.network)
+            meta = growth_placeholders.snapshot_meta()
+            user_ts = _serialize_user_ts()
+            end = dirty_state.revision(ctx)
+    except Exception:  # noqa: BLE001 - an unreadable network reads uncertain
+        return {"error": "readback_failed"}
+    return {
+        "revision_start": start,
+        "revision_end": end,
+        "pops": pops,
+        "own_pops": list(note["own_pops"]),
+        "depth": depth,
+        "digest": digest,
+        "template_meta": meta,
+        "user_ts": user_ts,
+    }
+
+
+def classify_undo(note: dict | None, read: dict | None) -> dict:
+    """Pure: completed / failed / uncertain for one undo_last call (W4/W5)."""
+
+    def out(outcome, reason=None):
+        return {"outcome": outcome, "reason": reason}
+
+    if not note or note.get("error"):
+        return out("uncertain", "no_submission")
+    if not isinstance(read, dict) or "error" in read:
+        return out("uncertain", "readback_failed")
+    if (
+        read.get("revision_start") != note["revision"]
+        or read.get("revision_end") != note["revision"]
+    ):
+        return out("uncertain", "revision_moved")
+    own = read.get("own_pops") or []
+    if read.get("pops", 0) - note["pops"] != len(own):
+        # Another session popped between the note and the read-back (X2).
+        return out("uncertain", "entry_moved")
+    if not own:
+        # Nothing was taken off the stack: failed only when nothing changed.
+        unchanged = (
+            read.get("depth") == note["depth"]
+            and read.get("digest") == note["digest_before"]
+            and not isinstance(note["digest_before"], _Uncomparable)
+            and read.get("template_meta") == note["meta_before"]
+            and read.get("user_ts") == note["user_ts_before"]
+        )
+        if not unchanged:
+            return out("uncertain", "not_restored")
+        return out("failed", None if note["expected"] else "nothing_to_undo")
+    expected = note.get("expected")
+    if len(own) != 1 or not expected or own[0] != expected["sha"]:
+        return out("uncertain", "entry_moved")
+    if isinstance(expected["digest"], _Uncomparable) or isinstance(
+        read.get("digest"), _Uncomparable
+    ):
+        return out("uncertain", "not_comparable")
+    if (
+        read.get("digest") != expected["digest"]
+        or read.get("user_ts") != expected["user_ts"]
+        or (
+            expected["template_meta"] is not None
+            and read.get("template_meta") != expected["template_meta"]
+        )
+    ):
+        return out("uncertain", "not_restored")
+    return out("completed")
+
+
+# ── Issue 04 S3: network import and export (GK B (26) X4–X8) ───────────────
+#
+# An import is checked against the file the call named, read into a scratch
+# Network with the route's own reader steps; an export against the one new
+# agent_export upload the call wrote, read back the same way. Excel and
+# MATPOWER have no independent reader yet: they read adapter_pending (X6).
+#
+# Saved vs live (X7): both read the LIVE network. An import lands as an unsaved
+# draft bound to no project, so it has no saved copy; an export writes the live
+# network, so its outcome says the file matches the live network, not the
+# project's saved files.
+
+PENDING_FORMATS = frozenset({"excel", "matpower"})
+# X4: the rows an import route adds beyond the file's own, as (class, name).
+# Measured empty: the netcdf and csv routes add columns (normalise_eh_columns)
+# but no rows, on ieee39 and the EH templates. Any other extra reads partial.
+IMPORT_EXTRAS: frozenset[tuple[str, str]] = frozenset()
+# X5: a csv bundle stores floats as text, which can move a value by an ulp
+# (95626.80260584055 → …57). The export check compares floats within this
+# relative tolerance; a change smaller than it is not seen (named open row).
+CSV_RTOL = 1e-12
+
+
+def _read_file(fmt: str, data: bytes):
+    """A scratch Network from file bytes, with the import route's reader steps."""
+    if fmt == "netcdf":
+        return _load_netcdf(data)
+    import io
+    import tempfile
+    import zipfile
+
+    import pypsa
+
+    from routers.io import _map_csv_folder, _unescape_formula
+    from services.adequacy.eh_columns import normalise_eh_columns
+    from services.upload_guard import safe_extract
+
+    n = pypsa.Network()
+    with tempfile.TemporaryDirectory() as folder:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            safe_extract(archive, folder)
+        _map_csv_folder(folder, _unescape_formula)
+        n.import_from_csv_folder(folder)
+    normalise_eh_columns(n)
+    return n
+
+
+def _rows(n) -> dict[str, set[str]]:
+    return {
+        cls: {str(x) for x in n.static(cls).index}
+        for cls in set(n.all_components) - DERIVED_CLASSES
+        if not n.static(cls).empty
+    }
+
+
+def _canon_col(s):
+    """A column as the formats carry it: numbers and flags as float, None as NaN,
+    and in a text column None, NaN and "" as one missing value."""
+    import numpy as np
+    import pandas as pd
+
+    if pd.api.types.is_bool_dtype(s) or pd.api.types.is_numeric_dtype(s):
+        return s.astype(float)
+    present = s.dropna()
+    if all(isinstance(v, (bool, int, float, np.number)) for v in present):
+        return s.astype(object).where(s.notna(), np.nan).astype(float)
+    # A file stores a missing string as "" (netcdf, csv): the two are one value.
+    return s.astype(object).where(s.notna() & (s != ""), None)
+
+
+def _eq_col(a, b, rtol: float):
+    """Elementwise equality of two canonical columns (`_canon_col`), as a bool array."""
+    import numpy as np
+
+    if a.dtype == float and b.dtype == float:
+        x, y = a.to_numpy(), b.to_numpy()
+        eq = (x == y) | (np.isnan(x) & np.isnan(y))
+        if rtol:
+            with np.errstate(invalid="ignore"):
+                eq |= np.isclose(x, y, rtol=rtol, atol=0)
+        return eq
+    if a.dtype == float:
+        a = a.astype(object).where(a.notna(), None)
+    if b.dtype == float:
+        b = b.astype(object).where(b.notna(), None)
+    # An array cell makes `bool(x == y)` raise ValueError: uncomparable.
+    return np.array(
+        [
+            x is y if x is None or y is None else bool(x == y)
+            for x, y in zip(a.tolist(), b.tolist())
+        ],
+        dtype=bool,
+    )
+
+
+def _eq_rows(a, b, rtol: float):
+    """Per-row equality of two frames over the same index, every column."""
+    import numpy as np
+    import pandas as pd
+
+    eq = np.ones(len(a), dtype=bool)
+    for col in set(a.columns) | set(b.columns):
+        ca = a[col] if col in a.columns else pd.Series(np.nan, index=a.index)
+        cb = b[col] if col in b.columns else pd.Series(np.nan, index=b.index)
+        eq &= _eq_col(_canon_col(ca), _canon_col(cb), rtol)
+    return eq
+
+
+def _same_frame(a, b, rtol: float) -> bool:
+    """Equal on what a file format carries (GK B (26) E1).
+
+    Index and column names, dtypes, and None against NaN are not compared; a
+    column one side lacks reads as all missing.
+    """
+    if set(a.index) != set(b.index):
+        return False
+    a = a.sort_index()
+    return bool(_eq_rows(a, b.sort_index().loc[a.index], rtol).all())
+
+
+def _match(live, expected, *, rtol: float = 0.0, drop=()) -> bool | _Uncomparable:
+    """True when `live` (less the `drop` rows) holds `expected`'s snapshots, rows and series.
+
+    Compared on what a file format carries (`_same_frame`): order, dtypes,
+    index names and None/NaN are not. Floats agree within `rtol` (0 is
+    exact). A cell that cannot be compared reads UNCOMPARABLE.
+    """
+    import pandas as pd
+
+    dropped: dict[str, list[str]] = {}
+    for cls, name in drop:
+        dropped.setdefault(cls, []).append(name)
+    try:
+        if not pd.Index(live.snapshots).equals(pd.Index(expected.snapshots)):
+            return False
+        if _meta_text(live) != _meta_text(expected):
+            return False
+        for attr in ("snapshot_weightings", "investment_period_weightings"):
+            a, b = getattr(live, attr), getattr(expected, attr)
+            if not (a.empty and b.empty) and not _same_frame(a, b, rtol):
+                return False
+        classes = (
+            set(live.all_components) | set(expected.all_components)
+        ) - DERIVED_CLASSES
+        for cls in sorted(classes):
+            gone = dropped.get(cls, [])
+            a, b = live.static(cls), expected.static(cls)
+            a = a.drop(index=[x for x in gone if x in a.index])
+            if a.empty and b.empty:
+                continue
+            if not _same_frame(a, b, rtol):
+                return False
+            series_a, series_b = live.dynamic(cls), expected.dynamic(cls)
+            for attr in sorted(set(series_a) | set(series_b)):
+                da = series_a.get(attr, pd.DataFrame())
+                da = da.drop(columns=[x for x in gone if x in da.columns])
+                db = series_b.get(attr, pd.DataFrame())
+                if da.empty and db.empty:
+                    continue
+                if not _same_frame(da, db, rtol):
+                    return False
+    except (TypeError, ValueError):
+        return UNCOMPARABLE
+    return True
+
+
+def _rows_already_equal(live, expected) -> list[tuple[str, str]]:
+    """The file's rows the live network already holds with equal static values."""
+    out = []
+    for cls, names in _rows(expected).items():
+        a, b = live.static(cls), expected.static(cls)
+        common = sorted(set(a.index) & set(b.index))
+        if not common:
+            continue
+        try:
+            eq = _eq_rows(a.loc[common], b.loc[common], 0.0)
+        except (TypeError, ValueError):
+            continue
+        out.extend((cls, str(name)) for name, same in zip(common, eq) if same)
+    return out
+
+
+def _import_bytes(tool: str, args: dict) -> tuple[str, bytes | None]:
+    """(format, the bytes the handler will import); bytes None for a pending format."""
+    import base64
+    import hashlib
+
+    fmt = IMPORT_FORMATS.get(tool) or args.get("format")
+    if fmt in PENDING_FORMATS:
+        return fmt, None
+    if tool != "import_uploaded_network":
+        return fmt, base64.b64decode(args["bytes_b64"])
+    from services.assistant_tools import _file
+
+    _, _, _, meta, path = _file(args["file_id"])
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != meta.sha256:
+        raise ValueError("upload_changed")  # the handler refuses it too
+    return fmt, data
+
+
+def note_import(tool: str, args: dict) -> dict:
+    """The file's network, and the live state it will replace, before the handler runs.
+
+    The prior state (digest, revision, the file's rows it already holds equal)
+    lets a no-op read failed, or completed when the prior state already was the
+    file (GK B (26) E2/E3).
+    """
+    from services import dirty_state
+    from services.pypsa_service import PyPSAService
+
+    try:
+        fmt, data = _import_bytes(tool, args)
+        if data is None:
+            return {"tool": tool, "pending": True}
+        if fmt not in ("netcdf", "csv_bundle"):
+            raise ValueError(fmt)
+        expected = _read_file(fmt, data)
+        want = _rows(expected)
+        # Imports keep the revision counter, so the revision alone cannot tell
+        # two projects apart (GK B (27) E3): bind the project, as note_undo does.
+        binding = _binding()
+        with PyPSAService.get_lock():
+            ctx = PyPSAService.get_active_context()
+            revision = dirty_state.revision(ctx)
+            digest = network_digest(ctx.network)
+            already = set(_rows_already_equal(ctx.network, expected))
+    except Exception:  # noqa: BLE001 - no note reads uncertain later
+        return {"tool": tool, "error": True}
+    return {
+        "tool": tool,
+        "format": fmt,
+        "expected": expected,
+        "binding": binding,
+        "revision": revision,
+        "digest_before": digest,
+        # The rows this import must change: the file's rows not already equal.
+        "need": sorted(
+            (cls, name)
+            for cls, names in want.items()
+            for name in names
+            if (cls, name) not in already
+        ),
+        "file_rows": sum(len(names) for names in want.values()),
+    }
+
+
+def read_import(note: dict | None) -> dict:
+    """An independent read of the live network after an import."""
+    if not note or note.get("error") or note.get("pending"):
+        return {"error": "no_note"}
+    from services import dirty_state
+    from services.pypsa_service import PyPSAService
+    from services.user_timeseries import _serialize_user_ts
+
+    expected = note["expected"]
+    want = _rows(expected)
+    try:
+        # A landed import publishes an UNBOUND context (`routers.io._unbind_session`);
+        # one that did not land leaves the note's own binding. Any other is
+        # another project, whatever its revision (GK B (27) E3).
+        if _binding() not in (note.get("binding"), _UNBOUND):
+            return {"error": "other_context"}
+        with PyPSAService.get_lock():
+            ctx = PyPSAService.get_active_context()
+            start = dirty_state.revision(ctx)
+            have = _rows(ctx.network)
+            extras = sorted(
+                (cls, name)
+                for cls, names in have.items()
+                for name in names - want.get(cls, set())
+            )
+            missing = sorted(
+                (cls, name)
+                for cls, names in want.items()
+                for name in names - have.get(cls, set())
+            )
+            match = _match(ctx.network, expected, drop=extras) if not missing else False
+            # The file's rows the live network now holds equal (GK B (27) E2).
+            equal = _rows_already_equal(ctx.network, expected)
+            digest = network_digest(ctx.network)
+            user_ts = _serialize_user_ts()
+            end = dirty_state.revision(ctx)
+    except Exception:  # noqa: BLE001 - an unreadable network reads uncertain
+        return {"error": "readback_failed"}
+    return {
+        "revision_start": start,
+        "revision_end": end,
+        "missing": missing,
+        "extras": extras,
+        "equal": equal,
+        "match": match,
+        "digest": digest,
+        "user_ts": user_ts,
+    }
+
+
+def classify_import(note: dict | None, read: dict | None, allowed=None) -> dict:
+    """Pure: completed / partial / failed / uncertain for one import call (X4).
+
+    D5: an import that left the live state unchanged reads completed only when
+    that state already was the file, and failed otherwise. `requested` and
+    `done` count only the rows the import had to change.
+    """
+    allowed = IMPORT_EXTRAS if allowed is None else allowed
+
+    def out(outcome, reason=None, **extra):
+        return {"outcome": outcome, "reason": reason, **extra}
+
+    if note and note.get("pending"):
+        return out("uncertain", "adapter_pending")
+    if not note or note.get("error"):
+        return out("uncertain", "no_submission")
+    if not isinstance(read, dict) or "error" in read:
+        if isinstance(read, dict) and read["error"] == "other_context":
+            return out("uncertain", "other_context")
+        return out("uncertain", "readback_failed")
+    if (
+        read.get("revision_start") != note["revision"]
+        or read.get("revision_end") != note["revision"]
+    ):
+        return out("uncertain", "revision_moved")
+    need = {tuple(x) for x in note.get("need") or []}
+    missing = {tuple(x) for x in read.get("missing") or []}
+    # Done: a needed row the live network now holds equal to the file (E2).
+    equal = {tuple(x) for x in read.get("equal") or []}
+    extras = [tuple(x) for x in read.get("extras") or []]
+    named = [f"{cls}/{name}" for cls, name in extras if (cls, name) in allowed]
+    unexpected = [f"{cls}/{name}" for cls, name in extras if (cls, name) not in allowed]
+    counts = {
+        "requested": len(need),
+        "done": len((need & equal) - missing),
+        "extra": len(unexpected),
+        "allowed_extras": named[:_MAX_PATHS],
+    }
+    if isinstance(read.get("match"), _Uncomparable):
+        return out("uncertain", "not_comparable", counts=counts)
+    before = note.get("digest_before")
+    if isinstance(before, str) and before == read.get("digest"):
+        # Nothing changed: the import either was a no-op or did not land (D5).
+        if read.get("match") is True and not read.get("user_ts"):
+            return out("completed", counts=counts)
+        return out("failed", counts=counts)
+    if missing or unexpected:
+        if need and counts["done"] == 0:
+            return out("uncertain", "not_as_file", counts=counts)
+        reason = "rows_missing" if missing else "extra_rows"
+        return out(
+            "partial", reason, counts=counts, paths_extra=unexpected[:_MAX_PATHS]
+        )
+    if read.get("match") is not True or read.get("user_ts"):
+        # Values on the file's own rows differ, or user series survived the import.
+        return out("uncertain", "not_as_file", counts=counts)
+    return out("completed", counts=counts)
+
+
+def _export_store() -> tuple[str, Any] | None:
+    """(project name, project dir) where `_save_agent_export` writes, or None."""
+    from services.pypsa_service import PyPSAService
+
+    name = PyPSAService.get_loaded_project()
+    if not name:
+        return None
+    if PyPSAService.get_active_context().project_uuid:
+        from services.assistant_tools import _project
+
+        project, directory, _owner = _project()
+        return project.name, directory
+    return name, None
+
+
+def _agent_exports(store) -> set[str]:
+    from services import upload_service
+
+    name, directory = store
+    return {
+        m.file_id
+        for m in upload_service.list_uploads(
+            name, project_dir=directory, kind="agent_export"
+        )
+    }
+
+
+def note_export(tool: str) -> dict:
+    """Where the export lands, the edit counter, and a watch on this call's uploads (X5)."""
+    from services import dirty_state, upload_service
+    from services.pypsa_service import PyPSAService
+
+    fmt = EXPORT_FORMATS[tool]
+    if fmt in PENDING_FORMATS:
+        return {"tool": tool, "pending": True}
+    try:
+        store = _export_store()
+        if store is None:
+            raise ValueError("no_project")  # the handler refuses it too
+        ctx = PyPSAService.get_active_context()
+        note = {
+            "tool": tool,
+            "format": fmt,
+            "store": store,
+            "ctx": ctx,
+            "revision": dirty_state.revision(ctx),
+        }
+        # Last, so a failed note leaves no watch behind (as note_undo).
+        note["own"], note["watch"] = upload_service.watch_uploads()
+    except Exception:  # noqa: BLE001 - no note reads uncertain later
+        return {"tool": tool, "error": True}
+    return note
+
+
+def read_export(note: dict | None) -> dict:
+    """The one new export file read back, and the live network it should hold."""
+    if not note or note.get("error") or note.get("pending"):
+        return {"error": "no_note"}
+    import hashlib
+
+    from services import dirty_state, upload_service
+    from services.pypsa_service import PyPSAService
+
+    release_note(note)
+    try:
+        # The uploads THIS call added (a dedup hit included), still listed as
+        # agent_export in the project's store: never another session's file.
+        new = sorted(set(note["own"]) & _agent_exports(note["store"]))
+        if len(note["own"]) != 1 or len(new) != 1:
+            return {
+                "new_files": len(new) if len(note["own"]) == 1 else len(note["own"])
+            }
+        name, directory = note["store"]
+        meta = upload_service.get_upload_meta(name, new[0], project_dir=directory)
+        data = upload_service.get_upload_bytes(name, new[0], project_dir=directory)
+        if hashlib.sha256(data).hexdigest() != meta.sha256:
+            return {"error": "readback_failed"}
+        exported = _read_file(note["format"], data)
+        rtol = CSV_RTOL if note["format"] == "csv_bundle" else 0.0
+        with PyPSAService.get_lock():
+            ctx = PyPSAService.get_active_context()
+            start = dirty_state.revision(ctx)
+            match = _match(ctx.network, exported, rtol=rtol)
+            end = dirty_state.revision(ctx)
+    except Exception:  # noqa: BLE001 - an unreadable file reads uncertain
+        return {"error": "readback_failed"}
+    return {
+        "new_files": 1,
+        "same_ctx": ctx is note["ctx"],
+        "revision_start": start,
+        "revision_end": end,
+        "match": match,
+    }
+
+
+def classify_export(note: dict | None, read: dict | None) -> dict:
+    """Pure: completed / uncertain for one export call (X5)."""
+
+    def out(outcome, reason=None):
+        return {"outcome": outcome, "reason": reason}
+
+    if note and note.get("pending"):
+        return out("uncertain", "adapter_pending")
+    if not note or note.get("error"):
+        return out("uncertain", "no_submission")
+    if not isinstance(read, dict) or "error" in read:
+        return out("uncertain", "readback_failed")
+    if read.get("new_files") != 1:
+        # No agent_export upload by this call, or more than one: which is the export?
+        return out("uncertain", "export_file_count")
+    if not read.get("same_ctx"):
+        return out("uncertain", "readback_failed")
+    if (
+        read.get("revision_start") != note["revision"]
+        or read.get("revision_end") != note["revision"]
+    ):
+        return out("uncertain", "revision_moved")
+    if isinstance(read.get("match"), _Uncomparable):
+        return out("uncertain", "not_comparable")
+    if read.get("match") is not True:
+        return out("uncertain", "not_as_network")
+    return out("completed")

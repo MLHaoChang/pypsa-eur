@@ -630,6 +630,18 @@ class ReservingProvider:
             else:
                 self._open[id(request)] = (weakref.ref(request), digest(request), key)
 
+    def settle_open(self) -> int:
+        """Settle `uncertain` every hold a send of this provider left open
+        for a retry that will not come (a job that ends, issue 07's
+        `RunSends.close`); the turn-end rule (`close_open`) for this
+        provider's own sends only. Returns how many it settled."""
+        with self._lock:
+            keys = [key for _ref, _body, key in self._open.values()]
+            self._open.clear()
+        for key in keys:
+            settle_uncertain(self._path, key)
+        return len(keys)
+
     def __getattr__(self, attr):
         return getattr(self._inner, attr)
 

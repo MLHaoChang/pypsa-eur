@@ -43,7 +43,7 @@ from tests.test_harness_run_loops import (  # noqa: F401
     site,
     stopped,
 )
-from tests.test_harness_runner import detached, task_path  # noqa: F401
+from tests.test_harness_runner import detached, fake_report_provider, task_path  # noqa: F401
 
 
 def ctx():

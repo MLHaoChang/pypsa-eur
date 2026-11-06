@@ -47,8 +47,18 @@ _CARRIER_DEFAULT = {"ac": "commercial", "dc": "commercial", "electricity": "comm
 def is_measured(meta) -> bool:
     """A stored series is measured when it came from a file: a raw upload
     (no meta) or one applied with provenance "measured" (the editors'
-    Measured file tab, a load meter upload). A default never replaces it."""
+    Measured file tab, a load meter upload). A default never replaces it.
+    The network's own series is seeded with provenance "network_native"
+    (`is_network_native`, RP-14), so it is not read as an upload."""
     return not meta or str(meta.get("provenance") or "").startswith("measured")
+
+
+def is_network_native(meta) -> bool:
+    """The series is the network's own `_t` column, as the project seeded it
+    (`user_timeseries._backup_network_ts_to_user_ts`)."""
+    from services.user_timeseries import NETWORK_NATIVE
+
+    return bool(meta) and meta.get("provenance") == NETWORK_NATIVE
 
 
 def guess_archetype(name: str, bus_carrier: str) -> tuple[str | None, str]:
@@ -82,6 +92,12 @@ def load_defaults(ctx, replace_generated: bool) -> list[dict[str, Any]]:
         meta = ctx.user_ts_meta.get(key)
         if key in ctx.user_ts and is_measured(meta):
             rows.append({**row, "skipped": "carries a measured upload; never replaced"})
+            continue
+        if key in ctx.user_ts and is_network_native(meta):
+            # A load's own demand series is real data; an archetype guessed
+            # from its name would discard it, so the list leaves it alone.
+            rows.append({**row, "skipped": "carries the network's own series; "
+                                           "open its editor to replace it"})
             continue
         if key in ctx.user_ts and not replace_generated:
             what = meta.get("archetype") or meta.get("kind") or meta.get("family")

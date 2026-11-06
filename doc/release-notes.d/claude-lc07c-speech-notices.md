@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Companion Live caption now shows the server's fixed notice when a spoken final is not admitted (echo ignored, two numbers, speech never approves a card), once per notice and never with transcript text.

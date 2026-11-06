@@ -191,3 +191,79 @@ the request after the edit counter's bump and projects `_outcome` beside S1's
 job outcome (a `None` result from delete_component gets one too). undo_last
 moves to S3 with import/export: all three are snapshot read-backs that share
 W4/W5. Shots: `.scratch/assistant-assurance/shots/aa04-s2-tool-outcome-{guided,expert}.png`.
+
+### 2026-11-06 — S2 OKs; S3 plan verdicts and undo_last build (branch `claude/aa04-s3-snapshot-outcomes`)
+
+#1161 (S2) has GK OK and UX OK @fc9732f83a129ee2710840b7ad76d577fdb14f66.
+
+Named open rows (GK B (26) R1):
+
+| Case | Owner | Note |
+|------|-------|------|
+| A3.6 extra edits by a row write (rows the call did not name) | S4 | S2's read-back covers only the named rows; W3 catches other writers only |
+| A3.4 saved/unsaved values | S3 (import/export part) done; saved project files: issue 11 | S3 reads the live network: an import lands as an unsaved draft with no saved copy; an export's file is compared with the live network, which is what it writes. A read-back of the project's saved files (save_project, autosave) is not an issue 04 tool; named for issue 11 (X7) |
+| AA04-P8 csv_bundle export: float text precision | `_pending` (X5) | a csv bundle stores floats as text, so the export check allows `CSV_RTOL` = 1e-12 relative; a change smaller than that reads completed (test_a_csv_export_sees_no_change_below_its_float_tolerance) |
+| AA04-P1 import_excel | `_pending` (X6) | no independent Excel reader; reads adapter_pending |
+| AA04-P2 import_matpower | `_pending` (X6) | no independent MATPOWER reader; reads adapter_pending |
+| AA04-P3 import_uploaded_network with format excel or matpower | `_pending` (X6) | as the two rows above |
+| AA04-P4 export_excel | `_pending` (X6) | no independent Excel reader; reads adapter_pending |
+| AA04-P5 export_matpower | `_pending` (X6) | no independent MATPOWER reader; reads adapter_pending |
+| AA04-P6 export whose bytes equal a non-export upload (e.g. a user upload) | `_pending` (X5) | `add_upload` dedups onto that file, which is not agent_export, so an ordinary export reads `export_file_count` (fails safe) |
+| AA04-P7 csv export: EH columns refilled on read | `_pending` (X5) | the read-back applies `normalise_eh_columns`, as the import route does; an EH column the export dropped is refilled with defaults and can match the live values |
+| R3: an outcome on the raise path for the four S2 tools and undo_last | S4 | GK B (26) chose (a): S3 keeps no `_outcome` on raise/timeout. S4 must keep: `failed` only when verified unchanged, never `failed` on a timeout. |
+
+GK B (26) S3 plan: GO WITH CHANGES, conditions X1–X8:
+- X1: load the scratch Network with the loader that apply_undo uses, and test that an undo of a real template network (custom columns, time series) reads completed.
+- X2: match peek and pop per call, never through a context-global last-popped sha. Test that another session's pop between note and read-back gives uncertain.
+- X3: a raise may give `failed` only when nothing changed. A tool_timeout never gives failed; it gives uncertain or no outcome. Test both.
+- X4: import extras use a closed allow-list in code (the classes and names the router adds), with a test. Any other extra row reads partial, and counts name the allowed extras.
+- X5: an export needs exactly one new agent_export upload, else uncertain. Show completed for nc and csv_bundle on a realistic template. A csv round-trip limit becomes a named `_pending` row, never a silent always-uncertain.
+- X6: excel and matpower read adapter_pending, each with a named `_pending` row.
+- X7: say whether S3 covers saved/unsaved, or name its owner.
+- X8: hold the PyPSA lock only for the read. State the digest's cost in the PR. A frame that cannot be hashed reads not_comparable, with a mutant.
+
+Riders: R2, keep the ctx object and compare with `is`; R3, the raise-path rule covers the S2 write tools too.
+
+UX (9) GO for the undo_last lines: entry_moved → "a different change was undone"; not_restored → "the network does not match its state before that change". Done, failed and no count are fine.
+
+Built so far (undo_last):
+- `undo_service` counts pops. `watch_pops` records, in this call's context only, the sha256 of each payload this call pops (X2).
+- `harness/outcomes.py` `note_undo` / `read_undo` / pure `classify_undo`. The note holds the peeked entry's sha (W4: payload = netcdf + user_ts + template_meta) and its network digest, loaded with `PyPSAService.import_network_from_netcdf`, the loader apply_undo uses (X1).
+- The read-back compares the live `network_digest`, user series and template meta, between two reads of the edit counter.
+- A pop count that differs from this call's own pops reads entry_moved.
+- The undo re-imports into a new context object, so undo compares the project binding. S2's row writes now keep the ctx and compare with `is` (R2).
+- `network_digest` costs about 20 ms on ieee39, eh_datacenter, eh_datacenter_staged and eh_ipp_hybrid (8760 snapshots) (X8).
+- Raise and timeout (X3, R3): the loop's error path carries no result dict, so a raising or timed-out write (S2 tools and undo_last) is a tool error with no `_outcome`, never completed or failed. It is tested for bulk_update_components and undo_last, including an orphan that lands after the timeout. Putting an outcome on the error path would change loop.py (held by #1154) and the frontend's error display; GK B (26) answered (a): no outcome on raise/timeout in S3, and R3 moves to S4 (row above). No loop.py error-branch change in S3.
+- Tests: `tests/assurance_acceptance/test_p3_snapshot_outcomes.py`, 37 passed. 14 mutants of classify_undo were killed (before X2; the X2 rows were added to the table after).
+
+Next: import/export (X4, X5, X6, X7). Then a PR with a release note and shots.
+
+Import/export build (same branch):
+- Tool sets: `IMPORT_TOOLS` (the four imports and import_uploaded_network) and `EXPORT_TOOLS` (the four exports) join `SNAPSHOT_TOOLS`. The loop dumps a pydantic result (ImportSummary) to a dict for a write tool, so the projection has a home; no other loop.py change.
+- X4: `note_import` reads the call's own bytes (b64 args, or the upload by file_id with its sha256 re-checked) into a scratch Network with the route's reader steps (netcdf: `import_network_from_netcdf`; csv: safe_extract, `_unescape_formula`, `import_from_csv_folder`, `normalise_eh_columns`). `read_import` reads, under the PyPSA lock between two edit-counter reads, the live rows per class, the extras, the values on the file's rows (`_match`: `pd.testing.assert_frame_equal`, order ignored, exact), and the user series (an import clears them). `classify_import`: completed; partial `rows_missing` (count "n of m imported") or `extra_rows`; uncertain `not_as_file`, `not_comparable`, `revision_moved`, `readback_failed`, `no_submission`. `IMPORT_EXTRAS` is a closed frozenset in code, measured empty: the routes add columns but no rows on ieee39 and the EH templates. A test shows an extra row reads partial, and reads completed with the row named in `counts.allowed_extras` once allow-listed.
+- X5: uploads are content-addressed, so a second export of an unchanged network lands on the first file (a dedup hit) and "one NEW upload" read uncertain on an ordinary repeat. `upload_service.watch_uploads` records, per call context as X2's pop watch does, the file_id of each upload this call adds, dedup hits included. The read-back needs exactly one, still listed as agent_export in the project's store, re-checks its sha256, reads it with the same reader, and compares it with the live network (exact for nc, `CSV_RTOL` for csv). Tests: completed for nc and csv on eh_datacenter; a repeat export completed; two files by one call, none, and another session's export into the same store all read `export_file_count`; a file unlike the network reads `not_as_network`.
+- X6: import_excel, import_matpower, import_uploaded_network with excel/matpower, export_excel and export_matpower read `uncertain adapter_pending` (tests named `..._pending`). The tool line words it "this file format cannot be checked yet"; a job keeps "this kind of job cannot be checked yet".
+- X7: see the A3.4 row above.
+- X8: `_match` returns UNCOMPARABLE on a TypeError/ValueError and the outcome reads not_comparable (a mutant test). The PyPSA lock is held only for the live read; the scratch read happens outside it.
+- R3: a refused import (an `ic:` bus) and an export with no project are tool errors with no `_outcome`. A watch set by a note whose handler then raises is never unwatched; it is a per-context list, so it is harmless, and S4 owns the raise path.
+- Review (mp-code-review): the digest and `_match` now compare snapshot and investment-period weightings and `n.meta` (asset provenance), with mutant tests for import and export; `note_undo` reads the user series under the lock; a parity test pins the frontend FILE_TOOLS and import verbs to the backend sets.
+- X8 cost: `_match` 40–55 ms on the four EH templates and 43 ms on eh_ipp_hybrid (8760 snapshots); `network_digest` 20–24 ms.
+- Tests: `tests/assurance_acceptance/test_p3_file_outcomes.py` 63 passed; p3 file + snapshot + write 154 passed. Frontend: 2093 passed (src/components), ChatPanel.toolOutcome + toolOutcome 94 passed.
+
+### 2026-11-06 — S3 GK NOT OK @ce6007dd (GK B (26)) and fixes
+
+GK B (26) accepted the X5 reading (a per-call upload record, dedup hits included), X4 with an empty `IMPORT_EXTRAS`, and X7 owned by issue 11. Fixes for E1–E5:
+- E1: `_match` compares what a file format carries (`_canon_col` / `_eq_rows`). Dtypes and index names are ignored. Numbers and flags compare as float. None, NaN and, in text columns, "" are one missing value; netcdf stores a missing string as "". A column one side lacks reads as all missing. Tests: export after a `batch_create_components` edit, and export of an in-memory template (the export fixture is parametrised loaded / in_memory), both complete for nc and csv.
+- E2 and contract D5: `note_import` records, under the lock, the live digest, the revision, and the file's rows the live network already holds with equal static values. `requested` and `done` count only the rows the import had to change. A live state left unchanged reads completed when it already was the file, else failed; never partial. Tests: a handler that does nothing reads failed; re-importing the live file reads completed with requested 0.
+- E3: the read-back's revision must equal the note's at both reads (an import keeps the counter; measured). Test: a bump between handler and read-back reads revision_moved.
+- E4: `DERIVED_CLASSES = {"SubNetwork"}` is left out of the digest, rows and match. Tests: export after `determine_network_topology` completes; the digest is equal across two loads after topology.
+- E5: M12 (a dedup onto a user upload of the same bytes reads export_file_count), M14 (the digest sees `meta`) and M15 (a tampered stored blob reads readback_failed) each have a killing test, run as mutants.
+- Riders: `release_note` stops the note's watch in the loop's error branch (test: a raising export leaves no upload watch); the X3 timeout test is parametrised over bulk_update_components, undo_last and import_network_nc; the `_pending` rows carry ids AA04-P1..P8; the csv tolerance test stands as row AA04-P8. The X2 HTTP-route test is not added; the route pops through the same `undo_service.pop`, so it would test the same seam.
+
+
+### 2026-11-06 — S3 GK NOT OK @94baa63c (GK B (27)) and fixes
+
+GK B (27) met E1 (it probed: "" vs "x", 2 vs 2.5, None vs 0.0 and "1" vs 1.0 all still differ), E4 and E5, and accepted skipping the X2 HTTP-route rider. Two asks are fixed:
+- E3: `note_import` records `_binding()`. A landed import publishes an unbound context (`routers.io._unbind_session`), so `read_import` accepts only the note's binding (the import did not land) or unbound; any other binding reads uncertain `other_context`, whatever the revision. Test: a project switch between the handler and the read-back, with an equal revision.
+- E2: `done` counts the needed rows the live network holds equal to the file at the read-back (`_rows_already_equal` ∩ `need`, less the missing rows), not every needed row that is present. Tests: pure need {a, b, l} → done 1; route drops one Load and spoils one Generator → done = requested − 2.
+- The format-only `loop.py` edits are reverted. Master's loop.py is already unformatted, so the ruff guard exempts it.

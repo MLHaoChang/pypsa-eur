@@ -31,6 +31,12 @@ BOUND_CONTEXT_TOOLS = frozenset({
     "generate_report",  # issue 07: stage 7 (GK B C6)
 })
 
+# Issue 07 (design §3 stages 7-8): steps only the runner runs, never a chat
+# call (`assistant_tasks.begin_step` leaves them alone). Stage 7's report job
+# is the only place a strict, run-charged report starts (GK B's stage-7
+# ruling); stage 8's read-back is a harness read and carries no card.
+NATIVE_STEPS = {"report": "generate_report", "handoff": "read_handoff"}
+
 # §6.0: the agent changes design levers, never the question. A profile that
 # lists one of these as tunable is refused at load.
 NEVER_TUNABLE = frozenset({
@@ -89,6 +95,10 @@ def _call(tool, **args):
     return {"tool": tool, "args": args}
 
 
+def _native(stage):
+    return {"tool": NATIVE_STEPS[stage], "args": {}, "native": stage}
+
+
 # §5 core rules, shared by every profile. Profiles may tighten, never loosen.
 CORE_INPUT_RULES = [
     _rule("in.validate.errors", "validate.errors", "eq", 0,
@@ -107,6 +117,19 @@ CORE_RESULT_RULES = [
 # does not fail the run (the base case's result gate does).
 EXPLORE_RULES = [
     _rule("ex.cases.settled", "explore.unsettled", "eq", 0, basis="Every admitted case is settled (§3 stage 6)."),
+]
+
+# Issue 07 (design §3 stages 7-8): the report is ready and lists every
+# chapter it cannot evidence (SC-15); the hand-off read every headline KPI
+# back natively. Each fact fails closed on a missing source (GK B C3).
+REPORT_RULES = [
+    _rule("rp.report.status", "report.status", "eq", "ready", basis="The run's own report job saved its report."),
+    _rule("rp.report.unsupported_listed", "report.unsupported_listed", "eq", True,
+          basis="Every chapter is evidenced or named as a gap (SC-15)."),
+]
+HANDOFF_RULES = [
+    _rule("ho.kpis_read", "handoff.kpis_read", "eq", True,
+          basis="Every headline KPI was read back from its native source (C14)."),
 ]
 
 # §9.2. Setup binds the open project: tasks never rebind (start_task), so
@@ -200,8 +223,14 @@ def load(profile: dict) -> dict:
         if len(actions) > STAGE_STEPS or len(json.dumps(actions)) > STAGE_CHARS:
             raise ProfileError(f"Stage {name}: at most {STAGE_STEPS} steps and {STAGE_CHARS} characters.")
         for action in actions:
-            if set(action) != {"tool", "args"} or not isinstance(action["args"], dict):
+            if set(action) - {"native"} != {"tool", "args"} or not isinstance(action["args"], dict):
                 raise ProfileError(f"Stage {name}: each action has tool and args.")
+            if "native" in action:
+                if action["native"] != name or NATIVE_STEPS.get(name) != action["tool"] or action["args"]:
+                    raise ProfileError(f"Stage {name}: a native step is its own stage's, {NATIVE_STEPS.get(name)}.")
+                if action["tool"] == "generate_report" and action["tool"] not in BOUND_CONTEXT_TOOLS:
+                    raise ProfileError(f"Stage {name}: generate_report is not yet shown to work on the run's own project.")
+                continue
             if action["tool"] not in BOUND_CONTEXT_TOOLS:
                 raise ProfileError(f"Stage {name}: {action['tool']} is not yet shown to work on the run's own project.")
         _check_tunable(stage.get("tunable", []))
@@ -330,6 +359,10 @@ EH_SITE = {
         "explore": {"actions": [], "rules": EXPLORE_RULES,
                     "agent": {"tools": list(EXPLORE_TOOLS), "rounds": 1, "changes": EXPLORE_CHANGES,
                               "cases": EXPLORE_CASES}},
+        # Issue 07: the report job (the harness's own, strict and charged to
+        # the run) and the hand-off read-back.
+        "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+        "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
     },
     # Issue 06 (§9.3): what a case may change on its fork, each with its
     # bounds and their basis (a `profile:` source). The connection is the
@@ -379,7 +412,9 @@ EH_SITE = {
                  {"tool": "attach_tariff",
                   "target": {"component": "Settings", "name": "Commercial", "attr": "import_tariff_ref"},
                   "source": {"kind": "library_tariff"}}],
-        "runs": [{"tool": "solve_queue_enqueue"}],
+        # Issue 07 (B1-b): the run's report covers the stage-7 card only; its sends
+        # are reserved against the run's budget (C4), never a solve.
+        "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
         "budget": {"solves": 6, "rounds": 6, "wall_time_h": 8.0},
         "research": {"allowed": True, "cost_cap_eur": 2.0},  # SH-RESEARCH-CAP-1; the grant governs
     },
@@ -392,8 +427,17 @@ EH_SITE = {
          "unit": "EUR/MWh", "basis": "energy charge, excl. VAT",
          "question": "What is the published import energy charge for this site's connection level?"},
     ]},
-    "kpis": [],
-    "chapters": [],
+    # Issue 07 (C14): the headline KPIs the hand-off reads back, each from one
+    # retained results section (`retained_results`) at one key path.
+    "kpis": [
+        {"id": "total_cost", "label": "Total system cost", "section": "results_summary",
+         "path": ["cost_breakdown", "total"], "unit": "EUR"},
+        {"id": "emissions", "label": "CO2 emissions", "section": "results_emissions",
+         "path": ["emissions", "total_tCO2"], "unit": "tCO2"},
+    ],
+    # §9.3: the EH reference design, reliability and investment chapters
+    # (evidence section ids); one the run did not establish is a gap (SC-15).
+    "chapters": ["sizing", "mc", "investment_case"],
     "missing_tools": [],
 }
 
@@ -419,5 +463,6 @@ def materialise(profile: dict, stage: str, project_id: str, start: int = 1) -> l
         if isinstance(value, list):
             return [fill(v) for v in value]
         return value
-    return [{"id": f"{stage}.{n}", "tool": a["tool"], "args": fill(a["args"]), "status": "pending"}
+    return [{"id": f"{stage}.{n}", "tool": a["tool"], "args": fill(a["args"]), "status": "pending",
+             **({"native": a["native"]} if "native" in a else {})}
             for n, a in enumerate(profile["stages"][stage].get("actions", []), start=start)]
