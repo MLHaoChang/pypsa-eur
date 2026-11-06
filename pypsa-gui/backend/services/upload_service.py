@@ -39,6 +39,7 @@ Quota:
 """
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import logging
 import os
@@ -386,6 +387,35 @@ def _current_usage_bytes(uploads_dir: pathlib.Path) -> int:
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
+# Issue 04 S3 (GK B (26) X5): the file_id of each upload added in THIS call's
+# context, a dedup hit included (an unchanged network exports the same bytes,
+# which land on the same content-addressed file), so an export's read-back
+# finds its own file and never another session's.
+_UPLOAD_WATCH: contextvars.ContextVar[list | None] = contextvars.ContextVar(
+    "upload_watch", default=None
+)
+
+
+def _note_upload(meta: UploadMeta) -> None:
+    watch = _UPLOAD_WATCH.get()
+    if watch is not None:
+        watch.append(meta.file_id)
+
+
+def watch_uploads() -> tuple[list, contextvars.Token]:
+    """Start recording the file_ids this context adds; returns (list, token)."""
+    watched: list = []
+    return watched, _UPLOAD_WATCH.set(watched)
+
+
+def unwatch_uploads(token: contextvars.Token) -> None:
+    """Stop recording; a token from another context is ignored."""
+    try:
+        _UPLOAD_WATCH.reset(token)
+    except ValueError:
+        _UPLOAD_WATCH.set(None)
+
+
 def add_upload(
     name: str,
     file_bytes: bytes,
@@ -443,6 +473,7 @@ def add_upload(
             if assurance_sha256 is not None and existing.assurance_sha256 != assurance_sha256:
                 existing = existing.model_copy(update={"assurance_sha256": assurance_sha256})
                 _atomic_write_meta(meta_path, existing)
+            _note_upload(existing)
             return existing
 
         # Quota check — only on a fresh upload (dedup hit doesn't grow disk).
@@ -498,6 +529,7 @@ def add_upload(
         _atomic_write_bytes(blob_path, file_bytes)
         meta = meta.model_copy(update={"blob_ready": True})
         _atomic_write_meta(meta_path, meta)
+        _note_upload(meta)
         return meta
 
 

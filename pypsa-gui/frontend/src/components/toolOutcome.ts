@@ -3,7 +3,9 @@
  * `_outcome` (an independent, identity-checked read of the job). The mark
  * follows that outcome, never a blanket ✓.
  */
-import { ACTIVITY_STATUS_WORDS, TOOL_OUTCOME_REASON_WORDS } from './activityWords'
+import {
+  ACTIVITY_STATUS_WORDS, TOOL_OUTCOME_FILE_REASON_WORDS, TOOL_OUTCOME_PARTIAL_REASON_WORDS, TOOL_OUTCOME_REASON_WORDS,
+} from './activityWords'
 
 /** Every outcome the backend's `_outcome.outcome` may carry (harness/outcomes.py). */
 export const TOOL_OUTCOMES = [
@@ -34,7 +36,16 @@ export interface ToolOutcomeBlock {
 const WRITE_VERBS: Record<string, string> = {
   bulk_update_components: 'updated', batch_create_components: 'added',
   delete_component: 'deleted', batch_delete_components: 'deleted',
+  // Issue 04 S3: an import counts the file's rows found in the network.
+  import_network_nc: 'imported', import_csv_bundle: 'imported', import_excel: 'imported',
+  import_matpower: 'imported', import_uploaded_network: 'imported',
 }
+
+/** The tools whose `_outcome` reads a network file (issue 04 S3, backend IMPORT_TOOLS | EXPORT_TOOLS). */
+const FILE_TOOLS: ReadonlySet<string> = new Set([
+  'import_network_nc', 'import_csv_bundle', 'import_excel', 'import_matpower', 'import_uploaded_network',
+  'export_network_nc', 'export_csv_bundle', 'export_excel', 'export_matpower',
+])
 
 const count = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0
 
@@ -102,8 +113,12 @@ export function toolOutcomeMark(outcome: string): ToolOutcomeMark {
 }
 
 /** Plain words for why an outcome is unknown, or null when the reason adds nothing. */
-export function toolOutcomeReasonWord(outcome: string, reason: string | null): string | null {
-  if (toolOutcomeMark(outcome).outcome !== 'uncertain' || !reason) return null
+export function toolOutcomeReasonWord(outcome: string, reason: string | null, tool?: string): string | null {
+  if (!reason) return null
+  const state = toolOutcomeMark(outcome).outcome
+  if (state === 'partial') return TOOL_OUTCOME_PARTIAL_REASON_WORDS[reason] ?? null
+  if (state !== 'uncertain') return null
+  if (tool && FILE_TOOLS.has(tool) && reason in TOOL_OUTCOME_FILE_REASON_WORDS) return TOOL_OUTCOME_FILE_REASON_WORDS[reason]
   return TOOL_OUTCOME_REASON_WORDS[reason] ?? null
 }
 
@@ -116,7 +131,7 @@ export function toolOutcomeCount(tool: string, block: ToolOutcomeBlock): string 
 /** The transcript line: `<glyph> <tool> (<word>[: <reason> | : <n> of <m> <verb>])`. */
 export function toolOutcomeLine(tool: string, block: ToolOutcomeBlock): string {
   const mark = toolOutcomeMark(block.outcome)
-  const why = toolOutcomeReasonWord(block.outcome, block.reason)
+  const why = toolOutcomeReasonWord(block.outcome, block.reason, tool)
   const n = toolOutcomeCount(tool, block)
   const detail = why ?? (n ? `${n} ${WRITE_VERBS[tool]}` : null)
   return `${mark.glyph} ${tool} (${mark.word}${detail ? `: ${detail}` : ''})`
@@ -159,7 +174,7 @@ export function currentToolOutcome(
     }
   }
   const n = own.tool_name ? toolOutcomeCount(own.tool_name, current) : null
-  return { mark: toolOutcomeMark(current.outcome), ts, why: toolOutcomeReasonWord(current.outcome, current.reason),
+  return { mark: toolOutcomeMark(current.outcome), ts, why: toolOutcomeReasonWord(current.outcome, current.reason, own.tool_name),
     count: n && own.tool_name ? { text: n, verb: WRITE_VERBS[own.tool_name] } : null }
 }
 

@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { ACTIVITY_STATUS_WORDS } from './activityWords'
 import {
-  TOOL_OUTCOMES, currentToolOutcome, outcomeClock, toolOutcomeLine, toolOutcomeMark, toolOutcomeOf, toolOutcomeWords,
+  TOOL_OUTCOMES, currentToolOutcome, outcomeClock, toolOutcomeLine, toolOutcomeMark, toolOutcomeOf, toolOutcomeReasonWord, toolOutcomeWords,
 } from './toolOutcome'
 
 const block = (outcome: string, job_id: string | null = 'fg:1', reason: string | null = null) => ({ outcome, job_id, reason })
@@ -190,5 +190,48 @@ describe('write outcomes (issue 04 S2)', () => {
   it('never counts a job tool', () => {
     const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'partial', counts: { requested: 5, done: 3 } } }, 'run_ac_pf_stage')!
     expect(toolOutcomeLine('run_ac_pf_stage', block)).toBe('– run_ac_pf_stage (partly done)')
+  })
+})
+
+describe('undo outcomes (issue 04 S3)', () => {
+  it.each([
+    ['completed', null, '✓ undo_last (done)'],
+    ['uncertain', 'entry_moved', '– undo_last (outcome unknown: a different change was undone)'],
+    ['uncertain', 'not_restored', '– undo_last (outcome unknown: the network does not match its state before that change)'],
+    ['failed', 'nothing_to_undo', '✕ undo_last (failed)'],
+  ])('words an undo that read back %s (%s)', (outcome, reason, line) => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome, reason } }, 'undo_last')!
+    expect(toolOutcomeLine('undo_last', block)).toBe(line)
+  })
+})
+
+describe('import and export outcomes (issue 04 S3)', () => {
+  const counts = (done: number) => ({ requested: 7, done, extra: 0, allowed_extras: [] })
+  it.each([
+    ['import_network_nc', 'completed', null, counts(7), '✓ import_network_nc (done)'],
+    ['import_csv_bundle', 'partial', 'rows_missing', counts(5), '– import_csv_bundle (partly done: 5 of 7 imported)'],
+    ['import_network_nc', 'partial', 'extra_rows', counts(7),
+      '– import_network_nc (partly done: the network has rows the file does not have)'],
+    ['import_uploaded_network', 'uncertain', 'not_as_file', counts(7),
+      '– import_uploaded_network (outcome unknown: the network does not match the imported file)'],
+    ['import_excel', 'uncertain', 'adapter_pending', null, '– import_excel (outcome unknown: this file format cannot be checked yet)'],
+    ['export_network_nc', 'completed', null, null, '✓ export_network_nc (done)'],
+    ['export_csv_bundle', 'uncertain', 'not_as_network', null,
+      '– export_csv_bundle (outcome unknown: the exported file does not match the network)'],
+    ['export_network_nc', 'uncertain', 'export_file_count', null,
+      '– export_network_nc (outcome unknown: the exported file could not be identified)'],
+    ['export_matpower', 'uncertain', 'adapter_pending', null, '– export_matpower (outcome unknown: this file format cannot be checked yet)'],
+  ])('words %s that read back %s (%s)', (tool, outcome, reason, c, line) => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome, reason, counts: c } }, tool)!
+    expect(toolOutcomeLine(tool, block)).toBe(line)
+  })
+
+  it('keeps the job words for a job that is adapter_pending', () => {
+    const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'uncertain', job_id: 'ad:x', reason: 'adapter_pending' } }, 'wait_for_job')!
+    expect(toolOutcomeLine('wait_for_job', block)).toBe('– wait_for_job (outcome unknown: this kind of job cannot be checked yet)')
+  })
+
+  it('gives no partial word for a reason without one', () => {
+    expect(toolOutcomeReasonWord('partial', 'rows_missing', 'import_network_nc')).toBeNull()
   })
 })
