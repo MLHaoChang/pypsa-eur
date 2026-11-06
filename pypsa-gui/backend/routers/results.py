@@ -482,6 +482,47 @@ def get_process_view():
     return {"available": True, **compute_process_view(n, _state.get("last_lost_load"))}
 
 
+def grid_risk_production_payload(project_id: str | None = None) -> dict:
+    """The "Grid risk to production" section (grid-to-process ticket 13) of the open project, for the acting user:
+    `project_id` must be the open project (it is the one whose network and campus run are read), resolved through
+    the project ACL before any file is read. `available` false before a solve; `omitted` when the network has no
+    process unit. See `services.results.grid_risk_production`."""
+    from services import chat_tools, project_registry
+    from services.results.grid_risk_production import campus_run_of, grid_risk_production
+
+    active = PyPSAService.get_active_context().project_uuid
+    project_id = str(project_id or active or "")
+    if not project_id:
+        raise HTTPException(409, {"error_kind": "no_active_project",
+                                  "message": "No project is open; open the project and ask again."})
+    if project_id != str(active or ""):
+        raise HTTPException(409, {"error_kind": "project_not_open",
+                                  "message": "Grid risk to production reads the open project's network and "
+                                             "campus run; open that project first."})
+    with chat_tools._acting() as (db, user):
+        try:
+            project = project_registry.resolve_project(db, user, project_id)
+        except HTTPException:
+            raise HTTPException(404, {"error_kind": "not_authorized",
+                                      "message": "The open project is not one you may read."}) from None
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        return {"available": False, "project_id": project_id, "omitted": None}
+    out = grid_risk_production(n, _state.get("last_lost_load"), campus=campus_run_of(project))
+    if out is None:
+        return {"available": False, "project_id": project_id, "omitted": "no_process_unit"}
+    return {"available": True, "project_id": project_id, "omitted": None, **out}
+
+
+@results_router.get("/grid_risk_production")
+def get_grid_risk_production(project_id: str | None = Query(default=None), actor: User = Depends(require_user)):
+    """Grid-to-process ticket 13: each grid risk (ride-through, island, N-1, connection curtailment) in t/yr and
+    EUR/yr per period, with its source file, stamp and stale flag; the total an upper bound (lines may overlap).
+    A missing input is null with its name, never 0; EUR null ("Unavailable") with no lost-production value."""
+    with _result_actor(actor):
+        return grid_risk_production_payload(project_id)
+
+
 @results_router.get("/statistics")
 def get_statistics():
     n = PyPSAService.get_network()

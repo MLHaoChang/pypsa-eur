@@ -271,6 +271,18 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                guided_label="FMEA",
                units="MW, h/a",
                card="reliability", sub_option="stress", card_tab="stress_fmea"),
+    # Grid-to-process ticket 13: each grid risk in t/yr, then EUR/yr; the total an upper bound.
+    ResultView("grid_risk", _RESULTS, "grid_risk", "Grid risk to production",
+               "each grid risk (ride-through, island, N-1, connection curtailment) as lost tonnes, "
+               "then EUR, per year, with the result file each comes from", "results",
+               (_rp("get_grid_risk_production", "lines"),),
+               guided_label="Grid risk to production",
+               claim_limits="Expected values per year, not a forecast. The total is an upper bound: the "
+                            "lines may overlap. A missing input is unknown, never zero; EUR is Unavailable "
+                            "without a lost-production value. Campus lines are from the last campus run "
+                            "and are out of date when it is stale.",
+               units="t/yr, EUR/yr",
+               card="reliability", sub_option="goal_study", card_tab="grid_risk"),
     ResultView("investment", _RESULTS, "investment", "Investment case",
                "the investment case verdict and its cash flows", "investment",
                (_r("get_investment_case"),),

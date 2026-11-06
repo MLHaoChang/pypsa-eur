@@ -156,6 +156,13 @@
     "card": "reliability"
    },
    {
+    "id": "grid_risk",
+    "label": "Grid risk to production",
+    "data": "available",
+    "shown": false,
+    "card": "reliability"
+   },
+   {
     "id": "investment",
     "label": "Investment case",
     "data": "available",
@@ -327,6 +334,13 @@
     "card": "reliability"
    },
    {
+    "id": "grid_risk",
+    "label": "Grid risk to production",
+    "data": "available",
+    "shown": false,
+    "card": "reliability"
+   },
+   {
     "id": "investment",
     "label": "Investment case",
     "data": "available",
@@ -402,6 +416,13 @@
    {
     "id": "fmea",
     "label": "FMEA",
+    "data": "available",
+    "shown": false,
+    "card": "reliability"
+   },
+   {
+    "id": "grid_risk",
+    "label": "Grid risk to production",
     "data": "available",
     "shown": false,
     "card": "reliability"
@@ -581,6 +602,13 @@
    {
     "id": "fmea",
     "label": "FMEA",
+    "data": "available",
+    "shown": false,
+    "card": "reliability"
+   },
+   {
+    "id": "grid_risk",
+    "label": "Grid risk to production",
     "data": "available",
     "shown": false,
     "card": "reliability"

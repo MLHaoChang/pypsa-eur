@@ -65,3 +65,11 @@ This ticket builds no new loop (design D5).
 **Likely files:** new `pypsa-gui/backend/services/results/grid_risk_production.py`, `pypsa-gui/backend/routers/results.py`, `pypsa-gui/backend/services/results/process_view.py` (read only), the report chapter code, `pypsa-gui/frontend/src/pages/Results.tsx`, tests.
 **Blocked by:** 12 (the `12-` file is 12b, owner G2P-12-SPLIT); 08 is done.
 **Model:** Opus (reads gridspine and adequacy results, gated). The Guided tiles need the UX reviewer's OK.
+
+## Comments
+
+**GK A (14), plan GO, 2026-11-06 (from master 482bb6e1e).**
+- Q1 overlap: the total is labelled "upper bound (lines may overlap)"; `total.incomplete` whenever a line is missing. The overlap test puts one shortfall hour in both the connection line and the island line and asserts the label.
+- Q2 N-1: the site-transformer Link (not the PoC import Link) via `process_loss.expected_outage_loss`; missing on A and B, the input named. No new Transformer fields.
+- Q3 island: the units outside every pickup block (`restart_sequence.NO_BLOCK`, `level == "unit"`, `transition == "island"`) × rate × mass pull × MTTR × events/yr; the in-block units' restart loss is a second, named and flagged row inside the line and counts in the total.
+- Conditions: line 1 shown from `campus_dip_trips.csv` as written (`unknown` → partial, lower bound); (q, MTTR) through the occurrence resolver, occurrence = the period's weighted hours × q / MTTR; the island line gets no inventory credit (`basis` says so, flagged conservative); every line t/yr, per period on a multi-period network, line 4 annualised like `expected_outage_loss`, never a horizon total (2-period test); each line carries its source stamp and a stale flag from the existing signals; EUR through `process_products.shortfalls`, null → "Unavailable"; a missing input → `missing` with its names, never 0; the route is a project-scoped result-view read (ACL, chat disposition, write-surface and parity checks); no report or Results UI before UX has the UI plan; a release-note fragment.
