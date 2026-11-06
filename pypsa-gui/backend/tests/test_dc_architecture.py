@@ -460,6 +460,26 @@ def test_the_screen_orders_own_first_and_states_its_assumptions_once():
     assert sst["verdicts"]["frequency_support"]["verdict"] == "warn"
 
 
+def test_a_genset_only_backup_leaves_every_conditional_service_unpassed():
+    spec = _spec()
+    assert spec.backup.mode == "genset" and not A.dc_bus_storage(spec)
+    out = _compare(_net()[0], spec)
+    assert out["dc_bus_storage"] is False
+    gated = {
+        a: {s for s, how in A.ARCH_SERVICES[a].items() if how == "needs_storage"}
+        for a in A.ARCHITECTURES
+    }
+    assert any(gated.values())
+    for v in out["variants"]:
+        a = v["architecture"]
+        assert set(v["services"]["conditional"]) == gated[a]
+        assert not gated[a] & set(v["services"]["counted"])
+        for verdict in v["verdicts"].values():
+            assert verdict["verdict"] != "pass"
+            assert set(verdict.get("conditional") or []) <= gated[a]
+        assert gated[a] <= set(A.services(a, True)["counted"])
+
+
 def test_without_a_tariff_or_a_price_the_screen_refuses():
     with pytest.raises(A.DcArchitectureError) as e:
         _compare(_net()[0], _spec(), energy_price_per_mwh=None)

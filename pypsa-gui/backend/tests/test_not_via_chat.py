@@ -63,6 +63,7 @@ def test_the_issue_rows_are_declared():
         'site_scene': ('unbuilt', 'map'),
         'intent_comparison': ('unbuilt', None),
         'dc_backup': ('unbuilt', None),
+        'dc_architecture': ('unbuilt', None),
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
     }

@@ -49,3 +49,11 @@ GK A (15), engine: GO with C1–C9. Q-A1 (a): PUE is stated for the own architec
 - C9: mutants RED: the in-rack line dropped, own and variant swapped, the weighting dropped, the C3 guard removed, a conditional service passed without storage, and an unset "ac" taking the chain-ledger path.
 
 Amendments, GK A (15): C3 refuses when PUE(T) − 1/η_own < 0; it is checked at create only when the architecture is set. Tests: AC 1.05 is refused, 1.3 passes, and the boundary passes. C7: stage rows have no part and are not_applicable, and a stage-named part is still refused. Services: SST's FFR and FCR are also conditional; DC-bus storage means backup bess or hybrid (assumed). Still to add: a test that a genset-only backup leaves every conditional service unpassed. UX (11): (a) GO. Issue 22 carries the create-form select; the create-form shot is dropped, and the PR body names issue 22.
+
+### 2026-11-06: build finished (session DC-05 (2))
+
+- GK A (15)'s added test is in: a genset-only backup leaves every conditional service unpassed (`test_a_genset_only_backup_leaves_every_conditional_service_unpassed`; the mutant "DC-bus storage always declared" is RED).
+- The wider run found three real failures, now fixed: the `dc_architecture` not-via-chat keywords were not single words; its row was missing from the declared-rows test; the six kinds were built with an f-string, so the error-kind manifest guard could not see them (now `error_kind` literals in `_KINDS`, and an undeclared kind is a KeyError).
+- Found in the shots: the template ships no import tariff, so Guided hit the no-price refusal with no field to answer it. Guided now shows the price field in place after that refusal only (two vitests, both mutants RED). The table cells got padding, the service chips no longer wrap, and the price line drops the doubled "(assumed)" beside the assumed tag.
+- Shots: `.scratch/datacenter-grid-readiness/shots/dc05-*` from `pypsa-gui/frontend/scripts/dc-architecture-shots.mjs` (real app; the result states answer from the committed fixture).
+

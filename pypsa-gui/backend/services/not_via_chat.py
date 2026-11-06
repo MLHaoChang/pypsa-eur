@@ -244,8 +244,9 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'panel': None,
         'keywords': frozenset({
             'architecture',
-            '800 vdc',
-            'solid-state transformer',
+            'vdc',
+            'sst',
+            'transformer',
         }),
         'routes': frozenset({
             ('POST', '/api/campus-electrical/{name}/dc-architecture/compare'),

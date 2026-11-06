@@ -11,6 +11,7 @@ import {
   campusApi, errorText,
   type DcArchitecture, type DcArchitectureCompare, type DcArchitectureVariant,
 } from '../api/campusElectrical'
+import { errorKind } from '../api/profiles'
 import { resultsApi } from '../api/simulation'
 import { Btn, PageSection } from '../components/PageKit'
 import { StatePill } from '../components/ResultState'
@@ -67,6 +68,9 @@ export default function DcArchitectureSection({ name }: { name: string }) {
   const [price, setPrice] = useState('')
   const [result, setResult] = useState<{ data: DcArchitectureCompare; key: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Guided shows the price field only once the project's tariff gave no energy rate: the refusal asks for a
+  // price, and the user gives it in place.
+  const [needPrice, setNeedPrice] = useState(false)
   const compare = useMutation({
     mutationFn: () => {
       const p = price.trim() === '' ? null : Number(price)
@@ -74,7 +78,10 @@ export default function DcArchitectureSection({ name }: { name: string }) {
     },
     onMutate: () => setError(null),
     onSuccess: data => setResult({ data, key: specKey(meta) }),
-    onError: e => setError(errorText(e)),
+    onError: e => {
+      setError(errorText(e))
+      if (errorKind(e) === 'dc_architecture_no_energy_price') setNeedPrice(true)
+    },
   })
 
   if (own == null) return null
@@ -91,7 +98,7 @@ export default function DcArchitectureSection({ name }: { name: string }) {
           <span data-testid="dc-architecture-compare">{compare.isPending ? 'Comparing…' : 'Compare'}</span>
         </Btn>}
       >
-        {!guided && (
+        {(!guided || needPrice) && (
           <label className="flex items-center gap-2 text-[11px]">
             <span className="text-muted">Energy price</span>
             <input
@@ -128,10 +135,10 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
         </p>
         <p data-testid="dc-architecture-price-used" className="text-[11px]">
           Energy priced at {p.weighted_mean_per_mwh == null ? '–' : money(p.weighted_mean_per_mwh, cur)} per MWh
-          {' '}({p.source}){p.assumed && <>{' '}<Assumed /></>}; held constant in real terms.
+          {' '}({p.assumed ? p.source.replace(/ \(assumed\)$/, '') : p.source}){p.assumed && <>{' '}<Assumed /></>}; held constant in real terms.
         </p>
         <div className="overflow-x-auto">
-          <table className="w-full text-[11px]" data-testid="dc-architecture-table">
+          <table className="w-full text-[11px] [&_td]:px-2 [&_td]:py-0.5 [&_th]:px-2 [&_th]:align-bottom" data-testid="dc-architecture-table">
             <thead className="text-muted">
               <tr>
                 <th className="text-left font-normal">Architecture</th>
@@ -177,11 +184,11 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
                       <td>
                         {v.services.counted.map(s => (
                           <span key={s} title={SERVICE_CHIP[s]?.full ?? s}
-                                className="mr-1 rounded border border-border px-1 text-[10px]">{SERVICE_CHIP[s]?.short ?? s}</span>
+                                className="mr-1 inline-block whitespace-nowrap rounded border border-border px-1 text-[10px]">{SERVICE_CHIP[s]?.short ?? s}</span>
                         ))}
                         {v.services.conditional.map(s => (
                           <span key={s} title={`${SERVICE_CHIP[s]?.full ?? s}: needs storage on the DC bus`}
-                                className="mr-1 rounded border border-dashed border-border px-1 text-[10px] text-muted">{SERVICE_CHIP[s]?.short ?? s}</span>
+                                className="mr-1 inline-block whitespace-nowrap rounded border border-dashed border-border px-1 text-[10px] text-muted">{SERVICE_CHIP[s]?.short ?? s}</span>
                         ))}
                         {v.services.counted.length + v.services.conditional.length === 0 && <span className="text-muted">none</span>}
                       </td>

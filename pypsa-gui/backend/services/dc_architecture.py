@@ -106,8 +106,21 @@ class DcArchitectureError(ValueError):
         self.kind, self.field = kind, field
 
 
+#: Each refusal's error kind, written as ``error_kind`` literals so the
+#: manifest guard (``tests/test_tool_error_kind_manifest.py``) sees them; an
+#: undeclared kind is a KeyError.
+_KINDS = {
+    "invalid": {"error_kind": "dc_architecture_invalid"},
+    "no_spec": {"error_kind": "dc_architecture_no_spec"},
+    "pue_infeasible": {"error_kind": "dc_architecture_pue_infeasible"},
+    "pack_row": {"error_kind": "dc_architecture_pack_row"},
+    "no_energy_price": {"error_kind": "dc_architecture_no_energy_price"},
+    "currency_mismatch": {"error_kind": "dc_architecture_currency_mismatch"},
+}
+
+
 def _err(message: str, kind: str, field: str) -> DcArchitectureError:
-    return DcArchitectureError(message, f"dc_architecture_{kind}", field)
+    return DcArchitectureError(message, _KINDS[kind]["error_kind"], field)
 
 
 # ── the chains ────────────────────────────────────────────────────────────

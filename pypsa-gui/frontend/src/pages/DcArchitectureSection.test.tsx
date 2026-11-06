@@ -80,6 +80,37 @@ describe('DcArchitectureSection', () => {
     expect(screen.queryByLabelText('Loss chain of Solid-state transformer')).toBeNull()
   })
 
+  it('Guided asks for a price in place when the project has no tariff energy rate', async () => {
+    ui.uiMode = 'guided'
+    const user = userEvent.setup()
+    results.getEhTemplate.mockResolvedValue({ dc_load: { spec: {} } })
+    campus.compareDcArchitecture.mockRejectedValueOnce({ response: { status: 422, data: { detail: {
+      error_kind: 'dc_architecture_no_energy_price',
+      message: 'energy_price_per_mwh: the project has no readable tariff energy component; give a price per MWh',
+    } } } })
+    campus.compareDcArchitecture.mockResolvedValueOnce(data)
+    renderIt()
+    await user.click(await screen.findByTestId('dc-architecture-compare'))
+    expect(text(await screen.findByTestId('dc-architecture-error'))).toContain('give a price per MWh')
+    await user.type(screen.getByTestId('dc-architecture-price'), '80')
+    await user.click(screen.getByTestId('dc-architecture-compare'))
+    expect(campus.compareDcArchitecture).toHaveBeenLastCalledWith('DC A', 80)
+    expect(text(await screen.findByTestId('dc-architecture-price-used'))).toMatch(/\(request\) assumed/)
+  })
+
+  it('Guided keeps the price field hidden after any other refusal', async () => {
+    ui.uiMode = 'guided'
+    const user = userEvent.setup()
+    results.getEhTemplate.mockResolvedValue({ dc_load: { spec: {} } })
+    campus.compareDcArchitecture.mockRejectedValue({ response: { status: 422, data: { detail: {
+      error_kind: 'dc_architecture_pack_row', message: 'the defaults pack lacks a row',
+    } } } })
+    renderIt()
+    await user.click(await screen.findByTestId('dc-architecture-compare'))
+    await screen.findByTestId('dc-architecture-error')
+    expect(screen.queryByTestId('dc-architecture-price')).toBeNull()
+  })
+
   it('reads out of date when the stored spec changes after a compare', async () => {
     const user = userEvent.setup()
     results.getEhTemplate.mockResolvedValue({ dc_load: { spec: { backup: { mode: 'genset' } } } })
