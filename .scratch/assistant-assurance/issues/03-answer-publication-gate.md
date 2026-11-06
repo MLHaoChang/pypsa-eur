@@ -42,13 +42,13 @@ names the slice that closes it, or its external blocker.
 | --- | --- | --- |
 | A2.1 | p2 prose/thinking/intermediate; p6 history/export; p7 every wire; LC07 caption = speech | Rejected draft never queued for speech, unsafe text split at every offset → **S1 (passed)** |
 | A2.2 | p2 wrong value/unit/entity/sign; wrong project/window | Same value under another metric → **S1 (passed)** |
-| A2.3 | sign, MW/MWh, %-of-baseline, zero baseline, full precision, nonfinite | kW/MW conversion and raw-value tolerance → S2; locale strings rejected by the strict number schema → S2 pin |
-| A2.4 | delta/cost oracles; invented formula id | Model-composed derived claims, known formula on wrong operands, arbitrary expressions → S2 |
+| A2.3 | sign, MW/MWh, %-of-baseline, zero baseline, full precision, nonfinite | kW/MW conversion and raw-value tolerance → **S2 (passed)**; locale strings rejected by the strict number schema → **S2 pin (passed)** |
+| A2.4 | delta/cost oracles; invented formula id | Model-composed derived claims, known formula on wrong operands, arbitrary expressions → **S2 (passed)** |
 | A2.5 | contradictory prose/narrative, omitted claims, invented entities | Whole-population quantifiers and causal wording → S5 |
 | A2.6 | bad JSON/nonobject → limited; checker/guard exception; commit failure; reviewer failures | Truncated draft that parses (OpenAI-compatible `length`/`content_filter`, Anthropic `max_tokens`) → **S1 (red, now passed)**; provider error before/after a fragment → **S1 (passed)**; zero repairs pinned exactly → **S1 (passed)** |
 | A2.7 | reviewer without tools; IDs/pairing; abort; generation change; stale ACK | Repair spends 0 tool executions (dispatch spy) → **S1 (passed)** |
 | A2.8 | storage/generator slots, missing basis, wrong run/selection, ambiguous cost, unsupported slots limited, 20/21 blocks | Ambiguous capacity, `request_complete` false while a slot is unmapped → **S3 (passed)**; valid blocks keep scope → **S3 (passed at 12 blocks, the largest valid set; 20 slots pinned by `test_harness_reliability`)**; required warning slots → `_pending`, blocked: no warning disposition in the result-slot contract (ticket 13) |
-| A2.9 | 17 MWh and energy vs objective weights; 51 EUR bridge; window joins; signed baseline; zero denominator | Percentage points, near-zero denominator, rounding cannot widen tolerance, formula DAG refs → S2 |
+| A2.9 | 17 MWh and energy vs objective weights; 51 EUR bridge; window joins; signed baseline; zero denominator | Percentage points, near-zero denominator, rounding cannot widen tolerance, formula DAG refs → **S2 (passed)** |
 | A2.10 | exclusion masks; hostile labels/notes; reviewer spoof | all/none/top-k, ties, feasible incumbent vs optimum → S4; stochastic coverage pending: no checked stochastic profile exists (ticket 10) |
 
 Slices, one PR each and test-first: S1 failure modes; S2 derived claims

@@ -20,6 +20,7 @@ from pydantic import (
     ValidationError,
 )
 
+from harness import derived
 from services import assurance_records as records
 
 
@@ -80,11 +81,27 @@ class Interpretation(BaseModel):
     block_ids: list[str] = Field(min_length=1, max_length=20)
 
 
+class Derived(BaseModel):
+    """A derived claim (AA-03 S2): a registered formula over published ids."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    kind: Literal["derived"]
+    formula_id: str = Field(min_length=1, max_length=64)
+    operands: list[str] = Field(min_length=1, max_length=8)
+    denominator: str | None = Field(default=None, min_length=1, max_length=64)
+    basis: str | None = Field(default=None, min_length=1, max_length=64)
+    to_unit: str | None = Field(default=None, min_length=1, max_length=16)
+    value: Annotated[StrictInt | StrictFloat, Field(allow_inf_nan=False)]
+    unit: str = Field(min_length=1, max_length=16)
+
+
 class Draft(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     schema_version: StrictInt
     blocks: list[Observed] = Field(min_length=1, max_length=20)
     interpretations: list[Interpretation] = Field(default_factory=list, max_length=2)
+    derived: list[Derived] = Field(default_factory=list, max_length=8)
 
 
 class Computed(Observed):
@@ -97,6 +114,7 @@ class ProfileDraft(BaseModel):
     schema_version: StrictInt
     blocks: list[Computed] = Field(max_length=20)
     interpretations: list[Interpretation] = Field(default_factory=list, max_length=2)
+    derived: list[Derived] = Field(default_factory=list, max_length=8)
 
 
 def _object(pairs):
@@ -158,6 +176,7 @@ class Turn:
         self.navigation_actions = []
         self.reviewer_status = "not_required"
         self.interpretations = []
+        self.derived = []
         self.usage_before = dict(session.usage_acc)
         self.effect_pending = False
         self.reservation_nonce = None
@@ -539,6 +558,9 @@ class Turn:
                         f"{len(slot['excluded_indices'])} snapshots excluded."
                     )
         lines.append(assurance_metrics.disclosure(self.request_scope))
+        shared = derived.scope_key(record)
+        published = {b["id"]: (b["value"], b["unit"], shared) for b in public_blocks}
+        lines.extend(self._derive(draft, published))
         return "\n".join(lines), public_blocks, [record["evidence_id"]]
 
     def history_seed(self, messages):
@@ -1027,6 +1049,7 @@ class Turn:
         ):
             raise ValueError("invalid version or repeated claim")
         public_blocks, evidence_ids, lines, notes = [], [], [], set()
+        published = {}
         for block in draft.blocks:
             source = block.source
             if (source.tool_use_id is None) == (source.evidence_id is None):
@@ -1065,6 +1088,7 @@ class Turn:
                     },
                 }
             )
+            published[block.id] = (fact["value"], fact["unit"], derived.scope_key(record))
             if record["evidence_id"] not in evidence_ids:
                 evidence_ids.append(record["evidence_id"])
             value_text = repr(fact["value"]).removesuffix(".0")
@@ -1169,10 +1193,16 @@ class Turn:
                     "aggregate",
                 )
                 if note in (notes or {"static"})
-            ),
+            )
+            + "".join("\n" + line for line in self._derive(draft, published)),
             public_blocks,
             evidence_ids,
         )
+
+    def _derive(self, draft, published):
+        """Check the draft's derived entries; their lines carry the software value."""
+        self.derived = derived.check(draft.derived, published)
+        return [derived.line(entry) for entry in self.derived]
 
     def commit(self, blocks, ctx, *, truncated=False):
         from harness.history import _redact_for_persist
@@ -1236,6 +1266,14 @@ class Turn:
             if not draft_failed
             else [],
         }
+        # Derived entries (S2) show in full or not at all; absent when there are none,
+        # so a record without them is stored exactly as before (GK B D-1, D-7).
+        entries = [] if draft_failed else self.derived
+        if entries:
+            receipt["derived"] = [
+                {k: e[k] for k in ("id", "formula_id", "operands", "value", "unit")}
+                for e in entries
+            ]
         if self.operation_contract is not None:
             receipt["operation_ids"] = (
                 [] if draft_failed else [self.operation_contract["operation_id"]]
@@ -1308,6 +1346,7 @@ class Turn:
             "text": text,
             "blocks": public_blocks,
             "interpretations": self.interpretations if not draft_failed else [],
+            **({"derived": entries} if entries else {}),
             "verdict": "limited" if limitations else "passed",
             "receipt": receipt,
             "expires_at": time.time() + records.RETENTION_SECONDS,

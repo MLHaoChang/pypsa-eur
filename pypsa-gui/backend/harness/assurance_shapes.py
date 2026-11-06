@@ -267,6 +267,14 @@ class Navigation(_Closed):
     window: ViewWindow | None = None
 
 
+class DerivedEntry(_Closed):
+    id: str
+    formula_id: str
+    operands: Annotated[list[str], Field(max_length=8)]
+    value: float
+    unit: str
+
+
 class Receipt(_Closed):
     policy_version: Literal["1"]
     content_sha256: Annotated[str, Field(pattern="^[0-9a-f]{64}$")]
@@ -284,6 +292,8 @@ class Receipt(_Closed):
     # The chart's own shape is not frozen yet (see PENDING).
     chart: dict | None = None
     navigation: Annotated[list[Navigation], Field(max_length=20)] | None = None
+    # AA-03 S2: present only when the draft named derived entries.
+    derived: Annotated[list[DerivedEntry], Field(max_length=8)] | None = None
 
 
 RECEIPTS = {"1": Receipt}
