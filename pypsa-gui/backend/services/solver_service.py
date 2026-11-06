@@ -105,6 +105,7 @@ from services.solver.island import solve_uc as _island_solve_uc
 from services.solver.split_storage import _wrap_with_split_storage
 from services.solver.envelope_floors import _wrap_with_envelope_floors
 from services.solver.pcs_statcom import _wrap_with_pcs_statcom
+from services.solver.reserve_products import ReserveRefusal as _ReserveRefusal
 from services.solver.reserve_products import _wrap_with_reserve_products
 from services.solver.reserve_products import clear_solution as _clear_reserves
 from services.solver.reserve_products import persist_solution as _persist_reserves
@@ -1694,6 +1695,16 @@ def run_simulation(
                 log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
         log_queue.put(f"[PHASE] Refused: {exc}")
         status, condition = "error", f"island_refused: {exc}"
+    except _ReserveRefusal as exc:
+        # A refusal, not a crash (DC grid readiness 06): the reserve rows cannot be
+        # built as configured; the condition names the typed kind.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
+        log_queue.put(f"[PHASE] Refused: {exc} [{exc.kind}]")
+        status, condition = "error", f"reserve_refused: {exc.kind}: {exc}"
     except ValidationRefused as exc:
         # Phase 12f: a refusal, not a failure. Same restore as the generic
         # handler (the network must not autosave carrying the run's vintage

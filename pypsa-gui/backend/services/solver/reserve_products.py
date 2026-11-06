@@ -76,7 +76,7 @@ CURRENCY_META = "ic_reserve_price_currency"
 SEP = "|"
 TOL = 1e-6
 
-#: Refusal kinds (tool-error-kinds.d/claude-dc06-reserve-products.json).
+#: Refusal kinds (tool-error-kinds.d/claude-dc06-flex-revenue.json; `POST /run` answers them).
 NOT_ELIGIBLE = "reserve_storage_not_eligible"
 FLOOR_EXCEEDS = "reserve_floor_exceeds_energy"
 PRICE_MISSING = "reserve_price_missing"

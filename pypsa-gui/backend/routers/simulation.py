@@ -556,6 +556,38 @@ _ROLLING_REFUSALS = {d["error_kind"]: d for d in (
     {"error_kind": "rolling_overlap_exceeds_horizon"},
 )}
 
+# DC grid readiness 06: the reserve rows' typed refusals (`services.solver.
+# reserve_products.KINDS`), as `error_kind` literals for the manifest. `POST /run`
+# answers them before it starts a worker, so the chat's run tool forwards the kind.
+_RESERVE_REFUSALS = {d["error_kind"]: d for d in (
+    {"error_kind": "reserve_storage_not_eligible"},
+    {"error_kind": "reserve_floor_exceeds_energy"},
+    {"error_kind": "reserve_price_missing"},
+    {"error_kind": "reserve_price_stale"},
+    {"error_kind": "reserve_initial_soc_below_floor"},
+    {"error_kind": "reserve_string_availability_edited"},
+)}
+
+
+def _reserve_refusal(n, config) -> dict | None:
+    """``{code, error_kind, message}`` when the config's reserve products cannot be
+    built on ``n`` (the same ``plan`` the solve runs), else None. A config whose
+    products do not parse is left to the solve's own refusal."""
+    from services.solver import reserve_products as RP
+
+    try:
+        products = RP.products_of(config)
+    except ValueError:
+        return None
+    if not products:
+        return None
+    try:
+        floors, strings = RP.project_backup(n)
+        RP.plan(n, products, floors, strings)
+    except RP.ReserveRefusal as exc:
+        return {**_RESERVE_REFUSALS[exc.kind], "code": exc.kind, "message": str(exc)}
+    return None
+
 
 @router.put("/solver_config")
 def update_solver_config(
@@ -1237,6 +1269,16 @@ def run():
     _blocked = _study_state.blocking_study_detail()
     if _blocked:
         raise HTTPException(409, _blocked)
+    # Reserve products (DC grid readiness 06): a typed refusal before any worker,
+    # read under the lock; a lock held elsewhere leaves it to the solve's own check.
+    _lock = PyPSAService.get_lock()
+    if _lock.acquire(blocking=False):
+        try:
+            _refusal = _reserve_refusal(PyPSAService.get_network(), _state["solver_config"])
+        finally:
+            _lock.release()
+        if _refusal:
+            raise HTTPException(422, _refusal)
 
     stop_event = threading.Event()
     log_queue = BufferedLogQueue()
