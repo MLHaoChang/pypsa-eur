@@ -60,7 +60,7 @@ X_u enters only rows a larger X loosens, so it settles at min(L_it, p_nom_u).
 By scenario (the plan's matrix): every scenario gets the steady-island GFM
 MVA row (GFM s_nom plus every genset's) and the spinning minimum load
 p_g ≥ p_min_pu·p_nom_g. ``seamless`` adds upward headroom (GFM storage plus
-spinning gensets ≥ ΔP⁺), downward power (GFM p_s + p_nom ≥ ΔP⁻), SoC room
+spinning gensets, each at min(its headroom, its load step) ≥ ΔP⁺), downward power (GFM p_s + p_nom ≥ ΔP⁻), SoC room
 (GFM max_hours·p_nom − e(t−1) ≥ ΔP⁻·t_curt/3600, t_curt from the ``gfl_fw``
 units; none, and the exporting hours are reported by
 ``not_islandable_hours`` instead), the GFM MVA at 0⁺ (GFM plus spinning
@@ -95,9 +95,9 @@ a unit that cannot run (p_nom 0, not extendable) cannot trip. In these rows a
 genset is credited at min(its (b↑) share, its load step,
 load_step_max_pct·P_n: gridspine frequency.py:632, ``step_mw``), what it
 gives inside I6's window; its ramp after the step is not credited
-(conservative). **Known gap:** E1's own rows still credit a genset's full
-headroom, so a spinning genset counts for more at the islanding step than in
-the event rows (``.scratch/guided-smoke-2026-10-16/issues/04-e1-genset-credit.md``).
+(conservative). E1's own up row (Island-headroom-up) credits a genset the
+same way, so a spinning genset counts the same at the islanding step as in
+the event rows.
 
 **Ledgered:** PV is left out (conservative); the site is a copperplate (the
 hub's one-way site transformer is not seen here; I4 catches it at the island
@@ -1355,13 +1355,14 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
             up.add(credit[g] if credit is not None else genset_room(g))
         return up
 
-    # The event rows credit a genset at min(its (b↑) share, its load step):
-    # inside I6's window a joined genset gives at most its step,
-    # load_step_max_pct·P_n (gridspine frequency.py:632, ``step_mw``), before
-    # its ramp (not credited). x_g ≤ both and enters only rows a larger x_g
-    # loosens, so it settles at the min (as Island-ups-relief does).
+    # Every up row (E1's and the event rows) credits a genset at min(its (b↑)
+    # share, its load step): inside I6's window a joined genset gives at most
+    # its step, load_step_max_pct·P_n (gridspine frequency.py:632,
+    # ``step_mw``), before its ramp (not credited). x_g ≤ both and enters only
+    # rows a larger x_g loosens, so it settles at the min (as
+    # Island-ups-relief does).
     credit = {}
-    for g in (online + spinning) if event_rows else ():
+    for g in online + spinning:
         x = m.add_variables(lower=0.0, coords=[coord], name=f"Island-event-genset-credit-{g}{tag}")
         _row(m, genset_room(g), _Lin(sns_p).var(x), f"Island-event-genset-room-{g}{tag}", coord)
         _row(m, on_out(_Lin(sns_p), g, spec(g)["load_step_max_pct"] / 100.0), _Lin(sns_p).var(x),
@@ -1378,7 +1379,7 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
             p_store(down, s, 1.0)
         return down
 
-    up, down = headroom_up(), headroom_down()
+    up, down = headroom_up(credit=credit), headroom_down()
     _row(m, up, dp_up, f"Island-headroom-up{tag}", coord, facts=facts)
     _row(m, down, dp_down, f"Island-headroom-down{tag}", coord, facts=facts)
     if event_rows:
