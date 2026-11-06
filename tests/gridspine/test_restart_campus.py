@@ -212,12 +212,16 @@ def test_n_minus_k_changes_the_island_verdict():
     from gridspine.static import motor_start as ms
 
     campus = _island()
+    # Unequal gensets: GEN2 at 25 MVA (166.7 MVA S_k''), GEN1 at 12.5 (83.3). N+1 drops the LARGEST, keeping 83.3.
+    campus.units.loc["GEN2", "s_mva"] = 25.0
     unit = pd.DataFrame([{"unit": "mill", "tier": "process_critical", "rated_mw": 1.0, "restart_time_h": 1.0,
                           "rate_tph": 10.0, "mass_pull": 1.0, "motor_kw": 1200.0, "start_method": "soft"}])
     n_plus_1, _, _ = _island_source(campus)
     campus.island["requirements"]["values"]["genset_redundancy_n"] = 0
     whole, _, _ = _island_source(campus)
-    # S_start 3 × 1.2 / 0.85 MVA at pf 0.35: ΔU 4.76 % on 83.3 MVA (fail), 2.38 % on the whole 166.7 (pass).
+    assert n_plus_1.sk_min_mva == pytest.approx(12.5 / 0.15) and whole.sk_min_mva == pytest.approx(37.5 / 0.15)
+    # S_start 3 × 1.2 / 0.85 MVA at pf 0.35: ΔU 4.76 % on 83.3 MVA (fail), 1.59 % on the whole 250 (pass).
+    # Keeping the larger genset instead (166.7 MVA) would read 2.38 %, a pass: the verdict pins which one is dropped.
     verdict = {k: rs.restart_sequence(unit, "island", island_source=src, limit_pct=3.0)[0].iloc[0]
                for k, src in (("n+1", n_plus_1), ("whole", whole))}
     assert verdict["n+1"]["start_verdict"] == "fail" and verdict["whole"]["start_verdict"] == "pass"
