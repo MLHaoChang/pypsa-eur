@@ -298,7 +298,7 @@ def test_the_tables_from_a_solve_survive_a_netcdf_round_trip(tmp_path):
     n = _hub(load=10.0, gensets=[("g", 6.0)])
     n.storage_units.at["bess", "p_nom_max"] = 7.0
     island = _uc(hub_units(gensets={"g": _genset(p_min_pu=_a(0.3))}))
-    # the islanding step's rows alone: u = 1/2 (with the event rows, 1; see
+    # the islanding step's rows alone: u = 5/8 (with the event rows, 1; see
     # test_island_study's first linearised-UC toy)
     n = _solve_uc(n, island, event_rows=False)
     before = island_hourly(n, island)
@@ -308,7 +308,7 @@ def test_the_tables_from_a_solve_survive_a_netcdf_round_trip(tmp_path):
     for a, b in zip(before, after):
         pd.testing.assert_frame_equal(a, b)
     unit, hourly = after
-    assert _row(unit, "g", 0)["online"] == pytest.approx(0.5)
+    assert _row(unit, "g", 0)["online"] == pytest.approx(5 / 8)
     assert _hrow(hourly, "seamless")["dp_up_mw"].tolist() == pytest.approx(
         list(10.0 - n.generators_t.p["g"]))
     assert np.isfinite(hourly["inertia_mws"]).all()

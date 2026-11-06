@@ -912,7 +912,9 @@ def _layer():
 def _fin_json(**over) -> dict:
     from tests.test_finance_case_adapter import _fin
 
-    return _fin(**over).model_dump(mode="json")
+    # USD: the fixtures' tariffs are US (priced in $), and the finance route
+    # stores FinanceInputs' EUR default otherwise (currency_mismatch, GS-01).
+    return _fin(**{"currency": "USD", **over}).model_dump(mode="json")
 
 
 # ── H: F6 ──────────────────────────────────────────────────────────────────
@@ -983,7 +985,7 @@ def _f6_case(label: str, tag: str, *, items=None, hp: bool = False):
     com = {"poc_link": "import", "value_flows": copy.deepcopy(F6_VF),
            "import_tariff": {"id": "t", "name": "t", "jurisdiction": "US",
                              "valid_from": "2029-01-01", "items": items or [TOU, DEMAND]}}
-    fin = _fin(cod_by_asset={"pv": COD})
+    fin = _fin(cod_by_asset={"pv": COD}, currency="USD")  # the US tariff's currency
     ctx = _setup(label, tag, n, com, fin.model_dump(mode="json"))
     if ctx is None:
         return None, fin
