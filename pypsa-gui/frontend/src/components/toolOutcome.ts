@@ -29,7 +29,7 @@ export interface ToolOutcomeMark {
 export interface ToolOutcomeBlock {
   outcome: string; job_id: string | null; reason: string | null
   /** A write's read-back counts (issue 04 S2), when the result carries them. */
-  counts?: { requested: number; done: number } | null
+  counts?: { requested: number; done: number; extra?: number } | null
 }
 
 /** What a write tool's read-back counts (issue 04 S2): "3 of 5 updated". */
@@ -50,8 +50,9 @@ const FILE_TOOLS: ReadonlySet<string> = new Set([
 const count = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0
 
 function countsOf(raw: unknown): ToolOutcomeBlock['counts'] {
-  const { requested, done } = (raw ?? {}) as Record<string, unknown>
-  return count(requested) && count(done) && done <= requested ? { requested, done } : null
+  const { requested, done, extra } = (raw ?? {}) as Record<string, unknown>
+  if (!(count(requested) && count(done) && done <= requested)) return null
+  return count(extra) && extra > 0 ? { requested, done, extra } : { requested, done }
 }
 
 /** The tools whose ordinary-turn result always carries `_outcome` (backend harness/outcomes.py JOB_TOOLS). */
@@ -145,10 +146,27 @@ export function toolOutcomeCount(tool: string, block: ToolOutcomeBlock): string 
   return `${block.counts.done} of ${block.counts.requested}`
 }
 
+/**
+ * A write that also changed what it was not asked to (issue 04 S4b,
+ * `extra_edits`), count first when known (UX (11)): "2 extra changes it was
+ * not asked to make", or with a short write "3 of 5 updated · 2 extra changes".
+ * Null for any other block.
+ */
+export function extraEditsWords(tool: string, block: ToolOutcomeBlock): string | null {
+  if (toolOutcomeMark(block.outcome).outcome !== 'partial' || block.reason !== 'extra_edits') return null
+  const words = TOOL_OUTCOME_PARTIAL_REASON_WORDS.extra_edits
+  const extra = block.counts?.extra
+  const extras = extra ? `${extra} extra change${extra === 1 ? '' : 's'}` : null
+  const c = block.counts
+  const short = c && c.done < c.requested && tool in WRITE_VERBS ? `${c.done} of ${c.requested} ${WRITE_VERBS[tool]}` : null
+  if (extras) return short ? `${short} · ${extras}` : `${extras} it was not asked to make`
+  return short ? `${short} · ${words}` : words
+}
+
 /** The transcript line: `<glyph> <tool> (<word>[: <reason> | : <n> of <m> <verb>])`. */
 export function toolOutcomeLine(tool: string, block: ToolOutcomeBlock): string {
   const mark = toolOutcomeMark(block.outcome)
-  const why = toolOutcomeReasonWord(block.outcome, block.reason, tool)
+  const why = extraEditsWords(tool, block) ?? toolOutcomeReasonWord(block.outcome, block.reason, tool)
   const n = toolOutcomeCount(tool, block)
   const detail = why ?? (n ? `${n} ${WRITE_VERBS[tool]}` : null)
   return `${mark.glyph} ${tool} (${mark.word}${detail ? `: ${detail}` : ''})`
@@ -191,7 +209,9 @@ export function currentToolOutcome(
     }
   }
   const n = own.tool_name ? toolOutcomeCount(own.tool_name, current) : null
-  return { mark: toolOutcomeMark(current.outcome), ts, why: toolOutcomeReasonWord(current.outcome, current.reason, own.tool_name),
+  const why = (own.tool_name ? extraEditsWords(own.tool_name, current) : null)
+    ?? toolOutcomeReasonWord(current.outcome, current.reason, own.tool_name)
+  return { mark: toolOutcomeMark(current.outcome), ts, why,
     count: n && own.tool_name ? { text: n, verb: WRITE_VERBS[own.tool_name] } : null }
 }
 

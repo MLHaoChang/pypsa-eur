@@ -26,6 +26,11 @@ export const TOOL_OUTCOME_REASON_WORDS: Record<string, string> = {
   export_file_count: 'the exported file could not be identified',
   // Issue 04 S4a: a job or file read whose project is no longer the open one.
   other_context: 'another project was opened while it was being checked',
+  // Issue 04 S4b: a write that raised or timed out is failed only when proven unchanged.
+  changed_before_error: 'it stopped with an error after changing the network',
+  not_as_requested: 'it changed the values, but not to what was asked',
+  tool_timeout: 'no answer in time',
+  tool_not_started: 'no answer in time',
 }
 
 /**
@@ -45,6 +50,9 @@ export const TOOL_OUTCOME_DENIED_REASON_WORDS: Record<string, string> = {
   required_guard_failed: 'the request did not pass a required check',
   confirmation_args_changed: 'the request changed after you approved it',
   no_progress_stop: 'stopped after repeating the same failing request',
+  // Issue 04 S4b: the edit lock, checked before anything ran.
+  project_locked: 'another change to this project was in progress',
+  project_lock_unavailable: "the project's edit lock could not be checked",
 }
 
 /** A refusal's Details text where the backend's own message would mislead or name internals (issue 04 S4a). */
@@ -61,6 +69,8 @@ export const TOOL_OUTCOME_FILE_REASON_WORDS: Record<string, string> = {
 /** Why a write reads "partly done" when its count alone would mislead (issue 04 S3). */
 export const TOOL_OUTCOME_PARTIAL_REASON_WORDS: Record<string, string> = {
   extra_rows: 'the network has rows the file does not have',
+  // Issue 04 S4b: a row write that also changed what it did not name.
+  extra_edits: 'it also changed things it was not asked to',
 }
 
 export const ACTIVITY_FAMILY_WORDS: Record<string, string> = {

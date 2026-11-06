@@ -63,15 +63,50 @@ def _role(n, link: str) -> str:
 
 
 def _peaks(n) -> dict[str, float]:
-    """peak(load) = max of ``loads_t.p_set[name]`` if present, else ``p_set``."""
+    """peak(load) = max of ``loads_t.p_set[name]`` if present, else ``p_set``,
+    for the electric Loads only (``site_peak.load_split``): a tonne offtake is
+    not MW."""
+    from services.adequacy.site_peak import electric_loads
+
     ts = n.loads_t.p_set if hasattr(n.loads_t, "p_set") else None
     out: dict[str, float] = {}
-    for name in n.loads.index:
+    for name in electric_loads(n):
         if ts is not None and name in ts.columns and len(ts):
             out[name] = _f(ts[name].max())
         else:
             out[name] = _f(n.loads.at[name, "p_set"]) if "p_set" in n.loads.columns else 0.0
     return out
+
+
+def _process_draw(n) -> tuple[dict[str, float], list[str]]:
+    """(peak electrical draw in MW per process Link, unsized process Links):
+    each ``eh_process`` Link on an electric bus0 draws its rating there,
+    p_nom × max p_max_pu (static, or the series max). p_nom only — the
+    suggester runs before a solve — so an unsized extendable unit (p_nom 0)
+    draws nothing and is listed instead."""
+    from services.adequacy.site_peak import electric_bus
+    from services.solver.process_uc import process_mask
+
+    links = n.links
+    ts = n.links_t.p_max_pu if hasattr(n.links_t, "p_max_pu") else None
+    draw: dict[str, float] = {}
+    unsized: list[str] = []
+    for name in links.index[process_mask(links)]:
+        if not electric_bus(n, links.at[name, "bus0"]):
+            continue
+        if ts is not None and name in ts.columns and len(ts):
+            pu = _f(ts[name].max())
+        else:
+            pu = _f(links.at[name, "p_max_pu"]) if "p_max_pu" in links.columns else 1.0
+        p_nom = _f(links.at[name, "p_nom"]) if "p_nom" in links.columns else 0.0
+        if p_nom <= 0 and _flag(links, name, "p_nom_extendable"):
+            unsized.append(str(name))
+        draw[str(name)] = p_nom * pu
+    return draw, unsized
+
+
+def _with_draw(mw: float) -> str:
+    return f", including {mw:.1f} MW of rated process draw" if mw > 0 else ""
 
 
 def _supply(n) -> dict[str, float]:
@@ -90,6 +125,9 @@ def _supply(n) -> dict[str, float]:
     # not supply: counted, a staged template's zero-cost candidates moved the
     # median and dropped the real grid supply out of the cheaper half.
     gens = gens[gens["p_nom"].map(_f) > 0] if "p_nom" in gens.columns else gens
+    # A source on a tonne / non-electric bus (a mine's ore feed) is not MW.
+    from services.adequacy.site_peak import electric_bus
+    gens = gens[[electric_bus(n, b) for b in gens["bus"]]]
     if gens.empty:
         return out
     mc = gens["marginal_cost"].map(_f) if "marginal_cost" in gens.columns else None
@@ -167,10 +205,21 @@ def suggest_eh_setup(n, archetype: str | None = None) -> dict[str, Any]:
                       "critical_buses": already_crit}
 
     peaks = _peaks(n)
-    total_peak = sum(peaks.values())
+    draw, unsized = _process_draw(n)
     bus_peak: dict[str, float] = defaultdict(float)
     for name, p in peaks.items():
         bus_peak[str(n.loads.at[name, "bus"])] += p
+    # A process unit's electrical draw is load on the bus it draws from.
+    bus_draw: dict[str, float] = defaultdict(float)
+    for name, p in draw.items():
+        b0 = str(links.at[name, "bus0"])
+        bus_peak[b0] += p
+        bus_draw[b0] += p
+    total_peak = sum(bus_peak.values())
+    total_draw = sum(bus_draw.values())
+    for name in unsized:
+        out["notes"].append(f"Process unit '{name}' is unsized (p_nom 0, extendable), so "
+                            "its draw is not counted in the site's demand.")
     load_buses = set(bus_peak)
     supply = _supply(n)
     adj: dict[str, list[tuple[str, str]]] = defaultdict(list)
@@ -222,7 +271,8 @@ def suggest_eh_setup(n, archetype: str | None = None) -> dict[str, Any]:
                 proposed_imports.append(l)
                 reason = (
                     f"Bus '{s}' holds {supply[s]:.0f} MW of supply — "
-                    f"{ratio:.1f}× the site's peak demand of {total_peak:.0f} MW — "
+                    f"{ratio:.1f}× the site's peak demand of {total_peak:.0f} MW"
+                    f"{_with_draw(total_draw)} — "
                     f"and the other side, '{d}', serves the site's loads"
                     + ("; the names point to a grid connection" if match else "")
                     + "." + _ARCHETYPE_IMPORT_NOTE.get(archetype or "", ""))
@@ -261,7 +311,7 @@ def suggest_eh_setup(n, archetype: str | None = None) -> dict[str, Any]:
 
     # ── critical buses ─────────────────────────────────────────────────────
     matched: dict[str, str] = {}
-    for name in n.loads.index:
+    for name in peaks:  # electric Loads only
         b = str(n.loads.at[name, "bus"])
         lc = str(n.loads.at[name, "carrier"]) if "carrier" in n.loads.columns else ""
         for label, text in (("bus", b), ("load", str(name)), ("load carrier", lc)):
@@ -280,7 +330,8 @@ def suggest_eh_setup(n, archetype: str | None = None) -> dict[str, Any]:
             v, b = max(rest)
             crit.append((b, "medium",
                          f"No load is named as critical; '{b}' has the largest peak "
-                         f"demand ({v:.1f} MW). Confirm it is the load that must stay on."))
+                         f"demand ({v:.1f} MW{_with_draw(bus_draw.get(b, 0.0))}). "
+                         "Confirm it is the load that must stay on."))
     for b, conf, reason in crit:
         proposed = {"eh_critical": True}
         suggestions.append({

@@ -334,6 +334,7 @@ def _note(*items, revision=3):
         "cls": "Generator",
         "items": list(items),
         "revision": revision,
+        "state": {},  # S4b: the whole-state map; nothing changed (see test_p3_raise_and_extra)
     }
 
 
@@ -349,7 +350,7 @@ def _cell(name="g", expected=1.0, before=True):
 
 
 def _read(rows, start=3, end=3):
-    return {"revision_start": start, "revision_end": end, "rows": rows}
+    return {"revision_start": start, "revision_end": end, "rows": rows, "state": {}}
 
 
 @pytest.mark.parametrize(
