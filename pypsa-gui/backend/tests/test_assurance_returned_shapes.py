@@ -9,6 +9,7 @@ same models; these tests make sure each path is exercised at least once.
 # ruff: noqa: F811 -- imported shared fixtures.
 import json
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
@@ -64,17 +65,25 @@ def test_every_frozen_receipt_version_is_accepted_by_both_readers(served):
     owner = assurance_records.actor_id()
     stored = assurance_records.load(owner, record["answer_id"], "answer")
     for version in contracts.build()["answer_receipt"]:
-        rewritten = {
-            **stored,
-            "receipt": {**stored["receipt"], "policy_version": version},
-        }
-        assurance_records.save(rewritten, record["answer_id"])
-        assert (
-            assurance_records.answer(owner, record["answer_id"])["receipt"]
-            == (rewritten["receipt"])
-        )
-        # harness/pilot_evaluation.py accepts exactly records.POLICY_VERSION.
-        assert version == assurance_records.POLICY_VERSION
+        receipt = {**stored["receipt"], "policy_version": version}
+        if version == assurance_records.DERIVED_POLICY_VERSION:
+            # Policy "2" always carries derived entries (GK B P2).
+            receipt["derived"] = [
+                {
+                    "id": "d1",
+                    "formula_id": "difference/1",
+                    "operands": ["a", "b"],
+                    "value": 1.0,
+                    "unit": "MW",
+                }
+            ]
+        rewritten = {**stored, "receipt": receipt}
+        # Answer records are immutable, so each version is stored under its own id.
+        answer_id = str(uuid.uuid4())
+        assurance_records.save(rewritten, answer_id)
+        assert assurance_records.answer(owner, answer_id)["receipt"] == receipt
+        # harness/pilot_evaluation.py gates on the same receipt_policy_ok.
+        assert assurance_records.receipt_policy_ok(receipt), version
 
 
 def test_returned_schemas_carry_no_notes():

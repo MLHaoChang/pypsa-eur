@@ -3,7 +3,7 @@
 
 # 21 — Chat data intake: attachments and pasted values feed setup, the run creates the project, and asks only for what is missing
 
-Status: ready-for-agent
+Status: done (#1070, #1100; 21c #1119, 21d #1136)
 Type: task
 Blocked by: 03, 04 (the L1 data-gap rule and its `needs_user` exit); 08 renders the card rows
 Gated: yes (GK B)

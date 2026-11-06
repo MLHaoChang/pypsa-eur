@@ -4,7 +4,7 @@
 # P2: private drafts and approved answer publication
 
 Status: ready-for-agent
-Progress: audit 2026-11-05 (master ad12e8c7) below; S1 failure-mode pins in progress, S2–S5 planned
+Progress: S1 merged (#1154), S3 merged (#1171); S2 in progress; S4–S5 planned
 Type: task
 Blocked by: 01, 02
 
@@ -42,13 +42,13 @@ names the slice that closes it, or its external blocker.
 | --- | --- | --- |
 | A2.1 | p2 prose/thinking/intermediate; p6 history/export; p7 every wire; LC07 caption = speech | Rejected draft never queued for speech, unsafe text split at every offset → **S1 (passed)** |
 | A2.2 | p2 wrong value/unit/entity/sign; wrong project/window | Same value under another metric → **S1 (passed)** |
-| A2.3 | sign, MW/MWh, %-of-baseline, zero baseline, full precision, nonfinite | kW/MW conversion and raw-value tolerance → S2; locale strings rejected by the strict number schema → S2 pin |
-| A2.4 | delta/cost oracles; invented formula id | Model-composed derived claims, known formula on wrong operands, arbitrary expressions → S2 |
+| A2.3 | sign, MW/MWh, %-of-baseline, zero baseline, full precision, nonfinite | kW/MW conversion and raw-value tolerance → **S2 (passed)**; locale strings rejected by the strict number schema → **S2 pin (passed)** |
+| A2.4 | delta/cost oracles; invented formula id | Model-composed derived claims, known formula on wrong operands, arbitrary expressions → **S2 (passed)** |
 | A2.5 | contradictory prose/narrative, omitted claims, invented entities | Whole-population quantifiers and causal wording → S5 |
 | A2.6 | bad JSON/nonobject → limited; checker/guard exception; commit failure; reviewer failures | Truncated draft that parses (OpenAI-compatible `length`/`content_filter`, Anthropic `max_tokens`) → **S1 (red, now passed)**; provider error before/after a fragment → **S1 (passed)**; zero repairs pinned exactly → **S1 (passed)** |
 | A2.7 | reviewer without tools; IDs/pairing; abort; generation change; stale ACK | Repair spends 0 tool executions (dispatch spy) → **S1 (passed)** |
 | A2.8 | storage/generator slots, missing basis, wrong run/selection, ambiguous cost, unsupported slots limited, 20/21 blocks | Ambiguous capacity, `request_complete` false while a slot is unmapped → **S3 (passed)**; valid blocks keep scope → **S3 (passed at 12 blocks, the largest valid set; 20 slots pinned by `test_harness_reliability`)**; required warning slots → `_pending`, blocked: no warning disposition in the result-slot contract (ticket 13) |
-| A2.9 | 17 MWh and energy vs objective weights; 51 EUR bridge; window joins; signed baseline; zero denominator | Percentage points, near-zero denominator, rounding cannot widen tolerance, formula DAG refs → S2 |
+| A2.9 | 17 MWh and energy vs objective weights; 51 EUR bridge; window joins; signed baseline; zero denominator | Percentage points, near-zero denominator, rounding cannot widen tolerance, formula DAG refs → **S2 (passed)** |
 | A2.10 | exclusion masks; hostile labels/notes; reviewer spoof | all/none/top-k, ties, feasible incumbent vs optimum → S4; stochastic coverage pending: no checked stochastic profile exists (ticket 10) |
 
 Slices, one PR each and test-first: S1 failure modes; S2 derived claims
@@ -162,3 +162,31 @@ S3 plan (from the delta sent to GK B):
 - Fail-closed: an ambiguous or unmapped slot becomes clarification or unavailable, never a number.
 
 Code pointers: harness/assurance_conversation.py (`_needs`, `QUESTIONS`, `cost_choices`, the `resolve` pending branch), harness/assurance_scope.py (the `sized` capacity grammar, about line 225), harness/capacity_calculations.py (`METRICS`), harness/assurance.py (result_slots/request_complete, about lines 1270–1295), tests/test_capacity_cycles_assurance.py, tests/test_conversation_scope.py.
+
+### S3 result
+
+Merged as #1171. `tests/assurance_acceptance/test_p2_request_slots.py`, 30 cases: the bare capacity form gets the choice card; configured (`configured_capacity`), optimized and available (always `available_capacity_not_checked`) each map to their own slot; 16 mutants killed. Warning slots stay `_pending` under ticket 13.
+
+### GK B S2 verdict (2026-11-06, GK B (26)): GO WITH CHANGES
+
+Q answered (a): one run per derived entry; a cross-run difference stays with cost_delta. Test: operands from two runs give mixed_scope.
+
+- D-1 Stored format: a draft or record without `derived` serializes byte-equal to master (omit the empty list on dump, or strip it on read), with a pin test, as for the run manifest MAC rule. Master's p2 tests running unedited is necessary but not enough.
+- D-2 Operands: only blocks that were published as a checked number, or earlier derived entries. A block whose slot is unavailable, needs_clarification or uncertain is operand_not_published. Test it.
+- D-3 Denominator and basis: percent_change's denominator must be one of its two operands (the baseline). share_percent's basis must share the part's unit and scope. Any other id is refused. Test a denominator that is published but a third block.
+- D-4 Unit kinds: unit_convert only within one dimension and kind. MW↔MVA and MWh↔MW are refused (apparent versus active power; capacity/1 emits MVA for lines). difference/1 or sum/1 on two % operands is refused, since percentage_point_delta is the only percent-on-percent formula. Test each.
+- D-5 Prose: every number in the prose traces to a published value, now also to derived entries by id. A prose number that matches neither is still refused, and a derived value can't legitimise a different number in the prose. Test a sentence that quotes a model-rounded value instead of the software value.
+- D-6 Tolerance: strict (1e-9 relative, rounding not widened); the PR says a rounded model claim limits the draft. Count how often the existing assurance acceptance fixtures would hit it and report the number. No rule change without an owner decision.
+- D-7 Receipt: derived entries show in the receipt with formula_id, operand ids and the software value. A truncated receipt keeps the derived block or marks the draft limited, never drops it silently (#927 / `_assurance` first).
+- D-8 Every refusal has its own test and a mutant it kills. Add one mutant on the DAG order check (a forward reference accepted) and one on the scope comparison (window ignored).
+
+### GK B (27) S2 D-7 ruling (2026-11-06): receipt policy "2"
+
+GO on (a): receipt policy "2" = policy "1" plus `derived`, because `answer_receipt` is a returns contract (AA-V1-CHANGE-1). Conditions:
+
+- P1. Policy "1" is unchanged; "2" is a new entry written by `--write`. An answer with no derived entries emits "1", byte-equal to master (D-1), pinned by a test. A "1" receipt carrying `derived` is refused by the server check and by `parseApproval`.
+- P2. "2" is strict both ways: without or with an empty `derived` it is refused; each entry is checked field by field (unknown keys and wrong types refused); `parseApproval` rejects any version but "1" and "2".
+- P3. Every receipt reader accepts "2": list them in the PR and test each with a "2" receipt; run the contract check and `assistant_inventory --check` at the trial merge.
+- P4. One killed mutant per new guard ("1"+derived accepted, "2" with empty derived accepted, a loose entry check).
+- P5. UX (10) looks only if the frontend hunk renders something new; a parse-only change does not need it.
+- D-6. The hit-rate goes in the PR body and to the coordinator for the owner: 5 of 305 published fixture values (57 distinct) fail at 1–3 decimals, 81 at 0. The 1e-9 tolerance stays.

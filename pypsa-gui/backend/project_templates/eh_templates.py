@@ -204,11 +204,34 @@ def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Net
     # mode fmea_top should rank.
     _outage(n, "links", "site_transformer", 0.005, 72.0)
     if phases is not None:
-        return _staged_datacenter(n, phases, load_spec)
+        n = _staged_datacenter(n, phases, load_spec)
+        _dc_backup(n, "eh_datacenter_staged", load_spec, phases.planning)
+        return n
     if load_spec is not None:
         _apply_dc_profile(n, load_spec, snaps, _single_year_phase(load_spec, planning).it_mw,
                           timezone=_dc_timezone("eh_datacenter"))
+        _dc_backup(n, "eh_datacenter", load_spec, planning)
     return n
+
+
+def _dc_backup(n, template_id: str, load_spec, planning: Planning | None):
+    """Edit the built campus to ``load_spec.backup``'s mode (DC 03) and
+    return ``(island sidecar, sizing)``; the genset mode (the default)
+    leaves ``n`` as built. The strings are sized on the campus's hourly
+    critical load against its firm gensets, over the planning horizon
+    (``services.adequacy.dc_backup``)."""
+    from services.adequacy import dc_backup
+    from services.adequacy.site_peak import firm_genset_mw as firm, named_load
+
+    base = _base_island(template_id, planning)
+    if load_spec is None or load_spec.backup.mode == "genset" or base is None:
+        return base, None
+    plan = planning or NATIVE_PLANNING[template_id]
+    g, _ = firm(n, base)
+    sizing = dc_backup.size_bess(named_load(n, dc_backup.critical_loads(base)), firm_genset_mw=g,
+                                 backup=load_spec.backup, redundancy=load_spec.redundancy,
+                                 years=plan.analysis_years)
+    return dc_backup.apply_backup(n, base, sizing, load_spec.backup), sizing
 
 
 # ── Planning years (E1; workspace reconciliation §3.3, owner Q3 = B) ─────────
@@ -669,7 +692,7 @@ def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> 
         n = BUILDERS[template_id](load_spec=spec, planning=planning)
     # A period whose energization is a placeholder is unknown, never refused.
     unset = unset_periods(template_meta(template_id, planning, load_spec=spec))
-    for row in peak_check(n, island_config(template_id, planning), unset=unset):
+    for row in peak_check(n, island_config(template_id, planning, load_spec=spec), unset=unset):
         if row["headroom_mw"] is not None and row["headroom_mw"] < -1e-9:
             raise DcLoadError(
                 f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
@@ -681,7 +704,12 @@ def dc_load_meta(template_id: str, spec) -> dict:
     ``eh_template.json`` (spec, dynamic envelope, ledger)."""
     from services.dc_load_profile import meta_block
 
-    return meta_block(spec, _dc_timezone(template_id))
+    block = meta_block(spec, _dc_timezone(template_id))
+    if spec.backup.mode != "genset":
+        # The saved network carries the backup strings: the backup
+        # assessment refuses it (DC-03, GK A Q1) and the card says so.
+        block["network_backup_mode"] = spec.backup.mode
+    return block
 
 
 # ── Industrial Hydrogen Hub (strong_grid) ──────────────────────────────────
@@ -1822,12 +1850,27 @@ def template_meta(template_id: str, planning: Planning | None = None, *, load_sp
     return meta
 
 
-def island_config(template_id: str, planning: Planning | None = None) -> dict | None:
-    """The template's island sidecar for ``planning``, or None when it has none."""
+def _base_island(template_id: str, planning: Planning | None = None) -> dict | None:
     p = _planned(template_id, planning)
     if p is not None and template_id in _PLANNED_ISLAND:
         return _PLANNED_ISLAND[template_id](p)
     return ISLAND_CONFIG.get(template_id)
+
+
+def island_config(template_id: str, planning: Planning | None = None,
+                  load_spec=None) -> dict | None:
+    """The template's island sidecar for ``planning``, or None when it has
+    none. A ``load_spec`` whose backup is not ``genset`` (DC 03) gets the
+    sidecar of the campus built in that mode (``_dc_backup``)."""
+    if load_spec is None or getattr(load_spec, "backup", None) is None \
+            or load_spec.backup.mode == "genset":
+        return _base_island(template_id, planning)
+    genset = load_spec.model_copy(update={"backup": load_spec.backup.model_copy(
+        update={"mode": "genset"})})
+    n = (BUILDERS[template_id](load_spec=genset) if planning is None
+         else BUILDERS[template_id](load_spec=genset, planning=planning))
+    island, _sizing = _dc_backup(n, template_id, load_spec, planning)
+    return island
 
 
 def write_sidecars(out_dir, template_id: str, planning: Planning | None = None, *,
@@ -1853,6 +1896,6 @@ def write_sidecars(out_dir, template_id: str, planning: Planning | None = None, 
     if template_id in CASES:
         (out_dir / CASES_FILE).write_text(
             json.dumps(CASES[template_id](), indent=1, ensure_ascii=False) + "\n")
-    island = island_config(template_id, planning)
+    island = island_config(template_id, planning, load_spec=load_spec)
     if island is not None:
         (out_dir / ISLAND_FILE).write_text(json.dumps(island, indent=2, sort_keys=True) + "\n")

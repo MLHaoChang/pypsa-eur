@@ -1209,6 +1209,15 @@ def generate_series_profiles(
         tz = commercial_timezone(ctx)
         if tz:
             params["timezone"] = tz
+    if body.kind == "cop" and "sink_c" not in params and "sink_c_by_id" not in params:
+        # Each heat pump's COP reads the sink temperature of the band it serves (grid-to-process
+        # issue 16); a pump on no heat band keeps the constant `sink_c`.
+        from services.process_heat import served_sink_c
+
+        by_id = {c: t for c in body.components
+                 if (t := served_sink_c(ctx.network, c)) is not None}
+        if by_id:
+            params["sink_c_by_id"] = by_id
     # An air-source COP draws the project's own ambient (its data-centre
     # load spec) unless the ambient is stated; with neither it is refused.
     from services.dc_load_profile import AMBIENT_FIELDS, read_ambient

@@ -201,6 +201,21 @@ def _write(target: Path, data: bytes, digest: str) -> None:
             os.unlink(tmp)
 
 
+class TariffCurrencyRequired(ValueError):
+    """A Library tariff whose currency is neither stated nor implied by its jurisdiction
+    (gridspine-library-eu 01, GK B C4). The route answers 422 `tariff_currency_required`,
+    the message under `jurisdiction`, the field a user can fix."""
+
+    code = "tariff_currency_required"
+
+    def __init__(self, jurisdiction: str):
+        # Words: UX (10), 2026-11-06. The builder lists it as "jurisdiction: …" and has no
+        # currency input yet, so it names only the fix it offers (issue 02 adds the other).
+        super().__init__(
+            f"\u201c{jurisdiction}\u201d names no country, so the tariff's currency is unknown. "
+            "Use the country's two-letter code, such as NL, GB or US.")
+
+
 class PreparedItem(NamedTuple):
     """What `put_item` would store: the validated name, meta and canonical bytes."""
     name: str
@@ -222,6 +237,10 @@ def prepare_item(kind: str, name: str, payload: dict, meta: dict | None = None) 
             f"{kind} {name!r} is a shipped common Library item and cannot be overwritten; "
             "store your own version under another name")
     model = validate_payload(kind, payload)
+    if kind == "tariff" and model.currency is None:
+        # A new Library tariff names its currency (owner Q-GS-1): stated, or implied
+        # by an ISO jurisdiction. Never guessed, so a project's currency gate can read it.
+        raise TariffCurrencyRequired(model.jurisdiction)
     try:
         meta_ok = ItemMeta.model_validate(meta or {})
     except ValidationError as exc:

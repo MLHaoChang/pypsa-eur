@@ -80,6 +80,15 @@ def test_receipt_under_the_current_policy_version_is_supported():
     assert answer["receipt"]["policy_version"] == records.POLICY_VERSION == "1"
     assert "unsupported_policy" not in score(case, frames, answer)["failures"]
 
+
+def test_a_derived_policy_two_receipt_is_supported():
+    # AA-03 S2 (GK B P3): policy "2" is policy "1" plus derived entries.
+    case = GOLDEN_CASES[0]
+    frames, answer = observation(case)
+    answer["receipt"].update(policy_version="2", derived=[
+        {"id": "d1", "formula_id": "difference/1", "operands": ["a", "b"], "value": 1, "unit": "MW"}])
+    assert "unsupported_policy" not in score(case, frames, answer)["failures"]
+
 def passing_results():
     results = []
     for case in CASES:

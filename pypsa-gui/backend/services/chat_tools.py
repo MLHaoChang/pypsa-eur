@@ -1796,6 +1796,7 @@ _LIBRARY_ERROR_KINDS = (
     {"error_kind": "library_reference_unknown"},
     {"error_kind": "reference_target_unsupported"}, {"error_kind": "currency_mismatch"},
     {"error_kind": "reference_confirmation_needed"},
+    {"error_kind": "tariff_currency_required"},
 )
 _LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
 
@@ -2342,7 +2343,18 @@ def put_library_item(kind: str, name: str, payload: dict, meta: dict | None = No
         body = ItemIn(payload=payload, meta=meta or {})
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=_safe_text(exc, 300)) from exc
-    return _library_call(_h, _library_kind(kind), name, body, org_id=None).model_dump(mode="json")
+    try:
+        return _library_call(_h, _library_kind(kind), name, body,
+                             org_id=None).model_dump(mode="json")
+    except HTTPException as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("error_kind") == \
+                "tariff_currency_required":
+            # This caller can state the currency, so its words keep that half (UX 10).
+            raise HTTPException(status_code=exc.status_code, detail={
+                "error_kind": "tariff_currency_required",
+                "message": f"{exc.detail['message'][:300]} Or state payload.currency "
+                           "(a three-letter ISO 4217 code, such as EUR)."}) from exc
+        raise
 
 
 def get_finance_inputs() -> dict:

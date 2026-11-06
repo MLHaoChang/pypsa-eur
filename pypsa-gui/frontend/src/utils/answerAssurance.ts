@@ -12,6 +12,16 @@ export interface AnswerReceipt {
   result_slots?: { metric: string; disposition: 'answered' | 'unavailable' | 'needs_clarification'; reason?: string; valid_snapshots?: number; requested_snapshots?: number }[]
   chart?: CheckedChart
   navigation?: NavigationEntry[]
+  /** Policy "2" only (AA-03 S2): software-recomputed derived claims. */
+  derived?: DerivedEntry[]
+}
+
+export interface DerivedEntry {
+  id: string
+  formula_id: string
+  operands: string[]
+  value: number
+  unit: string
 }
 
 /** A navigation outcome; for Load flow in a checked loading turn, whether the tab
@@ -27,6 +37,22 @@ export interface NavigationEntry {
 const SHOWS = new Set(['checked_evidence', 'different_view', 'not_confirmed'])
 const VIEW_REASONS = new Set(['window_differs', 'source_not_lopf', 'inputs_changed', 'fingerprint_basis_unknown',
   'project_differs'])
+
+const DERIVED_KEYS = ['id', 'formula_id', 'operands', 'value', 'unit']
+const text = (v: unknown, max: number) => typeof v === 'string' && v.length > 0 && v.length <= max
+
+/** Policy "2" carries one to eight derived entries, each with exactly the contract's fields. */
+function validDerived(entries: unknown): boolean {
+  return Array.isArray(entries) && entries.length >= 1 && entries.length <= 8 && entries.every(e => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) return false
+    const d = e as Record<string, unknown>
+    return Object.keys(d).length === DERIVED_KEYS.length && DERIVED_KEYS.every(k => k in d)
+      && text(d.id, 64) && text(d.formula_id, 64) && text(d.unit, 16)
+      && typeof d.value === 'number' && Number.isFinite(d.value)
+      && Array.isArray(d.operands) && d.operands.length >= 1 && d.operands.length <= 8
+      && d.operands.every(o => text(o, 4096))
+  })
+}
 
 function validNavigation(entries: unknown): boolean {
   return Array.isArray(entries) && entries.length <= 20 && entries.every(e => {
@@ -106,7 +132,8 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
     || value.turn_id.length > 128
     || typeof value.verdict !== 'string' || !['passed', 'limited'].includes(value.verdict) || !receipt
     || typeof receipt.content_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(receipt.content_sha256)
-    || receipt.policy_version !== '1'
+    || !(receipt.policy_version === '1' ? receipt.derived === undefined
+      : receipt.policy_version === '2' && validDerived(receipt.derived))
     || typeof receipt.reviewer_status !== 'string' || !REVIEW_STATUSES.has(receipt.reviewer_status)
     || (receipt.request_complete !== undefined && typeof receipt.request_complete !== 'boolean')
     || (scope !== undefined && (!scope || typeof scope !== 'object' || Array.isArray(scope)

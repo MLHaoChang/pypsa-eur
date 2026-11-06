@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The seamless island's islanding-step (E1) upward headroom row now credits a spinning or committed genset at min(its headroom, its load step), as the event rows and gridspine's I6 already do, instead of its full headroom.

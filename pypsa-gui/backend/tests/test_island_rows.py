@@ -708,17 +708,17 @@ def test_extendable_ups_relief_is_the_smaller_of_its_load_and_its_rating(ups_mw,
 
 
 def test_a_spinning_genset_adds_headroom_and_burns_its_minimum_load():
-    """A spinning 6 MW genset at p_min_pu 0.3 carries 6 − p_g of the 10 MW
-    step: the BESS needs 4 MW. It runs at ≥ 1.8 MW every hour, which is the
-    fuel it costs. Cold, the BESS needs 10 MW and the genset never runs.
-
-    With the event rows the 10 MW load is also E2's step, where the genset is
-    credited at its 50 % load step, 3 MW (frequency.py:632), not its full
-    headroom: the BESS needs 10 − 3 = 7 MW. E1 still credits the full
-    headroom (the known gap the I2b docs name)."""
+    """A spinning 6 MW genset at p_min_pu 0.3 runs at ≥ 1.8 MW every hour,
+    which is the fuel it costs, and is credited at min(its headroom 6 − p_g,
+    its 50 % load step, 3 MW: frequency.py:632), as gridspine's I6 gives it.
+    At the islanding step (E1) alone it runs at its 1.8 MW minimum, the
+    import step is 10 − 1.8 = 8.2 MW and the BESS needs 8.2 − 3 = 5.2 MW
+    (full headroom would credit 4.2 and the BESS would need 4). With the
+    event rows the 10 MW load is also E2's step: 10 − 3 = 7 MW. Cold, the
+    BESS needs 10 MW and the genset never runs."""
     units = _units(gensets={"g": _genset(spinning=True, p_min_pu=_a(0.3))})
     n = _solve(_hub(load=10.0, gensets=[("g", 6.0)]), _seamless(units), event_rows=False)
-    assert _p_nom(n) == pytest.approx(4.0, abs=TOL)
+    assert _p_nom(n) == pytest.approx(5.2, abs=TOL)
     assert (n.generators_t.p["g"] >= 1.8 - TOL).all()
     n = _solve(_hub(load=10.0, gensets=[("g", 6.0)]), _seamless(units))
     assert _p_nom(n) == pytest.approx(7.0, abs=TOL)

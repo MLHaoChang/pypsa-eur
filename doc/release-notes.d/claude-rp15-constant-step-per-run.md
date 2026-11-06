@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Generated profiles now accept a constant multi-hour step inside each run of a sampled window (for example two 3-hourly weeks): each snapshot takes the mean of its own hours, and a run with a different step is refused as `step_irregular`.

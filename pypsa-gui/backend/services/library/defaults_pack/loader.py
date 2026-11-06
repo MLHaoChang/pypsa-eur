@@ -1085,10 +1085,16 @@ def _parse_tariffs(path: Path) -> dict[str, PackTariff]:
         if payload.get("pack_hash") is not None:
             raise DefaultsPackError(f"{where}: pack_hash is stamped by the loader; leave it null")
         try:
-            tariff = validate_payload("tariff", payload)
             meta = PackTariffMeta.model_validate(entry.get("meta") or {})
+            tariff = validate_payload("tariff", payload)
         except (ValueError, ValidationError) as exc:
             raise DefaultsPackError(f"{where}: {exc}") from None
+        # A tariff's currency (stated, or its jurisdiction's) is its meta's. A `generic`
+        # tariff keeps none: stamping the meta's onto its copies would move every stored
+        # copy's hash (GK B C3, gridspine-library-eu 01; the gap is issue 03).
+        if tariff.currency is not None and tariff.currency != meta.currency:
+            raise DefaultsPackError(f"{where}: the tariff is in {tariff.currency}, its meta in "
+                                    f"{meta.currency}")
         items = {i.id: i for i in tariff.items}
         if set(meta.items) != set(items):
             raise DefaultsPackError(f"{where}: meta.items {sorted(meta.items)} != tariff items "
