@@ -78,3 +78,22 @@ GK B (25), finance: GO WITH CHANGES, option (a). A standalone `backup_cost_delta
 - Ruling 2: `dc_backup.network_window` is the one place the window reads weightings (`stores`); tested on both DC templates.
 - Ruling 3: `site_peak.without_backup` drops the strings from the shaving set only; the sidecar keeps them in `ride_through_storage`. The test tightens the import to 97 % of the peak so the check binds; the mutant (shaving on the raw sidecar) turns it RED.
 - GK A 6: `write_sidecars` per `TEMPLATE_META` id against `project_templates/<id>/`: 9 templates, 40 files, 0 mismatches.
+
+### 2026-11-06: UX (9) GO and review fixes (session_01G7qCuia7CuUNr1UaxfxeSd, PR #1172)
+
+UX (9) GO, with A (save on click; a refusal leaves the stored mode selected) and B (assess the stored mode only). Rules:
+1. "Assessing…" while it runs; a result for another mode reads "Out of date".
+2. Sign words and no "+/−" ("saves € 1.2 m"); the redundancy tier in words; nbsp units; plurals; the not-shown reason after a colon.
+3. Guided drops the lines table; "assumed" marks are visible in both modes.
+4. Shots of each state. All are done; the shots are `.scratch/datacenter-grid-readiness/shots/dc03-*-{guided,expert}.png`.
+
+mp-code-review fixes:
+- GK A 7: the assess result has `basis {network_saved_at, network_sha256, not_reproduced}`, and the card shows it.
+- "Usable" MWh now reads the usable per-string energy.
+- No repr quotes and no ticket id in user text.
+- `fixed_years` now sizes the nameplate for the longest gap between augmentations, not the whole horizon. Before, it paid the fade twice. Tested, and the mutant goes RED.
+
+Open for the reviewers:
+- GK A: a project *created* with backup=bess has the strings in network.nc, so assess refuses it ("assess a campus in genset form"). A PUT changes only the stored mode, and network.nc stays genset form; that is the path assess serves.
+- GK A ruling 3: gridspine's island schema rejects a backup list (unknown field in requirements and in units), so the `backup_bess_` name prefix is the only backup marker. site_peak drops the strings from both the shaving set and its reserve figure, which matches the ruling's test (the same shaving as with the strings removed).
+- GK B: F3: a missing `inflation_rate` is passed as 0, so the rate reads as real; the IC engine flags this case instead. F4: there is no pack fuel row today, and none is looked up. F6: the hybrid genset leg is the full fleet on the critical peak, so the delta is the strings alone. F7: retention compounds and augmentation is linear.

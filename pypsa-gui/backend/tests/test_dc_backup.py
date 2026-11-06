@@ -221,6 +221,19 @@ def test_augmentation_policies_on_one_fade_curve():
     assert none["augmentation_mwh"] == 0.0 and aug(none) == 0.0
 
 
+def test_fixed_years_sizes_for_the_longest_gap_not_the_horizon():
+    """Each augmentation restores the fade before it, so the nameplate covers
+    the longest stretch between augmentations: sizing for the whole horizon
+    as well would pay the fade twice (review finding on F7)."""
+    fade = {"calendar_fade_per_year": 0.02, "cycle_fade_per_full_cycle": 0.001}
+    fixed = _bk(test_cycles_per_year=10.0, bess={**fade, "augmentation_policy": "fixed_years",
+                                                  "augmentation_years": [4, 7]})
+    none = _bk(test_cycles_per_year=10.0, bess={**fade, "augmentation_policy": "none"})
+    # Gaps 0-4, 4-7, 7-10: the longest is 4 years.
+    assert dc_backup.retention(fixed, 10) == pytest.approx(dc_backup.retention(none, 4))
+    assert dc_backup.retention(fixed, 10) > dc_backup.retention(none, 10)
+
+
 def test_no_augmentation_puts_the_up_sized_energy_in_capex():
     bk = _bk(autonomy_h=2.0, ride_through_s=0.0, test_cycles_per_year=0.0,
              bess={"calendar_fade_per_year": 0.02, "augmentation_policy": "none"})

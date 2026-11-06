@@ -119,8 +119,21 @@ def retention(backup: BackupSpec, years: int) -> float:
     b = backup.bess
     if b.augmentation_policy == "restore_to_nameplate":
         return 1.0
-    return ((1.0 - b.calendar_fade_per_year) ** years
-            * (1.0 - b.cycle_fade_per_full_cycle * test_cycles(backup, years)))
+    span = _fade_span(backup, years)
+    return ((1.0 - b.calendar_fade_per_year) ** span
+            * (1.0 - b.cycle_fade_per_full_cycle * test_cycles(backup, span)))
+
+
+def _fade_span(backup: BackupSpec, years: int) -> int:
+    """Years of fade the nameplate must cover: the horizon, or under
+    ``fixed_years`` the longest stretch between augmentations (and to the
+    horizon's end), since each augmentation restores the fade before it.
+    Sizing for the whole horizon there would pay the fade twice."""
+    b = backup.bess
+    if b.augmentation_policy != "fixed_years":
+        return years
+    marks = [0, *sorted(y for y in set(b.augmentation_years) if 1 <= y < years), years]
+    return max(later - earlier for earlier, later in zip(marks, marks[1:]))
 
 
 def _inputs(backup: BackupSpec, redundancy: RedundancyTier, years: int) -> list[dict[str, Any]]:
