@@ -653,6 +653,16 @@ def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None =
     if spec.critical_share <= 0:
         raise DcLoadError("dc_load.critical_share: must be > 0 (it_load is the critical load)",
                           "dc_load.critical_share")
+    if "architecture" in spec.model_fields_set:
+        # DC 05, GK A C3: the stated PUE (this architecture's) must hold its own
+        # conversion chain plus a non-negative overhead; PUE(T) is lowest at design.
+        from services.dc_architecture import DcArchitectureError, chain, check_pue
+        try:
+            check_pue([spec.pue_at_design], chain(spec.architecture)["eta_to_rack"],
+                      field="dc_load.pue_at_design")
+        except DcArchitectureError as exc:
+            # The create form names its fields (dc_load.*), as its other refusals do.
+            raise DcLoadError(f"{exc.field}: {str(exc).removeprefix('PUE: ')}", exc.field) from None
     if template_id == "eh_datacenter_staged":
         expected = list(_dc_plan(planning).planning.years)
         got = [p.cod.year for p in spec.phases]

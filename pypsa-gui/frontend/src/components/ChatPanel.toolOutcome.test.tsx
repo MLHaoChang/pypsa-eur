@@ -185,6 +185,8 @@ describe('chat tool-line outcome marks', () => {
     ['approval_unavailable', 'the approval could not be recorded'],
     ['round_change_cap', 'the assistant used up the changes allowed for this request'],
     ['unknown_decision', 'your answer to the approval could not be read'],
+    ['project_locked', 'another change to this project was in progress'],
+    ['project_lock_unavailable', "the project's edit lock could not be checked"],
   ])('issue 04 S4a: a tool_error refused as %s reads denied with its reason in both modes', async (kind, words) => {
     await turn('expert')
     emit('tool_request', { tool_use_id: 'd', tool_name: 'bulk_update_components', safety_tier: 'write' })
@@ -267,6 +269,51 @@ describe('chat tool-line outcome marks', () => {
     expect(rows().at(-1)!.textContent).toContain('✗ bulk_update_components — validation_error: bus Field required')
     expect(within(rows().at(-1)!).queryByTestId('chat-tool-glyph')).toBeNull()
     expect(useChatStore.getState().messages.at(-1)!.tool_result).toBeUndefined()
+  })
+
+  it('issue 04 S4b: a write that raised with nothing changed reads failed, with its message', async () => {
+    await turn('expert')
+    emit('tool_request', { tool_use_id: 'f', tool_name: 'bulk_update_components', safety_tier: 'write' })
+    emit('tool_error', { tool_use_id: 'f', tool_name: 'bulk_update_components', error_kind: 'tool_error',
+      message: 'the network refused it', _outcome: { version: 1, outcome: 'failed', reason: null } })
+    const row = rows().at(-1)!
+    expect(within(row).getByTestId('chat-tool-outcome').textContent).toBe('✕bulk_update_components (failed)')
+    expect(within(row).getByTestId('chat-tool-glyph').className).toContain('text-warn')
+    expect(within(row).getByTestId('chat-tool-message').textContent).toBe('the network refused it')
+    act(() => useUIStore.setState({ uiMode: 'guided' }))
+    expect(within(rows().at(-1)!).getByTestId('chat-tool-label').textContent).toBe('Failed: update components')
+  })
+
+  it.each([
+    ['tool_timeout', 'no answer in time'],
+    ['changed_before_error', 'it stopped with an error after changing the network'],
+  ])('issue 04 S4b: a write error of reason %s reads outcome unknown in both modes', async (reason, words) => {
+    await turn('expert')
+    emit('tool_request', { tool_use_id: 't', tool_name: 'bulk_update_components', safety_tier: 'write' })
+    emit('tool_error', { tool_use_id: 't', tool_name: 'bulk_update_components', error_kind: 'tool_timeout',
+      message: "tool 'bulk_update_components' exceeded the 30s execution deadline",
+      _outcome: { version: 1, outcome: 'uncertain', reason } })
+    expect(within(rows().at(-1)!).getByTestId('chat-tool-outcome').textContent)
+      .toBe(`–bulk_update_components (outcome unknown: ${words})`)
+    // UX (11): the Details text drops Python repr quotes.
+    expect(within(rows().at(-1)!).getByTestId('chat-tool-message').textContent)
+      .toBe('tool bulk_update_components exceeded the 30s execution deadline')
+    act(() => useUIStore.setState({ uiMode: 'guided' }))
+    expect(within(rows().at(-1)!).getByTestId('chat-tool-label').textContent)
+      .toBe(`Outcome unknown: update components (${words})`)
+  })
+
+  it('issue 04 S4b: a write with extra edits puts the count first in both modes', async () => {
+    await turn('expert')
+    emit('tool_request', { tool_use_id: 'x', tool_name: 'bulk_update_components', safety_tier: 'write' })
+    emit('tool_result', { tool_use_id: 'x', tool_name: 'bulk_update_components', result: {
+      _outcome: { version: 1, outcome: 'partial', reason: 'extra_edits',
+        counts: { requested: 1, done: 1, not_done: 0, unknown: 0, extra: 2 }, paths_not_done: [], paths_extra: ['/Bus/B1/v_nom'] } } })
+    expect(screen.getByTestId('chat-tool-outcome').textContent)
+      .toBe('–bulk_update_components (partly done: 2 extra changes it was not asked to make)')
+    act(() => useUIStore.setState({ uiMode: 'guided' }))
+    expect(screen.getByTestId('chat-tool-label').textContent)
+      .toBe('Partly done: update components (2 extra changes it was not asked to make)')
   })
 
   it('issue 04 S4a: says another project was opened for an other_context read', async () => {

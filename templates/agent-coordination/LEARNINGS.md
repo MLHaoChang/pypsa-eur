@@ -284,3 +284,18 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **The done-Status format lived only in `frontier.py`.** Marking issues done meant reading the script to learn that "pending" in a done Status keeps it open.
   - Fix: `docs/agents/issue-tracker.md` gives the format `Status: done (#<PR>[; note])` and the "pending" rule.
   - Lives in: `docs/agents/issue-tracker.md`, live and template copies.
+
+## 6 Nov 2026: implementation-speed retro (owner picked four)
+
+- **Contract failures were found by the ~2 h CI, not before the push.** Route disposition, route parity, control matrix, assurance shapes: each ran in seconds locally and cost a push plus 2–3 reviewer re-OKs.
+  - Fix: a pre-push script runs lint, the tests mapped to the changed files, a fixed cross-cutting contract set and the diff guard; a missing tool is a FAIL, never a PASS. Steward: green before every push.
+  - Lives in: `scripts/coord/prepush.sh` (this repo's example; each project writes its own), steward step 3; test `test/test_coord_prepush.py`.
+- **Surviving mutants were the most common gatekeeper NOT OK** (4 of 9): a dropped filter, a dropped factor, a boundary flip, a `+ 0.0` fold.
+  - Fix: `mutants.py <src> <test>` mutates only the diff's changed lines, runs one targeted test per mutant under a timeout in its own process group, and restores the file (a sidecar backup survives SIGKILL). The builder lists survivors in the PR body; the gatekeeper starts from them but still mutates the guards.
+  - Lives in: `scripts/coord/mutants.py`, steward "Gatekeeper checkpoints", `docs/agents/review-gk.md`; test `test/test_coord_mutants.py`.
+- **Mechanical review asks had no check.** Python-repr quotes in user-visible text got two UX NOT OKs; the coordinator re-typed the stale-`refs/pull/N/head` workaround per run.
+  - Fix: a ratchet that fails ADDED `!r}` lines outside logging calls (CI job and prepush; `# repr-ok: <reason>` escapes); `PREMERGE_HEAD_REF` in premerge.sh.
+  - Lives in: `scripts/coord/repr_guard.py`, `.github/workflows/repr-guard.yaml`, premerge.sh, coordinator "Merging".
+- **Big PRs multiplied re-OK rounds** (+5352 lines: 4 NOT OK, 16 OK comments; +4397 lines, 25 commits).
+  - Fix (owner decision PR-SIZE-1): one reviewer area and about 1,500 changed lines per PR, excluding generated files, shots and fixtures; a plan GO names the slices.
+  - Lives in: steward "Gatekeeper checkpoints", `docs/agents/review-gk.md`, `docs/agents/session-brief.md`.

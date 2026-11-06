@@ -3659,8 +3659,9 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                     <OutcomeGlyph mark={outcomeNow.mark} />{`${m.tool_name} (${toolOutcomeWords(outcomeNow)})`}
                   </span>
                   {accessLink}
-                  {/* Issue 04 S4a: a refusal's message, collapsed as in Guided. */}
-                  {outcomeNow.mark.outcome === 'denied' && m.content.includes('\n') && (
+                  {/* Issue 04 S4a/S4b: a tool_error's message (a refusal, a raise or a
+                      timeout), collapsed as in Guided; result lines carry no newline. */}
+                  {m.content.includes('\n') && (
                     <details className="mt-0.5" data-testid="chat-tool-details">
                       <summary className="cursor-pointer select-none font-sans">Details</summary>
                       <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]"

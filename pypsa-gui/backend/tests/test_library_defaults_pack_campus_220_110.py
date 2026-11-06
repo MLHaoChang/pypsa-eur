@@ -71,8 +71,9 @@ def test_the_new_version_follows_is_the_default_and_is_pinned(new, prev):
 
     pins = json.loads((FIXTURES / "pack_hashes.json").read_text())["generic_defaults"]
     versions = loader.available_versions()
-    assert versions[versions.index(PREV) + 1] == NEW == versions[-1]
-    assert load_defaults_pack().version == NEW
+    # 2026-11-07 (DC-05) follows it and is the default now.
+    assert versions[versions.index(PREV) + 1] == NEW
+    assert load_defaults_pack(NEW).version == NEW
     assert new.hash == pins[NEW] != prev.hash == pins[PREV]
     assert new.typed and NEW not in loader.LEGACY_VERSIONS
 

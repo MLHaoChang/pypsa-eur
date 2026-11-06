@@ -74,6 +74,10 @@ class AiWorkloadSpec(BaseModel):
 
 
 BackupMode = Literal["genset", "bess", "hybrid"]
+#: The power architecture from the MV bus to the rack (DC grid readiness 05):
+#: LV double-conversion UPS, MV UPS, 800 VDC from a central rectifier, or a
+#: solid-state transformer to 800 VDC (``services.dc_architecture``).
+DcArchitecture = Literal["ac", "mv_ups", "dc_800v", "sst"]
 
 
 def _assumed_backup_bess() -> "BessSpec":
@@ -163,6 +167,9 @@ class DataCentreLoadSpec(BaseModel):
     design_intent: DesignIntentSpec | None = None
     #: Backup on loss of grid (DC 03); the default keeps the genset fleet.
     backup: BackupSpec = Field(default_factory=BackupSpec)
+    #: Power architecture (DC 05). ``pue_at_design`` is the PUE of this
+    #: architecture; the default "ac" is assumed when unset and moves nothing.
+    architecture: DcArchitecture = "ac"
 
     @model_validator(mode="after")
     def _shares(self) -> "DataCentreLoadSpec":

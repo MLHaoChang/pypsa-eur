@@ -548,3 +548,15 @@ def test_an_unverified_payload_has_the_checks_shape():
     bad = PU.unverified_payload(n, "boom", 0.0)
     assert set(bad) == set(ok)
     assert bad["status"] == "unverified" and bad["flagged"] is False
+
+
+@pytest.mark.parametrize("v, want", [
+    (True, True), (False, False), (None, False), (np.nan, False), (1, True), (0, False),
+    ("True", True), ("true", True), ("1", True), ("1.0", True), (" yes ", True),
+    ("False", False), ("0", False), ("0.0", False), ("", False),
+])
+def test_flag_column_reads_strings_as_written(v, want):
+    from services.solver.process_uc import flag_column
+
+    df = pd.DataFrame({"eh_process": pd.Series([v], index=["u"], dtype=object)})
+    assert bool(flag_column(df, "eh_process")["u"]) is want

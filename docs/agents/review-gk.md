@@ -49,6 +49,8 @@ A test never asserts a value a known defect produces as if it were correct. Asse
 
 A stacked or full-file mutant run can hang when the mutant lets a real solve or restudy run. Run the single targeted test with -x and a timeout.
 
+You may start from the PR body's survivor list and `scripts/coord/mutants.py <src> <test>`. It does not replace mutating the guards the PR changes and checking which test kills each (it misses multi-line statements, decorators and non-`.py` guards).
+
 A family-manifest PR flips a variant to `_covered` only for what its tests check. Each untested or defective annex item gets its own `_pending` row, with a ticket when it is a defect: a family whose only variant is covered reads as `evidenced` (#918, #920).
 
 A `pytest.raises(Exception)` on a refusal is checked for what actually raises. An incidental library error (#918's pandas `InvalidIndexError`, a 500) is a defect, not a guard.
@@ -67,6 +69,7 @@ A read-back that compares frames after an IO round trip normalises dtype, index 
 - A project-scoped result-view read carries `project_id` = the active project, and 404/409 count as `no_data`.
 - A run profile whose approval envelope lists `run_sensitivity_sweep` or `run_eh_study` needs its own GK review. A sweep's cases[].changes create child projects with arbitrary edits that no edit bound limits; admit such a run only with per-case bounds or a card per case. An envelope admission must also refuse any `*project*` argument that is not the run's own project (#875).
 - Builders record a GK plan GO's conditions in the issue file's `## Comments`, so a rotation does not drop them.
+- A plan GO for work over one reviewer area or about 1,500 changed lines (excluding generated files, shots and fixtures) names the slices, one PR each (PR-SIZE-1).
 - A PR that changes a stored format (e.g. the run manifest MAC): existing readers see byte-equal output (strip the new field on read), and a pin test shows the other MAC domains are unchanged.
 - A "covered" manifest row that says something is refused needs a test of each tool it names (#922 claimed "unknown asset moves nothing", and two tools emitted frames).
 - Measure a cap raise downstream: #927 found `_assurance` cut from long checked results; it now goes first, like `_edit_receipt`.
@@ -135,3 +138,7 @@ A read-back that compares frames after an IO round trip normalises dtype, index 
 - A record identity check (started_at) needs a test with the activity bindings cleared (after takeover); otherwise the binding's origin check masks the mutant (#1123).
 - A flag borrowed to reach an existing code path (eh_process on a gas boiler) also enrols the component in every other reader of that flag; list the readers before accepting it (#1142).
 - For a wording-only or ruff-only delta, compare ASTs with strings blanked rather than re-running mutants (#1142).
+- A multi-term credit cap needs a test per term: each term alone binds the cap while the others do not.
+- An energy or tonne sum needs a test with non-unit `snapshot_weightings`; unit weights hide a missing multiplication.
+- `flag_column` agrees with `process_chain._truthy`: "true", "1" and "1.0" are truthy, each string pinned by its own test.
+- Removing a duplicated caveat needs a positive test that the caveat now appears exactly once, not only that the copy is gone.

@@ -330,6 +330,39 @@ def denied(
     )
 
 
+# ── The edit-lock refusal (issue 04 S4b, G4) ────────────────────────────────
+
+# The two refusals of `chat_tools._check_foreign_lock`: another user's edit lock
+# or a harness run's hold (409), or a lock that could not be checked (503).
+LOCK_KINDS = frozenset({"project_locked", "project_lock_unavailable"})
+
+
+def lock_refusal(tool_name: str, args: Any) -> tuple[str, str] | None:
+    """`(kind, message)` when the edit lock refuses this call, else None.
+
+    The loop calls this after the confirmation and before any effect seam
+    (reservation, undo snapshot, write note, dirty mark, revision bump), so a
+    refusal here is `denied`. Only the tools the handler's own check gates;
+    the same task_id argument, so a run control on the caller's run passes.
+    """
+    from fastapi import HTTPException
+
+    from services import chat_tools
+
+    if tool_name not in chat_tools._lock_gated_tool_names():
+        return None
+    task_id = args.get("task_id") if isinstance(args, dict) else None
+    try:
+        chat_tools._check_foreign_lock(tool_name, task_id)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {}
+        kind = detail.get("error_kind")
+        if kind not in LOCK_KINDS:
+            raise
+        return kind, str(detail.get("message") or kind)
+    return None
+
+
 # ── The no-progress stop ─────────────────────────────────────────────────────
 
 

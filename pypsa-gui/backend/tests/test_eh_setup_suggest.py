@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import copy
 import pathlib
+import re
 import sys
 
 import numpy as np
@@ -34,12 +35,9 @@ sys.path.insert(0, str(BACKEND / "project_templates"))
 import eh_templates as TPL  # noqa: E402
 
 # The adequacy setup applies to a site with load: a generation-only template
-# (the IPP plant) has no critical bus and nothing to import for. A process-load
-# template draws through process links the suggester does not read yet
-# (owner decision G2P-10-SUGGEST-1; grid-to-process issue for the gap).
+# (the IPP plant) has no critical bus and nothing to import for.
 TEMPLATES = sorted(t for t in TPL.BUILDERS
-                   if not TPL.TEMPLATE_META.get(t, {}).get("generation_only")
-                   and not TPL.TEMPLATE_META.get(t, {}).get("process_load"))
+                   if not TPL.TEMPLATE_META.get(t, {}).get("generation_only"))
 
 
 def _strip(n: pypsa.Network) -> pypsa.Network:
@@ -361,3 +359,109 @@ def test_empty_candidate_rows_are_not_supply():
               p_nom_extendable=True, marginal_cost=0.0)
     assert dict(_supply(n)) == before
     assert before.get("mainland", 0.0) > 0
+
+
+# ── process-link draw and tonne loads (grid-to-process 19) ─────────────────
+
+
+def _process_site() -> pypsa.Network:
+    """A site bus feeding a 30 MW process unit (bus0 draw) into a tonne bus
+    whose 500 t/h offtake is not MW, plus 2 MW of services on the site."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(3))
+    n.add("Bus", "grid", carrier="AC")
+    n.add("Bus", "site", carrier="AC")
+    n.add("Bus", "aux", carrier="AC")
+    n.add("Bus", "product", carrier="ore", unit="t")
+    n.add("Generator", "supply", bus="grid", p_nom=200.0)
+    n.add("Link", "feeder", bus0="grid", bus1="site", p_nom=100.0)
+    n.add("Link", "aux_feed", bus0="grid", bus1="aux", p_nom=100.0)
+    n.add("Link", "mill", bus0="site", bus1="product", p_nom=30.0, efficiency=20.0)
+    n.links["eh_process"] = False
+    n.links.at["mill", "eh_process"] = True
+    n.links_t.p_max_pu = pd.DataFrame({"mill": [0.5, 0.8, 0.6]}, index=n.snapshots)
+    n.add("Load", "aux_load", bus="aux", p_set=5.0)
+    n.add("Load", "offtake", bus="product", p_set=500.0)
+    return n
+
+
+def test_process_draw_counts_as_load_on_its_bus0():
+    out = suggest_eh_setup(_process_site())
+    crit = [s for s in out["suggestions"] if s["kind"] == "critical_bus"]
+    # site: the mill's 30 MW × 0.8 peak = 24 MW beats aux's 5 MW; the 500 t/h
+    # offtake on 'product' is no MW at all.
+    assert [(s["name"], s["confidence"]) for s in crit] == [("site", "medium")]
+    assert "(24.0 MW, including 24.0 MW of rated process draw)" in crit[0]["reason"]
+    # the site's total peak carries the draw too: 24 + 5 MW
+    imp = [s for s in out["suggestions"] if s["kind"] == "import_link"]
+    assert imp and all("peak demand of 29 MW, including 24.0 MW of rated process draw"
+                       in s["reason"] for s in imp)
+
+
+@pytest.mark.parametrize("carrier", ["H2", "urban central heat"])
+def test_a_process_link_on_a_non_electric_bus0_adds_no_mw(carrier):
+    n = _process_site()
+    n.buses.at["site", "carrier"] = carrier
+    out = suggest_eh_setup(n)
+    crit = [s for s in out["suggestions"] if s["kind"] == "critical_bus"]
+    assert [s["name"] for s in crit] == ["aux"]
+    assert "rated process draw" not in " ".join(s["reason"] for s in out["suggestions"])
+
+
+def test_an_eh_process_of_the_string_false_adds_no_mw():
+    n = _process_site()
+    n.links["eh_process"] = n.links["eh_process"].astype(object)
+    n.links.at["mill", "eh_process"] = "False"
+    out = suggest_eh_setup(n)
+    crit = [s for s in out["suggestions"] if s["kind"] == "critical_bus"]
+    assert [s["name"] for s in crit] == ["aux"]
+
+
+def test_an_unsized_extendable_process_unit_is_named_not_counted():
+    n = _process_site()
+    n.links.at["mill", "p_nom"] = 0.0
+    n.links.at["mill", "p_nom_extendable"] = True
+    out = suggest_eh_setup(n)
+    assert any("'mill' is unsized" in note for note in out["notes"])
+    crit = [s for s in out["suggestions"] if s["kind"] == "critical_bus"]
+    assert [s["name"] for s in crit] == ["aux"]
+
+
+def test_no_suggested_mw_figure_includes_a_tonne_load():
+    n = _process_site()
+    n.links.drop(columns="eh_process", inplace=True)
+    n.links.loc[["feeder", "aux_feed"], "p_nom"] = 1000.0
+    n.generators.at["supply", "p_nom"] = 1000.0
+    out = suggest_eh_setup(n)
+    # without the process flag the only electric load is aux's 5 MW; the
+    # 500 t/h offtake is neither a load bus nor part of any MW figure
+    assert "product" not in [s["name"] for s in out["suggestions"]]
+    mw = [float(x) for s in out["suggestions"]
+          for x in re.findall(r"([0-9.]+) MW", s["reason"])]
+    assert mw == [1000.0, 5.0, 5.0]
+
+
+def test_the_concentrator_suggests_its_site_bus_as_critical():
+    n = _strip(TPL.BUILDERS["eh_concentrator_staged"]())
+    out = suggest_eh_setup(n)
+    assert _proposed(out)["critical_bus"] == {"site"}
+    tonnes = float(n.loads_t.p_set["shipments"].max())
+    for s in out["suggestions"]:
+        for mw in re.findall(r"([0-9.]+) MW", s["reason"]):
+            assert abs(float(mw) - tonnes) > 1.0, s["reason"]
+
+
+def test_a_source_on_a_tonne_bus_is_not_mw_of_supply():
+    """A mine's ore feed (t/h) on a product bus is neither a PoC nor MW of supply."""
+    n = _process_site()
+    n.add("Bus", "ore", carrier="ore", unit="t")
+    n.add("Generator", "mine", bus="ore", p_nom=5000.0)
+    n.links.loc[["feeder", "aux_feed"], "p_nom"] = 1000.0
+    out = suggest_eh_setup(n)
+    assert "ore" not in [s["name"] for s in out["suggestions"]]
+    imp = [s for s in out["suggestions"] if s["kind"] == "import_link"]
+    assert imp and all(s["reason"].startswith("Bus 'grid' holds 200 MW of supply") for s in imp)
+    # no import link: the PoC fallback still never picks the ore bus
+    n.links.drop(["feeder", "aux_feed"], inplace=True)
+    out = suggest_eh_setup(n)
+    assert [s["name"] for s in out["suggestions"] if s["kind"] == "poc_bus"] == ["grid"]

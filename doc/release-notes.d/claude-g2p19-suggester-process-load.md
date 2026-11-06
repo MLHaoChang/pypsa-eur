@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The Energy Hub setup suggester counts a process unit's rated electrical draw as load on the bus it draws from, and leaves tonne and other non-electric loads and sources out of its MW figures, so it proposes the right critical bus on the mining concentrator.

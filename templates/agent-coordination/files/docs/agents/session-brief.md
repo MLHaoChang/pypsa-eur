@@ -5,7 +5,7 @@ The coordinator sends this as a new session's first message. `scripts/coord/brie
 ```markdown
 You are a session for {{REPO}}, commissioned by the owner through the coordinator session `@COORDINATOR@`.
 
-**Task.** <What to build or fix, and the outcome that marks it done.>
+**Task.** <What to build or fix, and the outcome that marks it done. One reviewer area, about 1,500 changed lines at most (PR-SIZE-1).>
 
 **Owner decisions.** <keys only, e.g. `USE-1`, `OWN-PR`. Look each up with `grep -F '| KEY |' docs/agents/owner-decisions.md`; never read the whole file.>
 
