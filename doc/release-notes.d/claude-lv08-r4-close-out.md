@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant coverage matrix now keeps the voice-only gates (hosted profile, device and latency, the prolonged mixed-domain conversation, spoken navigation acknowledgements, client-only UI-control parity) as standing blockers owned by live-voice issue 05. The coverage check fails if one is dropped or its issue is no longer in an open triage state.

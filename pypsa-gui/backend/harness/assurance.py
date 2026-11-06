@@ -1174,7 +1174,7 @@ class Turn:
             evidence_ids,
         )
 
-    def commit(self, blocks, ctx):
+    def commit(self, blocks, ctx, *, truncated=False):
         from harness.history import _redact_for_persist
         from services.pypsa_service import PyPSAService
 
@@ -1188,6 +1188,9 @@ class Turn:
             raise HTTPException(409, {"error_kind": "assurance_context_changed"})
         draft_failed = False
         try:
+            if truncated:
+                # A cut-off draft can still parse; it is never certified.
+                raise ValueError("draft_truncated")
             text, public_blocks, evidence_ids = self.validate(blocks)
             if self.request_scope is not None:
                 if self.request_evidence is None:

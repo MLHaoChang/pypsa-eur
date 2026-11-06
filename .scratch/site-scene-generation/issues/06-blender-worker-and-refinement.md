@@ -3,7 +3,7 @@
 
 # SC-05 — optional integrated Blender generation and reviewed return
 
-Status: needs-info
+Status: ready-for-human (parked until a Blender/photo engine is chosen; Q-SS-1)
 Type: task
 Dependencies: SC-04; SC-00 worker/protocol/resource evidence
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -39,3 +39,5 @@ Deliver this slice's in-place explanation, typed proposed action or truthful UI 
 ### 2026-11-05: triage sweep (AA-FILL-2), role needs-info
 
 Was: `needs-triage — specification proposed; not implemented`. Owner question Q-SS-1 (see issue 05): the worker needs the SC-00 B worker, protocol and resource evidence, which waits for a supported Blender engine. Blockers when answered: 04 and 05. Opus, reviewers GK B (worker isolation, security) and UX.
+
+2026-11-05, owner answer Q-SS-1 (coordinator card): "Park until an engine is chosen (Recommended)". This issue waits for an engine choice.

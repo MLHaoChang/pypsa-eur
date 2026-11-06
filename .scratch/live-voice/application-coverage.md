@@ -189,7 +189,13 @@ fails if a claim appears while any of these hold:
   `route_parity` of the matrix. The other declared routes are limitations with a closed reason (account/auth, admin, assistant self-config, conversation
   transport, app shell, live streams, UI-local state, binary transfer).
 - Client-only UI controls (panel/subview/filter with no backend call): not mapped to navigation tools.
-- Hosted profile/device/latency gates and the prolonged mixed-domain conversation: not run.
+- Hosted profile/device/latency gates, the prolonged mixed-domain conversation and spoken
+  navigation acknowledgements: not run.
+
+The last two are standing blockers owned by issue 05 (LV 08 R4); each points at
+`issues/05-workflow-validation.md`, and the guard fails if one leaves `full_coverage.blockers`
+or if its issue file is gone, unreadable or not in an open triage state (needs-triage,
+needs-info, ready-for-agent, ready-for-human) while the blocker stands.
 
 Permitted statement until issue 05 journeys pass: tested subsets only, labelled
 accordingly. Load flow (issue 07), run evidence (issue 06) and monitoring adapters
