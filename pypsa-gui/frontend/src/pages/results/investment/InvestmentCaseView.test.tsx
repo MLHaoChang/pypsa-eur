@@ -288,7 +288,7 @@ describe('InvestmentCaseView', () => {
     // lines without tax would read as established; WP4.7 review round 2, R2-1).
     expect(y2031.lastElementChild?.textContent).toBe('not established')
     expect(within(cf).getByTestId('ic-cashflows-incomplete').textContent).toMatch(/tax_pack_missing/)
-    expect(within(cf).getByTestId('ic-cashflow-2030').textContent).toMatch(/–/)
+    expect(within(cf).getByTestId('ic-cashflow-2030').textContent).toMatch(/—/)
 
     // The debt schedule: a row per year with the DSCR; unknown years are
     // "not established", not 0.

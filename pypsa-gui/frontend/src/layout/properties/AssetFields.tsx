@@ -3,7 +3,7 @@
 // renderer replaces each card's four hand-written lists (read-out rows,
 // `startEdit` keys, save mapping, edit inputs). Derived rows (capital cost,
 // a battery's lifetime and fixed O&M) are shown read-only, never typed.
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
 import { ProvenanceChip } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
@@ -71,7 +71,15 @@ export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record
     if (f.kind === 'number' || f.kind === 'int') {
       const d = displayValue(f, v)
       if (d === null || (d === 0 && !f.key_param)) continue
-      push(f, { label: f.label, value: f.kind === 'int' ? d : fmt(d), unit: f.unit_display ? ` ${unitLabel(f.unit_display)}` : undefined, tip: f.help })
+      // A year is a label, not a quantity: no thousands separator, and the
+      // unit word only restates the label ("Build year 2027 year").
+      const isYear = f.unit_display === 'year' || f.unit_storage === 'year'
+      push(f, {
+        label: f.label,
+        value: isYear ? String(d) : f.kind === 'int' ? d : fmt(d),
+        unit: f.unit_display && !isYear ? ` ${unitLabel(f.unit_display)}` : undefined,
+        tip: f.help,
+      })
       continue
     }
     if (v !== null && v !== undefined && v !== '') push(f, { label: f.label, value: String(v), tip: f.help })
@@ -252,7 +260,21 @@ function CompareReferences({ componentClass, name, money, onApplied }: {
  * boolean's side effect (Extendable seeds the minimum); `after` places a card's
  * own control after a field (e.g. the per-period bounds link after the maximum).
  */
-export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onCheck, after, hidden, provenance, series }: {
+/** Scroll a field's control into view, focus it and flash it (`.field-flash`, index.css). */
+export function focusFieldControl(key: string): boolean {
+  const wrap = Array.from(document.querySelectorAll<HTMLElement>('[data-field]')).find(w => w.dataset.field === key)
+  const el = wrap?.querySelector<HTMLElement>('input:not([type=hidden]), select, textarea')
+  if (!el) return false
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  el.focus({ preventScroll: true })
+  el.classList.remove('field-flash')
+  void el.offsetWidth
+  el.classList.add('field-flash')
+  window.setTimeout(() => el.classList.remove('field-flash'), 2400)
+  return true
+}
+
+export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onCheck, after, hidden, provenance, series, focusField }: {
   schema: AssetSchema
   fs: FS
   set: SetFS
@@ -275,7 +297,10 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
    * the constant that editor starts from (UX review, checklist §6.2).
    */
   series?: Record<string, SeriesField>
+  /** A fix link's field: scrolled to, focused and highlighted once the form is shown. */
+  focusField?: string | null
 }) {
+  useEffect(() => { if (focusField) focusFieldControl(focusField) }, [focusField])
   // The typed parts of a composite asset render together, as one table where
   // the first of them would have been (the Investment group).
   const parts = schemaFields(schema).filter(f => f.part && !f.derived)
@@ -293,7 +318,7 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
           <div key={g.id} className="contents" data-testid={`asset-group-${g.id}`}>
             {g.id !== 'identity' && <SectionHdr title={g.label} />}
             {shown.map(f => (
-              <Fragment key={f.key}>
+              <div key={f.key} className="contents" data-field={f.key}>
                 {f.key === firstPart ? (
                   <>
                     <PartsTable parts={parts} fs={fs} set={set} stamps={provenance} />
@@ -329,7 +354,7 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                 )}
                 {!f.derived && f.key !== firstPart && LABEL_ONLY_KINDS.has(f.kind) && chipRow(provenance, f.key)}
                 {f.key !== firstPart && after?.[f.key]}
-              </Fragment>
+              </div>
             ))}
           </div>
         )

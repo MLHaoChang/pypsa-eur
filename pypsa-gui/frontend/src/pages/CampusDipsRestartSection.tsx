@@ -301,8 +301,13 @@ export default function CampusDipsRestartSection({ dips }: { dips: DipsRestart |
           const events = restartOf(t).filter(r => r.level === 'event')
           return events.length ? <Timeline key={t} transition={t} events={events} /> : null
         })}
+        {/* Two lines: each label carries its own caveat, so one joined line said "the binding answer" twice (UIP-01). */}
+        <div className="text-[11px] text-muted">
+          <p data-testid="dips-basis-dips">Dips basis: {dips.dip_label}</p>
+          <p data-testid="dips-basis-restart">Restart basis: {dips.restart_label}</p>
+        </div>
         <details className="text-[11px] text-muted">
-          <summary className="cursor-pointer">Basis: {dips.dip_label}; {dips.restart_label}</summary>
+          <summary className="cursor-pointer">Basis details</summary>
           <ul className="list-disc pl-4 mt-1">
             {dips.basis.map(b => <li key={b}>{b}</li>)}
           </ul>
