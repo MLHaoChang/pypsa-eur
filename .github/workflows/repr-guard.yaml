@@ -1,0 +1,31 @@
+name: Repr guard
+
+# User-visible text carries no Python-repr quotes (docs/agents/review-ux.md).
+# A ratchet: fails a PR that ADDS a `!r}` line to non-test pypsa-gui/backend
+# Python outside a logging call. Existing lines stay. Escape hatch for debug
+# text: `# repr-ok: <reason>`. See scripts/coord/repr_guard.py.
+
+on:
+  pull_request:
+    branches:
+    - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  repr:
+    name: Repr guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+
+    - name: Fail on new !r} in added backend lines
+      run: python scripts/coord/repr_guard.py "${{ github.event.pull_request.base.sha }}"

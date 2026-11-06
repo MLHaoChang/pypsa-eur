@@ -13,7 +13,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
    Done when the PR exists and its head is pushed.
 2. **Release note.** Add a fragment file under `{{RELEASE_NOTES_DIR}}/` as its `README.md` describes.
    Done when the PR diff contains one new fragment.
-3. **Wait for CI on the head.** You own CI for your PR: the coordinator does not watch it. Let every run on the current head finish. Each push cancels and restarts {{SLOW_CI_JOB}}, so batch fixes into one validated push.
+3. **Wait for CI on the head.** Run the project's pre-push check (`scripts/coord/prepush.sh` in the reference repo: lint, the tests mapped to the changed files, the fixed contract tests, the repr guard) before every push; it passes, or the push message names the failing step and why it stays. You own CI for your PR: the coordinator does not watch it. Let every run on the current head finish. Each push cancels and restarts {{SLOW_CI_JOB}}, so batch fixes into one validated push.
    `subscribe_pr_activity` only to the PR whose CI you are driving now: each subscription costs a ~13k-char wake. For the other PRs of a stack, run `scripts/coord/ciwait.sh 118 <pr>` with the Bash tool's `run_in_background` instead.
    Done when every check run on the head SHA is completed.
 4. **Fix red CI.** See [CI failures](#ci-failures). Loop back to step 3 after each push.
@@ -49,10 +49,10 @@ A PR that touches {{GATED_AREAS}} also needs the gatekeeper's OK on that exact h
 
 The gatekeeper (`docs/agents/roles.md`) advises at two points before review, as well as at review itself:
 
-- **Before a plan.** Before you build a change that touches {{GATED_AREAS}}, send the gatekeeper your plan in a few lines: what changes, which files, and how you will test it. For a bug fix the plan names the failing test; write that test first and watch it fail before you write the fix, following the `tdd` skill. Start building once the gatekeeper answers, or once it says the plan needs no input.
+- **Before a plan.** Before you build a change that touches {{GATED_AREAS}}, send the gatekeeper your plan in a few lines: what changes, which files, and how you will test it. For a bug fix the plan names the failing test; write that test first and watch it fail before you write the fix, following the `tdd` skill. Start building once the gatekeeper answers, or once it says the plan needs no input. A PR covers one reviewer area and about 1,500 changed lines or fewer, excluding generated files, screenshots and fixtures; name the slices in the plan when the work is bigger.
 - **Same failure twice.** When the same test or CI check fails twice for the same reason, run the `diagnosing-bugs` skill first (reproduce it, make it fail on demand, narrow it down). Then send the gatekeeper the diagnosis together with your two attempts, before a third try.
 
-Before you ask the gatekeeper for an OK on a gated PR, run the `mp-code-review` skill against the issue or spec file. Fix what it finds, or say in the PR body why a finding stays. Ungated PRs skip this.
+Before you ask the gatekeeper for an OK on a gated PR, run the `mp-code-review` skill against the issue or spec file. Fix what it finds, or say in the PR body why a finding stays. Ungated PRs skip this. Before the OK, run `scripts/coord/mutants.py <module> <test>` on each changed engine/service module against its tests; list the survivors, or why each is equivalent, in the PR body.
 
 The gatekeeper advises; it does not write the code. Plan verdicts go from the gatekeeper straight to you (your session id is in your plan message), since there is no PR yet; the coordinator hears only of a NO-GO you dispute or a standing ruling. A PR whose plan went to review opens after the plan verdicts arrive. The gatekeeper's standing rules are in `docs/agents/review-gk.md`.
 

@@ -38,6 +38,7 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `docs/agents/issue-tracker.md`, `triage-labels.md`, `domain.md` | Local markdown issues under `.scratch/`, triage roles, glossary layout |
 | `scripts/coord/premerge.sh` | The whole merge gate: conflicts, overlap, optional semantic tests, reviewer verdict comments, every check run |
 | `scripts/coord/sessions.py` | One line per live session from a saved `list_sessions` result, with context used and a `ROTATE` flag past 200k |
+| `scripts/coord/mutants.py` | AST mutants on the lines a PR changed in one module, run against one targeted test; prints survivors. A project-specific pre-push script (lint, mapped tests, contract tests, a diff guard such as `scripts/coord/prepush.sh` here) is written per project |
 | `scripts/coord/ciwait.sh` | Waits for CI on a PR that has no session; prints READY, FAIL, MACOS or TIMEOUT |
 | `scripts/coord/events.py` | Time, assistant text and last tool call per event from a saved `list_events` result |
 | `scripts/coord/frontier.py` | The frontier from the issue headers: ready, unblocked, unclaimed issues no open PR or live session covers; `--stages` gives the dashboard stage per issue |

@@ -105,9 +105,10 @@ template_live_re='^(\.claude/skills/(steward|coordinator|retro)/|scripts/coord/|
 
 base_ref="refs/remotes/$remote/$base_branch"
 pr_ref="refs/premerge/pr-$pr"
+# The git proxy can serve a stale refs/pull/N/head; pass PREMERGE_HEAD_REF=refs/heads/<branch>.
 git fetch -q "$remote" \
   "+refs/heads/$base_branch:$base_ref" \
-  "+refs/pull/$pr/head:$pr_ref"
+  "+${PREMERGE_HEAD_REF:-refs/pull/$pr/head}:$pr_ref"
 
 head=$(git rev-parse "$pr_ref")
 master=$(git rev-parse "$base_ref")
