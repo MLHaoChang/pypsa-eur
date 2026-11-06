@@ -102,6 +102,8 @@ def build_inventory() -> dict:
         'result_tabs': {t['id']: 'results_view_unvalidated' for t in tabs},
         'slide_panels': {p: coverage['panel_adapter'](p, ack_panels) for p in panels},
         'output_channels': coverage['OUTPUT_CHANNELS'],
+        'frame_projections': coverage['FRAME_PROJECTIONS'],
+        'route_surfaces': coverage['ROUTE_SURFACES'],
     }
     _check_assurance(assurance, adapters, coverage)
     return {
@@ -148,6 +150,11 @@ def _check_assurance(assurance: dict, tool_adapters: dict, coverage: dict) -> No
     unknown = sorted(f'{surface}={adapter}' for surface, adapter in surfaces if adapter not in known)
     if unknown:
         raise ValueError('Unknown assurance adapter: ' + ', '.join(unknown))
+    channels = {*assurance['output_channels'], coverage['NO_ASSISTANT_TEXT']}
+    unrouted = sorted(f'{route}={channel}' for route, channel in assurance['route_surfaces'].items()
+                      if channel not in channels)
+    if unrouted:
+        raise ValueError('Chat route mapped to an unknown output channel: ' + ', '.join(unrouted))
     declared = set(coverage['CHECKED_TOOL_ADAPTERS'])
     if set(assurance['checked_tools']) != declared:
         raise ValueError('harness.assurance.CHECKED_TOOLS differs from the assurance adapter map.')

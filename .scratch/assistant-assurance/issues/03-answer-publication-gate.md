@@ -4,7 +4,7 @@
 # P2: private drafts and approved answer publication
 
 Status: ready-for-agent
-Progress: S1 merged (#1154), S3 merged (#1171), S2 merged (#1186); S4 in progress; S5 planned
+Progress: S1 merged (#1154), S3 merged (#1171), S2 merged (#1186), S4 merged (#1197); S5 in review
 Type: task
 Blocked by: 01, 02
 
@@ -44,7 +44,7 @@ names the slice that closes it, or its external blocker.
 | A2.2 | p2 wrong value/unit/entity/sign; wrong project/window | Same value under another metric → **S1 (passed)** |
 | A2.3 | sign, MW/MWh, %-of-baseline, zero baseline, full precision, nonfinite | kW/MW conversion and raw-value tolerance → **S2 (passed)**; locale strings rejected by the strict number schema → **S2 pin (passed)** |
 | A2.4 | delta/cost oracles; invented formula id | Model-composed derived claims, known formula on wrong operands, arbitrary expressions → **S2 (passed)** |
-| A2.5 | contradictory prose/narrative, omitted claims, invented entities | Whole-population quantifiers and causal wording → S5 |
+| A2.5 | contradictory prose/narrative, omitted claims, invented entities | Whole-population quantifiers, causal and optimality wording in an interpretation → **S5 (passed)**; non-English wording → `_pending`, ticket 09 (marker lists are English only, AA03-FREEZE-1 item 5) |
 | A2.6 | bad JSON/nonobject → limited; checker/guard exception; commit failure; reviewer failures | Truncated draft that parses (OpenAI-compatible `length`/`content_filter`, Anthropic `max_tokens`) → **S1 (red, now passed)**; provider error before/after a fragment → **S1 (passed)**; zero repairs pinned exactly → **S1 (passed)** |
 | A2.7 | reviewer without tools; IDs/pairing; abort; generation change; stale ACK | Repair spends 0 tool executions (dispatch spy) → **S1 (passed)** |
 | A2.8 | storage/generator slots, missing basis, wrong run/selection, ambiguous cost, unsupported slots limited, 20/21 blocks | Ambiguous capacity, `request_complete` false while a slot is unmapped → **S3 (passed)**; valid blocks keep scope → **S3 (passed at 12 blocks, the largest valid set; 20 slots pinned by `test_harness_reliability`)**; required warning slots → `_pending`, blocked: no warning disposition in the result-slot contract (ticket 13) |
@@ -241,3 +241,31 @@ section, run comparison and scoped results each hold one entity, step, selection
 or run, not per-entity facts of one class. Receipt policy "3" carries the
 predicates and keeps any derived entries. 38 backend and 6 frontend mutants killed.
 "Feasible, not proven optimal" stays `_pending` under ticket 10 (A2.10 row).
+
+### S5 result
+
+`harness/interpretation_markers.py` holds three English lists: population,
+causal and optimality wording. An interpretation using any of them is withheld
+before any reviewer call, so review mode "required" cannot overrule it. The
+receipt reads `withheld_invalid_draft` and the answer is limited, as for any
+other withheld interpretation. Checked blocks, derived entries and predicates
+still publish. A whole-class claim is made only as an S4 predicate. PROMPT
+now describes `derived`, `predicates` and the marker rule (GK B (29) M7: PROMPT
+feeds no frozen hash).
+
+The surface map in `harness/assurance_coverage.py` has two parts:
+
+- `FRAME_PROJECTIONS` covers all 21 SSE events, enumerated by AST from the
+  frame modules and the router.
+- `ROUTE_SURFACES` covers all 52 `routers/chat.py` routes.
+
+Both have stale-row checks, and the relay-yield sites are pinned. In checked
+mode an unmapped event is dropped; an ordinary turn passes it through as before.
+`smoke/assistant_inventory.py --check` refuses a route mapped to an unknown
+channel. The release goldens cover 8 checked answer kinds; each is published
+with its receipt policy. Each of the 21 fault variants is refused for its own
+reason and differs from its golden in one field. Computed profiles stay with
+the pilot goldens (`tests/test_pilot_evaluation.py`).
+
+Tests: `tests/assurance_acceptance/test_p5_interpretation_markers.py`,
+`test_p5_surface_map.py`, `test_p5_release_goldens.py`.
