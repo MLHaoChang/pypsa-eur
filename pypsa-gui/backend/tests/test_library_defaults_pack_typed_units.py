@@ -576,3 +576,58 @@ def test_an_electric_input_bus_never_matches_an_output_basis():
     with pytest.raises(CapacityBasisMismatch):
         price_from_pack(n, "links", "mix", "fuel-cell", version=TYPED)
     assert n.links.equals(before), "a refusal writes nothing"
+
+
+# ── TC-02: a DC-rated PV row prices onto p_nom (the AC rating) by the DC/AC ratio ─
+
+def _solar_rows_dc(rows):
+    h = rows[0]
+    for r in rows[1:]:
+        if r[h.index("technology")] == "solar-utility":
+            r[h.index("capacity_basis")] = "output_electric_dc"
+
+
+def test_an_ac_pv_row_on_a_generator_is_unscaled_whatever_its_dc_ac_ratio():
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    n = _net()
+    n.generators["dc_ac_ratio"] = float("nan")
+    n.generators.at["g", "dc_ac_ratio"] = 1.3
+    out = price_from_pack(n, "generators", "g", "solar-utility", version=TYPED)
+    assert out["scale"] == 1.0 and out["capacity_basis"] == "output_electric_ac"
+
+
+def test_a_dc_pv_row_is_scaled_by_the_generators_dc_ac_ratio(tmp_path, monkeypatch):
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    _copy_with(tmp_path, monkeypatch, _solar_rows_dc)
+    n = _net()
+    n.generators["dc_ac_ratio"] = float("nan")
+    n.generators.at["g", "dc_ac_ratio"] = 1.25
+    out = price_from_pack(n, "generators", "g", "solar-utility", version=TYPED)
+    assert out["scale"] == pytest.approx(1.25) and out["capacity_basis"] == "output_electric_dc"
+    assert n.generators.at["g", "overnight_cost"] == pytest.approx(
+        1.25 * _v("solar-utility.investment.overnight"))
+
+
+@pytest.mark.parametrize("ratio", [None, float("nan")])
+def test_a_dc_pv_row_without_a_dc_ac_ratio_refuses_and_writes_nothing(tmp_path, monkeypatch, ratio):
+    from services.library.defaults_pack.pricing import CapacityBasisMismatch, price_from_pack
+
+    _copy_with(tmp_path, monkeypatch, _solar_rows_dc)
+    n = _net()
+    if ratio is not None:
+        n.generators["dc_ac_ratio"] = ratio
+    before = n.generators.copy()
+    with pytest.raises(CapacityBasisMismatch, match="DC/AC ratio"):
+        price_from_pack(n, "generators", "g", "solar-utility", version=TYPED)
+    assert n.generators.equals(before), "a refusal writes nothing"
+
+
+@pytest.mark.parametrize("component,name", [("storage_units", "s"), ("links", "fc")])
+def test_a_dc_pv_row_on_a_class_without_a_dc_rating_refuses(tmp_path, monkeypatch, component, name):
+    from services.library.defaults_pack.pricing import CapacityBasisMismatch, price_from_pack
+
+    _copy_with(tmp_path, monkeypatch, _solar_rows_dc)
+    with pytest.raises(CapacityBasisMismatch):
+        price_from_pack(_net(), component, name, "solar-utility", version=TYPED)
