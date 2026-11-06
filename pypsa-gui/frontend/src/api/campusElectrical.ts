@@ -1026,6 +1026,8 @@ export interface DcArchitectureCompare {
            time_mean_per_mwh: number | null; real: string; not_valued: string; currency_note?: string | null }
   currency: string; money_year: number; years: number; discount_rate: number
   discount_rate_source: string; it_mw: number; capex_note: string
+  /** Which inputs the cost ends range; lifetime and fixed O&M stay central. */
+  range_note: string
   variants: DcArchitectureVariant[]
   summary: { cheapest: DcArchitecture | null; cheapest_text: string
              most_services: DcArchitecture[]; most_services_text: string }

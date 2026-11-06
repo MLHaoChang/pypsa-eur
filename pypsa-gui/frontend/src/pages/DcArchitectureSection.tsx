@@ -237,6 +237,7 @@ function Result({ data, stale, guided }: { data: DcArchitectureCompare; stale: b
           <li>Effects not modelled: {data.second_order.replace(/^assumed: /, '')} (assumed).</li>
           <li>{data.rms_caveat}.</li>
           <li>{data.capex_note}; {data.years}{NBSP}years at {num(data.discount_rate * 100)}{NBSP}% real ({data.discount_rate_source}).</li>
+          <li data-testid="dc-architecture-range-note">Range: {data.range_note}.</li>
           <li>{p.not_valued}.</li>
           <li data-testid="dc-architecture-source">Source: defaults pack {data.pack_version}.</li>
         </ul>

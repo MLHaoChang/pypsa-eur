@@ -455,6 +455,7 @@ def test_the_screen_orders_own_first_and_states_its_assumptions_once():
     )
     assert out["price"]["source"] == "request (assumed)" and out["price"]["assumed"]
     assert "not valued" in out["price"]["not_valued"]
+    assert out["range_note"] == A.RANGE_NOTE and "held at their central values" in A.RANGE_NOTE
     sst = next(v for v in out["variants"] if v["architecture"] == "sst")
     assert sst["facility_mwh"] < out["variants"][0]["facility_mwh"]
     assert sst["verdicts"]["frequency_support"]["verdict"] == "warn"

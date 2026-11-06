@@ -63,6 +63,11 @@ SECOND_ORDER = (
 #: The energy weighting the MWh read (GK A C5): the load's own weighting.
 WEIGHTING = "generators"
 
+#: Which inputs the low and high cost ends range (GK B K4).
+RANGE_NOTE = (
+    "the cost ends range the overnight capex and the stage efficiencies; lifetime and fixed O&M are held at their central values"
+)
+
 #: What each architecture CAN offer the grid, in gridspine's SERVICES words:
 #: ``capability`` counts (as assumed); ``needs_storage`` counts only with
 #: storage declared on the DC bus (GK A C6), otherwise it reads conditional.
@@ -738,6 +743,7 @@ def compare(
             "capex on the final IT MW, bought in year 0 on every leg; boundary MV bus "
             "to rack input, the in-rack conversion inside"
         ),
+        "range_note": RANGE_NOTE,
         "variants": variants,
         "summary": summary(variants),
     }
