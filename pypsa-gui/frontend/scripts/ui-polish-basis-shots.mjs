@@ -18,6 +18,7 @@ const html = path.join(root, `${entry}.html`)
 const source = path.join(root, 'src', `${entry}.tsx`)
 const out = path.resolve(process.argv[2] || path.join(root, '..', '..', '.scratch', 'ui-polish', 'shots'))
 let server, browser
+const pageErrors = []
 try {
   await fs.mkdir(out, { recursive: true })
   await fs.writeFile(html, `<!doctype html><html><body><div id="root"></div><script type="module" src="/src/${entry}.tsx"></script></body></html>`)
@@ -45,13 +46,14 @@ createRoot(document.getElementById('root')!).render(<div style={{padding:16,maxW
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] })
   for (const mode of ['guided', 'expert']) {
     const page = await browser.newPage({ viewport: { width: 820, height: 520 }, deviceScaleFactor: 2 })
-    page.on('pageerror', e => { throw new Error('page error: ' + e.message) })
+    page.on('pageerror', e => { pageErrors.push(e.message) })
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${entry}.html?mode=${mode}`)
     await page.getByTestId('dips-basis-dips').waitFor()
     const f = path.join(out, `uip01-${mode}-4-after-dips-restart-basis.png`)
     await page.screenshot({ path: f }); console.log(f)
     await page.close()
   }
+  if (pageErrors.length) throw new Error('page error: ' + pageErrors[0])
 } finally {
   await browser?.close(); await server?.close()
   await Promise.all([fs.rm(html, { force: true }), fs.rm(source, { force: true })])

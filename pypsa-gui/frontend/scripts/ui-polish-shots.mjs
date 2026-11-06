@@ -24,6 +24,7 @@ const LINK = { name: 'grid_import', bus0: 'grid', bus1: 'hub', carrier: 'AC', p_
   p_nom_max: null, p_min_pu: 0, p_max_pu: 1, efficiency: 0.97, marginal_cost: 0, capital_cost: 0, build_year: 2027, lifetime: 40 }
 const BUSES = ['grid', 'hub'].map(name => ({ name, v_nom: 110, carrier: 'AC', x: 0, y: 0, country: '', unit: '', control: 'PQ', sub_network: '' }))
 let server, browser
+const pageErrors = []
 try {
   await fs.mkdir(out, { recursive: true })
   await fs.writeFile(html, `<!doctype html><html><body><div id="root"></div><script type="module" src="/src/${entry}.tsx"></script></body></html>`)
@@ -65,7 +66,7 @@ createRoot(document.getElementById('root')!).render(<MemoryRouter><QueryClientPr
       if (/\/provenance/.test(p)) return r.fulfill({ json: { component: 'Link', name: 'grid_import', fields: {} } })
       return r.fulfill({ json: [] })
     })
-    page.on('pageerror', e => { throw new Error('page error: ' + e.message) })
+    page.on('pageerror', e => { pageErrors.push(e.message) })
     await page.goto('http://127.0.0.1:' + server.httpServer.address().port + '/' + entry + '.html?mode=' + mode)
     await page.waitForFunction(() => window.nav && window.ui)
     const shot = async key => { const f = path.join(out, 'uip01-' + mode + '-' + key + '.png'); await page.screenshot({ path: f }); console.log(f) }
@@ -93,6 +94,7 @@ createRoot(document.getElementById('root')!).render(<MemoryRouter><QueryClientPr
     await shot('3-after-refused-save-one-toast')
     await page.close()
   }
+  if (pageErrors.length) throw new Error('page error: ' + pageErrors[0])
 } finally {
   await browser?.close()
   await server?.close()
