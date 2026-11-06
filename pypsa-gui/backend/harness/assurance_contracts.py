@@ -137,7 +137,9 @@ def build() -> dict:
         )
     stray = sorted(set(V1_INPUT_ADDITIONS) - CHECKED_TOOLS)
     if stray:
-        raise ValueError("V1_INPUT_ADDITIONS names unchecked tools: " + ", ".join(stray))
+        raise ValueError(
+            "V1_INPUT_ADDITIONS names unchecked tools: " + ", ".join(stray)
+        )
     unshaped = sorted(
         (set(INPUT_ADAPTERS.values()) - set(shapes.EVIDENCE))
         | (CHECKED_TOOLS ^ set(shapes.TOOL_RESULTS))

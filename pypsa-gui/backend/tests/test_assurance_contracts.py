@@ -354,7 +354,10 @@ def test_a_listed_input_addition_keeps_the_frozen_hash(live, frozen):
     added = contracts.V1_INPUT_ADDITIONS["ui_open_panel"]["results_tab"]
     tool = next(t for t in catalogue.TOOLS if t["name"] == "ui_open_panel")
     assert set(added) <= set(tool["input_schema"]["properties"]["results_tab"]["enum"])
-    assert live["checked_tools"]["ui_open_panel"] == frozen["checked_tools"]["ui_open_panel"]
+    assert (
+        live["checked_tools"]["ui_open_panel"]
+        == frozen["checked_tools"]["ui_open_panel"]
+    )
     assert live["checked_tool_input_additions"]["ui_open_panel"]["results_tab"] == {
         "enum": list(added)
     }
