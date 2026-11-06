@@ -19,7 +19,10 @@ symmetric ones, d_k = ``sustain_h``, eh = ``snapshot_weightings.stores``:
 
 ``avail_up`` is ``p_max_pu(t)``, except on a DC-03 string, whose time series
 is the DC-03 dispatch hold (no scheduled discharge outside an outage), not
-its availability: there the static ``p_max_pu`` bounds the reserve. soc(t-1)
+its availability: there the static ``p_max_pu`` bounds the reserve (GK A R1).
+The strings are named from the stored spec's sizing (``dc_backup.string_names``),
+never by a name pattern; a string whose series holds anything but 0 is refused.
+An activated up-reserve draws energy only above the floor, through (3). soc(t-1)
 is written through PyPSA's own storage balance, so the cyclic, per-period
 and initial-SoC paths are PyPSA's:
 
@@ -77,7 +80,8 @@ FLOOR_EXCEEDS = "reserve_floor_exceeds_energy"
 PRICE_MISSING = "reserve_price_missing"
 PRICE_STALE = "reserve_price_stale"
 INITIAL_SOC = "reserve_initial_soc_below_floor"
-KINDS = (NOT_ELIGIBLE, FLOOR_EXCEEDS, PRICE_MISSING, PRICE_STALE, INITIAL_SOC)
+STRING_AVAIL = "reserve_string_availability_edited"
+KINDS = (NOT_ELIGIBLE, FLOOR_EXCEEDS, PRICE_MISSING, PRICE_STALE, INITIAL_SOC, STRING_AVAIL)
 
 _UNSET = object()
 
@@ -97,8 +101,7 @@ def products_of(cfg) -> list["ReserveProduct"]:
     """The config's reserve products (``SolverConfig.commercial.reserve_products``)."""
     from models.reserve_products import ReserveProduct
 
-    commercial = getattr(cfg, "commercial", None)
-    raw = getattr(commercial, "reserve_products", None) or []
+    raw = _raw_products(getattr(cfg, "commercial", None))
     return [p if isinstance(p, ReserveProduct) else ReserveProduct.model_validate(p) for p in raw]
 
 
@@ -106,9 +109,18 @@ def without_reserves(cfg):
     """``cfg`` with no reserve products: an outage re-dispatch, where the grid the
     obligations are owed to is gone. ``cfg`` itself is unchanged."""
     commercial = getattr(cfg, "commercial", None)
-    if not getattr(commercial, "reserve_products", None):
+    if not _raw_products(commercial):
         return cfg
+    if isinstance(commercial, dict):
+        return dataclasses.replace(cfg, commercial={**commercial, "reserve_products": []})
     return dataclasses.replace(cfg, commercial=commercial.model_copy(update={"reserve_products": []}))
+
+
+def _raw_products(commercial) -> list:
+    """The products of a commercial config: the solve's plain dict or the typed model."""
+    if isinstance(commercial, dict):
+        return list(commercial.get("reserve_products") or [])
+    return list(getattr(commercial, "reserve_products", None) or [])
 
 
 def price_column(product_id: str) -> str:
@@ -144,55 +156,52 @@ def bound_price(n, product) -> tuple[pd.Series | None, list[str]]:
 # ── the floor (one source: the stored DC-03 spec) ────────────────────────────
 
 
-def _is_string(name: str) -> bool:
-    from services.adequacy.site_peak import BACKUP_SPARE_PREFIX, BACKUP_STRING_PREFIX
-
-    return str(name).startswith((BACKUP_STRING_PREFIX, BACKUP_SPARE_PREFIX))
-
-
-def derive_floors(n, project_dir) -> dict[str, float]:
-    """{storage: floor MWh} for every eligible storage of the project's saved
-    spec, read as the DC-03 sizing and proof read it. A project without a DC
-    spec or a readable sidecar has none (nothing eligible), never floor 0."""
+def derive_backup(n, project_dir) -> tuple[dict[str, float], frozenset[str]]:
+    """({storage: floor MWh} for every eligible storage, the DC-03 strings) of the
+    project's saved spec, read as the DC-03 sizing and proof read it. A project
+    without a DC spec or a readable sidecar has none (nothing eligible), never
+    floor 0."""
     from project_templates import eh_templates as tpl
     from services.adequacy import dc_backup
     from services.adequacy.site_peak import named_load
 
+    none: tuple[dict[str, float], frozenset[str]] = ({}, frozenset())
     if project_dir is None:
-        return {}
+        return none
     d = pathlib.Path(project_dir)
     try:
         tid, spec, planning = dc_backup.project_spec(d, tpl)
         island = json.loads((d / "island_config.json").read_text())
     except (dc_backup.DcBackupError, OSError, ValueError):
-        return {}
+        return none
     if not isinstance(island, dict):
-        return {}
+        return none
     backup = spec.backup
     critical = named_load(n, dc_backup.critical_loads(island))
     out: dict[str, float] = {}
-    strings = [s for s in n.storage_units.index if _is_string(s)]
-    if strings and backup.mode != "genset":
+    strings: list[str] = []
+    if backup.mode != "genset":
         plan = planning or tpl.NATIVE_PLANNING[tid]
         try:
             sizing = dc_backup.size_bess(critical, firm_genset_mw=_firm(n, island), backup=backup,
                                          redundancy=spec.redundancy, years=plan.analysis_years)
         except dc_backup.DcBackupError:
             sizing = None
-        e = None if sizing is None else sizing.get("e_backup_usable_mwh_per_string",
-                                                     sizing.get("e_usable_mwh_per_string"))
-        if e is not None and math.isfinite(float(e)) and float(e) >= 0:
-            out.update({s: float(e) for s in strings})
+        if sizing is not None:
+            strings = [s for s in dc_backup.string_names(sizing) if s in n.storage_units.index]
+            e = sizing.get("e_backup_usable_mwh_per_string", sizing.get("e_usable_mwh_per_string"))
+            if e is not None and math.isfinite(float(e)) and float(e) >= 0:
+                out.update({s: float(e) for s in strings})
     peak = float(np.max(np.asarray(critical, dtype=float))) if np.size(critical) else math.nan
     ride = float(backup.ride_through_s)
     for s in (island.get("requirements") or {}).get("ride_through_storage") or []:
-        if s in out or s not in n.storage_units.index or _is_string(s):
+        if s in out or s not in n.storage_units.index or s in strings:
             continue
         eta = float(n.storage_units.at[s, "efficiency_dispatch"])
         floor = peak * ride / 3600.0 / eta if eta > 0 else math.nan
         if math.isfinite(floor) and floor >= 0:
             out[str(s)] = floor
-    return out
+    return out, frozenset(strings)
 
 
 def _firm(n, island) -> float:
@@ -202,13 +211,13 @@ def _firm(n, island) -> float:
     return g
 
 
-def project_floors(n) -> dict[str, float]:
-    """``derive_floors`` for the project being solved (none when unsaved)."""
+def project_backup(n) -> tuple[dict[str, float], frozenset[str]]:
+    """``derive_backup`` for the project being solved (none when unsaved)."""
     from services.pypsa_service import PyPSAService
 
     ctx = PyPSAService.solve_target_context()
     storage = getattr(ctx, "storage_dir", None) if ctx is not None else None
-    return derive_floors(n, storage) if storage else {}
+    return derive_backup(n, storage) if storage else ({}, frozenset())
 
 
 # ── the plan (every refusal before the solve) ────────────────────────────────
@@ -220,7 +229,8 @@ def _static(n, name: str, attr: str, default: float) -> float:
     return default if v is None or (isinstance(v, float) and math.isnan(v)) else float(v)
 
 
-def plan(n, products: list["ReserveProduct"], floors: dict[str, float]) -> dict[str, Any]:
+def plan(n, products: list["ReserveProduct"], floors: dict[str, float],
+         strings: frozenset[str] = frozenset()) -> dict[str, Any]:
     """Check the products against ``n`` and the floors; return what the rows need.
     Raises ``ReserveRefusal`` (typed) on anything the rows cannot hold."""
     from models.reserve_products import check_unique
@@ -267,8 +277,14 @@ def plan(n, products: list["ReserveProduct"], floors: dict[str, float]) -> dict[
                 raise ReserveRefusal(INITIAL_SOC, (
                     f"storage {s!r} starts at {init:.3f} MWh, below its backup floor of {floor:.3f} MWh: "
                     "raise state_of_charge_initial or make it cyclic"))
+        series = n.storage_units_t.p_max_pu.get(s) if s in strings else None
+        if s in strings and (series is None or (series.to_numpy(dtype=float) != 0.0).any()):
+            raise ReserveRefusal(STRING_AVAIL, (
+                f"backup string {s!r}: its p_max_pu series is not DC-03's dispatch hold (0 in every "
+                "snapshot), so its availability for a reserve is unknown; restore the hold"))
     return {"products": products, "on": on, "prices": prices,
-            "floors": {s: eligible[s] for s in used}, "storages": used}
+            "floors": {s: eligible[s] for s in used}, "storages": used,
+            "strings": frozenset(s for s in used if s in strings)}
 
 
 # ── the rows ─────────────────────────────────────────────────────────────────
@@ -289,6 +305,27 @@ def _p_nom(m, n, s: str):
     if bool(n.storage_units.at[s, "p_nom_extendable"]):
         return m["StorageUnit-p_nom"].sel(name=s)
     return float(n.storage_units.at[s, "p_nom"])
+
+
+def _initial_at(n, s: str, sns) -> pd.Series:
+    """1.0 where PyPSA's balance starts ``s`` from ``state_of_charge_initial``
+    (its ``include_previous_soc`` is False), else 0.0, as
+    ``pypsa.optimization.constraints.define_storage_unit_constraints`` decides:
+    a non-cyclic storage's first snapshot; with investment periods, each
+    period's first when it resets per period and does not cycle per period."""
+    df = n.storage_units
+    flag = lambda col: bool(df.at[s, col]) if col in df.columns else False  # noqa: E731
+    out = pd.Series(0.0, index=sns)
+    multi = getattr(n, "_multi_invest", False) and isinstance(sns, pd.MultiIndex)
+    if multi and (flag("cyclic_state_of_charge_per_period") or flag("state_of_charge_initial_per_period")):
+        if flag("cyclic_state_of_charge_per_period"):
+            return out
+        firsts = ~pd.Series(sns.get_level_values(0), index=sns).duplicated()
+        out[firsts.to_numpy()] = 1.0
+        return out
+    if not flag("cyclic_state_of_charge") and len(out):
+        out.iloc[0] = 1.0
+    return out
 
 
 def add_rows(n, sns, the_plan: dict, emit=lambda _m: None) -> int:
@@ -321,8 +358,9 @@ def add_rows(n, sns, the_plan: dict, emit=lambda _m: None) -> int:
         dis, sto = m["StorageUnit-p_dispatch"].sel(name=s), m["StorageUnit-p_store"].sel(name=s)
         soc = soc_all.sel(name=s)
         ed, es = _da(eff_d[s], coord), _da(eff_s[s], coord)
-        # soc(t-1) through PyPSA's own balance (module docstring).
-        keep = (1.0 - _da(stand[s], coord)) ** eh_da
+        # soc(t-1) through PyPSA's own balance (module docstring). Where PyPSA
+        # starts from state_of_charge_initial, it applies no standing loss to it.
+        keep = ((1.0 - _da(stand[s], coord)) ** eh_da).where(~_da(_initial_at(n, s, sns), coord).astype(bool), 1.0)
         prev = (soc + eh_da / ed * dis - eh_da * es * sto - eh_da * _da(inflow[s], coord)
                 + (eh_da * m["StorageUnit-spill"].sel(name=s) if s in spill_names else 0)) / keep
         e_max = float(n.storage_units.at[s, "max_hours"]) * p_nom
@@ -330,8 +368,8 @@ def add_rows(n, sns, the_plan: dict, emit=lambda _m: None) -> int:
         need = 0
         if up:
             r_up = r.sel(reserve=up)
-            avail = (pd.Series(_static(n, s, "p_max_pu", 1.0), index=sns) if _is_string(s)
-                     else p_max[s])
+            avail = (pd.Series(_static(n, s, "p_max_pu", 1.0), index=sns)
+                     if s in the_plan["strings"] else p_max[s])
             m.add_constraints(dis - sto + r_up.sum("reserve") - p_nom * _da(avail, coord) <= 0,
                               name=f"Reserve-up-power-{s}")
             need = (r_up * d_up).sum("reserve") / ed
@@ -441,16 +479,17 @@ def solved(n) -> tuple[pd.DataFrame | None, list[str]]:
 # ── the wrap ─────────────────────────────────────────────────────────────────
 
 
-def _wrap_with_reserve_products(network: "pypsa.Network", user_fn, cfg, floors=_UNSET, log_queue=None):
+def _wrap_with_reserve_products(network: "pypsa.Network", user_fn, cfg, backup=_UNSET, log_queue=None):
     """Chain the reserve rows after ``user_fn``; ``user_fn`` unchanged when the config
-    has no reserve products. Raises ``ReserveRefusal`` before the solve."""
+    has no reserve products. Raises ``ReserveRefusal`` before the solve. ``backup``
+    defaults to the solving project's ``(floors, strings)``."""
     products = products_of(cfg)
     if hasattr(network, RECORD_ATTR):
         delattr(network, RECORD_ATTR)  # a failed run's record never reaches this run's persist
     if not products:
         return user_fn
-    floors = project_floors(network) if floors is _UNSET else floors
-    the_plan = plan(network, products, floors)
+    floors, strings = project_backup(network) if backup is _UNSET else backup
+    the_plan = plan(network, products, floors, strings)
     record = _Record([p.id for p in products])
     setattr(network, RECORD_ATTR, record)
 

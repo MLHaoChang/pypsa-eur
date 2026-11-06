@@ -411,6 +411,19 @@ def string_bus(n, island: dict | None) -> str:
     )
 
 
+def string_names(sizing: dict[str, Any], count: int | None = None) -> list[str]:
+    """The strings ``apply_backup`` adds for ``sizing``: the N the redundancy
+    rule needs, then the spares (named ``SPARE_PREFIX``); site_peak credits
+    the N only (GK A Q2). ``count`` (None: all of ``sizing["strings"]``) adds
+    fewer, for the proof with the redundant strings out."""
+    total = int(sizing["strings"])
+    count = total if count is None else min(count, total)
+    need = min(count, int(sizing["strings_n"]))
+    return [f"{STRING_PREFIX}{i}" for i in range(1, need + 1)] + [
+        f"{SPARE_PREFIX}{j}" for j in range(1, count - need + 1)
+    ]
+
+
 def apply_backup(
     n,
     island: dict,
@@ -469,12 +482,7 @@ def apply_backup(
         "i_max_pu": a(1.2),
         "k_gfm_min": a(1.0),
     }
-    # The N strings the redundancy rule needs, then the spares (named
-    # ``SPARE_PREFIX``): site_peak credits the N only (GK A Q2).
-    need = min(count, int(sizing["strings_n"]))
-    names = [f"{STRING_PREFIX}{i}" for i in range(1, need + 1)] + [
-        f"{SPARE_PREFIX}{j}" for j in range(1, count - need + 1)
-    ]
+    names = string_names(sizing, count)
     carrier = "battery" if "battery" in n.carriers.index else ""
     for name in names:
         n.add(
