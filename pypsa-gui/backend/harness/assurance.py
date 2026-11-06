@@ -120,7 +120,7 @@ class Predicate(BaseModel):
     ) = None
     holds: StrictBool | None = None
     k: StrictInt | None = None
-    members: list[str] | None = Field(
+    members: list[Annotated[str, Field(min_length=1, max_length=128)]] | None = Field(
         default=None, min_length=1, max_length=predicates.MAX_MEMBERS
     )
 
@@ -131,7 +131,9 @@ class Draft(BaseModel):
     blocks: list[Observed] = Field(min_length=1, max_length=20)
     interpretations: list[Interpretation] = Field(default_factory=list, max_length=2)
     derived: list[Derived] = Field(default_factory=list, max_length=8)
-    predicates: list[Predicate] = Field(default_factory=list, max_length=8)
+    predicates: list[Predicate] = Field(
+        default_factory=list, max_length=predicates.MAX_ENTRIES
+    )
 
 
 class Computed(Observed):
@@ -145,7 +147,9 @@ class ProfileDraft(BaseModel):
     blocks: list[Computed] = Field(max_length=20)
     interpretations: list[Interpretation] = Field(default_factory=list, max_length=2)
     derived: list[Derived] = Field(default_factory=list, max_length=8)
-    predicates: list[Predicate] = Field(default_factory=list, max_length=8)
+    predicates: list[Predicate] = Field(
+        default_factory=list, max_length=predicates.MAX_ENTRIES
+    )
 
 
 def _object(pairs):

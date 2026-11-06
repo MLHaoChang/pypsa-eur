@@ -20,6 +20,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
+from harness import predicates
 from harness.assurance_scope import RequestScope
 
 
@@ -304,8 +305,11 @@ class TopKPredicate(_PredicateBase):
     """The top k by value, every tie at the boundary included (owner freeze item 4)."""
 
     quantifier: Literal["top_k"]
-    k: Annotated[int, Field(ge=1, le=20)]
-    members: Annotated[list[str], Field(min_length=1, max_length=100)]
+    k: Annotated[int, Field(ge=1, le=predicates.MAX_K)]
+    members: Annotated[
+        list[Annotated[str, Field(min_length=1, max_length=128)]],
+        Field(min_length=1, max_length=predicates.MAX_MEMBERS),
+    ]
 
 
 # One checked predicate (AA-03 S4); strict field by field.
@@ -349,7 +353,9 @@ class PredicateReceipt(Receipt):
     """
 
     policy_version: Literal["3"]
-    predicates: Annotated[list[PredicateEntry], Field(min_length=1, max_length=8)]
+    predicates: Annotated[
+        list[PredicateEntry], Field(min_length=1, max_length=predicates.MAX_ENTRIES)
+    ]
     derived: Annotated[  # type: ignore[assignment]  # absent by default, never null
         list[DerivedEntry], Field(default=None, min_length=1, max_length=8)
     ]

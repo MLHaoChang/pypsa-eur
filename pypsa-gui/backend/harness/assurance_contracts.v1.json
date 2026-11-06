@@ -993,6 +993,8 @@
       },
       "members": {
        "items": {
+        "maxLength": 128,
+        "minLength": 1,
         "type": "string"
        },
        "maxItems": 100,
@@ -2450,6 +2452,8 @@
       "anyOf": [
        {
         "items": {
+         "maxLength": 128,
+         "minLength": 1,
          "type": "string"
         },
         "maxItems": 100,
@@ -5129,6 +5133,8 @@
       "anyOf": [
        {
         "items": {
+         "maxLength": 128,
+         "minLength": 1,
          "type": "string"
         },
         "maxItems": 100,

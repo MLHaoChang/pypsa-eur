@@ -93,7 +93,7 @@ function validPredicates(entries: unknown): boolean {
       && Array.isArray(p.warnings) && p.warnings.length <= 20 && p.warnings.every(w => typeof w === 'string'))) return false
     return p.quantifier === 'top_k'
       ? count(p.k, 1, 20) && Array.isArray(p.members) && p.members.length >= 1 && p.members.length <= 100
-        && p.members.every(m => text(m, 4096))
+        && p.members.every(m => text(m, 128))
       : typeof p.comparator === 'string' && COMPARATORS.has(p.comparator) && typeof p.holds === 'boolean'
         && typeof p.threshold === 'number' && Number.isFinite(p.threshold)
   })
