@@ -451,7 +451,7 @@ def run_dtc_stress(
         _detach_solver_model(network)
         nn = network.copy()
         window = (None if dtc.outage_start is None
-                  else (dtc.outage_start, dtc.outage_hours))
+                  else (dtc.outage_start, dtc.outage_snapshots))
         undo, mutation = apply_islanding_contingency(nn, str(link_id), window)
         if not network.is_solved:
             _plan_is_nameplate(nn)
@@ -553,7 +553,7 @@ def run_dtc_stress(
     if dtc.outage_start is not None:
         # DC 03: the import is out for the window only; the storage's state
         # of charge entering it is the re-dispatch's own choice.
-        out["outage_window"] = {"start": dtc.outage_start, "hours": dtc.outage_hours}
+        out["outage_window"] = {"start": dtc.outage_start, "snapshots": dtc.outage_snapshots}
         out["honesty_notes"].append("outage_window_soc_is_perfect_foresight")
     if per_load:
         exact, lossy, line_losses = _priority_caveats(
