@@ -1007,8 +1007,8 @@ DIP_TRIPS_CSV = "campus_dip_trips.csv"
 RESTART_CSV = "campus_restart.csv"
 #: The driver's own assumptions, beside ``ride_through.LEDGER`` and ``restart_sequence.LEDGER``.
 RESTART_LEDGER = (
-    "after a grid dip, the units that restart are those the worst dip class trips (it dominates every class, so "
-    "they are the units any class trips); a unit with no ride-through curve is assumed to trip (conservative)",
+    "after a grid dip, the units that restart are those any dip class trips (with the EN 50160 classes, the "
+    "worst class's set); a unit with no ride-through curve is assumed to trip (conservative)",
     "an island transition trips every process unit (assumed: no ride-through bridge; conservative)",
     "the island's pickup blocks order the restart after an island transition; after a grid dip the grid is back "
     "and the units are picked up one per step",

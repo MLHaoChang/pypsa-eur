@@ -21,14 +21,15 @@ efficiency (its magnitude drawn per unit of p0). Each consumer's factor is
     factor = efficiency_out / drawn * t_per_unit(out) / t_per_unit(in)
 
 for its one product output. The walk reads unknown in these cases:
-- a consumer has no product output, or more than one;
+- a consumer has no product output (a bus counted in t or MWh), or more than one;
+- its product output counts MWh with no tonne factor;
 - an efficiency it uses varies in time;
 - the consumers differ in output bus or factor (branching);
 - the walk returns to a bus (a cycle);
 - the walk ends on a bus with no consumer and no shortfall Generator.
 
 Parallel consumers with the same output bus and the same factor are one path: two flotation lines on one slurry
-bus. A Store or Load on the path is not a branch.
+bus. A Store or Load on the path is not a branch. Every Link counts, whatever its build year.
 """
 from __future__ import annotations
 
@@ -151,9 +152,11 @@ def mass_pull(n, unit: str) -> tuple[float | None, str]:
         steps = []
         for link, drawn, varies in _consumers(n, bus, unit):
             outs = [(b, e, v) for _, b, e, v in _ports(n, link)
-                    if b != bus and e is not None and e > 0 and t_per_unit(n, b)[0] is not None]
+                    if b != bus and e is not None and e > 0 and t_per_unit(n, b)[1] in ("t", "MWh")]
             if len(outs) != 1:
                 return None, f"unknown: {link} has {len(outs)} product outputs, not one"
+            if t_per_unit(n, outs[0][0])[0] is None:
+                return None, f"unknown: {outs[0][0]} counts MWh with no tonne factor (mwh_per_t)"
             out, e, out_varies = outs[0]
             if varies or out_varies:
                 return None, f"unknown: an efficiency of {link} varies in time"

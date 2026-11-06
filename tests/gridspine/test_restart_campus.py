@@ -176,3 +176,12 @@ def test_restart_units_keeps_a_unit_with_inputs_missing():
     # The flotations' own product is the shortfall bus: mass pull 1.
     assert units.set_index("unit").at["flot_a", "mass_pull"] == pytest.approx(1.0)
     assert rs.restart_sequence(units, "trip")[2]["lower_bound"] is True
+
+
+def test_a_product_output_with_no_tonne_factor_reads_unknown_not_dropped():
+    n = _chain()
+    n.add("Bus", "tails", unit="MWh")
+    n.links.loc[["flot_a", "flot_b"], "bus3"] = "tails"
+    n.links.loc[["flot_a", "flot_b"], "efficiency3"] = 1.0
+    mp, basis = pc.mass_pull(n, "mill")
+    assert mp is None and "2 product outputs" in basis
