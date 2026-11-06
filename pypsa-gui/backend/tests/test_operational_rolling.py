@@ -112,6 +112,9 @@ def test_still_sizeable_names_what_the_freeze_left_open():
     assert OP.still_sizeable(n) == []
     n.generators.loc["gas", "p_nom_max"] = n.generators.at["gas", "p_nom_min"] + 1.0
     assert OP.still_sizeable(n) == ["Generator/gas"]
+    for lo, hi in ((5.0, np.inf), (np.nan, 5.0), (5.0, np.nan), (-np.inf, 5.0)):
+        n.generators.loc["gas", ["p_nom_min", "p_nom_max"]] = [lo, hi]
+        assert OP.still_sizeable(n) == ["Generator/gas"], (lo, hi)
     undo()
 
 
@@ -122,8 +125,15 @@ def test_windows_match_pypsas_cut():
     assert OP.windows(sns, 8, 4)[:2] == [(0, 0, 8), (1, 4, 12)]
     assert OP.windows(sns, 8, 4)[-1] == (5, 20, 24)
     assert OP.windows(sns, 24, 0) == [(0, 0, 24)]
-    with pytest.raises(ValueError):
-        OP.windows(sns, 8, 8)
+    assert OP.windows(sns, 1, 0)[-1] == (23, 23, 24)
+    for h, o in ((8, 8), (8, 9), (8, -1), (0, 0)):
+        with pytest.raises(ValueError, match="rolling_overlap"):
+            OP.windows(sns, h, o)
+
+
+def test_an_unset_sizing_source_is_not_operational():
+    assert not OP.is_operational({"solve_strategy": "rolling", "fixed_sizes": None})
+    assert OP.is_operational({"solve_strategy": "rolling", "fixed_sizes": "nameplate"})
 
 
 def test_non_cyclic_turns_every_flag_off_and_restores_flags_and_initials():
@@ -160,6 +170,9 @@ def test_a_failed_window_stops_the_run_and_reads_not_solved():
     assert gen.iloc[:8].notna().all().all()
     assert gen.iloc[8:].isna().all().all()
     assert n.storage_units_t.state_of_charge.iloc[8:].isna().all().all()
+    # Only solver outputs read not solved; the inputs stay as given.
+    assert n.loads_t.p_set.iloc[8:].notna().all().all()
+    assert n.generators_t.p_max_pu.iloc[8:].notna().all().all()
 
 
 # ── through run_simulation (C1, C4, C5) ────────────────────────────────────
@@ -308,3 +321,24 @@ def test_the_reserve_floor_holds_in_every_window():
     assert (soc - need >= 20.0 - T.TOL).all()
     assert (prev - need >= 20.0 - T.TOL).all()
     assert need.max() > T.TOL                     # the rows earned something
+
+
+def test_an_operational_run_dispatches_the_capacity_runs_sizes(reset_backend):
+    """A sizing run, then the operational run on its recorded sizes: the
+    windows dispatch within those sizes, the record keeps its digest and is
+    not rewritten, and the bounds come back."""
+    n = _install(_flat_net())
+    status, cond, _, _ = _solve()
+    assert status in ("ok", "optimal"), cond
+    record = dict(n.meta["sizing_record"])
+    plan = {**n.generators.p_nom_opt.to_dict(), **n.storage_units.p_nom_opt.to_dict()}
+    status, cond, _, lines = _solve(fixed_sizes="capacity_run", solve_strategy="rolling",
+                                    rolling_horizon=8, rolling_overlap=4)
+    assert status == "ok", (cond, lines[-5:])
+    assert n.meta["sizing_record"] == record
+    rec = n.meta[OP.META_KEY]
+    assert rec["sizes_source"] == "capacity_run" and rec["sizes_digest"] == record["sha256"]
+    for g in ("pv", "gas"):
+        assert (n.generators_t.p[g] <= plan[g] * n.generators_t.p_max_pu.get(g, 1.0) + TOL).all()
+    assert (n.storage_units_t.p_dispatch["bess"] <= plan["bess"] + TOL).all()
+    assert set(OP.still_sizeable(n)) == {"Generator/pv", "Generator/gas", "StorageUnit/bess"}
