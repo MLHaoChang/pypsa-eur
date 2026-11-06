@@ -422,6 +422,14 @@ LINK: tuple[FieldSpec, ...] = (
     FieldSpec("i_start_pu", "performance", "Start current multiple", "The starting current as a "
               "multiple of rated current, when the maker states it. Leave empty to use the start method's default "
               "(6, 3 or 1).", "× rated", "pu", reveal_when={"eh_process": True}),
+    FieldSpec("ride_through_curve", "performance", "Ride-through curve", "The voltage dips the unit rides through, "
+              "as depth%:duration_s pairs, e.g. 20:0.5, 40:0.15, 100:0.02: it rides a dip when some pair is at least "
+              "as deep and as long. Leave empty when unknown: the dip screen then reads unknown, never rides "
+              "through.", kind="text", reveal_when={"eh_process": True}),
+    FieldSpec("restart_time_h", "performance", "Restart time", "Hours from a trip until the unit is back at full "
+              "rate, for the dip and restart screens' lost tonnes. Display and screens only: the solve reads Min "
+              "down time, not this. Leave empty when unknown: the lost tonnes then read unknown.", "h", "h",
+              reveal_when={"eh_process": True}),
     FieldSpec("max_supply_temp_c", "performance", "Max supply temperature", "The highest temperature this heat "
               "device can deliver (a heat pump's reach). It may not feed a heat bus whose supply temperature is "
               "above it. Empty: no limit.", "°C", "°C"),
@@ -614,11 +622,11 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
                    "Generator": {"process_role"},
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum",
-                            "start_method"}}
+                            "start_method", "ride_through_curve"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
                    "Bus": {"mwh_per_t", "product_value", "lost_production_value", "temperature_c", "pressure_bar"},
                    "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
-                            "single_phase_share", "motor_kw", "i_start_pu", "max_supply_temp_c", "max_pressure_bar"}}
+                            "single_phase_share", "motor_kw", "i_start_pu", "restart_time_h", "max_supply_temp_c", "max_pressure_bar"}}
 
 
 def _with_blank(component: str, specs: tuple[FieldSpec, ...]) -> tuple[FieldSpec, ...]:

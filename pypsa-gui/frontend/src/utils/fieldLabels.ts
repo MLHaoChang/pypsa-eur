@@ -23,6 +23,8 @@ export const FIELD_LABELS: Record<string, string> = {
   motor_kw: 'Motor rating',
   start_method: 'Start method',
   i_start_pu: 'Start current multiple',
+  ride_through_curve: 'Ride-through curve',
+  restart_time_h: 'Restart time',
   single_phase_share: 'Single-phase share',
   temperature_c: 'Supply temperature',
   pressure_bar: 'Header pressure',

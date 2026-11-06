@@ -137,6 +137,19 @@ def coerce_eh_value(component_class: str, col: str, value):
         except ContractError as exc:  # already names the field by its label
             raise ValueError(str(exc)) from None
         return v
+    if kind == "ride_through_curve":
+        v = "" if value is None else str(value).strip()
+        try:
+            from gridspine.schema.contracts import ContractError
+            from gridspine.static.ride_through import parse_curve
+        except ImportError:  # pragma: no cover - build-shape branch
+            # Stored unchecked; the restart screen reads a malformed curve as unknown on its unit.
+            return v
+        try:
+            parse_curve(v)
+        except ContractError as exc:  # already names the field by its label
+            raise ValueError(str(exc)) from None
+        return v
     if kind == "text":
         return "" if value is None else str(value).strip()
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
@@ -145,7 +158,7 @@ def coerce_eh_value(component_class: str, col: str, value):
 def _default(kind: str):
     return {"bool": False, "float_nonneg": float("nan"), "float_signed": float("nan"), "fraction": float("nan"), "role": "", "tier": "",
             "process_role": "", "text": "", "harmonic_source": "", "harmonic_spectrum": "",
-            "start_method": ""}[kind]
+            "start_method": "", "ride_through_curve": ""}[kind]
 
 
 def ensure_eh_column(n, component_class: str, col: str) -> None:
