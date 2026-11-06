@@ -87,7 +87,9 @@ function seriesOf(products: ReserveProduct[]): Series[] {
 
 const patternId = (base: string, s: Series) => `${base}-${s.key}`
 
-function Hatches({ base, series }: { base: string; series: Series[] }) {
+// Called as a function, not a component: recharts 2 renders a chart's plain
+// SVG children (`<defs>`) but drops unknown components.
+function hatches(base: string, series: Series[]) {
   return (
     <defs>
       {series.map(s => (
@@ -255,7 +257,7 @@ function StorageCharts({ storage, snapshots, series }: {
           </div>
           <ResponsiveContainer width="100%" height={170}>
             <AreaChart data={powerRows} stackOffset="sign" margin={{ top: 18, right: 12, left: 0, bottom: 4 }}>
-              <Hatches base={base} series={shown} />
+              {hatches(base, shown)}
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="t" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} />
               <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} tickFormatter={(v: number) => num(Math.abs(v))} />

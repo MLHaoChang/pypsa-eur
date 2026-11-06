@@ -308,7 +308,9 @@ export default function StorageCycling() {
   const periodLabel = filter.selectedPeriod != null ? `period ${filter.selectedPeriod}` : 'horizon'
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-4 gap-4">
+    // [&>*]:shrink-0: the cards keep their height and the column scrolls (DC 06
+    // adds a tall reserve card; a shrinking card would clip its content).
+    <div className="flex flex-col h-full overflow-auto p-4 gap-4 [&>*]:shrink-0">
       {/* Truncated-window banner — see FIX 1 secondary in the
           results-tabs-window final review: a narrow-but-wide window can
           still hit the server's MAX_RESPONSE_VALUES cap. */}

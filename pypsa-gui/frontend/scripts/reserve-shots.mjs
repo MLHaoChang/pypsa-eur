@@ -126,6 +126,9 @@ try {
         hub_cost: null, hub_cost_reason: null, results: null, settings: null })
       // No stored scope: every card counts as in scope (useInScope before a read).
       if (p.endsWith('/flow/scope')) return r.fulfill({ status: 404, json: { detail: 'none' } })
+      if (p.endsWith('/sites') && m === 'GET') return ok({ version: 1, asset_footprints: {}, sites: [] })
+      // Neighbouring sections of the campus study panel: nothing run yet.
+      if (p.endsWith('/intent-comparison') || p.endsWith('/island') || p.endsWith('/reliability_goal')) return r.fulfill({ status: 404, json: { detail: 'none' } })
       if (/\/flow$/.test(p)) return ok({ sections: [], run_request: { optimisation: true, study: false, loadflow: false }, notes: [], deferred: false, deferred_reason: null })
       const sch = p.match(/^\/api\/network\/asset_schema\/([^/]+)$/)
       if (sch) return SCHEMAS[sch[1]] ? ok(SCHEMAS[sch[1]]) : r.fulfill({ status: 404, json: { detail: 'none' } })
@@ -143,13 +146,13 @@ try {
       // and hide the fixed overlays outside it (chat dock, Back pill), as dips-restart-shots.mjs does.
       const view = page.viewportSize()
       const tall = (await locator.boundingBox())?.height ?? 0
-      if (tall + 400 > view.height) { await page.setViewportSize({ ...view, height: Math.ceil(tall) + 400 }); await page.waitForTimeout(600) }
+      await page.setViewportSize({ ...view, height: Math.max(view.height, Math.ceil(tall) + 600) }); await page.waitForTimeout(600)
       await locator.scrollIntoViewIfNeeded()
       await locator.evaluate(el => {
         window.__shotHidden = []
         for (const n of document.body.querySelectorAll('*')) {
           if (el.contains(n) || n.contains(el)) continue
-          if (getComputedStyle(n).position === 'fixed' && n.style.visibility !== 'hidden') { n.style.visibility = 'hidden'; window.__shotHidden.push(n) }
+          if ((getComputedStyle(n).position === 'fixed' || n.matches('[data-testid="companion-launcher"]')) && n.style.visibility !== 'hidden') { n.style.visibility = 'hidden'; window.__shotHidden.push(n) }
         }
       })
       await locator.screenshot({ path: file })
