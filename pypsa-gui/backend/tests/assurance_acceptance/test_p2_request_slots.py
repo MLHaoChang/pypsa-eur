@@ -313,6 +313,29 @@ def test_a_selected_line_keeps_its_pending_capacity_question(grid, chat, checked
 # ── C6: a required unavailable slot is never dropped by adding metrics ───
 
 
+@pytest.mark.parametrize("nominal", [float("nan"), -1.0])
+def test_an_invalid_configured_input_is_unavailable_not_a_number(
+    grid, checked, nominal
+):
+    # The input needs no solve, but a NaN or negative p_nom is not a capacity.
+    grid.network.generators.loc["G1", "p_nom"] = nominal
+    frames = ask(
+        checked,
+        grid,
+        "capacity/1",
+        "G1",
+        "Generator",
+        {"configured_capacity": 20},
+        metrics=["configured_capacity"],
+    )
+    assert approval(frames)["verdict"] == "limited"
+    assert slots(frames) == {
+        "configured_capacity": ("unavailable", "invalid_or_missing_capacity")
+    }
+    assert "20 MW" not in public_text(frames)
+    assert "-1 MW" not in public_text(frames)
+
+
 def test_unanswerable_slots_stay_in_the_receipt_beside_answered_ones(grid, checked):
     # Unsolved: the optimum and its change are unverified, the input is not.
     values = {"configured_capacity": 20}
