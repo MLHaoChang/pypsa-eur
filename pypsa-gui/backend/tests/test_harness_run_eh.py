@@ -751,5 +751,25 @@ def test_the_eh_study_runs_on_a_private_copy(monkeypatch):
     assert not run_profiles.NATIVE_STEPS.get("solve")
 
 
+def test_the_step_adds_no_ledger_row_and_no_chain_link(tmp_path, monkeypatch):
+    """F10, C7: admitted, started and settled, the EH step leaves the run's
+    ledger and the envelope's chain as they were (only its reservation row)."""
+    ctx = ctx_for(tmp_path)
+    path, task = task_for(tmp_path)
+    task["run"]["ledger"] = [{"id": "chg-1", "tool": "update_component"}]
+    envelope(path, audit=[{"event": "used", "tool": "solve_queue_enqueue", "call_id": "c0"}],
+             chain=[{"id": "chg-1"}])
+    step = frozen_step(ctx)
+    task["steps"] = [{**step, "status": "waiting", "job": {"job_id": "ad:1"}}]
+    assert run_eh.admit(path, task, step, step["args"], ctx) is None
+    path.write_text(json.dumps(task))
+    settled(monkeypatch)
+    run_eh.settle(path, ("t1", "solve.2", "a1"), "ad:1", record(), 1.0)
+    assert json.loads(path.read_text())["run"]["ledger"] == [{"id": "chg-1", "tool": "update_component"}]
+    grant = run_envelope._load(path)
+    assert grant["chain"] == [{"id": "chg-1"}]
+    assert [a["event"] for a in grant["audit"]] == ["used", "eh_study"] and grant["audit"][1]["solves"] == 1
+
+
 def test_module_path():
     assert Path(run_eh.__file__).name == "run_eh.py"
