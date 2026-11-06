@@ -73,6 +73,42 @@ class AiWorkloadSpec(BaseModel):
         return self
 
 
+BackupMode = Literal["genset", "bess", "hybrid"]
+
+
+def _assumed_backup_bess() -> "BessSpec":
+    """The backup BESS's assumed defaults (DC 03): Li-ion RTE and DoD, 2 %/yr
+    calendar fade, 0.005 %/full cycle, restored to nameplate every year."""
+    return BessSpec(power_mw=1.0, energy_mwh=1.0, round_trip_efficiency=0.88,
+                    depth_of_discharge=0.9, calendar_fade_per_year=0.02,
+                    cycle_fade_per_full_cycle=0.00005,
+                    augmentation_policy="restore_to_nameplate")
+
+
+class BackupSpec(BaseModel):
+    """How the critical load is backed on loss of grid (DC grid readiness 03).
+
+    ``genset`` keeps the template's genset fleet (today's model, bit for bit);
+    ``bess`` replaces it with battery strings sized for ``ride_through_s``
+    plus ``autonomy_h`` of the critical load; ``hybrid`` keeps the gensets
+    and sizes the strings on the critical load the firm gensets leave
+    uncovered. The strings honour ``DataCentreLoadSpec.redundancy``. The
+    ``bess`` spec's ``power_mw``/``energy_mwh`` are placeholders: sizing
+    sets them; its efficiency, DoD, fade and augmentation are read. Every
+    default is assumed (``services.adequacy.dc_backup.SOURCES``)."""
+    mode: BackupMode = "genset"
+    autonomy_h: float = Field(default=4.0, gt=0, le=72)
+    ride_through_s: float = Field(default=600.0, ge=0)
+    string_mw: float = Field(default=5.0, gt=0)
+    #: Full-depth test discharges a year, the cycle fade's clock.
+    test_cycles_per_year: float = Field(default=12.0, ge=0)
+    bess: BessSpec = Field(default_factory=lambda: _assumed_backup_bess())
+    #: Genset leg of the cost delta: run hours a year (testing) when the
+    #: genset spec gives no cap, and the fuel price per MWh of fuel.
+    genset_run_hours_per_year: float = Field(default=50.0, ge=0, le=8760)
+    fuel_price_per_mwh_fuel: float = Field(default=45.0, ge=0)
+
+
 class DataCentreLoadSpec(BaseModel):
     phases: list[DcPhase] = Field(min_length=1)
     utilisation: UtilisationKind = "mixed"
@@ -99,6 +135,8 @@ class DataCentreLoadSpec(BaseModel):
     waste_heat_export: bool = False
     #: Asset-sizing design intent A-E (AS-01); None = a backup_mode-only project.
     design_intent: DesignIntentSpec | None = None
+    #: Backup on loss of grid (DC 03); the default keeps the genset fleet.
+    backup: BackupSpec = Field(default_factory=BackupSpec)
 
     @model_validator(mode="after")
     def _shares(self) -> "DataCentreLoadSpec":
