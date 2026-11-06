@@ -311,3 +311,227 @@ def test_the_previous_soc_follows_pypsa_with_standing_loss_and_weighted_hours():
     soc = n.storage_units_t.state_of_charge[STRING]
     prev = pd.concat([pd.Series([24.0]), soc.iloc[:-1].reset_index(drop=True)]).to_numpy()
     assert (prev - r.to_numpy() >= 20.0 - 1e-5).all()
+
+
+# ── the floor from a saved DC project (GK A R3, R7, R9) ─────────────────────
+
+
+def _dc_project(tmp_path, backup: dict, tid: str = "eh_datacenter"):
+    """A saved data-centre project as ``project_spec`` reads it: the
+    template's network built from a dc_load spec, its island sidecar and its
+    ``eh_template.json``."""
+    import json
+
+    from models.flex_archetypes import DataCentreLoadSpec
+    from project_templates import eh_templates as t
+    from services.adequacy import dc_backup
+
+    spec = DataCentreLoadSpec.model_validate({**t.dc_load_preset(tid), "backup": backup})
+    n = t.BUILDERS[tid](load_spec=spec)
+    island = t.island_config(tid, None, load_spec=spec)
+    (tmp_path / "island_config.json").write_text(json.dumps(island))
+    (tmp_path / dc_backup.META_FILE).write_text(
+        json.dumps({"id": tid, "dc_load": {"spec": spec.model_dump(mode="json")}}))
+    return n
+
+
+def _strings(n) -> list[str]:
+    from services.adequacy import dc_backup
+
+    return [s for s in n.storage_units.index if s.startswith(dc_backup.STRING_PREFIX)]
+
+
+def test_the_floor_of_a_saved_hybrid_project_is_each_strings_sized_energy(tmp_path):
+    n = _dc_project(tmp_path, {"mode": "hybrid"})
+    floors, strings = RP.derive_backup(n, tmp_path)
+    built = _strings(n)
+    assert built and sorted(strings) == sorted(built)  # spares included (GK A Q2)
+    su = n.storage_units
+    for s in built:
+        # No headroom: each string is built holding exactly its usable backup energy.
+        assert floors[s] == pytest.approx(su.at[s, "p_nom"] * su.at[s, "max_hours"], rel=1e-12)
+
+
+def test_a_spec_edit_moves_the_floor_and_a_stale_network_is_refused(tmp_path):
+    from project_templates import eh_templates as t
+    from services.adequacy import dc_backup
+
+    n = _dc_project(tmp_path, {"mode": "hybrid"})
+    before, strings = RP.derive_backup(n, tmp_path)
+    s = sorted(strings)[0]
+    product = _product(storages=[s])
+    _bind(n, [product], {product.id: 10.0})
+    RP.plan(n, [product], before, strings)  # the built network holds its floor
+    # The spec moves; the saved network does not (save_backup never touches it).
+    dc_backup.save_backup(tmp_path, t, {"mode": "hybrid", "autonomy_h": 8.0})
+    after, _ = RP.derive_backup(n, tmp_path)
+    assert after[s] > before[s] + 1.0
+    with pytest.raises(RP.ReserveRefusal) as e:
+        RP.plan(n, [product], after, strings)
+    assert e.value.kind == RP.FLOOR_EXCEEDS
+
+
+def test_headroom_raises_the_energy_but_never_the_floor(tmp_path):
+    from models.flex_archetypes import BackupSpec
+
+    n = _dc_project(tmp_path, {"mode": "hybrid", "reserve_headroom_h": 1.0})
+    floors, strings = RP.derive_backup(n, tmp_path)
+    b = BackupSpec()
+    eta = np.sqrt(b.bess.round_trip_efficiency)
+    su = n.storage_units
+    for s in strings:
+        floor = b.string_mw * (b.autonomy_h + b.ride_through_s / 3600.0) / eta
+        assert floors[s] == pytest.approx(floor, rel=1e-12)
+        assert su.at[s, "p_nom"] * su.at[s, "max_hours"] == pytest.approx(
+            floor + b.string_mw * 1.0 / eta, rel=1e-12)
+
+
+def test_a_project_without_a_saved_spec_has_nothing_eligible(tmp_path):
+    n = _dc_project(tmp_path, {"mode": "hybrid"})
+    (tmp_path / "eh_template.json").unlink()
+    assert RP.derive_backup(n, tmp_path) == ({}, frozenset())
+    assert RP.derive_backup(n, None) == ({}, frozenset())
+
+
+def _ups_site(tmp_path, energy_mwh: float, ride_through_s=600.0, eta=0.9, crit_mw=10.0):
+    """A genset-mode DC project whose one ride-through storage is a UPS: its
+    floor is P_crit x ride_through_s / 3600 / eta_dis (GK A R7)."""
+    import json
+
+    from project_templates import eh_templates as t
+    from models.flex_archetypes import DataCentreLoadSpec
+    from services.adequacy import dc_backup
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.add("Bus", "site")
+    n.add("Generator", "supply", bus="site", p_nom=100.0, marginal_cost=1.0)
+    n.add("Load", "crit", bus="site", p_set=pd.Series([crit_mw * 0.5, crit_mw, crit_mw * 0.8, 0.0],
+                                                       index=n.snapshots))
+    n.add("StorageUnit", "ups", bus="site", p_nom=5.0, max_hours=energy_mwh / 5.0,
+          efficiency_store=eta, efficiency_dispatch=eta, cyclic_state_of_charge=True)
+    island = {"units": {"crit": {"kind": "load", "critical": True}},
+              "requirements": {"ride_through_storage": ["ups"]}}
+    spec = DataCentreLoadSpec.model_validate(
+        {**t.dc_load_preset("eh_datacenter"),
+         "backup": {"mode": "genset", "ride_through_s": ride_through_s}})
+    (tmp_path / "island_config.json").write_text(json.dumps(island))
+    (tmp_path / dc_backup.META_FILE).write_text(
+        json.dumps({"id": "eh_datacenter", "dc_load": {"spec": spec.model_dump(mode="json")}}))
+    return n
+
+
+UPS_FLOOR = 10.0 * 600.0 / 3600.0 / 0.9  # P_crit (the peak) x 600 s / 0.9
+
+
+@pytest.mark.parametrize("above,want_mw", [(0.0, 0.0), (0.45, 0.45 * 0.9 / 0.5)])
+def test_ups_floor_by_hand_at_and_just_above(tmp_path, above, want_mw):
+    n = _ups_site(tmp_path, UPS_FLOOR + above)
+    floors, strings = RP.derive_backup(n, tmp_path)
+    assert strings == frozenset()
+    assert floors == {"ups": pytest.approx(UPS_FLOOR, rel=1e-12)}
+    up = _product("up", kind="secondary", direction="up", sustain_h=0.5)
+    _bind(n, [up], {"up": 10.0})
+    fn = RP._wrap_with_reserve_products(n, None, _cfg([up]), backup=(floors, strings))
+    status, _ = n.optimize(solver_name="highs", extra_functionality=fn,
+                           include_objective_constant=False)
+    assert status == "ok"
+    assert RP.persist_solution(n)
+    frame, _ = RP.solved(n)
+    # Full SoC; the up band reserves r x 0.5 h / 0.9 above the floor.
+    assert frame["ups|up"].to_numpy() == pytest.approx(np.full(4, want_mw), abs=1e-6)
+
+
+def test_ups_just_below_its_floor_is_refused(tmp_path):
+    n = _ups_site(tmp_path, UPS_FLOOR - 0.01)
+    floors, strings = RP.derive_backup(n, tmp_path)
+    up = _product("up", kind="secondary", direction="up", sustain_h=0.5)
+    _bind(n, [up], {"up": 10.0})
+    with pytest.raises(RP.ReserveRefusal) as e:
+        RP.plan(n, [up], floors, strings)
+    assert e.value.kind == RP.FLOOR_EXCEEDS
+
+
+def test_a_ups_without_its_efficiency_or_critical_load_is_not_eligible(tmp_path):
+    n = _ups_site(tmp_path, UPS_FLOOR + 1.0)
+    n.storage_units.loc["ups", "efficiency_dispatch"] = 0.0
+    assert RP.derive_backup(n, tmp_path)[0] == {}
+    n = _ups_site(tmp_path, UPS_FLOOR + 1.0)
+    n.remove("Load", "crit")
+    assert RP.derive_backup(n, tmp_path)[0] == {}
+
+
+# ── headroom (GK A R4, GK B L8) ──────────────────────────────────────────────
+
+
+def _hbk(**kw):
+    from models.flex_archetypes import BackupSpec
+
+    bess = {"power_mw": 1.0, "energy_mwh": 1.0, "round_trip_efficiency": 0.81,
+            "depth_of_discharge": 0.9, "calendar_fade_per_year": 0.0,
+            "cycle_fade_per_full_cycle": 0.0}
+    return BackupSpec(mode="bess", bess=bess, **kw)
+
+
+def test_no_headroom_dumps_and_sizes_as_before():
+    from services.adequacy import dc_backup
+
+    for spec in (_hbk(), _hbk(reserve_headroom_h=0.0)):
+        assert "reserve_headroom_h" not in spec.model_dump(mode="json")
+        assert "reserve_headroom_h" not in spec.model_dump(exclude_unset=True)
+    plain = dc_backup.size_bess([10.0], firm_genset_mw=0.0, backup=_hbk(), redundancy="N+1", years=10)
+    zero = dc_backup.size_bess([10.0], firm_genset_mw=0.0, backup=_hbk(reserve_headroom_h=0.0),
+                               redundancy="N+1", years=10)
+    assert plain == zero
+    assert not {k for k in plain if "headroom" in k or "backup_usable" in k}
+    assert "reserve_headroom_h" in _hbk(reserve_headroom_h=2.0).model_dump()
+
+
+def test_headroom_adds_usable_energy_at_the_backup_energys_dod():
+    from services.adequacy import dc_backup
+
+    kw = dict(firm_genset_mw=0.0, redundancy="N+1", years=10)
+    plain = dc_backup.size_bess([10.0], backup=_hbk(), **kw)
+    more = dc_backup.size_bess([10.0], backup=_hbk(reserve_headroom_h=2.0), **kw)
+    eta = 0.9
+    assert more["e_backup_usable_mwh_per_string"] == pytest.approx(plain["e_usable_mwh_per_string"])
+    assert more["e_headroom_usable_mwh_per_string"] == pytest.approx(5.0 * 2.0 / eta)
+    assert more["e_usable_mwh_per_string"] == pytest.approx(
+        plain["e_usable_mwh_per_string"] + 5.0 * 2.0 / eta)
+    assert more["e_mwh_per_string"] == pytest.approx(more["e_usable_mwh_per_string"] / 0.9)
+    assert (more["strings"], more["p_mw"]) == (plain["strings"], plain["p_mw"])
+    assert {"key": "reserve_headroom_h", "value": 2.0, "unit": "h", "assumed": False,
+            "source": dc_backup.SET_SOURCE} in more["inputs"]
+
+
+def test_headroom_capex_is_priced_once_in_the_energy_lines():
+    from services.adequacy import dc_backup
+
+    prices = {"gas-genset.investment.overnight": 0.0, "gas-genset.investment.fom_share": 0.0,
+              "gas-genset.investment.lifetime": 20.0, "battery.power.overnight": 0.0,
+              "battery.power.fom_share": 0.0, "battery.power.lifetime": 20.0,
+              "battery.energy.overnight": 100.0, "battery.energy.fom_share": 0.0,
+              "battery.energy.lifetime": 20.0, "discount_rate": 0.0, "currency": "EUR"}
+    prices = {k: prices.get(k, 0.0) for k in (*dc_backup.PACK_KEYS, *prices)}
+    args = dict(genset_mw=0.0, heat_rate=2.8, run_hours_per_year=0.0, years=1, prices=prices)
+    kw = dict(firm_genset_mw=0.0, redundancy="N+1", years=1)
+    out = {}
+    for h in (0.0, 2.0):
+        b = _hbk(reserve_headroom_h=h)
+        sizing = dc_backup.size_bess([10.0], backup=b, **kw)
+        out[h] = (sizing, dc_backup.backup_cost_delta(sizing, b, **args))
+    (s0, c0), (s2, c2) = out[0.0], out[2.0]
+    assert "reserve_headroom_mwh" not in c0
+    assert not [r for r in c0["inputs"] if r["key"] == "reserve_headroom_mwh"]
+    head = c2["reserve_headroom_mwh"]
+    assert head == pytest.approx(s2["strings"] * 5.0 * 2.0 / 0.9 / 0.9)  # usable / DoD, no fade
+    assert head == pytest.approx(s2["e_mwh"] - s0["e_mwh"])
+    # Exactly once: the extra energy's capex is its MWh x price, in the energy line only.
+    def line(c, name):
+        return next(r["npv"] for r in c["lines"] if (r["leg"], r["line"]) == ("bess", name))
+
+    assert line(c2, "energy_capex_and_repurchase") - line(c0, "energy_capex_and_repurchase") \
+        == pytest.approx(head * 100.0, rel=1e-9)
+    assert line(c2, "power_capex_and_repurchase") == line(c0, "power_capex_and_repurchase")
+    # The remaining-life credit scales with it (20-year life, 1-year horizon).
+    assert c2["npv_bess"] - c0["npv_bess"] == pytest.approx(head * 100.0 / 20.0, rel=1e-9)

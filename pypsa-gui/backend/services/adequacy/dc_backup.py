@@ -194,6 +194,16 @@ def _inputs(
         }
         for k in _BESS_KEYS
     ]
+    if backup.reserve_headroom_h:
+        rows.append(
+            {
+                "key": "reserve_headroom_h",
+                "value": backup.reserve_headroom_h,
+                "unit": "h",
+                "assumed": False,
+                "source": SET_SOURCE,
+            }
+        )
     rows.append(
         {
             "key": "redundancy",
@@ -290,9 +300,21 @@ def size_bess(
             "backup.bess.augmentation_policy",
         )
     eta_d = math.sqrt(b.round_trip_efficiency)
-    usable = backup.string_mw * base["duration_h"] / eta_d
+    backup_usable = backup.string_mw * base["duration_h"] / eta_d
+    # Reserve headroom (DC 06): extra usable energy above the backup energy,
+    # bought at the same DoD and retention; the backup energy stays the floor.
+    headroom = backup.string_mw * backup.reserve_headroom_h / eta_d
+    usable = backup_usable + headroom
     nameplate = usable / (b.depth_of_discharge * keep)
     n, total = redundant_units(short, backup.string_mw, redundancy)
+    extra = (
+        {
+            "e_backup_usable_mwh_per_string": backup_usable if total else 0.0,
+            "e_headroom_usable_mwh_per_string": headroom if total else 0.0,
+        }
+        if backup.reserve_headroom_h
+        else {}
+    )
     return {
         **base,
         "firm_genset_mw": g,
@@ -305,6 +327,7 @@ def size_bess(
         "e_mwh": total * nameplate,
         "retention": keep,
         "eta_dispatch": eta_d,
+        **extra,
     }
 
 
@@ -936,6 +959,21 @@ def backup_cost_delta(
             for k in PACK_KEYS
         ),
     ]
+    headroom = _headroom_mwh(sizing, backup) if mode != "genset" else None
+    if headroom is not None:
+        # Priced once: it is inside e_mwh, so the energy lines above carry it
+        # with the backup energy's DoD, retention and augmentation (GK B L8).
+        inputs.append(
+            {
+                "key": "reserve_headroom_mwh",
+                "value": headroom,
+                "unit": "MWh",
+                "assumed": False,
+                "source": f"{backup.reserve_headroom_h:g} h of string power on each string "
+                "for reserve products, inside the energy lines at the backup energy's "
+                "depth of discharge, retention and augmentation",
+            }
+        )
     npv_genset, npv_chosen = npv(r, genset_cash), npv(r, chosen)
     return {
         "mode": mode,
@@ -960,7 +998,18 @@ def backup_cost_delta(
         "lines": lines,
         "inputs": inputs,
         "notes": list(COST_NOTES),
+        **({"reserve_headroom_mwh": headroom} if headroom is not None else {}),
     }
+
+
+def _headroom_mwh(sizing: dict[str, Any], backup: BackupSpec) -> float | None:
+    """The nameplate MWh of ``sizing["e_mwh"]`` bought as reserve headroom
+    (DC 06), or None when the spec carries none."""
+    per = sizing.get("e_headroom_usable_mwh_per_string")
+    if not backup.reserve_headroom_h or per is None:
+        return None
+    usable = float(sizing["e_usable_mwh_per_string"])
+    return float(sizing["e_mwh"]) * float(per) / usable if usable > 0 else 0.0
 
 
 # ── Assessment: sizing, the DtC proof per leg, the cost delta ───────────

@@ -192,7 +192,9 @@ def derive_backup(n, project_dir) -> tuple[dict[str, float], frozenset[str]]:
             e = sizing.get("e_backup_usable_mwh_per_string", sizing.get("e_usable_mwh_per_string"))
             if e is not None and math.isfinite(float(e)) and float(e) >= 0:
                 out.update({s: float(e) for s in strings})
-    peak = float(np.max(np.asarray(critical, dtype=float))) if np.size(critical) else math.nan
+    # No critical load in the network: P_crit is unknown, so no UPS floor (never 0).
+    named = [x for x in dc_backup.critical_loads(island) if x in n.loads.index]
+    peak = float(np.max(np.asarray(critical, dtype=float))) if named and np.size(critical) else math.nan
     ride = float(backup.ride_through_s)
     for s in (island.get("requirements") or {}).get("ride_through_storage") or []:
         if s in out or s not in n.storage_units.index or s in strings:

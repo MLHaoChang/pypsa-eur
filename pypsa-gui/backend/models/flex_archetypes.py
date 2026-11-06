@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_serializer, model_validator
 
 from models.commercial import TimeSeriesRef
 from models.design_intent import DesignIntentSpec
@@ -107,6 +107,19 @@ class BackupSpec(BaseModel):
     #: genset spec gives no cap, and the fuel price per MWh of fuel.
     genset_run_hours_per_year: float = Field(default=50.0, ge=0, le=8760)
     fuel_price_per_mwh_fuel: float = Field(default=45.0, ge=0)
+    #: Hours of ``string_mw`` each string carries on top of its backup
+    #: energy, for reserve products to commit (DC grid readiness 06). 0
+    #: sizes the backup alone; the backup energy stays the floor either way.
+    reserve_headroom_h: float = Field(default=0.0, ge=0, le=24, allow_inf_nan=False)
+
+    @model_serializer(mode="wrap")
+    def _omit_no_headroom(self, handler):
+        """A spec without headroom dumps as it did before the field existed,
+        so stored specs, sidecars and hashes stay byte-equal (GK A R4)."""
+        data = handler(self)
+        if isinstance(data, dict) and not self.reserve_headroom_h:
+            data.pop("reserve_headroom_h", None)
+        return data
 
     @model_validator(mode="after")
     def _fade_given(self) -> "BackupSpec":
