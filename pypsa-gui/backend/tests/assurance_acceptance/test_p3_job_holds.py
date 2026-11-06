@@ -1012,3 +1012,54 @@ def test_governs_only_the_same_tool_with_the_same_args(monkeypatch):
     assert governs(other_done, TOOL, ARGS) is False
     other_args = _task(monkeypatch, [_step("completed", OTHER)])
     assert governs(other_args, TOOL, ARGS) is False
+
+
+# ── GK B (30) U1–U3: the task's admitted next step skips only the store read ─
+
+
+def _store_row(rows):
+    rows.append({"id": "j9", "project_key": "org:alpha", "kind": "solve"})
+
+
+def test_a_tasked_session_whose_next_step_is_another_call_still_reads_the_store(
+    monkeypatch, store
+):
+    """U2c: a task merely exists; this call is not its next step."""
+    rows, seen, calls = store
+    _store_row(rows)
+    for step in (_step("pending", OTHER), _step("pending", ARGS, tool="run_simulation")):
+        session = _task(monkeypatch, [step])
+        error = _error(_call(monkeypatch, session, TOOL, ARGS))
+        assert error["error_kind"] == job_holds.PENDING, (step, error)
+        assert seen["strict"] is True
+    assert calls == []
+
+
+def test_the_tasks_admitted_next_step_is_left_to_the_handler(monkeypatch, store):
+    """U1: no store read for the step begin_step admits; the handler answers."""
+    from services import assistant_tasks
+
+    rows, seen, calls = store
+    _store_row(rows)
+    session = _task(monkeypatch, [_step("pending", ARGS)])
+    monkeypatch.setattr(assistant_tasks, "begin_step", lambda *a: None)
+    frames = _call(monkeypatch, session, TOOL, ARGS)
+    assert seen == {} and len(calls) == 1, frames
+
+
+def test_admits_next_step_only_for_the_same_call_begin_step_admits(monkeypatch):
+    from services.assistant_tasks import admits_next_step
+
+    assert admits_next_step(_task(monkeypatch, [_step("pending", ARGS)]), TOOL, ARGS)
+    for steps, status in (
+        ([_step("pending", OTHER)], "running"),
+        ([_step("pending", ARGS, tool="run_simulation")], "running"),
+        ([_step("pending", ARGS, native=True)], "running"),
+        ([_step("waiting", ARGS)], "running"),
+        ([_step("uncertain", ARGS)], "running"),
+        ([_step("pending", ARGS)], "cancelled"),
+        ([_step("completed", ARGS)], "running"),
+    ):
+        session = _task(monkeypatch, steps, status=status)
+        assert admits_next_step(session, TOOL, ARGS) is False, (steps, status)
+    assert admits_next_step(ChatSession(), TOOL, ARGS) is False

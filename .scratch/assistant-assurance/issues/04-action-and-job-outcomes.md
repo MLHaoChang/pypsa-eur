@@ -399,6 +399,17 @@ abort_simulation (destructive) and wait_for_job (read) are not (N2).
   after possible effect, no replay" and A3.6 "duplicate/conflicting job ops"
   are covered for jobs within one session, and across sessions for
   solve_queue_enqueue only.
+  GK B (30) U1–U4: an admitted task step of solve_queue_enqueue (the task's
+  next step, same tool and args, which begin_step admits:
+  `assistant_tasks.admits_next_step`) skips this store read. It relies on the
+  handler's own duplicate refusal and begin_step's step record, not the store
+  hold. The handler refuses a run's capture with `solve_already_queued`
+  (`pypsa-gui/backend/routers/solve_queue.py:203`), and `enqueue_unique` answers a
+  plain repeat with the active job (`already_queued`). Session holds still
+  apply to that step (T1). The killing tests: widening the skip to "task_id set" is killed by
+  `test_a_tasked_session_whose_next_step_is_another_call_still_reads_the_store`;
+  dropping it is killed by `test_the_tasks_admitted_next_step_is_left_to_the_handler`
+  and master's `test_harness_immutable_solve::test_a_run_solve_is_refused_while_another_solve_of_the_project_is_active`.
 - **N8**: the prep commit's `test_the_digest_ignores_sub_network_rows` is
   dropped; master's `test_p3_file_outcomes::test_the_digest_is_stable_across_loads_after_topology`
   already kills that mutant.

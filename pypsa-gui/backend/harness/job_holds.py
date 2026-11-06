@@ -409,7 +409,13 @@ def check(session, tool, args, fingerprint, card: dict | None = None):
                 del holds[key]
         return None
     if hold is None:
-        hold = _store_hold(tool, args, fingerprint)
+        from services import assistant_tasks
+
+        # GK B (30) U1: the task's admitted next step is left to the handler's
+        # own duplicate refusal and begin_step's record; session holds above
+        # still apply to it (T1).
+        if not assistant_tasks.admits_next_step(session, tool, args or {}):
+            hold = _store_hold(tool, args, fingerprint)
     if hold is None:
         return None
     if hold.fingerprint == fingerprint:

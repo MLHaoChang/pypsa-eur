@@ -1423,6 +1423,32 @@ def governs(session, tool, args) -> bool:
             return False
 
 
+def admits_next_step(session, tool, args) -> bool:
+    """Whether this call is the task's next step, same tool and arguments, that
+    `begin_step` admits (not waiting, running or uncertain). Issue 04 S5 (GK B
+    (30) U1): such a step skips only the N1 store read, since the handler and
+    `begin_step` record it; session holds still apply (T1). A task that cannot
+    be read admits nothing, so the store read runs (fail closed)."""
+    task_id = getattr(session, "task_id", None)
+    if not task_id or tool in _CONTROLS:
+        return False
+    with _LOCK:
+        try:
+            _, task = _read(task_id)
+            if task["status"] in ("cancelled", "completed"):
+                return False
+            step = _next(task)
+            return (
+                step is not None
+                and not step.get("native")
+                and step["tool"] == tool
+                and _same_args(tool, _resolve(step["args"], task["steps"]), args)
+                and step["status"] not in ("waiting", "running", "uncertain")
+            )
+        except Exception:  # noqa: BLE001 - unreadable: the store read runs (fail closed)
+            return False
+
+
 def begin_step(session, tool, args):
     """Called only after the ordinary offered-tool and confirmation gates."""
     task_id = getattr(session, "task_id", None)
