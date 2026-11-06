@@ -304,13 +304,7 @@ class RunSends:
         retry that will not come) settles `uncertain` at its bound, the
         runner's turn-end rule (`send_reservation.close_open`), limited to this
         job's own sends."""
-        from harness.send_reservation import settle_uncertain
-
-        with self._inner._lock:
-            keys = [key for _ref, _body, key in self._inner._open.values()]
-            self._inner._open.clear()
-        for key in keys:
-            settle_uncertain(self._inner._path, key)
+        self._inner.settle_open()
 
 
 AUDIT_FAILED = "(the number audit could not read this statement)"
@@ -535,6 +529,22 @@ def run_report_job(job: ReportJob) -> ReportDocument:
     finally:
         if isinstance(job.provider, RunSends):
             job.provider.close()
+        if job.run_binding is not None:
+            _settle_run_step(job)
+
+
+def _settle_run_step(job: ReportJob) -> None:
+    """Study harness 07 (B1-c): the job's outcome settles its run's report
+    step as the job ends, not only on the runner's next tick, which a run
+    stopped meanwhile (the budget) never gets."""
+    from harness import run_report
+
+    with job.lock:
+        record = dict(job.record)
+    try:
+        run_report.settle_record(job.run_binding[0], record, owner=job.run_binding[1])
+    except Exception:  # noqa: BLE001 -- the runner's tick settles it again
+        logger.exception("report job %s could not settle its run step", job.report_id)
 
 
 # ── the mapping job (WP11) ──────────────────────────────────────────────────

@@ -74,6 +74,16 @@ C14. KPI read-back. Value, unit and source come from the native reader only; no 
 
 Stage-7 run link (GK B ruling): the route never detects a run. Only the harness passes the run binding (task path, lease owner), explicitly, when it launches the stage-7 job. A human request through the route or the Reports panel is never strict and never charged to a run's budget, even while a run sits at its report stage. Test (PR B): a route call while a run is at stage 7 → non-strict, no reservation on the run's ledger.
 
+### GK B (25): PR B split, GO (B1 → B2 → B3, one PR open at a time)
+
+C1–C3, C7, C8 and C11–C14 carry over. B1 = stages 7/8 in place; B2 = the EH input/result rules and run_eh_study (C1, C2); B3 = the pilot and its smoke (C11). Conditions on B1 (verbatim in substance):
+
+- B1-a (C8 sync). A stage becomes pending only when it is missing, or was stored "skipped" because the profile lacked it; a stage the user or a gate skipped stays skipped. The sync records why a stage was skipped (or tells the two cases apart); test both.
+- B1-b (old grants). An in-flight run whose envelope was granted before stages 7/8 existed must not have cross() take generate_report on that grant: stage 7 pauses at its card unless the stored envelope explicitly lists it. Test with a pre-change run record in envelope mode.
+- B1-c (stage-7 launch). The step settles from the job record. A missing or unreadable record, or a job that ends refused, fails the step and never completes it (C3/#1079). Keep the C4 reservation addendum on this path: after the job the run's ledger holds no open reservation, whether the job finished, was refused or raised.
+- B1-d (hand-off). Neither run_handoff nor run_report ever calls apply_project_changes; assert it with a spy over both steps. preview_stale is the C7 stale check, named in the PR.
+- B1-e (ReservingProvider.close). Fold it in only if #1154 and #1150 don't touch send_reservation.py at the trial merge; otherwise its own follow-up.
+
 ## Folded from #970
 
 Owner decision HARNESS-970-1 (3 Nov). Three items from #970 land here, all after the pilot works. None changes the acceptance criteria above.
