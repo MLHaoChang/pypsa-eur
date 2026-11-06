@@ -81,6 +81,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
                                  "it onto the snapshots"),
     "profile_shapes.py": (2, "168 h week template used ONLY when there are no snapshots "
                              "to follow; with snapshots the template follows the axis"),
+    "process_heat.py": (1, "the two-level heat demo builds its OWN network on an hourly axis "
+                           "(`hours` snapshots); user snapshots are never assumed hourly, a "
+                           "flat demand on non-whole-hour snapshots is refused"),
     "results/finance_case.py": (2, "IC P4 C3: a period is a year when its represented hours "
                                    "(Σ snapshot weights, any resolution) are 8760 h (8784 in a leap "
                                    "year); `annualise` scales by 8760 / those hours — units"),
@@ -168,6 +171,7 @@ def test_the_inventory_is_pinned():
     # G2P-10: solver/process_uc.py (1) recognises the hourly year time base.
     # AS-03: solver/envelope_floors.py (4) prorates the annual run-hour cap.
     # AS-06: adequacy/sizing_loop_runner.py (1) reads a RangeIndex as hourly for tsam.
-    assert sum(c for c, _ in ALLOWED.values()) == 93
-    assert len(ALLOWED) == 49
+    # G2P-15: process_heat.py (1), the two-level heat demo's own hourly snapshots.
+    assert sum(c for c, _ in ALLOWED.values()) == 94
+    assert len(ALLOWED) == 50
     assert all(reason for _, reason in ALLOWED.values())

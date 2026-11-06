@@ -29,7 +29,7 @@ import { fieldLabel, fmt, sentence } from '../components/series/SeriesKit'
 import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
 import { WeatherBar } from '../components/series/WeatherBar'
-import { generateAndApply, readyRows } from '../components/series/renewableGeneration'
+import { generateAndApply, notReadyReason, readyRows } from '../components/series/renewableGeneration'
 import { MissingCoordinatesBanner, ReadinessBadge } from '../components/series/RenewableReadiness'
 import { profilesApi, type ReadinessRow } from '../api/profiles'
 
@@ -295,7 +295,8 @@ function UploadZone({ onFile, label }: { onFile: (f: File) => void; label?: stri
       onDragOver={e => { e.preventDefault(); setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onClick={() => inputRef.current?.click()}
-      className={`border-2 border-dashed rounded-lg p-6 flex flex-col items-center gap-2 cursor-pointer transition-colors
+      data-testid="ts-upload-zone" tabIndex={-1}
+      className={`focus:outline-none focus:ring-2 focus:ring-accent border-2 border-dashed rounded-lg p-6 flex flex-col items-center gap-2 cursor-pointer transition-colors
         ${dragging ? 'border-accent bg-accent/5' : 'border-border hover:border-accent/50 hover:bg-accent/3'}`}
     >
       <Upload size={24} className={dragging ? 'text-accent' : 'text-muted'} />
@@ -1123,6 +1124,16 @@ export default function TimeSeriesManager() {
   // Per-row Generate (RP-04b): generate with the weather bar's choice, wait, apply.
   const [generating, setGenerating] = useState<ReadonlySet<string>>(new Set())
   const [genNotice, setGenNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  // An Undo makes "…generated and applied. Undo reverts…" untrue: drop the notice
+  // when the undo stack gets shorter (the header's query, same cache entry).
+  const { data: undoInfo } = useQuery({ queryKey: nk(currentProject, 'undoInfo'), queryFn: networkApi.undoInfo })
+  const undoDepthSeen = useRef<number | null>(null)
+  useEffect(() => {
+    const depth = undoInfo?.depth
+    if (depth == null) return
+    if (undoDepthSeen.current != null && depth < undoDepthSeen.current) setGenNotice(null)
+    undoDepthSeen.current = depth
+  }, [undoInfo?.depth])
   const generateRow = async (name: string) => {
     const row = readinessOf(name)
     if (!row || !currentProject) return
@@ -1134,6 +1145,39 @@ export default function TimeSeriesManager() {
       ? { tone: 'error', text: `${name}: ${outcome.error}` }
       : { tone: 'ok', text: `${name}: profile generated and applied. Undo (Ctrl+Z) reverts it.` })
     void qc.invalidateQueries()
+  }
+  // One click for every ready generator (RP-Q2 = A): a missing location, a
+  // measured file or the network's own series are never written over.
+  const [generatingAll, setGeneratingAll] = useState(false)
+  const generateAll = async () => {
+    if (!currentProject) return
+    const ready = readyRows(readinessRows)
+    if (ready.length === 0) return
+    setGenNotice(null)
+    setGeneratingAll(true)
+    const outcomes = await generateAndApply(currentProject, ready)
+    setGeneratingAll(false)
+    const applied = outcomes.reduce((n, o) => n + o.applied, 0)
+    const failed = outcomes.filter(o => o.error)
+    const steps = outcomes.filter(o => o.applied > 0).length
+    const done = applied === 0 ? 'No profile was applied' : `${applied} profile${applied === 1 ? '' : 's'} generated and applied`
+    const undoWords = steps > 1 ? `Undo (Ctrl+Z) reverts them in ${steps} steps, one per technology.`
+      : applied === 1 ? 'Undo (Ctrl+Z) reverts it.' : 'Undo (Ctrl+Z) reverts them.'
+    setGenNotice(failed.length
+      ? { tone: 'error', text: `${done}. ${failed.map(o => `${o.generators.join(', ')}: ${o.error}`).join(' · ')}${applied > 0 ? ` ${undoWords}` : ''}` }
+      : { tone: 'ok', text: `${done}. ${undoWords}` })
+    void qc.invalidateQueries()
+  }
+  // Inline bus x/y through the normal bus edit (RP-04): the row turns ready
+  // once the readiness feed re-reads.
+  const setBusCoordinates = async (bus: string, x: number, y: number) => {
+    await networkApi.updateBus(bus, { name: bus, x, y })
+    await qc.invalidateQueries()
+  }
+  const focusUploadZone = () => {
+    const el = document.querySelector<HTMLElement>('[data-testid="ts-upload-zone"]')
+    el?.scrollIntoView?.({ block: 'center' })
+    el?.focus()
   }
   const canGenerateRow = (name: string) => {
     const row = readinessOf(name)
@@ -1948,13 +1992,25 @@ export default function TimeSeriesManager() {
             ) : (
               <>
                 {activeTab === 'renewable' && currentProject && <WeatherBar project={currentProject} />}
+                {activeTab === 'renewable' && readinessRows.length > 0 && (
+                  <div className="px-3 py-2 border-b border-border/40 flex flex-wrap items-center gap-2 text-[11px]">
+                    <Btn onClick={() => { void generateAll() }}
+                      disabled={generatingAll || readyRows(readinessRows).length === 0}
+                      data-testid="generate-all-ready">
+                      {generatingAll ? 'Generating…' : `Generate wind and solar (${readyRows(readinessRows).length} ready)`}
+                    </Btn>
+                    {readyRows(readinessRows).length === 0 && (
+                      <span className="text-muted" data-testid="generate-all-why">{notReadyReason(readinessRows)}</span>
+                    )}
+                  </div>
+                )}
                 {activeTab === 'renewable' && genNotice && (
                   <p data-testid="generate-notice"
                     className={`px-3 py-1.5 text-[11px] border-b border-border/40 ${genNotice.tone === 'error' ? 'text-warn' : 'text-success'}`}>
                     {genNotice.text}
                   </p>
                 )}
-                {activeTab === 'renewable' && <MissingCoordinatesBanner rows={readinessRows} />}
+                {activeTab === 'renewable' && <MissingCoordinatesBanner rows={readinessRows} onUploadInstead={focusUploadZone} onSetCoordinates={setBusCoordinates} />}
                 {gensWithProfile.map(g => (
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
                     readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}

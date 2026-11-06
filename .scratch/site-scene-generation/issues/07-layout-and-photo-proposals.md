@@ -3,7 +3,7 @@
 
 # SC-06 — layouts and photo-based campus reconstruction
 
-Status: needs-triage — specification proposed; not implemented
+Status: ready-for-agent (layout half only, after site-scene 02; photo half parked, Q-SS-1)
 Type: research/prototype then bounded task
 Dependencies: SC-00 N and SC-01 native proposal lifecycle for layout; independently accepted SC-00 P for photo; no Blender prerequisite
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -39,3 +39,11 @@ Deliver this slice's in-place explanation, typed proposed action or truthful UI 
 ## Optional coordinate-first workflow clarification
 
 Refine the optional coordinate-first campus workflow through the existing valid Site envelope; layout/photo sources do not bypass location, scale, ownership or worker gates. Keep manual/native mapping available. Pre-boundary media APIs are outside the first slice unless separately specified. Cover V77–V78/V90. Read [optional-site-workflow.md](../optional-site-workflow.md) and [workflow-assessment.md](../workflow-assessment.md).
+
+## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role needs-info
+
+Was: `needs-triage — specification proposed; not implemented`. Owner question Q-SS-1 (see issue 05). Under option (1) the layout half is buildable after SC-01 (02) lands; the photo half waits for an accepted SC-00 P. Splitting the file into 07a layout and 07b photo is advised when answered. Opus, reviewers GK B and UX; the type is research/prototype first, then a bounded task.
+
+2026-11-05, owner answer Q-SS-1 (coordinator card): "Park until an engine is chosen (Recommended)". The layout half builds after site-scene 02 lands; the photo half waits for an engine choice.

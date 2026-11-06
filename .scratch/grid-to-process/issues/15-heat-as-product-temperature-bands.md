@@ -3,7 +3,7 @@
 
 # Heat as a modelled product: temperature bands and pressure levels
 
-Status: ready-for-agent (triage 2026-10-28: owner Q15 answered, wait for issue 10; gatekeeper triage of 2026-10-23 stands; gated, plan to GK A first)
+Status: done (#1142)
 Type: task
 Blocked by: 10 (owner Q15); 02 and 03 are done
 Gated: **yes** (schema and validator: send the gatekeeper the plan first)
@@ -137,3 +137,16 @@ This is now `ready-for-agent`, blocked by 10, and gated: send GK A the plan, inc
 **Likely files:** `pypsa-gui/backend/services/carrier_catalog.py`, `pypsa-gui/backend/services/asset_schema/fields.py`, `pypsa-gui/backend/services/validation_service.py`, `pypsa-gui/backend/models/process_unit.py`, `pypsa-gui/backend/services/profile_gen/load_archetypes.py` (read only), `.scratch/grid-to-process/design.md` (§2.6, §7), new tests under `pypsa-gui/backend/tests/`.
 **Blocked by:** 10 (owner Q15). This blocks 16.
 **Model:** Opus (schema and validator, gated).
+
+## Comments
+
+- 2026-11-05, plan verdicts (GK A GO at base 3f39808c; UX GO). The build follows them:
+  - (a) `temperature_c` and `max_supply_temp_c` are finite floats and may be negative; `pressure_bar` and `max_pressure_bar` are ≥ 0 (gauge, bar(g)).
+  - (b) The Bus temperature row shows on any carrier naming heat (the heat pickers' rule, `HEAT_BUS_RE` in `frontend/src/utils/busCarriers.ts`), the pressure row on a carrier naming steam. A set row always shows. The Link reach rows show where one of the link's buses carries heat or steam, through the one helper `hiddenLevelFields`. An empty reach reads "No limit" as text.
+  - A level stored on a bus of another carrier stays visible and is checked: it is never hidden, so it is never silently ignored.
+  - Codes `heat_level_above_reach`, `steam_level_above_reach` and `level_without_supplier` are errors, registered in `issue_titles.py` and `flow_sections.py`.
+  - The reach is checked on bus1, and on bus2–bus4 where efficiencyN > 0 at any snapshot. A supplier needs capacity (p_nom > 0 or extendable) and p_max_pu > 0 somewhere. Stores and StorageUnits never count.
+  - The four columns are validation and display only: they stay out of `_network_input_fingerprint` and the investment-case digest (a pin test checks this). They are lazy: a network that never sets one gains no column.
+  - A given demand series must match `n.snapshots` exactly and is refused otherwise (typed `HeatLevelError`). It is never reindexed.
+  - Band edges and every demo value are `demo` in `process_heat.DEMO_LEDGER`, and the band label says "demo edges".
+- GK A (review, 2026-11-05, GK OK @158247f6): `eh_process=True` in `add_hybrid_supply` is accepted only while `add_hybrid_supply` and `build_two_level_heat_demo` have no caller outside tests. A PR that gives either a route, chat tool or template must first let process UC plan a committable non-process Link, or keep heat devices out of the process-unit readers (`results/process_view`, the motor-start screen); boilers must not ship as process units.

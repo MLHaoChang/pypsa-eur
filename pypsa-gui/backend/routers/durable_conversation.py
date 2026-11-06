@@ -42,6 +42,15 @@ class RebindBody(BaseModel):
     generation: int = Field(..., ge=1)
 
 
+class ReconcileBody(BaseModel):
+    """Resolutions stay loose here: ``dc.reconcile_effects`` validates the
+    whole list itself, so every malformed request gets the same typed 422."""
+
+    model_config = ConfigDict(extra='forbid')
+    generation: int = Field(..., ge=1)
+    resolutions: Any = Field(default_factory=list)
+
+
 class ProfileBody(BaseModel):
     model_config = ConfigDict(extra='forbid')
     generation: int = Field(..., ge=1)
@@ -84,6 +93,21 @@ def resume_thread(
     _bind_actor(user)
     thread, _session = dc.resume_episode(thread_id, generation=body.generation)
     return thread
+
+
+@router.post('/{thread_id}/reconcile')
+def reconcile_thread(
+    thread_id: str,
+    body: ReconcileBody,
+    user: User = Depends(require_user),
+):
+    """Resolve unverified turns/tool calls and re-read jobs; never replays."""
+    _bind_actor(user)
+    return dc.reconcile_effects(
+        thread_id,
+        generation=body.generation,
+        resolutions=body.resolutions,
+    )
 
 
 @router.post('/{thread_id}/rebind')

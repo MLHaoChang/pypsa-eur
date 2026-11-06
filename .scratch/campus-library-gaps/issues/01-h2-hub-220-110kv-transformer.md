@@ -3,7 +3,7 @@
 
 # The H2 hub's MILP invest finds no 220/110 kV transformer in the library
 
-Status: needs-triage
+Status: ready-for-agent (Q-CL-1 answered 2026-11-05: add cited 220/110 kV units)
 Type: task
 Blocked by: None
 
@@ -29,3 +29,11 @@ unresolved.
 
 `eh_h2_hub_staged` completes `invest` with `method="milp"`, or reports the
 transformer as unresolved with the reason, as the least-cost path does.
+
+## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role needs-info
+
+Was: `needs-triage`. Owner question Q-CL-1 (GK A, gridspine). The H2 hub MILP invest finds no 220/110 kV unit. Which fix? (1, Recommended) Let the MILP path carry the transformer need as unresolved, like the least-cost path: no uncited data enters the library, and both methods then behave alike. (2) Add cited 220/110 kV units to the shipped campus library: the MILP then completes, but needs sources for each rating. (3) Both: unresolved for any pair still missing, plus cited 220/110 kV units. Once answered: ready-for-agent, Opus, files `services/` campus invest MILP path and the gridspine campus library, reviewer GK A.
+
+2026-11-05, owner answer Q-CL-1 (coordinator card): "Add cited 220/110 kV units". The library gains sourced 220/110 kV transformer units (not the recommended "carry as unresolved"). GK A reviews.

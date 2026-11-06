@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A harness run that stops to ask for data now says so in its in-app notice and opt-in email, with the item count only ("waits for data (N items)"); the list itself stays in the run view.

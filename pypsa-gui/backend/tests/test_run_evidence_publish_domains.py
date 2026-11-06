@@ -229,16 +229,21 @@ def _refuse_authority():
     raise HTTPException(409, {'error_kind': 'run_project_required', 'message': 'x'})
 
 
-def _watchers(key):
-    return [t for t in threading.enumerate() if t.name == f'run-evidence-{key}' and t.is_alive()]
+def _watchers(key, before=()):
+    """Live watchers for `key` that are not in `before`. Another test's study can leave
+    its own watcher polling a record that never ends, so a test counts only the
+    threads its own call started."""
+    return [t for t in threading.enumerate()
+            if t.name == f'run-evidence-{key}' and t.is_alive() and t not in before]
 
 
 def test_a_study_with_no_authority_at_start_starts_no_watcher(tmp_path, monkeypatch):
     monkeypatch.setattr(re_, '_authority', _refuse_authority)
     record = {'status': 'running'}
+    before = set(_watchers('margin_loop'))
     re_.watch_study_run('margin_loop', record)
     assert '_run_evidence' not in record
-    assert _watchers('margin_loop') == []
+    assert _watchers('margin_loop', before) == []
 
     # Even when another project is active by the time the study finishes.
     later = tmp_path / 'later'
@@ -255,15 +260,17 @@ def test_a_watcher_publishes_into_the_project_bound_at_start(tmp_path, monkeypat
     later.mkdir()
     monkeypatch.setattr(re_, '_authority', lambda: (first, PROJECT, OWNER))
     record = {'status': 'running'}
+    before = set(_watchers('mc'))
     re_.watch_study_run('mc', record)
+    assert len(_watchers('mc', before)) == 1  # this call's own watcher
     run_id = record['_run_evidence']['run_id']
 
     monkeypatch.setattr(re_, '_authority', lambda: (later, PROJECT, OWNER))
     record['status'] = 'done'
     deadline = time.monotonic() + 5.0
-    while _watchers('mc') and time.monotonic() < deadline:
+    while _watchers('mc', before) and time.monotonic() < deadline:
         time.sleep(0.05)
-    assert _watchers('mc') == []
+    assert _watchers('mc', before) == []
     assert (first / 'run_evidence' / run_id / 'manifest.json').is_file()
     assert not (later / 'run_evidence').exists()
 

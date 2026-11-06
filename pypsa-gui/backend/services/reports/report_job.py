@@ -100,6 +100,13 @@ class ReportJob:
     meta_updates: dict[str, Any] = field(default_factory=dict)
     stop_event: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # Study harness issue 07: a run's report. Each section's prose may quote
+    # only the numbers of its own slice (its admitted facts, at most 12 for a
+    # network chapter), and a paragraph or bullet with a number the audit
+    # cannot verify against them is withheld, not flagged.
+    strict: bool = False
+    # (task path, boot): the run whose lease admits each send (C4, issue 24).
+    run_binding: tuple[pathlib.Path, str] | None = None
 
 
 # ── preparation ─────────────────────────────────────────────────────────────
@@ -132,7 +139,9 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
                        regenerate_section: str | None = None,
                        title: str | None = None,
                        template_file_id: str | None = None,
-                       meta_updates: dict[str, Any] | None = None) -> ReportJob:
+                       meta_updates: dict[str, Any] | None = None,
+                       strict: bool = False,
+                       run_binding: tuple[pathlib.Path, str] | None = None) -> ReportJob:
     """
     Everything `run_report_job` needs, validated, with the record it will
     publish. Raises `KeyError` for a section id the document does not have.
@@ -188,8 +197,11 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
         instruction=instruction, document=document,
         regenerate_section=regenerate_section, report_id=report_id,
         record=record, new_report=new_report,
-        meta_updates=dict(meta_updates or {}),
+        meta_updates=dict(meta_updates or {}), strict=strict,
+        run_binding=run_binding,
     )
+    if run_binding is not None:
+        job.provider = RunSends(provider, *run_binding)
     record["stop_event"] = job.stop_event
     return job
 
@@ -261,6 +273,81 @@ def _with_prose(section: Section, draft: SectionDraft, facts) -> Section:
     })
 
 
+class RunSends:
+    """A harness run's report sends (GK B C4): each one is reserved through
+    `send_reservation.admit` under the run's live lease before the provider
+    is called (`ReservingProvider`), and settled after. A refusal makes no
+    provider call; its reason is kept in `refused` and the job stops."""
+
+    def __init__(self, inner: Any, task_path: pathlib.Path, boot: str) -> None:
+        from harness.send_reservation import ReservingProvider
+
+        self._inner = ReservingProvider(inner, task_path, boot=boot)
+        self.name = getattr(inner, "name", "run_report")
+        self.refused: str | None = None
+
+    def __getattr__(self, attr: str) -> Any:
+        return getattr(self._inner, attr)
+
+    def stream(self, request: Any):
+        from harness.send_reservation import SendRefused
+
+        try:
+            yield from self._inner.stream(request)
+        except SendRefused as exc:
+            self.refused = exc.reason
+            raise
+
+    def close(self) -> None:
+        """Job end (GK B C4): a hold one of this job's sends left open (the
+        provider raised before answering, so `ReservingProvider` kept it for a
+        retry that will not come) settles `uncertain` at its bound, the
+        runner's turn-end rule (`send_reservation.close_open`), limited to this
+        job's own sends."""
+        from harness.send_reservation import settle_uncertain
+
+        with self._inner._lock:
+            keys = [key for _ref, _body, key in self._inner._open.values()]
+            self._inner._open.clear()
+        for key in keys:
+            settle_uncertain(self._inner._path, key)
+
+
+AUDIT_FAILED = "(the number audit could not read this statement)"
+WITHHELD_NOTE = ("{n} statement(s) withheld: each quoted a number that is not among "
+                 "this section's admitted facts.")
+
+
+def admitted_facts(job: ReportJob, section: Section):
+    """The numbers one section's prose may quote in a strict job: those of
+    its own slice (payload and headline), nothing from another section."""
+    from services.reports.evidence import _walk
+
+    sl = _slice(job, section)
+    out: list = []
+    _walk(sl.get("payload") or {}, f"/sections/{section.section_id}/payload", "", out)
+    _walk(sl.get("headline") or {}, "/headline", "", out)
+    return out
+
+
+def withhold_unverified(draft: SectionDraft, facts) -> tuple[SectionDraft, list[str]]:
+    """The draft without each paragraph or bullet the number audit cannot
+    verify against `facts`, and the numbers that withheld them."""
+    tokens: list[str] = []
+
+    def keep(text: str) -> bool:
+        try:
+            bad = list(audit([text], facts).unverified)
+        except Exception:  # noqa: BLE001 -- fail closed (GK B C5): an audit that cannot run admits nothing
+            logger.warning("report audit failed on a statement; it is withheld")
+            bad = [AUDIT_FAILED]
+        tokens.extend(bad)
+        return not bad
+    kept = draft.model_copy(update={"paragraphs": [p for p in draft.paragraphs if keep(p)],
+                                    "bullets": [b for b in draft.bullets if keep(b)]})
+    return kept, tokens
+
+
 def _with_failure(section: Section, reason: str, job: ReportJob) -> Section:
     failure = (f"{_FAILURE_PREFIX}{reason} (profile {job.profile_id}, "
                f"model {job.model})")
@@ -328,13 +415,42 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
         repairs = int(getattr(result, "repairs", 0) or 0)
         with job.lock:
             job.record["repairs"] += repairs
-        if isinstance(result, SectionDraft):
+        if isinstance(result, SectionDraft) and job.strict:
+            own = admitted_facts(job, section)
+            kept, withheld = withhold_unverified(result, own)
+            try:
+                written = _with_prose(section, kept, own)
+            except Exception:  # noqa: BLE001 -- fail closed (C5): no prose rather than an unaudited one
+                logger.warning("report audit failed on section %s; its prose is withheld", sid)
+                kept = kept.model_copy(update={"paragraphs": [], "bullets": []})
+                withheld = withheld or [AUDIT_FAILED]
+                written = section.model_copy(update={
+                    "source": "code", "note": _clean_note(section.note),
+                    "blocks": [b for b in section.blocks if b.type not in _PROSE_TYPES]})
+            if withheld:
+                n = len(result.paragraphs) + len(result.bullets) - len(kept.paragraphs) - len(kept.bullets)
+                note = WITHHELD_NOTE.format(n=n)
+                written = written.model_copy(update={
+                    "note": f"{written.note} {note}" if written.note else note,
+                    "audit": written.audit.model_copy(update={"unverified": withheld})})
+                with job.lock:
+                    job.record.setdefault("withheld", []).append({"section_id": sid, "statements": n})
+        elif isinstance(result, SectionDraft):
             written = _with_prose(section, result, facts)
         else:
             assert isinstance(result, SectionFailure)
             if result.reason == "aborted":
                 aborted = True
                 break
+            refused = getattr(job.provider, "refused", None)
+            if refused is not None:
+                # C4: the run's reservation refused the send; nothing more goes out.
+                with job.lock:
+                    job.record["refused"] = refused
+                for rest in pending:
+                    doc.sections[by_id[rest]] = _with_failure(doc.sections[by_id[rest]], f"send refused ({refused})", job)
+                _progress(job, done, None)
+                return doc, False
             written = _with_failure(section, result.reason, job)
             with job.lock:
                 job.record["prose_failures"].append({
@@ -416,6 +532,9 @@ def run_report_job(job: ReportJob) -> ReportDocument:
     except Exception as exc:
         _set(job, status="failed", error=str(exc), finished_at=time.time())
         raise
+    finally:
+        if isinstance(job.provider, RunSends):
+            job.provider.close()
 
 
 # ── the mapping job (WP11) ──────────────────────────────────────────────────
@@ -601,6 +720,8 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
                      title: str | None = None,
                      template_file_id: str | None = None,
                      meta_updates: dict[str, Any] | None = None,
+                     strict: bool = False,
+                     run_binding: tuple[pathlib.Path, str] | None = None,
                      lock: threading.Lock, state: dict[str, Any]) -> str:
     """
     Publish the record under `state["report_job"]` and start the daemon
@@ -614,7 +735,8 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
             provider=provider, language=language, sections=sections,
             instruction=instruction, base_document=base_document,
             regenerate_section=regenerate_section, title=title,
-            template_file_id=template_file_id, meta_updates=meta_updates),
+            template_file_id=template_file_id, meta_updates=meta_updates, strict=strict,
+            run_binding=run_binding),
         run=run_report_job, lock=lock, state=state)
 
 

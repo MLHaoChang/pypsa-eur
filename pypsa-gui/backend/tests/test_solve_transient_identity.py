@@ -312,6 +312,250 @@ def test_the_snapshot_outlives_the_restore(baseline, monkeypatch):
     assert at_restore and at_restore[0] == before
 
 
+# ── SP-1: the lasting normalisations are invisible to unlocked readers ──────
+
+
+def lasting_normalisation_layers(n):
+    """Two lasting normalisations far apart in `run_simulation`: a GUI
+    transformer preset that is no PyPSA type (cleared early) and a stale
+    dispatch fix (cleared late)."""
+    import pandas as pd
+
+    n.add("Bus", "B2", v_nom=20)
+    n.add(
+        "Transformer", "T1", bus0="B1", bus1="B2", s_nom=50.0, x=0.1, type="380/220 kV"
+    )
+    n.add("Load", "L2", bus="B2", p_set=1.0)
+    n.generators_t.p_set = pd.DataFrame({"G1": [5.0, 5.0]}, index=n.snapshots)
+
+
+def test_a_read_between_two_normalisations_sees_the_pre_solve_inputs(
+    baseline, monkeypatch
+):
+    """SP-1 (2): an unlocked reader inside the normalisation window, after the
+    transformer type is cleared but before the dispatch fix is, hashes the
+    inputs the solve started from: never a mix the network never had."""
+    cfg = short_horizon_layers(ctx().network)
+    lasting_normalisation_layers(ctx().network)
+    ctx().solver_state["solver_config"] = cfg
+    before = identity(ctx())
+    original = solver_service._normalise_dynamic_indexes
+    between = []
+
+    def reading(network, *args, **kwargs):
+        if not between:
+            assert ctx().network.transformers.at["T1", "type"] == ""  # first one done
+            assert "G1" in ctx().network.generators_t.p_set  # second one pending
+            between.append(identity(ctx()))
+        return original(network, *args, **kwargs)
+
+    monkeypatch.setattr(solver_service, "_normalise_dynamic_indexes", reading)
+    seen = solve_reading_mid_lp(cfg, lambda: identity(ctx()))
+    after = identity(ctx())
+    assert after != before  # both normalisations lasted
+    assert between == [before]
+    assert seen["mid"] == after  # past the window: the normalised inputs
+    assert not wt._SOLVE_INPUTS
+
+
+def test_a_nested_refresh_never_replaces_the_outer_snapshot(baseline):
+    c = ctx()
+    with c.mutation_lock:
+        outer = wt.hold_solve_inputs(c.network, c.mutation_lock)
+        snapshot = wt._solve_snapshot(c.network)
+        inner = wt.hold_solve_inputs(c.network, c.mutation_lock)
+        inner.refresh()
+        assert wt._solve_snapshot(c.network) is snapshot
+        inner()
+        outer.refresh()
+        assert wt._solve_snapshot(c.network) is not snapshot  # the outermost may
+        outer()
+        outer.refresh()  # released: a late refresh registers nothing
+    assert not wt._SOLVE_INPUTS
+
+
+def test_the_outer_refresh_works_after_a_nested_hold_came_and_went(baseline):
+    c = ctx()
+    with c.mutation_lock:
+        outer = wt.hold_solve_inputs(c.network, c.mutation_lock)
+        snapshot = wt._solve_snapshot(c.network)
+        inner = wt.hold_solve_inputs(c.network, c.mutation_lock)
+        inner()
+        assert wt._solve_snapshot(c.network) is snapshot  # the outer one stays
+        outer.refresh()
+        refreshed = wt._solve_snapshot(c.network)
+        assert refreshed is not None and refreshed is not snapshot
+        outer()
+    assert not wt._SOLVE_INPUTS
+
+
+def test_a_refresh_after_release_or_replacement_publishes_nothing(baseline):
+    """S3: refresh publishes only while its own hold is the registered one."""
+    c = ctx()
+    with c.mutation_lock:
+        stale = wt.hold_solve_inputs(c.network, c.mutation_lock)
+        stale()
+        stale.refresh()  # released
+        assert not wt._SOLVE_INPUTS
+        newer = wt.hold_solve_inputs(c.network, c.mutation_lock)
+        snapshot = wt._solve_snapshot(c.network)
+        stale.refresh()  # a newer hold replaced it
+        assert wt._solve_snapshot(c.network) is snapshot
+        newer()
+        outer = wt.hold_solve_inputs(c.network, c.mutation_lock)
+        inner = wt.hold_solve_inputs(c.network, c.mutation_lock)
+        snapshot = wt._solve_snapshot(c.network)
+        outer()  # released while a nested holder keeps the entry registered
+        outer.refresh()
+        assert wt._solve_snapshot(c.network) is snapshot
+        inner()
+    assert not wt._SOLVE_INPUTS
+
+
+class _Slot(list):
+    """An entry that records every write to its snapshot slot (the publish
+    point itself) and whether the copy behind it had finished by then."""
+
+    def __init__(self, entry, published, copied):
+        super().__init__(entry)
+        self.published = published
+        self.copied = copied
+
+    def __setitem__(self, i, value):
+        if i == 1:
+            self.published.append((value, self.copied.is_set()))
+        super().__setitem__(i, value)
+
+
+def test_a_reader_racing_refresh_sees_the_old_or_the_new_snapshot(
+    baseline, monkeypatch
+):
+    """S2: refresh builds its copy completely, then publishes it with one swap;
+    a reader racing it hashes the old snapshot or the new, nothing else."""
+    cfg = short_horizon_layers(ctx().network)
+    lasting_normalisation_layers(ctx().network)
+    c = ctx()
+    c.solver_state["solver_config"] = cfg
+    old = identity(c)
+    reads, published, stop = [], [], threading.Event()
+    copying, copied = threading.Event(), threading.Event()
+    real_copy = wt._network_copy
+
+    def slow_copy(network):
+        if network is not c.network:  # a reader copying the snapshot
+            return real_copy(network)
+        copying.set()
+        stop.wait(0.3)  # readers run while the new snapshot is being built
+        out = real_copy(network)
+        copied.set()
+        return out
+
+    def reader():  # one fingerprint per read: a swap may land between two
+        exact = False
+        while not stop.is_set():
+            reads.append((exact, wt._network_input_fingerprint(c, exact=exact)))
+            exact = not exact
+
+    with c.mutation_lock:
+        hold = wt.hold_solve_inputs(c.network, c.mutation_lock)
+        key = id(c.network)
+        wt._SOLVE_INPUTS[key] = _Slot(wt._SOLVE_INPUTS[key], published, copied)
+        hold._entry = wt._SOLVE_INPUTS[key]
+        c.network.transformers.at["T1", "type"] = ""  # the lasting normalisations
+        c.network.generators_t.p_set = c.network.generators_t.p_set.iloc[:, :0]
+        new = identity(_live(c))
+        t = threading.Thread(target=reader)
+        t.start()
+        monkeypatch.setattr(wt, "_network_copy", slow_copy)
+        hold.refresh()
+        monkeypatch.setattr(wt, "_network_copy", real_copy)
+        before_swap = len(reads)
+        while len(reads) < before_swap + 2:
+            stop.wait(0.01)
+        stop.set()
+        t.join()
+        assert copying.is_set()
+        assert [done for _, done in published] == [True]  # one swap, of a finished copy
+        assert published[0][0] is wt._solve_snapshot(c.network)
+        hold()
+    assert old != new
+    allowed = {(False, old[0]), (True, old[1]), (False, new[0]), (True, new[1])}
+    assert reads and set(reads) <= allowed, set(reads) - allowed
+    assert {fp for _, fp in reads} & set(old) and {fp for _, fp in reads} & set(new)
+
+
+def _live(c):
+    """A probe context that hashes the live network, not the snapshot."""
+    probe = copy.copy(c)
+    probe.network = wt._network_copy(c.network)  # not registered: read as it is
+    return probe
+
+
+def test_a_normalisation_that_raises_leaves_no_snapshot(baseline, monkeypatch):
+    """S4: a raise between the hold and the refresh releases the hold."""
+    cfg = short_horizon_layers(ctx().network)
+    ctx().solver_state["solver_config"] = cfg
+
+    def boom(*args, **kwargs):
+        assert wt._solve_snapshot(ctx().network) is not None  # held by now
+        raise RuntimeError("injected")
+
+    monkeypatch.setattr(solver_service, "_sanitise_transformer_types", boom)
+    c = ctx()
+    status, _ = run_simulation(
+        cfg, c.network, c.mutation_lock, threading.Event(), queue.SimpleQueue()
+    )
+    assert status == "error"
+    assert not wt._SOLVE_INPUTS
+
+
+def test_the_ac_pf_stage_transients_never_reach_the_identity(baseline, monkeypatch):
+    """S6: the AC-PF stage after a LOPF fixes dispatch into `p_set` and sets
+    generator controls in place, and reverts them; a reader mid-stage hashes
+    the inputs, as after the solve."""
+    from services import ac_pf_service
+
+    cfg = short_horizon_layers(ctx().network)
+    cfg.run_ac_pf_after_lopf = True
+    ctx().solver_state["solver_config"] = cfg
+    original = ac_pf_service._fix_dispatch_for_ac_pf
+    mid = []
+
+    def reading(network):
+        original(network)
+        assert "G1" in network.generators_t.p_set  # the transient is on
+        mid.append(identity(ctx()))
+
+    monkeypatch.setattr(ac_pf_service, "_fix_dispatch_for_ac_pf", reading)
+    solve_reading_mid_lp(cfg, lambda: None)
+    after = identity(ctx())
+    assert mid == [after]
+    assert not wt._SOLVE_INPUTS
+
+
+# Recorded on master 4e637711f (before SP-1): the short-horizon fixture's
+# solve, which SP-1 must leave unchanged.
+SOLVE_ON_MASTER = {
+    "objective": 14.876712,
+    "p_nom_opt": {"G1": 20.0, "G2": 12.0, "G3": 0.0},
+    "p": {"G1": 0.0, "G2": 12.0, "G3": 0.0},
+}
+
+
+def test_solve_results_equal_master(baseline):
+    cfg = short_horizon_layers(ctx().network)
+    lasting_normalisation_layers(ctx().network)
+    ctx().solver_state["solver_config"] = cfg
+    solve_reading_mid_lp(cfg, lambda: None)
+    n = ctx().network
+    got = {
+        "objective": round(float(n.objective), 6),
+        "p_nom_opt": {g: round(float(v), 6) for g, v in n.generators.p_nom_opt.items()},
+        "p": {g: round(float(v), 6) for g, v in n.generators_t.p.sum().items()},
+    }
+    assert got == SOLVE_ON_MASTER
+
+
 # ── T4: the owner's Done, at the envelope ───────────────────────────────────
 
 

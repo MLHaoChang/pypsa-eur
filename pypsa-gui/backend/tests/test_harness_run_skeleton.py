@@ -367,7 +367,31 @@ def enqueued_for(queued, project_id):
         return job['project_key'] == project_registry.registry_key(project_registry.resolve_project(db, user, project_id))
 
 
-def test_each_stage_tool_resolves_the_project_through_the_bound_context(session, site):
+def _report_reads_the_run_project(run_ctx, project_id, monkeypatch):
+    """Issue 07 (GK B C6): the report the run starts reads the run's project's
+    evidence, not the foreground's: the route's evidence read sees the run's
+    project. The read is stopped there (nothing is started)."""
+    from fastapi import HTTPException
+    from routers import report_jobs
+    from services.pypsa_service import PyPSAService
+    from services.study.runner import _on_ctx
+    seen = []
+
+    def evidence_for(project):  # the project the route resolved, and the network it would read
+        seen.append((str(project.uuid), str(PyPSAService.get_active_context().project_uuid)))
+        raise HTTPException(400, {"error_kind": "no_evidence", "message": "stopped by the test"})
+
+    monkeypatch.setattr(report_jobs, "_provider_or_400", lambda profile: object())
+    monkeypatch.setattr(report_jobs, "_resolve_profile", lambda: object())
+    monkeypatch.setattr(report_jobs, "_evidence_for", evidence_for)
+    try:
+        _on_ctx(run_ctx, chat_tools.generate_report)
+    except HTTPException:
+        pass
+    return seen == [(str(project_id), str(project_id))]
+
+
+def test_each_stage_tool_resolves_the_project_through_the_bound_context(session, site, monkeypatch):
     """With another network in the foreground, each tool of the eh_site stage
     subsets, run on the run's bound context, reads the run's project (§6.6)."""
     from services import workflow_tools
@@ -396,6 +420,7 @@ def test_each_stage_tool_resolves_the_project_through_the_bound_context(session,
                                        ['applied'] and 'L1' not in front.network.loads_t.p_set.columns
                                        and list(run_ctx.network.loads_t.p_set['L1']) == [7.5, 9.0]
                                        and ('loads', 'p_set', 'L1') in run_ctx.user_ts,
+            'generate_report': _report_reads_the_run_project(run_ctx, project_id, monkeypatch),
         }
         assert PyPSAService.get_network() is front.network  # the foreground is untouched
     assert seen == {tool: True for tool in run_profiles.BOUND_CONTEXT_TOOLS}
@@ -570,3 +595,71 @@ def test_another_projects_context_never_spends_a_gate(session, site):
     with foreground(two_buses()) as front:
         tasks._advance_run(path, front)
     assert stored(root, task['task_id']) == before
+
+
+def test_a_run_report_call_without_a_bound_context_never_reads_the_foreground(session, site, monkeypatch, client,
+                                                                             session_ctx, api_project):
+    """Issue 07 (GK B C6): a run's generate_report reached with the run's
+    context set (`RUN_CONTEXT`) but no request binding, while another project
+    is in the foreground, reads the run's project or is refused; it never
+    reads the foreground project's evidence."""
+    from fastapi import HTTPException
+    from routers import report_jobs
+    from services import assistant_tasks
+    from services.pypsa_service import PyPSAService
+    project_id, _ = site
+    run_ctx = PyPSAService.get_active_context()
+    api_project("Front Site")  # a real project the owner can read, now the session's foreground
+    front_ctx = session_ctx(client)
+    assert str(front_ctx.project_uuid) != str(project_id) and str(run_ctx.project_uuid) == str(project_id)
+    seen = []
+
+    def evidence_for(project):
+        seen.append({str(project.uuid), str(PyPSAService.get_active_context().project_uuid)})
+        raise HTTPException(400, {"error_kind": "no_evidence", "message": "stopped by the test"})
+
+    monkeypatch.setattr(report_jobs, "_provider_or_400", lambda profile: object())
+    monkeypatch.setattr(report_jobs, "_resolve_profile", lambda: object())
+    monkeypatch.setattr(report_jobs, "_evidence_for", evidence_for)
+    front_id = str(front_ctx.project_uuid)
+    binding = PyPSAService.bind_request_context(front_ctx)  # the foreground, as the request scope sees it
+    token = assistant_tasks.RUN_CONTEXT.set(run_ctx)
+    try:
+        with pytest.raises(HTTPException) as refused:
+            chat_tools.generate_report()
+    finally:
+        assistant_tasks.RUN_CONTEXT.reset(token)
+        PyPSAService.reset_request_context(binding)
+    assert all(front_id not in s for s in seen), (seen, front_id)
+    if seen:  # it read: the run's project and only it
+        assert seen == [{str(project_id)}]
+    else:  # it was refused before any read, naming why
+        assert refused.value.detail["error_kind"] == "project_changed"
+
+
+def test_a_run_report_call_whose_run_context_has_no_project_is_refused(session, site, monkeypatch):
+    """Issue 07 (GK B NOT OK @b5d23bb7, C6): a run context with no project id
+    is refused `project_changed`, even when the active context has none
+    either; nothing is read."""
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+    from routers import report_jobs
+    from services import assistant_tasks
+    from services.pypsa_service import PyPSAService
+
+    def evidence_for(project):
+        raise AssertionError("read evidence for a run with no project")
+
+    monkeypatch.setattr(report_jobs, "_evidence_for", evidence_for)
+    for active in ("", None):
+        monkeypatch.setattr(PyPSAService, "get_active_context",
+                            staticmethod(lambda a=active: SimpleNamespace(project_uuid=a)))
+        token = assistant_tasks.RUN_CONTEXT.set(SimpleNamespace(project_uuid=active))
+        try:
+            with pytest.raises(HTTPException) as refused:
+                chat_tools.generate_report()
+        finally:
+            assistant_tasks.RUN_CONTEXT.reset(token)
+        assert refused.value.status_code == 409
+        assert refused.value.detail["error_kind"] == "project_changed"

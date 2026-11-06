@@ -145,6 +145,8 @@ UI_INTERNAL: dict[str, dict] = {
             ('POST', '/api/durable-conversations/{thread_id}/rebind'),
             ('POST', '/api/durable-conversations/{thread_id}/resume'),
             ('POST', '/api/durable-conversations/{thread_id}/profile'),
+            # LV-09: the owner resolves unverified effects after a restart.
+            ('POST', '/api/durable-conversations/{thread_id}/reconcile'),
             # LC-07: the speech session's own media lifecycle and bridge.
             ('GET', '/api/durable-conversations/{thread_id}/speech'),
             ('POST', '/api/durable-conversations/{thread_id}/speech/start'),

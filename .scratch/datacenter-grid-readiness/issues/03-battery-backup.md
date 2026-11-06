@@ -1,6 +1,7 @@
 # Battery-based backup in place of diesel
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Opus
 Type: task
 Blocked by: 01
 Gated: yes (adequacy, finance)
@@ -17,3 +18,9 @@ Size: M
 ## Done when
 
 A DC project can switch to `bess` and see adequacy plus the cost delta against `genset`.
+
+## Comments
+
+### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
+
+Was: `needs-triage`. Files: DC load model and template parameters, `services/adequacy/` (DtC stress re-dispatch), `BessSpec` sizing and finance. Blockers: 01 is done (#421). Reviewers: GK A (adequacy) and GK B (finance). Unblocks 05, 06, 07.
