@@ -103,3 +103,31 @@ def test_test_files_are_ignored_by_main(tmp_path, monkeypatch, capsys):
     git("add", "-N", ".")
     monkeypatch.chdir(tmp_path)
     assert repr_guard.main(["master"]) == 0
+
+
+def test_warnings_warn_and_log_helpers_are_exempt():
+    src = (
+        "import warnings\n"
+        "def f(x):\n"
+        '    warnings.warn(f"{x!r}")\n'
+        '    _log_debug(f"{x!r}")\n'
+        '    self.logger.info(f"{x!r}")\n'
+        '    other.warn(f"{x!r}")\n'
+    )
+    assert [ln for ln, _ in repr_guard.check_file("m.py", [3, 4, 5, 6], src)] == [6]
+
+
+def test_log_call_closing_line_is_inside_the_call():
+    src = 'import logging\nlog = logging.getLogger("x")\nlog.info(\n    "a",\n    f"{1!r}")\nz = f"{2!r}"\n'
+    assert [ln for ln, _ in repr_guard.check_file("m.py", [5, 6], src)] == [6]
+
+
+def test_syntax_error_source_still_checks_lines():
+    src = 'def (:\n    msg = f"{1!r}"\n    log.info(f"{1!r}")\n'
+    assert [ln for ln, _ in repr_guard.check_file("m.py", [2, 3], src)] == [2]
+
+
+def test_test_path_kinds():
+    assert repr_guard.is_test_path("pypsa-gui/backend/tests/helpers.py")
+    assert repr_guard.is_test_path("pypsa-gui/backend/conftest.py")
+    assert not repr_guard.is_test_path("pypsa-gui/backend/services/contest.py")
