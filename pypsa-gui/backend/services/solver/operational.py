@@ -151,7 +151,7 @@ def issues(n, cfg) -> list[tuple[str, str, str, str]]:
                 "the full strategy.",
             )
         )
-    if (getattr(cfg, "extra_functionality_code", None) or "").strip():
+    if (_get(cfg, "extra_functionality_code", None) or "").strip():
         out.append(
             (
                 "warning",
@@ -190,6 +190,19 @@ def fallback_refusal(cfg, *, sclopf: bool) -> None:
             "operational_rolling_sclopf",
             "An operational (rolling) run on fixed sizes cannot run N-1 (SCLOPF). Turn "
             "N-1 off, or use the full strategy.",
+        )
+
+
+def refuse_sizeable(n) -> None:
+    """Raise :class:`OperationalRefused` (``operational_still_sizeable``) when
+    anything is still sizeable once the freeze is in place (C6)."""
+    left = still_sizeable(n)
+    if left:
+        more = " …" if len(left) > 5 else ""
+        raise OperationalRefused(
+            "operational_still_sizeable",
+            f"An operational run needs every size fixed, but {', '.join(left[:5])}{more} "
+            "can still be sized.",
         )
 
 
@@ -346,20 +359,26 @@ def stitched_opex(n) -> float:
     return total
 
 
-def report(n, cfg, window_records: list[dict], cyclic_off: list[str]) -> dict:
+def report(
+    n,
+    cfg,
+    *,
+    horizon: int,
+    overlap: int,
+    window_records: list[dict],
+    cyclic_off: list[str],
+) -> dict:
     """The ``n.meta[META_KEY]`` record of a solved operational run: what it
-    ran on (sizes source and digest, horizon, overlap), each window, the
-    storages whose cyclic flags were off, and the stitched opex (C4)."""
+    ran on (sizes source and digest, the horizon and overlap the windows were
+    cut with), each window, the storages whose cyclic flags were off, and the
+    stitched opex (C4)."""
     return {
         "version": 1,
-        "label": (
-            f"operational (rolling {int(_get(cfg, 'rolling_horizon', 168))}/"
-            f"{int(_get(cfg, 'rolling_overlap', 24))}) on plan sizes"
-        ),
+        "label": f"operational (rolling {horizon}/{overlap}) on plan sizes",
         "sizes_source": _get(cfg, "fixed_sizes", "off"),
         "sizes_digest": sizes_digest(n, cfg),
-        "horizon": int(_get(cfg, "rolling_horizon", 168)),
-        "overlap": int(_get(cfg, "rolling_overlap", 24)),
+        "horizon": horizon,
+        "overlap": overlap,
         "windows": window_records,
         "cyclic_off": list(cyclic_off),
         "opex": stitched_opex(n),

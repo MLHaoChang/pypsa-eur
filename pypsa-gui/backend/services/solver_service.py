@@ -1215,13 +1215,7 @@ def run_simulation(
                     elif use_rolling and _operational.is_operational(config):
                         # DC 07: dispatch the frozen design window by window, each
                         # window's status checked (services/solver/operational.py).
-                        _left = _operational.still_sizeable(network)
-                        if _left:
-                            raise _operational.OperationalRefused(
-                                "operational_still_sizeable",
-                                "An operational run needs every size fixed, but "
-                                f"{', '.join(_left[:5])}{' …' if len(_left) > 5 else ''} "
-                                "can still be sized.")
+                        _operational.refuse_sizeable(network)
                         with _operational.non_cyclic(network) as _cyclic_off:
                             if _cyclic_off:
                                 phase(f"Operational run: cyclic state of charge is off for "
@@ -1250,7 +1244,8 @@ def run_simulation(
                             network.meta.pop(_operational.META_KEY, None)
                         else:
                             _operational_report = _operational.report(
-                                network, config, _windows, _cyclic_off)
+                                network, config, horizon=H, overlap=O,
+                                window_records=_windows, cyclic_off=_cyclic_off)
                             network.meta[_operational.META_KEY] = _operational_report
                             phase(f"Operational run: {len(_windows)} window(s) solved; "
                                   f"stitched opex {_operational_report['opex']:.6g}.")

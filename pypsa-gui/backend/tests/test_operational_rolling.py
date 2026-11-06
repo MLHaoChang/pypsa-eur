@@ -428,3 +428,81 @@ def test_an_operational_run_dispatches_the_capacity_runs_sizes(reset_backend):
         "Generator/gas",
         "StorageUnit/bess",
     }
+
+
+def test_the_stitched_results_are_each_snapshots_last_writing_window(monkeypatch):
+    """C5(ii): with overlap, each snapshot keeps the dispatch of the last
+    window that solved it, and the charge each window starts from is the
+    stitched charge just before it."""
+    from services.adequacy.sweep import freeze_capacities
+
+    n = _flat_net()
+    freeze_capacities(n, source="nom", transient=False)
+    seen: list[tuple[pd.Index, pd.Series, float]] = []
+    accessor = type(n.optimize)
+    real = accessor.__call__
+
+    def record(self, snapshots=None, **kw):
+        init = float(n.storage_units.at["bess", "state_of_charge_initial"])
+        out = real(self, snapshots, **kw)
+        seen.append((snapshots, n.generators_t.p.loc[snapshots, "gas"].copy(), init))
+        return out
+
+    monkeypatch.setattr(accessor, "__call__", record)
+    with OP.non_cyclic(n):
+        OP.run_windows(n, horizon=8, overlap=4, solver_name="highs")
+    gas = n.generators_t.p["gas"]
+    soc = n.storage_units_t.state_of_charge["bess"]
+    owner = {}
+    for i, (sns, _, _) in enumerate(seen):
+        owner.update(dict.fromkeys(sns, i))
+    for t, i in owner.items():
+        assert gas[t] == pytest.approx(seen[i][1][t], abs=TOL)
+    for sns, _, init in seen[1:]:
+        assert init == pytest.approx(
+            soc[n.snapshots[n.snapshots.get_loc(sns[0]) - 1]], abs=TOL
+        )
+
+
+def test_a_pcs_statcom_tag_is_refused_under_the_operational_run(monkeypatch):
+    import services.solver.pcs_statcom as PQ
+
+    n = _flat_net()
+    tagged = pd.DataFrame(index=pd.Index(["bess_store"], name="Store"))
+    monkeypatch.setattr(PQ, "pcs_statcom_tags", lambda _n: (tagged, None))
+    op = {"solve_strategy": "rolling", "fixed_sizes": "nameplate"}
+    assert ("error", "operational_rolling_pcs_sizing", "bess_store") == OP.issues(
+        n, op
+    )[0][:3]
+    assert OP.issues(n, {"solve_strategy": "rolling"}) == []
+
+
+def test_a_size_the_freeze_left_open_is_refused_through_run_simulation(
+    reset_backend, monkeypatch
+):
+    """C6 at run time: the typed refusal, the failure card, and the bounds
+    restored."""
+    from services.failure_taxonomy import classify_failure
+
+    n = _install(_flat_net())
+    before = n.generators[["p_nom_min", "p_nom_max"]].copy()
+    monkeypatch.setattr(OP, "still_sizeable", lambda _n: ["Generator/gas"])
+    status, cond, _, _ = _solve(
+        fixed_sizes="nameplate",
+        solve_strategy="rolling",
+        rolling_horizon=8,
+        rolling_overlap=4,
+    )
+    assert status == "error"
+    assert cond.startswith("operational_refused: operational_still_sizeable")
+    assert classify_failure(status, cond)["category"] == "operational_refused"
+    pd.testing.assert_frame_equal(n.generators[["p_nom_min", "p_nom_max"]], before)
+
+
+def test_a_failed_window_reads_as_its_own_failure_card():
+    from services.failure_taxonomy import classify_failure
+
+    card = classify_failure(
+        "warning", "operational_window_failed: window 2: infeasible"
+    )
+    assert card["category"] == "operational_window_failed"
