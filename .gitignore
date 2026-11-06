@@ -148,3 +148,6 @@ pypsa-gui/backend/test-results/
 .scratch/live-copilot/family-manifest.json
 .scratch/live-copilot/release-evidence.json
 .scratch/live-voice/route-parity.json
+
+# Screenshot-harness leftovers
+pypsa-gui/frontend/src/*.tmp.tsx
