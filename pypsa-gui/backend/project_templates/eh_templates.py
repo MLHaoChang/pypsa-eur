@@ -704,7 +704,12 @@ def dc_load_meta(template_id: str, spec) -> dict:
     ``eh_template.json`` (spec, dynamic envelope, ledger)."""
     from services.dc_load_profile import meta_block
 
-    return meta_block(spec, _dc_timezone(template_id))
+    block = meta_block(spec, _dc_timezone(template_id))
+    if spec.backup.mode != "genset":
+        # The saved network carries the backup strings: the backup
+        # assessment refuses it (DC-03, GK A Q1) and the card says so.
+        block["network_backup_mode"] = spec.backup.mode
+    return block
 
 
 # ── Industrial Hydrogen Hub (strong_grid) ──────────────────────────────────

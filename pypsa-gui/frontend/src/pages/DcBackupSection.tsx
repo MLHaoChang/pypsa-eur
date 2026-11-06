@@ -82,6 +82,13 @@ function storedMode(meta: unknown): DcBackupMode | null {
   return dc.spec.backup?.mode ?? 'genset'
 }
 
+/** The backup mode the saved network was built in, when not gensets: the
+ *  network already has the strings, so the assessment refuses it (GK A Q1). */
+function builtMode(meta: unknown): DcBackupMode | null {
+  const m = (meta as { dc_load?: { network_backup_mode?: DcBackupMode } } | null)?.dc_load?.network_backup_mode
+  return m && m !== 'genset' ? m : null
+}
+
 export default function DcBackupSection({ name }: { name: string }) {
   const qc = useQueryClient()
   const key = nk(name, 'adequacy', 'eh_template')
@@ -91,6 +98,7 @@ export default function DcBackupSection({ name }: { name: string }) {
     staleTime: Infinity,
   })
   const mode = storedMode(meta)
+  const built = builtMode(meta)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [result, setResult] = useState<DcBackupAssessment | null>(null)
   const [assessError, setAssessError] = useState<string | null>(null)
@@ -123,10 +131,18 @@ export default function DcBackupSection({ name }: { name: string }) {
             }))}
             title="Backup mode"
           />
-          <Btn onClick={() => assess.mutate()} disabled={assess.isPending || save.isPending}>
-            <span data-testid="dc-backup-assess">{assess.isPending ? 'Assessing…' : 'Assess'}</span>
-          </Btn>
+          {!built && (
+            <Btn onClick={() => assess.mutate()} disabled={assess.isPending || save.isPending}>
+              <span data-testid="dc-backup-assess">{assess.isPending ? 'Assessing…' : 'Assess'}</span>
+            </Btn>
+          )}
         </div>
+        {built && (
+          <p className="mt-1 text-[12px] text-muted" data-testid="dc-backup-not-assessable">
+            This project was created with {MODE_WORD[built]} backup, so its saved network already has the
+            battery strings. To assess a backup, create the project with gensets and switch the mode here.
+          </p>
+        )}
         {refusal && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-refusal">{refusal}</p>}
         {assessError && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-error">{assessError}</p>}
         {result && <Assessment result={result} stale={result.mode !== mode} stored={mode} />}

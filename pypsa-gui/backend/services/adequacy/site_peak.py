@@ -150,6 +150,8 @@ def deliverable_mwh(n, u: str, entries: dict | None = None) -> float:
 
 #: The DC-03 backup strings' name prefix (``services.adequacy.dc_backup``).
 BACKUP_STRING_PREFIX = "backup_bess_"
+#: The redundant backup strings' prefix (beyond the N the rule needs).
+BACKUP_SPARE_PREFIX = f"{BACKUP_STRING_PREFIX}spare_"
 
 
 def without_backup(island: dict | None) -> dict | None:
@@ -172,14 +174,16 @@ def without_backup(island: dict | None) -> dict | None:
 
 
 def backup_strings_mwh(n, island: dict | None, year: int | None = None) -> float:
-    """The deliverable MWh of the backup strings (``BACKUP_STRING_PREFIX``)
-    in the ride-through set and in service in ``year``."""
-    names = ride_through_batteries(n, island, year)["names"]
-    strings = [u for u in names if str(u).startswith(BACKUP_STRING_PREFIX)]
-    if not strings:
+    """The outage energy the backup strings hold for the island (GK A Q2):
+    the N strings in the ride-through set and in service in ``year`` (not
+    the spares, ``BACKUP_SPARE_PREFIX``) × their MW × the sustained time."""
+    rt = ride_through_batteries(n, island, year)
+    strings = [u for u in rt["names"] if str(u).startswith(BACKUP_STRING_PREFIX)
+               and not str(u).startswith(BACKUP_SPARE_PREFIX)]
+    if not strings or not rt["sustained_h"]:
         return 0.0
     entries = _storages(n)
-    return sum(deliverable_mwh(n, u, entries) for u in strings)
+    return sum(storage_sizes(n, u, entries)[0] for u in strings) * rt["sustained_h"]
 
 
 def ride_through_batteries(n, island: dict | None, year: int | None = None) -> dict:

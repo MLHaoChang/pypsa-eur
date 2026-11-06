@@ -111,6 +111,14 @@ describe('DcBackupSection', () => {
     expect(screen.getByTestId('dc-backup-lines').textContent).toContain('Gensets kept')
   })
 
+  it('offers no Assess on a project created with the strings, and says why', async () => {
+    results.getEhTemplate.mockResolvedValue({ ...meta('bess'), dc_load: { spec: { backup: { mode: 'bess' } }, network_backup_mode: 'bess' } })
+    renderIt()
+    expect(text(await screen.findByTestId('dc-backup-not-assessable')))
+      .toContain('created with batteries backup, so its saved network already has the battery strings')
+    expect(screen.queryByTestId('dc-backup-assess')).toBeNull()
+  })
+
   it('says when the delta cannot be priced, and Guided drops the lines', async () => {
     const user = userEvent.setup()
     ui.uiMode = 'guided'

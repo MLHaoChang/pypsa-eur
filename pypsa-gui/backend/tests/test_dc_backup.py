@@ -315,12 +315,15 @@ def test_augmentation_policies_on_one_fade_curve():
         _bk(test_cycles_per_year=10.0, bess={**fade, "augmentation_policy": "none"}),
         years=3,
     )
-    # 3 % of 100 MWh a year: restore buys 3 MWh each year, fixed_years 9 MWh in year 3.
-    assert restore["augmentation_mwh"] == pytest.approx(9.0)
-    assert fixed["augmentation_mwh"] == pytest.approx(9.0)
+    # One compound curve (GK B F7): restore buys 1 − 0.98 × 0.99 = 2.98 % a
+    # year; fixed_years buys 1 − 0.98³ × (1 − 0.03) of 100 MWh in year 3.
+    yearly, gap3 = 100 * (1 - 0.98 * 0.99), 100 * (1 - 0.98**3 * 0.97)
+    assert restore["augmentation_mwh"] == pytest.approx(3 * yearly)
+    assert fixed["augmentation_mwh"] == pytest.approx(gap3)
     aug = lambda o: next(x for x in o["lines"] if x["line"] == "augmentation")["npv"]  # noqa: E731
-    assert aug(restore) == pytest.approx(300 / 1.1 + 300 / 1.21 + 300 / 1.331)
-    assert aug(fixed) == pytest.approx(900 / 1.331)
+    price = 100.0 * yearly
+    assert aug(restore) == pytest.approx(price / 1.1 + price / 1.21 + price / 1.331)
+    assert aug(fixed) == pytest.approx(100.0 * gap3 / 1.331)
     assert none["augmentation_mwh"] == 0.0 and aug(none) == 0.0
 
 
@@ -483,6 +486,27 @@ def test_a_given_bess_without_its_fade_is_refused_and_set_values_cite_the_spec()
     assert "restore_to_nameplate" in assumed["augmentation_policy"]["source"]
 
 
+def test_augmentation_is_the_sizing_curve_over_each_gap():
+    """GK B F7: one compound curve. restore_to_nameplate buys 1 − retention
+    over one year each year; fixed_years with one gap equal to the horizon
+    buys 1 − retention over the horizon, the curve sizing reads."""
+    fade = {"calendar_fade_per_year": 0.03, "cycle_fade_per_full_cycle": 0.002}
+
+    def bk(**b):
+        return _bk(test_cycles_per_year=12.0, bess={**fade, **b})
+
+    none = bk(augmentation_policy="none")
+    restore = dc_backup._augmentation(bk(), 100.0, 6)
+    assert restore[1:] == pytest.approx(
+        [100.0 * (1 - dc_backup.retention(none, 1))] * 6
+    )
+    fixed = dc_backup._augmentation(
+        bk(augmentation_policy="fixed_years", augmentation_years=[6]), 100.0, 6
+    )
+    assert fixed[6] == pytest.approx(100.0 * (1 - dc_backup.retention(none, 6)))
+    assert fixed[:6].sum() == 0.0
+
+
 def test_riders_repurchase_rounding_restore_linear_and_scrapped_augmentation():
     # Half-years round up, never banker's (2.5 → 3, not 2).
     assert dc_backup._repurchase_years(2.5, 5) == [3, 5]
@@ -494,7 +518,8 @@ def test_riders_repurchase_rounding_restore_linear_and_scrapped_augmentation():
     )
     assert dc_backup.retention(bk, 7) == 1.0
     aug = dc_backup._augmentation(bk, 100.0, 7)
-    assert aug[0] == 0.0 and aug[1:] == pytest.approx([100.0 * (0.02 + 0.001 * 10)] * 7)
+    one_year = 1.0 - 0.98 * (1.0 - 0.001 * 10)  # compound, one curve
+    assert aug[0] == 0.0 and aug[1:] == pytest.approx([100.0 * one_year] * 7)
     # An energy repurchase scraps the augmentation cells bought before it:
     # they get no remaining-life credit; those bought after it do.
     part = dc_backup._part(100.0, 0.0, 4.0, 6, 0.05, extra=[(2, 10.0), (5, 10.0)])
@@ -792,6 +817,7 @@ def test_strings_covering_the_reserve_demand_none_of_the_other_batteries(tid):
     strings' deliverable energy, and the strings never shave."""
     from services.adequacy.site_peak import (
         backup_strings_mwh,
+        named_load,
         outage_reserve_mwh,
         ride_through_batteries,
         shaving_reserve_mwh,
@@ -813,6 +839,28 @@ def test_strings_covering_the_reserve_demand_none_of_the_other_batteries(tid):
     assert set(strings) <= set(
         island["requirements"]["ride_through_storage"]
     )  # untouched
+    # GK A Q2: the N strings (not the spares) × string_mw × autonomy_h, and
+    # the other batteries shave as they do in genset mode.
+    from services.adequacy.site_peak import peak_check
+
+    spec, _n, _i = _built(tid, "bess", 0.6)
+    sizing = dc_backup.size_bess(
+        named_load(n, dc_backup.critical_loads(island)),
+        firm_genset_mw=0.0,
+        backup=spec.backup,
+        redundancy=spec.redundancy,
+        years=1,
+    )
+    b = spec.backup
+    assert held == pytest.approx(sizing["strings_n"] * b.string_mw * b.autonomy_h)
+    spares = [s for s in strings if s.startswith(dc_backup.SPARE_PREFIX)]
+    assert len(spares) == sizing["strings"] - sizing["strings_n"]
+    _g, gn, gisland = _built(tid, "genset", 0.6)
+
+    def shaving(rows):
+        return [(r["period"], r["firm"][1]["mw"]) for r in rows]
+
+    assert shaving(peak_check(n, island)) == shaving(peak_check(gn, gisland))
 
 
 def test_bess_mode_above_the_import_is_refused_at_create():
@@ -1124,12 +1172,6 @@ def test_assess_route_sizes_on_the_raw_sidecar_and_proves_the_priced_fleets(
             False,
             "real price basis",
         ),
-        (
-            {"wacc_nominal": 0.09, "financial_close": "2026-01-01"},
-            0.1,
-            True,
-            "no inflation",
-        ),
     ],
 )
 def test_assess_reads_the_finance_case_rate_on_its_basis(
@@ -1155,6 +1197,58 @@ def test_assess_reads_the_finance_case_rate_on_its_basis(
     assert c["discount_rate"] == pytest.approx(want)
     row = {r["key"]: r for r in c["inputs"]}["discount_rate"]
     assert row["assumed"] is assumed and words in row["source"]
+
+
+def test_a_project_created_with_strings_is_refused_with_the_way_out(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """GK A Q1: the saved network already has the strings; assess is a typed
+    422 that says to switch with PUT /dc-backup on a genset-form project,
+    and the meta marks it for the card."""
+    import json
+
+    from services import project_registry
+
+    _served(monkeypatch)
+    _stage_dc(tmp_path, monkeypatch, "eh_datacenter")
+    r = client.post(
+        "/api/projects/from_template/eh_datacenter",
+        params={"name": "dc_hy"},
+        json={"dc_load": {"backup": {"mode": "hybrid"}}},
+    )
+    assert r.status_code < 300, r.text
+    d = pathlib.Path(
+        project_registry.project_dir(project_row(r.json().get("name", "dc_hy")))
+    )
+    meta = json.loads((d / "eh_template.json").read_text())
+    assert meta["dc_load"]["network_backup_mode"] == "hybrid"
+    r = client.post(f"/api/campus-electrical/{d.name}/dc-backup/assess", json={})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "dc_backup_invalid"
+    assert "PUT /dc-backup" in str(detail) and "created with hybrid" in str(detail)
+
+
+def test_a_nominal_finance_rate_without_inflation_is_refused(
+    client, tmp_path, monkeypatch, tmp_projects_dir, project_row
+):
+    """GK B F3: a nominal wacc with no inflation is a typed 422, never read
+    as real and never an assumed 0."""
+    _served(monkeypatch)
+    d = _dc_project(
+        client,
+        tmp_path,
+        monkeypatch,
+        project_row,
+        "dc_nom",
+        {"wacc_nominal": 0.09, "financial_close": "2026-01-01"},
+    )
+    r = client.post(
+        f"/api/campus-electrical/{d.name}/dc-backup/assess", json={"mode": "hybrid"}
+    )
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "dc_backup_invalid" and "inflation" in str(detail)
 
 
 @pytest.mark.live_solve

@@ -39,6 +39,7 @@ import numpy as np
 
 from models.flex_archetypes import BackupSpec, RedundancyTier
 from services.adequacy.site_peak import BACKUP_STRING_PREFIX as STRING_PREFIX
+from services.adequacy.site_peak import BACKUP_SPARE_PREFIX as SPARE_PREFIX
 from datetime import UTC
 
 #: The source of a value the project's backup spec sets.
@@ -140,12 +141,17 @@ test_cycles.__test__ = False  # not a pytest test
 def retention(backup: BackupSpec, years: int) -> float:
     """End-of-horizon share of nameplate energy the strings keep: 1 when
     augmentation restores it every year, else calendar × cycle fade."""
-    b = backup.bess
-    if b.augmentation_policy == "restore_to_nameplate":
+    if backup.bess.augmentation_policy == "restore_to_nameplate":
         return 1.0
-    span = _fade_span(backup, years)
-    return (1.0 - b.calendar_fade_per_year) ** span * (
-        1.0 - b.cycle_fade_per_full_cycle * test_cycles(backup, span)
+    return _kept(backup, _fade_span(backup, years))
+
+
+def _kept(backup: BackupSpec, years: float) -> float:
+    """The one fade curve (sizing and augmentation, GK B F7): the share of
+    nameplate kept after ``years`` of calendar × cycle fade, compounded."""
+    b = backup.bess
+    return (1.0 - b.calendar_fade_per_year) ** years * (
+        1.0 - b.cycle_fade_per_full_cycle * test_cycles(backup, years)
     )
 
 
@@ -463,7 +469,12 @@ def apply_backup(
         "i_max_pu": a(1.2),
         "k_gfm_min": a(1.0),
     }
-    names = [f"{STRING_PREFIX}{i}" for i in range(1, count + 1)]
+    # The N strings the redundancy rule needs, then the spares (named
+    # ``SPARE_PREFIX``): site_peak credits the N only (GK A Q2).
+    need = min(count, int(sizing["strings_n"]))
+    names = [f"{STRING_PREFIX}{i}" for i in range(1, need + 1)] + [
+        f"{SPARE_PREFIX}{j}" for j in range(1, count - need + 1)
+    ]
     carrier = "battery" if "battery" in n.carriers.index else ""
     for name in names:
         n.add(
@@ -590,8 +601,8 @@ def finance_rate(finance: dict | None) -> dict[str, Any]:
     case (``SolverConfig.finance``, ``FinanceInputs``), on the IC engine's
     basis (GK B K3): ``wacc_nominal`` is made real with the case's
     ``inflation`` when ``price_basis`` is nominal, and read as real when it
-    is real. No case, no rate, or a nominal rate without inflation: the
-    pack's rate (real, assumed), with the reason. An invalid case is refused."""
+    is real. No case or no rate: the pack's rate (real, assumed), with the
+    reason. A nominal rate without inflation, or an invalid case, is refused."""
     from pydantic import ValidationError
 
     from models.finance import FinanceInputs
@@ -610,11 +621,12 @@ def finance_rate(finance: dict | None) -> dict[str, Any]:
     if fin.price_basis == "real":
         return {"rate": fin.wacc_nominal, "inflation": None, "rate_is_real": True}
     if fin.inflation is None:
-        return {
-            "rate": None,
-            "rate_note": "the finance case's nominal wacc has no inflation "
-            "to make it real",
-        }
+        # GK B F3: never a nominal rate read as real, never an assumed 0.
+        raise DcBackupError(
+            "finance.inflation: the finance case's wacc_nominal is nominal and has no "
+            "inflation to make it real; set finance.inflation or price_basis real",
+            "finance.inflation",
+        )
     return {"rate": fin.wacc_nominal, "inflation": fin.inflation}
 
 
@@ -631,21 +643,18 @@ def _repurchase_years(life: float, years: int) -> list[int]:
 
 def _augmentation(backup: BackupSpec, e_mwh: float, years: int) -> np.ndarray:
     """MWh of cells bought each year (index 0..years) to restore fade, on
-    one fade curve: calendar fade plus cycle fade at the test cycles, a
-    share of nameplate a year."""
+    the sizing's fade curve (``_kept``, GK B F7): an augmentation after a
+    gap of g years buys E·(1 − kept over g). ``restore_to_nameplate`` is
+    g = 1 every year; ``fixed_years`` uses each actual gap."""
     b = backup.bess
-    fade = (
-        b.calendar_fade_per_year
-        + b.cycle_fade_per_full_cycle * backup.test_cycles_per_year
-    ) * e_mwh
     out = np.zeros(years + 1)
     if b.augmentation_policy == "restore_to_nameplate":
-        out[1:] = fade
+        out[1:] = e_mwh * (1.0 - _kept(backup, 1))
     elif b.augmentation_policy == "fixed_years":
         last = 0
         for y in sorted(set(b.augmentation_years)):
             if 1 <= y <= years:
-                out[y] = fade * (y - last)
+                out[y] = e_mwh * (1.0 - _kept(backup, y - last))
                 last = y
     return out
 
@@ -1334,6 +1343,16 @@ def save_backup(project_dir, tpl, backup: dict) -> dict:
     return meta["dc_load"]["spec"]["backup"]
 
 
+#: The refusal for a project whose saved network already has the backup
+#: strings (created in that mode, GK A Q1); the card shows it in place of
+#: Assess.
+NOT_GENSET_FORM = (
+    "backup: this project was created with {mode} backup, so its saved network already "
+    "has the battery strings. The assessment needs a project created with gensets: "
+    "create one with gensets and switch its mode with PUT /dc-backup"
+)
+
+
 def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
     """``assess`` on a private copy of the project's saved network and island
     sidecar, in ``mode`` (None: the stored setting). The solver config is
@@ -1350,6 +1369,9 @@ def assess_project(project_dir, tpl, mode: str | None = None) -> dict[str, Any]:
 
     d = pathlib.Path(project_dir)
     tid, spec, planning = project_spec(d, tpl)
+    built = (_meta(d).get("dc_load") or {}).get("network_backup_mode")
+    if built and built != "genset":
+        raise DcBackupError(NOT_GENSET_FORM.format(mode=built), "backup.mode")
     if mode is not None:
         try:
             spec = spec.model_copy(
