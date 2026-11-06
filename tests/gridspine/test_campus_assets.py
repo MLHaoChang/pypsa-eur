@@ -85,7 +85,7 @@ def test_every_entry_carries_every_field_tagged():
 
 #: sha256 of the shipped library: the defaults pack 2026-11-06 manifest pins the same bytes
 #: (2026-10-23 .. 2026-10-30 pinned the library before the 220/110 kV units).
-SHIPPED_SHA256 = "c94a057685ebaafb54dafd382e8b42933cbc09dbff84c5973905411a6d6d554a"
+SHIPPED_SHA256 = "5058116ad6b169fad78677e5638b957ca86ece4e30d63465538c5dc50bb6c23f"
 #: How many cost fields of each kind are cited reference values (tag literature).
 LITERATURE_COUNTS = {
     ("transformers", "capex_eur"): 29,
@@ -134,12 +134,10 @@ def test_transformers_cover_the_four_voltage_pairs_in_r10_sizes():
     pairs = {}
     for t in LIB["transformers"]:
         pairs.setdefault((value(t["hv_kv"]), value(t["lv_kv"])), []).append(value(t["s_mva"]))
-        if (value(t["hv_kv"]), value(t["lv_kv"])) != (220.0, 110.0):
-            assert value(t["s_mva"]) in STANDARD_MVA
+        assert value(t["s_mva"]) in STANDARD_MVA
     assert set(pairs) == {(220.0, 110.0), (132.0, 33.0), (110.0, 20.0), (33.0, 11.0), (20.0, 0.4)}
-    # The 220/110 kV units are the sizes of their cited cost rows (Ei R-NR-T-8-1..5), 120 and 150 MVA
-    # among them although outside R10: a size is read, never interpolated (campus-library-gaps 01).
-    assert pairs[(220.0, 110.0)] == [120.0, 150.0, 200.0, 250.0, 315.0]
+    # campus-library-gaps 01: R10 sizes priced from Ei R-NR-T-8-1..5 (120-315 MVA)
+    assert pairs[(220.0, 110.0)] == [125.0, 160.0, 200.0, 250.0, 315.0]
     assert pairs[(132.0, 33.0)] == [20.0, 25.0, 31.5, 40.0, 50.0, 63.0, 80.0, 100.0]
     assert all(len(v) >= 4 for v in pairs.values())
 
@@ -668,27 +666,53 @@ def test_vector_group_and_tap_are_transformer_fields_only(tmp_path):
     refused(tmp_path, d, rf"cables\[{c['id']}\].*vector_group")
 
 
-#: campus-library-gaps 01: the 220/110 kV units and their Ei rows (245/123-145 kV), SEK of 2022.
-EI_220_110 = {120.0: ("R-NR-T-8-1", 33884380), 150.0: ("R-NR-T-8-2", 38992520),
+
+#: campus-library-gaps 01: Ei's 245/123-145 kV rows, MVA -> (row, SEK of 2022).
+EI_245_123 = {120.0: ("R-NR-T-8-1", 33884380), 150.0: ("R-NR-T-8-2", 38992520),
               200.0: ("R-NR-T-8-3", 46654733), 250.0: ("R-NR-T-8-4", 51762875),
               315.0: ("R-NR-T-8-5", 56871016)}
+#: The R10 sizes between two rows, and their anchors (GK A, CL-01 Q3 (c)).
+INTERPOLATED = {125.0: (120.0, 150.0), 160.0: (150.0, 200.0)}
+#: 1 SEK (2022) in EUR (2025): ECB 2022 SEK/EUR, then the C27.1 producer price index 2022 -> 2025.
+SEK_2022_TO_EUR_2025 = 119.8 / 108.6 / 10.6296
 
 
-def test_the_220_110_kv_units_are_their_ei_rows_with_the_class_rule_for_what_has_no_source():
-    """Each cost is its Ei row at the file's factor (ECB 2022 SEK/EUR, C27.1 PPI 2022 -> 2025), which
-    reproduces TR_132_33_20 too; impedance and losses are the producers' class rule, tagged assumed
-    with a note saying no public source gives them, so the library and the rule cannot drift."""
-    factor = 119.8 / 108.6 / 10.6296
-    tr20 = next(e for e in LIB["transformers"] if e["id"] == "TR_132_33_20")
-    assert value(tr20["capex_eur"]) == round(12632363 * factor, -2)
+def _sek_at(s):
+    """Ei's SEK at size ``s``: the row itself, or the log-log line between the two bracketing rows."""
+    if s in EI_245_123:
+        return EI_245_123[s][1]
+    (s1, c1), (s2, c2) = ((a, EI_245_123[a][1]) for a in INTERPOLATED[s])
+    return c1 * (s / s1) ** (math.log(c2 / c1) / math.log(s2 / s1))
+
+
+def test_the_conversion_and_interpolation_reproduce_a_shipped_132_33_row():
+    lib = {e["id"]: value(e["capex_eur"]) for e in LIB["transformers"]}
+    assert lib["TR_132_33_20"] == round(12632363 * SEK_2022_TO_EUR_2025, -2)
+    sek = 13438444 * (31.5 / 30) ** (math.log(14006581 / 13438444) / math.log(40 / 30))
+    assert lib["TR_132_33_31p5"] == round(sek * SEK_2022_TO_EUR_2025, -2)
+
+
+def test_the_220_110_kv_units_are_priced_from_their_ei_rows_with_the_class_rule_for_what_has_no_source():
+    """200/250/315 MVA are straight reads of R-NR-T-8-3/4/5; 125 and 160 MVA are interpolated between the
+    bracketing rows, and their notes name both anchors with their SEK. Impedance and losses are the
+    producers' class rule, tagged assumed with a note saying no public source gives them."""
     units = library_entries(LIB, "transformers", hv_kv=220.0, lv_kv=110.0)
-    assert [value(t["s_mva"]) for t in units] == sorted(EI_220_110)
+    assert [value(t["s_mva"]) for t in units] == [125.0, 160.0, 200.0, 250.0, 315.0]
     for t in units:
         s = value(t["s_mva"])
-        code, sek = EI_220_110[s]
         assert t["id"] == f"TR_220_110_{s:g}"
-        assert value(t["capex_eur"]) == round(sek * factor, -2)
-        assert t["capex_eur"]["source"] == "literature" and f"[EI-NVL] {code}," in t["capex_eur"]["note"]
+        cap = t["capex_eur"]
+        assert cap["source"] == "literature" and cap["value"] == round(_sek_at(s) * SEK_2022_TO_EUR_2025, -2)
+        if s in INTERPOLATED:
+            assert "log-log interpolation between" in cap["note"]
+            for a in INTERPOLATED[s]:
+                code, sek = EI_245_123[a]
+                assert f"{code} ({a:g} MVA, {sek} SEK)" in cap["note"], (t["id"], code)
+        else:
+            code, sek = EI_245_123[s]
+            assert cap["note"].startswith(f"[EI-NVL] {code}, 245/123-145 kV {s:g} MVA, {sek} SEK (2022)")
+            assert "interpolation" not in cap["note"]
+        assert "linspann" in cap["note"]
         vk, vkr = _trafo_class(s)
         assert (value(t["vk_percent"]), value(t["vkr_percent"])) == (vk, vkr) == (12.5, 0.3)
         assert "IEC 60076-5" in t["vk_percent"]["note"] and "minimum" in t["vk_percent"]["note"]

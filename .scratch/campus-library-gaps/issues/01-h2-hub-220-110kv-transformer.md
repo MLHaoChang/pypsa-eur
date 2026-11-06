@@ -47,11 +47,13 @@ Was: `needs-triage`. Owner question Q-CL-1 (GK A, gridspine). The H2 hub MILP in
 - Q2 (b): new defaults pack version 2026-11-06 = 2026-10-30 plus the 15 transcribed rows (source, URL,
   "linspann" scope note). It pins the new YAML sha. A test keeps every 2026-10-30 row byte-equal, and the
   shipped versions are untouched. The rows are also in the research doc's addendum.
-- Conditions: exactly the five Ei rows R-NR-T-8-1..5, nothing interpolated. hv_kv, lv_kv, s_mva and vk 12.5
-  are `assumed`, and the vk note says IEC 60076-5 Table 1 gives a minimum. Acceptance: both hubs complete
-  milp and least_cost. Every other template's campus invest output is compared before and after. Root and
-  pypsa-gui/backend tests run as separate pytest runs.
-- Correction to the plan's "2x TR_220_110_120": the PCC group has a single unit, so N-1 does not apply.
-  `eh_h2_hub_staged` buys 1x TR_220_110_120 (need 27.3 MVA, 32.8 with the margin) and `eh_h2_hub` buys
-  1x TR_220_110_150 (need 104.5 MVA, 125.4 with the margin), with both methods.
-
+- Q3 (c) (amends condition 1): R10 sizes only. 200/250/315 MVA are straight reads of R-NR-T-8-3/4/5.
+  125 and 160 MVA are log-log interpolated between R-NR-T-8-1/2 and R-NR-T-8-2/3 (the file's method), with
+  both anchors and their SEK in the note. A test recomputes them. 120 and 150 MVA are anchors only.
+- Conditions: hv_kv, lv_kv, s_mva and vk 12.5 are `assumed`, and the vk note says IEC 60076-5 Table 1 gives a
+  minimum. Acceptance: both hubs complete milp and least_cost. Every other template's campus invest output is
+  compared before and after. Root and pypsa-gui/backend tests run as separate pytest runs.
+- Correction to the plan's "2x": the PCC group has a single unit, so N-1 does not apply (GK A accepted).
+  `eh_h2_hub_staged` buys 1x TR_220_110_125 (need 27.3 MVA, 32.8 with the margin) and `eh_h2_hub` buys
+  1x TR_220_110_160 (need 104.5 MVA, 125.4 with the margin > 125), with both methods. A twin case (the
+  hub's PCC as two parallel units) covers the N-1 arm: 2x TR_220_110_160, because a survivor carries 125.4 MVA.

@@ -1,10 +1,11 @@
 """
 Campus-library-gaps 01 (`.scratch/campus-library-gaps/issues/01-h2-hub-220-110kv-transformer.md`, owner Q-CL-1):
 the defaults pack version 2026-11-06 = 2026-10-30 byte for byte plus the five 220/110 kV campus transformers the
-shipped library (`gridspine/templates/data/campus_assets.yaml`) gains, TR_220_110_120/150/200/250/315.
+shipped library (`gridspine/templates/data/campus_assets.yaml`) gains, TR_220_110_125/160/200/250/315.
 
-Their costs are Ei's Normvärdeslista rows R-NR-T-8-1..5 (245/123-145 kV, SEK 2022), converted to 2025 EUR as every
-other campus row (ECB 2022 rate, euro-area C27.1 producer prices); lifetime and fixed O&M are the DEA rows the other
+Their costs come from Ei's Normvärdeslista rows R-NR-T-8-1..5 (245/123-145 kV, 120-315 MVA, SEK 2022): 200, 250 and
+315 MVA read straight, 125 and 160 MVA log-log interpolated between the bracketing rows (120 and 150 MVA are anchors
+only; GK A, CL-01 Q3 (c)), converted to 2025 EUR as every other campus row (ECB 2022 rate, euro-area C27.1 producer prices); lifetime and fixed O&M are the DEA rows the other
 transformers cite. The manifest pins the library's new sha256, so the pack's campus rows stay a full transcription
 of it (GK A, CL-01 plan GO).
 
@@ -25,13 +26,13 @@ REPO = pathlib.Path(__file__).resolve().parents[3]
 CAMPUS_YAML = REPO / "gridspine" / "templates" / "data" / "campus_assets.yaml"
 EI_URL = ("https://ei.se/download/18.61d7efeb18b048db98c4e48/1697184391450/"
           "Normv%C3%A4rdeslista-2024-2027.xlsx")
-#: unit -> (Ei row, SEK of 2022, 2025 EUR as shipped)
+#: unit -> (the Ei rows it is priced from, 2025 EUR as shipped)
 UNITS = {
-    "TR_220_110_120": ("R-NR-T-8-1", 33884380, 3516500.0),
-    "TR_220_110_150": ("R-NR-T-8-2", 38992520, 4046600.0),
-    "TR_220_110_200": ("R-NR-T-8-3", 46654733, 4841800.0),
-    "TR_220_110_250": ("R-NR-T-8-4", 51762875, 5371900.0),
-    "TR_220_110_315": ("R-NR-T-8-5", 56871016, 5902000.0),
+    "TR_220_110_125": (("R-NR-T-8-1", "R-NR-T-8-2"), 3608000.0),
+    "TR_220_110_160": (("R-NR-T-8-2", "R-NR-T-8-3"), 4212800.0),
+    "TR_220_110_200": (("R-NR-T-8-3",), 4841800.0),
+    "TR_220_110_250": (("R-NR-T-8-4",), 5371900.0),
+    "TR_220_110_315": (("R-NR-T-8-5",), 5902000.0),
 }
 PARTS = ("overnight", "lifetime", "fom_share")
 NEW_KEYS = [f"transformer.{u.lower()}.investment.{p}" for u in UNITS for p in PARTS]
@@ -111,15 +112,17 @@ def test_the_manifest_changes_only_the_version_the_campus_pin_and_records_why():
 def test_the_220_110_rows_are_the_library_transcribed_with_their_sources(new):
     lib = {e["id"]: e for e in yaml.safe_load(CAMPUS_YAML.read_text())["transformers"]}
     rows = {r.key: r for r in new.cost_values}
-    for unit, (code, sek, eur) in UNITS.items():
+    for unit, (codes, eur) in UNITS.items():
         e = lib[unit]
         k = f"transformer.{unit.lower()}.investment"
         capex, life, fom = rows[f"{k}.overnight"], rows[f"{k}.lifetime"], rows[f"{k}.fom_share"]
         assert capex.value == eur == e["capex_eur"]["value"]
         assert life.value == e["lifetime_a"]["value"] == 40
         assert fom.value == e["opex_frac"]["value"] == 0.015
-        assert code in capex.source and capex.source_url == EI_URL and not capex.illustrative
-        assert capex.note == e["capex_eur"]["note"] and f"{sek} SEK (2022)" in capex.note and "linspann" in capex.note
+        assert all(c in capex.source and c in capex.note for c in codes)
+        assert ("interpolated" in capex.source) == (len(codes) == 2)
+        assert capex.source_url == EI_URL and not capex.illustrative
+        assert capex.note == e["capex_eur"]["note"] and "linspann" in capex.note
         assert (capex.currency, capex.money_year) == ("EUR", 2025)
 
 
