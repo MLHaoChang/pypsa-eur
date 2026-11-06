@@ -34,7 +34,7 @@ import toast from 'react-hot-toast'
 import CreationForm from './CreationForm'
 import { tip as docTip } from '../utils/propertyDocs'
 import { CARRIER_CATALOG_NAMES } from '../utils/carrierCatalog'
-import { vintageCloneToast } from '../utils/toasts'
+import { vintageCloneToast, saveFailedToast } from '../utils/toasts'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 import { useAssetSchema } from '../hooks/useAssetSchema'
 import { useAssetProvenance } from '../hooks/useAssetProvenance'
@@ -186,7 +186,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || gen.name
       if (newName !== gen.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
+    onError: (e: Error) => saveFailedToast(blockerMessage(e)),
   })
 
   const startEdit = () => {
@@ -366,7 +366,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || su.name
       if (newName !== su.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
+    onError: (e: Error) => saveFailedToast(blockerMessage(e)),
   })
 
   const startEdit = () => {
@@ -529,7 +529,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || store.name
       if (newName !== store.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
+    onError: (e: Error) => saveFailedToast(blockerMessage(e)),
   })
 
   const startEdit = () => {
@@ -683,7 +683,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || load.name
       if (newName !== load.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
+    onError: (e: Error) => saveFailedToast(blockerMessage(e)),
   })
 
   const startEdit = () => {
@@ -894,7 +894,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
       const newName = form.name?.trim() || link.name
       if (newName !== link.name) onRename?.(newName)
     },
-    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
+    onError: (e: Error) => saveFailedToast(blockerMessage(e)),
   })
 
   const startEdit = () => {
@@ -906,10 +906,12 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
 
   // Same request as the Bus card; only the selected Link's detail view takes
   // it (card mode stacks several Links in one asset group).
+  const [focusField, setFocusField] = useState<string | null>(null)
   const editRequest = useUIStore(s => s.propertiesEditRequest)
   useEffect(() => {
     if (editRequest?.type !== 'Link' || editRequest.name !== link.name || mode !== 'detail') return
     if (!open) startEdit()
+    if (editRequest.field) setFocusField(editRequest.field)
     useUIStore.getState().clearPropertiesEditRequest()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, link.name])
@@ -1018,6 +1020,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
       {schema ? (
         <AssetFieldsEdit
           schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
+          focusField={focusField}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
           // Issue 15: a device's reach shows where one of its buses carries heat or steam (or it is set).
           hidden={hiddenLevelFields(['bus0', 'bus1', 'bus2', 'bus3', 'bus4'].map(k =>

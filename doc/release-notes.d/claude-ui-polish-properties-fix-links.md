@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A fix link to a Link field opens the editable form at that field, a year in Properties no longer gets a thousands separator or a doubled unit word, a refused Properties save shows one toast clear of Save, and "no value" is always "—".

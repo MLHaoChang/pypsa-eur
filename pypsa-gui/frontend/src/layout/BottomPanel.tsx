@@ -523,10 +523,10 @@ function AssetTable({
   }
 
   const fmt = (v: unknown): string => {
-    if (v == null) return '–'
-    if (typeof v === 'boolean') return v ? '✓' : '–'
+    if (v == null) return '—'
+    if (typeof v === 'boolean') return v ? '✓' : '—'
     if (typeof v === 'number') {
-      if (!isFinite(v)) return '–'
+      if (!isFinite(v)) return '—'
       return Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/\.?0+$/, '')
     }
     return String(v)

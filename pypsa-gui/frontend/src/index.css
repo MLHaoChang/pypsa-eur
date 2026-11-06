@@ -494,3 +494,13 @@ html {
   0%, 70% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+/* A fix link's target field: flashed once after the form scrolls to it. */
+@keyframes field-flash {
+  0%, 60% { box-shadow: var(--ring-accent); border-color: var(--color-accent); }
+  100% { box-shadow: none; }
+}
+.field-flash { animation: field-flash 2.4s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .field-flash { animation: none; box-shadow: var(--ring-accent); }
+}

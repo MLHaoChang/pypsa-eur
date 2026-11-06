@@ -27,7 +27,7 @@ export function groupColumnsByUnit(columns: ColumnSpec[]):
   const order: string[] = []
   const byUnit = new Map<string, ColumnSpec[]>()
   for (const c of columns) {
-    const unit = c.unit || '–'
+    const unit = c.unit || '—'
     if (!byUnit.has(unit)) { byUnit.set(unit, []); order.push(unit) }
     byUnit.get(unit)!.push(c)
   }

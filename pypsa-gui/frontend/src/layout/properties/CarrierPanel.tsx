@@ -7,6 +7,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { saveFailedToast } from '../../utils/toasts'
 import { networkApi } from '../../api/network'
 import type { Carrier } from '../../api/types'
 import { useAssetProvenance } from '../../hooks/useAssetProvenance'
@@ -49,7 +50,7 @@ export default function CarrierPanel({ name }: { name: string }) {
       const newName = form.name?.trim() || name
       if (newName !== name) setSelectedComponent({ type: 'Carrier', name: newName })
     },
-    onError: (e: Error) => toast.error(`Save failed: ${blockerMessage(e)}`),
+    onError: (e: Error) => saveFailedToast(blockerMessage(e)),
   })
 
   if (!carrier) return <p className="p-3 text-xs text-muted">Loading…</p>

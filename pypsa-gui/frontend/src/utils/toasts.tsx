@@ -215,3 +215,15 @@ export function showUndoToast(
     { duration },
   )
 }
+
+/**
+ * A refused Properties save: ONE toast. The response interceptor has already
+ * toasted the backend sentence (under the sentence as its id), so that one is
+ * replaced by "Save failed: <sentence>" instead of stacking beside it. Shown
+ * top-centre: the Save button sits at the bottom of the panel or Guided
+ * drawer, where a bottom-right toast covered it.
+ */
+export function saveFailedToast(sentence: string): void {
+  toast.dismiss(sentence)
+  toast.error(`Save failed: ${sentence}`, { id: 'save-failed', position: 'top-center' })
+}

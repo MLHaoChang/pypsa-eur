@@ -347,8 +347,8 @@ export default function LoadProfileManager() {
                       <td className="px-2 py-1 font-semibold text-text">{l.name}</td>
                       <td className="px-2 py-1 text-muted">{l.bus}</td>
                       <td className="px-2 py-1 font-mono">{m.rows}</td>
-                      <td className="px-2 py-1 font-mono text-[10px]">{m.start?.slice(0, 10) ?? '–'}</td>
-                      <td className="px-2 py-1 font-mono text-[10px]">{m.end?.slice(0, 10) ?? '–'}</td>
+                      <td className="px-2 py-1 font-mono text-[10px]">{m.start?.slice(0, 10) ?? '—'}</td>
+                      <td className="px-2 py-1 font-mono text-[10px]">{m.end?.slice(0, 10) ?? '—'}</td>
                       <td className="px-2 py-1 font-mono">{fmtMW(m.peak)}</td>
                       <td className="px-2 py-1 font-mono">{fmtMW(m.mean)}</td>
                     </tr>
