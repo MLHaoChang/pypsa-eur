@@ -990,3 +990,25 @@ def test_governs_no_repeat_of_a_step_that_did_not_complete(monkeypatch):
         ],
     )
     assert governs(session, TOOL, ARGS) is False
+
+
+def test_governs_nothing_for_a_refused_native_step_or_a_closed_task(monkeypatch):
+    """The step begin_step would refuse, but the task is closed or the step native."""
+    from services.assistant_tasks import governs
+
+    native = _task(monkeypatch, [_step("waiting", ARGS, native=True)])
+    assert governs(native, TOOL, ARGS) is False
+    for status in ("cancelled", "completed"):
+        closed = _task(monkeypatch, [_step("waiting", ARGS)], status=status)
+        assert governs(closed, TOOL, ARGS) is False, status
+
+
+def test_governs_only_the_same_tool_with_the_same_args(monkeypatch):
+    from services.assistant_tasks import governs
+
+    other_next = _task(monkeypatch, [_step("waiting", ARGS, tool="run_simulation")])
+    assert governs(other_next, TOOL, ARGS) is False
+    other_done = _task(monkeypatch, [_step("completed", ARGS, tool="run_simulation")])
+    assert governs(other_done, TOOL, ARGS) is False
+    other_args = _task(monkeypatch, [_step("completed", OTHER)])
+    assert governs(other_args, TOOL, ARGS) is False
