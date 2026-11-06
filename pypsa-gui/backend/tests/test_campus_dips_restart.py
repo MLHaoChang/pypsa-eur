@@ -1,6 +1,7 @@
 """The campus run's dip and restart screens (grid-to-process issue 12b-3): the stage after the P–V/Q–V screen,
 the two CSVs in the results payload, a screen failure that never fails the run, and the units whose restart,
 ride-through or motor field changed since the run read out of date."""
+
 import math
 
 import pypsa
@@ -50,8 +51,13 @@ def test_the_run_screens_dips_and_restarts_after_the_pv_qv_screen(hub):  # noqa:
     assert {r["level"] for r in dips["restart"]} == {"unit", "event", "total"}
     unit = {r["unit"]: r for r in dips["dip_trips"] if r["level"] == "unit"}
     assert unit["pump"]["verdict"] == "unknown" and unit["mill"]["verdict"] == "known"
-    assert dips["inputs"]["mill"] == {"ride_through_curve": "20:0.5", "restart_time_h": 4.0, "motor_kw": 1500.0,
-                                      "start_method": "vfd", "i_start_pu": 1.2}
+    assert dips["inputs"]["mill"] == {
+        "ride_through_curve": "20:0.5",
+        "restart_time_h": 4.0,
+        "motor_kw": 1500.0,
+        "start_method": "vfd",
+        "i_start_pu": 1.2,
+    }
     assert dips["inputs"]["pump"] == dict.fromkeys(ce.DIPS_RESTART_FIELDS)
     assert "event model" in dips["restart_label"] and dips["basis"]
     assert state["stale"] is False and dips["out_of_date"] == []
@@ -75,7 +81,9 @@ def test_an_unrelated_change_leaves_every_unit_current(hub):  # noqa: F811
     n.loads.loc["dc_load", "p_set"] = 41.0
     n.export_to_netcdf(str(nc))
     state = ce.get_state(hub)
-    assert state["stale"] is True and state["results"]["dips_restart"]["out_of_date"] == []
+    assert (
+        state["stale"] is True and state["results"]["dips_restart"]["out_of_date"] == []
+    )
 
 
 def test_a_screen_error_never_fails_the_run_and_leaves_no_screen_file(hub, monkeypatch):  # noqa: F811
@@ -83,7 +91,7 @@ def test_a_screen_error_never_fails_the_run_and_leaves_no_screen_file(hub, monke
     real = ce.cs.restart_campus
 
     def broken(run_dir, *a, **kw):
-        real(run_dir, *a, **kw)                  # it wrote its CSVs, then fails: none of them may stay
+        real(run_dir, *a, **kw)  # it wrote its CSVs, then fails: none of them may stay
         raise ce.ContractError("restart: test failure")
 
     monkeypatch.setattr(ce.cs, "restart_campus", broken)
