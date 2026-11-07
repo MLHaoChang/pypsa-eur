@@ -588,3 +588,87 @@ def test_the_reference_leaves_no_meta_behind():
     assert (
         seen[0] is None and seen[1] is None
     )  # window 1 never sees the reference's write
+
+
+def _fresh_record():
+    n = _frozen(_net())
+    _direct(n)
+    n.meta["assistant_solve_input_fingerprint"] = "fp"
+    cfg = {
+        "fixed_sizes": "nameplate",
+        "solve_strategy": "rolling",
+        "rolling_horizon": 4,
+        "rolling_overlap": 0,
+    }
+    assert G.read(n, cfg, live_fingerprint="fp")["flag"] == G.FRESH
+    return n, cfg
+
+
+def _drop(rec, path):
+    *head, last = path
+    for k in head:
+        rec = rec[k]
+    del rec[last]
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        lambda r: r.update(version=G.VERSION + 1),
+        lambda r: r.update(version=0),
+        lambda r: r.pop("version"),
+        lambda r: r.update(key=None),
+        lambda r: r.update(key="x"),
+        lambda r: _drop(r, ["key", "horizon"]),
+        lambda r: _drop(r, ["key", "weightings"]),
+        lambda r: _drop(r, ["key", "reference_status"]),
+        lambda r: r.pop("windows"),
+        lambda r: _drop(r, ["windows", "failed"]),
+        lambda r: r.update(windows=[1, 2]),
+        lambda r: r.update(reference="ok"),
+        lambda r: r.update(operational_metrics=None),
+        lambda r: r.update(reference_metrics=None),
+        lambda r: r.update(operational_metrics=[]),
+        lambda r: r["operational_metrics"].update(opex_eur=3.0),
+        lambda r: r["operational_metrics"].update(opex_eur={}),
+        lambda r: r["operational_metrics"].update(opex_eur={"value": "3"}),
+        lambda r: r["operational_metrics"].update(opex_eur={"value": True}),
+        lambda r: r["reference_metrics"].update(opex_eur={"value": None}),
+    ],
+)
+def test_a_record_of_another_version_or_malformed_reads_stale(corrupt):
+    """GK A NOT OK @2c1ea51: a record of another version, or a malformed one,
+    reads stale with no metric, and never raises."""
+    n, cfg = _fresh_record()
+    corrupt(n.meta[G.GAP_KEY])
+    out = G.read(n, cfg, live_fingerprint="fp")
+    assert out["flag"] == G.STALE
+    assert out["metrics"] is None and out["windows"] is None
+
+
+@pytest.mark.parametrize("rec", [None, "x", 3, [], {}])
+def test_a_record_that_is_not_a_dict_never_raises(rec):
+    n, cfg = _fresh_record()
+    n.meta[G.GAP_KEY] = rec
+    out = G.read(n, cfg, live_fingerprint="fp")
+    assert out["flag"] == (G.MISSING if rec is None else G.STALE)
+    assert out["metrics"] is None
+
+
+def test_the_route_reads_a_malformed_record_as_stale_not_500(client, monkeypatch):
+    from routers.simulation import _state
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig
+
+    cfg = SolverConfig(
+        fixed_sizes="nameplate",
+        solve_strategy="rolling",
+        rolling_horizon=4,
+        rolling_overlap=0,
+    )
+    monkeypatch.setitem(_state, "solver_config", cfg)
+    PyPSAService.get_network().meta[G.GAP_KEY] = {"version": 99, "key": "x"}
+    r = client.get("/api/results/operational_gap")
+    assert r.status_code == 200, r.text
+    assert r.json()["flag"] == G.STALE
+    assert r.json()["metrics"] is None

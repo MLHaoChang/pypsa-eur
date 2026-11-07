@@ -259,11 +259,57 @@ def _gap_rows(op: dict, ref: dict) -> dict:
     return rows
 
 
+_KEY_FIELDS = ("horizon", "overlap", "weightings", "reference_status")
+_WINDOW_FIELDS = ("total", "solved", "failed", "failed_index")
+
+
+def _metrics_ok(m) -> bool:
+    """A stored metrics table: each entry a dict with a numeric or None value,
+    and a reason when the value is None."""
+    if not isinstance(m, dict):
+        return False
+    for entry in m.values():
+        if not isinstance(entry, dict) or "value" not in entry:
+            return False
+        v = entry["value"]
+        if v is None:
+            if not isinstance(entry.get("reason"), str):
+                return False
+        elif isinstance(v, bool) or not isinstance(v, (int, float)):
+            return False
+    return True
+
+
+def well_formed(rec) -> bool:
+    """True when ``rec`` is a record of this version with every field the read
+    uses. Any other record, from another version or malformed, reads stale and
+    never raises."""
+    if not isinstance(rec, dict) or rec.get("version") != VERSION:
+        return False
+    key, windows = rec.get("key"), rec.get("windows")
+    if not isinstance(key, dict) or any(f not in key for f in _KEY_FIELDS):
+        return False
+    if not isinstance(windows, dict) or any(f not in windows for f in _WINDOW_FIELDS):
+        return False
+    if rec.get("reference") is not None and not isinstance(rec["reference"], dict):
+        return False
+    for side in ("operational_metrics", "reference_metrics"):
+        if rec.get(side) is not None and not _metrics_ok(rec[side]):
+            return False
+    if not windows["failed"] and rec.get("operational_metrics") is None:
+        return False  # a solved run always records its metrics
+    if key["reference_status"] == "ok" and rec.get("reference_metrics") is None:
+        return False
+    return True
+
+
 def _flag(n, cfg, rec: dict | None, live_fingerprint: str | None) -> str:
     from services.solver.operational import is_operational
 
     if rec is None or not is_operational(cfg):
         return MISSING
+    if not well_formed(rec):
+        return STALE
     h, o = horizon_of(cfg)
     key = rec["key"]
     solved = (
