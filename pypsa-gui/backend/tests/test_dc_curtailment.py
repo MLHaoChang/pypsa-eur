@@ -896,3 +896,11 @@ def test_a_capture_without_the_dispatch_column_is_a_failed_capture():
     assert any("[CURTAIL] WARN" in m for m in msgs)
     C.commit(n, captured)
     assert n.meta[C.META_KEY]["curtailed_mwh"] is None
+
+
+def test_the_curtailed_energy_is_weighted_by_the_snapshot_hours(monkeypatch):
+    n = _network(hours=2.0)
+    status, _, _, _ = _solve(n, monkeypatch, _terms())
+    assert status in ("ok", "optimal")
+    assert n.meta[C.META_KEY]["curtailed_mwh"] == pytest.approx(2.0 * CURT_MWH)
+    assert C.curtailment_series(n)[0].sum() == pytest.approx(CURT_MWH)   # MW, not MWh
