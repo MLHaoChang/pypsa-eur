@@ -305,3 +305,22 @@ card through the coordinator.
   numpy, pandas and the standard library), non-unit weights that differ by
   column and by half (K4), adjacent window splits, and one wrong aggregate
   per family (K5).
+
+### 2026-11-07 — S5a review: GK B (35) NOT OK @416a05b8 (F1), fixed; CI fix
+
+- **F1:** a weighted metric declared `"none"` passed, because the K4 loop
+  skipped every column for `"none"`. `test_p4_fact_oracles.holds_basis` now
+  checks both directions for the 16 oracle metrics: a column basis gives the
+  fact under that column and differs under the other two; `"none"` gives the
+  same fact under every column. Killed: `dispatch_energy` → `"none"`,
+  `optimal_capacity` → `"generators"`, `equity_npv` → `"generators"`
+  (`test_a_wrong_weight_basis_is_caught` pins the first two).
+- **CI:** `fact_identity.window` raised KeyError on a metric no profile defines
+  (the pilot's `:unsupported` ask, `adequacy_certificate`), so 21 pilot cases
+  and 3 harness-reliability tests failed. The window now leaves that metric
+  out of `weight_basis`; its slot stays unavailable with its reason.
+- **Uncompared inputs (GK B (35) ruling):** the readiness oracle
+  (`fact_oracles.checked_pass`) takes each scorecard row's `project_value` and
+  `limit` as given; neither is compared against the builder network.
+  Follow-up: an oracle that computes `project_value` (and `limit`) for each
+  row from the network.

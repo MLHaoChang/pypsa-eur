@@ -306,17 +306,41 @@ def test_the_oracle_equals_the_recorded_fact(
     same(value, expected, exact)
     if profile != "grid-readiness/1":
         assert value != 0  # a zero fact would hide a wrong aggregate
-    basis = fact_identity.WEIGHT_BASIS[metric]
     weights = ctx.network.snapshot_weightings
     assert not (weights == 1).all().all()
     for column in COLUMNS:
         assert not weights[column].eq(weights[column].iloc[0]).all()
-    # K4: the fact's weight basis is the only column that gives it.
-    for column in COLUMNS:
-        if basis.startswith(column):
-            continue
-        if basis != "none":
-            assert compute(ctx, column=column) != pytest.approx(value, rel=1e-9), column
+    holds_basis(ctx, compute, value, fact_identity.WEIGHT_BASIS[metric], exact)
+
+
+def holds_basis(ctx, compute, value, basis, exact):
+    """K4, both directions (GK B (35) F1). A column basis: that column gives
+    the fact and every other column differs. "none": every column gives the
+    same fact (or the oracle takes no column)."""
+    column = basis.split("*")[0]
+    assert basis == "none" or column in COLUMNS, basis
+    for other in COLUMNS:
+        got = compute(ctx, column=other)
+        if basis == "none" or other == column:
+            same(got, value, exact)
+        else:
+            assert got != pytest.approx(value, rel=1e-9), other
+
+
+@pytest.mark.parametrize(
+    "profile,metric,declared",
+    [
+        ("generator-dispatch/1", "dispatch_energy", "none"),
+        ("capacity/1", "optimal_capacity", "generators"),
+    ],
+)
+def test_a_wrong_weight_basis_is_caught(request, checked, profile, metric, declared):
+    """The F1 mutant and its reverse: a weighted metric declared "none", and an
+    unweighted one declared "generators", each fail the K4 check."""
+    assert fact_identity.WEIGHT_BASIS[metric] != declared
+    ctx, scope = weighted(request, profile)
+    with pytest.raises(AssertionError):
+        holds_basis(ctx, ORACLES[profile], fact(checked, scope, metric), declared, True)
 
 
 # ── K4: exact windows ────────────────────────────────────────────────────
