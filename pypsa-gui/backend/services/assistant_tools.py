@@ -942,6 +942,28 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
     return {**artifact, "provenance": provenance, "manifest": manifest}
 
 
+def _one_run(runs):
+    """S2 (H8, J5): the charts of one delivery describe one solve or one input state.
+
+    Every scoped chart shares one input fingerprint and every result chart one
+    solve stamp. A legacy chart (no scope keys) names no run, so it shares a
+    delivery only with other legacy charts."""
+    def mixed(pairs):
+        seen = {}
+        for file_id, value in pairs:
+            seen.setdefault(value, file_id)
+        if len(seen) > 1:
+            first, second = list(seen.values())[:2]
+            workflow._refuse("delivery_mixed_runs", f"Charts {first} and {second} come from different solves "
+                             "or input states; deliver them separately.", 409)
+
+    mixed((file_id, "solve_stamp" in manifest) for file_id, manifest in runs)
+    scoped = [(file_id, manifest) for file_id, manifest in runs if "solve_stamp" in manifest]
+    mixed((file_id, manifest["validity"]["input_fingerprint"]) for file_id, manifest in scoped)
+    mixed((file_id, json.dumps(manifest["solve_stamp"], sort_keys=True))
+          for file_id, manifest in scoped if manifest["solve_stamp"] is not None)
+
+
 def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
     from services import chat_tools, upload_service
     if not isinstance(file_ids, list) or not 1 <= len(file_ids) <= 20 or any(not isinstance(f, str) for f in file_ids) or len(set(file_ids)) != len(file_ids):
@@ -957,6 +979,7 @@ def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
             workflow._refuse("delivery_too_large", "Delivery contents exceed the 25 MB limit.", 413)
         files.append((meta, path))
     manifest = {"version": 1, "project_id": str(project.id), "files": []}
+    runs = []
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for meta, path in files:
@@ -965,25 +988,31 @@ def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
             entry = f"{meta.file_id}_{safe}"
             data = path.read_bytes()
             if hashlib.sha256(data).hexdigest() != meta.sha256:
+                if meta.assurance_sha256 is not None:
+                    from services.assurance_artifacts import quarantine
+                    quarantine(root, meta.file_id, "bytes")
                 workflow._refuse("delivery_file_changed", "An artifact changed; regenerate it before delivery.", 409)
             archive.writestr(entry, data)
             item = {"file_id": meta.file_id, "archive_path": entry, "filename": meta.filename,
                     "sha256": meta.sha256, "size": len(data), "mime": meta.mime}
             sidecar = root / "assistant_artifacts" / (meta.file_id + ".json")
             from services.assurance_artifacts import verify_chart
-            checked = verify_chart(root, meta, data, str(project.id), provenance=True)
+            checked = verify_chart(root, meta, data, str(project.id), provenance="both")
             if checked is not None:
-                item["assurance"] = checked["manifest"]
-                item["provenance"] = checked
-                from services.assurance_artifacts import scope_status
-                status = scope_status(checked["manifest"], str(project.id))
-                if status is not None:
-                    item["scope_status"] = status
+                record, view = checked
+                item["assurance"] = record["manifest"]
+                item["provenance"] = record
+                for key in ("scope_status", "evidence_status", "evidence_note"):
+                    if key in view:
+                        item[key] = view[key]
+                if "scope_status" in view:
+                    runs.append((meta.file_id, record["manifest"]))
             elif sidecar.is_file():
                 item["provenance"] = workflow._read_json(sidecar)
                 item["provenance_status"] = "unvalidated"
             manifest["files"].append(item)
         archive.writestr("manifest.json", json.dumps(manifest, indent=2))
+    _one_run(runs)
     if buffer.tell() > upload_service.MAX_FILE_BYTES:
         workflow._refuse("delivery_too_large", "Compressed delivery exceeds 25 MB.", 413)
     if str(PyPSAService.get_active_context().project_uuid) != str(project.id):

@@ -1,0 +1,3 @@
+{"kinds": {
+  "delivery_mixed_runs": {"surface": "inline", "why": "build_delivery's own refusal (workflow._refuse in services/assistant_tools.py, AA-05 S2): the selected charts come from different solves or input states, or mix a chart without a recorded run with one that has one. Nothing is written; the model offers to deliver them separately."}
+}}
