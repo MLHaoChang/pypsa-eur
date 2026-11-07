@@ -3,7 +3,7 @@
 
 # 26 — Plan card names the held tariffs a run may attach
 
-Status: ready-for-agent
+Status: done
 Model: Sonnet
 Type: task
 Blocked by: none
@@ -40,3 +40,23 @@ frontend change with its own UX review.
 ### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
 
 Was: `needs-triage`. Frontend change, read from the envelope the card already renders. Files: the plan card in `pypsa-gui/frontend/src/` (Study run plan card) and its test; the envelope field is `run_envelope._library_tariffs`. Blockers: none. Reviewers: GK B (plan) and UX (card).
+
+### 2026-11-07: built (SH-26 session), premise corrected
+
+The "read from the envelope the card already renders; nothing new is fetched"
+premise was wrong: `run_envelope.describe()` stripped `at_grant` from gaps, the
+frontend `Envelope` type had no `gaps`, and `at_grant` is `{}` until the grant,
+so the card carried no held tariffs at all. Coordinator chose to add a
+read-only `held` / `held_state` to each plan-state `library_tariff` gap in
+`describe()` (`_held_for_plan`, same `_library_tariffs` call the grant uses) and
+render it in `EnvelopeSection`. GK B (32) plan GO with K1-K6: only before
+approval, an unreadable Library is `unreadable` and not "none", an id-less held
+tariff is `unnamed`, lines read `name vN · hash8`, absent fields render as
+before, and the grant path (`_gap_instances`, `_rows`) is untouched. The card
+says "held now" because the grant may resolve a different list. Shots:
+`.scratch/study-harness/evidence/26/`.
+
+UX (12) NOT OK @d20c28b3 changed the words (it outranks the issue's text): the empty
+state reads "No Library tariff is held, so approving leaves it empty." (not "the gap
+stays open"); no "grant" or "gap"; the outcome of approving is said for one and for
+several held; Guided shows `name vN`, Expert adds the hash8; no raw attribute key.
