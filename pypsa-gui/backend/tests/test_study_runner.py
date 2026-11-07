@@ -1054,7 +1054,7 @@ def test_a_reseed_leaves_a_study_year_the_user_set_apart_from_the_ledger(
                for n in r.json()["ledger"]["honesty_notes"])
 
 
-def _old_ledger_study(client, api_project, project_storage_dir, name, year):
+def _old_ledger_study(client, api_project, project_storage_dir, name, year, mixed=False):
     from services.study import library as L
     from services.study import questions as Q
     from services.study import store
@@ -1064,6 +1064,12 @@ def _old_ledger_study(client, api_project, project_storage_dir, name, year):
     study = store.load_study(base, sid)
     old = L.seed_ledger(Q.get_question(study.question_id), study.intake,
                         L.load_defaults(L.WP0_PACK_VERSION))
+    if mixed:  # one money row in another year: the ledger no longer has one money year
+        i = next(i for i, r in enumerate(old.rows)
+                 if r.currency_year == year and r.unit.startswith("EUR"))
+        rows = list(old.rows)
+        rows[i] = rows[i].model_copy(update={"currency_year": year + 1})
+        old = old.model_copy(update={"rows": rows})
     store.save_study(base, study.model_copy(update={
         "ledger": old, "ledger_version": old.ledger_version, "currency_year": year}))
     return sid, study
@@ -1102,6 +1108,20 @@ def test_a_tariff_patch_leaves_a_year_the_user_set_or_the_patch_sets(
         "settings": {"currency_year": 2022}})
     assert r.status_code == 200, r.text
     assert r.json()["currency_year"] == 2022
+    # A PATCH that sets the year the study already has still wins over the follow.
+    for suffix, year, extra, mixed in (("-c", 2020, {"currency_year": 2020}, False),
+                                       ("-d", 2020, {}, True),
+                                       ("-e", 2020, {"currency_year": None}, False)):
+        sid_x, study_x = _old_ledger_study(client, api_project, project_storage_dir,
+                                           name + suffix, year, mixed=mixed)
+        body = {"intake": {"tariff": dict(study_x.intake.get("tariff") or {})}}
+        if extra:
+            body["settings"] = extra
+        r = client.patch(f"/api/projects/{name}{suffix}/studies/{sid_x}", json=body)
+        if suffix == "-e" and r.status_code == 422:
+            continue  # unsetting the year is refused: nothing to follow
+        assert r.status_code == 200, (suffix, r.text)
+        assert r.json()["currency_year"] == (None if suffix == "-e" else 2020), suffix
 
 
 def test_a_ledger_naming_an_unshipped_pack_is_refused_never_read_on_the_pin(
