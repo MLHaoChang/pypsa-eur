@@ -730,6 +730,8 @@ def test_a_real_foreign_user_lock_is_denied_before_any_seam(
     assert error["error_kind"] == "project_locked"
     assert error["_outcome"]["outcome"] == "denied"
     assert "another user" in error["message"]
+    assert "it was not run" in error["message"]
+    assert "bulk_update_components" not in error["message"]
     assert called == [] and seen == []
     assert files() == before
 
