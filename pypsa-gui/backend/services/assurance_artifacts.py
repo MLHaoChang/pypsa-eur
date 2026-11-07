@@ -29,6 +29,62 @@ def canonical_sha256(value):
     ).hexdigest()
 
 
+# A4.1/H3: absent together = a chart drawn before them (legacy, unscoped);
+# present = checked, never downgraded to legacy.
+_SCOPE_KEYS = ("scope", "solve_stamp")
+
+
+def solve_stamp(network):
+    """The solve's recorded input fingerprints, as the result-freshness check reads them."""
+    meta = getattr(network, "meta", None) or {}
+    stamp = {
+        "input": meta.get("assistant_solve_input_fingerprint"),
+        "exact": meta.get("assistant_solve_exact_input_fingerprint"),
+    }
+    return stamp if all(isinstance(v, str) and v for v in stamp.values()) else None
+
+
+def _resident(project_id):
+    """The project's loaded context, or None when it is not loaded."""
+    from services.pypsa_service import PyPSAService
+
+    for key in PyPSAService.list_ids():
+        if key == project_id or key.endswith(":" + project_id):
+            ctx = PyPSAService.get_context(key)
+            if ctx is not None:
+                return ctx
+    ctx = PyPSAService.get_request_context() or PyPSAService.get_active_context()
+    if ctx is not None and str(getattr(ctx, "project_uuid", "") or "") == project_id:
+        return ctx
+    return None
+
+
+def _scope(manifest, project_id):
+    present = [key in manifest for key in _SCOPE_KEYS]
+    if not any(present):
+        return "legacy"
+    if not all(present) or manifest["scope"] != "current":
+        raise ValueError("scope mismatch")
+    stamp = manifest["solve_stamp"]
+    if manifest["source_kind"] != "captured_result":
+        if stamp is not None:
+            raise ValueError("input chart with a solve stamp")
+        return "input_as_drawn"
+    if (
+        not isinstance(stamp, dict)
+        or set(stamp) != {"input", "exact"}
+        or not all(isinstance(v, str) and v for v in stamp.values())
+        or stamp["input"] != manifest["validity"]["input_fingerprint"]
+    ):
+        raise ValueError("solve stamp mismatch")
+    ctx = _resident(project_id)
+    if ctx is None:
+        return "solve_not_rechecked"
+    if solve_stamp(ctx.network) != stamp:
+        raise ValueError("chart from another solve")
+    return "current"
+
+
 def verify_chart(root, meta, data, project_id, *, provenance=False):
     marker = meta.assurance_sha256
     if marker is None:
@@ -50,6 +106,8 @@ def verify_chart(root, meta, data, project_id, *, provenance=False):
             or manifest["artifact_sha256"] != meta.sha256
         ):
             raise ValueError("manifest mismatch")
+        if manifest.get("source_kind") in ("configured_input", "captured_result"):
+            manifest = {**manifest, "scope_status": _scope(manifest, str(project_id))}
         if manifest.get("source_kind") == "checked_evidence":
             # A checked chart is still its evidence's: same source hash, same values.
             from services import checked_charts

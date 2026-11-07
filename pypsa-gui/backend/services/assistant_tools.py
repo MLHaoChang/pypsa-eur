@@ -836,7 +836,7 @@ def apply_project_changes(preview_id: str) -> dict:
 
 def create_chart(component: str, attribute: str, names: list[str], source: str = "input") -> dict:
     from services import chat_tools
-    from services.assurance_artifacts import canonical_sha256
+    from services.assurance_artifacts import canonical_sha256, solve_stamp
     project, chart_root, _ = _project()
     if component not in ("Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer") or source not in ("input", "result") or not isinstance(names, list) or not 1 <= len(names) <= 8 or any(not isinstance(n, str) or not n for n in names) or len(set(names)) != len(names):
         workflow._refuse("invalid_chart", "Choose a component, input/result source, and 1–8 unique asset names.")
@@ -854,7 +854,14 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
         if source == "result" and (ctx.solver_state.get("status") == "running" or freshness["state"] != "fresh" or not matching_inputs):
             workflow._refuse("chart_results_unavailable", "Results do not have a matching input fingerprint. Solve the current inputs before charting results.", 409)
         dynamic = comp.dynamic.get(attribute)
-        if dynamic is not None and not dynamic.empty and set(names) <= set(dynamic.columns):
+        series = set(names) & set(dynamic.columns) if dynamic is not None and not dynamic.empty else set()
+        if series and series != set(names):
+            # A4.3: a static value under a series is not what the solve uses;
+            # never draw it beside the series, and never draw a series as static.
+            static_names = ", ".join(n for n in names if n not in series)[:200]
+            workflow._refuse("chart_data_partial", "Some selected assets have a time series for this attribute and "
+                             f"others do not ({static_names}); chart them separately.", 409)
+        if series:
             table = dynamic[names].copy()
         elif source == "input" and attribute in comp.static.columns and set(names) <= set(comp.static.index):
             table = comp.static.loc[names, [attribute]].copy()
@@ -864,8 +871,13 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
             workflow._refuse("chart_too_many_rows", "Choose a shorter time series (maximum 5000 rows).")
         table = table.apply(pd.to_numeric, errors="coerce")
         import numpy as np
-        if table.empty or not np.isfinite(table.to_numpy()).all():
+        if table.empty:
             workflow._refuse("chart_invalid_data", "Chart data must contain finite numeric values.")
+        finite = np.isfinite(table.to_numpy())
+        if not finite.all():
+            row, col = (int(i[0]) for i in np.nonzero(~finite))
+            where = f"{table.columns[col]} at {table.index[row]}"[:160]
+            workflow._refuse("chart_invalid_data", f"Chart data must contain finite numeric values; first missing or infinite value: {where}.")
         unit = str(defaults.at[attribute, "unit"])
         dataset = {"index": [list(map(str, i)) if isinstance(i, tuple) else str(i) for i in table.index],
                    "columns": list(map(str, table.columns)), "values": table.to_numpy().tolist(),
@@ -901,7 +913,8 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
                 "source_kind": "configured_input" if source == "input" else "captured_result",
                 "dataset": dataset, "render_spec": render_spec,
                 "dataset_sha256": canonical_sha256(dataset), "render_spec_sha256": canonical_sha256(render_spec),
-                "artifact_sha256": byte_hash,
+                "artifact_sha256": byte_hash, "scope": "current",
+                "solve_stamp": solve_stamp(ctx.network) if source == "result" else None,
                 "validity": {"coverage": "captured_rows", "input_fingerprint": fingerprint,
                              "limitations": ["Data/render/byte integrity; this does not certify engineering validity."]}}
     provenance = {"component": component, "attribute": attribute, "names": names, "source": source,
@@ -916,7 +929,7 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
             workflow._refuse("chart_source_changed", "Chart inputs changed while rendering; retry.", 409)
         current_comp = current.network.components[component]
         current_dynamic = current_comp.dynamic.get(attribute)
-        if dynamic is not None and not dynamic.empty and set(names) <= set(dynamic.columns):
+        if series:
             unchanged = current_dynamic is not None and current_dynamic[names].equals(table)
         else:
             unchanged = current_comp.static.loc[names, [attribute]].equals(table)
