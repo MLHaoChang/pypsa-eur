@@ -1742,3 +1742,28 @@ def test_skipped_ignores_a_stage_that_is_not_a_dict():
     assert run_eh.skipped({"report": {"pipeline": {"stages": stages}}}) == [
         "mc_certify: not run: budget"
     ]
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [{}, {"envelope": None}, {"envelope": {}}, {"envelope": {"budget": None}}],
+)
+def test_a_profile_without_an_envelope_budget_caps_at_zero(profile):
+    assert run_eh.solves_cap(profile, None) == 0
+
+
+def test_own_record_reads_the_latest_eh_step_that_is_not_superseded(tmp_path):
+    """F3: a later non-EH step and a superseded EH attempt never stand in for
+    the run's own settled EH step."""
+    ctx = ctx_for(tmp_path, eh_study=record(started=1.0))
+    steps = [
+        eh_done(started=1.0),
+        {**eh_done(started=2.0), "id": "solve.3", "superseded": True},
+        {
+            "id": "solve.4",
+            "tool": "solve_queue_enqueue",
+            "status": "completed",
+            "result": {},
+        },
+    ]
+    assert run_eh.own_record({"steps": steps}, ctx)["started_at"] == 1.0
