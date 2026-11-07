@@ -451,9 +451,13 @@ def test_an_identical_re_export_of_a_quarantined_table_is_refused_and_writes_not
 BASE_ITEM = {"file_id", "archive_path", "filename", "sha256", "size", "mime"}
 
 
-def test_other_exports_deliver_with_byte_hashes_only(baseline, client):
-    # R7: the five exports without a manifest build exactly as on master.
-    network = chat_tools.export_network_nc()
+@pytest.mark.parametrize(
+    "export",
+    ["export_network_nc", "export_csv_bundle", "export_excel", "export_matpower"],
+)
+def test_other_exports_deliver_with_byte_hashes_only(baseline, client, export):
+    # R7: the exports without a manifest build exactly as on master.
+    network = getattr(chat_tools, export)()
     items = delivered_items(client, network)
     assert set(items[0]) == BASE_ITEM
     assert (
@@ -500,3 +504,14 @@ def test_a_context_without_a_project_id_exports_bytes_only(baseline, monkeypatch
     export = chat_tools.export_to_csv([["G1", 1]], ["name", "p"], "t.csv")
     assert export["project_id"] is None and export["sha256"]
     assert (sorted(root.glob("*.json")) if root.exists() else []) == before
+
+
+def test_an_unreadable_read_before_the_check_never_reads_validated(
+    baseline, monkeypatch
+):
+    # R3: one exact fingerprint per call. When the read before the check fails,
+    # the status is input_assertion even though a later read would match.
+    imported()
+    assert status() == "validated"
+    monkeypatch.setattr(assurance_artifacts, "exact_or_none", lambda ctx: None)
+    assert status() == "input_assertion"

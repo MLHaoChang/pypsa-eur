@@ -319,16 +319,21 @@ def record_validation(ctx, exact):
         logger.warning("import validation not recorded (%s)", type(error).__name__)
 
 
-def import_status(ctx, exact=None):
+_READ_NOW = object()
+
+
+def import_status(ctx, exact=_READ_NOW):
     """"not_imported" without an assistant import stamp; "validated" only when
     the app-data record names this import and the current exact inputs;
-    "input_assertion" otherwise, including on any error (R3)."""
+    "input_assertion" otherwise, including on any error (R3). A caller that
+    already read the exact inputs passes them; None (an unreadable read) is
+    never re-read, so one call uses one fingerprint."""
     stamp = getattr(getattr(ctx, "network", None), "meta", {}).get(_IMPORT_KEY)
     if stamp is None:
         return "not_imported"
     try:
         record = json.loads(_validation_path(stamp["import_id"]).read_text(encoding="utf-8"))
-        current = exact if exact is not None else _exact(ctx)
+        current = _exact(ctx) if exact is _READ_NOW else exact
         if current is not None and (isinstance(stamp, dict) and record["import_id"] == stamp["import_id"]
                 and record["sha256"] == stamp["sha256"] and record["exact"] == current):
             return "validated"
@@ -339,7 +344,6 @@ def import_status(ctx, exact=None):
 
 # Table exports (AA-05 S3, A4.5, R5-R8)
 
-TABLE_FORMATS = ("csv", "xlsx")
 
 
 def _xlsx_cell(value):
