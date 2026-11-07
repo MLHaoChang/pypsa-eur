@@ -985,3 +985,23 @@ def test_refuse_rolling_reads_the_project_and_passes_when_off(monkeypatch):
     with pytest.raises(C.DcCurtailmentRefused) as exc:
         C.refuse_rolling()
     assert exc.value.kind == C.ROLLING_WITHOUT_CARRY_IN
+
+
+def test_energy_flows_refuse_a_curtailment_they_cannot_read(monkeypatch):
+    import json
+
+    import routers.results as R
+    from services.results.energy_flows import energy_flows
+    from services.results.load_shape import load_shape
+
+    n, _cfg, sink = _metered_solve(monkeypatch)
+    n.meta[C.META_KEY]["capture_failed"] = True
+    lost = sink.get("last_lost_load")
+    out = energy_flows(n, result_df=R._result_df, lost_load=lost)
+    assert out["status"] != "ok"
+    text = json.dumps(out, default=str)
+    assert C.NOT_ESTABLISHED in text and "bus balance does not close" not in text
+    shape = load_shape(n, result_df=R._result_df, lost_load=lost)
+    assert shape["status"] != "ok" and C.NOT_ESTABLISHED in json.dumps(
+        shape, default=str
+    )
