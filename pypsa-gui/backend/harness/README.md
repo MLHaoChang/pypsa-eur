@@ -956,7 +956,14 @@ charts require aligned dispatch and matching solve-input provenance;
 parameter edits invalidate the fingerprint even when component axes match.
 The solve service records that provenance under the existing solve lock and
 netCDF preserves it. Older imported solved files need a new solve before
-result charting. Private cloning skips the native solver model without
+result charting. A selection mixing assets with and without a series for the
+attribute refuses `chart_data_partial`, so a static value a series overrides
+is never drawn (AA-05 S1). A non-finite value refuses with the asset and
+first snapshot named. The manifest's `scope` and `solve_stamp` (the solve's
+input/exact fingerprints; null for input charts) are verified on download:
+both absent reads as `legacy`, a wrong value refuses, and a result chart from
+another solve refuses; an unloaded project reads `solve_not_rechecked`. The
+download sends the status as `X-Chart-Scope`. Private cloning skips the native solver model without
 changing the live model. `build_delivery` bundles selected authorized
 artifacts and a content-hash/provenance manifest within the 25 MB limit.
 All existing agent exports now include authenticated download metadata.
