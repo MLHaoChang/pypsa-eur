@@ -214,3 +214,55 @@ on the evidence-mismatch test) rides S3.
 - **R8:** `quarantined()` before any write in the table export path (H8a).
 - **R9:** `"delimiter": "comma (not detected)"`; inspect_import never returns
   inferred units or a mapping.
+
+### 2026-11-07 — S4 plan: GK B (32) GO WITH CHANGES (V1–V7)
+
+S4 covers A4.4 (reports) with H9 and Q3 (a). Answers: Q1 (a) withhold with an
+inline placeholder, under V1; Q2 (a) a sealed manifest for assistant report
+exports, split into S4a (P1–P6) and S4b (the manifest, with its own plan note
+to GK B first); Q3 (a) withhold in the job, so the stored version is already
+withheld. Plan P1–P7: the assistant's generate and regenerate run strict; an
+inline placeholder in docx, pdf and get_report, plus the appendix; tables
+equal a hand oracle cell for cell; required disclosures survive generate,
+regenerate and export (`report_disclosure_missing`, 409); regenerating one
+section leaves the others byte-equal; the human routes are pinned
+byte-identical; mutants.
+
+- **V1:** the placeholder names the count and the reason only ("Withheld: 2
+  numbers could not be checked against the study; see Numbers to check").
+  Values appear only in the appendix, marked unverified (withheld), in docx,
+  pdf and get_report's section view. Test: no withheld value string appears in
+  any surface's body text.
+- **V2:** the strict keyword is passed in-process only, never as a query, body
+  or form field on routers/reports.py or report_jobs.py. Test: a client
+  sending strict=true (or the keyword's name) to the human routes gets
+  master's behaviour; a pin on the same report shows identical bytes.
+- **V3:** fail closed. An audit exception, a missing audit, or an audit that
+  does not cover a paragraph withholds it under strict, with AUDIT_FAILED as
+  in run_report; reuse withhold_unverified, no second filter. Hand mutant: an
+  audit exception that publishes.
+- **V4:** a strict regenerate of one section of a human-generated report
+  leaves the others byte-equal; a later human non-strict regenerate may
+  un-withhold it (master behaviour), and the assistant's get_report reads that
+  version as stored, with the appendix flags. Stated in the PR, one round trip
+  tested.
+- **V5:** the required disclosure set comes from the stored version's
+  evidence, not the current project state; `report_disclosure_missing` goes
+  in the fragment; a generate and a regenerate that drop a required callout
+  are both tested.
+- **V6:** the table oracle is computed from the fixture's raw numbers, not
+  through EvidenceTable's code path; it covers a negative value, a NaN or
+  missing value and a unit cell.
+- **V7:** mutants: strict dropped, withhold-to-flag, disclosure check removed,
+  the pin's flag default flipped, a placeholder that echoes the value (V1),
+  an audit exception that publishes (V3).
+
+### 2026-11-07 — S3 review: GK B (32) NOT OK @3dd893d7 (T1, T2), fixed
+
+- **T1:** a refused identical re-export overwrote the earlier export's sealed
+  sidecar, and the next download quarantined it. Now `_publish_sealed_export`
+  runs the write-edge checks before any sidecar write, writes the sidecar and
+  the upload's seal under the project upload lock, and keeps a sidecar that
+  already seals the live upload (first seal wins). Charts use the same helper.
+- **T2:** validate_network reads the exact inputs before and after the check
+  and records only when the two agree; a hand mutant on the compare is killed.
