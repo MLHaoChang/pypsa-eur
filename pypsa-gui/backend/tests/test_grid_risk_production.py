@@ -717,6 +717,248 @@ def test_a_product_with_no_tonne_factor_is_unpriced_never_zero(tmp_path):
     assert c["ride"]["eur_per_year"] is None and c["ride"]["eur_flag"] == G.LPV_MISSING
 
 
+# --- G2P #22: N-1 per-transformer sub-rows (GK A (17) G22-1..6, UX (13)) -------------------------------------------
+
+
+def _two_trafos(periods=None):
+    """The chain with a second site transformer in parallel, site_trafo_b, with its own outage data."""
+    n = _network(periods=periods)
+    n.add(
+        "Link", "site_trafo_b", bus0="site", bus1="mill_bus", carrier="AC", p_nom=50.0
+    )
+    n.links.at["site_trafo_b", "eh_process"] = False
+    n.links.at["site_trafo_b", "eh_role"] = ""
+    _outage(n, "site_trafo_b", Q_TRAFO, MTTR_TRAFO)
+    return n
+
+
+def _prod(t, eur, flag=None, product="concentrate"):
+    return {
+        "product": product,
+        "lost_t_per_year": t,
+        "lost_eur_per_year": eur,
+        "flag": flag,
+    }
+
+
+_SCREEN_FLAGS = {
+    "line": ["no_inventory_credit"],
+    "period": ["feedstock_inventory_not_credited"],
+}
+
+
+def _fake_loss(monkeypatch, by_link):
+    """Stand in for the process-loss screen: ``by_link[link]`` is {period key: (products, bound)}."""
+    monkeypatch.setattr(G.PL, "units_cut_off", lambda n, link, period=None: ["mill"])
+
+    def loss(n, link, mttr, q, lost_load=None):
+        return {
+            "stopped_units": ["mill"],
+            "flags": _SCREEN_FLAGS["line"],  # one shared list: never changed in place
+            "by_period": {
+                k: {
+                    "occurrence_per_year": 1.0,
+                    "outage_hours": mttr,
+                    "products": prods,
+                    "flags": _SCREEN_FLAGS["period"],
+                    **({"bound": bound} if bound else {}),
+                }
+                for k, (prods, bound) in by_link[link].items()
+            },
+        }
+
+    monkeypatch.setattr(G.PL, "expected_outage_loss", loss)
+
+
+def _n1(n):
+    return _line(G.grid_risk_production(n), "n_1")
+
+
+def _fold_ref(prods):
+    """Today's line rule, written out: t None if any t is None; EUR None with the last unpriced product's flag."""
+    t = eur = 0.0
+    ef = None
+    for p in prods:
+        t = (
+            None
+            if p["lost_t_per_year"] is None
+            else (None if t is None else t + p["lost_t_per_year"])
+        )
+        if p["lost_eur_per_year"] is None:
+            eur, ef = None, p["flag"] or G.LPV_MISSING
+        elif eur is not None:
+            eur += p["lost_eur_per_year"]
+    return {
+        "t_per_year": t,
+        "eur_per_year": eur if t is not None else None,
+        "eur_flag": ef,
+    }
+
+
+@pytest.fixture(scope="module")
+def net_b():
+    return _two_trafos()
+
+
+def test_each_site_transformer_is_a_row_with_its_own_fold_and_the_line_folds_them_all(
+    net_b, monkeypatch
+):
+    # Float sums that depend on order: the line must fold every product in today's order, never re-add row sums.
+    a = [_prod(0.1, 0.1), _prod(0.2, 1e16, product="acid")]
+    b = [_prod(0.3, 0.3), _prod(1e16, 0.2, product="acid")]
+    _fake_loss(
+        monkeypatch, {"site_trafo": {"_": (a, None)}, "site_trafo_b": {"_": (b, None)}}
+    )
+    n1 = _n1(net_b)
+    assert [r["key"] for r in n1["rows"]] == [
+        "site_trafo",
+        "site_trafo_b",
+    ]  # the backend's order
+    assert [r["label"] for r in n1["rows"]] == [
+        "site_trafo out of service",
+        "site_trafo_b out of service",
+    ]
+    for r, prods in zip(n1["rows"], (a, b)):
+        cell = r["by_period"]["_"]
+        assert {
+            k: cell[k] for k in ("t_per_year", "eur_per_year", "eur_flag")
+        } == _fold_ref(prods)
+        assert (
+            cell["products"] == prods and cell["occurrence_per_year"] == 1.0
+        )  # existing keys untouched
+    assert n1["by_period"]["_"] == _fold_ref(a + b)  # exact bits, as master computes it
+    assert G.LOWER_BOUND not in n1["flags"]  # no row is a lower bound
+    rows = [r["by_period"]["_"] for r in n1["rows"]]
+    assert n1["by_period"]["_"]["t_per_year"] == pytest.approx(
+        sum(c["t_per_year"] for c in rows)
+    )
+
+
+def test_the_n_1_line_is_the_flat_fold_never_the_sum_of_the_row_cells(
+    net_b, monkeypatch
+):
+    # G22-1: 1e16 + 1 + 1 + 1 folded flat is 1e16; the row sums 1e16 + 2 give 1.0000000000000002e16.
+    a = [_prod(1e16, 1e16), _prod(1.0, 1.0, product="acid")]
+    b = [_prod(1.0, 1.0), _prod(1.0, 1.0, product="acid")]
+    _fake_loss(
+        monkeypatch, {"site_trafo": {"_": (a, None)}, "site_trafo_b": {"_": (b, None)}}
+    )
+    n1 = _n1(net_b)
+    rows = [r["by_period"]["_"] for r in n1["rows"]]
+    line = n1["by_period"]["_"]
+    assert line["t_per_year"] == 1e16 and line["eur_per_year"] == 1e16  # exact bits
+    assert (
+        rows[0]["t_per_year"] + rows[1]["t_per_year"] == 1.0000000000000002e16
+    )  # the row-sum grouping differs, so this test tells them apart
+
+
+def test_a_row_with_unknown_tonnes_has_no_eur_even_when_priced(net_b, monkeypatch):
+    a = [_prod(None, 50.0), _prod(1.0, 10.0)]
+    b = [_prod(2.0, 20.0)]
+    _fake_loss(
+        monkeypatch, {"site_trafo": {"_": (a, None)}, "site_trafo_b": {"_": (b, None)}}
+    )
+    ra, rb = (r["by_period"]["_"] for r in _n1(net_b)["rows"])
+    assert ra["t_per_year"] is None and ra["eur_per_year"] is None
+    assert rb["t_per_year"] == 2.0 and rb["eur_per_year"] == 20.0
+
+
+def test_a_row_with_an_unpriced_product_has_no_eur_and_names_why(net_b, monkeypatch):
+    a = [_prod(1.0, None, flag="mttr_missing"), _prod(1.0, 10.0)]
+    b = [_prod(2.0, 20.0)]
+    _fake_loss(
+        monkeypatch, {"site_trafo": {"_": (a, None)}, "site_trafo_b": {"_": (b, None)}}
+    )
+    n1 = _n1(net_b)
+    ra, rb = (r["by_period"]["_"] for r in n1["rows"])
+    assert (
+        ra["t_per_year"] == 2.0
+        and ra["eur_per_year"] is None
+        and ra["eur_flag"] == "mttr_missing"
+    )
+    assert rb["eur_per_year"] == 20.0 and rb["eur_flag"] is None
+    assert n1["by_period"]["_"]["eur_per_year"] is None
+
+
+def test_the_last_unpriced_products_flag_wins_and_no_flag_reads_missing_value(
+    net_b, monkeypatch
+):
+    a = [_prod(1.0, None, flag="mttr_missing"), _prod(1.0, None, flag=None)]
+    b = [_prod(1.0, None, flag=None), _prod(1.0, None, flag="mttr_missing")]
+    _fake_loss(
+        monkeypatch, {"site_trafo": {"_": (a, None)}, "site_trafo_b": {"_": (b, None)}}
+    )
+    ra, rb = (r["by_period"]["_"] for r in _n1(net_b)["rows"])
+    assert ra["eur_flag"] == G.LPV_MISSING and rb["eur_flag"] == "mttr_missing"
+
+
+def test_a_rows_lower_bound_sits_in_that_periods_row_cell_only(monkeypatch):
+    n = _two_trafos(periods=[2030, 2040])
+    p = [_prod(1.0, 10.0)]
+    _fake_loss(
+        monkeypatch,
+        {
+            "site_trafo": {"2030": (p, "lower"), "2040": (p, None)},
+            "site_trafo_b": {"2030": (p, None), "2040": (p, None)},
+        },
+    )
+    n1 = _n1(n)
+    ra, rb = n1["rows"]
+    assert G.LOWER_BOUND in ra["by_period"]["2030"]["flags"]
+    assert G.LOWER_BOUND not in ra["by_period"]["2040"]["flags"]
+    assert all(G.LOWER_BOUND not in c["flags"] for c in rb["by_period"].values())
+    assert G.LOWER_BOUND not in ra["flags"]  # never the row-level flags
+    assert ra["flags"] == [
+        "no_inventory_credit"
+    ]  # the row-level flags as the screen gave them
+    assert G.LOWER_BOUND in n1["flags"]  # the line still says so
+    assert _SCREEN_FLAGS == {
+        "line": ["no_inventory_credit"],
+        "period": ["feedstock_inventory_not_credited"],
+    }
+
+
+def test_a_skipped_transformer_gets_no_row_and_the_basis_says_so(monkeypatch):
+    n = _two_trafos()
+    n.links.at["site_trafo_b", "mttr_hours"] = float("nan")
+    p = [_prod(1.0, 10.0)]
+    _fake_loss(
+        monkeypatch, {"site_trafo": {"_": (p, None)}, "site_trafo_b": {"_": (p, None)}}
+    )
+    n1 = _n1(n)
+    assert [r["key"] for r in n1["rows"]] == ["site_trafo"]
+    assert (
+        "credited. It covers only the transformers listed. Not counted: site_trafo_b ("
+        in n1["basis"]
+    )
+    assert "—" not in n1["basis"]
+
+
+def test_with_every_transformer_listed_the_basis_names_no_skip(net_b, monkeypatch):
+    p = [_prod(1.0, 10.0)]
+    _fake_loss(
+        monkeypatch, {"site_trafo": {"_": (p, None)}, "site_trafo_b": {"_": (p, None)}}
+    )
+    assert "only the transformers listed" not in _n1(net_b)["basis"]
+
+
+def test_a_row_with_no_entry_for_a_period_adds_nothing_to_that_period(monkeypatch):
+    n = _two_trafos(periods=[2030, 2040])
+    p = [_prod(1.0, 10.0)]
+    _fake_loss(
+        monkeypatch,
+        {
+            "site_trafo": {"2030": (p, None), "2040": (p, None)},
+            "site_trafo_b": {"2030": (p, None)},
+        },
+    )
+    n1 = _n1(n)
+    assert (
+        n1["by_period"]["2030"]["t_per_year"] == 2.0
+        and n1["by_period"]["2040"]["t_per_year"] == 1.0
+    )
+
+
 def test_island_outside_blocks_prices_rate_times_mass_pull_per_product(net2, tmp_path):
     campus = _write_products(tmp_path / "run")
     df = pd.read_csv(campus.run_dir / G.RESTART_CSV)

@@ -503,19 +503,37 @@ def _import_link_all(n) -> list[str]:
     return list(select_import_links(n, ImportOverlaySpec()))
 
 
+def _fold(products) -> tuple:
+    """(t, EUR, flag) of a sequence of the process-loss screen's product rows: t None when any is None; EUR None
+    with the last unpriced product's flag (else ``LPV_MISSING``) when any is unpriced, and None when t is."""
+    t = eur = 0.0
+    ef = None
+    for prod in products:
+        if prod["lost_t_per_year"] is None:
+            t = None
+        elif t is not None:
+            t += prod["lost_t_per_year"]
+        if prod["lost_eur_per_year"] is None:
+            eur, ef = None, prod["flag"] or LPV_MISSING
+        elif eur is not None:
+            eur += prod["lost_eur_per_year"]
+    return t, eur if t is not None else None, ef
+
+
 def _n_1(n, lost_load, periods) -> dict:
     src = [NETWORK_FILE]
-    feeding, rows, flags = [], [], []
+    feeding, rows, flags, skipped = [], [], [], []
     for link in _site_transformers(n):
         q, mttr = _outage(n, link)
         if q is None or not mttr or mttr <= 0 or not PL.units_cut_off(n, link):
+            skipped.append(link)
             continue
         res = PL.expected_outage_loss(n, link, mttr, q, lost_load=lost_load)
         feeding.append(link)
         rows.append(
             {
                 "key": link,
-                "label": f"{link} out",
+                "label": f"{link} out of service",
                 "units": res["stopped_units"],
                 "flags": res["flags"],
                 "by_period": {
@@ -523,8 +541,12 @@ def _n_1(n, lost_load, periods) -> dict:
                         "occurrence_per_year": v["occurrence_per_year"],
                         "outage_hours": v["outage_hours"],
                         "products": v["products"],
-                        "flags": v["flags"],
+                        "flags": [  # a copy: the screen's list is never changed
+                            *v["flags"],
+                            *([LOWER_BOUND] if v.get("bound") == "lower" else []),
+                        ],
                         **({"bound": v["bound"]} if "bound" in v else {}),
+                        **_cell(*_fold(v["products"])),
                     }
                     for k, v in res["by_period"].items()
                 },
@@ -547,21 +569,10 @@ def _n_1(n, lost_load, periods) -> dict:
     by_period = {}
     for p in periods:
         k = _key(p)
-        t = eur = 0.0
-        ef = None
-        for r in rows:
-            for prod in (r["by_period"].get(k) or {}).get("products", []):
-                if prod["lost_t_per_year"] is None:
-                    t = None
-                elif t is not None:
-                    t += prod["lost_t_per_year"]
-                if prod["lost_eur_per_year"] is None:
-                    eur, ef = None, prod["flag"] or LPV_MISSING
-                elif eur is not None:
-                    eur += prod["lost_eur_per_year"]
-            if (r["by_period"].get(k) or {}).get("bound") == "lower":
-                flags.append(LOWER_BOUND)
-        by_period[k] = _cell(t, eur if t is not None else None, ef)
+        cells = [r["by_period"].get(k) or {} for r in rows]
+        # One fold over every product of every row, in row order: never the sum of the row sums (float order).
+        by_period[k] = _cell(*_fold(p for c in cells for p in c.get("products", [])))
+        flags += [LOWER_BOUND for c in cells if c.get("bound") == "lower"]
     return _line(
         "n_1",
         source_files=src,
@@ -570,7 +581,13 @@ def _n_1(n, lost_load, periods) -> dict:
         rows=rows,
         basis="the process-loss screen's expected outage loss per site transformer: events per year = year "
         "hours × outage rate / repair time, each event the mean undelivered tonnes over every start "
-        "hour of the solved dispatch, with inventory credited",
+        "hour of the solved dispatch, with inventory credited"
+        + (
+            f". It covers only the transformers listed. Not counted: {', '.join(skipped)} (no outage rate, "
+            "no repair time or no process unit behind it)"
+            if skipped
+            else ""
+        ),
         by_period=by_period,
     )
 
