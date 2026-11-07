@@ -1242,3 +1242,162 @@ def test_the_step_adds_no_ledger_row_and_no_chain_link(tmp_path, monkeypatch):
 
 def test_module_path():
     assert Path(run_eh.__file__).name == "run_eh.py"
+
+
+# ── mutants.py survivors (the guards' own tests) ────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "step", [None, "run_eh_study", {"tool": "solve_queue_enqueue"}, {}]
+)
+def test_only_an_eh_study_step_is_one(step):
+    assert not run_eh.is_eh_step(step)
+    assert run_eh.is_eh_step({"tool": "run_eh_study"})
+
+
+@pytest.mark.parametrize(
+    "block", [None, {"stages": ["apply_pack"]}, {"budget_solves": "2"}]
+)
+def test_a_profile_without_a_whole_eh_study_block_freezes_nothing(tmp_path, block):
+    profile = {k: v for k, v in PROFILE.items() if k != "eh_study"}
+    if block is not None:
+        profile["eh_study"] = block
+    with pytest.raises(run_eh.FreezeError):
+        run_eh.freeze(ctx_for(tmp_path), profile, 6)
+
+
+@pytest.mark.parametrize("state", ["revoked", "expired"])
+def test_an_envelope_no_longer_granted_neither_freezes_nor_caps(tmp_path, state):
+    """Q2 = A: without a live grant the stage entry freezes on the profile's budget."""
+    ctx = ctx_for(tmp_path)
+    path, task = task_for(tmp_path)
+    envelope(
+        path,
+        solves=1,
+        state=state,
+        eh_study={"args": {"archetype": "strong_grid"}, "digest": "d"},
+    )
+    assert (
+        run_eh.solves_cap(PROFILE, run_envelope._load(path))
+        == PROFILE["envelope"]["budget"]["solves"]
+    )
+    frozen = run_eh.stage_frozen(path, task, PROFILE, ctx)
+    assert (
+        frozen["args"]["archetype"] == "weak_flexible"
+        and frozen["args"]["budget_solves"] == 2
+    )
+
+
+def test_a_chat_plans_eh_step_never_waits_on_the_run_follower(tmp_path, monkeypatch):
+    from services import assistant_tasks
+
+    path, ticket = ticket_task(tmp_path)
+    task = json.loads(path.read_text())
+    del task["run"]
+    path.write_text(json.dumps(task))
+    monkeypatch.setattr(
+        assistant_tasks, "_read", lambda task_id: (path, json.loads(path.read_text()))
+    )
+    monkeypatch.setattr(
+        assistant_tasks,
+        "await_job",
+        lambda *a: pytest.fail("a chat plan's step waited"),
+    )
+    assert run_eh.wait(ticket, "ad:1", "s1", ctx_for(tmp_path), 1.0) is False
+
+
+def test_a_step_not_awaited_is_not_followed(tmp_path, monkeypatch):
+    from services import assistant_tasks
+
+    path, ticket = ticket_task(tmp_path)
+    monkeypatch.setattr(
+        assistant_tasks, "_read", lambda task_id: (path, json.loads(path.read_text()))
+    )
+    monkeypatch.setattr(assistant_tasks, "await_job", lambda *a: None)
+    monkeypatch.setattr(run_eh, "_follow", lambda *a: pytest.fail("followed"))
+    assert run_eh.wait(ticket, "ad:1", "s1", ctx_for(tmp_path), 1.0) is False
+
+
+def test_a_failed_settle_names_its_reason_on_the_step(tmp_path, monkeypatch):
+    path, ticket = ticket_task(tmp_path)
+    from services import assistant_tasks
+
+    monkeypatch.setattr(assistant_tasks, "settle_job", lambda *a: {"ok": True})
+    run_eh.settle(
+        path,
+        ticket,
+        "ad:1",
+        record(stages=record()["report"]["pipeline"]["stages"] + [EXHAUSTED]),
+        1.0,
+    )
+    assert "mc_certify" in json.loads(path.read_text())["steps"][0]["error"]
+    monkeypatch.setattr(
+        assistant_tasks, "settle_job", lambda *a: None
+    )  # settled elsewhere: nothing written
+    (tmp_path / "b").mkdir()
+    path2, ticket2 = ticket_task(tmp_path / "b")
+    run_eh.settle(path2, ticket2, "ad:1", record(status="failed"), 1.0)
+    assert "error" not in json.loads(path2.read_text())["steps"][0]
+
+
+@pytest.mark.parametrize(
+    "state, eh_study, task_id, project_dir",
+    [
+        ("revoked", {"args": {"archetype": "strong_grid"}}, "t1", True),
+        ("granted", None, "t1", True),
+        ("granted", {"args": {"archetype": "strong_grid"}}, None, True),
+        ("granted", {"args": {"archetype": "strong_grid"}}, "t1", False),
+    ],
+)
+def test_readiness_reads_a_grants_args_only_from_a_live_grant_of_this_run(
+    monkeypatch, tmp_path, state, eh_study, task_id, project_dir
+):
+    from services import chat_tools
+
+    seen = []
+    monkeypatch.setattr(run_gates, "_on", lambda ctx, fn, *args: fn(*args))
+    monkeypatch.setattr(
+        chat_tools, "get_eh_readiness", lambda *a: seen.append(a[0]) or None
+    )
+    env = env_for(tmp_path, ctx=ctx_for(tmp_path))
+    (env.project_dir / "assistant_tasks").mkdir()
+    envelope(
+        env.project_dir / "assistant_tasks" / "t1.json", state=state, eh_study=eh_study
+    )
+    env.task["task_id"] = task_id
+    if not project_dir:
+        env = Env(task=env.task, ctx=env.ctx, project=None, project_dir=None)
+    read("eh.readiness.ready", env)
+    assert seen == ["weak_flexible"]  # frozen again from the profile and goal
+
+
+def test_readiness_never_reads_without_the_runs_context(tmp_path):
+    assert read("eh.readiness.ready", env_for(tmp_path, ctx=None)) is None
+
+
+def test_unserved_energy_never_reads_for_an_explore_case(tmp_path, monkeypatch):
+    env = lost_load_env(tmp_path, monkeypatch, job=DONE_JOB)
+    env = Env(
+        task=env.task,
+        ctx=env.ctx,
+        project=None,
+        project_dir=env.project_dir,
+        case={"project_id": PROJECT},
+    )
+    assert read("kpi.unserved_mwh", env) is None
+
+
+def test_a_revoked_envelope_is_neither_charged_nor_checked_by_admit(tmp_path):
+    """Step-by-step after a revoke: the budget is the step's own card's, so
+    nothing is reserved on the dead grant's ledger."""
+    ctx = ctx_for(tmp_path)
+    path, task = task_for(tmp_path)
+    envelope(
+        path,
+        solves=1,
+        state="revoked",
+        audit=[{"event": "used", "tool": "solve_queue_enqueue", "call_id": "c0"}],
+    )
+    step = frozen_step(ctx)
+    assert run_eh.admit(path, task, step, step["args"], ctx) is None
+    assert [a["event"] for a in run_envelope._load(path)["audit"]] == ["used"]
