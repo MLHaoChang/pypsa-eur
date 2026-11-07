@@ -280,6 +280,17 @@ def test_another_failure_may_still_be_retried(session, monkeypatch):
     )
 
 
+def test_a_retry_is_no_card(session, monkeypatch, spy):
+    """N1: resolve_task retry re-opens the step, and its apply still needs the user's card."""
+    task_id, args = failed_apply(session, monkeypatch, "tool_error")
+    assert (
+        chat_tools.resolve_task_step(task_id, "retry")["next_step"]["status"]
+        == "pending"
+    )
+    _, results, asked = dispatch(session, monkeypatch, "site_scene_apply", args, "deny")
+    assert asked and results[-1]["is_error"] and spy == []
+
+
 def test_the_loop_records_the_refusal_kind_on_the_step(session, monkeypatch):
     plan()
     args = prepared(session, monkeypatch)
