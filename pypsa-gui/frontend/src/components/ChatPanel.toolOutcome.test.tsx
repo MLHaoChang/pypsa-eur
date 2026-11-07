@@ -174,7 +174,7 @@ describe('chat tool-line outcome marks', () => {
       .toBe('–wait_for_job (outcome unknown: this kind of job cannot be checked yet)')
     act(() => useUIStore.setState({ uiMode: 'guided' }))
     expect(screen.getByTestId('chat-tool-label').textContent)
-      .toBe('Outcome unknown: use wait for job (this kind of job cannot be checked yet)')
+      .toBe('Outcome unknown: wait for the job to finish (this kind of job cannot be checked yet)')
   })
 
   it('shows a partly done write with its count in both modes', async () => {
@@ -185,7 +185,7 @@ describe('chat tool-line outcome marks', () => {
         paths_not_done: ['/Generator/G4/p_nom'] }, updated: 5 } })
     expect(screen.getByTestId('chat-tool-outcome').textContent).toBe('–bulk_update_components (partly done: 3 of 5 updated)')
     act(() => useUIStore.setState({ uiMode: 'guided' }))
-    expect(screen.getByTestId('chat-tool-label').textContent).toBe('Partly done: update components (3 of 5)')
+    expect(screen.getByTestId('chat-tool-label').textContent).toBe('Partly done: update components (3 of 5 updated; 2 not updated)')
   })
 
   it.each([

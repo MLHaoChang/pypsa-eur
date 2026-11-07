@@ -13,6 +13,11 @@ export function unitLabel(u: string): string {
 // Stored units that only restate their label ("Build year (year)").
 const SELF_EVIDENT_UNITS = new Set(['year'])
 
+/** A unit as a label shows it, or undefined when it only restates the label ("Build year (year)"). */
+export function visibleUnit(u: string | null | undefined): string | undefined {
+  return u && !SELF_EVIDENT_UNITS.has(u) ? unitLabel(u) : undefined
+}
+
 /**
  * A raw-table column header from the asset schema (S1d): the descriptor's
  * label with its STORED unit, since the bottom grid and the generation stack
