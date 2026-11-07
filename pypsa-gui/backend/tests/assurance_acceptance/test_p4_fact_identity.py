@@ -272,6 +272,22 @@ def test_a_one_snapshot_window_counts_one_snapshot(request, checked):
     assert record["window"]["start"] == record["window"]["end"] == first
 
 
+def test_an_unsupported_metric_in_scope_still_captures_without_a_weight_basis(
+    request, checked
+):
+    """The pilot's `:unsupported` cases ask for a metric no profile defines:
+    the record still captures, that slot stays unavailable and the window
+    names a weight basis only for the defined metrics."""
+    ctx, scope = build(request, "generator-dispatch/1")
+    asked = [*calculations.requested_metrics(scope), "adequacy_certificate"]
+    record = records.capture_scoped(owner(checked), {**scope, "metrics": asked})
+    assert record["window"]["weight_basis"] == {
+        m: fact_identity.WEIGHT_BASIS[m] for m in asked[:-1]
+    }
+    slot = {s["metric"]: s for s in record["slots"]}["adequacy_certificate"]
+    assert slot["disposition"] == "unavailable" and slot["reason"]
+
+
 def test_the_evidence_route_and_export_hide_the_new_keys(request, checked):
     """Stored-format ruling: existing readers see the output they saw before."""
     _ctx, scope, record = _capture(request, checked, "generator-dispatch/1")

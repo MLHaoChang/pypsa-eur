@@ -139,5 +139,9 @@ def window(index, scope):
         "snapshots": None
         if scope["profile"] in NO_SNAPSHOT_INDEX
         else _count(index, start, end),
-        "weight_basis": {m: WEIGHT_BASIS[m] for m in requested_metrics(scope)},
+        # A metric no profile defines (the pilot's unsupported ask) has no
+        # weighting; its slot stays unavailable with its own reason.
+        "weight_basis": {
+            m: WEIGHT_BASIS[m] for m in requested_metrics(scope) if m in WEIGHT_BASIS
+        },
     }
