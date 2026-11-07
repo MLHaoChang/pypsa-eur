@@ -186,6 +186,13 @@ on the evidence-mismatch test) rides S3.
   (durable.file_lock), never in network.meta; `import_uploaded_network` strips
   any `assistant_validated_*` key; a file pre-stamped with its own fingerprint
   imports as input_assertion.
+- **R1 storage (a), app-data store, R1a–R1d** (supersedes the project-side
+  location above): R1a a server-minted uuid4 import_id, the carried stamp and
+  validated keys stripped; R1b a 32-hex id check before any path is built;
+  R1c import_id, sha256 and exact fingerprint all equal, anything unreadable
+  reads input_assertion, a hand mutant on the sha256 compare; R1d
+  durable.file_lock with an atomic replace, growth named in Skipped; plus an
+  import → validate → save → reload test that still reads validated.
 - **R2:** validate_network stays read-tier: dirty flag, exact fingerprint and
   meta unchanged.
 - **R3:** one exact fingerprint per call; unloaded or raising reads
