@@ -343,12 +343,13 @@ def test_disclosure_drift_on_matching_bytes_refuses_without_a_marker(project, cl
     assert _markers(project) == set()
 
 
-def test_an_io_error_on_the_version_refuses_without_a_marker(project, client, monkeypatch):
+@pytest.mark.parametrize("error", [OSError("disk"), TimeoutError("lock")], ids=["io", "timeout"])
+def test_an_io_error_or_timeout_on_the_version_refuses_without_a_marker(project, client, monkeypatch, error):
     rid = _assistant_report(monkeypatch)
     file_id = T.export_report_docx(rid)["file_id"]
 
     def unreadable(*a, **k):
-        raise OSError("disk")
+        raise error
 
     monkeypatch.setattr(store, "version_sha256", unreadable)
     assert _blob(client, file_id).status_code == 409
@@ -434,3 +435,37 @@ def test_a_template_export_records_the_template_and_the_plan(project, monkeypatc
     assert dataset["template"] == {"file_id": tid, "sha256": hashlib.sha256(data).hexdigest()}
     assert dataset["mapping_plan_sha256"] == canonical_sha256(store.load_meta(project, rid).mapping_plan)
     assert dataset["mapping_plan_sha256"] == canonical_sha256(plan)
+
+
+def test_the_disclosure_check_runs_before_the_quarantine_check(project, monkeypatch):
+    """X1 order: a lost disclosure is reported as such even for a file that
+    is also quarantined; with the disclosures kept, the quarantine refuses."""
+    from services import assurance_artifacts
+    from services.reports import docx_writer
+
+    rid = _assistant_report(monkeypatch, fmea="Generator g dominates again.")
+    monkeypatch.setattr(assurance_artifacts, "quarantined", lambda root, file_id: True)
+    with pytest.raises(HTTPException) as kept:
+        T.export_report_docx(rid)
+    assert kept.value.detail["error_kind"] == "artifact_quarantined"
+    required = report_job.disclosure_texts(store.load_report(project, rid))
+    real = docx_writer._disclosure
+    monkeypatch.setattr(docx_writer, "_disclosure",
+                        lambda doc, text: None if text in required else real(doc, text))
+    with pytest.raises(HTTPException) as lost:
+        T.export_report_docx(rid)
+    assert lost.value.detail["error_kind"] == "report_disclosure_missing"
+
+
+def test_a_missing_version_with_a_changed_figure_refuses(project, client, monkeypatch):
+    rid = _assistant_report(monkeypatch)
+    file_id = T.export_report_docx(rid)["file_id"]
+    record = _sidecar(project, file_id)
+    store.write_figure(project, rid, "fig1", b"\x89PNG one")
+    record["manifest"]["dataset"]["figures"] = {"fig1": "0" * 64}
+    _reseal(project, file_id, record)
+    _version_file(project, rid).unlink()
+    response = _blob(client, file_id)
+    assert response.status_code == 409
+    assert response.json()["detail"]["error_kind"] == "report_version_changed"
+    assert _markers(project) == set()

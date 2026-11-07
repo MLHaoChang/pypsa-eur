@@ -576,59 +576,13 @@ def export_report(report_id: str, body: ExportReportBody,
         # AA-05 S4b (GK B X1): render, convert, check the disclosures, then
         # the quarantine, then seal. No unsealed upload exists on this path.
         _check_disclosures(doc, docx)
-        return _publish_sealed_report(project, doc, body.format, data, target, mime,
-                                      figure_bytes=figure_bytes, template=template,
-                                      template_file_id=doc.template_file_id, plan=plan)
+        from services.reports.sealed_export import publish_sealed_report
+
+        return publish_sealed_report(project, doc, body.format, data, target, mime,
+                                     figure_bytes=figure_bytes, template=template, plan=plan)
     meta = upload_service.add_upload(project.name, data, target, mime,
                                      kind="agent_export", project_dir=project.directory)
     return meta.model_dump()
-
-
-def _publish_sealed_report(project: AuthorizedProject, doc: Any, fmt: str, data: bytes,
-                           filename: str, mime: str, *, figure_bytes: dict[str, bytes],
-                           template: bytes | None, template_file_id: str | None,
-                           plan: dict | None) -> dict:
-    """AA-05 S4b: an assistant export with its sealed manifest (B1, X1, X5).
-
-    The manifest names the stored version by the hash of its file as written
-    (X2), each figure and the template by their bytes, the disclosures the
-    export carries and the placeholders it shows. The mapping plan is recorded
-    but not re-checked on download: the template routes may change it later
-    without changing what this file was rendered from."""
-    import hashlib
-
-    from services import chat_tools
-    from services import workflow_tools as workflow
-    from services.assurance_artifacts import canonical_sha256, quarantined
-    from services.reports.formatting import is_withheld_block
-
-    byte_hash = hashlib.sha256(data).hexdigest()
-    if quarantined(project.directory, byte_hash[:16]):
-        workflow._refuse(
-            "artifact_quarantined",
-            "This exact file failed an integrity check earlier and is quarantined; it cannot be "
-            "published again. Tell the user it is unavailable and do not retry this call.", 409)
-    dataset = {
-        "report_id": doc.report_id, "version": doc.version,
-        "version_sha256": store.version_sha256(project.directory, doc.report_id, doc.version),
-        "version_hash_basis": "stored_file",
-        "figures": {fid: hashlib.sha256(raw).hexdigest() for fid, raw in sorted(figure_bytes.items())},
-        "template": (None if template is None else
-                     {"file_id": template_file_id, "sha256": hashlib.sha256(template).hexdigest()}),
-        "mapping_plan_sha256": None if plan is None else canonical_sha256(plan),
-    }
-    withheld = [{"section_id": s.section_id, "placeholders": n} for s in doc.sections
-                if (n := sum(1 for b in s.blocks if is_withheld_block(b)))]
-    render_spec = {"format": fmt, "disclosures": disclosure_texts(doc), "withheld": withheld}
-    manifest = {"schema_version": 1, "project_id": str(project.uuid), "source_kind": "report_export",
-                "dataset": dataset, "render_spec": render_spec,
-                "dataset_sha256": canonical_sha256(dataset), "render_spec_sha256": canonical_sha256(render_spec),
-                "artifact_sha256": byte_hash,
-                "validity": {"coverage": "stored_version", "limitations": [
-                    "Withheld numbers are listed in Numbers to check; this does not certify "
-                    "engineering validity."]}}
-    record = {"filename": filename, "report_id": doc.report_id, "version": doc.version, "manifest": manifest}
-    return chat_tools._publish_sealed_export(project.directory, record, data, filename, mime)[0]
 
 
 def _check_disclosures(doc: Any, data: bytes) -> None:
