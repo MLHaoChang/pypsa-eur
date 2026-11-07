@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Grid risk to production prices the ride-through and island lines in EUR with several shortfall products too: the campus study's dip and restart files now name the product each unit's lost tonnes are of, and each unit row is priced at that product's lost-production value.

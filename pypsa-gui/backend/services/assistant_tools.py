@@ -227,6 +227,7 @@ def inspect_import(file_id: str) -> dict:
     if suffix not in (".csv", ".xlsx", ".xls"):
         return {**base, "tabular_inspection": "unsupported", "next_tool": "import_uploaded_network" if suffix in formats else None}
     if suffix == ".csv":
+        base["delimiter"] = "comma (not detected)"  # AA-05 S3 (R9): never sniffed
         sheets = {"csv": pd.read_csv(path, nrows=200)}
     else:
         # Bound decompressed office data before pandas parses the workbook.
@@ -279,7 +280,15 @@ def import_uploaded_network(file_id: str, format: str) -> dict:
             if sum(item.file_size for item in archive.infolist()) > 50 * 1024 * 1024:
                 workflow._refuse("import_expansion_too_large", "Import expands beyond the 50 MB limit.", 413)
     # Base64 exists only within the server adapter, never in model context.
-    return handlers[format](bytes_b64=base64.b64encode(data).decode(), filename=meta.filename)
+    result = handlers[format](bytes_b64=base64.b64encode(data).decode(), filename=meta.filename)
+    # H10: an imported network is an input assertion until validate_network
+    # passes on its current inputs (AA-05 S3).
+    # The import unbinds the project; a fresh import_id has no validation yet.
+    from services.assurance_artifacts import stamp_import
+    with PyPSAService.get_lock():
+        stamp_import(PyPSAService.get_active_context().network, meta.file_id, meta.sha256, format)
+    summary = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+    return {**summary, "import_status": "input_assertion"}
 
 
 def _changes(changes):
@@ -836,7 +845,7 @@ def apply_project_changes(preview_id: str) -> dict:
 
 def create_chart(component: str, attribute: str, names: list[str], source: str = "input") -> dict:
     from services import chat_tools
-    from services.assurance_artifacts import canonical_sha256, solve_stamp
+    from services.assurance_artifacts import canonical_sha256, quarantined, solve_stamp
     project, chart_root, _ = _project()
     if component not in ("Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer") or source not in ("input", "result") or not isinstance(names, list) or not 1 <= len(names) <= 8 or any(not isinstance(n, str) or not n for n in names) or len(set(names)) != len(names):
         workflow._refuse("invalid_chart", "Choose a component, input/result source, and 1–8 unique asset names.")
@@ -909,6 +918,15 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
         workflow._refuse("project_changed", "Active project changed while rendering the chart; retry in the intended project.", 409)
     data = buffer.getvalue()
     byte_hash = hashlib.sha256(data).hexdigest()
+    # H8a: an identical redraw of a quarantined chart has the same content-hash
+    # file_id; refuse before any blob, meta or sidecar is written. A marker that
+    # lands after this check is caught by verify_chart before any download or
+    # delivery, so no second lock is taken here.
+    if quarantined(chart_root, byte_hash[:16]):
+        workflow._refuse(
+            "artifact_quarantined",
+            "This exact chart failed an integrity check earlier and is quarantined; it cannot be "
+            "published again. Tell the user it is unavailable and do not retry this call.", 409)
     manifest = {"schema_version": 1, "project_id": str(project.id),
                 "source_kind": "configured_input" if source == "input" else "captured_result",
                 "dataset": dataset, "render_spec": render_spec,
@@ -917,6 +935,10 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
                 "solve_stamp": solve_stamp(ctx.network) if source == "result" else None,
                 "validity": {"coverage": "captured_rows", "input_fingerprint": fingerprint,
                              "limitations": ["Data/render/byte integrity; this does not certify engineering validity."]}}
+    if "assistant_import" in ctx.network.meta:
+        # H10/R4: only with an import stamp, so other manifests stay as on master.
+        from services.assurance_artifacts import import_status
+        manifest["validity"]["import_status"] = import_status(ctx)
     provenance = {"component": component, "attribute": attribute, "names": names, "source": source,
                   "rows": len(table), "unit": unit, "input_fingerprint": fingerprint,
                   "dispatch": freshness, "first_index": str(table.index[0]), "last_index": str(table.index[-1])}
@@ -936,13 +958,35 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
         if not unchanged or str(current_comp.defaults.at[attribute, "unit"]) != unit:
             workflow._refuse("chart_source_changed", "Chart data changed while rendering; retry.", 409)
         _project()  # Fresh owner/project authorization before publishing bytes.
-        tasks._save(chart_root / "assistant_artifacts" / (byte_hash[:16] + ".json"), provenance)
-        artifact = chat_tools._save_agent_export(data, f"{component}_{attribute}.png", "image/png",
-                                                 assurance_sha256=canonical_sha256(provenance))
+        # GK B T1: checks first, sidecar and seal under one lock, first seal wins.
+        artifact, provenance = chat_tools._publish_sealed_export(
+            chart_root, provenance, data, f"{component}_{attribute}.png", "image/png")
     # The manifest goes to the model once; the sidecar keeps the full provenance
     # (it would otherwise be sent twice and spill the chat result cap).
     summary = {key: value for key, value in provenance.items() if key != "manifest"}
-    return {**artifact, "provenance": summary, "manifest": manifest}
+    return {**artifact, "provenance": summary, "manifest": provenance["manifest"]}
+
+
+def _one_run(runs):
+    """S2 (H8, J5): the charts of one delivery describe one solve or one input state.
+
+    Every scoped chart shares one input fingerprint and every result chart one
+    solve stamp. A legacy chart (no scope keys) names no run, so it shares a
+    delivery only with other legacy charts."""
+    def mixed(pairs):
+        seen = {}
+        for file_id, value in pairs:
+            seen.setdefault(value, file_id)
+        if len(seen) > 1:
+            first, second = list(seen.values())[:2]
+            workflow._refuse("delivery_mixed_runs", f"Charts {first} and {second} come from different solves "
+                             "or input states; deliver them separately.", 409)
+
+    mixed((file_id, "solve_stamp" in manifest) for file_id, manifest in runs)
+    scoped = [(file_id, manifest) for file_id, manifest in runs if "solve_stamp" in manifest]
+    mixed((file_id, manifest["validity"]["input_fingerprint"]) for file_id, manifest in scoped)
+    mixed((file_id, json.dumps(manifest["solve_stamp"], sort_keys=True))
+          for file_id, manifest in scoped if manifest["solve_stamp"] is not None)
 
 
 def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
@@ -960,6 +1004,7 @@ def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
             workflow._refuse("delivery_too_large", "Delivery contents exceed the 25 MB limit.", 413)
         files.append((meta, path))
     manifest = {"version": 1, "project_id": str(project.id), "files": []}
+    runs = []
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for meta, path in files:
@@ -968,25 +1013,34 @@ def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
             entry = f"{meta.file_id}_{safe}"
             data = path.read_bytes()
             if hashlib.sha256(data).hexdigest() != meta.sha256:
+                if meta.assurance_sha256 is not None:
+                    from services.assurance_artifacts import quarantine
+                    quarantine(root, meta.file_id, "bytes")
                 workflow._refuse("delivery_file_changed", "An artifact changed; regenerate it before delivery.", 409)
             archive.writestr(entry, data)
             item = {"file_id": meta.file_id, "archive_path": entry, "filename": meta.filename,
                     "sha256": meta.sha256, "size": len(data), "mime": meta.mime}
             sidecar = root / "assistant_artifacts" / (meta.file_id + ".json")
             from services.assurance_artifacts import verify_chart
-            checked = verify_chart(root, meta, data, str(project.id), provenance=True)
+            checked = verify_chart(root, meta, data, str(project.id), provenance="both")
             if checked is not None:
-                item["assurance"] = checked["manifest"]
-                item["provenance"] = checked
-                from services.assurance_artifacts import scope_status
-                status = scope_status(checked["manifest"], str(project.id))
-                if status is not None:
-                    item["scope_status"] = status
+                record, view = checked
+                item["assurance"] = record["manifest"]
+                item["provenance"] = record
+                for key in ("scope_status", "evidence_status", "evidence_note"):
+                    if key in view:
+                        item[key] = view[key]
+                if view.get("source_kind") == "table_export":  # verified table sidecar (R7)
+                    item["dataset_sha256"] = view["dataset_sha256"]
+                    item["render_spec_sha256"] = view["render_spec_sha256"]
+                if "scope_status" in view:
+                    runs.append((meta.file_id, record["manifest"]))
             elif sidecar.is_file():
                 item["provenance"] = workflow._read_json(sidecar)
                 item["provenance_status"] = "unvalidated"
             manifest["files"].append(item)
         archive.writestr("manifest.json", json.dumps(manifest, indent=2))
+    _one_run(runs)
     if buffer.tell() > upload_service.MAX_FILE_BYTES:
         workflow._refuse("delivery_too_large", "Compressed delivery exceeds 25 MB.", 413)
     if str(PyPSAService.get_active_context().project_uuid) != str(project.id):

@@ -241,8 +241,10 @@ def after_passed_gate(task, stage=STAGE):
 
 
 def job_of(task):
-    """The job id of the run's latest solve step, or None."""
-    step = next((s for s in reversed(task["steps"]) if s["id"].startswith("solve.") and s.get("job")), None)
+    """The job id of the run's latest queued solve step, or None (the solve
+    stage's EH study stores its own job, issue 07 B2)."""
+    step = next((s for s in reversed(task["steps"]) if s["id"].startswith("solve.") and s.get("job")
+                 and s["tool"] == "solve_queue_enqueue"), None)
     return step["job"].get("job_id") if step else None
 
 

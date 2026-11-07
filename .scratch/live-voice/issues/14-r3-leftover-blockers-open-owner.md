@@ -3,7 +3,7 @@
 
 # Give the r3-uncovered blockers an open owner issue
 
-Status: needs-info
+Status: done (#1247)
 Type: task
 
 The `r3-uncovered:LC-D20`, `LC-D21`, `LC-D22` and `LC-D23` blockers in
@@ -26,3 +26,7 @@ Raised by GK B G4 on the LV 08 close-out.
 - Not buildable until answered.
 - Question (GK B): Owner: the `r3-uncovered` rows LC-D20 to LC-D23 point at the done live-copilot issue 32. Should we (a) open one new live-copilot issue that owns those rows and repoint them, or (b) leave them as the follow-up list (LC32-CLOSE-1) and only extend the standing-blocker guard? (a) is S, sonnet, GK B.
 - Blocked by: the answer.
+
+### 2026-11-07: needs-info answered (coordinator)
+
+Owner (card, LV14-OWNER-1): "New owner issue". Open one live-copilot issue that owns rows LC-D20 to LC-D23 and repoint them from the done issue 32. S, Sonnet, GK B.

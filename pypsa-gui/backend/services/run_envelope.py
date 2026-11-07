@@ -625,6 +625,26 @@ def _gap_row(gap):
     return f"- No tariff is filled: {', '.join(held[:-1])} and {held[-1]} are {both} held, so you choose one yourself."
 
 
+def _held_for_plan(gap):
+    """SH-26: the held Library tariffs a plan-state `library_tariff` gap shows,
+    read-only and as the grant would read them (`_library_tariffs`). Adds
+    `held` (name, version, hash) with `held_state` "held" or "none", or
+    `held: None` with "unreadable" (no Library to read now) or "unnamed" (a
+    held tariff without an id: the grant fills none). Never raises; a gap with
+    an `at_grant`, or of another source, gets nothing."""
+    if gap.get("source", {}).get("kind") != "library_tariff" or gap.get("at_grant"):
+        return {}
+    try:
+        held = _library_tariffs()
+    except HeldTariffWithoutId:
+        return {"held": None, "held_state": "unnamed"}
+    except Exception as err:  # noqa: BLE001 — describe() also runs off-request
+        logger.warning("run envelope: the plan could not list the held tariffs (%s)", type(err).__name__)
+        return {"held": None, "held_state": "unreadable"}
+    rows = [{"name": name, "version": version, "hash": digest} for digest, (name, version) in held.items()]
+    return {"held": rows, "held_state": "held" if rows else "none"}
+
+
 def describe(envelope):
     """What the plan-review card shows (issue 08 renders it)."""
     if envelope is None:
@@ -632,7 +652,8 @@ def describe(envelope):
     audit = envelope["audit"]
     return {"id": envelope["id"], "state": envelope["state"], "expires_at": envelope["expires_at"],
             "edits": [{k: v for k, v in e.items() if k != "at_grant"} for e in envelope["edits"]],
-            "gaps": [{k: v for k, v in g.items() if k != "at_grant"} for g in envelope.get("gaps", [])],
+            "gaps": [{**{k: v for k, v in g.items() if k != "at_grant"}, **_held_for_plan(g)}
+                     for g in envelope.get("gaps", [])],
             "runs": envelope["runs"], "budget": envelope["budget"], "research": envelope["research"],
             "notify": envelope["notify"], "setup": envelope.get("setup"),
             "used": sum(1 for a in audit if a["event"] == "used"),

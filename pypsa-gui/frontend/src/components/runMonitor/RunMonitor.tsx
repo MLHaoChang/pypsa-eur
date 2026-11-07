@@ -19,6 +19,7 @@ import { PANEL_SECTION } from '../../layout/flowSections'
 import { manualNavigation } from '../../utils/navigationEpoch'
 import {
   FACT_WORDS, STAGE_STATUS_WORDS, factUnit, stageWords, stopWords, when, type RunFix,
+  GAP_WORDS,
 } from './runWords'
 import { runUnderReview } from './planReview'
 import { fmtCurrency } from '../../utils/format'
@@ -105,7 +106,6 @@ const RESEARCH_STOP: Record<string, string> = {
   not_available: 'This model has no web search',
   error: 'Research did not finish',
 }
-const GAP_WORDS: Record<string, string> = { import_tariff: 'Import tariff' }
 // No profile has an explore range gap yet (issue 29), so an unknown range says "A range".
 const gapWords = (gap: string, ranged = false) => GAP_WORDS[gap] ?? (ranged ? 'A range' : 'A value')
 

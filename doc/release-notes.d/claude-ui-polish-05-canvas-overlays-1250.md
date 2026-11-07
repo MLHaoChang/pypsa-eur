@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): at a window about 1250 px wide the network canvas no longer crowds its overlays: the legend starts folded and the minimap steps aside below a 760 px canvas, and the assistant launcher drops to the corner the minimap leaves free.

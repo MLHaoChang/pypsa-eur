@@ -175,7 +175,7 @@ The templates below: data centre (`eh_datacenter`, `eh_datacenter_staged`), ener
 |---|---|---|
 | DC-01 GPU / AI load profile | one **load profile model** among many in section 4 (flat, uploaded, library shape, AI-training). Its dynamic envelope (max ΔP/Δt, swing, oscillation band) is a field any load model may fill. | The AI-training parameters themselves (job-synchronised ramps, checkpoint dips): they describe GPU clusters. The *envelope* is generic. |
 | DC-02 grid-readiness check | the scorecard runs for every template (spec D2 already says so); it shows in section 3 (inputs) and section 9 (verdicts) | none |
-| DC-03 battery backup | the backup mode lives on any load with a critical share (hospital, process-critical tiers) | none; the rule is "critical load", not "data centre" |
+| DC-03 backup mode | the backup mode lives on any load with a critical share (hospital, process-critical tiers) | none; the rule is "critical load", not "data centre" |
 | DC-04 control presets | any converter-coupled asset (BESS, UPS, PV inverter, electrolyser rectifier) | none |
 | DC-05 power architecture | — | **DC-only**: AC / MV UPS / 800 VDC / SST is an IT-hall distribution choice. It is a section-5 field shown only when the site type is data centre. |
 | DC-06 flex-market revenue | any storage or flexible load with headroom | none |
@@ -298,7 +298,7 @@ Each ticket gets one home section. The coherence note says what the ticket must 
 |---|---|---|
 | DC-01 GPU / AI load profile | 4 Loads | A **load profile model** on the load row, chosen from a list that also holds flat / uploaded / library shapes. The dynamic envelope shows on the load row and, read-only, in section 3 next to the ramp and oscillation limits it is checked against. The roadmap knob (IT MW, rack density per COD phase) is per period, so it reads the period list from section 1. |
 | DC-02 grid-readiness check | 3 inputs, 9 verdicts | Each scorecard row carries `section` and `target`, so the flow endpoint files it. Row `unknown` → a section-3 warning naming the missing input. The report chapter is in 10. The scorecard runs for every template. |
-| DC-03 battery backup | 5 Assets | Backup mode (`genset/bess/hybrid`) on the backup-asset form. It reads the critical share from section 4 (shown read-only) and the redundancy level. The cost delta shows in 10 (Investment), not in the form. |
+| DC-03 backup mode | 5 Assets | Backup mode (`genset/bess/hybrid`) on the backup-asset form. It reads the critical share from section 4 (shown read-only) and the redundancy level. The cost delta shows in 10 (Investment), not in the form. |
 | DC-04 control presets | 5 Assets | A **Controls** block in the asset form of every converter-coupled asset. It is not edited in the island panel (Studies › Campus electrical) as today: that panel shows the preset read-only, with a link back. |
 | DC-05 power architecture | 5 Assets | A site-level field shown only for the data-centre site type. Its loss chain shows, read-only, on the PUE line of the load (4). The compare view is a section-8 variant set, its results in 10. |
 | DC-06 flex-market revenue | 7 Commercial (products, prices), 5 (headroom on the asset) | Reserve products and their price series in 7. The committed headroom on the BESS/UPS form in 5, with the "critical-backup energy untouchable" floor shown from 4's critical share. Revenue in 10. |

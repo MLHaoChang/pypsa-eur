@@ -142,15 +142,25 @@ def _consumers(n, bus: str, skip: str) -> list[tuple[str, float, bool]]:
 def mass_pull(n, unit: str) -> tuple[float | None, str]:
     """``(t of the shortfall product per t of the unit's product or None, basis)``: the walk the module
     docstring describes."""
+    return _walk(n, unit)[:2]
+
+
+def shortfall_product(n, unit: str) -> str | None:
+    """The shortfall product bus the unit's mass pull walk ends at (the product its tonnes are of), or None
+    when the walk reads unknown."""
+    return _walk(n, unit)[2]
+
+
+def _walk(n, unit: str) -> tuple[float | None, str, str | None]:
     gens = n.generators
     role = gens["process_role"].map(_text) if "process_role" in gens.columns else pd.Series(dtype=str)
     targets = {str(gens.at[g, "bus"]) for g in role.index[role == SHORTFALL]}
     if not targets:
-        return None, "unknown: no Generator has process_role shortfall"
+        return None, "unknown: no Generator has process_role shortfall", None
     bus = _text(_cell(n.links, unit, "bus1"))
     f_in, _ = t_per_unit(n, bus)
     if f_in is None:
-        return None, f"unknown: {bus} is not counted in tonnes"
+        return None, f"unknown: {bus} is not counted in tonnes", None
     factor, path, seen = 1.0, [bus], {bus}
     while bus not in targets:
         steps = []
@@ -158,26 +168,26 @@ def mass_pull(n, unit: str) -> tuple[float | None, str]:
             outs = [(b, e, v) for _, b, e, v in _ports(n, link)
                     if b != bus and e is not None and e > 0 and t_per_unit(n, b)[1] in ("t", "MWh")]
             if len(outs) != 1:
-                return None, f"unknown: {link} has {len(outs)} product outputs, not one"
+                return None, f"unknown: {link} has {len(outs)} product outputs, not one", None
             if t_per_unit(n, outs[0][0])[0] is None:
-                return None, f"unknown: {outs[0][0]} counts MWh with no tonne factor (mwh_per_t)"
+                return None, f"unknown: {outs[0][0]} counts MWh with no tonne factor (mwh_per_t)", None
             out, e, out_varies = outs[0]
             if varies or out_varies:
-                return None, f"unknown: an efficiency of {link} varies in time"
+                return None, f"unknown: an efficiency of {link} varies in time", None
             steps.append((link, out, e / drawn * t_per_unit(n, out)[0] / t_per_unit(n, bus)[0]))
         if not steps:
-            return None, f"unknown: the walk ends at {bus}, with no consumer and no shortfall Generator"
+            return None, f"unknown: the walk ends at {bus}, with no consumer and no shortfall Generator", None
         out, f = steps[0][1], steps[0][2]
         if any(o != out or not math.isclose(g, f, rel_tol=TOLERANCE) for _, o, g in steps[1:]):
-            return None, f"unknown: the product branches at {bus} ({', '.join(s[0] for s in steps)})"
+            return None, f"unknown: the product branches at {bus} ({', '.join(s[0] for s in steps)})", None
         if out in seen:
-            return None, f"unknown: the walk returns to {out} (a cycle)"
+            return None, f"unknown: the walk returns to {out} (a cycle)", None
         factor *= f
         names = " / ".join(s[0] for s in steps)
         path.append(f"{names} ×{f:.6g} → {out}")
         seen.add(out)
         bus = out
-    return factor, f"{' '.join(path)} = {factor:.6g} (to the shortfall product)"
+    return factor, f"{' '.join(path)} = {factor:.6g} (to the shortfall product)", bus
 
 
 def restart_units(n) -> pd.DataFrame:

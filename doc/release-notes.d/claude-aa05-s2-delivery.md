@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): An assistant chart that fails an integrity check stays refused, even after its file is restored; only a newly drawn chart is served. A delivery is refused when its charts come from different solves, and a checked chart's entry says when its evidence has expired.

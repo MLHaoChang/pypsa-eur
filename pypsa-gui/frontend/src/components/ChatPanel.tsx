@@ -213,6 +213,8 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   run_sensitivity_sweep: 'start the sensitivity cases',
   run_simulation: 'start a solve',
   run_ac_pf_stage: 'start the power-flow check',
+  wait_for_job: 'wait for the job to finish',
+  abort_simulation: 'stop the running job',
   run_frontier_study: 'start the cost-versus-reliability study',
   run_mc_study: 'start the random-outage reliability study',
   run_coupling_loop: 'start the planning loop that adjusts the shortfall limit',
@@ -298,7 +300,7 @@ export function guidedSettledToolIds(
 function guidedOutcomeLine(tool: string, now: CurrentToolOutcome): GuidedToolLine {
   const word = now.mark.word.charAt(0).toUpperCase() + now.mark.word.slice(1)
   const asOf = now.mark.inFlight ? `, as of ${outcomeClock(now.ts)}`
-    : now.why ? ` (${now.why})` : now.count ? ` (${now.count.text})` : ''
+    : now.why ? ` (${now.why})` : now.count ? ` (${now.count.text} ${now.count.verb} · ${now.count.rest} not ${now.count.verb})` : ''
   return { hidden: false, label: `${word}: ${guidedToolPhrase(tool)}${asOf}` }
 }
 

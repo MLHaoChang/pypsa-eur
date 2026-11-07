@@ -1,0 +1,4 @@
+{"kinds": {
+  "scene_apply_outcome_unknown": {"surface": "inline", "why": "site_scene_apply raised something other than a typed refusal and the 3D site's own record holds no receipt for that preview, or that record could not be read (`read_back`). Its card is not offered again and a second apply of it is refused. The assistant reads the site with site_scene_read, tells the user what it shows, and prepares the change again only if it is still wanted."},
+  "task_retry_needs_prepare": {"surface": "inline", "why": "resolve_task_step retry on a site_scene_apply step that failed with proposal_expired, proposal_cancelled or revision_conflict: its preview can never be applied again. Nothing changed; the assistant tells the user, cancels the plan with cancel_task and starts a new one with a fresh site_scene_prepare."}
+}}

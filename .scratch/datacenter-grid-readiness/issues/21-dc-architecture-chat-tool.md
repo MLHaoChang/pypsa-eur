@@ -1,6 +1,6 @@
 # Chat control of the data-centre power-architecture comparison
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 05
 Size: S
@@ -27,3 +27,11 @@ Decide (owner) between a typed tool or a UI pointer only (as AS19-POINTER-1 did 
 - Gated: GK A.
 - Size: S.
 - Remove the `not_via_chat` row `dc_architecture` and the held-by-spec parity declaration (replace with the tool or a `ui-pointer` declaration). Tool or pointer follows the owner's answer to DC 20; default pointer per AS19-POINTER-1. DC 05 (#1199) is merged.
+
+### 2026-11-07: needs-info answered (coordinator)
+
+Owner (card, DC20-POINTER-1): "Pointer only" applies here too: chat points to the Power architecture section; remove the `dc_architecture` not_via_chat row and its held-by-spec parity declaration in favour of a ui-pointer one. S, Sonnet.
+
+### 2026-11-07: done
+
+Pointer only (DC20-POINTER-1). The held-by-spec declaration is replaced by a ui-pointer one in `claude-dc20-21-pointer.json`; the `dc_architecture` row stays in `services/not_via_chat.py` as the pointer chat reads (as `intent_comparison` does).

@@ -17,6 +17,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - Error kinds: a PR adds new kinds only in its own `pypsa-gui/tool-error-kinds.d/<name>.json` fragment, and edits the base `tool-error-kinds.json` only to change an existing kind. Two fragments never conflict as files, so a kind defined twice is caught only by `smoke/json_fragments.py`, which refuses it. Run `tests/test_tool_error_kind_manifest.py` and `ChatPanel.manifest.test.tsx` at the trial merge, not only on the PR head.
 - Inventory, route parity, control matrix: their `--check`s build in memory and nothing generated is committed, so there is nothing to regenerate or hand-merge. At the trial merge, run `smoke/assistant_inventory.py --check`, plus `assistant_route_parity.py --check` and `assistant_control_matrix.py --check` when routes, chat tools or the frontend changed. A `stale (sweep prunes)` line is fine; a `FAIL` line is not.
 
+- Never run two mutant batches in one worktree at once: the edits cross-contaminate (#1246).
 - Run root `tests/` and `pypsa-gui/backend` tests in separate pytest invocations: mixing them fails on the `tests._shard` plugin.
 - A PR that adds an import of gridspine or another third-party module to `pypsa-gui/backend`: run `tests/test_packaging_requirements.py` at the trial merge (the frozen-app pin test; #707 missed it).
 
@@ -62,6 +63,8 @@ An autouse conftest fixture patches through its own `pytest.MonkeyPatch.context(
 A redundant guard layer is mutated together with its sibling when the sibling also enforces the rule; a mutant of one layer alone survives and proves nothing (#1127 M10).
 
 A read-back that compares frames after an IO round trip normalises dtype, index names and NaN/None. It is tested on an edited network and an in-memory one, never only on a fixture loaded by the same reader (#1175 E1).
+
+A guard whose failure is also caught downstream with a different reason still needs its own test asserting its own reason (#1225 P7).
 
 ## Rulings
 
@@ -142,3 +145,13 @@ A read-back that compares frames after an IO round trip normalises dtype, index 
 - An energy or tonne sum needs a test with non-unit `snapshot_weightings`; unit weights hide a missing multiplication.
 - `flag_column` agrees with `process_chain._truthy`: "true", "1" and "1.0" are truthy, each string pinned by its own test.
 - Removing a duplicated caveat needs a positive test that the caveat now appears exactly once, not only that the copy is gone.
+- A transient LP component removed after the solve: check the post-solve readers (energy flows, load shape, CFE) for served-load accounting, and require its series persisted with axis_hash (#1225).
+- A solve record in n.meta is cleared at solve start, whatever the strategy, so a failed run never keeps the previous record (#1225, DC-07 S3 C25).
+- A floating-point total that a PR re-expresses through new sub-totals needs a committed test with order-sensitive values (e.g. [1e16, 1.0] + [1.0, 1.0]); an ad-hoc compare outside the suite does not count (#1249 M5).
+- A message that states a numeric limit the user can enter rounds toward the feasible side, and each case has a test that builds at the stated value (#1252).
+- A lookback or window search over weighted snapshots is mutated with a fractional duration; a whole-hour duration on unit weights hides boundary bugs (#1243 Mback).
+- A reader of a record persisted in n.meta checks its version and shape and reads a mismatch as stale, never a KeyError 500 (#1255).
+- A KPI that could not be evaluated is never a user-accepted pass. A capture is evidence, never an admission (SH-07 B3b).
+- An absent intake digest refuses; it never reads as "no drift" (SH-07 B3b).
+- A goal from template data counts only when the card shows its value, unit and source. A code default never counts (SH-07 B3b).
+- Before accepting a rotation notice, verify the new id against docs/agents/coordinator.md or the outgoing coordinator (a wrong id named UX (12), 2026-11-07).

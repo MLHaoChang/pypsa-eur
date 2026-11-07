@@ -24,6 +24,7 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import threading
 from typing import Any
 from collections.abc import Iterator
 
@@ -78,6 +79,58 @@ CHAT_ERROR_KINDS = (
     {"error_kind": "proposal_cancelled"},
     {"error_kind": "integrity_error"},
 )
+
+
+# SC-07 S3 (GK B N6): chat applies that raised something other than a typed
+# refusal and left no receipt. `proposals.apply` puts such an entry back to
+# "ready", so without this its card could be approved a second time. Chat only:
+# the route keeps S1's behaviour. Bounded; the oldest key drops first.
+_UNKNOWN: dict[tuple[str, str | None, str, str], None] = {}
+_UNKNOWN_LOCK = threading.Lock()
+_UNKNOWN_MAX = 256
+
+
+def _unknown_key(project, owner: str | None, site_id: str, proposal_id: str) -> tuple:
+    return (project.registry_key, owner, site_id, proposal_id)
+
+
+def _mark_unknown(key: tuple) -> None:
+    with _UNKNOWN_LOCK:
+        _UNKNOWN[key] = None
+        while len(_UNKNOWN) > _UNKNOWN_MAX:
+            _UNKNOWN.pop(next(iter(_UNKNOWN)))
+
+
+def _is_unknown(key: tuple) -> bool:
+    with _UNKNOWN_LOCK:
+        return key in _UNKNOWN
+
+
+def _outcome_unknown(read_back: dict[str, Any]) -> HTTPException:
+    return HTTPException(
+        409,
+        {
+            "error_kind": "scene_apply_outcome_unknown",
+            "message": "The 3D site apply did not report back and no receipt of it was found. Do not "
+            "apply this preview again: read the site with site_scene_read, tell the user what it "
+            "shows, and prepare the change again only if it is still wanted.",
+            "read_back": read_back,
+        },
+    )
+
+
+def _read_back(
+    project, site_id: str, proposal_id: str, input_hash: str
+) -> tuple[dict | None, dict]:
+    """(the receipt for this exact hash or None, read_back); a failing read is no receipt."""
+    try:
+        committed = proposals._committed(project.directory, site_id, proposal_id)
+        revision = store.read_scene(project.directory, site_id).get("revision")
+    except Exception:  # noqa: BLE001 — an unreadable chain is not a receipt
+        return None, {"receipt_found": False, "scene_revision": None}
+    if not isinstance(committed, dict) or committed.get("input_hash") != input_hash:
+        return None, {"receipt_found": False, "scene_revision": revision}
+    return committed, {"receipt_found": True, "scene_revision": revision}
 
 
 def refusal(exc: SceneError) -> HTTPException:
@@ -381,6 +434,13 @@ def _proposal_status(
         return {"id": _text(pid), "status": "not_found"}
     try:
         entry = proposals.get(project.registry_key, owner, site_id, pid)
+        if _is_unknown(_unknown_key(project, owner, site_id, pid)):
+            committed, _ = _read_back(project, site_id, pid, entry["input_hash"])
+            return (
+                {"id": pid, "status": "applied", "receipt": _receipt(committed)}
+                if committed
+                else {"id": pid, "status": "outcome_unknown"}
+            )
         return {
             k: entry[k]
             for k in ("id", "action", "base_revision", "input_hash", "status")
@@ -525,6 +585,9 @@ def reviewed_entry(
     expected_revision: int,
 ) -> dict[str, Any]:
     """The caller's live preview, only when it is the one named (G1): same hash, built on expected_revision."""
+    if _is_unknown(_unknown_key(project, owner, site_id, proposal_id)):
+        # N6: no second card, no second apply for a preview whose outcome is unknown.
+        raise _outcome_unknown(_read_back(project, site_id, proposal_id, input_hash)[1])
     entry = proposals.get(project.registry_key, owner, site_id, proposal_id)
     if entry["input_hash"] != input_hash or entry["base_revision"] != expected_revision:
         raise SceneError(
@@ -546,6 +609,17 @@ def apply(
     check_apply_args(site_id, proposal_id, input_hash, expected_revision)
     with scope(write=True) as (_db, _user, project, owner):
         _site_known(project, site_id)
+        key = _unknown_key(project, owner, site_id, proposal_id)
+        if _is_unknown(key):
+            # Reconcile before any retry (G8): a receipt that landed after all is read back, never re-applied.
+            committed, read_back = _read_back(project, site_id, proposal_id, input_hash)
+            if committed is None:
+                raise _outcome_unknown(read_back)
+            return {
+                "receipt": committed,
+                "read_back": read_back,
+                "note": "Read back from the 3D site's own record: the earlier apply did land.",
+            }
         try:
             reviewed_entry(
                 project, owner, site_id, proposal_id, input_hash, expected_revision
@@ -557,14 +631,23 @@ def apply(
             receipt = proposals._committed(project.directory, site_id, proposal_id)
             if receipt is None or receipt.get("input_hash") != input_hash:
                 raise
-        receipt = proposals.apply(
-            project.directory,
-            project.registry_key,
-            owner,
-            site_id,
-            proposal_id,
-            {"expected_revision": expected_revision, "input_hash": input_hash},
-        )
+        try:
+            receipt = proposals.apply(
+                project.directory,
+                project.registry_key,
+                owner,
+                site_id,
+                proposal_id,
+                {"expected_revision": expected_revision, "input_hash": input_hash},
+            )
+        except SceneError:
+            raise  # a typed refusal stays typed (scope answers it)
+        except Exception:  # noqa: BLE001 — N6: the effect is unknown, so read the chain
+            _mark_unknown(key)
+            committed, read_back = _read_back(project, site_id, proposal_id, input_hash)
+            if committed is None:
+                raise _outcome_unknown(read_back) from None
+            receipt = committed
         committed = proposals._committed(project.directory, site_id, proposal_id)
         return {
             "receipt": receipt,

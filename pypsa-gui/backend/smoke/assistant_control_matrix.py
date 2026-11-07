@@ -65,7 +65,7 @@ PALETTE_TO_CLASS: dict[str, str] = {
 MANIFEST_SOURCE = 'pypsa-gui/backend/smoke/family_manifest.py'
 # The suites LC-06 leaves out (R3 of the LV 08 comparison); each keeps its own blocker.
 R3_SUITES = tuple(f'LC-D{i:02d}' for i in (1, 2, 20, 21, 22, 23, 24))
-R3_ISSUE = '.scratch/live-copilot/issues/32-uncovered-families-d01-d02-d20-d24.md'
+R3_ISSUE = '.scratch/live-copilot/issues/43-r3-uncovered-delivery-report-undo-wire-gates.md'
 
 
 def family_journeys(variants: list[dict] | None = None) -> list[dict]:
@@ -171,7 +171,7 @@ def _full_coverage(journeys: list[dict], route_parity: dict | None = None,
     for suite in R3_SUITES:
         open_ = sorted({v for j in pending for v in j['variants']['pending'] if v.split('.')[0] == suite})
         if open_:
-            blockers.append({'id': f'r3-uncovered:{suite}', 'issue': 'LC-32', 'pointer': R3_ISSUE,
+            blockers.append({'id': f'r3-uncovered:{suite}', 'issue': 'LC-43', 'pointer': R3_ISSUE,
                              'pending_variants': open_,
                              'summary': f'LC-06 leaves {suite} out; no behavioral fixture covers it.'})
     covered_tools = {t for v in variants if v['status'] == 'covered' for t in v.get('tools', [])}
