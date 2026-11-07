@@ -3,6 +3,8 @@
 """AA-15: enqueue_unique refuses (opt-in) a differing solver config."""
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from services import solve_queue as sq
@@ -134,3 +136,76 @@ def test_chat_tool_surfaces_error_kind(client, install_network, tmp_projects_dir
     with pytest.raises(HTTPException) as ei:
         chat_tools.solve_queue_enqueue("PE")
     assert ei.value.status_code == 409 and ei.value.detail["error_kind"] == "solve_config_conflict"
+
+
+def test_dispatch_tool_call_carries_error_kind(monkeypatch):
+    """R2: through loop.dispatch_tool_call, the conflict reaches the tool_error frame."""
+    import threading, time
+    from fastapi import HTTPException
+    from harness.loop import dispatch_tool_call
+    from harness.session import ChatSession
+    from routers import solve_queue as route
+    from services import chat_service, chat_tools, dirty_state
+
+    chat_service._reset_sessions_for_tests()
+    monkeypatch.setattr(dirty_state, "mark_dirty", lambda: None)
+    monkeypatch.setattr(dirty_state, "bump_revision", lambda: None)
+
+    def refuse(req, *a, **k):
+        raise HTTPException(409, {"error_kind": "solve_config_conflict", "message": "m", "job_id": "j"})
+    monkeypatch.setattr(route, "enqueue_solve", refuse)
+    monkeypatch.setattr(chat_tools, "_route", lambda h, *a, **k: h(*a, **k))
+
+    session = ChatSession(model="m", owner_user_id="u1")
+    frames, collector = [], []
+
+    def run():
+        for f in dispatch_tool_call(session, {"id": "tu_1", "name": "solve_queue_enqueue",
+                                              "input": {"project_id": "P"}}, collector,
+                                    offered_tool_names={"solve_queue_enqueue"}):
+            frames.append(f)
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    deadline = time.monotonic() + 10
+    decided = False
+    while t.is_alive() and time.monotonic() < deadline:
+        card = next((p for e, p in frames if e == "tool_pending_confirmation"), None)
+        if card is not None and not decided:
+            session.record_decision(card["confirmation_token"], "approve")
+            decided = True
+        time.sleep(0.01)
+    t.join(5)
+    assert not t.is_alive(), frames
+    kinds = [p.get("error_kind") for e, p in frames if e == "tool_error"]
+    assert "solve_config_conflict" in kinds, frames
+    assert "solve_config_conflict" in json.dumps(collector)
+
+
+def test_route_conflict_removes_capture_and_leaves_no_job(client, install_network, tmp_projects_dir,
+                                                          session_ctx, monkeypatch):
+    """R3: a run-captured enqueue against a conflicting active job is a 409 and the capture is removed."""
+    from tests.conftest import build_network
+    from services import project_registry, solve_capture
+    route, q = _fresh_route_queue(monkeypatch)
+    install_network(build_network(), name="PF")
+    assert client.post("/api/projects/PF", params={"force": True, "rebind": True}).status_code == 200
+    cfgs = iter(['{"a":1}', '{"a":2}'])
+    monkeypatch.setattr(route, "_config_snapshot_for", lambda *a, **k: next(cfgs))
+    assert client.post("/api/simulation/queue", json={"project_id": "PF"}).status_code == 200
+
+    seen = []
+    real = project_registry.resolve_project
+    monkeypatch.setattr(project_registry, "resolve_project",
+                        lambda *a, **k: seen.append(real(*a, **k)) or seen[-1])
+    monkeypatch.setattr(solve_capture, "request",
+                        lambda: {"ctx": type("C", (), {"project_uuid": property(lambda s: seen[-1].id)})()})
+    records, removed = [], []
+    monkeypatch.setattr(solve_capture, "capture",
+                        lambda c, d, s: records.append({"id": "cap"}) or records[-1])
+    monkeypatch.setattr(solve_capture, "remove", lambda rec: removed.append(rec))
+
+    r = client.post("/api/simulation/queue", json={"project_id": "PF"})
+    assert r.status_code == 409
+    assert r.json()["detail"]["error_kind"] == "solve_config_conflict"
+    assert records and removed == records
+    assert len(q.list_jobs()) == 1
