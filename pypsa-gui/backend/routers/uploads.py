@@ -329,6 +329,8 @@ def get_upload_blob(
         if isinstance(checked, dict) and checked.get("evidence_status"):
             # A checked chart says whether its evidence was re-verified now (S10).
             headers["X-Checked-Chart"] = checked.get("evidence_note") or "evidence re-verified now"
+        if isinstance(checked, dict) and checked.get("scope_status"):
+            headers["X-Chart-Scope"] = checked["scope_status"]
         # Send the exact checked bytes, avoiding a second file open after validation.
         return Response(content=data, media_type=meta.mime, headers=headers)
     return FileResponse(
