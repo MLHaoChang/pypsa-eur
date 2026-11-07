@@ -290,3 +290,28 @@ def test_the_product_is_where_the_mass_pull_walk_ends_not_bus1():
     assert pc.shortfall_product(n, "mill") == "conc"                 # mill's bus1 is slurry
     n.generators["process_role"] = [""]
     assert pc.shortfall_product(n, "mill") is None                   # mass pull unknown: no product
+
+
+def test_a_two_stage_chain_writes_the_downstream_product_on_every_unit_row(tmp_path):
+    """nh3 feeds a synthesis Link onto urea, where the shortfall sits: the tonnes, and so the product, are urea's."""
+    n = _restart_hub()
+    n.add("Carrier", "urea")
+    n.add("Bus", "urea", carrier="urea", unit="t")
+    n.add("Link", "synth", bus0="nh3", bus1="urea", efficiency=0.5, p_nom=100.0)
+    n.generators.loc["__lost_nh3", "bus"] = "urea"
+    run, _ = _run(tmp_path, n)
+    dip, restart = restart_campus(run)
+    for df in (dip, restart):
+        unit = df[df["level"] == "unit"]
+        assert set(unit["product"]) == {"urea"}
+        assert (unit["mass_pull"] == 0.5).all()
+
+
+def test_a_unit_whose_walk_reads_unknown_has_no_product_and_unknown_tonnes(tmp_path):
+    n = _restart_hub()
+    n.generators["process_role"] = ""                                 # no shortfall: the walk reads unknown
+    run, _ = _run(tmp_path, n)
+    restart_campus(run)
+    df = pd.read_csv(run / DIP_TRIPS_CSV, keep_default_na=False)
+    unit = df[df["level"] == "unit"]
+    assert set(unit["product"]) == {""} and set(unit["lost_t_per_year"]) == {""}
