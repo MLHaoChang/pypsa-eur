@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useProjectFlow } from '../hooks/useProjectFlow'
-import SiteCompanion, { buildingLabel, SECTION_WORDS } from './SiteCompanion'
+import SiteCompanion, { BlockerAsk, whereWords, buildingLabel, SECTION_WORDS } from './SiteCompanion'
 import { openSectionInExpert, openSectionInGuided, openSiteAnchor, withReturnFromSite3D } from '../layout/flowNavigation'
 import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type GreenfieldInput, type SceneBuilding, type SourceInput } from '../api/siteScene'
 import type { SceneAction, SitePart } from '../api/flow'
@@ -63,18 +63,20 @@ function SnapshotsLink() {
 
 const unreadable = (err: unknown) => sceneErrorDetail(err)?.error_kind === 'integrity_error'
 
-function Blocker({ action }: { action: SceneAction | undefined }) {
+function Blocker({ action, where }: { action: SceneAction | undefined; where: string }) {
   if (!action || action.available || !action.blocker) return null
   const leaves = !('site_part' in (action.blocker.home as object))
-  const where = (action.blocker.home as { guided?: { section: string } }).guided?.section
+  const section = (action.blocker.home as { guided?: { section: string } }).guided?.section
   return (
     <span className="text-[11px] text-muted" data-testid={`scene-blocker-${action.action}`}>
       {action.blocker.reason}
-      {leaves && where && (
+      {leaves && section && (
         <> <button type="button" onClick={() => goHome(action.blocker!.home)} className="text-accent hover:underline">
-          {action.blocker.link} {SECTION_WORDS[where] ?? where}
+          {action.blocker.link} {SECTION_WORDS[section] ?? section}
         </button></>
       )}
+      {/* The separator wraps with its button, never left dangling at a line end. */}
+      {' '}<span className="whitespace-nowrap">· <BlockerAsk where={where} reason={action.blocker.reason} /></span>
     </span>
   )
 }
@@ -199,7 +201,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
           </button>
         ))}
       </div>
-      <SiteCompanion siteName={site.name} part={part} scene={flow?.scene} selected={selected} />
+      <SiteCompanion siteName={site.name} part={part} selected={selected} />
 
       {/* The part's body scrolls inside itself, so the tabs (and the Site toolbar above the panel) stay in view
           when the Model part grows (a preview, the Place form, the bottom table open); focusable so the
@@ -327,7 +329,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
               </div>
               {!draftsOk && <span className="text-[11px] text-muted" data-testid="scene-generate-reason">{FIX_FIELDS}</span>}
               {accepted.length > 0 && <span className="text-[11px] text-muted">Generating again replaces the accepted buildings after you review it.</span>}
-              <Blocker action={genAction} />
+              <Blocker action={genAction} where={whereWords(site.name, part)} />
             </div>
           )}
         </div>
@@ -337,12 +339,12 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
         <div className="flex flex-col gap-1" data-testid="site-part-model-body">
           {enabled && action('assign_native')?.available
             ? <AssociationPanel key={site.id} site={site} scene={enabled} canWrite={canWrite} reasonAbove={!!blocked} blockedReason={blocked ?? (busy ? 'Working: wait for the current step to finish' : null)} />
-            : <Blocker action={action('assign_native')} />}
+            : <Blocker action={action('assign_native')} where={whereWords(site.name, part)} />}
         </div>
       )}
       {part === 'results' && (
         <div className="flex flex-col gap-1" data-testid="site-part-results-body">
-          <Blocker action={action('play_results')} />
+          <Blocker action={action('play_results')} where={whereWords(site.name, part)} />
         </div>
       )}
 
