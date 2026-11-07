@@ -766,6 +766,8 @@ def test_a_real_lock_check_that_breaks_reads_denied_unavailable(
         "outcome": "denied",
         "reason": "project_lock_unavailable",
     }
+    assert "it was not run" in error["message"]
+    assert "bulk_update_components" not in error["message"]
     assert called == [] and seen == []
     assert files() == before
 
