@@ -36,6 +36,7 @@ The model plays no part.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import uuid
@@ -149,6 +150,7 @@ def hand_over(
     template: str = "eh_site",
     lock_timeout: float = LOCK_TIMEOUT,
     precheck=None,
+    goal: float | None = None,
 ) -> dict:
     """Create the project and start the run there, once. `start(row, ctx)`
     starts the run's task on the new project and returns its task id.
@@ -184,6 +186,7 @@ def hand_over(
             start=start,
             template=template,
             precheck=precheck,
+            goal=goal,
         )
     finally:
         lock.__exit__(None, None, None)
@@ -204,6 +207,7 @@ def _under_lock(
     start,
     template,
     precheck=None,
+    goal=None,
 ):
     from db.models import Project
     from db.session import SessionLocal
@@ -271,6 +275,15 @@ def _under_lock(
         with ctx.mutation_lock, _bound(ctx, row, f"handover:{origin.get('task_id')}"):
             if intent["state"] == "creating":
                 project_routes._finish_created_project(made, db, user, None)
+                if goal is not None:
+                    # Issue 07 B3b (P5): the user's goal (h/yr) from the grant card,
+                    # stored before the save and the run's freeze; a goal field is
+                    # outside every input fingerprint (`reliability_goal.GOAL_FIELDS`).
+                    with ctx.solver_state_lock:
+                        cfg = ctx.solver_state["solver_config"]
+                        ctx.solver_state["solver_config"] = dataclasses.replace(
+                            cfg, target_lole_h=float(goal)
+                        )
                 # Saved once, as the user's first save would: a template ships no
                 # user_ts, and the run's first solve write-back would otherwise
                 # back the network's series into it, so that solve's inputs read

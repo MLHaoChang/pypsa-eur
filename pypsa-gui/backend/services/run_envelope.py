@@ -872,6 +872,10 @@ def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_
     items = run_intake.missing(profile, rows, intake.get("gaps") or [])
     if items:
         _refuse("intake_missing", run_intake.request_text(items))
+    goal = run_intake.goal(rows)
+    if goal is None and run_profiles.needs_goal(profile):
+        # Issue 07 B3b (GK B (33) P5): the LOLE rule judges against the user's own goal, never a default.
+        _refuse("goal_missing", "State the site's reliability goal (LOLE, h/yr) before the run is granted.")
     try:
         host = run_intake.host_for(ctx, task["owner_id"], task["project_id"])
         run_intake.check_grant(rows, intake_digest, host)
@@ -920,7 +924,7 @@ def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_
             path, owner_id=task["owner_id"], origin={"project_id": task["project_id"], "task_id": task["task_id"]},
             name=setup["name"], params=run_intake.params(confirmed), digest=intake_digest, decision_id=decision_id,
             host_name=host.name, host_dir=host.dir, uploads=_cited_uploads(confirmed), start=start,
-            template=setup["template"], precheck=precheck)
+            template=setup["template"], precheck=precheck, goal=goal)
     except run_handover.HandoverError as exc:
         _HANDOVER_REFUSALS.get(exc.kind, _HANDOVER_REFUSALS["handover_incomplete"])(str(exc))
     assistant_tasks.end_handed_over(path, intent)
