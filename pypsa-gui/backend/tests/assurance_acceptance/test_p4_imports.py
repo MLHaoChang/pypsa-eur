@@ -6,6 +6,7 @@ import datetime
 import hashlib
 import io
 import json
+import pathlib
 import uuid
 import zipfile
 
@@ -31,7 +32,9 @@ def refused(call, *args):
 
 def delivered_items(client, *exports):
     bundle = chat_tools.build_delivery([export["file_id"] for export in exports])
-    with zipfile.ZipFile(io.BytesIO(client.get(bundle["download_url"]).content)) as archive:
+    with zipfile.ZipFile(
+        io.BytesIO(client.get(bundle["download_url"]).content)
+    ) as archive:
         return json.loads(archive.read("manifest.json"))["files"]
 
 
@@ -92,7 +95,9 @@ def test_an_import_reads_input_assertion_until_a_validate_passes(baseline):
     assert record["sha256"] == stamp["sha256"]
     network().generators.at["G1", "marginal_cost"] = 99.0
     assert assurance_artifacts.import_status(ctx()) == "input_assertion"
-    assert status() == "validated"  # an edit followed by a passing validate re-stamps (R1d)
+    assert (
+        status() == "validated"
+    )  # an edit followed by a passing validate re-stamps (R1d)
 
 
 def ctx():
@@ -101,15 +106,33 @@ def ctx():
     return PyPSAService.get_active_context()
 
 
-def test_a_failing_validate_leaves_it_an_input_assertion(baseline, monkeypatch):
+@pytest.mark.parametrize(
+    "ok, errors", [(False, 1), (False, 0), (True, 1)], ids=["both", "not_ok", "errors"]
+)
+def test_a_failing_validate_leaves_it_an_input_assertion(
+    baseline, monkeypatch, ok, errors
+):
     import routers.simulation
 
     imported()
     monkeypatch.setattr(
         routers.simulation,
         "preflight",
-        lambda: {"ok": False, "errors": 1, "warnings": 0, "issues": []},
+        lambda: {"ok": ok, "errors": errors, "warnings": 0, "issues": []},
     )
+    assert status() == "input_assertion" and records() == []
+
+
+def test_a_validate_that_cannot_read_the_exact_inputs_records_nothing(
+    baseline, monkeypatch
+):
+    # R3: unreadable exact inputs read input_assertion and never write a record.
+    imported()
+
+    def unreadable(ctx):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(assurance_artifacts, "_exact", unreadable)
     assert status() == "input_assertion" and records() == []
 
 
@@ -168,7 +191,9 @@ def test_a_malformed_import_id_reads_input_assertion_and_writes_nothing(
 
 
 @pytest.mark.parametrize("fault", ["corrupt", "other_sha256", "lock_timeout"])
-def test_a_bad_record_or_a_busy_lock_reads_input_assertion(baseline, monkeypatch, fault):
+def test_a_bad_record_or_a_busy_lock_reads_input_assertion(
+    baseline, monkeypatch, fault
+):
     import app_paths
 
     imported()
@@ -183,7 +208,11 @@ def test_a_bad_record_or_a_busy_lock_reads_input_assertion(baseline, monkeypatch
         assert status() == "input_assertion"
         return
     assert status() == "validated"
-    path = app_paths.app_data_dir() / "assistant_import_validations" / (stamp["import_id"] + ".json")
+    path = (
+        app_paths.app_data_dir()
+        / "assistant_import_validations"
+        / (stamp["import_id"] + ".json")
+    )
     if fault == "corrupt":
         path.write_text("{")
     else:
@@ -251,7 +280,9 @@ def test_an_import_without_a_named_supported_format_is_refused(baseline, fmt):
 
 
 def test_a_csv_export_seals_the_table_as_written(baseline, client):
-    export = chat_tools.export_to_csv([["G1", 0.1 + 0.2], ["=cmd", None]], ["name", "p"], "t.csv")
+    export = chat_tools.export_to_csv(
+        [["G1", 0.1 + 0.2], ["=cmd", None]], ["name", "p"], "t.csv"
+    )
     manifest = sidecar(export)["manifest"]
     rows = manifest["dataset"]["sheets"][0]["rows"]
     assert rows == [["name", "p"], ["G1", "0.30000000000000004"], ["'=cmd", ""]]
@@ -297,9 +328,10 @@ def test_an_excel_export_seals_what_the_file_holds(baseline, client, case):
     assert manifest["dataset"] == {"sheets": [{"name": "Data", "rows": held}]}
     data = client.get(export["download_url"])
     assert data.status_code == 200
-    assert canonical_sha256(
-        assurance_artifacts.parse_table("xlsx", data.content)
-    ) == manifest["dataset_sha256"]
+    assert (
+        canonical_sha256(assurance_artifacts.parse_table("xlsx", data.content))
+        == manifest["dataset_sha256"]
+    )
 
 
 def test_an_excel_sheet_name_is_the_one_the_file_carries(baseline):
@@ -388,9 +420,10 @@ def test_other_exports_deliver_with_byte_hashes_only(baseline, client):
     network = chat_tools.export_network_nc()
     items = delivered_items(client, network)
     assert set(items[0]) == BASE_ITEM
-    assert items[0]["sha256"] == hashlib.sha256(
-        client.get(network["download_url"]).content
-    ).hexdigest()
+    assert (
+        items[0]["sha256"]
+        == hashlib.sha256(client.get(network["download_url"]).content).hexdigest()
+    )
 
 
 def test_a_table_and_a_scoped_chart_deliver_together(baseline, client):
@@ -398,7 +431,9 @@ def test_a_table_and_a_scoped_chart_deliver_together(baseline, client):
     table = chat_tools.export_to_csv([["1"]], ["h"], "t.csv")
     chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
     items = delivered_items(client, table, chart)
-    assert "scope_status" not in items[0] and items[1]["scope_status"] == "input_as_drawn"
+    assert (
+        "scope_status" not in items[0] and items[1]["scope_status"] == "input_as_drawn"
+    )
 
 
 def test_a_deferred_validate_is_passed_through_and_records_nothing(
@@ -412,3 +447,20 @@ def test_a_deferred_validate_is_passed_through_and_records_nothing(
     assert chat_tools.validate_network() == deferred
     assert records() == []
 
+
+def test_a_table_export_without_a_loaded_network_names_no_import_status(
+    baseline, monkeypatch
+):
+    monkeypatch.setattr(ctx(), "network", None)
+    export = chat_tools.export_to_csv([["G1", 1]], ["name", "p"], "t.csv")
+    assert "import_status" not in sidecar(export)["manifest"]["validity"]
+
+
+def test_a_context_without_a_project_id_exports_bytes_only(baseline, monkeypatch):
+    # The legacy name-addressed path: no manifest, the byte hash only, as on master.
+    root = pathlib.Path(ctx().storage_dir) / "assistant_artifacts"
+    before = sorted(root.glob("*.json")) if root.exists() else []
+    monkeypatch.setattr(ctx(), "project_uuid", None)
+    export = chat_tools.export_to_csv([["G1", 1]], ["name", "p"], "t.csv")
+    assert export["project_id"] is None and export["sha256"]
+    assert (sorted(root.glob("*.json")) if root.exists() else []) == before
