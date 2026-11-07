@@ -38,7 +38,8 @@ GUIDED_CONFIRM_TIERS = DESTRUCTIVE_TIERS | frozenset(["write"])
 # Write-tier tools Guided gates as Expert does (LC-16 OJ-21, "one card, one
 # approval in Expert or Guided"): each stores a record and changes nothing in
 # the project, and the tool that applies it carries the approval card.
-GUIDED_UNCARDED = frozenset(["preview_project_changes"])
+# SC-07 S1 (GK B G4): site_scene_cancel discards the caller's own unapplied preview.
+GUIDED_UNCARDED = frozenset(["preview_project_changes", "site_scene_cancel"])
 
 # A tool name absent from the catalogue gets the card in every mode.
 UNKNOWN_TOOL_TIER = "destructive"
