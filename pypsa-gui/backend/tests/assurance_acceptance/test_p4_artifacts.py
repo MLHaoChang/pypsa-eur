@@ -159,5 +159,8 @@ def test_delivery_copies_the_same_validated_provenance(baseline, client, monkeyp
         item = json.loads(archive.read("manifest.json"))["files"][0]
         # The result sends the manifest once; the delivery carries the full
         # sealed provenance, manifest included.
-        assert item["provenance"] == {**chart["provenance"], "manifest": chart["manifest"]}
+        assert item["provenance"] == {
+            **chart["provenance"],
+            "manifest": chart["manifest"],
+        }
         assert item["assurance"] == chart["manifest"]
