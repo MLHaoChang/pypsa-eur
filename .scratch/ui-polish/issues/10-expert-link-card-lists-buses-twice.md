@@ -3,7 +3,7 @@
 
 # Expert Link card lists From/To bus twice
 
-Status: ready-for-agent
+Status: done
 Type: bug (layout)
 Found by: UIP-01 (#1195), relayed by the coordinator.
 

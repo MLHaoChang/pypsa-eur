@@ -3,7 +3,7 @@
 
 # "Use wait for job" wording
 
-Status: ready-for-agent
+Status: done
 Type: wording
 Found by: UX (9) review items; owner list DOCS-1.
 

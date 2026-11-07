@@ -484,7 +484,7 @@ describe('the rail is the ten flow sections', () => {
     expect(useUIStore.getState().activeSection).toBe('loads')
     const item = await screen.findByTestId('section-item')
     expect(item.textContent).toContain('Add a demand')
-    expect(item.textContent).toContain("Loads & demand › Load 'dc_it'")
+    expect(item.textContent).toContain("Loads & demand › Load “dc_it”")
     expect(item.textContent).not.toContain('p_set')
     // The primary action opens the field here, in Guided (design §3.5).
     await user.click(screen.getByTestId('section-item-open'))

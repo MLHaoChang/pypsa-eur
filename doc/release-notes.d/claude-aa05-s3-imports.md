@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A network the assistant imports is marked as an unvalidated input until a validation passes on its current inputs, and charts and tables drawn from it say so. CSV and Excel files the assistant exports record the table they hold, and each download or delivery checks the file still reads back as that table.

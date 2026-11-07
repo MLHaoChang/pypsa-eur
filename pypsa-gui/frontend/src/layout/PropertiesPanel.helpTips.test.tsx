@@ -30,7 +30,7 @@ vi.mock('../api/simulation', async (importOriginal) => {
   }
 })
 
-import { LinePanel, LinkCard } from './PropertiesPanel'
+import { LinePanel, LinkCard, LinkPanel } from './PropertiesPanel'
 
 const LINE = { name: 'L1', bus0: 'B1', bus1: 'B2', carrier: 'AC', s_nom: 500, s_nom_extendable: false,
   length: 100, r: 3, x: 30, b: 0, lifetime: 40 } as never
@@ -58,6 +58,15 @@ async function tipOf(label: string): Promise<string> {
 
 beforeEach(() => { useUIStore.setState({ currentProject: 'Demo' }) })
 afterEach(() => { useUIStore.setState({ currentProject: null }) })
+
+describe('the Link panel', () => {
+  it('lists From and To bus once', async () => {
+    renderWith(<LinkPanel name="E1" />, [['links', [LINK]]])
+    await screen.findAllByText('From bus')
+    expect(screen.getAllByText('From bus')).toHaveLength(1)
+    expect(screen.getAllByText('To bus')).toHaveLength(1)
+  })
+})
 
 describe('panel rows read their tooltip from the asset schema', () => {
   it('a line’s topology rows', async () => {

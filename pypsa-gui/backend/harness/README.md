@@ -986,7 +986,31 @@ both absent reads as `legacy`, a wrong value refuses, and a result chart from
 another solve refuses; the same solve with inputs edited since reads
 `solve_stale` and an unloaded project reads `solve_not_rechecked`, never
 `current`. The download sends the status as `X-Chart-Scope` and a delivery
-manifest names each chart's `scope_status`. Private cloning skips the native solver model without
+manifest names each chart's `scope_status`. An integrity failure (bytes,
+dataset, sidecar, manifest, project or labels) writes a quarantine marker
+`assistant_artifacts/quarantine/<file_id>.json` under `durable.file_lock`;
+it is never cleared, so restored bytes or a repaired sidecar stay refused and
+only a new file_id passes (AA-05 S2); `create_chart` refuses an identical
+redraw with `artifact_quarantined` before writing anything. IO errors and stale or unrechecked
+solves write no marker, and an unreadable marker refuses. Scoped manifests
+also check the render spec's labels against the dataset; legacy manifests
+verify as before. A delivery whose scoped charts do not share one solve stamp
+(or, for input charts, one input fingerprint), or that mixes legacy and
+scoped charts, refuses `delivery_mixed_runs`; each checked chart's item keeps
+its `evidence_status` and, when expired or missing, its `evidence_note`.
+`import_uploaded_network` stamps `network.meta["assistant_import"]` with a fresh
+server-minted id and drops any `assistant_validated_*` key the file carries; the
+network reads `input_assertion` until `validate_network` passes, which records
+the import id, sha256 and exact input fingerprint in the app-data store
+(`assistant_import_validations/`), never in the network. `import_status` reads
+`validated` only while all three still match, and charts and table exports drawn
+from an imported network seal the status they were drawn with (AA-05 S3).
+`inspect_import` names the CSV delimiter as `comma (not detected)` and infers no
+units or mapping. `export_to_csv` and `export_to_excel` seal the table as the
+file holds it (Excel numbers to 16 significant digits) after re-parsing the
+bytes, or refuse `table_round_trip_failed`; download and delivery re-parse it
+again, quarantining on a seal or byte mismatch and refusing without a marker on
+parser drift. Private cloning skips the native solver model without
 changing the live model. `build_delivery` bundles selected authorized
 artifacts and a content-hash/provenance manifest within the 25 MB limit.
 All existing agent exports now include authenticated download metadata.
