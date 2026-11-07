@@ -159,12 +159,12 @@ def test_full_coverage_is_explicitly_not_claimed_while_manifest_variants_are_pen
         lc06 = [v for v in row['variants']['pending'] if v.split('.')[0] not in r3]
         if lc06:
             assert blockers[f'family-manifest:{row["journey_id"].removeprefix("manifest:")}']['pending_variants'] == lc06
-    # The families LC-06 leaves out (R3) keep an explicit blocker each, owned by LC-32,
-    # for as long as one of their variants is pending; a suite LC-32 has covered has none.
+    # The families LC-06 leaves out (R3) keep an explicit blocker each, owned by LC-43,
+    # for as long as one of their variants is pending; a suite LC-43 has covered has none.
     open_suites = {v.split('.')[0] for row in pending for v in row['variants']['pending']}
     for suite in sorted(r3):
         if suite in open_suites:
-            assert blockers[f'r3-uncovered:{suite}']['issue'] == 'LC-32'
+            assert blockers[f'r3-uncovered:{suite}']['issue'] == 'LC-43'
         else:
             assert f'r3-uncovered:{suite}' not in blockers
     assert 'behavioral-fixtures-pending' not in blockers
@@ -174,7 +174,7 @@ def test_full_coverage_is_explicitly_not_claimed_while_manifest_variants_are_pen
     for family, routes in parity['needs_tool_by_family'].items():
         assert routes and f'route-parity:needs-tool:{family}' in blockers
     for blocker in block['blockers']:
-        assert blocker['issue'] in {'05', '08', 'LC-06', 'LC-32'} and blocker['summary']
+        assert blocker['issue'] in {'05', '08', 'LC-06', 'LC-43'} and blocker['summary']
 
 
 def test_a_variant_going_pending_reopens_its_family_and_the_claim_reads_the_manifest():
