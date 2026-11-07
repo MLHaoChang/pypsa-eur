@@ -625,10 +625,35 @@ def _gap_row(gap):
     return f"- No tariff is filled: {', '.join(held[:-1])} and {held[-1]} are {both} held, so you choose one yourself."
 
 
-def describe(envelope):
-    """What the plan-review card shows (issue 08 renders it)."""
+_GOAL_SOURCE = {"stored": "from the project's solver settings", "template": "from the eh_site template"}
+
+
+def card_goal(task, ctx):
+    """GK B (33) P5a: the reliability goal a plain run's LOLE rule judges
+    against, as the card shows it (`{"value", "unit", "source"}`); None when
+    the run's profile needs no goal. A code default is no goal: its value
+    reads None, so the grant refuses goal_missing."""
+    from services import reliability_goal, run_profiles
+    if not run_profiles.needs_goal(run_profiles.resolve(task["run"]["profile"])):
+        return None
+    lole = reliability_goal.active_goal(ctx.solver_state)["target_lole_h"]
+    value = lole["value"] if lole["source"] in _GOAL_SOURCE else None
+    return {"value": value, "unit": "h/yr", "source": lole["source"]}
+
+
+def _goal_row(goal):
+    if goal["value"] is None:
+        return "- No reliability goal is set: state the site's LOLE goal (h/yr) before the run can be granted"
+    return f"- Judge LOLE against your reliability goal: {goal['value']:g} h/yr ({_GOAL_SOURCE[goal['source']]})"
+
+
+def describe(envelope, goal=None):
+    """What the plan-review card shows (issue 08 renders it). `goal` is a
+    proposed plain run's live goal (`card_goal`); a granted one shows the
+    goal frozen at the grant."""
     if envelope is None:
         return None
+    goal = envelope.get("goal", goal)
     audit = envelope["audit"]
     return {"id": envelope["id"], "state": envelope["state"], "expires_at": envelope["expires_at"],
             "edits": [{k: v for k, v in e.items() if k != "at_grant"} for e in envelope["edits"]],
@@ -637,11 +662,25 @@ def describe(envelope):
             "notify": envelope["notify"], "setup": envelope.get("setup"),
             "used": sum(1 for a in audit if a["event"] == "used"),
             "refused": sum(1 for a in audit if a["event"] == "refused"),
-            "detail": _rows(envelope)}
+            "detail": _rows(envelope) + ("\n" + _goal_row(goal) if goal is not None else ""),
+            **({"goal": goal} if goal is not None else {})}
 
 
 def read(task_path):
     return describe(_load(task_path))
+
+
+def read_for_card(task_path, task):
+    """`read`, plus a proposed plain run's live goal (GK B (33) P5a) when its
+    project is the open one; an intake run's card shows the intake's goal."""
+    envelope = _load(task_path)
+    if envelope is None or envelope["state"] != "proposed" or envelope.get("setup"):
+        return describe(envelope)
+    from services.pypsa_service import PyPSAService
+    ctx = PyPSAService.get_active_context()
+    if str(getattr(ctx, "project_uuid", None)) != task.get("project_id"):
+        return describe(envelope)
+    return describe(envelope, goal=card_goal(task, ctx))
 
 
 # ── Grant, revoke, end ───────────────────────────────────────────────────────
@@ -785,7 +824,7 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
     `setup` entry hands over at the grant (`_grant_setup`, issue 21 §2):
     `intake_digest` is the digest of the intake rows the card showed."""
     from harness import approvals
-    from services import assistant_tasks, reliability_goal, run_profiles
+    from services import assistant_tasks, run_profiles
     from services.pypsa_service import PyPSAService
     if verdict not in ("unattended", "stepwise", "revoke"):
         _invalid("Choose unattended, stepwise or revoke.")
@@ -826,12 +865,12 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
                 _refuse("brief_inputs_unreadable", "The project's inputs cannot be read, so nothing can be granted.")
             if assistant_tasks._stale(task, fingerprint):
                 _refuse("task_brief_stale", "The inputs changed since the brief; review a new brief first.")
-            if (run_profiles.needs_goal(run_profiles.resolve(task["run"]["profile"]))
-                    and reliability_goal.active_goal(ctx.solver_state)["target_lole_h"]["value"] is None):
-                # GK B (33) P5: a plain run judges LOLE against the user's own goal too (stored
-                # or template), never a default.
+            goal = card_goal(task, ctx)
+            if goal is not None and goal["value"] is None:
+                # GK B (33) P5/P5a: a plain run judges LOLE against the user's own goal too, stored
+                # or from the template and shown on the card with its source; never a default.
                 _refuse("goal_missing", "State the site's reliability goal (LOLE, h/yr) before the run is granted.")
-            gaps =[dict(g, at_grant=_gap_instances(ctx, g)) for g in chosen["gaps"]]  # may refuse (§6.0)
+            gaps = [dict(g, at_grant=_gap_instances(ctx, g)) for g in chosen["gaps"]]  # may refuse (§6.0)
             envelope_id, now = str(uuid.uuid4()), _now()
             if not approvals.decided(session, call_id="envelope-" + envelope_id, tool="grant_envelope",
                                      tier="envelope", outcome="approved", by="user",
@@ -845,10 +884,12 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
                            runs=chosen["runs"], budget=chosen["budget"], research=chosen["research"],
                            notify={"email": bool(notify_email)}, state="granted",
                            eh_study=_eh_frozen(ctx, task, chosen))
+            if goal is not None:
+                granted["goal"] = goal  # the goal the card showed, frozen with its source (P5a)
             _audit(granted, "granted", reason="user")
             _save(path, granted)
             message = (f"Approve and run unattended (plan: {task['title']}), inside this envelope until "
-                       f"{granted['expires_at']}:\n{_rows(granted)}")
+                       f"{granted['expires_at']}:\n{describe(granted)['detail']}")
     if setup is not None:
         return _grant_setup(session, *setup, intake_digest=intake_digest, notify_email=notify_email)
     assistant_tasks._wake(path)

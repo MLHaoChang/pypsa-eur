@@ -663,7 +663,7 @@ def _with_envelope(path, view):
     """A run's view carries its approval envelope (issue 03): what the
     plan-review card proposes, or what was granted and how far it went."""
     from services import run_envelope
-    envelope = run_envelope.read(path) if view.get("run") else None
+    envelope = run_envelope.read_for_card(path, view) if view.get("run") else None
     return {**view, "envelope": envelope} if envelope is not None else view
 
 

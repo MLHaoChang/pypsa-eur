@@ -298,21 +298,51 @@ def _plain_goal_profile(monkeypatch):
 def test_an_unattended_plain_grant_without_a_goal_is_refused_goal_missing(
     session, site, profile, monkeypatch
 ):
-    """GK B (33) P5: a plain run (no intake) is judged against the user's own
-    goal too; the DEFAULT (no goal) never counts, and nothing is granted."""
+    """GK B (33) P5/P5a: a plain run (no intake) is judged against the user's
+    own goal too; a code default never counts, the card says no goal is set,
+    and nothing is granted."""
     from tests.test_harness_envelope import envelope_of
 
     _plain_goal_profile(monkeypatch)
     task = start()
+    assert task["envelope"]["goal"] == {
+        "value": None,
+        "unit": "h/yr",
+        "source": "default",
+    }
+    assert "No reliability goal is set" in task["envelope"]["detail"]
     with pytest.raises(HTTPException) as exc:
         run_envelope.decide(session, task["task_id"], "unattended")
     assert exc.value.detail["error_kind"] == "goal_missing"
     assert envelope_of(task_path(site[1], task))["state"] != "granted"
 
 
-def test_an_unattended_plain_grant_takes_the_templates_goal(
+def test_a_code_default_with_a_value_still_refuses_goal_missing(
     session, site, profile, monkeypatch
 ):
+    """P5a: a default never counts, even one that carries a value."""
+    from services import reliability_goal
+
+    _plain_goal_profile(monkeypatch)
+    monkeypatch.setattr(
+        reliability_goal,
+        "active_goal",
+        lambda _state: {
+            "target_lole_h": {"value": 1.0, "source": reliability_goal.DEFAULT}
+        },
+    )
+    task = start()
+    assert task["envelope"]["goal"]["value"] is None
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(session, task["task_id"], "unattended")
+    assert exc.value.detail["error_kind"] == "goal_missing"
+
+
+def test_a_template_goal_is_on_the_card_with_its_source_and_frozen_at_the_grant(
+    session, site, profile, monkeypatch
+):
+    """P5a: a goal from template data counts only as the card shows it, with
+    its value, unit and source; the grant keeps what the card showed."""
     from services import flow_service
     from tests.test_harness_envelope import envelope_of
 
@@ -327,8 +357,37 @@ def test_an_unattended_plain_grant_takes_the_templates_goal(
         )
     )
     task = start()
+    shown = {"value": 2.0, "unit": "h/yr", "source": "template"}
+    assert task["envelope"]["goal"] == shown
+    assert "2 h/yr (from the eh_site template)" in task["envelope"]["detail"]
+    message = run_envelope.decide(session, task["task_id"], "unattended")
+    assert "2 h/yr (from the eh_site template)" in message
+    granted = envelope_of(task_path(site[1], task))
+    assert granted["state"] == "granted" and granted["goal"] == shown
+
+
+def test_a_stored_goal_is_on_the_card_with_its_source(
+    session, site, profile, monkeypatch
+):
+    import dataclasses
+
+    from services.pypsa_service import PyPSAService
+
+    _plain_goal_profile(monkeypatch)
+    state = PyPSAService.get_active_context().solver_state
+    monkeypatch.setitem(
+        state,
+        "solver_config",
+        dataclasses.replace(state["solver_config"], target_lole_h=3.0),
+    )
+    task = start()
+    assert task["envelope"]["goal"] == {
+        "value": 3.0,
+        "unit": "h/yr",
+        "source": "stored",
+    }
+    assert "3 h/yr (from the project's solver settings)" in task["envelope"]["detail"]
     run_envelope.decide(session, task["task_id"], "unattended")
-    assert envelope_of(task_path(site[1], task))["state"] == "granted"
 
 
 def test_an_ordinary_chat_enqueue_captures_nothing(session, baseline, monkeypatch):
