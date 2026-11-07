@@ -1711,3 +1711,21 @@ def test_the_profiles_dtc_attribution_wins_over_the_goal_cards(tmp_path):
     }
     frozen = run_eh.freeze(ctx_for(tmp_path), profile, 6)
     assert frozen["args"]["dtc_attribution"] == "bus_aggregate_not_per_load"
+
+
+@pytest.mark.parametrize(
+    "rec", [None, {}, {"report": None}, {"report": {}}, {"report": {"pipeline": None}}]
+)
+def test_charged_reads_none_for_a_record_without_a_pipeline(rec):
+    assert run_eh.charged(rec) is None
+
+
+def test_releasing_an_unknown_charge_on_a_row_without_a_reservation_settles_zero(
+    tmp_path,
+):
+    """C4: a reservation row that names no `reserved` closes at 0, never raises."""
+    path, task = task_for(tmp_path)
+    envelope(
+        path, audit=[{"event": "eh_study", "call_id": "a1", "tool": "run_eh_study"}]
+    )
+    assert run_eh.release(path, "a1", None, task=task) is True
