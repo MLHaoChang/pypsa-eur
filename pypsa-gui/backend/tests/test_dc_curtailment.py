@@ -319,3 +319,23 @@ def test_a_duration_the_horizon_cannot_hold_is_refused(monkeypatch):
 def test_the_claim_limit_is_in_the_docs():
     doc = " ".join((BACKEND.parent / "CONTEXT.md").read_text().split())
     assert C.CLAIM_LIMIT in doc
+
+
+def test_an_import_energy_cap_is_not_loosened(monkeypatch):
+    """C17: curtailing serves load on dc_mv; it never adds room under a metered import cap."""
+    n = _network()
+    n.remove("Generator", "grid")
+    n.add("Bus", "grid", carrier="AC")
+    n.add("Generator", "grid", bus="grid", carrier="AC", p_nom=1000.0, marginal_cost=GRID_MC)
+    n.add("Link", "poc", bus0="grid", bus1="dc_mv", p_nom=1000.0, efficiency=1.0)
+    hours = float(n.snapshot_weightings["generators"].sum())
+    cap_mwh_year = 900.0 * 8760.0 / hours          # 900 MWh over these 12 hours
+    status, _, sink, _ = _solve(n, monkeypatch, _terms(), voll=1000.0,
+                                import_energy_cap_mwh_per_year=cap_mwh_year,
+                                import_energy_links=["poc"])
+    assert status in ("ok", "optimal")
+    imported = float(n.links_t.p0["poc"].sum())
+    assert imported <= 900.0 + 1e-6
+    assert imported == pytest.approx(900.0, abs=1e-6)          # it binds
+    curt = _curtailed(sink).to_numpy()
+    assert curt == pytest.approx(np.minimum(SHARE * (IT + COOL), COOL), abs=1e-6)
