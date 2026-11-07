@@ -366,6 +366,12 @@ def test_a_template_goal_is_on_the_card_with_its_source_and_frozen_at_the_grant(
     assert "2 h/yr (from the eh_site template)" in message
     granted = envelope_of(task_path(site[1], task))
     assert granted["state"] == "granted" and granted["goal"] == shown
+    # Only a proposed card reads the live goal: a granted one shows what was frozen, or none.
+    path = task_path(site[1], task)
+    run_envelope.path_for(path).write_text(
+        json.dumps({k: v for k, v in granted.items() if k != "goal"})
+    )
+    assert "goal" not in run_envelope.read_for_card(path, task)
 
 
 def test_a_stored_goal_is_on_the_card_with_its_source(
