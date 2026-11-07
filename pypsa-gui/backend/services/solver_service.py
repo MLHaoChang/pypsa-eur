@@ -706,6 +706,7 @@ def run_simulation(
             # AS-12: likewise the PCS/STATCOM sizes; a success persists this run's after the solve.
             _clear_pcs_statcom(network)
             _clear_reserves(network)  # DC 06: likewise the reserve commitments
+            _dc_curtailment.clear(network)  # DC-07 S2: likewise the curtailment record and series
             t_solve = time.time()
             # Clean up stale `transformer.type` strings that don't match any
             # row in n.transformer_types. The GUI's presets are display
@@ -1074,6 +1075,8 @@ def run_simulation(
                         raise ValueError(
                             f"rolling_overlap ({O}) must be < rolling_horizon ({H})."
                         )
+                    # DC-07 S2: no duration rows across windows until C20's carry-in.
+                    _dc_curtailment.refuse_rolling()
                     phase(
                         f"Rolling-horizon solve: {len(network.snapshots)} snapshots "
                         f"in windows of {H} (overlap {O})"

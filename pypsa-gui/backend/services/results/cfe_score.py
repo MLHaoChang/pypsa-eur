@@ -73,6 +73,14 @@ def compute_cfe_score(n, cfg, *, result_df: Callable[..., Any] | None = None,
             ps = _frame(n, "loads_t", "p_set")
             load_mw += (ps[l].reindex(sns).to_numpy(dtype=float) if ps is not None
                         and l in ps.columns else float(n.loads.at[l, "p_set"] or 0.0))
+    # DC-07 S2: curtailed data-centre load was not consumed, so it is not in the CFE base.
+    from services.solver import dc_curtailment as _dc_curt
+
+    by_load, curt_flags = _dc_curt.curtailed_by_load(n)
+    flags.extend(curt_flags)
+    for l, mw in by_load.items():
+        if l in loads:
+            load_mw -= np.maximum(np.nan_to_num(mw.reindex(sns).to_numpy(dtype=float)), 0.0)
 
     # Clean carriers.
     if clean_carriers is None:

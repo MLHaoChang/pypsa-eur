@@ -627,3 +627,272 @@ def test_without_a_duration_the_lp_chain_is_returned_unchanged():
         C._wrap_with_dc_curtailment(_network(), marker, terms=_terms(d=2.0))
         is not marker
     )
+
+
+# ── GK A review asks 1-4: the series, the post-solve surfaces, stale and lost records ─────
+
+SERVED = (
+    IT + COOL - np.minimum(SHARE * (IT + COOL), COOL)
+)  # the curtailment fixture's served MW
+CURT_MWH = float(np.minimum(SHARE * (IT + COOL), COOL).sum())
+RATE = 0.05  # EUR/kWh, flat
+
+
+def _metered_solve(monkeypatch, terms=None):
+    """``_network`` behind a metered import Link (the grid on its own bus), solved through the
+    router state as the results endpoints read it."""
+    import routers.simulation as sim_router
+    from tests.conftest import install_network_into_backend
+
+    n = _network()
+    n.remove("Generator", "grid")
+    n.add("Bus", "grid", carrier="AC")
+    n.add(
+        "Generator",
+        "grid_supply",
+        bus="grid",
+        carrier="AC",
+        p_nom=1000.0,
+        marginal_cost=GRID_MC,
+    )
+    n.add("Link", "import", bus0="grid", bus1="dc_mv", p_nom=1000.0)
+    install_network_into_backend(n)
+    com = {
+        "poc_link": "import",
+        "import_tariff": {
+            "id": "t",
+            "name": "t",
+            "jurisdiction": "DE",
+            "valid_from": "2029-01-01",
+            "items": [
+                {
+                    "id": "energy",
+                    "kind": "energy",
+                    "unit": "per_kwh",
+                    "periods": [{"name": "all", "rate": RATE}],
+                }
+            ],
+        },
+    }
+    cfg = SolverConfig(commercial=com)
+    sim_router._state["solver_config"] = cfg
+    monkeypatch.setattr(
+        C, "project_terms", lambda: _terms() if terms is None else terms
+    )
+    n = PyPSAService.get_network()
+    sink: dict = {}
+    status, cond = run_simulation(
+        cfg,
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        queue.SimpleQueue(),
+        state_update=lambda **kw: sink.update(kw),
+    )
+    assert status in ("ok", "optimal"), (status, cond)
+    sim_router._state.update(sink)
+    return n, cfg, sink
+
+
+def test_the_series_is_committed_with_its_axis_and_survives_netcdf(
+    monkeypatch, tmp_path
+):
+    from services.commercial.settlement_inputs import axis_hash
+
+    n = _network()
+    status, _, sink, _ = _solve(n, monkeypatch, _terms())
+    assert status in ("ok", "optimal")
+    series, flags = C.curtailment_series(n)
+    assert flags == []
+    assert series.to_numpy() == pytest.approx(np.minimum(SHARE * (IT + COOL), COOL))
+    assert n.meta[C.META_KEY]["axis_hash"] == axis_hash(n.snapshots)
+    assert n.meta[C.META_KEY]["capture_failed"] is False
+    path = tmp_path / "n.nc"
+    n.export_to_netcdf(path)
+    back = pypsa.Network(path)
+    assert C.curtailment_series(back)[0].to_numpy() == pytest.approx(series.to_numpy())
+
+
+def test_the_reader_refuses_another_axis_or_a_missing_series(monkeypatch):
+    n = _network()
+    _solve(n, monkeypatch, _terms())
+    assert C.curtailment_series(n)[1] == []
+    n.set_snapshots(n.snapshots[:6])  # another axis than the record's
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
+    n = _network()
+    _solve(n, monkeypatch, _terms())
+    n.buses_t[C.SERIES_ATTR].iloc[3, 0] = np.nan
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
+    n.buses_t[C.SERIES_ATTR] = pd.DataFrame(index=n.snapshots)
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
+    assert C.curtailed_by_load(n) == ({}, [C.NOT_ESTABLISHED])
+
+
+def test_off_commits_no_series_and_clears_an_old_one(monkeypatch):
+    n = _network()
+    _solve(n, monkeypatch, _terms())
+    assert not n.buses_t[C.SERIES_ATTR].empty
+    _solve(n, monkeypatch, None)
+    assert C.META_KEY not in n.meta
+    assert n.buses_t[C.SERIES_ATTR].empty
+    assert C.curtailed_by_load(n) == ({}, [])
+
+
+def test_energy_flows_close_with_curtailment_apart_from_supply_import_and_unserved(
+    monkeypatch,
+):
+    import routers.results as R
+    from services.results.energy_flows import energy_flows
+
+    n, _cfg, sink = _metered_solve(monkeypatch)
+    out = energy_flows(n, result_df=R._result_df, lost_load=sink.get("last_lost_load"))
+    assert out["status"] == "ok", out["flags"]
+    assert out["conservation"]["residual_mwh"] == pytest.approx(0.0, abs=1e-6)
+    imported = float(n.links_t.p0["import"].sum())
+    assert imported == pytest.approx(SERVED.sum())
+    assert out["conservation"]["generation_mwh"] == pytest.approx(
+        imported
+    )  # never supply
+    assert out["curtailed_load_mwh"] == {
+        "cooling": pytest.approx(CURT_MWH)
+    }  # shown as itself
+    assert not out["unserved_mwh"]  # never unserved
+    served = sum(
+        r["mwh"] for r in out["rows"] if r["destination"] in ("it_load", "cooling")
+    )
+    assert served == pytest.approx(SERVED.sum())
+
+
+def test_load_shape_serves_less_by_the_curtailment_and_never_counts_it_as_supply(
+    monkeypatch,
+):
+    import routers.results as R
+    from services.results.load_shape import load_shape
+
+    n, _cfg, sink = _metered_solve(monkeypatch)
+    out = load_shape(n, result_df=R._result_df, lost_load=sink.get("last_lost_load"))
+    assert out["status"] == "ok"
+    (row,) = out["annual"]
+    assert row["load_served"] == pytest.approx(SERVED.sum())
+    supply = sum(
+        v or 0.0 for k, v in row.items() if k in ("solar", "wind", "genset", "grid")
+    )
+    assert supply == pytest.approx(SERVED.sum())
+
+
+def test_cfe_counts_only_the_served_load(monkeypatch):
+    import routers.results as R
+    from services.results.cfe_score import compute_cfe_score
+
+    n, cfg, _ = _metered_solve(monkeypatch)
+    out = compute_cfe_score(n, cfg, result_df=R._result_df)
+    assert out["per_period"]["_"]["load_mwh"] == pytest.approx(SERVED.sum())
+    assert C.NOT_ESTABLISHED not in out["flags"]
+
+
+def test_billing_bills_the_import_never_the_curtailed_energy(monkeypatch):
+    import routers.results as R
+    from services.results.billing import compute_billing
+
+    n, cfg, _ = _metered_solve(monkeypatch)
+    out = compute_billing(n, cfg, state={}, result_df=R._result_df)
+    billed = out["per_period"]["_"]["per_item"]["energy"]
+    assert billed == pytest.approx(SERVED.sum() * RATE * 1000.0)
+
+
+def test_site_generators_never_hold_the_transient(monkeypatch):
+    from services.commercial.lp_bindings import _parse, site_generators
+
+    n, cfg, _ = _metered_solve(monkeypatch)
+    assert C.GENERATOR not in site_generators(n, _parse(cfg.commercial))
+    assert C.GENERATOR not in n.generators.index
+
+
+def _infeasible(n):
+    n.generators.at["grid", "p_nom"] = 50.0  # below demand less the cap, with no VOLL
+    return n
+
+
+@pytest.mark.parametrize("failure", ["infeasible", "rolling_refusal"])
+def test_a_failed_run_keeps_no_record_of_the_last(monkeypatch, failure):
+    n = _network()
+    status, _, _, _ = _solve(n, monkeypatch, _terms(d=2.0))
+    assert status in ("ok", "optimal") and C.META_KEY in n.meta
+    if failure == "infeasible":
+        status, cond, _, _ = _solve(
+            _infeasible(n), monkeypatch, _terms(d=2.0), voll=0.0
+        )
+    else:
+        status, cond, _, _ = _solve(
+            n,
+            monkeypatch,
+            _terms(d=2.0),
+            solve_strategy="rolling",
+            rolling_horizon=6,
+            rolling_overlap=0,
+        )
+    assert status not in ("ok", "optimal"), cond
+    assert C.META_KEY not in n.meta
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
+
+
+def test_a_rolling_run_with_a_duration_is_refused_with_its_kind(monkeypatch):
+    status, cond, _, lines = _solve(
+        _network(),
+        monkeypatch,
+        _terms(d=2.0),
+        solve_strategy="rolling",
+        rolling_horizon=6,
+        rolling_overlap=0,
+    )
+    assert status == "error"
+    assert cond.startswith(f"curtailment_refused: {C.ROLLING_WITHOUT_CARRY_IN}:")
+    assert any(C.ROLLING_WITHOUT_CARRY_IN in ln for ln in lines)
+    with pytest.raises(C.DcCurtailmentRefused):
+        C.refuse_rolling(_terms(d=2.0))
+    C.refuse_rolling(_terms())  # no duration: rolling is fine
+
+
+def test_a_rolling_run_without_a_duration_still_solves(monkeypatch):
+    status, cond, _, _ = _solve(
+        _network(),
+        monkeypatch,
+        _terms(),
+        solve_strategy="rolling",
+        rolling_horizon=6,
+        rolling_overlap=0,
+    )
+    assert status in ("ok", "optimal"), cond
+
+
+def test_a_failed_capture_warns_and_records_unknown_energy(monkeypatch):
+    from services import period_utils
+
+    def boom(*_a, **_k):
+        raise RuntimeError("forced")
+
+    n = _network()
+    monkeypatch.setattr(period_utils, "snapshot_weights", boom)
+    status, _, _, lines = _solve(n, monkeypatch, _terms())
+    monkeypatch.undo()
+    assert status in ("ok", "optimal")
+    assert any("[CURTAIL] WARN" in ln and "forced" in ln for ln in lines)
+    rec = n.meta[C.META_KEY]
+    assert rec["curtailed_mwh"] is None and rec["capture_failed"] is True
+    assert rec["counts_as_unserved_energy"] is False
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
+    assert C.curtailed_by_load(n) == ({}, [C.NOT_ESTABLISHED])
+
+
+def test_a_capture_without_the_dispatch_column_is_a_failed_capture():
+    n = _network()
+    undo: list = []
+    captured: dict = {}
+    msgs: list = []
+    C.apply(n, msgs.append, undo, captured, terms=_terms())
+    for _kind, fn in undo:
+        fn()
+    assert captured[C.META_KEY]["capture_failed"] is True
+    assert any("[CURTAIL] WARN" in m for m in msgs)
+    C.commit(n, captured)
+    assert n.meta[C.META_KEY]["curtailed_mwh"] is None

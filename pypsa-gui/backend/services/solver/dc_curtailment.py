@@ -26,6 +26,7 @@ the fingerprint stay as they were (C15).
 
 from __future__ import annotations
 
+import logging
 import math
 import pathlib
 from dataclasses import dataclass
@@ -44,12 +45,21 @@ COOLING_BUS = "dc_mv"
 GENERATOR = f"{DC_CURTAILMENT_PREFIX}{COOLING_LOAD}"
 #: ``n.meta`` key of a solved run's record.
 META_KEY = "dc_curtailment"
+#: ``buses_t`` frame of a solved run's curtailed MW per snapshot (column ``COOLING_BUS``),
+#: committed beside the record's ``axis_hash`` the way ``settlement_inputs.commit_dsr`` does.
+SERIES_ATTR = "dc_curtailment_p"
+NOT_ESTABLISHED = "curtailment_not_established"
 CLAIM_LIMIT = (
     "energy proxy: curtailment can still be spread; consecutive hours are not enforced"
 )
 
 NO_COOLING_LOAD = "no_cooling_load"
 DURATION_EXCEEDS_HORIZON = "duration_exceeds_horizon"
+#: Until C20 (carry-in under the operational run), a rolling run cannot hold the duration rows
+#: across its windows, so a rolling run with a duration is refused.
+ROLLING_WITHOUT_CARRY_IN = "duration_under_rolling_not_supported"
+
+_log = logging.getLogger(__name__)
 
 
 class DcCurtailmentRefused(ValueError):
@@ -226,24 +236,32 @@ def apply(
     def _capture_and_remove():
         try:
             p = n.generators_t.p
-            if GENERATOR in getattr(p, "columns", []):
-                from services import period_utils
+            if GENERATOR not in getattr(p, "columns", []):
+                raise KeyError(f"{GENERATOR} has no dispatch column")
+            from services import period_utils
 
-                series = p[GENERATOR].astype(float).copy()
-                w = period_utils.snapshot_weights(n, "generators", sns=series.index)
-                captured[META_KEY] = {
-                    "p_t": series,
-                    "total_mwh": float(
-                        (
-                            series.clip(lower=0) * w.reindex(series.index).fillna(0.0)
-                        ).sum()
-                    ),
-                    "price_eur_per_mwh": terms.price,
-                    "share": terms.share,
-                    "max_duration_h": terms.max_duration_h,
-                }
-        except Exception:
-            pass
+            series = p[GENERATOR].astype(float).copy()
+            w = period_utils.snapshot_weights(n, "generators", sns=series.index)
+            total = float(
+                (series.clip(lower=0) * w.reindex(series.index).fillna(0.0)).sum()
+            )
+            captured[META_KEY] = {
+                "p_t": series,
+                "total_mwh": total,
+                "capture_failed": False,
+                **_terms_record(terms),
+            }
+        except Exception as exc:
+            # Never silent: a lost capture is recorded as unknown, never as "no curtailment".
+            msg = f"[CURTAIL] WARN: the curtailment capture failed ({exc}); curtailed_mwh is unknown."
+            _log.warning(msg)
+            phase(msg)
+            captured[META_KEY] = {
+                "p_t": None,
+                "total_mwh": None,
+                "capture_failed": True,
+                **_terms_record(terms),
+            }
         if GENERATOR in n.generators.index:
             n.remove("Generator", GENERATOR)
         PyPSAService.unmark_transient("Generator", GENERATOR)
@@ -253,23 +271,103 @@ def apply(
     undo_actions.append(("call", _capture_and_remove))
 
 
+def _terms_record(terms: Terms) -> dict:
+    return {
+        "price_eur_per_mwh": terms.price,
+        "share": terms.share,
+        "max_duration_h": terms.max_duration_h,
+    }
+
+
+def clear(n) -> None:
+    """At solve start: drop the previous run's record and series, so a failed run never keeps
+    them beside an unsolved dispatch (GK A review, ask 2)."""
+    n.meta.pop(META_KEY, None)
+    if SERIES_ATTR in n.buses_t:
+        n.buses_t[SERIES_ATTR] = pd.DataFrame(index=n.snapshots)
+
+
 def commit(n, captured: dict) -> None:
     """After a successful solve: the run's record in ``n.meta`` (curtailed energy apart from
-    unserved energy, the claim limit; C18, C19), or none when curtailment was off."""
+    unserved energy, the claim limit; C18, C19) and the curtailed MW in
+    ``buses_t[SERIES_ATTR]``, or neither when curtailment was off. A failed capture is recorded
+    with ``curtailed_mwh`` None and ``capture_failed``, and no series."""
+    clear(n)
     rec = captured.get(META_KEY)
     if not rec:
-        n.meta.pop(META_KEY, None)
         return
+    from services.commercial.settlement_inputs import axis_hash
+
+    p_t = rec.get("p_t")
+    failed = bool(rec.get("capture_failed")) or p_t is None
+    if not failed:
+        frame = pd.DataFrame({COOLING_BUS: pd.Series(p_t, dtype=float)}).reindex(
+            n.snapshots
+        )
+        n.buses_t[SERIES_ATTR] = frame
     n.meta[META_KEY] = {
         "generator": GENERATOR,
         "bus": COOLING_BUS,
-        "curtailed_mwh": rec["total_mwh"],
+        "curtailed_mwh": None if failed else rec["total_mwh"],
+        "capture_failed": failed,
+        "axis_hash": None if failed else axis_hash(n.snapshots),
         "price_eur_per_mwh": rec["price_eur_per_mwh"],
         "curtailable_share": rec["share"],
         "max_duration_h": rec["max_duration_h"],
         "claim_limit": CLAIM_LIMIT if rec["max_duration_h"] is not None else None,
         "counts_as_unserved_energy": False,
     }
+
+
+def curtailment_series(n) -> tuple[pd.Series | None, list[str]]:
+    """(the committed curtailed MW per snapshot on ``COOLING_BUS``; flags). ``None`` and
+    ``curtailment_not_established`` when there is no record, the capture failed, the series is
+    missing or incomplete, or it was made on another snapshot axis."""
+    from services.commercial.settlement_inputs import axis_hash
+
+    rec = (getattr(n, "meta", None) or {}).get(META_KEY)
+    frame = n.buses_t.get(SERIES_ATTR) if hasattr(n.buses_t, "get") else None
+    if (
+        not rec
+        or rec.get("capture_failed")
+        or frame is None
+        or frame.empty
+        or COOLING_BUS not in frame.columns
+        or rec.get("axis_hash") != axis_hash(n.snapshots)
+    ):
+        return None, [NOT_ESTABLISHED]
+    out = frame[COOLING_BUS].reindex(n.snapshots).astype(float)
+    if out.isna().any():
+        return None, [NOT_ESTABLISHED]
+    return out, []
+
+
+def curtailed_by_load(n) -> tuple[dict[str, pd.Series], list[str]]:
+    """What the post-solve surfaces take off a load's served power: ``{COOLING_LOAD: MW}``.
+    The loads keep their full ``p_set`` after the transient is removed, so without this the
+    curtailed MW would read as served demand with no supply behind it. ``({}, [])`` when the
+    run had no curtailment; ``({}, [NOT_ESTABLISHED])`` when it had some but the series cannot
+    be read (never a silent 0)."""
+    if not (getattr(n, "meta", None) or {}).get(META_KEY):
+        return {}, []
+    series, flags = curtailment_series(n)
+    if series is None or COOLING_LOAD not in n.loads.index:
+        return {}, [NOT_ESTABLISHED]
+    return {COOLING_LOAD: series}, flags
+
+
+def refuse_rolling(terms: Terms | None = None) -> None:
+    """A rolling run with a duration is refused until C20 builds the carry-in (GK A, ask 4):
+    windowed rows without it would leave each window's first run unbounded by the last."""
+    terms = project_terms() if terms is None else terms
+    if terms is None or terms.max_duration_h is None:
+        return
+    raise DcCurtailmentRefused(
+        ROLLING_WITHOUT_CARRY_IN,
+        f"curtail_max_duration_h ({terms.max_duration_h:g} h) is not supported under a rolling "
+        "solve yet: the duration rows have no carry-in between windows. Use the full-horizon "
+        "solve, or remove the duration.",
+    )
 
 
 # ── the duration rows ────────────────────────────────────────────────────────
