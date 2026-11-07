@@ -538,8 +538,10 @@ def test_the_builders_copy_of_the_jurisdiction_map_matches_the_backend():
     import re
     from pathlib import Path
 
-    src = (Path(__file__).parents[2] / "frontend/src/pages/results/investment/tariffModel.ts"
-           ).read_text()
+    src = (
+        Path(__file__).parents[2]
+        / "frontend/src/pages/results/investment/tariffModel.ts"
+    ).read_text()
     euro = re.search(r"const EURO = \[(.*?)\]", src, re.S).group(1)
     got = {c: "EUR" for c in re.findall(r"'([A-Z]{2})'", euro)}
     body = src.split("export const JURISDICTION_CURRENCY", 1)[1].split("\n}", 1)[0]
