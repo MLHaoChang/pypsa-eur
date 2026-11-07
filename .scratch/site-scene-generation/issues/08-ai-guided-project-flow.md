@@ -63,3 +63,32 @@ Implement the example intent-to-effect contract in ai-guided-project-flow.md and
 ### 2026-11-05: triage sweep (AA-FILL-2), role ready-for-agent
 
 Was: `needs-triage — owner-required specification; not implemented`. The owner required this specification, so it needs no further owner call. Build the native path only; optional-engine adapters report unavailable. Files: the assistant tools and flow in `pypsa-gui/backend/harness/` and `services/chat_tools.py`, the Site flow in `pypsa-gui/frontend/src/`, tests V61-V98. Blockers: 02 and 03 (SC-01, SC-02; in progress; SC-00 N contracts are accepted). Reviewers: GK B and UX. Large: the implementer proposes slices in its plan.
+
+### 2026-11-07: plan GO (GK B, UX) and the slices
+
+Session `session_01G7qCun9vXpfVgFsSgwQegs`. Seven PRs (PR-SIZE-1): S1 tools (GK B), S2 companion entry points (UX), S3 task step and recovery (GK B), S4 bindings through chat (GK B), S5 binding receipts (UX), S6 results read and integrated journey (GK B), S7 journey evidence and Status done (UX).
+
+GK B answers: D11's names `site_scene_read`, `site_scene_prepare`, `site_scene_apply` (with `site_scene_cancel`); the spec's names are aliases in the docs only. Prepare has no card. Adopt stays `not_via_chat`. Cancel has no card.
+
+GK B conditions:
+- **G1.** Apply requires `proposal_id`, `input_hash` and `expected_revision`, refused at the tool. The card binds them plus `site_id` and the owner.
+- **G2.** Chat prepares never evict others' previews: per-owner cap, and refuse at the global cap.
+- **G3.** Owner, project and site come from the server; a foreign or deleted `site_id` reads `not_found`.
+- **G4.** Cancel reaches only the caller's own preview, never relabels an applied one, and is idempotent.
+- **G5.** Read is capped in bytes and items, user strings are capped and fenced, and the `[site 3d]` block comes from a server re-read only.
+- **G6.** A chat apply lands the same receipt, revision and bindings as the route, with the D06 lock order.
+- **G7.** Apply is in no run envelope in S1; a task step joins `BOUND_CONTEXT_TOOLS` in S3.
+- **G8.** An uncertain apply reads the chain receipt before any retry and never retries silently (S3).
+- **G9.** Model edit and scene mapping are two cards; resume re-checks the model revision; ambiguity returns clarify (S4).
+- **G10.** Results reads are project-scoped, every channel carries unit, run and freshness, and stale results are labelled (S6).
+- **G11.** Kinds and route parity go in fragments; the listed checks run before each review.
+- **G12.** Hand-mutated guards are listed with the test that kills each.
+
+UX conditions:
+- **U1.** S2, S5 and S7 are each their own PR under PR-SIZE-1.
+- **U2.** Help jumps go through `withReturn` and the mode-aware opener; nothing jumps on its own.
+- **U3.** "Help with the current blocker" shows only when `/flow` reports one, named in the section's words.
+- **U4.** Receipt wording: no em dash or semicolon, and no ids or field keys in visible text.
+- **U5.** Prepare uses the existing ConfirmationCard unchanged; a malformed preview disables Approve with a reason.
+- **U6.** Resume says what it found. Success shows only on the browser ACK, with a pending word before it.
+- **U7.** Shots of each state in Guided and Expert, with real API and route mocks.

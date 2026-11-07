@@ -336,6 +336,11 @@ PUT     /api/projects/{name}/sites                                              
 DELETE  /api/projects/{name}/sites/{site_id}/context                               -> delete_site_context_api_projects__name__sites__site_id__context_delete
 GET     /api/projects/{name}/sites/{site_id}/context                               -> get_site_context_api_projects__name__sites__site_id__context_get
 POST    /api/projects/{name}/sites/{site_id}/context                               -> fetch_site_context_api_projects__name__sites__site_id__context_post
+GET     /api/projects/{name}/sites/{site_id}/scene                                 -> get_scene_api_projects__name__sites__site_id__scene_get
+POST    /api/projects/{name}/sites/{site_id}/scene/proposals                       -> create_proposal_api_projects__name__sites__site_id__scene_proposals_post
+GET     /api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}         -> get_proposal_api_projects__name__sites__site_id__scene_proposals__proposal_id__get
+POST    /api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply   -> apply_proposal_api_projects__name__sites__site_id__scene_proposals__proposal_id__apply_post
+POST    /api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel  -> cancel_proposal_api_projects__name__sites__site_id__scene_proposals__proposal_id__cancel_post
 GET     /api/projects/{name}/sites/{site_id}/thumbnail                             -> get_site_thumbnail_api_projects__name__sites__site_id__thumbnail_get
 PUT     /api/projects/{name}/sites/{site_id}/thumbnail                             -> put_site_thumbnail_api_projects__name__sites__site_id__thumbnail_put
 GET     /api/projects/{name}/snapshots                                             -> list_snapshots_api_projects__name__snapshots_get
