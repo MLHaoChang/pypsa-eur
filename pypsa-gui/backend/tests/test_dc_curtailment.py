@@ -618,3 +618,12 @@ def test_add_rows_guards():
     finally:
         for _kind, fn in undo:
             fn()
+
+
+def test_without_a_duration_the_lp_chain_is_returned_unchanged():
+    marker = object()
+    assert C._wrap_with_dc_curtailment(_network(), marker, terms=_terms()) is marker
+    assert (
+        C._wrap_with_dc_curtailment(_network(), marker, terms=_terms(d=2.0))
+        is not marker
+    )
