@@ -529,3 +529,15 @@ def test_the_terms_enter_the_fingerprint_only_when_on(tmp_path):
     assert (
         fp(_spec(curtailment_price_eur_per_mwh=5.0, curtail_max_duration_h=4.0)) != on
     )
+
+
+def test_check_refuses_before_the_solve_and_fits_holds_at_the_boundary():
+    """C21 at bind time, not only in the LP rows; D plus one snapshot exactly equal to the
+    horizon still fits."""
+    with pytest.raises(C.DcCurtailmentRefused) as exc:
+        C.check(_network(), _terms(d=12.0))
+    assert exc.value.kind == C.DURATION_EXCEEDS_HORIZON
+    C.check(_network(), _terms(d=11.0))
+    w = pd.Series([1.0, 1.0, 1.0])
+    assert C.fits(w, 2.0, w.index)
+    assert not C.fits(w, 2.5, w.index)
