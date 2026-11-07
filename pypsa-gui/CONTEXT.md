@@ -97,6 +97,15 @@ design**: its results and commercial records stand. The sweep's operational
 re-solve, which also freezes sizes, is a transient check and commits nothing.
 _Avoid_: dispatch-only, operational run (the sweep's term), extendable off
 
+**Plan-vs-operation gap**:
+The operational run (rolling, sizing off) against the **full-horizon dispatch
+on the same sizes**: one solve over the whole horizon, with the same sizes,
+initial charge and non-cyclic storage (`services/solver/operational_gap.py`,
+`GET /api/results/operational_gap`). gap = operational − reference, from
+PyPSA opex only. It is the cost of no look-ahead past each window, not a
+forecast error. It reads None with a flag when it is missing or stale.
+_Avoid_: forecast gap, plan error
+
 **Unavailable**:
 The state of a figure the backend could not resolve, as distinct from a figure
 that resolved to zero. Zero is a legitimate result in an energy-system model,
