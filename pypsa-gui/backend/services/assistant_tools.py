@@ -836,7 +836,7 @@ def apply_project_changes(preview_id: str) -> dict:
 
 def create_chart(component: str, attribute: str, names: list[str], source: str = "input") -> dict:
     from services import chat_tools
-    from services.assurance_artifacts import canonical_sha256, solve_stamp
+    from services.assurance_artifacts import canonical_sha256, quarantined, solve_stamp
     project, chart_root, _ = _project()
     if component not in ("Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer") or source not in ("input", "result") or not isinstance(names, list) or not 1 <= len(names) <= 8 or any(not isinstance(n, str) or not n for n in names) or len(set(names)) != len(names):
         workflow._refuse("invalid_chart", "Choose a component, input/result source, and 1–8 unique asset names.")
@@ -909,6 +909,15 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
         workflow._refuse("project_changed", "Active project changed while rendering the chart; retry in the intended project.", 409)
     data = buffer.getvalue()
     byte_hash = hashlib.sha256(data).hexdigest()
+    # H8a: an identical redraw of a quarantined chart has the same content-hash
+    # file_id; refuse before any blob, meta or sidecar is written. A marker that
+    # lands after this check is caught by verify_chart before any download or
+    # delivery, so no second lock is taken here.
+    if quarantined(chart_root, byte_hash[:16]):
+        workflow._refuse(
+            "artifact_quarantined",
+            "This exact chart failed an integrity check earlier and is quarantined; it cannot be "
+            "published again. Tell the user it is unavailable and do not retry this call.", 409)
     manifest = {"schema_version": 1, "project_id": str(project.id),
                 "source_kind": "configured_input" if source == "input" else "captured_result",
                 "dataset": dataset, "render_spec": render_spec,

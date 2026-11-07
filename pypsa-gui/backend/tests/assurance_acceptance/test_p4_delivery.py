@@ -165,6 +165,62 @@ def test_a_new_file_id_is_not_affected(baseline, client):
     assert client.get(other["download_url"]).status_code == 200
 
 
+# Redraws of a quarantined chart (H8: GK B (32) (a), H8a-H8d)
+
+
+def tree(root):
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def redraw_refused(chart):
+    with pytest.raises(HTTPException) as caught:
+        chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    assert caught.value.status_code == 409
+    assert caught.value.detail["error_kind"] == "artifact_quarantined"
+
+
+def test_an_identical_redraw_of_a_quarantined_chart_is_refused_and_writes_nothing(
+    baseline, client
+):
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    _, blob, _ = paths(chart)
+    original = blob.read_bytes()
+    blob.write_bytes(b"forged png")
+    assert client.get(chart["download_url"]).status_code == 409
+    blob.write_bytes(original)
+    root = chat_tools_root()
+    before = tree(root)
+    redraw_refused(chart)
+    assert tree(root) == before
+    assert client.get(chart["download_url"]).status_code == 409
+
+
+def test_an_unreadable_marker_refuses_the_redraw(baseline, monkeypatch):
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    lstat = assurance_artifacts.os.lstat
+
+    def denied(path, *args, **kwargs):
+        if "quarantine" in str(path):
+            raise PermissionError("denied")
+        return lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(assurance_artifacts.os, "lstat", denied)
+    redraw_refused(chart)
+
+
+def test_a_redraw_that_differs_gets_a_new_file_id_and_is_served(baseline, client):
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    paths(chart)[1].write_bytes(b"forged png")
+    assert client.get(chart["download_url"]).status_code == 409
+    other = chat_tools.create_chart("Generator", "marginal_cost", ["G1"])
+    assert other["file_id"] != chart["file_id"]
+    assert client.get(other["download_url"]).status_code == 200
+
+
 # Labels (A4.2, J3)
 
 LABELS = {
@@ -197,6 +253,29 @@ def test_a_line_chart_label_check_passes_for_a_series(solved, client):
     assert spec["kind"] == "line" and spec["x_values"] == [0, 1]
     assert client.get(chart["download_url"]).status_code == 200
 
+
+@pytest.mark.parametrize("names", [["G1", "G2"], ["p_max_pu"]])
+def test_a_series_chart_is_a_line_even_when_its_shape_looks_like_a_bar(
+    solved, client, names
+):
+    # Two assets over two snapshots, or one asset named like the attribute:
+    # only both bar conditions together make a bar chart.
+    network = solved.network
+    bus = network.generators.at["G1", "bus"]
+    for name in names:
+        if name not in network.generators.index:
+            network.add("Generator", name, bus=bus, p_nom=1.0)
+        network.generators_t.p_max_pu[name] = [0.5, 0.8]
+    chart = chat_tools.create_chart("Generator", "p_max_pu", names)
+    assert chart["manifest"]["render_spec"]["kind"] == "line"
+    assert client.get(chart["download_url"]).status_code == 200
+
+
+def test_an_oversized_sidecar_is_refused_and_quarantined(baseline, client):
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    reseal(chart, lambda record, manifest: record.update(pad="x" * (2 * 1024 * 1024)))
+    assert client.get(chart["download_url"]).status_code == 409
+    assert marker(chart)["reason_code"] == "sidecar"
 
 def test_a_legacy_manifest_gets_no_label_check(baseline, client):
     # J3: a chart drawn before S1 (no scope keys) verifies as on master, even
