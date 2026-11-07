@@ -1,0 +1,54 @@
+level,unit,u_min_pct,u_max_pct,t_min_s,t_max_s,depth_pct,duration_s,count_per_year,verdict,dip_stats_source,note,trips_per_year,restart_time_h,rate_tph,mass_pull,lost_t_per_trip,lost_t_per_year,label,rate_basis,mass_pull_basis,incomplete,unknown_count,known_count,profile
+class,compressor,80.0,90.0,0.01,0.2,20.0,0.2,10.0,rides,demo,depth 20 % for 0.2 s within the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,80.0,90.0,0.2,0.5,20.0,0.5,3.0,rides,demo,depth 20 % for 0.5 s within the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,80.0,90.0,0.5,1.0,20.0,1.0,1.0,trips,demo,depth 20 % for 1 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,80.0,90.0,1.0,5.0,20.0,5.0,0.5,trips,demo,depth 20 % for 5 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,80.0,90.0,5.0,60.0,20.0,60.0,0.2,trips,demo,depth 20 % for 60 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,70.0,80.0,0.01,0.2,30.0,0.2,5.0,trips,demo,depth 30 % for 0.2 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,70.0,80.0,0.2,0.5,30.0,0.5,2.0,trips,demo,depth 30 % for 0.5 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,70.0,80.0,0.5,1.0,30.0,1.0,0.5,trips,demo,depth 30 % for 1 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,70.0,80.0,1.0,5.0,30.0,5.0,0.3,trips,demo,depth 30 % for 5 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,70.0,80.0,5.0,60.0,30.0,60.0,0.1,trips,demo,depth 30 % for 60 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,40.0,70.0,0.01,0.2,60.0,0.2,4.0,trips,demo,depth 60 % for 0.2 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,40.0,70.0,0.2,0.5,60.0,0.5,1.5,trips,demo,depth 60 % for 0.5 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,40.0,70.0,0.5,1.0,60.0,1.0,0.5,trips,demo,depth 60 % for 1 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,40.0,70.0,1.0,5.0,60.0,5.0,0.2,trips,demo,depth 60 % for 5 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,40.0,70.0,5.0,60.0,60.0,60.0,0.1,trips,demo,depth 60 % for 60 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,5.0,40.0,0.01,0.2,95.0,0.2,1.5,trips,demo,depth 95 % for 0.2 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,5.0,40.0,0.2,0.5,95.0,0.5,0.5,trips,demo,depth 95 % for 0.5 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,5.0,40.0,0.5,1.0,95.0,1.0,0.2,trips,demo,depth 95 % for 1 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,5.0,40.0,1.0,5.0,95.0,5.0,0.1,trips,demo,depth 95 % for 5 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,5.0,40.0,5.0,60.0,95.0,60.0,0.05,trips,demo,depth 95 % for 60 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,0.0,5.0,0.01,0.2,100.0,0.2,1.0,trips,demo,depth 100 % for 0.2 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,0.0,5.0,0.2,0.5,100.0,0.5,0.5,trips,demo,depth 100 % for 0.5 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,0.0,5.0,0.5,1.0,100.0,1.0,0.2,trips,demo,depth 100 % for 1 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,0.0,5.0,1.0,5.0,100.0,5.0,0.2,trips,demo,depth 100 % for 5 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,compressor,0.0,5.0,5.0,60.0,100.0,60.0,0.3,trips,demo,depth 100 % for 60 s outside the curve,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,80.0,90.0,0.01,0.2,20.0,0.2,10.0,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,80.0,90.0,0.2,0.5,20.0,0.5,3.0,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,80.0,90.0,0.5,1.0,20.0,1.0,1.0,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,80.0,90.0,1.0,5.0,20.0,5.0,0.5,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,80.0,90.0,5.0,60.0,20.0,60.0,0.2,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,70.0,80.0,0.01,0.2,30.0,0.2,5.0,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,70.0,80.0,0.2,0.5,30.0,0.5,2.0,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,70.0,80.0,0.5,1.0,30.0,1.0,0.5,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,70.0,80.0,1.0,5.0,30.0,5.0,0.3,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,70.0,80.0,5.0,60.0,30.0,60.0,0.1,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,40.0,70.0,0.01,0.2,60.0,0.2,4.0,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,40.0,70.0,0.2,0.5,60.0,0.5,1.5,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,40.0,70.0,0.5,1.0,60.0,1.0,0.5,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,40.0,70.0,1.0,5.0,60.0,5.0,0.2,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,40.0,70.0,5.0,60.0,60.0,60.0,0.1,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,5.0,40.0,0.01,0.2,95.0,0.2,1.5,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,5.0,40.0,0.2,0.5,95.0,0.5,0.5,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,5.0,40.0,0.5,1.0,95.0,1.0,0.2,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,5.0,40.0,1.0,5.0,95.0,5.0,0.1,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,5.0,40.0,5.0,60.0,95.0,60.0,0.05,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,0.0,5.0,0.01,0.2,100.0,0.2,1.0,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,0.0,5.0,0.2,0.5,100.0,0.5,0.5,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,0.0,5.0,0.5,1.0,100.0,1.0,0.2,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,0.0,5.0,1.0,5.0,100.0,5.0,0.2,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+class,pump,0.0,5.0,5.0,60.0,100.0,60.0,0.3,unknown,demo,no input: Ride-through curve not set,,,,,,,,,,,,,eu_rfg_dcc_ce
+unit,compressor,,,,,,,,known,demo,"20.45 trips/yr × (4 h × 10 t/h × 1) = 818 t/yr; demo dip statistics, not this site's: the operator's statistics govern",20.450000000000003,4.0,10.0,1.0,40.0,818.0000000000001,screening estimate; the binding answer is the operator's dip statistics and the units' tested curves,p_nom 5 MW × efficiency 2 t/MWh onto nh3,nh3 = 1 (to the shortfall product),,,,eu_rfg_dcc_ce
+unit,pump,,,,,,,,unknown,demo,no input: Ride-through curve not set,,2.0,10.0,1.0,,,screening estimate; the binding answer is the operator's dip statistics and the units' tested curves,p_nom 5 MW × efficiency 2 t/MWh onto nh3,nh3 = 1 (to the shortfall product),,,,eu_rfg_dcc_ce
+total,,,,,,,,,,demo,"incomplete: 1 unit(s) unknown, so the total is a lower bound; demo dip statistics, not this site's: the operator's statistics govern",,,,,,818.0000000000001,,,,True,1.0,1.0,eu_rfg_dcc_ce
