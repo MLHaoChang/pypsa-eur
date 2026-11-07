@@ -56,6 +56,13 @@ describe('Site 3D scene panel', () => {
     expect(screen.getByTestId('scene-blocker-assign_native').textContent).toBe('Buildings only: configure model elements to map them › Loads')
   })
 
+  it('the companion row sits under the part tabs and follows the open part (SC-07 S2)', () => {
+    view()
+    expect(screen.queryByTestId('site-companion-blocker')).toBeNull()
+    fireEvent.click(screen.getByTestId('site-part-model'))
+    expect(screen.getByTestId('site-companion-blocker').textContent).toBe('Help with Loads')
+  })
+
   it('Model: with assign_native available on an enabled scene, the attachments panel replaces the blocker', async () => {
     vi.mocked(siteSceneApi.getScene).mockResolvedValue(enabled([osm]))
     const flow = flowState.flow as { scene: { actions: { action: string }[] } }

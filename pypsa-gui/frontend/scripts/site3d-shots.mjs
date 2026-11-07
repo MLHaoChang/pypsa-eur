@@ -10,7 +10,8 @@
  * States: `legend` (the legend column against the Results pill), `readonly` (lock held by someone else), `readonly-item` (the same with an item chosen in Place),
  * `undo-reload` (the detach receipt comes back from the scene after a reload), `results-building` (SC-03: the Eye on, a
  * building selected and its group open, quarter-hourly labels), `results-unavailable` (SC-03: the run out of date, every
- * value unavailable in words). Add a state to STATES to extend.
+ * value unavailable in words), `companion-blocker` and `companion-asked` (SC-07 S2: the "Ask the assistant" row with the
+ * Model blocker, and the dock prefilled after "Explain this"; the chat service is offline here). Add a state to STATES to extend.
  *
  * Usage: node scripts/site3d-shots.mjs [outDir]      env: BASE, ONLY=<state prefix>, DEBUG=1
  */
@@ -86,7 +87,12 @@ const STATES = {
   'undo-reload': { lastReceipt: DETACH, readOnly: false },
   'results-building': { lastReceipt: null, readOnly: false, results: { current: true } },
   'results-unavailable': { lastReceipt: null, readOnly: false, results: { current: false } },
+  // SC-07 S2: the "Ask the assistant" row on Model with assign_native blocked, then after "Explain this".
+  'companion-blocker': { lastReceipt: null, readOnly: false, blocked: true },
+  'companion-asked': { lastReceipt: null, readOnly: false, blocked: true, click: 'site-companion-explain' },
 }
+const LOADS_BLOCKER = { code: 'no_model_targets', reason: 'Buildings only: configure model elements to map them', link: '›',
+  home: { guided: { section: 'loads', drawer: null, open: 'request_then_scroll' }, expert: { table: 'Loads' } } }
 
 async function ensureStub() {
   const up = await fetch('http://127.0.0.1:8000/api/health').then(r => r.ok).catch(() => false)
@@ -114,6 +120,7 @@ try {
     const page = await ctx.newPage()
     page.setDefaultTimeout(15000)
     page.on('pageerror', e => problems.push(`${mode}/${key}: page error: ${(e.stack||e.message).split('\n').slice(0,4).join(' / ')}`))
+    if (process.env.DEBUG) page.on('console', msg => { if (msg.type() === 'error') console.log(`${mode}/${key} console: ${msg.text().slice(0, 400)}`) })
     const unmocked = new Set()
     await page.route(u => u.pathname.startsWith('/api/'), r => {
       const p = new URL(r.request().url()).pathname, m = r.request().method()
@@ -121,7 +128,9 @@ try {
       // The assistant and dictation are out of scope here: fail them the way an offline service does.
       if (p.startsWith('/api/chat/') || p.startsWith('/api/dictation/')) return r.abort()
       if (/\/flow$/.test(p)) return ok({ sections: [], run_request: { optimisation: true, study: false, loadflow: false }, notes: [], deferred: false, deferred_reason: null,
-        scene: { entry: 'available', anchor_moved: [], actions: ['generate', 'assign_native'].map(action => ({ action, available: true, blocker: null, required_inputs: [], computes: '' })) } })
+        scene: { entry: 'available', anchor_moved: [], actions: ['generate', 'assign_native'].map(action => (st.blocked && action === 'assign_native'
+          ? { action, available: false, blocker: LOADS_BLOCKER, required_inputs: [], computes: '' }
+          : { action, available: true, blocker: null, required_inputs: [], computes: '' })) } })
       if (p === '/api/simulation/queue') return ok({ jobs: [], running: [], paused: false })
       const sch = p.match(/^\/api\/network\/asset_schema\/([^/]+)$/)
       if (sch) return SCHEMAS[sch[1]] ? ok(SCHEMAS[sch[1]]) : r.fulfill({ status: 404, json: { detail: 'none' } })
@@ -141,6 +150,7 @@ try {
       if (p.endsWith('/context')) return r.fulfill({ status: 404, json: { detail: 'none' } })
       const table = { '/api/network/buses': BUSES, '/api/network/generators': GENS, '/api/network/storage_units': SUS, '/api/network/loads': LOADS }
       if (table[p]) return ok(table[p])
+      if (p === '/api/network/meta') return ok({ name: PROJECT, snapshot_count: 24, bus_count: BUSES.length, loaded_project: PROJECT })
       if (m === 'GET' && /\/api\/network\/[a-z_]+$/.test(p)) return ok([])
       unmocked.add(`${m} ${p}`)
       return ok(m === 'GET' && /(s|list|history|pending|workflows|profiles)$/.test(p) ? [] : {})
@@ -168,6 +178,7 @@ try {
       await page.getByTestId('scene-result-group-plant').click()
     } else if (key !== 'legend') await page.getByRole('tab', { name: 'Model', exact: true }).click().catch(() => page.getByText('Model', { exact: true }).first().click())
     await page.waitForTimeout(2000)
+    if (st.click) { await page.getByTestId(st.click).click(); await page.waitForTimeout(800) }
     if (st.pick) {   // the select is disabled under a lock, so the item is chosen first and the lock arrives after
       await page.getByTestId('place-item').selectOption({ index: 1 })
       await page.evaluate(async () => { (await import('/src/store/uiStore.ts')).useUIStore.getState().setLockState({ readOnly: true, holderEmail: 'other@example.com', reason: 'locked-by-user' }) })

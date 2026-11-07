@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useProjectFlow } from '../hooks/useProjectFlow'
+import SiteCompanion, { buildingLabel, SECTION_WORDS } from './SiteCompanion'
 import { openSectionInExpert, openSectionInGuided, openSiteAnchor, withReturnFromSite3D } from '../layout/flowNavigation'
 import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type GreenfieldInput, type SceneBuilding, type SourceInput } from '../api/siteScene'
 import type { SceneAction, SitePart } from '../api/flow'
@@ -66,13 +67,12 @@ function Blocker({ action }: { action: SceneAction | undefined }) {
   if (!action || action.available || !action.blocker) return null
   const leaves = !('site_part' in (action.blocker.home as object))
   const where = (action.blocker.home as { guided?: { section: string } }).guided?.section
-  const words: Record<string, string> = { project: 'Site coordinates', loads: 'Loads', results: 'Results' }
   return (
     <span className="text-[11px] text-muted" data-testid={`scene-blocker-${action.action}`}>
       {action.blocker.reason}
       {leaves && where && (
         <> <button type="button" onClick={() => goHome(action.blocker!.home)} className="text-accent hover:underline">
-          {action.blocker.link} {words[where] ?? where}
+          {action.blocker.link} {SECTION_WORDS[where] ?? where}
         </button></>
       )}
     </span>
@@ -199,6 +199,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
           </button>
         ))}
       </div>
+      <SiteCompanion siteName={site.name} part={part} scene={flow?.scene} selected={selected} />
 
       {/* The part's body scrolls inside itself, so the tabs (and the Site toolbar above the panel) stay in view
           when the Model part grows (a preview, the Place form, the bottom table open); focusable so the
@@ -270,7 +271,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
           ) : selected && enabled ? (
             <div className="flex flex-col gap-1.5" data-testid="scene-correction">
               <span className="text-text font-medium">
-                {selected.source.namespace === 'osm' ? `OSM building ${selected.source.source_id}` : 'Proposed building'}
+                {buildingLabel(selected)}
                 {selected.source.namespace === 'osm' && <span className="text-muted font-normal"> · {heightEvidenceWords(selected)}</span>}
               </span>
               {!editing ? (
