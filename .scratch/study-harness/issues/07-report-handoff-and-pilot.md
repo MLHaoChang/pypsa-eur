@@ -159,6 +159,27 @@ GK B (26)'s E1–E9 were unrecoverable; this verdict replaces them (coordinator 
 > - **L8, item 6.** An eh_site@1 change must not alter a run already started, beyond C8's synced stages (report, handoff) and E3's frozen explore. Your in-place C8 test asserts this for an old run record. If a §9.3 line would change an in-flight run's inputs or explore, bump to eh_site@2 instead, and ask me first.
 > - **L9, mutants.** Hand mutants, each with its killing test named: L2: the card branch is taken when any envelope id exists; the L3 cap; item 2: the generic run_evidence fallback is put back for eh_study; item 3: a lost record re-dispatches the study; the L5 lock. Plus mutants on the changed lines. Record L1–L9 in issue 07.
 
+### GK B (33): B3b plan verdict, GO WITH CHANGES (P1–P12, verbatim in substance)
+
+Standing from GK B (32): L7 (the smoke is offline and bounded, or stays out of CI) and L8 (no change to in-flight runs; one that is needed becomes eh_site@2, asked first). A report job is tied to a run only by the harness's own explicit launch; a human request is never strict.
+
+Driving the real pilot found three defects (F-a: the grant runs inside the host's chat turn, whose turn cell outranks the hand-over's request binding, so the new run was fingerprinted on the host and the new project's setup reset the host's user_ts and solver config; F-b: `_solve_job`/`job_of` read the EH study's job as the run's solve; F-c: a template project's first solve read as unverified, as its write-back backs the network series into user_ts) and three blockers (Q1 kpi.unserved_mwh refuses multi-period; Q2 no reliability goal at the grant; Q3 run_margin_loop refuses on the shipped eh_site network).
+
+Slices: PR 1 = F-a, F-b, F-c with failing-first tests (the data-loss fix lands first). PR 2 = Q1–Q3, the pilot and the smoke. Each under 1,500 lines.
+
+- P1 (F-a). The grant binds a fresh turn cell and releases it on every exit path, a raise included. Tests: the host's user_ts frames, solver config and network revision byte-equal after the grant; the new task's and envelope's fingerprints equal the new project's; the host cell is bound again after the grant, also after a raising grant; hand mutant: drop the cell.
+- P2 (F-b). `run_gates._solve_job` and `run_loops.job_of` match tool == solve_queue_enqueue exactly. Test on the shipped eh_site@1 step order (solve.2 is run_eh_study), sv.solve.state evaluates. Mutant: the old "latest solve.*" rule.
+- P3 (F-c). The one save runs before start() and before any fingerprint or freeze, and changes no solver config. Tests: the first solve of a fresh created project reads verified; the save does not bump the network revision again. The GUI create route is the named remaining risk.
+- P4 (Q1 → A). A multi-period branch in `run_gates._kpi_unserved_mwh` only; `lost_load_calculations.source` and Check answers untouched (B is GK A's ground). Keep every F6 identity check, frame index == n.snapshots, columns ⊆ loads. Per investment period: sum(frame × snapshot_weightings.generators) within the period; never investment_period_weightings. The gate compares the worst period with the cap and names it; never the sum over periods. Tests: non-unit generator weightings differing between periods; cap passes per period but fails on the sum, and the reverse; misaligned frame; other_solve; each refusal NoEvidence. Hand mutants: sum over periods; drop the weightings.
+- P5 (Q2 → A plus B's refusal). The goal is a value the user gave, shown on the grant card, unit-checked in h/yr, never a model default; written to the new project's solver config before the freeze. A profile with an LOLE rule and no resolved goal refuses the grant `goal_missing` (own tool-error-kinds.d fragment). The goal stays out of `_network_input_fingerprint` and the investment-case digest, with a test.
+- P6 (Q3 → A under eh_site@2). Switching a granted @1 run's engine is an L8 change: ship eh_site@2 with run_coupling_loop (max_solves 3, restore base); PROFILES keeps @1 byte-equal (pin test against master), resolve keeps @1 for stored runs; new intakes use @2, and P5's goal param lives in @2's intake. A test that every reader of a profile id or version accepts @1 and @2 (#1132 F1). Loop solves = solves_used + probe_solves + closing re-solve, charged to the run; goal via active_loop_goal/horizon_years. Probe `_refusal` with the grant: listing run_coupling_loop for the harness's own step never admits it on a model turn (#1123).
+- P7. fetch_site_context, genset fuel price, import_urdb_tariff and run_investment_case (§9.3 diffs) are follow-ups, each filed under .scratch.
+- P8 (L7). smoke/accept_harness_pilot.py: a hard 300 s timeout in the driver itself; fake provider; a socket guard refusing any non-loopback connect, with a test that it trips; run only through the gui-qa-drivers task.
+- P9. In the pilot only the EH study may be stubbed (C11); the coupling loop and the solve are real.
+- P10. Hand mutants plus `scripts/coord/mutants.py` on run_gates.py, killing tests named in the PR body.
+- P11. A report job is tied to a run only by the harness's own explicit launch; nothing infers a run from state.
+- P12. The release-note fragment states that a run granted before the change keeps eh_site@1.
+
 ## Folded from #970
 
 Owner decision HARNESS-970-1 (3 Nov). Three items from #970 land here, all after the pilot works. None changes the acceptance criteria above.
