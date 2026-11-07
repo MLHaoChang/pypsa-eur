@@ -560,7 +560,15 @@ def get_asset_costs() -> dict:
 
 def get_simulation_status() -> dict:
     from routers.simulation import get_status as _h
-    return _h()
+    out = _h()
+    if out.get("running"):
+        # LC-24: nothing continues this chat by itself after a Stop (#542) and
+        # a plain turn arms no continuation, so the words must not promise one.
+        out = {**out, "follow_up": (
+            "No automatic update is armed for this run. Do not say you will "
+            "keep checking or report back; tell the user to ask again or watch "
+            "the run status.")}
+    return out
 
 
 def get_simulation_lock_status() -> dict:

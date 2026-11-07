@@ -141,6 +141,17 @@ describe('chat tool-line outcome marks', () => {
       .toBe('–run_simulation (outcome unknown: the result could not be read)')
   })
 
+  it('LC-24: a call left open when the turn ends is settled, never Working', async () => {
+    await turn('guided')
+    emit('tool_request', { tool_use_id: 'w1', tool_name: 'wait_for_job', safety_tier: 'job' })
+    expect(screen.getByTestId('chat-tool-label').textContent).toMatch(/^Working:/)
+    emit('done', { stop_reason: 'aborted' })
+    act(() => useChatStore.setState({ streaming: false }))
+    const label = screen.getByTestId('chat-tool-label').textContent
+    expect(label).toMatch(/^Stopped: .*\(the turn was stopped\)$/)
+    expect(label).not.toMatch(/Working/)
+  })
+
   it('says why a queue job cannot be checked yet, in both modes', async () => {
     await turn('expert')
     call('w', 'wait_for_job', 'uncertain', 'ad:7', 'adapter_pending')

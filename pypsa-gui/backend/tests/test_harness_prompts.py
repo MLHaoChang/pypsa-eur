@@ -69,3 +69,13 @@ def test_prompt_fragment_bytes_unchanged(name):
 def test_the_golden_is_red_on_a_planted_byte():
     value = "x"
     assert hashlib.sha256(value.encode()).hexdigest() != EXPECTED_SHA256["_STYLE_GUIDANCE"]
+
+
+def test_running_status_never_promises_a_follow_up(monkeypatch):
+    """LC-24: a running solve's status tells the model no update is armed."""
+    from routers import simulation
+    from services import chat_tools
+    monkeypatch.setattr(simulation, "get_status", lambda: {"running": True, "status": "running"})
+    assert "Do not say you will" in chat_tools.get_simulation_status()["follow_up"]
+    monkeypatch.setattr(simulation, "get_status", lambda: {"running": False, "status": "completed"})
+    assert "follow_up" not in chat_tools.get_simulation_status()

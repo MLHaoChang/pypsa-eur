@@ -3599,7 +3599,14 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           // backend's denied line for the same call, which says the same.
           if (toolLine && m.tool_use_id && DENIED_LINE.test(m.content) && messages.some(o => o !== m && o.role === 'tool'
             && o.tool_use_id === m.tool_use_id && toolOutcomeOf(o.tool_result, o.tool_name)?.outcome === 'denied')) return null
-          const toolLabel = toolLine && !toolLine.hidden ? toolLine.label : null
+          // LC-24: a call that never got an outcome while no turn runs and no
+          // card waits was abandoned (Stop): settle it, never "Working".
+          const abandoned = !!toolLine && !toolLine.hidden && !streaming && pendingCard == null
+            && !!m.tool_use_id && REQUEST_LINE.test(m.content) && !outcomeNow
+            && !guidedSettledToolIds(messages).has(m.tool_use_id)
+          const toolLabel = toolLine && !toolLine.hidden
+            ? (abandoned ? `Stopped: ${guidedToolPhrase(REQUEST_LINE.exec(m.content)![1])} (the turn was stopped)` : toolLine.label)
+            : null
           // Issue 04 S4a: a call your project rule blocked links to where that rule is set.
           const accessLink = outcomeNow?.mark.outcome === 'denied'
             && toolOutcomeOf(m.tool_result, m.tool_name)?.reason === 'user_restriction' ? (
