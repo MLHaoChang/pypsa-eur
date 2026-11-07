@@ -67,3 +67,15 @@ def test_pue_refusal_is_plain_words():
         "dc_load.pue_at_design: 1.01 is below what the architecture’s own conversion losses "
         "need (at least 1.031). Raise the PUE or pick another architecture."
     )
+
+
+@pytest.mark.parametrize("arch", ARCHITECTURES)
+def test_stated_minimum_pue_builds(arch):
+    import re
+
+    base = {"architecture": arch, "phases": [{"cod": "2030-01-01", "it_mw": 20.0}]}
+    with pytest.raises(DcLoadError) as exc:
+        T.dc_load_spec("eh_datacenter", {**base, "pue_at_design": 1.0})
+    least = float(re.search(r"at least (\d\.\d{3})", str(exc.value)).group(1))
+    spec = T.dc_load_spec("eh_datacenter", {**base, "pue_at_design": least})
+    assert spec.pue_at_design == least

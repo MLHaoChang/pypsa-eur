@@ -25,6 +25,7 @@ hourly dispatch move 52 hours of stored energy.
 """
 from __future__ import annotations
 
+import math
 from typing import NamedTuple
 
 import numpy as np
@@ -663,9 +664,11 @@ def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None =
         except DcArchitectureError as exc:
             # The create form names its fields (dc_load.*), as its other refusals do; the
             # words are plain, and name only what the form's user can do (DC 22).
+            # Rounded up, so the stated minimum itself builds.
+            least = math.ceil(1.0 / eta * 1000) / 1000
             raise DcLoadError(
                 f"{exc.field}: {spec.pue_at_design:g} is below what the architecture’s own "
-                f"conversion losses need (at least {1.0 / eta:.3f}). Raise the PUE or pick "
+                f"conversion losses need (at least {least:.3f}). Raise the PUE or pick "
                 "another architecture.", exc.field) from None
     if template_id == "eh_datacenter_staged":
         expected = list(_dc_plan(planning).planning.years)
