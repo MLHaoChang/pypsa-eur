@@ -1054,6 +1054,56 @@ def test_a_reseed_leaves_a_study_year_the_user_set_apart_from_the_ledger(
                for n in r.json()["ledger"]["honesty_notes"])
 
 
+def _old_ledger_study(client, api_project, project_storage_dir, name, year):
+    from services.study import library as L
+    from services.study import questions as Q
+    from services.study import store
+
+    sid = _setup(client, api_project, name)
+    base = project_storage_dir(name)
+    study = store.load_study(base, sid)
+    old = L.seed_ledger(Q.get_question(study.question_id), study.intake,
+                        L.load_defaults(L.WP0_PACK_VERSION))
+    store.save_study(base, study.model_copy(update={
+        "ledger": old, "ledger_version": old.ledger_version, "currency_year": year}))
+    return sid, study
+
+
+def test_a_tariff_patch_moves_the_study_year_that_followed_an_older_ledger(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """Money-year issue 03: the tariff re-seed moves the year as the ledger PUT does."""
+    name = "tariff-year"
+    sid, study = _old_ledger_study(client, api_project, project_storage_dir, name, 2020)
+    tariff = dict(study.intake.get("tariff") or {})
+    r = client.patch(f"/api/projects/{name}/studies/{sid}", json={"intake": {"tariff": tariff}})
+    assert r.status_code == 200, r.text
+    assert r.json()["currency_year"] == 2025
+    assert not any(n.startswith("study_currency_year_")
+                   for n in r.json()["ledger"]["honesty_notes"])
+    assert client.post(f"/api/projects/{name}/studies/{sid}/run", json={}).status_code == 202
+    assert wait_run(client, name, sid)["status"] == "done"
+    case = client.get(f"/api/projects/{name}/studies/{sid}/options/bess_2h/case")
+    assert case.status_code == 200, case.text
+
+
+def test_a_tariff_patch_leaves_a_year_the_user_set_or_the_patch_sets(
+        client, api_project, studies_on, fake, project_storage_dir):
+    name = "tariff-year-kept"
+    sid, study = _old_ledger_study(client, api_project, project_storage_dir, name, 2023)
+    tariff = dict(study.intake.get("tariff") or {})
+    url = f"/api/projects/{name}/studies/{sid}"
+    r = client.patch(url, json={"intake": {"tariff": tariff}})
+    assert r.status_code == 200, r.text
+    assert r.json()["currency_year"] == 2023
+    sid2, study2 = _old_ledger_study(client, api_project, project_storage_dir,
+                                     name + "-b", 2020)
+    r = client.patch(f"/api/projects/{name}-b/studies/{sid2}", json={
+        "intake": {"tariff": dict(study2.intake.get("tariff") or {})},
+        "settings": {"currency_year": 2022}})
+    assert r.status_code == 200, r.text
+    assert r.json()["currency_year"] == 2022
+
+
 def test_a_ledger_naming_an_unshipped_pack_is_refused_never_read_on_the_pin(
         client, api_project, studies_on, fake, project_storage_dir):
     """
