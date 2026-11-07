@@ -193,7 +193,7 @@ def test_c8_a_stage_the_run_already_passed_is_never_reopened():
 # ── The stage-7 ruling: the route and the chat tool are never the run's ─────
 
 
-def test_a_chat_report_while_a_run_sits_at_stage_7_is_not_strict_and_not_the_runs(
+def test_a_chat_report_while_a_run_sits_at_stage_7_is_strict_but_not_the_runs(
     session, site, fake_report, monkeypatch
 ):
     _, root = site
@@ -230,7 +230,9 @@ def test_a_chat_report_while_a_run_sits_at_stage_7_is_not_strict_and_not_the_run
         session, monkeypatch, "generate_report", {}
     )  # the chat tool, then its route
     assert not [p for e, p in frames if e == "tool_error"], frames
-    assert fake_report == [{"strict": False, "run_binding": None}]
+    # AA-05 S4a (P1): the chat tool's report is strict, through its own
+    # in-process switch; it is still never bound or charged to the run.
+    assert fake_report == [{"strict": True, "run_binding": None}]
     record = stored(root, task["task_id"])
     assert run_report.report_step(record)["status"] == "pending"  # never the run's step
     assert not (record["run"].get("budgets") or {}).get("reservations")
