@@ -71,6 +71,8 @@ Every action follows **inspect → explain/clarify → prepare → review/confir
 
 Use existing `get_project_flow`, schema/component reads, native edit cards and navigation first. For a multi-action request, reuse the existing `start_task` / study-brief machinery in `services/assistant_tasks.py`, with reviewed typed scene-step support where needed, existing per-step approvals, card-phase pauses, limits and uncertain-effect behavior. Do not build a second plan executor or widen existing runnable engineering cases; unsupported scene-step kinds get a named refusal/manual fallback until their adapter is tested. Freeze the following minimal candidate adapters in SC-00 N and deliver them in SC-07; these names are proposed, not current tools:
 
+Shipped (SC-07 S1, GK B plan answer Q1) under D11's names: `site_scene_read` is get_site_guidance_context, `site_scene_prepare` is prepare_site_change and `site_scene_apply` is apply_site_change, with `site_scene_cancel` beside them. The candidate names below are aliases in these documents only and are not registered as tools.
+
 | Candidate | Allowed effect and required controls |
 |---|---|
 | get_site_guidance_context | Bounded owned scene/selection/provenance/availability summary, no mesh/original bytes and no job. Includes explicit unavailable fields and revision binding. |

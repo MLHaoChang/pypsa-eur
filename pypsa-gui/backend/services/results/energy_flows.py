@@ -288,7 +288,18 @@ def _read(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
             share = np.where(demand[:, None] > _EPS, lp[:, at] / np.where(demand > _EPS, demand, 1.0)[:, None], 0.0) if at else 0.0
             if at:
                 lost[:, at] += amount[:, None] * share
-    served = lp - (shed if shed is not None else 0.0) - lost
+    # DC-07 S2: curtailed data-centre load is neither served nor unserved, and never supply.
+    from services.solver import dc_curtailment as _dc_curt
+
+    curtailed = np.zeros_like(lp)
+    by_load, curt_flags = _dc_curt.curtailed_by_load(n)
+    if curt_flags:
+        _refuse("the data-centre curtailment of this solve was not captured "
+                f"({', '.join(curt_flags)})")
+    for ld, mw in by_load.items():
+        values = mw.to_numpy(dtype=float)[mask]
+        curtailed[:, lnames.index(ld)] = np.maximum(values, 0.0)
+    served = lp - (shed if shed is not None else 0.0) - lost - curtailed
     if (served < -1e-6 * (1 + lp.max(initial=0.0))).any():
         _refuse("more demand is recorded as unserved than the load asks for")
     served = np.maximum(served, 0.0)
@@ -343,8 +354,8 @@ def _read(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
 
     return {"T": T, "buses": buses, "bus_ix": bus_ix, "nb": nb, "wg": wg, "dt": dt, "gnames": gnames,
             "gp": gp, "g_bus": g_bus, "g_lab": g_lab, "external": external, "lnames": lnames, "lp": lp,
-            "l_bus": l_bus, "shed": shed, "lost": lost, "served": served, "elems": elems,
-            "storages": storages, "bus_unit": bus_unit}
+            "l_bus": l_bus, "shed": shed, "lost": lost, "curtailed": curtailed, "served": served,
+            "elems": elems, "storages": storages, "bus_unit": bus_unit}
 
 
 def read_dispatch(n, mask: np.ndarray, result_df=None, capture=None) -> tuple[dict[str, Any] | None, str | None]:
@@ -547,7 +558,8 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     return {
         "buses": buses, "T": T, "wg": wg, "dt": dt, "srcs": srcs, "vias": vias, "dests": dests,
         "ns": ns, "nv": nv, "D": D, "gp": gp, "g_lab": g_lab, "storages": storages,
-        "served": served, "lnames": lnames, "shed": shed, "lost": lost, "dsoc_t": dsoc_t,
+        "served": served, "lnames": lnames, "shed": shed, "lost": lost,
+        "curtailed": R["curtailed"], "dsoc_t": dsoc_t,
         "bus_bad": bus_bad, "soc_bad": soc_bad, "passes": passes,
     }
 
@@ -674,6 +686,9 @@ def energy_flows(n, period=None, window: tuple[int, int] | None = None, *,
         "unserved_product_mwh": {ld: float((att["lost"][win, i] * w).sum()) for i, ld in enumerate(att["lnames"])
                                  if att["lost"][:, i].any()},
         "unserved_mwh": None if att["shed"] is None else float((att["shed"][win].sum(axis=1) * w).sum()),
+        # DC-07 S2: curtailed load, apart from served and unserved demand.
+        "curtailed_load_mwh": {ld: float((att["curtailed"][win, i] * w).sum())
+                               for i, ld in enumerate(att["lnames"]) if att["curtailed"][:, i].any()},
         "flags": flags,
         "rule": "Proportional mix at each bus and a proportional pool per storage; "
                 "MWh = MW × generators weighting, per modelled year.",

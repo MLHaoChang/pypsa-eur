@@ -56,11 +56,35 @@ def clear() -> None:
         _entries.clear()
 
 
-def _evict(now: float) -> None:
+def _expire(now: float) -> None:
     for key in [k for k, e in _entries.items() if now - e["created"] > TTL_SECONDS]:
         del _entries[key]
+
+
+def _evict(now: float) -> None:
+    _expire(now)
     while len(_entries) > MAX_PROPOSALS or sum(e["bytes"] for e in _entries.values()) > MAX_TOTAL_BYTES:
         _entries.popitem(last=False)
+
+
+def _admit_owned(project_key: str, owner: str | None, max_owned: int, size: int, now: float) -> None:
+    """
+    SC-07 G2, the chat path only (called under `_lock`): refuse rather than evict.
+
+    A caller may hold at most `max_owned` live previews in this project, and a
+    new one may not push any preview out of the shared map, so a burst of chat
+    prepares never makes another user's open preview answer "expired".
+    """
+    _expire(now)
+    owned = sum(1 for (key, _), e in _entries.items()
+                if key == project_key and e["owner"] == owner and e["status"] in ("ready", "applying"))
+    if owned >= max_owned:
+        raise SceneError("resource_limit", f"Too many open previews: apply or discard one of your {owned} first",
+                         {"limit": "open_previews", "max": max_owned, "actual": owned})
+    if (len(_entries) + 1 > MAX_PROPOSALS
+            or sum(e["bytes"] for e in _entries.values()) + size > MAX_TOTAL_BYTES):
+        raise SceneError("resource_limit", "The preview store is full: try again once open previews are applied "
+                         "or expire", {"limit": "shared_previews", "max": MAX_PROPOSALS, "actual": len(_entries)})
 
 
 def input_hash(site_id: str, action: str, base_revision: int, inputs: dict[str, Any]) -> str:
@@ -94,9 +118,16 @@ def _parse(body: Any) -> tuple[str, int, dict[str, Any]]:
     return action, base, inputs
 
 
-def create(project_dir, project_key: str, owner: str | None, site_id: str, body: Any) -> dict[str, Any]:
-    """POST .../scene/proposals: validate, compute the preview, keep it. Writes nothing."""
+def create(project_dir, project_key: str, owner: str | None, site_id: str, body: Any, *,
+           max_owned: int | None = None) -> dict[str, Any]:
+    """POST .../scene/proposals: validate, compute the preview, keep it. Writes nothing.
+
+    `max_owned` is the chat path's admission (SC-07 G2, `_admit_owned`); the
+    route passes none and keeps its evicting behaviour."""
     action, base, inputs = _parse(body)
+    if max_owned is not None:
+        with _lock:     # refuse before the preview work; checked again at insert
+            _admit_owned(project_key, owner, max_owned, 0, time.monotonic())
     scene = store.read_scene(project_dir, site_id)
     if scene["state"] != "enabled":
         raise SceneError("not_found", "This site has no 3D scene yet: create it first")
@@ -122,6 +153,8 @@ def create(project_dir, project_key: str, owner: str | None, site_id: str, body:
              "status": "ready", "created": time.monotonic(), "bytes": size,
              "preview": preview, "stored": stored}
     with _lock:
+        if max_owned is not None:
+            _admit_owned(project_key, owner, max_owned, size, entry["created"])
         _entries[(project_key, pid)] = entry
         _evict(entry["created"])
     return view(entry)

@@ -1,6 +1,6 @@
 # A dc_load create form in the New project wizard
 
-Status: needs-triage
+Status: needs-info
 Type: task
 Blocked by: 05
 Size: M
@@ -14,3 +14,9 @@ The New project wizard sends no `dc_load` body (`api/projects.ts`: only `eh_site
 A data-centre project created in the wizard carries a `dc_load` spec with the chosen architecture, and the Backup and Power architecture sections show on it.
 
 ## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Not buildable until answered.
+- Question (UX (12)): UX (12): where does the `dc_load` step go in the New project wizard (own step after the template pick, or a section inside the template step), and does the architecture select sit with it? Builder needs the placement before the form can be built; then M, sonnet, GK A + UX (12). DC 05 (#1199) is merged.
+- Blocked by: the answer.

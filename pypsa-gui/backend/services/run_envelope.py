@@ -418,6 +418,86 @@ def reserve_engine(task_path, *, call_id, tool, rule, max_solves, overhead, rest
         return clamped, None
 
 
+# Issue 07 B3a (GK B (32) L2, L2a-L2c): a step-by-step run's engine loop.
+# A run that never had a grant takes the engine step's own card instead of
+# `no_envelope`; any other envelope keeps `no_envelope` (fail closed).
+_GRANT_EVENTS = frozenset({"granted", "used", "refused"})
+# The one refusal a never-granted envelope writes at each carded dispatch
+# (`_standing`): it says only that the envelope was never granted.
+_NEVER_GRANTED_REFUSAL = "not_granted"
+
+
+def never_granted(task_path, task):
+    """L2a: the envelope file reads whole and is exactly the never-granted
+    shape (proposed, no grant time, no granted/used/refused row, nothing
+    spent from it); L2b: the run passed its plan-review decision (the intake
+    stage's gate passed: `in.brief.valid`, the user reviewed the brief).
+    A `refused` row is allowed only with the reason "not_granted"."""
+    envelope = _load(task_path)
+    return (envelope is not None and envelope["state"] == "proposed" and envelope.get("granted_at") is None
+            and not any(a.get("event") in _GRANT_EVENTS
+                        and not (a.get("event") == "refused" and a.get("reason") == _NEVER_GRANTED_REFUSAL)
+                        for a in envelope["audit"])
+            and solves_used(envelope) == 0
+            and (((task.get("run") or {}).get("stages") or {}).get("intake") or {}).get("status") == "passed")
+
+
+def carded_clamp(task, profile, max_solves, overhead):
+    """A step-by-step engine loop's `max_solves`: the rule's, clamped to the
+    profile's solve budget left on the run's own count after `overhead`, and
+    to `MAX_LOOP_SOLVES`; 0 when the run's budget is spent."""
+    from harness.runner import _budget, budget_spent
+    from services.adequacy.coupling import MAX_LOOP_SOLVES
+    cap = int(((profile.get("envelope") or {}).get("budget") or {}).get("solves", 0))
+    left = cap - int(_budget(task)["used"].get("solves", 0) or 0)
+    clamped = min(int(max_solves), left - int(overhead), MAX_LOOP_SOLVES)
+    return 0 if budget_spent(task) else max(clamped, 0)
+
+
+def reserve_carded(task_path, *, step_id, call_id, overhead, restore):
+    """L3: the user Continued at the engine step's card. Under the task lock,
+    its `max_solves` is the card's, recomputed lower when the budget fell
+    since (never higher); that worst case plus `overhead` is reserved on the
+    run's own solve count and the step. Nothing is written to the envelope
+    (L2c). (max_solves, None), or (None, reason) with nothing reserved."""
+    from harness.runner import _budget
+    from services import assistant_tasks, run_profiles
+    with assistant_tasks._LOCK:
+        task = json.loads(Path(task_path).read_text())
+        if not never_granted(task_path, task):
+            return None, "no_envelope"
+        step = next((s for s in task["steps"] if s["id"] == step_id), None)
+        card = (step or {}).get("card")
+        shown = card.get("max_solves") if isinstance(card, dict) else None
+        if isinstance(shown, bool) or not isinstance(shown, int):
+            return None, "no_envelope"  # no card was shown: nothing approved it
+        if restore != "base" or card.get("restore") != "base":
+            return None, "restore_uncovered"
+        profile = run_profiles.resolve(task["run"]["profile"])
+        clamped = min(shown, carded_clamp(task, profile, shown, overhead))
+        if clamped < 1:
+            return None, "budget_spent"
+        step["reserved"] = {"call_id": call_id, "reserved": clamped + int(overhead)}
+        used = _budget(task)["used"]
+        used["solves"] = int(used.get("solves", 0) or 0) + clamped + int(overhead)
+        assistant_tasks._save(Path(task_path), task)
+        return clamped, None
+
+
+def settle_carded(task, step, solves):
+    """The step-by-step loop ended: its reservation on `task` (in memory,
+    the caller saves) becomes what it spent, once; `solves` None keeps the
+    whole reservation. False when there is none or it already settled."""
+    from harness.runner import _budget
+    row = step.get("reserved")
+    if not isinstance(row, dict) or "solves" in row:
+        return False
+    row["solves"] = int(row["reserved"] if solves is None else solves)
+    used = _budget(task)["used"]
+    used["solves"] = int(used.get("solves", 0) or 0) - int(row["reserved"]) + row["solves"]
+    return True
+
+
 def settle_engine_solves(task_path, call_id, solves, event="engine"):
     """The loop ended: its reservation becomes what it spent, once (C7).
     An explore case's row (issue 06, E5) settles the same way with

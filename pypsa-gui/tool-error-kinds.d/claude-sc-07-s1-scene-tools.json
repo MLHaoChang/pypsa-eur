@@ -1,0 +1,9 @@
+{"kinds": {
+  "invalid_input": {"surface": "inline", "why": "A Site 3D scene tool (site_scene_prepare, site_scene_apply) got a missing or malformed argument; `field` names it. Nothing was prepared or written; the assistant corrects that argument, asking the user for a missing dimension or unit rather than guessing."},
+  "invalid_geometry": {"surface": "inline", "why": "site_scene_prepare: a building footprint or dimension the native scene refuses (self-intersecting, too small, out of range). Nothing was prepared; the assistant names the building and asks the user for a corrected value."},
+  "revision_conflict": {"surface": "inline", "why": "A Site 3D scene tool's base or expected revision is not the scene's current one, or the apply named a preview other than the one reviewed. Nothing was written; the assistant reads the site again with site_scene_read and prepares the change again."},
+  "resource_limit": {"surface": "inline", "why": "A Site 3D scene request is over a named limit (`limit`, `max`, `actual`): request bytes, buildings, triangles, preview bytes, or too many open previews. Nothing was prepared; the assistant applies or discards an open preview, or asks the user to make the change smaller."},
+  "proposal_expired": {"surface": "inline", "why": "site_scene_apply: the preview is no longer held (30-minute expiry or a restart) and no commit of it exists. Nothing was written; the assistant prepares the change again and shows it for a new approval."},
+  "proposal_cancelled": {"surface": "inline", "why": "site_scene_apply: the preview was discarded (site_scene_cancel or Site 3D). Nothing was written; the assistant prepares it again only if the user still wants it."},
+  "integrity_error": {"surface": "inline", "why": "A Site 3D scene tool found the stored scene chain inconsistent. Nothing was written; the assistant reports it and points the user to Site 3D, never retrying."}
+}}

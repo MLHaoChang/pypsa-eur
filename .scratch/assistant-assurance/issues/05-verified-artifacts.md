@@ -48,3 +48,87 @@ does not cover these additions; review/freeze them before implementation.
 Authenticated checked-answer JSON/ZIP now exports the same approved facts, request scope, slots, limitations and revalidated evidence. ZIP binds answer JSON and spreadsheet-safe facts CSV by SHA-256/bytes. Existing PNG integrity is unchanged. Checked chart/report/import and other delivery adapters remain pending; an export does not establish scientific certification.
 
 See [implementation status](../implementation-status.md), [contracts](../harness-contracts.md) and [coverage ledger](../coverage-ledger.md). The whole ticket remains open; no independent review verdict is inherited by this extension.
+
+### 2026-11-07 — audit and slice plan: GK B (31) GO WITH CHANGES (H1–H10)
+
+Audit against master 1af1369a6a; 49 existing P4-related tests pass.
+
+| Case | State at audit | Slice |
+|------|----------------|-------|
+| A4.1 exact chart data/units/scope | input chart passed; checked chart passed; result chart refusal only, no positive test vs an independent fixture; no solve identity or scope in the manifest | S1 |
+| A4.2 swapped/corrupt/mislabeled/mixed/expired | dataset/render/bytes/sidecar corruption passed; swapped manifest, axis/unit/caption vs dataset, mixed runs in a delivery, quarantine: red | S2 |
+| A4.3 aggregation/window/NaN/partial/race | render race passed; non-finite refused; red: a selection mixing series and static names drew the static (shadowed) value | S1 |
+| A4.4 report disclosures/claims/tables/regeneration | number audit flags unverified numbers; export keeps disclosures; table equality vs evidence untested | S4 |
+| A4.5 imports; table/binary delivery hashes | inspect_import guesses nothing (untested); table exports carry byte hash only | S3 |
+| A4.6 same semantics across surfaces | not frozen; owner card sent through the coordinator | S5 |
+
+Slices: S1 chart data, S2 provenance and delivery, S3 imports and table
+delivery, S4 reports, S5 A4.6 and close-out. Each is under PR-SIZE-1, with a
+short plan note to GK B before S2–S5.
+
+GK B (31) answers: Q1 (a) keep refusing non-finite values, naming the asset
+and first bad snapshot; Q2 (a) quarantine, with H8; Q3 (a) flag inline and in
+the appendix, with H9; Q4 A4.6 is testable once the freeze names the metric
+set (ticket 10's ids), a per-surface field list for masks and required
+warnings, and an independent raw-data oracle.
+
+S1 conditions: H1 refuse a mixed series/static selection (input and result);
+H2 a result chart against a hand-solved oracle; H3 scope keys absent together
+read as legacy, and present-but-wrong keys are refused; H4 the stored format
+is unchanged (pin test); H5 the solve stamp is the result-freshness
+fingerprint pair, and a chart from another solve fails verification; H6 no
+widening; H7 mutants. Carried to later slices: H8 (S2) durable quarantine
+under `durable.file_lock`, never cleared, with mixed runs keyed on the solve
+stamp; H9 (S4) a paragraph whose audit errors is withheld, and the human
+Reports path stays byte-identical; H10 (S3) `input_assertion` until
+`validate_network` passes on the current revision, with the table dataset
+hash taken from the frame.
+
+### 2026-11-07 — S1 build (branch `claude/aa05-s1-chart-data`)
+
+`create_chart` refuses `chart_data_partial` for a selection that mixes
+series and static names. Before this, the static value was drawn under a
+series that overrides it. The non-finite refusal now names the asset and the
+first bad snapshot. The manifest gains `scope: "current"` and
+`solve_stamp` (the solve's input/exact fingerprints for a result chart,
+null for an input chart). `verify_chart` reads charts without both keys as
+`legacy` and refuses present-but-wrong keys. It also refuses a result chart
+whose stamp differs from the loaded project's solve. When the project is not
+loaded, the chart reads as `solve_not_rechecked`. The download sends the
+status as `X-Chart-Scope`. Tests: `tests/assurance_acceptance/test_p4_chart_data.py`.
+
+### 2026-11-07 — A4.6 frozen (owner decision AA05-FREEZE-1); GK B (31) K1–K5
+
+The owner froze A4.6 with three things named:
+
+- **Metric set:** every key of `harness.calculations.DEFINITIONS` at
+  1af1369a6a (69 metrics, 69 formula_ids), pinned. A later metric joins only
+  by a ledger row.
+- **Fields per surface:**
+  - *Identity:* metric, formula_id, unit, entity_id, window (start, end,
+    snapshot count, weight basis), evidence_id, source_sha256 and the solve
+    stamp.
+  - *Masks:* coverage, rows used and excluded, and the validity flags.
+  - *Required warnings:* slot dispositions and limitations, carried on the
+    answer, chart manifest, table sidecar, PDF/DOCX (only where a report table
+    carries a checked fact) and download metadata.
+- **Oracle:** raw fixture frames checked by an independent numpy calculation,
+  never the service under test.
+
+Coverage: identity, mask and warning agreement for all 69; the raw numeric
+oracle for one metric per profile module (about 20).
+
+GK B (31) adds K1–K5 for S5:
+
+- **K1:** identity includes project_id; a fact from project B on project A's
+  chart or table is refused.
+- **K2:** unavailable (not_established, no_data, not-evaluated) reads the same
+  on every surface, never 0 or blank; one test per surface.
+- **K3:** machine surfaces carry the exact float and unit. Rendered surfaces
+  equal the receipt value after the surface's pinned rounding, applied once.
+- **K4:** every fixture uses non-unit snapshot weightings. A window split
+  checks sums, and checks means and utilisation as weight-weighted means. The
+  boundary is half-open, with a test that no snapshot is counted twice or
+  dropped.
+- **K5:** one plausible-but-wrong aggregate per family, named: an unweighted
+  sum, a flipped Link/Store sign, or an excluded row included.

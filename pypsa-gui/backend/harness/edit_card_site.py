@@ -682,3 +682,78 @@ def _anchor_says(args: dict, rows: list[dict]) -> str:
 
 register("set_site_anchor", Adapter("settings_edit", _anchor_preview, _anchor_readback, section_id="project",
                                     binding=_anchor_binding, says=_anchor_says))
+
+
+# ── site_scene_apply: one exact 3D site preview (SC-07 S1, GK B G1) ──────────
+#
+# The card binds the owner, the project, the Site, the proposal id, its
+# input_hash, its base revision and the expected revision; any of them missing
+# or not the caller's live preview is refused before a card. A scene that moved
+# after the card (another apply) is `file_changed_since_read` at confirm, which
+# `require_current` turns into `edit_preview_stale`. The write is
+# `proposals.apply` only (services/site_scene/chat.apply), as the route's.
+
+_SCENE_ACTIONS = {"generate_native": "Generate buildings", "edit_buildings": "Correct buildings"}
+
+
+def _scene_state(args: dict) -> tuple[Any, str, dict, dict]:
+    """(project, owner, live entry, current scene), checked as `chat.apply` checks them."""
+    from services.site_scene import chat, store
+
+    site_id, pid = args.get("site_id"), args.get("proposal_id")
+    chat.check_apply_args(site_id, pid, args.get("input_hash"), args.get("expected_revision"))
+    with chat.scope(write=True) as (_db, _user, project, owner):
+        chat._site_known(project, site_id)
+        entry = chat.reviewed_entry(project, owner, site_id, pid, args["input_hash"], args["expected_revision"])
+        scene = store.read_scene(project.directory, site_id)
+    if scene.get("revision") != args["expected_revision"]:
+        # The kind `require_current` turns into `edit_preview_stale` at confirm.
+        raise HTTPException(409, {"error_kind": "file_changed_since_read",
+                                  "message": f"the 3D site changed since the preview (revision "
+                                             f"{scene.get('revision')}, preview built on {args['expected_revision']}); "
+                                             "prepare it again with site_scene_prepare"})
+    return project, owner, entry, scene
+
+
+def _scene_preview(args: dict) -> list[dict]:
+    from services.site_scene import chat
+
+    _, _, entry, scene = _scene_state(args)
+    s = chat.summarize(scene.get("buildings") or [], entry["preview"].get("buildings") or [])
+    name = "3D site"
+    rows = [_settings_row(name, "change", "Change", None, _SCENE_ACTIONS.get(entry["action"], entry["action"])),
+            _settings_row(name, "buildings", "Buildings", s["buildings_before"], s["buildings_after"]),
+            _settings_row(name, "revision", "Scene revision", scene.get("revision"), scene.get("revision", 0) + 1)]
+    counts = s["counts"]
+    rows.append(_note("Settings", name, "note_0",
+                      f"Added {counts['added']}, changed {counts['changed']}, removed {counts['removed']} "
+                      "buildings. Only the 3D site changes: no model, network, run or result."))
+    return rows
+
+
+def _scene_binding(args: dict) -> dict:
+    project, owner, entry, scene = _scene_state(args)
+    return {"owner": owner, "project": project.uuid or project.name, "site_id": args["site_id"],
+            "proposal_id": entry["id"], "input_hash": entry["input_hash"], "base_revision": entry["base_revision"],
+            "expected_revision": args["expected_revision"], "scene_revision": scene.get("revision")}
+
+
+def _scene_readback(args: dict, rows: list[dict]) -> list[Any]:
+    """The committed scene's values, read from the store the apply wrote."""
+    from services.site_scene import chat, store
+
+    with chat.scope() as (_db, _user, project, _owner):
+        scene = store.read_scene(project.directory, args.get("site_id"))
+    now = {"change": None, "buildings": len(scene.get("buildings") or []), "revision": scene.get("revision")}
+    return [None if row["role"] == "note" else (rows[0]["new"] if row["field"] == "change"
+                                                 else _setting(now.get(row["field"]))) for row in rows]
+
+
+def _scene_says(args: dict, rows: list[dict]) -> str:
+    new = {r["field"]: (r["old"], r["new"]) for r in rows if r["role"] == "typed"}
+    before, after = new.get("buildings", (None, None))
+    return f"Applies the reviewed 3D site preview: {before} → {after} buildings. The model is unchanged"
+
+
+register("site_scene_apply", Adapter("settings_edit", _scene_preview, _scene_readback, section_id="project",
+                                     binding=_scene_binding, says=_scene_says))

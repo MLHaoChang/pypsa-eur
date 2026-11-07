@@ -1,0 +1,3 @@
+{"kinds": {
+  "chart_data_partial": {"surface": "inline", "why": "create_chart's own refusal (workflow._refuse in services/assistant_tools.py): some selected assets have a series for the attribute and others do not (AA-05 S1), so a static value a series overrides is never drawn. The model reads the message and offers to chart them separately; it stays the gray tool line."}
+}}

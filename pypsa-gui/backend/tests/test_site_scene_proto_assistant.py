@@ -1,7 +1,7 @@
 """
 SC-00 N, D11 / V64 / V67 / V91: the bounded site context and a scripted
 native journey through the REAL turn loop (`harness.loop.run_turn`) on the
-existing FakeProvider. No paid call, no tool registered, no job enqueued.
+existing FakeProvider. No paid call and no job enqueued; SC-07 S1 registered the scene tools.
 """
 from __future__ import annotations
 
@@ -73,13 +73,12 @@ def test_the_cap_drops_whole_lines_and_says_so():
     assert f"omitted actions: {40 - len(kept)}" in text
 
 
-def test_site_scene_ui_context_reaches_no_provider_today_and_adds_no_tool():
-    # SC-07 wires the block; until then an unknown ui_context key is dropped by compose.
+def test_site_scene_ui_context_never_carries_a_mesh_and_does_not_change_the_offer():
+    # SC-07 S1 wires the block from a server re-read; a mesh in the browser hint never reaches the provider.
     base, _ = _turn("hello", ui_context={"panel": "horizon"})
     leaked, _ = _turn("hello", ui_context={"panel": "horizon", "site_scene": {"mesh": MESH_MARKER}})
     assert MESH_MARKER not in _request_text(leaked.requests[0])
     assert _tool_names(leaked.requests[0]) == _tool_names(base.requests[0])
-    assert not [n for n in _tool_names(base.requests[0]) if "scene" in n]
 
 
 def test_scripted_guided_site_setup_journey_is_read_only(tmp_path):
@@ -101,8 +100,8 @@ def test_scripted_guided_site_setup_journey_is_read_only(tmp_path):
         solve_queue.reset_for_tests()
 
 
-def test_an_unknown_scene_tool_call_is_refused_not_executed(tmp_path):
-    # Denial / unknown effect: a model asking for a scene apply tool that does not exist changes nothing.
+def test_a_scene_apply_without_its_reviewed_preview_is_refused_not_executed(tmp_path):
+    # SC-07 G1: site_scene_apply exists now; one that names no reviewed preview is refused, no card, no effect.
     solve_queue.reset_for_tests()
     try:
         call = {"type": "tool_use", "id": "tu-1", "name": "site_scene_apply", "input": {"proposal_id": "p1"}}

@@ -495,9 +495,12 @@ def test_flipping_sizing_off_is_refused_by_preflight(client, site, edit):
     assert _pf._flow(client, name)["verdicts"]["optimisation"]["ready"] is False
 
 
-def test_sizing_off_answers_for_its_source(client, site, set_cfg, bound_ctx, project_storage_dir):
+def test_sizing_off_answers_for_its_source(client, site, set_cfg, edit, bound_ctx,
+                                          project_storage_dir):
     """Sizing off (F1): with no capacity run, "capacity_run" is refused while
-    the nameplate is ready; with the option already set it is the flow's."""
+    the nameplate is ready; with the option already set it is the flow's. With
+    the rolling strategy it is the operational run (DC 07): ready, until a row
+    it cannot window (a run-hour cap) blocks it."""
     name = site()
     kinds = ("optimisation", "fixed_sizes")
     with bound_ctx(client):
@@ -514,7 +517,27 @@ def test_sizing_off_answers_for_its_source(client, site, set_cfg, bound_ctx, pro
         plate = RS.verdicts(project_storage_dir(name), kinds, cache_key=KEY,
                             size_source="nameplate")
     assert plate["fixed_sizes"] == plate["optimisation"]
-    assert plate["fixed_sizes"]["ready"] is False                 # rolling refuses it
+    assert plate["fixed_sizes"]["ready"] is True                  # the operational run
+    with edit() as n:
+        n.generators["run_hours_cap"] = float("nan")
+        n.generators.loc[n.generators.index[0], "run_hours_cap"] = 100.0
+    with bound_ctx(client):
+        plate = RS.verdicts(project_storage_dir(name), kinds, cache_key=KEY,
+                            size_source="nameplate")
+    assert plate["fixed_sizes"]["ready"] is False
+    assert plate["fixed_sizes"]["blocker"]["code"] == "operational_rolling_run_hours"
+
+
+def test_the_operational_run_codes_are_titled_and_filed():
+    """DC 07: every new code has a title and files to a flow section."""
+    from services import flow_sections as F
+    from services.issue_titles import ISSUE_TITLES
+
+    for code in ("operational_rolling_run_hours", "operational_rolling_pcs_sizing",
+                 "operational_rolling_user_code", "operational_rolling_multi_period",
+                 "operational_rolling_sclopf", "operational_still_sizeable"):
+        assert code in ISSUE_TITLES, code
+        assert F.file_issue(code, "", "", frozenset()) == "scenarios", code
 
 
 def test_sizing_off_answers_for_the_source_asked_not_the_one_set(client, site, set_cfg,

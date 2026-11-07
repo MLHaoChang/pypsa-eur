@@ -3,7 +3,7 @@
 
 # One money formatter
 
-Status: ready-for-agent
+Status: done
 Type: polish (consistency)
 Found by: UX (12), #1194 and #1199 reviews, relayed by the coordinator. This is also DOCS-1's fmtEurShort item, so don't file it twice.
 

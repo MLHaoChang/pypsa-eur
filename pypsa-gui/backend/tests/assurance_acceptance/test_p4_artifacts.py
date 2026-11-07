@@ -157,5 +157,10 @@ def test_delivery_copies_the_same_validated_provenance(baseline, client, monkeyp
     assert response.status_code == 200
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
         item = json.loads(archive.read("manifest.json"))["files"][0]
-        assert item["provenance"] == chart["provenance"]
+        # The result sends the manifest once; the delivery carries the full
+        # sealed provenance, manifest included.
+        assert item["provenance"] == {
+            **chart["provenance"],
+            "manifest": chart["manifest"],
+        }
         assert item["assurance"] == chart["manifest"]

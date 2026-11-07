@@ -17,6 +17,7 @@ source passed empty is a chapter stated not established.
 """
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from services.reports import formatting as F
@@ -475,12 +476,22 @@ def fmt_tonnes_year(t: float) -> str:
     return f"{_sig3(v)}{_NBSP}{u}/yr"
 
 
+def _sig(v: float, digits: int) -> str:
+    """JS `toLocaleString('en', {maximumSignificantDigits})`: half away from zero, thousands commas."""
+    d = Decimal(repr(float(v)))
+    if d == 0:
+        return "0"
+    q = d.quantize(Decimal(1).scaleb(d.adjusted() - digits + 1), rounding=ROUND_HALF_UP)
+    return f"{q:,f}".rstrip("0").rstrip(".") if "." in f"{q:f}" else f"{q:,f}"
+
+
 def fmt_eur_short(eur: float) -> str:
-    """"€ 1.2 m", "€ 350 k" (the tab's `fmtEurShort`)."""
+    """The one money notation, unsigned: "€ 1.2 m", "€ 350 k", "€ 900" (the frontend's `utils/money.ts`;
+    `money.cases.json` pins both)."""
     a = abs(eur)
-    v, u = ((eur / 1e9, "bn") if a >= 1e9 else (eur / 1e6, "m") if a >= 1e6
-            else (eur / 1e3, "k") if a >= 1e3 else (eur, ""))
-    return f"€{_NBSP}{_sig3(v)}{f'{_NBSP}{u}' if u else ''}"
+    body = (f"{_sig(a / 1e6, 2)}{_NBSP}m" if a >= 1e6 else f"{_sig(a / 1e3, 3)}{_NBSP}k" if a >= 1e3
+            else _sig(a, 3))
+    return f"€{_NBSP}{body}"
 
 
 def _grid_risk_cell(c: Any) -> dict:

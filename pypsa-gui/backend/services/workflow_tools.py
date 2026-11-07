@@ -561,6 +561,13 @@ def _network_input_fingerprint(ctx, *, exact=False):
         if tags is not None:
             parts.append(label)
             parts.append(_exact_frame_json(tags) if exact else tags.to_json())
+    # DC 07 S2: the curtailable load's price, share and duration come from the saved DC
+    # spec, outside the network and the config; appended only when curtailment is on.
+    from services.solver import dc_curtailment as _dcc
+    terms = _dcc.terms_for(getattr(ctx, "storage_dir", None))
+    if terms is not None:
+        parts.append("dc-curtailment/1")
+        parts.append(json.dumps([terms.price, terms.share, terms.max_duration_h]))
     # DC 06: the reserve rows read floors from the saved DC spec, outside the network
     # and the config; appended only when the config has reserve products.
     from services.solver import reserve_products as _rp
@@ -578,6 +585,13 @@ def _network_input_fingerprint(ctx, *, exact=False):
             floors, strings = _rp.derive_backup(n, getattr(ctx, "storage_dir", None))
             parts.append(json.dumps({"inputs": _rp.inputs_digest(products, floors),
                                      "strings": sorted(strings)}, sort_keys=True))
+    # DC 07: an operational run keys on the capacity run's recorded sizes, so a
+    # new plan makes it stale (C7). Appended only for an operational run.
+    from services.solver import operational as _op
+    digest = _op.sizes_digest(n, ctx.solver_state["solver_config"])
+    if digest is not None:
+        parts.append("operational-sizes/1")
+        parts.append(digest)
     parts.extend(str(key) + (encode(series.to_frame()) if exact else series.to_json(date_format="iso"))
                  for key, series in sorted(ctx.user_ts.items()))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
