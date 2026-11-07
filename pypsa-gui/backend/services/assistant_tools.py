@@ -227,6 +227,7 @@ def inspect_import(file_id: str) -> dict:
     if suffix not in (".csv", ".xlsx", ".xls"):
         return {**base, "tabular_inspection": "unsupported", "next_tool": "import_uploaded_network" if suffix in formats else None}
     if suffix == ".csv":
+        base["delimiter"] = "comma (not detected)"  # AA-05 S3 (R9): never sniffed
         sheets = {"csv": pd.read_csv(path, nrows=200)}
     else:
         # Bound decompressed office data before pandas parses the workbook.
@@ -279,7 +280,14 @@ def import_uploaded_network(file_id: str, format: str) -> dict:
             if sum(item.file_size for item in archive.infolist()) > 50 * 1024 * 1024:
                 workflow._refuse("import_expansion_too_large", "Import expands beyond the 50 MB limit.", 413)
     # Base64 exists only within the server adapter, never in model context.
-    return handlers[format](bytes_b64=base64.b64encode(data).decode(), filename=meta.filename)
+    result = handlers[format](bytes_b64=base64.b64encode(data).decode(), filename=meta.filename)
+    # H10: an imported network is an input assertion until validate_network
+    # passes on its current inputs (AA-05 S3).
+    # The import unbinds the project; a fresh import_id has no validation yet.
+    from services.assurance_artifacts import stamp_import
+    with PyPSAService.get_lock():
+        stamp_import(PyPSAService.get_active_context().network, meta.file_id, meta.sha256, format)
+    return {**result, "import_status": "input_assertion"} if isinstance(result, dict) else result
 
 
 def _changes(changes):
@@ -926,6 +934,10 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
                 "solve_stamp": solve_stamp(ctx.network) if source == "result" else None,
                 "validity": {"coverage": "captured_rows", "input_fingerprint": fingerprint,
                              "limitations": ["Data/render/byte integrity; this does not certify engineering validity."]}}
+    if "assistant_import" in ctx.network.meta:
+        # H10/R4: only with an import stamp, so other manifests stay as on master.
+        from services.assurance_artifacts import import_status
+        manifest["validity"]["import_status"] = import_status(chart_root, ctx)
     provenance = {"component": component, "attribute": attribute, "names": names, "source": source,
                   "rows": len(table), "unit": unit, "input_fingerprint": fingerprint,
                   "dispatch": freshness, "first_index": str(table.index[0]), "last_index": str(table.index[-1])}
@@ -1014,6 +1026,9 @@ def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
                 for key in ("scope_status", "evidence_status", "evidence_note"):
                     if key in view:
                         item[key] = view[key]
+                if view.get("source_kind") == "table_export":  # verified table sidecar (R7)
+                    item["dataset_sha256"] = view["dataset_sha256"]
+                    item["render_spec_sha256"] = view["render_spec_sha256"]
                 if "scope_status" in view:
                     runs.append((meta.file_id, record["manifest"]))
             elif sidecar.is_file():

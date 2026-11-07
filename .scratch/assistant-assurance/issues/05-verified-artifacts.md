@@ -172,3 +172,38 @@ or sidecar write (H8a). An unreadable marker also refuses (H8b). The kind is in
 `tool-error-kinds.d/claude-aa05-s2-delivery.json` (H8c). Tests and the hand
 mutant that removes the check are in `test_p4_delivery.py` (H8d). A marker
 landing after the check is caught by `verify_chart` before download or delivery.
+
+### 2026-11-07 — S2 GK OK @2729de42 (#1227); S3 plan: GK B (32) GO WITH CHANGES (R1–R9)
+
+S3 covers A4.5: import assertions (H10), no guessing at inspection, and
+dataset hashes for table exports. Answers: Q1 (a) only `export_to_csv` and
+`export_to_excel` get manifests; Q2 (a) download re-parses the bytes, with
+R5–R6; Q3 (a) import status in the import and validate results and in the
+validity of artifacts drawn from an import, with R4. W1 (no-marker assertion
+on the evidence-mismatch test) rides S3.
+
+- **R1:** the validated fact lives project-side under `assistant_artifacts/`
+  (durable.file_lock), never in network.meta; `import_uploaded_network` strips
+  any `assistant_validated_*` key; a file pre-stamped with its own fingerprint
+  imports as input_assertion.
+- **R2:** validate_network stays read-tier: dirty flag, exact fingerprint and
+  meta unchanged.
+- **R3:** one exact fingerprint per call; unloaded or raising reads
+  input_assertion; GUI-route imports stay not_imported (Skipped).
+- **R4:** import_status enters a validity block only with an import stamp;
+  otherwise manifests are byte-identical to master (H4 pin extended); a drawn
+  artifact keeps its sealed status.
+- **R5:** at write, re-parse the bytes with verify_table's parser and require
+  an equal dataset hash before sealing, else refuse with a fragment kind;
+  cases: timestamp index, NaN vs empty string, formula-escaped cell, 17-digit
+  floats, Excel sheet name.
+- **R6:** verify_table orders seal, byte hash, re-parse; seal/byte mismatch
+  quarantines; a re-parse mismatch or exception on matching bytes refuses and
+  logs, no marker. Hand mutants: re-parse mismatch quarantines; re-parse
+  removed; R1 compare dropped.
+- **R7:** delivery items carry dataset/render hashes only for verified table
+  sidecars; legacy and the other five exports build as on master (pin test);
+  the PR says whether tables join `_one_run`.
+- **R8:** `quarantined()` before any write in the table export path (H8a).
+- **R9:** `"delimiter": "comma (not detected)"`; inspect_import never returns
+  inferred units or a mapping.

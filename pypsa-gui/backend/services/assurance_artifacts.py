@@ -206,6 +206,8 @@ def _verify(root, meta, data, project_id):
         raise _Integrity("manifest") from error
     if scope is not None:
         manifest = {**manifest, "scope_status": scope}
+    if manifest.get("source_kind") == "table_export":
+        _verify_table(manifest, data)  # seal and bytes already passed (R6)
     if manifest.get("source_kind") == "checked_evidence":
         # A checked chart is still its evidence's: same source hash, same values.
         from services import checked_charts
@@ -248,3 +250,159 @@ def verify_chart(root, meta, data, project_id, *, provenance=False):
                 "message": "Chart data, rendering or bytes could not be verified.",
             },
         ) from None
+
+
+# Import assertions (AA-05 S3, H10, R1-R4)
+
+_IMPORT_KEY = "assistant_import"
+
+
+def stamp_import(network, file_id, sha256, fmt):
+    """Mark a network the assistant just imported as an input assertion. Any
+    validated fact the file itself carries is dropped (R1): validation is
+    recorded project-side only, so a pre-stamped file never reads validated."""
+    import uuid
+
+    for key in [key for key in network.meta if str(key).startswith("assistant_validated")]:
+        del network.meta[key]
+    network.meta[_IMPORT_KEY] = {"import_id": uuid.uuid4().hex, "file_id": file_id,
+                                 "sha256": sha256, "format": fmt}
+
+
+def _validation_path(root):
+    return root / "assistant_artifacts" / "import_validation.json"
+
+
+def _exact(ctx):
+    from services import workflow_tools
+
+    return workflow_tools._network_input_fingerprint(ctx, exact=True)
+
+
+def exact_or_none(ctx):
+    try:
+        return _exact(ctx)
+    except Exception:  # noqa: BLE001 -- unloaded or unreadable: never validated
+        return None
+
+
+def record_validation(root, ctx, exact):
+    """validate_network passed: remember it for this import and these exact
+    inputs, outside the network (R1, R2). A failed write is logged; the status
+    then stays input_assertion."""
+    from harness import durable
+
+    stamp = getattr(getattr(ctx, "network", None), "meta", {}).get(_IMPORT_KEY)
+    if not isinstance(stamp, dict):
+        return
+    try:
+        record = {"import_id": stamp["import_id"], "sha256": stamp["sha256"],
+                  "exact": exact, "at": time.time()}
+        path = _validation_path(root)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with durable.file_lock(str(path.parent / ".import_validation.lock")):
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(json.dumps(record), encoding="utf-8")
+            os.replace(temporary, path)
+    except Exception as error:  # noqa: BLE001 -- never validated on any failure
+        logger.warning("import validation not recorded (%s)", type(error).__name__)
+
+
+def import_status(root, ctx, exact=None):
+    """"not_imported" without an assistant import stamp; "validated" only when
+    the project-side record names this import and the current exact inputs;
+    "input_assertion" otherwise, including on any error (R3)."""
+    stamp = getattr(getattr(ctx, "network", None), "meta", {}).get(_IMPORT_KEY)
+    if stamp is None:
+        return "not_imported"
+    try:
+        record = json.loads(_validation_path(root).read_text(encoding="utf-8"))
+        current = exact if exact is not None else _exact(ctx)
+        if current is not None and (isinstance(stamp, dict) and record["import_id"] == stamp["import_id"]
+                and record["sha256"] == stamp["sha256"] and record["exact"] == current):
+            return "validated"
+    except Exception:  # noqa: BLE001 -- missing, unreadable or unloaded: not validated
+        pass
+    return "input_assertion"
+
+
+# Table exports (AA-05 S3, A4.5, R5-R8)
+
+TABLE_FORMATS = ("csv", "xlsx")
+
+
+def _xlsx_cell(value):
+    """A cell as openpyxl writes it and reads it back: numbers to 16
+    significant digits ("%.16g"), NaN, inf and "" as empty, datetimes as ISO."""
+    import datetime as _dt
+    import math
+
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+            return None
+        return float("%.16g" % value)
+    if isinstance(value, _dt.datetime):
+        return value.isoformat()
+    if isinstance(value, _dt.date):
+        return _dt.datetime(value.year, value.month, value.day).isoformat()
+    return value if isinstance(value, str) else str(value)
+
+
+def _rectangle(rows):
+    """Rows padded to the sheet's widest non-empty cell, trailing empty rows
+    dropped: the shape a read-only openpyxl sheet reports."""
+    width = max((i + 1 for row in rows for i, cell in enumerate(row) if cell is not None), default=0)
+    rows = [list(row[:width]) + [None] * (width - len(row[:width])) for row in rows]
+    while rows and all(cell is None for cell in rows[-1]):
+        rows.pop()
+    return rows
+
+
+def table_as_written(fmt, sheets):
+    """The dataset of `sheets` ([(name, rows of escaped cells)]) as the writer
+    puts it in the file."""
+    if fmt == "csv":
+        ((_, rows),) = sheets
+        return {"sheets": [{"name": None, "rows": [
+            ["" if cell is None else str(cell) for cell in row] for row in rows]}]}
+    return {"sheets": [{"name": name, "rows": _rectangle([[_xlsx_cell(c) for c in row] for row in rows])}
+                       for name, rows in sheets]}
+
+
+def parse_table(fmt, data):
+    """The dataset the bytes say, read with the one parser download and
+    delivery use."""
+    import csv
+    import io
+
+    if fmt == "csv":
+        rows = list(csv.reader(io.StringIO(data.decode("utf-8"), newline="")))
+        return {"sheets": [{"name": None, "rows": rows}]}
+    from openpyxl import load_workbook
+
+    book = load_workbook(io.BytesIO(data), read_only=True, data_only=False)
+    try:
+        return {"sheets": [{"name": sheet.title,
+                            "rows": _rectangle([[_xlsx_cell(c) for c in row]
+                                                for row in sheet.iter_rows(values_only=True)])}
+                           for sheet in book.worksheets]}
+    finally:
+        book.close()
+
+
+def _verify_table(manifest, data):
+    """R6: runs after the seal and byte checks. A re-parse that disagrees with
+    bytes whose hash still matches is parser drift, not tampering: refused and
+    logged, never quarantined."""
+    try:
+        same = canonical_sha256(parse_table(manifest["render_spec"]["format"], data)) == manifest["dataset_sha256"]
+    except Exception as error:  # noqa: BLE001 -- any parse failure refuses
+        logger.warning("table re-parse failed (%s)", type(error).__name__)
+        raise ValueError("table re-parse failed") from None
+    if not same:
+        logger.warning("table re-parse disagrees with its dataset hash")
+        raise ValueError("table re-parse mismatch")

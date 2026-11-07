@@ -3720,7 +3720,24 @@ def update_project_settings(name: str, derive_lengths_from_geometry: bool | None
 
 def validate_network() -> list[dict]:
     from routers.simulation import preflight as _h
-    return _h()
+    from services.assistant_tools import _project
+    from services.assurance_artifacts import exact_or_none, import_status, record_validation
+
+    # H10 (AA-05 S3): the exact inputs are read once, before the check, so an
+    # edit during it can never be recorded as validated (R3).
+    try:
+        _, root, _ = _project()
+        ctx = PyPSAService.get_active_context()
+    except Exception:  # noqa: BLE001 -- no project: nothing to record
+        root = ctx = None
+    exact = exact_or_none(ctx)
+    result = _h()
+    if root is None or not isinstance(result, dict) or "ok" not in result:
+        return result  # no project, or deferred while a solve is live
+    # A pass is recorded project-side; the network itself is never touched (R1, R2).
+    if result["ok"] and not result.get("errors") and exact is not None:
+        record_validation(root, ctx, exact)
+    return {**result, "import_status": import_status(root, ctx, exact)}
 
 
 def check_solver_availability() -> dict:
@@ -7758,13 +7775,17 @@ def export_to_excel(sheets: dict, filename: str) -> dict:
     default = wb.active
     if default is not None:
         wb.remove(default)
+    written = []
     for sheet_name, rows in (sheets or {}).items():
         ws = wb.create_sheet(title=str(sheet_name)[:31] or "Sheet")
+        written.append((ws.title, []))
         for row in (rows or []):
             # EXPORT-INJECT-1, the same rule as the app's Excel export: a text
             # cell starting = + - @ tab or CR gets a leading quote, so openpyxl
             # stores it as text, never a formula; a number stays a number.
-            ws.append([_escape_formula(v) for v in row])
+            cells = [_escape_formula(v) for v in row]
+            written[-1][1].append(cells)
+            ws.append(cells)
     buf = _io.BytesIO()
     wb.save(buf)
     payload = buf.getvalue()
@@ -7779,9 +7800,9 @@ def export_to_excel(sheets: dict, filename: str) -> dict:
                 ),
             },
         )
-    return _save_agent_export(
+    return _save_table_export(
         payload, filename,
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx", written,
     )
 
 
@@ -7795,10 +7816,12 @@ def export_to_csv(rows: list, columns: list, filename: str) -> dict:
     import io as _io
     buf = _io.StringIO()
     w = csv.writer(buf, lineterminator="\r\n")
+    written = []
     if columns:
-        w.writerow([_inert_csv_cell(c) for c in columns])
+        written.append([_inert_csv_cell(c) for c in columns])
     for row in (rows or []):
-        w.writerow([_inert_csv_cell(c) for c in row])
+        written.append([_inert_csv_cell(c) for c in row])
+    w.writerows(written)
     payload = buf.getvalue().encode("utf-8")
     if len(payload) > 25 * 1024 * 1024:
         raise HTTPException(
@@ -7811,7 +7834,63 @@ def export_to_csv(rows: list, columns: list, filename: str) -> dict:
                 ),
             },
         )
-    return _save_agent_export(payload, filename, "text/csv")
+    return _save_table_export(payload, filename, "text/csv", "csv", [(None, written)])
+
+
+def _save_table_export(payload, filename, mime, fmt, written):
+    """AA-05 S3 (A4.5): a table export carries a sealed manifest whose dataset
+    hash is the table as written. The bytes are re-parsed before sealing; a
+    disagreement refuses the export (R5). An identical re-export of a
+    quarantined table is refused before any write (R8)."""
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    if not getattr(ctx, "project_uuid", None):
+        return _save_agent_export(payload, filename, mime)  # no project id: byte hash only, as before
+    import hashlib
+
+    from services import assistant_tasks as tasks
+    from services import workflow_tools as workflow
+    from services.assistant_tools import _project
+    from services.assurance_artifacts import (
+        canonical_sha256, import_status, parse_table, quarantined, table_as_written,
+    )
+
+    project, root, _ = _project()
+    byte_hash = hashlib.sha256(payload).hexdigest()
+    if quarantined(root, byte_hash[:16]):
+        workflow._refuse(
+            "artifact_quarantined",
+            "This exact file failed an integrity check earlier and is quarantined; it cannot be "
+            "published again. Tell the user it is unavailable and do not retry this call.", 409)
+    try:
+        dataset = table_as_written(fmt, written)
+        same = canonical_sha256(parse_table(fmt, payload)) == canonical_sha256(dataset)
+    except Exception:  # noqa: BLE001 -- a value the file cannot hold as given
+        same = False
+    if not same:
+        workflow._refuse(
+            "table_round_trip_failed",
+            "The file would not read back as the table given (a value it cannot hold exactly); "
+            "nothing was saved. Tell the user which export failed.", 409)
+    if fmt == "csv":
+        render_spec = {"format": "csv", "encoding": "utf-8", "delimiter": ",", "line_terminator": "\r\n",
+                       "formula_escaping": "EXPORT-INJECT-1"}
+        limitations = ["Cells are text as written."]
+    else:
+        render_spec = {"format": "xlsx", "sheets": [name for name, _ in written],
+                       "formula_escaping": "EXPORT-INJECT-1", "numbers": "%.16g"}
+        limitations = ["Numbers are stored to 16 significant digits; NaN, infinity and empty text are empty cells."]
+    validity = {"coverage": "rows_as_written", "limitations": limitations}
+    if ctx.network is not None and "assistant_import" in ctx.network.meta:
+        validity["import_status"] = import_status(root, ctx)  # R4: only with an import stamp
+    manifest = {"schema_version": 1, "project_id": str(project.id), "source_kind": "table_export",
+                "dataset": dataset, "render_spec": render_spec,
+                "dataset_sha256": canonical_sha256(dataset), "render_spec_sha256": canonical_sha256(render_spec),
+                "artifact_sha256": byte_hash, "validity": validity}
+    record = {"filename": filename, "rows": sum(len(rows) for _, rows in written), "manifest": manifest}
+    tasks._save(root / "assistant_artifacts" / (byte_hash[:16] + ".json"), record)
+    return _save_agent_export(payload, filename, mime, assurance_sha256=canonical_sha256(record))
 
 
 def export_preview_png(filename: str, png_bytes_b64: str) -> dict:

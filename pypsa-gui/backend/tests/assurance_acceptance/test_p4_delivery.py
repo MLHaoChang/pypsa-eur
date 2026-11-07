@@ -507,6 +507,8 @@ def test_a_checked_chart_whose_evidence_no_longer_matches_is_refused(
     ).write_text("{")
     assert checked.client.get(chart["download_url"]).status_code == 409
     assert delivery(chart).status_code == 409
+    # W1: evidence that no longer matches is refused, never quarantined (J1).
+    assert marker(chart) is None
 
 
 def test_delivery_quarantines_a_forged_chart_but_not_a_plain_export(baseline):
