@@ -226,10 +226,13 @@ function ExpertTable({ lines, period }: { lines: GridRiskLine[]; period: string 
   const rows: Array<{ key: string; line: GridRiskLine; label: string; cell: Partial<GridRiskCell> | undefined; flags: string[]; sub: boolean }> = []
   for (const line of lines) {
     rows.push({ key: line.key, line, label: line.label, cell: line.by_period[period], flags: line.flags, sub: false })
-    if (line.key === 'island') {
+    // The island's two rows, and one row per N-1 site transformer, in the backend's order; never under a missing line.
+    if ((line.key === 'island' || line.key === 'n_1') && line.status !== 'missing') {
       for (const r of line.rows) {
-        rows.push({ key: `${line.key}-${r.key}`, line, label: r.label, cell: r.by_period[period] as Partial<GridRiskCell> | undefined,
-          flags: r.flags, sub: true })
+        const cell = r.by_period[period]
+        const periodFlags = Array.isArray(cell?.flags) ? (cell.flags as string[]) : []
+        rows.push({ key: `${line.key}-${r.key}`, line, label: r.label, cell: cell as Partial<GridRiskCell> | undefined,
+          flags: [...new Set([...r.flags, ...periodFlags])], sub: true })
       }
     }
   }

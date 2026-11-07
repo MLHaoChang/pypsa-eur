@@ -3,7 +3,7 @@
 
 # G2P-13: N-1 rows show the line only, with no per-transformer sub-rows
 
-Status: ready-for-agent
+Status: done
 Type: task
 Found by: G2P-13 (#1194) PR body, "Skipped / risk".
 

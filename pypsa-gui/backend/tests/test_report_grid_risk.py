@@ -247,3 +247,45 @@ def test_another_open_project_or_no_process_unit_adds_no_chapter(
     assert reports._grid_risk_source(_project(tmp_path), tmp_path) is None
     _open(monkeypatch, _network(process=False))
     assert reports._grid_risk_source(_project(tmp_path), tmp_path) is None
+
+
+# --- G2P #22: one sub-row per N-1 site transformer --------------------------------------------------------------
+
+
+def test_each_n_1_site_transformer_is_a_sub_row_under_the_line_in_the_lines_order(
+    monkeypatch,
+):
+    from tests.test_grid_risk_production import _fake_loss, _prod, _two_trafos
+
+    _fake_loss(
+        monkeypatch,
+        {
+            "site_trafo": {"_": ([_prod(2.0, 200.0)], None)},
+            "site_trafo_b": {"_": ([_prod(1.0, None)], "lower")},
+        },
+    )
+    ev = _collect(grid_risk=_section(_two_trafos()))
+    table = ev.tables[C.GRID_RISK]
+    labels = [r[0] for r in table.rows]
+    i = labels.index(G.LABELS["n_1"])
+    assert labels[i + 1 : i + 3] == [
+        "– site_trafo out of service",
+        "– site_trafo_b out of service",
+    ]
+    a, b = table.rows[i + 1], table.rows[i + 2]
+    assert a[1] == C.fmt_tonnes_year(2.0) and a[2] == f"{C.fmt_eur_short(200.0)}/yr"
+    assert (
+        b[1] == C.fmt_tonnes_year(1.0)
+        and b[2] == "Unavailable: no lost-production value"
+    )
+    assert (
+        "lower bound" in b[4] and "lower bound" not in a[4]
+    )  # the row's own period flags
+    assert a[3] == a[5] == ""  # status and source stay on the line
+
+
+def test_a_missing_n_1_line_has_no_sub_rows():
+    ev = _collect(grid_risk=_section(_network(trafo=False)))
+    table, rows = _rows(ev)
+    assert rows[G.LABELS["n_1"]][3] == "missing"
+    assert not [r for r in table.rows if r[0].endswith("out of service")]

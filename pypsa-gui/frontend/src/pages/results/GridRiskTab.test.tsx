@@ -186,4 +186,32 @@ describe('Grid risk to production (G2P-13)', () => {
     expect(missingWord('lost_production_value')).toBe('Lost-production value')
     expect(missingWord('site_transformer')).toBe('Site transformer')
   })
+  it('Expert lists each N-1 site transformer under the line, in the order given, with its period flags (G2P #22)', () => {
+    const n1 = line('n_1', {
+      flags: ['no_inventory_credit'],
+      rows: [
+        { key: 'trafo_b', label: 'trafo_b out of service', flags: ['no_inventory_credit'],
+          by_period: { _: { ...cell(30, 3000), flags: ['lower_bound'] } } },
+        { key: 'trafo_a', label: 'trafo_a out of service', flags: ['no_inventory_credit'], by_period: { _: cell(70, 7000) } },
+      ],
+    })
+    render(<GridRiskBody data={data([n1])} mode="expert" />)
+    const ids = [...screen.getByTestId('grid-risk-table').querySelectorAll('tr[data-testid]')].map(r => r.getAttribute('data-testid'))
+    expect(ids).toEqual(['grid-risk-row-n_1', 'grid-risk-row-n_1-trafo_b', 'grid-risk-row-n_1-trafo_a'])  // never re-sorted
+    const b = screen.getByTestId('grid-risk-row-n_1-trafo_b')
+    expect(b.textContent).toContain('trafo_b out of service')
+    expect(b.textContent).toContain('some units are not known, so this is a lower bound')
+    expect(screen.getByTestId('grid-risk-row-n_1-trafo_a').textContent).not.toContain('lower bound')
+    expect(b.children[3].textContent).toBe('')  // status, basis and source stay on the line
+  })
+
+  it('Guided keeps the single N-1 tile, and a missing N-1 line has no sub-rows', () => {
+    const rows = [{ key: 'trafo_a', label: 'trafo_a out of service', flags: [], by_period: { _: cell(70, 7000) } }]
+    const { unmount } = render(<GridRiskBody data={data([line('n_1', { rows })])} mode="guided" />)
+    expect(screen.queryByTestId('grid-risk-row-n_1-trafo_a')).toBeNull()
+    expect(screen.queryByText('trafo_a out of service')).toBeNull()
+    unmount()
+    render(<GridRiskBody data={data([line('n_1', { status: 'missing', by_period: {}, rows })])} mode="expert" />)
+    expect(screen.queryByTestId('grid-risk-row-n_1-trafo_a')).toBeNull()
+  })
 })

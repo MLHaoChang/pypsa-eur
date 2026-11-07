@@ -500,6 +500,18 @@ def _grid_risk_cell(c: Any) -> dict:
             "eur_flag": c.get("eur_flag")}
 
 
+def _grid_risk_row_cell(c: Any) -> dict:
+    """A sub-row's cell; an N-1 row also keeps its period's flags (a lower bound is per period)."""
+    cell = _grid_risk_cell(c)
+    if isinstance(c, dict) and isinstance(c.get("flags"), list):
+        cell["flags"] = list(c["flags"])
+    return cell
+
+
+#: The lines whose rows the table lists under them (the island's two, one per N-1 site transformer).
+GRID_RISK_SUB_ROW_LINES = ("island", "n_1")
+
+
 def grid_risk_payload(source: dict | None) -> dict | None:
     """The chapter's facts from `routers.results.grid_risk_production_of`: the lines (label, status, the missing
     inputs in the form's words, flags, basis, source files and stamp, per period), the island's two rows and the
@@ -518,7 +530,7 @@ def grid_risk_payload(source: dict | None) -> dict | None:
             "stamp": dict(ln.get("stamp") or {}),
             "by_period": {k: _grid_risk_cell(c) for k, c in (ln.get("by_period") or {}).items()},
             "rows": [{"key": r.get("key"), "label": r.get("label"), "flags": list(r.get("flags") or []),
-                      "by_period": {k: _grid_risk_cell(c) for k, c in (r.get("by_period") or {}).items()}}
+                      "by_period": {k: _grid_risk_row_cell(c) for k, c in (r.get("by_period") or {}).items()}}
                      for r in ln.get("rows") or []],
         })
     total = source.get("total") or {}
@@ -585,11 +597,13 @@ def grid_risk_table(payload: dict, source_path: str):
                 source = f"{source} ({_stamp_words(ln['stamp'])})"
             notes = "; ".join(grid_risk_flag_words(f) for f in ln["flags"] if f != "stale")
             rows.append([*lead, F.fmt_text(ln["label"]), t, eur, _grid_risk_status(ln), notes, source])
-            if ln["key"] == "island" and missing is None:
+            if ln["key"] in GRID_RISK_SUB_ROW_LINES and missing is None:
                 for r in ln["rows"]:
-                    rt, reur = _grid_risk_values(r["by_period"].get(p))
+                    rc = r["by_period"].get(p)
+                    rt, reur = _grid_risk_values(rc)
+                    rflags = list(dict.fromkeys([*r["flags"], *((rc or {}).get("flags") or [])]))
                     rows.append([*lead, f"– {r['label']}", rt, reur, "",
-                                 "; ".join(grid_risk_flag_words(f) for f in r["flags"]), ""])
+                                 "; ".join(grid_risk_flag_words(f) for f in rflags), ""])
         tt, teur = _grid_risk_values(payload["total"]["by_period"].get(p))
         status = "upper bound" + (", incomplete" if payload["total"]["incomplete"] else "")
         rows.append([*lead, "Total", tt, teur, status, "the lines may overlap", ""])
