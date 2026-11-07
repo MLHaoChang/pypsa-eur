@@ -311,13 +311,14 @@ def generate_frame(ids: list[str], kind: str, params: Mapping[str, Any],
         values, extra = _cop(idx, p, tz)
         target = _TARGETS[kind]
         if by_id:
-            cols, floored, warns = {}, 0, []
+            cols, floored, warns = {}, {}, []
             for i in ids:
                 v, e = _cop(idx, p, tz, by_id.get(i))
                 cols[i] = v
-                floored += e["cop_floored_hours"]
-                warns += [w for w in e.get("warnings", []) if w not in warns]
-            extra = {**extra, "cop_floored_hours": floored, "sink_c_by_id": by_id}
+                floored[i] = e["cop_floored_hours"]
+                warns += [f"{w} (component {i})" for w in e.get("warnings", [])]
+            extra = {**extra, "cop_floored_hours": max(floored.values(), default=0),
+                     "cop_floored_hours_by_id": floored, "sink_c_by_id": by_id}
             if warns:
                 extra["warnings"] = warns
             else:

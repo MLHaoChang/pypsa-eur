@@ -3,7 +3,7 @@
 
 # `harmonics.parse_spectrum` puts Python repr quotes in user-facing text
 
-Status: ready-for-agent
+Status: done
 Type: bug (wording)
 Found by: Logged during the harmonic/flicker work (G2P-17); owner list DOCS-1.
 

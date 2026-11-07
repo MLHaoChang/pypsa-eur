@@ -193,16 +193,23 @@ def test_no_fault_level_is_unknown():
     ("5:20, 5:10", "order 5 appears twice"),
     ("1:20", "order 1 is below 2"),
     ("51:1", "order 51 is above 50"),
-    ("5.5:1", "'5.5' is not a whole number"),
+    ("5.5:1", "“5.5” is not a whole number"),
     ("5:-1", "0 or more"),
     ("5:nan", "0 or more"),
-    ("5", "order:%"),
-    ("five:1", "'five' is not a whole number"),
+    ("5", "order:%.*got “5”"),
+    ("five:1", "“five” is not a whole number"),
 ])
 def test_bad_spectrum_is_refused(text, match):
     """UX: a refusal starts capitalised and names the field by its label."""
     with pytest.raises(ContractError, match=r"^Harmonic spectrum: .*" + match):
         hm.parse_spectrum(text)
+
+
+def test_spectrum_refusals_use_no_python_quotes():
+    for text in ("5-20", "5.5:1", "five:1"):
+        with pytest.raises(ContractError) as e:
+            hm.parse_spectrum(text)
+        assert "'" not in str(e.value)
 
 
 def test_spectrum_parses():

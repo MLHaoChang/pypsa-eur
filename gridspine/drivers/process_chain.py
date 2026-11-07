@@ -51,8 +51,12 @@ def _text(v) -> str:
     return "" if v is None or (isinstance(v, float) and math.isnan(v)) else str(v).strip()
 
 
-def _truthy(v) -> bool:
-    return _text(v).lower() in ("true", "1", "1.0")
+def truthy(v) -> bool:
+    """The one flag rule: a string is true for "true", "1", "1.0" or "yes" (any case, trimmed); a
+    non-string is its ``bool`` (False for None and NaN)."""
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "1.0", "yes")
+    return False if v is None or pd.isna(v) else bool(v)
 
 
 def _cell(df: pd.DataFrame, row: str, col: str):
@@ -87,7 +91,7 @@ def _ports(n, link: str) -> list[tuple[int, str, float | None, bool]]:
 
 
 def _capacity(n, link: str) -> tuple[float | None, str]:
-    if _truthy(_cell(n.links, link, "p_nom_extendable")):
+    if truthy(_cell(n.links, link, "p_nom_extendable")):
         return _num(_cell(n.links, link, "p_nom_opt")), "p_nom_opt"
     return _num(_cell(n.links, link, "p_nom")), "p_nom"
 
@@ -190,7 +194,7 @@ def restart_units(n) -> pd.DataFrame:
     """One row per process unit (``UNIT_COLUMNS``), every input as stored (None when not set) and the rate and
     mass pull with their bases. A unit with an input missing is kept: the screens read it unknown."""
     links = n.links
-    process = [u for u in links.index if _truthy(_cell(links, u, "eh_process"))]
+    process = [u for u in links.index if truthy(_cell(links, u, "eh_process"))]
     rows = []
     for u in process:
         rate, rate_basis = rate_tph(n, u)

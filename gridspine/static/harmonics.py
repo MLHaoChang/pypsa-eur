@@ -126,7 +126,7 @@ def parse_spectrum(text) -> dict:
         items = []
         for part in str(text).split(","):
             if ":" not in part:
-                raise ContractError(f"Harmonic spectrum: expected order:% pairs such as 5:20, got {part.strip()!r}.")
+                raise ContractError(f"Harmonic spectrum: expected order:% pairs such as 5:20, got “{part.strip()}”.")
             k, v = part.split(":", 1)
             items.append((k.strip(), v.strip()))
     out = {}
@@ -134,7 +134,7 @@ def parse_spectrum(text) -> dict:
         try:
             h = int(k)
         except ValueError:
-            raise ContractError(f"Harmonic spectrum: order {k!r} is not a whole number.") from None
+            raise ContractError(f"Harmonic spectrum: order “{k}” is not a whole number.") from None
         if h < H_MIN:
             raise ContractError(f"Harmonic spectrum: order {h} is below {H_MIN}.")
         if h > H_MAX:
