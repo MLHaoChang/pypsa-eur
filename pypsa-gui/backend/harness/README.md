@@ -986,7 +986,18 @@ both absent reads as `legacy`, a wrong value refuses, and a result chart from
 another solve refuses; the same solve with inputs edited since reads
 `solve_stale` and an unloaded project reads `solve_not_rechecked`, never
 `current`. The download sends the status as `X-Chart-Scope` and a delivery
-manifest names each chart's `scope_status`. Private cloning skips the native solver model without
+manifest names each chart's `scope_status`. An integrity failure (bytes,
+dataset, sidecar, manifest, project or labels) writes a quarantine marker
+`assistant_artifacts/quarantine/<file_id>.json` under `durable.file_lock`;
+it is never cleared, so restored bytes or a repaired sidecar stay refused and
+only a new file_id passes (AA-05 S2); `create_chart` refuses an identical
+redraw with `artifact_quarantined` before writing anything. IO errors and stale or unrechecked
+solves write no marker, and an unreadable marker refuses. Scoped manifests
+also check the render spec's labels against the dataset; legacy manifests
+verify as before. A delivery whose scoped charts do not share one solve stamp
+(or, for input charts, one input fingerprint), or that mixes legacy and
+scoped charts, refuses `delivery_mixed_runs`; each checked chart's item keeps
+its `evidence_status` and, when expired or missing, its `evidence_note`. Private cloning skips the native solver model without
 changing the live model. `build_delivery` bundles selected authorized
 artifacts and a content-hash/provenance manifest within the 25 MB limit.
 All existing agent exports now include authenticated download metadata.

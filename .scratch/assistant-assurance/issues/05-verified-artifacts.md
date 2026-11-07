@@ -132,3 +132,43 @@ GK B (31) adds K1–K5 for S5:
   dropped.
 - **K5:** one plausible-but-wrong aggregate per family, named: an unweighted
   sum, a flipped Link/Store sign, or an excluded row included.
+
+### 2026-11-07 — S1 GK OK @202d381c (#1224); S2 plan: GK B (31) GO WITH CHANGES (J1–J6)
+
+S2 covers A4.2:
+
+- **Quarantine:** a marker file `assistant_artifacts/quarantine/<file_id>.json`,
+  written under `durable.file_lock`. It is never cleared; only a new file_id
+  passes.
+- **Labels:** the render spec is checked against the dataset and sidecar.
+- **Swapped manifests:** tests only.
+- **Mixed runs:** a delivery is refused unless every chart shares one solve
+  stamp, or one input fingerprint.
+- **Expired evidence:** the delivery item keeps evidence_status.
+
+Q: a legacy chart with a stamped chart in one delivery is refused (a).
+
+GK B's conditions:
+
+- **J1:** a marker is written only on an integrity verdict (bytes, dataset,
+  sidecar, manifest, project or labels). An IO error, lock timeout,
+  unloaded project, solve_stale or solve_not_rechecked never writes one.
+- **J2:** the file_id is validated against the upload store's id pattern
+  before any path is built. Marker and lock stay under the owning project.
+- **J3:** label checks and label quarantine apply only to manifests with the
+  S1 scope keys; legacy manifests verify exactly as on master.
+- **J4:** an unreadable or corrupt marker refuses; it never reads as "no
+  marker".
+- **J5:** solve_stale and current charts with equal stamps may share a
+  delivery. The refusal names two file ids, capped. A legacy-only delivery
+  still builds.
+- **J6:** hand mutants for the verdict-only rule and the unreadable-marker
+  refusal.
+
+H8: GK B (32) (a), H8a–H8d. An identical redraw of a quarantined chart gets the
+same content-hash file_id, so `create_chart` refuses it with
+`artifact_quarantined` once the file_id is computed and before any blob, meta
+or sidecar write (H8a). An unreadable marker also refuses (H8b). The kind is in
+`tool-error-kinds.d/claude-aa05-s2-delivery.json` (H8c). Tests and the hand
+mutant that removes the check are in `test_p4_delivery.py` (H8d). A marker
+landing after the check is caught by `verify_chart` before download or delivery.
