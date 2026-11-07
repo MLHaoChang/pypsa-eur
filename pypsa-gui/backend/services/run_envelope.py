@@ -785,7 +785,7 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
     `setup` entry hands over at the grant (`_grant_setup`, issue 21 §2):
     `intake_digest` is the digest of the intake rows the card showed."""
     from harness import approvals
-    from services import assistant_tasks, run_profiles
+    from services import assistant_tasks, reliability_goal, run_profiles
     from services.pypsa_service import PyPSAService
     if verdict not in ("unattended", "stepwise", "revoke"):
         _invalid("Choose unattended, stepwise or revoke.")
@@ -826,7 +826,12 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
                 _refuse("brief_inputs_unreadable", "The project's inputs cannot be read, so nothing can be granted.")
             if assistant_tasks._stale(task, fingerprint):
                 _refuse("task_brief_stale", "The inputs changed since the brief; review a new brief first.")
-            gaps = [dict(g, at_grant=_gap_instances(ctx, g)) for g in chosen["gaps"]]  # may refuse (§6.0)
+            if (run_profiles.needs_goal(run_profiles.resolve(task["run"]["profile"]))
+                    and reliability_goal.active_goal(ctx.solver_state)["target_lole_h"]["value"] is None):
+                # GK B (33) P5: a plain run judges LOLE against the user's own goal too (stored
+                # or template), never a default.
+                _refuse("goal_missing", "State the site's reliability goal (LOLE, h/yr) before the run is granted.")
+            gaps =[dict(g, at_grant=_gap_instances(ctx, g)) for g in chosen["gaps"]]  # may refuse (§6.0)
             envelope_id, now = str(uuid.uuid4()), _now()
             if not approvals.decided(session, call_id="envelope-" + envelope_id, tool="grant_envelope",
                                      tier="envelope", outcome="approved", by="user",

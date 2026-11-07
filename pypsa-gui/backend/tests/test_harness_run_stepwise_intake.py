@@ -22,11 +22,9 @@ from tests.test_assistant_tasks_study_brief import (  # noqa: F401
 )
 from tests.test_harness_envelope import on_run, profile  # noqa: F401
 from tests.test_harness_run_eh_site_v2 import (  # noqa: F401
-    CAPTURE_FIELDS,
-    PILOT_CAPTURE_FILES,
     _start_v2,
     _tick_to,
-    capture_fields,
+    assert_one_exact_capture,
     goal_host,
     spy_capture,
 )
@@ -148,8 +146,9 @@ def test_pilot_stepwise_mode_reaches_the_hand_off_with_one_card_per_write_or_run
     """From one intake, decided step by step, the run goes intake -> hand-off
     on the new eh_site project; each write or run step is the user's card
     exactly once, and nothing runs inside an envelope (GK B (33) S2)."""
+    from harness import run_report
     from tests.test_harness_run_report_handoff import runner as run_runner
-    from tests.test_harness_runner import Clicks, mail
+    from tests.test_harness_runner import Clicks, mail, run_records
 
     mail(monkeypatch)
     captured = spy_capture(monkeypatch)
@@ -171,9 +170,12 @@ def test_pilot_stepwise_mode_reaches_the_hand_off_with_one_card_per_write_or_run
     rules = stages["result_gate"]["gate"]["rules"]
     # C3: the card-approved solve captured its input, so F6 reads an exact identity.
     assert {r["rule"]: r["verdict"] for r in rules}["kpi.unserved_mwh"] == "pass"
-    keys, files, exact = capture_fields(captured)  # C2: the envelope path's capture
-    assert (keys, exact) == CAPTURE_FIELDS
-    assert files == PILOT_CAPTURE_FILES.get("envelope", files)
+    assert_one_exact_capture(captured)  # C2: the same predicate as the envelope pilot
+    # Acceptance 2, as the envelope pilot: the report's harness_run chapter and one completion notice.
+    doc = run_report.saved(record, path.parent.parent)
+    assert "harness_run" in {s.section_id for s in doc.sections}
+    completed = [r for r in run_records(record) if r["native_status"] == "completed"]
+    assert len(completed) == 1
     steps = {s["id"]: s for s in record["steps"]}
     # E4: every write or run is the user's card exactly once. The engine
     # step's card is the result gate's own (issue 07 B3a, `card_engine`).
@@ -270,4 +272,59 @@ def test_a_denied_solve_card_enqueues_and_captures_nothing(
     solve = _solve_1(record)
     assert solve and solve["status"] != "completed", solve
     assert not (solve.get("result") or {}).get("job_id")
+    assert captured == []
+
+
+def _plain_goal_profile(monkeypatch):
+    """The profile fixture's eh_site@1 with eh_site@2's goal param and LOLE
+    rule: a plain run (no intake) whose profile needs the user's goal."""
+    import copy
+
+    from services import run_profiles
+
+    base, v2 = run_profiles.PROFILES["eh_site@1"], run_profiles.EH_SITE_V2
+    stages = {**base["stages"], "result_gate": copy.deepcopy(v2["stages"]["result_gate"])}
+    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1",
+                        {**base, "params": copy.deepcopy(v2["params"]), "stages": stages})
+    assert run_profiles.needs_goal(run_profiles.resolve("eh_site@1"))
+
+
+def test_an_unattended_plain_grant_without_a_goal_is_refused_goal_missing(
+    session, site, profile, monkeypatch
+):
+    """GK B (33) P5: a plain run (no intake) is judged against the user's own
+    goal too; the DEFAULT (no goal) never counts, and nothing is granted."""
+    from tests.test_harness_envelope import envelope_of
+
+    _plain_goal_profile(monkeypatch)
+    task = start()
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(session, task["task_id"], "unattended")
+    assert exc.value.detail["error_kind"] == "goal_missing"
+    assert envelope_of(task_path(site[1], task))["state"] != "granted"
+
+
+def test_an_unattended_plain_grant_takes_the_templates_goal(session, site, profile, monkeypatch):
+    from services import flow_service
+    from tests.test_harness_envelope import envelope_of
+
+    _plain_goal_profile(monkeypatch)
+    template = site[1] / flow_service.TEMPLATE_FILE
+    template.write_text(json.dumps({**json.loads(template.read_text()),
+                                    "pack_overrides": {"target_lole_h": 2.0}}))
+    task = start()
+    run_envelope.decide(session, task["task_id"], "unattended")
+    assert envelope_of(task_path(site[1], task))["state"] == "granted"
+
+
+def test_an_ordinary_chat_enqueue_captures_nothing(session, baseline, monkeypatch):
+    """GK B (33) C3: outside a run's own card-approved solve step, a chat
+    session's `solve_queue_enqueue` queues its solve and captures nothing."""
+    from tests.test_assistant_tasks_study_brief import dispatch, tool_result
+
+    _, project_id, _ = baseline
+    captured = spy_capture(monkeypatch)
+    assert getattr(session, "write_guard", None) is None
+    _, results = dispatch(session, monkeypatch, "solve_queue_enqueue", {"project_id": project_id})
+    assert tool_result(results).get("id"), results[-1]["content"][:200]
     assert captured == []

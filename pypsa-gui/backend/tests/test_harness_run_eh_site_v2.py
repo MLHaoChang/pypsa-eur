@@ -329,7 +329,16 @@ def capture_fields(records):
     return sorted(record), sorted(record["files"]), bool(record["exact"])
 
 
-PILOT_CAPTURE_FILES: dict = {}  # the captured file names, per mode (C2)
+def assert_one_exact_capture(records):
+    """C2's predicate, the same in both pilots and independent of test order:
+    one exact capture with the shared fields, holding every hydrate file."""
+    from services import solve_capture
+
+    keys, files, exact = capture_fields(records)
+    assert (keys, exact) == CAPTURE_FIELDS
+    assert set(files) >= set(solve_capture.HYDRATE_FILES), files
+
+
 CAPTURE_FIELDS = (
     ["dir", "exact", "files", "id", "identity", "network_revision"],
     True,
@@ -379,6 +388,4 @@ def test_pilot_envelope_mode_reaches_the_hand_off(
     assert fake_report == [{"strict": True, "run_binding": (path, "a")}]
     completed = [r for r in run_records(record) if r["native_status"] == "completed"]
     assert len(completed) == 1  # one completion notice
-    keys, files, exact = capture_fields(captured)
-    assert (keys, exact) == CAPTURE_FIELDS
-    PILOT_CAPTURE_FILES["envelope"] = files
+    assert_one_exact_capture(captured)
