@@ -289,7 +289,7 @@ def test_the_ens_cap_never_throttles_curtailment(monkeypatch):
 
 
 def test_the_reserve_margin_never_counts_it(monkeypatch):
-    n = _network()
+    n = _network(hours)
     n.remove("Generator", "grid")
     n.add("Carrier", "gas")
     n.add(
@@ -398,7 +398,7 @@ def test_the_claim_limit_is_in_the_docs():
 
 def test_an_import_energy_cap_is_not_loosened(monkeypatch):
     """C17: curtailing serves load on dc_mv; it never adds room under a metered import cap."""
-    n = _network()
+    n = _network(hours)
     n.remove("Generator", "grid")
     n.add("Bus", "grid", carrier="AC")
     n.add(
@@ -638,13 +638,13 @@ CURT_MWH = float(np.minimum(SHARE * (IT + COOL), COOL).sum())
 RATE = 0.05  # EUR/kWh, flat
 
 
-def _metered_solve(monkeypatch, terms=None):
+def _metered_solve(monkeypatch, terms=None, hours: float = 1.0):
     """``_network`` behind a metered import Link (the grid on its own bus), solved through the
     router state as the results endpoints read it."""
     import routers.simulation as sim_router
     from tests.conftest import install_network_into_backend
 
-    n = _network()
+    n = _network(hours)
     n.remove("Generator", "grid")
     n.add("Bus", "grid", carrier="AC")
     n.add(
@@ -904,3 +904,13 @@ def test_the_curtailed_energy_is_weighted_by_the_snapshot_hours(monkeypatch):
     assert status in ("ok", "optimal")
     assert n.meta[C.META_KEY]["curtailed_mwh"] == pytest.approx(2.0 * CURT_MWH)
     assert C.curtailment_series(n)[0].sum() == pytest.approx(CURT_MWH)   # MW, not MWh
+
+
+def test_energy_flows_weight_the_curtailed_energy_by_the_snapshot_hours(monkeypatch):
+    import routers.results as R
+    from services.results.energy_flows import energy_flows
+
+    n, _cfg, sink = _metered_solve(monkeypatch, hours=2.0)
+    out = energy_flows(n, result_df=R._result_df, lost_load=sink.get("last_lost_load"))
+    assert out["status"] == "ok", out["flags"]
+    assert out["curtailed_load_mwh"] == {"cooling": pytest.approx(2.0 * CURT_MWH)}
