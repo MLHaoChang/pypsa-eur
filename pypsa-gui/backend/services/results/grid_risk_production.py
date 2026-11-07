@@ -583,7 +583,7 @@ def _n_1(n, lost_load, periods) -> dict:
         "hours × outage rate / repair time, each event the mean undelivered tonnes over every start "
         "hour of the solved dispatch, with inventory credited"
         + (
-            f". It covers only the transformers listed; not counted: {', '.join(skipped)} (no outage rate, "
+            f". It covers only the transformers listed. Not counted: {', '.join(skipped)} (no outage rate, "
             "no repair time or no process unit behind it)"
             if skipped
             else ""

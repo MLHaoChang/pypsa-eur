@@ -214,4 +214,13 @@ describe('Grid risk to production (G2P-13)', () => {
     render(<GridRiskBody data={data([line('n_1', { status: 'missing', by_period: {}, rows })])} mode="expert" />)
     expect(screen.queryByTestId('grid-risk-row-n_1-trafo_a')).toBeNull()
   })
+  it('a sub-row bounded by an outage longer than the period never also says units are unknown', () => {
+    const n1 = line('n_1', {
+      rows: [{ key: 'trafo_a', label: 'trafo_a out of service', flags: [],
+        by_period: { _: { ...cell(70, 7000), flags: ['outage_longer_than_period', 'lower_bound'] } } }],
+    })
+    render(<GridRiskBody data={data([n1])} mode="expert" />)
+    const notes = screen.getByTestId('grid-risk-row-n_1-trafo_a').children[5].textContent
+    expect(notes).toBe('the outage is longer than the period, so this is a lower bound')
+  })
 })

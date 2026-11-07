@@ -508,6 +508,13 @@ def _grid_risk_row_cell(c: Any) -> dict:
     return cell
 
 
+def _sub_row_flags(flags: list[str]) -> list[str]:
+    """A sub-row's flags to word, once each. A bound from an outage longer than the period is not one from unknown
+    units, so the generic lower-bound words are left out beside it (the tab's `subRowFlags`)."""
+    out = list(dict.fromkeys(flags))
+    return [f for f in out if f != "lower_bound"] if "outage_longer_than_period" in out else out
+
+
 #: The lines whose rows the table lists under them (the island's two, one per N-1 site transformer).
 GRID_RISK_SUB_ROW_LINES = ("island", "n_1")
 
@@ -601,7 +608,7 @@ def grid_risk_table(payload: dict, source_path: str):
                 for r in ln["rows"]:
                     rc = r["by_period"].get(p)
                     rt, reur = _grid_risk_values(rc)
-                    rflags = list(dict.fromkeys([*r["flags"], *((rc or {}).get("flags") or [])]))
+                    rflags = _sub_row_flags([*r["flags"], *((rc or {}).get("flags") or [])])
                     rows.append([*lead, f"– {r['label']}", rt, reur, "",
                                  "; ".join(grid_risk_flag_words(f) for f in rflags), ""])
         tt, teur = _grid_risk_values(payload["total"]["by_period"].get(p))

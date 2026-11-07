@@ -827,6 +827,7 @@ def test_each_site_transformer_is_a_row_with_its_own_fold_and_the_line_folds_the
             cell["products"] == prods and cell["occurrence_per_year"] == 1.0
         )  # existing keys untouched
     assert n1["by_period"]["_"] == _fold_ref(a + b)  # exact bits, as master computes it
+    assert G.LOWER_BOUND not in n1["flags"]  # no row is a lower bound
     rows = [r["by_period"]["_"] for r in n1["rows"]]
     assert n1["by_period"]["_"]["t_per_year"] == pytest.approx(
         sum(c["t_per_year"] for c in rows)
@@ -909,7 +910,8 @@ def test_a_skipped_transformer_gets_no_row_and_the_basis_says_so(monkeypatch):
     n1 = _n1(n)
     assert [r["key"] for r in n1["rows"]] == ["site_trafo"]
     assert (
-        "only the transformers listed" in n1["basis"] and "site_trafo_b" in n1["basis"]
+        "credited. It covers only the transformers listed. Not counted: site_trafo_b ("
+        in n1["basis"]
     )
     assert "—" not in n1["basis"]
 
@@ -920,3 +922,20 @@ def test_with_every_transformer_listed_the_basis_names_no_skip(net_b, monkeypatc
         monkeypatch, {"site_trafo": {"_": (p, None)}, "site_trafo_b": {"_": (p, None)}}
     )
     assert "only the transformers listed" not in _n1(net_b)["basis"]
+
+
+def test_a_row_with_no_entry_for_a_period_adds_nothing_to_that_period(monkeypatch):
+    n = _two_trafos(periods=[2030, 2040])
+    p = [_prod(1.0, 10.0)]
+    _fake_loss(
+        monkeypatch,
+        {
+            "site_trafo": {"2030": (p, None), "2040": (p, None)},
+            "site_trafo_b": {"2030": (p, None)},
+        },
+    )
+    n1 = _n1(n)
+    assert (
+        n1["by_period"]["2030"]["t_per_year"] == 2.0
+        and n1["by_period"]["2040"]["t_per_year"] == 1.0
+    )
