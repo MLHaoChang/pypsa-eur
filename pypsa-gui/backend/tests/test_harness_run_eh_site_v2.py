@@ -158,6 +158,9 @@ def test_the_goal_is_read_from_its_own_param_only_and_never_from_a_write_row():
     assert run_intake.goal([row]) == 2.0
     assert run_intake.goal([{**row, "param": "solver.target_lole_h"}]) is None
     assert run_intake.goal([{**row, "write": "upload_time_series"}]) is None
+    assert run_intake.goal([{**row, "value": 0}]) == 0.0  # zero hours is a goal
+    for bad in ("2", True, float("nan"), float("inf"), -1.0, None):
+        assert run_intake.goal([{**row, "value": bad}]) is None, bad
 
 
 def test_a_profile_needs_the_goal_only_with_an_engine_rule():
