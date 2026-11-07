@@ -622,3 +622,10 @@ def test_island_rows_with_zero_tonnes_and_no_product_do_not_poison_the_sum(net2,
     events = _year_hours() * Q_IMPORT / MTTR_IMPORT
     assert c["outside"]["eur_per_year"] == pytest.approx(RATE * MTTR_IMPORT * events * LPV)
     assert c["inside"]["eur_per_year"] == pytest.approx(3.0 * events * LPV_ACID)
+
+
+def test_several_products_price_no_sum_they_are_not_given_the_rows_of():
+    prices = G._Prices(None, G.SEVERAL_PRODUCTS, {"concentrate": LPV})
+    assert prices.eur(None, []) == (None, None)  # no tonnes: no EUR, and no flag
+    assert prices.eur(5.0) == (None, G.SEVERAL_PRODUCTS)  # no unit rows: never priced as a whole
+    assert prices.eur(5.0, [(5.0, "concentrate")]) == (pytest.approx(5.0 * LPV), None)
