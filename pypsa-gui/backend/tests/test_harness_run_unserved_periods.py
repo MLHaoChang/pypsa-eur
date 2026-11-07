@@ -151,3 +151,96 @@ def test_a_stale_multi_period_solve_reads_no_value(tmp_path, monkeypatch):
     env = periods_env(tmp_path, monkeypatch)
     monkeypatch.setattr(calculations, "solve_matches_inputs", lambda c: False)
     assert read("kpi.unserved_mwh", env) is None
+
+
+# ── Each F6 guard of the multi-period read refuses on its own (P4, P10) ──────
+
+
+class _Snapshots:
+    """The run's network with another snapshot index, every other read the network's."""
+
+    def __init__(self, n, index):
+        self._n, self.snapshots = n, index
+
+    def __getattr__(self, name):
+        return getattr(self._n, name)
+
+
+def _by_period(env):
+    return run_gates._unserved_by_period(env.ctx)
+
+
+@pytest.mark.parametrize("levels", [1, 3])
+def test_a_snapshot_index_that_is_not_period_by_time_is_unsupported(
+    tmp_path, monkeypatch, levels
+):
+    env = periods_env(tmp_path, monkeypatch)
+    n = env.ctx.network
+    index = (
+        n.snapshots.get_level_values(1)
+        if levels == 1
+        else pd.MultiIndex.from_arrays([*zip(*n.snapshots), ["a"] * len(n.snapshots)])
+    )
+    env.ctx.network = _Snapshots(n, index)
+    value = _by_period(env)
+    assert isinstance(value, NoEvidence) and value.value == "unsupported_snapshot_scope"
+
+
+@pytest.mark.parametrize("cap, refused", [(3, True), (4, False)])
+def test_more_snapshots_than_the_cap_are_unsupported(
+    tmp_path, monkeypatch, cap, refused
+):
+    from harness import calculations
+
+    env = periods_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(calculations, "MAX_SNAPSHOTS", cap)
+    value = _by_period(env)
+    assert (
+        isinstance(value, NoEvidence) and value.value == "unsupported_snapshot_scope"
+    ) is refused
+
+
+def test_an_empty_capture_is_no_evidence(tmp_path, monkeypatch):
+    value = read("kpi.unserved_mwh", periods_env(tmp_path, monkeypatch, columns=()))
+    assert isinstance(value, NoEvidence) and value.value == "no_lost_load_capture"
+
+
+def test_a_capture_with_a_repeated_column_is_misaligned(tmp_path, monkeypatch):
+    env = periods_env(tmp_path, monkeypatch)
+    held = env.ctx.solver_state["last_lost_load"]
+    held["lost_load_t"] = pd.concat([held["lost_load_t"]] * 2, axis=1)
+    value = read("kpi.unserved_mwh", env)
+    assert isinstance(value, NoEvidence) and value.value == "misaligned_source"
+
+
+@pytest.mark.parametrize("cap, refused", [(0, True), (1, False)])
+def test_more_loads_than_the_cap_are_unsupported(tmp_path, monkeypatch, cap, refused):
+    from harness import lost_load_calculations as lost_load
+
+    env = periods_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(lost_load, "MAX_LOADS", cap)
+    value = read("kpi.unserved_mwh", env)
+    assert (
+        isinstance(value, NoEvidence) and value.value == "unsupported_load_population"
+    ) is refused
+
+
+def test_a_capture_of_no_electrical_load_is_no_evidence(tmp_path, monkeypatch):
+    env = periods_env(tmp_path, monkeypatch, load_carrier="heat")
+    value = read("kpi.unserved_mwh", env)
+    assert isinstance(value, NoEvidence) and value.value == "no_electrical_loads"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"shed": ((0.0, float("nan")), (1.0, 0.5))},
+        {"weights": ((2.0, -1.0), (3.0, 1.0))},
+    ],
+)
+def test_a_missing_shed_or_a_negative_weight_reads_no_value(
+    tmp_path, monkeypatch, kwargs
+):
+    assert (
+        read("kpi.unserved_mwh", periods_env(tmp_path, monkeypatch, **kwargs)) is None
+    )
