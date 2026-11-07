@@ -1610,3 +1610,68 @@ def test_charged_reads_none_when_a_stage_charge_is_not_a_count(value):
         {"stage": "ens_solve", "solves_charged": value},
     ]
     assert run_eh.charged({"report": {"pipeline": {"stages": stages}}}) is None
+
+
+def _done_thread():
+    t = threading.Thread(target=lambda: None)
+    t.start()
+    t.join()
+    return t
+
+
+@pytest.mark.parametrize(
+    "rec, deadline",
+    [
+        (None, 3600),  # no record
+        ({**record("running"), "started_at": 2.0}, 3600),  # another study's
+        (record(), 3600),  # already finished
+        ({**record("running"), "thread": _done_thread()}, 3600),  # worker died
+        (record("running"), 0),  # past the follower's deadline
+    ],
+)
+def test_the_follower_settles_without_waiting_unless_its_own_study_runs(
+    tmp_path, monkeypatch, rec, deadline
+):
+    """F3: the follower waits only while the record is its own, running, its
+    worker alive and the deadline not passed; otherwise it settles at once."""
+    state = {} if rec is None else {"eh_study": rec}
+    ctx = ctx_for(tmp_path, **state)
+    settled = []
+    monkeypatch.setattr(run_eh, "MAX_FOLLOW_SECONDS", deadline)
+    monkeypatch.setattr(run_eh._WAKE, "wait", lambda *a: pytest.fail("waited"))
+    monkeypatch.setattr(run_eh, "settle", lambda *a: settled.append(a[3]))
+    run_eh._follow(tmp_path / "t.json", ("t1", "solve.2", "a1"), "ad:1", ctx, 1.0)
+    assert len(settled) == 1 and (settled[0] is None) == (rec is None)
+
+
+def test_a_study_worker_is_alive_unless_it_ran_and_ended():
+    assert run_eh._alive({}) is True
+    assert run_eh._alive({"thread": "a thread"}) is True
+    assert run_eh._alive({"thread": threading.Thread(target=lambda: None)}) is True
+    assert run_eh._alive({"thread": _done_thread()}) is False
+    gate = threading.Event()
+    live = threading.Thread(target=gate.wait)
+    live.start()
+    try:
+        assert run_eh._alive({"thread": live}) is True
+    finally:
+        gate.set()
+        live.join()
+
+
+@pytest.mark.parametrize("rec, result", [(record(), True), (record("failed"), False)])
+def test_only_a_completed_settle_hands_the_job_a_result(
+    tmp_path, monkeypatch, rec, result
+):
+    """F4: the settled job carries the study, its start and its charge only
+    when the step completes; a failed or uncertain one carries none."""
+    from services import assistant_tasks
+
+    path, ticket = ticket_task(tmp_path)
+    seen = []
+    monkeypatch.setattr(assistant_tasks, "settle_job", lambda *a: seen.append(a[5]))
+    run_eh.settle(path, ticket, "ad:1", rec, 1.0)
+    expected = (
+        {"study": run_eh.STUDY, "started_at": 1.0, "solves": 1} if result else None
+    )
+    assert seen == [expected]
