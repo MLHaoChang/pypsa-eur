@@ -863,16 +863,12 @@ def test_cancelling_the_run_aborts_the_loop(
 
 
 def _mutate_task(path, change):
-    """Read-modify-write the task file the way the runner does: under the
-    lease's file lock and the task lock (same order as `settle_engine`), saved
-    atomically. A bare `write_text` truncates first, so a follower could read
-    an empty file, and it could lose a race with the runner's own write."""
-    from services import assistant_tasks
-
-    with harness_runner._file_lock(path), assistant_tasks._LOCK:
-        record = json.loads(path.read_text())
-        change(record)
-        assistant_tasks._save(path, record)
+    """Edit the task file the way a real takeover does: under the lease's file
+    lock, then `runner._update` (task lock, atomic save). A bare `write_text`
+    truncates first, so a follower could read an empty file, and it could lose
+    a race with the runner's own save."""
+    with harness_runner._file_lock(path):
+        harness_runner._update(path, change)
 
 
 def _hold_lease(path, owner, until):
