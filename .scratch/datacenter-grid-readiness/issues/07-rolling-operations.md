@@ -81,6 +81,7 @@ Also from the S2 mapping: DataCentreLoadSpec `_shares` already refuses critical 
 GK A (16): plan GO, with conditions C20a–C20f.
 
 - C20a: every row (full, cut at a window end, or carry-in) uses D·share·max F over the whole run, read from the full-horizon facility. A carry-in row's RHS is that bound less the final dispatch before the start: a value below 0 by at most 1e-9·bound clips to 0 with a log line; a larger one raises typed. A carry-in row is feasible at zero curtailment.
+  - C20a tolerance, GK A answer (a): an overshoot clips to 0 when it is at most max(1e-9·bound, `CARRY_IN_FLOOR_MWH` = 1e-6 MWh). The floor is about 10× HiGHS's default primal feasibility tolerance, and becomes 10× the merged solver options' `primal_feasibility_tolerance` when that is larger. The clip writes a log line naming the run and the overshoot. Above that, the run raises typed `carry_in_over_bound`. Tested: 5e-7 MWh clips; 2e-6 and 1e-3 MWh raise.
 - C20b: carry-in is built only inside an operational run's windows, flagged by `operational.run_windows` around each `n.optimize` and reset in a `finally`. A sub-horizon LP outside it keeps today's rows and never reads `n.generators_t.p`.
 - C20c: the constants come from the transient's column in `n.generators_t.p` at [lookback, start). A missing column, a NaN, or a value this run's earlier windows did not write raises typed.
 - C20d: runs that end before the window start are dropped; this changes no stitched result.

@@ -1142,18 +1142,44 @@ def test_window_rows_carry_the_whole_runs_bound_less_the_final_dispatch():
     )  # a run cut at the window's end keeps its whole bound
 
 
-def test_a_carry_in_a_hair_over_its_bound_is_clipped_and_a_larger_one_refused():
-    """C20a: below 0 by no more than 1e-9 * bound clips to 0 with a log line; more raises."""
+@pytest.mark.parametrize(
+    "over,options,clips",
+    [
+        (5e-7, {}, True),  # under the 1e-6 MWh floor: solver noise
+        (2e-6, {}, False),  # above the floor (and above 1e-9 of the bound)
+        (1e-3, {}, False),
+        (5e-6, {"primal_feasibility_tolerance": 1e-6}, True),  # 10x a looser solver
+        (2e-5, {"primal_feasibility_tolerance": 1e-6}, False),
+        (5e-7, {"primal_feasibility_tolerance": "x"}, True),  # unreadable: the floor
+        (2e-6, {"primal_feasibility_tolerance": float("nan")}, False),
+    ],
+)
+def test_a_carry_in_overshoot_within_the_noise_floor_clips_and_a_larger_one_refuses(
+    over, options, clips
+):
+    """C20a: an overshoot up to max(1e-9 * bound, CARRY_IN_FLOOR_MWH, 10x the solver's primal
+    feasibility tolerance) clips to 0 with a log line naming the run; more raises typed."""
     whole = 2.0 * SHARE * (IT + COOL)[2:5].max()  # the run (2, 4) across start 4
-    hair = np.array([0.0, 0.0, whole / 2, whole / 2 * (1 + 1e-12)])
-    n, sns, window = _window_state(hair)
+    assert 1e-9 * whole < 5e-7  # the floor, not the relative term, decides here
+    n, sns, window = _window_state(np.array([0.0, 0.0, whole / 2, whole / 2 + over]))
+    window["solver_options"] = options
     lines: list[str] = []
-    rows, _ = C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
-    assert rows[0] == (0, 0, 0.0) and any("clipped to 0" in ln for ln in lines)
-    n, sns, window = _window_state(np.array([0.0, 0.0, whole / 2, whole / 2 + 1e-3]))
+    if clips:
+        rows, _ = C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
+        assert rows[0] == (0, 0, 0.0)
+        assert any("clipped to 0" in ln and str(n.snapshots[2]) in ln for ln in lines)
+        return
     with pytest.raises(C.DcCurtailmentRefused) as exc:
-        C._window_rows(n, sns, _terms(d=2.0), window, print)
+        C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
     assert exc.value.kind == C.CARRY_IN_OVER_BOUND
+
+
+def test_the_carry_in_floor_is_ten_times_highs_default_tolerance():
+    assert C.CARRY_IN_FLOOR_MWH == pytest.approx(10 * 1e-7)
+    assert C._clip_floor({}) == C.CARRY_IN_FLOOR_MWH
+    assert C._clip_floor(
+        {"solver_options": {"primal_feasibility_tolerance": 1e-9}}
+    ) == (C.CARRY_IN_FLOOR_MWH)
 
 
 @pytest.mark.parametrize("fault", ["nan", "missing", "unwritten"])
@@ -1200,9 +1226,23 @@ def test_the_window_flag_names_its_network_and_is_reset_after_a_run(monkeypatch)
     finally:
         OP._WINDOW.reset(token)
     assert OP.current_window(a) is None
-    status, cond, _, _ = _op(a, monkeypatch, _terms(d=2.0))
+    seen: list = []
+    real = OP.current_window
+    monkeypatch.setattr(
+        OP, "current_window", lambda n: seen.append(real(n)) or seen[-1]
+    )
+    status, cond, _, _ = _op(
+        a,
+        monkeypatch,
+        _terms(d=2.0),
+        solver_options={"primal_feasibility_tolerance": 1e-7},
+    )
     assert status in ("ok", "optimal"), cond
-    assert OP.current_window(a) is None
+    assert [w["index"] for w in seen] == [0, 1, 2]
+    assert all(
+        w["solver_options"]["primal_feasibility_tolerance"] == 1e-7 for w in seen
+    )
+    assert real(a) is None
 
 
 def test_a_failed_window_is_never_a_carry_in_source(monkeypatch):

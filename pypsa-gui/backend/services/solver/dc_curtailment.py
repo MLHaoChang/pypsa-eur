@@ -66,6 +66,10 @@ DURATION_EXCEEDS_WINDOW = "duration_exceeds_window"
 CARRY_IN_UNAVAILABLE = "carry_in_unavailable"
 #: C20a: the dispatch before a window's start already exceeds a run's bound.
 CARRY_IN_OVER_BOUND = "carry_in_over_bound"
+#: C20a: an overshoot up to this many MWh (or 1e-9 of the bound, if larger) is solver noise in
+#: the previous window's dispatch and clips to 0. About 10x HiGHS's default primal feasibility
+#: tolerance (1e-7); 10x the solver options' ``primal_feasibility_tolerance`` when that is larger.
+CARRY_IN_FLOOR_MWH = 1e-6
 #: Plain rolling (PyPSA's loop) continues past a failed window, so a failed window could become a
 #: carry-in source (C20): a plain rolling run with a duration is refused. The operational run
 #: (rolling on fixed sizes) carries in instead.
@@ -505,6 +509,20 @@ def _carried(n, full: pd.Index, first: int, start: int, window: dict) -> np.ndar
     return values
 
 
+def _clip_floor(window: dict) -> float:
+    """``CARRY_IN_FLOOR_MWH``, or 10x a larger ``primal_feasibility_tolerance`` (C20a)."""
+    tol = (window.get("solver_options") or {}).get("primal_feasibility_tolerance")
+    try:
+        tol = float(tol)
+    except (TypeError, ValueError):
+        return CARRY_IN_FLOOR_MWH
+    return (
+        max(CARRY_IN_FLOOR_MWH, 10.0 * tol)
+        if math.isfinite(tol)
+        else CARRY_IN_FLOOR_MWH
+    )
+
+
 def _window_rows(n, sns, terms: Terms, window: dict, emit) -> tuple[list, int]:
     """The rows of one operational window (C20): the full horizon's runs that reach into
     ``[start, stop)``, each with its whole run's bound (C20a). A run spanning the start bounds
@@ -538,16 +556,17 @@ def _window_rows(n, sns, terms: Terms, window: dict, emit) -> tuple[list, int]:
                 before = _carried(n, full, g0 + k, g0 + s, window)
                 bound -= float((w[k:s] * before).sum())
                 if bound < 0:
-                    if bound < -1e-9 * whole:
+                    run = f"{full[g0 + k]}..{full[g0 + j]}"
+                    if -bound > max(1e-9 * whole, _clip_floor(window)):
                         raise DcCurtailmentRefused(
                             CARRY_IN_OVER_BOUND,
                             f"Curtailable load: the dispatch before window "
-                            f"{window['index'] + 1} already exceeds a run's bound by "
-                            f"{-bound:g} MWh.",
+                            f"{window['index'] + 1} already exceeds the bound of the run "
+                            f"{run} by {-bound:g} MWh.",
                         )
                     emit(
-                        f"window {window['index'] + 1}: a carry-in bound of {bound:g} "
-                        "MWh is clipped to 0."
+                        f"window {window['index'] + 1}: the run {run} overshoots its bound by "
+                        f"{-bound:g} MWh (solver noise); its carry-in bound is clipped to 0."
                     )
                     bound = 0.0
                 carried += 1

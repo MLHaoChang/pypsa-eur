@@ -73,7 +73,8 @@ _WINDOW: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
 
 def current_window(n) -> dict | None:
     """The operational window being solved on ``n`` (``index``, ``start``, ``stop``, and
-    ``written``: the position below which this run's earlier windows wrote the dispatch), or
+    ``written``: the position below which this run's earlier windows wrote the dispatch;
+    ``solver_options``: the keyword arguments each ``n.optimize`` gets), or
     None outside an operational run's ``n.optimize`` (C20b)."""
     window = _WINDOW.get()
     return window if window is not None and window["network"] is n else None
@@ -357,6 +358,7 @@ def run_windows(n, *, horizon: int, overlap: int, **optimize_kwargs) -> list[dic
                 "start": start,
                 "stop": stop,
                 "written": written,
+                "solver_options": optimize_kwargs,
             }
         )
         try:
