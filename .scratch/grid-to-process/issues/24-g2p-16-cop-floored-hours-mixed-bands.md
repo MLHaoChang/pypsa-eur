@@ -3,7 +3,7 @@
 
 # G2P-16: `cop_floored_hours` sums across ids when banded and unbanded pumps mix
 
-Status: needs-triage
+Status: ready-for-agent
 Type: bug
 Found by: G2P-16 (heat-pump COP by band, `16-heat-pump-cop-by-band-part-load.md`); owner list DOCS-1.
 
@@ -14,3 +14,14 @@ When a project has banded and unbanded heat pumps, the summed `cop_floored_hours
 ## Where to look
 
 `pypsa-gui/backend/services/profile_gen/series.py` (~line 260 sets `extra["cop_floored_hours"]`, ~line 318 `floored += e["cop_floored_hours"]`); test file `tests/test_profile_gen_series.py`.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `pypsa-gui/backend/services/profile_gen/series.py` (~260, ~318), `tests/test_profile_gen_series.py`.
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: GK A.
+- Size: S.
+- Report per id or sum like with like; test the mixed banded/unbanded case.

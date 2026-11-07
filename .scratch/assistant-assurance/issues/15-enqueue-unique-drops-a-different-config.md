@@ -3,7 +3,7 @@
 
 # `solve_queue.enqueue_unique` silently drops a different solver config
 
-Status: needs-triage
+Status: ready-for-agent
 Type: bug
 Found by: AA-04 S5 plan (`04-action-and-job-outcomes.md`); GK B (30) Q3 (a): outside S5.
 
@@ -28,3 +28,14 @@ re-enqueues stay idempotent.
 - Issue 04 S5's hold (`harness/job_holds.py`) denies a chat re-enqueue while the
   store has the project's solve, but the HTTP route and the panel still meet
   the silent drop.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `solve_queue.enqueue_unique` and its callers/tests; new tool-error kind JSON.
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: GK B.
+- Size: S.
+- Refuse (own kind) or flag a differing config snapshot; same config stays unchanged.

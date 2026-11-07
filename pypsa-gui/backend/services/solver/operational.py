@@ -30,6 +30,7 @@ A plain rolling run (sizing on) takes none of these paths.
 from __future__ import annotations
 
 import contextlib
+import contextvars
 import math
 from collections.abc import Iterator
 
@@ -61,6 +62,22 @@ _EXTENDABLE = (
     ("Line", "s_nom"),
     ("Transformer", "s_nom"),
 )
+
+
+#: The window whose LP ``run_windows`` is building, set around each ``n.optimize`` and reset in
+#: a ``finally`` (DC-07 C20b). Only inside it may a row read the dispatch before the window start.
+_WINDOW: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "operational_window", default=None
+)
+
+
+def current_window(n) -> dict | None:
+    """The operational window being solved on ``n`` (``index``, ``start``, ``stop``, and
+    ``written``: the position below which this run's earlier windows wrote the dispatch;
+    ``solver_options``: the keyword arguments each ``n.optimize`` gets), or
+    None outside an operational run's ``n.optimize`` (C20b)."""
+    window = _WINDOW.get()
+    return window if window is not None and window["network"] is n else None
 
 
 class OperationalWindowFailed(RuntimeError):
@@ -346,6 +363,7 @@ def run_windows(
             failed=failed,
         )
 
+    written = 0
     for index, start, stop in cut:
         sns = snapshots[start:stop]
         if index:
@@ -355,7 +373,20 @@ def run_windows(
                     static[INITIAL_ATTR[comp]] = (
                         n.components[comp].dynamic[state].loc[snapshots[start - 1]]
                     )
-        status, condition = n.optimize(sns, **optimize_kwargs)
+        token = _WINDOW.set(
+            {
+                "network": n,
+                "index": index,
+                "start": start,
+                "stop": stop,
+                "written": written,
+                "solver_options": optimize_kwargs,
+            }
+        )
+        try:
+            status, condition = n.optimize(sns, **optimize_kwargs)
+        finally:
+            _WINDOW.reset(token)
         record = {
             "index": index,
             "first": str(sns[0]),
@@ -369,6 +400,7 @@ def run_windows(
             _blank_from(n, snapshots[start:])
             _record(record)
             raise OperationalWindowFailed(record)
+        written = stop
     _record(None)
     return records
 

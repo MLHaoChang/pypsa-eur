@@ -3,7 +3,7 @@
 
 # Flaky `test_harness_engine_loops` follower test
 
-Status: needs-triage
+Status: ready-for-agent
 Type: bug (test)
 Found by: Seen in CI; owner list DOCS-1.
 
@@ -14,3 +14,14 @@ A follower test in the engine-loops suite fails intermittently. Root-cause it (d
 ## Where to look
 
 `pypsa-gui/backend/tests/test_harness_engine_loops*.py`, the follower test. Details: ask the coordinator.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `pypsa-gui/backend/tests/test_harness_engine_loops*.py` follower test.
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: GK B.
+- Size: S.
+- Root-cause the timing/ordering assumption; never skip or loosen the test.

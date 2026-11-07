@@ -3,7 +3,7 @@
 
 # Required warning slots (A2.8)
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Blocked by: no warning disposition exists in the result-slot contract
 
@@ -36,3 +36,12 @@ That test does **not** count as coverage for this ticket.
   false while it is unresolved. Kill a mutant that drops it.
 
 ## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `harness/profile_common.facts_and_slots`, `harness/assurance.py` (result slots), the profile calculations.
+- Blocked by: none.
+- Model tier: opus.
+- Gated: GK B; design plan to GK B first.
+- Size: L.
+- The listed blocker is the work itself: add a warning disposition to the slot contract, then the profiles; L: the builder proposes a split.

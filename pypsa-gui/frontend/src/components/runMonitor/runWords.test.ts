@@ -2,11 +2,13 @@
 // verdict 3). The backend side of this parity (every profile envelope's
 // component, field and run tool has words here) is
 // `backend/tests/test_harness_run_monitor.py`.
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { COMPONENT_LABEL } from '../../utils/componentLabels'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
 import { ENVELOPE } from './runFixtures'
-import { COMPONENT_WORDS, FACT_UNITS, factUnit, FACT_WORDS, FIELD_WORDS, RUN_WORDS, STAGE_WORDS, UNATTENDED_BLOCK_WORDS, editSubject } from './runWords'
+import { COMPONENT_WORDS, FACT_UNITS, factUnit, FACT_WORDS, FIELD_WORDS, GAP_WORDS, RUN_WORDS, STAGE_WORDS, UNATTENDED_BLOCK_WORDS, editSubject } from './runWords'
 
 describe('runWords', () => {
   it('names an envelope field by the panels’ FIELD_LABELS, with a unit', () => {
@@ -51,5 +53,17 @@ describe('runWords', () => {
 
   it('words every reason unattended cannot work, including no notice surface', () => {
     expect(UNATTENDED_BLOCK_WORDS.no_notice).toBe('Unattended needs a way to tell you when the run stops: email is not set up on this server, and in-app notices cannot be saved right now.')
+  })
+})
+
+describe('GAP_WORDS', () => {
+  it('names every research gap a backend profile can carry', () => {
+    const src = readFileSync(resolve(__dirname, '../../../../backend/services/run_profiles.py'), 'utf8')
+    const block = /"research": \{"gaps": \[([\s\S]*?)\n    \]\}/.exec(src)
+    expect(block).not.toBeNull()
+    const keys = [...block![1].matchAll(/\{"key": "(\w+)"/g)].map(m => m[1])
+    expect(keys.length).toBeGreaterThan(0)
+    for (const k of keys) expect(GAP_WORDS[k], k).toBeTruthy()
+    expect(Object.keys(GAP_WORDS).sort()).toEqual([...keys].sort())
   })
 })

@@ -672,3 +672,26 @@ def test_the_route_reads_a_malformed_record_as_stale_not_500(client, monkeypatch
     assert r.status_code == 200, r.text
     assert r.json()["flag"] == G.STALE
     assert r.json()["metrics"] is None
+
+
+def test_no_window_is_current_during_the_reference_solve(monkeypatch):
+    """C23 with C20 (#1243): the reference is full-horizon, so
+    ``current_window(n)`` is None while it solves and no carry-in rows can be
+    built; each window's own solve sees its window."""
+    n = _frozen(_net())
+    accessor = type(n.optimize)
+    real = accessor.__call__
+    seen: list[tuple[int, dict | None]] = []
+
+    def spy(self, snapshots=None, **kw):
+        win = OP.current_window(n)
+        seen.append((len(snapshots), None if win is None else dict(win)))
+        return real(self, snapshots, **kw)
+
+    monkeypatch.setattr(accessor, "__call__", spy)
+    _direct(n, horizon=8, overlap=4)
+    (ref_len, ref_win), wins = seen[0], seen[1:]
+    assert ref_len == HOURS and ref_win is None
+    assert [w["index"] for _, w in wins] == list(range(len(wins)))
+    assert all(w is not None and w["network"] is n for _, w in wins)
+    assert OP.current_window(n) is None  # and none after the run

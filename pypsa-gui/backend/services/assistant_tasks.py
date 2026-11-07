@@ -23,6 +23,12 @@ TASK_STEP_RETRIES_MAX = 2
 
 _CONTROLS = frozenset({"start_task", "get_task", "resume_task", "cancel_task", "resolve_task_step", "list_tasks"})
 _REF = re.compile(r"^\$([A-Za-z][A-Za-z0-9_-]{0,31})\.([A-Za-z0-9_.-]+)$")
+# SC-07 S3 (GK B N2-N4): a 3D site apply step commits only the preview a
+# prepare step of the same plan made, and reconciles from the scene chain.
+SCENE_APPLY = "site_scene_apply"
+SCENE_APPLY_ARGS = ("site_id", "proposal_id", "input_hash", "expected_revision")
+# A retried apply would replay a dead or moved preview: it needs a new prepare.
+SCENE_APPLY_DEAD = frozenset({"proposal_expired", "proposal_cancelled", "revision_conflict"})
 # LC-23 study brief (owner decisions AI-567b, COP-1): a plan labelled with an
 # objective, cards in scope, cases and one phase per card.
 CARDS = ("capacity", "grid", "control", "reliability", "commercial", "hand-off")
@@ -369,6 +375,8 @@ def _view(task, fresh=False, current=None):
            "total_steps": len(task["steps"]),
            "steps": [{k: s[k] for k in ("id", "tool", "status")} for s in task["steps"]]}
     for entry, s in zip(out["steps"], task["steps"]):
+        if isinstance(s.get("card"), dict):
+            entry["card"] = s["card"]  # issue 07 B3a: what a step-by-step engine card shows
         if (s.get("job") or {}).get("cases"):
             entry["cases"] = s["job"]["cases"]  # LC-17: each case's outcome and a failed one's cause
     brief = task.get("brief")
@@ -457,6 +465,22 @@ def _check_run(run, steps, brief):
     return profile, brief
 
 
+def _check_scene_apply(args, earlier):
+    """N2: every apply arg is a whole-value ref to one earlier site_scene_prepare
+    step's `apply_with.args`, so the plan never carries a literal preview."""
+    sources = set()
+    for key in SCENE_APPLY_ARGS:
+        value = args.get(key)
+        match = _REF.fullmatch(value) if isinstance(value, str) else None
+        source = next((s for s in earlier if match and s["id"] == match[1]), None)
+        if source is None or source["tool"] != "site_scene_prepare" or match[2] != f"apply_with.args.{key}":
+            _refuse("invalid_task_reference", f"A site_scene_apply step takes {key} as ${{step}}.apply_with.args.{key} "
+                    "from an earlier site_scene_prepare step of this plan, never a literal.", 422)
+        sources.add(match[1])
+    if len(sources) != 1:
+        _refuse("invalid_task_reference", "A site_scene_apply step takes all its args from one site_scene_prepare step.", 422)
+
+
 def start_task(title: str, steps: list[dict], request_id: str, brief: dict | None = None,
                run: dict | None = None) -> dict:
     from harness.catalogue import TOOLS
@@ -504,6 +528,8 @@ def start_task(title: str, steps: list[dict], request_id: str, brief: dict | Non
                 for child in (value.values() if isinstance(value, dict) else value):
                     references(child)
         references(args)
+        if tool == SCENE_APPLY:
+            _check_scene_apply(args, checked)
         checked.append({**copy.deepcopy(step), "status": "pending"})
         ids.add(name)
     if brief is not None:
@@ -812,6 +838,7 @@ def _advance_run(path, ctx=None):
                     run_loops.data_request(task, gaps)  # one notice listing every data gap
             else:
                 if name == run_loops.RESULT_STAGE and run_loops.engine_due(task, profile):
+                    run_loops.card_engine(path, task, profile, ctx)  # issue 07 B3a: step by step, its card
                     _save(path, task)  # issue 05 PR C: the next engine rule's loop, then the whole gate
                     _wake(path)
                     return
@@ -1009,6 +1036,7 @@ def settle_engine(path, ticket, loop, state):
             run_envelope.settle_engine_solves(path, ticket[2], spent)
             task = json.loads(Path(path).read_text())  # the solve count was written to it
             step = next(s for s in task["steps"] if s["id"] == ticket[1])
+            run_envelope.settle_carded(task, step, spent)  # issue 07 B3a: a step-by-step loop's own count
             step["status"], step["result"] = "completed", {"loop": loop}
             step["job"]["outcome"] = loop.get("status")
             step.pop("error", None)
@@ -1076,12 +1104,16 @@ def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) ->
             step["result"] = evidence
             step["status"] = "completed"
         else:
+            if step["tool"] == SCENE_APPLY and step.get("error_kind") in SCENE_APPLY_DEAD:
+                _refuse("task_retry_needs_prepare", f"This 3D site apply failed with {step['error_kind']}: its "
+                        "preview cannot be applied again. Tell the user, then cancel_task and start a new plan "
+                        "with a fresh site_scene_prepare.")
             if step.get("retries", 0) >= TASK_STEP_RETRIES_MAX:
                 _refuse("task_step_retry_limit", "This step has failed after 2 retries. Tell the user what failed and ask how to go on: they can fix the inputs, or cancel_task and start a new plan.")
             step["retries"] = step.get("retries", 0) + 1
             step["status"] = "pending"
             step.pop("result", None)
-        for key in ("error", "late_receipt", "receipt"):
+        for key in ("error", "error_kind", "late_receipt", "receipt"):
             step.pop(key, None)
         task["status"] = "completed" if _done(task) else "ready"
         _pause_at_boundary(task, step)
@@ -1104,6 +1136,8 @@ def _job_ref(job):
 
 def _native_evidence(path, task, step):
     """(found, result) for a failed or uncertain step, from native records only."""
+    if step["tool"] == SCENE_APPLY:
+        return _scene_apply_evidence(path, task, step)
     if "late_receipt" in step:
         return True, step["late_receipt"]["result"]
     if (step.get("job") or {}).get("kind") == "queue":
@@ -1127,6 +1161,11 @@ def _native_evidence(path, task, step):
         except Exception:  # noqa: BLE001 — an unreadable report is no evidence (C3)
             return False, None
         return True, {"kind": run_report.KIND, "report_id": job["report_id"], "version": job.get("version")}
+    if (step.get("job") or {}).get("kind") == "eh_study":
+        # Issue 07 B3a (GK B (32) L4): only the run's own Energy Hub study
+        # record; never the solve-run branch below.
+        from harness import run_eh
+        return run_eh.evidence(path, task, step)
     if step.get("job"):
         from services import run_evidence
         job_id = step["job"]["job_id"]
@@ -1148,6 +1187,22 @@ def _native_evidence(path, task, step):
         if receipt is not None:
             return True, {"_edit_receipt": receipt}
     return False, None
+
+
+def _scene_apply_evidence(path, task, step):
+    """N4: the scene chain's receipt for the plan's own preview, counted only
+    when its input_hash is the one the prepare step returned. Nothing else
+    (a late result, the edit read-back) stands in for it."""
+    try:
+        args = _resolve(step["args"], task["steps"])
+        from services.site_scene import proposals
+        receipt = proposals._committed(path.parent.parent, args["site_id"], args["proposal_id"])
+    except Exception:  # noqa: BLE001 — a lock timeout or unreadable chain is no evidence
+        return False, None
+    if not isinstance(receipt, dict) or receipt.get("input_hash") != args["input_hash"]:
+        return False, None
+    return True, {"receipt": {k: receipt.get(k) for k in ("proposal_id", "input_hash", "revision", "changed")},
+                  "read_back": {"receipt_found": True}}
 
 
 def admit(session, tool, args):
@@ -1302,9 +1357,10 @@ def _reconcile_lost(path, task):
     from harness import job_adapters
     changed = False
     for step in task["steps"]:
-        if step["status"] != "waiting" or step["job"].get("kind") in ("engine", "report"):
+        if step["status"] != "waiting" or step["job"].get("kind") in ("engine", "report", "eh_study"):
             # An engine step: the runner's recover reads its loop's own record (issue 05 PR C);
-            # a run's report job: the runner settles it from its job record (issue 07).
+            # a run's report job: the runner settles it from its job record (issue 07);
+            # a run's EH study: `run_eh.recover` settles it and its reservation (issue 07 B3a).
             continue
         if step["job"].get("kind") == "queue":
             # Followed by a thread of this process, or lost with a restart (SC-09).
@@ -1565,7 +1621,7 @@ def _stored(result):
     return json.loads(encoded) if len(encoded) <= 100000 else {"result_omitted": True, "note": "Use existing result tools for full evidence."}
 
 
-def finish_step(ticket, result=None, error=None):
+def finish_step(ticket, result=None, error=None, error_kind=None):
     if ticket is None:
         return None
     with _LOCK:
@@ -1595,8 +1651,11 @@ def finish_step(ticket, result=None, error=None):
             # own native read (fail closed there, not here).
             step["status"], message = "completed", None
         receipt = result.get("_edit_receipt") if isinstance(result, dict) else None
+        step.pop("error_kind", None)
         if message:
             step["error"] = message
+            if error is not None and isinstance(error_kind, str):
+                step["error_kind"] = error_kind[:64]  # what resolve_task_step's retry reads (N3)
             if step["status"] == "uncertain" and isinstance(receipt, dict) and isinstance(receipt.get("rows"), list) \
                     and len(json.dumps(receipt, default=str)) <= 20000:
                 step["receipt"] = _stored(receipt)  # what resolve_task_step re-reads (SC-12)

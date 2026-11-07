@@ -497,8 +497,11 @@ class Runner:
                     ticket = (task["task_id"], step["id"], step.get("attempt_id"))
                     swept += continuation.expire_engine(path, ticket, instance=self.instance, now=self.clock(),
                                                         lapsed_ok=True)
-            from harness import run_explore
+            from harness import run_eh, run_explore
             swept += run_explore.expire(path, boot=self.instance, clock=self.clock)  # E10
+            # Issue 07 B3a: a waiting EH study lost with the restart settles uncertain, its
+            # reservation kept whole; one with a live lease elsewhere is left to its holder.
+            swept += run_eh.recover(path, None, instance=self.instance, now=self.clock(), lapsed_ok=True)
         return swept
 
     # one tick
@@ -673,8 +676,9 @@ class Runner:
                 if takeover:
                     self._recover(path, ctx)
                 else:  # H2: a waiting engine step whose follower died is followed again, or expires
-                    from harness import run_loops
+                    from harness import run_eh, run_loops
                     run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
+                    run_eh.recover(path, ctx, instance=self.instance, now=self.clock())  # issue 07 B3a
                 from harness import run_report
                 run_report.settle(path, ctx)  # issue 07: the run's report job, once it ended
                 return self._step(path, ctx, session)
@@ -1093,8 +1097,9 @@ class Runner:
             elif states and all(s not in ("queued", "running", "unknown") for s in states):
                 continuation.settle_queue_from_record(path, ticket)
         if ctx is not None:
-            from harness import run_loops
+            from harness import run_eh, run_loops
             run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
+            run_eh.recover(path, ctx, instance=self.instance, now=self.clock())  # issue 07 B3a
         with tasks._LOCK:
             task = _read(path)
             tasks._reconcile_lost(path, task)

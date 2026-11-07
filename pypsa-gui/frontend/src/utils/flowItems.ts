@@ -40,7 +40,7 @@ export function fieldWords(
   // does not need it said again.
   const field = label && message && startsWithLabel(message, label) ? null : label
   if (!t.component && !t.entity && !field) return null
-  const thing = [t.component ? componentLabel(t.component) : null, t.entity ? `'${t.entity}'` : null]
+  const thing = [t.component ? componentLabel(t.component) : null, t.entity ? `“${t.entity}”` : null]
     .filter(Boolean).join(' ')
   return [sectionMeta(t.section).label, thing || null, field].filter(Boolean).join(' › ')
 }

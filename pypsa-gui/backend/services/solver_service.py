@@ -1082,8 +1082,12 @@ def run_simulation(
                         raise ValueError(
                             f"rolling_overlap ({O}) must be < rolling_horizon ({H})."
                         )
-                    # DC-07 S2: no duration rows across windows until C20's carry-in.
-                    _dc_curtailment.refuse_rolling()
+                    # DC-07 C20: the operational run carries the duration rows in across
+                    # its windows (D must fit the first window); plain rolling refuses them.
+                    if _operational.is_operational(config):
+                        _dc_curtailment.check_window(network, H)
+                    else:
+                        _dc_curtailment.refuse_rolling()
                     phase(
                         f"Rolling-horizon solve: {len(network.snapshots)} snapshots "
                         f"in windows of {H} (overlap {O})"

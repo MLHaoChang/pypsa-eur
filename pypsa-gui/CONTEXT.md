@@ -240,7 +240,10 @@ runs on `dc_mv` only, never above the cooling load. With
 `curtail_max_duration_h` = D, every run of D plus one snapshot of weighted
 hours holds at most D × share × the run's peak facility load. That is an
 energy proxy: curtailment can still be spread; consecutive hours are not
-enforced. A solve records it under `n.meta["dc_curtailment"]`.
+enforced; carried across operational windows (DC-07 C20: under the
+operational run, the final dispatch before a window's start enters each run
+that spans it; plain rolling with a duration is refused). A solve records it
+under `n.meta["dc_curtailment"]`.
 _Avoid_: load shedding (the involuntary VoLL tier), DSR (the bus opt-in tier)
 
 **Dynamic envelope**:
