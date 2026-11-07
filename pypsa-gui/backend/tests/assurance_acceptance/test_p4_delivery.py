@@ -31,14 +31,15 @@ def marker(chart):
     return json.loads(path.read_text()) if path.exists() else None
 
 
-def reseal(chart, change):
+def reseal(chart, change, rehash=True):
     """Rewrite the sidecar, its hashes AND its marker, as a store-level forger would."""
     root, blob, sidecar = paths(chart)
     record = json.loads(sidecar.read_text())
     change(record, record["manifest"])
     manifest = record["manifest"]
-    manifest["dataset_sha256"] = canonical_sha256(manifest["dataset"])
-    manifest["render_spec_sha256"] = canonical_sha256(manifest["render_spec"])
+    if rehash:
+        manifest["dataset_sha256"] = canonical_sha256(manifest["dataset"])
+        manifest["render_spec_sha256"] = canonical_sha256(manifest["render_spec"])
     sidecar.write_text(json.dumps(record))
     meta_path = blob.parent / "meta.json"
     meta = json.loads(meta_path.read_text())
@@ -314,6 +315,25 @@ def test_a_result_manifest_missing_its_validity_is_refused_and_quarantined(
 ):
     chart = chat_tools.create_chart("Generator", "p", ["G1"], source="result")
     reseal(chart, lambda record, manifest: manifest.pop("validity"))
+    assert client.get(chart["download_url"]).status_code == 409
+    assert marker(chart)["reason_code"] == "manifest"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda r, m: m.update(schema_version=2),
+        lambda r, m: m["dataset"]["values"][0].__setitem__(0, 9.0),
+        lambda r, m: m["render_spec"].update(title="Generator: p_nom (edited)"),
+    ],
+    ids=["schema_version", "dataset", "render_spec"],
+)
+def test_a_manifest_whose_hashes_no_longer_match_is_refused_and_quarantined(
+    baseline, client, change
+):
+    # The sidecar's own seal is redone; the dataset and render-spec hashes are not.
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    reseal(chart, change, rehash=False)
     assert client.get(chart["download_url"]).status_code == 409
     assert marker(chart)["reason_code"] == "manifest"
 
