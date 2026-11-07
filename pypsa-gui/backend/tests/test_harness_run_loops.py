@@ -20,7 +20,7 @@ from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline, dispatch, edit, helpers_state, session, wait_until,
 )
 from tests.test_harness_envelope import BLOCK, envelope_of, granted, on_run, profile  # noqa: F401
-from tests.test_harness_run_skeleton import site, start  # noqa: F401
+from tests.test_harness_run_skeleton import site, start, without_eh_study  # noqa: F401
 from tests.test_harness_runner import detached, fake_report_provider, frames_of, settle, task_path  # noqa: F401
 
 SHAPE = {"kind": "load_generator", "archetype": "industrial", "year": 2023, "energy": "fixture_energy"}
@@ -680,7 +680,8 @@ def test_a_gap_without_a_source_is_refused():
 def test_a_static_load_passes_the_eh_site_input_gate_as_before(granted, profile, site, rated, monkeypatch):
     """A site load with a constant p_set is the user's demand, not a gap: the
     shipped eh_site run passes its input gate, and L1 never starts."""
-    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", run_profiles.EH_SITE)  # as shipped
+    # as shipped, but for issue 07 B2's EH study and rules (`without_eh_study`)
+    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", without_eh_study(run_profiles.EH_SITE))
     no_series()  # the baseline's L1 is a constant p_set
     task, path, _ = granted()
     script = Script(say("No case is worth a fork here."))  # the explore turn's only (issue 06)
