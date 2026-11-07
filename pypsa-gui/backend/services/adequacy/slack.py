@@ -37,6 +37,10 @@ LEGACY_SLACK_CARRIER = "voll_slack"
 # compensation (well below VoLL), a RESOURCE — it does NOT count as unserved
 # energy, does not enter the ENS cap, and must not land in voll_shed_*.
 DSR_SLACK_CARRIER = "demand_response"
+# The data-centre curtailable load (DC-07 S2): the curtailable share of the
+# facility, priced at its curtailment price. A RESOURCE like DSR: never
+# unserved energy, never in the ENS cap, DtC or adequacy.
+DC_CURTAILMENT_CARRIER = "dc_curtailment"
 
 # Nothing else may grow these sets without auditing every call site's intent —
 # the cost decomposition and the capture must SPLIT the tiers, and the ENS cap
@@ -44,7 +48,9 @@ DSR_SLACK_CARRIER = "demand_response"
 INVOLUNTARY_SLACK_CARRIERS: frozenset[str] = frozenset(
     {INVOLUNTARY_SLACK_CARRIER, LEGACY_SLACK_CARRIER}
 )
-SLACK_CARRIERS: frozenset[str] = INVOLUNTARY_SLACK_CARRIERS | {DSR_SLACK_CARRIER}
+SLACK_CARRIERS: frozenset[str] = INVOLUNTARY_SLACK_CARRIERS | {
+    DSR_SLACK_CARRIER, DC_CURTAILMENT_CARRIER,
+}
 
 # What current builds create slack names with.
 # P6(b): involuntary VOLL slacks are per-Load (``f"{PREFIX}{load_id}"``).
@@ -53,9 +59,10 @@ SLACK_CARRIERS: frozenset[str] = INVOLUNTARY_SLACK_CARRIERS | {DSR_SLACK_CARRIER
 VOLL_SLACK_PREFIX = "__voll_"
 LEGACY_SLACK_PREFIX = "voll_slack_"
 DSR_SLACK_PREFIX = "__dsr_"
+DC_CURTAILMENT_PREFIX = "__dccurt_"
 INVOLUNTARY_SLACK_PREFIXES: tuple[str, ...] = (VOLL_SLACK_PREFIX, LEGACY_SLACK_PREFIX)
 SLACK_NAME_PREFIXES: tuple[str, ...] = (
-    VOLL_SLACK_PREFIX, LEGACY_SLACK_PREFIX, DSR_SLACK_PREFIX,
+    VOLL_SLACK_PREFIX, LEGACY_SLACK_PREFIX, DSR_SLACK_PREFIX, DC_CURTAILMENT_PREFIX,
 )
 
 

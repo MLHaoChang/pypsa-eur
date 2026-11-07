@@ -29,6 +29,25 @@ _SUCCESS_STATUSES = {"ok", "optimal"}
 # Matched against a lowercased haystack built from condition (+ optional detail).
 _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
     (
+        ("operational_window_failed",),
+        "operational_window_failed",
+        "A window of the operational run did not solve",
+        "The operational run on fixed sizes stopped at the window the detail names: "
+        "that window and every later one are not solved. The fixed sizes cannot serve "
+        "that window without look-ahead, or its inputs make it infeasible. Check that "
+        "window's load and limits, enable a value of lost load, or use a longer "
+        "horizon, then run again.",
+    ),
+    (
+        ("operational_refused",),
+        "operational_refused",
+        "Operational run refused before solving",
+        "The operational (rolling) run on fixed sizes cannot run as configured: the "
+        "detail names the reason (several investment periods, N-1, or a size the "
+        "freeze left open). Change that setting or use the full strategy, then run "
+        "again.",
+    ),
+    (
         ("reserve_refused",),
         "reserve_refused",
         "Reserve products refused before solving",
@@ -36,6 +55,15 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
         "detail names the product or storage and the reason. Save Commercial & "
         "parties again to pick up the price, restore the backup string's hold, or "
         "remove the product, then run again.",
+    ),
+    (
+        ("curtailment_refused",),
+        "curtailment_refused",
+        "Curtailable load refused before solving",
+        "The data centre's curtailable load cannot be modelled as configured: the detail "
+        "names the reason (no cooling load on dc_mv, or a maximum curtailment duration "
+        "longer than the horizon). Change that setting or clear the curtailment price, "
+        "then run again.",
     ),
     (
         ("validation_failed",),

@@ -3,7 +3,7 @@
 
 # Canvas overlays collide at about 1250 px width
 
-Status: needs-triage
+Status: ready-for-agent
 Type: layout
 Found by: UX (9) review items; owner list DOCS-1.
 
@@ -14,3 +14,14 @@ At a window about 1250 px wide the canvas overlays overlap or crowd each other. 
 ## Where to look
 
 Network canvas overlay components under `pypsa-gui/frontend/src/`. Details: ask the coordinator.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: network canvas overlay components under `pypsa-gui/frontend/src/`.
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: UX (12).
+- Size: M.
+- Reproduce at 1250 px in Guided and Expert with a screenshot before and after.

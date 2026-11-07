@@ -71,6 +71,8 @@ SETTINGS_EDITS = frozenset({
     "campus_save_grid_code_draft",
     # LV08 R2: the site anchor (Site 3D coordinates), through anchor.write_anchor
     "set_site_anchor",
+    # SC-07 S1: one exact 3D site preview, through proposals.apply (edit_card_site.py)
+    "site_scene_apply",
     # Study harness issue 23: a user-confirmed requirement on the durable thread
     "set_requirement",
 })
@@ -127,6 +129,8 @@ NOT_EDITS = {
     "pending_profile_from_current": "a pending profile; apply_generated_profile is the edit",
     "upload_load_profiles_file": "pending profiles; apply_generated_profiles is the edit",
     "upload_series_file": "a pending profile; apply_generated_profile is the edit",
+    # SC-07 S1
+    "site_scene_cancel": "discards your own unapplied 3D site preview; site_scene_apply is the edit",
 }
 
 

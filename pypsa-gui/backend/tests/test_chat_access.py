@@ -62,8 +62,10 @@ def test_guided_names_the_tools_that_skip_its_write_card(client, session_ctx, mo
     response = client.get('/api/chat/access', params={'project_id': ctx.project_uuid, 'ui_mode': ui_mode})
     assert response.status_code == 200, response.text
     uncarded = response.json()['guided_uncarded']
+    # SC-07 S1: site_scene_cancel discards the caller's own preview, uncarded as in Expert.
     assert uncarded == ([] if expected is None else
-                        [{'tool': 'preview_project_changes', 'native': expected}])
+                        [{'tool': 'preview_project_changes', 'native': expected},
+                         {'tool': 'site_scene_cancel', 'native': expected}])
 
 
 def test_no_guided_uncarded_tool_is_an_edit():

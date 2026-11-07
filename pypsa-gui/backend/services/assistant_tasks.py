@@ -369,6 +369,8 @@ def _view(task, fresh=False, current=None):
            "total_steps": len(task["steps"]),
            "steps": [{k: s[k] for k in ("id", "tool", "status")} for s in task["steps"]]}
     for entry, s in zip(out["steps"], task["steps"]):
+        if isinstance(s.get("card"), dict):
+            entry["card"] = s["card"]  # issue 07 B3a: what a step-by-step engine card shows
         if (s.get("job") or {}).get("cases"):
             entry["cases"] = s["job"]["cases"]  # LC-17: each case's outcome and a failed one's cause
     brief = task.get("brief")
@@ -735,7 +737,7 @@ def _advance_run(path, ctx=None):
     Gates read the network, so they are evaluated outside the task lock and
     written only if (stage, attempts, fingerprint) did not move meanwhile; a
     caller that may not edit the project writes nothing (`gate_due`)."""
-    from harness import run_explore, run_loops
+    from harness import run_eh, run_explore, run_loops
     from services import flow_service, run_gates, run_profiles
     ctx = ctx or RUN_CONTEXT.get() or PyPSAService.get_active_context()
     for _ in range(2 * len(run_profiles.STAGES)):
@@ -761,6 +763,9 @@ def _advance_run(path, ctx=None):
                     planned = run_envelope.planned_steps(path, name)
                 steps = planned + run_profiles.materialise(profile, name, task["project_id"],
                                                            start=start + len(planned))
+                if any(run_eh.is_eh_step(s) for s in steps):
+                    # Issue 07 B2 (C1, Q2 = A): the EH study's args, frozen at the grant or now.
+                    run_eh.fill(steps, run_eh.stage_frozen(path, task, profile, ctx))
                 stage.update(status="active", entered_at=_now())
                 task["steps"].extend(steps)
                 if any(_carded(s) for s in steps):
@@ -809,6 +814,7 @@ def _advance_run(path, ctx=None):
                     run_loops.data_request(task, gaps)  # one notice listing every data gap
             else:
                 if name == run_loops.RESULT_STAGE and run_loops.engine_due(task, profile):
+                    run_loops.card_engine(path, task, profile, ctx)  # issue 07 B3a: step by step, its card
                     _save(path, task)  # issue 05 PR C: the next engine rule's loop, then the whole gate
                     _wake(path)
                     return
@@ -1006,6 +1012,7 @@ def settle_engine(path, ticket, loop, state):
             run_envelope.settle_engine_solves(path, ticket[2], spent)
             task = json.loads(Path(path).read_text())  # the solve count was written to it
             step = next(s for s in task["steps"] if s["id"] == ticket[1])
+            run_envelope.settle_carded(task, step, spent)  # issue 07 B3a: a step-by-step loop's own count
             step["status"], step["result"] = "completed", {"loop": loop}
             step["job"]["outcome"] = loop.get("status")
             step.pop("error", None)
@@ -1124,6 +1131,11 @@ def _native_evidence(path, task, step):
         except Exception:  # noqa: BLE001 — an unreadable report is no evidence (C3)
             return False, None
         return True, {"kind": run_report.KIND, "report_id": job["report_id"], "version": job.get("version")}
+    if (step.get("job") or {}).get("kind") == "eh_study":
+        # Issue 07 B3a (GK B (32) L4): only the run's own Energy Hub study
+        # record; never the solve-run branch below.
+        from harness import run_eh
+        return run_eh.evidence(path, task, step)
     if step.get("job"):
         from services import run_evidence
         job_id = step["job"]["job_id"]
@@ -1299,9 +1311,10 @@ def _reconcile_lost(path, task):
     from harness import job_adapters
     changed = False
     for step in task["steps"]:
-        if step["status"] != "waiting" or step["job"].get("kind") in ("engine", "report"):
+        if step["status"] != "waiting" or step["job"].get("kind") in ("engine", "report", "eh_study"):
             # An engine step: the runner's recover reads its loop's own record (issue 05 PR C);
-            # a run's report job: the runner settles it from its job record (issue 07).
+            # a run's report job: the runner settles it from its job record (issue 07);
+            # a run's EH study: `run_eh.recover` settles it and its reservation (issue 07 B3a).
             continue
         if step["job"].get("kind") == "queue":
             # Followed by a thread of this process, or lost with a restart (SC-09).
@@ -1337,6 +1350,22 @@ def _continuation_message(task, job):
     from harness.run_lifecycle import continuation_note
     cases = "".join(f"; {c.get('name') or c.get('project_id')}: {c['status']}" for c in job.get("cases") or [])
     return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']}){cases}{continuation_note(job['outcome'])}"
+
+
+def continuation_armed(session) -> bool:
+    """LC-24: a plan step of this conversation is waiting on a job and will
+    continue it (armed or due), so a promise of a later report is true."""
+    from harness import job_adapters
+    with _LOCK:
+        for path, task in _owned_tasks():
+            for step in task["steps"]:
+                job = step.get("job") or {}
+                # Only a foreground-solve handle: a plan armed on a study or
+                # queue job says nothing about the solve running now.
+                if job.get("session_id") == session.session_id and job.get("continuation") in ("armed", "due") \
+                        and str(job.get("job_id") or "").startswith(job_adapters.FOREGROUND_PREFIX):
+                    return True
+    return False
 
 
 def dismiss_continuation(session, job_id):
@@ -1451,6 +1480,7 @@ def admits_next_step(session, tool, args) -> bool:
 
 def begin_step(session, tool, args):
     """Called only after the ordinary offered-tool and confirmation gates."""
+    from harness import run_eh
     task_id = getattr(session, "task_id", None)
     if not task_id or tool in _CONTROLS:
         return None
@@ -1483,10 +1513,21 @@ def begin_step(session, tool, args):
         if len(json.dumps(expected, default=str)) > ARGS_CHARS:
             _refuse("task_reference_too_large", "Resolved arguments exceed the step's limit; use file IDs or smaller result references.")
         _check_claim(task, step, session.session_id)
+        attempt = uuid.uuid4().hex
+        if task.get("run") and run_eh.is_eh_step(step):
+            # Issue 07 B2 (C1, C2, F1): the frozen args and goal, and the solves left,
+            # checked and reserved at every execution of the run's EH study.
+            refused = run_eh.admit(path, task, {**step, "attempt_id": attempt}, args,
+                                   RUN_CONTEXT.get() or PyPSAService.get_active_context())
+            if refused is not None:
+                _save(path, task)  # the run, stopped for the user
+                if refused[0] == run_eh.BUDGET_KIND:
+                    _refuse("eh_budget", refused[1])
+                _refuse("eh_args", refused[1])
         step.pop("claim", None)
         _clear_waiting(task, step["id"])
         step["status"], step["session_id"] = "running", session.session_id
-        step["attempt_id"] = uuid.uuid4().hex
+        step["attempt_id"] = attempt
         task["status"] = "running"
         _save(path, task)
         return (task_id, step["id"], step["attempt_id"])
@@ -1545,6 +1586,19 @@ def finish_step(ticket, result=None, error=None):
         if step.get("job"):
             return _view(task)  # waiting on its job, or already settled by it
         step["status"], message = _outcome(step["tool"], result, error)
+        from harness import run_eh
+        if task.get("run") and run_eh.is_eh_step(step):
+            # Issue 07 B2: the run's EH study is settled from its own record only (`run_eh.wait`).
+            if error is not None or not isinstance(result, dict) or result.get("status") != "running":
+                # F5: refused before it started (409 busy, 422, a campaign cap): nothing
+                # spent, the reservation released, and the step failed with no retry.
+                run_eh.release(path, ticket[2], 0, task)
+                step["status"] = "failed"
+                message = f"The Energy Hub study did not start ({run_eh.REFUSED_KIND}): {str(error or result)[:200]}"
+            else:
+                run_eh.release(path, ticket[2], None, task)  # C4: unfollowed, so its whole reservation
+                step["status"] = "uncertain"
+                message = "The Energy Hub study started, but its record is not followed; inspect it before going on."
         if task.get("run") and error is None and _retryable_read(step["tool"]):
             # A run's read step is done once it returned: what it found (an
             # `ok: false` validation) is the stage gate's to judge, from its

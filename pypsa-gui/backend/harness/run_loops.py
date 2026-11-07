@@ -46,6 +46,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import re
 import time
 import uuid
@@ -727,6 +728,43 @@ def engine_due(task, profile):
     return True
 
 
+def card_engine(path, task, profile, ctx=None):
+    """Issue 07 B3a (GK B (32) L2, L3): in a run that never had a grant
+    (`run_envelope.never_granted`), the new engine step's own card (COP-1):
+    it shows the loop tool, its rule, the clamped `max_solves` (the most its
+    Continue may reserve), the overhead, `restore` and the goal's target on
+    the network's horizon; the plan pauses at the result gate's card. Under
+    the task lock, on `task` (the caller saves). True when it carded."""
+    from services import run_envelope
+    step = next((s for s in reversed(task["steps"]) if s.get("engine") and not s.get("superseded")), None)
+    if step is None or step["status"] != "pending" or "card" in step or not run_envelope.never_granted(path, task):
+        return False
+    rule = next(r for r in engine_rules(profile) if r["id"] == step["engine"])
+    engine = rule["engine"]
+    overhead = _overhead(engine["tool"])
+    step["card"] = {"tool": engine["tool"], "rule": rule["id"],
+                    "max_solves": run_envelope.carded_clamp(task, profile, engine["max_solves"], overhead),
+                    "overhead": overhead, "restore": engine["restore"], "target_lole_h": _card_target(ctx)}
+    task["status"], task["pause"] = "paused_at_card", {"card": RESULT_STAGE, "after": None}
+    return True
+
+
+def _card_target(ctx):
+    """The goal's LOLE target on the network's horizon (`loop_goal`), for
+    the card only; the loop reads the goal itself at its start. None when
+    it cannot be read."""
+    if ctx is None:
+        return None
+    try:
+        from services import reliability_goal
+        from services.adequacy.metrics import horizon_years
+        target, _, _ = reliability_goal.loop_goal(
+            None, reliability_goal.active_goal(ctx.solver_state), float(horizon_years(ctx.network)))
+    except Exception:  # noqa: BLE001 — an unreadable goal shows no target
+        return None
+    return float(target) if isinstance(target, (int, float)) and math.isfinite(target) else None
+
+
 def _engine_stop(path, step_id, reason, detail=None, status="failed"):
     """An engine start that did not start: the step `status`, the result
     gate failed with `reason`, the run `needs_user`."""
@@ -778,9 +816,14 @@ def start_engine(path, ctx, step, *, instance):
     runner._update(path, claim)
     if not claimed:
         return "claimed_elsewhere"
-    max_solves, reason = run_envelope.reserve_engine(
-        path, call_id=attempt, tool=engine["tool"], rule=rule["id"], max_solves=engine["max_solves"],
-        overhead=_overhead(engine["tool"]), restore=engine["restore"])
+    carded = run_envelope.never_granted(path, task)  # issue 07 B3a: step by step, at its own card
+    if carded:
+        max_solves, reason = run_envelope.reserve_carded(
+            path, step_id=step["id"], call_id=attempt, overhead=_overhead(engine["tool"]), restore=engine["restore"])
+    else:
+        max_solves, reason = run_envelope.reserve_engine(
+            path, call_id=attempt, tool=engine["tool"], rule=rule["id"], max_solves=engine["max_solves"],
+            overhead=_overhead(engine["tool"]), restore=engine["restore"])
     if reason is not None:
         _engine_stop(path, step["id"], reason)
         return reason
@@ -798,6 +841,9 @@ def start_engine(path, ctx, step, *, instance):
         handler(max_solves=max_solves, restore=engine["restore"])
     except HTTPException as exc:
         run_envelope.settle_engine_solves(path, attempt, 0)  # refused before any solve
+        if carded:
+            runner._update(path, lambda t: run_envelope.settle_carded(
+                t, next(s for s in t["steps"] if s["id"] == step["id"]), 0))
         _engine_stop(path, step["id"], "engine_refused", str(exc.detail))
         return "engine_refused"
     except BaseException:

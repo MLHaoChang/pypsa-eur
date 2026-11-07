@@ -36,6 +36,11 @@ export const FACT_WORDS: Record<string, string> = {
   'ic.counterfactual': 'The comparison case exists',
   'ic.baseline_keeps': 'The comparison keeps the baseline',
   'adequacy.loop.converged': 'The plan meets the reliability goal',
+  'eh.readiness.ready': 'The Energy Hub study can run every stage it asks for',
+  'eh.energization.min_mw': 'Each growth stage has a grid connection size',
+  'eh.study.status': 'The Energy Hub study finished every stage',
+  'eh.review.blockers': 'The Energy Hub review found no serious problem',
+  'kpi.unserved_mwh': 'No load goes unserved',
   'explore.unsettled': 'Every what-if case has a result',
   'explore.study.status': 'The decision study finished',
   'report.status': 'The report is saved',
@@ -171,3 +176,6 @@ export function stopWords(reason: string | undefined, stage: string): { words: s
     default: return { words: `Stopped at ${at}`, fix: 'resume', fixWords: 'Resume' }
   }
 }
+
+/** A research gap's name, one per gap key in a profile's `research.gaps` (parity: runWords.test.ts). */
+export const GAP_WORDS: Record<string, string> = { import_tariff: 'Import tariff' }

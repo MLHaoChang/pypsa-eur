@@ -255,22 +255,17 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
     },
     {
         'id': 'site_scene',
-        'title': 'Site 3D scene: buildings and proposals',
+        'title': 'Site 3D: legacy Site adoption and results overlay',
         'disposition': 'unbuilt',
-        'reason': 'The 3D site scene is not available from chat yet (SC-07). Chat can read and set the site coordinates (get_site_anchor, set_site_anchor); generate and correct buildings in Site 3D.',
+        'reason': 'Chat reads and changes 3D site buildings (site_scene_read, site_scene_prepare, site_scene_apply). Adopting a Site saved before Site 3D, and the 3D results overlay, stay in Site 3D for now.',
         'page': 'Site 3D',
         'panel': 'map',
         'keywords': frozenset({
             'scene',
         }),
         'routes': frozenset({
-            ('GET', '/api/projects/{name}/sites/{site_id}/scene'),
             ('POST', '/api/projects/{name}/sites/{site_id}/scene/adopt'),
-            ('POST', '/api/projects/{name}/sites/{site_id}/scene/proposals'),
-            ('GET', '/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}'),
             ('GET', '/api/projects/{name}/sites/{site_id}/scene/results'),
-            ('POST', '/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply'),
-            ('POST', '/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel'),
         }),
     },
     {

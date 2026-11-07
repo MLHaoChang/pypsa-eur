@@ -558,9 +558,29 @@ def get_asset_costs() -> dict:
     return _h()
 
 
+def _continuation_armed_here() -> bool:
+    """True when this conversation has a plan step that will continue it
+    when its job ends (LC-12). Unknown (no session, no project) counts as not armed."""
+    try:
+        from services import assistant_tasks
+        with _acting() as (db, _user):
+            session = _acting_session(db)
+            return session is not None and assistant_tasks.continuation_armed(session)
+    except Exception:  # noqa: BLE001 — the hint is advice; never fail a status read
+        return False
+
+
 def get_simulation_status() -> dict:
     from routers.simulation import get_status as _h
-    return _h()
+    out = _h()
+    if out.get("running") and not _continuation_armed_here():
+        # LC-24: nothing continues this chat by itself after a Stop (#542) and
+        # a plain turn arms no continuation, so the words must not promise one.
+        out = {**out, "follow_up": (
+            "No automatic update is armed for this run. Do not say you will "
+            "keep checking or report back; tell the user to ask again or watch "
+            "the run status.")}
+    return out
 
 
 def get_simulation_lock_status() -> dict:
@@ -1406,7 +1426,8 @@ def fetch_site_context(name: str, site_id: str) -> dict:
 
 # ── LV08 R2: the site anchor (Site 3D, SC-01a) and the process view ─────────
 #
-# The five Site 3D scene routes stay held for SC-07 (route parity `held-by-spec`).
+# The Site 3D scene routes are served by the site_scene_* tools below (SC-07 S1); adopt
+# and the results overlay stay held for SC-07 (route parity `held-by-spec`).
 
 
 def _scene_refusal(exc) -> HTTPException:
@@ -1446,6 +1467,33 @@ def set_site_anchor(name: str, lat: float, lng: float, source: str, confirmed: b
             return anchor.write_anchor(project.directory, body, expected_revision)
         except SceneError as exc:
             raise _scene_refusal(exc) from None
+
+
+# ── SC-07 S1: the Site 3D scene (services/site_scene/chat.py) ───────────────
+
+
+def site_scene_read(site_id: str | None = None, proposal_id: str | None = None) -> dict:
+    """`GET .../sites/{site_id}/scene` (and a pending proposal's status), bounded and summarized."""
+    from services.site_scene import chat
+    return chat.read(site_id=site_id, proposal_id=proposal_id)
+
+
+def site_scene_prepare(site_id: str, action: str, base_revision: int, inputs: dict) -> dict:
+    """`POST .../scene/proposals`: a preview only; owner/project from the server (G3), admitted per G2."""
+    from services.site_scene import chat
+    return chat.prepare(site_id, action, base_revision, inputs)
+
+
+def site_scene_apply(site_id: str, proposal_id: str, input_hash: str, expected_revision: int) -> dict:
+    """`POST .../proposals/{id}/apply` behind its card (harness/edit_card_site.py), exact preview only (G1)."""
+    from services.site_scene import chat
+    return chat.apply(site_id, proposal_id, input_hash, expected_revision)
+
+
+def site_scene_cancel(site_id: str, proposal_id: str) -> dict:
+    """`POST .../proposals/{id}/cancel`: the caller's own preview; unknown or expired changes nothing (G4)."""
+    from services.site_scene import chat
+    return chat.cancel(site_id, proposal_id)
 
 
 def get_process_view() -> dict:
@@ -3720,7 +3768,21 @@ def update_project_settings(name: str, derive_lengths_from_geometry: bool | None
 
 def validate_network() -> list[dict]:
     from routers.simulation import preflight as _h
-    return _h()
+    from services.assurance_artifacts import exact_or_none, import_status, record_validation
+
+    # H10 (AA-05 S3): the exact inputs are read before and after the check, and
+    # a pass counts only when the two reads agree, so an edit during it can
+    # never be recorded as validated (R3, GK B T2).
+    ctx = PyPSAService.get_active_context()
+    before = exact_or_none(ctx)
+    result = _h()
+    if not isinstance(result, dict) or "ok" not in result:
+        return result  # deferred while a solve is live
+    exact = before if before is not None and exact_or_none(ctx) == before else None
+    # A pass is recorded in the app-data store; the network is never touched (R1, R2).
+    if result["ok"] and not result.get("errors") and exact is not None:
+        record_validation(ctx, exact)
+    return {**result, "import_status": import_status(ctx, exact)}
 
 
 def check_solver_availability() -> dict:
@@ -5712,20 +5774,9 @@ def import_matpower(bytes_b64: str, filename: str = "case.m") -> dict:
     return _import_raw(_h, upload)
 
 
-def _save_agent_export(data: bytes, filename: str, mime: str, *, assurance_sha256: str | None = None) -> dict:
-    """
-    Persist agent-generated export bytes as an `agent_export` upload artifact and
-    return lightweight metadata. The frontend's chat file strip renders
-    agent_export uploads as downloadable chips.
-
-    Why not return the bytes inline: a chat-tool result must be JSON-serializable
-    AND fits in the model's context — base64 of a multi-MB netcdf/zip would flood
-    the context window (and was the bug: the wrappers used to return a Starlette
-    StreamingResponse, which json.dumps stringified to "<StreamingResponse ...>").
-    Requires a loaded project (the artifact lives in that project's uploads dir);
-    the HTTP export routes still stream to the browser without one.
-    """
-    from urllib.parse import quote
+def _export_preflight(data: bytes) -> str:
+    """The write-edge checks every export passes before anything is written;
+    returns the loaded project's name."""
     from services import upload_service
     from services.pypsa_service import PyPSAService
     name = PyPSAService.get_loaded_project()
@@ -5744,6 +5795,60 @@ def _save_agent_export(data: bytes, filename: str, mime: str, *, assurance_sha25
     _check_foreign_lock("export")
     if len(data) > upload_service.MAX_FILE_BYTES:
         raise HTTPException(413, {"error_kind": "file_too_large", "message": "Export exceeds 25 MB."})
+    return name
+
+
+def _publish_sealed_export(root, record: dict, data: bytes, filename: str, mime: str) -> tuple[dict, dict]:
+    """AA-05 S3 (GK B T1): publish an export with its sealed sidecar.
+
+    The write-edge checks run before the sidecar is touched, and the sidecar
+    and the upload's seal are written under the project's upload lock. A
+    sidecar that already seals the live upload of these bytes is kept (first
+    seal wins), so a refused or repeated identical export never breaks an
+    earlier one. Returns the export and the record that seals it."""
+    import hashlib
+
+    from services import assistant_tasks as tasks
+    from services import upload_service
+    from services.assistant_tools import _project
+    from services.assurance_artifacts import canonical_sha256
+
+    _export_preflight(data)
+    project, directory, _owner = _project()
+    file_id = hashlib.sha256(data).hexdigest()[:16]
+    path = root / "assistant_artifacts" / (file_id + ".json")
+    with upload_service._project_upload_lock(project.name):
+        try:
+            kept = json.loads(path.read_text(encoding="utf-8"))
+            live = upload_service.get_upload_meta(project.name, file_id, project_dir=directory)
+            if live.assurance_sha256 != canonical_sha256(kept):
+                kept = None
+        except Exception:  # noqa: BLE001 -- no live sealed export of these bytes yet
+            kept = None
+        if kept is None:
+            tasks._save(path, record)
+        sealing = kept if kept is not None else record
+        artifact = _save_agent_export(data, filename, mime, assurance_sha256=canonical_sha256(sealing))
+    return artifact, sealing
+
+
+def _save_agent_export(data: bytes, filename: str, mime: str, *, assurance_sha256: str | None = None) -> dict:
+    """
+    Persist agent-generated export bytes as an `agent_export` upload artifact and
+    return lightweight metadata. The frontend's chat file strip renders
+    agent_export uploads as downloadable chips.
+
+    Why not return the bytes inline: a chat-tool result must be JSON-serializable
+    AND fits in the model's context — base64 of a multi-MB netcdf/zip would flood
+    the context window (and was the bug: the wrappers used to return a Starlette
+    StreamingResponse, which json.dumps stringified to "<StreamingResponse ...>").
+    Requires a loaded project (the artifact lives in that project's uploads dir);
+    the HTTP export routes still stream to the browser without one.
+    """
+    from urllib.parse import quote
+    from services import upload_service
+    from services.pypsa_service import PyPSAService
+    name = _export_preflight(data)
     ctx = PyPSAService.get_active_context()
     if ctx.project_uuid:
         from services.assistant_tools import _project
@@ -7766,13 +7871,17 @@ def export_to_excel(sheets: dict, filename: str) -> dict:
     default = wb.active
     if default is not None:
         wb.remove(default)
+    written = []
     for sheet_name, rows in (sheets or {}).items():
         ws = wb.create_sheet(title=str(sheet_name)[:31] or "Sheet")
+        written.append((ws.title, []))
         for row in (rows or []):
             # EXPORT-INJECT-1, the same rule as the app's Excel export: a text
             # cell starting = + - @ tab or CR gets a leading quote, so openpyxl
             # stores it as text, never a formula; a number stays a number.
-            ws.append([_escape_formula(v) for v in row])
+            cells = [_escape_formula(v) for v in row]
+            written[-1][1].append(cells)
+            ws.append(cells)
     buf = _io.BytesIO()
     wb.save(buf)
     payload = buf.getvalue()
@@ -7787,9 +7896,9 @@ def export_to_excel(sheets: dict, filename: str) -> dict:
                 ),
             },
         )
-    return _save_agent_export(
+    return _save_table_export(
         payload, filename,
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx", written,
     )
 
 
@@ -7803,10 +7912,12 @@ def export_to_csv(rows: list, columns: list, filename: str) -> dict:
     import io as _io
     buf = _io.StringIO()
     w = csv.writer(buf, lineterminator="\r\n")
+    written = []
     if columns:
-        w.writerow([_inert_csv_cell(c) for c in columns])
+        written.append([_inert_csv_cell(c) for c in columns])
     for row in (rows or []):
-        w.writerow([_inert_csv_cell(c) for c in row])
+        written.append([_inert_csv_cell(c) for c in row])
+    w.writerows(written)
     payload = buf.getvalue().encode("utf-8")
     if len(payload) > 25 * 1024 * 1024:
         raise HTTPException(
@@ -7819,7 +7930,61 @@ def export_to_csv(rows: list, columns: list, filename: str) -> dict:
                 ),
             },
         )
-    return _save_agent_export(payload, filename, "text/csv")
+    return _save_table_export(payload, filename, "text/csv", "csv", [(None, written)])
+
+
+def _save_table_export(payload, filename, mime, fmt, written):
+    """AA-05 S3 (A4.5): a table export carries a sealed manifest whose dataset
+    hash is the table as written. The bytes are re-parsed before sealing; a
+    disagreement refuses the export (R5). An identical re-export of a
+    quarantined table is refused before any write (R8)."""
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    if not getattr(ctx, "project_uuid", None):
+        return _save_agent_export(payload, filename, mime)  # no project id: byte hash only, as before
+    import hashlib
+
+    from services import workflow_tools as workflow
+    from services.assistant_tools import _project
+    from services.assurance_artifacts import (
+        canonical_sha256, import_status, parse_table, quarantined, table_as_written,
+    )
+
+    project, root, _ = _project()
+    byte_hash = hashlib.sha256(payload).hexdigest()
+    if quarantined(root, byte_hash[:16]):
+        workflow._refuse(
+            "artifact_quarantined",
+            "This exact file failed an integrity check earlier and is quarantined; it cannot be "
+            "published again. Tell the user it is unavailable and do not retry this call.", 409)
+    try:
+        dataset = table_as_written(fmt, written)
+        same = canonical_sha256(parse_table(fmt, payload)) == canonical_sha256(dataset)
+    except Exception:  # noqa: BLE001 -- a value the file cannot hold as given
+        same = False
+    if not same:
+        workflow._refuse(
+            "table_round_trip_failed",
+            "The file would not read back as the table given (a value it cannot hold exactly); "
+            "nothing was saved. Tell the user which export failed.", 409)
+    if fmt == "csv":
+        render_spec = {"format": "csv", "encoding": "utf-8", "delimiter": ",", "line_terminator": "\r\n",
+                       "formula_escaping": "EXPORT-INJECT-1"}
+        limitations = ["Cells are text as written."]
+    else:
+        render_spec = {"format": "xlsx", "sheets": [name for name, _ in written],
+                       "formula_escaping": "EXPORT-INJECT-1", "numbers": "%.16g"}
+        limitations = ["Numbers are stored to 16 significant digits; NaN, infinity and empty text are empty cells."]
+    validity = {"coverage": "rows_as_written", "limitations": limitations}
+    if ctx.network is not None and "assistant_import" in ctx.network.meta:
+        validity["import_status"] = import_status(ctx)  # R4: only with an import stamp
+    manifest = {"schema_version": 1, "project_id": str(project.id), "source_kind": "table_export",
+                "dataset": dataset, "render_spec": render_spec,
+                "dataset_sha256": canonical_sha256(dataset), "render_spec_sha256": canonical_sha256(render_spec),
+                "artifact_sha256": byte_hash, "validity": validity}
+    record = {"filename": filename, "rows": sum(len(rows) for _, rows in written), "manifest": manifest}
+    return _publish_sealed_export(root, record, payload, filename, mime)[0]
 
 
 def export_preview_png(filename: str, png_bytes_b64: str) -> dict:
@@ -9828,6 +9993,10 @@ DISPATCHERS.update({
 DISPATCHERS.update({
     "get_site_anchor": get_site_anchor,
     "set_site_anchor": set_site_anchor,
+    "site_scene_read": site_scene_read,
+    "site_scene_prepare": site_scene_prepare,
+    "site_scene_apply": site_scene_apply,
+    "site_scene_cancel": site_scene_cancel,
     "get_process_view": get_process_view,
     "get_grid_risk_production": get_grid_risk_production,
     "campus_save_campus": campus_save_campus,
@@ -10103,7 +10272,7 @@ def _check_foreign_lock(tool_name: str, task_id=None) -> None:
                 "error_kind": "project_locked",
                 "message": (
                     "This project is being edited by another user, so "
-                    f"{tool_name!r} was not run. Their edit lock must expire "
+                    "it was not run. Their edit lock must expire "
                     "or be released first."
                 ),
                 "lock": project_locks.serialize_lock(
@@ -10126,7 +10295,7 @@ def _check_foreign_lock(tool_name: str, task_id=None) -> None:
                 "error_kind": "project_lock_unavailable",
                 "message": (
                     "Could not verify this project's edit lock, so "
-                    f"{tool_name!r} was not run. Retry in a moment."
+                    "it was not run. Retry in a moment."
                 ),
             },
         ) from None

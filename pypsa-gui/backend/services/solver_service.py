@@ -90,6 +90,7 @@ from services.solver.periodized_costs import (  # noqa: F401
 )
 from services.validation_service import has_errors, validate_for_run
 from services.solver import fixed_sizes as _fixed_sizes
+from services.solver import operational as _operational
 from services.solver.adequacy import (  # noqa: F401
     _prm_margin,
     _wrap_with_ens_cap,
@@ -115,6 +116,7 @@ from services.solver.pcs_statcom import clear_solution as _clear_pcs_statcom
 from services.solver.pcs_statcom import HORIZON_BASIS as _PQ_HORIZON_BASIS
 from services.solver.pcs_statcom import MAX_BASIS as _PQ_MAX_BASIS
 from services.solver import lost_production as _lost_production
+from services.solver import dc_curtailment as _dc_curtailment
 from services.solver import process_uc as _process_uc
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
 # the LP-terms wrapper, re-exported with the rest of the solver seams.
@@ -569,6 +571,8 @@ def build_lp_chain(network, config, log_queue):
     extra_fn = _wrap_with_sizing_cuts(network, extra_fn, log_queue=log_queue)  # AS-06 sizing-loop cuts
     # Reserve products on backup storage (DC 06): headroom above the backup floor. No-op without products.
     extra_fn = _wrap_with_reserve_products(network, extra_fn, config, log_queue=log_queue)
+    # Curtailable data-centre load (DC-07 S2): the duration's energy-proxy rows. No-op when off.
+    extra_fn = _dc_curtailment._wrap_with_dc_curtailment(network, extra_fn, log_queue=log_queue)
     # Edge Investment Case LP-level commercial terms (peaks, ratchets,
     # tiers, group caps; spec §5.1). After the reserve margin, before the
     # objective scale, which must stay last.
@@ -703,6 +707,7 @@ def run_simulation(
             # AS-12: likewise the PCS/STATCOM sizes; a success persists this run's after the solve.
             _clear_pcs_statcom(network)
             _clear_reserves(network)  # DC 06: likewise the reserve commitments
+            _dc_curtailment.clear(network)  # DC-07 S2: likewise the curtailment record and series
             t_solve = time.time()
             # Clean up stale `transformer.type` strings that don't match any
             # row in n.transformer_types. The GUI's presets are display
@@ -1050,6 +1055,10 @@ def run_simulation(
                     getattr(config, "solve_strategy", "full") == "myopic"
                     and config.multi_investment_periods
                 )
+                # DC 07: an operational run (rolling on fixed sizes) never falls
+                # back to the full horizon below; it is refused instead (C6).
+                _operational.fallback_refusal(config, sclopf=use_sclopf)
+                network.meta.pop(_operational.META_KEY, None)
                 use_rolling = (
                     getattr(config, "solve_strategy", "full") == "rolling"
                     and not use_sclopf
@@ -1071,6 +1080,8 @@ def run_simulation(
                         raise ValueError(
                             f"rolling_overlap ({O}) must be < rolling_horizon ({H})."
                         )
+                    # DC-07 S2: no duration rows across windows until C20's carry-in.
+                    _dc_curtailment.refuse_rolling()
                     phase(
                         f"Rolling-horizon solve: {len(network.snapshots)} snapshots "
                         f"in windows of {H} (overlap {O})"
@@ -1207,6 +1218,44 @@ def run_simulation(
                         # consistent data. See `_patch_passive_branch_holes`
                         # docstring for the failure mode this works around.
                         _patch_passive_branch_holes(network, phase)
+                    elif use_rolling and _operational.is_operational(config):
+                        # DC 07: dispatch the frozen design window by window, each
+                        # window's status checked (services/solver/operational.py).
+                        _operational.refuse_sizeable(network)
+                        with _operational.non_cyclic(network) as _cyclic_off:
+                            if _cyclic_off:
+                                phase(f"Operational run: cyclic state of charge is off for "
+                                      f"{len(_cyclic_off)} storage(s); window 1 starts from "
+                                      "the configured initial state "
+                                      "[operational_cyclic_off].")
+                            try:
+                                _windows = _operational.run_windows(
+                                    network, horizon=H, overlap=O,
+                                    solver_name=config.solver_name,
+                                    extra_functionality=extra_fn,
+                                    **proc_uc_kwargs,
+                                    **merged_solver_options,
+                                )
+                                _failed = None
+                            except _operational.OperationalWindowFailed as _wexc:
+                                _windows, _failed = None, _wexc
+                        _capture_extendable_p_nom_opt_to_frozen_store(network, phase)
+                        _rescale_results_for_objective(network, log_queue=log_queue)
+                        if _failed is not None:
+                            phase(f"{_failed} [{_failed.kind}]")
+                            status = _failed.window["status"]
+                            condition = (f"{_failed.kind}: window "
+                                         f"{_failed.window['index'] + 1}: "
+                                         f"{_failed.window['condition']}")
+                            network.meta.pop(_operational.META_KEY, None)
+                        else:
+                            _operational_report = _operational.report(
+                                network, config, horizon=H, overlap=O,
+                                window_records=_windows, cyclic_off=_cyclic_off)
+                            network.meta[_operational.META_KEY] = _operational_report
+                            phase(f"Operational run: {len(_windows)} window(s) solved; "
+                                  f"stitched opex {_operational_report['opex']:.6g}.")
+                            status, condition = "ok", "optimal"
                     elif use_rolling:
                         # PyPSA's rolling-horizon returns the network itself
                         # (not a (status, condition) tuple) and, on a non-ok
@@ -1370,6 +1419,8 @@ def run_simulation(
                     # cleared, only after a successful non-operational solve.
                     from services.commercial.settlement_inputs import commit_dsr
                     commit_dsr(network, captured.get("dsr_t"), captured.get("dsr_total_mwh"))
+                    # DC-07 S2: the curtailed energy, apart from unserved energy.
+                    _dc_curtailment.commit(network, captured)
                     # Published only after a successful solve, like the commit
                     # (WP1.5a review #6); None after a plain successful solve.
                     _emit_state(last_commercial_terms=(
@@ -1695,6 +1746,15 @@ def run_simulation(
                 log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
         log_queue.put(f"[PHASE] Refused: {exc}")
         status, condition = "error", f"island_refused: {exc}"
+    except _dc_curtailment.DcCurtailmentRefused as exc:
+        # A refusal, not a crash (DC 07 S2): the curtailable load cannot be modelled as asked.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
+        log_queue.put(f"[PHASE] Refused: {exc} [{exc.kind}]")
+        status, condition = "error", f"curtailment_refused: {exc.kind}: {exc}"
     except _ReserveRefusal as exc:
         # A refusal, not a crash (DC grid readiness 06): the reserve rows cannot be
         # built as configured; the condition names the typed kind.
@@ -1705,6 +1765,15 @@ def run_simulation(
                 log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
         log_queue.put(f"[PHASE] Refused: {exc} [{exc.kind}]")
         status, condition = "error", f"reserve_refused: {exc.kind}: {exc}"
+    except _operational.OperationalRefused as exc:
+        # A refusal, not a crash (DC 07): the operational run cannot run as asked.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
+        log_queue.put(f"[PHASE] Refused: {exc} [{exc.kind}]")
+        status, condition = "error", f"operational_refused: {exc.kind}: {exc}"
     except ValidationRefused as exc:
         # Phase 12f: a refusal, not a failure. Same restore as the generic
         # handler (the network must not autosave carrying the run's vintage

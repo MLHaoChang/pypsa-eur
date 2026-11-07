@@ -3,7 +3,7 @@
 
 # LV-09: stored refs carry no fingerprint
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Found by: LV-09 (`09-durable-conversation.md`); owner list DOCS-1.
 
@@ -14,3 +14,14 @@ The current/discussed refs survive rotations but store no fingerprint, so a chan
 ## Where to look
 
 The durable conversation's ref store described in `.scratch/live-voice/issues/09-durable-conversation.md` (lines ~35, ~70).
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: durable conversation ref store (`09-durable-conversation.md` ~35, ~70).
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: GK B.
+- Size: M.
+- Store the fingerprint with each current/discussed ref and compare on resume; test a changed target.

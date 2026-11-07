@@ -1,0 +1,3 @@
+{"kinds": {
+  "table_round_trip_failed": {"surface": "inline", "why": "export_to_csv's and export_to_excel's own refusal (workflow._refuse in services/chat_tools.py, AA-05 S3, R5): the written file would not read back as the table given, so nothing is saved. The model tells the user which export failed; it does not retry the same call."}
+}}

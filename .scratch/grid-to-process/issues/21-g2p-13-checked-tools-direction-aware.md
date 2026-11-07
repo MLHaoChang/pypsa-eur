@@ -3,7 +3,7 @@
 
 # G2P-13: make `checked_tools` direction-aware so an enum widening is accepted by `--write`
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Found by: G2P-13 (#1194) PR body, "Follow-up".
 
@@ -14,3 +14,14 @@ Found by: G2P-13 (#1194) PR body, "Follow-up".
 ## Where to look
 
 `pypsa-gui/backend/harness/assurance_contracts.py`, the `checked_tools` handling (`"checked_tools": "returns"`, ~line 56 and ~125).
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `pypsa-gui/backend/harness/assurance_contracts.py` (`checked_tools`, ~56, ~125).
+- Blocked by: none.
+- Model tier: opus.
+- Gated: GK B; send the plan to GK B first (AA-V1-CHANGE-1).
+- Size: M.
+- Widening of a checked tool's input enum accepted by `--write`; narrowing or removal still refused; test both directions.

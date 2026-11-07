@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): After Stop, a tool row left open by the stopped turn now reads "No answer (the turn ended first)" instead of "Working", and a running solve's status tells the assistant that no automatic update is armed, so it no longer promises to report back (LC-24).

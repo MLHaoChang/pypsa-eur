@@ -234,6 +234,27 @@ Personal read-only rules remain authoritative even for a field marked editable;
 the strict checked pilot continues to refuse this unmapped tool. Non-component
 service/domain schemas and exact target resolution remain LC-01 follow-ups.
 
+## Site 3D scene tools (SC-07)
+
+`site_scene_read`, `site_scene_prepare`, `site_scene_apply` and `site_scene_cancel`
+(`services/site_scene/chat.py`) run the functions the scene routes run, on the
+caller's foreground project, re-authorized on every call. A `site_id` is only a
+key: an unknown, deleted or foreign one is the route's `not_found`.
+- **Read** is capped in items and bytes, names every cut (`truncated`) and gap
+  (`unavailable`), lists its user-authored fields (`data_fields`) and returns
+  no coordinates, footprints or meshes.
+- **Prepare** is read-tier with no card, but checks the edit lock and the saved
+  chat rule. A caller holds at most `MAX_LIVE_PER_OWNER` open previews, and a
+  chat preview never evicts another one (`proposals._admit_owned`); the route
+  keeps its evicting behaviour.
+- **Apply** needs `proposal_id`, `input_hash` and `expected_revision`, and its
+  card (`edit_card_site.py`) binds them with the owner, project and Site.
+- **Cancel** reaches only the caller's own preview and carries no card
+  (`GUIDED_UNCARDED`).
+- **Per-turn block.** The browser's `ui_context.site_scene` hint only names the
+  Site. The `[site 3d]` lines in the per-turn block (`compose._format_ui_context`,
+  D11's frozen block) come from a server re-read.
+
 ## Edit cards (LC-04)
 
 Owner decision Q3: every chat edit shows an old → new card before it applies,
@@ -956,7 +977,40 @@ charts require aligned dispatch and matching solve-input provenance;
 parameter edits invalidate the fingerprint even when component axes match.
 The solve service records that provenance under the existing solve lock and
 netCDF preserves it. Older imported solved files need a new solve before
-result charting. Private cloning skips the native solver model without
+result charting. A selection mixing assets with and without a series for the
+attribute refuses `chart_data_partial`, so a static value a series overrides
+is never drawn (AA-05 S1). A non-finite value refuses with the asset and
+first snapshot named. The manifest's `scope` and `solve_stamp` (the solve's
+input/exact fingerprints; null for input charts) are verified on download:
+both absent reads as `legacy`, a wrong value refuses, and a result chart from
+another solve refuses; the same solve with inputs edited since reads
+`solve_stale` and an unloaded project reads `solve_not_rechecked`, never
+`current`. The download sends the status as `X-Chart-Scope` and a delivery
+manifest names each chart's `scope_status`. An integrity failure (bytes,
+dataset, sidecar, manifest, project or labels) writes a quarantine marker
+`assistant_artifacts/quarantine/<file_id>.json` under `durable.file_lock`;
+it is never cleared, so restored bytes or a repaired sidecar stay refused and
+only a new file_id passes (AA-05 S2); `create_chart` refuses an identical
+redraw with `artifact_quarantined` before writing anything. IO errors and stale or unrechecked
+solves write no marker, and an unreadable marker refuses. Scoped manifests
+also check the render spec's labels against the dataset; legacy manifests
+verify as before. A delivery whose scoped charts do not share one solve stamp
+(or, for input charts, one input fingerprint), or that mixes legacy and
+scoped charts, refuses `delivery_mixed_runs`; each checked chart's item keeps
+its `evidence_status` and, when expired or missing, its `evidence_note`.
+`import_uploaded_network` stamps `network.meta["assistant_import"]` with a fresh
+server-minted id and drops any `assistant_validated_*` key the file carries; the
+network reads `input_assertion` until `validate_network` passes, which records
+the import id, sha256 and exact input fingerprint in the app-data store
+(`assistant_import_validations/`), never in the network. `import_status` reads
+`validated` only while all three still match, and charts and table exports drawn
+from an imported network seal the status they were drawn with (AA-05 S3).
+`inspect_import` names the CSV delimiter as `comma (not detected)` and infers no
+units or mapping. `export_to_csv` and `export_to_excel` seal the table as the
+file holds it (Excel numbers to 16 significant digits) after re-parsing the
+bytes, or refuse `table_round_trip_failed`; download and delivery re-parse it
+again, quarantining on a seal or byte mismatch and refusing without a marker on
+parser drift. Private cloning skips the native solver model without
 changing the live model. `build_delivery` bundles selected authorized
 artifacts and a content-hash/provenance manifest within the 25 MB limit.
 All existing agent exports now include authenticated download metadata.

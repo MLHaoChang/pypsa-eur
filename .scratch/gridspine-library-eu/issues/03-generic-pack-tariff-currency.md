@@ -1,6 +1,6 @@
 # 03. A `generic` pack tariff carries no currency, so the currency gate cannot check it
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Raised by: GS-01 session, issue 01 (GK B condition C3), 2026-11-06.
 Gated: yes (money semantics; hash).
@@ -18,3 +18,14 @@ Issue 01 derives a tariff's currency from its jurisdiction. The defaults pack's 
 
 - `pypsa-gui/backend/services/library/defaults_pack/loader.py` (`_parse_tariffs`, `pack_tariff`, `tariff_is_unchanged`).
 - `pypsa-gui/backend/models/commercial.py` (`Tariff.currency`, `jurisdiction_currency`).
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `services/library/defaults_pack/loader.py`, `models/commercial.py`.
+- Blocked by: none.
+- Model tier: opus.
+- Gated: GK B (money semantics, hash).
+- Size: M.
+- Plan to GK B first: stamp-on-copy versus reading the currency from `pack_hash`; existing copies keep their hashes.

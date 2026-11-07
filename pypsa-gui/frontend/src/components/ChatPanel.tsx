@@ -213,6 +213,8 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   run_sensitivity_sweep: 'start the sensitivity cases',
   run_simulation: 'start a solve',
   run_ac_pf_stage: 'start the power-flow check',
+  wait_for_job: 'wait for the job to finish',
+  abort_simulation: 'stop the running job',
   run_frontier_study: 'start the cost-versus-reliability study',
   run_mc_study: 'start the random-outage reliability study',
   run_coupling_loop: 'start the planning loop that adjusts the shortfall limit',
@@ -298,7 +300,7 @@ export function guidedSettledToolIds(
 function guidedOutcomeLine(tool: string, now: CurrentToolOutcome): GuidedToolLine {
   const word = now.mark.word.charAt(0).toUpperCase() + now.mark.word.slice(1)
   const asOf = now.mark.inFlight ? `, as of ${outcomeClock(now.ts)}`
-    : now.why ? ` (${now.why})` : now.count ? ` (${now.count.text})` : ''
+    : now.why ? ` (${now.why})` : now.count ? ` (${now.count.text} ${now.count.verb} · ${now.count.rest} not ${now.count.verb})` : ''
   return { hidden: false, label: `${word}: ${guidedToolPhrase(tool)}${asOf}` }
 }
 
@@ -3599,7 +3601,16 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           // backend's denied line for the same call, which says the same.
           if (toolLine && m.tool_use_id && DENIED_LINE.test(m.content) && messages.some(o => o !== m && o.role === 'tool'
             && o.tool_use_id === m.tool_use_id && toolOutcomeOf(o.tool_result, o.tool_name)?.outcome === 'denied')) return null
-          const toolLabel = toolLine && !toolLine.hidden ? toolLine.label : null
+          // LC-24: a call that never got an outcome, with a later user or
+          // assistant message and no turn running, ended unanswered (Stop, a
+          // dropped stream, a reload): never "Working". Both modes say so.
+          const abandoned = m.role === 'tool' && !(toolLine && toolLine.hidden) && !streaming && pendingCard == null
+            && messages.slice(index + 1).some(o => o.role === 'user' || o.role === 'assistant')
+            && !!m.tool_use_id && REQUEST_LINE.test(m.content) && !outcomeNow
+            && !guidedSettledToolIds(messages).has(m.tool_use_id)
+          const toolLabel = toolLine && !toolLine.hidden
+            ? (abandoned ? `No answer: ${guidedToolPhrase(REQUEST_LINE.exec(m.content)![1])} (the turn ended first)` : toolLine.label)
+            : null
           // Issue 04 S4a: a call your project rule blocked links to where that rule is set.
           const accessLink = outcomeNow?.mark.outcome === 'denied'
             && toolOutcomeOf(m.tool_result, m.tool_name)?.reason === 'user_restriction' ? (
@@ -3672,7 +3683,10 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                   )}
                 </>
               )
-              : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
+              : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                {m.content}
+                {abandoned && <span data-testid="chat-tool-no-answer">{' · no answer (the turn ended first)'}</span>}
+              </span>}
             {m.role === 'assistant' && m.answer_id && m.receipt && <CheckedEvidenceCard answerId={m.answer_id} receipt={m.receipt} />}
             {m.role === 'assistant' && m.answer_id && m.receipt?.chart && <CheckedChart chart={m.receipt.chart} profile={m.receipt.request_scope?.profile} entity={m.receipt.request_scope?.entity_id} />}
             {m.role === 'tool' && m.tool_use_id && (

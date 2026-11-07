@@ -141,6 +141,32 @@ describe('chat tool-line outcome marks', () => {
       .toBe('–run_simulation (outcome unknown: the result could not be read)')
   })
 
+  it('LC-24: a call left open when the turn ends is settled, never Working', async () => {
+    await turn('guided')
+    emit('tool_request', { tool_use_id: 'w1', tool_name: 'wait_for_job', safety_tier: 'job' })
+    expect(screen.getByTestId('chat-tool-label').textContent).toMatch(/^Working:/)
+    emit('done', { stop_reason: 'aborted' })
+    act(() => useChatStore.setState({ streaming: false, messages: [
+      ...useChatStore.getState().messages,
+      { id: 'u2', role: 'user', content: "What's happening?", ts: 99 },
+    ] }))
+    const label = screen.getByTestId('chat-tool-label').textContent
+    expect(label).toMatch(/^No answer: .*\(the turn ended first\)$/)
+    expect(label).not.toMatch(/Working/)
+  })
+
+  it('LC-24: Expert: an open call says no answer', async () => {
+    await turn('expert')
+    emit('tool_request', { tool_use_id: 'w1', tool_name: 'wait_for_job', safety_tier: 'job' })
+    expect(screen.queryByTestId('chat-tool-no-answer')).toBeNull()
+    emit('done', { stop_reason: 'aborted' })
+    act(() => useChatStore.setState({ streaming: false, messages: [
+      ...useChatStore.getState().messages,
+      { id: 'u2', role: 'user', content: "What's happening?", ts: 99 },
+    ] }))
+    expect(screen.getByTestId('chat-tool-no-answer').textContent).toBe(' · no answer (the turn ended first)')
+  })
+
   it('says why a queue job cannot be checked yet, in both modes', async () => {
     await turn('expert')
     call('w', 'wait_for_job', 'uncertain', 'ad:7', 'adapter_pending')
@@ -148,7 +174,7 @@ describe('chat tool-line outcome marks', () => {
       .toBe('–wait_for_job (outcome unknown: this kind of job cannot be checked yet)')
     act(() => useUIStore.setState({ uiMode: 'guided' }))
     expect(screen.getByTestId('chat-tool-label').textContent)
-      .toBe('Outcome unknown: use wait for job (this kind of job cannot be checked yet)')
+      .toBe('Outcome unknown: wait for the job to finish (this kind of job cannot be checked yet)')
   })
 
   it('shows a partly done write with its count in both modes', async () => {
@@ -159,7 +185,7 @@ describe('chat tool-line outcome marks', () => {
         paths_not_done: ['/Generator/G4/p_nom'] }, updated: 5 } })
     expect(screen.getByTestId('chat-tool-outcome').textContent).toBe('–bulk_update_components (partly done: 3 of 5 updated)')
     act(() => useUIStore.setState({ uiMode: 'guided' }))
-    expect(screen.getByTestId('chat-tool-label').textContent).toBe('Partly done: update components (3 of 5)')
+    expect(screen.getByTestId('chat-tool-label').textContent).toBe('Partly done: update components (3 of 5 updated · 2 not updated)')
   })
 
   it.each([

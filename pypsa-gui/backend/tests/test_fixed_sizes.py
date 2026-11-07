@@ -239,7 +239,6 @@ def test_capacity_run_on_an_unsolved_network_is_refused(reset_backend):
 
 @pytest.mark.parametrize("cfg,code", [
     ({"solve_strategy": "myopic", "multi_investment_periods": True}, "fixed_sizes_with_myopic"),
-    ({"solve_strategy": "rolling"}, "fixed_sizes_with_rolling"),
     ({"mode": "pf"}, "fixed_sizes_pf_mode"),
 ])
 def test_strategies_that_freeze_on_their_own_are_refused(reset_backend, cfg, code):
@@ -295,7 +294,7 @@ def test_the_new_codes_file_to_scenarios():
     from services import flow_sections as F
 
     for code in ("fixed_sizes_no_capacity_run", "fixed_sizes_source_changed",
-                 "fixed_sizes_with_myopic", "fixed_sizes_with_rolling", "fixed_sizes_pf_mode",
+                 "fixed_sizes_with_myopic", "fixed_sizes_pf_mode",
                  "fixed_sizes_nameplate_empty", "fixed_sizes_zero_nameplate",
                  "fixed_sizes_unknown"):
         assert F.file_issue(code, "", "", frozenset()) == "scenarios", code
