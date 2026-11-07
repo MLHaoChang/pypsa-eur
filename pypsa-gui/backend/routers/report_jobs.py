@@ -202,7 +202,7 @@ def _start(project: AuthorizedProject, **kwargs: Any) -> str:
     except SummarySectionUnknown as exc:
         raise HTTPException(400, {
             "error_kind": "summary_section_unknown",
-            "message": f"The summary declaration names {exc.args[0]!r}, which the report does not have.",
+            "message": f"The summary declaration names the section {exc.args[0]}, which the report does not have.",
         }) from exc
     except KeyError as exc:
         raise HTTPException(404, {
@@ -221,7 +221,7 @@ def _summaries(declared: list[SummaryDeclaration] | None) -> dict[str, list[str]
         if item.section_id in out:
             raise HTTPException(400, {
                 "error_kind": "summary_section_unknown",
-                "message": f"The summary {item.section_id!r} is declared twice.",
+                "message": f"The summary section {item.section_id} is declared twice.",
             })
         out[item.section_id] = list(item.sections)
     return out
