@@ -3600,14 +3600,14 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           if (toolLine && m.tool_use_id && DENIED_LINE.test(m.content) && messages.some(o => o !== m && o.role === 'tool'
             && o.tool_use_id === m.tool_use_id && toolOutcomeOf(o.tool_result, o.tool_name)?.outcome === 'denied')) return null
           // LC-24: a call that never got an outcome, with a later user or
-          // assistant message and no turn running, was abandoned (Stop):
-          // settle it, never "Working".
-          const abandoned = !!toolLine && !toolLine.hidden && !streaming && pendingCard == null
+          // assistant message and no turn running, ended unanswered (Stop, a
+          // dropped stream, a reload): never "Working". Both modes say so.
+          const abandoned = m.role === 'tool' && !(toolLine && toolLine.hidden) && !streaming && pendingCard == null
             && messages.slice(index + 1).some(o => o.role === 'user' || o.role === 'assistant')
             && !!m.tool_use_id && REQUEST_LINE.test(m.content) && !outcomeNow
             && !guidedSettledToolIds(messages).has(m.tool_use_id)
           const toolLabel = toolLine && !toolLine.hidden
-            ? (abandoned ? `Stopped: ${guidedToolPhrase(REQUEST_LINE.exec(m.content)![1])} (the turn was stopped)` : toolLine.label)
+            ? (abandoned ? `No answer: ${guidedToolPhrase(REQUEST_LINE.exec(m.content)![1])} (the turn ended first)` : toolLine.label)
             : null
           // Issue 04 S4a: a call your project rule blocked links to where that rule is set.
           const accessLink = outcomeNow?.mark.outcome === 'denied'
@@ -3681,7 +3681,10 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
                   )}
                 </>
               )
-              : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
+              : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                {m.content}
+                {abandoned && <span data-testid="chat-tool-no-answer">{' · no answer (the turn ended first)'}</span>}
+              </span>}
             {m.role === 'assistant' && m.answer_id && m.receipt && <CheckedEvidenceCard answerId={m.answer_id} receipt={m.receipt} />}
             {m.role === 'assistant' && m.answer_id && m.receipt?.chart && <CheckedChart chart={m.receipt.chart} profile={m.receipt.request_scope?.profile} entity={m.receipt.request_scope?.entity_id} />}
             {m.role === 'tool' && m.tool_use_id && (

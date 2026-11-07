@@ -151,8 +151,20 @@ describe('chat tool-line outcome marks', () => {
       { id: 'u2', role: 'user', content: "What's happening?", ts: 99 },
     ] }))
     const label = screen.getByTestId('chat-tool-label').textContent
-    expect(label).toMatch(/^Stopped: .*\(the turn was stopped\)$/)
+    expect(label).toMatch(/^No answer: .*\(the turn ended first\)$/)
     expect(label).not.toMatch(/Working/)
+  })
+
+  it('LC-24: Expert: an open call says no answer', async () => {
+    await turn('expert')
+    emit('tool_request', { tool_use_id: 'w1', tool_name: 'wait_for_job', safety_tier: 'job' })
+    expect(screen.queryByTestId('chat-tool-no-answer')).toBeNull()
+    emit('done', { stop_reason: 'aborted' })
+    act(() => useChatStore.setState({ streaming: false, messages: [
+      ...useChatStore.getState().messages,
+      { id: 'u2', role: 'user', content: "What's happening?", ts: 99 },
+    ] }))
+    expect(screen.getByTestId('chat-tool-no-answer').textContent).toBe(' · no answer (the turn ended first)')
   })
 
   it('says why a queue job cannot be checked yet, in both modes', async () => {
