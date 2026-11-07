@@ -1339,6 +1339,18 @@ def _continuation_message(task, job):
     return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']}){cases}{continuation_note(job['outcome'])}"
 
 
+def continuation_armed(session) -> bool:
+    """LC-24: a plan step of this conversation is waiting on a job and will
+    continue it (armed or due), so a promise of a later report is true."""
+    with _LOCK:
+        for path, task in _owned_tasks():
+            for step in task["steps"]:
+                job = step.get("job") or {}
+                if job.get("session_id") == session.session_id and job.get("continuation") in ("armed", "due"):
+                    return True
+    return False
+
+
 def dismiss_continuation(session, job_id):
     """"Stop waiting": this conversation will not continue for the job. The
     job itself runs on; nothing is cancelled."""
