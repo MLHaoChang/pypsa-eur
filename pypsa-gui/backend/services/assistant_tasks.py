@@ -1339,6 +1339,22 @@ def _continuation_message(task, job):
     return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']}){cases}{continuation_note(job['outcome'])}"
 
 
+def continuation_armed(session) -> bool:
+    """LC-24: a plan step of this conversation is waiting on a job and will
+    continue it (armed or due), so a promise of a later report is true."""
+    from harness import job_adapters
+    with _LOCK:
+        for path, task in _owned_tasks():
+            for step in task["steps"]:
+                job = step.get("job") or {}
+                # Only a foreground-solve handle: a plan armed on a study or
+                # queue job says nothing about the solve running now.
+                if job.get("session_id") == session.session_id and job.get("continuation") in ("armed", "due") \
+                        and str(job.get("job_id") or "").startswith(job_adapters.FOREGROUND_PREFIX):
+                    return True
+    return False
+
+
 def dismiss_continuation(session, job_id):
     """"Stop waiting": this conversation will not continue for the job. The
     job itself runs on; nothing is cancelled."""
