@@ -289,6 +289,29 @@ def test_a_sidecar_over_two_mebibytes_is_refused_and_quarantined(baseline, clien
     else:
         assert client.get(chart["download_url"]).status_code == 200
 
+
+def test_a_sidecar_with_a_missing_key_is_refused_and_quarantined(baseline, client):
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    reseal(chart, lambda record, manifest: manifest.pop("schema_version"))
+    assert client.get(chart["download_url"]).status_code == 409
+    assert marker(chart)["reason_code"] == "sidecar"
+
+
+def test_a_sidecar_that_is_not_json_is_refused_and_quarantined(baseline, client):
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    paths(chart)[2].write_text("{")
+    assert client.get(chart["download_url"]).status_code == 409
+    assert marker(chart)["reason_code"] == "sidecar"
+
+
+def test_a_result_manifest_missing_its_validity_is_refused_and_quarantined(
+    solved, client
+):
+    chart = chat_tools.create_chart("Generator", "p", ["G1"], source="result")
+    reseal(chart, lambda record, manifest: manifest.pop("validity"))
+    assert client.get(chart["download_url"]).status_code == 409
+    assert marker(chart)["reason_code"] == "manifest"
+
 def test_a_legacy_manifest_gets_no_label_check(baseline, client):
     # J3: a chart drawn before S1 (no scope keys) verifies as on master, even
     # if an older create_chart titled it differently.
