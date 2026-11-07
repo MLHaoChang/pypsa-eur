@@ -50,6 +50,8 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A backend refusal opens with the panel's field label, never a field key ("Energy price: …", not "energy_price_per_mwh: …") (#1199, #1190, UX-RULES-1107).
 - One money notation per section, in the `money()` style (#1199, UX-RULES-1107).
 - Every chip style has a visible key (#1199, UX-RULES-1107).
+- A chat row's settled words are true in every case that reaches them (Stop, a dropped stream, a reload) and never imply that a job stopped, e.g. "No answer: <phrase> (the turn ended first)" (#1220, UX-RULES-1107B).
+- Model-facing tool messages may name tools and ids; the user-visible Details get plain words through `TOOL_OUTCOME_DENIED_DETAIL_WORDS` (#1213, UX-RULES-1107B).
 
 ## Master merges
 
