@@ -90,6 +90,7 @@ from services.solver.periodized_costs import (  # noqa: F401
 )
 from services.validation_service import has_errors, validate_for_run
 from services.solver import fixed_sizes as _fixed_sizes
+from services.solver import operational as _operational
 from services.solver.adequacy import (  # noqa: F401
     _prm_margin,
     _wrap_with_ens_cap,
@@ -1054,6 +1055,10 @@ def run_simulation(
                     getattr(config, "solve_strategy", "full") == "myopic"
                     and config.multi_investment_periods
                 )
+                # DC 07: an operational run (rolling on fixed sizes) never falls
+                # back to the full horizon below; it is refused instead (C6).
+                _operational.fallback_refusal(config, sclopf=use_sclopf)
+                network.meta.pop(_operational.META_KEY, None)
                 use_rolling = (
                     getattr(config, "solve_strategy", "full") == "rolling"
                     and not use_sclopf
@@ -1213,6 +1218,44 @@ def run_simulation(
                         # consistent data. See `_patch_passive_branch_holes`
                         # docstring for the failure mode this works around.
                         _patch_passive_branch_holes(network, phase)
+                    elif use_rolling and _operational.is_operational(config):
+                        # DC 07: dispatch the frozen design window by window, each
+                        # window's status checked (services/solver/operational.py).
+                        _operational.refuse_sizeable(network)
+                        with _operational.non_cyclic(network) as _cyclic_off:
+                            if _cyclic_off:
+                                phase(f"Operational run: cyclic state of charge is off for "
+                                      f"{len(_cyclic_off)} storage(s); window 1 starts from "
+                                      "the configured initial state "
+                                      "[operational_cyclic_off].")
+                            try:
+                                _windows = _operational.run_windows(
+                                    network, horizon=H, overlap=O,
+                                    solver_name=config.solver_name,
+                                    extra_functionality=extra_fn,
+                                    **proc_uc_kwargs,
+                                    **merged_solver_options,
+                                )
+                                _failed = None
+                            except _operational.OperationalWindowFailed as _wexc:
+                                _windows, _failed = None, _wexc
+                        _capture_extendable_p_nom_opt_to_frozen_store(network, phase)
+                        _rescale_results_for_objective(network, log_queue=log_queue)
+                        if _failed is not None:
+                            phase(f"{_failed} [{_failed.kind}]")
+                            status = _failed.window["status"]
+                            condition = (f"{_failed.kind}: window "
+                                         f"{_failed.window['index'] + 1}: "
+                                         f"{_failed.window['condition']}")
+                            network.meta.pop(_operational.META_KEY, None)
+                        else:
+                            _operational_report = _operational.report(
+                                network, config, horizon=H, overlap=O,
+                                window_records=_windows, cyclic_off=_cyclic_off)
+                            network.meta[_operational.META_KEY] = _operational_report
+                            phase(f"Operational run: {len(_windows)} window(s) solved; "
+                                  f"stitched opex {_operational_report['opex']:.6g}.")
+                            status, condition = "ok", "optimal"
                     elif use_rolling:
                         # PyPSA's rolling-horizon returns the network itself
                         # (not a (status, condition) tuple) and, on a non-ok
@@ -1722,6 +1765,15 @@ def run_simulation(
                 log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
         log_queue.put(f"[PHASE] Refused: {exc} [{exc.kind}]")
         status, condition = "error", f"reserve_refused: {exc.kind}: {exc}"
+    except _operational.OperationalRefused as exc:
+        # A refusal, not a crash (DC 07): the operational run cannot run as asked.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
+        log_queue.put(f"[PHASE] Refused: {exc} [{exc.kind}]")
+        status, condition = "error", f"operational_refused: {exc.kind}: {exc}"
     except ValidationRefused as exc:
         # Phase 12f: a refusal, not a failure. Same restore as the generic
         # handler (the network must not autosave carrying the run's vintage

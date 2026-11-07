@@ -88,7 +88,8 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         get_project_sites set_project_sites get_project_layout update_project_layout get_project_flow
         get_project_flow_scope update_project_flow_scope get_project_network_meta get_meta update_meta
         project_readiness get_site_template_form fetch_site_context geocode_place get_osm_suggestions
-        list_project_network_component set_site_connection get_site_anchor set_site_anchor""",
+        list_project_network_component set_site_connection get_site_anchor set_site_anchor
+        site_scene_read site_scene_prepare site_scene_apply site_scene_cancel""",
     'network-topology': """
         batch_create_components batch_delete_components bulk_update_components cascade_delete_bus
         create_carrier create_component delete_component get_component get_component_schema list_carriers

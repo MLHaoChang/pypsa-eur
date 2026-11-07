@@ -1,6 +1,6 @@
 # 02. The tariff builder has no currency input
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Raised by: GK B (27), plan verdict on issue 01 (condition C4), 2026-11-06.
 Gated: no (UI; UX review).
@@ -21,3 +21,14 @@ Since issue 01, a Library tariff needs a currency, stated or implied by an ISO j
 
 - `pypsa-gui/frontend/src/pages/results/investment/TariffBuilder.tsx`, `tariffModel.ts` (`fieldKey`).
 - `pypsa-gui/backend/services/library/items.py` (`TariffCurrencyRequired`), `routers/library.py` (`_currency_required`).
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `pages/results/investment/TariffBuilder.tsx`, `tariffModel.ts`, `services/library/items.py`.
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: UX (12) (not gated otherwise).
+- Size: M.
+- Currency input defaulted from jurisdiction; restore "or state the currency" in the message; field labels in the error list. Needs UX placement OK in its plan.

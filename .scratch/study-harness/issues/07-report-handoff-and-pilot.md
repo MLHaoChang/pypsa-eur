@@ -147,6 +147,18 @@ GK B (26)'s E1–E9 were unrecoverable; this verdict replaces them (coordinator 
 >
 > GK B (31), session_01G7qCuiUB2VeFL67ZyXeCSQ
 
+### GK B (32): B3 plan verdict, GO WITH CHANGES (L1–L9, verbatim)
+
+> - **L1, split under PR-SIZE-1.** B3a is items 1–3 (the engine card, the EH evidence, recovery). B3b is items 4–6 (the pilot, the smoke, §9.3), built on B3a. B3a goes first, since the pilot depends on it.
+> - **L2, item 1: which branch.** Key it on the run record. A run that has never had any envelope id takes the card branch. A run with any envelope id at all (pending, granted, revoked or expired) keeps today's `no_envelope` → needs_user. That fails closed and needs no "was it ever granted" history.
+> - **L3, item 1: the card binds the number.** The card shows the clamp computed when the card is built, and on Continue the reservation is ≤ that shown max_solves. If the budget fell meanwhile, recompute it lower. It is never higher. If the recomputed clamp is 0, it is budget_spent with no call. restore stays base. Tests: the budget is lowered between card and Continue, and the reservation equals the lower value. Hand mutant: reserve the uncapped rule max_solves.
+> - **L4, item 2.** Match on project, ctx, job_id and started_at. Make the reservation release idempotent: a second resolve, or resolve plus a late settle, releases once. Test a double reconcile.
+> - **L5, item 3: one follower.** The "no live follower" check and the follower registration happen under one lock. A tick and a takeover racing on the same step start at most one follower. Test two concurrent recover() calls.
+> - **L6, item 3: older steps.** A waiting step stored before deadline_at existed has no deadline. It never times out by deadline; it goes to (b) or (c). Test a step with deadline_at absent.
+> - **L7, item 5: the smoke is offline and bounded.** No network: weather, tariff and fetch_site_context come from fixtures or the isolated Library. Give it a wall-clock bound (state it) that fails cleanly. If the real EH study can't run offline inside the bound, keep the smoke as a pixi task outside CI and say so in the PR. Don't add a flaky CI step.
+> - **L8, item 6.** An eh_site@1 change must not alter a run already started, beyond C8's synced stages (report, handoff) and E3's frozen explore. Your in-place C8 test asserts this for an old run record. If a §9.3 line would change an in-flight run's inputs or explore, bump to eh_site@2 instead, and ask me first.
+> - **L9, mutants.** Hand mutants, each with its killing test named: L2: the card branch is taken when any envelope id exists; the L3 cap; item 2: the generic run_evidence fallback is put back for eh_study; item 3: a lost record re-dispatches the study; the L5 lock. Plus mutants on the changed lines. Record L1–L9 in issue 07.
+
 ## Folded from #970
 
 Owner decision HARNESS-970-1 (3 Nov). Three items from #970 land here, all after the pilot works. None changes the acceptance criteria above.

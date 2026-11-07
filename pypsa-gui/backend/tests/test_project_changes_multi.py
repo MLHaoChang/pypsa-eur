@@ -122,7 +122,7 @@ def test_guided_asks_one_approval_and_still_cards_other_writes(mixed):
     from harness import confirm
 
     ctx, session, _ = mixed
-    assert confirm.GUIDED_UNCARDED == frozenset({"preview_project_changes"})
+    assert confirm.GUIDED_UNCARDED == frozenset({"preview_project_changes", "site_scene_cancel"})  # SC-07 S1 (GK B G4)
     frames = dispatch(session, "preview_project_changes", {"changes": OJ21}, guided=True)
     assert not [d for e, d in frames if e == "tool_pending_confirmation"]
     preview = frame(frames, "tool_result")["result"]

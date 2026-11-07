@@ -3,7 +3,7 @@
 
 # LC-03c — LC-T19 injection matrix on a past run's kept sections
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 
 Split from LC-03 at its close-out (acceptance map, `_pending` row). LC-T19 asks that
@@ -25,3 +25,14 @@ results_emissions). Ordinary (unchecked) turns are not evidence for LC-T19 (LC-C
 Acceptance: one parametrised backend test per family with a scripted model that injects
 each case; each is withheld or refused with a typed reason; a mutant that admits the
 current run's facts for the past run fails.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `tests/test_assurance_metrics.py`, `tests/test_retained_not_kept.py`, `checked_run_section`.
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: GK B.
+- Size: M.
+- Add the injection matrix per kept family against a past run; tests only unless it finds a leak.

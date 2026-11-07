@@ -1426,7 +1426,8 @@ def fetch_site_context(name: str, site_id: str) -> dict:
 
 # ── LV08 R2: the site anchor (Site 3D, SC-01a) and the process view ─────────
 #
-# The five Site 3D scene routes stay held for SC-07 (route parity `held-by-spec`).
+# The Site 3D scene routes are served by the site_scene_* tools below (SC-07 S1); adopt
+# and the results overlay stay held for SC-07 (route parity `held-by-spec`).
 
 
 def _scene_refusal(exc) -> HTTPException:
@@ -1466,6 +1467,33 @@ def set_site_anchor(name: str, lat: float, lng: float, source: str, confirmed: b
             return anchor.write_anchor(project.directory, body, expected_revision)
         except SceneError as exc:
             raise _scene_refusal(exc) from None
+
+
+# ── SC-07 S1: the Site 3D scene (services/site_scene/chat.py) ───────────────
+
+
+def site_scene_read(site_id: str | None = None, proposal_id: str | None = None) -> dict:
+    """`GET .../sites/{site_id}/scene` (and a pending proposal's status), bounded and summarized."""
+    from services.site_scene import chat
+    return chat.read(site_id=site_id, proposal_id=proposal_id)
+
+
+def site_scene_prepare(site_id: str, action: str, base_revision: int, inputs: dict) -> dict:
+    """`POST .../scene/proposals`: a preview only; owner/project from the server (G3), admitted per G2."""
+    from services.site_scene import chat
+    return chat.prepare(site_id, action, base_revision, inputs)
+
+
+def site_scene_apply(site_id: str, proposal_id: str, input_hash: str, expected_revision: int) -> dict:
+    """`POST .../proposals/{id}/apply` behind its card (harness/edit_card_site.py), exact preview only (G1)."""
+    from services.site_scene import chat
+    return chat.apply(site_id, proposal_id, input_hash, expected_revision)
+
+
+def site_scene_cancel(site_id: str, proposal_id: str) -> dict:
+    """`POST .../proposals/{id}/cancel`: the caller's own preview; unknown or expired changes nothing (G4)."""
+    from services.site_scene import chat
+    return chat.cancel(site_id, proposal_id)
 
 
 def get_process_view() -> dict:
@@ -9965,6 +9993,10 @@ DISPATCHERS.update({
 DISPATCHERS.update({
     "get_site_anchor": get_site_anchor,
     "set_site_anchor": set_site_anchor,
+    "site_scene_read": site_scene_read,
+    "site_scene_prepare": site_scene_prepare,
+    "site_scene_apply": site_scene_apply,
+    "site_scene_cancel": site_scene_cancel,
     "get_process_view": get_process_view,
     "get_grid_risk_production": get_grid_risk_production,
     "campus_save_campus": campus_save_campus,
@@ -10240,7 +10272,7 @@ def _check_foreign_lock(tool_name: str, task_id=None) -> None:
                 "error_kind": "project_locked",
                 "message": (
                     "This project is being edited by another user, so "
-                    f"{tool_name!r} was not run. Their edit lock must expire "
+                    "it was not run. Their edit lock must expire "
                     "or be released first."
                 ),
                 "lock": project_locks.serialize_lock(
@@ -10263,7 +10295,7 @@ def _check_foreign_lock(tool_name: str, task_id=None) -> None:
                 "error_kind": "project_lock_unavailable",
                 "message": (
                     "Could not verify this project's edit lock, so "
-                    f"{tool_name!r} was not run. Retry in a moment."
+                    "it was not run. Retry in a moment."
                 ),
             },
         ) from None

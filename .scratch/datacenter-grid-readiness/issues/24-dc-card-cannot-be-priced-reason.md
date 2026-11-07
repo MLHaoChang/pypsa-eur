@@ -3,7 +3,7 @@
 
 # DC Backup card: the "cannot be priced" reason gives no cause
 
-Status: needs-triage
+Status: ready-for-agent
 Type: wording
 Found by: Logged reviewing the DC cards (DC-05/DC-06); owner list DOCS-1.
 
@@ -14,3 +14,14 @@ The reason says that the cost cannot be priced but not why, nor which input to e
 ## Where to look
 
 `pypsa-gui/frontend/src/pages/DcBackupSection.tsx` line ~257: `The cost against the gensets cannot be priced.`
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `pypsa-gui/frontend/src/pages/DcBackupSection.tsx` (~257).
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: UX (12).
+- Size: S.
+- Name the missing input and add the "Missing: <input word> ›" link; test it.

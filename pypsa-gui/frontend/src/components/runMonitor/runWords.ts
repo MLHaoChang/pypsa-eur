@@ -176,3 +176,6 @@ export function stopWords(reason: string | undefined, stage: string): { words: s
     default: return { words: `Stopped at ${at}`, fix: 'resume', fixWords: 'Resume' }
   }
 }
+
+/** A research gap's name, one per gap key in a profile's `research.gaps` (parity: runWords.test.ts). */
+export const GAP_WORDS: Record<string, string> = { import_tariff: 'Import tariff' }

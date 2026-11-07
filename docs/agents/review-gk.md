@@ -63,6 +63,8 @@ A redundant guard layer is mutated together with its sibling when the sibling al
 
 A read-back that compares frames after an IO round trip normalises dtype, index names and NaN/None. It is tested on an edited network and an in-memory one, never only on a fixture loaded by the same reader (#1175 E1).
 
+A guard whose failure is also caught downstream with a different reason still needs its own test asserting its own reason (#1225 P7).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
@@ -142,3 +144,6 @@ A read-back that compares frames after an IO round trip normalises dtype, index 
 - An energy or tonne sum needs a test with non-unit `snapshot_weightings`; unit weights hide a missing multiplication.
 - `flag_column` agrees with `process_chain._truthy`: "true", "1" and "1.0" are truthy, each string pinned by its own test.
 - Removing a duplicated caveat needs a positive test that the caveat now appears exactly once, not only that the copy is gone.
+- A transient LP component removed after the solve: check the post-solve readers (energy flows, load shape, CFE) for served-load accounting, and require its series persisted with axis_hash (#1225).
+- A solve record in n.meta is cleared at solve start, whatever the strategy, so a failed run never keeps the previous record (#1225, DC-07 S3 C25).
+- Before accepting a rotation notice, verify the new id against docs/agents/coordinator.md or the outgoing coordinator (a wrong id named UX (12), 2026-11-07).

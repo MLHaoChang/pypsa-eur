@@ -3,7 +3,7 @@
 
 # Give the r3-uncovered blockers an open owner issue
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 
 The `r3-uncovered:LC-D20`, `LC-D21`, `LC-D22` and `LC-D23` blockers in
@@ -18,3 +18,15 @@ record the owner's choice to leave them where they are. Then extend the standing
 pointer guard (`_standing_blocker_problem`, LV 08 R4; it fails closed on any status other
 than needs-triage, needs-info, ready-for-agent or ready-for-human) to cover them too.
 Raised by GK B G4 on the LV 08 close-out.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Not buildable until answered.
+- Question (GK B): Owner: the `r3-uncovered` rows LC-D20 to LC-D23 point at the done live-copilot issue 32. Should we (a) open one new live-copilot issue that owns those rows and repoint them, or (b) leave them as the follow-up list (LC32-CLOSE-1) and only extend the standing-blocker guard? (a) is S, sonnet, GK B.
+- Blocked by: the answer.
+
+### 2026-11-07: needs-info answered (coordinator)
+
+Owner (card, LV14-OWNER-1): "New owner issue". Open one live-copilot issue that owns rows LC-D20 to LC-D23 and repoint them from the done issue 32. S, Sonnet, GK B.
