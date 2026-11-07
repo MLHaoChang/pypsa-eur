@@ -50,7 +50,9 @@ def _capture(request, checked, profile):
 def _answer(checked, scope, record):
     """The checked turn, answered with the record's own values."""
     values = {f["metric"]: f["value"] for f in record["facts"]}
-    frames = checked.run(NumericalProvider(values), message="Check results.", checked_scope=scope)
+    frames = checked.run(
+        NumericalProvider(values), message="Check results.", checked_scope=scope
+    )
     published = approval(frames)
     answer = checked.client.get("/api/chat/answers/" + published["answer_id"])
     assert answer.status_code == 200, answer.text
@@ -59,23 +61,38 @@ def _answer(checked, scope, record):
 
 def test_every_metric_has_one_weight_basis():
     assert list(fact_identity.WEIGHT_BASIS) == list(calculations.DEFINITIONS)
-    tokens = {"generators", "objective", "stores", "generators*years", "none", "derived",
-              "mixed:generators+stores"}
+    tokens = {
+        "generators",
+        "objective",
+        "stores",
+        "generators*years",
+        "none",
+        "derived",
+        "mixed:generators+stores",
+    }
     assert set(fact_identity.WEIGHT_BASIS.values()) <= tokens
 
 
-def test_every_metric_is_reached_by_a_profile_driver():
+def test_every_metric_belongs_to_a_driven_profile():
+    """Each metric is in some driven profile's list. A driver's scope may ask
+    for fewer (the cost scope names its own); those are listed in the PR."""
     reached = {m for p in PROFILES for m in calculations.PROFILES[p]}
     # capacity/1 asks for its DEFAULT_METRICS; configured_capacity is opt-in by name.
-    assert set(calculations.DEFINITIONS) - reached <= {"configured_capacity", "cost_delta",
-                                                      "cost_change_percent"}
+    assert set(calculations.DEFINITIONS) - reached <= {
+        "configured_capacity",
+        "cost_delta",
+        "cost_change_percent",
+    }
 
 
 @pytest.mark.parametrize("profile", PROFILES)
 def test_the_record_stores_its_window_and_solve_stamp(request, checked, profile):
     ctx, scope, record = _capture(request, checked, profile)
     window = record["window"]
-    assert (window["start"], window["end"]) == (record["scope"]["start"], record["scope"]["end"])
+    assert (window["start"], window["end"]) == (
+        record["scope"]["start"],
+        record["scope"]["end"],
+    )
     requested = calculations.requested_metrics(scope)
     if profile in fact_identity.NO_SNAPSHOT_INDEX:
         # No snapshot index: no count, and nothing is snapshot-weighted.
@@ -83,7 +100,9 @@ def test_the_record_stores_its_window_and_solve_stamp(request, checked, profile)
         assert set(window["weight_basis"].values()) == {"none"}
     else:
         assert isinstance(window["snapshots"], int) and window["snapshots"] >= 1
-    assert window["weight_basis"] == {m: fact_identity.WEIGHT_BASIS[m] for m in requested}
+    assert window["weight_basis"] == {
+        m: fact_identity.WEIGHT_BASIS[m] for m in requested
+    }
     assert record["solve_stamp"] == solve_stamp(ctx.network)
     assert record["project_id"] == ctx.project_uuid == scope["project_id"]
 
@@ -96,7 +115,10 @@ def test_each_surface_names_the_same_fact(request, checked, profile):
     for fact in record["facts"]:
         definition = calculations.definition(fact["metric"], profile)
         assert fact["formula_id"] == definition["formula_id"]
-        assert _unit_matches(fact["unit"], definition["unit"]), (fact["metric"], fact["unit"])
+        assert _unit_matches(fact["unit"], definition["unit"]), (
+            fact["metric"],
+            fact["unit"],
+        )
         assert fact["entity_id"] == scope["entity_id"]
         assert fact["path"] == "/" + fact["metric"]
     receipt, answer = _answer(checked, scope, record)
@@ -121,7 +143,9 @@ def test_each_surface_names_the_same_fact(request, checked, profile):
     assert receipt["result_slots"] == stored["slots"]
     assert stored["window"]["weight_basis"] == record["window"]["weight_basis"]
     assert (stored["scope"]["start"], stored["scope"]["end"]) == (
-        stored["window"]["start"], stored["window"]["end"])
+        stored["window"]["start"],
+        stored["window"]["end"],
+    )
     assert shown["project_id"] == stored["project_id"] == scope["project_id"]
 
 
@@ -131,15 +155,20 @@ def test_unavailable_never_reads_as_zero_or_blank(request, checked, profile):
     _ctx, scope, record = _capture(request, checked, profile)
     answered = {f["metric"] for f in record["facts"]}
     for slot in record["slots"]:
-        assert slot["disposition"] == ("answered" if slot["metric"] in answered else "unavailable")
+        assert slot["disposition"] == (
+            "answered" if slot["metric"] in answered else "unavailable"
+        )
         if slot["disposition"] == "unavailable":
             assert isinstance(slot.get("reason"), str) and slot["reason"].strip()
             assert slot["metric"] not in answered
     if answered == {s["metric"] for s in record["slots"]}:
         return
     receipt, answer = _answer(checked, scope, record)
-    missing = {s["metric"]: s["reason"] for s in receipt["result_slots"]
-               if s["disposition"] == "unavailable"}
+    missing = {
+        s["metric"]: s["reason"]
+        for s in receipt["result_slots"]
+        if s["disposition"] == "unavailable"
+    }
     assert missing and not missing.keys() & {b["metric"] for b in answer["blocks"]}
     for metric, reason in missing.items():
         assert f"{metric}: {reason}" in receipt["limitations"]
@@ -148,7 +177,9 @@ def test_unavailable_never_reads_as_zero_or_blank(request, checked, profile):
 def test_a_slot_that_excludes_snapshots_names_its_rows(request, checked):
     """Rows used and excluded come from the slot's valid/requested snapshots."""
     ctx, scope = build(request, "generator-dispatch/1")
-    ctx.network.generators_t.p.iloc[0, ctx.network.generators_t.p.columns.get_loc("G1")] = float("nan")
+    ctx.network.generators_t.p.iloc[
+        0, ctx.network.generators_t.p.columns.get_loc("G1")
+    ] = float("nan")
     record = records.capture_scoped(owner(checked), scope)
     slot = next(s for s in record["slots"] if s["metric"] == "dispatch_energy")
     assert slot["disposition"] == "unavailable" and slot["reason"]
@@ -177,10 +208,14 @@ def test_a_record_saved_without_the_new_keys_still_reads(request, checked):
     records.save(legacy, legacy["evidence_id"])
     loaded = records.evidence(owner(checked), legacy["evidence_id"])
     assert loaded == legacy
-    assert records.public(loaded) == records.public({**legacy, "window": {}, "solve_stamp": None})
+    assert records.public(loaded) == records.public(
+        {**legacy, "window": {}, "solve_stamp": None}
+    )
 
 
 def test_the_mac_domains_are_unchanged():
     assert records.RECORD_MAC_DOMAIN == b"pypsa-gui assistant-assurance record/1"
     assert RUN_MAC_DOMAIN == b"pypsa-gui run-manifest/1"
-    assert records.server_key(records.RECORD_MAC_DOMAIN) != records.server_key(RUN_MAC_DOMAIN)
+    assert records.server_key(records.RECORD_MAC_DOMAIN) != records.server_key(
+        RUN_MAC_DOMAIN
+    )

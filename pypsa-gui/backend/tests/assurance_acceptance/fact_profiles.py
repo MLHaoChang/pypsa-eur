@@ -56,7 +56,9 @@ from tests.test_workflow_tools import baseline  # noqa: F401
 def fact_store(tmp_path, monkeypatch):
     """As each profile module's own `private_store`, for all profiles at once."""
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
-    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", ",".join(calculations.PROFILES))
+    monkeypatch.setenv(
+        "PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", ",".join(calculations.PROFILES)
+    )
 
 
 @pytest.fixture
@@ -81,8 +83,15 @@ class Driver:
 
 def _scope(profile, entity, **options):
     def make(ctx):
-        return {"version": 1, "profile": profile, "project_id": ctx.project_uuid,
-                "entity_id": entity, "retain": False, **copy.deepcopy(options)}
+        return {
+            "version": 1,
+            "profile": profile,
+            "project_id": ctx.project_uuid,
+            "entity_id": entity,
+            "retain": False,
+            **copy.deepcopy(options),
+        }
+
     return make
 
 
@@ -94,9 +103,12 @@ def _storage_cost(ctx):
     """test_storage_cost_assurance's `priced`, on its `storage`."""
     n = ctx.network
     n.storage_units.at["Battery", "capital_cost"] = 3
-    n.storage_units_t.marginal_cost = pd.DataFrame({"Battery": [99, 2, 4]}, index=n.snapshots)
+    n.storage_units_t.marginal_cost = pd.DataFrame(
+        {"Battery": [99, 2, 4]}, index=n.snapshots
+    )
     n.storage_units_t.marginal_cost_storage = pd.DataFrame(
-        {"Battery": [0.5, 1, 7]}, index=n.snapshots)
+        {"Battery": [0.5, 1, 7]}, index=n.snapshots
+    )
     record_solve(ctx)
     return ctx
 
@@ -105,46 +117,103 @@ def _stored(mutate):
     def prepare(ctx):
         store(ctx, mutate)
         return ctx
+
     return prepare
 
 
 DRIVERS = {
-    "generator-dispatch/1": Driver("solved", _same, _scope("generator-dispatch/1", "G1")),
+    "generator-dispatch/1": Driver(
+        "solved", _same, _scope("generator-dispatch/1", "G1")
+    ),
     "generator-cost/1": Driver("solved", _same, cost_scope),
     "network-linear-cost/1": Driver(
-        "solved", _same,
-        lambda ctx: cost_scope(ctx, profile="network-linear-cost/1", entity_id="network")),
+        "solved",
+        _same,
+        lambda ctx: cost_scope(
+            ctx, profile="network-linear-cost/1", entity_id="network"
+        ),
+    ),
     "storage-unit-dispatch/1": Driver(
-        "storage", _same, _scope("storage-unit-dispatch/1", "Battery")),
+        "storage", _same, _scope("storage-unit-dispatch/1", "Battery")
+    ),
     "storage-unit-cost/1": Driver(
-        "storage", _storage_cost, _scope("storage-unit-cost/1", "Battery", cost_basis=BASIS)),
-    "carrier-energy/1": Driver("wind", solve_carrier, _scope("carrier-energy/1", "wind")),
+        "storage",
+        _storage_cost,
+        _scope("storage-unit-cost/1", "Battery", cost_basis=BASIS),
+    ),
+    "carrier-energy/1": Driver(
+        "wind", solve_carrier, _scope("carrier-energy/1", "wind")
+    ),
     "branch-loading/1": Driver("grid", solve_grid, _scope("branch-loading/1", "L12")),
-    "network-loading/1": Driver("grid", solve_grid, _scope("network-loading/1", "network")),
+    "network-loading/1": Driver(
+        "grid", solve_grid, _scope("network-loading/1", "network")
+    ),
     "lost-load/1": Driver("shed", _same, _scope("lost-load/1", "L1")),
-    "bus-price/1": Driver("priced", lambda ctx: solve(ctx, voll=1000), _scope("bus-price/1", "B1")),
-    "generator-emissions/1": Driver("gas", solve, _scope("generator-emissions/1", "G1")),
-    "network-emissions/1": Driver("gas", solve, _scope("network-emissions/1", "network")),
+    "bus-price/1": Driver(
+        "priced", lambda ctx: solve(ctx, voll=1000), _scope("bus-price/1", "B1")
+    ),
+    "generator-emissions/1": Driver(
+        "gas", solve, _scope("generator-emissions/1", "G1")
+    ),
+    "network-emissions/1": Driver(
+        "gas", solve, _scope("network-emissions/1", "network")
+    ),
     "curtailment/1": Driver("windy", solve, _scope("curtailment/1", "G1")),
-    "capacity/1": Driver("built", solve, _scope("capacity/1", "G2", component_class="Generator")),
+    "capacity/1": Driver(
+        "built", solve, _scope("capacity/1", "G2", component_class="Generator")
+    ),
     "storage-cycles/1": Driver(
-        "tank", solve, _scope("storage-cycles/1", "Tank", component_class="Store")),
-    "energy-balance/1": Driver("exporting", solve, _scope("energy-balance/1", "network")),
+        "tank", solve, _scope("storage-cycles/1", "Tank", component_class="Store")
+    ),
+    "energy-balance/1": Driver(
+        "exporting", solve, _scope("energy-balance/1", "network")
+    ),
     "site-import/1": Driver("importing", solve, _scope("site-import/1", "network")),
     "investment-case/1": Driver(
-        "project", _stored(hand), _scope("investment-case/1", "network")),
+        "project", _stored(hand), _scope("investment-case/1", "network")
+    ),
     "investment-lcoe/1": Driver(
-        "project", _stored(lcoe_hand), _scope("investment-lcoe/1", "network")),
-    "copt-screening/1": Driver("classical", _same, _scope("copt-screening/1", "network")),
-    "grid-readiness/1": Driver("hub", lambda value: value[0], _scope("grid-readiness/1", "network")),
+        "project", _stored(lcoe_hand), _scope("investment-lcoe/1", "network")
+    ),
+    "copt-screening/1": Driver(
+        "classical", _same, _scope("copt-screening/1", "network")
+    ),
+    "grid-readiness/1": Driver(
+        "hub", lambda value: value[0], _scope("grid-readiness/1", "network")
+    ),
 }
 assert set(DRIVERS) == set(calculations.PROFILES), "every profile needs a driver"
 
 # Every fixture a driver names, plus those they depend on, for a star import.
-FIXTURES = [fact_store, baseline, checked, solved, storage, wind, grid, short, shed, priced,
-            gas, windy, built, tank, exporting, importing, project, classical, hub]
-__all__ = ["DRIVERS", "Driver", "FIXTURES", "build", "owner",
-           *(f.__name__ for f in FIXTURES)]
+FIXTURES = [
+    fact_store,
+    baseline,
+    checked,
+    solved,
+    storage,
+    wind,
+    grid,
+    short,
+    shed,
+    priced,
+    gas,
+    windy,
+    built,
+    tank,
+    exporting,
+    importing,
+    project,
+    classical,
+    hub,
+]
+__all__ = [
+    "DRIVERS",
+    "Driver",
+    "FIXTURES",
+    "build",
+    "owner",
+    *(f.__name__ for f in FIXTURES),
+]
 
 
 def build(request, profile):

@@ -105,7 +105,9 @@ WEIGHT_BASIS: dict[str, str] = {
 
 # Profiles whose captured index is not snapshots: the investment report's
 # years and the saved readiness scorecard.
-NO_SNAPSHOT_INDEX = frozenset({"investment-case/1", "investment-lcoe/1", "grid-readiness/1"})
+NO_SNAPSHOT_INDEX = frozenset(
+    {"investment-case/1", "investment-lcoe/1", "grid-readiness/1"}
+)
 
 
 def window(index, scope):
