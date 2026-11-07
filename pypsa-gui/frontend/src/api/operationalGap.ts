@@ -7,8 +7,12 @@
 // a solve runs (raised quietly here).
 import client from './client'
 
-export type OperationalGapFlag =
-  | 'fresh' | 'missing' | 'stale' | 'operational_window_failed' | 'reference_not_solved'
+/** The route's five flags (`operational_gap.FRESH` … `REFERENCE_NOT_SOLVED`);
+ *  `tests/test_operational_gap_words.py` fails when they drift. */
+export const OP_GAP_FLAGS = [
+  'fresh', 'missing', 'stale', 'operational_window_failed', 'reference_not_solved',
+] as const
+export type OperationalGapFlag = typeof OP_GAP_FLAGS[number]
 
 export interface OperationalGapRow {
   definition: string
@@ -34,8 +38,9 @@ export interface OperationalGapPayload {
   metrics: Record<string, OperationalGapRow> | null
   windows: { total: number; solved: number; failed: number; failed_index: number | null } | null
   reference: { status: string; condition: string } | null
-  horizon?: number
-  overlap?: number
+  /** Present unless the flag is missing or stale. */
+  horizon?: number | null
+  overlap?: number | null
 }
 
 export const operationalGapApi = {

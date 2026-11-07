@@ -37,7 +37,7 @@ const BASE_GAP = {
   label: 'full-horizon dispatch on the same sizes',
   opex_basis: 'PyPSA statistics.opex (marginal + storage costs, curtailment and VOLL slack included as marginal cost) x objective snapshot weightings over the full horizon, on each side\'s own dispatch; LP-only objective terms excluded; n.objective is never read',
   excluded_terms: ['capital costs (the sizes are fixed and equal on both sides)', 'the objective constant', 'LP-only penalty and cost rows added by extra_functionality'],
-  claim_limit: 'claim', gap_definition: 'gap = operational - reference; gap_pct = 100 x gap / |reference|.',
+  claim_limit: 'The gap is what the lack of look-ahead past each window costs on these sizes, against a solve that sees the whole horizon at once. It is not a forecast-error measure: both sides see the same prices and loads.', gap_definition: 'gap = operational - reference; gap_pct = 100 x gap / |reference|.',
   windows_definition: 'windows', definitions: {},
   windows: { total: 12, solved: 12, failed: 0, failed_index: null },
   reference: { status: 'ok', condition: 'optimal' }, horizon: 24, overlap: 6,

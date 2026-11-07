@@ -100,3 +100,27 @@ GK A (16): GO, with C22–C28 on top of C12–C14. The reference solve runs insi
 - C26: the key carries the reference status. A missing or uncomputable fingerprint reads stale. A missing column is None with a reason, never 0. gap and gap_pct are None when either side is None.
 - C27: each metric is defined in the response. storage_discharge = StorageUnit p>0 plus Store p>0, each × the stores weighting. windows = {total, solved, failed, failed_index}, plus reference {status, condition}.
 - C28: the route is GET only, 409 while a solve runs, never solves, active-project ACL. At the trial merge, run the chat-disposition, ACL, write-lock, not_via_chat, route-parity, inventory and control-matrix checks.
+
+### 2026-11-07: S4 plan verdicts (DC-07 S3+S4, session_01G7qCujGRNfaQtDBrQxp156)
+
+S4 is the "Plan vs operation" card on Results › Summary, in both modes, reading S3's route (owner decision DC07-S4-1).
+
+UX (13): plan GO. Q1 (a): the Summary card. Q2 (a): when out of date, show the "out of date" state only, with no dimmed numbers. Conditions:
+- U1: "·" separates the lead line from "n of m windows solved". The claim limit uses no semicolon.
+- U2: the window settings use the Solve strategy fields' own words, pinned by a test.
+- U3: one visible line says which way the gap is positive. Gap and Gap % are signed. Money is in money() style throughout. A "—" row shows "—" in Gap and Gap % too, and its reason as visible text.
+- U4: "Solver settings ›" uses the mode-aware opener with Back to Results summary, and request-then-scroll to Solve strategy. Out of date names a real run control. Nothing jumps on its own.
+- U5: the reference's condition is in plain words.
+- U6: labels come from OP_GAP_WORDS. Engine terms appear only under Source.
+- U7: nothing shows while a solve is in flight, and never an earlier run's table.
+- U8: shots of fresh, a "—" row, out of date, a failed window, the reference not solved and the Back pill, in Guided and Expert.
+
+GK A (18): plan GO (light review of the parity test and the disposition row; deeper only if services/ is touched). Conditions:
+- S4-1: the types follow the route's shape. The flag is a union of the five constants. An unknown flag shows no table (fail closed).
+- S4-2: the failed window's index + 1 shows only when the index is a number; otherwise the line says "a window did not solve".
+- S4-3: gap_pct is None with no reason when the reference is 0. It shows "—", never 0. A fixture row has reference 0.
+- S4-4: parity tests: the metric word keys equal DEFINITIONS, and the flags equal the service's five.
+- S4-5: a fresh table with one None side shows its reason and no 0. claim_limit and opex_basis are rendered from the payload.
+- S4-6: at the trial merge, run test_route_chat_disposition, assistant_route_parity.py --check and assistant_control_matrix.py --check, and list the results in the PR body.
+
+Chat: `dc_operational_gap` moves to `manual` (Results › Summary). The route is held by the new issue 25 (`held-by-spec`) until the owner decides between a tool and a pointer.

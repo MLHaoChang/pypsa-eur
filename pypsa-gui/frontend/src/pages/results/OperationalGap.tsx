@@ -75,8 +75,6 @@ export const REFERENCE_CONDITION_WORDS: Record<string, string> = {
 }
 const REFERENCE_DEFAULT_WORDS = 'did not solve'
 
-export const CLAIM_LIMIT_WORDS =
-  'What the missing look-ahead costs on these sizes. Both sides see the same prices and loads, so this is not forecast error.'
 export const SIGN_WORDS = 'Gap: operation minus full horizon; positive means operation costs more.'
 const BACK_LABEL = 'Results summary'
 
@@ -105,6 +103,18 @@ export function pctText(v: number | null): string {
   if (Number(a) === 0) return '0.0 %'
   return `${v > 0 ? '+' : MINUS}${a} %`
 }
+
+/** The failed window, 1-based, only when the route names it (never "NaN of N"). */
+export function failedWindowWords(w: OperationalGapPayload['windows']): string {
+  const i = w?.failed_index
+  if (typeof i === 'number' && Number.isFinite(i) && typeof w?.total === 'number') {
+    return `Window ${i + 1} of ${w.total} did not solve`
+  }
+  return 'A window did not solve'
+}
+
+/** Gap % with no value although both sides have one: the full horizon is 0. */
+export const PCT_ZERO_REFERENCE = 'No gap %: the full horizon is 0.'
 
 /** Why a side reads "—", in the card's words. */
 function reasonWords(key: string, reason: string | undefined): string {
@@ -140,7 +150,7 @@ export default function OperationalGap() {
 export function OperationalGapCard({ payload }: { payload: OperationalGapPayload }) {
   const requestRunSolve = useUIStore(s => s.requestRunSolve)
   const w = payload.windows
-  const settings = payload.horizon != null && payload.overlap != null
+  const settings = typeof payload.horizon === 'number' && typeof payload.overlap === 'number'
     ? ` (rolling, ${payload.horizon} ${ROLLING_WORDS.horizon}, ${payload.overlap} ${ROLLING_WORDS.overlap})`
     : ''
   return (
@@ -158,7 +168,7 @@ export function OperationalGapCard({ payload }: { payload: OperationalGapPayload
       ) : payload.flag === 'operational_window_failed' ? (
         <div data-testid="operational-gap-window-failed"
           className="rounded-[8px] border border-border bg-bg px-3 py-2.5 text-[12px] text-muted">
-          Window {(w?.failed_index ?? 0) + 1} of {w?.total ?? '—'} did not solve, so the run stopped there and there is no gap to show.{' '}
+          {failedWindowWords(w)}, so the run stopped there and there is no gap to show.{' '}
           <button type="button" data-testid="operational-gap-open-strategy"
             onClick={() => openSolveStrategy(BACK_LABEL)}
             className="inline-flex items-center gap-1 text-[11px] text-accent hover:underline">
@@ -170,10 +180,13 @@ export function OperationalGapCard({ payload }: { payload: OperationalGapPayload
           className="rounded-[8px] border border-border bg-bg px-3 py-2.5 text-[12px] text-muted">
           The full-horizon dispatch {REFERENCE_CONDITION_WORDS[payload.reference?.condition ?? ''] ?? REFERENCE_DEFAULT_WORDS}, so there is no gap to show.
         </p>
-      ) : payload.metrics ? (
+      ) : payload.flag === 'fresh' && payload.metrics ? (
         <GapTable metrics={payload.metrics} />
-      ) : null}
-      <p className="text-[10.5px] text-muted" data-testid="operational-gap-claim">{CLAIM_LIMIT_WORDS}</p>
+      ) : (
+        // A flag this app does not know (or fresh with no metrics): no table, fail closed.
+        <ResultState state="unavailable" reason="The gap of this run cannot be read here." />
+      )}
+      <p className="text-[10.5px] text-muted" data-testid="operational-gap-claim">{payload.claim_limit}</p>
       <details className="text-[10px] text-muted" data-testid="operational-gap-source">
         <summary className="cursor-pointer">Source</summary>
         <p className="mt-1">{payload.opex_basis}.</p>
@@ -219,7 +232,9 @@ function GapTable({ metrics }: { metrics: Record<string, OperationalGapRow> }) {
                 <td className="py-0.5 text-right font-mono tabular-nums">{valueText(row.operational, words.unit)}</td>
                 <td className="py-0.5 text-right font-mono tabular-nums">{valueText(row.reference, words.unit)}</td>
                 <td className="py-0.5 text-right font-mono tabular-nums">{gapText(row.gap, words.unit)}</td>
-                <td className="py-0.5 text-right font-mono tabular-nums">{pctText(row.gap_pct)}</td>
+                <td className="py-0.5 text-right font-mono tabular-nums"
+                  title={row.gap_pct == null && row.gap != null ? PCT_ZERO_REFERENCE : undefined}
+                  data-testid={`operational-gap-pct-${k}`}>{pctText(row.gap_pct)}</td>
               </tr>
             )
           })}

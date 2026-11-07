@@ -8,7 +8,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { OperationalGapPayload } from '../../api/operationalGap'
 import { useUIStore } from '../../store/uiStore'
 import OperationalGap, {
-  OP_GAP_WORDS, REFERENCE_CONDITION_WORDS, gapText, pctText, valueText,
+  OP_GAP_WORDS, PCT_ZERO_REFERENCE, REFERENCE_CONDITION_WORDS, failedWindowWords, gapText, pctText, valueText,
 } from './OperationalGap'
 import { ROLLING_WORDS } from '../solver/rollingWords'
 import SolverSettingsSource from '../SolverSettings.tsx?raw'
@@ -36,9 +36,9 @@ function payload(over: Partial<OperationalGapPayload> = {}): OperationalGapPaylo
   return {
     label: 'full-horizon dispatch on the same sizes',
     flag: 'fresh',
-    opex_basis: 'PyPSA statistics.opex',
+    opex_basis: 'opex basis from the route',
     excluded_terms: ['capital costs'],
-    claim_limit: 'claim',
+    claim_limit: 'claim limit from the route',
     gap_definition: 'gap = operational - reference',
     windows_definition: 'windows',
     definitions: {},
@@ -91,8 +91,13 @@ describe('Plan vs operation card', () => {
     // A zero reference has no gap %: "—", never a division.
     expect(text(screen.getByTestId('operational-gap-row-storage_end_mwh'))).toContain('—')
     expect(text(screen.getByTestId('operational-gap-sign'))).toMatch(/positive means operation costs more/)
-    expect(text(screen.getByTestId('operational-gap-claim'))).toBe(
-      'What the missing look-ahead costs on these sizes. Both sides see the same prices and loads, so this is not forecast error.')
+    // The claim limit and the opex basis are the route's own text, never hard-coded here.
+    expect(text(screen.getByTestId('operational-gap-claim'))).toBe('claim limit from the route')
+    expect(text(screen.getByTestId('operational-gap-source'))).toContain('opex basis from the route.')
+    // A zero full-horizon value: gap % "—" with its why, no side reason, never 0.
+    expect(text(screen.getByTestId('operational-gap-pct-storage_end_mwh'))).toBe('—')
+    expect(screen.getByTestId('operational-gap-pct-storage_end_mwh').title).toBe(PCT_ZERO_REFERENCE)
+    expect(screen.queryByTestId('operational-gap-reason-storage_end_mwh')).toBeNull()
     expect(card.dataset.flag).toBe('fresh')
   })
 
@@ -115,6 +120,10 @@ describe('Plan vs operation card', () => {
     } }))
     renderIt()
     expect(text(await screen.findByTestId('operational-gap-reason-opex_eur'))).toBe('Full horizon: Not recorded for this run.')
+    const cells = Array.from(screen.getByTestId('operational-gap-row-opex_eur').querySelectorAll('td')).slice(1)
+      .map(td => text(td as HTMLElement))
+    expect(cells).toEqual(['€ 10', '—', '—', '—'])
+    expect(cells.some(c => /^0|€ 0$/.test(c))).toBe(false)
   })
 
   it('stale reads "out of date" with no table, and its action runs the solve', async () => {
@@ -173,6 +182,20 @@ describe('Plan vs operation card', () => {
     renderIt()
     const t = text(await screen.findByTestId('operational-gap-reference-failed'))
     expect(t).toBe('The full-horizon dispatch did not solve, so there is no gap to show.')
+  })
+
+  it('a failed window with no index says "a window", never NaN', () => {
+    expect(failedWindowWords({ total: 12, solved: 3, failed: 1, failed_index: null })).toBe('A window did not solve')
+    expect(failedWindowWords(null)).toBe('A window did not solve')
+    expect(failedWindowWords({ total: 12, solved: 3, failed: 1, failed_index: 3 })).toBe('Window 4 of 12 did not solve')
+  })
+
+  it('a flag this app does not know shows no table (fail closed)', async () => {
+    api.get.mockResolvedValue(payload({ flag: 'something_new' as never }))
+    renderIt()
+    const card = await screen.findByTestId('summary-operational-gap')
+    expect(screen.queryByTestId('operational-gap-table')).toBeNull()
+    expect(card.querySelector('[data-state="unavailable"]')).not.toBeNull()
   })
 
   it('missing renders nothing', async () => {
