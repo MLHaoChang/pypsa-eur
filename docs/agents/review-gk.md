@@ -140,5 +140,5 @@ A read-back that compares frames after an IO round trip normalises dtype, index 
 - For a wording-only or ruff-only delta, compare ASTs with strings blanked rather than re-running mutants (#1142).
 - A multi-term credit cap needs a test per term: each term alone binds the cap while the others do not.
 - An energy or tonne sum needs a test with non-unit `snapshot_weightings`; unit weights hide a missing multiplication.
-- `flag_column` agrees with `process_chain._truthy`: "true", "1" and "1.0" are truthy, each string pinned by its own test.
+- `flag_column` and `process_chain` share one function, `process_chain.truthy`: "true", "1", "1.0" and "yes" are truthy, each string pinned by its own test.
 - Removing a duplicated caveat needs a positive test that the caveat now appears exactly once, not only that the copy is gone.

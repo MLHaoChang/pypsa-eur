@@ -355,3 +355,17 @@ def test_a_set_currency_that_differs_still_refuses():
     _price_net(finance={"currency": "EUR"})
     with pytest.raises(InvalidSeriesUnitError, match="counts in EUR"):
         _apply_series(_gen("tou", dict(_TOU, currency="USD"), ids=("grid",)), "grid")
+
+
+def test_mixed_banded_and_unbanded_pumps_report_floored_hours_per_id():
+    """cop_floored_hours is never a sum across pumps: it is per id, and the headline
+    is the worst single pump."""
+    res = _gen("cop", {"source": "ground", "source_c": -10.0, "sink_c": 40.0,
+                       "eta": 0.2, "sink_c_by_id": {"HOT": 70.0}},
+               ids=("HOT", "COLD"))
+    by_id = res.meta["cop_floored_hours_by_id"]
+    assert by_id["COLD"] == 0
+    assert 0 < by_id["HOT"] <= 8760
+    assert res.meta["cop_floored_hours"] == max(by_id.values())
+    assert res.meta["cop_floored_hours"] <= 8760
+    assert all(w.startswith("cop_floored") and "HOT" in w for w in res.meta["warnings"])

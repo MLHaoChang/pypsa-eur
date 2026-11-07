@@ -560,3 +560,12 @@ def test_flag_column_reads_strings_as_written(v, want):
 
     df = pd.DataFrame({"eh_process": pd.Series([v], index=["u"], dtype=object)})
     assert bool(flag_column(df, "eh_process")["u"]) is want
+
+
+@pytest.mark.parametrize("v, want", [("yes", True), ("YES", True), ("true", True), ("no", False), ("", False)])
+def test_flag_column_and_process_chain_share_one_rule(v, want):
+    from gridspine.drivers import process_chain
+    from services.solver import process_uc
+
+    assert process_chain.truthy(v) is want
+    assert process_uc.truthy is process_chain.truthy
