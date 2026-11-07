@@ -446,6 +446,23 @@ def _eh_study_reads_the_run_project(run_ctx, project_id, monkeypatch):
     return seen == [str(project_id)]
 
 
+def _scene_apply_on_the_run_project(run_ctx, root):
+    """SC-07 S3 (GK B G7, N7): a 3D site apply on the run's bound context
+    commits the run's project's scene; the foreground project has none. The
+    prepare is setup here: a profile never lists the apply (N2)."""
+    from services import site_service
+    from services.site_scene import proposals, store
+    from services.study.runner import _on_ctx
+    from tests.test_sc07_scene_tools import BOX, SITE
+    proposals.clear()
+    site_service.write_sites(root, {'version': 1, 'sites': [copy.deepcopy(SITE)]})
+    store.adopt(root, 'campus', store.legacy_site_digest(site_service.read_sites(root), 'campus'))
+    prep = _on_ctx(run_ctx, chat_tools.site_scene_prepare, 'campus', 'generate_native', 1, {'greenfield': [BOX]})
+    out = _on_ctx(run_ctx, chat_tools.site_scene_apply, **prep['apply_with']['args'])
+    proposals.clear()
+    return out['receipt']['revision'] == 2 and store.read_scene(root, 'campus')['revision'] == 2
+
+
 def test_each_stage_tool_resolves_the_project_through_the_bound_context(session, site, monkeypatch):
     """With another network in the foreground, each tool of the eh_site stage
     subsets, run on the run's bound context, reads the run's project (§6.6)."""
@@ -480,6 +497,7 @@ def test_each_stage_tool_resolves_the_project_through_the_bound_context(session,
                                        and ('loads', 'p_set', 'L1') in run_ctx.user_ts,
             'generate_report': _report_reads_the_run_project(run_ctx, project_id, monkeypatch),
             'run_eh_study': _eh_study_reads_the_run_project(run_ctx, project_id, monkeypatch),
+            'site_scene_apply': _scene_apply_on_the_run_project(run_ctx, site[1]),
         }
         assert PyPSAService.get_network() is front.network  # the foreground is untouched
     assert seen == {tool: True for tool in run_profiles.BOUND_CONTEXT_TOOLS}

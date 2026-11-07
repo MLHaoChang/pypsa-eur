@@ -83,6 +83,9 @@ def _is_guided(ui_context: Any) -> bool:
     return isinstance(ui_context, dict) and ui_context.get("ui_mode") == "guided"
 
 
+# Tools no policy, task, brief or run envelope ever approves: the user's card only.
+CARD_ONLY_TOOLS: frozenset[str] = frozenset({"site_scene_apply"})
+
 # Per-tier auto-approve policy (#18). A comma-separated list of safety tiers
 # (intersected with DESTRUCTIVE_TIERS — only destructive/execution tiers are
 # confirmable) that the runtime auto-approves WITHOUT the human round-trip.
@@ -211,7 +214,9 @@ def _confirm_destructive_tool(
     from harness import requirements as _requirements
     # A requirement is only ever the user's own confirmation: never admitted unattended.
     # Issue 04 S5 (P4): repeating a held job call is only ever the user's own card.
-    confirm_only = violated or tool_name == _requirements.TOOL or repeat_card is not None
+    # SC-07 S3 (GK B N1): a 3D site apply is only ever its own card, in a task or not.
+    confirm_only = violated or tool_name == _requirements.TOOL or repeat_card is not None \
+        or tool_name in CARD_ONLY_TOOLS
     if policy == 'none' and not confirm_only:
         return True
     from harness import approvals
