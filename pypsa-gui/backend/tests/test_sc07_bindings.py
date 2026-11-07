@@ -100,6 +100,7 @@ def args_of(prep):
 def test_a_chat_bind_lands_what_the_route_lands(client, site):
     prep = bind(client, IT, HEAT)
     assert prep["action"] == "bind_targets" and prep["status"] == "ready"
+    assert "its own card" in prep["note"]
     rows = {(r["name"], r["status"]) for r in prep["summary"]["associations"]}
     assert rows == {("it", "new"), ("heat_demand", "new")}
     assert {r["unit"] for r in prep["summary"]["associations"]} == {"MW"}
@@ -136,10 +137,9 @@ def test_a_chat_placement_changes_the_scene_only(client, site):
     prep = chat_tools.site_scene_prepare(
         "campus", "place_existing", revision(client), PLACE
     )
-    assert (
-        prep["summary"]["placements"] == [{"item": "bess · battery", "status": "new"}]
-        or prep["summary"]["placements"]
-    )
+    assert prep["summary"]["placements"] == [
+        {"item": "StorageUnit:bess", "x": 60.0, "y": -50.0, "heading": 0}
+    ]
     before = client.get("/api/network/storage_units").json()
     chat_tools.site_scene_apply(**args_of(prep))
     assert _get(client)["site"]["placements"]["StorageUnit:bess"]["x"] == 60.0
@@ -177,7 +177,12 @@ def test_detach_and_undo_go_through_chat(client, site):
 
 
 def test_several_loads_of_a_carrier_ask_which_one(client, site):
-    out = bind(client, {"feature": A, "target": {"class": "Load", "carrier": "AC"}})
+    out = bind(
+        client,
+        {"feature": A, "target": {"class": "Load", "carrier": "AC"}},
+        {"feature": B, "target": {"class": "Load", "name": "it"}},
+    )
+    assert out["feature"] == A and out["total"] == 2 and "more" not in out["question"]
     assert (
         out["status"] == "clarify"
         and "proposal_id" not in out
@@ -593,6 +598,13 @@ def _apply_each(client, action):
 def test_a_scene_apply_of_a_model_action_changes_no_model_value(client, site, action):
     (prep,) = _apply_each(client, action)
     assert prep["action"] == action and prep["summary"]["model_changes"] == "none"
+    if action == "rebind":
+        assert prep["summary"]["rebind"] == {
+            "class": "Load",
+            "name": "L1",
+            "was": "it",
+            "feature": A,
+        }
     before = _model_state()
     out = chat_tools.site_scene_apply(**args_of(prep))
     assert out["read_back"]["receipt_found"] is True
