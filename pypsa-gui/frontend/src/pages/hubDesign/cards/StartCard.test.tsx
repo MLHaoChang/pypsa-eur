@@ -91,6 +91,16 @@ describe('StartCard', () => {
     expect(create.mutate).toHaveBeenCalledWith('eh_microgrid')
   })
 
+  it('a data-centre tile opens its form under it instead of creating (DC 22)', async () => {
+    const user = mount()
+    create.mutate.mockClear()
+    await user.click(screen.getByTestId('hub-start-template-eh_datacenter'))
+    expect(create.mutate).not.toHaveBeenCalled()
+    expect(screen.getByTestId('dc-load-form')).toBeTruthy()
+    await user.click(screen.getByTestId('dc-form-create'))
+    expect(create.mutate.mock.calls[0][0]).toMatchObject({ templateId: 'eh_datacenter' })
+  })
+
   it('shows the open template project\'s provenance and first note', async () => {
     mount()
     const p = await screen.findByTestId('hub-start-provenance')

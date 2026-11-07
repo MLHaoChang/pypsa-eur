@@ -48,6 +48,21 @@ describe('NewProjectWizard — templates', () => {
   })
 })
 
+// DC 22: a data-centre tile opens its setup form under it; Create sends dc_load.
+describe('NewProjectWizard — data-centre form', () => {
+  it('opens the form instead of creating, then creates with a dc_load', async () => {
+    vi.mocked(projectsApi.createFromTemplate).mockResolvedValue({ imported: 'DC', summary: { buses: 3 } } as never)
+    renderWizard()
+    await userEvent.click(screen.getByRole('button', { name: /^Data Center Energy Hub(?! \(staged)/ }))
+    expect(projectsApi.createFromTemplate).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByTestId('dc-form-create'))
+    await waitFor(() => expect(projectsApi.createFromTemplate).toHaveBeenCalled())
+    const [id, , params] = vi.mocked(projectsApi.createFromTemplate).mock.calls[0]
+    expect(id).toBe('eh_datacenter')
+    expect(params).toHaveProperty('dc_load.architecture', 'ac')
+  })
+})
+
 // G2 (UX review note 10): the generic site is a card in this tab, not a new
 // tab; it opens Guided Start with the form instead of creating on click.
 describe('NewProjectWizard — your own site', () => {

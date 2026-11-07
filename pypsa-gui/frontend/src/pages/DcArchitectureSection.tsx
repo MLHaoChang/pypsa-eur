@@ -21,6 +21,8 @@ import { nk } from '../utils/queryKeys'
 import { money, SYMBOL } from './DcBackupSection'
 
 const NBSP = ' '
+/** The section's own title; the create form shares it (DC 22). */
+export const ARCH_FIELD = 'Power architecture'
 export const ARCH_LABEL: Record<DcArchitecture, string> = {
   ac: 'AC (LV UPS)', mv_ups: 'MV UPS', dc_800v: '800 VDC', sst: 'Solid-state transformer',
 }
@@ -97,7 +99,7 @@ export default function DcArchitectureSection({ name }: { name: string }) {
   return (
     <div data-testid="dc-architecture" data-complete={complete}>
       <PageSection
-        title="Power architecture"
+        title={ARCH_FIELD}
         hint={<span data-testid="dc-architecture-own">
           {ARCH_LABEL[own.arch]} (set when the project is created){!own.set && <>{' '}<Assumed /></>}
         </span>}

@@ -1,6 +1,6 @@
 # A tariff change re-seeds an older ledger but leaves the study's currency year behind
 
-Status: ready-for-agent
+Status: done
 
 Follow-up to money-year issue 02 (MY-02, PR #1166); GK B (26) asked for this ticket on 2026-11-06.
 

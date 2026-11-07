@@ -6,7 +6,7 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { DcBackupAssessment } from '../api/campusElectrical'
-import DcBackupSection from './DcBackupSection'
+import DcBackupSection, { BACKUP_MODE_FIELD, MODE_LABEL } from './DcBackupSection'
 
 const campus = vi.hoisted(() => ({ setDcBackup: vi.fn(), assessDcBackup: vi.fn() }))
 vi.mock('../api/campusElectrical', async () => {
@@ -122,8 +122,34 @@ describe('DcBackupSection', () => {
     results.getEhTemplate.mockResolvedValue({ ...meta('bess'), dc_load: { spec: { backup: { mode: 'bess' } }, network_backup_mode: 'bess' } })
     renderIt()
     expect(text(await screen.findByTestId('dc-backup-not-assessable')))
-      .toContain('created with batteries backup, so its saved network already has the battery strings')
+      .toContain(`created with ${BACKUP_MODE_FIELD} set to ${MODE_LABEL.bess}, so its saved network already has the battery strings`)
+    expect(text(screen.getByTestId('dc-backup-not-assessable')))
+      .toContain(`create the project with ${MODE_LABEL.genset} and switch the ${BACKUP_MODE_FIELD} here`)
     expect(screen.queryByTestId('dc-backup-assess')).toBeNull()
+  })
+
+  it('names the hybrid build in the same words', async () => {
+    results.getEhTemplate.mockResolvedValue({ ...meta('hybrid'), dc_load: { spec: { backup: { mode: 'hybrid' } }, network_backup_mode: 'hybrid' } })
+    renderIt()
+    expect(text(await screen.findByTestId('dc-backup-not-assessable')))
+      .toContain(`${BACKUP_MODE_FIELD} set to ${MODE_LABEL.hybrid}`)
+  })
+
+  it.each(['guided', 'expert'] as const)('names the unreadable input, never a raw key (%s)', async mode => {
+    const user = userEvent.setup()
+    ui.uiMode = mode
+    results.getEhTemplate.mockResolvedValue(meta('hybrid'))
+    const a = assessment({ mode: 'hybrid' })
+    const inputs = (key: string) => [{ key, value: null, unit: '', assumed: false }] as unknown as typeof a.cost.inputs
+    campus.assessDcBackup.mockResolvedValueOnce({ ...a, cost: { ...a.cost, delta: null, inputs: inputs('fuel_price') } })
+    renderIt()
+    await user.click(await screen.findByTestId('dc-backup-assess'))
+    expect((await screen.findByTestId('dc-backup-cost')).textContent)
+      .toBe('The cost against the gensets cannot be priced. Missing: Fuel price.')
+    campus.assessDcBackup.mockResolvedValueOnce({ ...a, cost: { ...a.cost, delta: null, inputs: inputs('some_new_key') } })
+    await user.click(screen.getByTestId('dc-backup-assess'))
+    await waitFor(() => expect(screen.getByTestId('dc-backup-cost').textContent)
+      .toBe('The cost against the gensets cannot be priced: an input is missing.'))
   })
 
   it('says when the delta cannot be priced, and Guided drops the lines', async () => {
@@ -135,7 +161,8 @@ describe('DcBackupSection', () => {
       cost: { ...a.cost, delta: null } })
     renderIt()
     await user.click(await screen.findByTestId('dc-backup-assess'))
-    expect((await screen.findByTestId('dc-backup-cost')).textContent).toContain('cannot be priced')
+    expect((await screen.findByTestId('dc-backup-cost')).textContent).toBe(
+      'The cost against the gensets cannot be priced: an input is missing.')
     expect((screen.getByTestId('dc-backup-proof-hybrid')).textContent).toContain('Fail')
     expect(screen.queryByTestId('dc-backup-lines')).toBeNull()
     expect(screen.getByTestId('dc-backup-assumed')).toBeTruthy()
@@ -153,7 +180,7 @@ describe('DcBackupSection', () => {
     expect(screen.queryByTestId('dc-backup-stale')).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Hybrid' }))
     expect(text(await screen.findByTestId('dc-backup-stale'))).toContain('Out of date')
-    expect(text(screen.getByTestId('dc-backup-stale'))).toContain('This assessment is for batteries. Assess again for hybrid.')
+    expect(text(screen.getByTestId('dc-backup-stale'))).toContain('This assessment is for Batteries. Assess again for Hybrid.')
     expect(screen.getByTestId('dc-backup-result').getAttribute('data-stale')).toBe('true')
   })
 
