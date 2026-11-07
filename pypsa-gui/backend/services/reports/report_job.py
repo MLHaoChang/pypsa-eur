@@ -38,7 +38,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from typing import Any
 
-from models.report import Block, Bullets, Paragraph, ReportDocument, Section
+from models.report import Block, Bullets, Callout, Paragraph, ReportDocument, Section
 from services.atomic_io import atomic_write_text
 from services.reports import store
 from services.reports.assemble import (
@@ -52,6 +52,7 @@ from services.reports.generator import (
     SectionFailure,
     generate_section,
 )
+from services.reports.formatting import WITHHELD_PREFIX, withheld_placeholder
 from services.reports.number_audit import audit
 from services.reports.prompts import system_blocks
 
@@ -260,11 +261,18 @@ def _without_pending(section: Section) -> Section:
     return section
 
 
+def _code_blocks(section: Section) -> list[Block]:
+    """The section's code-written blocks: not its prose, and not a strict
+    job's withheld placeholder (it stood for prose that is written anew)."""
+    return [b for b in section.blocks if b.type not in _PROSE_TYPES
+            and not (b.type == "callout" and b.kind == "gap" and b.text.startswith(WITHHELD_PREFIX))]
+
+
 def _with_prose(section: Section, draft: SectionDraft, facts) -> Section:
     prose: list[Block] = [Paragraph(md=p) for p in draft.paragraphs]
     if draft.bullets:
         prose.append(Bullets(items=list(draft.bullets)))
-    code_blocks = [b for b in section.blocks if b.type not in _PROSE_TYPES]
+    code_blocks = _code_blocks(section)
     return section.model_copy(update={
         "source": "llm",
         "blocks": prose + code_blocks,
@@ -324,29 +332,57 @@ def admitted_facts(job: ReportJob, section: Section):
     return out
 
 
-def withhold_unverified(draft: SectionDraft, facts) -> tuple[SectionDraft, list[str]]:
+def withhold_unverified(draft: SectionDraft, facts,
+                        dropped: dict[str, list[int]] | None = None) -> tuple[SectionDraft, list[str]]:
     """The draft without each paragraph or bullet the number audit cannot
-    verify against `facts`, and the numbers that withheld them."""
+    verify against `facts`, and the numbers that withheld them. `dropped`,
+    when given, receives per kind ("paragraphs", "bullets") the count of
+    numbers each statement was withheld for, None for a kept one (0: the
+    audit could not read it), so the caller can place a placeholder there."""
     tokens: list[str] = []
+    marks: dict[str, list] = {"paragraphs": [], "bullets": []}
 
-    def keep(text: str) -> bool:
+    def keep(text: str, kind: str) -> bool:
         try:
             bad = list(audit([text], facts).unverified)
+            count = len(bad)
         except Exception:  # noqa: BLE001 -- fail closed (GK B C5): an audit that cannot run admits nothing
             logger.warning("report audit failed on a statement; it is withheld")
             bad = [AUDIT_FAILED]
+            count = 0
         tokens.extend(bad)
+        marks[kind].append(count if bad else None)
         return not bad
-    kept = draft.model_copy(update={"paragraphs": [p for p in draft.paragraphs if keep(p)],
-                                    "bullets": [b for b in draft.bullets if keep(b)]})
+    kept = draft.model_copy(update={"paragraphs": [p for p in draft.paragraphs if keep(p, "paragraphs")],
+                                    "bullets": [b for b in draft.bullets if keep(b, "bullets")]})
+    if dropped is not None:
+        dropped.update(marks)
     return kept, tokens
+
+
+def _with_placeholders(section: Section, marks: dict[str, list]) -> Section:
+    """`section` with a placeholder callout (V1) where each withheld
+    paragraph stood, and after the bullets for each withheld bullet."""
+    paragraphs = iter([b for b in section.blocks if b.type == "paragraph"])
+    prose: list[Block] = []
+    for mark in marks.get("paragraphs") or []:
+        if mark is None:
+            prose.append(next(paragraphs))
+        else:
+            prose.append(Callout(kind="gap", text=withheld_placeholder(mark)))
+    prose.extend(paragraphs)
+    prose.extend(b for b in section.blocks if b.type == "bullets")
+    prose.extend(Callout(kind="gap", text=withheld_placeholder(mark))
+                 for mark in marks.get("bullets") or [] if mark is not None)
+    code_blocks = _code_blocks(section)
+    return section.model_copy(update={"blocks": prose + code_blocks})
 
 
 def _with_failure(section: Section, reason: str, job: ReportJob) -> Section:
     failure = (f"{_FAILURE_PREFIX}{reason} (profile {job.profile_id}, "
                f"model {job.model})")
     base = _clean_note(section.note)
-    code_blocks = [b for b in section.blocks if b.type not in _PROSE_TYPES]
+    code_blocks = _code_blocks(section)
     return section.model_copy(update={
         "source": "code",
         "blocks": code_blocks,
@@ -411,16 +447,18 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
             job.record["repairs"] += repairs
         if isinstance(result, SectionDraft) and job.strict:
             own = admitted_facts(job, section)
-            kept, withheld = withhold_unverified(result, own)
+            marks: dict[str, list] = {}
+            kept, withheld = withhold_unverified(result, own, marks)
             try:
-                written = _with_prose(section, kept, own)
+                written = _with_placeholders(_with_prose(section, kept, own), marks)
             except Exception:  # noqa: BLE001 -- fail closed (C5): no prose rather than an unaudited one
                 logger.warning("report audit failed on section %s; its prose is withheld", sid)
                 kept = kept.model_copy(update={"paragraphs": [], "bullets": []})
                 withheld = withheld or [AUDIT_FAILED]
                 written = section.model_copy(update={
                     "source": "code", "note": _clean_note(section.note),
-                    "blocks": [b for b in section.blocks if b.type not in _PROSE_TYPES]})
+                    "blocks": ([Callout(kind="gap", text=withheld_placeholder(0))]
+                               + _code_blocks(section))})
             if withheld:
                 n = len(result.paragraphs) + len(result.bullets) - len(kept.paragraphs) - len(kept.bullets)
                 note = WITHHELD_NOTE.format(n=n)
@@ -491,14 +529,72 @@ def _write_generation_meta(job: ReportJob, *, aborted: bool) -> None:
     atomic_write_text(path, json.dumps(raw, indent=2, ensure_ascii=False))
 
 
+# AA-05 S4 (P1, V2): the assistant's report tools run the job strict. The
+# switch is this context variable, set in-process by the chat tool around
+# its route call, so no query, body or form field of the human routes can
+# reach it (`routers/report_jobs._start` reads it).
+_ASSISTANT_STRICT: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "report_assistant_strict", default=False)
+
+
+class assistant_strict:  # noqa: N801 -- used as `with assistant_strict():`
+    """Run the enclosed report-route call strict (the assistant's tools)."""
+
+    def __enter__(self) -> None:
+        self._token = _ASSISTANT_STRICT.set(True)
+
+    def __exit__(self, *exc: object) -> None:
+        _ASSISTANT_STRICT.reset(self._token)
+
+
+def assistant_strict_active() -> bool:
+    return _ASSISTANT_STRICT.get()
+
+
+class ReportDisclosureMissing(Exception):
+    """A strict job's or export's output lost a required disclosure (P4)."""
+
+    kind = "report_disclosure_missing"
+
+
+def disclosure_texts(doc: ReportDocument) -> list[str]:
+    """The required-disclosure callouts of `doc`, in document order."""
+    return [b.text for s in doc.sections for b in s.blocks
+            if b.type == "callout" and b.kind == "disclosure"]
+
+
+def missing_disclosures(required: list[str], present: list[str]) -> list[str]:
+    """Each of `required` that `present` does not carry as often (V5)."""
+    left = list(present)
+    missing = []
+    for text in required:
+        if text in left:
+            left.remove(text)
+        else:
+            missing.append(text)
+    return missing
+
+
 def run_report_job(job: ReportJob) -> ReportDocument:
     """
     The worker body: generate, audit, save, publish the outcome on the
     record. Returns the saved document; raises after marking the record
     `failed` (the thread wrapper logs, a direct caller sees the exception).
+
+    A strict job checks before it saves that every required disclosure of
+    the version it started from (the evidence's skeleton for a generate,
+    the stored version for a regenerate, V5) is still in the document; a
+    lost one fails the job with `report_disclosure_missing` and saves
+    nothing.
     """
+    required = disclosure_texts(job.document) if job.strict else []
     try:
         doc, aborted = _generate_all(job)
+        lost = missing_disclosures(required, disclosure_texts(doc)) if job.strict else []
+        if lost:
+            raise ReportDisclosureMissing(
+                f"report_disclosure_missing: {len(lost)} required disclosure(s) are missing "
+                "from the written report; nothing was saved.")
         doc = doc.model_copy(update={
             "mode": "generated",
             "profile_id": job.profile_id or None,
@@ -524,7 +620,8 @@ def run_report_job(job: ReportJob) -> ReportDocument:
              error=None, finished_at=time.time())
         return saved
     except Exception as exc:
-        _set(job, status="failed", error=str(exc), finished_at=time.time())
+        kind = {"error_kind": exc.kind} if isinstance(exc, ReportDisclosureMissing) else {}
+        _set(job, status="failed", error=str(exc), finished_at=time.time(), **kind)
         raise
     finally:
         if isinstance(job.provider, RunSends):

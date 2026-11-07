@@ -70,14 +70,19 @@ def test_a_regenerated_summary_cannot_change_the_admitted_numbers(project, clien
 
     second = T.get_report(report_id)
     assert second["version"] == 2
-    assert second["sections"][0]["blocks"][0] == {"type": "paragraph", "md": "The plan meets 9.9 h/yr."}
-    assert second["sections"][0]["audit"] == {"unverified": ["9.9 h/yr"], "verified": []}
+    # AA-05 S4 (P1, V1): the assistant's regenerate is strict, so the
+    # unchecked statement is withheld: a placeholder stands in its place.
+    assert second["sections"][0]["blocks"][0] == {
+        "type": "callout", "kind": "gap",
+        "text": "Withheld: 1 number could not be checked against the study; see Numbers to check."}
+    assert not [b for b in second["sections"][0]["blocks"] if b["type"] == "paragraph"]
+    assert second["sections"][0]["audit"] == {"unverified": ["9.9 h/yr"], "verified": [], "withheld": True}
     assert T.get_report_table(report_id, "headline")["items"] == HEADLINE
     headline = [[c.text for c in row.cells] for row in _docx(client, report_id).tables[0].rows]
     assert headline == [["Item", "Value"]] + HEADLINE
 
     # The document flags it in the "Numbers to check" appendix and, in version 1, has none.
-    assert "Executive summary: 9.9 h/yr" in [p.text for p in _docx(client, report_id).paragraphs]
+    assert "Executive summary: 9.9 h/yr (unverified, withheld)" in [p.text for p in _docx(client, report_id).paragraphs]
     assert not any(p.text.startswith("Executive summary: ") for p in _docx(client, report_id, 1).paragraphs)
 
     first = T.get_report(report_id, version=1)

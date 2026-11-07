@@ -89,6 +89,7 @@ from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.http_filenames import content_disposition
 from services.reports import pdf, roundtrip_service, store, templates
 from services.reports.docx_reader import TemplateOutline
+from services.reports.report_job import assistant_strict_active, disclosure_texts
 
 if TYPE_CHECKING:
     from services.reports.evidence import Evidence
@@ -554,6 +555,8 @@ def export_report(report_id: str, body: ExportReportBody,
         }) from exc
     except templates.TemplateReadError as exc:
         raise _template_unreadable(exc) from exc
+    if assistant_strict_active():
+        _check_disclosures(doc, data)
     ext, mime = (".pdf", pdf.PDF_MIME) if body.format == "pdf" else (".docx", DOCX_MIME)
     if body.format == "pdf":
         try:
@@ -572,6 +575,26 @@ def export_report(report_id: str, body: ExportReportBody,
     meta = upload_service.add_upload(project.name, data, target, mime,
                                      kind="agent_export", project_dir=project.directory)
     return meta.model_dump()
+
+
+def _check_disclosures(doc: Any, data: bytes) -> None:
+    """AA-05 S4 (P4, V5): an assistant export carries every required
+    disclosure of the stored version it renders, or is refused (409) before
+    anything is saved. The PDF is checked on the Word document it converts."""
+    from services.reports.docx_reader import body_text
+
+    try:
+        text = body_text(data)
+        lost = [t for t in disclosure_texts(doc) if t not in text]
+    except Exception:  # noqa: BLE001 -- fail closed: an export that cannot be read back is not shown complete
+        logger.warning("reports: the export could not be read back for its disclosure check")
+        lost = ["(unreadable export)"]
+    if lost:
+        raise HTTPException(409, {
+            "error_kind": "report_disclosure_missing",
+            "message": f"The export lost {len(lost)} required disclosure(s) of this report version; "
+                       "nothing was saved.",
+        })
 
 
 # ── WP11: user templates ────────────────────────────────────────────────────

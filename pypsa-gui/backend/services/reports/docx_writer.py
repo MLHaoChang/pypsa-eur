@@ -457,10 +457,16 @@ def _appendix(doc, report: ReportDocument, bookmarks: _Bookmarks, *,
                      "evidence. They were flagged, not edited: check each "
                      "against the section's table before the report leaves "
                      "your hands.")
+    if any(F.is_withheld_section(s) for s in flagged):
+        # AA-05 S4 (V1): a strict job's numbers were taken out of the prose,
+        # not flagged in it; the placeholder there points here.
+        _disclosure(doc, "Numbers marked withheld were taken out of the prose "
+                         "because they could not be checked against the study; "
+                         "a placeholder stands where each statement was.")
     for section in flagged:
         p = doc.add_paragraph()
         p.add_run(f"{section.heading}: ").bold = True
-        p.add_run(", ".join(section.audit.unverified))
+        p.add_run(", ".join(F.withheld_marked(section)))
 
 
 # ── entry points ─────────────────────────────────────────────────────────

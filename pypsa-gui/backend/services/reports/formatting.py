@@ -79,3 +79,43 @@ def fmt_text(value: Any) -> str:
     if isinstance(value, (list, tuple)):
         return ", ".join(fmt_text(v) for v in value) if value else NOT_ESTABLISHED
     return str(value)
+
+
+# AA-05 S4 (V1): a strict job's placeholder for a withheld statement. It
+# names the count and the reason only, never a value; the values are in the
+# "Numbers to check" appendix, marked withheld. A section that carries one is
+# a withheld section: every unverified number in it was withheld (a strict
+# job keeps no statement the audit could not verify).
+WITHHELD_PREFIX = "Withheld: "
+APPENDIX_NAME = "Numbers to check"
+
+
+def withheld_placeholder(count: int) -> str:
+    """The inline placeholder for one withheld statement that quoted `count`
+    unchecked numbers (0: the audit could not read it)."""
+    if count <= 0:
+        return f"{WITHHELD_PREFIX}a statement could not be checked against the study; see {APPENDIX_NAME}."
+    noun = "number" if count == 1 else "numbers"
+    return f"{WITHHELD_PREFIX}{count} {noun} could not be checked against the study; see {APPENDIX_NAME}."
+
+
+def is_withheld_section(section: Any) -> bool:
+    """True when `section` (a `Section` or its JSON dict) carries a strict
+    job's withheld placeholder."""
+    blocks = section.get("blocks") if isinstance(section, dict) else getattr(section, "blocks", None)
+    for block in blocks or []:
+        kind, btype, text = ((block.get("kind"), block.get("type"), block.get("text")) if isinstance(block, dict)
+                             else (getattr(block, "kind", None), getattr(block, "type", None), getattr(block, "text", None)))
+        if btype == "callout" and kind == "gap" and isinstance(text, str) and text.startswith(WITHHELD_PREFIX):
+            return True
+    return False
+
+
+def withheld_marked(section: Any) -> list[str]:
+    """The section's unverified numbers as the appendix lists them: marked
+    "(unverified, withheld)" in a withheld section (V1), else as they are."""
+    audit = section.get("audit") if isinstance(section, dict) else getattr(section, "audit", None)
+    values = (audit.get("unverified") if isinstance(audit, dict) else getattr(audit, "unverified", None)) or []
+    if not is_withheld_section(section):
+        return list(values)
+    return [f"{value} (unverified, withheld)" for value in values]
