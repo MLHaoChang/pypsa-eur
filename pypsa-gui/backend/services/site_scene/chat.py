@@ -215,12 +215,25 @@ def _association(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _fit(out: dict[str, Any]) -> dict[str, Any]:
-    """Halve the listed items until the result is under MAX_READ_BYTES, naming every cut (G5)."""
+    """
+    Cut the result to MAX_READ_BYTES, naming every cut (G5): halve the longest
+    listed collection (down to none), then drop the action reasons (the codes
+    stay). What remains is a fixed set of scalars and verdict codes.
+    """
+    out["limits"] = {
+        "max_items": MAX_ITEMS,
+        "max_bytes": MAX_READ_BYTES,
+        "max_name_chars": MAX_NAME_CHARS,
+    }
     lists = ("buildings", "associations", "unbound_keys", "sites")
-    while len(json.dumps(out, default=str).encode("utf-8")) > MAX_READ_BYTES:
+
+    def size() -> int:
+        return len(json.dumps(out, default=str).encode("utf-8"))
+
+    while size() > MAX_READ_BYTES:
         longest = max(lists, key=lambda k: len(out.get(k) or []))
         items = out.get(longest) or []
-        if len(items) <= 1:
+        if not items:
             break
         keep = len(items) // 2
         out["truncated"] = [t for t in out["truncated"] if t["field"] != longest] + [
@@ -231,11 +244,13 @@ def _fit(out: dict[str, Any]) -> dict[str, Any]:
             }
         ]
         out[longest] = items[:keep]
-    out["limits"] = {
-        "max_items": MAX_ITEMS,
-        "max_bytes": MAX_READ_BYTES,
-        "max_name_chars": MAX_NAME_CHARS,
-    }
+    if size() > MAX_READ_BYTES and out.get("actions"):
+        out["actions"] = [
+            {k: v for k, v in a.items() if k != "reason"} for a in out["actions"]
+        ]
+        out["truncated"].append(
+            {"field": "actions[].reason", "shown": 0, "total": len(out["actions"])}
+        )
     return out
 
 
