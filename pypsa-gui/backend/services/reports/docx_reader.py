@@ -186,6 +186,17 @@ def _collect_text(element, parts: list[str]) -> None:
             _collect_text(child, parts)
 
 
+def body_text(data: bytes) -> str:
+    """Every body paragraph's and table cell's text of a ``.docx``, one per
+    line (AA-05 S4: the export's disclosure check reads it)."""
+    doc = _open(data)
+    lines = [merged_paragraph_text(p) for p in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            lines.extend(_cell_text(c) for c in row.cells)
+    return "\n".join(lines)
+
+
 # ── tags and placeholders ────────────────────────────────────────────────
 
 
