@@ -289,7 +289,7 @@ def test_the_ens_cap_never_throttles_curtailment(monkeypatch):
 
 
 def test_the_reserve_margin_never_counts_it(monkeypatch):
-    n = _network(hours)
+    n = _network()
     n.remove("Generator", "grid")
     n.add("Carrier", "gas")
     n.add(
@@ -398,7 +398,7 @@ def test_the_claim_limit_is_in_the_docs():
 
 def test_an_import_energy_cap_is_not_loosened(monkeypatch):
     """C17: curtailing serves load on dc_mv; it never adds room under a metered import cap."""
-    n = _network(hours)
+    n = _network()
     n.remove("Generator", "grid")
     n.add("Bus", "grid", carrier="AC")
     n.add(
