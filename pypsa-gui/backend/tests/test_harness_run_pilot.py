@@ -99,7 +99,9 @@ def test_a_grant_inside_the_hosts_chat_turn_fingerprints_the_new_project_and_lea
     before = _host_state(front)
     leave = _in_a_chat_turn(front)
     try:
-        path, task, ctx, _ = _grant(host, session, site, f"Pilot {uuid.uuid4().hex[:6]}")
+        path, task, ctx, _ = _grant(
+            host, session, site, f"Pilot {uuid.uuid4().hex[:6]}"
+        )
         # The host's cell is the bound one again once the grant returns.
         assert PyPSAService.get_active_context() is front
     finally:
@@ -153,7 +155,9 @@ def test_the_created_project_is_saved_so_a_later_save_keeps_its_fingerprint(
 
     leave = _in_a_chat_turn(PyPSAService.get_active_context())
     try:
-        path, task, ctx, row = _grant(host, session, site, f"Pilot {uuid.uuid4().hex[:6]}")
+        path, task, ctx, row = _grant(
+            host, session, site, f"Pilot {uuid.uuid4().hex[:6]}"
+        )
     finally:
         leave()
     assert ctx.user_ts  # the template's series, as a first save stores them
@@ -183,8 +187,13 @@ def test_the_hand_over_save_runs_before_the_run_starts_and_changes_no_config(
     def save(ctx, *args, **kwargs):
         config, revision = repr(ctx.solver_state["solver_config"]), ctx.network_revision
         out = real_save(ctx, *args, **kwargs)
-        seen.append(("save", config == repr(ctx.solver_state["solver_config"]),
-                     revision == ctx.network_revision))
+        seen.append(
+            (
+                "save",
+                config == repr(ctx.solver_state["solver_config"]),
+                revision == ctx.network_revision,
+            )
+        )
         return out
 
     monkeypatch.setattr(project_routes, "_save_context", save)
@@ -194,6 +203,7 @@ def test_the_hand_over_save_runs_before_the_run_starts_and_changes_no_config(
         def started(row, ctx):
             seen.append(("start",))
             return start(row, ctx)
+
         return real_tasks_start(*args, start=started, **kwargs)
 
     monkeypatch.setattr(run_handover, "_under_lock", under_lock)
@@ -235,13 +245,18 @@ def test_the_first_solve_of_a_created_project_reads_verified(host, session, site
 def _two_solve_steps():
     """The shipped eh_site@1 solve stage, both steps run: the queued solve,
     then the EH study (issue 07 B2), each with its own job."""
-    steps = run_profiles.materialise(run_profiles.load(run_profiles.EH_SITE), "solve", "p")
+    steps = run_profiles.materialise(
+        run_profiles.load(run_profiles.EH_SITE), "solve", "p"
+    )
     assert [(s["id"], s["tool"]) for s in steps] == [
         ("solve.1", "solve_queue_enqueue"),
         ("solve.2", "run_eh_study"),
     ]
     jobs = {"solve.1": "q-1", "solve.2": "ad:eh-1"}
-    return {"task_id": "t", "steps": [{**s, "job": {"job_id": jobs[s["id"]]}} for s in steps]}
+    return {
+        "task_id": "t",
+        "steps": [{**s, "job": {"job_id": jobs[s["id"]]}} for s in steps],
+    }
 
 
 def test_the_l2_history_names_the_queued_solve_never_the_eh_study():
@@ -255,10 +270,17 @@ def test_the_solve_facts_read_the_queued_solve_never_the_eh_studys_job(monkeypat
 
     def visible(db, user, job_id):
         asked.append(job_id)
-        return {"job_id": job_id, "status": "completed", "condition": "optimal", "project_key": "k"}
+        return {
+            "job_id": job_id,
+            "status": "completed",
+            "condition": "optimal",
+            "project_key": "k",
+        }
 
     monkeypatch.setattr(solve_queue, "_visible_job_or_404", visible)
     monkeypatch.setattr(project_registry, "registry_key", lambda row: "k")
-    env = run_gates.Env(task=_two_solve_steps(), ctx=None, project=object(), project_dir=None)
+    env = run_gates.Env(
+        task=_two_solve_steps(), ctx=None, project=object(), project_dir=None
+    )
     assert run_gates._solve_state(env) == "completed"
     assert asked == ["q-1"]
