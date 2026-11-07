@@ -115,6 +115,7 @@ from services.solver.pcs_statcom import clear_solution as _clear_pcs_statcom
 from services.solver.pcs_statcom import HORIZON_BASIS as _PQ_HORIZON_BASIS
 from services.solver.pcs_statcom import MAX_BASIS as _PQ_MAX_BASIS
 from services.solver import lost_production as _lost_production
+from services.solver import dc_curtailment as _dc_curtailment
 from services.solver import process_uc as _process_uc
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
 # the LP-terms wrapper, re-exported with the rest of the solver seams.
@@ -569,6 +570,8 @@ def build_lp_chain(network, config, log_queue):
     extra_fn = _wrap_with_sizing_cuts(network, extra_fn, log_queue=log_queue)  # AS-06 sizing-loop cuts
     # Reserve products on backup storage (DC 06): headroom above the backup floor. No-op without products.
     extra_fn = _wrap_with_reserve_products(network, extra_fn, config, log_queue=log_queue)
+    # Curtailable data-centre load (DC-07 S2): the duration's energy-proxy rows. No-op when off.
+    extra_fn = _dc_curtailment._wrap_with_dc_curtailment(network, extra_fn, log_queue=log_queue)
     # Edge Investment Case LP-level commercial terms (peaks, ratchets,
     # tiers, group caps; spec §5.1). After the reserve margin, before the
     # objective scale, which must stay last.
@@ -1370,6 +1373,8 @@ def run_simulation(
                     # cleared, only after a successful non-operational solve.
                     from services.commercial.settlement_inputs import commit_dsr
                     commit_dsr(network, captured.get("dsr_t"), captured.get("dsr_total_mwh"))
+                    # DC-07 S2: the curtailed energy, apart from unserved energy.
+                    _dc_curtailment.commit(network, captured)
                     # Published only after a successful solve, like the commit
                     # (WP1.5a review #6); None after a plain successful solve.
                     _emit_state(last_commercial_terms=(
@@ -1695,6 +1700,15 @@ def run_simulation(
                 log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
         log_queue.put(f"[PHASE] Refused: {exc}")
         status, condition = "error", f"island_refused: {exc}"
+    except _dc_curtailment.DcCurtailmentRefused as exc:
+        # A refusal, not a crash (DC 07 S2): the curtailable load cannot be modelled as asked.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
+        log_queue.put(f"[PHASE] Refused: {exc} [{exc.kind}]")
+        status, condition = "error", f"curtailment_refused: {exc.kind}: {exc}"
     except _ReserveRefusal as exc:
         # A refusal, not a crash (DC grid readiness 06): the reserve rows cannot be
         # built as configured; the condition names the typed kind.
