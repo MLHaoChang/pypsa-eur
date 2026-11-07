@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant no longer starts a run, study or queued solve again while an earlier identical request may still be running after it stopped answering; it checks the earlier job first, and a repeat asks you on a card that names the earlier request. A request with other settings waits until the earlier one is known to have ended.

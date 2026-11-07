@@ -3408,6 +3408,22 @@ def _dispatch_real_tool_call(
     policy_revision = confirmation_gate.confirmation_revision()
     # G3: the approval binds the args the handler receives, after every rewrite.
     bound_args = guards.fingerprint(args, guards.schema_for(tool_name))
+    # Issue 04 S5: a job call in an ordinary, untasked turn is checked against
+    # this session's holds (harness/job_holds.py). A tasked call gets only
+    # begin_step's refusal (GK B (30) N7).
+    from harness import job_holds
+    from services import assistant_tasks as _tasks
+
+    hold_scope = (
+        session.assurance_turn is None
+        and not external
+        and job_holds.is_job_tool(tool_name)
+        and not _tasks.governs(session, tool_name, args or {})
+    )
+    # P4: a same-fingerprint repeat shows a card naming the hold it repeats.
+    repeat_card = (
+        job_holds.repeat_card(session, tool_name, args, bound_args) if hold_scope else None
+    )
     approved = yield from _confirm_destructive_tool(
         session,
         tool_use_id=tool_use_id,
@@ -3422,12 +3438,15 @@ def _dispatch_real_tool_call(
         restriction_snapshot=restriction,
         edit_card=edit_card,
         sweep_card=sweep_card,
+        **({"repeat_card": repeat_card} if repeat_card is not None else {}),
     )
     if not approved:
         return
 
     task_ticket = None
     write_note = None
+    hold_prior = None
+    handler_started = False
     try:
 
         def require_current_confirmation():
@@ -3461,6 +3480,16 @@ def _dispatch_real_tool_call(
             yield from guards.denied(tool_use_id, tool_name, *lock_refusal,
                 tool_results_collector)
             return
+        # Issue 04 S5 (N7): a held job call is denied here, before reserve,
+        # begin_step and the handler. An approved repeat card admits it once.
+        if hold_scope:
+            hold_refusal = job_holds.check(
+                session, tool_name, args, bound_args, card=repeat_card
+            )
+            if hold_refusal is not None:
+                yield from guards.denied(tool_use_id, tool_name, *hold_refusal,
+                    tool_results_collector)
+                return
         effect_fresh = True
         if session.assurance_turn is not None and tool_name == "update_component":
             from harness.effects import reserve
@@ -3470,6 +3499,17 @@ def _dispatch_real_tool_call(
 
         task_ticket = assistant_tasks.begin_step(session, tool_name, args or {})
         prior_worker = None
+        if hold_scope and task_ticket is None and tool_name in job_holds.SSE_TOOLS:
+            # S5: the solve thread before this call, so a raise can tell a
+            # solve it started from one that was already running.
+            from services.pypsa_service import PyPSAService
+
+            try:
+                hold_prior = job_holds.solve_thread(
+                    turn_ctx or PyPSAService.get_active_context()
+                )
+            except Exception:  # noqa: BLE001 - the raise path reads it again
+                hold_prior = None
         if task_ticket is not None and tool_name in (
             "run_simulation",
             "run_ac_pf_stage",
@@ -3573,6 +3613,7 @@ def _dispatch_real_tool_call(
         # inside it. A tool_not_started call was cancelled and cannot run at all.
         if tool_name in ("run_simulation", "run_ac_pf_stage"):
             require_current_confirmation()
+            handler_started = True
             result = handler(**(args or {}))
         else:
             # Copy the calling context into the worker thread. Tool handlers
@@ -3790,6 +3831,11 @@ def _dispatch_real_tool_call(
             except concurrent.futures.TimeoutError:
                 if checked_turn is not None:
                     checked_turn.effect_pending = True
+                if hold_scope and task_ticket is None:
+                    # S5: the orphaned worker may still start the job.
+                    job_holds.open_on_timeout(
+                        session, tool_name, bound_args, tool_use_id, future
+                    )
                 try:
                     assistant_tasks.finish_step(task_ticket, error="tool_timeout")
                 except Exception:
@@ -3825,6 +3871,18 @@ def _dispatch_real_tool_call(
                 return
     except Exception as exc:  # noqa: BLE001 — surface as tool_error
         raised_outcome = None
+        if handler_started and hold_scope and task_ticket is None:
+            # S5 (N9): a solve tool raised on the SSE thread; uncertain only
+            # when a new solve thread is alive or the state cannot be read.
+            from services.pypsa_service import PyPSAService
+
+            try:
+                hold_ctx = turn_ctx or PyPSAService.get_active_context()
+            except Exception:  # noqa: BLE001 - open_on_raise reads it as unknown
+                hold_ctx = None
+            job_holds.open_on_raise(
+                session, tool_name, bound_args, tool_use_id, hold_ctx, hold_prior
+            )
         if write_note is not None:
             # Issue 04 S4b (G5): `failed` only when the note's read-back found
             # the state unchanged, else uncertain; an import uses the same
@@ -4335,6 +4393,11 @@ def _dispatch_real_tool_call(
             else outcomes.project(tool_name, args or {}, tool_use_id),
             **{k: v for k, v in (result_for_model or {}).items() if k != "_outcome"},
         }
+        if hold_scope and task_ticket is None:
+            # S5: a returned solve whose outcome is unknown holds its job.
+            job_holds.open_on_outcome(
+                session, tool_name, bound_args, tool_use_id, result_for_model["_outcome"]
+            )
     if session.assurance_turn is not None:
         projection = session.assurance_turn.result_projection(
             tool_name, result_for_model, tool_use_id
