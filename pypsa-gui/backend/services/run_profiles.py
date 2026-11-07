@@ -29,6 +29,7 @@ BOUND_CONTEXT_TOOLS = frozenset({
     "get_weather_choice", "validate_network", "project_readiness", "diagnose_network", "solve_queue_enqueue",
     "apply_demand_from_excel",  # issue 21c: stage 2's planned write
     "generate_report",  # issue 07: stage 7 (GK B C6)
+    "run_eh_study",  # issue 07 B2: the solve stage's EH study, on its frozen args (GK B C1)
 })
 
 # Issue 07 (design §3 stages 7-8): steps only the runner runs, never a chat
@@ -132,6 +133,33 @@ HANDOFF_RULES = [
           basis="Every headline KPI was read back from its native source (C14)."),
 ]
 
+# Issue 07 B2 (design §9.3, GK B (31) F7-F9): eh_site's own input and result
+# rules. The EH review reads the study, so it sits in the result gate (F8, Q1 = A).
+EH_INPUT_RULES = [
+    _rule("eh.readiness.ready", "eh.readiness.ready", "eq", True,
+          basis="The Energy Hub readiness preflight predicts every requested stage runs."),
+    _rule("eh.energization.min_mw", "eh.energization.min_mw", "ge", 0.0,
+          basis="Each growth stage's energized connection is a number of MW, never negative."),
+]
+EH_SOLVE_RULES = [
+    _rule("eh.study.status", "eh.study.status", "eq", "done",
+          basis="The run's own Energy Hub study finished with every requested stage run (F2)."),
+]
+EH_RESULT_RULES = [
+    _rule("eh.review.blockers", "eh.review.blockers", "empty",
+          basis="The review of the run's own study names no high-severity finding."),
+    _rule("kpi.unserved_mwh", "kpi.unserved_mwh", "eq", 0.0,
+          basis="No load is shed in normal operation (the run's own solve)."),
+    # §6.2, F9: the goal's h/yr target on the network's horizon (`loop_goal`),
+    # judged by the loop record only; the EH study's own MC LOLE never is.
+    {**_rule("eh.adequacy.lole", "adequacy.loop.converged", "eq", True,
+             basis="LOLE at or below the project's reliability goal (h/yr, on the horizon)."),
+     "engine": {"tool": "run_margin_loop", "max_solves": 3, "restore": "base"}},
+]
+# Issue 07 B2 (GK B C1): the solve stage's EH study. Its args are frozen from
+# this block and the project's goal (`harness/run_eh.freeze`), never a model's.
+EH_STUDY_ACTION = {"tool": "run_eh_study", "args": {"frozen": "eh_study"}}
+
 # §9.2. Setup binds the open project: tasks never rebind (start_task), so
 # creating the project from the template stays the user's step for now.
 GENERIC: dict[str, dict] = {
@@ -233,6 +261,12 @@ def load(profile: dict) -> dict:
                 continue
             if action["tool"] not in BOUND_CONTEXT_TOOLS:
                 raise ProfileError(f"Stage {name}: {action['tool']} is not yet shown to work on the run's own project.")
+            if (action["tool"] == EH_STUDY_ACTION["tool"]) != (action["args"] == EH_STUDY_ACTION["args"]) or (
+                    action["tool"] == EH_STUDY_ACTION["tool"]
+                    and (name != "solve" or not isinstance(profile.get("eh_study"), dict))):
+                # Issue 07 B2 (GK B C1): its args are frozen by the harness, never written here.
+                raise ProfileError(f"Stage {name}: run_eh_study runs in the solve stage only, with the profile's "
+                                   "eh_study block and args frozen by the harness.")
         _check_tunable(stage.get("tunable", []))
         try:
             rules = [run_gates.check_rule(r) for r in stage.get("rules", [])]
@@ -353,8 +387,12 @@ EH_SITE = {
             _rule("set.project.template", "project.template", "eq", "eh_site",
                   basis="The profile serves the eh_site template only."),
         ]},
-        # Issue 01: the result gate reads the solver status only; LC-20 (05)
-        # and the eh_site KPI rules (07) join it later.
+        # Issue 07 B2: the EH input rules, the EH study after the solve, and
+        # the EH result rules (design §9.3).
+        "input_gate": {**GENERIC["input_gate"], "rules": [*CORE_INPUT_RULES, *EH_INPUT_RULES]},
+        "solve": {"actions": [*GENERIC["solve"]["actions"], EH_STUDY_ACTION],
+                  "rules": [*GENERIC["solve"]["rules"], *EH_SOLVE_RULES]},
+        "result_gate": {**GENERIC["result_gate"], "rules": [*CORE_RESULT_RULES, *EH_RESULT_RULES]},
         # Issue 06: connection against BESS against genset, at most 4 cases.
         "explore": {"actions": [], "rules": EXPLORE_RULES,
                     "agent": {"tools": list(EXPLORE_TOOLS), "rounds": 1, "changes": EXPLORE_CHANGES,
@@ -381,6 +419,9 @@ EH_SITE = {
         ],
         "study": {"question_id": "bess_at_site"},
     },
+    # Issue 07 B2: what the run's EH study runs with, besides the project's
+    # goal and its template's site overrides (`harness/run_eh.freeze`).
+    "eh_study": {"stages": ["apply_pack", "ens_solve", "mc_certify", "assemble"], "budget_solves": 2},
     "tunable": [{"component": "candidate:genset", "attr": "max_mw"},
                 {"component": "candidate:bess", "attr": "max_mw"},
                 {"component": "candidate:pv", "attr": "max_mw"},

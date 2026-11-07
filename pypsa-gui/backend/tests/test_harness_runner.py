@@ -18,7 +18,7 @@ from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline, dispatch, edit, helpers_state, session, stored, wait_until,
 )
-from tests.test_harness_run_skeleton import BRIEF, RUN, foreground, site, start, two_buses  # noqa: F401
+from tests.test_harness_run_skeleton import BRIEF, RUN, foreground, site, start, two_buses, without_eh_study  # noqa: F401
 
 
 class Clicks:
@@ -181,6 +181,8 @@ def until_solve_waits(detached, site, monkeypatch, follow=False):
     record = settle(a, path, task['task_id'], lambda r: any(s['status'] == 'waiting' for s in r['steps']))
     monkeypatch.undo()
     fake_report(monkeypatch)  # the undo took the autouse fake report provider too
+    from services import run_profiles  # and `site`'s eh_site@1 without its EH study
+    monkeypatch.setitem(run_profiles.PROFILES, 'eh_site@1', without_eh_study(run_profiles.EH_SITE))
     if not follow:
         step = record['steps'][-1]
         tasks.forget_queue_follower((task['task_id'], step['id'], step['attempt_id']))  # gone with the process
