@@ -399,3 +399,16 @@ def test_a_table_and_a_scoped_chart_deliver_together(baseline, client):
     chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
     items = delivered_items(client, table, chart)
     assert "scope_status" not in items[0] and items[1]["scope_status"] == "input_as_drawn"
+
+
+def test_a_deferred_validate_is_passed_through_and_records_nothing(
+    baseline, monkeypatch
+):
+    import routers.simulation
+
+    imported()
+    deferred = {"deferred": True, "message": "A solve is still finishing."}
+    monkeypatch.setattr(routers.simulation, "preflight", lambda: deferred)
+    assert chat_tools.validate_network() == deferred
+    assert records() == []
+
