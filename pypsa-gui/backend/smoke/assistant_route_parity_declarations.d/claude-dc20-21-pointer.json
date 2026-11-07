@@ -1,0 +1,28 @@
+{
+ "limitations": [
+  {
+   "method": "PUT",
+   "path": "/api/campus-electrical/{name}/dc-backup",
+   "reason": "ui-pointer",
+   "decision": "DC20-POINTER-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/dc-backup/assess",
+   "reason": "ui-pointer",
+   "decision": "DC20-POINTER-1"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/reserves",
+   "reason": "ui-pointer",
+   "decision": "DC20-POINTER-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/dc-architecture/compare",
+   "reason": "ui-pointer",
+   "decision": "DC20-POINTER-1"
+  }
+ ]
+}

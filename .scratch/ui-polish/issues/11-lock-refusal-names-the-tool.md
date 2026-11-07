@@ -3,7 +3,7 @@
 
 # Lock refusal names the tool in Python-repr quotes
 
-Status: ready-for-agent
+Status: done
 Type: bug (wording)
 Found by: UX (12), S4b review (#1204), relayed by the coordinator.
 Owner: AA-04 follow-up (job holds / foreign lock).

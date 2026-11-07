@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ChoiceCard } from '../ChatPanel'
 import { useChatStore } from '../../store/chatStore'
+import { useUIStore } from '../../store/uiStore'
 import * as api from '../../api/runMonitor'
 import { ENVELOPE, STATES, TASK_ID } from './runFixtures'
 
@@ -137,5 +138,65 @@ describe('EnvelopeSection', () => {
     render(<ChoiceCard />)
     expect(screen.queryByTestId('envelope-section')).toBeNull()
     expect(screen.getAllByTestId('chat-choice-option')).toHaveLength(2)
+  })
+})
+
+// SH-26: the plan card names the Library tariffs held now, under the attach_tariff gap.
+describe('EnvelopeSection held tariffs', () => {
+  const GAP = { tool: 'attach_tariff', target: { component: 'Settings', name: 'Commercial', attr: 'import_tariff_ref' },
+    source: { kind: 'library_tariff' } }
+  const H1 = 'a1b2c3d4e5f6'.padEnd(64, '0'), H2 = '99887766aabb'.padEnd(64, '1')
+  function openWith(gaps: unknown) {
+    const envelope = { ...ENVELOPE, ...(gaps === undefined ? {} : { gaps }) }
+    vi.mocked(api.getRun).mockResolvedValue({ ...STATES.proposal, envelope } as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope } }] })
+    render(<ChoiceCard />)
+  }
+
+  const TWO = [{ name: 'nl', version: 1, hash: H1 }, { name: 'other', version: 3, hash: H2 }]
+
+  it('lists two held tariffs and says approving fills none; Guided shows no hash', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    openWith([{ ...GAP, held_state: 'held', held: TWO }])
+    await screen.findByTestId('envelope-held')
+    expect(screen.getAllByTestId('envelope-held-tariff').map(e => e.textContent)).toEqual(['nl v1', 'other v3'])
+    const text = screen.getByTestId('envelope-held').textContent ?? ''
+    expect(text).toContain('Held now (read again when you approve):')
+    expect(text).toContain('2 are held now, so approving fills none: keep one in the Library to fill it.')
+    expect(text).not.toMatch(/grant|gap|import_tariff_ref|a1b2c3d4/)
+  })
+
+  it('Expert adds the short hash', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    openWith([{ ...GAP, held_state: 'held', held: TWO }])
+    await screen.findByTestId('envelope-held')
+    expect(screen.getAllByTestId('envelope-held-tariff').map(e => e.textContent)).toEqual(['nl v1 · a1b2c3d4', 'other v3 · 99887766'])
+  })
+
+  it('one held says approving fills it if it is still the only one', async () => {
+    openWith([{ ...GAP, held_state: 'held', held: TWO.slice(0, 1) }])
+    expect((await screen.findByTestId('envelope-held-note')).textContent)
+      .toBe('Approving fills it with this one if it is still the only one.')
+  })
+
+  it('never shows a raw attribute key for another tariff attribute', async () => {
+    openWith([{ ...GAP, target: { ...GAP.target, attr: 'export_tariff_ref' }, held_state: 'none', held: [] }])
+    expect((await screen.findByTestId('envelope-held')).textContent).not.toMatch(/_ref|export_tariff/)
+  })
+
+  it.each([
+    ['none', [], 'No Library tariff is held, so approving leaves it empty.'],
+    ['unreadable', null, 'Library tariffs could not be read now: they are read again when you approve.'],
+    ['unnamed', null, 'A Library tariff without an id is held, so approving fills none.'],
+  ])('says so when the state is %s', async (state, held, words) => {
+    openWith([{ ...GAP, held_state: state, held }])
+    expect((await screen.findByTestId('envelope-held-note')).textContent).toBe(words)
+    expect(screen.queryAllByTestId('envelope-held-tariff')).toHaveLength(0)
+  })
+
+  it('renders no line for an envelope without them, as before', async () => {
+    openWith(undefined)
+    await screen.findByTestId('envelope-section')
+    expect(screen.queryByTestId('envelope-held')).toBeNull()
   })
 })

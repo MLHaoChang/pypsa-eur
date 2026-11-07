@@ -323,6 +323,9 @@ def get_upload_blob(
             raise HTTPException(413, {"error_kind": "file_too_large"})
         data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != meta.sha256:
+            if meta.assurance_sha256 is not None:
+                from services.assurance_artifacts import quarantine
+                quarantine(project.directory, file_id, "bytes")
             raise HTTPException(409, {"error_kind": "artifact_evidence_unavailable"})
         checked = verify_chart(project.directory, meta, data, project.uuid)
         headers = {"Content-Disposition": content_disposition(meta.filename, disposition="inline")}

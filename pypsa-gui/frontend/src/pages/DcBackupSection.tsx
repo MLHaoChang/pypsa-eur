@@ -19,7 +19,9 @@ import { nk } from '../utils/queryKeys'
 import { money, SYMBOL } from '../utils/money'
 
 const NBSP = ' '
-const MODE_LABEL: Record<DcBackupMode, string> = { genset: 'Gensets', bess: 'Batteries', hybrid: 'Hybrid' }
+export const MODE_LABEL: Record<DcBackupMode, string> = { genset: 'Gensets', bess: 'Batteries', hybrid: 'Hybrid' }
+/** The backup control's own label; the create form shares it (DC 22). */
+export const BACKUP_MODE_FIELD = 'Backup mode'
 const CHIP: Record<DcBackupProof['verdict'], GridReadinessVerdict> = {
   pass: 'pass', fail: 'fail', not_shown: 'unknown',
 }
@@ -116,7 +118,7 @@ export default function DcBackupSection({ name }: { name: string }) {
   return (
     <div data-testid="dc-backup">
       <PageSection title="Backup" hint="Gensets, batteries or both for a grid outage">
-        <div className="flex items-center gap-2" role="group" aria-label="Backup mode"
+        <div className="flex items-center gap-2" role="group" aria-label={BACKUP_MODE_FIELD}
              data-testid="dc-backup-mode" data-mode={mode}>
           <Seg<DcBackupMode>
             value={mode}
@@ -124,7 +126,7 @@ export default function DcBackupSection({ name }: { name: string }) {
             options={(['genset', 'bess', 'hybrid'] as const).map(v => ({
               value: v, label: MODE_LABEL[v], disabled: save.isPending,
             }))}
-            title="Backup mode"
+            title={BACKUP_MODE_FIELD}
           />
           {!built && (
             <Btn onClick={() => assess.mutate()} disabled={assess.isPending || save.isPending}>

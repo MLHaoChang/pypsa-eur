@@ -8,7 +8,7 @@ import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/ass
 import { ProvenanceChip } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
 import { ReferenceApplyDrawer } from '../../pages/results/investment/ReferenceApplyDrawer'
-import { derivedStored, displayValue, isRevealed, tidy, unitLabel } from '../../utils/assetForm'
+import { derivedStored, displayValue, isRevealed, tidy, unitLabel, visibleUnit } from '../../utils/assetForm'
 import type { SeriesField } from '../../components/series/useSeriesFields'
 import {
   BusSelect, CarrierGroupSelect, ChkInput, FieldLabel, InfoTip, LifetimeInherit, NumInput, SectionHdr, TxtInput,
@@ -114,7 +114,7 @@ function DerivedRow({ spec, value, stamps }: { spec: AssetFieldSpec; value: unkn
     // ("Capital cost (annualised) (€/kW/yr)") and must not truncate.
     <div className="col-span-2 flex items-baseline justify-between gap-2" data-testid={`asset-derived-${spec.key}`}>
       <span className="text-[9px] text-muted">
-        <InfoTip text={spec.help}>{spec.label}{spec.unit_display ? ` (${unitLabel(spec.unit_display)})` : ''}</InfoTip>
+        <InfoTip text={spec.help}>{spec.label}{visibleUnit(spec.unit_display) ? ` (${visibleUnit(spec.unit_display)})` : ''}</InfoTip>
         {/* The derived key's own stamp only, never inferred from its parts. */}
         {chipOf(stamps, spec.key)}
       </span>
@@ -200,7 +200,7 @@ function PartsTable({ parts, fs, set, stamps }: { parts: AssetFieldSpec[]; fs: F
                     <td key={c.suffix} className="pr-1">
                       {f && (
                         <input type="number" step="any" value={fs[f.key] ?? ''}
-                          aria-label={`${f.label}${f.unit_display ? ` (${unitLabel(f.unit_display)})` : ''}`}
+                          aria-label={`${f.label}${visibleUnit(f.unit_display) ? ` (${visibleUnit(f.unit_display)})` : ''}`}
                           title={f.help}
                           onChange={e => set(p => ({ ...p, [f.key]: e.target.value }))}
                           className="bg-bg border border-border rounded px-1 py-0.5 text-[10px] font-mono focus:outline-none focus:border-accent w-full" />
@@ -335,7 +335,7 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                   : f.kind === 'carrier' ? <CarrierGroupSelect k={f.key} fs={fs} set={set} carriers={carriers} tip={f.help} />
                   : f.kind === 'text' ? <TxtInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} />
                   : f.kind === 'enum' ? <EnumInput spec={f} fs={fs} set={set} badge={chipOf(provenance, f.key)} />
-                  : <NumInput label={series?.[f.key] ? `Constant ${f.label.charAt(0).toLowerCase()}${f.label.slice(1)}` : f.label} k={f.key} fs={fs} set={set} unit={f.unit_display ? unitLabel(f.unit_display) : undefined}
+                  : <NumInput label={series?.[f.key] ? `Constant ${f.label.charAt(0).toLowerCase()}${f.label.slice(1)}` : f.label} k={f.key} fs={fs} set={set} unit={visibleUnit(f.unit_display)}
                       tip={series?.[f.key]
                         ? `${f.help ?? ''} The constant the ${series[f.key].editor} editor starts from; a series set there replaces it.`.trim()
                         : f.help}

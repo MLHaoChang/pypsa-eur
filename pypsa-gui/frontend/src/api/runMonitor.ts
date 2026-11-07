@@ -19,12 +19,21 @@ export interface EnvelopeEdit {
   bounds?: { min?: number; max?: number; rel?: number }
   enum?: (string | number)[]
 }
+/** SH-26: a gap the run may fill. A plan-state `library_tariff` gap also carries the Library
+    tariffs held now; an older stored envelope carries none of these fields. */
+export interface EnvelopeGap {
+  tool: string
+  target: { component: string; name: string; attr: string }
+  source: { kind: string }
+  held?: { name: string; version: number | string | null; hash: string }[] | null
+  held_state?: 'held' | 'none' | 'unreadable' | 'unnamed'
+}
 export interface EnvelopeRun { tool: string; kind?: string }
 export interface EnvelopeBudget { solves: number; rounds: number; wall_time_h: number }
 export interface Envelope {
   id: string; state: 'proposed' | 'granted' | 'expired' | 'revoked' | 'exhausted'
   expires_at: string | null
-  edits: EnvelopeEdit[]; runs: EnvelopeRun[]; budget: EnvelopeBudget
+  edits: EnvelopeEdit[]; gaps?: EnvelopeGap[]; runs: EnvelopeRun[]; budget: EnvelopeBudget
   research: { allowed: boolean; cost_cap_eur: number }
   notify: { email: boolean }
   used: number; refused: number

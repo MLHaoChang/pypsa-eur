@@ -3,7 +3,7 @@
 
 # #1124: `GAP_WORDS` covers one gap only
 
-Status: ready-for-agent
+Status: done
 Type: wording
 Found by: UX (9) review items (#1124); owner list DOCS-1.
 

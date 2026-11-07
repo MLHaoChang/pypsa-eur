@@ -3,7 +3,7 @@
 
 # RP-14: `readyRows` excludes `network_native` from bulk Generate
 
-Status: needs-info
+Status: wontfix
 Type: bug
 Found by: RP-14 (`14-native-series-read-as-measured.md`); owner list DOCS-1.
 
@@ -22,3 +22,7 @@ Found by: RP-14 (`14-native-series-read-as-measured.md`); owner list DOCS-1.
 - Not buildable until answered.
 - Question (UX (12)): UX (12): should bulk Generate include `network_native` rows (with the replace confirmation), or stay as is and leave them to per-row Generate? Include = S, sonnet, UX (12) review; stay = close as wontfix.
 - Blocked by: the answer.
+
+### 2026-11-07: needs-info answered (coordinator)
+
+UX (12): stay per-row. Network-native series are protected like measured uploads, and notReadyReason already says a default never replaces them; "Also replace series generated earlier" covers only generated series, so widening it would overwrite supplied data under a label that does not say so. Per-row Generate stays the deliberate way to replace one. Status: wontfix.

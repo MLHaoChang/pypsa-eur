@@ -25,6 +25,7 @@ hourly dispatch move 52 hours of stored energy.
 """
 from __future__ import annotations
 
+import math
 from typing import NamedTuple
 
 import numpy as np
@@ -657,12 +658,18 @@ def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None =
         # DC 05, GK A C3: the stated PUE (this architecture's) must hold its own
         # conversion chain plus a non-negative overhead; PUE(T) is lowest at design.
         from services.dc_architecture import DcArchitectureError, chain, check_pue
+        eta = chain(spec.architecture)["eta_to_rack"]
         try:
-            check_pue([spec.pue_at_design], chain(spec.architecture)["eta_to_rack"],
-                      field="dc_load.pue_at_design")
+            check_pue([spec.pue_at_design], eta, field="dc_load.pue_at_design")
         except DcArchitectureError as exc:
-            # The create form names its fields (dc_load.*), as its other refusals do.
-            raise DcLoadError(f"{exc.field}: {str(exc).removeprefix('PUE: ')}", exc.field) from None
+            # The create form names its fields (dc_load.*), as its other refusals do; the
+            # words are plain, and name only what the form's user can do (DC 22).
+            # Rounded up, so the stated minimum itself builds.
+            least = math.ceil(1.0 / eta * 1000) / 1000
+            raise DcLoadError(
+                f"{exc.field}: {spec.pue_at_design:g} is below what the architecture’s own "
+                f"conversion losses need (at least {least:.3f}). Raise the PUE or pick "
+                "another architecture.", exc.field) from None
     if template_id == "eh_datacenter_staged":
         expected = list(_dc_plan(planning).planning.years)
         got = [p.cod.year for p in spec.phases]
