@@ -601,7 +601,7 @@ def block(ctx: dict[str, Any], verdicts: list[dict[str, Any]]) -> str:
             not isinstance(v, (str, int, bool)) or len(str(v)) > MAX_VALUE_CHARS
         ):
             raise ValueError(
-                f"site context field {k!r} must be a scalar of at most {MAX_VALUE_CHARS} characters"
+                f"site context field {k!r} must be a scalar of at most {MAX_VALUE_CHARS} characters"  # repr-ok: developer ValueError, never shown
             )
     head = ["[site 3d]"] + [f"{k}: {ctx[k]}" for k in FIELDS if ctx.get(k) is not None]
     lines = [
