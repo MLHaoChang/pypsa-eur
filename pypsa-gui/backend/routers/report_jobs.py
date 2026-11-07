@@ -62,6 +62,7 @@ from services.pypsa_service import PyPSAService
 from services.reports import store, templates
 from services.reports.report_job import (
     ReportJobInFlight,
+    SummarySectionUnknown,
     assistant_strict_active,
     pending_instruction_of,
     public_record,
@@ -75,6 +76,12 @@ router = APIRouter()
 JOB_KEY = "report_job"
 
 
+class SummaryDeclaration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    section_id: str
+    sections: list[str]
+
+
 class GenerateReportBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
     title: str | None = None
@@ -83,6 +90,9 @@ class GenerateReportBody(BaseModel):
     sections: list[str] | None = Field(default=None, min_length=1)
     instruction: str | None = None
     template_file_id: str | None = None
+    # AA-05 Y1: each declared summary section and the section ids whose
+    # evidence facts it may quote in a strict job.
+    summaries: list[SummaryDeclaration] | None = None
 
 
 class ProposeMappingBody(BaseModel):
@@ -189,11 +199,32 @@ def _start(project: AuthorizedProject, **kwargs: Any) -> str:
             lock=PyPSAService.get_solver_state_lock(), state=_state(), **kwargs)
     except ReportJobInFlight as exc:
         raise _in_flight(exc) from exc
+    except SummarySectionUnknown as exc:
+        raise HTTPException(400, {
+            "error_kind": "summary_section_unknown",
+            "message": f"The summary declaration names {exc.args[0]!r}, which the report does not have.",
+        }) from exc
     except KeyError as exc:
         raise HTTPException(404, {
             "error_kind": "report_section_not_found",
             "message": f"The report has no section {exc.args[0]!r}.",
         }) from exc
+
+
+def _summaries(declared: list[SummaryDeclaration] | None) -> dict[str, list[str]] | None:
+    """The body's summary declarations as {section_id: listed ids}; a section
+    declared twice refuses, as an unknown one does (AA-05 Y1)."""
+    if not declared:
+        return None
+    out: dict[str, list[str]] = {}
+    for item in declared:
+        if item.section_id in out:
+            raise HTTPException(400, {
+                "error_kind": "summary_section_unknown",
+                "message": f"The summary {item.section_id!r} is declared twice.",
+            })
+        out[item.section_id] = list(item.sections)
+    return out
 
 
 # ── routes ──────────────────────────────────────────────────────────────────
@@ -229,7 +260,7 @@ def generate_report(body: GenerateReportBody,
         project, evidence=evidence, figure_pngs=figure_pngs, profile=profile,
         provider=provider, language=language or "en",
         sections=body.sections, instruction=body.instruction, title=body.title,
-        **template_kwargs)
+        summaries=_summaries(body.summaries), **template_kwargs)
     return {"status": "running", "report_id": report_id}
 
 

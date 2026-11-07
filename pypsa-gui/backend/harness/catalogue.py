@@ -2989,7 +2989,12 @@ TOOLS: list[dict[str, Any]] = [
         "established. `language` defaults to the template's detected language "
         "when `template_file_id` names one (an upload of kind "
         "report_template, see list_report_templates), else 'en'; "
-        "`instruction` is free text the writer follows. 400 no_evidence when "
+        "`instruction` is free text the writer follows. `summaries` "
+        "(optional) declares a summary section and the section ids whose "
+        "evidence numbers its prose may quote, e.g. [{section_id: "
+        "'executive_summary', sections: ['fmea']}]; the report notes them, "
+        "and an id the report does not have is 400 summary_section_unknown. "
+        "400 no_evidence when "
         "the session has nothing to report on (run a study first). Returns "
         "{status:'running', report_id} — poll get_report_status until "
         "done/aborted/failed, then read it with get_report. Only call this "
@@ -3001,6 +3006,13 @@ TOOLS: list[dict[str, Any]] = [
             "sections": {"type": "array", "items": {"type": "string"}},
             "instruction": {"type": "string"},
             "template_file_id": {"type": "string"},
+            "summaries": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"section_id": {"type": "string"},
+                               "sections": {"type": "array", "items": {"type": "string"}}},
+                "required": ["section_id", "sections"],
+                "additionalProperties": False,
+            }},
         },
         [],
     ),

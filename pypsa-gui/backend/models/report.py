@@ -111,6 +111,10 @@ class Section(_Model):
     # (investment | grid_plan | reliability | operation); None for the summary
     # and the pipeline appendix. A stored report from before has none.
     category: str | None = None
+    # AA-05 Y1 (additive): a section declared as a summary lists the section
+    # ids whose evidence facts its prose may quote in a strict job (one level,
+    # `report_job.admitted_facts`). None: the section admits its own slice only.
+    summarises: list[str] | None = None
 
 
 # ── tables and figures (rendered by code, referenced by blocks) ─────────────
