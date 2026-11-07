@@ -172,7 +172,7 @@ describe('TariffBuilder — review round 1', () => {
     renderBuilder({ ...structuredClone(H3), jurisdiction: 'generic' })
     const cur = screen.getByLabelText('Currency') as HTMLInputElement
     expect(cur.value).toBe('')
-    expect(cur.placeholder).toBe('ISO')
+    expect(cur.placeholder).toBe('')
     fireEvent.change(screen.getByLabelText('Jurisdiction'), { target: { value: 'NL' } })
     expect(cur.placeholder).toBe('EUR')
     fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
@@ -203,6 +203,7 @@ describe('TariffBuilder — review round 1', () => {
     fireEvent.change(screen.getByLabelText('Jurisdiction'), { target: { value: 'generic' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
     await screen.findByText('Currency: unknown.')
+    expect(screen.queryByTestId('tb-currency-note')).toBeNull()
     fireEvent.change(cur, { target: { value: 'EUR' } })
     expect(screen.queryByText('Currency: unknown.')).toBeNull()
     expect(cur.getAttribute('aria-invalid')).toBeNull()

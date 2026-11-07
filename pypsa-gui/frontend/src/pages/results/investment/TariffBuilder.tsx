@@ -355,17 +355,17 @@ export default function TariffBuilder({ initial, onSaved }: {
                                    value={t.jurisdiction}
                                    onChange={e => { clearCurrencyError(); setT({ ...t, jurisdiction: e.target.value }) }} /></label>
         <label>{FIELD_WORDS.currency.text} <input aria-label={FIELD_WORDS.currency.aria} className={`${input} w-14 uppercase aria-[invalid=true]:border-danger`}
-                               maxLength={3} value={t.currency ?? ''} placeholder={implied ?? 'ISO'}
+                               maxLength={3} value={t.currency ?? ''} placeholder={implied ?? ''}
                                aria-invalid={errors.currency ? true : undefined} aria-describedby="tb-currency-help"
                                onChange={e => { clearCurrencyError()
                                  setT({ ...t, currency: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') }) }} /></label>
         <span id="tb-currency-help" className="sr-only">{implied
           ? `Leave blank to use ${implied}, the currency for ${t.jurisdiction.trim()}.`
-          : 'Three-letter ISO 4217 code, such as EUR.'}</span>
+          : 'A three-letter currency code, such as EUR or USD.'}</span>
         <label>{FIELD_WORDS.valid_from.text} <input type="date" aria-label={FIELD_WORDS.valid_from.aria} className={input} value={t.valid_from}
                                  onChange={e => setT({ ...t, valid_from: e.target.value })} /></label>
       </div>
-      {!implied && !t.currency && <p className="text-muted text-[11px]" data-testid="tb-currency-note">
+      {!implied && !t.currency && !errors.currency && <p className="text-muted text-[11px]" data-testid="tb-currency-note">
         State a currency: no currency is known for this jurisdiction.</p>}
       <Errors list={Object.entries(errors).filter(([k]) => !/^items\.\d+/.test(k))
         .flatMap(([k, msgs]) => msgs.map(m => `${fieldLabel(k || 'tariff')}: ${m}`))} />
