@@ -98,3 +98,13 @@ describe('DcLoadForm', () => {
     expect(dcRefusalText(null, 'dc_load: must be an object')).toBe('must be an object')
   })
 })
+
+describe('DcLoadForm staged reason and selection mark', () => {
+  it('gives the read-only phase list its reason, and marks the selected hint', async () => {
+    mount('eh_datacenter_staged')
+    expect(screen.getByTestId('dc-form-phases').textContent).toContain('Phases come from the build plan: change them there.')
+    await userEvent.selectOptions(screen.getByLabelText(ARCH_FIELD), 'dc_800v')
+    expect(within(screen.getByTestId('dc-form-arch-hint-dc_800v')).getByTestId('dc-form-arch-selected')).toBeTruthy()
+    expect(screen.getAllByTestId('dc-form-arch-selected')).toHaveLength(1)
+  })
+})

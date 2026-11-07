@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /**
  * DC 22 screenshot harness: the data-centre create form under the eh_datacenter tile, on the real app and the real
- * create route. Per mode (Guided, Expert): `1-tile-closed`, `2-form-open`, `3-hint-<architecture>` (each of the four),
+ * create route. Per mode (Guided, Expert; `5-staged-form-open` adds the phase list and its reason): `1-tile-closed`, `2-form-open`, `3-hint-<architecture>` (each of the four),
  * `4-refusal` (a real 422: PUE 1.01 on the solid-state transformer cannot hold its own conversion losses).
  * The Expert shots are the New project wizard's Templates tab; the Guided ones are that wizard too plus the Guided
  * Start card (`start-` prefix). Nothing is created: the refusal is raised before the project exists.
@@ -37,7 +37,7 @@ try {
   await owner.close()
 
   for (const mode of ['guided', 'expert']) {
-    const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
+    const ctx = await browser.newContext({ storageState: auth, viewport: { width: 1280, height: 1000 }, deviceScaleFactor: 2, reducedMotion: 'reduce', colorScheme: 'light' })
     await ctx.route(u => ['http:', 'https:'].includes(u.protocol) && u.hostname !== '127.0.0.1', r => r.abort())
     await ctx.addInitScript(({ mode }) => {
       localStorage.setItem('network-diagram:ui-mode', mode)
@@ -65,12 +65,19 @@ try {
       await shot(`3-hint-${a}`)
     }
     await dialog.getByTestId('dc-form-pue').fill('1.01')
+    // refusal below; the staged form first
+
     await dialog.getByTestId('dc-form-create').click()
     const err = dialog.getByTestId('dc-form-error-pue')
     await err.waitFor()
     const text = (await err.textContent()) ?? ''
     if (!text.startsWith('PUE at design: ') || /dc_load/.test(text)) problems.push(`${mode}: refusal text "${text}"`)
     await shot('4-refusal')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await dialog.getByRole('button', { name: /^Data Center Energy Hub \(staged/ }).click()
+    await dialog.getByTestId('dc-form-phases').waitFor()
+    await dialog.getByTestId('dc-load-form').scrollIntoViewIfNeeded()
+    await shot('5-staged-form-open')
     await ctx.close()
   }
 } catch (e) { problems.push(String(e?.stack || e)) } finally { await browser.close() }

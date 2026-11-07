@@ -61,7 +61,7 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
         <label htmlFor="dc-form-it" className="font-semibold text-text">{DC_FIELD_LABEL.it_load}</label>
         {staged ? (
           <p id="dc-form-it" data-testid="dc-form-phases" className="text-muted">
-            {DC_DEFAULTS.phases.map(p => `${p.mw} MW from ${p.year}`).join(', ')}. The plan sets one load per period.
+            {DC_DEFAULTS.phases.map(p => `${p.mw} MW from ${p.year}`).join(', ')}. Phases come from the build plan: change them there.
           </p>
         ) : (
           <span className="inline-flex items-center gap-1.5">
@@ -109,6 +109,9 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
             <li key={v} data-testid={`dc-form-arch-hint-${v}`} data-selected={draft.architecture === v}
               className={draft.architecture === v ? 'text-text' : 'text-muted'}>
               <span className="font-semibold">{label}:</span> {ARCH_HINT[v]}
+              {draft.architecture === v && (
+                <span data-testid="dc-form-arch-selected" className="ml-1.5 rounded border border-accent/50 px-1 text-[10px] text-accent">selected</span>
+              )}
             </li>
           ))}
         </ul>
