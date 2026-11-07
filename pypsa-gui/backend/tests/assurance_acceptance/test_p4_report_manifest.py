@@ -15,7 +15,10 @@ refused, `report_version_changed`, with no marker.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import types
+import zipfile
 
 import pytest
 from fastapi import HTTPException
@@ -33,6 +36,25 @@ from tests.assurance_acceptance import test_p4_reports as _p4
 
 project = _p4.project
 helpers_state = _p4.helpers_state
+
+# python-docx stamps each zip member with `zipfile`'s clock, to 2 s: a render
+# across a tick has other bytes. Pinned, a re-render is byte-identical and
+# the tests that need equal bytes do not flake (GK B (35) F1 on #1265's S4b).
+ZIP_CLOCK = types.SimpleNamespace(
+    time=lambda: 0.0, localtime=lambda *_: (2026, 1, 1, 0, 0, 0, 3, 1, 0)
+)
+
+
+@pytest.fixture(autouse=True)
+def _pinned_zip_clock():
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(zipfile, "time", ZIP_CLOCK)
+        yield
+
+
+def _members(data: bytes) -> dict[str, bytes]:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        return {name: archive.read(name) for name in archive.namelist()}
 
 
 def _sidecar(project_dir, file_id: str) -> dict:
@@ -135,9 +157,8 @@ def test_the_human_export_has_no_sidecar_and_the_same_bytes(
         f"/api/projects/{PROJECT}/reports/{rid}/export", json={"strict": True}
     )
     assert again.status_code == 200
-    assert (
-        _upload_path(project, again.json()["file_id"]).read_bytes()
-        == _upload_path(project, file_id).read_bytes()
+    assert _members(_upload_path(project, again.json()["file_id"]).read_bytes()) == (
+        _members(_upload_path(project, file_id).read_bytes())
     )
 
 
@@ -170,18 +191,13 @@ def test_an_identical_re_export_keeps_the_first_seal(project, monkeypatch):
         PROJECT, first["file_id"], project_dir=project
     ).assurance_sha256
     second = T.export_report_docx(rid)
-    if second["file_id"] == first["file_id"]:  # a byte-identical render
-        assert (
-            upload_service.get_upload_meta(
-                PROJECT, first["file_id"], project_dir=project
-            ).assurance_sha256
-            == seal
-        )
-    else:  # docx timestamps differ: each export has its own seal
-        assert (
-            _sidecar(project, second["file_id"])["manifest"]["dataset"]
-            == _sidecar(project, first["file_id"])["manifest"]["dataset"]
-        )
+    assert second["file_id"] == first["file_id"]  # the zip clock is pinned
+    assert (
+        upload_service.get_upload_meta(
+            PROJECT, first["file_id"], project_dir=project
+        ).assurance_sha256
+        == seal
+    )
 
 
 def test_a_quarantined_export_is_refused_and_writes_nothing(project, monkeypatch):
@@ -285,8 +301,6 @@ def test_a_deleted_version_is_served_with_a_note_and_no_marker(
     archive = upload_service.get_upload_bytes(
         PROJECT, item["file_id"], project_dir=project
     )
-    import io
-    import zipfile
 
     manifest = json.loads(zipfile.ZipFile(io.BytesIO(archive)).read("manifest.json"))
     (entry,) = manifest["files"]
@@ -441,8 +455,6 @@ def test_an_io_error_or_timeout_on_the_version_refuses_without_a_marker(
 
 
 def test_a_delivery_item_carries_the_report_hashes(project, monkeypatch):
-    import io
-    import zipfile
 
     rid = _assistant_report(monkeypatch)
     file_id = T.export_report_docx(rid)["file_id"]
