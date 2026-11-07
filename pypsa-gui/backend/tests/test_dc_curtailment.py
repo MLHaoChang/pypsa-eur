@@ -1291,3 +1291,19 @@ def test_a_duration_the_first_window_cannot_hold_is_refused_before_any_window(
     assert exc.value.kind == C.DURATION_EXCEEDS_WINDOW
     C.check_window(n, 3, _terms())  # no duration: nothing to fit
     C.check_window(n, 3, _terms(d=4.0))
+
+
+def test_with_no_overlap_each_window_carries_in_from_the_last(monkeypatch):
+    """C20 at O = 0: a window starts where the last one stopped (start == written); the
+    carry-in still binds, so the stitched dispatch holds every full-horizon run."""
+    status, cond, sink, lines = _op(_network(), monkeypatch, _terms(d=2.0), 4, 0)
+    assert status in ("ok", "optimal"), cond
+    rows = _bounds(_curtailed(sink).to_numpy(), 1.0, 2.0)
+    assert min(b - s for _, _, b, s in rows) >= -1e-6
+    assert sum("carried in" in ln and "(0 carried in)" not in ln for ln in lines) == 2
+
+
+def test_check_window_without_project_terms_is_a_no_op(monkeypatch):
+    monkeypatch.setattr(C, "project_terms", lambda: None)
+    C.check_window(_network(), 1)
+    C.refuse_rolling()
