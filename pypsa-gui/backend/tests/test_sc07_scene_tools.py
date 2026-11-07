@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import time
+from pathlib import Path
 from types import SimpleNamespace
 
 import pypsa
@@ -585,7 +587,7 @@ def test_the_block_is_read_on_the_server(geo):
         {
             "site_scene": {
                 "site_id": "campus",
-                "part": "scene",
+                "part": "generate",
                 "revision": 99,
                 "buildings": 500,
             }
@@ -594,13 +596,25 @@ def test_the_block_is_read_on_the_server(geo):
     assert (
         "site 3d: revision: 1" in text
         and "site 3d: buildings: 0" in text
-        and "site 3d: part: scene" in text
+        and "site 3d: part: generate" in text
     )
     assert "99" not in text and "500" not in text
     assert (
         text.startswith(compose._UNTRUSTED_OPEN.split(">")[0])
         or compose._UNTRUSTED_OPEN in text
     )
+
+
+def test_the_parts_are_the_browsers_site_parts(geo):
+    flow_ts = (
+        Path(__file__).resolve().parents[2] / "frontend" / "src" / "api" / "flow.ts"
+    ).read_text()
+    union = re.search(r"export type SitePart = ([^\n]+)", flow_ts).group(1)
+    assert tuple(re.findall(r"'([a-z]+)'", union)) == chat.PARTS
+    text = compose._format_ui_context(
+        {"site_scene": {"site_id": "campus", "part": "inspector"}}
+    )
+    assert "part:" not in text
 
 
 def test_a_forged_hint_for_another_projects_site_shows_nothing_of_it(geo):

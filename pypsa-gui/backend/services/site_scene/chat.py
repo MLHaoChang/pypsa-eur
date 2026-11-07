@@ -59,7 +59,8 @@ FIELDS = (
     "equipment",
     "targets",
 )
-PARTS = ("map", "scene", "inspector")
+# The Site 3D parts as the browser names them (`SitePart` in frontend/src/api/flow.ts).
+PARTS = ("map", "generate", "model", "results")
 
 
 # The `SceneError` kinds these tools can put on a tool_error frame, as literals so
