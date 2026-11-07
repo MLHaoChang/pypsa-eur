@@ -325,7 +325,7 @@ def test_a_csv_export_seals_the_table_as_written(baseline, client):
 XLSX_CASES = {
     "timestamp_index": (
         [["at", "MW"], [datetime.datetime(2026, 1, 1, 1), 5]],
-        [["at", "MW"], ["2026-01-01T01:00:00", 5]],
+        [["at", "MW"], ["2026-01-01T01:00:00", 5.0]],
     ),
     "nan_and_empty_text": (
         [["a", "b"], [float("nan"), ""], [float("inf"), "x"]],
@@ -339,7 +339,7 @@ XLSX_CASES = {
     ),
     "seventeen_digits": (
         [[0.1 + 0.2, 12345678901234567, 1 / 3]],
-        [[0.3, 12345678901234570, 0.3333333333333333]],
+        [[0.3, 1.234567890123457e16, 0.3333333333333333]],
     ),
 }
 
@@ -349,7 +349,10 @@ def test_an_excel_export_seals_what_the_file_holds(baseline, client, case):
     given, held = XLSX_CASES[case]
     export = chat_tools.export_to_excel({"Data": given}, "t.xlsx")
     manifest = sidecar(export)["manifest"]
-    assert manifest["dataset"] == {"sheets": [{"name": "Data", "rows": held}]}
+    # JSON, not ==: True == 1.0 in Python, but a bool cell must stay a bool.
+    assert json.dumps(manifest["dataset"]) == json.dumps(
+        {"sheets": [{"name": "Data", "rows": held}]}
+    )
     assert manifest["render_spec"] == {
         "format": "xlsx",
         "sheets": ["Data"],
