@@ -1599,3 +1599,14 @@ def test_a_completed_settle_writes_no_error(tmp_path, monkeypatch):
     monkeypatch.setattr(assistant_tasks, "settle_job", lambda *a: {"ok": True})
     run_eh.settle(path, ticket, "ad:1", record(), 1.0)
     assert "error" not in json.loads(path.read_text())["steps"][0]
+
+
+@pytest.mark.parametrize("value", [True, False, -1, "1", 1.0, None])
+def test_charged_reads_none_when_a_stage_charge_is_not_a_count(value):
+    """F4: a stage whose `solves_charged` is a bool, negative or not an
+    integer makes the whole charge unknown (the reservation is kept)."""
+    stages = [
+        {"stage": "apply_pack", "solves_charged": 1},
+        {"stage": "ens_solve", "solves_charged": value},
+    ]
+    assert run_eh.charged({"report": {"pipeline": {"stages": stages}}}) is None
