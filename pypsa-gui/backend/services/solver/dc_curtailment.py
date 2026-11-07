@@ -113,8 +113,9 @@ def facility(n) -> pd.Series:
     ):
         raise DcCurtailmentRefused(
             NO_COOLING_LOAD,
-            f"Curtailable load: the network has no {COOLING_LOAD!r} load on {COOLING_BUS!r} beside "
-            f"{IT_LOAD!r}, so there is nowhere to curtail but the IT bus. Curtailment is placed on "
+            f"Curtailable load: the network has no \u201c{COOLING_LOAD}\u201d load on "
+            f"\u201c{COOLING_BUS}\u201d beside \u201c{IT_LOAD}\u201d, so there is nowhere to "
+            "curtail but the IT bus. Curtailment is placed on "
             "the cooling bus only; clear curtailment_price_eur_per_mwh or restore the load.",
         )
     return _dense_load(n, IT_LOAD) + _dense_load(n, COOLING_LOAD)
