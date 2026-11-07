@@ -97,6 +97,8 @@ def test_a_stepwise_setup_grants_nothing(goal_host, session, site):
     view = _start_v2(
         [*goal_host["citations"], goal_host["goal"]], f"Step {uuid.uuid4().hex[:6]}"
     )
+    # P5a: an intake run's card shows the intake's goal, never the open project's.
+    assert "goal" not in view["envelope"]
     _stepwise(session, view)
     path, task = _new_task(run_handover.read_intent(task_path(site[1], view)))
     envelope_file = run_envelope.path_for(path)
@@ -388,6 +390,32 @@ def test_a_stored_goal_is_on_the_card_with_its_source(
     }
     assert "3 h/yr (from the project's solver settings)" in task["envelope"]["detail"]
     run_envelope.decide(session, task["task_id"], "unattended")
+
+
+def test_a_run_whose_profile_needs_no_goal_shows_none_and_is_granted_without_one(
+    session, site, profile
+):
+    """P5a: the goal row and its refusal are only for a profile with an LOLE rule."""
+    from tests.test_harness_envelope import envelope_of
+
+    task = start()
+    assert "goal" not in task["envelope"]
+    run_envelope.decide(session, task["task_id"], "unattended")
+    granted = envelope_of(task_path(site[1], task))
+    assert granted["state"] == "granted" and "goal" not in granted
+
+
+def test_the_card_goal_is_the_open_projects_only(
+    session, site, profile, monkeypatch, tmp_path
+):
+    _plain_goal_profile(monkeypatch)
+    task = start()
+    path = task_path(site[1], task)
+    assert run_envelope.read_for_card(path, task)["goal"]["source"] == "default"
+    assert "goal" not in run_envelope.read_for_card(
+        path, {**task, "project_id": "another"}
+    )
+    assert run_envelope.read_for_card(tmp_path / "no-run.json", task) is None
 
 
 def test_an_ordinary_chat_enqueue_captures_nothing(session, baseline, monkeypatch):
