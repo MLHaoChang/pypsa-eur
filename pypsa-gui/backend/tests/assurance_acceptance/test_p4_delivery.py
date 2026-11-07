@@ -271,11 +271,23 @@ def test_a_series_chart_is_a_line_even_when_its_shape_looks_like_a_bar(
     assert client.get(chart["download_url"]).status_code == 200
 
 
-def test_an_oversized_sidecar_is_refused_and_quarantined(baseline, client):
+@pytest.mark.parametrize("over", [0, 1])
+def test_a_sidecar_over_two_mebibytes_is_refused_and_quarantined(baseline, client, over):
     chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
-    reseal(chart, lambda record, manifest: record.update(pad="x" * (2 * 1024 * 1024)))
-    assert client.get(chart["download_url"]).status_code == 409
-    assert marker(chart)["reason_code"] == "sidecar"
+    sidecar = paths(chart)[2]
+
+    def pad(record, manifest):
+        record["pad"] = ""
+        size = len(json.dumps(record).encode())  # reseal writes json.dumps(record)
+        record["pad"] = "x" * (2 * 1024 * 1024 + over - size)
+
+    reseal(chart, pad)
+    assert sidecar.stat().st_size == 2 * 1024 * 1024 + over
+    if over:
+        assert client.get(chart["download_url"]).status_code == 409
+        assert marker(chart)["reason_code"] == "sidecar"
+    else:
+        assert client.get(chart["download_url"]).status_code == 200
 
 def test_a_legacy_manifest_gets_no_label_check(baseline, client):
     # J3: a chart drawn before S1 (no scope keys) verifies as on master, even
