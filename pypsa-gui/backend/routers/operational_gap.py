@@ -20,7 +20,9 @@ def _live_fingerprint() -> str | None:
     from services.pypsa_service import PyPSAService
 
     try:
-        return workflow_tools._network_input_fingerprint(PyPSAService.get_active_context())
+        return workflow_tools._network_input_fingerprint(
+            PyPSAService.get_active_context()
+        )
     except Exception:  # noqa: BLE001 — unknown reads stale, never fresh
         _log.warning("operational gap: input fingerprint not computed", exc_info=True)
         return None

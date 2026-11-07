@@ -63,7 +63,9 @@ def _frozen(n):
 
 def _direct(n, *, horizon=4, overlap=0, **kw):
     with OP.non_cyclic(n):
-        return OP.run_windows(n, horizon=horizon, overlap=overlap, solver_name="highs", **kw)
+        return OP.run_windows(
+            n, horizon=horizon, overlap=overlap, solver_name="highs", **kw
+        )
 
 
 def _val(rec, side, name):
@@ -71,8 +73,13 @@ def _val(rec, side, name):
 
 
 def _op_solve(**kw):
-    cfg = {"fixed_sizes": "nameplate", "solve_strategy": "rolling", "rolling_horizon": 4,
-           "rolling_overlap": 0, **kw}
+    cfg = {
+        "fixed_sizes": "nameplate",
+        "solve_strategy": "rolling",
+        "rolling_horizon": 4,
+        "rolling_overlap": 0,
+        **kw,
+    }
     return _solve(**cfg)
 
 
@@ -105,11 +112,22 @@ def test_the_reference_is_the_full_horizon_dispatch_on_the_same_sizes():
     assert status == "ok"
     want = G.metrics(m)
     for name in G.DEFINITIONS:
-        assert _val(rec, "reference", name) == pytest.approx(want[name]["value"], abs=TOL)
-    assert m.storage_units_t.state_of_charge["bess"].iloc[0] != pytest.approx(5.0)  # it moved
-    assert _val(rec, "operational", "opex_eur") > _val(rec, "reference", "opex_eur") + 1.0
+        assert _val(rec, "reference", name) == pytest.approx(
+            want[name]["value"], abs=TOL
+        )
+    assert m.storage_units_t.state_of_charge["bess"].iloc[0] != pytest.approx(
+        5.0
+    )  # it moved
+    assert (
+        _val(rec, "operational", "opex_eur") > _val(rec, "reference", "opex_eur") + 1.0
+    )
     assert rec["reference"] == {"status": "ok", "condition": "optimal"}
-    assert rec["windows"] == {"total": 6, "solved": 6, "failed": 0, "failed_index": None}
+    assert rec["windows"] == {
+        "total": 6,
+        "solved": 6,
+        "failed": 0,
+        "failed_index": None,
+    }
     # The configured initial charge is back for the next run.
     assert n.storage_units.at["bess", "cyclic_state_of_charge"]
 
@@ -148,7 +166,12 @@ def test_a_fresh_read_defines_every_metric_and_counts_the_windows(reset_backend)
     out = _read(n)
     assert out["flag"] == G.FRESH
     assert out["label"] == "full-horizon dispatch on the same sizes"
-    assert out["windows"] == {"total": 6, "solved": 6, "failed": 0, "failed_index": None}
+    assert out["windows"] == {
+        "total": 6,
+        "solved": 6,
+        "failed": 0,
+        "failed_index": None,
+    }
     assert out["reference"]["status"] == "ok"
     assert (out["horizon"], out["overlap"]) == (4, 0)
     assert set(out["metrics"]) == set(G.DEFINITIONS) == set(out["definitions"])
@@ -200,11 +223,15 @@ def test_a_later_full_solve_leaves_no_gap(reset_backend):
 def test_never_run_reads_missing(reset_backend):
     n = _install(_net())
     out = _read(n)
-    assert out["flag"] == G.MISSING and out["metrics"] is None and out["windows"] is None
+    assert (
+        out["flag"] == G.MISSING and out["metrics"] is None and out["windows"] is None
+    )
     assert out["definitions"] == G.DEFINITIONS  # defined even when missing
 
 
-@pytest.mark.parametrize("change", ["load", "horizon", "weightings", "no_live", "no_solved"])
+@pytest.mark.parametrize(
+    "change", ["load", "horizon", "weightings", "no_live", "no_solved"]
+)
 def test_an_input_change_reads_stale(reset_backend, change):
     """C12/C26: stale reads None + flag; an unknown fingerprint is stale too."""
     from routers.simulation import _state
@@ -217,7 +244,9 @@ def test_an_input_change_reads_stale(reset_backend, change):
         n.loads_t.p_set.iloc[0, 0] = 11.0
         live = _live()
     elif change == "horizon":
-        _state["solver_config"] = dataclasses.replace(_state["solver_config"], rolling_horizon=6)
+        _state["solver_config"] = dataclasses.replace(
+            _state["solver_config"], rolling_horizon=6
+        )
         live = _live()
     elif change == "weightings":
         n.snapshot_weightings.loc[n.snapshots[0], :] = 2.0
@@ -236,12 +265,25 @@ def test_the_key_alone_makes_a_record_stale():
     n = _frozen(_net())
     _direct(n)
     n.meta["assistant_solve_input_fingerprint"] = "fp"
-    cfg = {"fixed_sizes": "nameplate", "solve_strategy": "rolling", "rolling_horizon": 4,
-           "rolling_overlap": 0}
+    cfg = {
+        "fixed_sizes": "nameplate",
+        "solve_strategy": "rolling",
+        "rolling_horizon": 4,
+        "rolling_overlap": 0,
+    }
     assert G.read(n, cfg, live_fingerprint="fp")["flag"] == G.FRESH
-    assert G.read(n, {**cfg, "rolling_overlap": 1}, live_fingerprint="fp")["flag"] == G.STALE
-    assert G.read(n, {**cfg, "rolling_horizon": 5}, live_fingerprint="fp")["flag"] == G.STALE
-    assert G.read(n, {**cfg, "fixed_sizes": "off"}, live_fingerprint="fp")["flag"] == G.MISSING
+    assert (
+        G.read(n, {**cfg, "rolling_overlap": 1}, live_fingerprint="fp")["flag"]
+        == G.STALE
+    )
+    assert (
+        G.read(n, {**cfg, "rolling_horizon": 5}, live_fingerprint="fp")["flag"]
+        == G.STALE
+    )
+    assert (
+        G.read(n, {**cfg, "fixed_sizes": "off"}, live_fingerprint="fp")["flag"]
+        == G.MISSING
+    )
     n.snapshot_weightings.iloc[0, :] = 3.0
     assert G.read(n, cfg, live_fingerprint="fp")["flag"] == G.STALE
 
@@ -270,12 +312,19 @@ def test_a_missing_column_is_none_with_its_reason_never_zero():
     n = _frozen(_net(storage=False))
     _direct(n)
     rec = n.meta[G.GAP_KEY]
-    for name in ("storage_discharge_mwh", "storage_end_mwh", "curtailed_energy_mwh",
-                 "unserved_energy_mwh"):
+    for name in (
+        "storage_discharge_mwh",
+        "storage_end_mwh",
+        "curtailed_energy_mwh",
+        "unserved_energy_mwh",
+    ):
         assert rec["operational_metrics"][name]["value"] is None
         assert rec["operational_metrics"][name]["reason"]
     rows = G._gap_rows(rec["operational_metrics"], rec["reference_metrics"])
-    assert rows["storage_end_mwh"]["gap"] is None and rows["storage_end_mwh"]["gap_pct"] is None
+    assert (
+        rows["storage_end_mwh"]["gap"] is None
+        and rows["storage_end_mwh"]["gap_pct"] is None
+    )
     assert rows["storage_end_mwh"]["operational_reason"]
     # Only the defined metrics are reported; a true zero is a value, not None.
     rows = G._gap_rows({"x": {"value": 0.0}}, {"x": {"value": 0.0}})
@@ -294,10 +343,16 @@ def test_storage_discharge_counts_storage_units_and_stores_on_the_stores_weighti
     _direct(n)
     rec = n.meta[G.GAP_KEY]
     want = 2.0 * (
-        n.storage_units_t.p["bess"].clip(lower=0).sum() + n.stores_t.p["tank"].clip(lower=0).sum()
+        n.storage_units_t.p["bess"].clip(lower=0).sum()
+        + n.stores_t.p["tank"].clip(lower=0).sum()
     )
-    assert _val(rec, "operational", "storage_discharge_mwh") == pytest.approx(want, abs=TOL)
-    end = n.storage_units_t.state_of_charge["bess"].iloc[-1] + n.stores_t.e["tank"].iloc[-1]
+    assert _val(rec, "operational", "storage_discharge_mwh") == pytest.approx(
+        want, abs=TOL
+    )
+    end = (
+        n.storage_units_t.state_of_charge["bess"].iloc[-1]
+        + n.stores_t.e["tank"].iloc[-1]
+    )
     assert _val(rec, "operational", "storage_end_mwh") == pytest.approx(end, abs=TOL)
 
 
@@ -305,7 +360,9 @@ def test_storage_discharge_counts_storage_units_and_stores_on_the_stores_weighti
 
 
 def _without_reference(monkeypatch):
-    monkeypatch.setattr(OP, "run_windows", functools.partial(OP.run_windows, reference=False))
+    monkeypatch.setattr(
+        OP, "run_windows", functools.partial(OP.run_windows, reference=False)
+    )
 
 
 def _outputs(n):
@@ -340,19 +397,35 @@ def test_the_reference_leaves_the_operation_unchanged_with_curtailment_on(
 
     def run():
         n = DC._network()
-        n.add("StorageUnit", "bess", bus="dc_mv", p_nom=10.0, max_hours=2.0,
-              state_of_charge_initial=5.0)
+        n.add(
+            "StorageUnit",
+            "bess",
+            bus="dc_mv",
+            p_nom=10.0,
+            max_hours=2.0,
+            state_of_charge_initial=5.0,
+        )
         n.generators_t.marginal_cost["grid"] = pd.Series(
-            np.r_[np.full(6, 20.0), np.full(6, 80.0)], index=n.snapshots)
+            np.r_[np.full(6, 20.0), np.full(6, 80.0)], index=n.snapshots
+        )
         status, cond, _, lines = DC._solve(
-            n, monkeypatch, DC._terms(), fixed_sizes="nameplate", solve_strategy="rolling",
-            rolling_horizon=4, rolling_overlap=2)
+            n,
+            monkeypatch,
+            DC._terms(),
+            fixed_sizes="nameplate",
+            solve_strategy="rolling",
+            rolling_horizon=4,
+            rolling_overlap=2,
+        )
         assert status == "ok", (cond, lines[-5:])
         return n
 
     with_ref = run()
     assert C.META_KEY in with_ref.meta  # curtailment was on
-    assert with_ref.meta[G.GAP_KEY]["operational_metrics"]["curtailed_energy_mwh"]["value"] > 0
+    assert (
+        with_ref.meta[G.GAP_KEY]["operational_metrics"]["curtailed_energy_mwh"]["value"]
+        > 0
+    )
     out_a, (meta_a, rep_a) = _outputs(with_ref), _meta_without_gap(with_ref)
     _without_reference(monkeypatch)
     without = run()
@@ -361,7 +434,10 @@ def test_the_reference_leaves_the_operation_unchanged_with_curtailment_on(
     meta_b, rep_b = _meta_without_gap(without)
     assert rep_a == rep_b
     for k in set(meta_a) | set(meta_b):
-        if k in ("assistant_solve_input_fingerprint", "assistant_solve_exact_input_fingerprint"):
+        if k in (
+            "assistant_solve_input_fingerprint",
+            "assistant_solve_exact_input_fingerprint",
+        ):
             continue
         assert repr(meta_a.get(k)) == repr(meta_b.get(k)), k
 
@@ -378,10 +454,18 @@ def test_the_reference_leaves_the_reserve_rows_unchanged():
         up = T._product("afrr_up", kind="secondary", direction="up", sustain_h=1.0)
         T._bind(n, [up], {"afrr_up": np.arange(8.0) + 1})
         fn = T.RP._wrap_with_reserve_products(
-            n, None, T._cfg([up]), backup=({T.STRING: 20.0}, frozenset({T.STRING})))
+            n, None, T._cfg([up]), backup=({T.STRING: 20.0}, frozenset({T.STRING}))
+        )
         with OP.non_cyclic(n):
-            OP.run_windows(n, horizon=3, overlap=1, reference=reference, solver_name="highs",
-                           extra_functionality=fn, include_objective_constant=False)
+            OP.run_windows(
+                n,
+                horizon=3,
+                overlap=1,
+                reference=reference,
+                solver_name="highs",
+                extra_functionality=fn,
+                include_objective_constant=False,
+            )
         assert T.RP.persist_solution(n)
         return n
 

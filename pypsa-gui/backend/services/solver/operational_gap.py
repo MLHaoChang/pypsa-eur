@@ -158,7 +158,9 @@ def metrics(n) -> dict[str, dict]:
         "storage_discharge_mwh": _value(
             _total(discharge), "no StorageUnit or Store in the network"
         ),
-        "storage_end_mwh": _value(_total(end), "no StorageUnit or Store in the network"),
+        "storage_end_mwh": _value(
+            _total(end), "no StorageUnit or Store in the network"
+        ),
     }
 
 
@@ -247,8 +249,16 @@ def _gap_rows(op: dict | None, ref: dict | None) -> dict:
             "reference": rv,
             "gap": gap,
             "gap_pct": pct,
-            **({"operational_reason": o["reason"]} if ov is None and "reason" in o else {}),
-            **({"reference_reason": r["reason"]} if rv is None and "reason" in r else {}),
+            **(
+                {"operational_reason": o["reason"]}
+                if ov is None and "reason" in o
+                else {}
+            ),
+            **(
+                {"reference_reason": r["reason"]}
+                if rv is None and "reason" in r
+                else {}
+            ),
         }
     return rows
 
@@ -260,7 +270,11 @@ def _flag(n, cfg, rec: dict | None, live_fingerprint: str | None) -> str:
         return MISSING
     h, o = horizon_of(cfg)
     key = rec.get("key") or {}
-    solved = n.meta.get("assistant_solve_input_fingerprint") if isinstance(n.meta, dict) else None
+    solved = (
+        n.meta.get("assistant_solve_input_fingerprint")
+        if isinstance(n.meta, dict)
+        else None
+    )
     if (
         not solved
         or not live_fingerprint
@@ -303,5 +317,7 @@ def read(n, cfg, *, live_fingerprint: str | None) -> dict:
     out["horizon"] = rec["key"]["horizon"]
     out["overlap"] = rec["key"]["overlap"]
     if flag == FRESH:
-        out["metrics"] = _gap_rows(rec.get("operational_metrics"), rec.get("reference_metrics"))
+        out["metrics"] = _gap_rows(
+            rec.get("operational_metrics"), rec.get("reference_metrics")
+        )
     return out
