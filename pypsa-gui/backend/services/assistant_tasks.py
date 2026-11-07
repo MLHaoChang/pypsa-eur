@@ -369,6 +369,8 @@ def _view(task, fresh=False, current=None):
            "total_steps": len(task["steps"]),
            "steps": [{k: s[k] for k in ("id", "tool", "status")} for s in task["steps"]]}
     for entry, s in zip(out["steps"], task["steps"]):
+        if isinstance(s.get("card"), dict):
+            entry["card"] = s["card"]  # issue 07 B3a: what a step-by-step engine card shows
         if (s.get("job") or {}).get("cases"):
             entry["cases"] = s["job"]["cases"]  # LC-17: each case's outcome and a failed one's cause
     brief = task.get("brief")
@@ -812,6 +814,7 @@ def _advance_run(path, ctx=None):
                     run_loops.data_request(task, gaps)  # one notice listing every data gap
             else:
                 if name == run_loops.RESULT_STAGE and run_loops.engine_due(task, profile):
+                    run_loops.card_engine(path, task, profile, ctx)  # issue 07 B3a: step by step, its card
                     _save(path, task)  # issue 05 PR C: the next engine rule's loop, then the whole gate
                     _wake(path)
                     return
@@ -1009,6 +1012,7 @@ def settle_engine(path, ticket, loop, state):
             run_envelope.settle_engine_solves(path, ticket[2], spent)
             task = json.loads(Path(path).read_text())  # the solve count was written to it
             step = next(s for s in task["steps"] if s["id"] == ticket[1])
+            run_envelope.settle_carded(task, step, spent)  # issue 07 B3a: a step-by-step loop's own count
             step["status"], step["result"] = "completed", {"loop": loop}
             step["job"]["outcome"] = loop.get("status")
             step.pop("error", None)
@@ -1127,6 +1131,11 @@ def _native_evidence(path, task, step):
         except Exception:  # noqa: BLE001 — an unreadable report is no evidence (C3)
             return False, None
         return True, {"kind": run_report.KIND, "report_id": job["report_id"], "version": job.get("version")}
+    if (step.get("job") or {}).get("kind") == "eh_study":
+        # Issue 07 B3a (GK B (32) L4): only the run's own Energy Hub study
+        # record; never the solve-run branch below.
+        from harness import run_eh
+        return run_eh.evidence(path, task, step)
     if step.get("job"):
         from services import run_evidence
         job_id = step["job"]["job_id"]
@@ -1302,9 +1311,10 @@ def _reconcile_lost(path, task):
     from harness import job_adapters
     changed = False
     for step in task["steps"]:
-        if step["status"] != "waiting" or step["job"].get("kind") in ("engine", "report"):
+        if step["status"] != "waiting" or step["job"].get("kind") in ("engine", "report", "eh_study"):
             # An engine step: the runner's recover reads its loop's own record (issue 05 PR C);
-            # a run's report job: the runner settles it from its job record (issue 07).
+            # a run's report job: the runner settles it from its job record (issue 07);
+            # a run's EH study: `run_eh.recover` settles it and its reservation (issue 07 B3a).
             continue
         if step["job"].get("kind") == "queue":
             # Followed by a thread of this process, or lost with a restart (SC-09).
