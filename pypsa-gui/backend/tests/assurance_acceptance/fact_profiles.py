@@ -22,8 +22,8 @@ enables every profile, opt-in ones included.
 
 # ruff: noqa: F811 -- imported shared fixtures.
 import copy
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import pandas as pd
 import pytest

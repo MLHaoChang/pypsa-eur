@@ -103,20 +103,29 @@ WEIGHT_BASIS: dict[str, str] = {
     "not_checked": "none",
 }
 
+# Profiles whose captured index is not snapshots: the investment report's
+# years and the saved readiness scorecard.
+NO_SNAPSHOT_INDEX = frozenset({"investment-case/1", "investment-lcoe/1", "grid-readiness/1"})
+
 
 def window(index, scope):
     """The record's window: exact boundaries, snapshot count and weight basis.
 
     `index` is the profile's snapshot index as captured (isoformat strings).
     The scope's end is inclusive, as `calculations._window` reads it: in index
-    positions the window is [a, b + 1)."""
+    positions the window is [a, b + 1). `snapshots` is None for a profile
+    whose index is not snapshots (investment years, the readiness scorecard)."""
     from harness.calculations import requested_metrics
 
     start = scope.get("start", index[0] if index else None)
     end = scope.get("end", index[-1] if index else None)
     try:
-        a = index.index(pd.Timestamp(start).isoformat())
-        b = index.index(pd.Timestamp(end).isoformat())
+        # Profiles write the index as isoformat or as str(Timestamp); compare
+        # instants. An index of years or a saved scorecard has no snapshots.
+        if scope["profile"] in NO_SNAPSHOT_INDEX:
+            raise TypeError("not a snapshot index")
+        stamps = [pd.Timestamp(v) for v in index]
+        a, b = stamps.index(pd.Timestamp(start)), stamps.index(pd.Timestamp(end))
         snapshots = b - a + 1 if b >= a else None
     except (ValueError, TypeError):
         snapshots = None
