@@ -362,4 +362,16 @@ describe('chat tool-line outcome marks', () => {
     expect(rows().at(-1)!.textContent).toContain('✓ list_components')
     expect(within(rows().at(-1)!).queryByTestId('chat-tool-glyph')).toBeNull()
   })
+
+  it.each(['guided', 'expert'] as const)('SC-07 S5a: an unknown 3D site apply says so in words and offers one check (%s)', async (mode) => {
+    await turn(mode)
+    emit('tool_request', { tool_use_id: 's', tool_name: 'site_scene_apply', safety_tier: 'write' })
+    emit('tool_error', { tool_use_id: 's', tool_name: 'site_scene_apply', error_kind: 'scene_apply_outcome_unknown',
+      message: 'The 3D site apply did not report back and no receipt of it was found. Do not apply this preview again: read the site with site_scene_read.' })
+    const row = rows().at(-1)!
+    expect(row.textContent).toContain('The 3D site change may not have landed. Check before trying again.')
+    expect(row.textContent).not.toMatch(/site_scene_|scene_apply_outcome_unknown|—|;/)
+    expect(within(row).getByTestId('scene-unknown-check-button').textContent).toBe('Check the 3D site')
+    expect(within(row).queryByText(/Approve/)).toBeNull()
+  })
 })

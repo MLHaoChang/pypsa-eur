@@ -253,6 +253,60 @@ def _text(value: Any) -> str | None:
     return text if len(text) <= MAX_NAME_CHARS else text[: MAX_NAME_CHARS - 1] + "…"
 
 
+def building_label(b: dict[str, Any]) -> str:
+    """A building as the correction panel names it (SiteCompanion.tsx `buildingLabel`; parity-tested)."""
+    src = b.get("source") or {}
+    if src.get("namespace") == "osm":
+        return f"OSM building {_text(src.get('source_id'))}"
+    return "Proposed building"
+
+
+def feature_words(scene: dict[str, Any], n=None) -> dict[str, str]:
+    """
+    SC-07 S5 (UX U4, GK B J3): each feature (building, group, placed item) in
+    the words the user sees, never its scene id. Labels that collide get a
+    number in scene order, so two "Proposed building" stay apart. Display
+    only: stored keys and fingerprints are unchanged.
+    """
+    from services.site_scene import associations
+
+    out: dict[str, str] = {}
+    buildings = [
+        b for b in scene.get("buildings") or [] if isinstance(b, dict) and b.get("id")
+    ]
+    labels = [building_label(b) for b in buildings]
+    seen: dict[str, int] = {}
+    for b, label in zip(buildings, labels):
+        if labels.count(label) > 1:
+            seen[label] = seen.get(label, 0) + 1
+            label = f"{label} {seen[label]}"
+        out[b["id"]] = label
+    for g in scene.get("groups") or []:
+        if isinstance(g, dict) and g.get("id"):
+            out[g["id"]] = f"group “{_text(g.get('label') or 'unnamed')}”"
+    for key in (scene.get("site") or {}).get("placements") or {}:
+        if isinstance(key, str) and ":" in key:
+            cls, name = key.split(":", 1)
+            out[key] = _text(associations._label(n, cls, name)) or "a placed item"
+    return out
+
+
+def _on_words(words: dict[str, str], on: Any) -> str:
+    """A placement's `on` in words: the ground, or the roof of a building by its label."""
+    if isinstance(on, str) and on.startswith("roof:"):
+        return f"on the roof of {feature_word(words, on[5:])}"
+    return "on the ground"
+
+
+def feature_word(words: dict[str, str], feature: Any) -> str:
+    """One feature's words; one not on the site (any more) is never shown by its id."""
+    return (
+        words.get(feature)
+        if isinstance(feature, str) and feature in words
+        else "an item not on the site"
+    )
+
+
 def _capped(items: list[Any], name: str, truncated: list[dict[str, Any]]) -> list[Any]:
     limit = MAX_ITEMS
     if len(items) > limit:
@@ -321,7 +375,7 @@ def _fit(out: dict[str, Any]) -> dict[str, Any]:
         "max_bytes": MAX_READ_BYTES,
         "max_name_chars": MAX_NAME_CHARS,
     }
-    lists = ("buildings", "associations", "unbound_keys", "sites")
+    lists = ("buildings", "associations", "unbound_keys", "sites", "my_previews")
 
     def size() -> int:
         return len(json.dumps(out, default=str).encode("utf-8"))
@@ -410,7 +464,7 @@ def read(site_id: str | None = None, proposal_id: str | None = None) -> dict[str
             out["counts"] = {"sites": len(sites)}
             return _fit(out)
         _site_known(project, site_id)
-        scene = get_scene(site_id, project=project)
+        scene = get_scene(site_id, project=project, user=user)
         site = next((s for s in sites if s.get("id") == site_id), {})
         out.update(
             site_id=site_id, site_name=_text(site.get("name")), state=scene["state"]
@@ -455,6 +509,11 @@ def read(site_id: str | None = None, proposal_id: str | None = None) -> dict[str
             out["unbound_keys"] = _capped(
                 [_text(k) for k in unbound], "unbound_keys", truncated
             )
+        mine = my_previews(project, owner, site_id)
+        if (
+            mine
+        ):  # S5 (J5): the caller's own previews; none is no key, inside the byte cap
+            out["my_previews"] = mine
         if proposal_id is not None:
             out["proposal"] = _proposal_status(project, owner, site_id, proposal_id)
         return _fit(out)
@@ -495,6 +554,59 @@ def _proposal_status(
             if receipt
             else {"id": pid, "status": "not_found"}
         )
+
+
+def my_previews(project, owner: str | None, site_id: str) -> list[dict[str, Any]]:
+    """
+    SC-07 S5 (GK B J4): the caller's own previews on this Site that a Resume
+    can report, newest first, at most MAX_LIVE_PER_OWNER. Never another
+    owner's, even with the same id. The chain is read first (H6), so a commit
+    that landed reads applied even when the preview was cancelled or its
+    unknown marker was evicted. A cancelled preview with no receipt and an
+    expired one are not listed. Reads only: no route or chat write.
+    """
+    with proposals._lock:
+        proposals._evict(time.monotonic())
+        entries = {
+            pid: dict(e)
+            for (key, pid), e in proposals._entries.items()
+            if key == project.registry_key
+            and e["owner"] == owner
+            and e["site_id"] == site_id
+        }
+    with _UNKNOWN_LOCK:
+        marked = [
+            k[3] for k in _UNKNOWN if k[:3] == (project.registry_key, owner, site_id)
+        ]
+    order = list(dict.fromkeys([*reversed(list(entries)), *reversed(marked)]))
+    out: list[dict[str, Any]] = []
+    for pid in order:
+        entry = entries.get(pid)
+        try:
+            receipt = proposals._committed(project.directory, site_id, pid)
+        except Exception:  # noqa: BLE001 — an unreadable chain is no receipt
+            receipt = None
+        if (
+            entry is not None
+            and isinstance(receipt, dict)
+            and receipt.get("input_hash") != entry["input_hash"]
+        ):
+            receipt = None
+        if receipt is not None:
+            status = "applied"
+        elif _is_unknown(_unknown_key(project, owner, site_id, pid)):
+            status = "outcome_unknown"
+        elif entry is not None and entry["status"] in ("ready", "applying"):
+            status = "open"
+        else:
+            continue  # cancelled with no receipt, applied but gone from the chain, or expired
+        row = {"id": pid, "status": status}
+        if entry is not None:
+            row.update(action=entry["action"], base_revision=entry["base_revision"])
+        out.append(row)
+        if len(out) >= MAX_LIVE_PER_OWNER:
+            break
+    return out
 
 
 def summarize(
@@ -637,14 +749,20 @@ def _target_row(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _model_summary(
-    action: str, preview: dict[str, Any], picked: dict[str, int]
+    action: str,
+    preview: dict[str, Any],
+    picked: dict[str, int],
+    words: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """What a model action's preview maps, capped (G5). Never a model value: there is none to change."""
+    """What a model action's preview maps, capped (G5). Never a model value: there is none to change.
+    Each feature carries `where`, its visible words (S5, U4): say those to the user, never the id."""
+    words = words or {}
     truncated: list[dict[str, Any]] = []
     out: dict[str, Any] = {"truncated": truncated, "model_changes": "none"}
     if action == "bind_targets":
         rows = [_target_row(r) for r in preview.get("associations") or []]
         for r in rows:
+            r["where"] = feature_word(words, r["feature"])
             if r["feature"] in picked and r["name"]:
                 r["picked_from"] = picked[r["feature"]]
         out["associations"] = _capped(rows, "associations", truncated)
@@ -655,6 +773,7 @@ def _model_summary(
                 {
                     "item": _text(k),
                     **{f: v.get(f) for f in ("x", "y", "heading", "on") if f in v},
+                    "where": _on_words(words, v.get("on")),
                 }
                 for k, v in (preview.get("placements") or {}).items()
             ],
@@ -667,6 +786,8 @@ def _model_summary(
             for k in ("class", "name", "was", "feature", "placement")
             if preview.get(k) is not None
         }
+        if preview.get("feature") is not None:
+            out["rebind"]["where"] = feature_word(words, preview["feature"])
     else:  # detach, undo_detach
         out["items"] = _capped(
             [
@@ -707,7 +828,8 @@ def prepare(
         if size > MAX_PROPOSAL_BODY:
             raise _too_large(MAX_PROPOSAL_BODY, size)
         _site_known(project, site_id)
-        current = store.read_scene(project.directory, site_id).get("buildings") or []
+        scene_now = store.read_scene(project.directory, site_id)
+        current = scene_now.get("buildings") or []
         try:
             view = proposals.create(
                 project.directory,
@@ -746,7 +868,9 @@ def prepare(
                         _unknown_key(project, owner, site_id, view["id"]),
                         picked,
                     )
-            summary = _model_summary(action, view["preview"], picked)
+            summary = _model_summary(
+                action, view["preview"], picked, feature_words(scene_now)
+            )
         else:
             stats = view["preview"].get("stats") or {}
             summary = {
@@ -775,7 +899,8 @@ def prepare(
             "it. The preview expires after 30 minutes."
             + (
                 " A model action maps existing model items into the 3D site only: a new or changed model item "
-                "is its own edit with its own card, before this."
+                "is its own edit with its own card, before this. Name each place to the user by its `where` "
+                "words, never by its feature id."
                 if action in MODEL_ACTIONS
                 else ""
             ),

@@ -1,5 +1,6 @@
 import { navigationEpoch, manualNavigation } from '../utils/navigationEpoch'
-import AssistantResultCard from './AssistantResultCard'
+import AssistantResultCard, { SCENE_APPLY_OUTCOME_UNKNOWN, SCENE_UNKNOWN_KEY } from './AssistantResultCard'
+import { TOOL_OUTCOME_DENIED_DETAIL_WORDS } from './activityWords'
 import EnvelopeSection, { type EnvelopeVerdict } from './runMonitor/EnvelopeSection'
 import { runUnderReview } from './runMonitor/planReview'
 import { UNATTENDED_BLOCK_WORDS } from './runMonitor/runWords'
@@ -2409,18 +2410,24 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
             detail.length > 160 ? `${detail.slice(0, 157)}…` : detail
           // Issue 04 S4a: a refusal's `_outcome` (denied, with its kind) drives
           // the tool line as a result's does; without one, the ✗ line stays.
-          const tool_result = d._outcome && typeof d._outcome === 'object' ? { _outcome: d._outcome } : undefined
-          const outcome = tool_result && d.tool_name ? toolOutcomeOf(tool_result, d.tool_name) : null
+          // SC-07 S5a (UX R4): a 3D site apply whose outcome is unknown says so in words and
+          // offers one status check (AssistantResultCard), never an apply again.
+          const sceneUnknown = d.error_kind === SCENE_APPLY_OUTCOME_UNKNOWN
+          const outcomeBlock = d._outcome && typeof d._outcome === 'object' ? { _outcome: d._outcome } : undefined
+          const tool_result = sceneUnknown ? { ...outcomeBlock, [SCENE_UNKNOWN_KEY]: true } : outcomeBlock
+          const outcome = outcomeBlock && d.tool_name ? toolOutcomeOf(outcomeBlock, d.tool_name) : null
           const why = outcome ? refusalDetail(short, d.error_kind) : null
           appendMessage({
             role: 'tool',
             content: outcome && d.tool_name
               ? `${toolOutcomeLine(d.tool_name, outcome)}${why ? `\n${why}` : ''}`
+              : sceneUnknown
+              ? `✗ ${TOOL_OUTCOME_DENIED_DETAIL_WORDS[SCENE_APPLY_OUTCOME_UNKNOWN]}`
               : short
               ? `✗ ${d.tool_name ?? '?'} — ${d.error_kind}: ${short}`
               : `✗ ${d.tool_name ?? '?'} — ${d.error_kind}`,
             tool_use_id: d.tool_use_id, tool_name: d.tool_name,
-            ...(outcome ? { tool_result, origin_project: streamProjectRef.current } : {}),
+            ...(outcome || sceneUnknown ? { tool_result, origin_project: streamProjectRef.current } : {}),
           })
         }
         break

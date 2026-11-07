@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import AssistantResultCard from './AssistantResultCard'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import AssistantResultCard, { CHECK_START_MS, SCENE_UNKNOWN_KEY } from './AssistantResultCard'
 import { useUIStore } from '../store/uiStore'
 afterEach(cleanup)
 const task = { task_id: '0ba037fe-bc46-43d3-a9c2-9b587c9cd50e', title: 'Refine grid', status: 'ready',
@@ -124,4 +124,34 @@ it('LC-02: names the brief phase by its results card label, hand-off included', 
   expect(screen.getByTestId('assistant-task-phase').textContent).toBe('Size the battery · phase 4 of 4: Hand-off')
   rerender(<AssistantResultCard result={{ _task: plan('grid') }} disabled={false} onRequest={vi.fn()} />)
   expect(screen.getByTestId('assistant-task-phase').textContent).toBe('Size the battery · phase 4 of 4: AC power flow & grid')
+})
+
+it('SC-07 S5a (R4): Checking… from the click until the turn ends, never a success word', () => {
+  const onRequest = vi.fn()
+  const result = { [SCENE_UNKNOWN_KEY]: true }
+  const { rerender } = render(<AssistantResultCard result={result} disabled={false} onRequest={onRequest} />)
+  const button = () => screen.getByTestId('scene-unknown-check-button') as HTMLButtonElement
+  expect(button().textContent).toBe('Check the 3D site')
+  fireEvent.click(button())
+  expect(onRequest.mock.calls[0][0]).toMatch(/site_scene_read/)
+  expect(onRequest.mock.calls[0][0]).toMatch(/Do not apply it again/)
+  expect(button().textContent).toBe('Checking…')
+  expect(button().disabled).toBe(true)
+  rerender(<AssistantResultCard result={result} disabled onRequest={onRequest} />)  // the turn runs
+  expect(button().textContent).toBe('Checking…')
+  rerender(<AssistantResultCard result={result} disabled={false} onRequest={onRequest} />)  // it ended
+  expect(button().textContent).toBe('Check the 3D site')
+  expect(screen.getByTestId('scene-unknown-check').textContent).not.toMatch(/Applied|Done|Found/)
+})
+it('SC-07 S5a (R4): a check that never started a turn does not leave Checking… up', () => {
+  vi.useFakeTimers()
+  try {
+    render(<AssistantResultCard result={{ [SCENE_UNKNOWN_KEY]: true }} disabled={false} onRequest={vi.fn()} />)
+    fireEvent.click(screen.getByTestId('scene-unknown-check-button'))
+    expect(screen.getByTestId('scene-unknown-check-button').textContent).toBe('Checking…')
+    act(() => { vi.advanceTimersByTime(CHECK_START_MS + 1) })
+    expect(screen.getByTestId('scene-unknown-check-button').textContent).toBe('Check the 3D site')
+  } finally {
+    vi.useRealTimers()
+  }
 })

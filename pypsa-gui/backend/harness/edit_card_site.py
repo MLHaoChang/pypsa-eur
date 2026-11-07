@@ -758,11 +758,11 @@ def _scene_state(args: dict) -> tuple[Any, str, dict, dict]:
 
 
 def _target_text(expect: dict, unit: str | None) -> str:
-    """The exact target (H1): name and kind, its class, bus, carrier and unit."""
+    """The exact target (H1): its name and kind in words, its bus, carrier and unit (U4: no class key)."""
     from services.site_scene import associations, chat
 
     kind = associations.KIND_WORDS.get(expect["class"], "model item")
-    parts = [f"{expect['class']} on bus {chat._text(expect.get('bus'))}"]
+    parts = [f"bus “{chat._text(expect.get('bus'))}”"]
     if expect.get("carrier"):
         parts.append(f"carrier {chat._text(expect['carrier'])}")
     if unit:
@@ -770,66 +770,196 @@ def _target_text(expect: dict, unit: str | None) -> str:
     return f"{chat._text(expect['name'])} · {kind} ({', '.join(parts)})"
 
 
-def _units(project, expects: list[dict]) -> dict:
+def _units(n, expects: list[dict]) -> dict:
     """`<Class>:<name>` (and None for a rebound association) -> the target's unit, read from the open network."""
-    from services.pypsa_service import PyPSAService
-    from services.site_scene import associations, proposals
+    from services.site_scene import associations
 
-    with PyPSAService.get_lock():
-        n = proposals._open_network(project.directory)
-        out = {f"{e['class']}:{e['name']}": associations._unit(n, e["class"], e["name"]) for e in expects}
+    out = {f"{e['class']}:{e['name']}": associations._unit(n, e["class"], e["name"]) for e in expects}
     if len(expects) == 1:
         out[None] = next(iter(out.values()))
     return out
 
 
-def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
-    """One row per target the preview maps, with its full identity, and no model value (G9, H1)."""
+# SC-07 S5 (GK B J1): each target the card maps is a typed row whose new value
+# is a state in words; the receipt reads the same words back from disk (the
+# scene and sites.json D06 bindings, under the network lock) and compares them.
+# A target that is missing or different reads back other words: uncertain.
+ATTACHED, NOT_ATTACHED = "attached", "not attached"
+MARKED, NOT_MARKED = "marked unavailable", "not marked"
+NOT_PLACED, OTHER_ITEM = "not placed", "a different item"
+ON_SITE, OFF_SITE, OFF_MODEL = "on the site", "off the site, still in the model", "off the site and not in the model"
+NOT_READ = "not read back: the project is not open"
+
+
+def _where_placed(entry: dict, words: dict) -> str:
+    """A placement in words, the same on the card and the receipt."""
     from services.site_scene import chat
 
-    name, rows = "3D site", []
+    return (f"x {entry['x']:g} m, y {entry['y']:g} m, heading {entry['heading']:g}°, "
+            f"{chat._on_words(words, entry.get('on'))}")
+
+
+def _target_row(i: int, label: str, old: str, new: str, check: dict, not_compared: tuple[str, ...]) -> dict:
+    row = _settings_row("3D site", f"target_{i}", label, old, new, says_name=label)
+    row["check"], row["not_compared"] = check, list(not_compared)
+    return row
+
+
+def _expect(expect: dict) -> dict:
+    return {k: expect.get(k) for k in ("class", "name", "bus", "carrier")}
+
+
+def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
+    """
+    One row per target the preview maps, with its full identity and no model
+    value (G9, H1), in words (U4, J3). A `keep` step changes nothing and is a
+    note, never a done row (J1). Associations the bind drops are shown too.
+    """
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import associations, chat, proposals
+
+    rows: list[dict] = []
     preview, stored, action = entry["preview"], entry.get("stored") or {}, entry["action"]
     picked = chat.picks(project, owner, entry["site_id"], entry["id"])
-    units = _units(project, [t[0] for t in _targets(entry)])
+    with PyPSAService.get_lock():
+        n = proposals._open_network(project.directory)
+        units = _units(n, [t[0] for t in _targets(entry)])
+        words = chat.feature_words(scene, n)
+        labels = {a["id"]: associations._assoc_label(n, a) for a in scene.get("associations") or []}
 
     def note(text: str) -> None:
-        rows.append(_note("Settings", name, f"note_{len(rows)}", text))
+        rows.append(_note("Settings", "3D site", f"note_{len(rows)}", text))
+
+    def add(label, old, new, check, not_compared=()):
+        rows.append(_target_row(len(rows), label, old, new, check, not_compared))
 
     if action == "bind_targets":
+        kept = set()
         steps = iter(s for s in stored.get("plan") or [])
         for row in preview.get("associations") or []:
             step = next(steps, {})
-            where = chat._text(row.get("feature"))
+            where = chat.feature_word(words, row.get("feature"))
             if "new" in step:
                 text = f"Attach {_target_text(step['new']['expect'], row.get('unit'))} to {where}"
                 if row.get("weight") is not None:
                     text += f", share {row['weight'] * 100:g} %"
                 if row.get("feature") in picked:
                     text += f". Picked from {picked[row['feature']]} candidates"
+                add(text, NOT_ATTACHED, ATTACHED,
+                    {"kind": "attach", "feature": row.get("feature"), "weight": row.get("weight"),
+                     **_expect(step["new"]["expect"])}, ("unit", "capacity"))
             elif "keep" in step:
-                text = f"Keep {chat._text(step['keep'].get('name_at_bind'))} attached to {where}"
+                kept.add(step["keep"].get("id"))
+                note(f"Keeps {chat._text(labels.get(step['keep'].get('id')) or step['keep'].get('name_at_bind'))} "
+                     f"attached to {where}: no change")
             else:
-                text = f"No {chat._text(row.get('carrier'))} load in the model for {where}: marked unavailable"
-            note(text)
+                add(f"No {chat._text(row.get('carrier'))} load in the model for {where}", NOT_MARKED, MARKED,
+                    {"kind": "gap", "feature": row.get("feature"), "carrier": row.get("carrier")})
+        for a in scene.get("associations") or []:
+            if a.get("id") not in kept:  # the bind replaces the list: what it does not keep, it drops
+                add(f"Take {chat._text(labels.get(a['id']))} off {chat.feature_word(words, a.get('feature'))}",
+                    ATTACHED, NOT_ATTACHED, {"kind": "dropped", "association": a.get("id")})
     elif action == "place_existing":
+        placed = (scene.get("site") or {}).get("placements") or {}
         for key, step in (stored.get("plan") or {}).items():
-            e = step["entry"]
-            on = "on the roof" if str(e.get("on", "ground")).startswith("roof:") else "on the ground"
-            note(f"Place {_target_text(step['expect'], units.get(key))} at x {e['x']:g} m, y {e['y']:g} m, "
-                 f"heading {e['heading']:g}°, {on}")
+            old = _where_placed(placed[key], words) if key in placed else NOT_PLACED
+            add(f"Place {_target_text(step['expect'], units.get(key))}", old, _where_placed(step["entry"], words),
+                {"kind": "place", "key": key, **_expect(step["expect"])}, ("footprint size",))
     elif action == "rebind":
-        note(f"Attach again to {_target_text(stored['expect'], units.get(None))}, was {chat._text(preview.get('was'))}")
+        expect = stored["expect"]
+        new = associations._label(None, expect["class"], expect["name"])
+        if "placement" in stored:
+            was = associations._label(None, preview.get("class") or expect["class"], preview.get("was") or "")
+            add(f"Attach again: the placed item {chat._text(was)} becomes {_target_text(expect, units.get(None))}",
+                chat._text(was), chat._text(new), {"kind": "replaced", "key": stored["placement"], **_expect(expect)})
+        else:
+            where = chat.feature_word(words, preview.get("feature"))
+            was = labels.get(stored["association"]) or preview.get("was")
+            add(f"Attach again on {where}: {_target_text(expect, units.get(None))}", chat._text(was),
+                chat._text(new), {"kind": "rebind", "association": stored["association"], **_expect(expect)},
+                ("unit", "capacity"))
     else:
-        verb = "Take off the site" if action == "detach" else "Put back on the site"
+        detach = action == "detach"
         for item in preview.get("items") or []:
-            note(f"{verb}: {chat._text(item.get('label'))}, with {len(item.get('associations') or [])} "
-                 "attachments. It stays in the model")
+            cls, name = str(item.get("key")).split(":", 1)
+            count = len(item.get("associations") or [])
+            label = f"{chat._text(item.get('label'))}, with {count} attachment{'' if count == 1 else 's'}"
+            check = {"kind": "detach" if detach else "restore", "key": item.get("key"), "class": cls, "name": name,
+                     "associations": sorted(a.get("id") for a in item.get("associations") or [])}
+            back = f"back on the site with {count} attachment{'' if count == 1 else 's'}"
+            add(label, ON_SITE if detach else OFF_SITE, OFF_SITE if detach else back, check, ("group memberships",))
     for finding in preview.get("findings") or []:
         note(chat._text(finding.get("message")) or "")
-    rows.append(_settings_row(name, "revision", "Scene revision", scene.get("revision"),
+    rows.append(_settings_row("3D site", "revision", "Scene revision", scene.get("revision"),
                               scene.get("revision", 0) + 1))
     note(NO_MODEL_CHANGE)
     return rows
+
+
+def _live(n, cls: str, uid, fallback: str | None = None) -> str | None:
+    from services import component_identity
+
+    if uid:
+        return component_identity.name_of(n, cls, uid)
+    return fallback
+
+
+def _same_target(n, check: dict, name: str | None) -> bool:
+    """The live instance is the planned one: same class and name, on the same bus and carrier."""
+    from services.site_scene import associations
+
+    if name != check["name"] or not associations._exists(n, check["class"], name):
+        return False
+    now = associations._fingerprint(n, check["class"], name)
+    return (now["bus"], now["carrier"]) == (check["bus"], check["carrier"])
+
+
+def _read_target(n, check: dict, scene: dict, recorded: dict, words: dict, row: dict) -> str:
+    """What the site holds now for one target row, in the row's own words (J1)."""
+    from services.site_scene import associations, chat
+
+    kind, assoc = check["kind"], {a.get("id"): a for a in scene.get("associations") or []}
+    placed = (scene.get("site") or {}).get("placements") or {}
+    if kind == "attach":
+        for a in scene.get("associations") or []:
+            if (a.get("feature") == check["feature"] and a.get("class") == check["class"]
+                    and a.get("weight") == check["weight"]
+                    and _same_target(n, check, _live(n, a["class"], a.get("uid")))):
+                return ATTACHED
+        return NOT_ATTACHED
+    if kind == "gap":
+        hit = any(a.get("feature") == check["feature"] and not a.get("uid") and a.get("carrier") == check["carrier"]
+                  for a in scene.get("associations") or [])
+        return MARKED if hit else NOT_MARKED
+    if kind == "dropped":
+        return ATTACHED if check["association"] in assoc else NOT_ATTACHED
+    if kind == "place":
+        key = check["key"]
+        if key not in placed:
+            return NOT_PLACED
+        if not _same_target(n, check, _live(n, check["class"], recorded.get(key), check["name"])):
+            return OTHER_ITEM
+        return _where_placed(placed[key], words)
+    if kind in ("rebind", "replaced"):
+        if kind == "rebind":
+            a = assoc.get(check["association"])
+            name = _live(n, check["class"], a.get("uid")) if a else None
+        else:
+            new_key = f"{check['class']}:{check['name']}"
+            name = _live(n, check["class"], recorded.get(new_key), check["name"]) if new_key in placed else None
+        if name is None:
+            return NOT_ATTACHED
+        label = chat._text(associations._label(None, check["class"], name))
+        return label if _same_target(n, check, name) else OTHER_ITEM
+    key = check["key"]
+    left = sorted(a_id for a_id, a in assoc.items() if a.get("feature") == key)
+    if kind == "detach":
+        if key in placed or left:
+            return ON_SITE
+        return OFF_SITE if associations._exists(n, check["class"], check["name"]) else OFF_MODEL
+    if key not in placed:
+        return OFF_SITE
+    return row["new"] if left == check["associations"] else ON_SITE
 
 
 def _scene_preview(args: dict) -> list[dict]:
@@ -859,21 +989,48 @@ def _scene_binding(args: dict) -> dict:
 
 
 def _scene_readback(args: dict, rows: list[dict]) -> list[Any]:
-    """The committed scene's values, read from the store the apply wrote."""
-    from services.site_scene import chat, store
+    """The committed scene's values, read from disk: the store the apply wrote and, for a model
+    action, each target against the open network and the D06 bindings (J1), never apply's return."""
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import chat, proposals, store
 
     with chat.scope() as (_db, _user, project, _owner):
-        scene = store.read_scene(project.directory, args.get("site_id"))
-    now = {"change": None, "buildings": len(scene.get("buildings") or []), "revision": scene.get("revision")}
-    return [None if row["role"] == "note" else (rows[0]["new"] if row["field"] == "change"
-                                                 else _setting(now.get(row["field"]))) for row in rows]
+        targets = [row for row in rows if row.get("check")]
+        if targets:
+            with PyPSAService.get_lock():
+                scene = store.read_scene(project.directory, args.get("site_id"))
+                try:
+                    n = proposals._open_network(project.directory)
+                except Exception:  # noqa: BLE001 — nothing to compare against: every target is unread
+                    n = None
+                recorded = proposals._recorded_bindings(project.directory)
+                words = chat.feature_words(scene, n)
+                read = {id(row): NOT_READ if n is None else _read_target(n, row["check"], scene, recorded, words, row)
+                        for row in targets}
+        else:
+            scene = store.read_scene(project.directory, args.get("site_id"))
+            read = {}
+    now = {"buildings": len(scene.get("buildings") or []), "revision": scene.get("revision")}
+    out = []
+    for row in rows:
+        if row["role"] == "note":
+            out.append(None)
+        elif row["field"] == "change":
+            out.append(rows[0]["new"])
+        elif id(row) in read:
+            out.append(read[id(row)])
+        else:
+            out.append(_setting(now.get(row["field"])))
+    return out
 
 
 def _scene_says(args: dict, rows: list[dict]) -> str:
     new = {r["field"]: (r["old"], r["new"]) for r in rows if r["role"] == "typed"}
     if "buildings" not in new:
         change = new.get("change", (None, None))[1]
-        return f"Applies the reviewed 3D site preview: {change}. No model value changes"
+        done = sum(1 for r in rows if r.get("check") and r["old"] != r["new"])  # J1: a kept row is not done
+        return (f"Applies the reviewed 3D site preview: {change}, {done} change{'' if done == 1 else 's'}. "
+                "No model value changes")
     before, after = new.get("buildings", (None, None))
     return f"Applies the reviewed 3D site preview: {before} → {after} buildings. The model is unchanged"
 
