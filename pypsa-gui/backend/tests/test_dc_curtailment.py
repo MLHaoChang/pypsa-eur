@@ -541,3 +541,54 @@ def test_check_refuses_before_the_solve_and_fits_holds_at_the_boundary():
     w = pd.Series([1.0, 1.0, 1.0])
     assert C.fits(w, 2.0, w.index)
     assert not C.fits(w, 2.5, w.index)
+
+
+def test_the_carrier_is_added_for_the_solve_only_and_a_users_is_kept():
+    n = _network()
+    undo: list = []
+    C.apply(n, lambda _m: None, undo, {}, terms=_terms())
+    assert slack.DC_CURTAILMENT_CARRIER in n.carriers.index  # there while the row is
+    for _kind, fn in undo:
+        fn()
+    assert slack.DC_CURTAILMENT_CARRIER not in n.carriers.index
+    m = _network()
+    m.add("Carrier", slack.DC_CURTAILMENT_CARRIER)
+    undo = []
+    C.apply(m, lambda _m: None, undo, {}, terms=_terms())
+    for _kind, fn in undo:
+        fn()
+    assert slack.DC_CURTAILMENT_CARRIER in m.carriers.index  # not ours to remove
+
+
+def test_an_existing_row_is_left_alone():
+    n = _network()
+    n.add("Generator", C.GENERATOR, bus="dc_mv", p_nom=1.0)
+    undo: list = []
+    C.apply(n, lambda _m: None, undo, {}, terms=_terms())
+    assert undo == [] and n.generators.at[C.GENERATOR, "p_nom"] == 1.0
+
+
+def test_a_failed_add_unmarks_the_row_and_raises(monkeypatch):
+    n = _network()
+    marks: list = []
+    monkeypatch.setattr(
+        PyPSAService,
+        "mark_transient",
+        classmethod(lambda cls, c, nm: marks.append(("+", nm))),
+    )
+    monkeypatch.setattr(
+        PyPSAService,
+        "unmark_transient",
+        classmethod(lambda cls, c, nm: marks.append(("-", nm))),
+    )
+    real_add = n.add
+
+    def add(cls, name, *a, **k):
+        if cls == "Generator":
+            raise RuntimeError("boom")
+        return real_add(cls, name, *a, **k)
+
+    monkeypatch.setattr(n, "add", add)
+    with pytest.raises(RuntimeError, match="boom"):
+        C.apply(n, lambda _m: None, [], {}, terms=_terms())
+    assert marks == [("+", C.GENERATOR), ("-", C.GENERATOR)]
