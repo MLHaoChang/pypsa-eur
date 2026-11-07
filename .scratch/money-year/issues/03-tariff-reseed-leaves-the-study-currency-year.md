@@ -1,6 +1,6 @@
 # A tariff change re-seeds an older ledger but leaves the study's currency year behind
 
-Status: needs-triage
+Status: ready-for-agent
 
 Follow-up to money-year issue 02 (MY-02, PR #1166); GK B (26) asked for this ticket on 2026-11-06.
 
@@ -16,3 +16,14 @@ The tariff path does not do this. The study stays in 2020, the ledger carries th
 Apply the issue-02 rule in the tariff re-seed too: if the study's year equals the old ledger's only money-row year, move it to the pin's `finance.currency_year`.
 If the PATCH body itself sets `currency_year`, that value wins.
 Test: a stored 10-05 study with year 2020, given a tariff change by PATCH, runs and its case reads 200 in 2025.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `pypsa-gui/backend/routers/studies.py` (Gate S2 [S9] re-seed block), `study_ledger.money_years`.
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: GK B (finance).
+- Size: S.
+- Apply the issue-02 rule; a PATCH-set `currency_year` wins; test: stored 10-05 study, tariff PATCH, case reads 200 in 2025.

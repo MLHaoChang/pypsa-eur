@@ -3,7 +3,7 @@
 
 # G2P-13: N-1 rows show the line only, with no per-transformer sub-rows
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Found by: G2P-13 (#1194) PR body, "Skipped / risk".
 
@@ -14,3 +14,14 @@ The N-1 line is one number. In the Expert table and the report it should list ea
 ## Where to look
 
 `services/results/grid_risk_production.py` (N-1 line, from `process_loss.expected_outage_loss` on the site-transformer Links), `GridRiskTab.tsx` Expert table and `chapters.GRID_RISK` in the report.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `services/results/grid_risk_production.py`, `GridRiskTab.tsx`, `chapters.GRID_RISK`.
+- Blocked by: none.
+- Model tier: opus.
+- Gated: GK A (engine rows), UX (12) (Expert table).
+- Size: M.
+- First check whether `expected_outage_loss` already returns the per-Link split; Guided keeps the single line.
