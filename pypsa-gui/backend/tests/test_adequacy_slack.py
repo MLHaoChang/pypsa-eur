@@ -104,6 +104,10 @@ _FORBIDDEN = (
     re.compile(r"""startswith\(\s*["']__dsr_"""),
     re.compile(r"""replace\(\s*["']__dsr_"""),
     re.compile(r"""f["']__dsr_"""),
+    # The curtailable data-centre load (DC-07 S2), the same way.
+    re.compile(r"""==\s*["']dc_curtailment["']"""),
+    re.compile(r"""startswith\(\s*["']__dccurt_"""),
+    re.compile(r"""f["']__dccurt_"""),
 )
 
 

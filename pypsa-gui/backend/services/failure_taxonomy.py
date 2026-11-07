@@ -38,6 +38,15 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
         "remove the product, then run again.",
     ),
     (
+        ("curtailment_refused",),
+        "curtailment_refused",
+        "Curtailable load refused before solving",
+        "The data centre's curtailable load cannot be modelled as configured: the detail "
+        "names the reason (no cooling load on dc_mv, or a maximum curtailment duration "
+        "longer than the horizon). Change that setting or clear the curtailment price, "
+        "then run again.",
+    ),
+    (
         ("validation_failed",),
         "validation",
         "Validation failed before solving",
