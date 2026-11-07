@@ -207,6 +207,7 @@ RESULT_TAMPER = {
     "stamp_not_the_inputs": lambda m: m["solve_stamp"].update(input="0" * 64),
     "stamp_extra_key": lambda m: m["solve_stamp"].update(run="x"),
     "stamp_value_not_text": lambda m: m["solve_stamp"].update(exact=123),
+    "stamp_value_blank": lambda m: m["solve_stamp"].update(exact=""),
 }
 
 
@@ -231,6 +232,7 @@ def test_an_unloaded_project_reads_as_not_rechecked(solved, monkeypatch):
         root, meta, data, chart["manifest"]["project_id"]
     )
     assert checked["scope_status"] == "solve_not_rechecked"
+    assert checked["artifact_sha256"] == chart["manifest"]["artifact_sha256"]
 
 
 # A well-formed stamp of another solve is caught only against the loaded solve.
