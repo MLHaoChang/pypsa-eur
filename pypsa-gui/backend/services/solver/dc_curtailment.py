@@ -15,6 +15,10 @@ the facility: the LP pays the price for each MWh it does not serve.
   ``sum(w * p) <= D * share * max F`` over the run. This is an energy proxy: curtailment can
   still be spread inside a run; consecutive hours are not enforced (``CLAIM_LIMIT``, written to
   ``n.meta`` and the docs). A D the horizon cannot hold is refused.
+- Under the operational run (C20, C9) the rows carry in across windows: the dispatch before a
+  window's start is final and enters each run that spans the start as a constant, read only
+  inside ``operational.run_windows`` (``operational.current_window``). A D the first window
+  cannot hold is refused; plain rolling with a duration stays refused.
 - The lifecycle is the DSR tier's (``services/solver/assumptions.py``): mark transient, add,
   capture into ``captured["dc_curtailment"]``, remove. The carrier and prefix are in
   ``slack.SLACK_CARRIERS`` / ``SLACK_NAME_PREFIXES`` and never in the involuntary tier, so the
@@ -50,13 +54,21 @@ META_KEY = "dc_curtailment"
 SERIES_ATTR = "dc_curtailment_p"
 NOT_ESTABLISHED = "curtailment_not_established"
 CLAIM_LIMIT = (
-    "energy proxy: curtailment can still be spread; consecutive hours are not enforced"
+    "energy proxy: curtailment can still be spread; consecutive hours are not enforced; "
+    "carried across operational windows"
 )
 
 NO_COOLING_LOAD = "no_cooling_load"
 DURATION_EXCEEDS_HORIZON = "duration_exceeds_horizon"
-#: Until C20 (carry-in under the operational run), a rolling run cannot hold the duration rows
-#: across its windows, so a rolling run with a duration is refused.
+#: C21's operational half: D plus one snapshot does not fit in the first window.
+DURATION_EXCEEDS_WINDOW = "duration_exceeds_window"
+#: C20c: the dispatch before a window's start is missing, not solved, or not this run's.
+CARRY_IN_UNAVAILABLE = "carry_in_unavailable"
+#: C20a: the dispatch before a window's start already exceeds a run's bound.
+CARRY_IN_OVER_BOUND = "carry_in_over_bound"
+#: Plain rolling (PyPSA's loop) continues past a failed window, so a failed window could become a
+#: carry-in source (C20): a plain rolling run with a duration is refused. The operational run
+#: (rolling on fixed sizes) carries in instead.
 ROLLING_WITHOUT_CARRY_IN = "duration_under_rolling_not_supported"
 
 _log = logging.getLogger(__name__)
@@ -153,6 +165,20 @@ def _groups(sns) -> list[np.ndarray]:
     return [np.arange(len(sns))]
 
 
+def _scan(w: np.ndarray, d_h: float, ks) -> list[tuple[int, int]]:
+    """(first, last) of the run from each local position in ``ks`` over one period's weights."""
+    cum = np.concatenate([[0.0], np.cumsum(w)])
+    out: list[tuple[int, int]] = []
+    for k in ks:
+        need = cum[k] + d_h + w[k] - 1e-9
+        j = int(np.searchsorted(cum, need, side="left"))  # cum[j] >= need
+        if j <= len(w):
+            out.append((int(k), j - 1))
+        elif cum[-1] - cum[k] > d_h + 1e-9:
+            out.append((int(k), len(w) - 1))
+    return out
+
+
 def runs(hours: pd.Series, d_h: float, sns) -> list[tuple[int, int]]:
     """(first, last) positions of every run: from each snapshot i, the fewest consecutive
     snapshots whose weighted hours reach D plus snapshot i's own (Q3). Near the horizon's end,
@@ -161,14 +187,9 @@ def runs(hours: pd.Series, d_h: float, sns) -> list[tuple[int, int]]:
     w = hours.to_numpy()
     out: list[tuple[int, int]] = []
     for pos in _groups(sns):
-        cum = np.concatenate([[0.0], np.cumsum(w[pos])])
-        for k in range(len(pos)):
-            need = cum[k] + d_h + w[pos[k]] - 1e-9
-            j = int(np.searchsorted(cum, need, side="left"))  # cum[j] >= need
-            if j <= len(pos):
-                out.append((int(pos[k]), int(pos[j - 1])))
-            elif cum[-1] - cum[k] > d_h + 1e-9:
-                out.append((int(pos[k]), int(pos[-1])))
+        out.extend(
+            (int(pos[i]), int(pos[j])) for i, j in _scan(w[pos], d_h, range(len(pos)))
+        )
     return out
 
 
@@ -356,53 +377,94 @@ def curtailed_by_load(n) -> tuple[dict[str, pd.Series], list[str]]:
 
 
 def refuse_rolling(terms: Terms | None = None) -> None:
-    """A rolling run with a duration is refused until C20 builds the carry-in (GK A, ask 4):
-    windowed rows without it would leave each window's first run unbounded by the last."""
+    """A plain rolling run (PyPSA's loop, which continues past a failed window) with a duration
+    is refused: a failed window could seed the next one's carry-in (C20)."""
     terms = project_terms() if terms is None else terms
     if terms is None or terms.max_duration_h is None:
         return
     raise DcCurtailmentRefused(
         ROLLING_WITHOUT_CARRY_IN,
-        f"curtail_max_duration_h ({terms.max_duration_h:g} h) is not supported under a rolling "
-        "solve yet: the duration rows have no carry-in between windows. Use the full-horizon "
-        "solve, or remove the duration.",
+        f"curtail_max_duration_h ({terms.max_duration_h:g} h) is not supported under a plain "
+        "rolling solve: its windows continue past a failed one, so the duration rows cannot "
+        "carry in safely. Use the full-horizon solve or the operational run (rolling on fixed "
+        "sizes), or remove the duration.",
     )
+
+
+def check_window(n, horizon: int, terms: Terms | None = None) -> None:
+    """C21's operational half, before the first window: D plus one snapshot must fit, in
+    weighted hours, in the first window of ``horizon`` snapshots. A shorter last window is
+    fine: its runs carry in from the windows before it."""
+    terms = project_terms() if terms is None else terms
+    if terms is None or terms.max_duration_h is None:
+        return
+    sns = n.snapshots[: max(1, int(horizon))]
+    d_h = float(terms.max_duration_h)
+    if not fits(_hours(n, sns), d_h, sns):
+        raise DcCurtailmentRefused(
+            DURATION_EXCEEDS_WINDOW,
+            f"Curtailable load: curtail_max_duration_h {d_h:g} h plus one snapshot does not fit "
+            f"in the operational run's window ({float(_hours(n, sns).sum()):g} weighted hours "
+            f"in {len(sns)} snapshots). Shorten the duration or lengthen the rolling horizon.",
+        )
 
 
 # ── the duration rows ────────────────────────────────────────────────────────
 
 
 def add_rows(n, snapshots, terms: Terms, emit) -> tuple[int, int]:
-    """The energy-proxy rows over the LP's ``snapshots`` (Q3); (rows, nonzeros), logged (C21)."""
-    import linopy
-    import xarray as xr
+    """The energy-proxy rows over the LP's ``snapshots`` (Q3); (rows, nonzeros), logged (C21).
+    Inside an operational run's window the rows carry in (C20, :func:`_window_rows`)."""
+    from services.solver import operational
 
     if terms.max_duration_h is None or GENERATOR not in n.generators.index:
         return 0, 0
     sns = pd.Index(snapshots) if not isinstance(snapshots, pd.Index) else snapshots
     d_h = float(terms.max_duration_h)
+    window = operational.current_window(n)
+    if window is not None:
+        rows, carried = _window_rows(n, sns, terms, window, emit)
+        found, nonzeros = _constrain(n, sns, rows)
+        emit(
+            f"window {window['index'] + 1}: {found} energy-proxy rows ({carried} carried in), "
+            f"{nonzeros} nonzeros (D = {d_h:g} h, {CLAIM_LIMIT})."
+        )
+        return found, nonzeros
     if not fits(_hours(n, sns), d_h, sns):
         raise DcCurtailmentRefused(
             DURATION_EXCEEDS_HORIZON,
             f"Curtailable load: curtail_max_duration_h {d_h:g} h plus one snapshot does not fit in "
             f"the {float(_hours(n, sns).sum()):g} weighted hours this LP spans.",
         )
-    found = runs(_hours(n, sns), d_h, sns)
+    f = facility(n).reindex(sns).to_numpy()
+    rows = [
+        (i, j, d_h * terms.share * float(np.max(f[i : j + 1])))
+        for i, j in runs(_hours(n, sns), d_h, sns)
+    ]
+    found, nonzeros = _constrain(n, sns, rows)
+    emit(f"{found} energy-proxy rows, {nonzeros} nonzeros (D = {d_h:g} h, {CLAIM_LIMIT}).")
+    return found, nonzeros
+
+
+def _constrain(n, sns, rows: list[tuple[int, int, float]]) -> tuple[int, int]:
+    """Add ``sum(w * p) <= rhs`` over positions ``first..last`` of ``sns`` for each row."""
+    import linopy
+    import xarray as xr
+
     m = n.model
     labels = m.variables["Generator-p"].labels.sel(name=GENERATOR).to_numpy()
     if labels.shape[0] != len(sns):
         raise RuntimeError("Generator-p does not span the LP snapshots")
     w = _hours(n, sns).to_numpy()
-    f = facility(n).reindex(sns).to_numpy()
-    width = max(j - i + 1 for i, j in found)
-    vars_ = np.full((len(found), width), -1, dtype=np.int64)
-    coeffs = np.zeros((len(found), width))
-    rhs = np.empty(len(found))
-    for r, (i, j) in enumerate(found):
+    width = max(j - i + 1 for i, j, _ in rows)
+    vars_ = np.full((len(rows), width), -1, dtype=np.int64)
+    coeffs = np.zeros((len(rows), width))
+    rhs = np.empty(len(rows))
+    for r, (i, j, bound) in enumerate(rows):
         k = j - i + 1
         vars_[r, :k] = labels[i : j + 1]
         coeffs[r, :k] = w[i : j + 1]
-        rhs[r] = d_h * terms.share * float(np.max(f[i : j + 1]))
+        rhs[r] = bound
     data = xr.Dataset(
         {
             "coeffs": (("DcCurtailment-run", "_term"), coeffs),
@@ -413,11 +475,78 @@ def add_rows(n, snapshots, terms: Terms, emit) -> tuple[int, int]:
     m.add_constraints(
         lhs <= xr.DataArray(rhs, dims="DcCurtailment-run"), name="DcCurtailment-energy"
     )
-    nonzeros = int((vars_ >= 0).sum())
-    emit(
-        f"{len(found)} energy-proxy rows, {nonzeros} nonzeros (D = {d_h:g} h, {CLAIM_LIMIT})."
-    )
-    return len(found), nonzeros
+    return len(rows), int((vars_ >= 0).sum())
+
+
+def _carried(n, full: pd.Index, first: int, start: int, window: dict) -> np.ndarray:
+    """The final dispatch at ``full[first:start]``, the constants of a carry-in row (C20c)."""
+    if start > window["written"]:
+        raise DcCurtailmentRefused(
+            CARRY_IN_UNAVAILABLE,
+            f"Curtailable load: window {window['index'] + 1} would carry in dispatch the earlier "
+            "windows of this run did not write.",
+        )
+    p = n.generators_t.p
+    if GENERATOR not in getattr(p, "columns", []):
+        raise DcCurtailmentRefused(
+            CARRY_IN_UNAVAILABLE,
+            f"Curtailable load: {GENERATOR} has no dispatch to carry into window "
+            f"{window['index'] + 1}.",
+        )
+    values = p[GENERATOR].reindex(full[first:start]).to_numpy(dtype=float)
+    if np.isnan(values).any():
+        raise DcCurtailmentRefused(
+            CARRY_IN_UNAVAILABLE,
+            f"Curtailable load: the dispatch before window {window['index'] + 1} is not solved, "
+            "so it cannot carry in.",
+        )
+    return values
+
+
+def _window_rows(n, sns, terms: Terms, window: dict, emit) -> tuple[list, int]:
+    """The rows of one operational window (C20): the full horizon's runs that reach into
+    ``[start, stop)``, each with its whole run's bound (C20a). A run spanning the start bounds
+    its window part by the bound less its final dispatch before the start; runs that end before
+    the start are dropped (C20d); runs past the window's end are cut at it."""
+    full = n.snapshots
+    start, stop = int(window["start"]), int(window["stop"])
+    if not sns.equals(full[start:stop]):
+        raise RuntimeError("the LP snapshots are not the operational window's")
+    d_h = float(terms.max_duration_h)
+    hours = _hours(n, full).to_numpy()
+    f = facility(n).reindex(full).to_numpy()
+    rows: list[tuple[int, int, float]] = []
+    carried = 0
+    for pos in _groups(full):
+        lo, hi = max(start, int(pos[0])), min(stop, int(pos[-1]) + 1)
+        if lo >= hi:
+            continue
+        g0, w = int(pos[0]), hours[pos]
+        s, e = lo - g0, hi - g0
+        cum = np.concatenate([[0.0], np.cumsum(w)])
+        back = int(np.searchsorted(cum, cum[s] - d_h - float(w.max()) - 1e-9, side="left"))
+        for k, j in _scan(w, d_h, range(back, e)):
+            if j < s:
+                continue  # ended before the window (C20d)
+            whole = d_h * terms.share * float(np.max(f[g0 + k : g0 + j + 1]))
+            bound = whole
+            if k < s:
+                before = _carried(n, full, g0 + k, g0 + s, window)
+                bound -= float((w[k:s] * before).sum())
+                if bound < 0:
+                    if bound < -1e-9 * whole:
+                        raise DcCurtailmentRefused(
+                            CARRY_IN_OVER_BOUND,
+                            f"Curtailable load: the dispatch before window "
+                            f"{window['index'] + 1} already exceeds a run's bound by "
+                            f"{-bound:g} MWh.",
+                        )
+                    emit(f"window {window['index'] + 1}: a carry-in bound of {bound:g} "
+                         "MWh is clipped to 0.")
+                    bound = 0.0
+                carried += 1
+            rows.append((g0 + max(k, s) - start, g0 + min(j, e - 1) - start, bound))
+    return rows, carried
 
 
 def _wrap_with_dc_curtailment(network, user_fn, log_queue=None, terms=None):
