@@ -93,15 +93,25 @@ WINDOWS_DEFINITION = (
 )
 
 
-def _weighted(frame: pd.DataFrame | None, columns, weights: pd.Series) -> float | None:
+def _present(frame: pd.DataFrame, columns) -> list:
+    return [c for c in columns if c in frame.columns]
+
+
+def _weighted(frame: pd.DataFrame, columns, weights: pd.Series) -> float | None:
     """Sum of ``frame[columns]`` x ``weights``. None when no column exists, so
     a missing column never reads as 0 (C26)."""
-    if frame is None or not len(columns):
-        return None
-    cols = [c for c in columns if c in frame.columns]
+    cols = _present(frame, columns)
     if not cols:
         return None
     return float(frame[cols].mul(weights, axis=0).sum().sum())
+
+
+def _last(frame: pd.DataFrame, columns) -> float | None:
+    """Sum of ``frame[columns]`` at the last snapshot; None without a column."""
+    cols = _present(frame, columns)
+    if not cols:
+        return None
+    return float(frame[cols].iloc[-1].sum())
 
 
 def _value(value: float | None, reason: str) -> dict:
@@ -118,29 +128,17 @@ def metrics(n) -> dict[str, dict]:
     sw = n.snapshot_weightings.stores
     gens = n.generators
     gp = n.generators_t.p
-    ens = gens.index[involuntary_slack_mask(gens)] if len(gens) else []
-    curt = (
-        gens.index[gens["carrier"].astype(str) == DC_CURTAILMENT_CARRIER]
-        if len(gens) and "carrier" in gens.columns
-        else []
-    )
+    ens = gens.index[involuntary_slack_mask(gens)]
+    curt = gens.index[gens["carrier"].astype(str) == DC_CURTAILMENT_CARRIER]
 
     su, st = n.storage_units, n.stores
-    su_p = n.storage_units_t.p
-    st_p = n.stores_t.p
     discharge = [
-        _weighted(su_p.clip(lower=0) if len(su) else None, su.index, sw),
-        _weighted(st_p.clip(lower=0) if len(st) else None, st.index, sw),
+        _weighted(n.storage_units_t.p.clip(lower=0), su.index, sw),
+        _weighted(n.stores_t.p.clip(lower=0), st.index, sw),
     ]
-    soc = n.storage_units_t.state_of_charge
-    e = n.stores_t.e
     end = [
-        float(soc[[c for c in su.index if c in soc.columns]].iloc[-1].sum())
-        if len(su) and len(soc) and any(c in soc.columns for c in su.index)
-        else None,
-        float(e[[c for c in st.index if c in e.columns]].iloc[-1].sum())
-        if len(st) and len(e) and any(c in e.columns for c in st.index)
-        else None,
+        _last(n.storage_units_t.state_of_charge, su.index),
+        _last(n.stores_t.e, st.index),
     ]
 
     def _total(parts):
@@ -169,15 +167,14 @@ def reference(n, **optimize_kwargs) -> dict:
     every snapshot, its status and, when it solved, its :func:`metrics`. The
     ``n.meta`` it leaves is restored (C22). The outputs stay until the windows
     overwrite them."""
-    saved = copy.deepcopy(dict(n.meta)) if isinstance(n.meta, dict) else None
+    saved = copy.deepcopy(dict(n.meta))
     try:
         status, condition = n.optimize(n.snapshots, **optimize_kwargs)
         out = {"status": str(status), "condition": str(condition)}
         out["metrics"] = metrics(n) if status == "ok" else None
     finally:
-        if saved is not None:
-            n.meta.clear()
-            n.meta.update(saved)
+        n.meta.clear()
+        n.meta.update(saved)
     return out
 
 
@@ -269,7 +266,7 @@ def _flag(n, cfg, rec: dict | None, live_fingerprint: str | None) -> str:
     if rec is None or not is_operational(cfg):
         return MISSING
     h, o = horizon_of(cfg)
-    key = rec.get("key") or {}
+    key = rec["key"]
     solved = (
         n.meta.get("assistant_solve_input_fingerprint")
         if isinstance(n.meta, dict)
@@ -286,7 +283,7 @@ def _flag(n, cfg, rec: dict | None, live_fingerprint: str | None) -> str:
         return STALE
     if (rec.get("windows") or {}).get("failed"):
         return WINDOW_FAILED
-    if key.get("reference_status") != "ok" or rec.get("reference_metrics") is None:
+    if key.get("reference_status") != "ok":
         return REFERENCE_NOT_SOLVED
     return FRESH
 

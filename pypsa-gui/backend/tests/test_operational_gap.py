@@ -230,7 +230,7 @@ def test_never_run_reads_missing(reset_backend):
 
 
 @pytest.mark.parametrize(
-    "change", ["load", "horizon", "weightings", "no_live", "no_solved"]
+    "change", ["load", "horizon", "weightings", "no_live", "no_solved", "neither"]
 )
 def test_an_input_change_reads_stale(reset_backend, change):
     """C12/C26: stale reads None + flag; an unknown fingerprint is stale too."""
@@ -253,8 +253,11 @@ def test_an_input_change_reads_stale(reset_backend, change):
         live = _live()
     elif change == "no_live":
         live = None
-    else:
+    elif change == "no_solved":
         n.meta.pop("assistant_solve_input_fingerprint")
+    else:  # neither fingerprint is known: None == None is never fresh
+        n.meta.pop("assistant_solve_input_fingerprint")
+        live = None
     out = G.read(n, _state["solver_config"], live_fingerprint=live)
     assert out["flag"] == G.STALE
     assert out["metrics"] is None and out["windows"] is None
@@ -532,3 +535,48 @@ def test_the_route_is_409_while_a_solve_runs(client, monkeypatch):
 
 def test_the_route_is_get_only(client):
     assert client.post("/api/results/operational_gap").status_code == 405
+
+
+def test_no_record_under_an_operational_config_reads_missing():
+    n = _frozen(_net())
+    cfg = {
+        "fixed_sizes": "nameplate",
+        "solve_strategy": "rolling",
+        "rolling_horizon": 4,
+        "rolling_overlap": 0,
+    }
+    n.meta["assistant_solve_input_fingerprint"] = "fp"
+    out = G.read(n, cfg, live_fingerprint="fp")
+    assert out["flag"] == G.MISSING and out["metrics"] is None
+
+
+def test_a_gap_is_none_when_one_side_is_none():
+    for op, ref in (
+        ({"value": None, "reason": "r"}, {"value": 3.0}),
+        ({"value": 3.0}, {"value": None, "reason": "r"}),
+    ):
+        row = G._gap_rows({"opex_eur": op}, {"opex_eur": ref})["opex_eur"]
+        assert row["gap"] is None and row["gap_pct"] is None
+
+
+def test_the_reference_leaves_no_meta_behind():
+    """C22: whatever the reference solve writes into n.meta is restored."""
+    n = _frozen(_net())
+
+    def writes_meta(net, sns):
+        net.meta["written_by_the_lp"] = len(sns)
+
+    _direct(n, extra_functionality=writes_meta)
+    # Only the last window's write survives; the reference's (24) does not.
+    assert n.meta["written_by_the_lp"] == 4
+    seen = []
+
+    def records(net, sns):
+        seen.append(dict(net.meta).get("written_by_the_lp"))
+        net.meta["written_by_the_lp"] = len(sns)
+
+    m = _frozen(_net())
+    _direct(m, extra_functionality=records)
+    assert (
+        seen[0] is None and seen[1] is None
+    )  # window 1 never sees the reference's write
