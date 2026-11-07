@@ -1203,3 +1203,13 @@ def test_a_yes_flagged_process_unit_is_in_the_rapid_voltage_change_screen():
     links = pd.DataFrame({"eh_process": ["yes", "True", "no", ""]}, index=list("abcd"))
     assert G._process_units(links) == ["a", "b"]
     assert G._process_units(None) == [] and G._process_units(links.drop(columns="eh_process")) == []
+
+
+def test_without_gridspine_there_are_no_process_units_to_screen(monkeypatch):
+    import sys
+
+    import pandas as pd
+
+    monkeypatch.setitem(sys.modules, "gridspine.drivers.process_chain", None)  # makes the import raise
+    links = pd.DataFrame({"eh_process": ["yes", True]}, index=["a", "b"])
+    assert G._process_units(links) == []

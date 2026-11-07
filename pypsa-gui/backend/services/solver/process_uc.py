@@ -42,7 +42,6 @@ from concurrent.futures import ProcessPoolExecutor, wait
 import numpy as np
 import pandas as pd
 
-from gridspine.drivers.process_chain import truthy
 from models.process_unit import product_role_generators
 
 #: Snapshots per period the binary check solves: one representative week at 1 h.
@@ -63,12 +62,26 @@ FLAG_MESSAGE = "linearised UC understates restarts"
 _LIN = {"linearized_unit_commitment": True}
 
 
+try:
+    from gridspine.drivers.process_chain import truthy
+except ImportError:  # a build without gridspine: the partial-build fallback below
+    truthy = None
+
+
+def _fallback_truthy(v) -> bool:
+    """The flag rule for a partial build WITHOUT gridspine only (so ``committable`` stays right). The one rule is
+    ``gridspine.drivers.process_chain.truthy``; a test pins the two to the same strings (grid-to-process issue 26)."""
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "1.0", "yes")
+    return False if v is None or pd.isna(v) else bool(v)
+
+
 def flag_column(df: pd.DataFrame, col: str) -> pd.Series:
     """A bool column as a clean bool Series (False where absent or NaN, and
     for a string that does not read as true: ``"False"``, ``"0"``, ``""``)."""
     if df.empty or col not in df.columns:
         return pd.Series(False, index=df.index)
-    return df[col].map(truthy).astype(bool)
+    return df[col].map(truthy or _fallback_truthy).astype(bool)
 
 
 def committable_mask(df: pd.DataFrame) -> pd.Series:

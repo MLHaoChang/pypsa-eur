@@ -1066,8 +1066,10 @@ def _truthy(v) -> bool:
 
 def _process_units(links) -> list[str]:
     """The Links flagged ``eh_process``, by the one flag rule (``process_chain.truthy``)."""
-    from gridspine.drivers.process_chain import truthy
-
+    try:
+        from gridspine.drivers.process_chain import truthy
+    except ImportError:  # no gridspine in this build: no process units to screen
+        return []
     if links is None or "eh_process" not in links.columns:
         return []
     return [u for u in links.index if truthy(links.at[u, "eh_process"])]

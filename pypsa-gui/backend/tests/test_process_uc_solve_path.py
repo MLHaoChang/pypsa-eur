@@ -569,3 +569,23 @@ def test_flag_column_and_process_chain_share_one_rule(v, want):
 
     assert process_chain.truthy(v) is want
     assert process_uc.truthy is process_chain.truthy
+
+
+_FLAG_VALUES = [True, False, None, np.nan, 1, 0, 2, "True", "true", "TRUE", "1", "1.0", " yes ", "YES",
+                "False", "0", "0.0", "", "no", "y"]
+
+
+def test_the_partial_build_fallback_and_the_gridspine_rule_read_every_value_alike():
+    from gridspine.drivers.process_chain import truthy
+    from services.solver.process_uc import _fallback_truthy
+
+    for v in _FLAG_VALUES:
+        assert _fallback_truthy(v) is truthy(v), repr(v)
+
+
+def test_flag_column_without_gridspine_still_reads_committable(monkeypatch):
+    from services.solver import process_uc
+
+    monkeypatch.setattr(process_uc, "truthy", None)
+    df = pd.DataFrame({"committable": pd.Series([True, "yes", "False", "", None], dtype=object)})
+    assert process_uc.flag_column(df, "committable").tolist() == [True, True, False, False, False]
