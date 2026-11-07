@@ -414,3 +414,23 @@ def test_a_template_lookup_that_fails_otherwise_refuses_and_is_not_read_as_missi
     assert response.status_code == 503
     assert "X-Report-Source" not in response.headers
     assert _markers(project) == set()
+
+
+from tests.test_chat_report_template_tools import (  # noqa: E402
+    _plan_for,
+    _upload_template,
+    fixtures,  # noqa: F401  (the template fixture, shared by name)
+)
+
+
+def test_a_template_export_records_the_template_and_the_plan(project, monkeypatch, fixtures):  # noqa: F811
+    rid = _assistant_report(monkeypatch, fmea="Generator g dominates again.")
+    data = fixtures["corporate_untagged.docx"]
+    tid = _upload_template(project, "corporate.docx", data)
+    T.set_report_template(rid, tid)
+    plan = T.set_report_mapping(rid, _plan_for(T.get_report_template(rid)["outline"]))
+    file_id = T.export_report_docx(rid)["file_id"]
+    dataset = _sidecar(project, file_id)["manifest"]["dataset"]
+    assert dataset["template"] == {"file_id": tid, "sha256": hashlib.sha256(data).hexdigest()}
+    assert dataset["mapping_plan_sha256"] == canonical_sha256(store.load_meta(project, rid).mapping_plan)
+    assert dataset["mapping_plan_sha256"] == canonical_sha256(plan)
