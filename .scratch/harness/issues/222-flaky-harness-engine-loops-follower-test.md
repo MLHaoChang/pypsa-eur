@@ -3,7 +3,7 @@
 
 # Flaky `test_harness_engine_loops` follower test
 
-Status: ready-for-agent
+Status: done
 Type: bug (test)
 Found by: Seen in CI; owner list DOCS-1.
 
