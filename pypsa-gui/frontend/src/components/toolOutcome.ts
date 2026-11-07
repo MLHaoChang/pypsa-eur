@@ -179,7 +179,7 @@ interface OutcomeMessage {
 export interface CurrentToolOutcome {
   mark: ToolOutcomeMark; ts: number; why: string | null
   /** "3 of 5" and its verb for a partly done write; null otherwise. */
-  count?: { text: string; verb: string } | null
+  count?: { text: string; verb: string; rest: number } | null
 }
 
 /**
@@ -212,7 +212,8 @@ export function currentToolOutcome(
   const why = (own.tool_name ? extraEditsWords(own.tool_name, current) : null)
     ?? toolOutcomeReasonWord(current.outcome, current.reason, own.tool_name)
   return { mark: toolOutcomeMark(current.outcome), ts, why,
-    count: n && own.tool_name ? { text: n, verb: WRITE_VERBS[own.tool_name] } : null }
+    count: n && own.tool_name && current.counts
+      ? { text: n, verb: WRITE_VERBS[own.tool_name], rest: current.counts.requested - current.counts.done } : null }
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']

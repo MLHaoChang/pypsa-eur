@@ -234,6 +234,27 @@ Personal read-only rules remain authoritative even for a field marked editable;
 the strict checked pilot continues to refuse this unmapped tool. Non-component
 service/domain schemas and exact target resolution remain LC-01 follow-ups.
 
+## Site 3D scene tools (SC-07)
+
+`site_scene_read`, `site_scene_prepare`, `site_scene_apply` and `site_scene_cancel`
+(`services/site_scene/chat.py`) run the functions the scene routes run, on the
+caller's foreground project, re-authorized on every call. A `site_id` is only a
+key: an unknown, deleted or foreign one is the route's `not_found`.
+- **Read** is capped in items and bytes, names every cut (`truncated`) and gap
+  (`unavailable`), lists its user-authored fields (`data_fields`) and returns
+  no coordinates, footprints or meshes.
+- **Prepare** is read-tier with no card, but checks the edit lock and the saved
+  chat rule. A caller holds at most `MAX_LIVE_PER_OWNER` open previews, and a
+  chat preview never evicts another one (`proposals._admit_owned`); the route
+  keeps its evicting behaviour.
+- **Apply** needs `proposal_id`, `input_hash` and `expected_revision`, and its
+  card (`edit_card_site.py`) binds them with the owner, project and Site.
+- **Cancel** reaches only the caller's own preview and carries no card
+  (`GUIDED_UNCARDED`).
+- **Per-turn block.** The browser's `ui_context.site_scene` hint only names the
+  Site. The `[site 3d]` lines in the per-turn block (`compose._format_ui_context`,
+  D11's frozen block) come from a server re-read.
+
 ## Edit cards (LC-04)
 
 Owner decision Q3: every chat edit shows an old → new card before it applies,

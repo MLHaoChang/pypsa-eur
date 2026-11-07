@@ -2701,6 +2701,12 @@ def validate_for_run(n, solver_config) -> list[Issue]:
 
     issues += [Issue(severity=sev, code=code, component_class="", name=name, message=msg)
                for sev, code, name, msg in _fixed_sizes.issues(n, solver_config)]
+    # Operational run (DC 07): rolling on fixed sizes refuses the
+    # horizon-coupled rows no other guard refuses under rolling.
+    from services.solver import operational as _operational
+
+    issues += [Issue(severity=sev, code=code, component_class="", name=name, message=msg)
+               for sev, code, name, msg in _operational.issues(n, solver_config)]
 
     mode = solver_config.mode
     if mode == "pf":

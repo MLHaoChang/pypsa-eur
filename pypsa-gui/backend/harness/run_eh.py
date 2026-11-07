@@ -53,6 +53,11 @@ GOAL_FIELDS = ("site_archetype", "target_lole_h", "ens_cap_permyriad", "mc_draws
 POLL_SECONDS = 0.5
 MAX_FOLLOW_SECONDS = 24 * 3600
 _WAKE = threading.Event()  # never set in production; a poll interval (tests set it)
+# Issue 07 B3a (GK B (32) L5): ticket -> this process's live follower. The
+# "no live follower" check and the registration happen under one lock, so a
+# tick and a takeover racing on one step start at most one follower.
+_FOLLOWERS: dict = {}
+_FOLLOW_LOCK = threading.Lock()
 
 
 class FreezeError(ValueError):
@@ -379,18 +384,40 @@ def wait(ticket, job_id, session_id, ctx, begun):
             or step["status"] != "waiting"
         ):
             return False
-        step["job"].update(kind=STUDY, started_at=begun, call_id=ticket[2])
+        step["job"].update(
+            kind=STUDY,
+            started_at=begun,
+            call_id=ticket[2],
+            deadline_at=time.time() + MAX_FOLLOW_SECONDS,
+        )
 
     from harness import runner
 
     runner._update(path, mark)
-    threading.Thread(
+    with _FOLLOW_LOCK:
+        _start_follower(path, ticket, job_id, ctx, begun)
+    return True
+
+
+def _start_follower(path, ticket, job_id, ctx, begun):
+    """Start and register the step's follower (the caller holds `_FOLLOW_LOCK`)."""
+    for key in [k for k, t in _FOLLOWERS.items() if not t.is_alive()]:
+        _FOLLOWERS.pop(key, None)
+    thread = threading.Thread(
         target=_follow,
         args=(path, ticket, job_id, ctx, begun),
         name=f"run-eh-{job_id[-8:]}",
         daemon=True,
-    ).start()
-    return True
+    )
+    _FOLLOWERS[tuple(ticket)] = thread
+    thread.start()
+    return thread
+
+
+def following(ticket) -> bool:
+    """Whether this process has a live follower for the EH step `ticket`."""
+    thread = _FOLLOWERS.get(tuple(ticket))
+    return thread is not None and thread.is_alive()
 
 
 def _follow(path, ticket, job_id, ctx, begun):
@@ -479,3 +506,136 @@ def finite_number(value):
         or not math.isfinite(value)
         else float(value)
     )
+
+
+# ── Issue 07 B3a: reconcile and recovery (GK B (32) L4-L6) ───────────────────
+
+
+def _resident(project_id, ctx_id):
+    """The resident context the study's activity binding names, when it is
+    still the run project's; None otherwise (never hydrated: a fresh
+    context holds no study record)."""
+    from services.pypsa_service import PyPSAService
+
+    for key in PyPSAService.list_ids():
+        ctx = PyPSAService.get_context(key)
+        if (
+            ctx is not None
+            and id(ctx) == ctx_id
+            and str(getattr(ctx, "project_uuid", "")) == project_id
+        ):
+            return ctx
+    return None
+
+
+def evidence(path, task, step):
+    """(found, result) for reconciling an uncertain or failed EH step
+    (`assistant_tasks._native_evidence`): only the step's own study, matched
+    on the run's project, its context, its job id and its `started_at`
+    (L4, F3), and only an outcome that completes it (F2). Its reservation
+    settles to what the study charged, once (`settle_engine_solves`): a
+    second reconcile or a late settle releases nothing more. A study lost
+    with a restart has no record: no evidence, retry only."""
+    from harness import job_adapters
+
+    job = step.get("job") or {}
+    job_id, begun = job.get("job_id"), job.get("started_at")
+    handle = job_adapters._STUDIES.get(job_id) if isinstance(job_id, str) else None
+    binding = (
+        job_adapters._ACTIVITY_BINDINGS.get(job_id) if handle is not None else None
+    )
+    if (
+        begun is None
+        or handle is None
+        or handle.study_key != STUDY
+        or str(handle.project_uuid) != task["project_id"]
+        or binding is None
+        or binding[1] != STUDY
+        or binding[3] != begun
+    ):
+        return False, None
+    ctx = _resident(task["project_id"], binding[0])
+    if ctx is None:
+        return False, None
+    record = _record(ctx)
+    if outcome(record, begun)[1] != "completed":
+        return False, None
+    spent = charged(record)
+    release(path, step.get("attempt_id"), spent, task=task)
+    return True, {
+        "job_id": job_id,
+        "final_status": "completed",
+        "study": STUDY,
+        "started_at": begun,
+        "solves": spent,
+    }
+
+
+TIMED_OUT = "The study passed its follow deadline; its outcome cannot be verified."
+
+
+def recover(path, ctx, *, instance, now=None, lapsed_ok=False):
+    """Each tick, on a takeover and at boot (`lapsed_ok`, ctx None): each
+    waiting EH step with no live follower in this process is settled
+    uncertain past its `deadline_at` (L6: a step stored without one never
+    times out), else followed again while its own record still runs on
+    `ctx`, else settled from its own record (`settle`): a missing record
+    is uncertain, the whole reservation kept (F4). The study is never
+    started again. Only by the run's lease holder, or on a lapsed lease at
+    boot. Returns the steps it settled."""
+    from harness import runner
+    from services import assistant_tasks
+
+    now = time.time() if now is None else now
+    task = runner._read(path) or {}
+    lease = (task.get("run") or {}).get("runner") or {}
+    if lease.get("lease_owner") != instance and not (
+        lapsed_ok and lease.get("lease_until", 0) <= now
+    ):
+        return 0
+    mine = ctx is not None and str(getattr(ctx, "project_uuid", "")) == task.get(
+        "project_id"
+    )
+    swept = 0
+    for step in task.get("steps", []):
+        job = step.get("job") or {}
+        if step.get("status") != "waiting" or job.get("kind") != STUDY:
+            continue
+        ticket = (task["task_id"], step["id"], step.get("attempt_id"))
+        job_id, begun = job.get("job_id"), job.get("started_at")
+        record = None
+        with _FOLLOW_LOCK:  # L5: the check and the registration under one lock
+            if following(ticket):
+                continue
+            deadline = finite_number(job.get("deadline_at"))
+            late = deadline is not None and now >= deadline
+            if not late:
+                record = _record(ctx) if mine else None
+                if (
+                    begun is not None
+                    and record is not None
+                    and record.get("started_at") == begun
+                    and record.get("status") == "running"
+                    and _alive(record)
+                ):
+                    _start_follower(path, ticket, job_id, ctx, begun)
+                    continue
+        if late:
+            release(path, ticket[2], None)  # unverifiable: the whole reservation
+            if (
+                assistant_tasks.settle_job(
+                    path, ticket, job_id, "timed_out", "uncertain"
+                )
+                is not None
+            ):
+                runner._update(
+                    path,
+                    lambda t, sid=step["id"]: next(
+                        s for s in t["steps"] if s["id"] == sid
+                    ).update(error=TIMED_OUT),
+                )
+                swept += 1
+            continue
+        if settle(path, ticket, job_id, record, begun) is not None:
+            swept += 1
+    return swept

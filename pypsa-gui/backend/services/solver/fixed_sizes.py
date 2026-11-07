@@ -27,8 +27,10 @@ The size comes from one of two sources:
   is 0 (``fixed_sizes_nameplate_empty``); a zero candidate is named
   (``fixed_sizes_zero_nameplate``).
 
-Incompatible with the myopic and rolling strategies, which freeze capacity
-themselves, and with the power-flow mode. N-1 (SCLOPF) and multi-period full
+Incompatible with the myopic strategy, which freezes capacity per period
+itself, and with the power-flow mode. With the rolling strategy it is the
+operational run (DC 07, `services/solver/operational.py`), which checks its own
+refusals. N-1 (SCLOPF) and multi-period full
 runs are supported (``tests/test_fixed_sizes.py``).
 """
 from __future__ import annotations
@@ -144,10 +146,6 @@ def issues(n, cfg) -> list[tuple[str, str, str, str]]:
         out.append(("error", "fixed_sizes_with_myopic", "",
                     "Sizing off cannot run with the myopic strategy, which freezes "
                     "capacity per period itself."))
-    if strategy == "rolling":
-        out.append(("error", "fixed_sizes_with_rolling", "",
-                    "Sizing off cannot run with the rolling strategy, which decouples "
-                    "windows and freezes capacity itself."))
     if mode == "capacity_run":
         problem = source_problem(n)
         if problem is not None:

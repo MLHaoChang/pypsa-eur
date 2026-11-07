@@ -352,6 +352,16 @@ def _format_ui_context(ui_context: dict[str, Any] | None) -> str | None:
         if klass and name:
             lines.append(f"  selected component: {klass} '{name}'")
 
+    # SC-07 S1 (D11, GK B G5): the open Site, re-read on the server. The
+    # browser's `site_scene` hint only names the Site; every value below comes
+    # from the owned scene and /flow verdicts, inside this same untrusted fence.
+    if isinstance(ui_context.get("site_scene"), dict):
+        from services.site_scene import chat as site_scene_chat
+
+        scene_block = site_scene_chat.context_block(ui_context["site_scene"])
+        for line in (scene_block or "").split("\n")[1:]:
+            add("site 3d", line.lstrip("- "))
+
     # Guided only (§6.2). An Expert context — `ui_mode: 'expert'` or no key —
     # adds nothing here, so its block is byte-identical to before P25.
     mode = ui_context.get("ui_mode")

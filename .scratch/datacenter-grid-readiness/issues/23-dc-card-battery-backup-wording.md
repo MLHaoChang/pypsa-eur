@@ -3,7 +3,7 @@
 
 # DC Backup card: "battery backup" wording
 
-Status: needs-triage
+Status: ready-for-agent
 Type: wording
 Found by: Logged reviewing the DC cards (DC-05/DC-06); owner list DOCS-1.
 
@@ -14,3 +14,14 @@ The card says "battery backup" where the model's term is the backup fleet. Align
 ## Where to look
 
 `pypsa-gui/frontend/src/pages/DcBackupSection.tsx` (and `DcBackupSection.test.tsx`); `.scratch/project-workflow/design.md` also uses the phrase.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `pypsa-gui/frontend/src/pages/DcBackupSection.tsx` and `.test.tsx`; `.scratch/project-workflow/design.md`.
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: UX (12); GK A not needed (wording only).
+- Size: S.
+- Use the backup fleet term from the panel's word map.

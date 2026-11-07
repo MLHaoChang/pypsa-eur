@@ -585,6 +585,13 @@ def _network_input_fingerprint(ctx, *, exact=False):
             floors, strings = _rp.derive_backup(n, getattr(ctx, "storage_dir", None))
             parts.append(json.dumps({"inputs": _rp.inputs_digest(products, floors),
                                      "strings": sorted(strings)}, sort_keys=True))
+    # DC 07: an operational run keys on the capacity run's recorded sizes, so a
+    # new plan makes it stale (C7). Appended only for an operational run.
+    from services.solver import operational as _op
+    digest = _op.sizes_digest(n, ctx.solver_state["solver_config"])
+    if digest is not None:
+        parts.append("operational-sizes/1")
+        parts.append(digest)
     parts.extend(str(key) + (encode(series.to_frame()) if exact else series.to_json(date_format="iso"))
                  for key, series in sorted(ctx.user_ts.items()))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()

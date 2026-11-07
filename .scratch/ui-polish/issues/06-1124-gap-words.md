@@ -3,7 +3,7 @@
 
 # #1124: `GAP_WORDS` covers one gap only
 
-Status: needs-triage
+Status: done
 Type: wording
 Found by: UX (9) review items (#1124); owner list DOCS-1.
 
@@ -14,3 +14,14 @@ Only `import_tariff` has a word; any other gap falls back to the generic text. E
 ## Where to look
 
 `pypsa-gui/frontend/src/components/runMonitor/RunMonitor.tsx` line ~108 (`GAP_WORDS` = `{ import_tariff: 'Import tariff' }`), `gapWords` (~110) and the row text (~143).
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `components/runMonitor/RunMonitor.tsx` (`GAP_WORDS`, ~108), backend gap list.
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: UX (12).
+- Size: S.
+- Parity test against the backend gap list.

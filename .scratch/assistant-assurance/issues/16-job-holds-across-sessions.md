@@ -3,7 +3,7 @@
 
 # Job holds across sessions, tabs, replicas and restarts
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Found by: AA-04 S5 (`04-action-and-job-outcomes.md`); GK B (30) N1.
 
@@ -26,3 +26,14 @@ job id when known, opened at), written when the hold opens and cleared on the
 same evidence, which P2 reads when the session has no hold; or, per tool, an
 existing store row that identifies the operation. Test the new-session case
 for each tool family.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `harness/job_holds.py`, solve-queue store, study/sweep/report/profile-generation job tools.
+- Blocked by: none.
+- Model tier: opus.
+- Gated: GK B; plan to GK B first.
+- Size: L.
+- Needs a cross-process record keyed by project and arguments (#1070); L: the builder proposes a split.

@@ -8,11 +8,22 @@ import { useEffect, useState } from 'react'
 import { getRun, type Envelope, type RunMonitorView } from '../../api/runMonitor'
 import { UNATTENDED_BLOCK_WORDS, editLimits, editSubject, runWords } from './runWords'
 import { fmtCurrency } from '../../utils/format'
+import { useUIStore } from '../../store/uiStore'
 
 export type EnvelopeVerdict =
   | { verdict: 'unattended'; envelope: Record<string, unknown>; notify_email: boolean }
   | { verdict: 'stepwise' }
   | { verdict: 'change' }
+
+// SH-26 (UX): what a plan-state tariff gap says about the Library tariffs held now, as the outcome of approving.
+const HELD_WORDS: Record<string, string> = {
+  none: 'No Library tariff is held, so approving leaves it empty.',
+  unreadable: 'Library tariffs could not be read now: they are read again when you approve.',
+  unnamed: 'A Library tariff without an id is held, so approving fills none.',
+}
+const heldOutcome = (n: number) => n === 1
+  ? 'Approving fills it with this one if it is still the only one.'
+  : `${n} are held now, so approving fills none: keep one in the Library to fill it.`
 
 const VERDICT = 'w-full text-left px-2.5 py-1.5 text-[12px] rounded border transition-colors disabled:opacity-50'
 
@@ -39,6 +50,7 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
   disabled: boolean
   onVerdict: (v: EnvelopeVerdict) => void
 }) {
+  const expert = useUIStore(s => s.uiMode === 'expert')
   const [view, setView] = useState<RunMonitorView | null>(null)
   useEffect(() => {
     let live = true
@@ -87,6 +99,22 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
         </label>
       </li>)}
     </ul>
+    {envelope.gaps?.filter(g => g.source.kind === 'library_tariff' && g.held_state).map((g, i) =>
+      <div key={`g${i}`} data-testid="envelope-held" className="my-1">
+        <div>Fills {g.target.name} tariff from the Library, only where none is set.</div>
+        {g.held_state === 'held' && g.held
+          ? <>
+            <div className="text-muted">Held now (read again when you approve):</div>
+            <ul aria-label="Library tariffs held now" className="space-y-0.5">
+              {g.held.map(t => <li key={t.hash} data-testid="envelope-held-tariff">
+                {t.name}{t.version != null && ` v${t.version}`}
+                {expert && <> · <span className="font-mono">{t.hash.slice(0, 8)}</span></>}
+              </li>)}
+            </ul>
+            <div className="text-muted" data-testid="envelope-held-note">{heldOutcome(g.held.length)}</div>
+          </>
+          : <div className="text-muted" data-testid="envelope-held-note">{HELD_WORDS[g.held_state!]}</div>}
+      </div>)}
     {/* Two short rows, so a wrap never leaves a "·" at a line's end. */}
     <div className="space-y-1" data-testid="envelope-budgets">
       <div className="flex flex-wrap items-center gap-x-2" data-testid="envelope-budget-row">
