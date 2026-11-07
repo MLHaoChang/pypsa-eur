@@ -366,7 +366,9 @@ def test_a_human_job_is_the_same_with_and_without_a_declaration(
 
 def test_the_human_route_stores_its_declaration(project, client, monkeypatch):
     rid, _sections = _human(client, monkeypatch, {"summaries": DECLARED})
-    stored = {s.section_id: s.summarises for s in store.load_report(project, rid).sections}
+    stored = {
+        s.section_id: s.summarises for s in store.load_report(project, rid).sections
+    }
     assert stored.pop(EXECUTIVE_SUMMARY_ID) == ["fmea_top"]
     assert set(stored.values()) == {None}
 
