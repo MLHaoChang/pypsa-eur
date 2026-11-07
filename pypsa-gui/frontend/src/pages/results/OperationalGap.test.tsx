@@ -90,13 +90,14 @@ describe('Plan vs operation card', () => {
     expect(storage).toContain('−23.1 %')
     // A zero reference has no gap %: "—", never a division.
     expect(text(screen.getByTestId('operational-gap-row-storage_end_mwh'))).toContain('—')
-    expect(text(screen.getByTestId('operational-gap-sign'))).toMatch(/positive means operation costs more/)
+    expect(text(screen.getByTestId('operational-gap-sign'))).toBe('Gap: operation minus full horizon. Positive means operation costs more.')
     // The claim limit and the opex basis are the route's own text, never hard-coded here.
     expect(text(screen.getByTestId('operational-gap-claim'))).toBe('claim limit from the route')
     expect(text(screen.getByTestId('operational-gap-source'))).toContain('opex basis from the route.')
     // A zero full-horizon value: gap % "—" with its why, no side reason, never 0.
     expect(text(screen.getByTestId('operational-gap-pct-storage_end_mwh'))).toBe('—')
-    expect(screen.getByTestId('operational-gap-pct-storage_end_mwh').title).toBe(PCT_ZERO_REFERENCE)
+    expect(text(screen.getByTestId('operational-gap-pct-why-storage_end_mwh'))).toBe(PCT_ZERO_REFERENCE)
+    expect(screen.queryByTestId('operational-gap-pct-why-opex_eur')).toBeNull()
     expect(screen.queryByTestId('operational-gap-reason-storage_end_mwh')).toBeNull()
     expect(card.dataset.flag).toBe('fresh')
   })

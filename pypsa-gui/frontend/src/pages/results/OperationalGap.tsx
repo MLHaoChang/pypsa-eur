@@ -9,7 +9,6 @@
 // The card's words come from OP_GAP_WORDS; the route's engine definitions
 // sit only under "Source" (UX: engine identifiers only in a Source column).
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight } from 'lucide-react'
 import {
   operationalGapApi, type OperationalGapPayload, type OperationalGapRow,
 } from '../../api/operationalGap'
@@ -75,7 +74,7 @@ export const REFERENCE_CONDITION_WORDS: Record<string, string> = {
 }
 const REFERENCE_DEFAULT_WORDS = 'did not solve'
 
-export const SIGN_WORDS = 'Gap: operation minus full horizon; positive means operation costs more.'
+export const SIGN_WORDS = 'Gap: operation minus full horizon. Positive means operation costs more.'
 const BACK_LABEL = 'Results summary'
 
 const MINUS = '−'
@@ -114,7 +113,7 @@ export function failedWindowWords(w: OperationalGapPayload['windows']): string {
 }
 
 /** Gap % with no value although both sides have one: the full horizon is 0. */
-export const PCT_ZERO_REFERENCE = 'No gap %: the full horizon is 0.'
+export const PCT_ZERO_REFERENCE = 'No percentage: the full horizon is 0.'
 
 /** Why a side reads "—", in the card's words. */
 function reasonWords(key: string, reason: string | undefined): string {
@@ -172,7 +171,7 @@ export function OperationalGapCard({ payload }: { payload: OperationalGapPayload
           <button type="button" data-testid="operational-gap-open-strategy"
             onClick={() => openSolveStrategy(BACK_LABEL)}
             className="inline-flex items-center gap-1 text-[11px] text-accent hover:underline">
-            Solver settings <ArrowRight size={10} />
+            Solver settings ›
           </button>
         </div>
       ) : payload.flag === 'reference_not_solved' ? (
@@ -228,12 +227,14 @@ function GapTable({ metrics }: { metrics: Record<string, OperationalGapRow> }) {
                   {reason && (
                     <span className="block text-[10px] text-warn" data-testid={`operational-gap-reason-${k}`}>{reason}</span>
                   )}
+                  {!reason && row.gap_pct == null && row.gap != null && (
+                    <span className="block text-[10px] text-muted" data-testid={`operational-gap-pct-why-${k}`}>{PCT_ZERO_REFERENCE}</span>
+                  )}
                 </td>
                 <td className="py-0.5 text-right font-mono tabular-nums">{valueText(row.operational, words.unit)}</td>
                 <td className="py-0.5 text-right font-mono tabular-nums">{valueText(row.reference, words.unit)}</td>
                 <td className="py-0.5 text-right font-mono tabular-nums">{gapText(row.gap, words.unit)}</td>
                 <td className="py-0.5 text-right font-mono tabular-nums"
-                  title={row.gap_pct == null && row.gap != null ? PCT_ZERO_REFERENCE : undefined}
                   data-testid={`operational-gap-pct-${k}`}>{pctText(row.gap_pct)}</td>
               </tr>
             )

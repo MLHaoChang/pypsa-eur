@@ -114,7 +114,8 @@ try {
       const card = page.getByTestId('summary-operational-gap')
       try {
         await card.waitFor()
-        await card.scrollIntoViewIfNeeded()
+        // The card at the top, so the floating chat button never covers the table.
+        await card.evaluate(el => el.scrollIntoView({ block: 'start' }))
         // Let any startup toast clear, so it does not cover the card.
         await page.getByText('Refusing to overwrite').waitFor({ state: 'detached', timeout: 20000 }).catch(() => {})
         await page.waitForTimeout(300)
