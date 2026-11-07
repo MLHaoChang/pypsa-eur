@@ -230,3 +230,69 @@ def test_an_unloaded_project_reads_as_not_rechecked(solved, monkeypatch):
         root, meta, data, chart["manifest"]["project_id"]
     )
     assert checked["scope_status"] == "solve_not_rechecked"
+
+
+# A well-formed stamp of another solve is caught only against the loaded solve.
+@pytest.mark.parametrize("fault", sorted(set(RESULT_TAMPER) - {"stamp_other_solve"}))
+def test_a_tampered_result_stamp_is_refused_while_the_project_is_unloaded(
+    solved, client, monkeypatch, fault
+):
+    # Without a loaded solve to compare, the stamp's own shape check must refuse.
+    chart = chat_tools.create_chart("Generator", "p", ["G1"], source="result")
+    reseal((solved, None, chat_tools_root()), chart, RESULT_TAMPER[fault])
+    monkeypatch.setattr(assurance_artifacts, "_resident", lambda project_id: None)
+    assert client.get(chart["download_url"]).status_code == 409
+
+
+class _Network:
+    meta = None
+
+
+def test_a_network_without_meta_has_no_solve_stamp():
+    assert assurance_artifacts.solve_stamp(_Network()) is None
+
+
+class _Ctx:
+    def __init__(self, project_uuid):
+        self.project_uuid = project_uuid
+
+
+@pytest.fixture
+def registry(monkeypatch):
+    from services.pypsa_service import PyPSAService
+
+    state = {"contexts": {}, "request": None, "active": _Ctx("other")}
+    monkeypatch.setattr(
+        PyPSAService, "list_ids", classmethod(lambda cls: list(state["contexts"]))
+    )
+    monkeypatch.setattr(
+        PyPSAService,
+        "get_context",
+        classmethod(lambda cls, key: state["contexts"].get(key)),
+    )
+    monkeypatch.setattr(
+        PyPSAService, "get_request_context", classmethod(lambda cls: state["request"])
+    )
+    monkeypatch.setattr(
+        PyPSAService, "get_active_context", classmethod(lambda cls: state["active"])
+    )
+    return state
+
+
+def test_the_loaded_project_is_found_by_its_registry_key(registry):
+    mine, theirs = _Ctx("p1"), _Ctx("p2")
+    registry["contexts"].update({"org:p2": theirs, "org:p1": mine})
+    assert assurance_artifacts._resident("p1") is mine
+    assert assurance_artifacts._resident("p3") is None
+
+
+def test_the_request_context_is_preferred_over_the_active_one(registry):
+    registry["request"] = request = _Ctx("p1")
+    registry["active"] = _Ctx("p1")
+    assert assurance_artifacts._resident("p1") is request
+
+
+def test_the_active_context_counts_only_for_its_own_project(registry):
+    registry["active"] = active = _Ctx("p1")
+    assert assurance_artifacts._resident("p1") is active
+    assert assurance_artifacts._resident("p2") is None
