@@ -354,9 +354,9 @@ export default function TariffBuilder({ initial, onSaved }: {
         <label>{FIELD_WORDS.jurisdiction.text} <input aria-label={FIELD_WORDS.jurisdiction.aria} className={`${input} w-14`}
                                    value={t.jurisdiction}
                                    onChange={e => { clearCurrencyError(); setT({ ...t, jurisdiction: e.target.value }) }} /></label>
-        <label>{FIELD_WORDS.currency.text} <input aria-label={FIELD_WORDS.currency.aria} className={`${input} w-14 uppercase`}
+        <label>{FIELD_WORDS.currency.text} <input aria-label={FIELD_WORDS.currency.aria} className={`${input} w-14 uppercase aria-[invalid=true]:border-danger`}
                                maxLength={3} value={t.currency ?? ''} placeholder={implied ?? 'ISO'}
-                               aria-invalid={!!errors.currency || undefined} aria-describedby="tb-currency-help"
+                               aria-invalid={errors.currency ? true : undefined} aria-describedby="tb-currency-help"
                                onChange={e => { clearCurrencyError()
                                  setT({ ...t, currency: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') }) }} /></label>
         <span id="tb-currency-help" className="sr-only">{implied
