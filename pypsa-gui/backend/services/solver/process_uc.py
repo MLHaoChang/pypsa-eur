@@ -42,6 +42,7 @@ from concurrent.futures import ProcessPoolExecutor, wait
 import numpy as np
 import pandas as pd
 
+from gridspine.drivers.process_chain import truthy
 from models.process_unit import product_role_generators
 
 #: Snapshots per period the binary check solves: one representative week at 1 h.
@@ -67,13 +68,7 @@ def flag_column(df: pd.DataFrame, col: str) -> pd.Series:
     for a string that does not read as true: ``"False"``, ``"0"``, ``""``)."""
     if df.empty or col not in df.columns:
         return pd.Series(False, index=df.index)
-    return df[col].map(_truthy).astype(bool)
-
-
-def _truthy(v) -> bool:
-    if isinstance(v, str):
-        return v.strip().lower() in ("true", "1", "1.0", "yes")
-    return False if pd.isna(v) else bool(v)
+    return df[col].map(truthy).astype(bool)
 
 
 def committable_mask(df: pd.DataFrame) -> pd.Series:

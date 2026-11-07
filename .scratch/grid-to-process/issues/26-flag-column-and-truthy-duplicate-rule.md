@@ -3,7 +3,7 @@
 
 # `process_uc.flag_column` and `process_chain._truthy` are two copies of the string-flag rule
 
-Status: ready-for-agent
+Status: done
 Type: task
 Found by: G2P-19 (#1189, merged), relayed by the coordinator; owner list DOCS-1.
 

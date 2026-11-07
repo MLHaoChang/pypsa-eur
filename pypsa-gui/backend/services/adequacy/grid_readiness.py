@@ -1064,6 +1064,15 @@ def _truthy(v) -> bool:
     return v is True or str(v).lower() in ("true", "1")
 
 
+def _process_units(links) -> list[str]:
+    """The Links flagged ``eh_process``, by the one flag rule (``process_chain.truthy``)."""
+    from gridspine.drivers.process_chain import truthy
+
+    if links is None or "eh_process" not in links.columns:
+        return []
+    return [u for u in links.index if truthy(links.at[u, "eh_process"])]
+
+
 def _q_gfm_mvar(inp: _Inputs) -> tuple[float | None, str | None]:
     """The reactive power the grid-forming storage at the PoC can give, Mvar: Σ rating · tan(acos pf_rated) over
     the island's battery units offering grid forming, as the reactive-range row counts it; None when the project
@@ -1111,8 +1120,7 @@ def _motor_start_rows(inp: _Inputs) -> list[dict]:
     lim = (inp.profile or {}).get("rvc_limit_pct")
     lim_assumed = limit is None or lim.get("source") != "code"
     links = inp.n.links if inp.n is not None else None
-    process = ([] if links is None or "eh_process" not in links.columns
-               else [u for u in links.index if _truthy(links.at[u, "eh_process"])])
+    process = _process_units(links)
     if not process:
         return [_row("motor_start", req, rule=RULE_MOTOR_START, limit=limit, unit="% of nominal", source=source,
                      project_value=None, verdict="unknown", assumed=True,
