@@ -198,8 +198,11 @@ class _Prices:
         for pt, prod in parts:
             if not pt:
                 continue  # a row with no tonnes costs nothing, whatever its product
-            if not prod or prod not in self.by_product:
-                return None, SEVERAL_PRODUCTS  # a run from before the product column, or a product not short
+            if prod not in self.by_product:  # "" too
+                return (
+                    None,
+                    SEVERAL_PRODUCTS,
+                )  # a run from before the product column, or a product not short
             if self.by_product[prod] is None:
                 return None, LPV_MISSING
             eur += pt * self.by_product[prod]
@@ -216,7 +219,9 @@ def _product_value(n, lost_load) -> _Prices:
             tpu = PP.t_per_unit(n, s.bus)
             by_product[s.bus] = None if s.value is None or not tpu else s.value / tpu
     if len(by_product) != 1:
-        return _Prices(None, SEVERAL_PRODUCTS if by_product else LPV_MISSING, by_product)
+        return _Prices(
+            None, SEVERAL_PRODUCTS if by_product else LPV_MISSING, by_product
+        )
     per_t = next(iter(by_product.values()))
     return _Prices(per_t, None if per_t is not None else LPV_MISSING, by_product)
 
