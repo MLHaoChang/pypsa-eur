@@ -78,9 +78,11 @@ def test_the_network_matches_the_spec():
     n = T.BUILDERS[TID]()
     assert len(n.snapshots) == 8760 and n.snapshots[0] == pd.Timestamp("2030-01-01")
     assert n.links.at["grid_export", "p_nom"] == 70.0 and n.links.at["grid_import", "p_nom"] == 20.0
-    for g, mw in (("wind_farm", 60.0), ("pv_plant", 50.0)):
+    for g, mw in (("wind_farm", 60.0), ("pv_plant", 50.0 / 1.2)):  # TCU06-AC-1: p_nom is the AC rating
         assert n.generators.at[g, "p_nom_extendable"]
-        assert n.generators.at[g, "p_nom_min"] == n.generators.at[g, "p_nom_max"] == mw
+        assert n.generators.at[g, "p_nom_min"] == n.generators.at[g, "p_nom_max"] == pytest.approx(mw)
+        if g == "pv_plant":
+            assert n.generators.at[g, "dc_ac_ratio"] == 1.2
         assert n.generators.at[g, "overnight_cost"] > 0
     assert n.storage_units.at["bess", "p_nom_max"] == 50.0
     assert n.storage_units.at["bess", "max_hours"] == 2.0

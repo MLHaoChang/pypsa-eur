@@ -1,6 +1,6 @@
 # The IPP template's PV `p_nom` is a DC (MWp) figure
 
-Status: ready-for-agent
+Status: done
 Type: gap
 Found in: TC-02 (issue 02, PR #1190), 2026-11-06.
 
