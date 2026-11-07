@@ -3722,13 +3722,15 @@ def validate_network() -> list[dict]:
     from routers.simulation import preflight as _h
     from services.assurance_artifacts import exact_or_none, import_status, record_validation
 
-    # H10 (AA-05 S3): the exact inputs are read once, before the check, so an
-    # edit during it can never be recorded as validated (R3).
+    # H10 (AA-05 S3): the exact inputs are read before and after the check, and
+    # a pass counts only when the two reads agree, so an edit during it can
+    # never be recorded as validated (R3, GK B T2).
     ctx = PyPSAService.get_active_context()
-    exact = exact_or_none(ctx)
+    before = exact_or_none(ctx)
     result = _h()
     if not isinstance(result, dict) or "ok" not in result:
         return result  # deferred while a solve is live
+    exact = before if before is not None and exact_or_none(ctx) == before else None
     # A pass is recorded in the app-data store; the network is never touched (R1, R2).
     if result["ok"] and not result.get("errors") and exact is not None:
         record_validation(ctx, exact)
@@ -5716,20 +5718,9 @@ def import_matpower(bytes_b64: str, filename: str = "case.m") -> dict:
     return _import_raw(_h, upload)
 
 
-def _save_agent_export(data: bytes, filename: str, mime: str, *, assurance_sha256: str | None = None) -> dict:
-    """
-    Persist agent-generated export bytes as an `agent_export` upload artifact and
-    return lightweight metadata. The frontend's chat file strip renders
-    agent_export uploads as downloadable chips.
-
-    Why not return the bytes inline: a chat-tool result must be JSON-serializable
-    AND fits in the model's context — base64 of a multi-MB netcdf/zip would flood
-    the context window (and was the bug: the wrappers used to return a Starlette
-    StreamingResponse, which json.dumps stringified to "<StreamingResponse ...>").
-    Requires a loaded project (the artifact lives in that project's uploads dir);
-    the HTTP export routes still stream to the browser without one.
-    """
-    from urllib.parse import quote
+def _export_preflight(data: bytes) -> str:
+    """The write-edge checks every export passes before anything is written;
+    returns the loaded project's name."""
     from services import upload_service
     from services.pypsa_service import PyPSAService
     name = PyPSAService.get_loaded_project()
@@ -5748,6 +5739,60 @@ def _save_agent_export(data: bytes, filename: str, mime: str, *, assurance_sha25
     _check_foreign_lock("export")
     if len(data) > upload_service.MAX_FILE_BYTES:
         raise HTTPException(413, {"error_kind": "file_too_large", "message": "Export exceeds 25 MB."})
+    return name
+
+
+def _publish_sealed_export(root, record: dict, data: bytes, filename: str, mime: str) -> tuple[dict, dict]:
+    """AA-05 S3 (GK B T1): publish an export with its sealed sidecar.
+
+    The write-edge checks run before the sidecar is touched, and the sidecar
+    and the upload's seal are written under the project's upload lock. A
+    sidecar that already seals the live upload of these bytes is kept (first
+    seal wins), so a refused or repeated identical export never breaks an
+    earlier one. Returns the export and the record that seals it."""
+    import hashlib
+
+    from services import assistant_tasks as tasks
+    from services import upload_service
+    from services.assistant_tools import _project
+    from services.assurance_artifacts import canonical_sha256
+
+    _export_preflight(data)
+    project, directory, _owner = _project()
+    file_id = hashlib.sha256(data).hexdigest()[:16]
+    path = root / "assistant_artifacts" / (file_id + ".json")
+    with upload_service._project_upload_lock(project.name):
+        try:
+            kept = json.loads(path.read_text(encoding="utf-8"))
+            live = upload_service.get_upload_meta(project.name, file_id, project_dir=directory)
+            if live.assurance_sha256 != canonical_sha256(kept):
+                kept = None
+        except Exception:  # noqa: BLE001 -- no live sealed export of these bytes yet
+            kept = None
+        if kept is None:
+            tasks._save(path, record)
+        sealing = kept if kept is not None else record
+        artifact = _save_agent_export(data, filename, mime, assurance_sha256=canonical_sha256(sealing))
+    return artifact, sealing
+
+
+def _save_agent_export(data: bytes, filename: str, mime: str, *, assurance_sha256: str | None = None) -> dict:
+    """
+    Persist agent-generated export bytes as an `agent_export` upload artifact and
+    return lightweight metadata. The frontend's chat file strip renders
+    agent_export uploads as downloadable chips.
+
+    Why not return the bytes inline: a chat-tool result must be JSON-serializable
+    AND fits in the model's context — base64 of a multi-MB netcdf/zip would flood
+    the context window (and was the bug: the wrappers used to return a Starlette
+    StreamingResponse, which json.dumps stringified to "<StreamingResponse ...>").
+    Requires a loaded project (the artifact lives in that project's uploads dir);
+    the HTTP export routes still stream to the browser without one.
+    """
+    from urllib.parse import quote
+    from services import upload_service
+    from services.pypsa_service import PyPSAService
+    name = _export_preflight(data)
     ctx = PyPSAService.get_active_context()
     if ctx.project_uuid:
         from services.assistant_tools import _project
@@ -7844,7 +7889,6 @@ def _save_table_export(payload, filename, mime, fmt, written):
         return _save_agent_export(payload, filename, mime)  # no project id: byte hash only, as before
     import hashlib
 
-    from services import assistant_tasks as tasks
     from services import workflow_tools as workflow
     from services.assistant_tools import _project
     from services.assurance_artifacts import (
@@ -7884,8 +7928,7 @@ def _save_table_export(payload, filename, mime, fmt, written):
                 "dataset_sha256": canonical_sha256(dataset), "render_spec_sha256": canonical_sha256(render_spec),
                 "artifact_sha256": byte_hash, "validity": validity}
     record = {"filename": filename, "rows": sum(len(rows) for _, rows in written), "manifest": manifest}
-    tasks._save(root / "assistant_artifacts" / (byte_hash[:16] + ".json"), record)
-    return _save_agent_export(payload, filename, mime, assurance_sha256=canonical_sha256(record))
+    return _publish_sealed_export(root, record, payload, filename, mime)[0]
 
 
 def export_preview_png(filename: str, png_bytes_b64: str) -> dict:

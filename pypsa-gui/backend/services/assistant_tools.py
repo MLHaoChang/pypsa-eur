@@ -958,10 +958,10 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
         if not unchanged or str(current_comp.defaults.at[attribute, "unit"]) != unit:
             workflow._refuse("chart_source_changed", "Chart data changed while rendering; retry.", 409)
         _project()  # Fresh owner/project authorization before publishing bytes.
-        tasks._save(chart_root / "assistant_artifacts" / (byte_hash[:16] + ".json"), provenance)
-        artifact = chat_tools._save_agent_export(data, f"{component}_{attribute}.png", "image/png",
-                                                 assurance_sha256=canonical_sha256(provenance))
-    return {**artifact, "provenance": provenance, "manifest": manifest}
+        # GK B T1: checks first, sidecar and seal under one lock, first seal wins.
+        artifact, provenance = chat_tools._publish_sealed_export(
+            chart_root, provenance, data, f"{component}_{attribute}.png", "image/png")
+    return {**artifact, "provenance": provenance, "manifest": provenance["manifest"]}
 
 
 def _one_run(runs):

@@ -515,3 +515,72 @@ def test_an_unreadable_read_before_the_check_never_reads_validated(
     assert status() == "validated"
     monkeypatch.setattr(assurance_artifacts, "exact_or_none", lambda ctx: None)
     assert status() == "input_assertion"
+
+
+def _foreign_lock(monkeypatch):
+    def locked(tool_name, task_id=None):
+        raise HTTPException(409, {"error_kind": "project_locked", "message": "locked"})
+
+    monkeypatch.setattr(chat_tools, "_check_foreign_lock", locked)
+
+
+def test_a_refused_identical_re_export_leaves_the_earlier_export_intact(
+    baseline, client, monkeypatch
+):
+    # GK B T1: the write-edge checks run before the sidecar is touched, so a
+    # refused re-export of the same bytes never breaks the earlier seal.
+    export = chat_tools.export_to_csv([["G1", 1]], ["name", "p"], "first.csv")
+    before = paths(export)[2].read_bytes()
+    _foreign_lock(monkeypatch)
+    error = refused(chat_tools.export_to_csv, [["G1", 1]], ["name", "p"], "second.csv")
+    assert error.status_code == 409
+    assert paths(export)[2].read_bytes() == before
+    assert client.get(export["download_url"]).status_code == 200
+    assert marker(export) is None
+
+
+def test_an_identical_re_export_keeps_the_first_seal(baseline, client):
+    export = chat_tools.export_to_csv([["G1", 1]], ["name", "p"], "first.csv")
+    again = chat_tools.export_to_csv([["G1", 1]], ["name", "p"], "second.csv")
+    assert again["file_id"] == export["file_id"]
+    assert sidecar(again)["filename"] == "first.csv"
+    assert client.get(export["download_url"]).status_code == 200
+    assert marker(export) is None
+
+
+def test_a_refused_identical_redraw_leaves_the_earlier_chart_intact(
+    baseline, client, monkeypatch
+):
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    before = paths(chart)[2].read_bytes()
+    _foreign_lock(monkeypatch)
+    error = refused(chat_tools.create_chart, "Generator", "p_nom", ["G1"])
+    assert error.status_code == 409
+    assert paths(chart)[2].read_bytes() == before
+    assert client.get(chart["download_url"]).status_code == 200
+    assert marker(chart) is None
+
+
+def test_an_input_change_during_validate_records_nothing(baseline, monkeypatch):
+    # GK B T2: the exact inputs are read before and after the check; a pass is
+    # recorded only when the two reads agree.
+    imported()
+    real = assurance_artifacts.exact_or_none
+    reads = []
+
+    def changing(ctx):
+        reads.append(1)
+        return real(ctx) if len(reads) == 1 else "changed during the check"
+
+    monkeypatch.setattr(assurance_artifacts, "exact_or_none", changing)
+    assert status() == "input_assertion" and records() == []
+
+
+def test_a_refused_export_writes_no_sidecar(baseline, monkeypatch):
+    # GK B T1: the lock and size checks run before any sidecar write.
+    folder = chat_tools_root() / "assistant_artifacts"
+    before = sorted(folder.glob("*.json")) if folder.exists() else []
+    _foreign_lock(monkeypatch)
+    error = refused(chat_tools.export_to_csv, [["G9", 9]], ["name", "p"], "new.csv")
+    assert error.status_code == 409
+    assert (sorted(folder.glob("*.json")) if folder.exists() else []) == before
