@@ -1,6 +1,6 @@
 # Chat control of the data-centre backup
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 03
 Size: S
@@ -30,3 +30,7 @@ Decide (owner) between a typed tool for each, or a UI pointer only (as AS19-POIN
 ### 2026-11-07: needs-info answered (coordinator)
 
 Owner (card, DC20-POINTER-1): "Pointer only", as AS19-POINTER-1. Chat points to the Backup section; the two held-by-spec declarations become ui-pointer ones; no typed tools. S, Sonnet, GK B (chat surface) with GK A for DC-03's no-write guarantees. The same answer decides DC 21.
+
+### 2026-11-07: done
+
+Pointer only (DC20-POINTER-1). The held-by-spec declarations are replaced by ui-pointer ones in `claude-dc20-21-pointer.json`; the `dc_backup` row stays in `services/not_via_chat.py` as the pointer chat reads.
