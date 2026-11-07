@@ -3,7 +3,7 @@
 
 # Guided partial count reads "15 of 17 rows"
 
-Status: ready-for-agent
+Status: done
 Type: wording
 Found by: AA-04 (`assistant-assurance/issues/04-action-and-job-outcomes.md`) review; owner list DOCS-1.
 

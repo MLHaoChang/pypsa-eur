@@ -52,6 +52,13 @@ describe('a year reads as a year', () => {
     expect(container.textContent).toBe('Build year2027')
     expect(within(container).queryByText('year')).toBeNull()
   })
+  it('keeps the unit word out of the edit label too', () => {
+    render(<div className="grid grid-cols-2"><AssetFieldsEdit schema={SCHEMA} fs={FORM} set={() => {}} current={LINK}
+      carriers={[]} buses={[]} /></div>)
+    const label = document.querySelector('[data-field="build_year"]')!.textContent ?? ''
+    expect(label).toContain('Build year')
+    expect(label).not.toContain('(year)')
+  })
   it('still groups an ordinary number', () => {
     const { container } = render(<Row label="Cost" value={12345} />)
     expect(container.textContent).toMatch(/12.345/)

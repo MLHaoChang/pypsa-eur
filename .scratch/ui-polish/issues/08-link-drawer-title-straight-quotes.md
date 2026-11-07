@@ -3,7 +3,7 @@
 
 # Guided drawer title for a Link shows 'grid_import' in straight quotes
 
-Status: ready-for-agent
+Status: done
 Type: wording
 Found by: UIP-01 (#1195), relayed by the coordinator.
 

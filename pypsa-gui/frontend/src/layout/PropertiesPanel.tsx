@@ -1837,20 +1837,16 @@ const TRANSFORMER_TOPOLOGY: ReadonlySet<string> = new Set(['bus0', 'bus1'])
 const TRANSFORMER_VOLTAGES: ReadonlySet<string> = new Set(['v_nom_0', 'v_nom_1'])
 
 // ── Link panel ─────────────────────────────────────────────────────────────────
-function LinkPanel({ name }: { name: string }) {
+export function LinkPanel({ name }: { name: string }) {
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
   const uiMode = useUIStore(s => s.uiMode)
   const { data: links = [] } = useQuery({ queryKey: nk(currentProject, 'links'), queryFn: networkApi.getLinks })
   const link = (links as Link[]).find((l: Link) => l.name === name)
-  const { data: schema } = useAssetSchema('Link')
   if (!link) return <p className="p-3 text-xs text-muted">Loading…</p>
   return (
     <div className="p-3">
-      <Section title="Topology">
-        <Row label="From bus" value={link.bus0} tip={fieldHelp(schema, 'bus0')} />
-        <Row label="To bus"   value={link.bus1} tip={fieldHelp(schema, 'bus1')} />
-      </Section>
+      {/* From and To bus lead LinkCard's own read-out: not repeated here. */}
       <LinkCard key={link.name} link={link} mode="detail" onRename={n => setSelectedComponent({ type: 'Link', name: n })} />
       {currentProject && (
         <Section title="Availability">

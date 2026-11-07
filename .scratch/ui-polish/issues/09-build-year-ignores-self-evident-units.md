@@ -3,7 +3,7 @@
 
 # Edit label "Build year (year)" ignores `SELF_EVIDENT_UNITS`
 
-Status: ready-for-agent
+Status: done
 Type: wording
 Found by: UIP-01 (#1195), relayed by the coordinator.
 
