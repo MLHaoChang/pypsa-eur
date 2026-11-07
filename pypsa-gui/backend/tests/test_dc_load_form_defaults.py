@@ -1,5 +1,6 @@
 """DC 22: the New project form's defaults (frontend pages/hubDesign/dcLoadForm.ts)
 are the template's own, and the body the form sends builds for every option."""
+
 import pytest
 
 from project_templates import eh_templates as T
@@ -7,8 +8,12 @@ from services.dc_architecture import ARCHITECTURES
 from services.dc_load_profile import DcLoadError
 
 # Mirrors DC_DEFAULTS in frontend/src/pages/hubDesign/dcLoadForm.ts.
-FORM = {"pue": 1.3, "it_mw": 36.0, "single_year": 2030,
-        "phases": [(2027, 12.0), (2030, 24.0), (2035, 36.0)]}
+FORM = {
+    "pue": 1.3,
+    "it_mw": 36.0,
+    "single_year": 2030,
+    "phases": [(2027, 12.0), (2030, 24.0), (2035, 36.0)],
+}
 
 
 def test_form_defaults_are_the_presets():
@@ -23,8 +28,12 @@ def test_form_defaults_are_the_presets():
 @pytest.mark.parametrize("arch", ARCHITECTURES)
 @pytest.mark.parametrize("mode", ["genset", "bess", "hybrid"])
 def test_form_body_builds(arch, mode):
-    body = {"pue_at_design": 1.3, "architecture": arch, "backup": {"mode": mode},
-            "phases": [{"cod": "2030-01-01", "it_mw": 36.0}]}
+    body = {
+        "pue_at_design": 1.3,
+        "architecture": arch,
+        "backup": {"mode": mode},
+        "phases": [{"cod": "2030-01-01", "it_mw": 36.0}],
+    }
     if mode == "bess":
         # No gensets: the default 36 MW peaks above the weak grid, refused on the
         # IT load field (the form shows it beside "IT load"); a smaller load builds.
