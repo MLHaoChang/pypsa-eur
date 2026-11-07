@@ -462,6 +462,15 @@ def _patched_study(study: DecisionStudy, body: StudyPatch) -> DecisionStudy:
             # its tariff rows (the demand-charge price, the energy level)
             # follow the new tariff; a user value that no longer applies
             # is flagged `needs_attention`, and the run refuses it.
+            if (study.currency_year is not None
+                    and not (body.settings and body.settings.currency_year is not None)
+                    and updated.currency_year == study.currency_year
+                    and study_ledger.money_years(study.ledger) == [study.currency_year]):
+                # Money-year 03: as the ledger PUT re-seed (02), a study year
+                # that followed the old ledger's money rows follows the pin;
+                # a year the user set apart, or this PATCH sets, stays.
+                updated = updated.model_copy(update={
+                    "currency_year": int(_library_or_500().finance["currency_year"])})
             try:
                 updated = updated.model_copy(update={
                     "ledger": study_ledger.reseed_ledger(
