@@ -175,6 +175,7 @@ export interface HarnessTurn {
   envelope_decision?: {
     task_id: string; verdict: 'unattended' | 'stepwise' | 'revoke'
     envelope?: Record<string, unknown>; notify_email?: boolean
+    goal?: { value: number | null; unit: 'h/yr'; source: string }
   }
 }
 

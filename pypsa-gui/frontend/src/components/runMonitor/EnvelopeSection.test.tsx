@@ -200,3 +200,33 @@ describe('EnvelopeSection held tariffs', () => {
     expect(screen.queryByTestId('envelope-held')).toBeNull()
   })
 })
+
+describe('EnvelopeSection reliability goal', () => {
+  // GK B (33) P5a, GK B (34) F1: the card shows the goal with unit and source and echoes it at the grant.
+  function openWith(goal: api.EnvelopeGoal | undefined) {
+    const envelope = { ...ENVELOPE, ...(goal ? { goal } : {}) }
+    vi.mocked(api.getRun).mockResolvedValue({ ...STATES.proposal, envelope } as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope } }] })
+    render(<ChoiceCard />)
+  }
+
+  it('shows a template goal with its unit and source and sends it back with the grant', async () => {
+    const goal = { value: 2, unit: 'h/yr' as const, source: 'template' }
+    openWith(goal)
+    await waitFor(() => expect((screen.getAllByTestId('envelope-verdict')[0] as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.getByTestId('envelope-goal').textContent).toBe('Reliability goal (LOLE): 2 h/yr, from the eh_site template')
+    fireEvent.click(screen.getAllByTestId('envelope-verdict')[0])
+    expect(useChatStore.getState().requestQueue[0].harness!.envelope_decision!.goal).toEqual(goal)
+  })
+
+  it('says when no goal is set, and a run without a goal row sends none', async () => {
+    openWith({ value: null, unit: 'h/yr', source: 'default' })
+    await waitFor(() => expect(screen.getByTestId('envelope-goal').textContent).toContain('No reliability goal is set'))
+    cleanup()
+    openWith(undefined)
+    await waitFor(() => expect((screen.getAllByTestId('envelope-verdict')[0] as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.queryByTestId('envelope-goal')).toBeNull()
+    fireEvent.click(screen.getAllByTestId('envelope-verdict')[0])
+    expect(useChatStore.getState().requestQueue.at(-1)!.harness!.envelope_decision!.goal).toBeUndefined()
+  })
+})

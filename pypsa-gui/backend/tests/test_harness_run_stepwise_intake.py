@@ -362,7 +362,9 @@ def test_a_template_goal_is_on_the_card_with_its_source_and_frozen_at_the_grant(
     shown = {"value": 2.0, "unit": "h/yr", "source": "template"}
     assert task["envelope"]["goal"] == shown
     assert "2 h/yr (from the eh_site template)" in task["envelope"]["detail"]
-    message = run_envelope.decide(session, task["task_id"], "unattended")
+    message = run_envelope.decide(
+        session, task["task_id"], "unattended", goal=task["envelope"]["goal"]
+    )
     assert "2 h/yr (from the eh_site template)" in message
     granted = envelope_of(task_path(site[1], task))
     assert granted["state"] == "granted" and granted["goal"] == shown
@@ -395,7 +397,73 @@ def test_a_stored_goal_is_on_the_card_with_its_source(
         "source": "stored",
     }
     assert "3 h/yr (from the project's solver settings)" in task["envelope"]["detail"]
-    run_envelope.decide(session, task["task_id"], "unattended")
+    run_envelope.decide(
+        session, task["task_id"], "unattended", goal=task["envelope"]["goal"]
+    )
+
+
+def _template_goal(site, value=2.0):
+    from services import flow_service
+
+    template = site[1] / flow_service.TEMPLATE_FILE
+    template.write_text(
+        json.dumps(
+            {
+                **json.loads(template.read_text()),
+                "pack_overrides": {"target_lole_h": value},
+            }
+        )
+    )
+
+
+def _set_stored_goal(monkeypatch, value):
+    import dataclasses
+
+    from services.pypsa_service import PyPSAService
+
+    state = PyPSAService.get_active_context().solver_state
+    monkeypatch.setitem(
+        state,
+        "solver_config",
+        dataclasses.replace(state["solver_config"], target_lole_h=value),
+    )
+
+
+@pytest.mark.parametrize(
+    "change", ["template_to_stored", "stored_to_template", "stored_value", "no_echo"]
+)
+def test_the_grant_freezes_only_the_goal_the_card_showed(
+    session, site, profile, monkeypatch, change
+):
+    """GK B (34) F1: goal fields are outside the input fingerprint, so the grant
+    compares the card's echoed goal with the live one and refuses goal_changed;
+    nothing is granted."""
+    from tests.test_harness_envelope import envelope_of
+
+    _plain_goal_profile(monkeypatch)
+    _template_goal(site)
+    if change in ("stored_to_template", "stored_value"):
+        _set_stored_goal(monkeypatch, 3.0)
+    task = start()
+    shown = task["envelope"]["goal"]
+    if change == "template_to_stored":
+        assert shown["source"] == "template"
+        _set_stored_goal(monkeypatch, 50.0)
+    elif change == "stored_to_template":
+        assert shown["source"] == "stored"
+        # the template's 2 h/yr, never shown, would apply
+        _set_stored_goal(monkeypatch, None)
+    elif change == "stored_value":
+        _set_stored_goal(monkeypatch, 50.0)  # same source, another value
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(
+            session,
+            task["task_id"],
+            "unattended",
+            goal=None if change == "no_echo" else shown,
+        )
+    assert exc.value.detail["error_kind"] == "goal_changed"
+    assert envelope_of(task_path(site[1], task))["state"] != "granted"
 
 
 def test_a_run_whose_profile_needs_no_goal_shows_none_and_is_granted_without_one(
@@ -437,3 +505,16 @@ def test_an_ordinary_chat_enqueue_captures_nothing(session, baseline, monkeypatc
     )
     assert tool_result(results).get("id"), results[-1]["content"][:200]
     assert captured == []
+
+
+def test_the_envelope_decision_carries_the_cards_goal_strictly():
+    """F1: the `/stream` body takes the card's goal in h/yr only, nothing more."""
+    from pydantic import ValidationError
+    from routers.chat import EnvelopeDecision
+
+    goal = {"value": 2.0, "unit": "h/yr", "source": "template"}
+    body = EnvelopeDecision(task_id="0" * 36, verdict="unattended", goal=goal)
+    assert body.model_dump()["goal"] == goal
+    for bad in ({**goal, "unit": "h"}, {**goal, "extra": 1}):
+        with pytest.raises(ValidationError):
+            EnvelopeDecision(task_id="0" * 36, verdict="unattended", goal=bad)

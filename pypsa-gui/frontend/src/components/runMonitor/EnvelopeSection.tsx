@@ -5,13 +5,20 @@
 // The user may narrow it (untick an edit or run, lower a budget), never
 // widen it: the server checks again (`run_envelope.narrow`).
 import { useEffect, useState } from 'react'
-import { getRun, type Envelope, type RunMonitorView } from '../../api/runMonitor'
+import { getRun, type Envelope, type EnvelopeGoal, type RunMonitorView } from '../../api/runMonitor'
 import { UNATTENDED_BLOCK_WORDS, editLimits, editSubject, runWords } from './runWords'
 import { fmtCurrency } from '../../utils/format'
 import { useUIStore } from '../../store/uiStore'
 
+// P5a: the goal the LOLE rule judges against, with its unit and where it comes from.
+const GOAL_SOURCE: Record<string, string> = { stored: "from the project's solver settings", template: 'from the eh_site template' }
+function goalWords(goal: EnvelopeGoal): string {
+  if (goal.value === null) return "No reliability goal is set: state the site's LOLE goal (h/yr) before you approve."
+  return `Reliability goal (LOLE): ${goal.value} h/yr, ${GOAL_SOURCE[goal.source] ?? goal.source}`
+}
+
 export type EnvelopeVerdict =
-  | { verdict: 'unattended'; envelope: Record<string, unknown>; notify_email: boolean }
+  | { verdict: 'unattended'; envelope: Record<string, unknown>; notify_email: boolean; goal?: EnvelopeGoal }
   | { verdict: 'stepwise' }
   | { verdict: 'change' }
 
@@ -76,6 +83,8 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
       edits: envelope.edits.filter((_, i) => edits[i]), runs: envelope.runs.filter((_, i) => runs[i]),
       budget: { solves, rounds: envelope.budget.rounds, wall_time_h: hours }, research: envelope.research,
     },
+    // GK B (34) F1: echo the goal this card shows, so the grant freezes exactly it.
+    ...(envelope.goal ? { goal: envelope.goal } : {}),
   })
 
   return <div data-testid="envelope-section" className="mb-2 rounded border border-border bg-bg-2/40 px-2.5 py-1.5 text-[12px]">
@@ -128,6 +137,7 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
         <span>{costCap !== undefined && costCap > 0 ? `Cost cap ${fmtCurrency(costCap)}` : 'no cost cap'}</span>
       </div>
     </div>
+    {envelope.goal && <div data-testid="envelope-goal">{goalWords(envelope.goal)}</div>}
     <div data-testid="envelope-research">
       {envelope.research.allowed ? `Research cost cap ${fmtCurrency(envelope.research.cost_cap_eur)}` : 'No research'}
     </div>

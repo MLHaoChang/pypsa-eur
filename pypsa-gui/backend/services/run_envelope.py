@@ -628,6 +628,14 @@ def _gap_row(gap):
 _GOAL_SOURCE = {"stored": "from the project's solver settings", "template": "from the eh_site template"}
 
 
+def _same_goal(shown, live):
+    """The card's echoed goal is the live one: the same value (h/yr) and source."""
+    if not isinstance(shown, dict) or shown.get("unit") != "h/yr" or shown.get("source") != live["source"]:
+        return False
+    value = shown.get("value")
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and float(value) == live["value"]
+
+
 def card_goal(task, ctx):
     """GK B (33) P5a: the reliability goal a plain run's LOLE rule judges
     against, as the card shows it (`{"value", "unit", "source"}`); None when
@@ -838,12 +846,13 @@ def _same_load(ctx, name, record):
         return False
 
 
-def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_digest=None):
+def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_digest=None, goal=None):
     """The user's verdict on the plan-review card; returns the message the
     harness writes into the conversation. Reached only from the `/stream`
     request's `envelope_decision`, never from a tool call. A plan with a
     `setup` entry hands over at the grant (`_grant_setup`, issue 21 §2):
-    `intake_digest` is the digest of the intake rows the card showed."""
+    `intake_digest` is the digest of the intake rows the card showed;
+    `goal` is the reliability goal a plain run's card showed (P5a, F1)."""
     from harness import approvals
     from services import assistant_tasks, run_profiles
     from services.pypsa_service import PyPSAService
@@ -886,11 +895,15 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
                 _refuse("brief_inputs_unreadable", "The project's inputs cannot be read, so nothing can be granted.")
             if assistant_tasks._stale(task, fingerprint):
                 _refuse("task_brief_stale", "The inputs changed since the brief; review a new brief first.")
-            goal = card_goal(task, ctx)
+            shown, goal = goal, card_goal(task, ctx)
             if goal is not None and goal["value"] is None:
                 # GK B (33) P5/P5a: a plain run judges LOLE against the user's own goal too, stored
                 # or from the template and shown on the card with its source; never a default.
                 _refuse("goal_missing", "State the site's reliability goal (LOLE, h/yr) before the run is granted.")
+            if goal is not None and not _same_goal(shown, goal):
+                # GK B (34) F1: freeze only the goal the card showed; goal fields are outside the
+                # input fingerprint, so a change after the card is caught here.
+                _refuse("goal_changed", "The reliability goal changed since the card was shown; review it again.")
             gaps = [dict(g, at_grant=_gap_instances(ctx, g)) for g in chosen["gaps"]]  # may refuse (§6.0)
             envelope_id, now = str(uuid.uuid4()), _now()
             if not approvals.decided(session, call_id="envelope-" + envelope_id, tool="grant_envelope",
