@@ -5,6 +5,7 @@ Fixture economics: the grid costs 50 EUR/MWh and curtailing 5, so the LP curtail
 the cap (C16) and the duration's energy proxy (Q3) let it. The project's spec is injected by
 patching ``project_terms`` (the read through ``dc_backup.project_spec`` is DC-06's).
 """
+
 from __future__ import annotations
 
 import queue
@@ -41,7 +42,14 @@ def _network(hours: float = 1.0, cooling_bus: str = "dc_mv") -> pypsa.Network:
     n.add("Carrier", "AC")
     n.add("Bus", "dc_mv", carrier="AC")
     n.add("Bus", "it_bus", carrier="AC")
-    n.add("Generator", "grid", bus="dc_mv", carrier="AC", p_nom=1000.0, marginal_cost=GRID_MC)
+    n.add(
+        "Generator",
+        "grid",
+        bus="dc_mv",
+        carrier="AC",
+        p_nom=1000.0,
+        marginal_cost=GRID_MC,
+    )
     n.add("Link", "ups", bus0="dc_mv", bus1="it_bus", p_nom=1000.0, efficiency=1.0)
     n.add("Load", "it_load", bus="it_bus", p_set=pd.Series(IT, index=n.snapshots))
     n.add("Load", "cooling", bus=cooling_bus, p_set=pd.Series(COOL, index=n.snapshots))
@@ -61,9 +69,14 @@ def _solve_with(n, monkeypatch, **cfg_kw):
     PyPSAService.set_network(n)
     sink: dict = {}
     log_q: queue.SimpleQueue = queue.SimpleQueue()
-    status, condition = run_simulation(SolverConfig(voll=cfg_kw.pop("voll", 3000.0), **cfg_kw), n,
-                                       PyPSAService.get_lock(), threading.Event(), log_q,
-                                       state_update=lambda **kw: sink.update(kw))
+    status, condition = run_simulation(
+        SolverConfig(voll=cfg_kw.pop("voll", 3000.0), **cfg_kw),
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        log_q,
+        state_update=lambda **kw: sink.update(kw),
+    )
     lines = []
     while True:
         try:
@@ -81,8 +94,13 @@ def _curtailed(sink) -> pd.Series:
 
 
 def _spec(**kw) -> DataCentreLoadSpec:
-    base = {"phases": [{"cod": "2030-01-01", "it_mw": 80}], "pue_at_design": 1.3,
-            "redundancy": "N+1", "critical_share": 0.75, "curtailable_share": SHARE}
+    base = {
+        "phases": [{"cod": "2030-01-01", "it_mw": 80}],
+        "pue_at_design": 1.3,
+        "redundancy": "N+1",
+        "critical_share": 0.75,
+        "curtailable_share": SHARE,
+    }
     return DataCentreLoadSpec.model_validate({**base, **kw})
 
 
@@ -96,8 +114,13 @@ def test_the_price_defaults_to_none_and_is_finite_and_not_negative():
 
 def test_no_price_or_a_zero_share_is_off():
     assert C.terms_of(_spec()) is None
-    assert C.terms_of(_spec(curtailable_share=0.0, curtailment_price_eur_per_mwh=5.0)) is None
-    assert C.terms_of(_spec(curtailment_price_eur_per_mwh=0.0)) == C.Terms(0.0, SHARE, None)
+    assert (
+        C.terms_of(_spec(curtailable_share=0.0, curtailment_price_eur_per_mwh=5.0))
+        is None
+    )
+    assert C.terms_of(_spec(curtailment_price_eur_per_mwh=0.0)) == C.Terms(
+        0.0, SHARE, None
+    )
 
 
 def test_critical_plus_curtailable_above_one_is_refused():
@@ -107,8 +130,11 @@ def test_critical_plus_curtailable_above_one_is_refused():
 
 
 def _off_spec(off):
-    return (_spec(curtailable_share=0.0, curtailment_price_eur_per_mwh=5.0)
-            if off == "share0" else _spec())
+    return (
+        _spec(curtailable_share=0.0, curtailment_price_eur_per_mwh=5.0)
+        if off == "share0"
+        else _spec()
+    )
 
 
 @pytest.mark.parametrize("off", ["no_price", "share0"])
@@ -128,7 +154,9 @@ def test_off_leaves_the_network_and_its_netcdf_byte_equal(monkeypatch, tmp_path,
 
 
 @pytest.mark.parametrize("off", ["no_price", "share0"])
-def test_off_solves_byte_equal_to_a_build_without_the_feature(monkeypatch, tmp_path, off):
+def test_off_solves_byte_equal_to_a_build_without_the_feature(
+    monkeypatch, tmp_path, off
+):
     """Solved through ``run_simulation`` with the spec off, and with the feature's three calls
     removed: the same LP chain, the same netCDF data and the same input fingerprint (only the
     sizing record's clock and revision differ between two solves)."""
@@ -154,7 +182,10 @@ def test_off_solves_byte_equal_to_a_build_without_the_feature(monkeypatch, tmp_p
         m.get("sizing_record", {}).pop("solved_at", None)
         m.get("sizing_record", {}).pop("revision", None)
     assert ma == mb and C.META_KEY not in ma
-    assert ma["assistant_solve_input_fingerprint"] == mb["assistant_solve_input_fingerprint"]
+    assert (
+        ma["assistant_solve_input_fingerprint"]
+        == mb["assistant_solve_input_fingerprint"]
+    )
 
 
 # ── C16: the cap ─────────────────────────────────────────────────────────────
@@ -166,15 +197,23 @@ def test_the_cap_is_the_share_of_the_facility_and_never_above_cooling(monkeypatc
     p = _curtailed(sink).to_numpy()
     cap = np.minimum(SHARE * (IT + COOL), COOL)
     assert np.all(p <= cap + 1e-6)
-    assert p == pytest.approx(cap, abs=1e-6)        # cheap: it runs at the cap
-    assert p[2] == pytest.approx(10.0)              # the cooling load binds, not share · F
+    assert p == pytest.approx(cap, abs=1e-6)  # cheap: it runs at the cap
+    assert p[2] == pytest.approx(10.0)  # the cooling load binds, not share · F
     assert C.GENERATOR not in _network().generators.index
 
 
 @pytest.mark.parametrize("tid", ["eh_datacenter", "eh_datacenter_staged"])
-def test_on_the_built_template_the_cap_stays_under_cooling_with_slope_and_ai_workload(tid):
-    spec = T.dc_load_spec(tid, {"curtailable_share": 0.25, "curtailment_price_eur_per_mwh": 5.0,
-                                "pue_temperature_slope_per_k": 0.05})
+def test_on_the_built_template_the_cap_stays_under_cooling_with_slope_and_ai_workload(
+    tid,
+):
+    spec = T.dc_load_spec(
+        tid,
+        {
+            "curtailable_share": 0.25,
+            "curtailment_price_eur_per_mwh": 5.0,
+            "pue_temperature_slope_per_k": 0.05,
+        },
+    )
     assert spec.ai_workload is not None and spec.pue_temperature_slope_per_k > 0
     n = T.BUILDERS[tid](load_spec=spec)
     undo: list = []
@@ -182,7 +221,9 @@ def test_on_the_built_template_the_cap_stays_under_cooling_with_slope_and_ai_wor
     try:
         g = n.generators.loc[C.GENERATOR]
         assert g.bus == "dc_mv" and g.carrier == slack.DC_CURTAILMENT_CARRIER
-        p_max = n.get_switchable_as_dense("Generator", "p_max_pu")[C.GENERATOR] * g.p_nom
+        p_max = (
+            n.get_switchable_as_dense("Generator", "p_max_pu")[C.GENERATOR] * g.p_nom
+        )
         cooling = n.get_switchable_as_dense("Load", "p_set")["cooling"]
         assert (p_max <= cooling + 1e-9).all()
         assert (p_max > 0).any()
@@ -197,8 +238,9 @@ def test_on_the_built_template_the_cap_stays_under_cooling_with_slope_and_ai_wor
 
 
 def test_the_tier_is_a_slack_but_never_involuntary():
-    gens = pd.DataFrame({"carrier": [slack.DC_CURTAILMENT_CARRIER, "AC"]},
-                        index=[C.GENERATOR, "grid"])
+    gens = pd.DataFrame(
+        {"carrier": [slack.DC_CURTAILMENT_CARRIER, "AC"]}, index=[C.GENERATOR, "grid"]
+    )
     assert slack.slack_generator_mask(gens).tolist() == [True, False]
     assert slack.involuntary_slack_mask(gens).tolist() == [False, False]
     assert slack.DC_CURTAILMENT_CARRIER not in slack.INVOLUNTARY_SLACK_CARRIERS
@@ -206,15 +248,24 @@ def test_the_tier_is_a_slack_but_never_involuntary():
 
 def test_curtailed_energy_is_reported_apart_from_unserved_energy(monkeypatch):
     n = _network()
-    n.generators.at["grid", "p_nom"] = 90.0       # 10 MW short at the hours the cap is below it
+    n.generators.at["grid", "p_nom"] = (
+        90.0  # 10 MW short at the hours the cap is below it
+    )
     status, _, sink, _ = _solve(n, monkeypatch, _terms(), voll=1000.0)
     assert status in ("ok", "optimal")
     cap = sink["last_lost_load"]
-    assert not any(str(c).startswith(slack.DC_CURTAILMENT_PREFIX) for c in cap["lost_load_t"].columns)
+    assert not any(
+        str(c).startswith(slack.DC_CURTAILMENT_PREFIX)
+        for c in cap["lost_load_t"].columns
+    )
     lost = float(cap["lost_load_total_mwh"])
     curt = cap[C.META_KEY]["total_mwh"]
-    assert curt == pytest.approx(float(np.minimum(SHARE * (IT + COOL), COOL).sum()), rel=1e-6)
-    short = np.clip(IT + COOL - 90.0 - np.minimum(SHARE * (IT + COOL), COOL), 0, None).sum()
+    assert curt == pytest.approx(
+        float(np.minimum(SHARE * (IT + COOL), COOL).sum()), rel=1e-6
+    )
+    short = np.clip(
+        IT + COOL - 90.0 - np.minimum(SHARE * (IT + COOL), COOL), 0, None
+    ).sum()
     assert lost == pytest.approx(short, abs=1e-6)
     rec = n.meta[C.META_KEY]
     assert rec["curtailed_mwh"] == pytest.approx(curt)
@@ -223,20 +274,35 @@ def test_curtailed_energy_is_reported_apart_from_unserved_energy(monkeypatch):
 
 def test_the_ens_cap_never_throttles_curtailment(monkeypatch):
     n = _network()
-    n.generators.at["grid", "p_nom"] = 80.0      # 4 MWh short once curtailment is at its cap
+    n.generators.at["grid", "p_nom"] = (
+        80.0  # 4 MWh short once curtailment is at its cap
+    )
     # VoLL 20 < the grid's 50: shedding is cheap, so only the ENS cap (40 ‱ ≈ 4.7 MWh) holds
     # it; were curtailment counted there, the cap could not be met at full curtailment.
-    status, _, sink, _ = _solve(n, monkeypatch, _terms(), voll=20.0, ens_cap_permyriad=40.0)
+    status, _, sink, _ = _solve(
+        n, monkeypatch, _terms(), voll=20.0, ens_cap_permyriad=40.0
+    )
     assert status in ("ok", "optimal")
-    assert _curtailed(sink).to_numpy() == pytest.approx(np.minimum(SHARE * (IT + COOL), COOL), abs=1e-6)
+    assert _curtailed(sink).to_numpy() == pytest.approx(
+        np.minimum(SHARE * (IT + COOL), COOL), abs=1e-6
+    )
 
 
 def test_the_reserve_margin_never_counts_it(monkeypatch):
     n = _network()
     n.remove("Generator", "grid")
     n.add("Carrier", "gas")
-    n.add("Generator", "grid", bus="dc_mv", carrier="gas", p_nom=300.0, marginal_cost=GRID_MC,
-          outage_rate_value=0.05, outage_rate_basis="EFORd", mttr_hours=24.0)
+    n.add(
+        "Generator",
+        "grid",
+        bus="dc_mv",
+        carrier="gas",
+        p_nom=300.0,
+        marginal_cost=GRID_MC,
+        outage_rate_value=0.05,
+        outage_rate_basis="EFORd",
+        mttr_hours=24.0,
+    )
     undo: list = []
     C.apply(n, lambda _m: None, undo, {}, terms=_terms())
     try:
@@ -299,11 +365,16 @@ def test_every_run_holds_its_energy_bound_and_one_binds(monkeypatch, hours, d):
     f = IT + COOL
     found = C.runs(pd.Series(w), d, pd.RangeIndex(len(p)))
     assert found
-    slack_ = [d * SHARE * f[i:j + 1].max() - (w[i:j + 1] * p[i:j + 1]).sum() for i, j in found]
+    slack_ = [
+        d * SHARE * f[i : j + 1].max() - (w[i : j + 1] * p[i : j + 1]).sum()
+        for i, j in found
+    ]
     assert min(slack_) >= -1e-6
     assert min(slack_) == pytest.approx(0.0, abs=1e-6)
-    assert p.sum() < np.minimum(SHARE * f, COOL).sum() - 1e-3      # the duration cut it
-    assert any(f"{len(found)} energy-proxy rows" in ln and "nonzeros" in ln for ln in lines)
+    assert p.sum() < np.minimum(SHARE * f, COOL).sum() - 1e-3  # the duration cut it
+    assert any(
+        f"{len(found)} energy-proxy rows" in ln and "nonzeros" in ln for ln in lines
+    )
     assert n.meta[C.META_KEY]["claim_limit"] == C.CLAIM_LIMIT
     assert "consecutive hours are not enforced" in C.CLAIM_LIMIT
 
@@ -326,17 +397,29 @@ def test_an_import_energy_cap_is_not_loosened(monkeypatch):
     n = _network()
     n.remove("Generator", "grid")
     n.add("Bus", "grid", carrier="AC")
-    n.add("Generator", "grid", bus="grid", carrier="AC", p_nom=1000.0, marginal_cost=GRID_MC)
+    n.add(
+        "Generator",
+        "grid",
+        bus="grid",
+        carrier="AC",
+        p_nom=1000.0,
+        marginal_cost=GRID_MC,
+    )
     n.add("Link", "poc", bus0="grid", bus1="dc_mv", p_nom=1000.0, efficiency=1.0)
     hours = float(n.snapshot_weightings["generators"].sum())
-    cap_mwh_year = 900.0 * 8760.0 / hours          # 900 MWh over these 12 hours
-    status, _, sink, _ = _solve(n, monkeypatch, _terms(), voll=1000.0,
-                                import_energy_cap_mwh_per_year=cap_mwh_year,
-                                import_energy_links=["poc"])
+    cap_mwh_year = 900.0 * 8760.0 / hours  # 900 MWh over these 12 hours
+    status, _, sink, _ = _solve(
+        n,
+        monkeypatch,
+        _terms(),
+        voll=1000.0,
+        import_energy_cap_mwh_per_year=cap_mwh_year,
+        import_energy_links=["poc"],
+    )
     assert status in ("ok", "optimal")
     imported = float(n.links_t.p0["poc"].sum())
     assert imported <= 900.0 + 1e-6
-    assert imported == pytest.approx(900.0, abs=1e-6)          # it binds
+    assert imported == pytest.approx(900.0, abs=1e-6)  # it binds
     curt = _curtailed(sink).to_numpy()
     assert curt == pytest.approx(np.minimum(SHARE * (IT + COOL), COOL), abs=1e-6)
 
@@ -352,16 +435,23 @@ def test_project_terms_reads_the_saved_spec(monkeypatch, tmp_path):
 
     from services.adequacy import dc_backup
 
-    monkeypatch.setattr(PyPSAService, "solve_target_context", classmethod(lambda cls: None))
+    monkeypatch.setattr(
+        PyPSAService, "solve_target_context", classmethod(lambda cls: None)
+    )
     assert C.project_terms() is None
     ctx = types.SimpleNamespace(storage_dir=None)
-    monkeypatch.setattr(PyPSAService, "solve_target_context", classmethod(lambda cls: ctx))
+    monkeypatch.setattr(
+        PyPSAService, "solve_target_context", classmethod(lambda cls: ctx)
+    )
     assert C.project_terms() is None
     ctx.storage_dir = str(tmp_path)
-    assert C.project_terms() is None                          # no template metadata
+    assert C.project_terms() is None  # no template metadata
     spec = _spec(curtailment_price_eur_per_mwh=7.0, curtail_max_duration_h=3.0)
-    (tmp_path / dc_backup.META_FILE).write_text(json.dumps(
-        {"id": "eh_datacenter", "dc_load": {"spec": spec.model_dump(mode="json")}}))
+    (tmp_path / dc_backup.META_FILE).write_text(
+        json.dumps(
+            {"id": "eh_datacenter", "dc_load": {"spec": spec.model_dump(mode="json")}}
+        )
+    )
     assert C.project_terms() == C.Terms(7.0, SHARE, 3.0)
 
 
@@ -370,7 +460,11 @@ def test_terms_of_refuses_a_bad_price_by_itself():
 
     for bad in (-1.0, float("inf"), float("nan")):
         with pytest.raises(ValueError):
-            C.terms_of(types.SimpleNamespace(curtailment_price_eur_per_mwh=bad, curtailable_share=0.2))
+            C.terms_of(
+                types.SimpleNamespace(
+                    curtailment_price_eur_per_mwh=bad, curtailable_share=0.2
+                )
+            )
 
 
 def test_a_cooling_load_of_zero_throughout_adds_nothing():

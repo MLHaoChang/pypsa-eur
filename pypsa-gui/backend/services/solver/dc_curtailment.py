@@ -23,6 +23,7 @@ the facility: the LP pays the price for each MWh it does not serve.
 Off (no price, or a share of 0) nothing is read or written: the network, the LP, network.nc and
 the fingerprint stay as they were (C15).
 """
+
 from __future__ import annotations
 
 import math
@@ -43,7 +44,9 @@ COOLING_BUS = "dc_mv"
 GENERATOR = f"{DC_CURTAILMENT_PREFIX}{COOLING_LOAD}"
 #: ``n.meta`` key of a solved run's record.
 META_KEY = "dc_curtailment"
-CLAIM_LIMIT = ("energy proxy: curtailment can still be spread; consecutive hours are not enforced")
+CLAIM_LIMIT = (
+    "energy proxy: curtailment can still be spread; consecutive hours are not enforced"
+)
 
 NO_COOLING_LOAD = "no_cooling_load"
 DURATION_EXCEEDS_HORIZON = "duration_exceeds_horizon"
@@ -103,13 +106,17 @@ def _dense_load(n, name: str) -> pd.Series:
 def facility(n) -> pd.Series:
     """F(t) = it_load + cooling, MW; refuses a network without the cooling load on dc_mv (C18)."""
     loads = n.loads
-    if COOLING_LOAD not in loads.index or str(loads.at[COOLING_LOAD, "bus"]) != COOLING_BUS \
-            or IT_LOAD not in loads.index:
+    if (
+        COOLING_LOAD not in loads.index
+        or str(loads.at[COOLING_LOAD, "bus"]) != COOLING_BUS
+        or IT_LOAD not in loads.index
+    ):
         raise DcCurtailmentRefused(
             NO_COOLING_LOAD,
             f"Curtailable load: the network has no {COOLING_LOAD!r} load on {COOLING_BUS!r} beside "
             f"{IT_LOAD!r}, so there is nowhere to curtail but the IT bus. Curtailment is placed on "
-            "the cooling bus only; clear curtailment_price_eur_per_mwh or restore the load.")
+            "the cooling bus only; clear curtailment_price_eur_per_mwh or restore the load.",
+        )
     return _dense_load(n, IT_LOAD) + _dense_load(n, COOLING_LOAD)
 
 
@@ -160,10 +167,13 @@ def check(n, terms: Terms, sns=None) -> None:
             DURATION_EXCEEDS_HORIZON,
             f"Curtailable load: curtail_max_duration_h {terms.max_duration_h:g} h plus one snapshot "
             f"does not fit in the horizon ({total:g} weighted hours), so no curtailment run can be "
-            "bounded. Shorten the duration or lengthen the horizon.")
+            "bounded. Shorten the duration or lengthen the horizon.",
+        )
 
 
-def apply(n, phase, undo_actions: list, captured: dict, terms: Terms | None = None) -> None:
+def apply(
+    n, phase, undo_actions: list, captured: dict, terms: Terms | None = None
+) -> None:
     """Add the transient generator (module docstring); the restore callback appended to
     ``undo_actions`` captures its dispatch and removes it. ``terms`` defaults to the project's."""
     terms = project_terms() if terms is None else terms
@@ -179,25 +189,38 @@ def apply(n, phase, undo_actions: list, captured: dict, terms: Terms | None = No
     try:
         if added_carrier:
             n.add("Carrier", DC_CURTAILMENT_CARRIER)
-        n.add("Generator", GENERATOR, bus=COOLING_BUS, p_nom=peak,
-              p_max_pu=(limit / peak).clip(upper=1.0), marginal_cost=terms.price,
-              carrier=DC_CURTAILMENT_CARRIER)
+        n.add(
+            "Generator",
+            GENERATOR,
+            bus=COOLING_BUS,
+            p_nom=peak,
+            p_max_pu=(limit / peak).clip(upper=1.0),
+            marginal_cost=terms.price,
+            carrier=DC_CURTAILMENT_CARRIER,
+        )
     except Exception:
         PyPSAService.unmark_transient("Generator", GENERATOR)
         raise
-    phase(f"Added the curtailable load {GENERATOR} on {COOLING_BUS} at {terms.price:g} EUR/MWh, up to "
-          f"{terms.share:.0%} of the facility and never above cooling (a resource, NOT unserved energy).")
+    phase(
+        f"Added the curtailable load {GENERATOR} on {COOLING_BUS} at {terms.price:g} EUR/MWh, up to "
+        f"{terms.share:.0%} of the facility and never above cooling (a resource, NOT unserved energy)."
+    )
 
     def _capture_and_remove():
         try:
             p = n.generators_t.p
             if GENERATOR in getattr(p, "columns", []):
                 from services import period_utils
+
                 series = p[GENERATOR].astype(float).copy()
                 w = period_utils.snapshot_weights(n, "generators", sns=series.index)
                 captured[META_KEY] = {
                     "p_t": series,
-                    "total_mwh": float((series.clip(lower=0) * w.reindex(series.index).fillna(0.0)).sum()),
+                    "total_mwh": float(
+                        (
+                            series.clip(lower=0) * w.reindex(series.index).fillna(0.0)
+                        ).sum()
+                    ),
                     "price_eur_per_mwh": terms.price,
                     "share": terms.share,
                     "max_duration_h": terms.max_duration_h,
@@ -249,7 +272,8 @@ def add_rows(n, snapshots, terms: Terms, emit) -> tuple[int, int]:
         raise DcCurtailmentRefused(
             DURATION_EXCEEDS_HORIZON,
             f"Curtailable load: curtail_max_duration_h {d_h:g} h plus one snapshot does not fit in "
-            f"the {float(_hours(n, sns).sum()):g} weighted hours this LP spans.")
+            f"the {float(_hours(n, sns).sum()):g} weighted hours this LP spans.",
+        )
     m = n.model
     labels = m.variables["Generator-p"].labels.sel(name=GENERATOR).to_numpy()
     if labels.shape[0] != len(sns):
@@ -262,15 +286,23 @@ def add_rows(n, snapshots, terms: Terms, emit) -> tuple[int, int]:
     rhs = np.empty(len(found))
     for r, (i, j) in enumerate(found):
         k = j - i + 1
-        vars_[r, :k] = labels[i:j + 1]
-        coeffs[r, :k] = w[i:j + 1]
-        rhs[r] = d_h * terms.share * float(np.max(f[i:j + 1]))
-    data = xr.Dataset({"coeffs": (("DcCurtailment-run", "_term"), coeffs),
-                       "vars": (("DcCurtailment-run", "_term"), vars_)})
+        vars_[r, :k] = labels[i : j + 1]
+        coeffs[r, :k] = w[i : j + 1]
+        rhs[r] = d_h * terms.share * float(np.max(f[i : j + 1]))
+    data = xr.Dataset(
+        {
+            "coeffs": (("DcCurtailment-run", "_term"), coeffs),
+            "vars": (("DcCurtailment-run", "_term"), vars_),
+        }
+    )
     lhs = linopy.LinearExpression(data, m)
-    m.add_constraints(lhs <= xr.DataArray(rhs, dims="DcCurtailment-run"), name="DcCurtailment-energy")
+    m.add_constraints(
+        lhs <= xr.DataArray(rhs, dims="DcCurtailment-run"), name="DcCurtailment-energy"
+    )
     nonzeros = int((vars_ >= 0).sum())
-    emit(f"{len(found)} energy-proxy rows, {nonzeros} nonzeros (D = {d_h:g} h, {CLAIM_LIMIT}).")
+    emit(
+        f"{len(found)} energy-proxy rows, {nonzeros} nonzeros (D = {d_h:g} h, {CLAIM_LIMIT})."
+    )
     return len(found), nonzeros
 
 
