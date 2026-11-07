@@ -356,10 +356,10 @@ export const projectsApi = {
   createFromTemplate: (templateId: string, name?: string, params?: Record<string, unknown>) =>
     client.post<BundleImportResult>(
       `/projects/from_template/${encodeURIComponent(templateId)}`,
-      // Only the generic site (`eh_site`) takes parameters; any other
-      // template refuses a body.
+      // The generic site (`eh_site`) and the data centers (`dc_load`) take
+      // parameters; any other template refuses a body.
       params ?? null,
-      // A refused site (422 site_params_invalid) is shown beside its field.
+      // A refused site or dc_load (422) is shown beside its field.
       { params: name ? { name } : undefined, skipErrorToast: params !== undefined },
     ).then(r => r.data),
   /** The generic site form's presets, load shapes and bounds (G2). */
