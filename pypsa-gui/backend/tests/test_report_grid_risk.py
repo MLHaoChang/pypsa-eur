@@ -7,6 +7,7 @@ solve) is a chapter stated not established; a network with no process unit, or a
 every other report keeps its evidence hash.
 """
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -197,15 +198,13 @@ def test_the_tonnes_format_is_the_tabs(t, want):
     assert C.fmt_tonnes_year(t) == want
 
 
-@pytest.mark.parametrize(
-    "eur,want",
-    [
-        (1.2e6, f"€{NBSP}1.2{NBSP}m"),
-        (350e3, f"€{NBSP}350{NBSP}k"),
-        (12.0, f"€{NBSP}12"),
-    ],
-)
-def test_the_money_format_is_the_tabs(eur, want):
+_MONEY_CASES = json.loads(
+    (Path(__file__).resolve().parents[2] / "frontend/src/utils/money.cases.json").read_text(encoding="utf-8")
+)["cases"]
+
+
+@pytest.mark.parametrize("eur,want", _MONEY_CASES)
+def test_the_money_format_is_the_one_shared_with_the_tab(eur, want):
     assert C.fmt_eur_short(eur) == want
 
 

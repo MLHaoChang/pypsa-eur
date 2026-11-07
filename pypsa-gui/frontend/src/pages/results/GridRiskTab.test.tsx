@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { GridRiskLine, GridRiskProduction } from '../../api/types'
-import { GridRiskBody, fmtEurShort, fmtTonnesYear, flagWords, missingWord } from './GridRiskTab'
+import { GridRiskBody, moneyForGridRisk, fmtTonnesYear, flagWords, missingWord } from './GridRiskTab'
 
 const nav = vi.hoisted(() => ({ openFlowTarget: vi.fn(), openFlowTargetInPlace: vi.fn(), showResultsTab: vi.fn() }))
 vi.mock('../../layout/flowNavigation', () => nav)
@@ -36,8 +36,8 @@ describe('Grid risk to production (G2P-13)', () => {
   it('formats tonnes and money with non-breaking spaces', () => {
     expect(fmtTonnesYear(350)).toBe('350 t/yr')
     expect(fmtTonnesYear(1234)).toBe('1.23 kt/yr')
-    expect(fmtEurShort(1_200_000)).toBe('€ 1.2 m')
-    expect(fmtEurShort(350_000)).toBe('€ 350 k')
+    expect(moneyForGridRisk(1_200_000)).toBe('€ 1.2 m')
+    expect(moneyForGridRisk(350_000)).toBe('€ 350 k')
   })
 
   it('shows every line, the total as an upper bound with its reason, and the source in words', () => {
