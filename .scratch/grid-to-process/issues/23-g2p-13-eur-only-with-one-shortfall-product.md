@@ -3,7 +3,7 @@
 
 # G2P-13: lines 1–2 are priced in EUR only with exactly one shortfall product
 
-Status: ready-for-agent
+Status: done
 Type: task
 Found by: G2P-13 (#1194) PR body, "Skipped / risk".
 
