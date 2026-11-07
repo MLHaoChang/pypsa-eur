@@ -314,6 +314,8 @@ def test_a_csv_export_seals_the_table_as_written(baseline, client):
         ]
     )
     assert (manifest["schema_version"], manifest["source_kind"]) == (1, "table_export")
+    record = sidecar(export)
+    assert (record["filename"], record["rows"]) == ("t.csv", 3)
     assert client.get(export["download_url"]).status_code == 200
     (item,) = delivered_items(client, export)
     assert item["dataset_sha256"] == manifest["dataset_sha256"]
