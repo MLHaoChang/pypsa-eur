@@ -121,7 +121,7 @@ class Section(_Model):
         # Stored-format ruling: an undeclared section serializes byte-equal
         # to before Y (no `summarises` key in the version file or a dump).
         data = handler(self)
-        if self.summarises is None and isinstance(data, dict):
+        if self.summarises is None:
             data.pop("summarises", None)
         return data
 
