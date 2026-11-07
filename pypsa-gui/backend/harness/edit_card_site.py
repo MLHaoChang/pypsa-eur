@@ -770,6 +770,19 @@ def _target_text(expect: dict, unit: str | None) -> str:
     return f"{chat._text(expect['name'])} · {kind} ({', '.join(parts)})"
 
 
+def _units(project, expects: list[dict]) -> dict:
+    """`<Class>:<name>` (and None for a rebound association) -> the target's unit, read from the open network."""
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import associations, proposals
+
+    with PyPSAService.get_lock():
+        n = proposals._open_network(project.directory)
+        out = {f"{e['class']}:{e['name']}": associations._unit(n, e["class"], e["name"]) for e in expects}
+    if len(expects) == 1:
+        out[None] = next(iter(out.values()))
+    return out
+
+
 def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
     """One row per target the preview maps, with its full identity, and no model value (G9, H1)."""
     from services.site_scene import chat
@@ -777,6 +790,7 @@ def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
     name, rows = "3D site", []
     preview, stored, action = entry["preview"], entry.get("stored") or {}, entry["action"]
     picked = chat.picks(project, owner, entry["site_id"], entry["id"])
+    units = _units(project, [t[0] for t in _targets(entry)])
 
     def note(text: str) -> None:
         rows.append(_note("Settings", name, f"note_{len(rows)}", text))
@@ -801,10 +815,10 @@ def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
         for key, step in (stored.get("plan") or {}).items():
             e = step["entry"]
             on = "on the roof" if str(e.get("on", "ground")).startswith("roof:") else "on the ground"
-            note(f"Place {_target_text(step['expect'], None)} at x {e['x']:g} m, y {e['y']:g} m, "
+            note(f"Place {_target_text(step['expect'], units.get(key))} at x {e['x']:g} m, y {e['y']:g} m, "
                  f"heading {e['heading']:g}°, {on}")
     elif action == "rebind":
-        note(f"Attach again to {_target_text(stored['expect'], None)}, was {chat._text(preview.get('was'))}")
+        note(f"Attach again to {_target_text(stored['expect'], units.get(None))}, was {chat._text(preview.get('was'))}")
     else:
         verb = "Take off the site" if action == "detach" else "Put back on the site"
         for item in preview.get("items") or []:

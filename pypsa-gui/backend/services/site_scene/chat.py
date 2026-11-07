@@ -25,6 +25,7 @@ import contextlib
 import json
 import re
 import threading
+import time
 from typing import Any
 from collections.abc import Iterator
 
@@ -150,8 +151,11 @@ def _read_back(
 
 # SC-07 S4 (GK B H1): which features a clarify asked about, and how many
 # candidates it listed, so the card of the prepare that follows says the user
-# picked that target from N. Keyed by (project, owner, site, feature); bounded.
-_CLARIFIED: dict[tuple, int] = {}
+# picked that target from N. Keyed by (project, owner, site, feature) to
+# (N, when asked); bounded, and an answer older than CLARIFY_TTL_SECONDS (a
+# preview's own life) claims no pick.
+_CLARIFIED: dict[tuple, tuple[int, float]] = {}
+CLARIFY_TTL_SECONDS = 30 * 60
 # The picks a prepared preview carries: (project, owner, site, proposal) -> {feature: N}.
 _PICKS: dict[tuple, dict[str, int]] = {}
 
@@ -574,7 +578,9 @@ def _clarify(
         "base_revision": base_revision,
         "field": "target",
         "question": _text(exc.message) if code != "ambiguous_target" else None,
-        "data_fields": [
+        "data_fields": ["question", "target.name"]
+        if code != "ambiguous_target"
+        else [
             "question",
             "feature",
             "candidates[].name",
@@ -611,7 +617,9 @@ def _clarify(
     )
     for feature in features:
         _remember(
-            _CLARIFIED, (project.registry_key, owner, site_id, feature), len(names)
+            _CLARIFIED,
+            (project.registry_key, owner, site_id, feature),
+            (len(names), time.monotonic()),
         )
     return out
 
@@ -726,12 +734,12 @@ def prepare(
                     if not row.get("name"):
                         continue
                     with _UNKNOWN_LOCK:  # one clarify answers one pick
-                        n = _CLARIFIED.pop(
+                        asked = _CLARIFIED.pop(
                             (project.registry_key, owner, site_id, row.get("feature")),
                             None,
                         )
-                    if n:
-                        picked[row["feature"]] = n
+                    if asked and time.monotonic() - asked[1] <= CLARIFY_TTL_SECONDS:
+                        picked[row["feature"]] = asked[0]
                 if picked:
                     _remember(
                         _PICKS,
