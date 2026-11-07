@@ -1329,3 +1329,13 @@ def test_a_window_carries_in_only_from_its_own_period():
     assert carried == 2  # the runs from 2040's positions 6 and 7
     assert rows[0] == (0, 0, pytest.approx(2.0 * SHARE * f[6:9].max() - 2.0))
     assert rows[1] == (0, 1, pytest.approx(2.0 * SHARE * f[7:10].max() - 1.0))
+
+
+def test_a_carry_in_that_meets_its_bound_exactly_is_not_a_clip():
+    """C20a: a bound of exactly 0 after the carry-in is no overshoot: no clip line."""
+    whole = 2.0 * SHARE * (IT + COOL)[2:5].max()  # the run (2, 4) across start 4
+    n, sns, window = _window_state(np.array([0.0, 0.0, whole, 0.0]))
+    lines: list[str] = []
+    rows, _ = C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
+    assert rows[0] == (0, 0, 0.0)
+    assert not any("clipped" in ln for ln in lines)
