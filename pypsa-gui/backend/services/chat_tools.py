@@ -2400,8 +2400,9 @@ def put_library_item(kind: str, name: str, payload: dict, meta: dict | None = No
             # This caller can state the currency, so its words keep that half (UX 10).
             raise HTTPException(status_code=exc.status_code, detail={
                 "error_kind": "tariff_currency_required",
-                "message": f"{exc.detail['message'][:300]} Or state payload.currency "
-                           "(a three-letter ISO 4217 code, such as EUR)."}) from exc
+                "message": f"{exc.detail['message'][:300].removesuffix(', or state the currency.')}, "
+                           "or state payload.currency (a three-letter ISO 4217 code, "
+                           "such as EUR)."}) from exc
         raise
 
 
