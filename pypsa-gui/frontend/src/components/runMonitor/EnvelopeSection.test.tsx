@@ -1,11 +1,14 @@
 // Study harness issue 08: the plan-review card's Envelope section (UX
 // conditions 2 and 3; design §7 "Grant").
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ChoiceCard } from '../ChatPanel'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore } from '../../store/uiStore'
 import * as api from '../../api/runMonitor'
+import { RELIABILITY_GOAL_LABEL } from '../../hooks/useReliabilityGoal'
 import { ENVELOPE, STATES, TASK_ID } from './runFixtures'
 
 vi.mock('../../api/runMonitor', () => ({
@@ -214,19 +217,46 @@ describe('EnvelopeSection reliability goal', () => {
     const goal = { value: 2, unit: 'h/yr' as const, source: 'template' }
     openWith(goal)
     await waitFor(() => expect((screen.getAllByTestId('envelope-verdict')[0] as HTMLButtonElement).disabled).toBe(false))
-    expect(screen.getByTestId('envelope-goal').textContent).toBe('Reliability goal (LOLE): 2 h/yr, from the eh_site template')
+    expect(screen.getByTestId('envelope-goal').textContent).toBe("Reliability goal (LOLE): 2 h/yr, from the site template's default")
     fireEvent.click(screen.getAllByTestId('envelope-verdict')[0])
     expect(useChatStore.getState().requestQueue[0].harness!.envelope_decision!.goal).toEqual(goal)
   })
 
-  it('says when no goal is set, and a run without a goal row sends none', async () => {
+  it('names the missing goal, blocks only the unattended approval, and a run without a goal row sends none', async () => {
     openWith({ value: null, unit: 'h/yr', source: 'default' })
-    await waitFor(() => expect(screen.getByTestId('envelope-goal').textContent).toContain('No reliability goal is set'))
+    await waitFor(() => expect(screen.getByTestId('envelope-unattended-reason').textContent)
+      .toBe('Set the reliability goal first: see above.'))
+    expect(screen.getByTestId('envelope-goal').textContent).toBe('No reliability goal is set. Missing: Reliability goal (LOLE) ›')
+    const [unattended, stepwise] = screen.getAllByTestId('envelope-verdict') as HTMLButtonElement[]
+    expect(unattended.disabled).toBe(true)
+    expect(stepwise.disabled).toBe(false)
     cleanup()
     openWith(undefined)
     await waitFor(() => expect((screen.getAllByTestId('envelope-verdict')[0] as HTMLButtonElement).disabled).toBe(false))
     expect(screen.queryByTestId('envelope-goal')).toBeNull()
     fireEvent.click(screen.getAllByTestId('envelope-verdict')[0])
     expect(useChatStore.getState().requestQueue.at(-1)!.harness!.envelope_decision!.goal).toBeUndefined()
+  })
+
+  it.each(['guided', 'expert'] as const)('the missing goal opens its editor in %s, with Back to this card', async (mode) => {
+    useUIStore.setState({ uiMode: mode, activeSection: 'project', activeSlidePanel: null, fieldDrawer: null, flowReturn: null })
+    openWith({ value: null, unit: 'h/yr', source: 'default' })
+    fireEvent.click(await screen.findByTestId('envelope-goal-fix'))
+    const ui = useUIStore.getState()
+    expect(ui.uiMode).toBe(mode)
+    expect(ui.activeSection).toBe('scenarios')
+    expect(ui.solverBlockRequest).toBe('goal')
+    expect(ui.flowReturn).not.toBeNull()
+    expect(screen.getByTestId('envelope-section')).toBeTruthy()
+  })
+
+  it('names the goal in the words the run intake and the template ledgers use', () => {
+    const backend = resolve(__dirname, '../../../../backend')
+    const profiles = readFileSync(resolve(backend, 'services/run_profiles.py'), 'utf8')
+    expect(profiles).toContain(`_num(\n        "${RELIABILITY_GOAL_LABEL}"`)
+    for (const t of ['eh_microgrid', 'eh_datacenter', 'eh_datacenter_staged']) {
+      const ledger = JSON.parse(readFileSync(resolve(backend, `project_templates/${t}/eh_template.json`), 'utf8')).ledger
+      expect(ledger.find((r: { field: string }) => r.field === 'target_lole_h').label).toBe(RELIABILITY_GOAL_LABEL)
+    }
   })
 })

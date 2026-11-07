@@ -625,7 +625,7 @@ def _gap_row(gap):
     return f"- No tariff is filled: {', '.join(held[:-1])} and {held[-1]} are {both} held, so you choose one yourself."
 
 
-_GOAL_SOURCE = {"stored": "from the project's solver settings", "template": "from the eh_site template"}
+_GOAL_SOURCE = {"stored": "from the project's solver settings", "template": "from the site template's default"}
 
 
 def _same_goal(shown, live):

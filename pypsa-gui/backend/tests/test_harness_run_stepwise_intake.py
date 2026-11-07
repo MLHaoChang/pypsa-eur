@@ -361,11 +361,11 @@ def test_a_template_goal_is_on_the_card_with_its_source_and_frozen_at_the_grant(
     task = start()
     shown = {"value": 2.0, "unit": "h/yr", "source": "template"}
     assert task["envelope"]["goal"] == shown
-    assert "2 h/yr (from the eh_site template)" in task["envelope"]["detail"]
+    assert "2 h/yr (from the site template's default)" in task["envelope"]["detail"]
     message = run_envelope.decide(
         session, task["task_id"], "unattended", goal=task["envelope"]["goal"]
     )
-    assert "2 h/yr (from the eh_site template)" in message
+    assert "2 h/yr (from the site template's default)" in message
     granted = envelope_of(task_path(site[1], task))
     assert granted["state"] == "granted" and granted["goal"] == shown
     # Only a proposed card reads the live goal: a granted one shows what was frozen, or none.
