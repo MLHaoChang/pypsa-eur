@@ -1,0 +1,1 @@
+* Chore(pypsa-gui): The data-centre backup and power-architecture comparison routes are now declared as UI pointers (owner decision DC20-POINTER-1) instead of held for a chat tool: chat points to the Backup and Power architecture sections of the Grid study tab and does not set, assess or compare them.

@@ -91,6 +91,7 @@ from services.solver.periodized_costs import (  # noqa: F401
 from services.validation_service import has_errors, validate_for_run
 from services.solver import fixed_sizes as _fixed_sizes
 from services.solver import operational as _operational
+from services.solver import operational_gap as _operational_gap
 from services.solver.adequacy import (  # noqa: F401
     _prm_margin,
     _wrap_with_ens_cap,
@@ -1059,6 +1060,7 @@ def run_simulation(
                 # back to the full horizon below; it is refused instead (C6).
                 _operational.fallback_refusal(config, sclopf=use_sclopf)
                 network.meta.pop(_operational.META_KEY, None)
+                _operational_gap.clear(network)  # DC 07 S3: a gap never outlives its run (C25)
                 use_rolling = (
                     getattr(config, "solve_strategy", "full") == "rolling"
                     and not use_sclopf
@@ -1080,8 +1082,12 @@ def run_simulation(
                         raise ValueError(
                             f"rolling_overlap ({O}) must be < rolling_horizon ({H})."
                         )
-                    # DC-07 S2: no duration rows across windows until C20's carry-in.
-                    _dc_curtailment.refuse_rolling()
+                    # DC-07 C20: the operational run carries the duration rows in across
+                    # its windows (D must fit the first window); plain rolling refuses them.
+                    if _operational.is_operational(config):
+                        _dc_curtailment.check_window(network, H)
+                    else:
+                        _dc_curtailment.refuse_rolling()
                     phase(
                         f"Rolling-horizon solve: {len(network.snapshots)} snapshots "
                         f"in windows of {H} (overlap {O})"

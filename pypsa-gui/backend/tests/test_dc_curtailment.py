@@ -1005,3 +1005,393 @@ def test_energy_flows_refuse_a_curtailment_they_cannot_read(monkeypatch):
     assert shape["status"] != "ok" and C.NOT_ESTABLISHED in json.dumps(
         shape, default=str
     )
+
+
+# ── C20: carry-in under the operational run (GK A C20a-C20f) ─────────────────
+
+from services.solver import operational as OP  # noqa: E402
+
+
+def _op(n, monkeypatch, terms, horizon=6, overlap=2, **cfg_kw):
+    return _solve(
+        n,
+        monkeypatch,
+        terms,
+        solve_strategy="rolling",
+        fixed_sizes="nameplate",
+        rolling_horizon=horizon,
+        rolling_overlap=overlap,
+        **cfg_kw,
+    )
+
+
+def _bounds(p, hours, d):
+    """(first, last, whole-run bound, sum) of every full-horizon run of the stitched dispatch."""
+    w = np.full(len(p), hours)
+    f = IT + COOL
+    return [
+        (
+            i,
+            j,
+            d * SHARE * f[i : j + 1].max(),
+            float((w[i : j + 1] * p[i : j + 1]).sum()),
+        )
+        for i, j in C.runs(pd.Series(w), d, pd.RangeIndex(len(p)))
+    ]
+
+
+def _starts(horizon, overlap, count=len(IT)):
+    return [s for i, s, _ in OP.windows(pd.RangeIndex(count), horizon, overlap) if i]
+
+
+@pytest.mark.parametrize("hours,d", [(1.0, 2.0), (2.0, 4.0)])
+def test_the_operational_run_carries_the_duration_in_and_it_binds(
+    monkeypatch, hours, d
+):
+    """C20, C9: with O > 0 the stitched dispatch holds every full-horizon run's bound (C20a's
+    whole-run right-hand side), and a run across a window start is tight with a nonzero
+    final dispatch before the start: the carry-in binds."""
+    n = _network(hours=hours)
+    status, cond, sink, lines = _op(n, monkeypatch, _terms(d=d))
+    assert status in ("ok", "optimal"), cond
+    p = _curtailed(sink).to_numpy()
+    rows = _bounds(p, hours, d)
+    assert min(b - s for _, _, b, s in rows) >= -1e-6
+    starts = _starts(6, 2)
+    tight = [
+        (i, j)
+        for i, j, b, s in rows
+        if any(i < st <= j and p[i:st].sum() > 1e-6 for st in starts)
+        and s == pytest.approx(b, abs=1e-6)
+    ]
+    assert tight
+    carried = [ln for ln in lines if "carried in" in ln]
+    assert (
+        len(carried) == 3
+        and "window 1: " in carried[0]
+        and "(0 carried in)" in carried[0]
+    )
+    assert all("(0 carried in)" not in ln for ln in carried[1:])
+    assert n.meta[C.META_KEY]["claim_limit"] == C.CLAIM_LIMIT
+    assert "carried across operational windows" in C.CLAIM_LIMIT
+
+
+def test_without_the_carry_in_the_stitched_dispatch_breaks_a_run(monkeypatch):
+    """The counterfactual of C20: windows that see no dispatch before their start curtail past
+    a run's bound at a boundary (H = 3, O = 1); with it, every run holds."""
+    status, cond, sink, _ = _op(_network(), monkeypatch, _terms(d=2.0), 3, 1)
+    assert status in ("ok", "optimal"), cond
+    rows = _bounds(_curtailed(sink).to_numpy(), 1.0, 2.0)
+    assert min(b - s for _, _, b, s in rows) >= -1e-6
+    monkeypatch.setattr(C, "_carried", lambda n, full, a, b, w: np.zeros(b - a))
+    status, cond, sink, _ = _op(_network(), monkeypatch, _terms(d=2.0), 3, 1)
+    assert status in ("ok", "optimal"), cond
+    rows = _bounds(_curtailed(sink).to_numpy(), 1.0, 2.0)
+    assert min(b - s for _, _, b, s in rows) < -1e-3
+
+
+def test_a_run_ended_before_the_window_is_already_held_so_dropping_it_changes_nothing(
+    monkeypatch,
+):
+    """C20d: a run that ends before a window's start would enter that window as a row with no
+    variable, ``0 <= bound - its final dispatch``; it holds at every start, so keeping it
+    would change no stitched result."""
+    status, cond, sink, _ = _op(_network(), monkeypatch, _terms(d=2.0))
+    assert status in ("ok", "optimal"), cond
+    p = _curtailed(sink).to_numpy()
+    dropped = [
+        (b, s) for st in _starts(6, 2) for i, j, b, s in _bounds(p, 1.0, 2.0) if j < st
+    ]
+    assert dropped and all(s <= b + 1e-6 for b, s in dropped)
+
+
+def _window_state(before, start=4, stop=10, written=6):
+    n = _network()
+    n.add("Generator", C.GENERATOR, bus=C.COOLING_BUS, p_nom=30.0)
+    p = pd.Series(np.nan, index=n.snapshots)
+    p.iloc[:start] = before
+    n.generators_t.p[C.GENERATOR] = p
+    window = {
+        "network": n,
+        "index": 1,
+        "start": start,
+        "stop": stop,
+        "written": written,
+    }
+    return n, n.snapshots[start:stop], window
+
+
+def test_window_rows_carry_the_whole_runs_bound_less_the_final_dispatch():
+    """C20a: each row's right-hand side is D * share * max F over the whole run (the
+    full-horizon facility), less the run's final dispatch before the start; rows past the
+    window's end are cut at it; a carry-in row is feasible at zero curtailment."""
+    before = np.array([20.0, 20.0, 0.0, 1.0])
+    n, sns, window = _window_state(before)
+    rows, carried = C._window_rows(n, sns, _terms(d=2.0), window, print)
+    f = IT + COOL
+    full = C.runs(pd.Series(1.0, index=range(12)), 2.0, pd.RangeIndex(12))
+    live = [(i, j) for i, j in full if j >= 4 and i < 10]
+    assert len(rows) == len(live) and carried == sum(i < 4 for i, _ in live)
+    for (i, j), (a, b, bound) in zip(live, rows):
+        assert (a, b) == (max(i, 4) - 4, min(j, 9) - 4)
+        whole = 2.0 * SHARE * f[i : j + 1].max()
+        assert bound == pytest.approx(whole - before[i:4].sum() if i < 4 else whole)
+        assert bound >= 0.0
+    assert any(
+        j > 9 for _, j in live
+    )  # a run cut at the window's end keeps its whole bound
+
+
+@pytest.mark.parametrize(
+    "over,options,clips",
+    [
+        (5e-7, {}, True),  # under the 1e-6 MWh floor: solver noise
+        (2e-6, {}, False),  # above the floor (and above 1e-9 of the bound)
+        (1e-3, {}, False),
+        (5e-6, {"primal_feasibility_tolerance": 1e-6}, True),  # 10x a looser solver
+        (2e-5, {"primal_feasibility_tolerance": 1e-6}, False),
+        (5e-7, {"primal_feasibility_tolerance": "x"}, True),  # unreadable: the floor
+        (2e-6, {"primal_feasibility_tolerance": float("nan")}, False),
+    ],
+)
+def test_a_carry_in_overshoot_within_the_noise_floor_clips_and_a_larger_one_refuses(
+    over, options, clips
+):
+    """C20a: an overshoot up to max(1e-9 * bound, CARRY_IN_FLOOR_MWH, 10x the solver's primal
+    feasibility tolerance) clips to 0 with a log line naming the run; more raises typed."""
+    whole = 2.0 * SHARE * (IT + COOL)[2:5].max()  # the run (2, 4) across start 4
+    assert 1e-9 * whole < 5e-7  # the floor, not the relative term, decides here
+    n, sns, window = _window_state(np.array([0.0, 0.0, whole / 2, whole / 2 + over]))
+    window["solver_options"] = options
+    lines: list[str] = []
+    if clips:
+        rows, _ = C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
+        assert rows[0] == (0, 0, 0.0)
+        assert any("clipped to 0" in ln and str(n.snapshots[2]) in ln for ln in lines)
+        return
+    with pytest.raises(C.DcCurtailmentRefused) as exc:
+        C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
+    assert exc.value.kind == C.CARRY_IN_OVER_BOUND
+
+
+def test_the_carry_in_floor_is_ten_times_highs_default_tolerance():
+    assert C.CARRY_IN_FLOOR_MWH == pytest.approx(10 * 1e-7)
+    assert C._clip_floor({}) == C.CARRY_IN_FLOOR_MWH
+    assert C._clip_floor(
+        {"solver_options": {"primal_feasibility_tolerance": 1e-9}}
+    ) == (C.CARRY_IN_FLOOR_MWH)
+
+
+@pytest.mark.parametrize("fault", ["nan", "missing", "unwritten"])
+def test_a_carry_in_with_no_final_dispatch_is_refused_typed(fault):
+    """C20c: a NaN, a missing column, or a start the earlier windows did not reach."""
+    n, sns, window = _window_state(np.array([20.0, 20.0, 0.0, 1.0]))
+    if fault == "nan":
+        n.generators_t.p.loc[n.snapshots[3], C.GENERATOR] = np.nan
+    elif fault == "missing":
+        n.generators_t.p = n.generators_t.p.drop(columns=C.GENERATOR)
+    else:
+        window["written"] = 3
+    with pytest.raises(C.DcCurtailmentRefused) as exc:
+        C._window_rows(n, sns, _terms(d=2.0), window, print)
+    assert exc.value.kind == C.CARRY_IN_UNAVAILABLE
+
+
+def test_a_window_whose_snapshots_are_not_the_lps_is_an_error():
+    n, _sns, window = _window_state(np.zeros(4))
+    with pytest.raises(RuntimeError, match="operational window"):
+        C._window_rows(n, n.snapshots[4:9], _terms(d=2.0), window, print)
+
+
+def test_outside_an_operational_window_a_mid_horizon_lp_reads_no_dispatch():
+    """C20b: a sub-horizon LP built outside ``run_windows`` keeps today's rows over its own
+    snapshots and never reads ``generators_t.p`` (a previous run's dispatch, here poisoned)."""
+    n, sns, _window = _window_state(np.full(4, 1e6))
+    n.generators_t.p.loc[:, C.GENERATOR] = np.nan
+    n.optimize.create_model(snapshots=sns)
+    lines: list[str] = []
+    rows, nz = C.add_rows(n, sns, _terms(d=2.0), lines.append)
+    assert rows == len(C.runs(pd.Series(1.0, index=range(6)), 2.0, pd.RangeIndex(6)))
+    assert nz == 3 * rows and "carried in" not in lines[0]
+
+
+def test_the_window_flag_names_its_network_and_is_reset_after_a_run(monkeypatch):
+    a, b = _network(), _network()
+    token = OP._WINDOW.set(
+        {"network": a, "index": 0, "start": 0, "stop": 6, "written": 0}
+    )
+    try:
+        assert OP.current_window(a)["stop"] == 6
+        assert OP.current_window(b) is None
+    finally:
+        OP._WINDOW.reset(token)
+    assert OP.current_window(a) is None
+    seen: list = []
+    real = OP.current_window
+    monkeypatch.setattr(
+        OP, "current_window", lambda n: seen.append(real(n)) or seen[-1]
+    )
+    status, cond, _, _ = _op(
+        a,
+        monkeypatch,
+        _terms(d=2.0),
+        solver_options={"primal_feasibility_tolerance": 1e-7},
+    )
+    assert status in ("ok", "optimal"), cond
+    # DC-07 S3: the full-horizon reference solves first, with no window flagged (C23).
+    ref, seen = seen[0], seen[1:]
+    assert ref is None
+    assert [w["index"] for w in seen] == [0, 1, 2]
+    assert all(
+        w["solver_options"]["primal_feasibility_tolerance"] == 1e-7 for w in seen
+    )
+    assert real(a) is None
+
+
+def test_a_failed_window_is_never_a_carry_in_source(monkeypatch):
+    """C20, C2: window 2 is infeasible; the run stops typed, window 3 builds no rows, and no
+    curtailment record or flag is left."""
+    n = _network()
+    pmax = pd.Series(1.0, index=n.snapshots)
+    pmax.iloc[7] = 0.01  # 10 MW of grid at snapshot 7, in window 2 only ([4, 10))
+    n.generators_t.p_max_pu["grid"] = pmax
+    status, cond, _, lines = _op(n, monkeypatch, _terms(d=2.0), voll=0.0)
+    assert status not in ("ok", "optimal")
+    assert "operational_window_failed: window 2" in cond
+    windows = [ln for ln in lines if "carried in" in ln]
+    assert [ln.split(":")[0] for ln in windows] == [
+        "[CURTAIL] window 1",
+        "[CURTAIL] window 2",
+    ]
+    assert OP.current_window(n) is None
+    assert C.META_KEY not in n.meta
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
+
+
+@pytest.mark.parametrize(
+    "hours,d,ok", [(2.0, 4.0, True), (2.0, 5.0, False), (1.0, 4.0, True)]
+)
+def test_a_duration_the_first_window_cannot_hold_is_refused_before_any_window(
+    monkeypatch, hours, d, ok
+):
+    """C21 / C20e, in weighted hours: H = 3 two-hourly snapshots hold D = 4 plus one snapshot
+    but not D = 5, refused before the first window. Hourly, H = 6 holds D = 4 though the last
+    window ([8, 12)) is shorter than D plus one: its runs carry in."""
+    n = _network(hours=hours)
+    horizon, overlap = (3, 1) if hours == 2.0 else (6, 2)
+    status, cond, sink, lines = _op(n, monkeypatch, _terms(d=d), horizon, overlap)
+    if ok:
+        assert status in ("ok", "optimal"), cond
+        rows = _bounds(_curtailed(sink).to_numpy(), hours, d)
+        assert min(b - s for _, _, b, s in rows) >= -1e-6
+        return
+    assert status == "error"
+    assert cond.startswith(f"curtailment_refused: {C.DURATION_EXCEEDS_WINDOW}:")
+    assert not any("carried in" in ln or "window(s) solved" in ln for ln in lines)
+    assert C.GENERATOR not in n.generators.index
+    with pytest.raises(C.DcCurtailmentRefused) as exc:
+        C.check_window(n, 3, _terms(d=5.0))
+    assert exc.value.kind == C.DURATION_EXCEEDS_WINDOW
+    C.check_window(n, 3, _terms())  # no duration: nothing to fit
+    C.check_window(n, 3, _terms(d=4.0))
+
+
+def test_with_no_overlap_each_window_carries_in_from_the_last(monkeypatch):
+    """C20 at O = 0: a window starts where the last one stopped (start == written); the
+    carry-in still binds, so the stitched dispatch holds every full-horizon run."""
+    status, cond, sink, lines = _op(_network(), monkeypatch, _terms(d=2.0), 4, 0)
+    assert status in ("ok", "optimal"), cond
+    rows = _bounds(_curtailed(sink).to_numpy(), 1.0, 2.0)
+    assert min(b - s for _, _, b, s in rows) >= -1e-6
+    assert sum("carried in" in ln and "(0 carried in)" not in ln for ln in lines) == 2
+
+
+def test_check_window_without_project_terms_is_a_no_op(monkeypatch):
+    monkeypatch.setattr(C, "project_terms", lambda: None)
+    C.check_window(_network(), 1)
+    C.refuse_rolling()
+
+
+def test_a_window_carries_in_only_from_its_own_period():
+    """Runs never cross a period: a window in the second period carries in from that period's
+    snapshots before its start, never from the first period's."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=6, freq="h"))
+    n.set_investment_periods([2030, 2040])
+    n.add("Bus", "dc_mv")
+    n.add("Bus", "it_bus")
+    n.add("Load", "it_load", bus="it_bus", p_set=pd.Series(IT, index=n.snapshots))
+    n.add("Load", "cooling", bus="dc_mv", p_set=pd.Series(COOL, index=n.snapshots))
+    n.add("Generator", C.GENERATOR, bus="dc_mv", p_nom=30.0)
+    p = pd.Series(np.nan, index=n.snapshots)
+    p.iloc[:8] = 1.0
+    n.generators_t.p[C.GENERATOR] = p
+    window = {"network": n, "index": 1, "start": 8, "stop": 12, "written": 9}
+    rows, carried = C._window_rows(n, n.snapshots[8:12], _terms(d=2.0), window, print)
+    f = IT + COOL
+    assert carried == 2  # the runs from 2040's positions 6 and 7
+    assert rows[0] == (0, 0, pytest.approx(2.0 * SHARE * f[6:9].max() - 2.0))
+    assert rows[1] == (0, 1, pytest.approx(2.0 * SHARE * f[7:10].max() - 1.0))
+
+
+def test_a_carry_in_that_meets_its_bound_exactly_is_not_a_clip():
+    """C20a: a bound of exactly 0 after the carry-in is no overshoot: no clip line."""
+    whole = 2.0 * SHARE * (IT + COOL)[2:5].max()  # the run (2, 4) across start 4
+    n, sns, window = _window_state(np.array([0.0, 0.0, whole, 0.0]))
+    lines: list[str] = []
+    rows, _ = C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
+    assert rows[0] == (0, 0, 0.0)
+    assert not any("clipped" in ln for ln in lines)
+
+
+def test_on_a_large_bound_the_relative_tolerance_decides():
+    """C20a: with a bound above 1000 MWh, 1e-9 * bound exceeds the floor: an overshoot between
+    the two clips; one past 1e-9 * bound raises."""
+    scale = 1e4
+    whole = 2.0 * SHARE * (IT + COOL)[2:5].max() * scale
+    assert 1e-9 * whole > 1e2 * C.CARRY_IN_FLOOR_MWH
+    for over, clips in ((1e-9 * whole / 2, True), (1e-9 * whole * 2, False)):
+        n, sns, window = _window_state(
+            np.array([0.0, 0.0, whole / 2, whole / 2 + over])
+        )
+        n.loads_t.p_set *= scale
+        lines: list[str] = []
+        if clips:
+            rows, _ = C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
+            assert rows[0] == (0, 0, 0.0) and any("clipped" in ln for ln in lines)
+        else:
+            with pytest.raises(C.DcCurtailmentRefused) as exc:
+                C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
+            assert exc.value.kind == C.CARRY_IN_OVER_BOUND
+
+
+def test_with_a_fractional_duration_the_lookback_reaches_the_earliest_spanning_run():
+    """C20 lookback: with unit weights, D = 2.5 h and the start at 6, the runs spanning the
+    start are (3, 6), (4, 7) and (5, 8); the earliest starts D + one snapshot before the start,
+    so the lookback must reach back by the longest snapshot too."""
+    before = np.array([0.0, 0.0, 0.0, 9.0, 1.0, 1.0])
+    n, sns, window = _window_state(before, start=6, stop=12, written=8)
+    rows, carried = C._window_rows(n, sns, _terms(d=2.5), window, print)
+    f = IT + COOL
+    spanning = [
+        (i, j)
+        for i, j in C.runs(pd.Series(1.0, index=range(12)), 2.5, pd.RangeIndex(12))
+        if i < 6 <= j
+    ]
+    assert spanning == [(3, 6), (4, 7), (5, 8)]
+    assert carried == 3
+    assert rows[0] == (0, 0, pytest.approx(2.5 * SHARE * f[3:7].max() - 11.0))
+
+
+def test_an_operational_run_with_a_fractional_duration_holds_every_run(monkeypatch):
+    """The same lookback through the operational run (H 6, O 2, D 2.5 h): the stitched
+    dispatch holds every full-horizon run, including those starting 3 snapshots before a
+    window."""
+    status, cond, sink, lines = _op(_network(), monkeypatch, _terms(d=2.5))
+    assert status in ("ok", "optimal"), cond
+    rows = _bounds(_curtailed(sink).to_numpy(), 1.0, 2.5)
+    assert min(b - s for _, _, b, s in rows) >= -1e-6
+    assert [ln.count("(3 carried in)") for ln in lines if "carried in" in ln][1:] == [
+        1,
+        1,
+    ]

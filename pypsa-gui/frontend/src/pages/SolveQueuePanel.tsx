@@ -493,10 +493,15 @@ export default function SolveQueuePanel() {
         toast.success(`Queued '${name}' to solve`)
       }
     } catch (e) {
-      const resp = (e as { response?: { status?: number; data?: { detail?: string } } })?.response
+      const resp = (e as { response?: { status?: number; data?: { detail?: string | { error_kind?: string; message?: string } } } })?.response
       const detail = resp?.data?.detail
       if (resp?.status === 409) {
-        toast.error(detail ?? 'Cannot queue while a solve is in progress — wait for the queue to finish.')
+        // A conflicting solver config answers with an object detail; the older 409s send a string.
+        if (typeof detail === 'object' && detail?.error_kind === 'solve_config_conflict') {
+          toast.error(detail.message ?? `'${name}' already has a solve with other settings in the queue.`)
+        } else if (typeof detail === 'string') {
+          toast.error(detail)
+        } else toast.error('Cannot queue while a solve is in progress — wait for the queue to finish.')
       } else if (resp?.status === 404) {
         toast.error(`'${name}' has no saved network yet — save it first.`)
       } else {

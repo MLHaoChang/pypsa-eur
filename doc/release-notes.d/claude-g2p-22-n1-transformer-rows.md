@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Grid risk to production lists each N-1 site transformer as its own row ("<transformer> out of service", lost tonnes and EUR per year) under the N-1 line in the Expert table and the report; Guided keeps the single N-1 tile, and the N-1 basis names any transformer it could not count.

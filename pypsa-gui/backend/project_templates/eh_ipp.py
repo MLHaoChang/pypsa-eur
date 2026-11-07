@@ -33,6 +33,8 @@ PACK_VERSION = "2026-10-26"
 # ── The plant and the connection (owner Q-IPP2 = A, Q-IPP3 = A) ────────────
 WIND_MW = 60.0
 PV_MWP = 50.0
+PV_DC_AC_RATIO = 1.2   # TCU06-AC-1: the plant's DC/AC ratio
+PV_MW_AC = PV_MWP / PV_DC_AC_RATIO   # p_nom is the AC rating (about 41.7 MW)
 EXPORT_MW = 70.0
 IMPORT_MW = 20.0
 BESS_MAX_MW = 50.0
@@ -168,12 +170,14 @@ def build_eh_ipp_hybrid(load_spec=None, planning=None) -> "pypsa.Network":  # no
     # Forced-size candidates (G5): the investment case counts their capex and the
     # counterfactual (the site without its candidates) is empty.
     for name, carrier, mw, tech in (("wind_farm", "wind", WIND_MW, "onwind"),
-                                    ("pv_plant", "solar", PV_MWP, "solar-utility")):
+                                    ("pv_plant", "solar", PV_MW_AC, "solar-utility")):
         n.add("Generator", name, bus="poi", carrier=carrier, p_nom=mw, p_nom_extendable=True,
               p_nom_min=mw, p_nom_max=mw, marginal_cost=0.0)
+        if name == "pv_plant":
+            n.generators.loc[name, "dc_ac_ratio"] = PV_DC_AC_RATIO
         _price(n, "generators", name, tech)
     n.generators_t.p_max_pu = pd.DataFrame({"wind_farm": wind.to_numpy(),
-                                            "pv_plant": sun.to_numpy()}, index=idx)
+                                            "pv_plant": np.minimum(sun.to_numpy() * PV_DC_AC_RATIO, 1.0)}, index=idx)
     n.add("StorageUnit", "bess", bus="poi", carrier="battery", p_nom=0.0,
           p_nom_extendable=True, p_nom_max=BESS_MAX_MW, max_hours=BESS_HOURS,
           efficiency_store=BESS_EFF, efficiency_dispatch=BESS_EFF,
@@ -421,14 +425,14 @@ def _ledger(planning=None) -> list[dict]:
         {"item": "bidding zone", "value": "DE-LU", "source": "assumed",
          "note": "re-derived from the pin once it is set"},
         {"item": "export limit", "value": f"{EXPORT_MW:g} MW (grid_export)", "source": "assumed",
-         "note": f"from the connection offer; below the plants' {WIND_MW + PV_MWP:g} MW "
-                 f"(overbuild {(WIND_MW + PV_MWP) / EXPORT_MW:.2f})"},
+         "note": f"from the connection offer; below the plants' {WIND_MW + PV_MW_AC:.1f} MW "
+                 f"(overbuild {(WIND_MW + PV_MW_AC) / EXPORT_MW:.2f})"},
         {"item": "import limit", "value": f"{IMPORT_MW:g} MW (grid_import)", "source": "assumed",
          "note": "auxiliaries and battery grid charging"},
         {"item": "wind farm", "value": f"{WIND_MW:g} MW, fixed new build", "source": "pack",
          "note": f"onwind costs from defaults pack {PACK_VERSION}; forced size (the IC counts "
                  "the capex)"},
-        {"item": "PV plant", "value": f"{PV_MWP:g} MWp, fixed new build", "source": "pack",
+        {"item": "PV plant", "value": f"{PV_MWP:g} MWp ({PV_MW_AC:.1f} MW AC at DC/AC {PV_DC_AC_RATIO:g}), fixed new build", "source": "pack",
          "note": f"solar-utility costs from defaults pack {PACK_VERSION}"},
         {"item": "battery", "value": f"candidate 0–{BESS_MAX_MW:g} MW at {BESS_HOURS:g} h, "
                                      f"round trip {BESS_EFF ** 2:.2f}", "source": "pack",

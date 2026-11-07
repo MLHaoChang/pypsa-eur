@@ -1,0 +1,1 @@
+{"kinds": {"solve_config_conflict": {"surface": "inline", "why": "A solve was queued while the project already has a queued or running solve with other settings. Nothing was queued. The assistant tells the user, who can wait, abort the active solve, or keep its settings."}}}

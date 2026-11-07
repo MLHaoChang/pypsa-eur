@@ -862,10 +862,24 @@ def test_cancelling_the_run_aborts_the_loop(
 # ── GK A (11)(b): restart recovery ──────────────────────────────────────────
 
 
+def _mutate_task(path, change):
+    """Edit the task file the way a real takeover does: under the lease's file
+    lock, then `runner._update` (task lock, atomic save). A bare `write_text`
+    truncates first, so a follower could read an empty file, and it could lose
+    a race with the runner's own save."""
+    with harness_runner._file_lock(path):
+        harness_runner._update(path, change)
+
+
 def _hold_lease(path, owner, until):
-    record = record_of(path)
-    record["run"].setdefault("runner", {}).update(lease_owner=owner, lease_until=until)
-    path.write_text(json.dumps(record))
+    _mutate_task(
+        path,
+        lambda r: (
+            r["run"]
+            .setdefault("runner", {})
+            .update(lease_owner=owner, lease_until=until)
+        ),
+    )
 
 
 def _lease_to(path, instance):
@@ -910,13 +924,13 @@ def test_a_stale_follower_writes_nothing_and_the_new_holder_settles_from_the_rec
     loops.hold()
     task, path, _ = granted()
     _waiting(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    ticket = _ticket(path)
     _hold_lease(path, "c", time.time() + 3600)  # another process took the run over
     loops.release_all(status="unreachable", solves_used=4, probe_solves=1)
     [record_] = loops.records
     assert wait_until(lambda: record_["status"] == "unreachable")
-    time.sleep(
-        3 * continuation.ENGINE_POLL_SECONDS
-    )  # the old follower polled the ended loop
+    # the old follower polled the ended loop and stood down (no fixed sleep)
+    assert wait_until(lambda: not continuation.following(ticket))
     assert (
         engine_steps(record_of(path))[0]["status"] == "waiting"
     )  # ... and wrote nothing
@@ -1096,9 +1110,10 @@ def _ticket(path):
 
 
 def _past_deadline(path):
-    record = record_of(path)
-    engine_steps(record)[0]["job"]["deadline_at"] = time.time() - 1
-    path.write_text(json.dumps(record))
+    _mutate_task(
+        path,
+        lambda r: engine_steps(r)[0]["job"].update(deadline_at=time.time() - 1),
+    )
 
 
 def test_the_follower_settles_timed_out_at_the_steps_deadline(
@@ -1202,9 +1217,7 @@ def test_a_user_edit_after_the_loops_own_hold_settles_not_applied(
     runner = harness_runner.Runner("a", agent_provider=Never())
     _waiting(runner, path, task)
     if not start_revision:
-        record = record_of(path)
-        engine_steps(record)[0]["job"].pop("revision")
-        path.write_text(json.dumps(record))
+        _mutate_task(path, lambda r: engine_steps(r)[0]["job"].pop("revision"))
     lock = ctx().mutation_lock
     lock.acquire()  # the settle waits for the project's mutation lock
     try:

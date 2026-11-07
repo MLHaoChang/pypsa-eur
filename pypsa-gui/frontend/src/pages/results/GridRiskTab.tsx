@@ -220,16 +220,26 @@ function stampWords(stamp: Record<string, string>): string {
   return parts.join(', ')
 }
 
+/** A sub-row's flags, once each. A bound from an outage longer than the period is not one from unknown units, so
+ *  the generic lower-bound words are left out beside it (the data keeps both). */
+export function subRowFlags(flags: string[]): string[] {
+  const out = [...new Set(flags)]
+  return out.includes('outage_longer_than_period') ? out.filter(f => f !== 'lower_bound') : out
+}
+
 function ExpertTable({ lines, period }: { lines: GridRiskLine[]; period: string }) {
   const th = 'px-2 py-1 text-left text-[10.5px] font-semibold text-muted whitespace-nowrap'
   const td = 'px-2 py-1 align-top text-[11px] text-text'
   const rows: Array<{ key: string; line: GridRiskLine; label: string; cell: Partial<GridRiskCell> | undefined; flags: string[]; sub: boolean }> = []
   for (const line of lines) {
     rows.push({ key: line.key, line, label: line.label, cell: line.by_period[period], flags: line.flags, sub: false })
-    if (line.key === 'island') {
+    // The island's two rows, and one row per N-1 site transformer, in the backend's order; never under a missing line.
+    if ((line.key === 'island' || line.key === 'n_1') && line.status !== 'missing') {
       for (const r of line.rows) {
-        rows.push({ key: `${line.key}-${r.key}`, line, label: r.label, cell: r.by_period[period] as Partial<GridRiskCell> | undefined,
-          flags: r.flags, sub: true })
+        const cell = r.by_period[period]
+        const periodFlags = Array.isArray(cell?.flags) ? (cell.flags as string[]) : []
+        rows.push({ key: `${line.key}-${r.key}`, line, label: r.label, cell: cell as Partial<GridRiskCell> | undefined,
+          flags: subRowFlags([...r.flags, ...periodFlags]), sub: true })
       }
     }
   }

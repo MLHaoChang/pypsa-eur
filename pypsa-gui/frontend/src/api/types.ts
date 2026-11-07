@@ -382,6 +382,8 @@ export interface TariffItem {
 }
 export interface Tariff {
   id: string; name: string; jurisdiction: string
+  /** ISO 4217; absent: the jurisdiction's (stated only when it differs or none is implied). */
+  currency?: string | null
   dso_or_retailer?: string | null
   valid_from: string; valid_to?: string | null
   items: TariffItem[]

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The renewables-IPP template's PV plant now declares a DC/AC ratio of 1.2 and a p_nom of about 41.7 MW AC (50 MWp / 1.2), matching the AC-rating convention of typed cost units; its profile is scaled to the AC rating.

@@ -104,13 +104,15 @@ def _unserved_islands(env):
 def _solve_job(env):
     """The job whose id the run's own solve step stored, never "the latest
     job" (the run's latest solve step, once L2 re-solved); a job of another
-    project is no evidence."""
+    project is no evidence. Only a queued solve's step counts: the solve
+    stage's EH study (issue 07 B2) stores its own job too."""
     from routers.solve_queue import _visible_job_or_404
     from services import chat_tools, project_registry
     if env.case is not None:
         job_id = env.case.get("job_id")  # issue 06: the case's own job, never the run's solve
     else:
-        step = next((s for s in reversed(env.task["steps"]) if s["id"].startswith("solve.") and s.get("job")), None)
+        step = next((s for s in reversed(env.task["steps"]) if s["id"].startswith("solve.") and s.get("job")
+                     and s["tool"] == "solve_queue_enqueue"), None)
         job_id = None if step is None else step["job"]["job_id"]
     if job_id is None:
         return None

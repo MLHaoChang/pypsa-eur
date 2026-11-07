@@ -8,7 +8,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { commercialApi, libraryApi } from '../../../api/commercial'
 import TariffBuilder from './TariffBuilder'
 import { H3 } from './tariffModel.test'
-import { blankTariff } from './tariffModel'
+import { blankTariff, fieldLabel, FIELD_WORDS } from './tariffModel'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
 vi.mock('../../../api/commercial', async (importOriginal) => {
@@ -122,7 +122,7 @@ describe('TariffBuilder — review round 1', () => {
     renderBuilder()
     fireEvent.click(screen.getByRole('button', { name: 'Preview the bill' }))
     const alerts = await screen.findAllByRole('alert')
-    expect(alerts.some(a => a.textContent?.includes('tariff: tariff item ids must be unique'))).toBe(true)
+    expect(alerts.some(a => a.textContent?.includes('Tariff: tariff item ids must be unique'))).toBe(true)
   })
 
   it('shows the Library 422 reason (#4)', async () => {
@@ -163,5 +163,59 @@ describe('TariffBuilder — review round 1', () => {
     renderBuilder()
     const box = screen.getByLabelText('Item energy tier rates per period')
     expect(box.hasAttribute('disabled')).toBe(true)      // H3's peak and off-peak rates differ
+  })
+
+  it('the currency input defaults from the jurisdiction, is sent only when typed, and shows its 422', async () => {
+    lib.putItem.mockRejectedValueOnce({ response: { status: 422, data: { detail: {
+      code: 'tariff_currency_required', message: 'x',
+      errors: [{ loc: ['currency'], msg: 'unknown, or state the currency.' }] } } } })
+    renderBuilder({ ...structuredClone(H3), jurisdiction: 'generic' })
+    const cur = screen.getByLabelText('Currency') as HTMLInputElement
+    expect(cur.value).toBe('')
+    expect(cur.placeholder).toBe('')
+    fireEvent.change(screen.getByLabelText('Jurisdiction'), { target: { value: 'NL' } })
+    expect(cur.placeholder).toBe('EUR')
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    expect(lib.putItem.mock.calls[0][2]).not.toHaveProperty('currency')
+    expect(screen.getByText('Currency: unknown, or state the currency.')).toBeTruthy()
+    expect(cur.getAttribute('aria-invalid')).toBe('true')
+    lib.putItem.mockResolvedValue({ kind: 'tariff', id: 'h3_us_ci', version: 1, hash: 'h' })
+    fireEvent.change(cur, { target: { value: 'usd1' } })
+    expect(cur.value).toBe('USD')
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+    await waitFor(() => expect(lib.putItem).toHaveBeenCalledTimes(2))
+    expect(lib.putItem.mock.calls[1][2]).toMatchObject({ currency: 'USD' })
+  })
+
+  it('describes the implied currency, notes a missing one, and clears the error on a change', async () => {
+    lib.putItem.mockRejectedValueOnce({ response: { status: 422, data: { detail: {
+      code: 'tariff_currency_required', message: 'x',
+      errors: [{ loc: ['currency'], msg: 'unknown.' }] } } } })
+    renderBuilder({ ...structuredClone(H3), jurisdiction: 'generic' })
+    const cur = screen.getByLabelText('Currency')
+    expect(screen.getByTestId('tb-currency-note').textContent)
+      .toBe('State a currency: no currency is known for this jurisdiction.')
+    fireEvent.change(screen.getByLabelText('Jurisdiction'), { target: { value: 'NL' } })
+    expect(screen.queryByTestId('tb-currency-note')).toBeNull()
+    expect(document.getElementById(cur.getAttribute('aria-describedby')!)!.textContent)
+      .toBe('Leave blank to use EUR, the currency for NL.')
+    fireEvent.change(screen.getByLabelText('Jurisdiction'), { target: { value: 'generic' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+    await screen.findByText('Currency: unknown.')
+    expect(screen.queryByTestId('tb-currency-note')).toBeNull()
+    fireEvent.change(cur, { target: { value: 'EUR' } })
+    expect(screen.queryByText('Currency: unknown.')).toBeNull()
+    expect(cur.getAttribute('aria-invalid')).toBeNull()
+  })
+
+  it('one word map drives the visible label, the accessible name and the error prefix', () => {
+    const { container } = renderBuilder()
+    for (const [key, w] of Object.entries(FIELD_WORDS)) {
+      const input = screen.getByLabelText(w.aria)
+      expect(input.closest('label')!.textContent!.startsWith(w.text)).toBe(true)
+      expect(fieldLabel(key)).toBe(w.aria)
+    }
+    expect(container).toBeTruthy()
   })
 })

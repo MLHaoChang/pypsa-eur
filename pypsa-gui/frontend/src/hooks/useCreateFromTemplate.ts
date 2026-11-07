@@ -82,6 +82,15 @@ export function siteParamsRefusal(e: unknown): { field: string; message: string 
     ? { field: d.field, message: d.message } : null
 }
 
+/** A refusal the data-centre form shows beside its field (422
+ *  `dc_load_invalid`, DC 22), or null. */
+export function dcLoadRefusal(e: unknown): { field: string; message: string } | null {
+  const res = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
+  const d = res?.data?.detail as { code?: string; field?: string; message?: string } | undefined
+  return res?.status === 422 && d?.code === 'dc_load_invalid' && d.message
+    ? { field: d.field ?? 'dc_load', message: d.message } : null
+}
+
 /** `{ mutate(templateId), isPending, variables }` — the wizard's mutation.
  *  `mutate({templateId, params})` creates the generic site from its form. */
 export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
@@ -133,7 +142,7 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
     },
     // A refused site parameter is shown beside its field by the form.
     onError: (e: unknown) => {
-      if (siteParamsRefusal(e)) return
+      if (siteParamsRefusal(e) || dcLoadRefusal(e)) return
       // N17: a taken name stays on screen with a way to open that project.
       const taken = nameClashFrom(blockerMessage(e))
       if (taken) {

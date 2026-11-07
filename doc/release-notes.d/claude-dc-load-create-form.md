@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): the data-centre example tiles (New project wizard and Guided Start card) open a setup form for IT load, PUE, backup mode and power architecture, so a data-centre project created in the app has a `dc_load` spec.

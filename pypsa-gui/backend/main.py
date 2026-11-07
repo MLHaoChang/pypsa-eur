@@ -93,6 +93,7 @@ from routers import (
     library_references,
     local_settings,
     network,
+    operational_gap,
     profiles,
     project_network,
     projects,
@@ -1324,6 +1325,8 @@ app.include_router(simulation.router, prefix="/api/simulation", tags=["simulatio
 app.include_router(results.results_router, prefix="/api/results", tags=["results"])
 # Reserve products on backup storage (DC grid readiness 06): read-only.
 app.include_router(reserves.router, prefix="/api/results", tags=["results"])
+# The plan-vs-operation gap (DC grid readiness 07 S3): read-only.
+app.include_router(operational_gap.router, prefix="/api/results", tags=["results"])
 # Per-asset "Asset Detail" results (Phase 1). Mounted AFTER results_router so
 # the more specific /api/results/asset/... prefix registers without being
 # shadowed; the two routers don't share any literal path segments in practice

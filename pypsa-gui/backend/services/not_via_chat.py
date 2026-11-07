@@ -254,6 +254,21 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'dc_operational_gap',
+        'title': 'Plan-vs-operation gap of the operational run',
+        'disposition': 'unbuilt',
+        'reason': 'The gap between the operational (rolling) run and the full-horizon dispatch on the same sizes is not available from chat yet. Its results view comes with DC 07 S4.',
+        'page': 'Results',
+        'panel': None,
+        'keywords': frozenset({
+            'foresight',
+            'lookahead',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/results/operational_gap'),
+        }),
+    },
+    {
         'id': 'site_scene',
         'title': 'Site 3D: legacy Site adoption and results overlay',
         'disposition': 'unbuilt',

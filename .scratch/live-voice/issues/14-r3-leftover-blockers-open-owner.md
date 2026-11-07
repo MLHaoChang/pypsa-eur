@@ -3,7 +3,7 @@
 
 # Give the r3-uncovered blockers an open owner issue
 
-Status: ready-for-agent
+Status: done (#1247)
 Type: task
 
 The `r3-uncovered:LC-D20`, `LC-D21`, `LC-D22` and `LC-D23` blockers in

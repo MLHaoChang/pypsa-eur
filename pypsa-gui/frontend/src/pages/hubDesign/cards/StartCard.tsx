@@ -8,7 +8,7 @@
 // decision-study questions and starts one through the wizard's own entry hook
 // (`useDecisionEntry`): the intake opens in the decision panel, and the study
 // builds its own project, so the open one is not changed.
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { FolderOpen, Hexagon, Scale, SlidersHorizontal } from 'lucide-react'
 import { GUIDED_QUESTIONS, useDecisionEntry } from '../../decision/useDecisionEntry'
 import { TEMPLATES } from '../../../layout/NewProjectWizard'
@@ -21,6 +21,8 @@ import { Term } from '../shared/Term'
 import { useHubStudy, useHubTemplate } from '../useHubData'
 import { STUDY_RUNNING_SWITCH } from '../../../hooks/useCreateFromTemplate'
 import { GenericSiteForm } from './GenericSiteForm'
+import { DcLoadForm } from './DcLoadForm'
+import { DC_TEMPLATES } from '../dcLoadForm'
 import { plainIds } from '../plainWords'
 import SiteSetupSection from '../../../site3d/SiteSetupSection'
 
@@ -74,6 +76,8 @@ export function StartCard() {
     useHubDesignStore.getState().setSiteFormRequested(false)
   }, [siteFormRequested])
   const siteFormOpen = formToggled || siteSeed !== null
+  // A data-centre tile opens its own form under it instead of creating at once (DC 22).
+  const [dcForm, setDcForm] = useState<string | null>(null)
 
   return (
     <CardShell step="start" testId="hub-card-start" title="Start">
@@ -100,18 +104,30 @@ export function StartCard() {
           <div data-testid="hub-start-templates" className="grid gap-2 sm:grid-cols-3">
             {HUB_TEMPLATES.map(t => {
               const creating = create.isPending && create.variables === t.id
+              const hasForm = DC_TEMPLATES.includes(t.id)
               return (
-                <button key={t.id} type="button" data-testid={`hub-start-template-${t.id}`}
-                  onClick={() => create.mutate(t.id)}
-                  disabled={create.isPending || running}
-                  title={running ? STUDY_RUNNING_SWITCH : `Create a new project from the ${t.name} example`}
-                  className="flex flex-col gap-1 rounded-lg border border-border p-3 text-left hover:border-accent/60 hover:bg-accent/5 disabled:opacity-50">
-                  <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">
-                    <Hexagon size={12} className="text-accent" /> {t.name}
-                    {creating && <span className="text-[10px] font-normal text-accent animate-pulse">creating…</span>}
-                  </span>
-                  <span className="text-[11px] leading-relaxed text-muted">{purpose(t.id, t.description)}</span>
-                </button>
+                <Fragment key={t.id}>
+                  <button type="button" data-testid={`hub-start-template-${t.id}`}
+                    aria-expanded={hasForm ? dcForm === t.id : undefined}
+                    onClick={() => (hasForm ? setDcForm(dcForm === t.id ? null : t.id) : create.mutate(t.id))}
+                    disabled={create.isPending || running}
+                    title={running ? STUDY_RUNNING_SWITCH
+                      : hasForm ? `Set up the ${t.name} example` : `Create a new project from the ${t.name} example`}
+                    className={`flex flex-col gap-1 rounded-lg border p-3 text-left hover:border-accent/60 hover:bg-accent/5 disabled:opacity-50
+                      ${hasForm && dcForm === t.id ? 'border-accent bg-accent/5' : 'border-border'}`}>
+                    <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">
+                      <Hexagon size={12} className="text-accent" /> {t.name}
+                      {creating && <span className="text-[10px] font-normal text-accent animate-pulse">creating…</span>}
+                    </span>
+                    <span className="text-[11px] leading-relaxed text-muted">{purpose(t.id, t.description)}</span>
+                  </button>
+                  {hasForm && dcForm === t.id && (
+                    <div className="col-span-full">
+                      <DcLoadForm templateId={t.id} templateName={t.name} create={create}
+                        onCancel={() => setDcForm(null)} disabledReason={running ? STUDY_RUNNING_SWITCH : null} />
+                    </div>
+                  )}
+                </Fragment>
               )
             })}
             <button type="button" data-testid="hub-start-own-site"

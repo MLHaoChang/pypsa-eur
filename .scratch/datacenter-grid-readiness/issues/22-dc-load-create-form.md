@@ -1,6 +1,6 @@
 # A dc_load create form in the New project wizard
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 05
 Size: M

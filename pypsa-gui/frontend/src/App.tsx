@@ -10,7 +10,8 @@ import BottomPanel from './layout/BottomPanel'
 import StatusBar from './components/StatusBar'
 import MapModeSwitcher from './components/MapModeSwitcher'
 import SnapshotPicker from './components/SnapshotPicker'
-import TopologyCanvas from './pages/TopologyCanvas'
+import TopologyCanvas, { MINIMAP_MIN_CANVAS_PX } from './pages/TopologyCanvas'
+import { useElementWidth } from './hooks/useElementWidth'
 import MapCanvas from './pages/MapCanvas'
 // The 3D site view is the only lazily-loaded canvas: three.js and its React
 // bindings are ~300 kB gzipped that a user who never opens it should never
@@ -249,6 +250,8 @@ export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: ()
 }
 
 export default function App() {
+  const [companionAnchorEl, setCompanionAnchorEl] = useState<HTMLDivElement | null>(null)
+  const companionAnchorWidth = useElementWidth(companionAnchorEl)
   // The assistant dock steps aside over Results and when no key is set,
   // unless pinned (UX overhaul S5, owner decision Q5a).
   useDockAutoCollapse()
@@ -748,11 +751,13 @@ export default function App() {
                 {/* L2 (LC-04): the assistant's floating launcher lands here
                     (AssistantDock portals it), over the canvas only: above the
                     bottom panel and left of the Properties / slide panel. */}
-                <div id="companion-anchor" data-testid="companion-anchor"
+                <div id="companion-anchor" data-testid="companion-anchor" ref={setCompanionAnchorEl}
                   className={`absolute inset-x-0 top-0 z-40 pointer-events-none [&>*]:pointer-events-auto ${
-                    // Above the schematic's minimap (bottom-right); clear of
-                    // the snapshot bar (bottom-centre) on the other views.
-                    canvasView === 'blank' ? 'bottom-[176px]' : 'bottom-14'}`} />
+                    // Above the schematic's minimap (bottom-right) while it shows
+                    // (it folds away on a narrow canvas); clear of the snapshot
+                    // bar (bottom-centre) on the other views.
+                    canvasView === 'blank' && (companionAnchorWidth == null || companionAnchorWidth >= MINIMAP_MIN_CANVAS_PX)
+                      ? 'bottom-[176px]' : 'bottom-14'}`} />
                 <div className="absolute inset-0 z-10 pointer-events-none [&>*]:pointer-events-auto">
                   <MapModeSwitcher />
                   {/* Snapshot picker / playback bar for the results overlay —

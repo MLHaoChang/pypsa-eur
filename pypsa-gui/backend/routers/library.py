@@ -325,9 +325,9 @@ def put_item(kind: ItemKind, name: str, body: ItemIn, org_id: UUID | None = None
 
 def _currency_required(exc) -> dict:
     """The typed 422 (GK B C4): `errors` in the field-error shape the tariff builder
-    shows beside its jurisdiction input."""
+    shows beside its currency input."""
     return {"code": exc.code, "message": str(exc),
-            "errors": [{"loc": ["jurisdiction"], "msg": str(exc)}]}
+            "errors": [{"loc": ["currency"], "msg": str(exc)}]}
 
 
 @router.get("/items/{kind}/{name}", response_model=ItemOut)

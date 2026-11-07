@@ -18,6 +18,12 @@ changing an existing profile, metric definition or checked-tool schema, needs a
 new profile version (``x/2``) beside the old one, or a protocol version bump.
 ``--write`` refuses a non-additive snapshot update.
 
+A checked tool's input is a contract the server accepts, so its hash in
+``checked_tools`` is direction-aware: ``checked_tool_inputs`` stores each input
+schema, and a moved hash is additive when that schema only widened (a new enum
+member, an optional property, a wider bound). A narrowing, a removal or a
+changed ``default`` still breaks.
+
     python -m harness.assurance_contracts --check
     python -m harness.assurance_contracts --write
 """
@@ -59,13 +65,16 @@ DIRECTIONS = {
     "answer_receipt": "returns",
     "checked_tool_results": "returns",
     "checked_tool_input_additions": "accepts",
+    "checked_tool_inputs": "accepts",
 }
 
 # Enum members a checked tool's input accepted after v1 froze its hash
 # (AA-V1-CHANGE-1: accepting more is additive). `checked_tools` hashes the
 # input schema without them, so the frozen hash holds; the list itself is an
 # `accepts` contract, so dropping a member later breaks. Only enum members of
-# top-level properties may be listed; any other input change moves the hash.
+# top-level properties may be listed. Frozen as the record of #1194: since
+# G2P-21 a widening moves the hash and `checked_tool_inputs` shows it is
+# additive, so new widenings need no entry here.
 V1_INPUT_ADDITIONS: dict[str, dict[str, list[str]]] = {
     "ui_open_panel": {"results_tab": ["grid_risk"]},  # G2P-13 (#1194)
 }
@@ -76,6 +85,9 @@ _GROW = {"maxLength", "maximum", "maxItems", "exclusiveMaximum"}
 _SHRINK = {"minLength", "minimum", "minItems", "exclusiveMinimum"}
 _OPEN_MAPS = {"properties", "$defs"}
 _NOTES = {"title", "description", "default"}
+# A checked tool's `default` decides what a call omitting the argument does,
+# so inside `checked_tool_inputs` it is a contract, not a note.
+_INPUT_NOTES = {"title", "description"}
 
 
 def _schema_sha256(schema) -> str:
@@ -162,6 +174,9 @@ def build() -> dict:
             )
             for name in sorted(CHECKED_TOOLS)
         },
+        "checked_tool_inputs": {
+            name: tools[name]["input_schema"] for name in sorted(CHECKED_TOOLS)
+        },
         "checked_tool_input_additions": {
             name: {field: {"enum": list(members)} for field, members in fields.items()}
             for name, fields in sorted(V1_INPUT_ADDITIONS.items())
@@ -197,11 +212,54 @@ def breaking_changes(old: dict, new: dict) -> list[str]:
             found.append(f"{where} removed")
         elif directions.get(key) != new.get("directions", {}).get(key):
             found.append(f"{where} direction changed")
+        elif key == "checked_tool_inputs":
+            # Keys are tool names and values whole input schemas.
+            found += _accepts_breaks(
+                value, new[key], where, notes=_INPUT_NOTES, open_map=True
+            )
         elif directions.get(key) == "accepts":
             found += _accepts_breaks(value, new[key], where)
+        elif key == "checked_tools":
+            found += [
+                b
+                for b in _returns_breaks(value, new[key], where)
+                if not _widened_input(old, new, b)
+            ]
         else:
             found += _returns_breaks(value, new[key], where)
     return found
+
+
+def _input_hash_matches(document: dict, name: str) -> bool:
+    """Whether `document` hashes `name`'s stored input schema to its listed hash."""
+    schema = document.get("checked_tool_inputs", {}).get(name)
+    if not isinstance(schema, dict):
+        return False
+    additions = {
+        field: spec.get("enum", [])
+        for field, spec in document.get("checked_tool_input_additions", {})
+        .get(name, {})
+        .items()
+    }
+    try:
+        sha = _schema_sha256(_v1_input_schema(name, schema, additions))
+    except (ValueError, AttributeError, TypeError):
+        return False
+    return document.get("checked_tools", {}).get(name) == sha
+
+
+def _widened_input(old: dict, new: dict, broken: str) -> bool:
+    """A moved checked-tool hash that `checked_tool_inputs` accounts for.
+
+    Only `changed` qualifies, and only when both documents store the tool's
+    input schema and hash it to their listed hash; whether that schema change
+    is additive is then judged on `checked_tool_inputs`. Fails closed.
+    """
+    prefix, suffix = "$.checked_tools.", " changed"
+    if not (broken.startswith(prefix) and broken.endswith(suffix)):
+        return False
+    name = broken[len(prefix) : -len(suffix)]
+    return _input_hash_matches(old, name) and _input_hash_matches(new, name)
 
 
 def _returns_breaks(old: dict, new: dict, path: str) -> list[str]:
@@ -212,13 +270,26 @@ def _returns_breaks(old: dict, new: dict, path: str) -> list[str]:
     ]
 
 
-def _accepts_breaks(old, new, path) -> list[str]:
-    """Every place `new` accepts less than `old` did."""
+def _accepts_breaks(old, new, path, notes=_NOTES, open_map=False) -> list[str]:
+    """Every place `new` accepts less than `old` did.
+
+    In an open map (`properties`, `$defs`, or a map of tool names) every key is
+    a name, never a keyword: an existing entry may not go and its value is
+    compared as a schema, while a new entry is additive.
+    """
+    if isinstance(old, dict) and isinstance(new, dict) and open_map:
+        found = []
+        for key, value in old.items():
+            if key not in new:
+                found.append(f"{path}.{key} removed")
+            else:
+                found += _accepts_breaks(value, new[key], f"{path}.{key}", notes)
+        return found
     if isinstance(old, dict) and isinstance(new, dict):
         found = []
         for key, value in old.items():
             where = f"{path}.{key}"
-            if key in _NOTES:
+            if key in notes:
                 continue
             if key not in new:
                 found.append(f"{where} removed")
@@ -234,18 +305,22 @@ def _accepts_breaks(old, new, path) -> list[str]:
             elif key in _SHRINK and isinstance(value, (int, float)):
                 if not isinstance(new[key], (int, float)) or new[key] > value:
                     found.append(f"{where} narrowed")
+            elif key == "default":
+                if new[key] != value:
+                    found.append(f"{where} changed")
             else:
-                found += _accepts_breaks(value, new[key], where)
+                found += _accepts_breaks(
+                    value, new[key], where, notes, open_map=key in _OPEN_MAPS
+                )
         if "required" in new and "required" not in old:
             found += [
                 f"{path}.required adds required {name}" for name in new["required"]
             ]
-        if path.rsplit(".", 1)[-1] not in _OPEN_MAPS:
-            found += [
-                f"{path}.{key} added constraint"
-                for key in new
-                if key not in old and key not in _NOTES and key != "required"
-            ]
+        found += [
+            f"{path}.{key} added " + ("default" if key == "default" else "constraint")
+            for key in new
+            if key not in old and key not in notes and key != "required"
+        ]
         return found
     if old != new:
         return [f"{path} changed"]
