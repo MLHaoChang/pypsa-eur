@@ -25,6 +25,7 @@ import contextlib
 import json
 import re
 import threading
+import time
 from typing import Any
 from collections.abc import Iterator
 
@@ -33,9 +34,16 @@ from fastapi import HTTPException
 from services.site_scene import anchor, proposals, store
 from services.site_scene.contract import SceneError
 
-# S1 admits the geometry actions; the model actions (bind_targets, place_existing,
-# rebind, detach, undo_detach) come with their clarify/receipt rules in S4.
-CHAT_ACTIONS = ("generate_native", "edit_buildings")
+# S1 admitted the geometry actions; S4 (GK B G9, H1-H8) adds the model actions
+# the Site 3D routes serve. A model action maps existing model items into the
+# scene: it never creates, edits or removes one (associations.py).
+GEOMETRY_ACTIONS = ("generate_native", "edit_buildings")
+MODEL_ACTIONS = ("bind_targets", "place_existing", "rebind", "detach", "undo_detach")
+CHAT_ACTIONS = GEOMETRY_ACTIONS + MODEL_ACTIONS
+# G9: a target prepare cannot resolve is asked about, never guessed. Only an
+# ambiguous one has candidates (H2: zero candidates is unknown_target).
+CLARIFY_CODES = ("ambiguous_target", "unknown_target", "unsupported_target")
+MAX_CANDIDATES = 12  # H2: listed candidates; the rest are "and N more"
 MAX_LIVE_PER_OWNER = 8  # G2: open chat previews per owner and project
 MAX_ITEMS = 40  # G5: listed items per collection
 MAX_NAME_CHARS = 60  # G5: a user-authored string
@@ -119,18 +127,52 @@ def _outcome_unknown(read_back: dict[str, Any]) -> HTTPException:
     )
 
 
-def _read_back(
+def _read_chain(
     project, site_id: str, proposal_id: str, input_hash: str
-) -> tuple[dict | None, dict]:
-    """(the receipt for this exact hash or None, read_back); a failing read is no receipt."""
+) -> tuple[dict | None, dict, bool]:
+    """(the receipt for this exact hash or None, read_back, whether the read itself succeeded)."""
     try:
         committed = proposals._committed(project.directory, site_id, proposal_id)
         revision = store.read_scene(project.directory, site_id).get("revision")
     except Exception:  # noqa: BLE001 — an unreadable chain is not a receipt
-        return None, {"receipt_found": False, "scene_revision": None}
+        return None, {"receipt_found": False, "scene_revision": None}, False
     if not isinstance(committed, dict) or committed.get("input_hash") != input_hash:
-        return None, {"receipt_found": False, "scene_revision": revision}
-    return committed, {"receipt_found": True, "scene_revision": revision}
+        return None, {"receipt_found": False, "scene_revision": revision}, True
+    return committed, {"receipt_found": True, "scene_revision": revision}, True
+
+
+def _read_back(
+    project, site_id: str, proposal_id: str, input_hash: str
+) -> tuple[dict | None, dict]:
+    """(the receipt for this exact hash or None, read_back); a failing read is no receipt."""
+    committed, read_back, _ok = _read_chain(project, site_id, proposal_id, input_hash)
+    return committed, read_back
+
+
+# SC-07 S4 (GK B H1): which features a clarify asked about, and how many
+# candidates it listed, so the card of the prepare that follows says the user
+# picked that target from N. Keyed by (project, owner, site, feature) to
+# (N, when asked); bounded, and an answer older than CLARIFY_TTL_SECONDS (a
+# preview's own life) claims no pick.
+_CLARIFIED: dict[tuple, tuple[int, float]] = {}
+CLARIFY_TTL_SECONDS = 30 * 60
+# The picks a prepared preview carries: (project, owner, site, proposal) -> {feature: N}.
+_PICKS: dict[tuple, dict[str, int]] = {}
+
+
+def _remember(table: dict, key: tuple, value: Any) -> None:
+    with _UNKNOWN_LOCK:
+        table[key] = value
+        while len(table) > _UNKNOWN_MAX:
+            table.pop(next(iter(table)))
+
+
+def picks(project, owner: str | None, site_id: str, proposal_id: str) -> dict[str, int]:
+    """{feature: number of candidates the user picked its target from} for one preview (H1)."""
+    with _UNKNOWN_LOCK:
+        return dict(
+            _PICKS.get(_unknown_key(project, owner, site_id, proposal_id)) or {}
+        )
 
 
 def refusal(exc: SceneError) -> HTTPException:
@@ -434,13 +476,14 @@ def _proposal_status(
         return {"id": _text(pid), "status": "not_found"}
     try:
         entry = proposals.get(project.registry_key, owner, site_id, pid)
-        if _is_unknown(_unknown_key(project, owner, site_id, pid)):
+        unknown = _is_unknown(_unknown_key(project, owner, site_id, pid))
+        if unknown or entry["status"] == "cancelled":
+            # H6: the chain first, so a commit that landed always reads applied.
             committed, _ = _read_back(project, site_id, pid, entry["input_hash"])
-            return (
-                {"id": pid, "status": "applied", "receipt": _receipt(committed)}
-                if committed
-                else {"id": pid, "status": "outcome_unknown"}
-            )
+            if committed:
+                return {"id": pid, "status": "applied", "receipt": _receipt(committed)}
+            if unknown:
+                return {"id": pid, "status": "outcome_unknown"}
         return {
             k: entry[k]
             for k in ("id", "action", "base_revision", "input_hash", "status")
@@ -479,6 +522,171 @@ def summarize(
     }
 
 
+def _candidate(n, name: str) -> dict[str, Any]:
+    """One Load a carrier names, with its whole identity (H1): name, kind, bus, carrier, unit."""
+    from services.site_scene import associations as assoc
+
+    return {
+        "name": _text(name),
+        "class": "Load",
+        "kind": "load",
+        "bus": _text(assoc._bus_of(n, "Load", name)),
+        "carrier": _text(assoc._carrier(n, "Load", name)),
+        "unit": assoc._unit(n, "Load", name),
+    }
+
+
+def _asked_features(inputs: dict[str, Any], carrier: Any) -> list[str]:
+    """The features whose target asks for `carrier` by carrier alone (what the clarify is about)."""
+    rows = inputs.get("associations") if isinstance(inputs, dict) else None
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        target = row.get("target") if isinstance(row, dict) else None
+        if (
+            isinstance(target, dict)
+            and not isinstance(target.get("name"), str)
+            and target.get("carrier") == carrier
+            and isinstance(row.get("feature"), str)
+        ):
+            out.append(row["feature"])
+    return out
+
+
+def _clarify(
+    project,
+    owner: str | None,
+    site_id: str,
+    action: str,
+    base_revision: int,
+    inputs: dict[str, Any],
+    exc: SceneError,
+) -> dict[str, Any]:
+    """
+    G9: a target prepare could not resolve, as a question for the user and no
+    proposal. An ambiguous carrier lists its candidates (capped, H2) and picks
+    none of them; an unknown or unsupported target has none.
+    """
+    from services.pypsa_service import PyPSAService
+
+    detail = exc.detail or {}
+    code = detail.get("code")
+    out: dict[str, Any] = {
+        "status": "clarify" if code == "ambiguous_target" else "unresolved",
+        "code": code,
+        "site_id": site_id,
+        "action": action,
+        "base_revision": base_revision,
+        "field": "target",
+        "question": _text(exc.message) if code != "ambiguous_target" else None,
+        "data_fields": ["question", "target.name"]
+        if code != "ambiguous_target"
+        else [
+            "question",
+            "feature",
+            "candidates[].name",
+            "candidates[].bus",
+            "candidates[].carrier",
+        ],
+        "note": "Nothing was prepared. Ask the user which model item they mean and never pick one for "
+        "them. Prepare again with the item's name once they choose.",
+    }
+    if code != "ambiguous_target":
+        target = detail.get("target") if isinstance(detail.get("target"), dict) else {}
+        out["target"] = {
+            "class": _text(target.get("class")),
+            "name": _text(target.get("name")),
+        }
+        return out
+    names = [n for n in detail.get("candidates") or [] if isinstance(n, str)]
+    with PyPSAService.get_lock():
+        n = proposals._open_network(project.directory)
+        rows = [_candidate(n, name) for name in names[:MAX_CANDIDATES]]
+    carrier = _text(detail.get("carrier"))
+    features = _asked_features(inputs, detail.get("carrier"))
+    more = len(names) - len(rows)
+    question = f"Which {carrier} load is meant? There are {len(names)}"
+    if more > 0:
+        question += f". The first {len(rows)} are listed, and {more} more"
+    out.update(
+        question=question + ".",
+        carrier=carrier,
+        feature=_text(features[0]) if len(features) == 1 else None,
+        candidates=rows,
+        total=len(names),
+        more=max(more, 0),
+    )
+    for feature in features:
+        _remember(
+            _CLARIFIED,
+            (project.registry_key, owner, site_id, feature),
+            (len(names), time.monotonic()),
+        )
+    return out
+
+
+def _target_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "feature": _text(row.get("feature")),
+        "class": row.get("class"),
+        "name": _text(row.get("name")),
+        "carrier": _text(row.get("carrier")),
+        "unit": row.get("unit"),
+        "weight": row.get("weight"),
+        "status": row.get("status"),
+    }
+
+
+def _model_summary(
+    action: str, preview: dict[str, Any], picked: dict[str, int]
+) -> dict[str, Any]:
+    """What a model action's preview maps, capped (G5). Never a model value: there is none to change."""
+    truncated: list[dict[str, Any]] = []
+    out: dict[str, Any] = {"truncated": truncated, "model_changes": "none"}
+    if action == "bind_targets":
+        rows = [_target_row(r) for r in preview.get("associations") or []]
+        for r in rows:
+            if r["feature"] in picked and r["name"]:
+                r["picked_from"] = picked[r["feature"]]
+        out["associations"] = _capped(rows, "associations", truncated)
+        out["groups"] = len(preview.get("groups") or [])
+    elif action == "place_existing":
+        out["placements"] = _capped(
+            [
+                {
+                    "item": _text(k),
+                    **{f: v.get(f) for f in ("x", "y", "heading", "on") if f in v},
+                }
+                for k, v in (preview.get("placements") or {}).items()
+            ],
+            "placements",
+            truncated,
+        )
+    elif action == "rebind":
+        out["rebind"] = {
+            k: _text(preview.get(k))
+            for k in ("class", "name", "was", "feature", "placement")
+            if preview.get(k) is not None
+        }
+    else:  # detach, undo_detach
+        out["items"] = _capped(
+            [
+                {
+                    "item": _text(i.get("key")),
+                    "label": _text(i.get("label")),
+                    "attachments": len(i.get("associations") or []),
+                }
+                for i in preview.get("items") or []
+            ],
+            "items",
+            truncated,
+        )
+    out["findings"] = [
+        {"code": f.get("code"), "message": _text(f.get("message"))}
+        for f in (preview.get("findings") or [])[:MAX_ITEMS]
+    ]
+    return out
+
+
 def prepare(
     site_id: str, action: str, base_revision: int, inputs: dict[str, Any]
 ) -> dict[str, Any]:
@@ -489,8 +697,7 @@ def prepare(
         raise refusal(
             SceneError(
                 "invalid_input",
-                f"Prepare: action must be one of {', '.join(CHAT_ACTIONS)} "
-                "(placement and bindings are done in Site 3D for now)",
+                f"Prepare: action must be one of {', '.join(CHAT_ACTIONS)}",
                 {"field": "action"},
             )
         )
@@ -501,15 +708,52 @@ def prepare(
             raise _too_large(MAX_PROPOSAL_BODY, size)
         _site_known(project, site_id)
         current = store.read_scene(project.directory, site_id).get("buildings") or []
-        view = proposals.create(
-            project.directory,
-            project.registry_key,
-            owner,
-            site_id,
-            body,
-            max_owned=MAX_LIVE_PER_OWNER,
-        )
-        stats = view["preview"].get("stats") or {}
+        try:
+            view = proposals.create(
+                project.directory,
+                project.registry_key,
+                owner,
+                site_id,
+                body,
+                max_owned=MAX_LIVE_PER_OWNER,
+            )
+        except SceneError as exc:
+            if (
+                action in MODEL_ACTIONS
+                and exc.kind == "invalid_input"
+                and (exc.detail or {}).get("code") in CLARIFY_CODES
+            ):
+                return _clarify(
+                    project, owner, site_id, action, base_revision, inputs, exc
+                )
+            raise
+        if action in MODEL_ACTIONS:
+            picked: dict[str, int] = {}
+            if action == "bind_targets":
+                for row in view["preview"].get("associations") or []:
+                    if not row.get("name"):
+                        continue
+                    with _UNKNOWN_LOCK:  # one clarify answers one pick
+                        asked = _CLARIFIED.pop(
+                            (project.registry_key, owner, site_id, row.get("feature")),
+                            None,
+                        )
+                    if asked and time.monotonic() - asked[1] <= CLARIFY_TTL_SECONDS:
+                        picked[row["feature"]] = asked[0]
+                if picked:
+                    _remember(
+                        _PICKS,
+                        _unknown_key(project, owner, site_id, view["id"]),
+                        picked,
+                    )
+            summary = _model_summary(action, view["preview"], picked)
+        else:
+            stats = view["preview"].get("stats") or {}
+            summary = {
+                **summarize(current, view["preview"].get("buildings") or []),
+                "triangles": stats.get("triangles"),
+                "bytes": stats.get("bytes"),
+            }
         return {
             "proposal_id": view["id"],
             "site_id": site_id,
@@ -517,11 +761,7 @@ def prepare(
             "base_revision": view["base_revision"],
             "input_hash": view["input_hash"],
             "status": view["status"],
-            "summary": {
-                **summarize(current, view["preview"].get("buildings") or []),
-                "triangles": stats.get("triangles"),
-                "bytes": stats.get("bytes"),
-            },
+            "summary": summary,
             "apply_with": {
                 "tool": "site_scene_apply",
                 "args": {
@@ -532,7 +772,13 @@ def prepare(
                 },
             },
             "note": "Nothing is written. Show the summary; the user approves site_scene_apply's card to commit "
-            "it. The preview expires after 30 minutes.",
+            "it. The preview expires after 30 minutes."
+            + (
+                " A model action maps existing model items into the 3D site only: a new or changed model item "
+                "is its own edit with its own card, before this."
+                if action in MODEL_ACTIONS
+                else ""
+            ),
         }
 
 
@@ -625,12 +871,24 @@ def apply(
                 project, owner, site_id, proposal_id, input_hash, expected_revision
             )
         except SceneError as exc:
-            if exc.kind != "proposal_expired":
+            if exc.kind not in ("proposal_expired", "proposal_cancelled"):
                 raise
             # A restart or eviction loses the map, not the commit: read back a receipt for this exact hash.
             receipt = proposals._committed(project.directory, site_id, proposal_id)
             if receipt is None or receipt.get("input_hash") != input_hash:
                 raise
+            if exc.kind == "proposal_cancelled":
+                # H6: a cancelled preview whose commit landed reads back applied, never re-applied.
+                return {
+                    "receipt": receipt,
+                    "read_back": {
+                        "receipt_found": True,
+                        "scene_revision": store.read_scene(
+                            project.directory, site_id
+                        ).get("revision"),
+                    },
+                    "note": "Read back from the 3D site's own record: this apply did land.",
+                }
         try:
             receipt = proposals.apply(
                 project.directory,
@@ -644,8 +902,18 @@ def apply(
             raise  # a typed refusal stays typed (scope answers it)
         except Exception:  # noqa: BLE001 — N6: the effect is unknown, so read the chain
             _mark_unknown(key)
-            committed, read_back = _read_back(project, site_id, proposal_id, input_hash)
+            committed, read_back, read_ok = _read_chain(
+                project, site_id, proposal_id, input_hash
+            )
             if committed is None:
+                if read_ok:
+                    # W2 (H6): the chain was read and holds no receipt, so the preview is
+                    # discarded: a lost marker can never bring its card back. A failed
+                    # read only marks it unknown.
+                    with contextlib.suppress(SceneError):
+                        proposals.cancel(
+                            project.registry_key, owner, site_id, proposal_id
+                        )
                 raise _outcome_unknown(read_back) from None
             receipt = committed
         committed = proposals._committed(project.directory, site_id, proposal_id)
@@ -657,7 +925,7 @@ def apply(
                     "revision"
                 ),
             },
-            "note": "Only the 3D site changed: no model, network, run or result.",
+            "note": "Only the 3D site changed: no model value, network, run or result.",
         }
 
 

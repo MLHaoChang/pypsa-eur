@@ -107,3 +107,18 @@ GK B (32), `session_01G7qCujH35CpYUUDWwdZg7v`, to SC-07 (2) and resent to SC-07 
 - **N8, mutants (G12).** By hand, each with its killing test: drop the literal-arg refusal; drop the input_hash match in the reconcile; drop the N3 retry refusal; let the unknown outcome answer applied with no receipt; drop the card requirement for a task-dispatched apply.
 
 Kinds go in the fragment, with a catalogue row only if the guard asks for one (G11). Review goes to GK B (33).
+
+### 2026-11-07: S4 plan GO with changes H1–H8 (GK B)
+
+GK B (33), `session_01G7qCukLe9Nbb6fsN1EwMTV`, on SC-07 (3)'s S4 plan: chat prepare admits bind_targets, place_existing, rebind, detach and undo_detach; ambiguous, unknown or unsupported targets return clarify; the scene card maps targets only and a model edit keeps its own native card; the card re-checks each target's fingerprint; W2 cancels an unknown-outcome preview.
+
+- **H1, the choice is the user's, on the card.** Catalogue text is not enforcement. After a clarify, the scene card row names the exact target (component name and class, bus, carrier, unit, not only its label) and says it was picked from N candidates. A target outside the candidates is allowed and shown the same way. Tested.
+- **H2, clarify bounds.** Over the cap the result says "and N more" and lists no partial pick. Zero candidates is unknown_target, never clarify. Labels pass the G5 fence; tested with an instruction-shaped load name.
+- **H3, clarify in a plan.** A task step whose prepare returns clarify is not completed: it waits for the user, and the apply step's refs never resolve against a clarify result. Test: a plan with a clarify prepare stops before apply, and the apply is never dispatched.
+- **H4, no model value changes.** A scene apply of each of the five model actions leaves `_network_input_fingerprint` and the network revision unchanged, one test per action. If D06 bindings feed any LP input, stop and tell GK B before building.
+- **H5.** The card-time fingerprint check adds to apply's check and never replaces it. Mutate each alone and both together; each alone-mutant has its own killing test (target moved after the card, before apply).
+- **H6, W2 never hides a landed receipt.** Cancel only after a successful receipt read found none; a failed read marks unknown but does not cancel. Status and reconcile read the chain first, so a landed commit always reports applied. Tests: landed, first read fails, a later read finds it → applied; no receipt → cancelled, and evicting the marker does not re-enable a card.
+- **H7, two cards.** A denied scene card leaves the native edit and no binding; a denied native card means the prepare never runs (the N2 refs fail closed). Spy on `proposals.create`.
+- **H8, mutants.** The plan's three, plus: clarify returning the first candidate; H6's cancel on a failed read; H4's guard if one is added. Then `mutants.py` on chat.py's changed lines, survivors named in the PR body.
+
+One PR, GK B's area. Send the head to GK B.
