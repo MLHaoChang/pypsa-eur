@@ -200,6 +200,15 @@ The stepwise pilot stopped at the result gate: only an envelope-admitted solve w
 - C4. Hand mutants with killing tests: drop the wrap; capture every solve in a run session; capture before the card approval.
 - C5. The seam is named in the PR body; a capture is evidence, never an admission.
 
+### GK B (33): stepwise engine card, GO on A (E1–E5)
+
+The engine step is carded in stepwise; `generate_report` (P11's explicit launch, no project input) and `read_handoff` need none.
+- E1. Through the existing confirmation path, recorded as a user approval, bound to the engine step's frozen args; it states the solve bound, the base restore and the charge to the run. Already B3a's `run_loops.card_engine` + `run_envelope.reserve_carded` (the result gate's card).
+- E2. Deny → waits for the user, zero solves, nothing reserved, no restore; a later Continue runs the loop once (`test_harness_engine_card.py`).
+- E3. The gate is "never granted", read from the run's own envelope record (`never_granted`); envelope mode has no card (`test_a_granted_run_never_takes_the_card_branch`). A granted-then-revoked run is not `never_granted`, so it keeps B3a's `no_envelope` stop.
+- E4. Pilot: cards == {solve.1, solve.2, result_gate.1}; harness launches == {report.1, handoff.1}; the engine step's settled solves == solves_used + probe_solves + the closing re-solve.
+- E5. Hand mutants: skip the card in stepwise; card also in envelope mode; deny still runs the loop.
+
 ## Folded from #970
 
 Owner decision HARNESS-970-1 (3 Nov). Three items from #970 land here, all after the pilot works. None changes the acceptance criteria above.

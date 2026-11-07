@@ -36,6 +36,19 @@ from tests.test_harness_runner import task_path
 from tests.test_run_intake_grant import _count, _new_task
 
 
+def harness_session_probe_carded(step):
+    """A completed step the runner's card policy would card (Guided, COP-1),
+    the engine and native steps included."""
+    from tests.test_harness_run_report_handoff import runner as run_runner
+
+    probe = harness_session.ChatSession(session_id="probe")
+    return step["status"] == "completed" and (
+        step.get("engine")
+        or step.get("native")
+        or run_runner(None)._policy(probe, step["tool"]) != "none"
+    )
+
+
 def _stepwise(session, view, digest=None):
     return run_envelope.decide(
         session,
@@ -162,20 +175,22 @@ def test_pilot_stepwise_mode_reaches_the_hand_off_with_one_card_per_write_or_run
     assert (keys, exact) == CAPTURE_FIELDS
     assert files == PILOT_CAPTURE_FILES.get("envelope", files)
     steps = {s["id"]: s for s in record["steps"]}
-    harness_runner = run_runner(clicks)
-    probe = harness_session.ChatSession(session_id="probe")
-    carded = [  # the steps the runner's own card policy cards (Guided, COP-1)
-        s["id"]
-        for s in record["steps"]
-        if s["status"] == "completed"
-        and harness_runner._policy(probe, s["tool"]) != "none"
-    ]
-    assert carded  # the run wrote and ran
-    asked = [ref for ref in clicks.used if ref in steps]
-    assert sorted(asked) == sorted(carded), [  # equality: one card per write or run
-        (i, steps[i]["tool"], steps[i].get("engine")) for i in carded
-    ]
-    assert len(asked) == len(set(asked))
+    # E4: every write or run is the user's card exactly once. The engine
+    # step's card is the result gate's own (issue 07 B3a, `card_engine`).
+    [engine] = [s for s in record["steps"] if s.get("engine")]
+    cards = [steps.get(ref, {}).get("id") or ref for ref in clicks.used if ref in steps]
+    cards += [engine["id"]] * clicks.used.count("result_gate")
+    assert sorted(cards) == ["result_gate.1", "solve.1", "solve.2"], clicks.used
+    assert engine["tool"] == "run_coupling_loop" and engine["card"]["restore"] == "base"
+    launches = sorted(s["id"] for s in record["steps"] if s.get("native"))
+    assert launches == ["handoff.1", "report.1"]  # the harness's own launches (P11)
+    assert sorted(cards + launches) == sorted(
+        s["id"] for s in record["steps"] if harness_session_probe_carded(s)
+    )
+    loop = engine["result"]["loop"]
+    assert engine["reserved"]["solves"] == int(loop.get("solves_used") or 0) + int(
+        loop.get("probe_solves") or 0
+    ) + (1 if loop.get("base_restore_status") is not None else 0)
     envelope_file = run_envelope.path_for(path)
     if envelope_file.exists():
         assert json.loads(envelope_file.read_text())["state"] != "granted"

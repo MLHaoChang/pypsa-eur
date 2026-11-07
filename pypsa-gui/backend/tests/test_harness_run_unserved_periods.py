@@ -244,3 +244,21 @@ def test_a_missing_shed_or_a_negative_weight_reads_no_value(
     assert (
         read("kpi.unserved_mwh", periods_env(tmp_path, monkeypatch, **kwargs)) is None
     )
+
+
+def test_a_single_snapshot_scope_is_read(tmp_path, monkeypatch):
+    env = periods_env(tmp_path, monkeypatch)
+    n = env.ctx.network
+    one = n.snapshots[:1]
+    held = env.ctx.solver_state["last_lost_load"]
+    held["lost_load_t"] = held["lost_load_t"].loc[one]
+    env.ctx.network = _Snapshots(n, one)
+    value = _by_period(env)
+    assert isinstance(value, Scored) and value.value == 0.0
+
+
+def test_a_zero_generator_weighting_counts_no_energy_but_is_read(tmp_path, monkeypatch):
+    env = periods_env(tmp_path, monkeypatch, weights=((0.0, 2.0), (3.0, 1.0)))
+    value = read("kpi.unserved_mwh", env)
+    assert isinstance(value, Scored)
+    assert [r["unserved_mwh"] for r in value.rows] == [2.0, 3.5]
