@@ -382,6 +382,10 @@ def report(
         "windows": window_records,
         "cyclic_off": list(cyclic_off),
         "opex": stitched_opex(n),
+        "notes": [
+            "The envelope smoothing slice (P^sm, E^sm) is allocated per window "
+            "within the fixed store; its floors hold in every window."
+        ],
         "opex_basis": (
             "stitched dispatch x objective snapshot weightings over the full "
             "horizon (marginal and storage costs); window objectives are not "
