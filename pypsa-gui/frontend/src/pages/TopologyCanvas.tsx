@@ -1905,12 +1905,20 @@ function ResultsPill() {
 // Q11 (UX assessment 2026-10-05): below this canvas width the minimap covers
 // the network it maps. The assessment proposed 900 px; a browser check showed
 // that hides it for good on a 1366 px laptop (the canvas is ~790 px beside the
-// sidebar and properties), where it fits. 640 px hides it only when a side
-// panel squeezes the canvas (~400 px).
-const MINIMAP_MIN_CANVAS_PX = 640
+// sidebar and properties), where it fits. 760 px keeps it there (~790 px) and
+// hides it when a side panel squeezes the canvas below that: at a ~1250 px
+// window (canvas ~710 px) it sat against the assistant launcher and the nodes.
+export const MINIMAP_MIN_CANVAS_PX = 760
 const LEGEND_KEY = 'pypsa.canvasLegendOpen'
-function readLegendOpen(): boolean {
-  try { return localStorage.getItem(LEGEND_KEY) !== 'false' } catch { return true }
+// Below this canvas width (a side panel open on a ~1250 px window) the open
+// legend card covers the network and crowds the left toolbar, so it starts
+// folded; the user's own choice, once made, wins.
+const LEGEND_OPEN_MIN_CANVAS_PX = 760
+function readLegendOpen(): boolean | null {
+  try {
+    const v = localStorage.getItem(LEGEND_KEY)
+    return v === 'true' ? true : v === 'false' ? false : null
+  } catch { return null }
 }
 function writeLegendOpen(open: boolean) {
   try { localStorage.setItem(LEGEND_KEY, String(open)) } catch { /* private mode: not remembered */ }
@@ -1996,8 +2004,9 @@ export default function TopologyCanvas() {
   // and the legend remembers whether the user folded it away.
   const [canvasEl, setCanvasEl] = useState<HTMLDivElement | null>(null)
   const canvasWidth = useElementWidth(canvasEl)
-  const [legendOpen, setLegendOpenState] = useState<boolean>(() => readLegendOpen())
-  const setLegendOpen = (open: boolean) => { setLegendOpenState(open); writeLegendOpen(open) }
+  const [legendChoice, setLegendChoice] = useState<boolean | null>(() => readLegendOpen())
+  const legendOpen = legendChoice ?? (canvasWidth == null || canvasWidth >= LEGEND_OPEN_MIN_CANVAS_PX)
+  const setLegendOpen = (open: boolean) => { setLegendChoice(open); writeLegendOpen(open) }
   const rfInstance = useRef<{
     fitView: (opts?: { padding?: number; duration?: number; maxZoom?: number; minZoom?: number }) => void
     flowToScreenPosition: (pos: { x: number; y: number }) => { x: number; y: number }
