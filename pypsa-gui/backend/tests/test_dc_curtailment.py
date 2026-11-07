@@ -326,11 +326,14 @@ def test_it_never_takes_a_curtailment_cost_term():
             fn()
 
 
-@pytest.mark.parametrize("where", ["missing", "it_bus"])
+@pytest.mark.parametrize("where", ["missing", "it_bus", "no_it_load"])
 def test_a_project_without_a_cooling_load_on_dc_mv_is_refused(monkeypatch, where):
-    n = _network(cooling_bus="it_bus")
+    """No cooling load on dc_mv, or no it_load to read F from: refused, never placed elsewhere."""
+    n = _network(cooling_bus="dc_mv" if where == "no_it_load" else "it_bus")
     if where == "missing":
         n.remove("Load", "cooling")
+    if where == "no_it_load":
+        n.remove("Load", "it_load")
     status, condition, _, lines = _solve(n, monkeypatch, _terms())
     assert status == "error"
     assert condition.startswith(f"curtailment_refused: {C.NO_COOLING_LOAD}")
