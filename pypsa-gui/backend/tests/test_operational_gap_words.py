@@ -32,5 +32,9 @@ def test_the_card_flags_are_exactly_the_service_flags():
     body = re.search(r"export const OP_GAP_FLAGS = \[(.*?)\] as const", src, re.S)
     assert body, "OP_GAP_FLAGS not found"
     assert set(re.findall(r"'(\w+)'", body.group(1))) == {
-        og.FRESH, og.MISSING, og.STALE, og.WINDOW_FAILED, og.REFERENCE_NOT_SOLVED,
+        og.FRESH,
+        og.MISSING,
+        og.STALE,
+        og.WINDOW_FAILED,
+        og.REFERENCE_NOT_SOLVED,
     }
