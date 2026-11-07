@@ -14,6 +14,8 @@ entity_id, window, evidence_id, project_id) and each slot's disposition.
 """
 
 # ruff: noqa: F811 -- imported shared fixtures.
+import uuid
+
 import pytest
 
 from harness import calculations, fact_identity
@@ -188,6 +190,16 @@ def test_a_slot_that_excludes_snapshots_names_its_rows(request, checked):
         assert slot["valid_snapshots"] < slot["requested_snapshots"]
 
 
+def test_a_one_snapshot_window_counts_one_snapshot(request, checked):
+    ctx, scope = build(request, "generator-dispatch/1")
+    first = ctx.network.snapshots[0].isoformat()
+    record = records.capture_scoped(
+        owner(checked), {**scope, "start": first, "end": first}
+    )
+    assert record["window"]["snapshots"] == 1
+    assert record["window"]["start"] == record["window"]["end"] == first
+
+
 def test_the_evidence_route_and_export_hide_the_new_keys(request, checked):
     """Stored-format ruling: existing readers see the output they saw before."""
     _ctx, scope, record = _capture(request, checked, "generator-dispatch/1")
@@ -204,7 +216,7 @@ def test_the_evidence_route_and_export_hide_the_new_keys(request, checked):
 def test_a_record_saved_without_the_new_keys_still_reads(request, checked):
     _ctx, _scope, record = _capture(request, checked, "generator-dispatch/1")
     legacy = {k: v for k, v in record.items() if k not in records.IDENTITY_KEYS}
-    legacy["evidence_id"] = "legacy-" + record["evidence_id"]
+    legacy["evidence_id"] = str(uuid.uuid4())
     records.save(legacy, legacy["evidence_id"])
     loaded = records.evidence(owner(checked), legacy["evidence_id"])
     assert loaded == legacy
