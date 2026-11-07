@@ -12,7 +12,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { fmtAmount } from './valueFlows'
 import {
-  blankItem, errorsByField, fieldLabel, impliedCurrency, errorsUnder, isWindowed, KINDS, listText, MEASURED,
+  blankItem, errorsByField, FIELD_WORDS, fieldLabel, impliedCurrency, errorsUnder, isWindowed, KINDS, listText, MEASURED,
   normaliseTariff, parseIntList, parseNumberList, SETTLEMENTS, UNITS, type Item, type Period,
 } from './tariffModel'
 
@@ -338,6 +338,8 @@ export default function TariffBuilder({ initial, onSaved }: {
   }))[0]
   const blocked = invalid.size > 0
   const draft = () => normaliseTariff(t)
+  const implied = impliedCurrency(t.jurisdiction, t.valid_from)
+  const clearCurrencyError = () => { if (errors.currency) setErrors(({ currency: _c, ...rest }) => rest) }
 
   return (
     <InvalidLists.Provider value={reportList}>
@@ -345,19 +347,26 @@ export default function TariffBuilder({ initial, onSaved }: {
       {blocked && <p role="alert" className="text-danger" data-testid="tb-blocked">
         Fix the lists that are not numbers ({[...invalid.values()].join(', ')}) before previewing or saving.</p>}
       <div className="flex flex-wrap gap-2 items-center">
-        <label>id <input aria-label="Tariff id" className={`${input} w-28`} value={t.id}
+        <label>{FIELD_WORDS.id.text} <input aria-label={FIELD_WORDS.id.aria} className={`${input} w-28`} value={t.id}
                          onChange={e => setT({ ...t, id: e.target.value })} /></label>
-        <label>name <input aria-label="Tariff name" className={`${input} w-40`} value={t.name}
+        <label>{FIELD_WORDS.name.text} <input aria-label={FIELD_WORDS.name.aria} className={`${input} w-40`} value={t.name}
                            onChange={e => setT({ ...t, name: e.target.value })} /></label>
-        <label>jurisdiction <input aria-label="Jurisdiction" className={`${input} w-14`} value={t.jurisdiction}
-                                   onChange={e => setT({ ...t, jurisdiction: e.target.value })} /></label>
-        <label>currency <input aria-label="Currency" className={`${input} w-14 uppercase`} maxLength={3}
-                               value={t.currency ?? ''} placeholder={impliedCurrency(t.jurisdiction, t.valid_from) ?? 'ISO'}
-                               aria-invalid={!!errors.currency}
-                               onChange={e => setT({ ...t, currency: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') })} /></label>
-        <label>valid from <input type="date" aria-label="Valid from" className={input} value={t.valid_from}
+        <label>{FIELD_WORDS.jurisdiction.text} <input aria-label={FIELD_WORDS.jurisdiction.aria} className={`${input} w-14`}
+                                   value={t.jurisdiction}
+                                   onChange={e => { clearCurrencyError(); setT({ ...t, jurisdiction: e.target.value }) }} /></label>
+        <label>{FIELD_WORDS.currency.text} <input aria-label={FIELD_WORDS.currency.aria} className={`${input} w-14 uppercase`}
+                               maxLength={3} value={t.currency ?? ''} placeholder={implied ?? 'ISO'}
+                               aria-invalid={!!errors.currency || undefined} aria-describedby="tb-currency-help"
+                               onChange={e => { clearCurrencyError()
+                                 setT({ ...t, currency: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') }) }} /></label>
+        <span id="tb-currency-help" className="sr-only">{implied
+          ? `Leave blank to use ${implied}, the currency for ${t.jurisdiction.trim()}.`
+          : 'Three-letter ISO 4217 code, such as EUR.'}</span>
+        <label>{FIELD_WORDS.valid_from.text} <input type="date" aria-label={FIELD_WORDS.valid_from.aria} className={input} value={t.valid_from}
                                  onChange={e => setT({ ...t, valid_from: e.target.value })} /></label>
       </div>
+      {!implied && !t.currency && <p className="text-muted text-[11px]" data-testid="tb-currency-note">
+        State a currency: no currency is known for this jurisdiction.</p>}
       <Errors list={Object.entries(errors).filter(([k]) => !/^items\.\d+/.test(k))
         .flatMap(([k, msgs]) => msgs.map(m => `${fieldLabel(k || 'tariff')}: ${m}`))} />
       {t.items.map((item, i) => (

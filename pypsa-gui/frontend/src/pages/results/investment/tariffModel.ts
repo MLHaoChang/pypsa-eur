@@ -102,14 +102,19 @@ export function impliedCurrency(jurisdiction: string, validFrom?: string): strin
   return JURISDICTION_CURRENCY[code] ?? null
 }
 
-/** The form's label for the first part of a field key, for the error list. */
-const FIELD_LABELS: Record<string, string> = {
-  id: 'Tariff id', name: 'Tariff name', jurisdiction: 'Jurisdiction', currency: 'Currency',
-  valid_from: 'Valid from',
-}
+/** The tariff header's field words, one map: `text` is the visible label, `aria` the
+ *  accessible name and the error list's prefix. A tariff-level error is "Tariff". */
+export const FIELD_WORDS = {
+  id: { text: 'id', aria: 'Tariff id' },
+  name: { text: 'name', aria: 'Tariff name' },
+  jurisdiction: { text: 'jurisdiction', aria: 'Jurisdiction' },
+  currency: { text: 'currency', aria: 'Currency' },
+  valid_from: { text: 'valid from', aria: 'Valid from' },
+} as const
 export function fieldLabel(key: string): string {
   const [head, ...rest] = key.split('.')
-  return [FIELD_LABELS[head] ?? head, ...rest].join('.')
+  const word = head === 'tariff' ? 'Tariff' : (FIELD_WORDS as Record<string, { aria: string }>)[head]?.aria
+  return [word ?? head, ...rest].join('.')
 }
 
 /** The server's validation errors (preview 422 `errors`, or FastAPI's list) by field key. */
