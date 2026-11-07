@@ -200,7 +200,8 @@ def enqueue_solve(
     except BaseException as exc:
         if capture is not None:
             solve_capture.remove(capture)  # no job names it: never left for the sweep
-        if isinstance(exc, solve_queue.SolveConfigConflict):
+        from services.solve_queue import SolveConfigConflict
+        if isinstance(exc, SolveConfigConflict):
             raise HTTPException(409, {
                 "error_kind": "solve_config_conflict",
                 "message": "This project already has a queued or running solve with "

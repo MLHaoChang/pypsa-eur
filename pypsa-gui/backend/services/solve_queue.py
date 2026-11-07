@@ -235,6 +235,14 @@ class SolveJob:
         }
 
 
+def _same_config(a: str, b: str) -> bool:
+    """Equal as JSON (key order and whitespace are not a difference); raw text if either is not JSON."""
+    try:
+        return json.loads(a) == json.loads(b)
+    except ValueError:
+        return a == b
+
+
 class SolveConfigConflict(Exception):
     """An active job exists for the project and the new call's solver config differs."""
 
@@ -403,7 +411,7 @@ class SolveQueue:
                     and existing.kind == kind
                     and solver_config_json is not None
                     and existing.solver_config_json is not None
-                    and existing.solver_config_json != solver_config_json
+                    and not _same_config(existing.solver_config_json, solver_config_json)
                 ):
                     raise SolveConfigConflict(existing)
                 logger.info(

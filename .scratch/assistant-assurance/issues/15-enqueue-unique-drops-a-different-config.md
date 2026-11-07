@@ -39,3 +39,13 @@ re-enqueues stay idempotent.
 - Gated: GK B.
 - Size: S.
 - Refuse (own kind) or flag a differing config snapshot; same config stays unchanged.
+
+### 2026-11-07: GK B plan verdict, GO WITH CHANGES (recorded verbatim)
+
+- Q1. Compare canonically, not as raw strings: json.loads both, then compare dicts (or sort_keys dumps). Key order or whitespace must never read as a conflict. Test: the same config serialised with a different key order → already_queued.
+- Q2. The conflict check sits in the same critical section as enqueue_unique's active-job lookup, under the queue's lock, so no second enqueue can land between check and insert. Test: two threads, differing configs → exactly one job, and the other raises.
+- Q3. Every 409 consumer branches on error_kind, never on status alone. This route can already 409 (the solve_capture project mismatch). List every caller of the enqueue route and of solve_queue_enqueue in the PR body: the frontend panels, the chat tool's `_route` mapping, harness/runner. Show that none reads a 409 as "already queued" or as success. If the panel UI shows a generic error, say so as the skipped item.
+- Q4. Harness: in a run, a refused solve step (solve_config_conflict) fails or waits; it never completes and never captures. Test through runner.step_capture (issue 07 C1): a conflicting enqueue leaves no capture record and no settled solve.
+- Q5. The typed refusal gets a fail-closed test at the catching site in routers/solve_queue.py, with a base-class mutant that the test kills. Plus a chat-tool test against the real dispatcher signature (no `_probe` monkeypatch) showing error_kind reaches the tool result.
+- Q6. The 409 body names the existing job id only, never its config or its owner. The route's existing project ACL stays in front of the check.
+- Q7. Opt-in default False: test that the campus/gridspine callers' behaviour is byte-unchanged (differing config → (existing, False) as today). Put the kind in your own tool-error-kinds.d fragment; at the trial merge run test_tool_error_kind_manifest, ChatPanel.manifest.test.tsx and smoke/json_fragments.py.
