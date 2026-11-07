@@ -271,6 +271,10 @@ XLSX_CASES = {
         [["a", "b"], [None, None], ["x", None]],
     ),
     "formula_escaped": ([["=SUM(A1)", "@x"]], [["'=SUM(A1)", "'@x"]]),
+    "bool_date_ragged": (
+        [["a", "b"], [True, datetime.date(2026, 1, 2)], ["c"]],
+        [["a", "b"], [True, "2026-01-02T00:00:00"], ["c", None]],
+    ),
     "seventeen_digits": (
         [[0.1 + 0.2, 12345678901234567, 1 / 3]],
         [[0.3, 12345678901234570, 0.3333333333333333]],
