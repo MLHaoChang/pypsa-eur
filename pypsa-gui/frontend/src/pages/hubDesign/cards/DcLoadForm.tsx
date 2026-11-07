@@ -58,9 +58,11 @@ export function DcLoadForm({ templateId, templateName, create, disabledReason, o
       </p>
 
       <div className="flex flex-col gap-1">
-        <label htmlFor="dc-form-it" className="font-semibold text-text">{DC_FIELD_LABEL.it_load}</label>
+        {staged
+          ? <span id="dc-form-it-label" className="font-semibold text-text">{DC_FIELD_LABEL.it_load}</span>
+          : <label htmlFor="dc-form-it" className="font-semibold text-text">{DC_FIELD_LABEL.it_load}</label>}
         {staged ? (
-          <p id="dc-form-it" data-testid="dc-form-phases" className="text-muted">
+          <p aria-labelledby="dc-form-it-label" data-testid="dc-form-phases" className="text-muted">
             {DC_DEFAULTS.phases.map(p => `${p.mw} MW from ${p.year}`).join(', ')}. Phases come from the build plan: change them there.
           </p>
         ) : (

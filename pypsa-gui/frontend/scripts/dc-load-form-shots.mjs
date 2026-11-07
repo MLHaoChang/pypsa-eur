@@ -78,6 +78,35 @@ try {
     await dialog.getByTestId('dc-form-phases').waitFor()
     await dialog.getByTestId('dc-load-form').scrollIntoViewIfNeeded()
     await shot('5-staged-form-open')
+    if (mode === 'guided') {
+      // The Guided Start card: a separate placement of the same form (`start-` prefix).
+      const g = await ctx.newPage()
+      g.setDefaultTimeout(30000)
+      await g.goto(`${BASE}/app`)
+      await g.waitForLoadState('networkidle')
+      await g.evaluate(async () => {
+        const hub = (await import('/src/pages/hubDesign/hubDesignStore.ts')).useHubDesignStore.getState()
+        hub.setStep('start', { user: true })
+        ;(await import('/src/store/uiStore.ts')).useUIStore.getState().setSlidePanel('hubDesign')
+      })
+      const card = g.getByTestId('hub-card-start')
+      const startShot = async name => { await card.screenshot({ path: path.join(OUT, `guided-start-${name}.png`) }) }
+      const t1 = g.getByTestId('hub-start-template-eh_datacenter')
+      await t1.scrollIntoViewIfNeeded()
+      await startShot('1-tile-closed')
+      await t1.click()
+      await g.getByTestId('dc-load-form').scrollIntoViewIfNeeded()
+      await startShot('2-form-open')
+      await g.getByTestId('dc-form-arch').selectOption('sst')
+      await g.getByTestId('dc-form-pue').fill('1.01')
+      await g.getByTestId('dc-form-create').click()
+      await g.getByTestId('dc-form-error-pue').waitFor()
+      await startShot('4-refusal')
+      await g.getByTestId('hub-start-template-eh_datacenter_staged').click()
+      await g.getByTestId('dc-form-phases').waitFor()
+      await g.getByTestId('dc-load-form').scrollIntoViewIfNeeded()
+      await startShot('5-staged-form-open')
+    }
     await ctx.close()
   }
 } catch (e) { problems.push(String(e?.stack || e)) } finally { await browser.close() }

@@ -83,10 +83,10 @@ describe('DcLoadForm', () => {
     const create = mount()
     create.mutate.mockImplementation((_a, opts) => opts?.onError?.({ response: { status: 422, data: { detail: {
       code: 'dc_load_invalid', field: 'dc_load.pue_at_design',
-      message: 'dc_load.pue_at_design: a PUE of 1.05 cannot include the architecture’s own conversion losses' } } } }))
+      message: 'dc_load.pue_at_design: 1.05 is below what the architecture’s own conversion losses need (at least 1.031). Raise the PUE or pick another architecture.' } } } }))
     await userEvent.click(screen.getByTestId('dc-form-create'))
     const e = screen.getByTestId('dc-form-error-pue').textContent ?? ''
-    expect(e.startsWith('PUE at design: a PUE of 1.05')).toBe(true)
+    expect(e.startsWith('PUE at design: 1.05 is below')).toBe(true)
     expect(e).not.toContain('dc_load')
   })
 

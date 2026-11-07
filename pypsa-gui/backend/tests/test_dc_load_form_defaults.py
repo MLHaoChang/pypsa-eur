@@ -52,3 +52,18 @@ def test_form_body_builds(arch, mode):
         assert exc.value.field.startswith("dc_load.phases")
         return
     assert len(T.dc_load_spec("eh_datacenter_staged", staged_body).phases) == 3
+
+
+def test_pue_refusal_is_plain_words():
+    body = {
+        "pue_at_design": 1.01,
+        "architecture": "sst",
+        "phases": [{"cod": "2030-01-01", "it_mw": 20.0}],
+    }
+    with pytest.raises(DcLoadError) as exc:
+        T.dc_load_spec("eh_datacenter", body)
+    assert exc.value.field == "dc_load.pue_at_design"
+    assert str(exc.value) == (
+        "dc_load.pue_at_design: 1.01 is below what the architecture’s own conversion losses "
+        "need (at least 1.031). Raise the PUE or pick another architecture."
+    )
