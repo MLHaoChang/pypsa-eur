@@ -1339,3 +1339,24 @@ def test_a_carry_in_that_meets_its_bound_exactly_is_not_a_clip():
     rows, _ = C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
     assert rows[0] == (0, 0, 0.0)
     assert not any("clipped" in ln for ln in lines)
+
+
+def test_on_a_large_bound_the_relative_tolerance_decides():
+    """C20a: with a bound above 1000 MWh, 1e-9 * bound exceeds the floor: an overshoot between
+    the two clips; one past 1e-9 * bound raises."""
+    scale = 1e4
+    whole = 2.0 * SHARE * (IT + COOL)[2:5].max() * scale
+    assert 1e-9 * whole > 1e2 * C.CARRY_IN_FLOOR_MWH
+    for over, clips in ((1e-9 * whole / 2, True), (1e-9 * whole * 2, False)):
+        n, sns, window = _window_state(
+            np.array([0.0, 0.0, whole / 2, whole / 2 + over])
+        )
+        n.loads_t.p_set *= scale
+        lines: list[str] = []
+        if clips:
+            rows, _ = C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
+            assert rows[0] == (0, 0, 0.0) and any("clipped" in ln for ln in lines)
+        else:
+            with pytest.raises(C.DcCurtailmentRefused) as exc:
+                C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
+            assert exc.value.kind == C.CARRY_IN_OVER_BOUND
