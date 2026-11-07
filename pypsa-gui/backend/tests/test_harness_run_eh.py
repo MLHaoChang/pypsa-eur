@@ -1767,3 +1767,29 @@ def test_own_record_reads_the_latest_eh_step_that_is_not_superseded(tmp_path):
         },
     ]
     assert run_eh.own_record({"steps": steps}, ctx)["started_at"] == 1.0
+
+
+def test_the_freeze_takes_the_profiles_block_over_the_goal_card_and_falls_back_to_it(
+    tmp_path,
+):
+    """F1: the profile's `eh_study` block wins for pack overrides and MC
+    settings (draws stay the goal's); its stages, when it names none, are
+    the goal card's, and with neither the study's own default applies."""
+    block = {
+        "budget_solves": 2,
+        "pack_overrides": {"import_p_nom_mw": 55.0},
+        "mc": {"seed": 7},
+    }
+    template = {**TEMPLATE, "stages": ["apply_pack", "ens_solve"]}
+    frozen = run_eh.freeze(
+        ctx_for(tmp_path, template=template), {**PROFILE, "eh_study": block}, 6
+    )
+    # the card's stages (the study request appends its own closing stage)
+    assert frozen["args"]["stages"][:2] == ["apply_pack", "ens_solve"]
+    assert "mc_certify" not in frozen["args"]["stages"]
+    assert frozen["args"]["pack_overrides"]["import_p_nom_mw"] == 55.0
+    assert frozen["args"]["mc"]["seed"] == 7
+    bare = run_eh.freeze(
+        ctx_for(tmp_path), {**PROFILE, "eh_study": {"budget_solves": 2}}, 6
+    )
+    assert "stages" not in bare["args"]
