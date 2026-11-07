@@ -969,7 +969,8 @@ manifest names each chart's `scope_status`. An integrity failure (bytes,
 dataset, sidecar, manifest, project or labels) writes a quarantine marker
 `assistant_artifacts/quarantine/<file_id>.json` under `durable.file_lock`;
 it is never cleared, so restored bytes or a repaired sidecar stay refused and
-only a new file_id passes (AA-05 S2). IO errors and stale or unrechecked
+only a new file_id passes (AA-05 S2); `create_chart` refuses an identical
+redraw with `artifact_quarantined` before writing anything. IO errors and stale or unrechecked
 solves write no marker, and an unreadable marker refuses. Scoped manifests
 also check the render spec's labels against the dataset; legacy manifests
 verify as before. A delivery whose scoped charts do not share one solve stamp

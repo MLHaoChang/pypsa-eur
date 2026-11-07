@@ -164,3 +164,11 @@ GK B's conditions:
   still builds.
 - **J6:** hand mutants for the verdict-only rule and the unreadable-marker
   refusal.
+
+H8: GK B (32) (a), H8a–H8d. An identical redraw of a quarantined chart gets the
+same content-hash file_id, so `create_chart` refuses it with
+`artifact_quarantined` once the file_id is computed and before any blob, meta
+or sidecar write (H8a). An unreadable marker also refuses (H8b). The kind is in
+`tool-error-kinds.d/claude-aa05-s2-delivery.json` (H8c). Tests and the hand
+mutant that removes the check are in `test_p4_delivery.py` (H8d). A marker
+landing after the check is caught by `verify_chart` before download or delivery.
