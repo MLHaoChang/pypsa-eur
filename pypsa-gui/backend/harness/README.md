@@ -990,6 +990,23 @@ manifest names each chart's `scope_status`. Private cloning skips the native sol
 changing the live model. `build_delivery` bundles selected authorized
 artifacts and a content-hash/provenance manifest within the 25 MB limit.
 All existing agent exports now include authenticated download metadata.
+
+The assistant's report tools (`generate_report`, `regenerate_report_section`)
+run the report job strict (AA-05 S4a). The switch is an in-process context
+variable, `services.reports.report_job.assistant_strict`, set around the route
+call. No query, body or form field of the human Reports routes reaches it, so
+those routes keep flagging numbers as before. A strict job withholds each
+statement the number audit cannot check, and an audit that fails withholds
+too. A `gap` callout stands in its place, giving only the count of numbers
+and pointing to the "Numbers to check" appendix. The appendix (docx, the PDF's
+docx, the tagged template's `unverified`, `get_report`'s `audit.withheld`)
+lists the values marked withheld.
+
+A strict job and the assistant's `export_report_docx` and `export_report_pdf`
+check that every required disclosure of the version they start from is still
+there. A lost one fails the job, or refuses the export, with
+`report_disclosure_missing` (409), and nothing is saved. A later human
+regenerate of a section rewrites it non-strict and drops its placeholders.
 The frontend renders task progress, ordinary resume/cancel requests and safe
 file links from existing `tool_result` frames; no new stream vocabulary or
 provider-specific handlers are introduced.

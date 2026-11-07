@@ -69,6 +69,7 @@ from models.report import (
     ReportDocument,
 )
 from services.reports.docx_writer import _CODE_FONT, _LINK_COLOR, tokenize_inline
+from services.reports.formatting import withheld_marked
 
 EXECUTIVE_SUMMARY_ID = "executive_summary"
 PICTURE_WIDTH = Inches(6.0)
@@ -141,7 +142,7 @@ def build_context(doc: ReportDocument, figure_bytes: dict[str, bytes]) -> dict[s
                 elif block.kind == "gap":
                     gaps.append(block.text)
         fields[section.section_id] = entry
-        unverified[section.section_id] = list(section.audit.unverified)
+        unverified[section.section_id] = withheld_marked(section)
     tables = {tid: {"columns": list(t.columns), "rows": [list(r) for r in t.rows],
                     "caption": t.caption or ""}
               for tid, t in doc.tables.items()}

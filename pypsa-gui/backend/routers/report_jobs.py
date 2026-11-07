@@ -62,6 +62,7 @@ from services.pypsa_service import PyPSAService
 from services.reports import store, templates
 from services.reports.report_job import (
     ReportJobInFlight,
+    assistant_strict_active,
     pending_instruction_of,
     public_record,
     start_mapping_job,
@@ -178,6 +179,10 @@ def _in_flight(exc: Exception) -> HTTPException:
 
 
 def _start(project: AuthorizedProject, **kwargs: Any) -> str:
+    # AA-05 S4 (V2): strict only from the assistant's in-process switch;
+    # no request field reaches it.
+    if "strict" not in kwargs and assistant_strict_active():
+        kwargs["strict"] = True
     try:
         return start_report_job(
             project_name=project.name, project_dir=project.directory,
