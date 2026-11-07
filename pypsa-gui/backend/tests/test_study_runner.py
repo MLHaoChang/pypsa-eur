@@ -1092,6 +1092,17 @@ def test_a_tariff_patch_moves_the_study_year_that_followed_an_older_ledger(
     assert case.status_code == 200, case.text
 
 
+def test_a_tariff_patch_with_settings_but_no_year_still_moves_the_followed_year(
+        client, api_project, studies_on, fake, project_storage_dir):
+    name = "tariff-year-settings"
+    sid, study = _old_ledger_study(client, api_project, project_storage_dir, name, 2020)
+    r = client.patch(f"/api/projects/{name}/studies/{sid}", json={
+        "intake": {"tariff": dict(study.intake.get("tariff") or {})},
+        "settings": {"perspective": study.perspective.value}})
+    assert r.status_code == 200, r.text
+    assert r.json()["currency_year"] == 2025
+
+
 def test_a_tariff_patch_leaves_a_year_the_user_set_or_the_patch_sets(
         client, api_project, studies_on, fake, project_storage_dir):
     name = "tariff-year-kept"
