@@ -55,3 +55,8 @@ tariff is `unnamed`, lines read `name vN · hash8`, absent fields render as
 before, and the grant path (`_gap_instances`, `_rows`) is untouched. The card
 says "held now" because the grant may resolve a different list. Shots:
 `.scratch/study-harness/evidence/26/`.
+
+UX (12) NOT OK @d20c28b3 changed the words (it outranks the issue's text): the empty
+state reads "No Library tariff is held, so approving leaves it empty." (not "the gap
+stays open"); no "grant" or "gap"; the outcome of approving is said for one and for
+several held; Guided shows `name vN`, Expert adds the hash8; no raw attribute key.

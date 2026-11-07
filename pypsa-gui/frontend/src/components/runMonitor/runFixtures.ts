@@ -79,6 +79,8 @@ export const STATES: Record<string, RunMonitorView> = {
   envelope_held_two: { ...REVIEW, envelope: { ...ENVELOPE, gaps: [{ ...TARIFF_GAP, held_state: 'held', held: [
     { name: 'nl-commercial', version: 1, hash: 'a1b2c3d4'.padEnd(64, '0') },
     { name: 'nl-peak-shaving', version: 3, hash: '99887766'.padEnd(64, '1') }] }] } },
+  envelope_held_one: { ...REVIEW, envelope: { ...ENVELOPE, gaps: [{ ...TARIFF_GAP, held_state: 'held', held: [
+    { name: 'nl-commercial', version: 1, hash: 'a1b2c3d4'.padEnd(64, '0') }] }] } },
   envelope_held_none: { ...REVIEW, envelope: { ...ENVELOPE, gaps: [{ ...TARIFF_GAP, held_state: 'none', held: [] }] } },
   envelope_unattended_disabled: { ...REVIEW, monitor: { ...MONITOR, unattended: { available: false, reason: 'no_provider' } } },
   envelope_email_disabled: { ...REVIEW, monitor: { ...MONITOR, email: { available: false } } },
