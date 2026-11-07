@@ -347,6 +347,13 @@ def _eh_record(env):
     record = run_eh.own_record(env.task, env.ctx)
     if record is None:
         return NoEvidence("not_own", "the run's own EH study record is missing or was replaced")
+    # W1: the record's revision, captured at study start, against the run
+    # project's current one. The margin loop's restore="base" does not bump
+    # it (only a restore="final" hold does), so the run's own LOLE loop leaves
+    # the record readable; a user edit since the study does not.
+    from services import dirty_state, study_state
+    if study_state.edited_since(record, revision=dirty_state.revision(env.ctx)) is not False:
+        return NoEvidence("inputs_changed", "the network was edited after the run's EH study, or the study recorded no revision")
     return record
 
 

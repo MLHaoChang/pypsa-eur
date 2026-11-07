@@ -50,6 +50,7 @@ def ctx_for(tmp_path, cfg=None, template=TEMPLATE, **state):
         project_uuid=PROJECT,
         solver_state_lock=threading.RLock(),
         solver_state={"solver_config": dict(cfg or {}), **state},
+        network_revision=0,
     )
 
 
@@ -410,6 +411,7 @@ def record(status="done", started=1.0, stages=None, report=True):
         "status": status,
         "started_at": started,
         "error": None,
+        "network_revision": 0,
         "report": {"pipeline": {"stages": stages}} if report else None,
     }
 
@@ -972,6 +974,73 @@ def test_the_study_status_reads_the_runs_own_record_only(
     assert (value.value if isinstance(value, NoEvidence) else value) == expected
 
 
+@pytest.mark.parametrize("captured", [0, None])
+def test_an_edit_after_the_study_leaves_both_eh_facts_without_evidence(
+    tmp_path, monkeypatch, captured
+):
+    """W1: a record whose captured revision is not the project's current one
+    (a user edit since the study, or no revision captured) is no evidence for
+    either EH fact, the way `kpi.unserved_mwh` refuses another solve."""
+    from services.adequacy import eh_review
+
+    monkeypatch.setattr(
+        eh_review, "review_report", lambda report, rec: {"findings": []}
+    )
+    ctx = ctx_for(tmp_path, eh_study={**record(), "network_revision": captured})
+    env = env_for(tmp_path, ctx=ctx, steps=[eh_done()])
+    if captured is not None:
+        assert read("eh.study.status", env) == "done"
+        assert read("eh.review.blockers", env) == []
+        ctx.network_revision = 1  # the user edits the project after the study
+    for name in ("eh.study.status", "eh.review.blockers"):
+        value = read(name, env)
+        assert isinstance(value, NoEvidence) and value.value == "inputs_changed", (
+            name,
+            value,
+        )
+
+
+@pytest.mark.parametrize("restore, readable", [("base", True), ("final", False)])
+def test_the_runs_own_restore_base_margin_loop_keeps_the_eh_record_readable(
+    tmp_path, client, install_network, monkeypatch, restore, readable
+):
+    """W1: the eh_site LOLE rule runs the margin loop with restore="base"
+    after the EH study. That loop does not bump the project's revision, so the
+    gate compares the record with the project's CURRENT revision and still
+    reads it; a restore="final" hold bumps it, and the same read is stale."""
+    from services import dirty_state
+    from tests.test_adequacy_margin_loop import (
+        _install_stubs,
+        _poll,
+        _setup,
+        _start,
+        _Stubs,
+    )
+
+    stubs = _Stubs(firm_base=130.0, lole_fn=lambda m: 0.2)
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network, reserve_margin=0.10)
+    # The loop runs on the request's project context; take it, and the
+    # revision at the loop's start, from the loop's own capture.
+    seen = []
+    capture = dirty_state.capture
+    monkeypatch.setattr(
+        dirty_state,
+        "capture",
+        lambda rec, ctx=None, **kw: (
+            seen.append((ctx, capture(rec, ctx, **kw))) or seen[-1][1]
+        ),
+    )
+    _start(client, restore=restore, max_solves=2)
+    assert _poll(client)["status"] == "met"
+    ctx, at_start = seen[0]
+    # The EH study ran just before the loop, on the same project revision.
+    with ctx.solver_state_lock:
+        ctx.solver_state[run_eh.STUDY] = {**record(), "network_revision": at_start}
+    value = read("eh.study.status", env_for(tmp_path, ctx=ctx, steps=[eh_done()]))
+    assert value == "done" if readable else value.value == "inputs_changed"
+
+
 def test_the_review_reads_the_runs_own_record_never_the_latest(tmp_path, monkeypatch):
     """F3, F8: review_report on the record the step settled from."""
     from services.adequacy import eh_review
@@ -1401,3 +1470,48 @@ def test_a_revoked_envelope_is_neither_charged_nor_checked_by_admit(tmp_path):
     step = frozen_step(ctx)
     assert run_eh.admit(path, task, step, step["args"], ctx) is None
     assert [a["event"] for a in run_envelope._load(path)["audit"]] == ["used"]
+
+
+@pytest.mark.parametrize("budget", [0, "2", None])
+def test_without_an_envelope_admit_refuses_a_budget_that_is_not_a_positive_int(
+    tmp_path, budget
+):
+    """C2, step-by-step (no envelope): the card's own budget is the bound,
+    so a missing, zero or non-integer one refuses before the study starts."""
+    ctx = ctx_for(tmp_path)
+    path, task = task_for(tmp_path)
+    step = frozen_step(ctx)
+    args = {**step["args"], "budget_solves": budget}
+    frozen = {**step["frozen"], "args": args, "digest": run_eh.digest(args)}
+    step = {**step, "args": args, "frozen": frozen}
+    refusal = run_eh.admit(path, task, step, args, ctx)
+    assert refusal is not None and refusal[0] == run_eh.BUDGET_KIND
+
+
+def test_releasing_an_unknown_charge_without_a_reservation_settles_nothing(tmp_path):
+    """C4: `release(..., None)` keeps the whole reservation; with no
+    reservation row for the call there is nothing to keep or settle."""
+    path, task = task_for(tmp_path)
+    envelope(
+        path, audit=[{"event": "used", "tool": "solve_queue_enqueue", "call_id": "c0"}]
+    )
+    assert run_eh.release(path, "a-missing", None, task=task) is False
+    assert [a["event"] for a in run_envelope._load(path)["audit"]] == ["used"]
+
+
+@pytest.mark.parametrize("stages", [5, 1.5, True])
+def test_charged_reads_none_when_the_stages_are_not_a_list(stages):
+    assert run_eh.charged({"report": {"pipeline": {"stages": stages}}}) is None
+
+
+@pytest.mark.parametrize(
+    "rec, started",
+    [
+        (None, 1.0),  # no record
+        ("done", 1.0),  # not a dict
+        ({**record(), "started_at": None}, None),  # the step captured no start
+        (record(started=2.0), 1.0),  # replaced
+    ],
+)
+def test_outcome_of_a_missing_or_replaced_record_is_uncertain(rec, started):
+    assert run_eh.outcome(rec, started)[:2] == ("unknown", "uncertain")
