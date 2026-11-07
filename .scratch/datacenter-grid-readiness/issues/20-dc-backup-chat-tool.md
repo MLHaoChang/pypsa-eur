@@ -1,6 +1,6 @@
 # Chat control of the data-centre backup
 
-Status: needs-info
+Status: ready-for-agent
 Type: task
 Blocked by: 03
 Size: S
@@ -26,3 +26,7 @@ Decide (owner) between a typed tool for each, or a UI pointer only (as AS19-POIN
 - Not buildable until answered.
 - Question (GK A): Owner: for the data-centre backup routes (`PUT /api/campus-electrical/{name}/dc-backup`, `POST .../dc-backup/assess`, `GET /api/results/reserves`), does chat get typed tools, or is it a pointer to the Backup section only (as AS19-POINTER-1 did)? Pointer = S, sonnet, drops the two held-by-spec declarations for ui-pointer ones; tools = M and must keep 03's no-write guarantees. The same answer decides DC 21.
 - Blocked by: the answer.
+
+### 2026-11-07: needs-info answered (coordinator)
+
+Owner (card, DC20-POINTER-1): "Pointer only", as AS19-POINTER-1. Chat points to the Backup section; the two held-by-spec declarations become ui-pointer ones; no typed tools. S, Sonnet, GK B (chat surface) with GK A for DC-03's no-write guarantees. The same answer decides DC 21.

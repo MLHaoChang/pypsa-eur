@@ -1,6 +1,6 @@
 # The IPP template's PV `p_nom` is a DC (MWp) figure
 
-Status: needs-info
+Status: ready-for-agent
 Type: gap
 Found in: TC-02 (issue 02, PR #1190), 2026-11-06.
 
@@ -16,3 +16,7 @@ but the template's capacity, its profile and its cost basis disagree. Decide the
 - Not buildable until answered.
 - Question (GK A): Owner: what AC rating and DC/AC ratio should the `eh_ipp` `pv_plant` have (today `p_nom` = 50 MWp)? E.g. ratio 1.2 gives p_nom about 41.7 MW AC with `dc_ac_ratio` set and the investment-case numbers re-pinned (M, sonnet, GK A); or keep 50 as the AC rating.
 - Blocked by: the answer.
+
+### 2026-11-07: needs-info answered (coordinator)
+
+Owner (card, TCU06-AC-1): "Ratio 1.2 → ~41.7 MW AC". Set the eh_ipp pv_plant dc_ac_ratio = 1.2 and p_nom ≈ 41.7 MW AC (50 MWp / 1.2), and re-pin the investment-case numbers. M, Sonnet, GK A.
