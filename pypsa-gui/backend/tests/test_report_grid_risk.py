@@ -199,7 +199,9 @@ def test_the_tonnes_format_is_the_tabs(t, want):
 
 
 _MONEY_CASES = json.loads(
-    (Path(__file__).resolve().parents[2] / "frontend/src/utils/money.cases.json").read_text(encoding="utf-8")
+    (
+        Path(__file__).resolve().parents[2] / "frontend/src/utils/money.cases.json"
+    ).read_text(encoding="utf-8")
 )["cases"]
 
 
