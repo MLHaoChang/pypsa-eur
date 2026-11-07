@@ -1249,6 +1249,392 @@
    }
   }
  },
+ "checked_tool_inputs": {
+  "compare_project_runs": {
+   "properties": {
+    "allow_input_changes": {
+     "type": "boolean"
+    },
+    "baseline_run_id": {
+     "maxLength": 64,
+     "type": "string"
+    },
+    "metrics": {
+     "items": {
+      "maxLength": 64,
+      "type": "string"
+     },
+     "maxItems": 20,
+     "minItems": 1,
+     "type": "array"
+    },
+    "run_id": {
+     "maxLength": 64,
+     "type": "string"
+    }
+   },
+   "required": [
+    "run_id",
+    "baseline_run_id"
+   ],
+   "type": "object"
+  },
+  "get_aggregate_load": {
+   "properties": {
+    "names": {
+     "type": "string"
+    },
+    "section": {
+     "type": "string"
+    }
+   },
+   "required": [],
+   "type": "object"
+  },
+  "get_component": {
+   "properties": {
+    "component_class": {
+     "enum": [
+      "Bus",
+      "Carrier",
+      "Line",
+      "Link",
+      "Transformer",
+      "Generator",
+      "StorageUnit",
+      "Store",
+      "Load",
+      "ShuntImpedance",
+      "GlobalConstraint"
+     ],
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "component_class",
+    "name"
+   ],
+   "type": "object"
+  },
+  "get_run_evidence": {
+   "properties": {
+    "run_id": {
+     "maxLength": 64,
+     "type": "string"
+    },
+    "section": {
+     "maxLength": 32,
+     "type": "string"
+    }
+   },
+   "required": [
+    "run_id"
+   ],
+   "type": "object"
+  },
+  "get_timeseries": {
+   "properties": {
+    "attribute": {
+     "type": "string"
+    },
+    "component": {
+     "type": "string"
+    },
+    "end": {
+     "minimum": 1,
+     "type": "integer"
+    },
+    "name": {
+     "type": "string"
+    },
+    "period": {
+     "type": "integer"
+    },
+    "start": {
+     "minimum": 0,
+     "type": "integer"
+    }
+   },
+   "required": [
+    "component",
+    "name",
+    "attribute"
+   ],
+   "type": "object"
+  },
+  "list_components": {
+   "properties": {
+    "component_class": {
+     "enum": [
+      "Bus",
+      "Carrier",
+      "Line",
+      "Link",
+      "Transformer",
+      "Generator",
+      "StorageUnit",
+      "Store",
+      "Load",
+      "ShuntImpedance",
+      "GlobalConstraint"
+     ],
+     "type": "string"
+    },
+    "limit": {
+     "description": "Rows to return. Defaults to 200; values above 1000 are clamped, and the response then carries limit_clamped_to.",
+     "type": "integer"
+    },
+    "offset": {
+     "description": "Row to start at. Defaults to 0.",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "component_class"
+   ],
+   "type": "object"
+  },
+  "ui_open_panel": {
+   "properties": {
+    "bottom_tab": {
+     "enum": [
+      "Log",
+      "History",
+      "Buses",
+      "Lines",
+      "Transformers",
+      "Generators",
+      "Storage",
+      "Stores",
+      "Loads",
+      "Links",
+      "Carriers",
+      "Shunts"
+     ],
+     "type": "string"
+    },
+    "canvas_view": {
+     "enum": [
+      "blank",
+      "satellite",
+      "hybrid",
+      "site"
+     ],
+     "type": "string"
+    },
+    "compare_a": {
+     "type": "string"
+    },
+    "compare_b": {
+     "type": "string"
+    },
+    "compare_rail": {
+     "type": "boolean"
+    },
+    "compare_tab": {
+     "enum": [
+      "overview",
+      "capacity",
+      "dispatch",
+      "loading",
+      "prices",
+      "emissions",
+      "economics",
+      "curtailment",
+      "lost_load",
+      "storage_cycling"
+     ],
+     "type": "string"
+    },
+    "highlight_branch": {
+     "additionalProperties": false,
+     "properties": {
+      "component": {
+       "enum": [
+        "Line",
+        "Transformer"
+       ],
+       "type": "string"
+      },
+      "name": {
+       "maxLength": 128,
+       "minLength": 1,
+       "type": "string"
+      }
+     },
+     "required": [
+      "component",
+      "name"
+     ],
+     "type": "object"
+    },
+    "highlight_projects": {
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 4,
+     "minItems": 1,
+     "type": "array"
+    },
+    "loadflow_source": {
+     "enum": [
+      "lopf",
+      "ac_pf"
+     ],
+     "type": "string"
+    },
+    "panel_id": {
+     "enum": [
+      "Results",
+      "results",
+      "Topology",
+      "topology",
+      "MapCanvas",
+      "map",
+      "BottomPanel",
+      "PropertiesPanel",
+      "properties",
+      "TimeSeriesManager",
+      "timeseries",
+      "LoadProfileManager",
+      "VintagePeriodBoundsModal",
+      "capacityBounds",
+      "OverviewPanel",
+      "overview",
+      "GenerationStack",
+      "ImportExport",
+      "import_export",
+      "SolverSettings",
+      "simparams",
+      "Compare",
+      "compare",
+      "IssuesPanel",
+      "issues",
+      "CommandPalette",
+      "palette",
+      "Chat",
+      "chat",
+      "Scenarios",
+      "scenarios",
+      "Snapshots",
+      "snapshots",
+      "Horizon",
+      "horizon",
+      "SolveQueue",
+      "solveQueue",
+      "ProjectPicker",
+      "project_picker",
+      "OpenProject",
+      "NewProject",
+      "new_project",
+      "NewProjectWizard",
+      "HubDesign",
+      "hubDesign",
+      "Workspace",
+      "workspace",
+      "Settings",
+      "settings",
+      "GridSpine",
+      "gridspine",
+      "Reports",
+      "reports",
+      "CampusElectrical",
+      "campusElectrical",
+      "CampusStudy",
+      "campusStudy",
+      "CampusResults",
+      "campusResults",
+      "DecisionStudy",
+      "decision",
+      "Economics",
+      "economics",
+      "ProfileStudio",
+      "profiles",
+      "CommercialLibrary",
+      "library"
+     ],
+     "type": "string"
+    },
+    "results_tab": {
+     "enum": [
+      "summary",
+      "overview",
+      "capex",
+      "dispatch",
+      "loadflow",
+      "prices",
+      "economics",
+      "emissions",
+      "curtailment",
+      "lostload",
+      "storage",
+      "asset",
+      "investment",
+      "adequacy",
+      "fmea",
+      "flows",
+      "loadshape",
+      "grid_code",
+      "electrical_design",
+      "island",
+      "grid_forming",
+      "grid_risk"
+     ],
+     "type": "string"
+    },
+    "window_from": {
+     "minimum": 0,
+     "type": "integer"
+    },
+    "window_to": {
+     "minimum": 0,
+     "type": "integer"
+    }
+   },
+   "required": [
+    "panel_id"
+   ],
+   "type": "object"
+  },
+  "update_component": {
+   "properties": {
+    "attrs": {
+     "description": "Field values in each field's STORED unit (get_component_schema unit_storage), e.g. EUR/MWh, never the display unit EUR/kWh.",
+     "type": "object"
+    },
+    "component_class": {
+     "enum": [
+      "Bus",
+      "Carrier",
+      "Line",
+      "Link",
+      "Transformer",
+      "Generator",
+      "StorageUnit",
+      "Store",
+      "Load",
+      "ShuntImpedance",
+      "GlobalConstraint"
+     ],
+     "type": "string"
+    },
+    "name": {
+     "type": "string"
+    },
+    "new_name": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "component_class",
+    "name"
+   ],
+   "type": "object"
+  }
+ },
  "checked_tool_results": {
   "compare_project_runs": {
    "$defs": {
@@ -2653,6 +3039,7 @@
  "directions": {
   "answer_receipt": "returns",
   "checked_tool_input_additions": "accepts",
+  "checked_tool_inputs": "accepts",
   "checked_tool_results": "returns",
   "checked_tools": "returns",
   "computed_draft": "accepts",
