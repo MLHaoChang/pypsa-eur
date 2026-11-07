@@ -111,6 +111,8 @@ export interface PendingConfirmationCard {
   edit_card?: unknown
   /** LC-17: a sensitivity sweep's cases and base → case rows (components/SweepCard.tsx). */
   sweep_card?: unknown
+  /** Issue 04 S5: the earlier job call this card repeats (components/ConfirmationCard.tsx). */
+  repeat_card?: unknown
   /** Issue 19: set when the tool comes from an admin's MCP server (harness/confirm.py). */
   external?: { server: string }
   /** Study harness 08: a run's card, answered on the run's own session (`run:<task_id>`). */

@@ -1,0 +1,3 @@
+{"kinds": {
+  "operation_conflict": {"surface": "inline", "why": "A job call with other arguments was made while an earlier call of that tool on this project has an unknown outcome and may still be running (harness/job_holds.py). Nothing ran and no card is offered; the result reads denied. The assistant waits for the earlier job, reads its status or stops it, then asks again."}
+}}
