@@ -345,11 +345,21 @@ def section_2_generate(rep: dict, seam: _Seam) -> tuple[str, dict] | None:
     verified = [str(v) for v in audit.get("verified") or []]
     _step("the planted wrong number is in audit.unverified",
           any("99.9" in u for u in unverified), f"unverified={unverified}")
-    _step("the right number copied from the evidence is in audit.verified",
-          any(plan["right_number"] in v for v in verified), f"verified={verified}")
-    _step("the summary's prose is intact in the per-section read",
-          any(b.get("type") == "paragraph" and WRONG_NUMBER_SENTENCE in b.get("md", "")
-              for b in ssec.get("blocks") or []))
+    # AA-05 S4 (P1): the assistant's generate is strict, so the summary may
+    # quote only its own slice's numbers; the FMEA criticality it copies from
+    # another section is withheld with the planted one.
+    _step("the right number copied from another section is withheld, not verified (strict)",
+          any(plan["right_number"] in u for u in unverified) and not verified
+          and audit.get("withheld") is True,
+          f"unverified={unverified} verified={verified}")
+    blocks = ssec.get("blocks") or []
+    _step("the summary's statement is withheld behind a placeholder that names no value",
+          any(b.get("type") == "callout" and b.get("kind") == "gap"
+              and b.get("text") == "Withheld: 2 numbers could not be checked against the study; "
+                                   "see Numbers to check." for b in blocks)
+          and not any(WRONG_NUMBER_SENTENCE in json.dumps(b) or "99.9" in json.dumps(b)
+                      for b in blocks),
+          f"blocks={[b.get('type') for b in blocks]}")
 
     listed = _as_session(chat_tools.list_reports)
     meta = next((m for m in listed if m.get("report_id") == rid), {})
