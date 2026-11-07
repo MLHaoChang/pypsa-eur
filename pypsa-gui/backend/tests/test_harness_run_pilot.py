@@ -72,9 +72,16 @@ def _grant(host, session, site, name):
 # ── The hand-over binds the new project, never the host ─────────────────────
 
 
-def test_a_grant_inside_the_hosts_chat_turn_fingerprints_the_new_project_and_leaves_the_host(
-    host, session, site
-):
+def _host_state(front):
+    return (
+        {k: v.to_json(date_format="iso") for k, v in front.user_ts.items()},
+        repr(front.solver_state["solver_config"]),
+        front.network_revision,
+        workflow_tools._network_input_fingerprint(front),
+    )
+
+
+def _profiled_host():
     front = PyPSAService.get_active_context()
     front.user_ts[("loads", "p_set", "L1")] = pd.Series(
         [1.0, 2.0], index=front.network.snapshots[:2]
@@ -82,23 +89,59 @@ def test_a_grant_inside_the_hosts_chat_turn_fingerprints_the_new_project_and_lea
     front.solver_state["solver_config"] = dataclasses.replace(
         front.solver_state["solver_config"], voll=1234.0
     )
-    before = workflow_tools._network_input_fingerprint(front)
+    return front
+
+
+def test_a_grant_inside_the_hosts_chat_turn_fingerprints_the_new_project_and_leaves_the_host(
+    host, session, site
+):
+    front = _profiled_host()
+    before = _host_state(front)
     leave = _in_a_chat_turn(front)
     try:
         path, task, ctx, _ = _grant(host, session, site, f"Pilot {uuid.uuid4().hex[:6]}")
+        # The host's cell is the bound one again once the grant returns.
+        assert PyPSAService.get_active_context() is front
     finally:
         leave()
-    # The host keeps its profiles and its config: the new project's setup
-    # reset only its own.
-    assert list(front.user_ts) == [("loads", "p_set", "L1")]
-    assert front.solver_state["solver_config"].voll == 1234.0
-    assert workflow_tools._network_input_fingerprint(front) == before
+    # The host keeps its profiles, its config and its revision: the new
+    # project's setup reset only its own.
+    assert _host_state(front) == before
     # The run and its grant start from the new project's inputs.
     new = workflow_tools._network_input_fingerprint(ctx)
     envelope = json.loads(run_envelope.path_for(path).read_text())
-    assert new != before
+    assert new != before[-1]
     assert task["fingerprint"] == envelope["fingerprint"] == new
     assert envelope["chain"][-1]["fingerprint"] == new
+
+
+def test_a_grant_that_raises_mid_setup_leaves_the_hosts_cell_bound(
+    host, session, site, monkeypatch
+):
+    from routers import projects as project_routes
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("setup failed")
+
+    monkeypatch.setattr(project_routes, "_finish_created_project", broken)
+    front = _profiled_host()
+    before = _host_state(front)
+    leave = _in_a_chat_turn(front)
+    try:
+        view = _start(host, f"Pilot {uuid.uuid4().hex[:6]}")
+        try:
+            run_envelope.decide(
+                session,
+                view["task_id"],
+                "unattended",
+                intake_digest=view["run"]["intake"]["digest"],
+            )
+        except Exception:  # noqa: BLE001 -- the grant's own refusal shape is not under test
+            pass
+        assert PyPSAService.get_active_context() is front
+    finally:
+        leave()
+    assert _host_state(front) == before
 
 
 def test_the_created_project_is_saved_so_a_later_save_keeps_its_fingerprint(
@@ -129,17 +172,76 @@ def test_the_created_project_is_saved_so_a_later_save_keeps_its_fingerprint(
     assert workflow_tools._network_input_fingerprint(ctx) == granted
 
 
+def test_the_hand_over_save_runs_before_the_run_starts_and_changes_no_config(
+    host, session, site, monkeypatch
+):
+    from routers import projects as project_routes
+
+    seen = []
+    real_save = project_routes._save_context
+
+    def save(ctx, *args, **kwargs):
+        config, revision = repr(ctx.solver_state["solver_config"]), ctx.network_revision
+        out = real_save(ctx, *args, **kwargs)
+        seen.append(("save", config == repr(ctx.solver_state["solver_config"]),
+                     revision == ctx.network_revision))
+        return out
+
+    monkeypatch.setattr(project_routes, "_save_context", save)
+    real_tasks_start = run_handover._under_lock
+
+    def under_lock(*args, start, **kwargs):
+        def started(row, ctx):
+            seen.append(("start",))
+            return start(row, ctx)
+        return real_tasks_start(*args, start=started, **kwargs)
+
+    monkeypatch.setattr(run_handover, "_under_lock", under_lock)
+    leave = _in_a_chat_turn(PyPSAService.get_active_context())
+    try:
+        _grant(host, session, site, f"Pilot {uuid.uuid4().hex[:6]}")
+    finally:
+        leave()
+    # Saved once, before start() (the brief's fingerprint and the EH freeze),
+    # with the config and the edit counter as they were.
+    assert seen == [("save", True, True), ("start",)]
+
+
+def test_the_first_solve_of_a_created_project_reads_verified(host, session, site):
+    from harness import continuation
+    from services import chat_tools
+    from services.study.runner import _on_ctx
+    from tests.test_assistant_tasks_study_brief import wait_until
+
+    leave = _in_a_chat_turn(PyPSAService.get_active_context())
+    try:
+        _, task, ctx, _ = _grant(host, session, site, f"Pilot {uuid.uuid4().hex[:6]}")
+    finally:
+        leave()
+    cell = PyPSAService._turn_cell.set(None)  # as the runner's thread: no chat turn
+    try:
+        queued = _on_ctx(ctx, chat_tools.solve_queue_enqueue, task["project_id"])
+    finally:
+        PyPSAService._turn_cell.reset(cell)
+    job_id = queued["id"]
+    job = {"job_id": job_id, "project_id": task["project_id"]}
+    assert wait_until(lambda: continuation._queue_job_status(job) == "completed", 300)
+    assert continuation._queue_run(job) is not None  # verified, never "unverified"
+
+
 # ── The run's own solve job is its queued solve's ───────────────────────────
 
 
 def _two_solve_steps():
-    return {
-        "task_id": "t",
-        "steps": [
-            {"id": "solve.1", "tool": "solve_queue_enqueue", "job": {"job_id": "q-1"}},
-            {"id": "solve.2", "tool": "run_eh_study", "job": {"job_id": "ad:eh-1"}},
-        ],
-    }
+    """The shipped eh_site@1 solve stage, both steps run: the queued solve,
+    then the EH study (issue 07 B2), each with its own job."""
+    steps = run_profiles.materialise(run_profiles.load(run_profiles.EH_SITE), "solve", "p")
+    assert [(s["id"], s["tool"]) for s in steps] == [
+        ("solve.1", "solve_queue_enqueue"),
+        ("solve.2", "run_eh_study"),
+    ]
+    jobs = {"solve.1": "q-1", "solve.2": "ad:eh-1"}
+    return {"task_id": "t", "steps": [{**s, "job": {"job_id": jobs[s["id"]]}} for s in steps]}
 
 
 def test_the_l2_history_names_the_queued_solve_never_the_eh_study():
