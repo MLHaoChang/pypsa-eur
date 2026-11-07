@@ -3,6 +3,7 @@ holds, and one delivery holds one run."""
 
 # ruff: noqa: F811 -- imported shared fixtures.
 import json
+import time
 
 import pandas as pd
 import pytest
@@ -61,8 +62,12 @@ def test_a_chart_whose_bytes_were_forged_stays_refused_after_they_are_restored(
     _, blob, _ = paths(chart)
     original = blob.read_bytes()
     blob.write_bytes(b"forged png")
+    before = time.time()
     assert client.get(chart["download_url"]).status_code == 409
-    assert marker(chart)["reason_code"] == "bytes"
+    record = marker(chart)
+    assert set(record) == {"file_id", "reason_code", "at"}
+    assert record["file_id"] == chart["file_id"] and record["reason_code"] == "bytes"
+    assert before <= record["at"] <= time.time()
     blob.write_bytes(original)
     assert client.get(chart["download_url"]).status_code == 409
     assert delivery(chart).status_code == 409
