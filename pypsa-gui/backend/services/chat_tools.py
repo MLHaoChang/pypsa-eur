@@ -10137,7 +10137,7 @@ def _check_foreign_lock(tool_name: str, task_id=None) -> None:
                 "error_kind": "project_locked",
                 "message": (
                     "This project is being edited by another user, so "
-                    f"{tool_name!r} was not run. Their edit lock must expire "
+                    "it was not run. Their edit lock must expire "
                     "or be released first."
                 ),
                 "lock": project_locks.serialize_lock(
@@ -10160,7 +10160,7 @@ def _check_foreign_lock(tool_name: str, task_id=None) -> None:
                 "error_kind": "project_lock_unavailable",
                 "message": (
                     "Could not verify this project's edit lock, so "
-                    f"{tool_name!r} was not run. Retry in a moment."
+                    "it was not run. Retry in a moment."
                 ),
             },
         ) from None
