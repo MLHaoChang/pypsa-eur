@@ -69,3 +69,45 @@ def test_prompt_fragment_bytes_unchanged(name):
 def test_the_golden_is_red_on_a_planted_byte():
     value = "x"
     assert hashlib.sha256(value.encode()).hexdigest() != EXPECTED_SHA256["_STYLE_GUIDANCE"]
+
+
+def _status(monkeypatch, running, armed):
+    from routers import simulation
+    from services import chat_tools
+    monkeypatch.setattr(simulation, "get_status", lambda: {"running": running, "status": "x"})
+    monkeypatch.setattr(chat_tools, "_continuation_armed_here", lambda: armed)
+    return chat_tools.get_simulation_status()
+
+
+def test_running_unarmed_status_never_promises_a_follow_up(monkeypatch):
+    """LC-24: with no continuation armed, the status says so."""
+    assert "Do not say you will" in _status(monkeypatch, True, False)["follow_up"]
+
+
+def test_running_armed_status_has_no_hint(monkeypatch):
+    """Killed mutant: dropping the armed check would add the hint here."""
+    assert "follow_up" not in _status(monkeypatch, True, True)
+
+
+def test_not_running_status_has_no_hint(monkeypatch):
+    assert "follow_up" not in _status(monkeypatch, False, False)
+
+
+def test_continuation_armed_reads_this_conversations_steps(monkeypatch):
+    from types import SimpleNamespace as NS
+    from services import assistant_tasks
+    task = {"steps": [{"job": {"job_id": "fg:1", "session_id": "s1", "continuation": "armed"}}]}
+    monkeypatch.setattr(assistant_tasks, "_owned_tasks", lambda: [("p", task)])
+    assert assistant_tasks.continuation_armed(NS(session_id="s1"))
+    assert not assistant_tasks.continuation_armed(NS(session_id="s2"))
+    task["steps"][0]["job"]["continuation"] = "withdrawn"
+    assert not assistant_tasks.continuation_armed(NS(session_id="s1"))
+
+
+def test_continuation_armed_ignores_a_plan_on_another_kind_of_job(monkeypatch):
+    """U1: an ad:-armed study plan does not cover the foreground solve; kills the dropped-filter mutant."""
+    from types import SimpleNamespace as NS
+    from services import assistant_tasks
+    task = {"steps": [{"job": {"job_id": "ad:7", "session_id": "s1", "continuation": "armed"}}]}
+    monkeypatch.setattr(assistant_tasks, "_owned_tasks", lambda: [("p", task)])
+    assert not assistant_tasks.continuation_armed(NS(session_id="s1"))

@@ -20,9 +20,21 @@ RUN = {'profile': 'eh_site@1', 'mode': 'stepwise'}
 BRIEF = {'objective': 'Size the own site supply through 2035.', 'cards': ['capacity']}
 
 
+def without_eh_study(profile):
+    """eh_site@1 without issue 07 B2's Energy Hub study and rules: the
+    baseline network is no Energy Hub site, so its readiness, its study and
+    the LOLE loop never pass there. `tests/test_harness_run_eh.py` drives the
+    shipped profile."""
+    stages = {**profile["stages"], **{k: copy.deepcopy(run_profiles.GENERIC[k])
+                                      for k in ("input_gate", "solve", "result_gate")}}
+    return {k: v for k, v in {**profile, "stages": stages}.items() if k != "eh_study"}
+
+
 @pytest.fixture
-def site(baseline):
-    """The baseline project, stamped as an eh_site project (its template file)."""
+def site(baseline, monkeypatch):
+    """The baseline project, stamped as an eh_site project (its template file).
+    The run mechanics run on eh_site@1 without its EH study (`without_eh_study`)."""
+    monkeypatch.setitem(run_profiles.PROFILES, 'eh_site@1', without_eh_study(run_profiles.EH_SITE))
     _, project_id, root = baseline
     (root / flow_service.TEMPLATE_FILE).write_text(json.dumps({'id': 'eh_site', 'site_type': 'industrial'}))
     return project_id, root
@@ -415,6 +427,25 @@ def _report_reads_the_run_project(run_ctx, project_id, monkeypatch):
     return seen == [(str(project_id), str(project_id))]
 
 
+def _eh_study_reads_the_run_project(run_ctx, project_id, monkeypatch):
+    """Issue 07 B2 (GK B C6): the run's EH study starts on the run's project,
+    not the foreground's. The start is stopped at the runner (nothing runs)."""
+    from services.adequacy import eh_study_runner
+    from services.pypsa_service import PyPSAService
+    from services.study.runner import _on_ctx
+    seen = []
+
+    def start(body, **kwargs):
+        seen.append(str(PyPSAService.get_active_context().project_uuid))
+        return {"status": "running"}
+
+    monkeypatch.setattr(eh_study_runner, "start_eh_study", start)
+    from routers import results  # the sweep's own queued solve may still hold the mesh
+    monkeypatch.setattr(results, "_refuse_if_mesh_busy", lambda study: None)
+    _on_ctx(run_ctx, chat_tools.run_eh_study)
+    return seen == [str(project_id)]
+
+
 def test_each_stage_tool_resolves_the_project_through_the_bound_context(session, site, monkeypatch):
     """With another network in the foreground, each tool of the eh_site stage
     subsets, run on the run's bound context, reads the run's project (§6.6)."""
@@ -425,8 +456,9 @@ def test_each_stage_tool_resolves_the_project_through_the_bound_context(session,
     run_ctx = PyPSAService.get_active_context()
     run_ctx.network.generators.at['G1', 'bus'] = 'nowhere'  # only the run's project has this error
     # Issue 07: the hand-off's native read-back is the harness's own code on the run's context, not a tool.
-    tools = {a['tool'] for stage in run_profiles.resolve('eh_site@1')['stages'].values() for a in stage.get('actions', [])
-             if a.get('native') != 'handoff'}
+    tools = {a['tool'] for stage in run_profiles.load(run_profiles.EH_SITE)['stages'].values()
+             for a in stage.get('actions', [])
+             if a.get('native') != 'handoff'}  # as shipped, with its EH study (`site` runs without it)
     assert tools <= run_profiles.BOUND_CONTEXT_TOOLS
     from services import upload_service
     demand = upload_service.add_upload(  # issue 21c: the planned write's upload, in the run's project
@@ -447,6 +479,7 @@ def test_each_stage_tool_resolves_the_project_through_the_bound_context(session,
                                        and list(run_ctx.network.loads_t.p_set['L1']) == [7.5, 9.0]
                                        and ('loads', 'p_set', 'L1') in run_ctx.user_ts,
             'generate_report': _report_reads_the_run_project(run_ctx, project_id, monkeypatch),
+            'run_eh_study': _eh_study_reads_the_run_project(run_ctx, project_id, monkeypatch),
         }
         assert PyPSAService.get_network() is front.network  # the foreground is untouched
     assert seen == {tool: True for tool in run_profiles.BOUND_CONTEXT_TOOLS}

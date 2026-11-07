@@ -14,6 +14,7 @@ import { StatePill } from '../../components/ResultState'
 import { openFlowTarget, openFlowTargetInPlace, showResultsTab } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
 import { FIELD_LABELS } from '../../utils/fieldLabels'
+import { money } from '../../utils/money'
 import { nk } from '../../utils/queryKeys'
 import { DIPS_TITLE, count } from '../CampusDipsRestartSection'
 import { Seg } from './shared'
@@ -84,12 +85,8 @@ export function fmtTonnesYear(t: number): string {
   return `${Number(v.toPrecision(3))}${NBSP}${u}/yr`
 }
 
-/** Money as the DC Backup card writes it: "€ 1.2 m", "€ 350 k", with non-breaking spaces. */
-export function fmtEurShort(eur: number): string {
-  const a = Math.abs(eur)
-  const [v, u] = a >= 1e9 ? [eur / 1e9, 'bn'] : a >= 1e6 ? [eur / 1e6, 'm'] : a >= 1e3 ? [eur / 1e3, 'k'] : [eur, '']
-  return `€${NBSP}${Number(v.toPrecision(3))}${u ? `${NBSP}${u}` : ''}`
-}
+/** Euros in the shared `money()` notation (UX-RULES-1107). */
+export const moneyForGridRisk = (eur: number) => money(eur, 'EUR')
 
 function toFlow(t: GridRiskTarget): FlowTarget {
   return { ...t, section: t.section as FlowTarget['section'] }
@@ -119,7 +116,7 @@ function EurLine({ cell, eurTarget, testId, mode }: {
 }) {
   if (!cell || cell.t_per_year == null) return null
   if (cell.eur_per_year != null) {
-    return <span data-testid={testId} className="text-[12px] text-text tabular-nums">{fmtEurShort(cell.eur_per_year)}/yr</span>
+    return <span data-testid={testId} className="text-[12px] text-text tabular-nums">{moneyForGridRisk(cell.eur_per_year)}/yr</span>
   }
   const several = cell.eur_flag === 'several_shortfall_products'
   return (
@@ -211,7 +208,7 @@ function TotalTile({ data, period, eurTarget, mode }: {
 
 function cellText(c: Partial<GridRiskCell> | undefined): [string, string] {
   if (!c || c.t_per_year == null) return ['—', '—']
-  return [fmtTonnesYear(c.t_per_year), c.eur_per_year != null ? `${fmtEurShort(c.eur_per_year)}/yr` : 'Unavailable']
+  return [fmtTonnesYear(c.t_per_year), c.eur_per_year != null ? `${moneyForGridRisk(c.eur_per_year)}/yr` : 'Unavailable']
 }
 
 function stampWords(stamp: Record<string, string>): string {

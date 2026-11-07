@@ -35,6 +35,7 @@
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { useHubDesignStore, type HubStep } from '../pages/hubDesign/hubDesignStore'
+import type { SitePart } from '../api/flow'
 import { displayedResultsSource, type ResultsSourceBinding } from './resultsSource'
 
 export interface UiContext {
@@ -53,6 +54,9 @@ export interface UiContext {
   // backend rebind a session that lost its state. Absent otherwise, so a
   // context without a workflow is byte-identical to before.
   workflow?: { id: string; step: string }
+  // SC-07 S2 — only while Site 3D shows a Site: which Site and part are
+  // open. Names only; the server re-reads the scene for the [site 3d] block.
+  site_scene?: { site_id: string; part: SitePart }
 }
 
 export function buildUiContext(): UiContext | null {
@@ -97,6 +101,8 @@ export function buildUiContext(): UiContext | null {
     ctx.ui_mode = 'guided'
     if (s.activeSlidePanel === 'hubDesign') ctx.guided_step = useHubDesignStore.getState().step
   }
+
+  if (s.canvasView === 'site' && s.activeSiteId) ctx.site_scene = { site_id: s.activeSiteId, part: s.sitePart }
 
   const wf = useChatStore.getState().workflow
   if (wf) ctx.workflow = { id: wf.id, step: wf.step }

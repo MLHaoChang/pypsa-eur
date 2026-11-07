@@ -961,7 +961,10 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
         # GK B T1: checks first, sidecar and seal under one lock, first seal wins.
         artifact, provenance = chat_tools._publish_sealed_export(
             chart_root, provenance, data, f"{component}_{attribute}.png", "image/png")
-    return {**artifact, "provenance": provenance, "manifest": provenance["manifest"]}
+    # The manifest goes to the model once; the sidecar keeps the full provenance
+    # (it would otherwise be sent twice and spill the chat result cap).
+    summary = {key: value for key, value in provenance.items() if key != "manifest"}
+    return {**artifact, "provenance": summary, "manifest": provenance["manifest"]}
 
 
 def _one_run(runs):
