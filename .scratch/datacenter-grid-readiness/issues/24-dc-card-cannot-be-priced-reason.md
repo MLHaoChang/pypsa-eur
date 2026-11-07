@@ -3,7 +3,7 @@
 
 # DC Backup card: the "cannot be priced" reason gives no cause
 
-Status: ready-for-agent
+Status: done
 Type: wording
 Found by: Logged reviewing the DC cards (DC-05/DC-06); owner list DOCS-1.
 
