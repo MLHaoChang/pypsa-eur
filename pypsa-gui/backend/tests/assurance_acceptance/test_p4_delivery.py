@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from services import assurance_artifacts, chat_tools, upload_service, workflow_tools
 from tests.assurance_acceptance.test_p4_artifacts import canonical_sha256
 from tests.assurance_acceptance.test_p4_chart_data import chat_tools_root, strip
+from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_assurance_metrics import solved  # noqa: F401
 from tests.test_workflow_tools import baseline  # noqa: F401
 
@@ -312,3 +313,31 @@ def test_stale_charts_of_one_solve_deliver_together_labelled(solved, client):
     ) as archive:
         items = json.loads(archive.read("manifest.json"))["files"]
     assert [item["scope_status"] for item in items] == ["solve_stale", "solve_stale"]
+
+
+def test_an_expired_checked_charts_item_says_its_evidence_expired(
+    solved, checked, tmp_path, monkeypatch
+):
+    import io
+    import zipfile
+
+    from services import assurance_records, checked_charts
+    from tests.test_checked_charts import GENERATOR, ask, sidecar
+
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+    monkeypatch.setenv(
+        "PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", "generator-dispatch/1,branch-loading/1"
+    )
+    chart = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])["chart"]
+    stamp = checked_charts.readable_stamp(sidecar(chart)["drawn_at"])
+    evidence_id = chart["evidence_id"]
+    path = assurance_records._path(assurance_records.actor_id(), evidence_id)
+    envelope = json.loads(path.read_text())
+    envelope["record"]["expires_at"] = 0
+    envelope.update(assurance_records.seal(envelope["record"], path.stem))
+    path.write_text(json.dumps(envelope))
+    bundle = chat_tools.build_delivery([chart["file_id"]])
+    with zipfile.ZipFile(io.BytesIO(checked.client.get(bundle["download_url"]).content)) as archive:
+        (item,) = json.loads(archive.read("manifest.json"))["files"]
+    assert item["evidence_status"] == "expired"
+    assert item["evidence_note"] == checked_charts.EXPIRED_NOTE.format(drawn_at=stamp)
