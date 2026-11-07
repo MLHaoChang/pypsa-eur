@@ -240,6 +240,22 @@ def test_a_deleted_version_is_served_with_a_note_and_no_marker(project, client, 
     (entry,) = manifest["files"]
     assert entry["source_status"] == "version_missing"
     assert "no longer stored" in entry["source_note"]
+    sealed = _sidecar(project, file_id)["manifest"]
+    assert entry["dataset_sha256"] == sealed["dataset_sha256"]  # the view keeps the manifest
+    assert entry["render_spec_sha256"] == sealed["render_spec_sha256"]
+
+
+def test_a_missing_version_outranks_a_missing_template(project, client, monkeypatch):
+    rid = _assistant_report(monkeypatch)
+    file_id = T.export_report_docx(rid)["file_id"]
+    record = _sidecar(project, file_id)
+    record["manifest"]["dataset"]["template"] = {"file_id": "f" * 16, "sha256": "0" * 64}
+    record["manifest"]["dataset"]["figures"] = {"fig2": "0" * 64}
+    _reseal(project, file_id, record)
+    _version_file(project, rid).unlink()
+    response = _blob(client, file_id)
+    assert response.status_code == 200
+    assert response.headers["X-Report-Source"] == "version_missing"
 
 
 def test_a_deleted_report_is_served_with_a_note(project, client, monkeypatch):
