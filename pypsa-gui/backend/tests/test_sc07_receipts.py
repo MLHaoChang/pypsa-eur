@@ -488,3 +488,16 @@ def test_the_list_is_capped_at_the_per_owner_limit(client, site):
     for i in range(chat.MAX_LIVE_PER_OWNER + 3):
         chat._mark_unknown(_key(f"p-{i:032x}"))
     assert len(_mine()) == chat.MAX_LIVE_PER_OWNER
+
+
+def test_a_preview_the_map_still_calls_ready_whose_commit_landed_reads_applied(
+    client, site
+):
+    """Chain first (H6): an apply that landed, then raised, leaves the entry `ready` (proposals.apply resets it)."""
+    prep = bind(client, IT)
+    chat_tools.site_scene_apply(**args_of(prep))
+    entry = next(
+        e for (_k, pid), e in proposals._entries.items() if pid == prep["proposal_id"]
+    )
+    entry["status"] = "ready"
+    assert _mine()[0]["status"] == "applied"
