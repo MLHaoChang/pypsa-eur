@@ -147,6 +147,34 @@ def test_the_goal_is_never_a_creation_param_and_reads_only_from_a_usable_h_per_y
     assert run_intake.goal(rows[:1]) is None
 
 
+def test_the_goal_is_read_from_its_own_param_only_and_never_from_a_write_row():
+    """P5: only a usable `goal.target_lole_h` row in h/yr gives the goal (P10)."""
+    row = {
+        "param": "goal.target_lole_h",
+        "status": "confirmed",
+        "unit": "h/yr",
+        "value": 2.0,
+    }
+    assert run_intake.goal([row]) == 2.0
+    assert run_intake.goal([{**row, "param": "solver.target_lole_h"}]) is None
+    assert run_intake.goal([{**row, "write": "upload_time_series"}]) is None
+
+
+def test_a_profile_needs_the_goal_only_with_an_engine_rule():
+    """P5: the goal param alone asks for no goal; the LOLE engine rule does (P10)."""
+    v2 = run_profiles.EH_SITE_V2
+    assert run_profiles.needs_goal(v2)
+    rules = [
+        {k: v for k, v in r.items() if k != "engine"}
+        for r in v2["stages"]["result_gate"]["rules"]
+    ]
+    stages = {
+        **v2["stages"],
+        "result_gate": {**v2["stages"]["result_gate"], "rules": rules},
+    }
+    assert not run_profiles.needs_goal({**v2, "stages": stages})
+
+
 def test_the_goal_stays_out_of_the_input_fingerprint_and_the_investment_case_digest(
     site,
 ):
