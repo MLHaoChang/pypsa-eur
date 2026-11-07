@@ -195,10 +195,18 @@ def enqueue_solve(
             solver_config_json=snapshot,
             enqueued_by_user_id=user.id,
             capture=capture,
+            refuse_config_conflict=True,
         )
-    except BaseException:
+    except BaseException as exc:
         if capture is not None:
             solve_capture.remove(capture)  # no job names it: never left for the sweep
+        if isinstance(exc, solve_queue.SolveConfigConflict):
+            raise HTTPException(409, {
+                "error_kind": "solve_config_conflict",
+                "message": "This project already has a queued or running solve with "
+                "other settings; wait for it, abort it, or keep its settings.",
+                "job_id": str(exc.existing.id),
+            })
         raise
     if capture is not None and not created:
         # Another active job of this project solves other input: the run's

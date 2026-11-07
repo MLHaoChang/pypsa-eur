@@ -235,6 +235,14 @@ class SolveJob:
         }
 
 
+class SolveConfigConflict(Exception):
+    """An active job exists for the project and the new call's solver config differs."""
+
+    def __init__(self, existing: "SolveJob"):
+        super().__init__("a solve with other settings is already queued or running")
+        self.existing = existing
+
+
 class SolveQueue:
     """FIFO dispatcher: enqueue saved projects, solve them one at a time."""
 
@@ -320,6 +328,7 @@ class SolveQueue:
         enqueued_by_user_id: Any = None,
         kind: str = KIND_SOLVE,
         capture: dict | None = None,
+        refuse_config_conflict: bool = False,
     ) -> tuple[SolveJob, bool]:
         """
         Enqueue `project_id` UNLESS it already has a queued or running job.
@@ -328,6 +337,10 @@ class SolveQueue:
         the existing one, untouched, and nothing was appended — `solver_config_json`
         is silently discarded in that case, so a re-enqueue of an already-active
         project can never overwrite the config the FIRST enqueue snapshotted.
+        With `refuse_config_conflict=True` a re-enqueue of the same `kind`
+        whose snapshot differs from the active job's raises
+        `SolveConfigConflict` instead, so the caller is told its settings
+        were not used. Identical (or missing) snapshots stay idempotent.
 
         This is the enforcement point. `enqueue` appended unconditionally and
         the one-active-job-per-project invariant lived in three separate client
@@ -385,6 +398,14 @@ class SolveQueue:
         with self._lock:
             existing = self._active_job_locked(project_id, project_key)
             if existing is not None:
+                if (
+                    refuse_config_conflict
+                    and existing.kind == kind
+                    and solver_config_json is not None
+                    and existing.solver_config_json is not None
+                    and existing.solver_config_json != solver_config_json
+                ):
+                    raise SolveConfigConflict(existing)
                 logger.info(
                     "solve_queue: %r already has active job %s (%s) — not queuing a second",
                     project_id, existing.id, existing.status,
