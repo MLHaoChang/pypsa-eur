@@ -859,10 +859,16 @@ def project_write(note: dict | None) -> dict:
 
 
 def _meta_text(n) -> str:
-    """The network's `meta` dict as canonical text (asset provenance lives there)."""
+    """The network's `meta` dict as canonical text (asset provenance lives there).
+
+    The assistant's import stamp (AA-05 S3) is left out: it is the assistant's
+    own bookkeeping with a fresh id per import, not content a file carries."""
     import json
 
-    return json.dumps(n.meta, sort_keys=True, default=str)
+    from services.assurance_artifacts import _IMPORT_KEY
+
+    meta = {key: value for key, value in (n.meta or {}).items() if key != _IMPORT_KEY}
+    return json.dumps(meta, sort_keys=True, default=str)
 
 
 # Topology pypsa derives on demand (determine_network_topology): SubNetwork
