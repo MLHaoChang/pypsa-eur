@@ -150,4 +150,4 @@ pypsa-gui/backend/test-results/
 .scratch/live-voice/route-parity.json
 
 # Screenshot-harness leftovers
-pypsa-gui/frontend/src/*.tmp.tsx
+pypsa-gui/frontend/src/**/*.tmp.tsx
