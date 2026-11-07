@@ -339,3 +339,43 @@ def test_an_import_energy_cap_is_not_loosened(monkeypatch):
     assert imported == pytest.approx(900.0, abs=1e-6)          # it binds
     curt = _curtailed(sink).to_numpy()
     assert curt == pytest.approx(np.minimum(SHARE * (IT + COOL), COOL), abs=1e-6)
+
+
+# ── the spec read and the no-op edges ────────────────────────────────────────
+
+
+def test_project_terms_reads_the_saved_spec(monkeypatch, tmp_path):
+    """Read as DC-06 reads it: none without a project, none for a project with no DC spec, the
+    spec's terms for a DC project."""
+    import json
+    import types
+
+    from services.adequacy import dc_backup
+
+    monkeypatch.setattr(PyPSAService, "solve_target_context", classmethod(lambda cls: None))
+    assert C.project_terms() is None
+    ctx = types.SimpleNamespace(storage_dir=None)
+    monkeypatch.setattr(PyPSAService, "solve_target_context", classmethod(lambda cls: ctx))
+    assert C.project_terms() is None
+    ctx.storage_dir = str(tmp_path)
+    assert C.project_terms() is None                          # no template metadata
+    spec = _spec(curtailment_price_eur_per_mwh=7.0, curtail_max_duration_h=3.0)
+    (tmp_path / dc_backup.META_FILE).write_text(json.dumps(
+        {"id": "eh_datacenter", "dc_load": {"spec": spec.model_dump(mode="json")}}))
+    assert C.project_terms() == C.Terms(7.0, SHARE, 3.0)
+
+
+def test_terms_of_refuses_a_bad_price_by_itself():
+    import types
+
+    for bad in (-1.0, float("inf"), float("nan")):
+        with pytest.raises(ValueError):
+            C.terms_of(types.SimpleNamespace(curtailment_price_eur_per_mwh=bad, curtailable_share=0.2))
+
+
+def test_a_cooling_load_of_zero_throughout_adds_nothing():
+    n = _network()
+    n.loads_t.p_set["cooling"] = 0.0
+    undo: list = []
+    C.apply(n, lambda _m: None, undo, {}, terms=_terms())
+    assert undo == [] and C.GENERATOR not in n.generators.index
