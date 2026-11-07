@@ -45,11 +45,19 @@ describe.each(['guided', 'expert'] as const)('Site 3D companion row (%s)', mode 
     expect(seed()).toBe('Explain OSM building 7, selected in the Generate part of the site “Campus” in Site 3D.')
   })
 
-  it('Help with shows only while /flow reports a blocker for the open part, in the section words', () => {
+  it('labels name their target: the selection, else the part tab', () => {
+    const { rerender } = render(<SiteCompanion siteName="Campus" part="model" scene={scene} selected={null} />)
+    expect(screen.getByTestId('site-companion-explain').textContent).toBe('Explain Model')
+    rerender(<SiteCompanion siteName="Campus" part="model" scene={scene} selected={osm} />)
+    expect(screen.getByTestId('site-companion-explain').textContent).toBe('Explain OSM building 7')
+    expect(screen.getByTestId('site-companion-explain').title).toMatch(/^Explain OSM building 7\. Opens the assistant/)
+  })
+
+  it('Help with shows only while /flow reports a blocker for the open part, named by its reason', () => {
     const { rerender } = render(<SiteCompanion siteName="Campus" part="generate" scene={scene} selected={null} />)
     expect(screen.queryByTestId('site-companion-blocker')).toBeNull()
     rerender(<SiteCompanion siteName="Campus" part="model" scene={scene} selected={null} />)
-    expect(screen.getByTestId('site-companion-blocker').textContent).toBe('Help with Loads')
+    expect(screen.getByTestId('site-companion-blocker').textContent).toBe('Help with: Buildings only: configure model elements to map them')
     fireEvent.click(screen.getByTestId('site-companion-blocker'))
     expect(seed()).toBe('Help me with what blocks the Model part of the site “Campus” in Site 3D: '
       + 'Buildings only: configure model elements to map them.')

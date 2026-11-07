@@ -10,8 +10,8 @@
  * States: `legend` (the legend column against the Results pill), `readonly` (lock held by someone else), `readonly-item` (the same with an item chosen in Place),
  * `undo-reload` (the detach receipt comes back from the scene after a reload), `results-building` (SC-03: the Eye on, a
  * building selected and its group open, quarter-hourly labels), `results-unavailable` (SC-03: the run out of date, every
- * value unavailable in words), `companion-blocker` and `companion-asked` (SC-07 S2: the "Ask the assistant" row with the
- * Model blocker, and the dock prefilled after "Explain this"; the chat service is offline here). Add a state to STATES to extend.
+ * value unavailable in words), `companion-*` (SC-07 S2: the "Ask the assistant" row with no selection, a selection, the
+ * Model blocker, the dock prefilled after "Explain", and the same with no provider). Add a state to STATES to extend.
  *
  * Usage: node scripts/site3d-shots.mjs [outDir]      env: BASE, ONLY=<state prefix>, DEBUG=1
  */
@@ -87,10 +87,19 @@ const STATES = {
   'undo-reload': { lastReceipt: DETACH, readOnly: false },
   'results-building': { lastReceipt: null, readOnly: false, results: { current: true } },
   'results-unavailable': { lastReceipt: null, readOnly: false, results: { current: false } },
-  // SC-07 S2: the "Ask the assistant" row on Model with assign_native blocked, then after "Explain this".
-  'companion-blocker': { lastReceipt: null, readOnly: false, blocked: true },
-  'companion-asked': { lastReceipt: null, readOnly: false, blocked: true, click: 'site-companion-explain' },
+  // SC-07 S2 (UX V5): the "Ask the assistant" row with no selection and no blocker, a selection, a blocker, the dock
+  // prefilled after a click, and the same click with no provider.
+  'companion-none': { lastReceipt: null, readOnly: false, part: 'Generate', provider: 'ready' },
+  'companion-selection': { lastReceipt: null, readOnly: false, part: 'Generate', provider: 'ready', select: 'osm:104' },
+  'companion-blocker': { lastReceipt: null, readOnly: false, blocked: true, provider: 'ready' },
+  'companion-asked': { lastReceipt: null, readOnly: false, blocked: true, provider: 'ready', click: 'site-companion-explain' },
+  'companion-no-provider': { lastReceipt: null, readOnly: false, blocked: true, provider: 'none', click: 'site-companion-explain' },
 }
+const OSM_BUILDING = { id: 'osm:104', footprint: [[-40, -20], [-24, -20], [-24, -6], [-40, -6]], height_m: 7, height_evidence: 'levels',
+  source: { namespace: 'osm', source_id: '104' }, levels: 2 }
+const PROFILE = { id: 'anthropic', label: 'Claude', wire: 'anthropic' }
+const chatHealth = ready => ({ ok: true, anthropic_api_key_present: ready, default_model: 'claude-model', confirmation_ttl_seconds: 300,
+  active_profile: PROFILE, chat_ready: ready })
 const LOADS_BLOCKER = { code: 'no_model_targets', reason: 'Buildings only: configure model elements to map them', link: '›',
   home: { guided: { section: 'loads', drawer: null, open: 'request_then_scroll' }, expert: { table: 'Loads' } } }
 
@@ -126,6 +135,9 @@ try {
       const p = new URL(r.request().url()).pathname, m = r.request().method()
       const ok = json => r.fulfill({ json })
       // The assistant and dictation are out of scope here: fail them the way an offline service does.
+      // The S2 companion states answer the readiness probes: a ready provider, or none configured.
+      if (st.provider && p === '/api/chat/health') return ok(chatHealth(st.provider === 'ready'))
+      if (st.provider && p === '/api/chat/profiles') return ok({ profiles: [{ ...PROFILE, chat_ready: st.provider === 'ready' }], active_profile_id: PROFILE.id })
       if (p.startsWith('/api/chat/') || p.startsWith('/api/dictation/')) return r.abort()
       if (/\/flow$/.test(p)) return ok({ sections: [], run_request: { optimisation: true, study: false, loadflow: false }, notes: [], deferred: false, deferred_reason: null,
         scene: { entry: 'available', anchor_moved: [], actions: ['generate', 'assign_native'].map(action => (st.blocked && action === 'assign_native'
@@ -136,6 +148,7 @@ try {
       if (sch) return SCHEMAS[sch[1]] ? ok(SCHEMAS[sch[1]]) : r.fulfill({ status: 404, json: { detail: 'none' } })
       if (p === '/api/health') return ok({ status: 'ok', auth_enabled: false })
       if (p === '/api/projects/' || p === '/api/projects') return ok([{ name: PROJECT, bus_count: 2, snapshot_count: 24, has_results: false, created_at: '2026-01-01T00:00:00Z', is_root: true, parent: null }])
+      if (st.select && p.endsWith(`/sites/${SITE}/scene`)) return ok({ ...scene(st.lastReceipt), buildings: [OSM_BUILDING] })
       if (p.endsWith(`/sites/${SITE}/scene`)) return ok(st.results
         ? { ...scene(st.lastReceipt), buildings: BUILDINGS, groups: [{ id: 'plant', label: 'Ammonia plant', members: ['b1', 'b2'] }] }
         : scene(st.lastReceipt))
@@ -176,8 +189,11 @@ try {
         ui.setSitePartSelection({ kind: 'building', id: 'b2' })
       })
       await page.getByTestId('scene-result-group-plant').click()
-    } else if (key !== 'legend') await page.getByRole('tab', { name: 'Model', exact: true }).click().catch(() => page.getByText('Model', { exact: true }).first().click())
+    } else if (key !== 'legend') await page.getByRole('tab', { name: st.part ?? 'Model', exact: true }).click().catch(() => page.getByText('Model', { exact: true }).first().click())
     await page.waitForTimeout(2000)
+    if (st.select) await page.evaluate(async id => {
+      (await import('/src/store/uiStore.ts')).useUIStore.getState().setSitePartSelection({ kind: 'building', id })
+    }, st.select)
     if (st.click) { await page.getByTestId(st.click).click(); await page.waitForTimeout(800) }
     if (st.pick) {   // the select is disabled under a lock, so the item is chosen first and the lock arrives after
       await page.getByTestId('place-item').selectOption({ index: 1 })

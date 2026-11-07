@@ -60,7 +60,7 @@ describe('Site 3D scene panel', () => {
     view()
     expect(screen.queryByTestId('site-companion-blocker')).toBeNull()
     fireEvent.click(screen.getByTestId('site-part-model'))
-    expect(screen.getByTestId('site-companion-blocker').textContent).toBe('Help with Loads')
+    expect(screen.getByTestId('site-companion-blocker').textContent).toBe('Help with: Buildings only: configure model elements to map them')
   })
 
   it('Model: with assign_native available on an enabled scene, the attachments panel replaces the blocker', async () => {
