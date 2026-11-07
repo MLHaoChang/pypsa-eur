@@ -85,11 +85,15 @@ def terms_of(spec) -> Terms | None:
 def project_terms() -> Terms | None:
     """``terms_of`` the spec of the project being solved (``dc_backup.project_spec``, as DC-06's
     ``project_backup`` reads it); None for an unsaved or non-DC project."""
+    ctx = PyPSAService.solve_target_context()
+    return terms_for(getattr(ctx, "storage_dir", None) if ctx is not None else None)
+
+
+def terms_for(storage) -> Terms | None:
+    """``terms_of`` the saved spec of the project in ``storage``; None without one."""
     from project_templates import eh_templates as tpl
     from services.adequacy import dc_backup
 
-    ctx = PyPSAService.solve_target_context()
-    storage = getattr(ctx, "storage_dir", None) if ctx is not None else None
     if not storage:
         return None
     try:
@@ -140,9 +144,10 @@ def _groups(sns) -> list[np.ndarray]:
 
 
 def runs(hours: pd.Series, d_h: float, sns) -> list[tuple[int, int]]:
-    """(first, last) positions of every full run: from each snapshot i, the fewest consecutive
-    snapshots whose weighted hours reach D plus snapshot i's own (Q3). Runs that the horizon
-    cuts short are left out: each is inside a full one that starts earlier."""
+    """(first, last) positions of every run: from each snapshot i, the fewest consecutive
+    snapshots whose weighted hours reach D plus snapshot i's own (Q3). Near the horizon's end,
+    where no full run starts, the stretch to the end is bounded too when it spans more than D
+    weighted hours (with uneven weights it need not sit inside an earlier full run)."""
     w = hours.to_numpy()
     out: list[tuple[int, int]] = []
     for pos in _groups(sns):
@@ -150,10 +155,21 @@ def runs(hours: pd.Series, d_h: float, sns) -> list[tuple[int, int]]:
         for k in range(len(pos)):
             need = cum[k] + d_h + w[pos[k]] - 1e-9
             j = int(np.searchsorted(cum, need, side="left"))  # cum[j] >= need
-            if j > len(pos):
-                break
-            out.append((int(pos[k]), int(pos[j - 1])))
+            if j <= len(pos):
+                out.append((int(pos[k]), int(pos[j - 1])))
+            elif cum[-1] - cum[k] > d_h + 1e-9:
+                out.append((int(pos[k]), int(pos[-1])))
     return out
+
+
+def fits(hours: pd.Series, d_h: float, sns) -> bool:
+    """True when some period spans D plus one snapshot: a full run exists (C21)."""
+    w = hours.to_numpy()
+    return any(
+        float(w[pos].sum()) >= d_h + float(w[pos[0]]) - 1e-9
+        for pos in _groups(sns)
+        if len(pos)
+    )
 
 
 def check(n, terms: Terms, sns=None) -> None:
@@ -162,7 +178,7 @@ def check(n, terms: Terms, sns=None) -> None:
     if terms.max_duration_h is None:
         return
     sns = n.snapshots if sns is None else sns
-    if not runs(_hours(n, sns), float(terms.max_duration_h), sns):
+    if not fits(_hours(n, sns), float(terms.max_duration_h), sns):
         total = float(_hours(n, sns).sum())
         raise DcCurtailmentRefused(
             DURATION_EXCEEDS_HORIZON,
@@ -268,13 +284,13 @@ def add_rows(n, snapshots, terms: Terms, emit) -> tuple[int, int]:
         return 0, 0
     sns = pd.Index(snapshots) if not isinstance(snapshots, pd.Index) else snapshots
     d_h = float(terms.max_duration_h)
-    found = runs(_hours(n, sns), d_h, sns)
-    if not found:
+    if not fits(_hours(n, sns), d_h, sns):
         raise DcCurtailmentRefused(
             DURATION_EXCEEDS_HORIZON,
             f"Curtailable load: curtail_max_duration_h {d_h:g} h plus one snapshot does not fit in "
             f"the {float(_hours(n, sns).sum()):g} weighted hours this LP spans.",
         )
+    found = runs(_hours(n, sns), d_h, sns)
     m = n.model
     labels = m.variables["Generator-p"].labels.sel(name=GENERATOR).to_numpy()
     if labels.shape[0] != len(sns):

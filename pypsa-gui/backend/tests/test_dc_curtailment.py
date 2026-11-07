@@ -346,7 +346,8 @@ def test_runs_are_measured_in_weighted_hours():
     two = pd.Series(2.0, index=range(6))
     assert C.runs(two, 4.0, two.index) == [(0, 2), (1, 3), (2, 4), (3, 5)]
     assert C.runs(two, 2.0, two.index) == [(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)]
-    assert C.runs(two, 11.0, two.index) == []
+    assert C.runs(two, 11.0, two.index) == [(0, 5)]  # a bounded tail, but no full run:
+    assert not C.fits(two, 11.0, two.index)  # the horizon is refused (C21)
 
 
 def test_runs_never_cross_a_period():
@@ -473,3 +474,55 @@ def test_a_cooling_load_of_zero_throughout_adds_nothing():
     undo: list = []
     C.apply(n, lambda _m: None, undo, {}, terms=_terms())
     assert undo == [] and C.GENERATOR not in n.generators.index
+
+
+def test_an_uneven_tail_longer_than_d_is_bounded_too():
+    w = pd.Series([1.0, 1, 1, 1, 3])
+    assert C.runs(w, 2.0, w.index) == [(0, 2), (1, 3), (2, 4), (3, 4), (4, 4)]
+    assert C.fits(w, 2.0, w.index)
+    assert not C.fits(pd.Series([3.0, 1.0]), 2.0, pd.RangeIndex(2))
+    assert C.fits(pd.Series([1.0, 3.0]), 2.0, pd.RangeIndex(2))
+
+
+def test_the_terms_enter_the_fingerprint_only_when_on(tmp_path):
+    """C15: off (no spec, no price, or a share of 0) adds nothing to the input fingerprint; on, a
+    price or duration edit in the saved spec moves it."""
+    import json
+    import types
+
+    from services.adequacy import dc_backup
+    from services.workflow_tools import _network_input_fingerprint
+
+    n = _network()
+
+    def fp(spec):
+        meta = tmp_path / dc_backup.META_FILE
+        if spec is None:
+            meta.unlink(missing_ok=True)
+        else:
+            meta.write_text(
+                json.dumps(
+                    {
+                        "id": "eh_datacenter",
+                        "dc_load": {"spec": spec.model_dump(mode="json")},
+                    }
+                )
+            )
+        return _network_input_fingerprint(
+            types.SimpleNamespace(
+                network=n,
+                solver_state={"solver_config": SolverConfig()},
+                user_ts={},
+                storage_dir=str(tmp_path),
+            )
+        )
+
+    base = fp(None)
+    assert fp(_spec()) == base
+    assert fp(_spec(curtailable_share=0.0, curtailment_price_eur_per_mwh=5.0)) == base
+    on = fp(_spec(curtailment_price_eur_per_mwh=5.0))
+    assert on != base
+    assert fp(_spec(curtailment_price_eur_per_mwh=6.0)) != on
+    assert (
+        fp(_spec(curtailment_price_eur_per_mwh=5.0, curtail_max_duration_h=4.0)) != on
+    )
