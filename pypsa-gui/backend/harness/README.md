@@ -997,7 +997,20 @@ also check the render spec's labels against the dataset; legacy manifests
 verify as before. A delivery whose scoped charts do not share one solve stamp
 (or, for input charts, one input fingerprint), or that mixes legacy and
 scoped charts, refuses `delivery_mixed_runs`; each checked chart's item keeps
-its `evidence_status` and, when expired or missing, its `evidence_note`. Private cloning skips the native solver model without
+its `evidence_status` and, when expired or missing, its `evidence_note`.
+`import_uploaded_network` stamps `network.meta["assistant_import"]` with a fresh
+server-minted id and drops any `assistant_validated_*` key the file carries; the
+network reads `input_assertion` until `validate_network` passes, which records
+the import id, sha256 and exact input fingerprint in the app-data store
+(`assistant_import_validations/`), never in the network. `import_status` reads
+`validated` only while all three still match, and charts and table exports drawn
+from an imported network seal the status they were drawn with (AA-05 S3).
+`inspect_import` names the CSV delimiter as `comma (not detected)` and infers no
+units or mapping. `export_to_csv` and `export_to_excel` seal the table as the
+file holds it (Excel numbers to 16 significant digits) after re-parsing the
+bytes, or refuse `table_round_trip_failed`; download and delivery re-parse it
+again, quarantining on a seal or byte mismatch and refusing without a marker on
+parser drift. Private cloning skips the native solver model without
 changing the live model. `build_delivery` bundles selected authorized
 artifacts and a content-hash/provenance manifest within the 25 MB limit.
 All existing agent exports now include authenticated download metadata.
