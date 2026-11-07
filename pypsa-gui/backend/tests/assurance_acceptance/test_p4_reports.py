@@ -510,3 +510,29 @@ def test_a_disclosure_required_twice_must_be_written_twice():
         == []
     )
     assert report_job.missing_disclosures(need, need) == []
+
+
+def test_only_a_withheld_gap_callout_marks_a_section():
+    from services.reports import formatting as F
+
+    text = F.withheld_placeholder(2)
+    assert F.withheld_placeholder(0) == (
+        "Withheld: a statement could not be checked against the study; see Numbers to check."
+    )
+    assert F.withheld_placeholder(1) == PLACEHOLDER
+    assert F.is_withheld_block({"type": "callout", "kind": "gap", "text": text})
+    assert not F.is_withheld_block(
+        {"type": "callout", "kind": "disclosure", "text": text}
+    )
+    assert not F.is_withheld_block({"type": "paragraph", "kind": "gap", "text": text})
+    assert not F.is_withheld_block(
+        {"type": "callout", "kind": "gap", "text": "Gap: no read."}
+    )
+    assert not F.is_withheld_block({"type": "callout", "kind": "gap", "text": None})
+    assert not F.is_withheld_section({"blocks": None, "audit": None})
+    assert F.withheld_marked({"blocks": None, "audit": {"unverified": None}}) == []
+    withheld = {
+        "blocks": [{"type": "callout", "kind": "gap", "text": text}],
+        "audit": {"unverified": ["7"]},
+    }
+    assert F.withheld_marked(withheld) == ["7 (unverified, withheld)"]
