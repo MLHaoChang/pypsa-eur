@@ -73,9 +73,7 @@ def publish_sealed_report(
         "mapping_plan_sha256": None if plan is None else canonical_sha256(plan),
     }
     # AA-05 Y5: a declared summary names the sections its numbers may come from.
-    summaries = {
-        s.section_id: list(s.summarises) for s in doc.sections if s.summarises
-    }
+    summaries = {s.section_id: list(s.summarises) for s in doc.sections if s.summarises}
     if summaries:
         dataset["summaries"] = summaries
     withheld = [
