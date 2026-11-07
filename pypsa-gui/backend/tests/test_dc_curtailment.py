@@ -1307,3 +1307,25 @@ def test_check_window_without_project_terms_is_a_no_op(monkeypatch):
     monkeypatch.setattr(C, "project_terms", lambda: None)
     C.check_window(_network(), 1)
     C.refuse_rolling()
+
+
+def test_a_window_carries_in_only_from_its_own_period():
+    """Runs never cross a period: a window in the second period carries in from that period's
+    snapshots before its start, never from the first period's."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=6, freq="h"))
+    n.set_investment_periods([2030, 2040])
+    n.add("Bus", "dc_mv")
+    n.add("Bus", "it_bus")
+    n.add("Load", "it_load", bus="it_bus", p_set=pd.Series(IT, index=n.snapshots))
+    n.add("Load", "cooling", bus="dc_mv", p_set=pd.Series(COOL, index=n.snapshots))
+    n.add("Generator", C.GENERATOR, bus="dc_mv", p_nom=30.0)
+    p = pd.Series(np.nan, index=n.snapshots)
+    p.iloc[:8] = 1.0
+    n.generators_t.p[C.GENERATOR] = p
+    window = {"network": n, "index": 1, "start": 8, "stop": 12, "written": 9}
+    rows, carried = C._window_rows(n, n.snapshots[8:12], _terms(d=2.0), window, print)
+    f = IT + COOL
+    assert carried == 2  # the runs from 2040's positions 6 and 7
+    assert rows[0] == (0, 0, pytest.approx(2.0 * SHARE * f[6:9].max() - 2.0))
+    assert rows[1] == (0, 1, pytest.approx(2.0 * SHARE * f[7:10].max() - 1.0))
