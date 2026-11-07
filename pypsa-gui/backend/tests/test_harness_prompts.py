@@ -96,9 +96,18 @@ def test_not_running_status_has_no_hint(monkeypatch):
 def test_continuation_armed_reads_this_conversations_steps(monkeypatch):
     from types import SimpleNamespace as NS
     from services import assistant_tasks
-    task = {"steps": [{"job": {"session_id": "s1", "continuation": "armed"}}]}
+    task = {"steps": [{"job": {"job_id": "fg:1", "session_id": "s1", "continuation": "armed"}}]}
     monkeypatch.setattr(assistant_tasks, "_owned_tasks", lambda: [("p", task)])
     assert assistant_tasks.continuation_armed(NS(session_id="s1"))
     assert not assistant_tasks.continuation_armed(NS(session_id="s2"))
     task["steps"][0]["job"]["continuation"] = "withdrawn"
+    assert not assistant_tasks.continuation_armed(NS(session_id="s1"))
+
+
+def test_continuation_armed_ignores_a_plan_on_another_kind_of_job(monkeypatch):
+    """U1: an ad:-armed study plan does not cover the foreground solve; kills the dropped-filter mutant."""
+    from types import SimpleNamespace as NS
+    from services import assistant_tasks
+    task = {"steps": [{"job": {"job_id": "ad:7", "session_id": "s1", "continuation": "armed"}}]}
+    monkeypatch.setattr(assistant_tasks, "_owned_tasks", lambda: [("p", task)])
     assert not assistant_tasks.continuation_armed(NS(session_id="s1"))
