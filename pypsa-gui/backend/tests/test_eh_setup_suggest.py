@@ -451,6 +451,20 @@ def test_the_concentrator_suggests_its_site_bus_as_critical():
             assert abs(float(mw) - tonnes) > 1.0, s["reason"]
 
 
+def test_the_concentrator_site_is_a_high_confidence_pick_from_its_criticality_tier():
+    n = _strip(TPL.BUILDERS["eh_concentrator_staged"]())
+    crit = [s for s in suggest_eh_setup(n)["suggestions"] if s["kind"] == "critical_bus"]
+    assert [(s["name"], s["confidence"]) for s in crit] == [("site", "high")]
+    assert "criticality_tier process_critical" in crit[0]["reason"]
+
+
+def test_a_flexible_only_site_stays_a_medium_pick():
+    n = _strip(TPL.BUILDERS["eh_concentrator_staged"]())
+    n.links["criticality_tier"] = "process_flexible"
+    crit = [s for s in suggest_eh_setup(n)["suggestions"] if s["kind"] == "critical_bus"]
+    assert [(s["name"], s["confidence"]) for s in crit] == [("site", "medium")]
+
+
 def test_a_source_on_a_tonne_bus_is_not_mw_of_supply():
     """A mine's ore feed (t/h) on a product bus is neither a PoC nor MW of supply."""
     n = _process_site()

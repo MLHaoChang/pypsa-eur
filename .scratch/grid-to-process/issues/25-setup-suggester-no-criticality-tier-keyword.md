@@ -3,7 +3,7 @@
 
 # Setup suggester has no `criticality_tier` keyword match, so the concentrator's `site` is a medium-confidence pick
 
-Status: ready-for-agent
+Status: done
 Type: task
 Found by: G2P-19 (#1189, merged), relayed by the coordinator; owner list DOCS-1.
 
