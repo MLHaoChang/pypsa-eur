@@ -246,7 +246,7 @@ def _same_config(a: str, b: str) -> bool:
 class SolveConfigConflict(Exception):
     """An active job exists for the project and the new call's solver config differs."""
 
-    def __init__(self, existing: "SolveJob"):
+    def __init__(self, existing: SolveJob):
         super().__init__("a solve with other settings is already queued or running")
         self.existing = existing
 
