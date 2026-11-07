@@ -939,3 +939,20 @@ def test_a_row_with_no_entry_for_a_period_adds_nothing_to_that_period(monkeypatc
         n1["by_period"]["2030"]["t_per_year"] == 2.0
         and n1["by_period"]["2040"]["t_per_year"] == 1.0
     )
+
+
+def test_island_outside_blocks_prices_rate_times_mass_pull_per_product(net2, tmp_path):
+    campus = _write_products(tmp_path / "run")
+    df = pd.read_csv(campus.run_dir / G.RESTART_CSV)
+    df.loc[df["unit"] == "mill", "mass_pull"] = (
+        0.5  # 0.5 t of concentrate per t of the mill's output
+    )
+    df.to_csv(campus.run_dir / G.RESTART_CSV, index=False)
+    c = _campus_cells(net2, campus)
+    events = _year_hours() * Q_IMPORT / MTTR_IMPORT
+    assert c["outside"]["t_per_year"] == pytest.approx(
+        RATE * 0.5 * MTTR_IMPORT * events
+    )
+    assert c["outside"]["eur_per_year"] == pytest.approx(
+        RATE * 0.5 * MTTR_IMPORT * events * LPV
+    )
