@@ -84,6 +84,12 @@ def test_an_import_reads_input_assertion_until_a_validate_passes(baseline):
     assert stamp["format"] == "netcdf" and len(stamp["import_id"]) == 32
     assert status() == "validated"
     assert records() == [stamp["import_id"] + ".json"]
+    import app_paths
+
+    folder = app_paths.app_data_dir() / "assistant_import_validations"
+    record = json.loads((folder / records()[0]).read_text())
+    assert set(record) == {"import_id", "sha256", "exact", "at"}
+    assert record["sha256"] == stamp["sha256"]
     network().generators.at["G1", "marginal_cost"] = 99.0
     assert assurance_artifacts.import_status(ctx()) == "input_assertion"
     assert status() == "validated"  # an edit followed by a passing validate re-stamps (R1d)
@@ -267,8 +273,8 @@ XLSX_CASES = {
         [["at", "MW"], ["2026-01-01T01:00:00", 5]],
     ),
     "nan_and_empty_text": (
-        [["a", "b"], [float("nan"), ""], ["x", None]],
-        [["a", "b"], [None, None], ["x", None]],
+        [["a", "b"], [float("nan"), ""], [float("inf"), "x"]],
+        [["a", "b"], [None, None], [None, "x"]],
     ),
     "formula_escaped": ([["=SUM(A1)", "@x"]], [["'=SUM(A1)", "'@x"]]),
     "empty_sheet": ([], []),
