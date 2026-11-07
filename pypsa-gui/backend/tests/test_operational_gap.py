@@ -557,6 +557,14 @@ def test_a_gap_is_none_when_one_side_is_none():
     ):
         row = G._gap_rows({"opex_eur": op}, {"opex_eur": ref})["opex_eur"]
         assert row["gap"] is None and row["gap_pct"] is None
+        # Only the side that is None carries a reason.
+        assert ("operational_reason" in row) == (op["value"] is None)
+        assert ("reference_reason" in row) == (ref["value"] is None)
+        assert row.get("operational_reason", row.get("reference_reason")) == "r"
+    # An unrecorded metric reads not established on that side.
+    row = G._gap_rows({}, {"opex_eur": {"value": 1.0}})["opex_eur"]
+    assert row["operational_reason"] == "not established"
+    assert "reference_reason" not in row
 
 
 def test_the_reference_leaves_no_meta_behind():

@@ -232,31 +232,30 @@ def clear(n) -> None:
         n.meta.pop(GAP_KEY, None)
 
 
-def _gap_rows(op: dict | None, ref: dict | None) -> dict:
+_NOT_ESTABLISHED = {"value": None, "reason": "not established"}
+
+
+def _gap_rows(op: dict, ref: dict) -> dict:
+    """One row per defined metric. A side that is None carries its reason."""
     rows = {}
     for name, definition in DEFINITIONS.items():
-        o = (op or {}).get(name) or {"value": None, "reason": "not established"}
-        r = (ref or {}).get(name) or {"value": None, "reason": "not established"}
-        ov, rv = o.get("value"), r.get("value")
+        o = op.get(name) or _NOT_ESTABLISHED
+        r = ref.get(name) or _NOT_ESTABLISHED
+        ov, rv = o["value"], r["value"]
         gap = None if ov is None or rv is None else ov - rv
         pct = None if gap is None or rv == 0 else 100.0 * gap / abs(rv)
-        rows[name] = {
+        row = {
             "definition": definition,
             "operational": ov,
             "reference": rv,
             "gap": gap,
             "gap_pct": pct,
-            **(
-                {"operational_reason": o["reason"]}
-                if ov is None and "reason" in o
-                else {}
-            ),
-            **(
-                {"reference_reason": r["reason"]}
-                if rv is None and "reason" in r
-                else {}
-            ),
         }
+        if ov is None:
+            row["operational_reason"] = o["reason"]
+        if rv is None:
+            row["reference_reason"] = r["reason"]
+        rows[name] = row
     return rows
 
 
@@ -274,14 +273,13 @@ def _flag(n, cfg, rec: dict | None, live_fingerprint: str | None) -> str:
     )
     if (
         not solved
-        or not live_fingerprint
         or solved != live_fingerprint
         or key.get("horizon") != h
         or key.get("overlap") != o
         or key.get("weightings") != weightings_digest(n)
     ):
         return STALE
-    if (rec.get("windows") or {}).get("failed"):
+    if rec["windows"]["failed"]:
         return WINDOW_FAILED
     if key.get("reference_status") != "ok":
         return REFERENCE_NOT_SOLVED
