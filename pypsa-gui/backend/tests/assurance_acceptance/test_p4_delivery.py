@@ -434,8 +434,16 @@ def test_stale_charts_of_one_solve_deliver_together_labelled(solved, client):
     assert [item["scope_status"] for item in items] == ["solve_stale", "solve_stale"]
 
 
+@pytest.fixture
+def checked_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+    monkeypatch.setenv(
+        "PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", "generator-dispatch/1,branch-loading/1"
+    )
+
+
 def test_an_expired_checked_charts_item_says_its_evidence_expired(
-    solved, checked, tmp_path, monkeypatch
+    checked_store, solved, checked
 ):
     import io
     import zipfile
@@ -443,10 +451,6 @@ def test_an_expired_checked_charts_item_says_its_evidence_expired(
     from services import assurance_records, checked_charts
     from tests.test_checked_charts import GENERATOR, ask, sidecar
 
-    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
-    monkeypatch.setenv(
-        "PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", "generator-dispatch/1,branch-loading/1"
-    )
     chart = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])["chart"]
     stamp = checked_charts.readable_stamp(sidecar(chart)["drawn_at"])
     evidence_id = chart["evidence_id"]
@@ -460,3 +464,15 @@ def test_an_expired_checked_charts_item_says_its_evidence_expired(
         (item,) = json.loads(archive.read("manifest.json"))["files"]
     assert item["evidence_status"] == "expired"
     assert item["evidence_note"] == checked_charts.EXPIRED_NOTE.format(drawn_at=stamp)
+
+
+def test_a_checked_chart_whose_evidence_no_longer_matches_is_refused(
+    checked_store, solved, checked
+):
+    from services import assurance_records
+    from tests.test_checked_charts import GENERATOR, ask
+
+    chart = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])["chart"]
+    assurance_records._path(assurance_records.actor_id(), chart["evidence_id"]).write_text("{")
+    assert checked.client.get(chart["download_url"]).status_code == 409
+    assert delivery(chart).status_code == 409
