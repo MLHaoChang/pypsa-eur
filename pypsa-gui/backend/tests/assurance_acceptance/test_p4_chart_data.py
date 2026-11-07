@@ -253,6 +253,21 @@ def test_a_network_without_meta_has_no_solve_stamp():
     assert assurance_artifacts.solve_stamp(_Network()) is None
 
 
+@pytest.mark.parametrize("value", ["", 123, None])
+def test_a_blank_or_non_text_fingerprint_is_no_solve_stamp(value):
+    network = _Network()
+    network.meta = {
+        "assistant_solve_input_fingerprint": "a" * 64,
+        "assistant_solve_exact_input_fingerprint": value,
+    }
+    assert assurance_artifacts.solve_stamp(network) is None
+    network.meta["assistant_solve_exact_input_fingerprint"] = "b" * 64
+    assert assurance_artifacts.solve_stamp(network) == {
+        "input": "a" * 64,
+        "exact": "b" * 64,
+    }
+
+
 class _Ctx:
     def __init__(self, project_uuid):
         self.project_uuid = project_uuid
