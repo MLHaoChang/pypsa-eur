@@ -65,7 +65,6 @@ const inputValue = (v: unknown, unit?: string) =>
     : typeof v === 'string' ? (POLICY_WORDS[v] ?? v) : String(v)
 /** "2030-07-07 13:00" from an ISO or "YYYY-MM-DD HH:MM:SS" timestamp (UX 10). */
 const minute = (t: string) => t.slice(0, 16).replace('T', ' ')
-const MODE_WORD: Record<DcBackupMode, string> = { genset: 'gensets', bess: 'batteries', hybrid: 'hybrid' }
 
 const num = (v: number | null | undefined, digits = 3) =>
   v == null || !Number.isFinite(v) ? '–' : v.toLocaleString('en', { maximumSignificantDigits: digits })
@@ -136,8 +135,8 @@ export default function DcBackupSection({ name }: { name: string }) {
         </div>
         {built && (
           <p className="mt-1 text-[12px] text-muted" data-testid="dc-backup-not-assessable">
-            This project was created with {MODE_WORD[built]} backup, so its saved network already has the
-            battery strings. To assess a backup, create the project with gensets and switch the mode here.
+            This project was created with {BACKUP_MODE_FIELD} set to {MODE_LABEL[built]}, so its saved network already has the
+            battery strings. To assess a backup, create the project with {MODE_LABEL.genset} and switch the {BACKUP_MODE_FIELD} here.
           </p>
         )}
         {refusal && <p className="mt-1 text-[12px] text-danger" data-testid="dc-backup-refusal">{refusal}</p>}
@@ -193,7 +192,7 @@ function Assessment({ result, stale, stored }: { result: DcBackupAssessment; sta
       {stale && (
         <p className="flex items-center gap-2" data-testid="dc-backup-stale">
           <StatePill state="stale" />
-          <span className="text-muted">This assessment is for {MODE_WORD[result.mode]}. Assess again for {stored ? MODE_WORD[stored] : 'the stored mode'}.</span>
+          <span className="text-muted">This assessment is for {MODE_LABEL[result.mode]}. Assess again for {stored ? MODE_LABEL[stored] : 'the stored mode'}.</span>
         </p>
       )}
       <div className={stale ? 'opacity-50 space-y-2' : 'space-y-2'}>
@@ -280,7 +279,15 @@ function CostLine({ result }: { result: DcBackupAssessment }) {
   const c = result.cost
   if (result.mode === 'genset') return null
   if (c.delta == null) {
-    return <p data-testid="dc-backup-cost">The cost against the gensets cannot be priced.</p>
+    // The input the engine could not read, in the card's own words. No input has a GUI field that edits it
+    // (the backup spec and pack prices are not in the app), so none gets a link; an unnamed one says so.
+    const unread = c.inputs.find(i => i.value == null || (typeof i.value === 'number' && !Number.isFinite(i.value)))
+    const word = unread ? INPUT_LABEL[unread.key] : undefined
+    return (
+      <p data-testid="dc-backup-cost">
+        The cost against the gensets cannot be priced{word ? `. Missing: ${word}.` : ': an input is missing.'}
+      </p>
+    )
   }
   const amount = money(c.delta, c.currency)
   return (
