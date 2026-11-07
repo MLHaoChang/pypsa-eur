@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import math
 
+import pandas as pd
 import pypsa
 import pytest
 
@@ -164,3 +165,11 @@ def test_a_computed_motor_start_row_is_checked_by_its_declared_rule(tmp_path):
     assert R.disposition(_row(tmp_path, _site(method="dol"))) == ("checked", "warn")
     assert R.disposition(_row(tmp_path, _site(method="vfd"))) == ("checked", "pass")
     assert R.disposition(_row(tmp_path, _site(method="")))[0] == "unknown"
+
+
+def test_a_string_yes_flagged_process_unit_gets_its_motor_start_row(tmp_path):
+    """The flag rule is the shared one: "yes" (an object-dtype string) is a process unit."""
+    n = _site()
+    n.links["eh_process"] = pd.Series([False, "yes"], index=n.links.index, dtype=object)
+    row = _row(tmp_path, n)
+    assert row["project_value"] == pytest.approx(9.8761, abs=1e-4) and row["verdict"] == "warn"
