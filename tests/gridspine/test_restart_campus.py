@@ -267,3 +267,26 @@ def test_an_extendable_unit_rates_on_p_nom_opt_not_p_nom():
     assert rate == pytest.approx(550.0) and basis.startswith("p_nom_opt 8.8 MW")
     n.links.loc["mill", "p_nom_opt"] = 0.0
     assert pc.rate_tph(n, "mill") == (None, "unknown: p_nom_opt is not above 0")
+
+
+# The two files' columns before they carried the product (G2P #23, G23-1): adding it changes nothing else.
+_DIP_COLUMNS_BEFORE = "level,unit,u_min_pct,u_max_pct,t_min_s,t_max_s,depth_pct,duration_s,count_per_year,verdict,dip_stats_source,note,trips_per_year,restart_time_h,rate_tph,mass_pull,lost_t_per_trip,lost_t_per_year,label,rate_basis,mass_pull_basis,incomplete,unknown_count,known_count,profile".split(",")
+_RESTART_COLUMNS_BEFORE = "level,unit,tier,rated_mw,block,pickup_s,full_rate_s,restart_time_h,rate_tph,mass_pull,du_pct,start_verdict,lost_wait_t,lost_restart_t,lost_t,verdict,note,label,rate_basis,mass_pull_basis,transition,sk_mva_source,assumed,t_s,event,fail_count,unknown_count,lower_bound,end_s,limit_pct,limit_clause,profile".split(",")
+
+
+def test_every_unit_row_names_the_shortfall_product_its_tonnes_are_of(tmp_path):
+    run, _ = _run(tmp_path, _restart_hub())
+    restart_campus(run)
+    for name, before in ((DIP_TRIPS_CSV, _DIP_COLUMNS_BEFORE), (RESTART_CSV, _RESTART_COLUMNS_BEFORE)):
+        df = pd.read_csv(run / name, keep_default_na=False)          # raw text: an empty cell stays ""
+        assert [c for c in df.columns if c != "product"] == before
+        unit = df["level"] == "unit"
+        assert set(df.loc[unit, "product"]) == {"nh3"}
+        assert set(df.loc[~unit, "product"]) == {""}                  # never "nan"
+
+
+def test_the_product_is_where_the_mass_pull_walk_ends_not_bus1():
+    n = _chain()
+    assert pc.shortfall_product(n, "mill") == "conc"                 # mill's bus1 is slurry
+    n.generators["process_role"] = [""]
+    assert pc.shortfall_product(n, "mill") is None                   # mass pull unknown: no product

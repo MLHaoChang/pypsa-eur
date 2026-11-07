@@ -480,3 +480,145 @@ def test_every_missing_word_has_the_forms_word_in_the_frontend(net, tmp_path):
             "mwh_per_t",
         ):
             assert labels[w].strip("'") == form[w], (w, labels[w], form[w])
+
+
+# --- G2P #23: lines 1-2 priced with several shortfall products (GK A plan GO, G23-1..5) ---------------------------
+
+LPV_ACID = 40.0  # EUR/t
+
+
+def _two_products(acid_lpv=LPV_ACID):
+    """The chain plus a second shortfall product, acid (t), so the campus lines cannot take one product's value."""
+    n = _network()
+    n.add("Carrier", "acid")
+    n.add("Bus", "acid", carrier="acid", unit="t")
+    n.add(
+        "Generator",
+        "__lost_acid",
+        bus="acid",
+        carrier="acid",
+        p_nom=1000.0,
+        marginal_cost=acid_lpv if acid_lpv is not None else float("nan"),
+    )
+    n.generators.at["__lost_acid", "process_role"] = "shortfall"
+    return n
+
+
+@pytest.fixture(scope="module")
+def net2():
+    return _two_products()
+
+
+def _write_products(run, dip=None, island=None, total=None, product_column=True):
+    """Campus CSVs in restart_campus's shape. ``dip``: (unit, lost t/yr, product); ``island``: (unit, outside
+    every block?, rate or lost t, product)."""
+    run.mkdir(parents=True, exist_ok=True)
+    dip = dip or [("mill", 7.5, "concentrate"), ("pump", 2.5, "acid")]
+    island = island or [("mill", True, RATE, "concentrate"), ("pump", False, 3.0, "acid")]
+    rows = [
+        {"level": "unit", "unit": u, "lost_t_per_year": t, "verdict": "known", "note": "", "product": p}
+        for u, t, p in dip
+    ]
+    known = sum(t or 0.0 for _, t, _ in dip)
+    rows.append(
+        {"level": "total", "lost_t_per_year": known if total is None else total, "incomplete": False,
+         "unknown_count": 0, "known_count": len(dip), "dip_stats_source": "demo", "note": "demo"}
+    )
+    restart = [
+        {"level": "unit", "transition": "island", "unit": u, "block": None if out else 1,
+         "rate_tph": v if out else 2.0, "mass_pull": 1.0, "lost_t": None if out else v,
+         "verdict": "fail" if out else "pass",
+         "note": f"island on gensets; {NO_BLOCK}: above every pickup block" if out else "motor start pass",
+         "product": p}
+        for u, out, v, p in island
+    ]
+    frames = [pd.DataFrame(rows), pd.DataFrame(restart)]
+    if not product_column:
+        frames = [f.drop(columns="product") for f in frames]
+    frames[0].to_csv(run / G.DIP_TRIPS_CSV, index=False)
+    frames[1].to_csv(run / G.RESTART_CSV, index=False)
+    return G.CampusRun(run_dir=run, stamp={"file": G.RESTART_CSV})
+
+
+def _campus_cells(n, campus):
+    out = G.grid_risk_production(n, campus=campus)
+    rt, isl = _line(out, "ride_through"), _line(out, "island")
+    outside, inside = isl["rows"]
+    return {
+        "ride": rt["by_period"]["_"],
+        "island": isl["by_period"]["_"],
+        "outside": outside["by_period"]["_"],
+        "inside": inside["by_period"]["_"],
+    }
+
+
+def test_several_products_price_each_unit_row_at_its_own_product(net2, tmp_path):
+    c = _campus_cells(net2, _write_products(tmp_path / "run"))
+    events = _year_hours() * Q_IMPORT / MTTR_IMPORT
+    assert c["ride"]["eur_per_year"] == pytest.approx(7.5 * LPV + 2.5 * LPV_ACID)
+    assert c["outside"]["eur_per_year"] == pytest.approx(RATE * MTTR_IMPORT * events * LPV)
+    assert c["inside"]["eur_per_year"] == pytest.approx(3.0 * events * LPV_ACID)
+    assert c["island"]["eur_per_year"] == pytest.approx((RATE * MTTR_IMPORT * LPV + 3.0 * LPV_ACID) * events)
+    assert all(v["eur_flag"] is None for v in c.values())
+    assert c["ride"]["t_per_year"] == 10.0  # tonnes unchanged
+
+
+def test_a_campus_run_from_before_the_product_column_stays_unavailable(net2, tmp_path):
+    c = _campus_cells(net2, _write_products(tmp_path / "run", product_column=False))
+    for k, v in c.items():
+        assert v["t_per_year"] is not None, k
+        assert v["eur_per_year"] is None and v["eur_flag"] == G.SEVERAL_PRODUCTS, k
+
+
+def test_an_unpriced_product_never_prices_at_zero(tmp_path):
+    c = _campus_cells(_two_products(acid_lpv=None), _write_products(tmp_path / "run"))
+    assert c["ride"]["eur_per_year"] is None and c["ride"]["eur_flag"] == G.LPV_MISSING
+    assert c["inside"]["eur_per_year"] is None and c["inside"]["eur_flag"] == G.LPV_MISSING
+    assert c["island"]["eur_per_year"] is None and c["island"]["eur_flag"] == G.LPV_MISSING
+    assert c["outside"]["eur_per_year"] == pytest.approx(  # all concentrate: priced
+        RATE * MTTR_IMPORT * _year_hours() * Q_IMPORT / MTTR_IMPORT * LPV
+    )
+
+
+def test_ride_through_unit_rows_that_do_not_sum_to_the_total_are_not_priced(net2, tmp_path):
+    c = _campus_cells(net2, _write_products(tmp_path / "run", total=11.0))
+    assert c["ride"]["t_per_year"] == 11.0
+    assert c["ride"]["eur_per_year"] is None and c["ride"]["eur_flag"] == G.SEVERAL_PRODUCTS
+
+
+def test_ride_through_a_row_with_tonnes_and_no_product_gives_none(net2, tmp_path):
+    dip = [("mill", 7.5, "concentrate"), ("pump", 2.5, None)]
+    c = _campus_cells(net2, _write_products(tmp_path / "run", dip=dip))
+    assert c["ride"]["eur_per_year"] is None and c["ride"]["eur_flag"] == G.SEVERAL_PRODUCTS
+    assert c["outside"]["eur_per_year"] is not None and c["inside"]["eur_per_year"] is not None
+
+
+def test_ride_through_a_row_with_zero_tonnes_and_no_product_does_not_poison_the_sum(net2, tmp_path):
+    dip = [("mill", 7.5, "concentrate"), ("pump", 2.5, "acid"), ("fan", 0.0, None)]
+    c = _campus_cells(net2, _write_products(tmp_path / "run", dip=dip))
+    assert c["ride"]["eur_per_year"] == pytest.approx(7.5 * LPV + 2.5 * LPV_ACID)
+
+
+def test_island_outside_blocks_a_row_with_no_product_gives_none(net2, tmp_path):
+    island = [("mill", True, RATE, None), ("pump", False, 3.0, "acid")]
+    c = _campus_cells(net2, _write_products(tmp_path / "run", island=island))
+    assert c["outside"]["eur_per_year"] is None and c["outside"]["eur_flag"] == G.SEVERAL_PRODUCTS
+    assert c["inside"]["eur_per_year"] is not None and c["ride"]["eur_per_year"] is not None
+    assert c["island"]["eur_per_year"] is None and c["island"]["eur_flag"] == G.SEVERAL_PRODUCTS
+
+
+def test_island_in_block_a_row_with_no_product_gives_none(net2, tmp_path):
+    island = [("mill", True, RATE, "concentrate"), ("pump", False, 3.0, None)]
+    c = _campus_cells(net2, _write_products(tmp_path / "run", island=island))
+    assert c["inside"]["eur_per_year"] is None and c["inside"]["eur_flag"] == G.SEVERAL_PRODUCTS
+    assert c["outside"]["eur_per_year"] is not None
+    assert c["island"]["eur_per_year"] is None
+
+
+def test_island_rows_with_zero_tonnes_and_no_product_do_not_poison_the_sum(net2, tmp_path):
+    island = [("mill", True, RATE, "concentrate"), ("pump", False, 3.0, "acid"),
+              ("fan", True, 0.0, None), ("valve", False, 0.0, None)]
+    c = _campus_cells(net2, _write_products(tmp_path / "run", island=island))
+    events = _year_hours() * Q_IMPORT / MTTR_IMPORT
+    assert c["outside"]["eur_per_year"] == pytest.approx(RATE * MTTR_IMPORT * events * LPV)
+    assert c["inside"]["eur_per_year"] == pytest.approx(3.0 * events * LPV_ACID)

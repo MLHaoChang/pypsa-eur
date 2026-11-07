@@ -1087,6 +1087,7 @@ def restart_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> 
     ``event`` row per timeline event and one ``total`` row. A grid trip screens each motor start on the PCC's
     minimum case, an island transition on the island's gensets (``RESTART_LEDGER``). The unit inputs are read
     from the project network the run was prepared from, which must be unchanged since."""
+    from gridspine.drivers import process_chain as pc
     from gridspine.drivers.process_chain import restart_units
     from gridspine.static import motor_start as ms
     from gridspine.static import restart_sequence as rs
@@ -1104,6 +1105,7 @@ def restart_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> 
 
     units = restart_units(n)
     bases = units.set_index("unit")[["rate_basis", "mass_pull_basis"]]
+    bases["product"] = [pc.shortfall_product(n, u) for u in bases.index]   # what each unit's tonnes are of
     trips = rt.trip_table(units)
     lost = rt.lost_tonnes_table(units).join(bases, on="unit")
     total = rt.lost_tonnes_total(lost)

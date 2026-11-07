@@ -176,19 +176,49 @@ def _line(
     }
 
 
-def _product_value(n, lost_load) -> tuple[float | None, str | None]:
-    """(EUR per t, flag) of the shortfall product the campus lines' mass pull leads to: the one product's
-    lost-production value over its tonne factor. Several products: None, flagged (the campus rows do not name it)."""
-    products = {}
+@dataclass(frozen=True)
+class _Prices:
+    """EUR per t of the campus lines' tonnes. One shortfall product: its value prices any sum (``per_t``, or None
+    with ``flag``). Several (``flag`` is ``SEVERAL_PRODUCTS``): each unit row is priced at the product the campus
+    run wrote on it (the bus its mass pull walk ends at), from ``by_product`` (None when unpriced, never 0)."""
+
+    per_t: float | None
+    flag: str | None
+    by_product: dict = field(default_factory=dict)
+
+    def eur(self, t, parts=None) -> tuple[float | None, str | None]:
+        """(EUR, flag) of ``t`` tonnes; ``parts``: the (tonnes, product) of the unit rows ``t`` is the sum of."""
+        if t is None or self.flag != SEVERAL_PRODUCTS:
+            return _eur(t, self.per_t, self.flag)
+        if parts is None or not math.isclose(
+            sum(pt for pt, _ in parts), t, rel_tol=1e-6, abs_tol=1e-9
+        ):
+            return None, SEVERAL_PRODUCTS  # never priced on a part of the tonnes
+        eur = 0.0
+        for pt, prod in parts:
+            if not pt:
+                continue  # a row with no tonnes costs nothing, whatever its product
+            if not prod or prod not in self.by_product:
+                return None, SEVERAL_PRODUCTS  # a run from before the product column, or a product not short
+            if self.by_product[prod] is None:
+                return None, LPV_MISSING
+            eur += pt * self.by_product[prod]
+        return eur, None
+
+
+def _product_value(n, lost_load) -> _Prices:
+    """The prices of the campus lines' tonnes: each shortfall product's lost-production value over its tonne
+    factor (None when it has no value). One product prices the lines as a whole; several price each unit row at
+    the product the campus run names on it."""
+    by_product = {}
     for s in PP.shortfalls(n, lost_load):
-        products.setdefault(s.bus, s)
-    if len(products) != 1:
-        return None, SEVERAL_PRODUCTS if products else LPV_MISSING
-    s = next(iter(products.values()))
-    tpu = PP.t_per_unit(n, s.bus)
-    if s.value is None or not tpu:
-        return None, LPV_MISSING
-    return s.value / tpu, None
+        if s.bus not in by_product:
+            tpu = PP.t_per_unit(n, s.bus)
+            by_product[s.bus] = None if s.value is None or not tpu else s.value / tpu
+    if len(by_product) != 1:
+        return _Prices(None, SEVERAL_PRODUCTS if by_product else LPV_MISSING, by_product)
+    per_t = next(iter(by_product.values()))
+    return _Prices(per_t, None if per_t is not None else LPV_MISSING, by_product)
 
 
 def eur_inputs(n, lost_load) -> list[dict]:
@@ -248,7 +278,7 @@ def _outage(n, link: str) -> tuple[float | None, float | None]:
 # ── the lines ────────────────────────────────────────────────────────────
 
 
-def _ride_through(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
+def _ride_through(n, campus: CampusRun, prices: _Prices, periods) -> dict:
     src = [DIP_TRIPS_CSV]
     rows = None if campus.run_dir is None else _rows(campus.run_dir / DIP_TRIPS_CSV)
     if rows is None:
@@ -291,7 +321,12 @@ def _ride_through(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
             flags=flags,
             rows=detail,
         )
-    eur, ef = _eur(t, per_t, eur_flag)
+    parts = [
+        (d["lost_t_per_year"], (r.get("product") or "").strip())
+        for d, r in zip(detail, units)
+        if d["lost_t_per_year"] is not None
+    ]
+    eur, ef = prices.eur(t, parts)
     return _line(
         "ride_through",
         source_files=src,
@@ -305,7 +340,7 @@ def _ride_through(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
     )
 
 
-def _island(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
+def _island(n, campus: CampusRun, prices: _Prices, periods) -> dict:
     src = [RESTART_CSV, NETWORK_FILE]
     try:
         from gridspine.static.restart_sequence import NO_BLOCK
@@ -352,25 +387,33 @@ def _island(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
                 inside.append(r)
         else:
             inside.append(r)
-    per_hour, unknown_out = 0.0, []
+    per_hour, unknown_out, out_parts = 0.0, [], []  # out_parts: (t/h, product) per unit
     for r in outside:
         rate, mp = _num(r.get("rate_tph")), _num(r.get("mass_pull"))
         if rate is None or mp is None:
             unknown_out.append(r["unit"])
         else:
             per_hour += rate * mp
+            out_parts.append((rate * mp, (r.get("product") or "").strip()))
     if unknown_out:
         flags.append(LOWER_BOUND)
-    per_event_in = sum(_num(r.get("lost_t")) or 0.0 for r in inside)
+    in_parts = [  # (t per event, product) per unit
+        (_num(r.get("lost_t")), (r.get("product") or "").strip())
+        for r in inside
+        if _num(r.get("lost_t")) is not None
+    ]
+    per_event_in = sum(pt for pt, _ in in_parts)
     totals, outside_bp, inside_bp = {}, {}, {}
     for p in periods:
         events = PL._year_hours(p) * q / mttr
         t_out, t_in = per_hour * mttr * events, per_event_in * events
-        outside_bp[_key(p)] = _cell(t_out, *_eur(t_out, per_t, eur_flag))
-        inside_bp[_key(p)] = _cell(t_in, *_eur(t_in, per_t, eur_flag))
+        e_out = prices.eur(t_out, [(v * mttr * events, b) for v, b in out_parts])
+        e_in = prices.eur(t_in, [(v * events, b) for v, b in in_parts])
+        outside_bp[_key(p)] = _cell(t_out, *e_out)
+        inside_bp[_key(p)] = _cell(t_in, *e_in)
         t = t_out + t_in
         totals[_key(p)] = {
-            **_cell(t, *_eur(t, per_t, eur_flag)),
+            **_cell(t, *_island_eur(t, prices, e_out, e_in)),
             "events_per_year": events,
         }
     names = {r["unit"] for r in units}
@@ -407,6 +450,16 @@ def _island(n, campus: CampusRun, per_t, eur_flag, periods) -> dict:
         "campus study's restart screen gives it",
         by_period=totals,
     )
+
+
+def _island_eur(t, prices: _Prices, e_out, e_in) -> tuple[float | None, str | None]:
+    """The island line's EUR: one product prices its tonnes as a whole; several, the sum of its two rows."""
+    if prices.flag != SEVERAL_PRODUCTS:
+        return prices.eur(t)
+    for eur, flag in (e_out, e_in):
+        if eur is None:
+            return None, flag
+    return e_out[0] + e_in[0], None
 
 
 def _site_transformers(n) -> list[str]:
@@ -645,10 +698,10 @@ def grid_risk_production(
         return None
     campus = campus or CampusRun()
     periods = _periods(n)
-    per_t, eur_flag = _product_value(n, lost_load)
+    prices = _product_value(n, lost_load)
     lines = [
-        _ride_through(n, campus, per_t, eur_flag, periods),
-        _island(n, campus, per_t, eur_flag, periods),
+        _ride_through(n, campus, prices, periods),
+        _island(n, campus, prices, periods),
         _n_1(n, lost_load, periods),
         _connection(n, lost_load, periods),
     ]
