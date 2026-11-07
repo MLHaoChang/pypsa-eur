@@ -1220,7 +1220,8 @@ def test_a_duration_the_first_window_cannot_hold_is_refused_before_any_window(
     assert cond.startswith(f"curtailment_refused: {C.DURATION_EXCEEDS_WINDOW}:")
     assert not any("carried in" in ln or "window(s) solved" in ln for ln in lines)
     assert C.GENERATOR not in n.generators.index
-    with pytest.raises(C.DcCurtailmentRefused):
+    with pytest.raises(C.DcCurtailmentRefused) as exc:
         C.check_window(n, 3, _terms(d=5.0))
+    assert exc.value.kind == C.DURATION_EXCEEDS_WINDOW
     C.check_window(n, 3, _terms())  # no duration: nothing to fit
     C.check_window(n, 3, _terms(d=4.0))
