@@ -3900,7 +3900,13 @@ def _dispatch_real_tool_call(
         # future.result(), so this block still owns handler failures.
         if task_ticket is not None:
             try:
-                assistant_tasks.finish_step(task_ticket, error=type(exc).__name__)
+                raised = getattr(exc, "detail", None)
+                assistant_tasks.finish_step(
+                    task_ticket,
+                    error=type(exc).__name__,
+                    # SC-07 S3 (N3): the typed refusal a retry is judged by.
+                    error_kind=raised.get("error_kind") if isinstance(raised, dict) else None,
+                )
             except Exception:
                 logger.exception("Task failure checkpoint unavailable")
         error_kind = "tool_error"

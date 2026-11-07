@@ -30,6 +30,9 @@ BOUND_CONTEXT_TOOLS = frozenset({
     "apply_demand_from_excel",  # issue 21c: stage 2's planned write
     "generate_report",  # issue 07: stage 7 (GK B C6)
     "run_eh_study",  # issue 07 B2: the solve stage's EH study, on its frozen args (GK B C1)
+    # SC-07 S3 (GK B G7, N7): a 3D site apply step works on the bound project. A
+    # profile never lists it: its args come only from a prepare step (N2).
+    "site_scene_apply",
 })
 
 # Issue 07 (design §3 stages 7-8): steps only the runner runs, never a chat
@@ -261,6 +264,9 @@ def load(profile: dict) -> dict:
                 continue
             if action["tool"] not in BOUND_CONTEXT_TOOLS:
                 raise ProfileError(f"Stage {name}: {action['tool']} is not yet shown to work on the run's own project.")
+            if action["tool"] == "site_scene_apply":
+                raise ProfileError(f"Stage {name}: site_scene_apply takes its args from a prepare step of a "
+                                   "plan, never from a profile.")
             if (action["tool"] == EH_STUDY_ACTION["tool"]) != (action["args"] == EH_STUDY_ACTION["args"]) or (
                     action["tool"] == EH_STUDY_ACTION["tool"]
                     and (name != "solve" or not isinstance(profile.get("eh_study"), dict))):
