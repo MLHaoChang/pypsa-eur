@@ -1030,7 +1030,12 @@ def _bounds(p, hours, d):
     w = np.full(len(p), hours)
     f = IT + COOL
     return [
-        (i, j, d * SHARE * f[i : j + 1].max(), float((w[i : j + 1] * p[i : j + 1]).sum()))
+        (
+            i,
+            j,
+            d * SHARE * f[i : j + 1].max(),
+            float((w[i : j + 1] * p[i : j + 1]).sum()),
+        )
         for i, j in C.runs(pd.Series(w), d, pd.RangeIndex(len(p)))
     ]
 
@@ -1040,7 +1045,9 @@ def _starts(horizon, overlap, count=len(IT)):
 
 
 @pytest.mark.parametrize("hours,d", [(1.0, 2.0), (2.0, 4.0)])
-def test_the_operational_run_carries_the_duration_in_and_it_binds(monkeypatch, hours, d):
+def test_the_operational_run_carries_the_duration_in_and_it_binds(
+    monkeypatch, hours, d
+):
     """C20, C9: with O > 0 the stitched dispatch holds every full-horizon run's bound (C20a's
     whole-run right-hand side), and a run across a window start is tight with a nonzero
     final dispatch before the start: the carry-in binds."""
@@ -1059,7 +1066,11 @@ def test_the_operational_run_carries_the_duration_in_and_it_binds(monkeypatch, h
     ]
     assert tight
     carried = [ln for ln in lines if "carried in" in ln]
-    assert len(carried) == 3 and "window 1: " in carried[0] and "(0 carried in)" in carried[0]
+    assert (
+        len(carried) == 3
+        and "window 1: " in carried[0]
+        and "(0 carried in)" in carried[0]
+    )
     assert all("(0 carried in)" not in ln for ln in carried[1:])
     assert n.meta[C.META_KEY]["claim_limit"] == C.CLAIM_LIMIT
     assert "carried across operational windows" in C.CLAIM_LIMIT
@@ -1100,7 +1111,13 @@ def _window_state(before, start=4, stop=10, written=6):
     p = pd.Series(np.nan, index=n.snapshots)
     p.iloc[:start] = before
     n.generators_t.p[C.GENERATOR] = p
-    window = {"network": n, "index": 1, "start": start, "stop": stop, "written": written}
+    window = {
+        "network": n,
+        "index": 1,
+        "start": start,
+        "stop": stop,
+        "written": written,
+    }
     return n, n.snapshots[start:stop], window
 
 
@@ -1120,7 +1137,9 @@ def test_window_rows_carry_the_whole_runs_bound_less_the_final_dispatch():
         whole = 2.0 * SHARE * f[i : j + 1].max()
         assert bound == pytest.approx(whole - before[i:4].sum() if i < 4 else whole)
         assert bound >= 0.0
-    assert any(j > 9 for _, j in live)  # a run cut at the window's end keeps its whole bound
+    assert any(
+        j > 9 for _, j in live
+    )  # a run cut at the window's end keeps its whole bound
 
 
 def test_a_carry_in_a_hair_over_its_bound_is_clipped_and_a_larger_one_refused():
@@ -1172,7 +1191,9 @@ def test_outside_an_operational_window_a_mid_horizon_lp_reads_no_dispatch():
 
 def test_the_window_flag_names_its_network_and_is_reset_after_a_run(monkeypatch):
     a, b = _network(), _network()
-    token = OP._WINDOW.set({"network": a, "index": 0, "start": 0, "stop": 6, "written": 0})
+    token = OP._WINDOW.set(
+        {"network": a, "index": 0, "start": 0, "stop": 6, "written": 0}
+    )
     try:
         assert OP.current_window(a)["stop"] == 6
         assert OP.current_window(b) is None
@@ -1195,13 +1216,18 @@ def test_a_failed_window_is_never_a_carry_in_source(monkeypatch):
     assert status not in ("ok", "optimal")
     assert "operational_window_failed: window 2" in cond
     windows = [ln for ln in lines if "carried in" in ln]
-    assert [ln.split(":")[0] for ln in windows] == ["[CURTAIL] window 1", "[CURTAIL] window 2"]
+    assert [ln.split(":")[0] for ln in windows] == [
+        "[CURTAIL] window 1",
+        "[CURTAIL] window 2",
+    ]
     assert OP.current_window(n) is None
     assert C.META_KEY not in n.meta
     assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
 
 
-@pytest.mark.parametrize("hours,d,ok", [(2.0, 4.0, True), (2.0, 5.0, False), (1.0, 4.0, True)])
+@pytest.mark.parametrize(
+    "hours,d,ok", [(2.0, 4.0, True), (2.0, 5.0, False), (1.0, 4.0, True)]
+)
 def test_a_duration_the_first_window_cannot_hold_is_refused_before_any_window(
     monkeypatch, hours, d, ok
 ):

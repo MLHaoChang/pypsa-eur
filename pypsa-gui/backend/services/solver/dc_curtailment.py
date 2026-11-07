@@ -442,7 +442,9 @@ def add_rows(n, snapshots, terms: Terms, emit) -> tuple[int, int]:
         for i, j in runs(_hours(n, sns), d_h, sns)
     ]
     found, nonzeros = _constrain(n, sns, rows)
-    emit(f"{found} energy-proxy rows, {nonzeros} nonzeros (D = {d_h:g} h, {CLAIM_LIMIT}).")
+    emit(
+        f"{found} energy-proxy rows, {nonzeros} nonzeros (D = {d_h:g} h, {CLAIM_LIMIT})."
+    )
     return found, nonzeros
 
 
@@ -524,7 +526,9 @@ def _window_rows(n, sns, terms: Terms, window: dict, emit) -> tuple[list, int]:
         g0, w = int(pos[0]), hours[pos]
         s, e = lo - g0, hi - g0
         cum = np.concatenate([[0.0], np.cumsum(w)])
-        back = int(np.searchsorted(cum, cum[s] - d_h - float(w.max()) - 1e-9, side="left"))
+        back = int(
+            np.searchsorted(cum, cum[s] - d_h - float(w.max()) - 1e-9, side="left")
+        )
         for k, j in _scan(w, d_h, range(back, e)):
             if j < s:
                 continue  # ended before the window (C20d)
@@ -541,8 +545,10 @@ def _window_rows(n, sns, terms: Terms, window: dict, emit) -> tuple[list, int]:
                             f"{window['index'] + 1} already exceeds a run's bound by "
                             f"{-bound:g} MWh.",
                         )
-                    emit(f"window {window['index'] + 1}: a carry-in bound of {bound:g} "
-                         "MWh is clipped to 0.")
+                    emit(
+                        f"window {window['index'] + 1}: a carry-in bound of {bound:g} "
+                        "MWh is clipped to 0."
+                    )
                     bound = 0.0
                 carried += 1
             rows.append((g0 + max(k, s) - start, g0 + min(j, e - 1) - start, bound))

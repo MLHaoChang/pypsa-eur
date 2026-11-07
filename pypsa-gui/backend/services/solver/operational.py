@@ -351,7 +351,13 @@ def run_windows(n, *, horizon: int, overlap: int, **optimize_kwargs) -> list[dic
                         n.components[comp].dynamic[state].loc[snapshots[start - 1]]
                     )
         token = _WINDOW.set(
-            {"network": n, "index": index, "start": start, "stop": stop, "written": written}
+            {
+                "network": n,
+                "index": index,
+                "start": start,
+                "stop": stop,
+                "written": written,
+            }
         )
         try:
             status, condition = n.optimize(sns, **optimize_kwargs)
