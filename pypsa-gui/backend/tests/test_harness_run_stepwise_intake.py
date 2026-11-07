@@ -430,7 +430,14 @@ def _set_stored_goal(monkeypatch, value):
 
 
 @pytest.mark.parametrize(
-    "change", ["template_to_stored", "stored_to_template", "stored_value", "no_echo"]
+    "change",
+    [
+        "template_to_stored",
+        "stored_to_template",
+        "stored_value",
+        "source_only",
+        "no_echo",
+    ],
 )
 def test_the_grant_freezes_only_the_goal_the_card_showed(
     session, site, profile, monkeypatch, change
@@ -455,6 +462,9 @@ def test_the_grant_freezes_only_the_goal_the_card_showed(
         _set_stored_goal(monkeypatch, None)
     elif change == "stored_value":
         _set_stored_goal(monkeypatch, 50.0)  # same source, another value
+    elif change == "source_only":
+        assert shown == {"value": 2.0, "unit": "h/yr", "source": "template"}
+        _set_stored_goal(monkeypatch, 2.0)  # same value, now stored (GK B (34) F1a)
     with pytest.raises(HTTPException) as exc:
         run_envelope.decide(
             session,
