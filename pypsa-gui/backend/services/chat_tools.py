@@ -3720,24 +3720,19 @@ def update_project_settings(name: str, derive_lengths_from_geometry: bool | None
 
 def validate_network() -> list[dict]:
     from routers.simulation import preflight as _h
-    from services.assistant_tools import _project
     from services.assurance_artifacts import exact_or_none, import_status, record_validation
 
     # H10 (AA-05 S3): the exact inputs are read once, before the check, so an
     # edit during it can never be recorded as validated (R3).
-    try:
-        _, root, _ = _project()
-        ctx = PyPSAService.get_active_context()
-    except Exception:  # noqa: BLE001 -- no project: nothing to record
-        root = ctx = None
+    ctx = PyPSAService.get_active_context()
     exact = exact_or_none(ctx)
     result = _h()
-    if root is None or not isinstance(result, dict) or "ok" not in result:
-        return result  # no project, or deferred while a solve is live
-    # A pass is recorded project-side; the network itself is never touched (R1, R2).
+    if not isinstance(result, dict) or "ok" not in result:
+        return result  # deferred while a solve is live
+    # A pass is recorded in the app-data store; the network is never touched (R1, R2).
     if result["ok"] and not result.get("errors") and exact is not None:
-        record_validation(root, ctx, exact)
-    return {**result, "import_status": import_status(root, ctx, exact)}
+        record_validation(ctx, exact)
+    return {**result, "import_status": import_status(ctx, exact)}
 
 
 def check_solver_availability() -> dict:
@@ -7883,7 +7878,7 @@ def _save_table_export(payload, filename, mime, fmt, written):
         limitations = ["Numbers are stored to 16 significant digits; NaN, infinity and empty text are empty cells."]
     validity = {"coverage": "rows_as_written", "limitations": limitations}
     if ctx.network is not None and "assistant_import" in ctx.network.meta:
-        validity["import_status"] = import_status(root, ctx)  # R4: only with an import stamp
+        validity["import_status"] = import_status(ctx)  # R4: only with an import stamp
     manifest = {"schema_version": 1, "project_id": str(project.id), "source_kind": "table_export",
                 "dataset": dataset, "render_spec": render_spec,
                 "dataset_sha256": canonical_sha256(dataset), "render_spec_sha256": canonical_sha256(render_spec),

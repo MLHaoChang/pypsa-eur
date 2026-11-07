@@ -287,7 +287,8 @@ def import_uploaded_network(file_id: str, format: str) -> dict:
     from services.assurance_artifacts import stamp_import
     with PyPSAService.get_lock():
         stamp_import(PyPSAService.get_active_context().network, meta.file_id, meta.sha256, format)
-    return {**result, "import_status": "input_assertion"} if isinstance(result, dict) else result
+    summary = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+    return {**summary, "import_status": "input_assertion"}
 
 
 def _changes(changes):
@@ -937,7 +938,7 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
     if "assistant_import" in ctx.network.meta:
         # H10/R4: only with an import stamp, so other manifests stay as on master.
         from services.assurance_artifacts import import_status
-        manifest["validity"]["import_status"] = import_status(chart_root, ctx)
+        manifest["validity"]["import_status"] = import_status(ctx)
     provenance = {"component": component, "attribute": attribute, "names": names, "source": source,
                   "rows": len(table), "unit": unit, "input_fingerprint": fingerprint,
                   "dispatch": freshness, "first_index": str(table.index[0]), "last_index": str(table.index[-1])}

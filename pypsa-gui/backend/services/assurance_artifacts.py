@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time
 
 from fastapi import HTTPException
@@ -259,8 +260,9 @@ _IMPORT_KEY = "assistant_import"
 
 def stamp_import(network, file_id, sha256, fmt):
     """Mark a network the assistant just imported as an input assertion. Any
-    validated fact the file itself carries is dropped (R1): validation is
-    recorded project-side only, so a pre-stamped file never reads validated."""
+    validated fact the file itself carries is dropped and its stamp replaced
+    under a fresh server-minted id (R1, R1a): validation lives in the app-data
+    store only, so a pre-stamped file never reads validated."""
     import uuid
 
     for key in [key for key in network.meta if str(key).startswith("assistant_validated")]:
@@ -269,8 +271,17 @@ def stamp_import(network, file_id, sha256, fmt):
                                  "sha256": sha256, "format": fmt}
 
 
-def _validation_path(root):
-    return root / "assistant_artifacts" / "import_validation.json"
+_IMPORT_ID_RE = re.compile(r"\A[0-9a-f]{32}\Z")
+
+
+def _validation_path(import_id):
+    """One record per import in the app-data store, outside any network or
+    project (R1); the id is checked before a path is built (R1b)."""
+    import app_paths
+
+    if not isinstance(import_id, str) or not _IMPORT_ID_RE.fullmatch(import_id):
+        raise ValueError("invalid import id")
+    return app_paths.app_data_dir() / "assistant_import_validations" / (import_id + ".json")
 
 
 def _exact(ctx):
@@ -286,9 +297,9 @@ def exact_or_none(ctx):
         return None
 
 
-def record_validation(root, ctx, exact):
+def record_validation(ctx, exact):
     """validate_network passed: remember it for this import and these exact
-    inputs, outside the network (R1, R2). A failed write is logged; the status
+    inputs in the app-data store, outside the network (R1, R1d, R2). A failed write is logged; the status
     then stays input_assertion."""
     from harness import durable
 
@@ -298,9 +309,9 @@ def record_validation(root, ctx, exact):
     try:
         record = {"import_id": stamp["import_id"], "sha256": stamp["sha256"],
                   "exact": exact, "at": time.time()}
-        path = _validation_path(root)
+        path = _validation_path(stamp["import_id"])
         path.parent.mkdir(parents=True, exist_ok=True)
-        with durable.file_lock(str(path.parent / ".import_validation.lock")):
+        with durable.file_lock(str(path.parent / ".lock")):
             temporary = path.with_suffix(".tmp")
             temporary.write_text(json.dumps(record), encoding="utf-8")
             os.replace(temporary, path)
@@ -308,15 +319,15 @@ def record_validation(root, ctx, exact):
         logger.warning("import validation not recorded (%s)", type(error).__name__)
 
 
-def import_status(root, ctx, exact=None):
+def import_status(ctx, exact=None):
     """"not_imported" without an assistant import stamp; "validated" only when
-    the project-side record names this import and the current exact inputs;
+    the app-data record names this import and the current exact inputs;
     "input_assertion" otherwise, including on any error (R3)."""
     stamp = getattr(getattr(ctx, "network", None), "meta", {}).get(_IMPORT_KEY)
     if stamp is None:
         return "not_imported"
     try:
-        record = json.loads(_validation_path(root).read_text(encoding="utf-8"))
+        record = json.loads(_validation_path(stamp["import_id"]).read_text(encoding="utf-8"))
         current = exact if exact is not None else _exact(ctx)
         if current is not None and (isinstance(stamp, dict) and record["import_id"] == stamp["import_id"]
                 and record["sha256"] == stamp["sha256"] and record["exact"] == current):

@@ -6,6 +6,7 @@ import datetime
 import hashlib
 import io
 import json
+import uuid
 import zipfile
 
 import pytest
@@ -32,6 +33,189 @@ def delivered_items(client, *exports):
     bundle = chat_tools.build_delivery([export["file_id"] for export in exports])
     with zipfile.ZipFile(io.BytesIO(client.get(bundle["download_url"]).content)) as archive:
         return json.loads(archive.read("manifest.json"))["files"]
+
+
+# P1: an import is an input assertion until validated (H10, R1-R4)
+
+
+@pytest.fixture(autouse=True)
+def private_app_data(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+
+
+def imported(network_change=None):
+    """Export the loaded network (optionally changed first), import it back.
+    An import unbinds the project, so an unsaved network is saved first."""
+    from services.pypsa_service import PyPSAService
+
+    if not PyPSAService.get_loaded_project():
+        chat_tools.save_project_as("Saved " + uuid.uuid4().hex[:8])
+    if network_change is not None:
+        network_change(PyPSAService.get_network())
+    exported = chat_tools.export_network_nc()
+    return chat_tools.import_uploaded_network(exported["file_id"], "netcdf")
+
+
+def network():
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_network()
+
+
+def status():
+    return chat_tools.validate_network()["import_status"]
+
+
+def records():
+    import app_paths
+
+    folder = app_paths.app_data_dir() / "assistant_import_validations"
+    return sorted(p.name for p in folder.glob("*.json")) if folder.exists() else []
+
+
+def test_a_network_that_was_not_imported_reads_not_imported(baseline):
+    assert status() == "not_imported" and records() == []
+
+
+def test_an_import_reads_input_assertion_until_a_validate_passes(baseline):
+    result = imported()
+    assert result["import_status"] == "input_assertion"
+    stamp = network().meta["assistant_import"]
+    assert stamp["format"] == "netcdf" and len(stamp["import_id"]) == 32
+    assert status() == "validated"
+    assert records() == [stamp["import_id"] + ".json"]
+    network().generators.at["G1", "marginal_cost"] = 99.0
+    assert assurance_artifacts.import_status(ctx()) == "input_assertion"
+    assert status() == "validated"  # an edit followed by a passing validate re-stamps (R1d)
+
+
+def ctx():
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_active_context()
+
+
+def test_a_failing_validate_leaves_it_an_input_assertion(baseline, monkeypatch):
+    import routers.simulation
+
+    imported()
+    monkeypatch.setattr(
+        routers.simulation,
+        "preflight",
+        lambda: {"ok": False, "errors": 1, "warnings": 0, "issues": []},
+    )
+    assert status() == "input_assertion" and records() == []
+
+
+def test_validate_changes_nothing_on_the_network(baseline):
+    # R2: a read-tier tool. Dirty flag, exact inputs and meta are unchanged.
+    from services import dirty_state, workflow_tools
+
+    imported()
+    before = (
+        dirty_state.is_dirty(ctx()),
+        workflow_tools._network_input_fingerprint(ctx(), exact=True),
+        json.dumps(network().meta, sort_keys=True),
+    )
+    assert status() == "validated"
+    assert before == (
+        dirty_state.is_dirty(ctx()),
+        workflow_tools._network_input_fingerprint(ctx(), exact=True),
+        json.dumps(network().meta, sort_keys=True),
+    )
+
+
+def test_a_re_import_starts_a_new_assertion(baseline):
+    imported()
+    assert status() == "validated"
+    first = network().meta["assistant_import"]["import_id"]
+    assert imported()["import_status"] == "input_assertion"
+    assert network().meta["assistant_import"]["import_id"] != first
+    assert assurance_artifacts.import_status(ctx()) == "input_assertion"
+
+
+def test_a_file_pre_stamped_as_validated_imports_as_an_input_assertion(baseline):
+    # R1, R1a: a record exists for the stamp the file carries, and the file
+    # also claims a validated fingerprint; neither carries over.
+    imported()
+    assert status() == "validated"
+    carried = dict(network().meta["assistant_import"])
+    exact = assurance_artifacts.exact_or_none(ctx())
+
+    def forge(n):
+        n.meta["assistant_validated_fingerprint"] = exact
+
+    result = imported(forge)
+    assert result["import_status"] == "input_assertion"
+    assert network().meta["assistant_import"]["import_id"] != carried["import_id"]
+    assert not [k for k in network().meta if k.startswith("assistant_validated")]
+    assert assurance_artifacts.import_status(ctx()) == "input_assertion"
+
+
+@pytest.mark.parametrize("import_id", ["../../evil", "A" * 32, "", None, 7])
+def test_a_malformed_import_id_reads_input_assertion_and_writes_nothing(
+    baseline, import_id
+):
+    imported()
+    network().meta["assistant_import"]["import_id"] = import_id
+    assert status() == "input_assertion" and records() == []
+
+
+@pytest.mark.parametrize("fault", ["corrupt", "other_sha256", "lock_timeout"])
+def test_a_bad_record_or_a_busy_lock_reads_input_assertion(baseline, monkeypatch, fault):
+    import app_paths
+
+    imported()
+    stamp = network().meta["assistant_import"]
+    if fault == "lock_timeout":
+        from harness import durable
+
+        def busy(*args, **kwargs):
+            raise TimeoutError("busy")
+
+        monkeypatch.setattr(durable, "file_lock", busy)
+        assert status() == "input_assertion"
+        return
+    assert status() == "validated"
+    path = app_paths.app_data_dir() / "assistant_import_validations" / (stamp["import_id"] + ".json")
+    if fault == "corrupt":
+        path.write_text("{")
+    else:
+        record = json.loads(path.read_text())
+        record["sha256"] = "0" * 64
+        path.write_text(json.dumps(record))
+    assert assurance_artifacts.import_status(ctx()) == "input_assertion"
+
+
+def test_validated_survives_a_save_into_a_project_and_a_reload(baseline):
+    imported()
+    assert status() == "validated"
+    chat_tools.save_project_as("Imported Copy")
+    chat_tools.load_project("Imported Copy")
+    assert network().meta["assistant_import"]["import_id"]
+    assert assurance_artifacts.import_status(ctx()) == "validated"
+
+
+def test_an_artifact_keeps_the_status_it_was_drawn_with(baseline):
+    # R4: drawn while an input assertion, it stays one after a later validate.
+    imported()
+    chat_tools.save_project_as("Imported Copy")
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    table = chat_tools.export_to_csv([["1"]], ["h"], "t.csv")
+    assert chart["manifest"]["validity"]["import_status"] == "input_assertion"
+    assert sidecar(table)["manifest"]["validity"]["import_status"] == "input_assertion"
+    assert status() == "validated"
+    assert sidecar(chart)["manifest"]["validity"]["import_status"] == "input_assertion"
+    later = chat_tools.create_chart("Generator", "marginal_cost", ["G1"])
+    assert later["manifest"]["validity"]["import_status"] == "validated"
+
+
+def test_without_an_import_no_manifest_names_an_import_status(baseline):
+    # R4: byte-identical to master (the H4 pin checks the chart's validity exactly).
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    table = chat_tools.export_to_csv([["1"]], ["h"], "t.csv")
+    assert "import_status" not in chart["manifest"]["validity"]
+    assert "import_status" not in sidecar(table)["manifest"]["validity"]
 
 
 # P2: inspection guesses nothing (R9)
