@@ -277,9 +277,9 @@ def test_a_missing_column_is_none_with_its_reason_never_zero():
     rows = G._gap_rows(rec["operational_metrics"], rec["reference_metrics"])
     assert rows["storage_end_mwh"]["gap"] is None and rows["storage_end_mwh"]["gap_pct"] is None
     assert rows["storage_end_mwh"]["operational_reason"]
-    # A true zero: the battery exists and ends empty on both sides.
+    # Only the defined metrics are reported; a true zero is a value, not None.
     rows = G._gap_rows({"x": {"value": 0.0}}, {"x": {"value": 0.0}})
-    assert rows == {}  # only defined metrics are reported
+    assert set(rows) == set(G.DEFINITIONS) and "x" not in rows
     zero = G._gap_rows({"opex_eur": {"value": 0.0}}, {"opex_eur": {"value": 0.0}})
     assert zero["opex_eur"]["gap"] == 0.0 and zero["opex_eur"]["gap_pct"] is None
 
@@ -427,7 +427,8 @@ def test_a_window_is_seeded_by_the_operation_never_by_the_reference(monkeypatch)
 
 def test_the_route_reads_the_gap_and_never_solves(client, monkeypatch):
     calls = []
-    monkeypatch.setattr(pypsa.Network, "optimize", property(lambda self: calls.append(1)))
+    monkeypatch.setattr(G, "reference", lambda *a, **k: calls.append(1))
+    monkeypatch.setattr(OP, "run_windows", lambda *a, **k: calls.append(1))
     r = client.get("/api/results/operational_gap")
     assert r.status_code == 200, r.text
     body = r.json()
