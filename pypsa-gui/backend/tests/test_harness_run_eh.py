@@ -1675,3 +1675,39 @@ def test_only_a_completed_settle_hands_the_job_a_result(
         {"study": run_eh.STUDY, "started_at": 1.0, "solves": 1} if result else None
     )
     assert seen == [expected]
+
+
+@pytest.mark.parametrize(
+    "budget, solves, used",
+    [(1, None, 0), (1, 6, 0), (3, 3, 0), (2, 3, 1)],
+)
+def test_admit_takes_a_budget_of_one_and_one_that_uses_every_solve_left(
+    tmp_path, budget, solves, used
+):
+    """C2 boundaries: a budget of exactly 1, and one equal to the solves left,
+    are admitted (with no envelope, `solves` is None)."""
+    ctx = ctx_for(tmp_path)
+    path, task = task_for(tmp_path)
+    if solves is not None:
+        audit = [
+            {"event": "used", "tool": "solve_queue_enqueue", "call_id": f"c{i}"}
+            for i in range(used)
+        ]
+        envelope(path, solves=solves, audit=audit)
+    step = frozen_step(ctx)
+    args = {**step["args"], "budget_solves": budget}
+    frozen = {**step["frozen"], "args": args, "digest": run_eh.digest(args)}
+    step = {**step, "args": args, "frozen": frozen}
+    assert run_eh.admit(path, task, step, args, ctx) is None
+
+
+def test_the_profiles_dtc_attribution_wins_over_the_goal_cards(tmp_path):
+    profile = {
+        **PROFILE,
+        "eh_study": {
+            **PROFILE["eh_study"],
+            "dtc_attribution": "bus_aggregate_not_per_load",
+        },
+    }
+    frozen = run_eh.freeze(ctx_for(tmp_path), profile, 6)
+    assert frozen["args"]["dtc_attribution"] == "bus_aggregate_not_per_load"
