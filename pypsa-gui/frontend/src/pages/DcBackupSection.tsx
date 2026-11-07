@@ -16,6 +16,7 @@ import { StatePill } from '../components/ResultState'
 import { VerdictChip } from '../components/gridReadiness/GridReadinessScorecard'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { money, SYMBOL } from '../utils/money'
 
 const NBSP = ' '
 const MODE_LABEL: Record<DcBackupMode, string> = { genset: 'Gensets', bess: 'Batteries', hybrid: 'Hybrid' }
@@ -24,7 +25,7 @@ const CHIP: Record<DcBackupProof['verdict'], GridReadinessVerdict> = {
 }
 /** The redundancy tier in words (UX: no bare "N+1"). */
 const SPARE: Record<string, string> = { N: 'no spare string', 'N+1': 'one spare string', '2N': 'a full second set' }
-export const SYMBOL: Record<string, string> = { EUR: '€', USD: '$', GBP: '£' }
+export { money, SYMBOL }
 /** Cost-line words (UX: labels from a word map, never raw keys). */
 const LINE_LABEL: Record<string, string> = {
   capex_and_repurchase: 'Capex and repurchase', fom: 'Fixed O&M', fuel: 'Fuel',
@@ -68,14 +69,6 @@ const num = (v: number | null | undefined, digits = 3) =>
   v == null || !Number.isFinite(v) ? '–' : v.toLocaleString('en', { maximumSignificantDigits: digits })
 const qty = (v: number | null | undefined, unit: string, digits = 3) => `${num(v, digits)}${NBSP}${unit}`
 const plural = (n: number, one: string, many: string) => `${n}${NBSP}${n === 1 ? one : many}`
-
-/** Money in short form, unsigned: "€ 1.2 m", "€ 350 k", "€ 900". */
-export function money(v: number, currency?: string | null): string {
-  const cur = currency ? (SYMBOL[currency] ?? currency) : ''
-  const a = Math.abs(v)
-  const body = a >= 1e6 ? `${num(a / 1e6, 2)}${NBSP}m` : a >= 1e3 ? `${num(a / 1e3, 3)}${NBSP}k` : num(a, 3)
-  return cur ? `${cur}${NBSP}${body}` : body
-}
 
 /** The stored backup mode of a data-centre project, or null when it has no `dc_load`. */
 function storedMode(meta: unknown): DcBackupMode | null {
