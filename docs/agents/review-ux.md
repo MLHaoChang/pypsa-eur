@@ -8,6 +8,7 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 
 - Read a PR with `git diff --stat` first, then one hunk or file at a time, each capped with `| head -c 6000`. Whole-file or cross-file reads go to an Explore subagent that returns file:line findings only.
 - Open screenshots downscaled: resize to at most 1000 px wide before `Read` (13 full PNGs cost ~15k tokens).
+- Harness temp files (`*.tmp.tsx`) are never committed under `src/`; a shot script removes them in a `finally` block (#1195, UX-RULES-1107).
 
 ## Navigation
 
@@ -15,6 +16,7 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - Panel links from Results or tabs use a mode-aware opener: `openFlowTargetInPlace` in Guided, `openFlowTarget` in Expert (`pages/results/openPanel.ts`). A bare `openFlowTarget` switches Guided to Expert.
 - A link to a block deep in a panel uses request-then-scroll (`requestSolverBlock`, `requestGridReadiness`), never a bare `setSlidePanel`. A whole-panel gate in `setSlidePanel` is fine. In Guided it targets the block's Guided home (Grid readiness scorecard: Site card, section `connection`).
 - Time Series' Guided home is the field drawer over the section-6 card (what `openTimeSeriesFor`'s Guided branch opens), never the full-screen `timeseries` panel.
+- A link to a block in a Results tab goes through `showResultsTab(tab, {section, from})` with request-then-scroll, and the Back pill names the real origin (#1202, UX-RULES-1107).
 
 ## Wording and layout
 
@@ -45,6 +47,9 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - The fix action sits on the refusal's own line, not in a separate block (#1193).
 - A demo-data label stays visible wherever a total uses demo data, in both modes (#1174, #1194).
 - Engine identifiers go only in a Source column, never in Basis or reason text (#1194, #1172).
+- A backend refusal opens with the panel's field label, never a field key ("Energy price: …", not "energy_price_per_mwh: …") (#1199, #1190, UX-RULES-1107).
+- One money notation per section, in the `money()` style (#1199, UX-RULES-1107).
+- Every chip style has a visible key (#1199, UX-RULES-1107).
 
 ## Master merges
 
