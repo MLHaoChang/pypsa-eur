@@ -317,7 +317,7 @@ def version_sha256(project_dir: pathlib.Path, report_id: str, version: int) -> s
     rdir = _existing_report_dir(project_dir, report_id)
     path = _version_file(rdir, version) if isinstance(version, int) else None
     if path is None:
-        raise ReportNotFound(f"report {report_id} has no version {version!r}")
+        raise ReportNotFound(f"report {report_id} has no version {version}")
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
