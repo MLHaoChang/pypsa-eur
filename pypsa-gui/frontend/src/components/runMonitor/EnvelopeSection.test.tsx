@@ -139,3 +139,39 @@ describe('EnvelopeSection', () => {
     expect(screen.getAllByTestId('chat-choice-option')).toHaveLength(2)
   })
 })
+
+// SH-26: the plan card names the Library tariffs held now, under the attach_tariff gap.
+describe('EnvelopeSection held tariffs', () => {
+  const GAP = { tool: 'attach_tariff', target: { component: 'Settings', name: 'Commercial', attr: 'import_tariff_ref' },
+    source: { kind: 'library_tariff' } }
+  const H1 = 'a1b2c3d4e5f6'.padEnd(64, '0'), H2 = '99887766aabb'.padEnd(64, '1')
+  function openWith(gaps: unknown) {
+    const envelope = { ...ENVELOPE, ...(gaps === undefined ? {} : { gaps }) }
+    vi.mocked(api.getRun).mockResolvedValue({ ...STATES.proposal, envelope } as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope } }] })
+    render(<ChoiceCard />)
+  }
+
+  it('lists two held tariffs by name, version and short hash', async () => {
+    openWith([{ ...GAP, held_state: 'held', held: [{ name: 'nl', version: 1, hash: H1 }, { name: 'other', version: 3, hash: H2 }] }])
+    await screen.findByTestId('envelope-held')
+    expect(screen.getAllByTestId('envelope-held-tariff').map(e => e.textContent)).toEqual(['nl v1 · a1b2c3d4', 'other v3 · 99887766'])
+    expect(screen.getByTestId('envelope-held').textContent).toContain('may resolve a different list')
+  })
+
+  it.each([
+    ['none', [], 'No Library tariff held: the gap stays open.'],
+    ['unreadable', null, 'Library tariffs could not be read now; the grant reads them again.'],
+    ['unnamed', null, 'A Library tariff without an id is held, so the grant fills none.'],
+  ])('says so when the state is %s', async (state, held, words) => {
+    openWith([{ ...GAP, held_state: state, held }])
+    expect((await screen.findByTestId('envelope-held-note')).textContent).toBe(words)
+    expect(screen.queryAllByTestId('envelope-held-tariff')).toHaveLength(0)
+  })
+
+  it('renders no line for an envelope without them, as before', async () => {
+    openWith(undefined)
+    await screen.findByTestId('envelope-section')
+    expect(screen.queryByTestId('envelope-held')).toBeNull()
+  })
+})

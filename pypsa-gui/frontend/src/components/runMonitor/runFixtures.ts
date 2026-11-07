@@ -64,6 +64,8 @@ function view(over: Partial<RunMonitorView> & { run: RunMonitorView['run'] }): R
 const run = (stage: string, extra: Partial<RunMonitorView['run']> & { stages: RunStage[] }) =>
   ({ profile: 'eh_site@1', mode: 'stepwise', status: 'running', stage, ...extra })
 
+const TARIFF_GAP = { tool: 'attach_tariff', target: { component: 'Settings', name: 'Commercial', attr: 'import_tariff_ref' },
+  source: { kind: 'library_tariff' } }
 const REVIEW = view({ status: 'ready', run: run('intake', { mode: 'unattended', status: 'needs_user', stages: stages('intake') }), envelope: ENVELOPE })
 
 /** Every state the PR's screenshots show, by key. The `envelope_*` keys render
@@ -73,6 +75,11 @@ export const STATES: Record<string, RunMonitorView> = {
   proposal: view({ run: run('inputs', { stages: stages('inputs') }), envelope: ENVELOPE, paused_at_card: 'inputs' }),
   envelope_approval: REVIEW,
   envelope_narrowed: REVIEW,
+  // SH-26: the attach_tariff gap's held tariffs, two held and none.
+  envelope_held_two: { ...REVIEW, envelope: { ...ENVELOPE, gaps: [{ ...TARIFF_GAP, held_state: 'held', held: [
+    { name: 'nl-commercial', version: 1, hash: 'a1b2c3d4'.padEnd(64, '0') },
+    { name: 'nl-peak-shaving', version: 3, hash: '99887766'.padEnd(64, '1') }] }] } },
+  envelope_held_none: { ...REVIEW, envelope: { ...ENVELOPE, gaps: [{ ...TARIFF_GAP, held_state: 'none', held: [] }] } },
   envelope_unattended_disabled: { ...REVIEW, monitor: { ...MONITOR, unattended: { available: false, reason: 'no_provider' } } },
   envelope_email_disabled: { ...REVIEW, monitor: { ...MONITOR, email: { available: false } } },
   gate_pass: view({ run: run('input_gate', { stages: stages('input_gate', { gate: PASS }) }), envelope: GRANTED,

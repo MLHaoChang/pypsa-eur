@@ -136,3 +136,53 @@ def test_a_held_ref_without_an_id_grants_no_tariff(
         envelope, "attach_tariff", {"name": "nl"}, card(), None, {}
     )
     assert refused == "new_instance", refused  # nothing granted: refused
+
+
+# SH-26: the plan card names the held tariffs (`describe` -> gaps[].held).
+def plan(**extra):
+    gap = {k: v for k, v in entry({}).items() if k != "at_grant"}
+    return {"gaps": [{**gap, "at_grant": {}, **extra}], "edits": [], "runs": [], "audit": [],
+            "id": "e", "state": "proposed", "expires_at": None, "notify": {},
+            "budget": {"solves": 1, "rounds": 1, "wall_time_h": 1.0}, "research": {"allowed": False}}
+
+
+def test_the_plan_names_the_held_tariffs(library):
+    library(own("nl", H1), own("other", H2, 3))
+    gap = run_envelope.describe(plan())["gaps"][0]
+    assert gap["held_state"] == "held"
+    assert gap["held"] == [{"name": "nl", "version": 1, "hash": H1}, {"name": "other", "version": 3, "hash": H2}]
+    assert "at_grant" not in gap
+
+
+def test_the_plan_says_none_held(library):
+    library()
+    gap = run_envelope.describe(plan())["gaps"][0]
+    assert (gap["held"], gap["held_state"]) == ([], "none")
+
+
+def test_an_unreadable_library_is_not_none_held(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("no acting context")
+
+    monkeypatch.setattr(chat_tools, "_library_call", boom)
+    gap = run_envelope.describe(plan())["gaps"][0]
+    assert (gap["held"], gap["held_state"]) == (None, "unreadable")
+
+
+def test_a_held_tariff_without_an_id_is_unnamed(library):
+    library({**own("nl", H1), "id": None})
+    gap = run_envelope.describe(plan())["gaps"][0]
+    assert (gap["held"], gap["held_state"]) == (None, "unnamed")
+
+
+def test_a_granted_envelope_carries_no_held(library):
+    library(own("nl", H1))
+    gap = run_envelope.describe(plan(at_grant={"Commercial": {"tariffs": {H1: ["nl", 1]}}}))["gaps"][0]
+    assert "held" not in gap and "held_state" not in gap
+
+
+def test_another_gap_source_carries_no_held(library):
+    library(own("nl", H1))
+    env = plan()
+    env["gaps"][0]["source"] = {"kind": "weather_choices", "choices": []}
+    assert "held" not in run_envelope.describe(env)["gaps"][0]
