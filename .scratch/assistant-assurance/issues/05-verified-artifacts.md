@@ -96,3 +96,39 @@ null for an input chart). `verify_chart` reads charts without both keys as
 whose stamp differs from the loaded project's solve. When the project is not
 loaded, the chart reads as `solve_not_rechecked`. The download sends the
 status as `X-Chart-Scope`. Tests: `tests/assurance_acceptance/test_p4_chart_data.py`.
+
+### 2026-11-07 — A4.6 frozen (owner decision AA05-FREEZE-1); GK B (31) K1–K5
+
+The owner froze A4.6 with three things named:
+
+- **Metric set:** every key of `harness.calculations.DEFINITIONS` at
+  1af1369a6a (69 metrics, 69 formula_ids), pinned. A later metric joins only
+  by a ledger row.
+- **Fields per surface:**
+  - *Identity:* metric, formula_id, unit, entity_id, window (start, end,
+    snapshot count, weight basis), evidence_id, source_sha256 and the solve
+    stamp.
+  - *Masks:* coverage, rows used and excluded, and the validity flags.
+  - *Required warnings:* slot dispositions and limitations, carried on the
+    answer, chart manifest, table sidecar, PDF/DOCX (only where a report table
+    carries a checked fact) and download metadata.
+- **Oracle:** raw fixture frames checked by an independent numpy calculation,
+  never the service under test.
+
+Coverage: identity, mask and warning agreement for all 69; the raw numeric
+oracle for one metric per profile module (about 20).
+
+GK B (31) adds K1–K5 for S5:
+
+- **K1:** identity includes project_id; a fact from project B on project A's
+  chart or table is refused.
+- **K2:** unavailable (not_established, no_data, not-evaluated) reads the same
+  on every surface, never 0 or blank; one test per surface.
+- **K3:** machine surfaces carry the exact float and unit. Rendered surfaces
+  equal the receipt value after the surface's pinned rounding, applied once.
+- **K4:** every fixture uses non-unit snapshot weightings. A window split
+  checks sums, and checks means and utilisation as weight-weighted means. The
+  boundary is half-open, with a test that no snapshot is counted twice or
+  dropped.
+- **K5:** one plausible-but-wrong aggregate per family, named: an unweighted
+  sum, a flipped Link/Store sign, or an excluded row included.
