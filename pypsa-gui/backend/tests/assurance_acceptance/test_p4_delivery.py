@@ -476,3 +476,14 @@ def test_a_checked_chart_whose_evidence_no_longer_matches_is_refused(
     assurance_records._path(assurance_records.actor_id(), chart["evidence_id"]).write_text("{")
     assert checked.client.get(chart["download_url"]).status_code == 409
     assert delivery(chart).status_code == 409
+
+
+def test_delivery_quarantines_a_forged_chart_but_not_a_plain_export(baseline):
+    chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    paths(chart)[1].write_bytes(b"forged png")
+    assert delivery(chart).detail["error_kind"] == "delivery_file_changed"
+    assert marker(chart)["reason_code"] == "bytes"
+    plain = chat_tools._save_agent_export(b"a,b\n1,2\n", "plain.csv", "text/csv")
+    paths(plain)[1].write_bytes(b"forged csv")
+    assert delivery(plain).detail["error_kind"] == "delivery_file_changed"
+    assert marker(plain) is None
