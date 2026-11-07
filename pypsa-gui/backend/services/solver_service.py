@@ -91,6 +91,7 @@ from services.solver.periodized_costs import (  # noqa: F401
 from services.validation_service import has_errors, validate_for_run
 from services.solver import fixed_sizes as _fixed_sizes
 from services.solver import operational as _operational
+from services.solver import operational_gap as _operational_gap
 from services.solver.adequacy import (  # noqa: F401
     _prm_margin,
     _wrap_with_ens_cap,
@@ -1059,6 +1060,7 @@ def run_simulation(
                 # back to the full horizon below; it is refused instead (C6).
                 _operational.fallback_refusal(config, sclopf=use_sclopf)
                 network.meta.pop(_operational.META_KEY, None)
+                _operational_gap.clear(network)  # DC 07 S3: a gap never outlives its run (C25)
                 use_rolling = (
                     getattr(config, "solve_strategy", "full") == "rolling"
                     and not use_sclopf

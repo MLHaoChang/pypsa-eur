@@ -450,7 +450,8 @@ def test_the_stitched_results_are_each_snapshots_last_writing_window(monkeypatch
 
     monkeypatch.setattr(accessor, "__call__", record)
     with OP.non_cyclic(n):
-        OP.run_windows(n, horizon=8, overlap=4, solver_name="highs")
+        # The windows only: S3's reference solve is the same with it on (test_operational_gap, C22).
+        OP.run_windows(n, horizon=8, overlap=4, reference=False, solver_name="highs")
     gas = n.generators_t.p["gas"]
     soc = n.storage_units_t.state_of_charge["bess"]
     owner = {}

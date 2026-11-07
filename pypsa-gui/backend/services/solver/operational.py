@@ -316,15 +316,37 @@ def _blank_from(n, snapshots: pd.Index) -> None:
                 frame.loc[rows, :] = math.nan
 
 
-def run_windows(n, *, horizon: int, overlap: int, **optimize_kwargs) -> list[dict]:
+def run_windows(
+    n, *, horizon: int, overlap: int, reference: bool = True, **optimize_kwargs
+) -> list[dict]:
     """PyPSA's ``optimize_with_rolling_horizon`` loop, with each window's
     status checked (C2). Window ``i > 0`` starts from the state solved at the
     snapshot before it. The first failure blanks that window's snapshots and
     every later one and raises :class:`OperationalWindowFailed`. Returns one
-    record per window."""
+    record per window.
+
+    With ``reference`` (S3), the full-horizon dispatch on the same sizes runs
+    first, on the same kwargs, and ``n.meta[operational_gap.GAP_KEY]`` records
+    both sides once the windows end or one fails."""
+    from services.solver import operational_gap as gap
+
     snapshots = n.snapshots
+    cut = windows(snapshots, horizon, overlap)
+    ref = gap.reference(n, **optimize_kwargs) if reference else None
     records: list[dict] = []
-    for index, start, stop in windows(snapshots, horizon, overlap):
+
+    def _record(failed):
+        n.meta[gap.GAP_KEY] = gap.record(
+            n,
+            horizon=horizon,
+            overlap=overlap,
+            total=len(cut),
+            windows=records,
+            ref=ref,
+            failed=failed,
+        )
+
+    for index, start, stop in cut:
         sns = snapshots[start:stop]
         if index:
             for comp, state in STATE_ATTR.items():
@@ -345,7 +367,9 @@ def run_windows(n, *, horizon: int, overlap: int, **optimize_kwargs) -> list[dic
         records.append(record)
         if status != "ok":
             _blank_from(n, snapshots[start:])
+            _record(record)
             raise OperationalWindowFailed(record)
+    _record(None)
     return records
 
 

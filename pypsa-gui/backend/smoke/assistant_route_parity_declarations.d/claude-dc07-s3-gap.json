@@ -1,0 +1,10 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/results/operational_gap",
+   "reason": "held-by-spec",
+   "issue": ".scratch/datacenter-grid-readiness/issues/07-rolling-operations.md"
+  }
+ ]
+}
