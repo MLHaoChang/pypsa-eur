@@ -15,6 +15,9 @@ values read from a report); "mixed:<a>+<b>" combines two columns;
 
 import pandas as pd
 
+from harness import grid_readiness_calculations as readiness
+from harness import investment_calculations as investment
+
 WEIGHT_BASIS: dict[str, str] = {
     # calculations.py
     "dispatch_energy": "generators",
@@ -105,9 +108,18 @@ WEIGHT_BASIS: dict[str, str] = {
 
 # Profiles whose captured index is not snapshots: the investment report's
 # years and the saved readiness scorecard.
-NO_SNAPSHOT_INDEX = frozenset(
-    {"investment-case/1", "investment-lcoe/1", "grid-readiness/1"}
-)
+NO_SNAPSHOT_INDEX = frozenset({*investment.PROFILES, readiness.PROFILE})
+
+
+def _count(index, start, end):
+    """Snapshots in [start, end]. Profiles write the index as isoformat or as
+    str(Timestamp), so instants are compared; a boundary not in it gives None."""
+    try:
+        stamps = [pd.Timestamp(v) for v in index]
+        a, b = stamps.index(pd.Timestamp(start)), stamps.index(pd.Timestamp(end))
+    except (ValueError, TypeError):
+        return None
+    return b - a + 1 if b >= a else None
 
 
 def window(index, scope):
@@ -121,19 +133,11 @@ def window(index, scope):
 
     start = scope.get("start", index[0] if index else None)
     end = scope.get("end", index[-1] if index else None)
-    try:
-        # Profiles write the index as isoformat or as str(Timestamp); compare
-        # instants. An index of years or a saved scorecard has no snapshots.
-        if scope["profile"] in NO_SNAPSHOT_INDEX:
-            raise TypeError("not a snapshot index")
-        stamps = [pd.Timestamp(v) for v in index]
-        a, b = stamps.index(pd.Timestamp(start)), stamps.index(pd.Timestamp(end))
-        snapshots = b - a + 1 if b >= a else None
-    except (ValueError, TypeError):
-        snapshots = None
     return {
         "start": start,
         "end": end,
-        "snapshots": snapshots,
+        "snapshots": None
+        if scope["profile"] in NO_SNAPSHOT_INDEX
+        else _count(index, start, end),
         "weight_basis": {m: WEIGHT_BASIS[m] for m in requested_metrics(scope)},
     }

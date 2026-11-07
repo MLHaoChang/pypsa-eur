@@ -19,7 +19,9 @@ import uuid
 import pytest
 
 from harness import calculations, fact_identity
+from harness import capacity_calculations as capacity
 from services import assurance_records as records
+from services import workflow_tools
 from services.assurance_artifacts import solve_stamp
 from services.run_evidence import RUN_MAC_DOMAIN
 from tests.assurance_acceptance.fact_profiles import *  # noqa: F401,F403
@@ -76,11 +78,11 @@ def test_every_metric_has_one_weight_basis():
 
 
 def test_every_metric_belongs_to_a_driven_profile():
-    """Each metric is in some driven profile's list. A driver's scope may ask
-    for fewer (the cost scope names its own); those are listed in the PR."""
+    """Each metric is in a driven profile's default list, or is one of the
+    three the comparison/opt-in test asks for by name."""
     reached = {m for p in PROFILES for m in calculations.PROFILES[p]}
-    # capacity/1 asks for its DEFAULT_METRICS; configured_capacity is opt-in by name.
-    assert set(calculations.DEFINITIONS) - reached <= {
+    # The three left out are driven by name in the comparison/opt-in test.
+    assert set(calculations.DEFINITIONS) - reached == {
         "configured_capacity",
         "cost_delta",
         "cost_change_percent",
@@ -112,6 +114,38 @@ def test_the_record_stores_its_window_and_solve_stamp(request, checked, profile)
 @pytest.mark.parametrize("profile", PROFILES)
 def test_each_surface_names_the_same_fact(request, checked, profile):
     _ctx, scope, record = _capture(request, checked, profile)
+    _same_on_every_surface(checked, profile, scope, record)
+
+
+def test_the_comparison_and_opt_in_metrics_name_the_same_fact(request, checked):
+    """The three metrics no driver's default scope asks for: configured_capacity
+    (capacity/1 by name), and cost_delta and cost_change_percent (against a
+    retained baseline, as test_harness_reliability builds one)."""
+    _ctx, scope = build(request, "capacity/1")
+    scope = {**scope, "metrics": list(capacity.METRICS)}
+    record = records.capture_scoped(owner(checked), scope)
+    assert "configured_capacity" in {f["metric"] for f in record["facts"]}
+    _same_on_every_surface(checked, "capacity/1", scope, record)
+
+    ctx, base = build(request, "generator-cost/1")
+    ctx.network.generators.at["G1", "capital_cost"] = 4.5
+    workflow_tools._record_solve_inputs(ctx.network, ctx.solver_state["solver_config"])
+    baseline = records.capture_scoped(owner(checked), {**base, "retain": True})
+    ctx.network.generators.at["G1", "capital_cost"] = 3
+    workflow_tools._record_solve_inputs(ctx.network, ctx.solver_state["solver_config"])
+    scope = {
+        **base,
+        "metrics": ["total_cost", "cost_delta", "cost_change_percent"],
+        "comparison_evidence_id": baseline["evidence_id"],
+    }
+    record = records.capture_scoped(owner(checked), scope)
+    assert {"cost_delta", "cost_change_percent"} <= {
+        f["metric"] for f in record["facts"]
+    }
+    _same_on_every_surface(checked, "generator-cost/1", scope, record)
+
+
+def _same_on_every_surface(checked, profile, scope, record):
     requested = calculations.requested_metrics(scope)
     assert [s["metric"] for s in record["slots"]] == list(requested)
     for fact in record["facts"]:
@@ -149,6 +183,13 @@ def test_each_surface_names_the_same_fact(request, checked, profile):
         stored["window"]["end"],
     )
     assert shown["project_id"] == stored["project_id"] == scope["project_id"]
+    # Masks: coverage and validity read the same on the record and the route.
+    assert (
+        shown["validity"]
+        == stored["validity"]
+        == record["validity"] | {"as_of": stored["validity"]["as_of"]}
+    )
+    assert shown["slots"] == stored["slots"]
 
 
 @pytest.mark.parametrize("profile", PROFILES)
@@ -186,8 +227,39 @@ def test_a_slot_that_excludes_snapshots_names_its_rows(request, checked):
     slot = next(s for s in record["slots"] if s["metric"] == "dispatch_energy")
     assert slot["disposition"] == "unavailable" and slot["reason"]
     assert slot["requested_snapshots"] == record["window"]["snapshots"]
-    if "valid_snapshots" in slot:
-        assert slot["valid_snapshots"] < slot["requested_snapshots"]
+    assert slot["valid_snapshots"] == slot["requested_snapshots"] - 1
+
+
+@pytest.mark.parametrize("surface", ["record", "route", "receipt", "answer"])
+def test_an_unavailable_slot_keeps_its_reason_on_each_surface(
+    request, checked, surface
+):
+    """K2, one test per surface: a slot with a missing input is never 0 or blank."""
+    ctx, scope = build(request, "generator-dispatch/1")
+    p = ctx.network.generators_t.p
+    p.iloc[0, p.columns.get_loc("G1")] = float("nan")
+    record = records.capture_scoped(owner(checked), scope)
+    receipt, answer = _answer(checked, scope, record)
+    [evidence_id] = receipt["evidence_ids"]
+    route = checked.client.get("/api/chat/evidence/" + evidence_id).json()
+    slots = {
+        "record": record["slots"],
+        "route": route["slots"],
+        "receipt": receipt["result_slots"],
+        "answer": receipt["result_slots"],
+    }[surface]
+    facts = {
+        "record": record["facts"],
+        "route": route["facts"],
+        "receipt": [],
+        "answer": answer["blocks"],
+    }[surface]
+    slot = next(s for s in slots if s["metric"] == "dispatch_energy")
+    assert slot["disposition"] == "unavailable"
+    assert isinstance(slot["reason"], str) and slot["reason"].strip()
+    assert "dispatch_energy" not in {f["metric"] for f in facts}
+    if surface in ("receipt", "answer"):
+        assert f"dispatch_energy: {slot['reason']}" in receipt["limitations"]
 
 
 def test_a_one_snapshot_window_counts_one_snapshot(request, checked):
@@ -220,9 +292,9 @@ def test_a_record_saved_without_the_new_keys_still_reads(request, checked):
     records.save(legacy, legacy["evidence_id"])
     loaded = records.evidence(owner(checked), legacy["evidence_id"])
     assert loaded == legacy
-    assert records.public(loaded) == records.public(
-        {**legacy, "window": {}, "solve_stamp": None}
-    )
+    # Byte-equal to what a new record shows: the new keys never reach a reader.
+    shown = records.public(records.evidence(owner(checked), record["evidence_id"]))
+    assert records.public(loaded) == {**shown, "evidence_id": legacy["evidence_id"]}
 
 
 def test_the_mac_domains_are_unchanged():

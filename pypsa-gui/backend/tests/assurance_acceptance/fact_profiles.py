@@ -53,12 +53,15 @@ from tests.test_workflow_tools import baseline  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
-def fact_store(tmp_path, monkeypatch):
-    """As each profile module's own `private_store`, for all profiles at once."""
-    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
-    monkeypatch.setenv(
-        "PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", ",".join(calculations.PROFILES)
-    )
+def fact_store(tmp_path):
+    """As each profile module's own `private_store`, for all profiles at once.
+    Its own MonkeyPatch context, not the test's (review-gk.md, #1132)."""
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+        patch.setenv(
+            "PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", ",".join(calculations.PROFILES)
+        )
+        yield
 
 
 @pytest.fixture
