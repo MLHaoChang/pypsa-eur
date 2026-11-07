@@ -12,7 +12,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { fmtAmount } from './valueFlows'
 import {
-  blankItem, errorsByField, errorsUnder, isWindowed, KINDS, listText, MEASURED,
+  blankItem, errorsByField, fieldLabel, impliedCurrency, errorsUnder, isWindowed, KINDS, listText, MEASURED,
   normaliseTariff, parseIntList, parseNumberList, SETTLEMENTS, UNITS, type Item, type Period,
 } from './tariffModel'
 
@@ -351,11 +351,15 @@ export default function TariffBuilder({ initial, onSaved }: {
                            onChange={e => setT({ ...t, name: e.target.value })} /></label>
         <label>jurisdiction <input aria-label="Jurisdiction" className={`${input} w-14`} value={t.jurisdiction}
                                    onChange={e => setT({ ...t, jurisdiction: e.target.value })} /></label>
+        <label>currency <input aria-label="Currency" className={`${input} w-14 uppercase`} maxLength={3}
+                               value={t.currency ?? ''} placeholder={impliedCurrency(t.jurisdiction, t.valid_from) ?? 'ISO'}
+                               aria-invalid={!!errors.currency}
+                               onChange={e => setT({ ...t, currency: e.target.value.toUpperCase().replace(/[^A-Z]/g, '') })} /></label>
         <label>valid from <input type="date" aria-label="Valid from" className={input} value={t.valid_from}
                                  onChange={e => setT({ ...t, valid_from: e.target.value })} /></label>
       </div>
       <Errors list={Object.entries(errors).filter(([k]) => !/^items\.\d+/.test(k))
-        .flatMap(([k, msgs]) => msgs.map(m => `${k || 'tariff'}: ${m}`))} />
+        .flatMap(([k, msgs]) => msgs.map(m => `${fieldLabel(k || 'tariff')}: ${m}`))} />
       {t.items.map((item, i) => (
         <ItemEditor key={i} item={item} idx={i} set={it => setItem(i, it)}
                     remove={() => setT({ ...t, items: t.items.filter((_, j) => j !== i) })}

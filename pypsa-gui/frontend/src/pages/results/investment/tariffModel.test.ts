@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { Tariff } from '../../../api/types'
 import {
-  errorsByField, errorsUnder, isWindowed, normaliseTariff, parseIntList, parseNumberList,
+  errorsByField, errorsUnder, fieldLabel, impliedCurrency, isWindowed, normaliseTariff, parseIntList, parseNumberList,
 } from './tariffModel'
 
 // The P2 oracle, read from the backend's fixtures (vitest runs from the frontend root).
@@ -44,5 +44,20 @@ describe('tariff model', () => {
     expect(errorsUnder(byField, 'items.2')).toEqual(['items.2.ratchet: exactly one of'])
     expect(byField.valid_from).toEqual(['bad date'])
     expect(errorsByField([{ loc: ['body', 'tariff', 'id'], msg: 'x' }])).toEqual({ id: ['x'] })
+  })
+})
+
+describe('currency defaults and error labels', () => {
+  it('implies a currency from the jurisdiction like the backend', () => {
+    expect(impliedCurrency('NL')).toBe('EUR')
+    expect(impliedCurrency('us-ca')).toBe('USD')
+    expect(impliedCurrency('generic')).toBeNull()
+    expect(impliedCurrency('BG', '2025-06-01')).toBe('BGN')
+    expect(impliedCurrency('BG', '2026-01-01')).toBe('EUR')
+  })
+  it('labels a field key with the form words', () => {
+    expect(fieldLabel('valid_from')).toBe('Valid from')
+    expect(fieldLabel('jurisdiction')).toBe('Jurisdiction')
+    expect(fieldLabel('items.0.periods')).toBe('items.0.periods')
   })
 })

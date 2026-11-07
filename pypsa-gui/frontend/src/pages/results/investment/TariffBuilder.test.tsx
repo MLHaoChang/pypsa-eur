@@ -164,4 +164,27 @@ describe('TariffBuilder — review round 1', () => {
     const box = screen.getByLabelText('Item energy tier rates per period')
     expect(box.hasAttribute('disabled')).toBe(true)      // H3's peak and off-peak rates differ
   })
+
+  it('the currency input defaults from the jurisdiction, is sent only when typed, and shows its 422', async () => {
+    lib.putItem.mockRejectedValueOnce({ response: { status: 422, data: { detail: {
+      code: 'tariff_currency_required', message: 'x',
+      errors: [{ loc: ['currency'], msg: 'unknown, or state the currency.' }] } } } })
+    renderBuilder({ ...structuredClone(H3), jurisdiction: 'generic' })
+    const cur = screen.getByLabelText('Currency') as HTMLInputElement
+    expect(cur.value).toBe('')
+    expect(cur.placeholder).toBe('ISO')
+    fireEvent.change(screen.getByLabelText('Jurisdiction'), { target: { value: 'NL' } })
+    expect(cur.placeholder).toBe('EUR')
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy())
+    expect(lib.putItem.mock.calls[0][2]).not.toHaveProperty('currency')
+    expect(screen.getByText('Currency: unknown, or state the currency.')).toBeTruthy()
+    expect(cur.getAttribute('aria-invalid')).toBe('true')
+    lib.putItem.mockResolvedValue({ kind: 'tariff', id: 'h3_us_ci', version: 1, hash: 'h' })
+    fireEvent.change(cur, { target: { value: 'usd1' } })
+    expect(cur.value).toBe('USD')
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+    await waitFor(() => expect(lib.putItem).toHaveBeenCalledTimes(2))
+    expect(lib.putItem.mock.calls[1][2]).toMatchObject({ currency: 'USD' })
+  })
 })

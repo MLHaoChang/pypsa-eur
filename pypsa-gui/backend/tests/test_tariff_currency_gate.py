@@ -267,11 +267,11 @@ def test_a_library_tariff_with_no_currency_is_refused_until_it_states_one(client
     detail = r.json()["detail"]
     assert detail["code"] == "tariff_currency_required"
     # C4: under the field the tariff builder can fix, in words naming the currency.
-    assert detail["errors"] == [{"loc": ["jurisdiction"], "msg": detail["message"]}]
+    assert detail["errors"] == [{"loc": ["currency"], "msg": detail["message"]}]
     assert detail["message"] == (
         "\u201cgeneric\u201d names no country, so the tariff's "
         "currency is unknown. Use the country's two-letter code, "
-        "such as NL, GB or US."
+        "such as NL, GB or US, or state the currency."
     )
     r = client.put(
         "/api/library/items/tariff/g", json={"payload": {**GENERIC, "currency": "EUR"}}
@@ -531,3 +531,17 @@ def test_no_guided_study_trips_the_currency_gate():
                 version,
                 tid,
             )
+
+
+def test_the_builders_copy_of_the_jurisdiction_map_matches_the_backend():
+    """`tariffModel.ts` shows the implied currency as the currency input's default."""
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).parents[2] / "frontend/src/pages/results/investment/tariffModel.ts"
+           ).read_text()
+    euro = re.search(r"const EURO = \[(.*?)\]", src, re.S).group(1)
+    got = {c: "EUR" for c in re.findall(r"'([A-Z]{2})'", euro)}
+    body = src.split("export const JURISDICTION_CURRENCY", 1)[1].split("\n}", 1)[0]
+    got.update(re.findall(r"\b([A-Z]{2}): '([A-Z]{3})'", body))
+    assert got == M.JURISDICTION_CURRENCY

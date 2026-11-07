@@ -41,7 +41,7 @@ const drop = <T extends object>(o: T, keys: Array<keyof T>, when: (v: unknown) =
 const empty = (v: unknown) => v === undefined || v === null || (Array.isArray(v) && v.length === 0)
 
 export function normaliseTariff(t: Tariff): Tariff {
-  const base = drop({ ...t }, ['dso_or_retailer', 'valid_to', 'pack_hash'] as Array<keyof Tariff>, empty)
+  const base = drop({ ...t }, ['dso_or_retailer', 'valid_to', 'pack_hash', 'currency'] as Array<keyof Tariff>, empty)
   const unsupported = (t as { unsupported_fields?: string[] }).unsupported_fields
   if (!unsupported?.length) delete (base as { unsupported_fields?: unknown }).unsupported_fields
   return {
@@ -83,6 +83,33 @@ export function fieldKey(loc: Array<string | number>): string {
   // validator) is the tariff's (review #3).
   const t = loc.findIndex(x => x === 'import_tariff' || x === 'tariff' || x === 'payload')
   return t >= 0 ? 'tariff' : (loc.join('.') || 'tariff')
+}
+
+/** The currencies a jurisdiction implies: a copy of the backend's frozen
+ *  `JURISDICTION_CURRENCY` (`models/commercial.py`), shown as the currency input's default. */
+const EURO = ['AT', 'BE', 'CY', 'DE', 'EE', 'ES', 'FI', 'FR', 'GR', 'HR', 'IE', 'IT', 'LT', 'LU',
+              'LV', 'MT', 'NL', 'PT', 'SI', 'SK', 'EU']
+export const JURISDICTION_CURRENCY: Record<string, string> = {
+  ...Object.fromEntries(EURO.map(c => [c, 'EUR'])),
+  GB: 'GBP', UK: 'GBP', US: 'USD', CA: 'CAD', CH: 'CHF', AU: 'AUD', NZ: 'NZD', DK: 'DKK',
+  SE: 'SEK', NO: 'NOK', PL: 'PLN', CZ: 'CZK', HU: 'HUF', RO: 'RON', JP: 'JPY',
+}
+
+/** The currency `jurisdiction` implies (`NL` → `EUR`, `US-CA` → `USD`), or null. */
+export function impliedCurrency(jurisdiction: string, validFrom?: string): string | null {
+  const code = jurisdiction.trim().toUpperCase().replace(/_/g, '-').split('-')[0]
+  if (code === 'BG') return validFrom && validFrom >= '2026-01-01' ? 'EUR' : validFrom ? 'BGN' : null
+  return JURISDICTION_CURRENCY[code] ?? null
+}
+
+/** The form's label for the first part of a field key, for the error list. */
+const FIELD_LABELS: Record<string, string> = {
+  id: 'Tariff id', name: 'Tariff name', jurisdiction: 'Jurisdiction', currency: 'Currency',
+  valid_from: 'Valid from',
+}
+export function fieldLabel(key: string): string {
+  const [head, ...rest] = key.split('.')
+  return [FIELD_LABELS[head] ?? head, ...rest].join('.')
 }
 
 /** The server's validation errors (preview 422 `errors`, or FastAPI's list) by field key. */
