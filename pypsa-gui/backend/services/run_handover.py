@@ -88,7 +88,10 @@ def _owner(db, owner_id: str):
 
 def _bound(ctx, row, scratch):
     """The new project's context request-scoped for the block (the runner's
-    binding), never the process-wide active one."""
+    binding), never the process-wide active one. The grant runs inside the
+    host's chat turn, whose turn cell outranks a request binding: a fresh
+    cell holds the new project's context, as `retained_results` does, so
+    nothing in the block reads or publishes into the host's."""
     import contextlib
 
     from services import project_registry
@@ -99,9 +102,12 @@ def _bound(ctx, row, scratch):
         tokens = PyPSAService.bind_request_scope(
             ctx, project_registry.registry_key(row), scratch
         )
+        cell = PyPSAService.bind_turn_cell()
         try:
             yield
         finally:
+            if cell is not None:
+                PyPSAService._turn_cell.reset(cell)
             PyPSAService.reset_request_scope(tokens)
 
     return scope()
@@ -202,6 +208,7 @@ def _under_lock(
     from db.models import Project
     from db.session import SessionLocal
     from routers import projects as project_routes
+    from services import project_registry
     from services.study.runner import base_context
 
     intent = read_intent(host_task_path)
@@ -264,6 +271,20 @@ def _under_lock(
         with ctx.mutation_lock, _bound(ctx, row, f"handover:{origin.get('task_id')}"):
             if intent["state"] == "creating":
                 project_routes._finish_created_project(made, db, user, None)
+                # Saved once, as the user's first save would: a template ships no
+                # user_ts, and the run's first solve write-back would otherwise
+                # back the network's series into it, so that solve's inputs read
+                # as changed and its result as unverified (issue 07 B3b).
+                project_routes._save_context(
+                    ctx,
+                    row.name,
+                    expect=row.name,
+                    persist_user_ts=True,
+                    storage_dir=project_registry.project_dir(row),
+                    db=db,
+                    user=user,
+                    project_row=row,
+                )
                 intent.update(
                     state="created", project_id=str(row.id), project_name=row.name
                 )
