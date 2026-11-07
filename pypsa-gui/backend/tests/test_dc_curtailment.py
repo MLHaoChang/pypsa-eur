@@ -903,7 +903,7 @@ def test_the_curtailed_energy_is_weighted_by_the_snapshot_hours(monkeypatch):
     status, _, _, _ = _solve(n, monkeypatch, _terms())
     assert status in ("ok", "optimal")
     assert n.meta[C.META_KEY]["curtailed_mwh"] == pytest.approx(2.0 * CURT_MWH)
-    assert C.curtailment_series(n)[0].sum() == pytest.approx(CURT_MWH)   # MW, not MWh
+    assert C.curtailment_series(n)[0].sum() == pytest.approx(CURT_MWH)  # MW, not MWh
 
 
 def test_energy_flows_weight_the_curtailed_energy_by_the_snapshot_hours(monkeypatch):
