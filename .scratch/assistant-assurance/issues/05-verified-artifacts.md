@@ -266,3 +266,42 @@ byte-identical; mutants.
   already seals the live upload (first seal wins). Charts use the same helper.
 - **T2:** validate_network reads the exact inputs before and after the check
   and records only when the two agree; a hand mutant on the compare is killed.
+
+### 2026-11-07 (~20:07 CET) — S5 plan: GK B (34) verdict (verbatim)
+
+- Q1, scope: an OWNER question, so send it to the coordinator as an AskUserQuestion card. AA05-FREEZE-1 names five surfaces for the field lists: answer, chart manifest, table sidecar, PDF/DOCX, download metadata. Your (a) pins three of them as carrying no checked fact, which narrows what the owner chose. It is sound engineering, and my recommendation is (a); (c) leaves the chart without facts, and (b) is several PRs. But the owner has to confirm that "pinned absent" counts as frozen for table, report and headers. Put the finding (only two surfaces carry facts today) in the card. Build S5a meanwhile: it is the same under (a) and (b).
+- Q2: GO on (a). window.weight_basis and solve_stamp {input, exact} as new keys. Readers see old records as legacy and byte-equal output (strip on read, stored-format ruling), with a pin test that the other MAC domains are unchanged. Rows used/excluded come from the slots' valid/requested snapshots, with a test on a slot that excludes snapshots.
+- Q3: GO on (a). One test per surface that unavailable is never 0 or blank and keeps its reason code. A shared vocabulary is out of scope while no fact reaches reports.
+- K1–K5 GO as written:
+  - K3: pin "no rounding" as exact repr equality on every machine surface;
+  - K4: non-unit snapshot_weightings that differ between the two halves of the split;
+  - K5: each family's wrong-aggregate mutant gets its own killing test.
+  The 16 oracles read raw component data only and never import the service under test (FREEZE-1 (iii)); add a grep-style test of the oracle module's imports.
+- Split: S5a and S5b as you propose, one PR each.
+
+The plan note (AA-05 (7)) found that only two surfaces carry a checked fact
+today: the answer (its evidence record and receipt) and, in part, the checked
+chart (evidence id, source hash, window; no metric or formula id). Table
+exports, reports and download headers carry none. Q1 went to the owner as a
+card through the coordinator.
+
+### 2026-11-07 — S5a build (branch `claude/aa05-s5a-fact-identity`)
+
+- The scoped evidence record stores `window` (start, end, snapshot count,
+  `weight_basis` per requested metric) and `solve_stamp` {input, exact}.
+  `assurance_records.public` strips both from evidence records only, so the
+  evidence route and the checked export are byte-equal to before.
+  `snapshots` is None for the investment and readiness profiles, whose index
+  is years or a scorecard.
+- `harness/fact_identity.WEIGHT_BASIS` declares the weighting of all 69
+  metrics; a test holds its keys equal to `DEFINITIONS`.
+- `test_p4_fact_identity.py`: all 21 profiles (`fact_profiles.DRIVERS`). The
+  record, the evidence route, the receipt and the answer blocks agree on
+  metric, formula_id, unit, entity_id, path, evidence_id, project_id, slots
+  and the exact repr of the value (K3). Unavailable slots keep a reason on
+  every surface (K2). Also tested: a legacy record, the strip on read, and
+  the MAC domains.
+- `test_p4_fact_oracles.py`: 16 oracles in `fact_oracles.py` (imports held to
+  numpy, pandas and the standard library), non-unit weights that differ by
+  column and by half (K4), adjacent window splits, and one wrong aggregate
+  per family (K5).
