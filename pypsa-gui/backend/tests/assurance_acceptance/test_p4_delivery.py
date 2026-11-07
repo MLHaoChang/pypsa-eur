@@ -278,7 +278,9 @@ def test_a_series_chart_is_a_line_even_when_its_shape_looks_like_a_bar(
 
 
 @pytest.mark.parametrize("over", [0, 1])
-def test_a_sidecar_over_two_mebibytes_is_refused_and_quarantined(baseline, client, over):
+def test_a_sidecar_over_two_mebibytes_is_refused_and_quarantined(
+    baseline, client, over
+):
     chart = chat_tools.create_chart("Generator", "p_nom", ["G1"])
     sidecar = paths(chart)[2]
 
@@ -336,6 +338,7 @@ def test_a_manifest_whose_hashes_no_longer_match_is_refused_and_quarantined(
     reseal(chart, change, rehash=False)
     assert client.get(chart["download_url"]).status_code == 409
     assert marker(chart)["reason_code"] == "manifest"
+
 
 def test_a_legacy_manifest_gets_no_label_check(baseline, client):
     # J3: a chart drawn before S1 (no scope keys) verifies as on master, even
@@ -471,7 +474,9 @@ def test_an_expired_checked_charts_item_says_its_evidence_expired(
     from services import assurance_records, checked_charts
     from tests.test_checked_charts import GENERATOR, ask, sidecar
 
-    chart = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])["chart"]
+    chart = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])[
+        "chart"
+    ]
     stamp = checked_charts.readable_stamp(sidecar(chart)["drawn_at"])
     evidence_id = chart["evidence_id"]
     path = assurance_records._path(assurance_records.actor_id(), evidence_id)
@@ -480,7 +485,9 @@ def test_an_expired_checked_charts_item_says_its_evidence_expired(
     envelope.update(assurance_records.seal(envelope["record"], path.stem))
     path.write_text(json.dumps(envelope))
     bundle = chat_tools.build_delivery([chart["file_id"]])
-    with zipfile.ZipFile(io.BytesIO(checked.client.get(bundle["download_url"]).content)) as archive:
+    with zipfile.ZipFile(
+        io.BytesIO(checked.client.get(bundle["download_url"]).content)
+    ) as archive:
         (item,) = json.loads(archive.read("manifest.json"))["files"]
     assert item["evidence_status"] == "expired"
     assert item["evidence_note"] == checked_charts.EXPIRED_NOTE.format(drawn_at=stamp)
@@ -492,8 +499,12 @@ def test_a_checked_chart_whose_evidence_no_longer_matches_is_refused(
     from services import assurance_records
     from tests.test_checked_charts import GENERATOR, ask
 
-    chart = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])["chart"]
-    assurance_records._path(assurance_records.actor_id(), chart["evidence_id"]).write_text("{")
+    chart = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])[
+        "chart"
+    ]
+    assurance_records._path(
+        assurance_records.actor_id(), chart["evidence_id"]
+    ).write_text("{")
     assert checked.client.get(chart["download_url"]).status_code == 409
     assert delivery(chart).status_code == 409
 
