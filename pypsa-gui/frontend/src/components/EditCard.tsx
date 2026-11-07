@@ -342,19 +342,30 @@ export function EditCardTable({ card, guided, labels }: { card: EditCard; guided
   )
 }
 
+/** SC-07 S5a: a 3D site card's target rows carry their read-back check (GK B J1). */
+const sceneTargets = (rows: EditCardRow[]) =>
+  rows.filter(r => r.role === 'typed' && (r as { check?: unknown }).check != null)
+
 export function EditReceiptLine({ receipt, disabled, onRequest, guided = false }: {
   receipt: EditReceipt; disabled: boolean; onRequest: (text: string) => void
   /** Guided words the receipt as the card's headline did, never in ids. */
   guided?: boolean
 }) {
   const verified = receipt.outcome === 'verified'
-  const says = guided ? editCardWords({ rows: receipt.rows, sets: receipt.sets } as EditCard) || receipt.says : receipt.says
+  const targets = sceneTargets(receipt.rows)
+  // A 3D site receipt says its one change line in both modes; its rows are listed below when one differs.
+  const says = guided && !targets.length
+    ? editCardWords({ rows: receipt.rows, sets: receipt.sets } as EditCard) || receipt.says : receipt.says
+  const differs = targets.filter(r => r.readback !== r.new)
   return (
     <div className="mt-1 rounded border border-border p-2 font-sans text-xs" data-testid="chat-edit-receipt">
       <div className={verified ? '' : 'text-warn'}>
         {verified ? `${says}. Read back from the project.`
           : `${says || 'The change'}: the project does not show the expected values. Check them before going on.`}
       </div>
+      {!verified && differs.length > 0 && <ul className="mt-1 text-warn" data-testid="chat-edit-receipt-differs">
+        {differs.map(r => <li key={r.field}>{r.label}: {r.readback == null ? 'not read back' : String(r.readback)}.</li>)}
+      </ul>}
       {receipt.section?.changed && <div data-testid="chat-edit-section">
         {receipt.section.label}: {FLOW_STATE_WORDS[receipt.section.state as FlowSectionState] ?? receipt.section.state}.
       </div>}

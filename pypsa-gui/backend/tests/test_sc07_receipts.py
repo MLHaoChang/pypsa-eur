@@ -232,7 +232,7 @@ def test_a_kept_attachment_is_a_note_and_never_counted_done(client, site):
     assert any(
         "Keeps it · load attached to" in (r.get("note") or "") for r in card["rows"]
     )
-    assert ", 1 change." in card["says"]
+    assert card["says"] == "Attach model items in the 3D site, 1 change"
     chat_tools.site_scene_apply(**args)
     assert edit_card.receipt(card, args)["outcome"] == "verified"
 
@@ -248,7 +248,7 @@ def test_a_bind_that_drops_an_attachment_shows_it_and_reads_it_back(client, site
         and dropped[0]["new"] == "not attached"
     )
     assert dropped[0]["label"].startswith("Take it · load off Proposed building")
-    assert ", 2 changes." in card["says"]
+    assert card["says"] == "Attach model items in the 3D site, 2 changes"
     chat_tools.site_scene_apply(**args)
     assert edit_card.receipt(card, args)["outcome"] == "verified"
 
@@ -505,3 +505,8 @@ def test_a_preview_the_map_still_calls_ready_whose_commit_landed_reads_applied(
     )
     entry["status"] = "ready"
     assert _mine()[0]["status"] == "applied"
+
+
+def test_target_rows_are_named_in_words_for_expert(client, site):
+    card, _ = card_of(bind(client, IT, HEAT))
+    assert [r["field"] for r in targets(card)] == ["Item 1", "Item 2"]

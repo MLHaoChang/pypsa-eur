@@ -360,3 +360,30 @@ it('a card one line over the cap shows every line rather than "and 1 more"', () 
   expect(words.split('; ')).toHaveLength(HEADLINE_CAP + 1)
   expect(words).not.toContain('more')
 })
+
+// SC-07 S5a: a 3D site receipt names each row that read back otherwise, in both modes.
+const sceneRow = (field: string, label: string, readback: string) => ({
+  component_class: 'Settings', name: '3D site', field, label, old: 'not attached', new: 'attached', unit: '',
+  role: 'typed', readback, check: { kind: 'attach' } })
+const sceneReceipt = (outcome: 'verified' | 'uncertain', readback: string) => ({ _edit_receipt: {
+  version: 1, digest: 'd', outcome, says: 'Attach model items in the 3D site, 1 change', results_stale: false,
+  undo: { tool: 'undo_last', available: false },
+  rows: [sceneRow('Item 1', 'Attach it · load (bus “B1”, carrier AC, MW) to Proposed building 1', readback)] } })
+
+it.each(['guided', 'expert'] as const)('SC-07 S5a: an uncertain 3D site receipt lists the row that differs (%s)', (mode) => {
+  useUIStore.setState({ uiMode: mode })
+  render(<AssistantResultCard result={sceneReceipt('uncertain', 'not attached')} disabled={false} onRequest={vi.fn()} />)
+  const receipt = screen.getByTestId('chat-edit-receipt')
+  expect(receipt.textContent).toContain('Attach model items in the 3D site, 1 change: the project does not show')
+  expect(screen.getByTestId('chat-edit-receipt-differs').textContent)
+    .toBe('Attach it · load (bus “B1”, carrier AC, MW) to Proposed building 1: not attached.')
+  expect(receipt.textContent).not.toMatch(/;|—|Item 1/)
+})
+
+it('SC-07 S5a: a verified 3D site receipt says its one line and lists nothing', () => {
+  useUIStore.setState({ uiMode: 'guided' })
+  render(<AssistantResultCard result={sceneReceipt('verified', 'attached')} disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getByTestId('chat-edit-receipt').textContent)
+    .toContain('Attach model items in the 3D site, 1 change. Read back from the project.')
+  expect(screen.queryByTestId('chat-edit-receipt-differs')).toBeNull()
+})

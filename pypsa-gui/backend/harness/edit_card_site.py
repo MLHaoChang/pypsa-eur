@@ -800,7 +800,8 @@ def _where_placed(entry: dict, words: dict) -> str:
 
 
 def _target_row(i: int, label: str, old: str, new: str, check: dict, not_compared: tuple[str, ...]) -> dict:
-    row = _settings_row("3D site", f"target_{i}", label, old, new, says_name=label)
+    # Expert shows the field: "Item 2" in words, never a key (S5a shots).
+    row = _settings_row("3D site", f"Item {i}", label, old, new, says_name=label)
     row["check"], row["not_compared"] = check, list(not_compared)
     return row
 
@@ -831,7 +832,7 @@ def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
         rows.append(_note("Settings", "3D site", f"note_{len(rows)}", text))
 
     def add(label, old, new, check, not_compared=()):
-        rows.append(_target_row(len(rows), label, old, new, check, not_compared))
+        rows.append(_target_row(sum(1 for r in rows if r.get("check")) + 1, label, old, new, check, not_compared))
 
     if action == "bind_targets":
         kept = set()
@@ -1029,8 +1030,8 @@ def _scene_says(args: dict, rows: list[dict]) -> str:
     if "buildings" not in new:
         change = new.get("change", (None, None))[1]
         done = sum(1 for r in rows if r.get("check") and r["old"] != r["new"])  # J1: a kept row is not done
-        return (f"Applies the reviewed 3D site preview: {change}, {done} change{'' if done == 1 else 's'}. "
-                "No model value changes")
+        # No clause after it: the receipt adds ". Read back …" or ": the project does not show …".
+        return f"{change} in the 3D site, {done} change{'' if done == 1 else 's'}"
     before, after = new.get("buildings", (None, None))
     return f"Applies the reviewed 3D site preview: {before} → {after} buildings. The model is unchanged"
 

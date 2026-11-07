@@ -135,6 +135,7 @@ it('SC-07 S5a (R4): Checking… from the click until the turn ends, never a succ
   fireEvent.click(button())
   expect(onRequest.mock.calls[0][0]).toMatch(/site_scene_read/)
   expect(onRequest.mock.calls[0][0]).toMatch(/Do not apply it again/)
+  expect(onRequest.mock.calls[0][1]).toBe('Check the 3D site')  // the bubble's words; the prompt stays in Details
   expect(button().textContent).toBe('Checking…')
   expect(button().disabled).toBe(true)
   rerender(<AssistantResultCard result={result} disabled onRequest={onRequest} />)  // the turn runs

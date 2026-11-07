@@ -94,6 +94,8 @@ function WaitingLine({ line }: { line: ContinuationLine }) {
 export const SCENE_APPLY_OUTCOME_UNKNOWN = 'scene_apply_outcome_unknown'
 export const SCENE_UNKNOWN_KEY = '_scene_outcome_unknown'
 export const CHECK_START_MS = 15_000
+/** What the transcript shows for the check (the prompt, which names a tool, stays in Details). */
+export const SCENE_CHECK_LABEL = 'Check the 3D site'
 export const SCENE_CHECK_PROMPT = 'Check the 3D site change that may not have landed: read its status with '
   + 'site_scene_read for that preview and tell me what the site shows. Do not apply it again.'
 
@@ -103,7 +105,7 @@ export const SCENE_CHECK_PROMPT = 'Check the 3D site change that may not have la
  * an apply. "Checking…" shows from the click until that turn ends, never a
  * success word before the answer.
  */
-export function SceneUnknownCheck({ disabled, onRequest }: { disabled: boolean; onRequest: (text: string) => void }) {
+export function SceneUnknownCheck({ disabled, onRequest }: { disabled: boolean; onRequest: (text: string, label?: string) => void }) {
   const [asked, setAsked] = useState(false)
   const [busySeen, setBusySeen] = useState(false)
   useEffect(() => {
@@ -118,8 +120,10 @@ export function SceneUnknownCheck({ disabled, onRequest }: { disabled: boolean; 
   }, [asked, busySeen])
   const checking = asked
   return <div className="mt-1 font-sans text-xs" data-testid="scene-unknown-check">
-    <button type="button" disabled={disabled || checking} className="text-accent disabled:opacity-40"
-      data-testid="scene-unknown-check-button" onClick={() => { setAsked(true); onRequest(SCENE_CHECK_PROMPT) }}>
+    {/* "Checking…" is a state, not a dead control: it keeps full contrast (UX, S5a shots). */}
+    <button type="button" disabled={disabled || checking}
+      className={checking ? 'text-muted' : 'text-accent disabled:opacity-40'}
+      data-testid="scene-unknown-check-button" onClick={() => { setAsked(true); onRequest(SCENE_CHECK_PROMPT, SCENE_CHECK_LABEL) }}>
       {checking ? 'Checking…' : 'Check the 3D site'}
     </button>
     <span role="status" className="sr-only">{checking ? 'Checking the 3D site' : ''}</span>
@@ -127,7 +131,7 @@ export function SceneUnknownCheck({ disabled, onRequest }: { disabled: boolean; 
 }
 
 export default function AssistantResultCard({ result, disabled, disabledReason, onRequest, continuation, toolWords }: {
-  result: unknown; disabled: boolean; onRequest: (text: string) => void
+  result: unknown; disabled: boolean; onRequest: (text: string, label?: string) => void
   /** Why `disabled` holds, in words, when it is not passing (chat off, project mismatch). */
   disabledReason?: string
   /** LC-02: names a plan step's tool in words (Guided); the tool name otherwise. */
