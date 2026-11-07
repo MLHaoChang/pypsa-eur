@@ -128,7 +128,7 @@ A read-back that compares frames after an IO round trip normalises dtype, index 
 - A storage availability rule treats inflow-fed hydro separately: an inflow-fed StorageUnit keeps dispatch-only availability and is named in `storage_notes` (#1010).
 - A PR that rewords an exception message runs `git grep "<old text>"` for substring matches on it; a change to `adequacy/levers.py` also runs the EH suites (#1010).
 - A split-storage reader handles a split whose charger and discharger sit on different buses; `storage_inventory.results_splits` keeps such splits out (#1012).
-- A report job is tied to a harness run (strict mode, run_binding) only by the harness's own explicit launch. The route and the chat tool never infer a run from state, so a human request is never strict and never charged to a run's budget, even while a run sits at its report stage (SH-07).
+- A report job is tied to a harness run (run_binding, charged to the run's budget) only by the harness's own explicit launch; the route and the chat tool never infer a run from state (SH-07). A human request is never strict. The assistant's own chat report tools run strict (AA-05 S4 P1) through an in-process switch no route field reaches, without a run binding.
 - Pin the publish point, not `Thread.start` (#1077, #1085).
 - A unit-precedence rule needs a case where the units disagree (#1057).
 - Frontend types follow the server's return shape (#1060).

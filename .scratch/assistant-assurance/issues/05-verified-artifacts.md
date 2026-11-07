@@ -266,3 +266,29 @@ byte-identical; mutants.
   already seals the live upload (first seal wins). Charts use the same helper.
 - **T2:** validate_network reads the exact inputs before and after the check
   and records only when the two agree; a hand mutant on the compare is killed.
+
+### 2026-11-07 — S4a GK OK @36cf88f2 (#1234); S4b plan: GK B (32) GO WITH CHANGES (X1–X6)
+
+S4b seals the assistant's report exports (S4 Q2 (a)). Answers: Q1 (a) seal in
+the route under the in-process strict switch; Q2 (a) download re-checks the
+seal, the bytes, the stored version's hash and, for Word, the disclosures;
+Q3 (b) a source that is gone is noted and the bytes served, with X3. W1 from
+#1234 rides S4b: `is_withheld_block` matches the full placeholder text. The
+SH-07 wording in `docs/agents/review-gk.md` lands in the S4b PR.
+
+- **X1:** strict path order: render, PDF conversion, `_check_disclosures`,
+  `quarantined()`, `_publish_sealed_export`; no `add_upload` on it. The human
+  path stays byte-identical with no sidecar (pinned).
+- **X2:** `version_sha256` is one function at seal and verify, the hash of the
+  stored file as written (basis recorded), tested against a load-normalised
+  version.
+- **X3:** a missing version, figure or template is served with `source_status`
+  and a note, no marker; one present with another hash refuses
+  `report_version_changed`, no marker.
+- **X4:** J1 throughout: only a seal or byte mismatch quarantines; a disclosure
+  re-read that fails or drops one on matching bytes refuses and logs (R6).
+- **X5:** no `_one_run`; the delivery item carries dataset_sha256 and
+  render_spec_sha256, as tables do.
+- **X6:** hand mutants: seal skipped, version compare dropped, version change
+  quarantines, quarantine check removed, missing version quarantines,
+  disclosure drift quarantines, X1 order inverted; each with its killing test.
