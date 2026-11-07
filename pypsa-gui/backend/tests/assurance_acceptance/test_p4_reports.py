@@ -555,4 +555,37 @@ def test_a_strict_regenerate_that_checks_out_drops_the_old_placeholder(
         for b in fmea["blocks"]
         if b["type"] == "callout" and b["text"].startswith("Withheld")
     ]
-    assert {"type": "paragraph", "md": "Generator g dominates."} in fmea["blocks"]
+    assert [b for b in fmea["blocks"] if b["type"] in ("paragraph", "bullets")] == [
+        {"type": "paragraph", "md": "Generator g dominates."}
+    ]
+
+
+def test_a_withheld_bullet_leaves_its_placeholder_after_the_list(project, monkeypatch):
+    from tests.test_chat_report_tools import _turn
+
+    _store_eh_report()
+    fmea = _turn(
+        {
+            "section_id": "fmea_top",
+            "paragraphs": ["Generator g dominates."],
+            "bullets": [
+                "It saves 4,700 EUR a year.",
+                "Generator g is the first to check.",
+            ],
+        }
+    )
+    _install_provider(monkeypatch, FakeProvider([_script()[0], fmea]))
+    rid = T.generate_report(sections=SECTIONS)["report_id"]
+    assert _poll()["status"] == "done"
+    blocks = T.get_report(rid, section_id="fmea_top")["sections"][0]["blocks"]
+    prose = [
+        b
+        for b in blocks
+        if b["type"] in ("paragraph", "bullets", "callout")
+        and b.get("kind") != "disclosure"
+    ]
+    assert prose[:3] == [
+        {"type": "paragraph", "md": "Generator g dominates."},
+        {"type": "bullets", "items": ["Generator g is the first to check."]},
+        {"type": "callout", "kind": "gap", "text": PLACEHOLDER},
+    ]
