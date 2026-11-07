@@ -693,7 +693,48 @@ register("set_site_anchor", Adapter("settings_edit", _anchor_preview, _anchor_re
 # `require_current` turns into `edit_preview_stale`. The write is
 # `proposals.apply` only (services/site_scene/chat.apply), as the route's.
 
-_SCENE_ACTIONS = {"generate_native": "Generate buildings", "edit_buildings": "Correct buildings"}
+_SCENE_ACTIONS = {"generate_native": "Generate buildings", "edit_buildings": "Correct buildings",
+                  "bind_targets": "Attach model items", "place_existing": "Place model items",
+                  "rebind": "Attach again", "detach": "Take items off the site",
+                  "undo_detach": "Put items back on the site"}
+NO_MODEL_CHANGE = ("No model value changes: no component, connection, run or result. "
+                   "Only what the 3D site shows and attaches changes.")
+
+
+def _targets(entry: dict) -> list[tuple[dict, bool, str | None]]:
+    """(fingerprint, attachable, placement key) for each model target a stored preview names."""
+    stored, action = entry.get("stored") or {}, entry["action"]
+    if action == "bind_targets":
+        return [(step["new"]["expect"], True, None) for step in stored.get("plan") or [] if "new" in step]
+    if action == "place_existing":
+        return [(step["expect"], False, key) for key, step in (stored.get("plan") or {}).items()]
+    if action == "rebind":
+        return [(stored["expect"], "placement" not in stored, stored.get("placement"))]
+    return []  # detach and undo_detach name placed keys; apply re-derives them under the lock
+
+
+def _recheck_targets(project, entry: dict) -> None:
+    """
+    SC-07 S4 (GK B G9, H5): each target the preview names is still the
+    instance it was, on the same bus and carrier, before a card is shown. This
+    adds to apply's own check (associations._check) and never replaces it.
+    """
+    from services.pypsa_service import PyPSAService
+    from services.site_scene import associations, chat, proposals
+    from services.site_scene.contract import SceneError
+
+    targets = _targets(entry)
+    if not targets:
+        return
+    try:
+        with PyPSAService.get_lock():
+            n = proposals._open_network(project.directory)
+            recorded = proposals._recorded_bindings(project.directory)
+            for expect, attachable, key in targets:
+                prior = recorded.get(key) if key else None
+                associations._check(n, expect, prior if isinstance(prior, str) else None, attachable=attachable)
+    except SceneError as exc:
+        raise chat.refusal(exc) from None
 
 
 def _scene_state(args: dict) -> tuple[Any, str, dict, dict]:
@@ -706,6 +747,7 @@ def _scene_state(args: dict) -> tuple[Any, str, dict, dict]:
         chat._site_known(project, site_id)
         entry = chat.reviewed_entry(project, owner, site_id, pid, args["input_hash"], args["expected_revision"])
         scene = store.read_scene(project.directory, site_id)
+        _recheck_targets(project, entry)
     if scene.get("revision") != args["expected_revision"]:
         # The kind `require_current` turns into `edit_preview_stale` at confirm.
         raise HTTPException(409, {"error_kind": "file_changed_since_read",
@@ -715,10 +757,74 @@ def _scene_state(args: dict) -> tuple[Any, str, dict, dict]:
     return project, owner, entry, scene
 
 
+def _target_text(expect: dict, unit: str | None) -> str:
+    """The exact target (H1): name and kind, its class, bus, carrier and unit."""
+    from services.site_scene import associations, chat
+
+    kind = associations.KIND_WORDS.get(expect["class"], "model item")
+    parts = [f"{expect['class']} on bus {chat._text(expect.get('bus'))}"]
+    if expect.get("carrier"):
+        parts.append(f"carrier {chat._text(expect['carrier'])}")
+    if unit:
+        parts.append(unit)
+    return f"{chat._text(expect['name'])} · {kind} ({', '.join(parts)})"
+
+
+def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
+    """One row per target the preview maps, with its full identity, and no model value (G9, H1)."""
+    from services.site_scene import chat
+
+    name, rows = "3D site", []
+    preview, stored, action = entry["preview"], entry.get("stored") or {}, entry["action"]
+    picked = chat.picks(project, owner, entry["site_id"], entry["id"])
+
+    def note(text: str) -> None:
+        rows.append(_note("Settings", name, f"note_{len(rows)}", text))
+
+    if action == "bind_targets":
+        steps = iter(s for s in stored.get("plan") or [])
+        for row in preview.get("associations") or []:
+            step = next(steps, {})
+            where = chat._text(row.get("feature"))
+            if "new" in step:
+                text = f"Attach {_target_text(step['new']['expect'], row.get('unit'))} to {where}"
+                if row.get("weight") is not None:
+                    text += f", share {row['weight'] * 100:g} %"
+                if row.get("feature") in picked:
+                    text += f". Picked from {picked[row['feature']]} candidates"
+            elif "keep" in step:
+                text = f"Keep {chat._text(step['keep'].get('name_at_bind'))} attached to {where}"
+            else:
+                text = f"No {chat._text(row.get('carrier'))} load in the model for {where}: marked unavailable"
+            note(text)
+    elif action == "place_existing":
+        for key, step in (stored.get("plan") or {}).items():
+            e = step["entry"]
+            on = "on the roof" if str(e.get("on", "ground")).startswith("roof:") else "on the ground"
+            note(f"Place {_target_text(step['expect'], None)} at x {e['x']:g} m, y {e['y']:g} m, "
+                 f"heading {e['heading']:g}°, {on}")
+    elif action == "rebind":
+        note(f"Attach again to {_target_text(stored['expect'], None)}, was {chat._text(preview.get('was'))}")
+    else:
+        verb = "Take off the site" if action == "detach" else "Put back on the site"
+        for item in preview.get("items") or []:
+            note(f"{verb}: {chat._text(item.get('label'))}, with {len(item.get('associations') or [])} "
+                 "attachments. It stays in the model")
+    for finding in preview.get("findings") or []:
+        note(chat._text(finding.get("message")) or "")
+    rows.append(_settings_row(name, "revision", "Scene revision", scene.get("revision"),
+                              scene.get("revision", 0) + 1))
+    note(NO_MODEL_CHANGE)
+    return rows
+
+
 def _scene_preview(args: dict) -> list[dict]:
     from services.site_scene import chat
 
-    _, _, entry, scene = _scene_state(args)
+    project, owner, entry, scene = _scene_state(args)
+    if entry["action"] in chat.MODEL_ACTIONS:
+        change = _settings_row("3D site", "change", "Change", None, _SCENE_ACTIONS[entry["action"]])
+        return [change, *_model_rows(project, owner, entry, scene)]
     s = chat.summarize(scene.get("buildings") or [], entry["preview"].get("buildings") or [])
     name = "3D site"
     rows = [_settings_row(name, "change", "Change", None, _SCENE_ACTIONS.get(entry["action"], entry["action"])),
@@ -751,6 +857,9 @@ def _scene_readback(args: dict, rows: list[dict]) -> list[Any]:
 
 def _scene_says(args: dict, rows: list[dict]) -> str:
     new = {r["field"]: (r["old"], r["new"]) for r in rows if r["role"] == "typed"}
+    if "buildings" not in new:
+        change = new.get("change", (None, None))[1]
+        return f"Applies the reviewed 3D site preview: {change}. No model value changes"
     before, after = new.get("buildings", (None, None))
     return f"Applies the reviewed 3D site preview: {before} → {after} buildings. The model is unchanged"
 

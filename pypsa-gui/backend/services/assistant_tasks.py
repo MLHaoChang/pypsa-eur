@@ -29,6 +29,9 @@ SCENE_APPLY = "site_scene_apply"
 SCENE_APPLY_ARGS = ("site_id", "proposal_id", "input_hash", "expected_revision")
 # A retried apply would replay a dead or moved preview: it needs a new prepare.
 SCENE_APPLY_DEAD = frozenset({"proposal_expired", "proposal_cancelled", "revision_conflict"})
+SCENE_PREPARE = "site_scene_prepare"
+# A prepare that asks the user (services/site_scene/chat.prepare): no preview was made.
+SCENE_PREPARE_ASKS = frozenset({"clarify", "unresolved"})
 # LC-23 study brief (owner decisions AI-567b, COP-1): a plan labelled with an
 # objective, cards in scope, cases and one phase per card.
 CARDS = ("capacity", "grid", "control", "reliability", "commercial", "hand-off")
@@ -1584,6 +1587,11 @@ def _outcome(tool, result, error):
     receipt = result.get("_edit_receipt") if isinstance(result, dict) else None
     if error:
         return ("failed" if _retryable_read(tool) else "uncertain"), str(error)[:300]
+    if tool == SCENE_PREPARE and isinstance(result, dict) and result.get("status") in SCENE_PREPARE_ASKS:
+        # SC-07 S4 (GK B H3): a clarify is the user's choice, never a completed
+        # step, so no later apply ref resolves against it.
+        return "failed", ("The 3D site preview needs the user's choice of model item. Ask them, then "
+                          "cancel_task and start a new plan with the item they chose.")
     if tool == "refresh_experiment" and isinstance(result, dict) and result.get("status") != "completed":
         # Only a completed case with intact evidence completes the step (issue 23).
         if result.get("status") in ("ready", "submitting", "submitted", "running"):

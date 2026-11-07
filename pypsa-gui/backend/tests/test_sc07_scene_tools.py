@@ -319,9 +319,11 @@ def test_prepare_writes_nothing_and_returns_the_exact_apply_args(geo):
     assert store.read_scene(geo, "campus")["revision"] == 1
 
 
-def test_prepare_refuses_model_actions_until_s4(geo):
+def test_prepare_admits_the_route_actions_and_refuses_any_other(geo):
+    # S4 admits the model actions (tests/test_sc07_bindings.py); adopt stays not_via_chat.
+    assert set(chat.CHAT_ACTIONS) == set(proposals.ACTIONS)
     with pytest.raises(HTTPException) as exc:
-        chat_tools.site_scene_prepare("campus", "bind_targets", 1, {"associations": []})
+        chat_tools.site_scene_prepare("campus", "adopt", 1, {})
     assert _kind(exc) == "invalid_input" and exc.value.detail["field"] == "action"
 
 

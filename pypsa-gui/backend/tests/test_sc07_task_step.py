@@ -414,8 +414,9 @@ def test_an_unknown_outcome_with_no_receipt_is_never_approved_again(geo, monkeyp
     calls = _fault(monkeypatch, lands=False)
     detail = refused("scene_apply_outcome_unknown", chat_tools.site_scene_apply, **args)
     assert detail["read_back"] == {"receipt_found": False, "scene_revision": 1}
-    # The entry reads "ready" in the map again, yet no card and no second apply.
-    assert proposals.get(*_owned(args))["status"] == "ready"
+    # W2 (S4, GK B H6): the chain was read and holds no receipt, so the preview is
+    # cancelled; no card and no second apply either way.
+    assert proposals.get(*_owned(args))["status"] == "cancelled"
     with pytest.raises(HTTPException) as card:
         edit_card.preview("site_scene_apply", args)
     assert "scene_apply_outcome_unknown" in json.dumps(card.value.detail)
