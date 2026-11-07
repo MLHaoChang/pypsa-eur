@@ -283,9 +283,15 @@ def _plain_goal_profile(monkeypatch):
     from services import run_profiles
 
     base, v2 = run_profiles.PROFILES["eh_site@1"], run_profiles.EH_SITE_V2
-    stages = {**base["stages"], "result_gate": copy.deepcopy(v2["stages"]["result_gate"])}
-    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1",
-                        {**base, "params": copy.deepcopy(v2["params"]), "stages": stages})
+    stages = {
+        **base["stages"],
+        "result_gate": copy.deepcopy(v2["stages"]["result_gate"]),
+    }
+    monkeypatch.setitem(
+        run_profiles.PROFILES,
+        "eh_site@1",
+        {**base, "params": copy.deepcopy(v2["params"]), "stages": stages},
+    )
     assert run_profiles.needs_goal(run_profiles.resolve("eh_site@1"))
 
 
@@ -304,14 +310,22 @@ def test_an_unattended_plain_grant_without_a_goal_is_refused_goal_missing(
     assert envelope_of(task_path(site[1], task))["state"] != "granted"
 
 
-def test_an_unattended_plain_grant_takes_the_templates_goal(session, site, profile, monkeypatch):
+def test_an_unattended_plain_grant_takes_the_templates_goal(
+    session, site, profile, monkeypatch
+):
     from services import flow_service
     from tests.test_harness_envelope import envelope_of
 
     _plain_goal_profile(monkeypatch)
     template = site[1] / flow_service.TEMPLATE_FILE
-    template.write_text(json.dumps({**json.loads(template.read_text()),
-                                    "pack_overrides": {"target_lole_h": 2.0}}))
+    template.write_text(
+        json.dumps(
+            {
+                **json.loads(template.read_text()),
+                "pack_overrides": {"target_lole_h": 2.0},
+            }
+        )
+    )
     task = start()
     run_envelope.decide(session, task["task_id"], "unattended")
     assert envelope_of(task_path(site[1], task))["state"] == "granted"
@@ -325,6 +339,8 @@ def test_an_ordinary_chat_enqueue_captures_nothing(session, baseline, monkeypatc
     _, project_id, _ = baseline
     captured = spy_capture(monkeypatch)
     assert getattr(session, "write_guard", None) is None
-    _, results = dispatch(session, monkeypatch, "solve_queue_enqueue", {"project_id": project_id})
+    _, results = dispatch(
+        session, monkeypatch, "solve_queue_enqueue", {"project_id": project_id}
+    )
     assert tool_result(results).get("id"), results[-1]["content"][:200]
     assert captured == []
