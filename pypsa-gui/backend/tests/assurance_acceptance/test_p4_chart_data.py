@@ -353,3 +353,19 @@ def test_a_delivery_names_each_charts_scope_status(solved, client):
             json.loads(archive.read("manifest.json"))["files"][0]["scope_status"]
             == "solve_stale"
         )
+
+
+def test_a_chart_result_carries_its_manifest_once(solved, client):
+    # The tool result stays under the chat result cap: the manifest is sent
+    # once, at the top level; the sealed sidecar keeps the full provenance.
+    from harness.results import _RESULT_CONTENT_CAP
+
+    chart = chat_tools.create_chart("Generator", "p", ["G1"], source="result")
+    assert "manifest" not in chart["provenance"]
+    root = chat_tools_root()
+    sidecar = json.loads(
+        (root / "assistant_artifacts" / (chart["file_id"] + ".json")).read_text()
+    )
+    assert chart["manifest"] == sidecar["manifest"]
+    assert {**chart["provenance"], "manifest": chart["manifest"]} == sidecar
+    assert len(json.dumps(chart, default=str)) < _RESULT_CONTENT_CAP

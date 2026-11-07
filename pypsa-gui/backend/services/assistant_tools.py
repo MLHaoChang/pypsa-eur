@@ -939,7 +939,10 @@ def create_chart(component: str, attribute: str, names: list[str], source: str =
         tasks._save(chart_root / "assistant_artifacts" / (byte_hash[:16] + ".json"), provenance)
         artifact = chat_tools._save_agent_export(data, f"{component}_{attribute}.png", "image/png",
                                                  assurance_sha256=canonical_sha256(provenance))
-    return {**artifact, "provenance": provenance, "manifest": manifest}
+    # The manifest goes to the model once; the sidecar keeps the full provenance
+    # (it would otherwise be sent twice and spill the chat result cap).
+    summary = {key: value for key, value in provenance.items() if key != "manifest"}
+    return {**artifact, "provenance": summary, "manifest": manifest}
 
 
 def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
