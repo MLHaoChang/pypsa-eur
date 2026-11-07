@@ -1238,6 +1238,9 @@ def test_the_window_flag_names_its_network_and_is_reset_after_a_run(monkeypatch)
         solver_options={"primal_feasibility_tolerance": 1e-7},
     )
     assert status in ("ok", "optimal"), cond
+    # DC-07 S3: the full-horizon reference solves first, with no window flagged (C23).
+    ref, seen = seen[0], seen[1:]
+    assert ref is None
     assert [w["index"] for w in seen] == [0, 1, 2]
     assert all(
         w["solver_options"]["primal_feasibility_tolerance"] == 1e-7 for w in seen
