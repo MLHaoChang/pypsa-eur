@@ -3,7 +3,7 @@
 
 # RP-14: `readyRows` excludes `network_native` from bulk Generate
 
-Status: needs-triage
+Status: needs-info
 Type: bug
 Found by: RP-14 (`14-native-series-read-as-measured.md`); owner list DOCS-1.
 
@@ -14,3 +14,11 @@ Found by: RP-14 (`14-native-series-read-as-measured.md`); owner list DOCS-1.
 ## Where to look
 
 `pypsa-gui/frontend/src/components/series/DefaultsReview.tsx` / `renewableGeneration.ts` (`readyRows`).
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Not buildable until answered.
+- Question (UX (12)): UX (12): should bulk Generate include `network_native` rows (with the replace confirmation), or stay as is and leave them to per-row Generate? Include = S, sonnet, UX (12) review; stay = close as wontfix.
+- Blocked by: the answer.

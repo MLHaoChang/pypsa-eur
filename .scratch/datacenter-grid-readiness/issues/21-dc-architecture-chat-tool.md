@@ -1,6 +1,6 @@
 # Chat control of the data-centre power-architecture comparison
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Blocked by: 05
 Size: S
@@ -18,3 +18,12 @@ Decide (owner) between a typed tool or a UI pointer only (as AS19-POINTER-1 did 
 - The route is served by a tool, or carries a `ui-pointer` declaration naming an owner decision, and the `held-by-spec` declaration in `pypsa-gui/backend/smoke/assistant_route_parity_declarations.d/claude-dc-05-architecture-compare.json` is gone.
 
 ## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `services/not_via_chat.py` (entry `dc_architecture`), `pypsa-gui/backend/smoke/assistant_route_parity_declarations.d/claude-dc-05-architecture-compare.json`, a harness tool or ui-pointer declaration.
+- Blocked by: owner answer to the DC 20 question (does not hold the pointer variant).
+- Model tier: sonnet.
+- Gated: GK A.
+- Size: S.
+- Remove the `not_via_chat` row `dc_architecture` and the held-by-spec parity declaration (replace with the tool or a `ui-pointer` declaration). Tool or pointer follows the owner's answer to DC 20; default pointer per AS19-POINTER-1. DC 05 (#1199) is merged.

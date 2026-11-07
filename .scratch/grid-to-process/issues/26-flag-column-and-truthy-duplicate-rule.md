@@ -3,7 +3,7 @@
 
 # `process_uc.flag_column` and `process_chain._truthy` are two copies of the string-flag rule
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Found by: G2P-19 (#1189, merged), relayed by the coordinator; owner list DOCS-1.
 
@@ -14,3 +14,14 @@ Found by: G2P-19 (#1189, merged), relayed by the coordinator; owner list DOCS-1.
 ## Where to look
 
 `process_uc.flag_column` and gridspine `process_chain._truthy`.
+
+## Comments
+
+### 2026-11-07: triage sweep (FILL-1107)
+
+- Likely files: `process_uc.flag_column`, `gridspine/drivers/process_chain.py:54` (`_truthy`), `docs/agents/review-gk.md` point 5.
+- Blocked by: none.
+- Model tier: sonnet.
+- Gated: GK A.
+- Size: S.
+- One shared function; keep "yes" true; pin per string; update review-gk.md point 5 to name "yes".
