@@ -292,3 +292,37 @@ SH-07 wording in `docs/agents/review-gk.md` lands in the S4b PR.
 - **X6:** hand mutants: seal skipped, version compare dropped, version change
   quarantines, quarantine check removed, missing version quarantines,
   disclosure drift quarantines, X1 order inverted; each with its killing test.
+
+### 2026-11-07 — Y plan: GK B (33) GO WITH CHANGES (Y1–Y7), option (a)
+
+GK B (33) restated GK B (32)'s summary as binding conditions; AA-05 (6)
+adapted Y1 to the code (no summary declaration existed), and GK B (33)
+confirmed it. It ships as its own PR after S4b.
+
+- **Y1, scope:** an additive `Section.summarises` field, declared through
+  `prepare_report_job(summaries=...)` (route body, `generate_report`, stage 7's
+  optional argument). A declared summary admits the evidence payload facts of
+  the sections it lists, one level only. It never admits their prose, quoted
+  text, or withheld or unverified values. A declared or listed id the
+  document does not have refuses `summary_section_unknown` (400) before any
+  job starts; it is never skipped.
+- **Y2, one path:** the widening lives only in `report_job.admitted_facts`,
+  so the assistant's strict generate and stage 7 get the same set. (a): stage
+  7 takes an optional caller argument, default none, so production stage 7 is
+  unchanged. One test per caller.
+- **Y3, tests:**
+  - a listed section's fact is verified;
+  - the same fact unlisted is withheld;
+  - copied prose is withheld;
+  - a non-summary gains nothing;
+  - an unknown id refuses.
+  qa_reports_phase2's FMEA step stays (its summary declares nothing).
+- **Y4, mutants:** admit all to all, a summary admits every section, prose
+  admitted, unknown-id refusal dropped, `summarises` dropped from the digest.
+  Then mutants.py on the changed modules.
+- **Y5, disclosure:** the strict summary's note names the listed sections, and
+  the sealed manifest's `dataset.summaries` records them.
+- **Y6, identity:** `summarises` is stored in the version file, so a
+  different declaration gives a different `version_sha256`.
+- **Y7, human route:** stored and validated there too, but a non-strict job's
+  output is the same with and without a declaration.
