@@ -82,7 +82,20 @@ def _scope(manifest, project_id):
         return "solve_not_rechecked"
     if solve_stamp(ctx.network) != stamp:
         raise ValueError("chart from another solve")
+    from services.workflow_tools import solve_freshness
+
+    # Same solve, but inputs edited since: the chart shows that solve's
+    # results, which no longer describe the current inputs (GK B P2).
+    if solve_freshness(ctx)["inputs_changed_since_solve"] is not False:
+        return "solve_stale"
     return "current"
+
+
+def scope_status(manifest, project_id):
+    """The scope status of a manifest `verify_chart` has already verified."""
+    if manifest.get("source_kind") not in ("configured_input", "captured_result"):
+        return None
+    return _scope(manifest, str(project_id))
 
 
 def verify_chart(root, meta, data, project_id, *, provenance=False):
@@ -106,8 +119,9 @@ def verify_chart(root, meta, data, project_id, *, provenance=False):
             or manifest["artifact_sha256"] != meta.sha256
         ):
             raise ValueError("manifest mismatch")
-        if manifest.get("source_kind") in ("configured_input", "captured_result"):
-            manifest = {**manifest, "scope_status": _scope(manifest, str(project_id))}
+        scope = scope_status(manifest, project_id)
+        if scope is not None:
+            manifest = {**manifest, "scope_status": scope}
         if manifest.get("source_kind") == "checked_evidence":
             # A checked chart is still its evidence's: same source hash, same values.
             from services import checked_charts

@@ -975,6 +975,10 @@ def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
             if checked is not None:
                 item["assurance"] = checked["manifest"]
                 item["provenance"] = checked
+                from services.assurance_artifacts import scope_status
+                status = scope_status(checked["manifest"], str(project.id))
+                if status is not None:
+                    item["scope_status"] = status
             elif sidecar.is_file():
                 item["provenance"] = workflow._read_json(sidecar)
                 item["provenance_status"] = "unvalidated"

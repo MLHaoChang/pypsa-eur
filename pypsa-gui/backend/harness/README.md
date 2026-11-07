@@ -962,8 +962,10 @@ is never drawn (AA-05 S1). A non-finite value refuses with the asset and
 first snapshot named. The manifest's `scope` and `solve_stamp` (the solve's
 input/exact fingerprints; null for input charts) are verified on download:
 both absent reads as `legacy`, a wrong value refuses, and a result chart from
-another solve refuses; an unloaded project reads `solve_not_rechecked`. The
-download sends the status as `X-Chart-Scope`. Private cloning skips the native solver model without
+another solve refuses; the same solve with inputs edited since reads
+`solve_stale` and an unloaded project reads `solve_not_rechecked`, never
+`current`. The download sends the status as `X-Chart-Scope` and a delivery
+manifest names each chart's `scope_status`. Private cloning skips the native solver model without
 changing the live model. `build_delivery` bundles selected authorized
 artifacts and a content-hash/provenance manifest within the 25 MB limit.
 All existing agent exports now include authenticated download metadata.

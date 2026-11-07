@@ -1527,10 +1527,6 @@
       "surface": "inline",
       "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. No series exists for these assets and attribute; the model says so."
     },
-    "chart_data_partial": {
-      "surface": "inline",
-      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. Some selected assets have a series for the attribute and others do not (AA-05 S1); the model offers to chart them separately."
-    },
     "chart_invalid_data": {
       "surface": "inline",
       "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The chart data holds non-finite values; the model says so."

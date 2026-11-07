@@ -2,7 +2,9 @@
 which solve it came from."""
 
 # ruff: noqa: F811 -- imported shared fixtures.
+import io
 import json
+import zipfile
 
 import pandas as pd
 import pytest
@@ -319,3 +321,35 @@ def test_the_active_context_counts_only_for_its_own_project(registry):
     registry["active"] = active = _Ctx("p1")
     assert assurance_artifacts._resident("p1") is active
     assert assurance_artifacts._resident("p2") is None
+
+
+def test_an_input_edit_without_a_re_solve_reads_stale_never_current(solved, client):
+    chart = chat_tools.create_chart("Generator", "p", ["G1"], source="result")
+    solved.network.generators.at["G1", "marginal_cost"] = 99.0
+    response = client.get(chart["download_url"])
+    assert (
+        response.status_code == 200
+        and response.headers["X-Chart-Scope"] == "solve_stale"
+    )
+
+
+def test_a_delivery_names_each_charts_scope_status(solved, client):
+    result = chat_tools.create_chart("Generator", "p", ["G1"], source="result")
+    configured = chat_tools.create_chart("Generator", "p_nom", ["G1"])
+    bundle = chat_tools.build_delivery([result["file_id"], configured["file_id"]])
+    response = client.get(bundle["download_url"])
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        items = json.loads(archive.read("manifest.json"))["files"]
+    assert {item["file_id"]: item["scope_status"] for item in items} == {
+        result["file_id"]: "current",
+        configured["file_id"]: "input_as_drawn",
+    }
+    solved.network.generators.at["G1", "marginal_cost"] = 99.0
+    bundle = chat_tools.build_delivery([result["file_id"]])
+    with zipfile.ZipFile(
+        io.BytesIO(client.get(bundle["download_url"]).content)
+    ) as archive:
+        assert (
+            json.loads(archive.read("manifest.json"))["files"][0]["scope_status"]
+            == "solve_stale"
+        )
