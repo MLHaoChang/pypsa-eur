@@ -28,6 +28,20 @@ from tests.test_assurance_metrics import NumericalProvider
 PROFILES = sorted(DRIVERS)
 
 
+def _unit_matches(unit, declared):
+    """A declared unit, or the one a placeholder resolves to for this entity:
+    capacity's by component class, an investment report's by its currency."""
+    if declared == "MW, MVA or MWh by class":
+        return unit in {"MW", "MVA", "MWh"}
+    currency, _, rest = unit.partition("/")
+    resolved = len(currency) == 3 and currency.isalpha() and currency.isupper()
+    if declared == "report currency":
+        return resolved and not rest
+    if declared == "currency/MWh":
+        return resolved and rest == "MWh"
+    return unit == declared
+
+
 def _capture(request, checked, profile):
     ctx, scope = build(request, profile)
     return ctx, scope, records.capture_scoped(owner(checked), scope)
@@ -81,7 +95,8 @@ def test_each_surface_names_the_same_fact(request, checked, profile):
     assert [s["metric"] for s in record["slots"]] == list(requested)
     for fact in record["facts"]:
         definition = calculations.definition(fact["metric"], profile)
-        assert (fact["formula_id"], fact["unit"]) == (definition["formula_id"], definition["unit"])
+        assert fact["formula_id"] == definition["formula_id"]
+        assert _unit_matches(fact["unit"], definition["unit"]), (fact["metric"], fact["unit"])
         assert fact["entity_id"] == scope["entity_id"]
         assert fact["path"] == "/" + fact["metric"]
     receipt, answer = _answer(checked, scope, record)
