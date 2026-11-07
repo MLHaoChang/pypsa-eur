@@ -331,7 +331,6 @@ def curtailment_series(n) -> tuple[pd.Series | None, list[str]]:
         not rec
         or rec.get("capture_failed")
         or frame is None
-        or frame.empty
         or COOLING_BUS not in frame.columns
         or rec.get("axis_hash") != axis_hash(n.snapshots)
     ):
