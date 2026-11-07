@@ -1488,6 +1488,24 @@ def test_without_an_envelope_admit_refuses_a_budget_that_is_not_a_positive_int(
     assert refusal is not None and refusal[0] == run_eh.BUDGET_KIND
 
 
+@pytest.mark.parametrize("budget", [0, -1, "2", 2.0, None])
+def test_under_a_grant_admit_refuses_a_budget_that_is_not_a_positive_int(
+    tmp_path, budget
+):
+    """C2, envelope mode: a zero, negative or non-integer budget refuses even
+    when it fits the solves left, and nothing is reserved on the ledger."""
+    ctx = ctx_for(tmp_path)
+    path, task = task_for(tmp_path)
+    envelope(path, solves=6)
+    step = frozen_step(ctx)
+    args = {**step["args"], "budget_solves": budget}
+    frozen = {**step["frozen"], "args": args, "digest": run_eh.digest(args)}
+    step = {**step, "args": args, "frozen": frozen}
+    refusal = run_eh.admit(path, task, step, args, ctx)
+    assert refusal is not None and refusal[0] == run_eh.BUDGET_KIND
+    assert run_envelope._load(path)["audit"] == []
+
+
 def test_releasing_an_unknown_charge_without_a_reservation_settles_nothing(tmp_path):
     """C4: `release(..., None)` keeps the whole reservation; with no
     reservation row for the call there is nothing to keep or settle."""
@@ -1515,3 +1533,69 @@ def test_charged_reads_none_when_the_stages_are_not_a_list(stages):
 )
 def test_outcome_of_a_missing_or_replaced_record_is_uncertain(rec, started):
     assert run_eh.outcome(rec, started)[:2] == ("unknown", "uncertain")
+
+
+def test_fill_puts_the_frozen_args_only_on_an_unfrozen_eh_step():
+    """Q2: only the run's EH step that still carries `UNFROZEN` takes the
+    frozen args; another tool's step and an EH step already filled keep theirs."""
+    frozen = {"args": {"archetype": "strong_grid", "budget_solves": 1}, "digest": "d"}
+    other = {
+        "id": "solve.1",
+        "tool": "solve_queue_enqueue",
+        "args": dict(run_eh.UNFROZEN),
+    }
+    filled = {"id": "solve.2", "tool": run_eh.TOOL, "args": {"archetype": "weak_grid"}}
+    fresh = {"id": "solve.3", "tool": run_eh.TOOL, "args": dict(run_eh.UNFROZEN)}
+    run_eh.fill([other, filled, fresh], frozen)
+    assert other == {
+        "id": "solve.1",
+        "tool": "solve_queue_enqueue",
+        "args": run_eh.UNFROZEN,
+    }
+    assert filled == {
+        "id": "solve.2",
+        "tool": run_eh.TOOL,
+        "args": {"archetype": "weak_grid"},
+    }
+    assert fresh["args"] == frozen["args"] and fresh["frozen"] == frozen
+
+
+def test_own_record_needs_the_steps_start_and_a_context(tmp_path):
+    """F3: a step whose start receipt names no `started_at` owns no record,
+    even one whose own `started_at` is missing; without a ctx nothing is read."""
+    ctx = ctx_for(tmp_path, eh_study={**record(), "started_at": None})
+    task = {"steps": [{**eh_done(), "result": {}}]}
+    assert run_eh.own_record(task, ctx) is None
+    assert run_eh.own_record({"steps": [eh_done()]}, None) is None
+
+
+@pytest.mark.parametrize(
+    "change", [{"status": "completed"}, {"attempt_id": "a2"}, {"id": "solve.9"}]
+)
+def test_wait_never_marks_a_step_that_moved_on(tmp_path, monkeypatch, change):
+    """F3: `mark` writes the follower's identity only on the awaited attempt
+    while it still waits; a step that settled, was re-attempted or is gone
+    keeps its job as it was."""
+    from services import assistant_tasks
+
+    path, ticket = ticket_task(tmp_path)
+    task = json.loads(path.read_text())
+    task["steps"][0].update(change)
+    path.write_text(json.dumps(task))
+    monkeypatch.setattr(
+        assistant_tasks, "_read", lambda task_id: (path, json.loads(path.read_text()))
+    )
+    monkeypatch.setattr(assistant_tasks, "await_job", lambda *a: path)
+    monkeypatch.setattr(run_eh, "_follow", lambda *a: None)
+    run_eh.wait(ticket, "ad:1", "s1", ctx_for(tmp_path), 1.0)
+    job = json.loads(path.read_text())["steps"][0]["job"]
+    assert job == {"job_id": "ad:1", "continuation": "armed"}
+
+
+def test_a_completed_settle_writes_no_error(tmp_path, monkeypatch):
+    from services import assistant_tasks
+
+    path, ticket = ticket_task(tmp_path)
+    monkeypatch.setattr(assistant_tasks, "settle_job", lambda *a: {"ok": True})
+    run_eh.settle(path, ticket, "ad:1", record(), 1.0)
+    assert "error" not in json.loads(path.read_text())["steps"][0]
