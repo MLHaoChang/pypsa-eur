@@ -300,7 +300,7 @@ export function guidedSettledToolIds(
 function guidedOutcomeLine(tool: string, now: CurrentToolOutcome): GuidedToolLine {
   const word = now.mark.word.charAt(0).toUpperCase() + now.mark.word.slice(1)
   const asOf = now.mark.inFlight ? `, as of ${outcomeClock(now.ts)}`
-    : now.why ? ` (${now.why})` : now.count ? ` (${now.count.text} ${now.count.verb}; ${now.count.rest} not ${now.count.verb})` : ''
+    : now.why ? ` (${now.why})` : now.count ? ` (${now.count.text} ${now.count.verb} · ${now.count.rest} not ${now.count.verb})` : ''
   return { hidden: false, label: `${word}: ${guidedToolPhrase(tool)}${asOf}` }
 }
 
