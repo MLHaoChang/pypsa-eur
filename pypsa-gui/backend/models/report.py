@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field as PField
+from pydantic import BaseModel, ConfigDict, Field as PField, model_serializer
 
 
 class _Model(BaseModel):
@@ -115,6 +115,15 @@ class Section(_Model):
     # ids whose evidence facts its prose may quote in a strict job (one level,
     # `report_job.admitted_facts`). None: the section admits its own slice only.
     summarises: list[str] | None = None
+
+    @model_serializer(mode="wrap")
+    def _undeclared_as_before(self, handler):
+        # Stored-format ruling: an undeclared section serializes byte-equal
+        # to before Y (no `summarises` key in the version file or a dump).
+        data = handler(self)
+        if self.summarises is None and isinstance(data, dict):
+            data.pop("summarises", None)
+        return data
 
 
 # ── tables and figures (rendered by code, referenced by blocks) ─────────────

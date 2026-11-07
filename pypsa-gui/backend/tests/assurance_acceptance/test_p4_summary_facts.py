@@ -96,7 +96,7 @@ def test_the_same_fact_without_a_declaration_is_withheld(project, monkeypatch):
     assert "may quote numbers from" not in (summary.get("note") or "")
 
 
-def test_a_summary_listing_another_section_does_not_admit_fmea(project, monkeypatch):
+def test_a_summary_listing_itself_does_not_admit_fmea(project, monkeypatch):
     # Listing the summary itself admits no other section's facts (one level).
     rid = _assistant(
         monkeypatch,
@@ -282,14 +282,30 @@ def test_stage_7_admits_the_same_set_through_the_same_path(project, monkeypatch)
     assert any(p.startswith("/sections/fmea_top/payload") for p in assistant[0])
 
 
-def test_run_report_start_passes_the_callers_declaration(monkeypatch):
-    import inspect
-
+@pytest.mark.parametrize("summaries", [None, {EXECUTIVE_SUMMARY_ID: ["fmea_top"]}])
+def test_run_report_start_passes_the_callers_declaration(
+    tmp_path, monkeypatch, summaries
+):
     from harness import run_report
+    from routers import report_jobs
+    from tests.test_harness_run_report_handoff import _Ctx, _pending_report
 
-    assert inspect.signature(run_report.start).parameters["summaries"].default is None
-    source = inspect.getsource(run_report.start)
-    assert "summaries=summaries" in source
+    path = _pending_report(tmp_path)
+
+    class Project:
+        uuid = "p1"
+
+    seen = {}
+    monkeypatch.setattr(T, "_report_project", lambda: Project())
+    monkeypatch.setattr(run_report, "harness_source", lambda *a: {})
+    monkeypatch.setattr(report_jobs, "_resolve_profile", lambda: {})
+    monkeypatch.setattr(report_jobs, "_provider_or_400", lambda profile: None)
+    monkeypatch.setattr(report_jobs, "_evidence_for", lambda *a, **k: ({}, {}))
+    monkeypatch.setattr(report_jobs, "_start", lambda *a, **k: seen.update(k) or "r1")
+    step = json.loads(path.read_text())["steps"][0]
+    kwargs = {} if summaries is None else {"summaries": summaries}
+    run_report.start(path, _Ctx(), step, instance="a", **kwargs)
+    assert seen["strict"] is True and seen["summaries"] == summaries
 
 
 # ── Y5/Y6: provenance and identity ───────────────────────────────────────────
@@ -327,7 +343,7 @@ def test_a_different_declaration_is_a_different_version_hash(
 # ── Y7: the human route ──────────────────────────────────────────────────────
 
 
-def _human(client, monkeypatch, body: dict) -> list[dict]:
+def _human(client, monkeypatch, body: dict) -> tuple[str, list[dict]]:
     _store_eh_report()
     _install_provider(monkeypatch, FakeProvider(_script(LISTED_FACT)))
     started = client.post(
@@ -336,16 +352,33 @@ def _human(client, monkeypatch, body: dict) -> list[dict]:
     assert started.status_code == 200, started.text
     assert _poll()["status"] == "done"
     rid = started.json()["report_id"]
-    sections = T.get_report(rid)["sections"]
-    return [{k: v for k, v in s.items() if k != "summarises"} for s in sections]
+    return rid, T.get_report(rid)["sections"]
 
 
 def test_a_human_job_is_the_same_with_and_without_a_declaration(
     project, client, monkeypatch
 ):
-    plain = _human(client, monkeypatch, {})
-    declared = _human(client, monkeypatch, {"summaries": DECLARED})
-    assert json.dumps(plain, sort_keys=True) == json.dumps(declared, sort_keys=True)
+    _rid, plain = _human(client, monkeypatch, {})
+    _rid, declared = _human(client, monkeypatch, {"summaries": DECLARED})
+    shown = [{k: v for k, v in s.items() if k != "summarises"} for s in declared]
+    assert json.dumps(plain, sort_keys=True) == json.dumps(shown, sort_keys=True)
+
+
+def test_the_human_route_stores_its_declaration(project, client, monkeypatch):
+    rid, _sections = _human(client, monkeypatch, {"summaries": DECLARED})
+    stored = {s.section_id: s.summarises for s in store.load_report(project, rid).sections}
+    assert stored.pop(EXECUTIVE_SUMMARY_ID) == ["fmea_top"]
+    assert set(stored.values()) == {None}
+
+
+def test_an_undeclared_report_stores_no_summarises_key(project, client, monkeypatch):
+    """Stored-format ruling: an undeclared document's sections serialize as
+    before Y, on the route and in the version file's bytes."""
+    rid, sections = _human(client, monkeypatch, {})
+    assert all("summarises" not in s for s in sections)
+    doc = store.load_report(project, rid)
+    assert '"summarises"' not in doc.model_dump_json(indent=2)
+    assert "summarises" not in doc.sections[0].model_dump()
 
 
 def test_the_human_route_refuses_an_unknown_declaration(project, client, monkeypatch):
