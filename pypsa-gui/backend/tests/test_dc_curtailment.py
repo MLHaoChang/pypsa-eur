@@ -1360,3 +1360,35 @@ def test_on_a_large_bound_the_relative_tolerance_decides():
             with pytest.raises(C.DcCurtailmentRefused) as exc:
                 C._window_rows(n, sns, _terms(d=2.0), window, lines.append)
             assert exc.value.kind == C.CARRY_IN_OVER_BOUND
+
+
+def test_with_a_fractional_duration_the_lookback_reaches_the_earliest_spanning_run():
+    """C20 lookback: with unit weights, D = 2.5 h and the start at 6, the runs spanning the
+    start are (3, 6), (4, 7) and (5, 8); the earliest starts D + one snapshot before the start,
+    so the lookback must reach back by the longest snapshot too."""
+    before = np.array([0.0, 0.0, 0.0, 9.0, 1.0, 1.0])
+    n, sns, window = _window_state(before, start=6, stop=12, written=8)
+    rows, carried = C._window_rows(n, sns, _terms(d=2.5), window, print)
+    f = IT + COOL
+    spanning = [
+        (i, j)
+        for i, j in C.runs(pd.Series(1.0, index=range(12)), 2.5, pd.RangeIndex(12))
+        if i < 6 <= j
+    ]
+    assert spanning == [(3, 6), (4, 7), (5, 8)]
+    assert carried == 3
+    assert rows[0] == (0, 0, pytest.approx(2.5 * SHARE * f[3:7].max() - 11.0))
+
+
+def test_an_operational_run_with_a_fractional_duration_holds_every_run(monkeypatch):
+    """The same lookback through the operational run (H 6, O 2, D 2.5 h): the stitched
+    dispatch holds every full-horizon run, including those starting 3 snapshots before a
+    window."""
+    status, cond, sink, lines = _op(_network(), monkeypatch, _terms(d=2.5))
+    assert status in ("ok", "optimal"), cond
+    rows = _bounds(_curtailed(sink).to_numpy(), 1.0, 2.5)
+    assert min(b - s for _, _, b, s in rows) >= -1e-6
+    assert [ln.count("(3 carried in)") for ln in lines if "carried in" in ln][1:] == [
+        1,
+        1,
+    ]
