@@ -715,3 +715,20 @@ def test_a_product_with_no_tonne_factor_is_unpriced_never_zero(tmp_path):
     n.buses.at["acid", "unit"] = "MWh"  # no mwh_per_t: its tonnes have no price
     c = _campus_cells(n, _write_products(tmp_path / "run"))
     assert c["ride"]["eur_per_year"] is None and c["ride"]["eur_flag"] == G.LPV_MISSING
+
+
+def test_island_outside_blocks_prices_rate_times_mass_pull_per_product(net2, tmp_path):
+    campus = _write_products(tmp_path / "run")
+    df = pd.read_csv(campus.run_dir / G.RESTART_CSV)
+    df.loc[df["unit"] == "mill", "mass_pull"] = (
+        0.5  # 0.5 t of concentrate per t of the mill's output
+    )
+    df.to_csv(campus.run_dir / G.RESTART_CSV, index=False)
+    c = _campus_cells(net2, campus)
+    events = _year_hours() * Q_IMPORT / MTTR_IMPORT
+    assert c["outside"]["t_per_year"] == pytest.approx(
+        RATE * 0.5 * MTTR_IMPORT * events
+    )
+    assert c["outside"]["eur_per_year"] == pytest.approx(
+        RATE * 0.5 * MTTR_IMPORT * events * LPV
+    )
