@@ -355,7 +355,7 @@ def _xlsx_cell(value):
     if isinstance(value, (int, float)):
         if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
             return None
-        return float("%.16g" % value)
+        return float(format(value, ".16g"))
     if isinstance(value, _dt.datetime):
         return value.isoformat()
     if isinstance(value, _dt.date):
