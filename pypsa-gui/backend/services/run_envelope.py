@@ -796,8 +796,12 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
         if not task.get("run") or current is None:
             _refuse("envelope_not_grantable", "This plan is not a harness run with an envelope.")
         if verdict == "stepwise":
-            return f"Approve, step by step (plan: {task['title']}): every write and run keeps its own card."
-        if verdict == "revoke":
+            if not current.get("setup"):
+                return f"Approve, step by step (plan: {task['title']}): every write and run keeps its own card."
+            # Issue 07 B3b (GK B (33) A, S1-S3): a stepwise intake run creates its
+            # project through the same hand-over, on the card's digest; nothing is granted.
+            setup = (path, task, current, None)
+        elif verdict == "revoke":
             if current["state"] != "granted":
                 _refuse("envelope_not_grantable", "This run has no granted envelope to stop.")
             current["state"] = "revoked"
@@ -851,6 +855,10 @@ def _cited_uploads(rows):
                    if r["status"] == "confirmed" and r["source"].get("upload_id")})
 
 
+_GRANT_DECISION = {"tool": "grant_envelope", "tier": "envelope"}
+_STEPWISE_DECISION = {"tool": "create_from_intake", "tier": "stage"}  # a card decision; grants nothing
+
+
 def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_email):
     """Issue 21 §2, create at grant: the intake digest is checked against the
     rows and their sources (R6), the user's decision goes on record, then
@@ -887,8 +895,8 @@ def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_
     prior = run_handover.read_intent(path)
     if prior is not None and prior.get("digest") == intake_digest:
         decision_id = prior["decision_id"]  # a retried grant goes on from its intent (A1)
-    else:
-        decision_id = "envelope-" + str(uuid.uuid4())  # put on record by the precheck, once it passes
+    else:  # put on record by the precheck, once it passes
+        decision_id = ("stepwise-" if chosen is None else "envelope-") + str(uuid.uuid4())
     handover = {"decision_id": decision_id, "digest": intake_digest}
 
     def precheck():
@@ -909,8 +917,8 @@ def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_
         # Only a grant that passed the checks goes on record, once (GK B (20)): a
         # retry that resumes an intent keeps the decision that intent names.
         if run_handover.read_intent(path) is None and not approvals.decided(
-                session, call_id=decision_id, tool="grant_envelope", tier="envelope", outcome="approved",
-                by="user", link={"envelope_id": current["id"], "setup": setup["template"]}):
+                session, call_id=decision_id, **(_STEPWISE_DECISION if chosen is None else _GRANT_DECISION),
+                outcome="approved", by="user", link={"envelope_id": current["id"], "setup": setup["template"]}):
             raise run_handover.HandoverError("approval_unavailable",
                                              "The grant could not be put on record, so nothing is granted.")
 
@@ -918,7 +926,8 @@ def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_
         grant_handover(new_path, new_task, chosen, handover=handover, ctx=new_ctx, notify_email=notify_email,
                        rows=confirmed)
 
-    start = assistant_tasks.handover_starter(task, profile, task["owner_id"], grant=grant, handover=handover)
+    start = assistant_tasks.handover_starter(task, profile, task["owner_id"],
+                                             grant=None if chosen is None else grant, handover=handover)
     try:
         intent = run_handover.hand_over(
             path, owner_id=task["owner_id"], origin={"project_id": task["project_id"], "task_id": task["task_id"]},
@@ -934,6 +943,9 @@ def _grant_setup(session, path, task, current, chosen, *, intake_digest, notify_
             _audit(envelope, "handed_over", project_id=intent["project_id"], task_id=intent["task_id"],
                    decision_id=decision_id)
             _save(path, envelope)
+    if chosen is None:
+        return (f"Approve, step by step (plan: {task['title']}): creates project `{intent['project_name']}` from "
+                f"this intake (digest {intake_digest[:8]}); every write and run keeps its own card.")
     return (f"Approve and run unattended (plan: {task['title']}): project `{intent['project_name']}` was created "
             f"from the {setup['template']} template with the inputs shown, and the run goes on there.")
 

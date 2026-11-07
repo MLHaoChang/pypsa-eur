@@ -180,6 +180,16 @@ Slices: PR 1 = F-a, F-b, F-c with failing-first tests (the data-loss fix lands f
 - P11. A report job is tied to a run only by the harness's own explicit launch; nothing infers a run from state.
 - P12. The release-note fragment states that a run granted before the change keeps eh_site@1.
 
+### GK B (33): stepwise pilot design, GO on A (S1–S6, verbatim in substance)
+
+A step-by-step verdict on an intake run creates the project through the same hand-over as the envelope path and grants nothing.
+- S1. Creating the project is a write, so the stepwise verdict card states "creates project <name> from this intake" and the digest. The hand-over runs only on that user click, on exactly the digest the card showed; a drift refuses as in the envelope path (tested in stepwise).
+- S2. Nothing is granted: no envelope reads granted, no approval is on record by an envelope, `run_envelope.admit` returns None for a later write. The pilot counts exactly one user card per write or run from the hand-over to the hand-off (equality).
+- S3. The same hand-over code, no fork: P1, P3 and P5 apply in stepwise. One parametrised test runs both verdicts against the host-unchanged and fingerprint assertions.
+- S4. The early return stays for every non-intake run, pinned by a test that a plain run's stepwise verdict calls no `_grant_setup`.
+- S5. Hand mutants with their killing tests: stepwise also grants the envelope; stepwise skips `_grant_setup` on intake; the digest check dropped in stepwise.
+- S6. L8 is not engaged: a decided run is past `decide()`, and an undecided stepwise intake run dead-ended before. Said in the PR body.
+
 ## Folded from #970
 
 Owner decision HARNESS-970-1 (3 Nov). Three items from #970 land here, all after the pilot works. None changes the acceptance criteria above.
