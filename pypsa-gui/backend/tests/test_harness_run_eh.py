@@ -1735,3 +1735,10 @@ def test_the_freeze_takes_a_goal_card_without_pack_overrides(tmp_path):
     ctx = ctx_for(tmp_path, template={**TEMPLATE, "pack_overrides": None})
     frozen = run_eh.freeze(ctx, PROFILE, 6)
     assert "import_p_nom_mw" not in frozen["args"].get("pack_overrides", {})
+
+
+def test_skipped_ignores_a_stage_that_is_not_a_dict():
+    stages = ["apply_pack", None, {"stage": "mc_certify", "note": "not run: budget"}]
+    assert run_eh.skipped({"report": {"pipeline": {"stages": stages}}}) == [
+        "mc_certify: not run: budget"
+    ]
