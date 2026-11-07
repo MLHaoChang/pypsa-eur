@@ -834,6 +834,24 @@ def test_each_site_transformer_is_a_row_with_its_own_fold_and_the_line_folds_the
     )
 
 
+def test_the_n_1_line_is_the_flat_fold_never_the_sum_of_the_row_cells(
+    net_b, monkeypatch
+):
+    # G22-1: 1e16 + 1 + 1 + 1 folded flat is 1e16; the row sums 1e16 + 2 give 1.0000000000000002e16.
+    a = [_prod(1e16, 1e16), _prod(1.0, 1.0, product="acid")]
+    b = [_prod(1.0, 1.0), _prod(1.0, 1.0, product="acid")]
+    _fake_loss(
+        monkeypatch, {"site_trafo": {"_": (a, None)}, "site_trafo_b": {"_": (b, None)}}
+    )
+    n1 = _n1(net_b)
+    rows = [r["by_period"]["_"] for r in n1["rows"]]
+    line = n1["by_period"]["_"]
+    assert line["t_per_year"] == 1e16 and line["eur_per_year"] == 1e16  # exact bits
+    assert (
+        rows[0]["t_per_year"] + rows[1]["t_per_year"] == 1.0000000000000002e16
+    )  # the row-sum grouping differs, so this test tells them apart
+
+
 def test_a_row_with_unknown_tonnes_has_no_eur_even_when_priced(net_b, monkeypatch):
     a = [_prod(None, 50.0), _prod(1.0, 10.0)]
     b = [_prod(2.0, 20.0)]
