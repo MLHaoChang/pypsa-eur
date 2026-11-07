@@ -115,6 +115,15 @@ describe('buildUiContext', () => {
     ])
   })
 
+  it('names the open Site and part only while Site 3D shows a Site (SC-07 S2)', () => {
+    useUIStore.setState({ canvasView: 'site', activeSiteId: 'campus', sitePart: 'model' })
+    expect(buildUiContext()?.site_scene).toEqual({ site_id: 'campus', part: 'model' })
+    useUIStore.setState({ canvasView: 'site', activeSiteId: null })
+    expect(buildUiContext()?.site_scene).toBeUndefined()
+    useUIStore.setState({ canvasView: 'satellite', activeSiteId: 'campus' })
+    expect(buildUiContext()?.site_scene).toBeUndefined()
+  })
+
   it('returns null when there is genuinely nothing to say', () => {
     // Cold start: no panel, default canvas, nothing selected, rail closed,
     // snapshot 0. Sending a block here would spend tokens and cache churn to

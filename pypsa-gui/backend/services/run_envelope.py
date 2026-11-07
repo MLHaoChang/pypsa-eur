@@ -754,7 +754,8 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
                            edits=[dict(e, at_grant=_instances(ctx, e)) for e in chosen["edits"]],
                            gaps=gaps, prepared=[],
                            runs=chosen["runs"], budget=chosen["budget"], research=chosen["research"],
-                           notify={"email": bool(notify_email)}, state="granted")
+                           notify={"email": bool(notify_email)}, state="granted",
+                           eh_study=_eh_frozen(ctx, task, chosen))
             _audit(granted, "granted", reason="user")
             _save(path, granted)
             message = (f"Approve and run unattended (plan: {task['title']}), inside this envelope until "
@@ -867,6 +868,22 @@ _HANDOVER_REFUSALS = {
 }
 
 
+def _eh_frozen(ctx, task, chosen):
+    """Issue 07 B2 (GK B C1): the EH study's args, fixed at the grant from
+    the profile and the project's goal, within the granted solves. None
+    when the profile runs no EH study, or they cannot be fixed now (the
+    solve stage then fixes them on entry, and the step's card shows them)."""
+    from harness import run_eh
+    from services import run_profiles
+    profile = run_profiles.resolve(task["run"]["profile"])
+    if "eh_study" not in profile:
+        return None
+    try:
+        return run_eh.freeze(ctx, profile, chosen["budget"]["solves"])
+    except run_eh.FreezeError:
+        return None
+
+
 def grant_handover(task_path, task, chosen, *, handover, ctx, notify_email=False, rows=()):
     """The created project's envelope, granted as the host card's decision
     (A2): it carries that decision id and the grant digest, the narrowing the
@@ -883,7 +900,7 @@ def grant_handover(task_path, task, chosen, *, handover, ctx, notify_email=False
                    gaps=[dict(g, at_grant=_gap_instances(ctx, g)) for g in chosen["gaps"]], prepared=[],
                    runs=chosen["runs"], budget=chosen["budget"], research=chosen["research"],
                    notify={"email": bool(notify_email)}, handover=dict(handover), state="granted",
-                   planned=_planned_rows(rows))
+                   planned=_planned_rows(rows), eh_study=_eh_frozen(ctx, task, chosen))
     _audit(granted, "granted", reason="user", decision_id=handover["decision_id"])
     _save(task_path, granted)
     return granted

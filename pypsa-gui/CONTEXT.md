@@ -222,6 +222,18 @@ utilisation × PUE(ambient), split by `critical_share` over `it_load` and
 `{"dc_load": {...}}`; without it the template keeps its load.
 _Avoid_: GPU profile generator (that's `profile_gen`, renewables)
 
+**Curtailable load**:
+The share of a data centre's facility load (`curtailable_share` of
+`it_load + cooling`) the solve may leave unserved at the spec's
+`curtailment_price_eur_per_mwh`, a resource like demand response and never
+unserved energy (DC-07 S2, `backend/services/solver/dc_curtailment.py`). It
+runs on `dc_mv` only, never above the cooling load. With
+`curtail_max_duration_h` = D, every run of D plus one snapshot of weighted
+hours holds at most D × share × the run's peak facility load. That is an
+energy proxy: curtailment can still be spread; consecutive hours are not
+enforced. A solve records it under `n.meta["dc_curtailment"]`.
+_Avoid_: load shedding (the involuntary VoLL tier), DSR (the bus opt-in tier)
+
 **Dynamic envelope**:
 The sub-hourly behaviour of an AI-training load that the LP never sees, per
 COD phase: swing (MW), max ΔP/Δt (MW/s), checkpoint dip (MW and MW/s) and the

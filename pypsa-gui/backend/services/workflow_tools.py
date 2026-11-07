@@ -561,6 +561,13 @@ def _network_input_fingerprint(ctx, *, exact=False):
         if tags is not None:
             parts.append(label)
             parts.append(_exact_frame_json(tags) if exact else tags.to_json())
+    # DC 07 S2: the curtailable load's price, share and duration come from the saved DC
+    # spec, outside the network and the config; appended only when curtailment is on.
+    from services.solver import dc_curtailment as _dcc
+    terms = _dcc.terms_for(getattr(ctx, "storage_dir", None))
+    if terms is not None:
+        parts.append("dc-curtailment/1")
+        parts.append(json.dumps([terms.price, terms.share, terms.max_duration_h]))
     # DC 06: the reserve rows read floors from the saved DC spec, outside the network
     # and the config; appended only when the config has reserve products.
     from services.solver import reserve_products as _rp

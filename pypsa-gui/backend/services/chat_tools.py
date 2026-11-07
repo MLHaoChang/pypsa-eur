@@ -558,9 +558,29 @@ def get_asset_costs() -> dict:
     return _h()
 
 
+def _continuation_armed_here() -> bool:
+    """True when this conversation has a plan step that will continue it
+    when its job ends (LC-12). Unknown (no session, no project) counts as not armed."""
+    try:
+        from services import assistant_tasks
+        with _acting() as (db, _user):
+            session = _acting_session(db)
+            return session is not None and assistant_tasks.continuation_armed(session)
+    except Exception:  # noqa: BLE001 — the hint is advice; never fail a status read
+        return False
+
+
 def get_simulation_status() -> dict:
     from routers.simulation import get_status as _h
-    return _h()
+    out = _h()
+    if out.get("running") and not _continuation_armed_here():
+        # LC-24: nothing continues this chat by itself after a Stop (#542) and
+        # a plain turn arms no continuation, so the words must not promise one.
+        out = {**out, "follow_up": (
+            "No automatic update is armed for this run. Do not say you will "
+            "keep checking or report back; tell the user to ask again or watch "
+            "the run status.")}
+    return out
 
 
 def get_simulation_lock_status() -> dict:

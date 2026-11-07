@@ -84,6 +84,69 @@ C1–C3, C7, C8 and C11–C14 carry over. B1 = stages 7/8 in place; B2 = the EH 
 - B1-d (hand-off). Neither run_handoff nor run_report ever calls apply_project_changes; assert it with a spy over both steps. preview_stale is the C7 stale check, named in the PR.
 - B1-e (ReservingProvider.close). Fold it in only if #1154 and #1150 don't touch send_reservation.py at the trial merge; otherwise its own follow-up.
 
+### GK B (31): B2 plan verdict, GO WITH CHANGES (verbatim, restated 2026-11-06 22:28Z)
+
+GK B (26)'s E1–E9 were unrecoverable; this verdict replaces them (coordinator ruling, option B).
+
+> GK B (31), SH-07 B2: binding plan verdict, restated per the coordinator's ruling. GO WITH CHANGES. This list replaces the missing E1–E9 and my earlier message; record it verbatim in issue 07's ## Comments.
+>
+> Scope (GK B (25) split): B2 covers the EH input and result rules and run_eh_study. B3 keeps the pilot and its smoke (C11). B1's C12–C14 are done and B2 must not regress them.
+>
+> From issue 07 (GK B (24)), as they apply to B2:
+> - C1. run_eh_study stays in NEVER_LISTED.
+>   - Envelope mode shows it as one card.
+>   - Test that a grant listing it is refused.
+>   - Its args come from the profile and the goal, fixed at the grant (stepwise: at solve-stage entry, Q2 A), never from model output (#1072). A model-supplied pack_overrides never reaches the call (autospec spy, from an L2 turn and from a tampered step).
+>   - The card shows the args.
+>   - It runs only on the bound run project, never the foreground (#875). Join BOUND_CONTEXT_TOOLS and the §6.6 sweep test.
+> - C2. Solve accounting.
+>   - budget_solves ≤ the solves left; zero left gives needs_user eh_budget and no call.
+>   - The LOLE rule goes through loop_goal(horizon_years(n)).
+>   - The engine's solves = solves_used + probe_solves + the closing re-solve whenever it ran.
+> - C3. Each new fact fails closed, one test per fact: eh.readiness.ready, eh.energization.min_mw, eh.study.status, eh.review.blockers, kpi.unserved_mwh, the eh_site loop fact. An unreadable source, a missing record or a truncated card never passes (#1079).
+> - C4 addendum. After the run_eh_study step, the run's ledger holds no open reservation. Cover done, failed, refused (409/422/campaign) and a raise.
+> - C7. The revert exact-set test stays green. The step adds no ledger rows (F10).
+> - C8. eh_site@1 changes in place. Tests:
+>   - an old run already at solve, with no run_eh_study step, reads not_evaluated → needs_user, never passed;
+>   - an old run before solve materialises the new step.
+> - C10. New kinds go only in your tool-error-kinds.d fragment. I'll run the trial-merge checks (kinds manifest, inventory, and route parity/control matrix if routes or tools change).
+>
+> New, from master's code (F):
+> - F1. Freeze the goal fully. eh_request_with_goal fills any omitted archetype, target_lole_h, ens_cap_permyriad (plus certification_metric) and mc.draws from the LIVE goal at call time.
+>   - The frozen args carry all of them resolved, covered by the digest and shown on the card.
+>   - Test: edit the goal after the freeze, then dispatch. Either the record's goal_sources read override with the frozen values, or the step stops needs_user eh_args.
+> - F2. Status mapping. The record says done, failed, aborted or running, never "completed".
+>   - Only done passes.
+>   - A done study that skipped a requested stage for budget fails the rule and names the stage. Test it.
+> - F3. Record identity (#1038, #1123). The settle, eh.study.status and eh.review.blockers use the record the step's own dispatch published: started_at captured under the solver-state lock, and review_latest called on that record, never on "latest".
+>   - Tests: a user-started EH study after the run's own; and the same with the activity bindings cleared.
+> - F4. Settle count. The actual count is the sum of pipeline.stages[].solves_charged.
+>   - A missing or unreadable count keeps the whole reservation.
+>   - Actual > reserved charges the actual count, never capped down. Test it.
+>   - Name the extra campaign charge from _campaign_gated in the PR.
+> - F5. Dispatch only after the solve_queue job settled completed. A 409 or 422 settles the step refused, releases the reservation, and does not retry. Test it.
+> - F6. kpi.unserved_mwh reads the run's own solve (bound ctx, the run's project_id, that solve's revision). Stale or unsolved data reads not_evaluated. Add a non-unit snapshot_weightings test.
+> - F7. energization_mw: NaN or non-numeric reads as missing. Test that not_evaluated at the INPUT gate blocks, for both this fact and eh.readiness.ready.
+> - F8. Q1 = A: eh.review.blockers goes in the result gate. Record the deviation in design.md §9.3 in the same PR. An erroring or truncated review fails the rule.
+> - F9. Q3 = A: run_margin_loop through the existing LOOP_FACT engine path, restore base.
+>   - Test target = goal h/yr × horizon_years(n) on a network whose horizon is not 1 year.
+>   - The gate's LOLE comes from the loop record only, never from the EH study's MC LOLE.
+>   - The engine loop and the agent loop never act on the same rule.
+> - F10. No project write. run_eh_study runs on a private copy (eh_study.py:1158). Test that the step leaves the project's network revision and the run ledger unchanged.
+> - F11. Mutants. Beyond mutants.py, hand-mutate each new guard and name the test that kills it:
+>   - the args digest compare;
+>   - the zero-left check;
+>   - the F3 identity check;
+>   - the F2 status map;
+>   - the F1 freeze;
+>   - the envelope refusal of run_eh_study;
+>   - each fact's fail-closed branch.
+>   List the survivors in the PR body.
+>
+> Process: one PR, with a release-note fragment and a kinds fragment.
+>
+> GK B (31), session_01G7qCuiUB2VeFL67ZyXeCSQ
+
 ## Folded from #970
 
 Owner decision HARNESS-970-1 (3 Nov). Three items from #970 land here, all after the pilot works. None changes the acceptance criteria above.
