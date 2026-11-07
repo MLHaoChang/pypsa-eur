@@ -1729,3 +1729,9 @@ def test_releasing_an_unknown_charge_on_a_row_without_a_reservation_settles_zero
         path, audit=[{"event": "eh_study", "call_id": "a1", "tool": "run_eh_study"}]
     )
     assert run_eh.release(path, "a1", None, task=task) is True
+
+
+def test_the_freeze_takes_a_goal_card_without_pack_overrides(tmp_path):
+    ctx = ctx_for(tmp_path, template={**TEMPLATE, "pack_overrides": None})
+    frozen = run_eh.freeze(ctx, PROFILE, 6)
+    assert "import_p_nom_mw" not in frozen["args"].get("pack_overrides", {})
