@@ -3,7 +3,7 @@
 
 # `harness/README.md` lacks an `outcomes.py` entry
 
-Status: needs-triage
+Status: done (#1213)
 Type: docs
 Found by: AA-04 (`04-action-and-job-outcomes.md`); owner list DOCS-1.
 

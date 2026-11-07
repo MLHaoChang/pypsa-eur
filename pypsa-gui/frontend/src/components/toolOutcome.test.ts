@@ -251,6 +251,8 @@ describe('denied outcomes (issue 04 S4a)', () => {
     ['unknown_decision', 'your answer to the approval could not be read'],
     ['project_locked', 'another change to this project was in progress'],
     ['project_lock_unavailable', "the project's edit lock could not be checked"],
+    ['operation_pending', 'the same request may still be running'],
+    ['operation_conflict', 'an earlier request may still be running'],
   ])('words a refusal of kind %s', (reason, words) => {
     const block = toolOutcomeOf({ _outcome: { version: 1, outcome: 'denied', reason } }, 'bulk_update_components')!
     expect(toolOutcomeLine('bulk_update_components', block)).toBe(`– bulk_update_components (denied: ${words})`)
@@ -279,6 +281,12 @@ describe('refusal details (issue 04 S4a)', () => {
     ["approval for 'delete_component' could not be recorded", 'approval_unavailable',
       'The app could not save the approval: its data folder may be full or not writable.'],
     [undefined, 'aborted', null],
+    ["The same solve_queue_enqueue request from earlier may still be running; its outcome is unknown.", 'operation_pending',
+      'An earlier request with the same settings may still be running, so it was not started again. Ask the assistant to check it or stop it.'],
+    ["The solve queue already has this project's solve, queued or running, so it was not queued again.", 'operation_pending',
+      'An earlier request with the same settings may still be running, so it was not started again. Ask the assistant to check it or stop it.'],
+    ["An earlier run_simulation request with other settings may still be running.", 'operation_conflict',
+      'An earlier request with other settings may still be running, so this one was not started. Ask the assistant to check it or stop it first.'],
   ])('%s → %s', (message, kind, detail) => {
     expect(refusalDetail(message, kind)).toBe(detail)
   })

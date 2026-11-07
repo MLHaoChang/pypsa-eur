@@ -64,6 +64,8 @@ function call(id: string, tool: string, outcome: string | null, jobId: string | 
 const DETAILS: Record<string, string> = {
   user_restriction: 'A rule you set for this project blocks changes.',
   approval_unavailable: 'The app could not save the approval: its data folder may be full or not writable.',
+  operation_pending: 'An earlier request with the same settings may still be running, so it was not started again. Ask the assistant to check it or stop it.',
+  operation_conflict: 'An earlier request with other settings may still be running, so this one was not started. Ask the assistant to check it or stop it first.',
 }
 const rows = () => screen.getAllByTestId('chat-message').filter(r => r.dataset.role === 'tool')
 const at = new Date(2026, 10, 5, 14, 2).getTime()
@@ -187,6 +189,8 @@ describe('chat tool-line outcome marks', () => {
     ['unknown_decision', 'your answer to the approval could not be read'],
     ['project_locked', 'another change to this project was in progress'],
     ['project_lock_unavailable', "the project's edit lock could not be checked"],
+    ['operation_pending', 'the same request may still be running'],
+    ['operation_conflict', 'an earlier request may still be running'],
   ])('issue 04 S4a: a tool_error refused as %s reads denied with its reason in both modes', async (kind, words) => {
     await turn('expert')
     emit('tool_request', { tool_use_id: 'd', tool_name: 'bulk_update_components', safety_tier: 'write' })

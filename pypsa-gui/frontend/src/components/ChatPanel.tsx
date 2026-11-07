@@ -178,6 +178,7 @@ interface ToolPendingFrame {
   ttl_seconds: number
   edit_card?: unknown
   sweep_card?: unknown
+  repeat_card?: unknown
   external?: { server: string }
 }
 
@@ -2303,6 +2304,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           expires_at_epoch_ms: Date.now() + d.ttl_seconds * 1000,
           edit_card: d.edit_card,
           sweep_card: d.sweep_card,
+          repeat_card: d.repeat_card,
           external: d.external,
         })
         break

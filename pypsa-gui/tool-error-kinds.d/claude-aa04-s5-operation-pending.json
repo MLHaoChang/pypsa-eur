@@ -1,0 +1,3 @@
+{"kinds": {
+  "operation_pending": {"surface": "inline", "why": "A job call repeats, with the same arguments, an earlier call of that tool on this project whose outcome is unknown (it timed out, or a solve raised while its thread ran), or the solve queue still has this project's solve (harness/job_holds.py). Nothing ran; the result reads denied. The assistant checks the earlier job with wait_for_job or its status; if the user wants it run again, a second call shows a card naming the earlier request."}
+}}
