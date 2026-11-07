@@ -394,6 +394,10 @@ def _fit(out: dict[str, Any]) -> dict[str, Any]:
             }
         ]
         out[longest] = items[:keep]
+        if longest == "my_previews" and not keep:
+            del out[
+                "my_previews"
+            ]  # none shown is no key (S5, J5); the cut is named above
     if size() > MAX_READ_BYTES and out.get("actions"):
         out["actions"] = [
             {k: v for k, v in a.items() if k != "reason"} for a in out["actions"]
@@ -509,7 +513,10 @@ def read(site_id: str | None = None, proposal_id: str | None = None) -> dict[str
             out["unbound_keys"] = _capped(
                 [_text(k) for k in unbound], "unbound_keys", truncated
             )
-        mine = my_previews(project, owner, site_id)
+        # The previews the assistant must act on; an applied one is in last_receipt or `proposal`.
+        mine = [
+            p for p in my_previews(project, owner, site_id) if p["status"] != "applied"
+        ]
         if (
             mine
         ):  # S5 (J5): the caller's own previews; none is no key, inside the byte cap

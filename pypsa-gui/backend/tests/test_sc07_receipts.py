@@ -396,7 +396,11 @@ def test_the_route_and_the_chat_read_list_the_same_previews(client, site):
     prep = bind(client, IT)
     route = _get(client)["my_previews"]
     assert route == _mine() and route[0]["id"] == prep["proposal_id"]
-    assert chat_tools.site_scene_read("campus")["my_previews"] == route
+    assert any(p["status"] == "applied" for p in route)  # the fixture's own generate
+    # The chat read lists what the assistant must act on; an applied one is its receipt.
+    assert chat_tools.site_scene_read("campus")["my_previews"] == [
+        p for p in route if p["status"] != "applied"
+    ]
     proposals.clear()
     assert (
         "my_previews" not in chat_tools.site_scene_read("campus")
