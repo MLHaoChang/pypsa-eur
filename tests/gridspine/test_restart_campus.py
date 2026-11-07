@@ -1,6 +1,7 @@
 """The campus study's dip and restart screens, ``campus_dip_trips.csv`` and ``campus_restart.csv``, and the process
 chain they read rate and mass pull from (grid-to-process issue 12b-2)."""
 import math
+from pathlib import Path
 
 import pandas as pd
 import pypsa
@@ -267,3 +268,53 @@ def test_an_extendable_unit_rates_on_p_nom_opt_not_p_nom():
     assert rate == pytest.approx(550.0) and basis.startswith("p_nom_opt 8.8 MW")
     n.links.loc["mill", "p_nom_opt"] = 0.0
     assert pc.rate_tph(n, "mill") == (None, "unknown: p_nom_opt is not above 0")
+
+
+# Both files as restart_campus wrote them for _restart_hub() before they carried the product (G2P #23, G23-1).
+_BEFORE = Path(__file__).parent / "fixtures" / "restart_campus_before_product"
+
+
+def test_the_product_is_the_one_new_column_and_every_other_byte_is_unchanged(tmp_path):
+    run, _ = _run(tmp_path, _restart_hub())
+    restart_campus(run)
+    for name in (DIP_TRIPS_CSV, RESTART_CSV):
+        before = (_BEFORE / name).read_text().splitlines()
+        after = (run / name).read_text().splitlines()
+        assert len(after) == len(before)
+        level = before[0].split(",").index("level")
+        assert after[0] == before[0] + ",product"                     # last: no column shifts
+        for b, a in zip(before[1:], after[1:]):
+            tail = "nh3" if b.split(",")[level] == "unit" else ""      # never "nan" off the unit rows
+            assert a == f"{b},{tail}"
+
+
+def test_the_product_is_where_the_mass_pull_walk_ends_not_bus1():
+    n = _chain()
+    assert pc.shortfall_product(n, "mill") == "conc"                 # mill's bus1 is slurry
+    n.generators["process_role"] = [""]
+    assert pc.shortfall_product(n, "mill") is None                   # mass pull unknown: no product
+
+
+def test_a_two_stage_chain_writes_the_downstream_product_on_every_unit_row(tmp_path):
+    """nh3 feeds a synthesis Link onto urea, where the shortfall sits: the tonnes, and so the product, are urea's."""
+    n = _restart_hub()
+    n.add("Carrier", "urea")
+    n.add("Bus", "urea", carrier="urea", unit="t")
+    n.add("Link", "synth", bus0="nh3", bus1="urea", efficiency=0.5, p_nom=100.0)
+    n.generators.loc["__lost_nh3", "bus"] = "urea"
+    run, _ = _run(tmp_path, n)
+    dip, restart = restart_campus(run)
+    for df in (dip, restart):
+        unit = df[df["level"] == "unit"]
+        assert set(unit["product"]) == {"urea"}
+        assert (unit["mass_pull"] == 0.5).all()
+
+
+def test_a_unit_whose_walk_reads_unknown_has_no_product_and_unknown_tonnes(tmp_path):
+    n = _restart_hub()
+    n.generators["process_role"] = ""                                 # no shortfall: the walk reads unknown
+    run, _ = _run(tmp_path, n)
+    restart_campus(run)
+    df = pd.read_csv(run / DIP_TRIPS_CSV, keep_default_na=False)
+    unit = df[df["level"] == "unit"]
+    assert set(unit["product"]) == {""} and set(unit["lost_t_per_year"]) == {""}

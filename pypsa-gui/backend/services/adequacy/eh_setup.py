@@ -25,6 +25,7 @@ from models.energy_hub import EH_CONVERSION_ROLES, EH_INTERNAL_ROLES
 _IMPORT_KW = re.compile(r"(grid|import|utility|mainland|tie|poc)", re.I)
 _CRITICAL_KW = re.compile(
     r"(crit|hospital|clinic|it[_-]|data|process|essential|emerg)", re.I)
+_MUST_RUN_TIERS = frozenset({"safety", "process_critical"})
 # A supply-side bus must cover this share of the site's summed peak demand.
 _SUPPLY_SHARE = 0.8
 # Candidates scoring within this share of the best are all proposed.
@@ -161,6 +162,24 @@ def _reaches_load(adj, start: str, banned: str, load_buses: set[str]) -> bool:
                 seen.add(nb)
                 todo.append(nb)
     return False
+
+
+def _tiered_buses(n) -> dict[str, str]:
+    """Bus → the process Link whose ``criticality_tier`` marks it must-run
+    (``safety`` or ``process_critical``), on the unit's electric bus0."""
+    from services.adequacy.site_peak import electric_bus
+    from services.solver.process_uc import process_mask
+
+    links = n.links
+    if "criticality_tier" not in links.columns:
+        return {}
+    out: dict[str, str] = {}
+    for name in links.index[process_mask(links)]:
+        tier = str(links.at[name, "criticality_tier"]).strip()
+        b = str(links.at[name, "bus0"])
+        if tier in _MUST_RUN_TIERS and electric_bus(n, b) and b not in out:
+            out[b] = f"process unit '{name}' (criticality_tier {tier})"
+    return out
 
 
 def _update(cls: str, name: str, proposed: dict, effect: str) -> dict:
@@ -317,6 +336,9 @@ def suggest_eh_setup(n, archetype: str | None = None) -> dict[str, Any]:
         for label, text in (("bus", b), ("load", str(name)), ("load carrier", lc)):
             if _CRITICAL_KW.search(text) and b not in matched:
                 matched[b] = f"its {label} name '{text}'"
+    for b, why in _tiered_buses(n).items():
+        if b in bus_peak and b not in matched:
+            matched[b] = why
     crit: list[tuple[str, str, str]] = []
     for b in load_buses_in_order(n, bus_peak):
         if b in matched and b not in already_crit:

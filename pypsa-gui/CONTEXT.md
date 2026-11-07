@@ -97,6 +97,15 @@ design**: its results and commercial records stand. The sweep's operational
 re-solve, which also freezes sizes, is a transient check and commits nothing.
 _Avoid_: dispatch-only, operational run (the sweep's term), extendable off
 
+**Plan-vs-operation gap**:
+The operational run (rolling, sizing off) against the **full-horizon dispatch
+on the same sizes**: one solve over the whole horizon, with the same sizes,
+initial charge and non-cyclic storage (`services/solver/operational_gap.py`,
+`GET /api/results/operational_gap`). gap = operational − reference, from
+PyPSA opex only. It is the cost of no look-ahead past each window, not a
+forecast error. It reads None with a flag when it is missing or stale.
+_Avoid_: forecast gap, plan error
+
 **Unavailable**:
 The state of a figure the backend could not resolve, as distinct from a figure
 that resolved to zero. Zero is a legitimate result in an energy-system model,
@@ -231,7 +240,10 @@ runs on `dc_mv` only, never above the cooling load. With
 `curtail_max_duration_h` = D, every run of D plus one snapshot of weighted
 hours holds at most D × share × the run's peak facility load. That is an
 energy proxy: curtailment can still be spread; consecutive hours are not
-enforced. A solve records it under `n.meta["dc_curtailment"]`.
+enforced; carried across operational windows (DC-07 C20: under the
+operational run, the final dispatch before a window's start enters each run
+that spans it; plain rolling with a duration is refused). A solve records it
+under `n.meta["dc_curtailment"]`.
 _Avoid_: load shedding (the involuntary VoLL tier), DSR (the bus opt-in tier)
 
 **Dynamic envelope**:

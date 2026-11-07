@@ -4969,18 +4969,37 @@ TOOLS: list[dict[str, Any]] = [
         "generate_native builds the Site's buildings from inputs (replacing the current set); "
         "edit_buildings replaces the buildings with the same ids and keeps the rest. inputs: "
         "{greenfield: [{id, center: [x, y], width, depth, height, heading, unit: m|ft}], sources: "
-        "[...]} (sources are the footprints get_project_sites returns for a site). base_revision "
-        "is site_scene_read's revision (409 revision_conflict when it moved). Returns the "
-        "proposal_id, input_hash, the ids added, changed and removed, and apply_with: show the "
-        "summary, then call site_scene_apply with exactly those args. Ask instead of guessing a "
-        "dimension or a unit. Placement and model bindings stay in Site 3D. 413 resource_limit "
-        "when you hold too many open previews (apply or site_scene_cancel one). Safety: read.",
+        "[...]} (sources are the footprints get_project_sites returns for a site). The model "
+        "actions map EXISTING model items into the scene and change no model value: bind_targets "
+        "{associations: [{feature, target: {class, name} or {class: Load, carrier}, weight?}], "
+        "groups: [{id, label?, members}]} attaches loads, process units, inventory or equipment to "
+        "a building, group or placed item (shares only as the user gives them, totalling 100 %); "
+        "place_existing {placements: {'<Class>:<name>': {x, y, heading, on?}}}; rebind {association "
+        "or placement, target: {class, name}, confirmed: true}; detach {keys: ['<Class>:<name>']}; "
+        "undo_detach {proposal: the detach's proposal_id}. A new or changed model item is its own "
+        "edit with its own card first, then this. status clarify (several candidates, none picked) "
+        "or unresolved (unknown or unsupported item) prepares nothing: ask the user which item, "
+        "never choose one, then prepare again with its name. base_revision is site_scene_read's "
+        "revision (409 revision_conflict when it moved). Returns the proposal_id, input_hash, a "
+        "summary and apply_with: show the summary, then call site_scene_apply with exactly those "
+        "args. Ask instead of guessing a dimension or a unit. 413 resource_limit when you hold too "
+        "many open previews (apply or site_scene_cancel one). Safety: read.",
         {"site_id": {"type": "string", "maxLength": 128},
-         "action": {"type": "string", "enum": ["generate_native", "edit_buildings"]},
+         "action": {"type": "string", "enum": ["generate_native", "edit_buildings", "bind_targets",
+                                               "place_existing", "rebind", "detach", "undo_detach"]},
          "base_revision": {"type": "integer", "minimum": 0},
          "inputs": {"type": "object", "additionalProperties": False,
                     "properties": {"greenfield": {"type": "array", "maxItems": 500, "items": {"type": "object"}},
-                                   "sources": {"type": "array", "maxItems": 500, "items": {"type": "object"}}}}},
+                                   "sources": {"type": "array", "maxItems": 500, "items": {"type": "object"}},
+                                   "associations": {"type": "array", "maxItems": 200, "items": {"type": "object"}},
+                                   "groups": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
+                                   "placements": {"type": "object", "maxProperties": 200},
+                                   "keys": {"type": "array", "maxItems": 200, "items": {"type": "string"}},
+                                   "association": {"type": "string", "maxLength": 64},
+                                   "placement": {"type": "string", "maxLength": 200},
+                                   "target": {"type": "object"},
+                                   "confirmed": {"type": "boolean"},
+                                   "proposal": {"type": "string", "maxLength": 34}}}},
         ["site_id", "action", "base_revision", "inputs"],
     ),
     _t(
@@ -4989,8 +5008,9 @@ TOOLS: list[dict[str, Any]] = [
         "Guided). Pass site_scene_prepare's apply_with args exactly: proposal_id, input_hash and "
         "expected_revision are all required, and a preview that changed, expired (410 "
         "proposal_expired), was discarded (409 proposal_cancelled) or a scene that moved (409 "
-        "revision_conflict) writes nothing. Returns the scene receipt and its read-back. Changes "
-        "only the 3D site: never the model, a run or a result. Safety: write.",
+        "revision_conflict) writes nothing; a model item that changed since the preview is 409 "
+        "revision_conflict code target_changed. Returns the scene receipt and its read-back. "
+        "Changes only the 3D site: never a model value, a run or a result. Safety: write.",
         {"site_id": {"type": "string", "maxLength": 128},
          "proposal_id": {"type": "string", "maxLength": 34},
          "input_hash": {"type": "string", "maxLength": 64},

@@ -3,7 +3,7 @@
 
 # G2P-16: `cop_floored_hours` sums across ids when banded and unbanded pumps mix
 
-Status: ready-for-agent
+Status: done
 Type: bug
 Found by: G2P-16 (heat-pump COP by band, `16-heat-pump-cop-by-band-part-load.md`); owner list DOCS-1.
 

@@ -451,6 +451,49 @@ def test_the_concentrator_suggests_its_site_bus_as_critical():
             assert abs(float(mw) - tonnes) > 1.0, s["reason"]
 
 
+def test_the_concentrator_site_is_a_high_confidence_pick_from_its_criticality_tier():
+    n = _strip(TPL.BUILDERS["eh_concentrator_staged"]())
+    crit = [s for s in suggest_eh_setup(n)["suggestions"] if s["kind"] == "critical_bus"]
+    assert [(s["name"], s["confidence"]) for s in crit] == [("site", "high")]
+    assert "criticality_tier process_critical" in crit[0]["reason"]
+
+
+def test_a_flexible_only_site_stays_a_medium_pick():
+    n = _strip(TPL.BUILDERS["eh_concentrator_staged"]())
+    n.links["criticality_tier"] = "process_flexible"
+    crit = [s for s in suggest_eh_setup(n)["suggestions"] if s["kind"] == "critical_bus"]
+    assert [(s["name"], s["confidence"]) for s in crit] == [("site", "medium")]
+
+
+def test_a_safety_tier_unit_makes_its_bus_a_high_pick():
+    n = _process_site()
+    n.links["criticality_tier"] = ""
+    n.links.at["mill", "criticality_tier"] = "safety"
+    crit = [s for s in suggest_eh_setup(n)["suggestions"] if s["kind"] == "critical_bus"]
+    assert [(s["name"], s["confidence"]) for s in crit] == [("site", "high")]
+    assert "criticality_tier safety" in crit[0]["reason"]
+
+
+def test_a_tiered_unit_on_a_non_electric_bus_is_no_match():
+    """No match must leave the medium largest-load fallback in place."""
+    n = _process_site()
+    n.buses.at["site", "carrier"] = "H2"
+    n.links["criticality_tier"] = ""
+    n.links.at["mill", "criticality_tier"] = "process_critical"
+    crit = [s for s in suggest_eh_setup(n)["suggestions"] if s["kind"] == "critical_bus"]
+    assert [(s["name"], s["confidence"]) for s in crit] == [("aux", "medium")]
+
+
+def test_a_tier_on_a_non_process_link_is_no_match():
+    n = _process_site()
+    n.add("Link", "aux_tie", bus0="aux", bus1="grid", p_nom=10.0)
+    n.links["criticality_tier"] = ""
+    n.links["eh_process"] = n.links["eh_process"].fillna(False).astype(bool)
+    n.links.at["aux_tie", "criticality_tier"] = "process_critical"
+    crit = [s for s in suggest_eh_setup(n)["suggestions"] if s["kind"] == "critical_bus"]
+    assert [(s["name"], s["confidence"]) for s in crit] == [("site", "medium")]
+
+
 def test_a_source_on_a_tonne_bus_is_not_mw_of_supply():
     """A mine's ore feed (t/h) on a product bus is neither a PoC nor MW of supply."""
     n = _process_site()

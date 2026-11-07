@@ -363,11 +363,39 @@ def test_a_listed_input_addition_keeps_the_frozen_hash(live, frozen):
     }
 
 
-def test_an_unlisted_enum_addition_still_breaks(monkeypatch, frozen):
+def test_an_unlisted_enum_widening_is_additive_and_write_accepts_it(
+    tmp_path, monkeypatch, frozen
+):
+    """G2P-21: a widening moves the hash; `checked_tool_inputs` shows it is additive."""
     _ui_open_panel_with_enum(monkeypatch, [*catalogue.RESULTS_TAB_ENUM, "not_listed"])
+    widened = contracts.build()
+    assert (
+        widened["checked_tools"]["ui_open_panel"]
+        != frozen["checked_tools"]["ui_open_panel"]
+    )
+    assert breaking_changes(frozen, widened) == []
+    snapshot = tmp_path / "assurance_contracts.v1.json"
+    snapshot.write_text(json.dumps(frozen))
+    monkeypatch.setattr(contracts, "SNAPSHOT", snapshot)
+    assert contracts.main(["--write"]) == 0
+    assert json.loads(snapshot.read_text()) == widened
+
+
+def test_dropping_an_original_enum_member_is_refused_by_write(
+    tmp_path, monkeypatch, frozen
+):
+    gone = catalogue.RESULTS_TAB_ENUM[0]
+    _ui_open_panel_with_enum(
+        monkeypatch, [t for t in catalogue.RESULTS_TAB_ENUM if t != gone]
+    )
     assert breaking_changes(frozen, contracts.build()) == [
-        "$.checked_tools.ui_open_panel changed"
+        f"$.checked_tool_inputs.ui_open_panel.properties.results_tab.enum drops {gone!r}"
     ]
+    snapshot = tmp_path / "assurance_contracts.v1.json"
+    snapshot.write_text(json.dumps(frozen))
+    monkeypatch.setattr(contracts, "SNAPSHOT", snapshot)
+    assert contracts.main(["--write"]) == 1
+    assert json.loads(snapshot.read_text()) == frozen
 
 
 def test_dropping_a_listed_addition_breaks(monkeypatch, frozen):
@@ -376,9 +404,231 @@ def test_dropping_a_listed_addition_breaks(monkeypatch, frozen):
         monkeypatch, [t for t in catalogue.RESULTS_TAB_ENUM if t != gone]
     )
     monkeypatch.setattr(contracts, "V1_INPUT_ADDITIONS", {})
-    assert breaking_changes(frozen, contracts.build()) == [
-        "$.checked_tool_input_additions.ui_open_panel removed"
+    assert sorted(breaking_changes(frozen, contracts.build())) == [
+        "$.checked_tool_input_additions.ui_open_panel removed",
+        "$.checked_tool_inputs.ui_open_panel.properties.results_tab.enum drops "
+        f"{gone!r}",
     ]
+
+
+def _input_edit(frozen, tool, edit):
+    """`frozen` with `edit` applied to `tool`'s stored input schema, rehashed."""
+    changed = copy.deepcopy(frozen)
+    schema = changed["checked_tool_inputs"][tool]
+    edit(schema)
+    additions = {
+        field: spec["enum"]
+        for field, spec in changed["checked_tool_input_additions"].get(tool, {}).items()
+    }
+    changed["checked_tools"][tool] = contracts._schema_sha256(
+        contracts._v1_input_schema(tool, schema, additions)
+    )
+    return changed
+
+
+def _first_optional(schema):
+    required = set(schema.get("required", []))
+    return next(name for name in schema["properties"] if name not in required)
+
+
+TOOL = "ui_open_panel"
+TAB = ("properties", "results_tab")
+
+
+def _at(schema, path):
+    for key in path:
+        schema = schema[key]
+    return schema
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        pytest.param(
+            lambda s: _at(s, TAB)["enum"].append("new_tab"), id="enum-widening"
+        ),
+        pytest.param(
+            lambda s: s["properties"].__setitem__("extra", {"type": "string"}),
+            id="optional-property",
+        ),
+        pytest.param(
+            lambda s: s["properties"].__setitem__(
+                "nested",
+                {"type": "array", "items": {"type": "string", "enum": ["a", "b"]}},
+            ),
+            id="new-nested-property",
+        ),
+        pytest.param(
+            lambda s: s["properties"].__setitem__("required", {"type": "string"}),
+            id="property-named-required",
+        ),
+        pytest.param(
+            lambda s: s["properties"].__setitem__("default", {"type": "string"}),
+            id="property-named-default",
+        ),
+        pytest.param(
+            lambda s: _at(s, TAB).__setitem__("description", "Reworded."),
+            id="description",
+        ),
+    ],
+)
+def test_widening_a_checked_tool_input_is_additive(frozen, edit):
+    changed = _input_edit(frozen, TOOL, edit)
+    assert changed["checked_tools"][TOOL] != frozen["checked_tools"][TOOL]
+    assert breaking_changes(frozen, changed) == []
+
+
+def test_a_nested_enum_widening_is_additive(frozen):
+    nested = {"type": "array", "items": {"type": "string", "enum": ["a", "b"]}}
+    base = _input_edit(
+        frozen, TOOL, lambda s: s["properties"].__setitem__("nested", nested)
+    )
+    widened = _input_edit(
+        base,
+        TOOL,
+        lambda s: s["properties"]["nested"]["items"]["enum"].append("c"),
+    )
+    assert breaking_changes(base, widened) == []
+    narrowed = _input_edit(
+        base,
+        TOOL,
+        lambda s: s["properties"]["nested"]["items"]["enum"].remove("a"),
+    )
+    assert breaking_changes(base, narrowed) == [
+        f"$.checked_tool_inputs.{TOOL}.properties.nested.items.enum drops 'a'"
+    ]
+
+
+@pytest.mark.parametrize(
+    "edit, expected",
+    [
+        (
+            lambda s: s["properties"].pop(_first_optional(s)),
+            "removed",
+        ),
+        (
+            lambda s: s.setdefault("required", []).append(_first_optional(s)),
+            "adds required",
+        ),
+        (lambda s: _at(s, TAB).__setitem__("pattern", "^a"), "added constraint"),
+        (lambda s: _at(s, TAB).__setitem__("format", "date"), "added constraint"),
+        (lambda s: _at(s, TAB).__setitem__("const", "results"), "added constraint"),
+        (lambda s: _at(s, TAB).__setitem__("type", "integer"), "changed"),
+        (lambda s: _at(s, TAB).__setitem__("default", "summary"), "added default"),
+    ],
+    ids=[
+        "remove-optional",
+        "add-required",
+        "pattern",
+        "format",
+        "const",
+        "type",
+        "add-default",
+    ],
+)
+def test_narrowing_a_checked_tool_input_breaks(frozen, edit, expected):
+    changed = _input_edit(frozen, TOOL, edit)
+    broken = breaking_changes(frozen, changed)
+    assert broken and all(b.startswith(f"$.checked_tool_inputs.{TOOL}") for b in broken)
+    assert any(expected in b for b in broken), broken
+
+
+def test_additional_properties_true_to_false_breaks(frozen):
+    base = _input_edit(
+        frozen, TOOL, lambda s: s.__setitem__("additionalProperties", True)
+    )
+    closed = _input_edit(
+        base, TOOL, lambda s: s.__setitem__("additionalProperties", False)
+    )
+    assert breaking_changes(base, closed) == [
+        f"$.checked_tool_inputs.{TOOL}.additionalProperties changed"
+    ]
+
+
+def test_a_changed_or_removed_default_breaks(frozen):
+    """G1: a default decides what an old call omitting the argument does."""
+    base = _input_edit(frozen, TOOL, lambda s: _at(s, TAB).__setitem__("default", "a"))
+    changed = _input_edit(base, TOOL, lambda s: _at(s, TAB).__setitem__("default", "b"))
+    removed = _input_edit(base, TOOL, lambda s: _at(s, TAB).pop("default"))
+    where = f"$.checked_tool_inputs.{TOOL}.properties.results_tab.default"
+    assert breaking_changes(base, changed) == [f"{where} changed"]
+    assert breaking_changes(base, removed) == [f"{where} removed"]
+
+
+@pytest.mark.parametrize("name", ["title", "description", "default", "required"])
+def test_a_property_named_like_a_keyword_is_a_property(frozen, name):
+    """G2: inside `properties` every key is a property name, never a keyword."""
+    prop = {"type": "string"}
+    base = _input_edit(frozen, TOOL, lambda s: s["properties"].__setitem__(name, prop))
+    assert breaking_changes(frozen, base) == []
+    removed = _input_edit(base, TOOL, lambda s: s["properties"].pop(name))
+    assert breaking_changes(base, removed) == [
+        f"$.checked_tool_inputs.{TOOL}.properties.{name} removed"
+    ]
+
+
+def test_the_hash_skip_fails_closed(frozen):
+    """G3: only a hash its stored schema explains, on both sides, is skipped."""
+    widened = _input_edit(frozen, TOOL, lambda s: _at(s, TAB)["enum"].append("x"))
+    changed = f"$.checked_tools.{TOOL} changed"
+    old_without = copy.deepcopy(frozen)
+    del old_without["checked_tool_inputs"]
+    assert changed in breaking_changes(old_without, widened)
+    old_missing_tool = copy.deepcopy(frozen)
+    del old_missing_tool["checked_tool_inputs"][TOOL]
+    assert changed in breaking_changes(old_missing_tool, widened)
+    new_missing_tool = copy.deepcopy(widened)
+    del new_missing_tool["checked_tool_inputs"][TOOL]
+    assert changed in breaking_changes(frozen, new_missing_tool)
+    bare_hash = copy.deepcopy(frozen)
+    bare_hash["checked_tools"][TOOL] = "0" * 64
+    assert breaking_changes(frozen, bare_hash) == [changed]
+    removed = copy.deepcopy(widened)
+    del removed["checked_tools"][TOOL]
+    del removed["checked_tool_inputs"][TOOL]
+    assert sorted(breaking_changes(frozen, removed)) == [
+        f"$.checked_tool_inputs.{TOOL} removed",
+        f"$.checked_tools.{TOOL} removed",
+    ]
+
+
+def test_a_new_checked_tool_input_is_additive(frozen):
+    added = copy.deepcopy(frozen)
+    added["checked_tools"]["new_tool"] = contracts._schema_sha256({"type": "object"})
+    added["checked_tool_inputs"]["new_tool"] = {"type": "object"}
+    assert breaking_changes(frozen, added) == []
+
+
+# The v1 hashes as master froze them before G2P-21 added `checked_tool_inputs`.
+V1_HASHES = {
+    "compare_project_runs": "5ff81e9828bdd6ccb997ace8ad45a83d40efafd2ac4860887ca0f17247238a5f",
+    "get_aggregate_load": "49cd7d3066d8405553280d53afeea4b809936b2157ae9e0670f4bba89eeb66a2",
+    "get_component": "8fcf1af620907ec9eea2e325e5981fd665785455bab256b5ead3f13987acf2b3",
+    "get_run_evidence": "4abaac2419832365fa560a3c15252f7900510c90f2b42c052298b438a97032cb",
+    "get_timeseries": "379ddbdecfeb262575eee58c147e81cb6ffa59905d2c8738d12519f3303a5c88",
+    "list_components": "6e4521eb8f8ac1bc72ab54928c82adbab7b47bf4bb8f627ff00b10ceb2dfa353",
+    "ui_open_panel": "93e4ba6a83996226176f7ca0cf7798c8bb96bcd0c67da8819140f4b565f61cba",
+    "update_component": "620554ac6bc2ecc1d9abf2620676d5e050b7c0f5ad50d0c0d00c1de13f908734",
+}
+
+
+def test_adding_the_inputs_section_keeps_every_v1_hash(tmp_path, monkeypatch, live):
+    """G4: on master's tree --write adds only `checked_tool_inputs`."""
+    assert live["checked_tools"] == V1_HASHES
+    before = copy.deepcopy(live)
+    del before["checked_tool_inputs"]
+    del before["directions"]["checked_tool_inputs"]
+    snapshot = tmp_path / "assurance_contracts.v1.json"
+    snapshot.write_text(json.dumps(before))
+    monkeypatch.setattr(contracts, "SNAPSHOT", snapshot)
+    assert contracts.main(["--write"]) == 0
+    written = json.loads(snapshot.read_text())
+    assert set(written) - set(before) == {"checked_tool_inputs"}
+    assert {k: v for k, v in written.items() if k != "directions"} == {
+        **{k: v for k, v in before.items() if k != "directions"},
+        "checked_tool_inputs": live["checked_tool_inputs"],
+    }
+    assert written["checked_tools"] == V1_HASHES
 
 
 @pytest.mark.parametrize(

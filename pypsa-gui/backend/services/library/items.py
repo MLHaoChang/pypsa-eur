@@ -204,16 +204,16 @@ def _write(target: Path, data: bytes, digest: str) -> None:
 class TariffCurrencyRequired(ValueError):
     """A Library tariff whose currency is neither stated nor implied by its jurisdiction
     (gridspine-library-eu 01, GK B C4). The route answers 422 `tariff_currency_required`,
-    the message under `jurisdiction`, the field a user can fix."""
+    the message under `currency`, the field a user can fix."""
 
     code = "tariff_currency_required"
 
     def __init__(self, jurisdiction: str):
-        # Words: UX (10), 2026-11-06. The builder lists it as "jurisdiction: …" and has no
-        # currency input yet, so it names only the fix it offers (issue 02 adds the other).
+        # Words: UX (10), 2026-11-06; the second fix returned with the builder's currency
+        # input (gridspine-library-eu 02).
         super().__init__(
             f"\u201c{jurisdiction}\u201d names no country, so the tariff's currency is unknown. "
-            "Use the country's two-letter code, such as NL, GB or US.")
+            "Use the country's two-letter code, such as NL, GB or US, or state the currency.")
 
 
 class PreparedItem(NamedTuple):

@@ -355,3 +355,27 @@ def test_a_set_currency_that_differs_still_refuses():
     _price_net(finance={"currency": "EUR"})
     with pytest.raises(InvalidSeriesUnitError, match="counts in EUR"):
         _apply_series(_gen("tou", dict(_TOU, currency="USD"), ids=("grid",)), "grid")
+
+
+def test_mixed_banded_and_unbanded_pumps_report_floored_hours_per_id():
+    """cop_floored_hours is never a sum across pumps: it is per id, and the headline
+    is the worst single pump."""
+    res = _gen("cop", {"source": "ground", "source_c": -10.0, "sink_c": 40.0,
+                       "eta": 0.2, "sink_c_by_id": {"HOT": 70.0}},
+               ids=("HOT", "COLD"))
+    by_id = res.meta["cop_floored_hours_by_id"]
+    assert by_id["COLD"] == 0
+    assert 0 < by_id["HOT"] <= 8760
+    assert res.meta["cop_floored_hours"] == max(by_id.values())
+    assert res.meta["cop_floored_hours"] <= 8760
+    assert all(w.startswith("cop_floored") and "HOT" in w for w in res.meta["warnings"])
+
+
+def test_two_floored_pumps_report_the_worst_one_not_the_sum():
+    """Both pumps floor a different, nonzero number of hours; the headline is the max."""
+    res = _gen("cop", {"source": "air", "sink_c": 45.0, "eta": 0.2, **_AMB,
+                       "sink_c_by_id": {"A": 70.0, "B": 80.0}}, ids=("A", "B"))
+    by_id = res.meta["cop_floored_hours_by_id"]
+    assert 0 < by_id["A"] < by_id["B"] < 8760
+    assert res.meta["cop_floored_hours"] == by_id["B"]
+    assert res.meta["cop_floored_hours"] != sum(by_id.values())

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Library tariff builder has a currency (ISO 4217) input, defaulting from the jurisdiction; the `tariff_currency_required` error shows beside it, says "or state the currency", and the builder's error list uses the form's label words.

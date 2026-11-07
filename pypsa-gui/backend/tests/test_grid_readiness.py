@@ -1195,3 +1195,21 @@ def test_the_flicker_row_equals_the_campus_studys_flicker_csv(tmp_path):
     poc = pd.read_csv(tmp_path / "run" / FLICKER_CSV).query("level == 'poc'").iloc[0]
     row = _flicker_row_of(tmp_path, pypsa.Network(str(path)))
     assert row["project_value"] == pytest.approx(poc["pst"], rel=1e-9)
+
+
+def test_a_yes_flagged_process_unit_is_in_the_rapid_voltage_change_screen():
+    import pandas as pd
+
+    links = pd.DataFrame({"eh_process": ["yes", "True", "no", ""]}, index=list("abcd"))
+    assert G._process_units(links) == ["a", "b"]
+    assert G._process_units(None) == [] and G._process_units(links.drop(columns="eh_process")) == []
+
+
+def test_without_gridspine_there_are_no_process_units_to_screen(monkeypatch):
+    import sys
+
+    import pandas as pd
+
+    monkeypatch.setitem(sys.modules, "gridspine.drivers.process_chain", None)  # makes the import raise
+    links = pd.DataFrame({"eh_process": ["yes", True]}, index=["a", "b"])
+    assert G._process_units(links) == []

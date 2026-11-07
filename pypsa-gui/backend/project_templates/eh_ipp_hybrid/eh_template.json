@@ -33,7 +33,7 @@
     },
     {
       "item": "export limit",
-      "note": "from the connection offer; below the plants' 110 MW (overbuild 1.57)",
+      "note": "from the connection offer; below the plants' 101.7 MW (overbuild 1.45)",
       "source": "assumed",
       "value": "70 MW (grid_export)"
     },
@@ -53,7 +53,7 @@
       "item": "PV plant",
       "note": "solar-utility costs from defaults pack 2026-10-26",
       "source": "pack",
-      "value": "50 MWp, fixed new build"
+      "value": "50 MWp (41.7 MW AC at DC/AC 1.2), fixed new build"
     },
     {
       "item": "battery",

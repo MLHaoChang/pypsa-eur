@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useId } from 'react'
+import { Fragment, useState, useRef, useEffect, useCallback, useId } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   FolderInput,
@@ -12,6 +12,8 @@ import { formatApiDetail } from '../api/client'
 import { useAuthMode } from '../auth/AuthModeProvider'
 import { useCreateFromTemplate, useOpenInWorkbench, useOptionalNavigate } from '../hooks/useCreateFromTemplate'
 import { useHubDesignStore } from '../pages/hubDesign/hubDesignStore'
+import { DcLoadForm } from '../pages/hubDesign/cards/DcLoadForm'
+import { DC_TEMPLATES } from '../pages/hubDesign/dcLoadForm'
 import FromFolderTab from './FromFolderTab'
 import { ioApi } from '../api/io'
 import { networkApi } from '../api/network'
@@ -295,8 +297,11 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
       })
       return
     }
+    // A data center opens its setup form under the tile instead (DC 22).
+    if (DC_TEMPLATES.includes(id)) { setDcForm(f => (f === id ? null : id)); return }
     importMut.mutate(id)
   }, [importMut])
+  const [dcForm, setDcForm] = useState<string | null>(null)
 
   // Which card (if any) is mid-import — used to show a per-card spinner label.
   const pendingId = importMut.isPending ? importMut.variables : null
@@ -328,9 +333,10 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
           const loading = pendingId === t.id
           const disabled = importMut.isPending || !t.available
           return (
+            <Fragment key={t.id}>
             <button
-              key={t.id}
               onClick={() => handlePick(t.id, t.available)}
+              aria-expanded={DC_TEMPLATES.includes(t.id) ? dcForm === t.id : undefined}
               disabled={disabled}
               title={t.available
                 ? `Create a new project from the ${t.name} template`
@@ -357,6 +363,13 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
               <div className="text-[11px] text-muted leading-relaxed flex-1">{t.description}</div>
               <div className="text-[10px] text-muted font-mono">{t.buses} buses · {t.lines} lines · {t.badge}</div>
             </button>
+            {dcForm === t.id && (
+              <div className="col-span-2">
+                <DcLoadForm templateId={t.id} templateName={t.name} create={importMut}
+                  onCancel={() => setDcForm(null)} disabledReason={null} />
+              </div>
+            )}
+            </Fragment>
           )
         })}
         <button
