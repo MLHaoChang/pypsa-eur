@@ -15,7 +15,93 @@ values read from a report); "mixed:<a>+<b>" combines two columns;
 
 import pandas as pd
 
-WEIGHT_BASIS: dict[str, str] = {}  # filled below
+WEIGHT_BASIS: dict[str, str] = {
+    # calculations.py
+    "dispatch_energy": "generators",
+    "marginal_expenditure": "objective",
+    "peak_dispatch": "none",
+    "annual_fixed_cost": "none",
+    "allocated_fixed_cost": "derived",
+    "total_cost": "derived",
+    "cost_delta": "derived",
+    "cost_change_percent": "derived",
+    # storage_calculations.py: duration = stores weights
+    "charged_energy": "stores",
+    "discharged_energy": "stores",
+    "net_storage_energy": "derived",
+    "peak_charging_power": "none",
+    "peak_discharging_power": "none",
+    "final_state_of_charge": "none",
+    # storage_costs.py
+    "storage_discharge_expenditure": "objective",
+    "storage_holding_expenditure": "objective",
+    "storage_operating_expenditure": "derived",
+    # carrier_calculations.py: storage members through storage.calculate
+    "carrier_generator_energy": "generators",
+    "carrier_peak_generator_output": "none",
+    "carrier_storage_discharged_energy": "stores",
+    "carrier_storage_charged_energy": "stores",
+    # branch_calculations.py
+    "peak_branch_utilisation": "none",
+    "hours_above_rating": "generators",
+    "peak_branch_flow": "none",
+    "branch_rating": "none",
+    "max_branch_utilisation": "none",
+    "branches_above_rating": "none",
+    # lost_load_calculations.py
+    "lost_load_energy": "generators",
+    "peak_shed": "none",
+    "shed_hours": "generators",
+    "lost_load_cost": "objective",
+    # price_calculations.py: the mean divides by the sum of weights
+    "mean_price": "generators",
+    "min_price": "none",
+    "max_price": "none",
+    "hours_at_voll": "generators",
+    # emissions_calculations.py
+    "generator_emissions": "generators",
+    "total_emissions": "generators",
+    "co2_cap_shadow_price": "none",
+    # curtailment_calculations.py
+    "available_energy": "generators",
+    "curtailed_energy": "generators",
+    "curtailment_share": "generators",
+    # capacity_calculations.py
+    "optimal_capacity": "none",
+    "capacity_change": "none",
+    "configured_capacity": "none",
+    # storage_cycles_calculations.py
+    "window_discharged_energy": "stores",
+    "energy_capacity": "none",
+    "equivalent_cycles": "stores",
+    # energy_balance_calculations.py: the state change is rescaled by generator over store weights
+    "generation_energy": "generators",
+    "served_energy": "generators",
+    "unserved_energy": "generators",
+    "storage_change": "mixed:generators+stores",
+    "export_losses_and_conversion": "derived",
+    # site_import_calculations.py
+    "grid_import_energy": "generators",
+    "peak_grid_import": "none",
+    "export_energy": "generators",
+    "hours_at_import_limit": "generators",
+    # investment_calculations.py: yearly rows of the stored report
+    "equity_npv": "none",
+    "project_npv": "none",
+    "equity_irr": "none",
+    "project_irr": "none",
+    "lcoe_nominal": "none",
+    "lcoe_real": "none",
+    # copt_calculations.py: years apply only on a multi-period network
+    "screening_lole": "generators*years",
+    "screening_eue": "generators*years",
+    "screening_lolp_max": "none",
+    # grid_readiness_calculations.py: row counts
+    "checked_pass": "none",
+    "checked_warn": "none",
+    "checked_fail": "none",
+    "not_checked": "none",
+}
 
 
 def window(index, scope):
