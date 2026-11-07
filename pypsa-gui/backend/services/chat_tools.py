@@ -5170,6 +5170,14 @@ def _acting_session(db):
     return db.get(SessionRow, uuid.UUID(session_id))
 
 
+def _assistant_strict():
+    """AA-05 S4: the in-process switch that runs a report route call strict
+    (`services.reports.report_job.assistant_strict`)."""
+    from services.reports.report_job import assistant_strict as _strict
+
+    return _strict()
+
+
 def _route(handler, *args, **kwargs):
     """Call a project-router handler with the acting identity injected."""
     with _acting() as (db, user):
@@ -8256,6 +8264,12 @@ def _compact_section(section: dict, tables: dict, figures: dict) -> dict:
             "verified": [v.get("text") if isinstance(v, dict) else v
                          for v in audit.get("verified") or []],
         }
+        from services.reports.formatting import is_withheld_section
+
+        if is_withheld_section(section):
+            # AA-05 S4 (V1): a strict job took these out of the prose; the
+            # placeholder callout stands in the blocks, the values only here.
+            out["audit"]["withheld"] = True
     return out
 
 
@@ -8321,7 +8335,8 @@ def generate_report(
         sections=[str(s) for s in sections] if sections else None,
         instruction=instruction, template_file_id=template_file_id or None,
     )
-    result = _route(_h, body, project=project)
+    with _assistant_strict():  # AA-05 S4 (P1): the assistant's report is strict
+        result = _route(_h, body, project=project)
     return {
         **result,
         "message": (
@@ -8474,7 +8489,8 @@ def regenerate_report_section(
 
     project = _report_project()
     body = RegenerateSectionBody(instruction=instruction, language=language)
-    result = _route(_h, report_id, section_id, body, project=project)
+    with _assistant_strict():  # AA-05 S4 (P1): the assistant's rewrite is strict
+        result = _route(_h, report_id, section_id, body, project=project)
     return {
         **result,
         "message": (
@@ -8499,8 +8515,9 @@ def export_report_docx(
 
     project = _report_project()
     rid = report_id if report_id is not None else _newest_report_id(project)
-    meta = _route(_h, rid, ExportReportBody(version=version, filename=filename),
-                  project=project)
+    with _assistant_strict():  # AA-05 S4 (P4): the export keeps its disclosures
+        meta = _route(_h, rid, ExportReportBody(version=version, filename=filename),
+                      project=project)
     return {
         "file_id": meta["file_id"],
         "filename": meta["filename"],
@@ -8690,8 +8707,9 @@ def export_report_pdf(
 
     project = _report_project()
     rid = report_id if report_id is not None else _newest_report_id(project)
-    meta = _route(_h, rid, ExportReportBody(version=version, filename=filename, format="pdf"),
-                  project=project)
+    with _assistant_strict():  # AA-05 S4 (P4): the export keeps its disclosures
+        meta = _route(_h, rid, ExportReportBody(version=version, filename=filename, format="pdf"),
+                      project=project)
     return {
         "file_id": meta["file_id"],
         "filename": meta["filename"],

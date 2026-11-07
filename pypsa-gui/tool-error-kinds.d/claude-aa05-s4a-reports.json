@@ -1,0 +1,3 @@
+{"kinds": {
+  "report_disclosure_missing": {"surface": "inline", "why": "The assistant's report export refuses (409, routers/reports.py _check_disclosures) when the rendered document lost a required disclosure of the stored version; a strict report job fails with the same kind and saves nothing (AA-05 S4a). The model reads the message and tells the user the export was not made; it stays the gray tool line."}
+}}

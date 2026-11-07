@@ -2,11 +2,12 @@
 07, design §3 stage 7).
 
 The runner alone starts it (`start`), on the run's bound context, and it is
-the only caller that passes `strict=True` and `run_binding=(task path, lease
-owner)` to the report job, plus the `harness_run` evidence source (GK B's
-stage-7 ruling). The route and the chat tool never set either: a human
-request through them is never strict and never charged to a run, even while
-a run sits at this stage. A chat call of `generate_report` never claims the
+the only caller that passes `run_binding=(task path, lease owner)` to the
+report job, plus the `harness_run` evidence source (GK B's stage-7 ruling),
+and it passes `strict=True`. The human route never sets either: a human
+request through it is never strict and never charged to a run, even while a
+run sits at this stage. The chat tools run strict through the in-process
+`report_job.assistant_strict` switch (AA-05 S4a), never charged to a run. A chat call of `generate_report` never claims the
 step either (`assistant_tasks.begin_step` leaves native steps alone).
 
 `settle` settles the waiting step from the job record on the run's
