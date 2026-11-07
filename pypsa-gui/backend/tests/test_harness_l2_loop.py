@@ -24,7 +24,7 @@ from tests.test_harness_envelope import BLOCK, envelope_of, granted, on_run, pro
 from tests.test_harness_envelope_atomic import ATOMIC, eh, writer  # noqa: F401
 from tests.test_harness_immutable_solve import held_queue  # noqa: F401
 from tests.test_harness_run_loops import Script, call, go, rated, say  # noqa: F401
-from tests.test_harness_run_skeleton import site, start  # noqa: F401
+from tests.test_harness_run_skeleton import site, start, without_eh_study  # noqa: F401
 from tests.test_harness_runner import (  # noqa: F401
     detached,
     fake_report_provider,
@@ -56,7 +56,7 @@ def infeasible(eh, monkeypatch):
             run_profiles.PROFILES,
             "eh_site@1",
             {
-                **run_profiles.PROFILES["eh_site@1"],
+                **without_eh_study(run_profiles.PROFILES["eh_site@1"]),
                 "envelope": dict(
                     ATOMIC, budget={"solves": solves, "rounds": 6, "wall_time_h": 8.0}
                 ),
@@ -428,9 +428,11 @@ def test_the_l2_block_leaves_the_pinned_envelope_and_tunables_as_they_were():
         "rounds": 2,
         "changes": 2,
     }
-    assert (
-        "result_gate" not in run_profiles.EH_SITE["stages"]
-    )  # the GENERIC block: envelope and tunable untouched
+    # the GENERIC block, envelope and tunables untouched: issue 07 B2 adds rules only
+    shipped = run_profiles.EH_SITE["stages"]["result_gate"]
+    assert {k: v for k, v in shipped.items() if k != "rules"} == {
+        k: v for k, v in run_profiles.GENERIC["result_gate"].items() if k != "rules"
+    }
 
 
 @pytest.mark.parametrize(
@@ -653,7 +655,7 @@ def test_a_scorecard_block_rule_with_no_rows_ends_the_run_needs_user(
         "severity": "block",
         "basis": "issue 05, C5",
     }
-    current = run_profiles.PROFILES["eh_site@1"]
+    current = without_eh_study(run_profiles.PROFILES["eh_site@1"])
     result_gate = copy.deepcopy(run_profiles.GENERIC["result_gate"])
     result_gate["rules"] = [*result_gate["rules"], scorecard]
     monkeypatch.setitem(

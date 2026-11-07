@@ -22,7 +22,7 @@ from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline, dispatch, edit, helpers_state, session, wait_until,
 )
 from tests.test_harness_envelope import envelope_of, granted, profile, refusals, stopped, until  # noqa: F401
-from tests.test_harness_run_skeleton import site  # noqa: F401
+from tests.test_harness_run_skeleton import site, without_eh_study  # noqa: F401
 from tests.test_harness_runner import detached, frames_of, settle, task_path  # noqa: F401
 
 # eh_site@1's edit shapes (`run_profiles.EH_SITE`), on the baseline's G1 and a storage unit S1.
@@ -57,10 +57,11 @@ def value(component, name, attr):
 
 @pytest.fixture
 def eh(granted, monkeypatch):
-    """A granted run on eh_site@1's edit shapes."""
+    """A granted run on eh_site@1's edit shapes (without its EH study: the
+    baseline is no Energy Hub site)."""
     tunable = [{"component": "Generator", "attr": "p_nom_max"}, {"component": "StorageUnit", "attr": "p_nom_max"},
                {"component": "StorageUnit", "attr": "max_hours"}]
-    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", {**run_profiles.EH_SITE, "envelope": ATOMIC,
+    monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", {**without_eh_study(run_profiles.EH_SITE), "envelope": ATOMIC,
                                                               "tunable": tunable})
     network = ctx().network
     network.generators.at["G1", "p_nom_max"] = 40.0

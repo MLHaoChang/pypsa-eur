@@ -160,6 +160,9 @@ class DataCentreLoadSpec(BaseModel):
     critical_share: float = Field(ge=0, le=1)
     curtailable_share: float = Field(ge=0, le=1)
     curtail_max_duration_h: float | None = Field(default=None, gt=0)
+    #: DC-07 S2: what curtailing the curtailable share costs (EUR/MWh). None
+    #: (the default) keeps curtailment off; 0 only when given.
+    curtailment_price_eur_per_mwh: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     workload_shift_window_h: float | None = Field(default=None, gt=0)
     gensets: list[GensetSpec] = Field(default_factory=list)
     waste_heat_export: bool = False

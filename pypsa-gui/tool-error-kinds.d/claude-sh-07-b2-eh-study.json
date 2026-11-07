@@ -1,0 +1,4 @@
+{"kinds": {
+  "eh_args": {"surface": "inline", "why": "A run's run_eh_study step was called with arguments other than the ones frozen from the profile and the project's reliability goal, or the goal changed since they were frozen; the run stops for the user to review it again."},
+  "eh_budget": {"surface": "inline", "why": "A run's run_eh_study step needs more solves than the run's envelope has left; nothing is started and the run stops for the user."}
+}}

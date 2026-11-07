@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Site 3D has an "Ask the assistant" row under its part tabs: Explain (the selected building, else the open part) and Prepare a change, and a blocker line in Site 3D gains Ask for help. Each opens the assistant with the question prefilled and sends nothing. While a Site is open in Site 3D, the companion is told which Site and part you are looking at.

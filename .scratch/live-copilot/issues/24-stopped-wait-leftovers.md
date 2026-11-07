@@ -3,7 +3,7 @@
 
 # LC-24 — after Stop, a waiting turn leaves a stuck row and a false promise
 
-Status: ready-for-agent
+Status: done
 Model: Sonnet
 Type: task
 Baseline: master `06fa29b422c456e39b5e44c0312275fc4c51345e`

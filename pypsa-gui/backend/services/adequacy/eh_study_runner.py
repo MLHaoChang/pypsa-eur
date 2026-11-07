@@ -467,4 +467,6 @@ def start_eh_study(
         "archetype": archetype,
         "budget_solves": budget,
         "goal_sources": plan["goal_sources"],
+        # Study harness 07 B2 (F3): this call's own record, as published above.
+        "started_at": record["started_at"],
     }

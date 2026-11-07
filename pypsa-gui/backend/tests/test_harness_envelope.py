@@ -17,7 +17,7 @@ from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline, dispatch, edit, helpers_state, session, wait_until,
 )
-from tests.test_harness_run_skeleton import site, start  # noqa: F401
+from tests.test_harness_run_skeleton import site, start, without_eh_study  # noqa: F401
 from tests.test_harness_runner import detached, fake_report_provider, frames_of, settle, task_path  # noqa: F401
 
 # The baseline project has Bus B1, Generator G1 (p_nom 20, marginal_cost 10)
@@ -37,8 +37,9 @@ BLOCK = {
 def profile(monkeypatch):
     def use(block=BLOCK):
         tunable = [{"component": "Generator", "attr": a} for a in ("p_nom", "marginal_cost")]
-        monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", {**run_profiles.EH_SITE, "envelope": block,
-                                                                  "tunable": tunable})
+        # without issue 07 B2's EH study: the baseline is no Energy Hub site
+        monkeypatch.setitem(run_profiles.PROFILES, "eh_site@1", {**without_eh_study(run_profiles.EH_SITE),
+                                                                  "envelope": block, "tunable": tunable})
     use()
     return use
 

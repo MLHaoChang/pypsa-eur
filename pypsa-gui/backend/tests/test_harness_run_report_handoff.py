@@ -36,6 +36,7 @@ from tests.test_harness_run_skeleton import (  # noqa: F401
     site,
     start,
     stages,
+    without_eh_study,
 )
 from tests.test_harness_runner import (  # noqa: F401
     Clicks,
@@ -749,9 +750,11 @@ def test_b1a_a_new_run_records_who_skipped_a_stage(session, site, monkeypatch):
         run_profiles.PROFILES,
         "eh_site@1",
         {
-            **run_profiles.EH_SITE,
+            **without_eh_study(run_profiles.EH_SITE),
             "stages": {
-                k: v for k, v in run_profiles.EH_SITE["stages"].items() if k != "report"
+                k: v
+                for k, v in without_eh_study(run_profiles.EH_SITE)["stages"].items()
+                if k != "report"
             },
         },
     )
@@ -781,7 +784,7 @@ def test_b1b_the_report_card_is_crossed_only_on_a_grant_that_lists_it(
         run_profiles.PROFILES,
         "eh_site@1",
         {
-            **run_profiles.EH_SITE,
+            **without_eh_study(run_profiles.EH_SITE),
             "envelope": {**BLOCK, "runs": runs},
             "tunable": tunable,
         },
