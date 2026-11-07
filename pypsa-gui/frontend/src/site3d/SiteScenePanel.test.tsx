@@ -53,7 +53,7 @@ describe('Site 3D scene panel', () => {
     expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Map', 'Generate', 'Model', 'Results'])
     expect(screen.getByRole('tablist').textContent).not.toContain('·')
     fireEvent.click(screen.getByTestId('site-part-model'))
-    expect(screen.getByTestId('scene-blocker-assign_native').textContent).toBe('Buildings only: configure model elements to map them › Loads · Ask for help')
+    expect(screen.getByTestId('scene-blocker-assign_native').textContent).toBe('Buildings only: configure model elements to map them › LoadsAsk for help')
   })
 
   it('the companion row follows the open part; Ask for help sits on the blocker line (SC-07 S2)', () => {
@@ -176,7 +176,7 @@ describe('Site 3D scene panel', () => {
         home: { guided: { section: 'results', drawer: null, open: 'request_then_scroll' }, expert: { panel: 'results' } } } })
     view()
     expect(screen.getByTestId('scene-blocker-play_results').textContent)
-      .toBe('Not available yet: comes in a later version › Results · Ask for help')
+      .toBe('Not available yet: comes in a later version › ResultsAsk for help')
   })
 
   it('an expired preview is dropped with its error, and the error clears on a part change', async () => {

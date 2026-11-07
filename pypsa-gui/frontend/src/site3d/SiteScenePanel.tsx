@@ -75,8 +75,8 @@ function Blocker({ action, where }: { action: SceneAction | undefined; where: st
           {action.blocker.link} {SECTION_WORDS[section] ?? section}
         </button></>
       )}
-      {/* The separator wraps with its button, never left dangling at a line end. */}
-      {' '}<span className="whitespace-nowrap">· <BlockerAsk where={where} reason={action.blocker.reason} /></span>
+      {/* Its own line under the reason (UX #1226): the button never fits beside it at the panel's width. */}
+      <span className="block mt-1"><BlockerAsk where={where} reason={action.blocker.reason} /></span>
     </span>
   )
 }
