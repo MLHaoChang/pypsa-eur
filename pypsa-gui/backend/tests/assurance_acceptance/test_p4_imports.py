@@ -292,6 +292,28 @@ def test_a_csv_export_seals_the_table_as_written(baseline, client):
         "coverage": "rows_as_written",
         "limitations": ["Cells are text as written."],
     }
+    assert manifest["render_spec"] == {
+        "format": "csv",
+        "encoding": "utf-8",
+        "delimiter": ",",
+        "line_terminator": "\r\n",
+        "formula_escaping": "EXPORT-INJECT-1",
+    }
+    assert manifest["render_spec_sha256"] == canonical_sha256(manifest["render_spec"])
+    assert sorted(manifest) == sorted(
+        [
+            "schema_version",
+            "project_id",
+            "source_kind",
+            "dataset",
+            "render_spec",
+            "dataset_sha256",
+            "render_spec_sha256",
+            "artifact_sha256",
+            "validity",
+        ]
+    )
+    assert (manifest["schema_version"], manifest["source_kind"]) == (1, "table_export")
     assert client.get(export["download_url"]).status_code == 200
     (item,) = delivered_items(client, export)
     assert item["dataset_sha256"] == manifest["dataset_sha256"]
@@ -326,6 +348,15 @@ def test_an_excel_export_seals_what_the_file_holds(baseline, client, case):
     export = chat_tools.export_to_excel({"Data": given}, "t.xlsx")
     manifest = sidecar(export)["manifest"]
     assert manifest["dataset"] == {"sheets": [{"name": "Data", "rows": held}]}
+    assert manifest["render_spec"] == {
+        "format": "xlsx",
+        "sheets": ["Data"],
+        "formula_escaping": "EXPORT-INJECT-1",
+        "numbers": "%.16g",
+    }
+    assert manifest["validity"]["limitations"] == [
+        "Numbers are stored to 16 significant digits; NaN, infinity and empty text are empty cells."
+    ]
     data = client.get(export["download_url"])
     assert data.status_code == 200
     assert (
