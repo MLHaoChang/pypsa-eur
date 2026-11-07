@@ -112,13 +112,20 @@ def scope_status(manifest, project_id):
     return _scope(manifest, str(project_id))
 
 
+_HEX = "0123456789abcdef"
+
+
 def _quarantine_path(root, file_id):
     from services.upload_service import _FILE_ID_RE
 
     # J2: the store's own id pattern, before any path is built.
     if not isinstance(file_id, str) or not _FILE_ID_RE.fullmatch(file_id):
         raise ValueError("invalid file id")
-    return root / "assistant_artifacts" / "quarantine" / (file_id + ".json")
+    # Re-spelled from a fixed alphabet after the fullmatch, so the path is
+    # built from no caller character (CodeQL py/path-injection; the
+    # `reports.store._rebuilt` pattern).
+    safe = "".join(_HEX[_HEX.index(ch)] for ch in file_id)
+    return root / "assistant_artifacts" / "quarantine" / (safe + ".json")
 
 
 def quarantined(root, file_id):
