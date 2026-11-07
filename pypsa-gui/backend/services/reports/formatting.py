@@ -99,23 +99,31 @@ def withheld_placeholder(count: int) -> str:
     return f"{WITHHELD_PREFIX}{count} {noun} could not be checked against the study; see {APPENDIX_NAME}."
 
 
+def _get(obj: Any, key: str) -> Any:
+    return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+
+
+def is_withheld_block(block: Any) -> bool:
+    """True for a strict job's withheld placeholder (a `Block` or its dict)."""
+    text = _get(block, "text")
+    return (
+        _get(block, "type") == "callout"
+        and _get(block, "kind") == "gap"
+        and isinstance(text, str)
+        and text.startswith(WITHHELD_PREFIX)
+    )
+
+
 def is_withheld_section(section: Any) -> bool:
     """True when `section` (a `Section` or its JSON dict) carries a strict
     job's withheld placeholder."""
-    blocks = section.get("blocks") if isinstance(section, dict) else getattr(section, "blocks", None)
-    for block in blocks or []:
-        kind, btype, text = ((block.get("kind"), block.get("type"), block.get("text")) if isinstance(block, dict)
-                             else (getattr(block, "kind", None), getattr(block, "type", None), getattr(block, "text", None)))
-        if btype == "callout" and kind == "gap" and isinstance(text, str) and text.startswith(WITHHELD_PREFIX):
-            return True
-    return False
+    return any(is_withheld_block(block) for block in _get(section, "blocks") or [])
 
 
 def withheld_marked(section: Any) -> list[str]:
     """The section's unverified numbers as the appendix lists them: marked
     "(unverified, withheld)" in a withheld section (V1), else as they are."""
-    audit = section.get("audit") if isinstance(section, dict) else getattr(section, "audit", None)
-    values = (audit.get("unverified") if isinstance(audit, dict) else getattr(audit, "unverified", None)) or []
+    values = _get(_get(section, "audit"), "unverified") or []
     if not is_withheld_section(section):
         return list(values)
     return [f"{value} (unverified, withheld)" for value in values]

@@ -89,7 +89,7 @@ from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.http_filenames import content_disposition
 from services.reports import pdf, roundtrip_service, store, templates
 from services.reports.docx_reader import TemplateOutline
-from services.reports.report_job import assistant_strict_active, disclosure_texts
+from services.reports.report_job import assistant_strict_active, disclosure_texts, missing_disclosures
 
 if TYPE_CHECKING:
     from services.reports.evidence import Evidence
@@ -585,7 +585,7 @@ def _check_disclosures(doc: Any, data: bytes) -> None:
 
     try:
         text = body_text(data)
-        lost = [t for t in disclosure_texts(doc) if t not in text]
+        lost = missing_disclosures(disclosure_texts(doc), text)
     except Exception:  # noqa: BLE001 -- fail closed: an export that cannot be read back is not shown complete
         logger.warning("reports: the export could not be read back for its disclosure check")
         lost = ["(unreadable export)"]

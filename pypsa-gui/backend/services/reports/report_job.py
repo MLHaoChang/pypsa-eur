@@ -52,7 +52,7 @@ from services.reports.generator import (
     SectionFailure,
     generate_section,
 )
-from services.reports.formatting import WITHHELD_PREFIX, withheld_placeholder
+from services.reports.formatting import is_withheld_block, withheld_placeholder
 from services.reports.number_audit import audit
 from services.reports.prompts import system_blocks
 
@@ -264,8 +264,7 @@ def _without_pending(section: Section) -> Section:
 def _code_blocks(section: Section) -> list[Block]:
     """The section's code-written blocks: not its prose, and not a strict
     job's withheld placeholder (it stood for prose that is written anew)."""
-    return [b for b in section.blocks if b.type not in _PROSE_TYPES
-            and not (b.type == "callout" and b.kind == "gap" and b.text.startswith(WITHHELD_PREFIX))]
+    return [b for b in section.blocks if b.type not in _PROSE_TYPES and not is_withheld_block(b)]
 
 
 def _with_prose(section: Section, draft: SectionDraft, facts) -> Section:
@@ -563,8 +562,15 @@ def disclosure_texts(doc: ReportDocument) -> list[str]:
             if b.type == "callout" and b.kind == "disclosure"]
 
 
-def missing_disclosures(required: list[str], present: list[str]) -> list[str]:
-    """Each of `required` that `present` does not carry as often (V5)."""
+def missing_disclosures(required: list[str], present: list[str] | str) -> list[str]:
+    """Each of `required` that `present` does not carry as often (V5).
+    `present` is the written document's disclosure texts, or an export's
+    body text, where each one must occur as often as it is required."""
+    if isinstance(present, str):
+        need: dict[str, int] = {}
+        for text in required:
+            need[text] = need.get(text, 0) + 1
+        return [text for text, n in need.items() for _ in range(max(0, n - present.count(text)))]
     left = list(present)
     missing = []
     for text in required:
@@ -593,8 +599,8 @@ def run_report_job(job: ReportJob) -> ReportDocument:
         lost = missing_disclosures(required, disclosure_texts(doc)) if job.strict else []
         if lost:
             raise ReportDisclosureMissing(
-                f"report_disclosure_missing: {len(lost)} required disclosure(s) are missing "
-                "from the written report; nothing was saved.")
+                f"{len(lost)} required disclosure(s) are missing from the written report; "
+                "nothing was saved.")
         doc = doc.model_copy(update={
             "mode": "generated",
             "profile_id": job.profile_id or None,

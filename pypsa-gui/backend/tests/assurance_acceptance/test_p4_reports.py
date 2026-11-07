@@ -494,3 +494,19 @@ def test_a_report_table_equals_the_hand_oracle_cell_for_cell():
     )
     grids = [[[c.text for c in row.cells] for row in t.rows] for t in rendered.tables]
     assert oracle in grids
+
+
+def test_a_disclosure_required_twice_must_be_written_twice():
+    """V5: the job's and the export's check count each disclosure."""
+    need = ["Proxy only.", "Proxy only.", "Stage note: x"]
+    assert report_job.missing_disclosures(need, ["Proxy only.", "Stage note: x"]) == [
+        "Proxy only."
+    ]
+    assert report_job.missing_disclosures(need, "Proxy only.\nStage note: x") == [
+        "Proxy only."
+    ]
+    assert (
+        report_job.missing_disclosures(need, "Proxy only.\nProxy only.\nStage note: x")
+        == []
+    )
+    assert report_job.missing_disclosures(need, need) == []
