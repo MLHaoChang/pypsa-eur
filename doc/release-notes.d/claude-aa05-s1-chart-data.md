@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The assistant's charts no longer show a static value that an asset's time series overrides. A selection mixing assets with and without a series is refused. A result chart records which solve it came from, and its download is refused once a different solve replaces that one.
