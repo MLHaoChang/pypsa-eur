@@ -13,6 +13,7 @@ import pytest
 from fastapi import HTTPException
 
 from harness import approvals, confirm
+from harness import session as harness_session
 from services import run_envelope, run_handover
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline,
@@ -20,7 +21,15 @@ from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     session,
 )
 from tests.test_harness_envelope import on_run, profile  # noqa: F401
-from tests.test_harness_run_eh_site_v2 import _start_v2, _tick_to, goal_host  # noqa: F401
+from tests.test_harness_run_eh_site_v2 import (  # noqa: F401
+    CAPTURE_FIELDS,
+    PILOT_CAPTURE_FILES,
+    _start_v2,
+    _tick_to,
+    capture_fields,
+    goal_host,
+    spy_capture,
+)
 from tests.test_harness_run_report_handoff import fake_report  # noqa: F401
 from tests.test_harness_run_skeleton import RUN, site, start  # noqa: F401
 from tests.test_harness_runner import task_path
@@ -126,11 +135,11 @@ def test_pilot_stepwise_mode_reaches_the_hand_off_with_one_card_per_write_or_run
     """From one intake, decided step by step, the run goes intake -> hand-off
     on the new eh_site project; each write or run step is the user's card
     exactly once, and nothing runs inside an envelope (GK B (33) S2)."""
-    from harness import loop
     from tests.test_harness_run_report_handoff import runner as run_runner
     from tests.test_harness_runner import Clicks, mail
 
     mail(monkeypatch)
+    captured = spy_capture(monkeypatch)
     view = _start_v2(
         [*goal_host["citations"], goal_host["goal"]], f"Pilot {uuid.uuid4().hex[:6]}"
     )
@@ -146,11 +155,20 @@ def test_pilot_stepwise_mode_reaches_the_hand_off_with_one_card_per_write_or_run
     assert record["run"]["status"] == "completed", record["run"]
     stages = record["run"]["stages"]
     assert all(stages[k]["status"] == "passed" for k in stages), stages
+    rules = stages["result_gate"]["gate"]["rules"]
+    # C3: the card-approved solve captured its input, so F6 reads an exact identity.
+    assert {r["rule"]: r["verdict"] for r in rules}["kpi.unserved_mwh"] == "pass"
+    keys, files, exact = capture_fields(captured)  # C2: the envelope path's capture
+    assert (keys, exact) == CAPTURE_FIELDS
+    assert files == PILOT_CAPTURE_FILES.get("envelope", files)
     steps = {s["id"]: s for s in record["steps"]}
-    carded = [
+    harness_runner = run_runner(clicks)
+    probe = harness_session.ChatSession(session_id="probe")
+    carded = [  # the steps the runner's own card policy cards (Guided, COP-1)
         s["id"]
         for s in record["steps"]
-        if s["status"] == "completed" and loop._safety_tier_for(s["tool"]) != "read"
+        if s["status"] == "completed"
+        and harness_runner._policy(probe, s["tool"]) != "none"
     ]
     assert carded  # the run wrote and ran
     asked = [ref for ref in clicks.used if ref in steps]
@@ -159,3 +177,75 @@ def test_pilot_stepwise_mode_reaches_the_hand_off_with_one_card_per_write_or_run
     envelope_file = run_envelope.path_for(path)
     if envelope_file.exists():
         assert json.loads(envelope_file.read_text())["state"] != "granted"
+
+
+# ── S1a: no project from an intake the user never saw ────────────────────────
+
+
+@pytest.mark.parametrize("verdict", ["unattended", "stepwise"])
+@pytest.mark.parametrize("digest", [None, "0" * 64])
+def test_an_absent_or_drifted_digest_refuses_both_verdicts(
+    goal_host, session, verdict, digest
+):
+    name = f"Step {uuid.uuid4().hex[:6]}"
+    view = _start_v2([*goal_host["citations"], goal_host["goal"]], name)
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(session, view["task_id"], verdict, intake_digest=digest)
+    assert exc.value.detail["error_kind"] == "intake_stale"
+    assert _count(name) == 0
+
+
+# ── C1-C3: a stepwise run's own solve step captures its input ────────────────
+
+
+def test_only_the_runs_own_solve_step_call_is_captured():
+    from harness import runner
+    from services import solve_capture
+
+    ctx, args = object(), {"label": "run"}
+    guard = runner.step_capture("run-solve.1-ab", args, ctx)
+    assert guard("run-solve.1-cd", "solve_queue_enqueue", args) is None  # a second call
+    assert (
+        guard("run-solve.1-ab", "solve_queue_enqueue", {"label": "x"}) is None
+    )  # other args
+    assert guard("run-solve.1-ab", "update_component", args) is None  # another tool
+    assert solve_capture.request() is None
+    with guard("run-solve.1-ab", "solve_queue_enqueue", dict(args)):
+        assert solve_capture.request() == {"ctx": ctx}
+    assert solve_capture.request() is None  # nothing stays on the session or thread
+
+
+def test_a_denied_solve_card_enqueues_and_captures_nothing(
+    goal_host, session, site, monkeypatch
+):
+    from services import solve_capture
+    from tests.test_harness_run_report_handoff import runner as run_runner
+
+    captured = []
+    real = solve_capture.capture
+    monkeypatch.setattr(
+        solve_capture, "capture", lambda *a, **k: captured.append(1) or real(*a, **k)
+    )
+    view = _start_v2(
+        [*goal_host["citations"], goal_host["goal"]], f"Deny {uuid.uuid4().hex[:6]}"
+    )
+    _stepwise(session, view)
+    path, task = _new_task(run_handover.read_intent(task_path(site[1], view)))
+
+    def decisions(task_id, ref, args_hash):
+        return "deny" if ref == "solve.1" else "approve"
+
+    record = _tick_to(
+        run_runner(decisions),
+        path,
+        task["task_id"],
+        lambda r: (
+            r["run"]["status"] in ("completed", "needs_user", "failed")
+            or next(s for s in r["steps"] if s["id"] == "solve.1")["status"]
+            != "pending"
+        ),
+    )
+    solve = next(s for s in record["steps"] if s["id"] == "solve.1")
+    assert solve["status"] != "completed"
+    assert not (solve.get("result") or {}).get("job_id")
+    assert captured == []

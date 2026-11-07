@@ -189,6 +189,16 @@ A step-by-step verdict on an intake run creates the project through the same han
 - S4. The early return stays for every non-intake run, pinned by a test that a plain run's stepwise verdict calls no `_grant_setup`.
 - S5. Hand mutants with their killing tests: stepwise also grants the envelope; stepwise skips `_grant_setup` on intake; the digest check dropped in stepwise.
 - S6. L8 is not engaged: a decided run is past `decide()`, and an undecided stepwise intake run dead-ended before. Said in the PR body.
+- S1a. Until the card renders the intake and sends its digest ([37](37-plan-card-intake-rows.md)), an intake run's verdict, stepwise or envelope, refuses an absent digest (`intake_stale`), and a drifted one. The GUI cannot start an intake run until 37 lands.
+
+### GK B (33): capture of a stepwise run's own solve, GO on A (C1–C5)
+
+The stepwise pilot stopped at the result gate: only an envelope-admitted solve was captured, so `kpi.unserved_mwh` read `no_capture`. C (a user-accepted not_evaluated KPI) is refused (#1079).
+- C1. The capture is keyed on the step binding, never session state: only the run's own pending `solve_queue_enqueue` step (its call id, its frozen args), dispatched after its user card was approved. Any other call in a run session gets no capture.
+- C2. One capture path: `solve_capture.requested(run ctx)` with the same identity checks and the project-mismatch 409; the envelope path byte-unchanged, pinned by comparing a capture record from each path.
+- C3. Tests: the stepwise solve carries capture.exact and the pilot reaches hand-off with exactly one card per write or run; an ordinary chat or copilot solve gets no capture; the off-step call gets no capture; a denied card captures and enqueues nothing.
+- C4. Hand mutants with killing tests: drop the wrap; capture every solve in a run session; capture before the card approval.
+- C5. The seam is named in the PR body; a capture is evidence, never an admission.
 
 ## Folded from #970
 

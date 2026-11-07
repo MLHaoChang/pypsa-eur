@@ -308,6 +308,34 @@ def _tick_to(runner, path, task_id, done, limit=120):
         PyPSAService._turn_cell.reset(token)
 
 
+def spy_capture(monkeypatch):
+    """Every capture record `solve_capture.capture` writes (GK B (33) C2)."""
+    from services import solve_capture
+
+    records, real = [], solve_capture.capture
+
+    def spy(*a, **k):
+        records.append(real(*a, **k))
+        return records[-1]
+
+    monkeypatch.setattr(solve_capture, "capture", spy)
+    return records
+
+
+def capture_fields(records):
+    """The capture's fields, minus its random id and dir: the same in both
+    modes, since one capture path serves both (C2)."""
+    (record,) = records
+    return sorted(record), sorted(record["files"]), bool(record["exact"])
+
+
+PILOT_CAPTURE_FILES: dict = {}  # the captured file names, per mode (C2)
+CAPTURE_FIELDS = (
+    ["dir", "exact", "files", "id", "identity", "network_revision"],
+    True,
+)
+
+
 def test_pilot_envelope_mode_reaches_the_hand_off(
     goal_host, session, site, fake_report, monkeypatch
 ):
@@ -320,6 +348,7 @@ def test_pilot_envelope_mode_reaches_the_hand_off(
     from tests.test_harness_runner import Clicks, mail, run_records
 
     mail(monkeypatch)
+    captured = spy_capture(monkeypatch)
     name = f"Pilot {uuid.uuid4().hex[:6]}"
     view = _start_v2([*goal_host["citations"], goal_host["goal"]], name)
     run_envelope.decide(
@@ -350,3 +379,6 @@ def test_pilot_envelope_mode_reaches_the_hand_off(
     assert fake_report == [{"strict": True, "run_binding": (path, "a")}]
     completed = [r for r in run_records(record) if r["native_status"] == "completed"]
     assert len(completed) == 1  # one completion notice
+    keys, files, exact = capture_fields(captured)
+    assert (keys, exact) == CAPTURE_FIELDS
+    PILOT_CAPTURE_FILES["envelope"] = files
