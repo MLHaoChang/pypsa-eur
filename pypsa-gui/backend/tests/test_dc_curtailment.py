@@ -592,3 +592,29 @@ def test_a_failed_add_unmarks_the_row_and_raises(monkeypatch):
     with pytest.raises(RuntimeError, match="boom"):
         C.apply(n, lambda _m: None, [], {}, terms=_terms())
     assert marks == [("+", C.GENERATOR), ("-", C.GENERATOR)]
+
+
+def test_add_rows_guards():
+    """The LP-time guards: nothing without a duration or a row; a window D does not fit is
+    refused (C21, the operational run's windows); a model over other snapshots is an error."""
+    n = _network()
+    assert C.add_rows(n, n.snapshots, _terms(), print) == (0, 0)  # no model is read
+    assert C.add_rows(n, n.snapshots, _terms(d=2.0), print) == (0, 0)
+    undo: list = []
+    C.apply(n, lambda _m: None, undo, {}, terms=_terms(d=2.0))
+    try:
+        assert C.add_rows(n, n.snapshots, _terms(), print) == (0, 0)
+        with pytest.raises(C.DcCurtailmentRefused) as exc:
+            C.add_rows(n, n.snapshots[:2], _terms(d=2.0), print)
+        assert exc.value.kind == C.DURATION_EXCEEDS_HORIZON
+        n.optimize.create_model()
+        with pytest.raises(RuntimeError, match="does not span"):
+            C.add_rows(n, n.snapshots[:6], _terms(d=2.0), print)
+        rows, nz = C.add_rows(n, n.snapshots, _terms(d=2.0), print)
+        assert rows == len(
+            C.runs(pd.Series(1.0, index=range(12)), 2.0, pd.RangeIndex(12))
+        )
+        assert nz == 3 * rows
+    finally:
+        for _kind, fn in undo:
+            fn()
