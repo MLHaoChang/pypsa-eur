@@ -1793,3 +1793,49 @@ def test_the_freeze_takes_the_profiles_block_over_the_goal_card_and_falls_back_t
         ctx_for(tmp_path), {**PROFILE, "eh_study": {"budget_solves": 2}}, 6
     )
     assert "stages" not in bare["args"]
+
+
+def test_releasing_an_unknown_charge_keeps_the_calls_own_eh_reservation(
+    tmp_path, monkeypatch
+):
+    """C4: the whole reservation kept is the `eh_study` row of this call,
+    never another call's study row or this call's other ledger rows."""
+    from services import run_envelope as envelopes
+
+    path, task = task_for(tmp_path)
+    envelope(
+        path,
+        audit=[
+            {
+                "event": "used",
+                "tool": "solve_queue_enqueue",
+                "call_id": "a1",
+                "reserved": 9,
+            },
+            {
+                "event": "eh_study",
+                "tool": "run_eh_study",
+                "call_id": "a0",
+                "reserved": 4,
+            },
+            {
+                "event": "eh_study",
+                "tool": "run_eh_study",
+                "call_id": "a1",
+                "reserved": 2,
+            },
+        ],
+    )
+    seen = []
+    monkeypatch.setattr(
+        envelopes,
+        "settle_engine_solves",
+        lambda p, c, n, **kw: seen.append((c, n)) or True,
+    )
+    assert run_eh.release(path, "a1", None) is True
+    assert seen == [("a1", 2)]
+
+
+@pytest.mark.parametrize("task", [{}, {"steps": None}, {"steps": []}])
+def test_a_task_without_steps_owns_no_record(tmp_path, task):
+    assert run_eh.own_record(task, ctx_for(tmp_path, eh_study=record())) is None
