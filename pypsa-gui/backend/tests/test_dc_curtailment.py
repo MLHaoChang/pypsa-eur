@@ -914,3 +914,74 @@ def test_energy_flows_weight_the_curtailed_energy_by_the_snapshot_hours(monkeypa
     out = energy_flows(n, result_df=R._result_df, lost_load=sink.get("last_lost_load"))
     assert out["status"] == "ok", out["flags"]
     assert out["curtailed_load_mwh"] == {"cooling": pytest.approx(2.0 * CURT_MWH)}
+
+
+def _committed(p_t=None, failed=False):
+    """A network with a committed record, without a solve."""
+    n = _network()
+    series = pd.Series(np.minimum(SHARE * (IT + COOL), COOL), index=n.snapshots)
+    captured = {
+        C.META_KEY: {
+            "p_t": series if p_t is None else p_t,
+            "total_mwh": CURT_MWH,
+            "capture_failed": failed,
+            "price_eur_per_mwh": PRICE,
+            "share": SHARE,
+            "max_duration_h": None,
+        }
+    }
+    C.commit(n, captured)
+    return n, series
+
+
+def test_commit_treats_a_flagged_or_a_missing_series_as_a_failed_capture():
+    n, _ = _committed(failed=True)  # a flag beside a series still fails
+    assert n.meta[C.META_KEY]["capture_failed"] is True
+    assert n.meta[C.META_KEY]["curtailed_mwh"] is None
+    n = _network()
+    rec = {
+        "p_t": None,
+        "total_mwh": 1.0,
+        "capture_failed": False,
+        "price_eur_per_mwh": PRICE,
+        "share": SHARE,
+        "max_duration_h": None,
+    }  # no series, no flag
+    C.commit(n, {C.META_KEY: rec})
+    assert n.meta[C.META_KEY]["capture_failed"] is True
+    n, series = _committed()
+    assert n.meta[C.META_KEY]["capture_failed"] is False
+    assert C.curtailment_series(n)[0].to_numpy() == pytest.approx(series.to_numpy())
+
+
+def test_the_reader_refuses_each_unreadable_state_on_its_own():
+    n, series = _committed()
+    n.meta[C.META_KEY]["capture_failed"] = True  # the flag alone
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
+    n, series = _committed()
+    n.buses_t[C.SERIES_ATTR] = pd.DataFrame({"it_bus": series})  # another column
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
+    n, _ = _committed()
+    del n.buses_t[C.SERIES_ATTR]  # no frame at all
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
+    n, _ = _committed()
+    n.meta[C.META_KEY]["axis_hash"] = "another"  # the hash alone
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])
+    n = _network()
+    assert C.curtailment_series(n) == (None, [C.NOT_ESTABLISHED])  # no record
+
+
+def test_without_the_cooling_load_the_surfaces_get_no_reduction():
+    n, _ = _committed()
+    assert set(C.curtailed_by_load(n)[0]) == {C.COOLING_LOAD}
+    n.remove("Load", C.COOLING_LOAD)
+    assert C.curtailed_by_load(n) == ({}, [C.NOT_ESTABLISHED])
+
+
+def test_refuse_rolling_reads_the_project_and_passes_when_off(monkeypatch):
+    monkeypatch.setattr(C, "project_terms", lambda: None)
+    C.refuse_rolling()
+    monkeypatch.setattr(C, "project_terms", lambda: _terms(d=2.0))
+    with pytest.raises(C.DcCurtailmentRefused) as exc:
+        C.refuse_rolling()
+    assert exc.value.kind == C.ROLLING_WITHOUT_CARRY_IN
