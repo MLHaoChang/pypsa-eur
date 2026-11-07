@@ -608,3 +608,14 @@ def test_revenue_by_stream_on_the_base_case(solved):
     assert (rows["om"][on] < 0).all()
     payload = assemble_finance_sections(res, case).sections["project"].payload
     assert payload["revenue_streams"]["rows"][0]["id"] == "ppa"
+
+
+def test_the_pv_profile_is_scaled_to_the_ac_rating():
+    """TCU06-AC-1: p_nom is the AC rating, so p_max_pu is the DC capacity factor times the DC/AC
+    ratio, capped at 1 (the inverter clips)."""
+    n = T.BUILDERS[TID]()
+    _wind, sun = M.profiles()
+    pu = n.generators_t.p_max_pu["pv_plant"].to_numpy()
+    assert pu == pytest.approx((sun.to_numpy() * 1.2).clip(max=1.0))
+    assert pu.max() <= 1.0
+    assert (pu > sun.to_numpy() + 1e-9).any()
