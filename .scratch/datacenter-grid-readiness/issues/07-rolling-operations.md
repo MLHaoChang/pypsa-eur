@@ -35,3 +35,7 @@ GK A (16): Q1 (a), Q2 (a), Q3 (a), with conditions C15–C21 added to S2. S1 is 
   - C21: rows ≈ snapshots × run length. The row and nonzero counts are logged. A typed refusal applies when D exceeds the horizon (full run) or the window (operational run).
 
 Also from the S2 mapping: DataCentreLoadSpec `_shares` already refuses critical + curtailable > 1 (flex_archetypes.py:175), so C8 needs a pin test only. The template splits it_load = critical·F on it_bus and cooling = (1−critical)·F on dc_mv (eh_templates.py:619; also dc_architecture.py:786).
+
+### 2026-11-07: S2 built (DC-07 S2, session_01G7qCuizo1mH5kACP1VKbiV)
+
+`services/solver/dc_curtailment.py`: `DataCentreLoadSpec.curtailment_price_eur_per_mwh` (None default, finite, ≥ 0), a transient `__dccurt_cooling` on dc_mv (carrier `dc_curtailment`, a slack but never involuntary), cap min(share·F, cooling)(t), energy-proxy duration rows over weighted-hour runs, typed refusals `curtailment_refused: no_cooling_load | duration_exceeds_horizon`, the run's record in `n.meta["dc_curtailment"]` with the claim limit (also in `pypsa-gui/CONTEXT.md`). C15–C19 and C21 tested in `tests/test_dc_curtailment.py`. C20 (carry-in under the operational run) waits for #1218's `services/solver/operational.py`.
