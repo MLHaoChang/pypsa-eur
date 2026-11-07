@@ -1,6 +1,7 @@
 """The campus study's dip and restart screens, ``campus_dip_trips.csv`` and ``campus_restart.csv``, and the process
 chain they read rate and mass pull from (grid-to-process issue 12b-2)."""
 import math
+from pathlib import Path
 
 import pandas as pd
 import pypsa
@@ -269,20 +270,22 @@ def test_an_extendable_unit_rates_on_p_nom_opt_not_p_nom():
     assert pc.rate_tph(n, "mill") == (None, "unknown: p_nom_opt is not above 0")
 
 
-# The two files' columns before they carried the product (G2P #23, G23-1): adding it changes nothing else.
-_DIP_COLUMNS_BEFORE = "level,unit,u_min_pct,u_max_pct,t_min_s,t_max_s,depth_pct,duration_s,count_per_year,verdict,dip_stats_source,note,trips_per_year,restart_time_h,rate_tph,mass_pull,lost_t_per_trip,lost_t_per_year,label,rate_basis,mass_pull_basis,incomplete,unknown_count,known_count,profile".split(",")
-_RESTART_COLUMNS_BEFORE = "level,unit,tier,rated_mw,block,pickup_s,full_rate_s,restart_time_h,rate_tph,mass_pull,du_pct,start_verdict,lost_wait_t,lost_restart_t,lost_t,verdict,note,label,rate_basis,mass_pull_basis,transition,sk_mva_source,assumed,t_s,event,fail_count,unknown_count,lower_bound,end_s,limit_pct,limit_clause,profile".split(",")
+# Both files as restart_campus wrote them for _restart_hub() before they carried the product (G2P #23, G23-1).
+_BEFORE = Path(__file__).parent / "fixtures" / "restart_campus_before_product"
 
 
-def test_every_unit_row_names_the_shortfall_product_its_tonnes_are_of(tmp_path):
+def test_the_product_is_the_one_new_column_and_every_other_byte_is_unchanged(tmp_path):
     run, _ = _run(tmp_path, _restart_hub())
     restart_campus(run)
-    for name, before in ((DIP_TRIPS_CSV, _DIP_COLUMNS_BEFORE), (RESTART_CSV, _RESTART_COLUMNS_BEFORE)):
-        df = pd.read_csv(run / name, keep_default_na=False)          # raw text: an empty cell stays ""
-        assert [c for c in df.columns if c != "product"] == before
-        unit = df["level"] == "unit"
-        assert set(df.loc[unit, "product"]) == {"nh3"}
-        assert set(df.loc[~unit, "product"]) == {""}                  # never "nan"
+    for name in (DIP_TRIPS_CSV, RESTART_CSV):
+        before = (_BEFORE / name).read_text().splitlines()
+        after = (run / name).read_text().splitlines()
+        assert len(after) == len(before)
+        level = before[0].split(",").index("level")
+        assert after[0] == before[0] + ",product"                     # last: no column shifts
+        for b, a in zip(before[1:], after[1:]):
+            tail = "nh3" if b.split(",")[level] == "unit" else ""      # never "nan" off the unit rows
+            assert a == f"{b},{tail}"
 
 
 def test_the_product_is_where_the_mass_pull_walk_ends_not_bus1():

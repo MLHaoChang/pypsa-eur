@@ -209,7 +209,7 @@ class _Prices:
         return eur, None
 
 
-def _product_value(n, lost_load) -> _Prices:
+def _prices(n, lost_load) -> _Prices:
     """The prices of the campus lines' tonnes: each shortfall product's lost-production value over its tonne
     factor (None when it has no value). One product prices the lines as a whole; several price each unit row at
     the product the campus run names on it."""
@@ -327,7 +327,7 @@ def _ride_through(n, campus: CampusRun, prices: _Prices, periods) -> dict:
             rows=detail,
         )
     parts = [
-        (d["lost_t_per_year"], (r.get("product") or "").strip())
+        (d["lost_t_per_year"], _product(r))
         for d, r in zip(detail, units)
         if d["lost_t_per_year"] is not None
     ]
@@ -399,11 +399,11 @@ def _island(n, campus: CampusRun, prices: _Prices, periods) -> dict:
             unknown_out.append(r["unit"])
         else:
             per_hour += rate * mp
-            out_parts.append((rate * mp, (r.get("product") or "").strip()))
+            out_parts.append((rate * mp, _product(r)))
     if unknown_out:
         flags.append(LOWER_BOUND)
     in_parts = [  # (t per event, product) per unit
-        (_num(r.get("lost_t")), (r.get("product") or "").strip())
+        (_num(r.get("lost_t")), _product(r))
         for r in inside
         if _num(r.get("lost_t")) is not None
     ]
@@ -455,6 +455,11 @@ def _island(n, campus: CampusRun, prices: _Prices, periods) -> dict:
         "campus study's restart screen gives it",
         by_period=totals,
     )
+
+
+def _product(row: dict) -> str:
+    """The shortfall product a campus unit row's tonnes are of; "" for a run from before the column."""
+    return (row.get("product") or "").strip()
 
 
 def _island_eur(t, prices: _Prices, e_out, e_in) -> tuple[float | None, str | None]:
@@ -703,7 +708,7 @@ def grid_risk_production(
         return None
     campus = campus or CampusRun()
     periods = _periods(n)
-    prices = _product_value(n, lost_load)
+    prices = _prices(n, lost_load)
     lines = [
         _ride_through(n, campus, prices, periods),
         _island(n, campus, prices, periods),

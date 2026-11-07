@@ -1112,6 +1112,7 @@ def restart_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> 
     dip = pd.concat([_stamp(trips, "class"), _stamp(lost, "unit"),
                      _stamp(pd.DataFrame([total]), "total")], ignore_index=True)
     dip["profile"] = profile
+    dip["product"] = dip.pop("product")              # last: a reader by position sees no shift
     _write_text_atomic(run_dir / DIP_TRIPS_CSV, dip.to_csv(index=False))
 
     tripped = set(trips.loc[trips["verdict"].isin(("trips", "unknown")), "unit"])
@@ -1137,6 +1138,7 @@ def restart_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> 
                           limit_pct=limit, limit_clause=clause)]
     restart = pd.concat(frames, ignore_index=True)
     restart["profile"] = profile
+    restart["product"] = restart.pop("product")              # last: a reader by position sees no shift
     _write_text_atomic(run_dir / RESTART_CSV, restart.to_csv(index=False))
     return dip, restart
 
