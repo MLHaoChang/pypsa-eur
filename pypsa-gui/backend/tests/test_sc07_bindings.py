@@ -649,20 +649,24 @@ def _lost(monkeypatch, *, lands):
 def test_a_failed_receipt_read_marks_unknown_but_never_cancels(
     client, site, monkeypatch
 ):
+    """The commit lands inside proposals.apply, which then fails, so its entry is "ready" again."""
     args = args_of(bind(client, IT))
-    real = _lost(monkeypatch, lands=True)
+    real_commit = store.apply
+
+    def landed_then_lost(*a, **k):
+        real_commit(*a, **k)
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(store, "apply", landed_then_lost)
     committed = proposals._committed
     monkeypatch.setattr(
         proposals, "_committed", lambda *_a: (_ for _ in ()).throw(TimeoutError("lock"))
     )
     refused("scene_apply_outcome_unknown", chat_tools.site_scene_apply, **args)
     key, owner = _scope()
-    assert (
-        proposals.get(key, owner, "campus", args["proposal_id"])["status"]
-        != "cancelled"
-    )
+    assert proposals.get(key, owner, "campus", args["proposal_id"])["status"] == "ready"
     monkeypatch.setattr(proposals, "_committed", committed)
-    monkeypatch.setattr(proposals, "apply", real)
+    monkeypatch.setattr(store, "apply", real_commit)
     status = chat_tools.site_scene_read(
         site_id="campus", proposal_id=args["proposal_id"]
     )["proposal"]
