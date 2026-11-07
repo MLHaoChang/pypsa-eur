@@ -379,3 +379,22 @@ def test_a_regenerate_keeps_a_gap_that_only_starts_like_a_placeholder():
         gap, {"type": "callout", "kind": "gap", "text": PLACEHOLDER}]})
     kept = report_job._code_blocks(section)
     assert [b.text for b in kept] == [gap["text"]]
+
+
+def test_a_template_lookup_that_fails_otherwise_refuses_and_is_not_read_as_missing(project, client, monkeypatch):
+    """Only a 404 means the template is gone; any other failure is no
+    verdict and refuses, rather than serving the file as `template_missing`."""
+    rid = _assistant_report(monkeypatch)
+    file_id = T.export_report_docx(rid)["file_id"]
+    record = _sidecar(project, file_id)
+    record["manifest"]["dataset"]["template"] = {"file_id": "e" * 16, "sha256": "0" * 64}
+    _reseal(project, file_id, record)
+
+    def failing(*a, **k):
+        raise HTTPException(503, {"error_kind": "upload_store_unavailable"})
+
+    monkeypatch.setattr(upload_service, "get_upload_bytes", failing)
+    response = _blob(client, file_id)
+    assert response.status_code == 503
+    assert "X-Report-Source" not in response.headers
+    assert _markers(project) == set()
