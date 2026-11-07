@@ -165,7 +165,7 @@ def _reaches_load(adj, start: str, banned: str, load_buses: set[str]) -> bool:
 
 
 def _tiered_buses(n) -> dict[str, str]:
-    """bus → the process Link whose ``criticality_tier`` marks it must-run
+    """Bus → the process Link whose ``criticality_tier`` marks it must-run
     (``safety`` or ``process_critical``), on the unit's electric bus0."""
     from services.adequacy.site_peak import electric_bus
     from services.solver.process_uc import process_mask
