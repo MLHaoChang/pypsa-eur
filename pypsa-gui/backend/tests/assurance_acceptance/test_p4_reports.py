@@ -536,3 +536,23 @@ def test_only_a_withheld_gap_callout_marks_a_section():
         "audit": {"unverified": ["7"]},
     }
     assert F.withheld_marked(withheld) == ["7 (unverified, withheld)"]
+
+
+def test_a_strict_regenerate_that_checks_out_drops_the_old_placeholder(
+    project, monkeypatch
+):
+    """Only disclosures are required: an earlier placeholder (a gap callout)
+    may go when the rewritten prose checks out."""
+    rid = _assistant_report(monkeypatch)
+    _install_provider(
+        monkeypatch, FakeProvider([_draft("fmea_top", "Generator g dominates.")])
+    )
+    T.regenerate_report_section(rid, "fmea_top")
+    assert _poll()["status"] == "done"
+    fmea = T.get_report(rid, section_id="fmea_top")["sections"][0]
+    assert not [
+        b
+        for b in fmea["blocks"]
+        if b["type"] == "callout" and b["text"].startswith("Withheld")
+    ]
+    assert {"type": "paragraph", "md": "Generator g dominates."} in fmea["blocks"]
