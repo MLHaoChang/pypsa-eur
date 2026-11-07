@@ -64,7 +64,9 @@ def install_guard() -> None:
 
     def check(sock, address):
         if sock.family in (socket.AF_INET, socket.AF_INET6) and not _local(address[0]):
-            raise NetworkRefused(f"offline pilot: connect to {address[0]!r} refused")
+            raise NetworkRefused(
+                f"offline pilot: connect to {address[0]!r} refused"  # repr-ok: test-driver error
+            )
 
     def guarded_connect(self, address):
         check(self, address)
@@ -76,7 +78,9 @@ def install_guard() -> None:
 
     def guarded_getaddrinfo(host, *args, **kwargs):
         if not _local(host):
-            raise NetworkRefused(f"offline pilot: name lookup of {host!r} refused")
+            raise NetworkRefused(
+                f"offline pilot: name lookup of {host!r} refused"  # repr-ok: test-driver error
+            )
         return getaddrinfo(host, *args, **kwargs)
 
     for fn in (guarded_connect, guarded_connect_ex, guarded_getaddrinfo):
