@@ -206,6 +206,7 @@ RESULT_TAMPER = {
     "stamp_other_solve": lambda m: m["solve_stamp"].update(exact="0" * 64),
     "stamp_not_the_inputs": lambda m: m["solve_stamp"].update(input="0" * 64),
     "stamp_extra_key": lambda m: m["solve_stamp"].update(run="x"),
+    "stamp_value_not_text": lambda m: m["solve_stamp"].update(exact=123),
 }
 
 
@@ -284,6 +285,11 @@ def test_the_loaded_project_is_found_by_its_registry_key(registry):
     registry["contexts"].update({"org:p2": theirs, "org:p1": mine})
     assert assurance_artifacts._resident("p1") is mine
     assert assurance_artifacts._resident("p3") is None
+
+
+def test_a_bare_project_key_is_found_too(registry):
+    registry["contexts"]["p1"] = mine = _Ctx("p1")
+    assert assurance_artifacts._resident("p1") is mine
 
 
 def test_the_request_context_is_preferred_over_the_active_one(registry):
