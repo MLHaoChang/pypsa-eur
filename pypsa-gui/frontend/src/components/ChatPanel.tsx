@@ -3599,9 +3599,11 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           // backend's denied line for the same call, which says the same.
           if (toolLine && m.tool_use_id && DENIED_LINE.test(m.content) && messages.some(o => o !== m && o.role === 'tool'
             && o.tool_use_id === m.tool_use_id && toolOutcomeOf(o.tool_result, o.tool_name)?.outcome === 'denied')) return null
-          // LC-24: a call that never got an outcome while no turn runs and no
-          // card waits was abandoned (Stop): settle it, never "Working".
+          // LC-24: a call that never got an outcome, with a later user or
+          // assistant message and no turn running, was abandoned (Stop):
+          // settle it, never "Working".
           const abandoned = !!toolLine && !toolLine.hidden && !streaming && pendingCard == null
+            && messages.slice(index + 1).some(o => o.role === 'user' || o.role === 'assistant')
             && !!m.tool_use_id && REQUEST_LINE.test(m.content) && !outcomeNow
             && !guidedSettledToolIds(messages).has(m.tool_use_id)
           const toolLabel = toolLine && !toolLine.hidden

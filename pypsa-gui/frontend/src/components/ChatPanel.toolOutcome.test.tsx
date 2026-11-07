@@ -146,7 +146,10 @@ describe('chat tool-line outcome marks', () => {
     emit('tool_request', { tool_use_id: 'w1', tool_name: 'wait_for_job', safety_tier: 'job' })
     expect(screen.getByTestId('chat-tool-label').textContent).toMatch(/^Working:/)
     emit('done', { stop_reason: 'aborted' })
-    act(() => useChatStore.setState({ streaming: false }))
+    act(() => useChatStore.setState({ streaming: false, messages: [
+      ...useChatStore.getState().messages,
+      { id: 'u2', role: 'user', content: "What's happening?", ts: 99 },
+    ] }))
     const label = screen.getByTestId('chat-tool-label').textContent
     expect(label).toMatch(/^Stopped: .*\(the turn was stopped\)$/)
     expect(label).not.toMatch(/Working/)
