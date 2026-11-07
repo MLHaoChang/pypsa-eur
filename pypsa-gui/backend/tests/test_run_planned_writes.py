@@ -328,7 +328,9 @@ def test_c3_it_joins_the_bound_context_tools_and_no_sweep_or_study_tool_does():
     assert TOOL in run_profiles.BOUND_CONTEXT_TOOLS
     # Issue 07 B2 (GK B C1): the one study tool bound is eh_site's own EH
     # study step, always its own card and never in an envelope.
-    assert run_profiles.BOUND_CONTEXT_TOOLS & run_envelope.NEVER_LISTED == {"run_eh_study"}
+    assert run_profiles.BOUND_CONTEXT_TOOLS & run_envelope.NEVER_LISTED == {
+        "run_eh_study"
+    }
     assert {
         t for t in run_profiles.BOUND_CONTEXT_TOOLS if "sweep" in t or "study" in t
     } == {"run_eh_study"}

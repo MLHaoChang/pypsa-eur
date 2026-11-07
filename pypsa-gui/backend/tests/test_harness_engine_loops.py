@@ -354,8 +354,11 @@ def test_eh_site_carries_the_issue_07_lole_rule_only():
         if "engine" in r or r["fact"] == FACT
     ]
     assert [(name, r["id"], r["engine"]) for name, r in engine] == [
-        ("result_gate", "eh.adequacy.lole",
-         {"tool": "run_margin_loop", "max_solves": 3, "restore": "base"})
+        (
+            "result_gate",
+            "eh.adequacy.lole",
+            {"tool": "run_margin_loop", "max_solves": 3, "restore": "base"},
+        )
     ]
 
 
