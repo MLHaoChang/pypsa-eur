@@ -36,7 +36,9 @@ helpers_state = _p4.helpers_state
 
 
 def _sidecar(project_dir, file_id: str) -> dict:
-    return json.loads((project_dir / "assistant_artifacts" / f"{file_id}.json").read_text())
+    return json.loads(
+        (project_dir / "assistant_artifacts" / f"{file_id}.json").read_text()
+    )
 
 
 def _blob(client, file_id: str):
@@ -60,13 +62,19 @@ def _pdf(monkeypatch):
     from services.reports import pdf
 
     monkeypatch.setattr(pdf, "pdf_available", lambda: True)
-    monkeypatch.setattr(pdf, "convert_docx_to_pdf", lambda data, **_: b"%PDF-1.4 " + hashlib.sha256(data).digest())
+    monkeypatch.setattr(
+        pdf,
+        "convert_docx_to_pdf",
+        lambda data, **_: b"%PDF-1.4 " + hashlib.sha256(data).digest(),
+    )
 
 
 # ── B1/X1: the assistant's export is sealed; the human one is not ──────────
 
 
-def test_an_assistant_docx_export_is_sealed_with_its_version_and_disclosures(project, client, monkeypatch):
+def test_an_assistant_docx_export_is_sealed_with_its_version_and_disclosures(
+    project, client, monkeypatch
+):
     rid = _assistant_report(monkeypatch)
     meta = T.export_report_docx(rid)
     record = _sidecar(project, meta["file_id"])
@@ -74,25 +82,34 @@ def test_an_assistant_docx_export_is_sealed_with_its_version_and_disclosures(pro
     doc = store.load_report(project, rid)
     raw = (store.report_dir(project, rid) / f"v{doc.version}.json").read_bytes()
     assert manifest["source_kind"] == "report_export"
-    assert manifest["dataset"]["report_id"] == rid and manifest["dataset"]["version"] == doc.version
+    assert (
+        manifest["dataset"]["report_id"] == rid
+        and manifest["dataset"]["version"] == doc.version
+    )
     assert manifest["dataset"]["version_sha256"] == hashlib.sha256(raw).hexdigest()
     assert manifest["dataset"]["version_hash_basis"] == "stored_file"
     assert manifest["render_spec"]["format"] == "docx"
     assert manifest["render_spec"]["disclosures"] == report_job.disclosure_texts(doc)
     assert manifest["render_spec"]["disclosures"]  # the fixture carries at least one
-    assert manifest["render_spec"]["withheld"] == [{"section_id": "fmea_top", "placeholders": 1}]
+    assert manifest["render_spec"]["withheld"] == [
+        {"section_id": "fmea_top", "placeholders": 1}
+    ]
     assert manifest["dataset_sha256"] == canonical_sha256(manifest["dataset"])
     assert manifest["render_spec_sha256"] == canonical_sha256(manifest["render_spec"])
     data = _upload_path(project, meta["file_id"]).read_bytes()
     assert manifest["artifact_sha256"] == hashlib.sha256(data).hexdigest()
-    stored = upload_service.get_upload_meta(PROJECT, meta["file_id"], project_dir=project)
+    stored = upload_service.get_upload_meta(
+        PROJECT, meta["file_id"], project_dir=project
+    )
     assert stored.assurance_sha256 == canonical_sha256(record)
     response = _blob(client, meta["file_id"])
     assert response.status_code == 200 and response.content == data
     assert "X-Report-Source" not in response.headers
 
 
-def test_an_assistant_pdf_export_is_sealed_after_its_conversion(project, client, monkeypatch):
+def test_an_assistant_pdf_export_is_sealed_after_its_conversion(
+    project, client, monkeypatch
+):
     rid = _assistant_report(monkeypatch)
     _pdf(monkeypatch)
     meta = T.export_report_pdf(rid)
@@ -104,7 +121,9 @@ def test_an_assistant_pdf_export_is_sealed_after_its_conversion(project, client,
     assert _blob(client, meta["file_id"]).content == data
 
 
-def test_the_human_export_has_no_sidecar_and_the_same_bytes(project, client, monkeypatch):
+def test_the_human_export_has_no_sidecar_and_the_same_bytes(
+    project, client, monkeypatch
+):
     rid = _human_report(client, monkeypatch)
     response = client.post(f"/api/projects/{PROJECT}/reports/{rid}/export", json={})
     assert response.status_code == 200, response.text
@@ -112,9 +131,14 @@ def test_the_human_export_has_no_sidecar_and_the_same_bytes(project, client, mon
     meta = upload_service.get_upload_meta(PROJECT, file_id, project_dir=project)
     assert meta.assurance_sha256 is None
     assert not (project / "assistant_artifacts" / f"{file_id}.json").exists()
-    again = client.post(f"/api/projects/{PROJECT}/reports/{rid}/export", json={"strict": True})
+    again = client.post(
+        f"/api/projects/{PROJECT}/reports/{rid}/export", json={"strict": True}
+    )
     assert again.status_code == 200
-    assert _upload_path(project, again.json()["file_id"]).read_bytes() == _upload_path(project, file_id).read_bytes()
+    assert (
+        _upload_path(project, again.json()["file_id"]).read_bytes()
+        == _upload_path(project, file_id).read_bytes()
+    )
 
 
 def test_the_disclosure_check_runs_before_the_seal(project, monkeypatch):
@@ -124,10 +148,15 @@ def test_the_disclosure_check_runs_before_the_seal(project, monkeypatch):
     rid = _assistant_report(monkeypatch, fmea="Generator g dominates again.")
     required = report_job.disclosure_texts(store.load_report(project, rid))
     real = docx_writer._disclosure
-    monkeypatch.setattr(docx_writer, "_disclosure",
-                        lambda doc, text: None if text in required else real(doc, text))
+    monkeypatch.setattr(
+        docx_writer,
+        "_disclosure",
+        lambda doc, text: None if text in required else real(doc, text),
+    )
     sealed = []
-    monkeypatch.setattr(T, "_publish_sealed_export", lambda *a, **k: sealed.append(a) or ({}, {}))
+    monkeypatch.setattr(
+        T, "_publish_sealed_export", lambda *a, **k: sealed.append(a) or ({}, {})
+    )
     with pytest.raises(HTTPException) as exc:
         T.export_report_docx(rid)
     assert exc.value.detail["error_kind"] == "report_disclosure_missing"
@@ -137,14 +166,22 @@ def test_the_disclosure_check_runs_before_the_seal(project, monkeypatch):
 def test_an_identical_re_export_keeps_the_first_seal(project, monkeypatch):
     rid = _assistant_report(monkeypatch)
     first = T.export_report_docx(rid)
-    seal = upload_service.get_upload_meta(PROJECT, first["file_id"], project_dir=project).assurance_sha256
+    seal = upload_service.get_upload_meta(
+        PROJECT, first["file_id"], project_dir=project
+    ).assurance_sha256
     second = T.export_report_docx(rid)
     if second["file_id"] == first["file_id"]:  # a byte-identical render
-        assert upload_service.get_upload_meta(
-            PROJECT, first["file_id"], project_dir=project).assurance_sha256 == seal
+        assert (
+            upload_service.get_upload_meta(
+                PROJECT, first["file_id"], project_dir=project
+            ).assurance_sha256
+            == seal
+        )
     else:  # docx timestamps differ: each export has its own seal
-        assert _sidecar(project, second["file_id"])["manifest"]["dataset"] == \
-            _sidecar(project, first["file_id"])["manifest"]["dataset"]
+        assert (
+            _sidecar(project, second["file_id"])["manifest"]["dataset"]
+            == _sidecar(project, first["file_id"])["manifest"]["dataset"]
+        )
 
 
 def test_a_quarantined_export_is_refused_and_writes_nothing(project, monkeypatch):
@@ -156,12 +193,16 @@ def test_a_quarantined_export_is_refused_and_writes_nothing(project, monkeypatch
     (folder / f"{first['file_id']}.json").write_text(json.dumps({"code": "bytes"}))
     sidecar = project / "assistant_artifacts" / f"{first['file_id']}.json"
     sidecar.unlink()
-    before = sorted(p.relative_to(project).as_posix() for p in project.rglob("*") if p.is_file())
+    before = sorted(
+        p.relative_to(project).as_posix() for p in project.rglob("*") if p.is_file()
+    )
     with pytest.raises(HTTPException) as exc:
         T.export_report_pdf(rid)
     assert exc.value.status_code == 409
     assert exc.value.detail["error_kind"] == "artifact_quarantined"
-    after = sorted(p.relative_to(project).as_posix() for p in project.rglob("*") if p.is_file())
+    after = sorted(
+        p.relative_to(project).as_posix() for p in project.rglob("*") if p.is_file()
+    )
     assert after == before
 
 
@@ -192,10 +233,15 @@ def test_an_edited_sidecar_quarantines(project, client, monkeypatch):
 
 
 def _version_file(project_dir, rid: str):
-    return store.report_dir(project_dir, rid) / f"v{store.load_report(project_dir, rid).version}.json"
+    return (
+        store.report_dir(project_dir, rid)
+        / f"v{store.load_report(project_dir, rid).version}.json"
+    )
 
 
-def test_a_stored_version_changed_on_disk_refuses_without_a_marker(project, client, monkeypatch):
+def test_a_stored_version_changed_on_disk_refuses_without_a_marker(
+    project, client, monkeypatch
+):
     rid = _assistant_report(monkeypatch)
     file_id = T.export_report_docx(rid)["file_id"]
     version = _version_file(project, rid)
@@ -206,7 +252,9 @@ def test_a_stored_version_changed_on_disk_refuses_without_a_marker(project, clie
     assert _markers(project) == set()
 
 
-def test_a_load_normalised_version_does_not_read_as_changed(project, client, monkeypatch):
+def test_a_load_normalised_version_does_not_read_as_changed(
+    project, client, monkeypatch
+):
     """X2: the hash is of the file as written, so a loader that normalises
     the document differently does not change it."""
     from models.report import ReportDocument
@@ -223,7 +271,9 @@ def test_a_load_normalised_version_does_not_read_as_changed(project, client, mon
     assert _blob(client, file_id).status_code == 200
 
 
-def test_a_deleted_version_is_served_with_a_note_and_no_marker(project, client, monkeypatch):
+def test_a_deleted_version_is_served_with_a_note_and_no_marker(
+    project, client, monkeypatch
+):
     rid = _assistant_report(monkeypatch)
     file_id = T.export_report_docx(rid)["file_id"]
     _version_file(project, rid).unlink()
@@ -232,7 +282,9 @@ def test_a_deleted_version_is_served_with_a_note_and_no_marker(project, client, 
     assert response.headers["X-Report-Source"] == "version_missing"
     assert _markers(project) == set()
     item = A.build_delivery([file_id])
-    archive = upload_service.get_upload_bytes(PROJECT, item["file_id"], project_dir=project)
+    archive = upload_service.get_upload_bytes(
+        PROJECT, item["file_id"], project_dir=project
+    )
     import io
     import zipfile
 
@@ -241,7 +293,9 @@ def test_a_deleted_version_is_served_with_a_note_and_no_marker(project, client, 
     assert entry["source_status"] == "version_missing"
     assert "no longer stored" in entry["source_note"]
     sealed = _sidecar(project, file_id)["manifest"]
-    assert entry["dataset_sha256"] == sealed["dataset_sha256"]  # the view keeps the manifest
+    assert (
+        entry["dataset_sha256"] == sealed["dataset_sha256"]
+    )  # the view keeps the manifest
     assert entry["render_spec_sha256"] == sealed["render_spec_sha256"]
 
 
@@ -249,7 +303,10 @@ def test_a_missing_version_outranks_a_missing_template(project, client, monkeypa
     rid = _assistant_report(monkeypatch)
     file_id = T.export_report_docx(rid)["file_id"]
     record = _sidecar(project, file_id)
-    record["manifest"]["dataset"]["template"] = {"file_id": "f" * 16, "sha256": "0" * 64}
+    record["manifest"]["dataset"]["template"] = {
+        "file_id": "f" * 16,
+        "sha256": "0" * 64,
+    }
     record["manifest"]["dataset"]["figures"] = {"fig2": "0" * 64}
     _reseal(project, file_id, record)
     _version_file(project, rid).unlink()
@@ -268,7 +325,9 @@ def test_a_deleted_report_is_served_with_a_note(project, client, monkeypatch):
     assert _markers(project) == set()
 
 
-def test_a_swapped_template_refuses_and_a_deleted_one_is_noted(project, client, monkeypatch):
+def test_a_swapped_template_refuses_and_a_deleted_one_is_noted(
+    project, client, monkeypatch
+):
     rid = _assistant_report(monkeypatch)
     file_id = T.export_report_docx(rid)["file_id"]
     path = project / "assistant_artifacts" / f"{file_id}.json"
@@ -276,22 +335,36 @@ def test_a_swapped_template_refuses_and_a_deleted_one_is_noted(project, client, 
     # reseal the record so only the template check differs.
     record = json.loads(path.read_text())
     blob = b"template bytes"
-    tmeta = upload_service.add_upload(PROJECT, blob, "t.docx", "application/octet-stream",
-                                      kind="report_template", project_dir=project)
-    record["manifest"]["dataset"]["template"] = {"file_id": tmeta.file_id, "sha256": "0" * 64}
+    tmeta = upload_service.add_upload(
+        PROJECT,
+        blob,
+        "t.docx",
+        "application/octet-stream",
+        kind="report_template",
+        project_dir=project,
+    )
+    record["manifest"]["dataset"]["template"] = {
+        "file_id": tmeta.file_id,
+        "sha256": "0" * 64,
+    }
     _reseal(project, file_id, record)
     response = _blob(client, file_id)
     assert response.status_code == 409
     assert response.json()["detail"]["error_kind"] == "report_version_changed"
     assert _markers(project) == set()
-    record["manifest"]["dataset"]["template"] = {"file_id": "f" * 16, "sha256": "0" * 64}
+    record["manifest"]["dataset"]["template"] = {
+        "file_id": "f" * 16,
+        "sha256": "0" * 64,
+    }
     _reseal(project, file_id, record)
     response = _blob(client, file_id)
     assert response.status_code == 200
     assert response.headers["X-Report-Source"] == "template_missing"
 
 
-def test_a_changed_figure_refuses_and_a_deleted_one_is_noted(project, client, monkeypatch):
+def test_a_changed_figure_refuses_and_a_deleted_one_is_noted(
+    project, client, monkeypatch
+):
     rid = _assistant_report(monkeypatch)
     file_id = T.export_report_docx(rid)["file_id"]
     record = _sidecar(project, file_id)
@@ -315,14 +388,18 @@ def _reseal(project_dir, file_id: str, record: dict) -> None:
     manifest = record["manifest"]
     manifest["dataset_sha256"] = canonical_sha256(manifest["dataset"])
     manifest["render_spec_sha256"] = canonical_sha256(manifest["render_spec"])
-    (project_dir / "assistant_artifacts" / f"{file_id}.json").write_text(json.dumps(record))
+    (project_dir / "assistant_artifacts" / f"{file_id}.json").write_text(
+        json.dumps(record)
+    )
     meta_path = _upload_path(project_dir, file_id).parent / "meta.json"
     meta = json.loads(meta_path.read_text())
     meta["assurance_sha256"] = canonical_sha256(record)
     meta_path.write_text(json.dumps(meta))
 
 
-def test_disclosure_drift_on_matching_bytes_refuses_without_a_marker(project, client, monkeypatch):
+def test_disclosure_drift_on_matching_bytes_refuses_without_a_marker(
+    project, client, monkeypatch
+):
     """X4/R6: a read-back that loses a disclosure on bytes whose hash matches
     is parser drift, not tampering."""
     from services.reports import docx_reader
@@ -343,8 +420,12 @@ def test_disclosure_drift_on_matching_bytes_refuses_without_a_marker(project, cl
     assert _markers(project) == set()
 
 
-@pytest.mark.parametrize("error", [OSError("disk"), TimeoutError("lock")], ids=["io", "timeout"])
-def test_an_io_error_or_timeout_on_the_version_refuses_without_a_marker(project, client, monkeypatch, error):
+@pytest.mark.parametrize(
+    "error", [OSError("disk"), TimeoutError("lock")], ids=["io", "timeout"]
+)
+def test_an_io_error_or_timeout_on_the_version_refuses_without_a_marker(
+    project, client, monkeypatch, error
+):
     rid = _assistant_report(monkeypatch)
     file_id = T.export_report_docx(rid)["file_id"]
 
@@ -366,8 +447,12 @@ def test_a_delivery_item_carries_the_report_hashes(project, monkeypatch):
     rid = _assistant_report(monkeypatch)
     file_id = T.export_report_docx(rid)["file_id"]
     delivered = A.build_delivery([file_id])
-    archive = upload_service.get_upload_bytes(PROJECT, delivered["file_id"], project_dir=project)
-    (entry,) = json.loads(zipfile.ZipFile(io.BytesIO(archive)).read("manifest.json"))["files"]
+    archive = upload_service.get_upload_bytes(
+        PROJECT, delivered["file_id"], project_dir=project
+    )
+    (entry,) = json.loads(zipfile.ZipFile(io.BytesIO(archive)).read("manifest.json"))[
+        "files"
+    ]
     manifest = _sidecar(project, file_id)["manifest"]
     assert entry["assurance"] == manifest
     assert entry["dataset_sha256"] == manifest["dataset_sha256"]
@@ -380,31 +465,52 @@ def test_a_delivery_item_carries_the_report_hashes(project, monkeypatch):
 
 def test_only_the_exact_placeholder_text_is_a_placeholder():
     for count in (0, 1, 2, 10, 123):
-        assert F.is_withheld_block({"type": "callout", "kind": "gap", "text": F.withheld_placeholder(count)})
+        assert F.is_withheld_block(
+            {"type": "callout", "kind": "gap", "text": F.withheld_placeholder(count)}
+        )
     assert F.withheld_placeholder(1) == PLACEHOLDER
-    for text in ("Withheld: data not public.", PLACEHOLDER + " More.", "x" + PLACEHOLDER,
-                 PLACEHOLDER.replace("1 number", "1 numbers"), PLACEHOLDER.replace("1 number", "2 number"),
-                 PLACEHOLDER.replace("1 number", "01 numbers")):
-        assert not F.is_withheld_block({"type": "callout", "kind": "gap", "text": text}), text
+    for text in (
+        "Withheld: data not public.",
+        PLACEHOLDER + " More.",
+        "x" + PLACEHOLDER,
+        PLACEHOLDER.replace("1 number", "1 numbers"),
+        PLACEHOLDER.replace("1 number", "2 number"),
+        PLACEHOLDER.replace("1 number", "01 numbers"),
+    ):
+        assert not F.is_withheld_block(
+            {"type": "callout", "kind": "gap", "text": text}
+        ), text
 
 
 def test_a_regenerate_keeps_a_gap_that_only_starts_like_a_placeholder():
     from models.report import Section
 
     gap = {"type": "callout", "kind": "gap", "text": "Withheld: data not public."}
-    section = Section.model_validate({"section_id": "s", "heading": "S", "source": "code", "status": "ok", "blocks": [
-        gap, {"type": "callout", "kind": "gap", "text": PLACEHOLDER}]})
+    section = Section.model_validate(
+        {
+            "section_id": "s",
+            "heading": "S",
+            "source": "code",
+            "status": "ok",
+            "blocks": [gap, {"type": "callout", "kind": "gap", "text": PLACEHOLDER}],
+        }
+    )
     kept = report_job._code_blocks(section)
     assert [b.text for b in kept] == [gap["text"]]
 
 
-def test_a_template_lookup_that_fails_otherwise_refuses_and_is_not_read_as_missing(project, client, monkeypatch):
+def test_a_template_lookup_that_fails_otherwise_refuses_and_is_not_read_as_missing(
+    project, client, monkeypatch
+):
     """Only a 404 means the template is gone; any other failure is no
     verdict and refuses, rather than serving the file as `template_missing`."""
     rid = _assistant_report(monkeypatch)
     file_id = T.export_report_docx(rid)["file_id"]
     record = _sidecar(project, file_id)
-    record["manifest"]["dataset"]["template"] = {"file_id": "e" * 16, "sha256": "0" * 64}
+    record["manifest"]["dataset"]["template"] = {
+        "file_id": "e" * 16,
+        "sha256": "0" * 64,
+    }
     _reseal(project, file_id, record)
 
     def failing(*a, **k):
@@ -424,7 +530,11 @@ from tests.test_chat_report_template_tools import (  # noqa: E402
 )
 
 
-def test_a_template_export_records_the_template_and_the_plan(project, monkeypatch, fixtures):  # noqa: F811
+def test_a_template_export_records_the_template_and_the_plan(
+    project,
+    monkeypatch,
+    fixtures,  # noqa: F811
+):
     rid = _assistant_report(monkeypatch, fmea="Generator g dominates again.")
     data = fixtures["corporate_untagged.docx"]
     tid = _upload_template(project, "corporate.docx", data)
@@ -432,8 +542,13 @@ def test_a_template_export_records_the_template_and_the_plan(project, monkeypatc
     plan = T.set_report_mapping(rid, _plan_for(T.get_report_template(rid)["outline"]))
     file_id = T.export_report_docx(rid)["file_id"]
     dataset = _sidecar(project, file_id)["manifest"]["dataset"]
-    assert dataset["template"] == {"file_id": tid, "sha256": hashlib.sha256(data).hexdigest()}
-    assert dataset["mapping_plan_sha256"] == canonical_sha256(store.load_meta(project, rid).mapping_plan)
+    assert dataset["template"] == {
+        "file_id": tid,
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+    assert dataset["mapping_plan_sha256"] == canonical_sha256(
+        store.load_meta(project, rid).mapping_plan
+    )
     assert dataset["mapping_plan_sha256"] == canonical_sha256(plan)
 
 
@@ -450,8 +565,11 @@ def test_the_disclosure_check_runs_before_the_quarantine_check(project, monkeypa
     assert kept.value.detail["error_kind"] == "artifact_quarantined"
     required = report_job.disclosure_texts(store.load_report(project, rid))
     real = docx_writer._disclosure
-    monkeypatch.setattr(docx_writer, "_disclosure",
-                        lambda doc, text: None if text in required else real(doc, text))
+    monkeypatch.setattr(
+        docx_writer,
+        "_disclosure",
+        lambda doc, text: None if text in required else real(doc, text),
+    )
     with pytest.raises(HTTPException) as lost:
         T.export_report_docx(rid)
     assert lost.value.detail["error_kind"] == "report_disclosure_missing"
