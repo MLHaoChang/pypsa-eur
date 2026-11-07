@@ -220,6 +220,7 @@ def load_by_status(
     *,
     limit: int | None = None,
     project_key_prefix: str | None = None,
+    strict: bool = False,
 ) -> list[dict]:
     """
     Rows in any of `statuses`, as plain dicts.
@@ -308,6 +309,10 @@ def load_by_status(
             ]
     except Exception:  # noqa: BLE001 — an unreadable table means "nothing to restore"
         logger.exception("solve_job_store: could not load jobs by status %s", statuses)
+        if strict:
+            # Issue 04 S5 (N4): a caller deciding whether a job is still
+            # active must not read an unreadable table as "none".
+            raise
         return []
 
 

@@ -210,6 +210,8 @@ Named open rows (GK B (26) R1):
 | AA04-P5 export_matpower | `_pending` (X6) | no independent MATPOWER reader; reads adapter_pending |
 | AA04-P6 export whose bytes equal a non-export upload (e.g. a user upload) | `_pending` (X5) | `add_upload` dedups onto that file, which is not agent_export, so an ordinary export reads `export_file_count` (fails safe) |
 | AA04-P7 csv export: EH columns refilled on read | `_pending` (X5) | the read-back applies `normalise_eh_columns`, as the import route does; an EH column the export dropped is refilled with defaults and can match the live values |
+| AA04-P9 job holds across sessions (N1): every job tool but solve_queue_enqueue | `_pending` (ticket 16) | the hold lives on the in-memory ChatSession; a new chat, another tab, a second replica or a restart can start the same operation again. Only solve_queue_enqueue reads a persisted record (the solve-queue store) |
+| AA04-P10 enqueue_unique drops a different config | `_pending` (ticket 15) | GK B (30) Q3 (a): outside S5. A chat re-enqueue is denied while the store has the project's solve; the HTTP route and the panel still meet the silent drop |
 | R3: an outcome on the raise path for the four S2 tools and undo_last | S4 | GK B (26) chose (a): S3 keeps no `_outcome` on raise/timeout. S4 must keep: `failed` only when verified unchanged, never `failed` on a timeout. |
 
 GK B (26) S3 plan: GO WITH CHANGES, conditions X1–X8:
@@ -322,3 +324,119 @@ Build (AA-04 (7), finished by AA-04 (8)):
 - Mutants, 16/16 killed against test_p3_raise_and_extra.py: classify_raised 6, classify_write extras 4, classify_export extras 2, loop lock pre-check and timeout tier 3, guards.lock_refusal 1. The two that first survived (export with an uncomparable map; timeout outcome leaking into checked turns) got their own tests.
 - The red EH-flag test was a test bug: Generator has no bool EH column; it now uses Bus (eh_poc/eh_critical).
 - Trial merge with master: assistant inventory, control-matrix and route-parity `--check`, test_tool_error_kind_manifest and ChatPanel.manifest all pass.
+
+### 2026-11-06 — S4b merged (#1204); S5 plan: GK B (30) GO with conditions N1–N9
+
+S4b merged as #1204 (0b7677bd). It was reviewed by GK B (29), who killed 10 of 10 mutants including the H7 negative-zero and SubNetwork gaps, and by UX (11). UX's non-blocking follow-up is still open: the lock refusals' Details still name the tool ("so bulk_update_components was not run"); that text is in services/chat_tools._check_foreign_lock.
+
+S5 plan (AA-04 (8)): a job call that ends uncertain in an ordinary, untasked turn opens a hold keyed by project binding + tool, carrying the G3 fingerprint, tool_use_id, any job_id and the worker future.
+- The same fingerprint is then denied `operation_pending`; a different one is denied `operation_conflict`.
+- The hold clears only on independent evidence that the operation is terminal.
+- A repeat the user asks for runs as a new operation once the user approves a card that names the hold.
+
+GK B (30) answers: Q1 (a) key per project binding + tool; Q2 (a) a confirmation card that names the hold; Q3 (a) solve_queue.enqueue_unique silently dropping a different config is out of S5, to be filed as a ticket and cited here.
+
+Conditions, as GK B (30) sent them:
+- N1 Cross-session gap. A hold on ChatSession is in-process and per session; a new chat, another tab, a second replica or a restart replays freely (#1070: fail closed means a cross-process mechanism). Either, per job tool, name the persisted record P2 also reads when the session has no hold (the solve-queue store's non-terminal job with the same project and fingerprint; the alive solve thread is per process) and test the new-session case for queue jobs; or, where no persisted record exists (sweeps?), add a `_pending` row in issue 04 for the cross-session replay, with a ticket. Do not claim A3.2/A3.6 covered beyond what this holds.
+- N2 abort_simulation is exempt from holds: re-aborting is idempotent, a timed-out abort must never block the next abort, and a hold on a run must never block abort_simulation. Test both.
+- N3 Every hold kind lists its clearing evidence. A hold with no job_id and no future (tool_not_started, or a raise read uncertain) clears only on the solve thread or late_receipt evidence, a P4 card, or the end of the session; never on time alone. If tool_not_started really means not started, open no hold for it, and say which with the code path.
+- N4 A store or thread check that cannot read counts as "not terminal" (deny), never as free (#1079). Test it with the store read raising.
+- N5 An operation_conflict outcome names the held operation and points to wait_for_job, the job status, or abort. Whether the P4 card also covers a different-args call is the builder's choice; say which. If it does, the approval is bound to the held hold id and the new call's fingerprint, both fixed when the card is issued (#1072); test that a card approved for fingerprint F leaves a call with F′ still denied.
+- N6 The repeat card runs exactly once; a second identical call after the approved repeat is held by the new hold. Test it.
+- N7 Order: the deny comes after the G3 compare and the lock pre-check, before reserve, begin_step and the handler. The handler, the queue enqueue and the solve thread start are spied with 0 calls. A tasked call gets only begin_step's refusal and is not double-denied.
+- N8 Drop the DERIVED_CLASSES item: that mutant (now outcomes.py:582) is already killed on master by test_p3_file_outcomes::test_the_digest_is_stable_across_loads_after_topology, checked during #1208.
+- N9 Each new error kind goes in its own tool-error-kinds.d fragment. Run test_tool_error_kind_manifest, ChatPanel.manifest.test.tsx and the denied-words parity at the trial merge. Kill one mutant per new branch (pending, conflict, each clearing source, the N4 read-fail, the card binding) and name the killing test for each. Note in issue 04 that run_simulation and run_ac_pf_stage open holds on an uncertain raise only, since they run on the SSE thread and never time out.
+
+GK B: "Send the PR when CI is green."
+
+### 2026-11-06 — S5 build (branch `claude/aa04-s5-conflict`), against GK B (30) N1–N9
+
+`harness/job_holds.py`, called from `loop._dispatch_real_tool_call`. A job call
+is a tool of the `execution` or `execution_long_running` tier (28 tools);
+abort_simulation (destructive) and wait_for_job (read) are not (N2).
+
+- **Open** (ordinary, untasked turn only; a call `assistant_tasks.governs` is
+  left to `begin_step`, N7: the next step with the same args, or a repeat of
+  a completed step; a task that cannot be read governs nothing, so the hold
+  check still runs): `tool_timeout` on the shared pool, carrying the
+  worker future; run_simulation / run_ac_pf_stage on an uncertain raise only
+  (a new solve thread alive after it, or the solver state unreadable) since
+  they run on the SSE thread and never time out (N9); a returned solve whose
+  `_outcome` reads uncertain, carrying its job id. `tool_not_started` opens
+  none: `Future.cancel()` succeeded, so the handler can never run (N3,
+  loop.py the `started.wait(...) and future.cancel()` branch). A raise of a
+  pool tool opens none: the worker returned.
+- **Deny** after the G3 compare and the lock check, before reserve,
+  begin_step and the handler (N7): `operation_pending` (same fingerprint) or
+  `operation_conflict` (other fingerprint), both through `guards.denied`, so
+  the result reads denied. The message names the tool and points to
+  wait_for_job with the job id, the job status, or the stop tool (N5).
+- **Repeat card** (P4): after a same-fingerprint call was told
+  `operation_pending`, the next one shows the card with `repeat_card`
+  (hold id, fingerprint, opened, opened_at, job id), always the user's own
+  card (confirm_only, as a requirement card). Its approval admits the call
+  only while that hold is the open one and the fingerprint is the one bound;
+  the hold is then dropped and the call runs as a new operation (N5/N6). An
+  other-args call never gets a card (builder's choice under N5).
+- **Clear** only on evidence (N3): future done (a late result naming a job id
+  moves the hold onto that job), the job's status terminal
+  (`job_adapters` for fg:/ad:/rpt:, the queue route's read for its UUIDs),
+  the solve thread ended, or with no thread known the live solver record
+  shows none alive; an approved repeat; the end of the session. Never time.
+  Any read that fails keeps the hold (N4).
+- **N1**: solve_queue_enqueue with no session hold reads the solve-queue
+  store's queued/running rows for the resolved project
+  (`solve_job_store.load_by_status(..., strict=True)`; a failed read denies).
+  Its args are only the project (`rerun_current` is ignored by its handler),
+  so a matching row is the same operation: `operation_pending`, worded as
+  "the solve queue already has this project's solve", no card (the queue
+  cannot run the project twice). The project lookup in front of it fails
+  closed too; only the handler's own refusal (an HTTPException) passes. This
+  read also runs inside the session that queued the solve, so a chat
+  re-enqueue while the project's solve is queued or running is refused
+  instead of being answered with the existing job.
+  Every other tool's cross-session replay: AA04-P9 (ticket 16). A3.2 "timeout
+  after possible effect, no replay" and A3.6 "duplicate/conflicting job ops"
+  are covered for jobs within one session, and across sessions for
+  solve_queue_enqueue only.
+  GK B (30) U1–U4: an admitted task step of solve_queue_enqueue (the task's
+  next step, same tool and args, which begin_step admits:
+  `assistant_tasks.admits_next_step`) skips this store read. It relies on the
+  handler's own duplicate refusal and begin_step's step record, not the store
+  hold. The handler refuses a run's capture with `solve_already_queued`
+  (`pypsa-gui/backend/routers/solve_queue.py:203`), and `enqueue_unique` answers a
+  plain repeat with the active job (`already_queued`). Session holds still
+  apply to that step (T1). The killing tests: widening the skip to "task_id set" is killed by
+  `test_a_tasked_session_whose_next_step_is_another_call_still_reads_the_store`;
+  dropping it is killed by `test_the_tasks_admitted_next_step_is_left_to_the_handler`
+  and master's `test_harness_immutable_solve::test_a_run_solve_is_refused_while_another_solve_of_the_project_is_active`.
+- **N8**: the prep commit's `test_the_digest_ignores_sub_network_rows` is
+  dropped; master's `test_p3_file_outcomes::test_the_digest_is_stable_across_loads_after_topology`
+  already kills that mutant.
+- **Q3**: ticket 15 (`enqueue_unique` drops a different config).
+
+Mutants (N9), each run against `tests/assurance_acceptance/test_p3_job_holds.py`, all killed:
+
+| Branch | Mutant | Killing test |
+|---|---|---|
+| pending | same fingerprint never denied | test_a_timed_out_job_call_denies_the_same_args_as_pending |
+| conflict | other fingerprint admitted | test_a_timed_out_job_call_denies_other_args_as_conflict |
+| clear: future | a running future reads terminal | test_a_timed_out_job_call_denies_the_same_args_as_pending |
+| clear: future raised | a raised worker keeps the hold | test_the_hold_clears_when_the_worker_raises |
+| clear: future, no job | a jobless late result keeps the hold | test_the_hold_clears_when_the_worker_ends_with_no_job |
+| clear: job status | the job reads terminal unread | test_a_late_result_moves_the_hold_onto_its_job |
+| clear: solve thread | the raise's thread reads ended | test_a_solve_raise_that_left_a_new_thread_alive_holds_until_it_ends |
+| clear: live solver | no thread known reads idle | test_a_solve_raise_with_an_unreadable_state_holds_until_the_solver_is_idle |
+| N4 read fails | a failed read clears | test_a_job_status_read_that_fails_keeps_the_hold |
+| N4 store read fails | an unreadable store reads empty | test_a_store_read_that_raises_denies |
+| N1 store | no store read | test_a_new_session_is_denied_while_the_store_has_the_projects_solve |
+| card: hold id | binding ignores the hold id | test_a_repeat_approval_is_bound_to_its_hold_and_fingerprint |
+| card: fingerprint | binding ignores the fingerprint | test_a_repeat_approval_is_bound_to_its_hold_and_fingerprint |
+| card: after pending | card on the first repeat | test_a_timed_out_job_call_denies_the_same_args_as_pending |
+| raise: new thread | every raise holds | test_a_solve_raise_that_left_a_new_thread_alive_holds_until_it_ends |
+| raise: prior thread | the earlier solve's thread counts as new | test_a_solve_raise_with_no_new_thread_opens_no_hold |
+| loop: timeout opens | no hold on tool_timeout | test_a_timed_out_job_call_denies_other_args_as_conflict |
+| loop: tasked skip (N7) | a governed call also checked | test_a_tasked_call_gets_only_begin_steps_refusal |
+| loop: card binding | the approved card not passed to the check | test_after_the_pending_deny_a_repeat_card_names_the_hold_and_runs_once |
+| loop: raise opens | no hold on an uncertain solve raise | test_a_solve_raise_through_the_loop_holds_the_next_call |
+| confirm: forced card | the repeat follows the tier's policy | test_the_repeat_card_is_forced_even_when_the_tier_auto_approves |

@@ -166,6 +166,7 @@ def _confirm_destructive_tool(
     restriction_snapshot: dict | None = None,
     edit_card: dict | None = None,
     sweep_card: dict | None = None,
+    repeat_card: dict | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, bool]:
     """
     Gate a destructive tool on the user's confirmation. Returns whether to
@@ -208,7 +209,8 @@ def _confirm_destructive_tool(
     violated = edit_card is not None and bool(edit_card.get("requirement_violations"))
     from harness import requirements as _requirements
     # A requirement is only ever the user's own confirmation: never admitted unattended.
-    confirm_only = violated or tool_name == _requirements.TOOL
+    # Issue 04 S5 (P4): repeating a held job call is only ever the user's own card.
+    confirm_only = violated or tool_name == _requirements.TOOL or repeat_card is not None
     if policy == 'none' and not confirm_only:
         return True
     from harness import approvals
@@ -277,6 +279,8 @@ def _confirm_destructive_tool(
         card["edit_card"] = copy.deepcopy(edit_card)
     if sweep_card is not None:
         card["sweep_card"] = copy.deepcopy(sweep_card)  # LC-17, harness/sweep_card.py
+    if repeat_card is not None:
+        card["repeat_card"] = copy.deepcopy(repeat_card)  # issue 04 S5, harness/job_holds.py
     yield "tool_pending_confirmation", card
     decision = session.wait_for_decision(pc.token)
     if decision == 'approve' and confirmation_revision() != revision:

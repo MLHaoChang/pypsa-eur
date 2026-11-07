@@ -53,12 +53,18 @@ export const TOOL_OUTCOME_DENIED_REASON_WORDS: Record<string, string> = {
   // Issue 04 S4b: the edit lock, checked before anything ran.
   project_locked: 'another change to this project was in progress',
   project_lock_unavailable: "the project's edit lock could not be checked",
+  // Issue 04 S5: a job call held while an earlier one's outcome is unknown.
+  operation_pending: 'the same request may still be running',
+  operation_conflict: 'an earlier request may still be running',
 }
 
 /** A refusal's Details text where the backend's own message would mislead or name internals (issue 04 S4a). */
 export const TOOL_OUTCOME_DENIED_DETAIL_WORDS: Record<string, string> = {
   user_restriction: 'A rule you set for this project blocks changes.',
   approval_unavailable: 'The app could not save the approval: its data folder may be full or not writable.',
+  // Issue 04 S5 (UX (12)): no tool ids; the backend message stays for the model.
+  operation_pending: 'An earlier request with the same settings may still be running, so it was not started again. Ask the assistant to check it or stop it.',
+  operation_conflict: 'An earlier request with other settings may still be running, so this one was not started. Ask the assistant to check it or stop it first.',
 }
 
 /** A file tool's words where they differ from a job's (issue 04 S3: import/export). */

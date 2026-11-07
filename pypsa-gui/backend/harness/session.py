@@ -169,6 +169,8 @@ class ChatSession:
     experiment_id: str | None = None
     experiment_project_id: str | None = None
     job_wait_progress: dict[str, Any] | None = None
+    # Issue 04 S5: holds on job calls whose outcome is unknown (harness/job_holds.py).
+    job_holds: dict[Any, Any] = field(default_factory=dict)
     # Private turn-local checked-answer state; cleared on every exit.
     assurance_turn: Any | None = None
     shadow_turn: Any | None = None
