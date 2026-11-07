@@ -172,7 +172,9 @@ def test_pilot_stepwise_mode_reaches_the_hand_off_with_one_card_per_write_or_run
     ]
     assert carded  # the run wrote and ran
     asked = [ref for ref in clicks.used if ref in steps]
-    assert sorted(asked) == sorted(carded)  # equality: one card per write or run
+    assert sorted(asked) == sorted(carded), [  # equality: one card per write or run
+        (i, steps[i]["tool"], steps[i].get("engine")) for i in carded
+    ]
     assert len(asked) == len(set(asked))
     envelope_file = run_envelope.path_for(path)
     if envelope_file.exists():
@@ -215,6 +217,10 @@ def test_only_the_runs_own_solve_step_call_is_captured():
     assert solve_capture.request() is None  # nothing stays on the session or thread
 
 
+def _solve_1(record):
+    return next((s for s in record["steps"] if s["id"] == "solve.1"), {})
+
+
 def test_a_denied_solve_card_enqueues_and_captures_nothing(
     goal_host, session, site, monkeypatch
 ):
@@ -232,20 +238,21 @@ def test_a_denied_solve_card_enqueues_and_captures_nothing(
     _stepwise(session, view)
     path, task = _new_task(run_handover.read_intent(task_path(site[1], view)))
 
+    denied = []
+
     def decisions(task_id, ref, args_hash):
-        return "deny" if ref == "solve.1" else "approve"
+        if ref == "solve.1":
+            denied.append(ref)
+            return "deny"
+        return "approve"
 
     record = _tick_to(
         run_runner(decisions),
         path,
         task["task_id"],
-        lambda r: (
-            r["run"]["status"] in ("completed", "needs_user", "failed")
-            or next(s for s in r["steps"] if s["id"] == "solve.1")["status"]
-            != "pending"
-        ),
+        lambda r: len(denied) >= 2,  # denied, and asked again: it never ran
     )
-    solve = next(s for s in record["steps"] if s["id"] == "solve.1")
-    assert solve["status"] != "completed"
+    solve = _solve_1(record)
+    assert solve and solve["status"] != "completed", solve
     assert not (solve.get("result") or {}).get("job_id")
     assert captured == []
