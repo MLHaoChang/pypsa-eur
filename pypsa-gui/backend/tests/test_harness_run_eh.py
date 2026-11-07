@@ -1839,3 +1839,21 @@ def test_releasing_an_unknown_charge_keeps_the_calls_own_eh_reservation(
 @pytest.mark.parametrize("task", [{}, {"steps": None}, {"steps": []}])
 def test_a_task_without_steps_owns_no_record(tmp_path, task):
     assert run_eh.own_record(task, ctx_for(tmp_path, eh_study=record())) is None
+
+
+def test_skipped_of_no_record_is_empty():
+    assert run_eh.skipped(None) == []
+
+
+def test_releasing_an_unknown_charge_without_an_envelope_settles_nothing(tmp_path):
+    path, task = task_for(tmp_path)
+    assert run_eh.release(path, "a1", None, task=task) is False
+
+
+@pytest.mark.parametrize(
+    "error, shown", [("solver crashed", "solver crashed"), (None, "")]
+)
+def test_a_failed_study_names_its_own_error_and_never_none(error, shown):
+    native, status, message = run_eh.outcome({**record("failed"), "error": error}, 1.0)
+    assert (native, status) == ("failed", "failed")
+    assert message == f"The study ended failed: {shown}"
