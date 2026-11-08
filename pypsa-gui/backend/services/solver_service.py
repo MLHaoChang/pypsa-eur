@@ -533,10 +533,15 @@ def _revision_or_none(network) -> int | None:
         from services import dirty_state
         from services.pypsa_service import PyPSAService
 
+        # The solving context first, and the active one only when it does not
+        # hold the network: on the dispatcher the active context is the
+        # foreground, so it is not even read there (#1282's decoy check).
         solving = PyPSAService._transient_target(ensure=False)
-        for ctx in (solving, PyPSAService.get_active_context()):
-            if ctx is not None and ctx.network is network:
-                return dirty_state.revision(ctx)
+        if solving is not None and solving.network is network:
+            return dirty_state.revision(solving)
+        active = PyPSAService.get_active_context()
+        if active.network is network:
+            return dirty_state.revision(active)
     except Exception:                                         # noqa: BLE001
         pass
     return None

@@ -268,3 +268,22 @@ def test_only_an_org_and_uuid_key_names_an_owner(decoy_foreground, key, org):
     with _owning_org(key):
         change_log_service.log("save", "Project", "P", "x")
     assert [e["org_id"] for e in change_log_service.get_all()] == ([org] if org else [])
+
+
+def test_a_solving_context_that_holds_the_network_reads_no_foreground(
+    decoy_foreground, monkeypatch
+):
+    """On the dispatcher the active context is the foreground: the revision
+    must not even read it when the solving context owns the network (#1282's
+    decoy check records every active-context read)."""
+    from services.solver_service import _revision_or_none
+
+    solving = ProjectContext(network=pypsa.Network())
+    solving.network_revision = 3
+
+    def no_foreground():
+        raise AssertionError("read the foreground")
+
+    with PyPSAService.solving_context(solving):
+        monkeypatch.setattr(PyPSAService, "get_active_context", no_foreground)
+        assert _revision_or_none(solving.network) == 3
