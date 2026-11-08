@@ -85,18 +85,29 @@ def project_currency(finance) -> str | None:
     return str(cur).strip().upper() or None if cur else None
 
 
+def resolved_tariff_currency(tariff) -> tuple[str | None, str | None]:
+    """The currency `tariff` is priced in and where it came from: ``(currency, "stated")``,
+    else ``(stamped currency, "stamp")`` for a `generic` pack copy that states none
+    (issue 03), else ``(None, None)``. A stated currency wins; a broken pack raises."""
+    have = getattr(tariff, "currency", None)
+    if have:
+        return have, "stated"
+    if getattr(tariff, "pack_hash", None):
+        from services.library.defaults_pack.loader import stamped_tariff_currency
+
+        stamped = (stamped_tariff_currency(tariff) or "").strip().upper()
+        if stamped:
+            return stamped, "stamp"
+    return None, None
+
+
 def tariff_currency_mismatch(tariff, currency: str | None) -> str | None:
     """Why `tariff` cannot price a project in `currency` (the #499 `currency_mismatch`
     rule, gridspine-library-eu 01), or None: both known and equal, or either unknown.
     Nothing is converted."""
-    have, how = getattr(tariff, "currency", None), ""
-    if not have and getattr(tariff, "pack_hash", None):
-        # A `generic` pack copy states none: its stamp names the pack's (issue 03).
-        from services.library.defaults_pack.loader import stamped_tariff_currency
-
-        have = (stamped_tariff_currency(tariff) or "").strip().upper()
-        how = (" (from its defaults-pack stamp; state the tariff's currency if you rewrote "
-               "its rates)")
+    have, source = resolved_tariff_currency(tariff)
+    how = (" (from its defaults-pack stamp; state the tariff's currency if you rewrote "
+           "its rates)") if source == "stamp" else ""
     if not currency or not have or have == currency:
         return None
     return (f"Tariff \u201c{getattr(tariff, 'id', '')}\u201d is priced in {have}{how}; the project's finance "
