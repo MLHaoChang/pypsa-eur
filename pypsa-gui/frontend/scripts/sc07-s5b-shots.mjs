@@ -21,14 +21,14 @@
  *     unknown: MOCKED by a route on the scene GET that marks the real open preview
  *       outcome_unknown (and leaves the other open preview out), since an unknown outcome needs
  *       an apply whose report is lost, which the real server cannot be made to do on demand.
- *     Checking…: the click's refetch is a real scene GET, held by the route until its shot is taken (delay only, at most 25 s).
+ *     Checking…: the click's refetch is a real scene GET, held by the route until its shot is taken (delay only, at most 28 s).
  *     applied after the check: real. The preview is applied through the real route before the
  *       click, and the refetch passes the real my_previews through (status applied).
  *     not applied + Prepare it again: the line before the click is MOCKED (the other real open
  *       preview marked outcome_unknown); the refetch is real (that preview is still open).
  *  R6 Site 3D open line: the ui_open_panel(map, canvas_view site) call, its ACK issue and the
  *     browser's POST /api/chat/ui-ack are real. "Opening the 3D site…" is captured while a route
- *     holds the real ui-ack response until its shot is taken (delay only, at most 25 s); "Opened the 3D site" is the real ACK
+ *     holds the real ui-ack response until its shot is taken (delay only, at most 28 s); "Opened the 3D site" is the real ACK
  *     outcome. "Could not confirm the 3D site opened": MOCKED, the route answers ui-ack 409.
  * Each in Expert and Guided, deviceScaleFactor 2, full page and a close crop. Every state's
  * visible text is asserted, and no crop's text holds a preview id, "outcome_unknown",
@@ -183,7 +183,7 @@ try {
   // R6: the browser's ACK, passed through, held, or refused.
   // A held answer waits until its shot is taken (release()), capped below the client's 30 s timeout.
   const gate = { release: () => {} }
-  const held = () => new Promise(resolve => { gate.release = resolve; setTimeout(resolve, 25000) })
+  const held = () => new Promise(resolve => { gate.release = resolve; setTimeout(resolve, 28000) })
   const ack = { mode: null, seen: [], bodies: [] }
   await page.route(url => url.pathname === '/api/chat/ui-ack', async route => {
     const mode = ack.mode
