@@ -600,7 +600,9 @@ def test_a_stamp_that_names_no_shipped_tariff_reads_no_currency():
         f"generic_defaults@{uk.version}:sha256:{uk.hash}",
         f"generic_defaults@{uk.version.split('+')[0]}+atlantis:sha256:{uk.hash}",
     ):
-        assert stamped_tariff_currency(t.model_copy(update={"pack_hash": stamp})) is None, stamp
+        assert (
+            stamped_tariff_currency(t.model_copy(update={"pack_hash": stamp})) is None
+        ), stamp
     # An id the stamped pack does not ship.
     assert stamped_tariff_currency(t.model_copy(update={"id": "nope"})) is None
 
@@ -662,11 +664,16 @@ def test_an_unread_stamp_or_no_stamp_leaves_the_tariff_unchecked(monkeypatch):
         raise AssertionError("an unstamped tariff never reads a pack")
 
     monkeypatch.setattr(loader, "stamped_tariff_currency", never)
-    assert tariff_currency_mismatch(t.model_copy(update={"pack_hash": None}), "GBP") is None
+    assert (
+        tariff_currency_mismatch(t.model_copy(update={"pack_hash": None}), "GBP")
+        is None
+    )
 
 
-STAMP_NOTE = ("is priced in EUR (from its defaults-pack stamp; state the tariff's "
-              "currency if you rewrote its rates); the project's finance inputs are in GBP.")
+STAMP_NOTE = (
+    "is priced in EUR (from its defaults-pack stamp; state the tariff's "
+    "currency if you rewrote its rates); the project's finance inputs are in GBP."
+)
 
 
 def test_a_gbp_project_refuses_the_copied_generic_tariff_in_preflight(
@@ -705,9 +712,17 @@ def test_a_gbp_project_refuses_a_library_ref_to_a_stamped_generic_copy():
         {"poc_link": "import", "timezone": "Europe/Amsterdam", "import_tariff_ref": ref}
     )
     with pytest.raises(B.BindingRefusal) as exc:
-        B.bind_commercial(None, cfg, project_dir=None, resolve_ref=lambda r: None,
-                          resolve_item=lambda r: payload, currency="GBP")
+        B.bind_commercial(
+            None,
+            cfg,
+            project_dir=None,
+            resolve_ref=lambda r: None,
+            resolve_item=lambda r: payload,
+            currency="GBP",
+        )
     assert exc.value.status == 409
     assert exc.value.code == "currency_mismatch"
     assert STAMP_NOTE in exc.value.message
-    assert Hh.library_item_digest(t) == Hh.library_item_digest(M.Tariff.model_validate(payload))
+    assert Hh.library_item_digest(t) == Hh.library_item_digest(
+        M.Tariff.model_validate(payload)
+    )
