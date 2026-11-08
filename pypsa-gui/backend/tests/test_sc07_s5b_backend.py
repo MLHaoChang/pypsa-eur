@@ -176,3 +176,19 @@ def test_an_unknown_row_says_when_its_chain_could_not_be_read(monkeypatch, reada
     if not readable:
         expected["receipt_read"] = False
     assert rows == [expected]
+
+
+def test_an_open_row_never_carries_receipt_read(monkeypatch):
+    """An open preview is open whatever the chain read did: the flag is for unknown rows only."""
+
+    def committed(_directory, _site, _pid):
+        raise OSError("chain unreadable")
+
+    monkeypatch.setattr(
+        proposals, "_entries", OrderedDict({(PROJECT.registry_key, "o0"): _entry(0)})
+    )
+    monkeypatch.setattr(chat, "_UNKNOWN", {})
+    monkeypatch.setattr(proposals, "_committed", committed)
+    rows = chat.my_previews(PROJECT, OWNER, SITE)
+    assert [r["status"] for r in rows] == ["open"]
+    assert "receipt_read" not in rows[0]
