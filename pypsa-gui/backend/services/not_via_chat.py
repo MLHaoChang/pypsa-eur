@@ -254,6 +254,8 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        # Owner decision DC25-POINTER-1: chat points to the Plan vs operation
+        # card; no typed read tool.
         'id': 'dc_operational_gap',
         'title': 'Plan-vs-operation gap of the operational run',
         'disposition': 'manual',
