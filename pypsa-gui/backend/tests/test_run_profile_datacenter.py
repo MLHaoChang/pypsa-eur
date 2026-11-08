@@ -1155,3 +1155,143 @@ def test_a_grant_naming_the_datacenter_profile_is_refused(hub, monkeypatch):  # 
     with pytest.raises(HTTPException) as exc:
         run_envelope.decide(SimpleNamespace(), task["task_id"], "unattended")
     assert exc.value.detail["error_kind"] == "envelope_not_grantable"
+
+
+# ── the dc.* readers, each edge (mutant survivors at a4dbee10) ──────────────
+
+
+def _reader_env(hub, steps=(), rows=None, project=True, project_dir=None):  # noqa: F811
+    return run_gates.Env(
+        task={
+            "steps": list(steps),
+            "run": {"intake": {"rows": rows}} if rows is not None else {},
+        },
+        ctx=None,
+        project=hub if project else None,
+        project_dir=project_dir,
+    )
+
+
+def test_the_published_reader_edges(hub):  # noqa: F811
+    assert run_gates._dc_gridcode_published(_reader_env(hub, project=False)) is None
+    none = run_gates._dc_gridcode_published(_reader_env(hub))
+    assert isinstance(none, run_gates.NoEvidence) and none.value == "none_published"
+    _publish(hub, "sagc_dc")
+    assert run_gates._dc_gridcode_published(_reader_env(hub)) is True
+
+
+def test_the_unchanged_reader_edges(hub):  # noqa: F811
+    _publish(hub, "sagc_dc")
+    step = {
+        "id": "solve.4",
+        "tool": run_actions.READINESS,
+        "native": run_actions.KIND,
+        "status": "completed",
+        "frozen": {"grid_code": run_actions.choose(hub)},
+    }
+    for env in (_reader_env(hub), _reader_env(hub, [step], project=False)):
+        got = run_gates._dc_gridcode_unchanged(env)
+        assert isinstance(got, run_gates.NoEvidence) and got.value == "not_frozen"
+    assert run_gates._dc_gridcode_unchanged(_reader_env(hub, [step])) is True
+    _publish(
+        hub,
+        "sagc_dc",
+        harmonic_resonance_clearance_h={"value": 0.7, "clause": "x", "source": "code"},
+    )
+    assert run_gates._dc_gridcode_unchanged(_reader_env(hub, [step])) is False
+
+
+@pytest.mark.parametrize(
+    "status, job, want",
+    [
+        (None, None, None),
+        ("running", None, None),
+        ("waiting", None, None),
+        ("completed", None, "done"),
+        ("failed", {"outcome": "aborted"}, "aborted"),
+        ("failed", None, "failed"),
+    ],
+)
+def test_the_campus_study_reader(hub, status, job, want):  # noqa: F811
+    steps = (
+        []
+        if status is None
+        else [
+            {
+                "id": "solve.3",
+                "tool": run_actions.CAMPUS,
+                "native": run_actions.KIND,
+                "status": status,
+                **({"job": job} if job else {}),
+            }
+        ]
+    )
+    assert run_gates._dc_campus_study(_reader_env(hub, steps)) == want
+
+
+def test_the_frequency_reader_without_intake_or_campus(hub, tmp_path):  # noqa: F811
+    got = run_gates._dc_gridcode_frequency(
+        run_gates.Env(task={"run": {}}, ctx=None, project=hub, project_dir=tmp_path)
+    )
+    assert isinstance(got, run_gates.NoEvidence) and got.value == "not_given"
+    row = {"param": run_gates.FREQUENCY_PARAM, "value": "50", "status": "confirmed"}
+    got = run_gates._dc_gridcode_frequency(
+        _reader_env(hub, rows=[row], project_dir=None)
+    )
+    assert isinstance(got, run_gates.NoEvidence) and got.value == "campus_missing"
+
+
+@pytest.mark.parametrize(
+    "steps, state",
+    [
+        ([], "not_read"),
+        ([{**_read_step(), "status": "failed"}], "not_read"),
+        ([{**_read_step(), "frozen": {}}], "grid_code_changed"),
+    ],
+)
+def test_the_scorecard_without_its_own_read_gives_no_evidence(steps, state):
+    got = run_gates._frozen_scorecard(_env(steps))
+    assert isinstance(got, run_gates.NoEvidence) and got.value == state
+
+
+def test_a_never_pass_row_without_a_read_says_so_first():
+    got = run_gates._scorecard_reader(run_gates.SCORECARD + "ride_through:")(_env([]))
+    assert isinstance(got, run_gates.NoEvidence) and got.value == "not_read"
+
+
+def test_only_a_warn_pass_on_assumed_rows_is_screening():
+    scored = run_gates.Scored(
+        "fail", [{"id": "r", "verdict": "unknown", "assumed": True}]
+    )
+    assert (
+        run_gates._scored_problem({"severity": "block"}, {"verdict": "fail"}, scored)
+        is None
+    )
+    failed = {"verdict": "fail"}
+    assert (
+        run_gates._scored_problem(
+            {"severity": "block"},
+            failed,
+            run_gates.Scored("fail", [{"id": "r", "verdict": "fail", "assumed": True}]),
+        )
+        is None
+    )
+    assert "screening" not in failed
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        {
+            "tool": "not_an_action",
+            "native": run_actions.KIND,
+            "args": dict(run_actions.FROZEN),
+        },
+        {"tool": run_actions.CAMPUS, "args": dict(run_actions.FROZEN)},
+    ],
+)
+def test_a_profile_naming_half_an_action_is_refused(action):
+    profile = copy.deepcopy(run_profiles.EH_DATACENTER)
+    profile["stages"]["solve"]["actions"].append(action)
+    with pytest.raises(run_profiles.ProfileError, match="native actions"):
+        run_profiles.load(profile)
