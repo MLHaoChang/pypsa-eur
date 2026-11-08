@@ -757,6 +757,14 @@ def _scene_state(args: dict) -> tuple[Any, str, dict, dict]:
     return project, owner, entry, scene
 
 
+def _placed_words(entry: dict, at: dict, words: dict, planned: str) -> str:
+    """Where an item stands, in words; a place that differs from the plan never reads as the plan (F2)."""
+    text = _where_placed(entry, words)
+    if _place_of(entry) != at and text == planned:
+        return f"{text}, not exactly the planned place"
+    return text
+
+
 def _target_text(expect: dict, unit: str | None) -> str:
     """The exact target (H1): its name and kind in words, its bus, carrier and unit (U4: no class key)."""
     from services.site_scene import associations, chat
@@ -789,6 +797,11 @@ MARKED, NOT_MARKED = "marked unavailable", "not marked"
 NOT_PLACED, OTHER_ITEM = "not placed", "the site shows a different item there"
 ON_SITE, OFF_SITE, OFF_MODEL = "on the site", "off the site, still in the model", "off the site and not in the model"
 NOT_READ = "not read back: the project is not open"
+
+
+def _place_of(entry: dict) -> dict:
+    """A placement's stored values, compared as stored, never as their rounded words (GK B F2)."""
+    return {k: entry.get(k) for k in ("x", "y", "heading", "on")}
 
 
 def _where_placed(entry: dict, words: dict) -> str:
@@ -865,7 +878,8 @@ def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
         for key, step in (stored.get("plan") or {}).items():
             old = _where_placed(placed[key], words) if key in placed else NOT_PLACED
             add(f"Place {_target_text(step['expect'], units.get(key))}", old, _where_placed(step["entry"], words),
-                {"kind": "place", "key": key, **_expect(step["expect"])}, ("footprint size",))
+                {"kind": "place", "key": key, **_expect(step["expect"]), "at": _place_of(step["entry"])},
+                ("footprint size",))
     elif action == "rebind":
         expect = stored["expect"]
         new = associations._label(None, expect["class"], expect["name"])
@@ -874,7 +888,7 @@ def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
             at = ((scene.get("site") or {}).get("placements") or {}).get(stored["placement"])
             add(f"Attach again: the placed item {chat._text(was)} becomes {_target_text(expect, units.get(None))}",
                 chat._text(was), chat._text(new), {"kind": "replaced", "key": stored["placement"], **_expect(expect),
-                                                   "at": _where_placed(at, words) if at else None},
+                                                   "at": _place_of(at) if at else None},
                 ("unit", "capacity"))
         else:
             where = chat.feature_word(words, preview.get("feature"))
@@ -888,10 +902,13 @@ def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
             cls, name = str(item.get("key")).split(":", 1)
             count = len(item.get("associations") or [])
             label = f"{chat._text(item.get('label'))}, with {count} attachment{'' if count == 1 else 's'}"
+            # Detach writes the placement, the memberships and the attachments; the restore puts each back (F3).
             check = {"kind": "detach" if detach else "restore", "key": item.get("key"), "class": cls, "name": name,
-                     "associations": sorted(a.get("id") for a in item.get("associations") or [])}
+                     "associations": sorted(a.get("id") for a in item.get("associations") or []),
+                     "groups": [] if detach else sorted(g.get("id") for g in item.get("groups") or []),
+                     "at": None if detach else _place_of(stored["derived"]["restore"][item.get("key")]["entry"])}
             back = f"back on the site with {count} attachment{'' if count == 1 else 's'}"
-            add(label, ON_SITE if detach else OFF_SITE, OFF_SITE if detach else back, check, ("group memberships",))
+            add(label, ON_SITE if detach else OFF_SITE, OFF_SITE if detach else back, check)
     for finding in preview.get("findings") or []:
         note(chat._text(finding.get("message")) or "")
     rows.append(_settings_row("3D site", "revision", "Scene revision", scene.get("revision"),
@@ -943,7 +960,7 @@ def _read_target(n, check: dict, scene: dict, recorded: dict, words: dict, row: 
             return NOT_PLACED
         if not _same_target(n, check, _live(n, check["class"], recorded.get(key), check["name"])):
             return OTHER_ITEM
-        return _where_placed(placed[key], words)
+        return _placed_words(placed[key], check["at"], words, row["new"])
     if kind in ("rebind", "replaced"):
         if kind == "rebind":
             a = assoc.get(check["association"])
@@ -957,18 +974,21 @@ def _read_target(n, check: dict, scene: dict, recorded: dict, words: dict, row: 
         if not _same_target(n, check, name):
             return OTHER_ITEM
         # The new item keeps the old one's place (J1: a placement's x/y/heading/on).
-        if kind == "replaced" and check.get("at") and _where_placed(placed[new_key], words) != check["at"]:
+        if kind == "replaced" and check.get("at") and _place_of(placed[new_key]) != check["at"]:
             return f"{label}, moved to {_where_placed(placed[new_key], words)}"
         return label
     key = check["key"]
     left = sorted(a_id for a_id, a in assoc.items() if a.get("feature") == key)
+    groups = sorted(g.get("id") for g in scene.get("groups") or [] if key in (g.get("members") or []))
     if kind == "detach":
-        if key in placed or left:
+        if key in placed or left or groups:
             return ON_SITE
         return OFF_SITE if associations._exists(n, check["class"], check["name"]) else OFF_MODEL
     if key not in placed:
         return OFF_SITE
-    return row["new"] if left == check["associations"] else ON_SITE
+    as_planned = (left == check["associations"] and groups == check["groups"]
+                  and _place_of(placed[key]) == check["at"])
+    return row["new"] if as_planned else ON_SITE
 
 
 def _scene_preview(args: dict) -> list[dict]:

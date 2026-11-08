@@ -568,7 +568,8 @@ def _proposal_status(
 def my_previews(project, owner: str | None, site_id: str) -> list[dict[str, Any]]:
     """
     SC-07 S5 (GK B J4): the caller's own previews on this Site that a Resume
-    can report, newest first, at most MAX_LIVE_PER_OWNER. Never another
+    can report, newest first, open and outcome_unknown before applied, at most
+    MAX_LIVE_PER_OWNER. Never another
     owner's, even with the same id. The chain is read first (H6), so a commit
     that landed reads applied even when the preview was cancelled or its
     unknown marker was evicted. A cancelled preview with no receipt and an
@@ -613,9 +614,10 @@ def my_previews(project, owner: str | None, site_id: str) -> list[dict[str, Any]
         if entry is not None:
             row.update(action=entry["action"], base_revision=entry["base_revision"])
         out.append(row)
-        if len(out) >= MAX_LIVE_PER_OWNER:
-            break
-    return out
+    # Previews to act on come first, then applied ones, then the cap: applied
+    # entries live for the TTL and must never crowd out an open one (GK B F1).
+    out.sort(key=lambda r: r["status"] == "applied")
+    return out[:MAX_LIVE_PER_OWNER]
 
 
 def summarize(

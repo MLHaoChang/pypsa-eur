@@ -547,9 +547,8 @@ def _replace_prep(client):
 def test_a_placed_item_attached_again_reads_back_verified(client, site):
     card, args = applied(_replace_prep(client))
     (row,) = targets(card)
-    assert row["check"]["kind"] == "replaced" and row["check"]["at"].startswith(
-        "x 60 m"
-    )
+    assert row["check"]["kind"] == "replaced"
+    assert row["check"]["at"] == {"x": 60.0, "y": -50.0, "heading": 0, "on": None}
     assert row["not_compared"] == ["unit", "capacity"]
     out = edit_card.receipt(card, args)
     assert out["outcome"] == "verified", [
@@ -716,3 +715,131 @@ def test_a_placement_to_where_it_already_stands_counts_no_change(client, site):
     )
     assert _row(card, "place")["old"] == _row(card, "place")["new"]
     assert card["says"] == "Place model items in the 3D site (0 changes)"
+
+
+# ── GK B F1–F3, T1–T3 (#1275 review) ───────────────────────────────────────
+
+
+def test_applied_previews_never_crowd_out_an_open_one_on_either_surface(client, site):
+    """F1: applied entries live for the TTL; the cap applies after the open ones are listed."""
+    proposals.clear()
+    open_one = bind(client, IT)
+    for _ in range(chat.MAX_LIVE_PER_OWNER):
+        chat_tools.site_scene_apply(**args_of(bind(client, HEAT)))
+    route = _get(client)["my_previews"]
+    assert len(route) == chat.MAX_LIVE_PER_OWNER
+    assert route[0] == {**route[0], "id": open_one["proposal_id"], "status": "open"}
+    assert [p["id"] for p in chat_tools.site_scene_read("campus")["my_previews"]] == [
+        open_one["proposal_id"]
+    ]
+
+
+def test_another_sites_previews_are_not_listed(client, site):
+    """T2: the list is per Site, the marker included."""
+    prep = bind(client, IT)
+    chat._mark_unknown(_key(prep["proposal_id"]))
+    with chat.scope() as (_db, _user, project, owner):
+        assert chat.my_previews(project, owner, "another-site") == []
+
+
+def test_a_dropped_attachment_still_there_reads_back_attached(
+    client, site, monkeypatch
+):
+    """T3: a dropped row reads what the site holds, not a fixed word."""
+    applied(bind(client, IT))
+    kept = next(a for a in _get(client)["associations"] if a["name"] == "it")
+    card, args = applied(bind(client, HEAT))
+    _scene_after(monkeypatch, lambda s: s["associations"].append(dict(kept)))
+    out = edit_card.receipt(card, args)
+    assert (
+        out["outcome"] == "uncertain" and _row(out, "dropped")["readback"] == "attached"
+    )
+
+
+def _nudge(key):
+    def change(scene):
+        scene["site"]["placements"][key]["x"] += (
+            1e-7  # the same in words (:g), not the same value
+        )
+
+    return change
+
+
+def test_a_placement_a_hair_off_reads_back_not_the_planned_place(
+    client, site, monkeypatch
+):
+    """F2: compared as stored, never as rounded words."""
+    (prep,) = _apply_each(client, "place_existing")
+    card, args = applied(prep)
+    _scene_after(monkeypatch, _nudge("StorageUnit:bess"))
+    out = edit_card.receipt(card, args)
+    row = _row(out, "place")
+    assert out["outcome"] == "uncertain"
+    assert row["readback"] == f"{row['new']}, not exactly the planned place"
+
+
+def test_a_replaced_item_a_hair_off_reads_back_moved(client, site, monkeypatch):
+    card, args = applied(_replace_prep(client))
+    _scene_after(monkeypatch, _nudge("StorageUnit:bess2"))
+    out = edit_card.receipt(card, args)
+    assert (
+        out["outcome"] == "uncertain"
+        and "moved to" in _row(out, "replaced")["readback"]
+    )
+
+
+def _join_group(key):
+    def change(scene):
+        scene.setdefault("groups", []).append(
+            {"id": "g-x", "label": "Extra", "members": [key]}
+        )
+
+    return change
+
+
+@pytest.mark.parametrize(
+    ("action", "kind"), [("detach", "detach"), ("undo_detach", "restore")]
+)
+def test_a_membership_not_as_planned_reads_back_uncertain(
+    client, site, monkeypatch, action, kind
+):
+    """F3: memberships are written by detach and restore, so they are compared, never uncompared."""
+    (prep,) = _apply_each(client, action)
+    card, args = applied(prep)
+    assert _row(card, kind)["not_compared"] == []
+    _scene_after(monkeypatch, _join_group("StorageUnit:bess"))
+    out = edit_card.receipt(card, args)
+    assert (
+        out["outcome"] == "uncertain" and _row(out, kind)["readback"] == "on the site"
+    )
+
+
+def test_a_restore_put_back_elsewhere_reads_back_uncertain(client, site, monkeypatch):
+    """F3: the restore's placement is compared."""
+    (prep,) = _apply_each(client, "undo_detach")
+    card, args = applied(prep)
+    _scene_after(monkeypatch, _nudge("StorageUnit:bess"))
+    out = edit_card.receipt(card, args)
+    assert (
+        out["outcome"] == "uncertain"
+        and _row(out, "restore")["readback"] == "on the site"
+    )
+
+
+def test_a_restore_with_other_attachments_reads_back_uncertain(
+    client, site, monkeypatch
+):
+    """T1: the restore compares the attachments it put back."""
+    (prep,) = _apply_each(client, "undo_detach")
+    card, args = applied(prep)
+    _scene_after(
+        monkeypatch,
+        lambda s: s["associations"].append(
+            {"id": "extra", "feature": "StorageUnit:bess"}
+        ),
+    )
+    out = edit_card.receipt(card, args)
+    assert (
+        out["outcome"] == "uncertain"
+        and _row(out, "restore")["readback"] == "on the site"
+    )
