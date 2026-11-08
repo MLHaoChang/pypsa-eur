@@ -3,7 +3,7 @@
 
 # A queued solve stamps the foreground project's revision and org
 
-Status: done (#PR)
+Status: done (#1286)
 Type: bug
 Found by: SH-07b (2), the trajectory evaluation's decoy check (#1282): pilot:positive scored `wrong_project_results` 5 with every oracle check passing.
 
