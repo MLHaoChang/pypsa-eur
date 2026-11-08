@@ -21,14 +21,14 @@
  *     unknown: MOCKED by a route on the scene GET that marks the real open preview
  *       outcome_unknown (and leaves the other open preview out), since an unknown outcome needs
  *       an apply whose report is lost, which the real server cannot be made to do on demand.
- *     Checking…: the click's refetch is a real scene GET, held ~3 s by the route (delay only).
+ *     Checking…: the click's refetch is a real scene GET, held ~15 s by the route (delay only).
  *     applied after the check: real. The preview is applied through the real route before the
  *       click, and the refetch passes the real my_previews through (status applied).
  *     not applied + Prepare it again: the line before the click is MOCKED (the other real open
  *       preview marked outcome_unknown); the refetch is real (that preview is still open).
  *  R6 Site 3D open line: the ui_open_panel(map, canvas_view site) call, its ACK issue and the
  *     browser's POST /api/chat/ui-ack are real. "Opening the 3D site…" is captured while a route
- *     holds the real ui-ack response ~3 s (delay only); "Opened the 3D site" is the real ACK
+ *     holds the real ui-ack response ~15 s (delay only); "Opened the 3D site" is the real ACK
  *     outcome. "Could not confirm the 3D site opened": MOCKED, the route answers ui-ack 409.
  * Each in Expert and Guided, deviceScaleFactor 2, full page and a close crop. Every state's
  * visible text is asserted, and no crop's text holds a preview id, "outcome_unknown",
@@ -188,7 +188,7 @@ try {
     if (mode === '409') return route.fulfill({ status: 409, json: { detail: 'The navigation was not confirmed.' } })
     const resp = await route.fetch()
     ack.bodies.push(`${resp.status()} ${(await resp.text()).slice(0, 300)}`)
-    if (mode === 'hold') await sleep(3000)
+    if (mode === 'hold') await sleep(15000)
     return route.fulfill({ response: resp })
   })
   // R5: the scene GET, passed through, its my_previews patched, or the next read held.
@@ -226,15 +226,18 @@ try {
     for (const id of ids) assert(!text.includes(id), `${label}: shows a preview id`)
     for (const bad of ['outcome_unknown', 'bind_targets', '—', ';']) assert(!text.includes(bad), `${label}: shows ${JSON.stringify(bad)}: ${text}`)
   }
-  const shoot = async (name, target) => {
+  // `holds`: words a transient state must still show once both images are taken (a held route).
+  const shoot = async (name, target, holds) => {
     await target.scrollIntoViewIfNeeded()
     const text = await target.innerText()
     clean(name, text)
+    if (holds) assert(text.includes(holds), `${name}: wanted ${holds}, have ${text}`)
     shots.push(path.join(out, `${name}.png`))
     await page.screenshot({ path: shots.at(-1) })
     shots.push(path.join(out, `${name}-close.png`))
     // A reload can re-mount the panel once after it first appears: retry the crop once.
     await target.screenshot({ path: shots.at(-1) }).catch(async () => { await page.waitForTimeout(1000); await target.screenshot({ path: shots.at(-1) }) })
+    if (holds) assert((await target.innerText()).includes(holds), `${name}: ${holds} ended before the images were taken`)
     report[name] = text
     return text
   }
@@ -300,7 +303,7 @@ try {
         await page.waitForFunction(n => document.querySelectorAll('[data-testid="chat-site3d-open"]')[n]?.dataset.state === 'pending',
           before, { timeout: 5000 })
         assert.equal(await line.innerText(), 'Opening the 3D site…')
-        await shoot(`r6-opening-${mode}`, toolRow())
+        await shoot(`r6-opening-${mode}`, toolRow(), 'Opening the 3D site…')
         await page.waitForFunction(n => document.querySelectorAll('[data-testid="chat-site3d-open"]')[n]?.dataset.state === 'opened',
           before, { timeout: 15000 }).catch(async e => {
           throw new Error(`${e.message}: state ${await line.getAttribute('data-state')}, ACK ${ack.bodies.join(' | ')}`) })
@@ -363,10 +366,10 @@ try {
     await shoot(`r5-unknown-${mode}`, panel)
     await applyPreview(X)
     sceneRoute.patch = null
-    sceneRoute.hold = 3000
+    sceneRoute.hold = 15000
     await check.click()
     await page.waitForFunction(() => document.querySelector('[data-testid="site-resume-check"]')?.textContent === 'Checking…', null, { timeout: 2500 })
-    await shoot(`r5-checking-${mode}`, panel)
+    await shoot(`r5-checking-${mode}`, panel, 'Checking…')
     await expectLine('Found: your placement was applied.')
     await shoot(`r5-applied-${mode}`, panel)
 
