@@ -605,6 +605,24 @@ def test_a_stamp_that_names_no_shipped_tariff_reads_no_currency():
     assert stamped_tariff_currency(t.model_copy(update={"id": "nope"})) is None
 
 
+def test_a_regional_stamp_reads_that_regional_pack(monkeypatch):
+    """GLE3-2: `<date>+uk` asks for the UK pack of that date, never the EU pack of it."""
+    from services.library.defaults_pack import loader
+
+    real, asked = loader.load_defaults_pack, []
+
+    def spy(version=None, *, region=None):
+        asked.append((version, region))
+        return real(version, region=region)
+
+    uk = real(region="uk")
+    _, t = _generic_copy()
+    monkeypatch.setattr(loader, "load_defaults_pack", spy)
+    stamped = t.model_copy(update={"pack_hash": uk.stamp})
+    assert loader.stamped_tariff_currency(stamped) is None
+    assert asked == [(uk.version.split("+")[0], "uk")]
+
+
 def test_a_vendored_pack_that_fails_to_load_is_not_read_as_unknown(monkeypatch):
     """GLE3-1: only a lookup miss reads as unknown; a broken pack never switches the gate off."""
     from services.library.defaults_pack import loader

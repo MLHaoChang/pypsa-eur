@@ -808,7 +808,7 @@ def stamped_tariff_currency(tariff: Tariff) -> str | None:
     nothing is written. None when no vendored pack of that id, version and hash ships
     the tariff. Only a lookup miss is None; a pack that fails to load raises (GK A GLE3-1)."""
     try:
-        pid, version, digest = parse_pack_stamp(tariff.pack_hash or "")
+        pid, version, digest = parse_pack_stamp(tariff.pack_hash)
     except DefaultsPackError:
         return None
     date_part, _, region = version.partition("+")
