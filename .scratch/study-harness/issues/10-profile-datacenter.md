@@ -82,3 +82,16 @@ Conditions:
   - It needs `campus/campus.yaml`, otherwise 422 (Q2).
   - Follow it like the queue kind (`harness/continuation.follow_queue_job`, `:279`), but with a campus-run evidence read: `run_job_state(project)` and the published run's `profile_used` sha (`:245`).
 - **Analogue for frozen args, reservation, follower and recovery:** `harness/run_eh.py` (freeze `:100`, admit `:190`, release `:254`, settle/recover `:456`/`:577`); the runner's native dispatch is `harness/runner.py:798-805`.
+
+### 10a build (session_01G7qCuiz5MQHhJ9WJuGKXjQ)
+
+- `eh_datacenter@1` in `services/run_profiles.py`:
+  - Stage 2 has `dc.gridcode.published` ("publish the grid-code profile").
+  - The input gate has `dc.gridcode.frequency_match`, against the intake param `grid.frequency_hz`.
+  - The solve stage runs solve_queue_enqueue, run_eh_study, `dc_campus_study` and `dc_grid_readiness`, with `dc.campus.study`.
+  - The result gate has the core rules, `dc.gridcode.unchanged`, the `DC_SCORECARD` row table (`lole` listed as not gated) and the coupling-loop LOLE rule (Q5).
+  - No envelope: every write and run is carded.
+- The registry is `services/run_actions.py`. The runner dispatches and settles from `harness/runner.py`. The freeze happens on solve-stage entry (`assistant_tasks._advance_run`), and a stage entered again keeps the first freeze.
+- D2–D4 and the never-pass families are in `services/run_gates.py` (`_frozen_scorecard`, `_scored_problem`, `NEVER_PASS`).
+- What the campus run writes (D6): `services/campus_electrical_service.py` `run`. It writes `campus_electrical/run/` (via `_publish_run`, plus `used_library` and the cost basis when investing) and `campus_electrical/settings.json` (`(d / SETTINGS_FILE).write_text`). It runs no PyPSA optimisation. `test_the_campus_run_optimises_nothing_and_writes_only_its_run_and_settings` pins both.
+- Open: where a DC run gets `grid.frequency_hz` while the chat intake serves eh_site only. Asked of the coordinator; built as option A (fail closed until an intake row exists).

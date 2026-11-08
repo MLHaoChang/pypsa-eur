@@ -1,8 +1,8 @@
 """The result gate's scorecard rules (study harness issue 05; design §5,
 GK A): `dc.readiness.<row>` and `dc.readiness.<family>:` gate by verdict.
 Only `pass` satisfies a rule; `warn`, `unknown`, `fail` and a missing row
-never do. A pass that rests on an assumed row is a screening pass, reported
-as such. A family passes only when every row passes; zero rows is
+never do. A pass that rests on an assumed row is "within the screening
+limit" on a warn rule, and not evaluated on a block rule (study harness 10a, D3). A family passes only when every row passes; zero rows is
 `not_evaluated`."""
 
 from __future__ import annotations
@@ -12,7 +12,18 @@ import pytest
 from services import run_gates
 from services.adequacy import grid_readiness as G
 
-ENV = dict(task={}, ctx=None, project=object(), project_dir=None)
+# Study harness 10a (D2): rows read only with the run's own readiness step's frozen profile.
+CODE = {"id": "sagc_dc", "label": "SAGC (project)", "digest": "d" * 64}
+READ = {"id": "solve.4", "tool": "dc_grid_readiness", "native": "action", "status": "completed",
+        "args": {"frozen": "dc_grid_code"}, "frozen": {"grid_code": CODE},
+        "result": {"profile": CODE["id"], "digest": CODE["digest"]}}
+ENV = dict(task={"steps": [READ]}, ctx=None, project=object(), project_dir=None)
+
+
+@pytest.fixture(autouse=True)
+def _frozen_profile_unchanged(monkeypatch):
+    from services import run_actions
+    monkeypatch.setattr(run_actions, "unchanged", lambda project, code: code == CODE)
 
 
 def _row(id_, verdict, assumed=False):
@@ -66,42 +77,42 @@ def test_a_verified_pass_passes_and_is_not_a_screening_pass(monkeypatch):
 
 def test_an_assumed_pass_is_a_screening_pass_in_the_gate_record(monkeypatch):
     result, _ = _gate(
-        monkeypatch, [_row("tdd", "pass", assumed=True)], "dc.readiness.tdd"
+        monkeypatch, [_row("tdd", "pass", assumed=True)], "dc.readiness.tdd", severity="warn"
     )
     assert result["verdict"] == "pass"
-    assert result["screening"] is True and result["note"] == "screening pass"
+    assert result["screening"] is True and result["note"] == "within the screening limit"
     assert result["facts"][0]["rows"][0]["assumed"] is True
 
 
 def test_a_family_passes_only_when_every_row_passes(monkeypatch):
     rows = [
-        _row("ride_through:a", "pass"),
-        _row("ride_through:b", "pass"),
+        _row("energization_peak:a", "pass"),
+        _row("energization_peak:b", "pass"),
         _row("motor_start:m", "fail"),
     ]
-    result, _ = _gate(monkeypatch, rows, "dc.readiness.ride_through:")
+    result, _ = _gate(monkeypatch, rows, "dc.readiness.energization_peak:")
     assert result["verdict"] == "pass"
     assert [r["id"] for r in result["facts"][0]["rows"]] == [
-        "ride_through:a",
-        "ride_through:b",
+        "energization_peak:a",
+        "energization_peak:b",
     ]
-    rows[1] = _row("ride_through:b", "warn")
-    result, _ = _gate(monkeypatch, rows, "dc.readiness.ride_through:")
+    rows[1] = _row("energization_peak:b", "warn")
+    result, _ = _gate(monkeypatch, rows, "dc.readiness.energization_peak:")
     assert result["verdict"] == "fail"
 
 
 def test_a_family_with_one_assumed_row_is_a_screening_pass(monkeypatch):
     rows = [_row("motor_start:a", "pass"), _row("motor_start:b", "pass", assumed=True)]
-    result, _ = _gate(monkeypatch, rows, "dc.readiness.motor_start:")
-    assert result["verdict"] == "pass" and result["note"] == "screening pass"
+    result, _ = _gate(monkeypatch, rows, "dc.readiness.motor_start:", severity="warn")
+    assert result["verdict"] == "pass" and result["note"] == "within the screening limit"
 
 
 def test_a_family_with_zero_rows_is_not_evaluated(monkeypatch):
-    excluded = [{"id": "ride_through:a", "reason": "off grid"}]
+    excluded = [{"id": "motor_start:a", "reason": "off grid"}]
     result, _ = _gate(
         monkeypatch,
         [_row("scr", "pass")],
-        "dc.readiness.ride_through:",
+        "dc.readiness.motor_start:",
         excluded=excluded,
     )
     assert (

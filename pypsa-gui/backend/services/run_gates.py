@@ -12,7 +12,11 @@ reader itself marks as no evidence (`NoEvidence`: its state and reason kept).
 
 Scorecard rows (issue 05, GK A) gate by verdict: `dc.readiness.<row>` names
 one row and `dc.readiness.<family>:` one family. Only `pass` satisfies a
-rule; a pass on an assumed row is a screening pass, reported as such.
+rule; a pass on an assumed row is "within the screening limit", never
+verified. Study harness 10a (GK B (36) D2-D4, D8): rows read with the run's
+frozen grid-code profile only, and give no evidence once its digest moved; a
+block row passing on an assumed input is not evaluated; a warn row reading
+`unknown` is not evaluated; ride-through and dynamic rows never pass.
 
 Engine loops (issue 05, PR C; GK A): a result rule with an `engine` block is
 driven by `run_margin_loop` or `run_coupling_loop`, never by an agent turn.
@@ -480,6 +484,58 @@ def _handoff_kpis_read(env):
     return _on(env.ctx, run_handoff.kpis_read, env.task, _profile(env))
 
 
+# Study harness 10a (GK B (36) D1, Q1, Q2): the data-centre run's grid-code
+# and campus facts, read through `services/run_actions.py`.
+FREQUENCY_PARAM = "grid.frequency_hz"
+
+
+def _dc_gridcode_published(env):
+    """D1: a published profile the run can be held to (`run_actions.choose`)."""
+    from services import run_actions
+    if env.project is None:
+        return None
+    try:
+        run_actions.choose(env.project)
+    except run_actions.FreezeError as exc:
+        return NoEvidence(exc.state, str(exc))
+    return True
+
+
+def _dc_gridcode_frequency(env):
+    """Q1 = A: the campus's nominal frequency equals the grid frequency the
+    user gave at intake (`grid.frequency_hz`, Hz). No intake row or no
+    campus file is no evidence (Q2: the user drafts the campus)."""
+    from services import campus_electrical_service as ce
+    from services.run_intake import USABLE
+    from services.solver.island import campus_f_hz
+    rows = ((env.task.get("run") or {}).get("intake") or {}).get("rows") or []
+    given = next((r.get("value") for r in rows if r.get("param") == FREQUENCY_PARAM
+                  and r.get("status") in USABLE and not r.get("write")), None)
+    if str(given) not in ("50", "60"):
+        return NoEvidence("not_given", "state the grid frequency (Hz) at intake")
+    if env.project_dir is None or not (Path(env.project_dir) / ce.SUBDIR / ce.CAMPUS_FILE).is_file():
+        return NoEvidence("campus_missing", "draft the campus")
+    return float(campus_f_hz(env.project_dir)) == float(given)
+
+
+def _dc_gridcode_unchanged(env):
+    """D1: the run's frozen profile is still published with the same content."""
+    from services import run_actions
+    code = run_actions.frozen_code(env.task)
+    if code is None or env.project is None:
+        return NoEvidence("not_frozen", "the run froze no grid-code profile")
+    return run_actions.unchanged(env.project, code)
+
+
+def _dc_campus_study(env):
+    """The run's own campus job: `done` only once its step settled completed."""
+    from services import run_actions
+    step = run_actions.latest(env.task, run_actions.CAMPUS)
+    if step is None or step["status"] not in ("completed", "failed"):
+        return None
+    return "done" if step["status"] == "completed" else ((step.get("job") or {}).get("outcome") or "failed")
+
+
 FACTS: dict[str, Fact] = {
     # Harness facts: the run block itself, written only by harness code.
     "brief.valid": Fact("task.brief", "brief", None, lambda env: bool(env.task.get("brief"))),
@@ -517,6 +573,13 @@ FACTS: dict[str, Fact] = {
     "eh.review.blockers": Fact("services.adequacy.eh_review.review_report", "findings", None, _eh_review_blockers),
     "kpi.unserved_mwh": Fact("harness.lost_load_calculations.calculate", "lost_load_energy", "MWh",
                              _kpi_unserved_mwh),
+    # Study harness 10a: the data-centre run (GK B (36) D1, Q1, Q2).
+    "dc.gridcode.published": Fact("services.run_actions.choose", "id", None, _dc_gridcode_published),
+    "dc.gridcode.frequency_match": Fact("services.solver.island.campus_f_hz", "f_hz", None,
+                                        _dc_gridcode_frequency),
+    "dc.gridcode.unchanged": Fact("services.campus_electrical_service.profile_fingerprint", "sha256", None,
+                                  _dc_gridcode_unchanged),
+    "dc.campus.study": Fact("services.solve_queue.get_job", "status", None, _dc_campus_study),
 }
 
 
@@ -525,7 +588,9 @@ FACTS: dict[str, Fact] = {
 # never picks one row of a family.
 SCORECARD = "dc.readiness."
 FAMILIES = ("energization_peak:", "dynamic:", "ride_through:", "motor_start:")
-SCREENING_PASS = "screening pass"
+SCREENING_PASS = "within the screening limit"
+# D8: requirements only the operator's own study can show; the screening never passes them.
+NEVER_PASS = ("ride_through:", "dynamic:")
 
 
 @dataclass(frozen=True)
@@ -538,11 +603,26 @@ class Scored:
 
 
 def _scorecard(env):
-    """`grid_readiness_for` of the run's project, read once per gate."""
-    from services.adequacy import grid_readiness
+    """`grid_readiness_for` of the run's project with the run's frozen
+    grid-code profile, read once per gate (D2): no evidence unless the run's
+    own readiness step read it and the profile's digest is still the one
+    that step stored."""
     if "scorecard" not in env.cache:
-        env.cache["scorecard"] = grid_readiness.grid_readiness_for(env.project)
+        env.cache["scorecard"] = _frozen_scorecard(env)
     return env.cache["scorecard"]
+
+
+def _frozen_scorecard(env):
+    from services import run_actions
+    from services.adequacy import grid_readiness
+    step = run_actions.latest(env.task, run_actions.READINESS)
+    if step is None or step.get("status") != "completed":
+        return NoEvidence("not_read", "the run's own grid-readiness step has not read the scorecard")
+    code = (step.get("frozen") or {}).get("grid_code") or {}
+    if not code.get("id") or (step.get("result") or {}).get("digest") != code.get("digest") \
+            or not run_actions.unchanged(env.project, code):
+        return NoEvidence("grid_code_changed", "the run's grid-code profile changed since its scorecard was read")
+    return grid_readiness.grid_readiness_for(env.project, code["id"])
 
 
 def _scorecard_reader(name):
@@ -551,6 +631,11 @@ def _scorecard_reader(name):
     def read(env):
         from services.adequacy import grid_readiness
         card = _scorecard(env)
+        if isinstance(card, NoEvidence):
+            return card
+        if target in NEVER_PASS:
+            return NoEvidence("screening_only", f"{target} rows need the network operator's own study; "
+                                                "the screening never passes them")
         if target.endswith(":"):
             rows = [r for r in card.get("rows") or [] if str(r["id"]).startswith(target)]
             if not rows:
@@ -681,13 +766,25 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
                 result["verdict"] = "pass" if _holds(rule["op"], value, rule.get("value")) else "fail"
             except (TypeError, ValueError) as exc:
                 problem = f"the fact cannot be compared: {exc}"
-        if problem is None and scored is not None and result["verdict"] == "pass" \
-                and any(r["assumed"] for r in scored.rows):
-            result.update(screening=True, note=SCREENING_PASS)  # never "verified" (§5)
+        if problem is None and scored is not None:
+            problem = _scored_problem(rule, result, scored)
         if problem is not None:
             result.update(verdict="not_evaluated", reason=problem)
         out.append(result)
     return out
+
+
+def _scored_problem(rule, result, scored):
+    """D3, D4: why a scorecard reading is no evidence for this rule, or None
+    (a pass on an assumed warn row is marked "within the screening limit")."""
+    if rule["severity"] == "warn" and any(r["verdict"] == "unknown" for r in scored.rows):
+        return "not evaluated: an input the row needs is missing"  # D4: never a pass, never accepted
+    if result["verdict"] == "pass" and any(r["assumed"] for r in scored.rows):
+        if rule["severity"] == "block":
+            # D3: a block row never passes on a generic or code-default input.
+            return "passes only on assumed inputs, so it is not evaluated for a block rule"
+        result.update(screening=True, note=SCREENING_PASS)  # never "verified" (§5)
+    return None
 
 
 def passed(results: list[dict]) -> bool:

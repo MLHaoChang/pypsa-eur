@@ -696,6 +696,8 @@ class Runner:
                     run_eh.recover(path, ctx, instance=self.instance, now=self.clock())  # issue 07 B3a
                 from harness import run_report
                 run_report.settle(path, ctx)  # issue 07: the run's report job, once it ended
+                from services import run_actions
+                run_actions.settle(path, ctx)  # study harness 10a: the run's campus job, once it ended
                 return self._step(path, ctx, session)
         return contextvars.copy_context().run(bound)
 
@@ -759,7 +761,7 @@ class Runner:
             stage = waiting["ref"] in run_profiles.STAGES
             # Issue 03: an envelope granted meanwhile goes on for what it covers.
             inside = not waiting.get("envelope_refused") and (
-                run_envelope.live(path) if stage else
+                (run_envelope.live(path) and not run_envelope._own_card(path, waiting["ref"])) if stage else
                 bool(step) and step["id"] == waiting["ref"] and run_envelope.covers(path, step["tool"]))
             if not inside and (decision is None or (decision == "live" and stage)):
                 return "waiting"  # a stage's Continue comes only from the plan card (COP-1)
@@ -799,6 +801,9 @@ class Runner:
             # Issue 07: the report job (strict, charged to the run under this lease)
             # and the hand-off read-back are the runner's own, never a chat call.
             from harness import run_handoff, run_report
+            from services import run_actions
+            if run_actions.is_action(step):  # study harness 10a: the closed native-action registry
+                return run_actions.start(path, ctx, step, instance=self.instance)
             if step["native"] == "report":
                 return run_report.start(path, ctx, step, instance=self.instance)
             return run_handoff.run_step(path, ctx, step)

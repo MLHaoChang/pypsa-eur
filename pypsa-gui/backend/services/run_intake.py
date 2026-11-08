@@ -669,8 +669,10 @@ def params(rows: list) -> dict:
     for r in rows:
         if r.get("write"):
             continue  # a planned write runs on the created network, never a creation param
-        if top(r["param"]) == GOAL:
-            continue  # the user's goal goes to the solver config (`goal`), never the template
+        if top(r["param"]) in (GOAL, GRID):
+            # The user's goal goes to the solver config (`goal`); the grid frequency is
+            # the frequency rule's (study harness 10a, Q1 = A): neither reaches the template.
+            continue
         if r["status"] in USABLE and r["param"] not in seen:
             seen.add(r["param"])
             _put(out, r["param"], r["value"])
@@ -678,6 +680,7 @@ def params(rows: list) -> dict:
 
 
 GOAL = "goal"  # `run_profiles.GOAL_PARAM`'s top: the user's reliability goal (issue 07 B3b, P5)
+GRID = "grid"  # `run_profiles.FREQUENCY_PARAM`'s top: the grid frequency the user gives (study harness 10a)
 
 
 def goal(rows: list) -> float | None:
