@@ -641,3 +641,14 @@ def test_a_row_with_a_bad_job_id_or_time_is_malformed(over):
     assert job_hold_store._record(_Row()).id == "r"
     with pytest.raises(job_hold_store.MalformedRecord):
         job_hold_store._record(_Row(**over))
+
+
+def test_a_hold_opened_on_an_unreadable_binding_stays_on_its_chat(monkeypatch):
+    def broken():
+        raise OSError("no context")
+
+    monkeypatch.setattr(job_holds, "_binding", broken)
+    session = ChatSession()
+    hold = job_holds.open_on_timeout(session, QUEUE, "F", "tu", _NeverDone())
+    assert not hold.shared and hold.share_error == "no_saved_project"
+    assert job_holds.check(session, QUEUE, {}, "F")[0] == job_holds.PENDING
