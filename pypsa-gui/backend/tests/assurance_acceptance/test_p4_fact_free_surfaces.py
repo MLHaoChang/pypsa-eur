@@ -28,6 +28,8 @@ BASE = {"content-disposition", "content-length", "content-type", "x-pypsa-replic
 HEADERS = {
     "table": BASE,
     "chart": BASE | {"x-checked-chart"},
+    # A chart of configured inputs or captured results says only whether its solve is current.
+    "result chart": BASE | {"x-chart-scope"},
 }
 # Keys that would present a value as checked, anywhere in a delivery item.
 CHECKED_KEYS = {"facts", "metrics", "warnings", "blocks", "evidence_id", "evidence_ids",
@@ -51,7 +53,10 @@ def checked_numbers(record):
 
 
 def numbers_in(headers):
-    return {n for value in headers.values() for n in NUMBER.findall(value)}
+    """Numbers in every header value except content-length, the body's byte
+    count, which the framework sets and which could equal a fact by chance."""
+    return {n for name, value in headers.items() if name.lower() != "content-length"
+            for n in NUMBER.findall(value)}
 
 
 def keys_in(value):
@@ -80,6 +85,15 @@ def test_a_chart_download_sends_only_its_header_names_and_no_checked_number(solv
     assert response.status_code == 200
     assert set(response.headers) == HEADERS["chart"]
     assert response.headers["x-checked-chart"] == "evidence re-verified now"
+    assert not numbers_in(response.headers) & checked_numbers(record)
+
+
+def test_a_result_chart_download_sends_only_its_header_names(solved, checked):
+    _receipt, record = _checked(solved, checked)
+    chart = chat_tools.create_chart("Generator", "p", ["G1"], source="result")
+    response = checked.client.get(chart["download_url"])
+    assert response.status_code == 200
+    assert set(response.headers) == HEADERS["result chart"]
     assert not numbers_in(response.headers) & checked_numbers(record)
 
 

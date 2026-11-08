@@ -569,6 +569,11 @@ draws only per-snapshot series the request's evidence holds (generator `p`; Stor
 profile's own `utilisation_series`), every value as stored, and binds the PNG to the answer's receipt
 (`receipt.chart`: series slots, the not-drawn list, the evidence id). The evidence is re-checked at render
 time, and `verify_chart` re-extracts the dataset from the evidence on every download.
+The dataset also names each evidence slot (`metrics`: metric, disposition, and the fact's formula_id and
+unit, or the reason when not answered) and its `warnings`, the receipt's limitation lines
+(`calculations.slot_warnings`), both read from the sealed record only. A chart stored without both keys
+verifies as before. Evidence from another project is refused (`other_project`) before anything is drawn
+or written. Table exports, reports and download headers carry no checked fact (AA05-A46-SCOPE-1).
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,

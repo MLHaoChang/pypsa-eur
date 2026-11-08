@@ -84,16 +84,28 @@ def test_a_drawn_chart_carries_the_identity_of_its_evidence(solved, checked):
     assert checked_charts.verify(manifest) == "current"
 
 
-def test_a_branch_chart_names_an_unavailable_slot_and_warns(grid, checked):
+def _branch_chart(grid, checked):
+    """A drawn branch chart whose evidence has unavailable slots (a NaN flow inside the window)."""
     ctx = solve_grid(grid)
     first, second = (v.isoformat() for v in ctx.network.snapshots[:2])
-    ctx.network.lines_t.p0.iloc[0, 0] = float("nan")  # inside the window: loading cannot be drawn
+    ctx.network.lines_t.p0.iloc[0, 0] = float("nan")
     receipt = ask(checked, ctx, "branch-loading/1", "L12",
                   {"branch_rating": LINE["branch_rating"]}, ["p1", "loading"],
                   component_class="Line", start=first, end=second)
-    chart = receipt["chart"]
-    assert chart["status"] == "drawn", chart
-    manifest = sidecar(chart)
+    assert receipt["chart"]["status"] == "drawn", receipt["chart"]
+    return receipt
+
+
+def _generator_chart(solved, checked):
+    return ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
+
+
+CHARTS = {"generator": ("solved", _generator_chart), "branch": ("grid", _branch_chart)}
+
+
+def test_a_branch_chart_names_an_unavailable_slot_and_warns(grid, checked):
+    receipt = _branch_chart(grid, checked)
+    manifest = sidecar(receipt["chart"])
     record = records.evidence(owner(checked), receipt["evidence_ids"][0])
     unavailable = [s for s in record["slots"] if s["disposition"] != "answered"]
     assert unavailable, record["slots"]
@@ -106,13 +118,42 @@ def test_a_branch_chart_names_an_unavailable_slot_and_warns(grid, checked):
     assert checked_charts.verify(manifest) == "current"
 
 
-def test_a_definition_changed_after_drawing_still_verifies(solved, checked, monkeypatch):
-    """B1: the identity comes from the sealed record, never the live definitions."""
-    receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
+@pytest.mark.parametrize("kind", sorted(CHARTS))
+def test_a_definition_changed_after_drawing_still_verifies(request, checked, monkeypatch, kind):
+    """B1: the identity comes from the sealed record, never the live definitions,
+    for answered slots and for unavailable ones (the branch chart has both)."""
+    fixture, draw = CHARTS[kind]
+    receipt = draw(request.getfixturevalue(fixture), checked)
     manifest = sidecar(receipt["chart"])
-    for metric in GENERATOR:
+    for metric in [m["metric"] for m in manifest["dataset"]["metrics"]]:
         changed = {**calculations.DEFINITIONS[metric], "formula_id": metric + "/changed", "unit": "changed"}
         monkeypatch.setitem(calculations.DEFINITIONS, metric, changed)
+    assert checked_charts.verify(manifest) == "current"
+
+
+# The series each profile with a per-snapshot series can draw (checked_charts.series_table).
+SERIES = {
+    "generator-dispatch/1": ["p"],
+    "storage-unit-dispatch/1": ["p_store", "p_dispatch", "state_of_charge"],
+    "bus-price/1": ["marginal_price"],
+    "branch-loading/1": ["p0", "p1", "loading"],
+}
+
+
+@pytest.mark.parametrize("profile", sorted(SERIES))
+def test_each_drawable_profile_draws_its_records_identity(request, checked, profile):
+    """End to end for every profile that draws: the manifest's metrics and
+    warnings are the record's and the receipt's."""
+    assert set(SERIES) <= set(DRIVERS)
+    _ctx, scope = build(request, profile)
+    record = records.capture_scoped(owner(checked), scope)
+    receipt, _answer_json, stored = _answer(checked, {**scope, "chart": SERIES[profile]}, record)
+    chart = receipt["chart"]
+    assert chart["status"] == "drawn", chart
+    manifest = sidecar(chart)
+    assert manifest["dataset"]["metrics"] == checked_charts.identity(stored)
+    assert [m["metric"] for m in manifest["dataset"]["metrics"]] == [s["metric"] for s in stored["slots"]]
+    assert manifest["dataset"]["warnings"] == receipt["limitations"]
     assert checked_charts.verify(manifest) == "current"
 
 
@@ -133,9 +174,9 @@ def test_a_chart_drawn_before_the_identity_still_verifies(solved, checked):
     tampered = json.loads(json.dumps(legacy))
     tampered["dataset"]["values"][0][0] += 1
     assert checked_charts.verify(tampered) is False
-    # An empty warnings list is a key that is present, not a legacy chart.
+    # An empty warnings list is a key that is present, not a legacy chart
+    # (the "metrics" removal above already leaves it alone).
     assert manifest["dataset"]["warnings"] == []
-    assert checked_charts.verify(_without(manifest, "metrics")) is False
 
 
 @pytest.mark.parametrize("change", [

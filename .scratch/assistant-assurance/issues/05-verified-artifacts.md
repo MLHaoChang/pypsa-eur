@@ -372,3 +372,31 @@ GK B (35), as sent at about 01:10Z (resent 01:13Z):
 > B7. Citation and survivors.
 > - The PR cites the owner's S5 Q1 pick ("Pin them as fact-free", 2026-11-08) by its owner-decisions.md row. If the row has not landed yet, say so in the body.
 > - mutants.py survivors are fixed or listed with a reason.
+
+### 2026-11-08 — S5b build (branch `claude/aa05-s5b-chart-identity`)
+
+- `checked_charts.dataset` carries `metrics` (one entry per evidence slot:
+  metric, disposition, formula_id and unit from the record's fact, or None
+  and the slot's reason when not answered; B1) and `warnings`
+  (`calculations.slot_warnings`, shared with the receipt's limitations; B3).
+  Both sit inside `dataset`, so `dataset_sha256` covers them.
+- `verify` treats a dataset with neither key as drawn before S5b (B2); one key
+  alone is a mismatch.
+- `render` refuses `other_project` before drawing or writing (K1/B6). The
+  frontend shows the reason's title, never the code.
+- `test_p4_chart_identity.py`: identity against record, answer and receipt for
+  all 21 profiles; drawn end to end for the four profiles with series; B1 on
+  an all-answered chart and on one with unavailable slots; B2; changed
+  identity; K1 (no draw, no upload, no sidecar; a moved manifest does not
+  verify).
+- `test_p4_fact_free_surfaces.py` (B4/B5): exact header names for checked
+  chart, result chart and table downloads; no header value carries a checked
+  number; a delivered table item has exactly today's keys and none that names
+  a fact, metric or evidence. The human report and assistant report_export
+  kinds follow once #1267 has merged.
+- Mutants: `mutants.py` 17/17 killed (checked_charts 16, calculations 1;
+  assurance.py's lines yield none). Hand mutants killed: legacy always taken,
+  metrics dropped from verify, warnings from answered slots, K1 removed,
+  reason dropped, unit dropped. "Legacy taken when only one key is absent" is
+  equivalent: stripping both keys from the re-derived data still mismatches a
+  manifest that holds one.
