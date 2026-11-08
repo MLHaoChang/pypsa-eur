@@ -88,7 +88,7 @@ function streamRewriter(unknownMessage) {
         error_kind: 'scene_apply_outcome_unknown', message: unknownMessage })}`
     }
     const receipt = frame.result && frame.result._edit_receipt
-    const row = receipt && receipt.rows.find(r => typeof r.field === 'string' && r.field.startsWith('target_'))
+    const row = receipt && receipt.rows.find(r => r.check != null)
     if (!row) return block
     receipt.outcome = 'uncertain'
     row.readback = 'a different item'
@@ -270,6 +270,9 @@ try {
     report[`unknown-${mode}`].transcript_tail = (await page.getByTestId('chat-messages').innerText()).slice(-600)
   }
   report.rewritten = await page.evaluate(() => window.__sc07.rewritten)
+  // Each mocked shot must show its mock: two uncertain receipts and two unknown outcomes.
+  assert.equal(report.rewritten.filter(r => r.startsWith('receipt uncertain')).length, 2, 'uncertain receipts rewritten')
+  assert.equal(report.rewritten.filter(r => r === 'tool_result -> tool_error').length, 2, 'unknown outcomes rewritten')
   assert.deepEqual(errors, [])
   result = { passed: true, report, screenshots: shots }
   await context.close()
