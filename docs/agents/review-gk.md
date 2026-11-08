@@ -66,6 +66,8 @@ A read-back that compares frames after an IO round trip normalises dtype, index 
 
 A guard whose failure is also caught downstream with a different reason still needs its own test asserting its own reason (#1225 P7).
 
+Each part of an equality guard needs its own killing case: a mutant that drops one compared field survives a test that only changes another (#1257 F1a).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
@@ -112,6 +114,8 @@ A guard whose failure is also caught downstream with a different reason still ne
 - A "done" count includes only rows the call changed, never rows already present or left as they were (#1175 E2, the S2 W1 analogue).
 - A reader of the island sidecar states whether it takes the raw or the validated config, and its caller passes that one (#1172).
 - An adequacy proof and its cost leg describe the same fleet. An extendable candidate with no size reads `not_shown`, never `fail` (#1172).
+- A grant freezes only what the card showed; a field the card did not show stays outside the grant (#1257 F1).
+- A 409 detail that changes from a string to an object is checked against every frontend consumer of that route (#1261 R1).
 
 ## Engineering rules
 
@@ -143,7 +147,7 @@ A guard whose failure is also caught downstream with a different reason still ne
 - For a wording-only or ruff-only delta, compare ASTs with strings blanked rather than re-running mutants (#1142).
 - A multi-term credit cap needs a test per term: each term alone binds the cap while the others do not.
 - An energy or tonne sum needs a test with non-unit `snapshot_weightings`; unit weights hide a missing multiplication.
-- `flag_column` agrees with `process_chain._truthy`: "true", "1" and "1.0" are truthy, each string pinned by its own test.
+- `flag_column` and the link-flag readers share one function, `process_chain.truthy`: "true", "1", "1.0" and "yes" are truthy, each string pinned by its own test. `process_uc` keeps a short fallback (`_fallback_truthy`) for a build without gridspine only, pinned to the same strings by a test. The bus-flag copies (`eh_stages`, `grid_readiness` eh_poc, `scr_gate`) are still separate (grid-to-process issue 27).
 - Removing a duplicated caveat needs a positive test that the caveat now appears exactly once, not only that the copy is gone.
 - A transient LP component removed after the solve: check the post-solve readers (energy flows, load shape, CFE) for served-load accounting, and require its series persisted with axis_hash (#1225).
 - A solve record in n.meta is cleared at solve start, whatever the strategy, so a failed run never keeps the previous record (#1225, DC-07 S3 C25).
