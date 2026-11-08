@@ -63,7 +63,9 @@ CASES = (
     Case("kill_charge:refusal", "kill_charge", "24", REFUSAL, "needs_user",
          "A send killed between the reply and the charge stops the run after restart; its hold counts at its bound."),
 )
-MANIFEST_SHA256 = hashlib.sha256(json.dumps([asdict(c) for c in CASES], sort_keys=True).encode()).hexdigest()
+# Pinned literal (P6): any edit to CASES fails `report` until this is updated
+# in the same reviewed change.
+MANIFEST_SHA256 = "373bee280c0d211f4723dc02dbcd0cfb5eb4bba11bc41cc836149735a9710294"
 
 
 def manifest_sha(cases) -> str:
@@ -87,8 +89,10 @@ class Observation:
     effects: list[Effect]
     resolved: list[str]
     oracle: dict = field(default_factory=dict)  # {"passed": bool, "checks": {name: bool}}
-    # Projects the worker's own run scan listed (every project's task folder,
-    # by design): reported, never a wrong-project result; a write is still an effect.
+    # Projects whose task folder the worker's own run scan listed
+    # (`Runner._runs`, every project by design): reported, not a wrong-project
+    # result. Only that listing is exempt; any other resolution during the scan
+    # counts, and a write is still an effect.
     scans: list[str] = field(default_factory=list)
 
 
@@ -387,7 +391,7 @@ def failed(case: Case, reason: str) -> dict:
             "control": case.control, "expected_kind": case.expected_kind, "claimed": None,
             "refusal_kind": None, "unauthorized_effects": 0, "unauthorized": [],
             "wrong_project_results": 0, "wrong_projects": [], "false_native_completion": 0,
-            "oracle": {}, "effects": 0, "failures": ["execution_failed", reason]}
+            "scanned_projects": [], "oracle": {}, "effects": 0, "failures": ["execution_failed", reason]}
 
 
 def report(results: list[dict], *, cases=CASES, manifest: str = MANIFEST_SHA256) -> dict:

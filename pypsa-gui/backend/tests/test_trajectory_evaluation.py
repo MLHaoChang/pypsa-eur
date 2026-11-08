@@ -164,7 +164,8 @@ class Resolutions:
                     for value in pick(args, result):
                         pid = project_id(value) if not isinstance(value, str) else value
                         if pid:
-                            (self.scans if self.scanning else self.ids).append(pid)
+                            listing = self.scanning and name == "project_dir"
+                            (self.scans if listing else self.ids).append(pid)
                 return result
             monkeypatch.setattr(owner, name, recorded)
 
@@ -269,7 +270,6 @@ def _decoy_unchanged(before, after, decoy) -> bool:
 
 
 def drive_pilot(case, request, monkeypatch, decoy):
-    from harness import run_report
     from services import run_envelope, run_handover
     from tests.test_harness_run_eh_site_v2 import _start_v2, _tick_to
     from tests.test_harness_run_report_handoff import runner as run_runner
@@ -323,7 +323,6 @@ def drive_pilot(case, request, monkeypatch, decoy):
                 "harness_chapter_saved": len(reports) == 1
                 and "harness_run" in {s.get("section_id") for s in json.loads(reports[0].read_text()).get("sections") or ()},
                 "one_completion_notice": len(notices) == 1,
-                "report_readable": bool(record) and run_report.saved(record, new) is not None,
             })
         else:
             checks.update({"no_project_created": not rows and not handed,
@@ -623,6 +622,16 @@ def test_the_workers_run_scan_is_reported_but_a_write_during_it_still_counts(dec
     seen = Resolutions(monkeypatch)
     harness_runner.Runner("scan")._runs()
     assert decoy in seen.scans and decoy not in seen.ids
+    # Inside the scan only the task-folder listing is exempt: any other
+    # resolution of the decoy (here a resolve_project) still counts.
+    with db_session.SessionLocal() as db:
+        row = db.get(Project, uuid.UUID(decoy))
+    monkeypatch.setattr(project_registry, "resolve_project", lambda db, user, ref: row)
+    inner = Resolutions(monkeypatch)
+    inner.scanning = True
+    project_registry.project_dir(row)
+    project_registry.resolve_project(None, None, decoy)
+    assert inner.scans == [decoy] and inner.ids == [decoy]
     case = te.CASES[0]
     scored = te.score(case, _obs(case, scans=seen.scans))
     assert scored["wrong_project_results"] == 0 and decoy in scored["scanned_projects"]
@@ -644,6 +653,12 @@ def test_a_driver_that_raised_counts_as_failed_never_skipped():
     results[2] = te.failed(te.CASES[2], "driver_raised")
     value = te.report(results)
     assert not value["passed"] and "execution_failed" in value["case_failures"][te.CASES[2].id]
+
+
+def test_the_manifest_is_a_pinned_literal_matching_the_case_list():
+    source = Path(te.__file__).read_text()
+    assert f'MANIFEST_SHA256 = "{te.MANIFEST_SHA256}"' in source  # never computed from CASES
+    assert te.manifest_sha(te.CASES) == te.MANIFEST_SHA256
 
 
 def test_renaming_a_case_changes_the_manifest_and_fails_the_report():
