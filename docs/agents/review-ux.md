@@ -52,6 +52,14 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - Every chip style has a visible key (#1199, UX-RULES-1107).
 - A chat row's settled words are true in every case that reaches them (Stop, a dropped stream, a reload) and never imply that a job stopped, e.g. "No answer: <phrase> (the turn ended first)" (#1220, UX-RULES-1107B).
 - Model-facing tool messages may name tools and ids; the user-visible Details get plain words through `TOOL_OUTCOME_DENIED_DETAIL_WORDS` (#1213, UX-RULES-1107B).
+- Data in a count line is separated with "·", never ";" ("3 of 5 updated · 2 not updated") (#1245).
+- A sub-row never repeats a generic flag word that is false for it; the data keeps both flags (#1249).
+- A "›" goes only where a GUI field really edits the input; with no GUI home, use plain words and no link (#1252, #1262).
+- A missing input that blocks Approve disables it through `block`, with a short reason that does not repeat the row (#1257).
+- When a card stays open in the chat dock across a jump, the Back pill names the origin view (#1257).
+- A muted pre-save note hides while the matching refusal shows (#1259).
+- A "—" needs its reason as visible text, not a tooltip (#1266).
+- The reviewer re-reads suggested wording against these rules before sending it (#1266).
 
 ## Master merges
 

@@ -378,4 +378,28 @@ describe('useLiveSpeech notices (LC-07c)', () => {
     await waitFor(() => expect(result.current.caption).toBe(LISTENING_CAPTION), { timeout: 10000 })
     expect(result.current.notice).toBe(false)
   })
+
+  it('clears on a turn start, and a later notice gets its full time', { timeout: 20000 }, async () => {
+    const { result } = await listening()
+    api.getSpeechState.mockResolvedValue({ generation: 3, session: null, notices: [notice('clarify', 'One.', 1)] })
+    await waitFor(() => expect(result.current.caption).toBe('One.'), { timeout: 4000 })
+    await act(async () => { useChatStore.setState({ streaming: true }) })
+    expect(result.current.notice).toBe(false)
+    expect(result.current.caption).toBe(LISTENING_CAPTION)
+    await act(async () => { useChatStore.setState({ streaming: false }) })
+    api.getSpeechState.mockResolvedValue({ generation: 3, session: null, notices: [notice('clarify', 'Two.', 2)] })
+    await waitFor(() => expect(result.current.caption).toBe('Two.'), { timeout: 4000 })
+    await act(async () => { await new Promise((r) => setTimeout(r, 4000)) })
+    expect(result.current.caption).toBe('Two.') // the old timer did not clear it
+  })
+
+  it('clears on a newly admitted final (a user message) and does not re-show the seq', { timeout: 20000 }, async () => {
+    const { result } = await listening()
+    api.getSpeechState.mockResolvedValue({ generation: 3, session: null, notices: [notice('echo_ignored', 'Ignored.', 1)] })
+    await waitFor(() => expect(result.current.caption).toBe('Ignored.'), { timeout: 4000 })
+    await act(async () => { useChatStore.getState().appendMessage({ role: 'user', content: 'hello' } as never) })
+    expect(result.current.caption).toBe(LISTENING_CAPTION)
+    await tick()
+    expect(result.current.caption).toBe(LISTENING_CAPTION)
+  })
 })

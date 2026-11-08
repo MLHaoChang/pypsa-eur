@@ -412,6 +412,8 @@ def _kpi_unserved_mwh(env):
         with network_guard():
             if (getattr(env.ctx.network, "meta", None) or {}).get("assistant_solve_exact_input_fingerprint") != exact:
                 return NoEvidence("other_solve", "the live results are not the run's own solve")
+            if len(env.ctx.network.investment_periods):
+                return _unserved_by_period(env.ctx)
             try:
                 raw = lost_load.source(env.ctx, "network")
             except ValueError as exc:
@@ -419,6 +421,55 @@ def _kpi_unserved_mwh(env):
         facts, _ = lost_load.calculate(raw, {"profile": lost_load.PROFILE, "entity_id": "network", "metrics": ["lost_load_energy"]})
         return facts[0]["value"] if facts else None
     return _on(env.ctx, read)
+
+
+def _unserved_by_period(ctx):
+    """Issue 07 B3b (GK B (33) P4): unserved energy of a multi-period solve,
+    under the network lock. Per investment period, the shed MW of every
+    captured Load times that snapshot's generator weighting, summed within
+    the period; never `investment_period_weightings` and never a sum over
+    periods. The value the rule compares is the worst period's; its rows
+    name every period and mark the worst. The F6 identity checks of
+    `lost_load_calculations.source` hold here too."""
+    import pandas as pd
+
+    from harness import lost_load_calculations as lost_load
+    from harness.calculations import MAX_SNAPSHOTS, solve_matches_inputs
+    from services.adequacy.metrics import electrical_columns
+    n = ctx.network
+    index = n.snapshots
+    if not isinstance(index, pd.MultiIndex) or index.nlevels != 2 or not 1 <= len(index) <= MAX_SNAPSHOTS:
+        return NoEvidence("unsupported_snapshot_scope", "unsupported_snapshot_scope: unserved energy cannot be read")
+    frame = (ctx.solver_state.get("last_lost_load") or {}).get("lost_load_t")
+    if not isinstance(frame, pd.DataFrame) or frame.empty:
+        return NoEvidence("no_lost_load_capture", "no_lost_load_capture: unserved energy cannot be read")
+    if not frame.index.equals(index) or not frame.columns.is_unique:
+        return NoEvidence("misaligned_source", "misaligned_source: unserved energy cannot be read")
+    columns = [str(c) for c in frame.columns]
+    if any(c not in n.loads.index for c in columns):
+        return NoEvidence("legacy_lost_load_capture", "legacy_lost_load_capture: unserved energy cannot be read")
+    if len(columns) > lost_load.MAX_LOADS:
+        return NoEvidence("unsupported_load_population",
+                          "unsupported_load_population: unserved energy cannot be read")
+    if not electrical_columns(n, columns):
+        return NoEvidence("no_electrical_loads", "no_electrical_loads: unserved energy cannot be read")
+    if not solve_matches_inputs(ctx):
+        return None  # as the single-period read: a stale solve has no value
+    weights = n.snapshot_weightings["generators"].reindex(index)
+    rows = []
+    for period in index.get_level_values(0).unique():
+        mask = index.get_level_values(0) == period
+        w = [float(v) for v in weights[mask]]
+        shed = [[float(v) for v in frame.loc[mask, c]] for c in frame.columns]
+        if not all(math.isfinite(v) for v in w + [x for col in shed for x in col]) or any(v < 0 for v in w):
+            return None  # any missing shed or weight makes the energy unavailable
+        totals = [math.fsum(max(col[i], 0.0) for col in shed) for i in range(len(w))]
+        rows.append({"period": int(period), "unserved_mwh": math.fsum(a * t for a, t in zip(w, totals)),
+                     "assumed": False})
+    worst = max(rows, key=lambda r: r["unserved_mwh"])
+    for r in rows:
+        r["worst"] = r is worst
+    return Scored(value=worst["unserved_mwh"], rows=rows)
 
 
 def _handoff_kpis_read(env):
