@@ -140,6 +140,9 @@ node_modules
 pypsa-gui/backend/pilot-evaluation.json
 pypsa-gui/backend/pilot-evaluation.json.log
 pypsa-gui/backend/pilot-evaluation.json.tmp
+pypsa-gui/backend/trajectory-evaluation.json
+pypsa-gui/backend/trajectory-evaluation.json.log
+pypsa-gui/backend/trajectory-evaluation.json.tmp
 pypsa-gui/backend/test-results/
 
 # Built in memory by the assistant smoke checks; --write saves them for reading (RETRO-COST-1).
