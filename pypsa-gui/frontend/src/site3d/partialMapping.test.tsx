@@ -9,17 +9,17 @@ const task = (next: Record<string, unknown> | null, changes: unknown = ['Set the
   ...(next ? { next_step: next } : {}),
 })
 const failed = (tool: string, error_kind?: string) => ({ id: 's2', tool, status: 'failed', ...(error_kind ? { error_kind } : {}) })
+// What the task layer stores for a refused apply: "uncertain" with the tool's typed kind.
+const refused = (error_kind: string) => ({ id: 's2', tool: 'site_scene_apply', status: 'uncertain', error_kind })
 
 describe('partial mapping line (R3)', () => {
   it.each([
     ['proposal_expired', 'the prepared mapping expired'],
     ['proposal_cancelled', 'it was cancelled'],
     ['revision_conflict', 'the site changed after it was prepared'],
-    ['confirmation_denied', 'you did not approve it'],
     ['unknown_target', 'a target needs your choice'],
-    ['some_other_kind', 'it did not complete'],
-  ])('a failed apply (%s) says what was done and why the mapping was not', (kind, words) => {
-    render(<PartialMappingLine task={task(failed('site_scene_apply', kind))} taskId={TASK} onRequest={vi.fn()} />)
+  ])('a refused apply (%s) says what was done and why the mapping was not', (kind, words) => {
+    render(<PartialMappingLine task={task(refused(kind))} taskId={TASK} onRequest={vi.fn()} />)
     expect(screen.getByRole('status').textContent)
       .toBe(`Done: Set the IT load “Hall A” to 2 MW. Not done: the 3D site mapping (${words}).`)
     const text = screen.getByTestId('task-partial-mapping').textContent ?? ''
@@ -27,8 +27,13 @@ describe('partial mapping line (R3)', () => {
     expect(text).not.toMatch(/[—;›]/)
   })
 
-  it('a denied card and a cancelled one stay distinct (U-e)', () => {
-    expect(MAPPING_REASON.confirmation_denied).not.toBe(MAPPING_REASON.proposal_cancelled)
+  it('a denied card (the apply still pending) claims no "Not done", unlike a cancelled one (U-e)', () => {
+    expect(partialMapping(task({ id: 's2', tool: 'site_scene_apply', status: 'pending' }))).toBeNull()
+    expect(partialMapping(task(failed('site_scene_apply', 'proposal_cancelled')))?.reason).toBe(MAPPING_REASON.proposal_cancelled)
+  })
+
+  it('a failed apply with no kind falls back to the generic reason', () => {
+    expect(partialMapping(task(failed('site_scene_apply')))?.reason).toBe('it did not complete')
   })
 
   it('a prepare that asks for a choice (no kind) names the choice', () => {
@@ -38,6 +43,8 @@ describe('partial mapping line (R3)', () => {
   it.each([
     ['an unknown outcome', task(failed('site_scene_apply', 'scene_apply_outcome_unknown'))],
     ['an uncertain apply', task({ id: 's2', tool: 'site_scene_apply', status: 'uncertain' })],
+    ['an uncertain apply with another kind', task(refused('some_other_kind'))],
+    ['an unknown outcome stored uncertain', task(refused('scene_apply_outcome_unknown'))],
     ['a pending apply', task({ id: 's2', tool: 'site_scene_apply', status: 'pending' })],
     ['no model edit done', task(failed('site_scene_apply', 'proposal_expired'), [])],
     ['another tool failed', task(failed('update_component', 'invalid'))],

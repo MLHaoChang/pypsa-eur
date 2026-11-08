@@ -17,19 +17,34 @@ OWNER, SITE = "owner-a", "campus"
 
 
 def _entry(i, status="ready", owner=OWNER, site=SITE):
-    return {"owner": owner, "site_id": site, "status": status, "input_hash": f"h{i}",
-            "action": "bind_targets", "base_revision": i, "created": time.monotonic(), "bytes": 1}
+    return {
+        "owner": owner,
+        "site_id": site,
+        "status": status,
+        "input_hash": f"h{i}",
+        "action": "bind_targets",
+        "base_revision": i,
+        "created": time.monotonic(),
+        "bytes": 1,
+    }
 
 
 def _reference(entries, marked, receipts):
     """The S5a code with no early stop: every row's chain read, then the sort and the cap."""
-    mine = {pid: e for (key, pid), e in entries.items()
-            if key == PROJECT.registry_key and e["owner"] == OWNER and e["site_id"] == SITE}
+    mine = {
+        pid: e
+        for (key, pid), e in entries.items()
+        if key == PROJECT.registry_key and e["owner"] == OWNER and e["site_id"] == SITE
+    }
     order = list(dict.fromkeys([*reversed(list(mine)), *reversed(marked)]))
     out = []
     for pid in order:
         entry, receipt = mine.get(pid), receipts.get(pid)
-        if entry is not None and receipt is not None and receipt["input_hash"] != entry["input_hash"]:
+        if (
+            entry is not None
+            and receipt is not None
+            and receipt["input_hash"] != entry["input_hash"]
+        ):
             receipt = None
         if receipt is not None:
             status = "applied"
@@ -44,13 +59,17 @@ def _reference(entries, marked, receipts):
             row.update(action=entry["action"], base_revision=entry["base_revision"])
         out.append(row)
     out.sort(key=lambda r: r["status"] == "applied")
-    return out[:chat.MAX_LIVE_PER_OWNER]
+    return out[: chat.MAX_LIVE_PER_OWNER]
 
 
 def _scenario(monkeypatch, entries, marked, receipts):
     store = OrderedDict(((PROJECT.registry_key, pid), e) for pid, e in entries)
     monkeypatch.setattr(proposals, "_entries", store)
-    monkeypatch.setattr(chat, "_UNKNOWN", {(PROJECT.registry_key, OWNER, SITE, pid): None for pid in marked})
+    monkeypatch.setattr(
+        chat,
+        "_UNKNOWN",
+        {(PROJECT.registry_key, OWNER, SITE, pid): None for pid in marked},
+    )
     reads = []
 
     def committed(_directory, _site, pid):
@@ -67,12 +86,18 @@ def test_eight_open_rows_stop_the_chain_reads_with_the_same_output(monkeypatch):
     applied_old = [(f"a{i}", _entry(i)) for i in range(3)]
     open_rows = [(f"o{i}", _entry(10 + i)) for i in range(8)]
     applied_new = [(f"n{i}", _entry(30 + i)) for i in range(4)]
-    receipts = {pid: {"input_hash": e["input_hash"]} for pid, e in applied_old + applied_new}
-    got, expected, reads = _scenario(monkeypatch, applied_old + open_rows + applied_new, [], receipts)
+    receipts = {
+        pid: {"input_hash": e["input_hash"]} for pid, e in applied_old + applied_new
+    }
+    got, expected, reads = _scenario(
+        monkeypatch, applied_old + open_rows + applied_new, [], receipts
+    )
     assert got == expected
     assert [r["status"] for r in got] == ["open"] * 8
     # Newest first: the 4 applied, then the 8 open; the 3 oldest applied are never read.
-    assert reads == [p for p, _ in reversed(applied_new)] + [p for p, _ in reversed(open_rows)]
+    assert reads == [p for p, _ in reversed(applied_new)] + [
+        p for p, _ in reversed(open_rows)
+    ]
 
 
 def test_markers_count_as_rows_to_act_on(monkeypatch):
@@ -89,10 +114,17 @@ def test_fewer_than_the_cap_reads_every_row(monkeypatch, n_open):
     """At most 8 rows to act on (n_open, a0 whose receipt is another's, and u0): every row is read."""
     open_rows = [(f"o{i}", _entry(i)) for i in range(n_open)]
     applied = [(f"a{i}", _entry(20 + i)) for i in range(5)]
-    other = [("x0", _entry(99, owner="owner-b")), ("c0", _entry(98, status="cancelled"))]
+    other = [
+        ("x0", _entry(99, owner="owner-b")),
+        ("c0", _entry(98, status="cancelled")),
+    ]
     receipts = {pid: {"input_hash": e["input_hash"]} for pid, e in applied}
-    receipts["a0"] = {"input_hash": "another"}  # a receipt for another preview is not this one's
-    got, expected, reads = _scenario(monkeypatch, open_rows + applied + other, ["u0"], receipts)
+    receipts["a0"] = {
+        "input_hash": "another"
+    }  # a receipt for another preview is not this one's
+    got, expected, reads = _scenario(
+        monkeypatch, open_rows + applied + other, ["u0"], receipts
+    )
     assert got == expected
     assert sorted(reads) == sorted([p for p, _ in open_rows + applied] + ["c0", "u0"])
 
@@ -106,9 +138,13 @@ def test_exactly_the_cap_of_open_rows_is_listed(monkeypatch):
 
 # ── S5a survivor: chat.py `_on_words` roof placement words ──────────────────
 
+
 def test_roof_placement_reads_the_building_label():
     words = {"b1": "“Main hall”"}
-    assert chat._on_words(words, "roof:b1") == f"on the roof of {chat.feature_word(words, 'b1')}"
+    assert (
+        chat._on_words(words, "roof:b1")
+        == f"on the roof of {chat.feature_word(words, 'b1')}"
+    )
     assert "b1" not in chat._on_words(words, "roof:b1")
 
 

@@ -7,12 +7,13 @@
 
 const SCENE_STEPS = new Set(['site_scene_prepare', 'site_scene_apply'])
 
-/** The reason in plain words, from the failed step's kind (never shown as a key). */
+/** The reason in plain words, from the failed step's kind (never shown as a key). A denied card
+ * never reaches the step (the confirmation gate refuses before it begins), so the apply stays
+ * pending and the card's Next line says so; no "Not done" is claimed for it (U-e). */
 export const MAPPING_REASON: Record<string, string> = {
   proposal_expired: 'the prepared mapping expired',
   proposal_cancelled: 'it was cancelled',
   revision_conflict: 'the site changed after it was prepared',
-  confirmation_denied: 'you did not approve it',
   unknown_target: 'a target needs your choice',
 }
 
@@ -24,9 +25,13 @@ const clause = (s: string) => s.trim().replace(/[.;:\s]+$/, '')
 export function partialMapping(task: Obj): { done: string; reason: string } | null {
   const changes = Array.isArray(task.changes) ? task.changes.filter((c): c is string => typeof c === 'string' && !!c.trim()) : []
   const next = object(task.next_step)
-  if (!changes.length || !next || !SCENE_STEPS.has(String(next.tool)) || next.status !== 'failed') return null
+  if (!changes.length || !next || !SCENE_STEPS.has(String(next.tool))) return null
   const kind = typeof next.error_kind === 'string' ? next.error_kind : null
-  if (kind === 'scene_apply_outcome_unknown') return null
+  // A refused write step is stored "uncertain" (the task layer cannot know its effect). Only a
+  // typed refusal that proves nothing landed (the reasons above) reads "Not done"; any other
+  // uncertain step, scene_apply_outcome_unknown included, keeps S5a's check (U-f).
+  const proven = next.status === 'failed' || (next.status === 'uncertain' && kind !== null && kind in MAPPING_REASON)
+  if (!proven || kind === 'scene_apply_outcome_unknown') return null
   // A prepare that asks for a choice fails with no kind (GK B H3).
   const reason = (kind && MAPPING_REASON[kind]) ?? (next.tool === 'site_scene_prepare' && !kind
     ? 'a target needs your choice' : 'it did not complete')
