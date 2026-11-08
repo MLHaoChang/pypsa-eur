@@ -657,3 +657,68 @@ def test_a_real_queue_tool_holds_on_its_solve_jobs_row(real, replica):
     assert _check()[0] == job_holds.PENDING
     _set_job_status(record.job_id, "interrupted")  # reconcile_on_boot's mark
     assert _check() is None
+
+
+# ── Boundaries and the sweep's malformed rows (mutant survivors) ────────────
+
+
+def test_a_lease_lapses_only_after_its_end(project):
+    _open(INPROC_TOOL)
+    (record,) = job_hold_store.active(project, INPROC_TOOL)
+    assert not job_holds.lapsed(record, record.lease_until)
+    assert job_holds.lapsed(record, record.lease_until + 0.001)
+
+
+def test_a_null_lease_lapses_only_after_its_bound(project, replica, monkeypatch):
+    hold = _open(INPROC_TOOL)
+    _set_lease(hold.id, None)
+    (record,) = job_hold_store.active(project, INPROC_TOOL)
+    monkeypatch.setattr(job_holds, "_STARTED_AT", record.opened_at - 1.0)
+    bound = record.opened_at + job_holds.NULL_LEASE_BOUND_SECONDS
+    assert not job_holds.lapsed(record, bound)
+    assert job_holds.lapsed(record, bound + 0.001)
+
+
+def test_a_job_enqueued_at_the_window_start_counts(project):
+    enqueued = time.time() - 100.0
+    _solve_job(project, "queued", enqueued_at=enqueued)
+    assert job_hold_store.live_solve_jobs(project, ("solve",), enqueued) == 1
+    assert job_hold_store.live_solve_jobs(project, ("solve",), enqueued + 0.001) == 0
+
+
+def test_a_deleted_project_has_no_live_jobs(_auth_db):
+    assert job_hold_store.live_solve_jobs(str(uuid.uuid4()), ("solve",), 0.0) == 0
+
+
+def test_an_adopted_record_clears_once_another_chats_card_deleted_it(project, replica):
+    hold = _open(INPROC_TOOL)
+    replica["id"] = "replica-b"
+    adopter, other = ChatSession(), ChatSession()
+    assert job_holds.check(adopter, INPROC_TOOL, {}, "F")[0] == job_holds.PENDING
+    job_holds.check(other, INPROC_TOOL, {}, "F")
+    card = job_holds.repeat_card(other, INPROC_TOOL, {}, "F")
+    assert job_holds.check(other, INPROC_TOOL, {}, "F", card=card) is None
+    assert not job_hold_store.exists(hold.id)
+    assert job_holds.check(adopter, INPROC_TOOL, {}, "F") is None
+
+
+def test_a_malformed_row_does_not_stop_the_sweep(project, replica, _auth_db):
+    from sqlalchemy import text
+
+    replica["id"] = "replica-b"
+    bad = _open(QUEUE)
+    lapsed = _open(INPROC_TOOL)
+    _lapse(lapsed.id)
+    engine, _ = _auth_db
+    with engine.begin() as conn:
+        conn.execute(
+            text("UPDATE assistant_job_holds SET lease_until = 'soon' WHERE id = :id"),
+            {"id": bad.id},
+        )
+    replica["id"] = "replica-a"
+    with job_holds._REGISTRY_LOCK:
+        job_holds._REGISTRY.clear()
+    job_holds.renew_tick()
+    assert not job_hold_store.exists(lapsed.id)  # swept
+    assert job_hold_store.exists(bad.id)  # left; a read of it denies
+    assert _check()[0] == job_holds.PENDING

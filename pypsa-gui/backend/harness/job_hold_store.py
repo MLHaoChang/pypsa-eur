@@ -20,9 +20,13 @@ an S1 replica carry NULL.
 
 from __future__ import annotations
 
+import logging
 import math
 import uuid
 from dataclasses import dataclass
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -152,8 +156,10 @@ def get(record_id: str) -> Record | None:
 
 
 def foreign(owner_replica_id: str) -> list[Record]:
-    """Every record another process owns, on any project (the renewer's
-    sweep). Raises when the table cannot be read or a row is malformed."""
+    """Every readable record another process owns, on any project (the
+    renewer's sweep). A malformed row is left out, so it stays (a read of it
+    denies) and the other rows are still swept. Raises when the table cannot
+    be read."""
     from db.models import AssistantJobHold
 
     with _session() as db:
@@ -163,7 +169,13 @@ def foreign(owner_replica_id: str) -> list[Record]:
             .order_by(AssistantJobHold.opened_at, AssistantJobHold.id)
             .all()
         )
-        return [_record(row) for row in rows]
+        records = []
+        for row in rows:
+            try:
+                records.append(_record(row))
+            except MalformedRecord as exc:
+                logger.warning("job hold sweep left a malformed row: %s", exc)
+        return records
 
 
 def solve_job_status(job_id: str) -> str | None:
