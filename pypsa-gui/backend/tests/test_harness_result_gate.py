@@ -14,15 +14,22 @@ from services.adequacy import grid_readiness as G
 
 # Study harness 10a (D2): rows read only with the run's own readiness step's frozen profile.
 CODE = {"id": "sagc_dc", "label": "SAGC (project)", "digest": "d" * 64}
-READ = {"id": "solve.4", "tool": "dc_grid_readiness", "native": "action", "status": "completed",
-        "args": {"frozen": "dc_grid_code"}, "frozen": {"grid_code": CODE},
-        "result": {"profile": CODE["id"], "digest": CODE["digest"]}}
+READ = {
+    "id": "solve.4",
+    "tool": "dc_grid_readiness",
+    "native": "action",
+    "status": "completed",
+    "args": {"frozen": "dc_grid_code"},
+    "frozen": {"grid_code": CODE},
+    "result": {"profile": CODE["id"], "digest": CODE["digest"]},
+}
 ENV = dict(task={"steps": [READ]}, ctx=None, project=object(), project_dir=None)
 
 
 @pytest.fixture(autouse=True)
 def _frozen_profile_unchanged(monkeypatch):
     from services import run_actions
+
     monkeypatch.setattr(run_actions, "unchanged", lambda project, code: code == CODE)
 
 
@@ -77,10 +84,15 @@ def test_a_verified_pass_passes_and_is_not_a_screening_pass(monkeypatch):
 
 def test_an_assumed_pass_is_a_screening_pass_in_the_gate_record(monkeypatch):
     result, _ = _gate(
-        monkeypatch, [_row("tdd", "pass", assumed=True)], "dc.readiness.tdd", severity="warn"
+        monkeypatch,
+        [_row("tdd", "pass", assumed=True)],
+        "dc.readiness.tdd",
+        severity="warn",
     )
     assert result["verdict"] == "pass"
-    assert result["screening"] is True and result["note"] == "within the screening limit"
+    assert (
+        result["screening"] is True and result["note"] == "within the screening limit"
+    )
     assert result["facts"][0]["rows"][0]["assumed"] is True
 
 
@@ -104,7 +116,9 @@ def test_a_family_passes_only_when_every_row_passes(monkeypatch):
 def test_a_family_with_one_assumed_row_is_a_screening_pass(monkeypatch):
     rows = [_row("motor_start:a", "pass"), _row("motor_start:b", "pass", assumed=True)]
     result, _ = _gate(monkeypatch, rows, "dc.readiness.motor_start:", severity="warn")
-    assert result["verdict"] == "pass" and result["note"] == "within the screening limit"
+    assert (
+        result["verdict"] == "pass" and result["note"] == "within the screening limit"
+    )
 
 
 def test_a_family_with_zero_rows_is_not_evaluated(monkeypatch):
