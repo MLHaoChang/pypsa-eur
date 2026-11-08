@@ -3,7 +3,7 @@
 
 # GS-04: non-spinning gensets get no I7 cut coefficient
 
-Status: ready-for-agent
+Status: done (#PR)
 Type: bug
 Found by: GS-04 (`04-e1-genset-credit.md`); owner list DOCS-1.
 

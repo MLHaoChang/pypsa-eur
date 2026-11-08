@@ -3,7 +3,7 @@
 
 # GS-04: rename the `Island-event-genset-*` constraints
 
-Status: ready-for-agent
+Status: done (#PR)
 Type: task
 Found by: GS-04 (`04-e1-genset-credit.md`); owner list DOCS-1.
 
