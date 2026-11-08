@@ -20,3 +20,9 @@ unchanged (AC rows unchanged). Reword it to the new definition, or retire the co
 - Gated: GK A; GK B for the `catalogue.py` enum.
 - Size: S.
 - Reword to the AC `p_nom` definition or retire the confirmation; the plan says which. Error-kind/catalogue JSON fragments as steward requires.
+
+### 2026-11-08: TCU-04 plan verdicts
+
+- Direction: reword (option A); retire (B) is an owner question sent to the coordinator.
+- GK A (19), TCU4-1..4: grep `dc_ac` over envelopes/profiles/flows/smoke (no hits beyond reference_apply, catalogue, error-kind text, frontend, tests); error-kinds only edit existing text; catalogue lines only, run inventory and control-matrix `--check` at the trial merge; (B) only: unknown-name test.
+- GK B (37), C1-C4: catalogue `confirm` enums pinned equal to `reference_apply.CONFIRMATIONS` (test added); description truthful; `--check` runs at the trial merge.
