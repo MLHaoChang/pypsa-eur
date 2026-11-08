@@ -522,15 +522,24 @@ def _run_process_uc_check(network, config, merged_solver_options, phase) -> dict
     return check
 
 
-def _revision_or_none() -> int | None:
-    """The active project's network revision (the sizing record's provenance);
-    None where no project context is bound (qa scripts)."""
+def _revision_or_none(network) -> int | None:
+    """The network revision of the context that owns `network` (the sizing
+    record's provenance): the thread's solving context (a queued solve of a
+    background project) or the active one, whichever holds this very network.
+    None when neither does (a private copy, a qa script): no provenance rather
+    than the foreground's, which on the dispatcher thread is another project's
+    (SQ-FG)."""
     try:
         from services import dirty_state
+        from services.pypsa_service import PyPSAService
 
-        return dirty_state.revision()
+        solving = PyPSAService._transient_target(ensure=False)
+        for ctx in (solving, PyPSAService.get_active_context()):
+            if ctx is not None and ctx.network is network:
+                return dirty_state.revision(ctx)
     except Exception:                                         # noqa: BLE001
-        return None
+        pass
+    return None
 
 
 def build_lp_chain(network, config, log_queue):
@@ -1419,7 +1428,7 @@ def run_simulation(
                     # "capacity_run" source (F1). Never an operational one.
                     if (getattr(config, "fixed_sizes", "off") == "off"
                             and not getattr(network, "_ic_operational", False)):
-                        _fixed_sizes.record_sizing(network, _revision_or_none())
+                        _fixed_sizes.record_sizing(network, _revision_or_none(network))
                     _ic_conn.commit()
                     # The DSR dispatch record (IC P2 WP2.2-0): committed, or
                     # cleared, only after a successful non-operational solve.
