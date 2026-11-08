@@ -10,7 +10,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import fixture from '../../test/fixtures/assetSchema.json'
 import type { AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
-import { AssetFieldsEdit, assetReadoutItems } from './AssetFields'
+import { AssetFieldsEdit, assetReadoutItems, schemaFields } from './AssetFields'
 import { ExpandedProps, type FS } from './cardKit'
 
 // The lifetime note under a card's field reads the project default from the query cache.
@@ -132,5 +132,32 @@ describe('the collapsed read-out', () => {
       { inv_power_overnight: entry('default'), inv_energy_overnight: entry('default') })} />)
     expect(screen.queryByTestId('asset-prov-capital_cost')).toBeNull()
     expect(screen.queryByTestId('asset-prov-lifetime')).toBeNull()
+  })
+})
+
+describe('the Expert card with an out-of-date cost (TCU-05)', () => {
+  it('shows the chip and the visible note under the field, and nothing on a fresh one', () => {
+    const stale: ProvenanceEntry = { ...entry('default'), stale: { field: 'dc_ac_ratio', recorded: 1.3,
+      current_field: 'dc_ac_ratio', current: 1.5, reason: 'scale input changed' } }
+    render(<div className="grid grid-cols-2"><AssetFieldsEdit schema={SCHEMA} fs={FORM} set={() => {}} current={BESS}
+      carriers={[]} buses={[]} provenance={{ inv_power_overnight: stale, inv_energy_overnight: entry('default') }} /></div>)
+    expect(screen.getByTestId('asset-prov-inv_power_overnight-stale').textContent).toBe('out of date')
+    expect(screen.getByTestId('asset-stale-inv_power_overnight').textContent).toBe(
+      'Out of date: DC/AC ratio changed. Priced with DC/AC ratio 1.3, now 1.5. Compare with references to re-price.')
+    expect(screen.queryByTestId('asset-stale-inv_energy_overnight')).toBeNull()
+    expect(screen.queryByTestId('asset-prov-inv_energy_overnight-stale')).toBeNull()
+  })
+})
+
+describe('the collapsed read-out with an out-of-date cost (TCU-05)', () => {
+  it('carries the note on the stamped row only', () => {
+    const stale: ProvenanceEntry = { ...entry('default'), stale: { field: 'efficiency', recorded: 0.9,
+      current_field: 'efficiency', current: 0.8, reason: 'scale input changed' } }
+    const items = assetReadoutItems(SCHEMA, BESS, undefined, { inv_power_overnight: stale, inv_energy_overnight: entry('default') })
+    const note = (key: string) => items.find(i => i.label.startsWith(
+      schemaFields(SCHEMA).find(f => f.key === key)!.label))?.note
+    expect(note('inv_power_overnight')).toContain('Out of date: Efficiency changed. Priced with Efficiency 0.9, now 0.8.')
+    expect(note('inv_power_overnight')).toContain('Edit the asset, then compare with references')
+    expect(note('inv_energy_overnight')).toBeUndefined()
   })
 })

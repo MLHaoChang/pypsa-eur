@@ -64,6 +64,19 @@ export interface ProvenanceEntry {
   approved_at?: string
   /** The source the applied reference replaced (e.g. the defaults pack). */
   replaces?: string
+  /** The cost was priced through a scale input (DC/AC ratio, Link efficiency) that has since changed,
+   *  was never recorded or is unreadable (TCU-05). Absent: nothing to say. */
+  stale?: StaleVerdict
+}
+
+/** `services/asset_schema/provenance.py` `staleness`: `field`/`recorded` are what the price was made
+ *  with, `current_field`/`current` what pricing would read now (null: nothing readable). */
+export interface StaleVerdict {
+  field: string | null
+  recorded: number | null
+  current_field: string | null
+  current: number | null
+  reason: string
 }
 
 /** One investment part of an asset (`services/asset_schema/access.py` `upfront_parts`): EUR per unit of the
