@@ -203,6 +203,7 @@ def lease_seconds() -> float:
 
     return float(runner.LEASE_SECONDS)
 
+
 UNSHARED_NOTE = (
     "This hold is kept in this chat only: another chat on this project is not "
     "told that the operation may still be running."
@@ -560,7 +561,9 @@ def _renew() -> None:
             logger.warning("job hold %s not renewed: %s", hold.id, type(exc).__name__)
             continue
         if not kept:
-            logger.warning("job hold lost: %s on %s was cleared elsewhere", hold.id, hold.tool)
+            logger.warning(
+                "job hold lost: %s on %s was cleared elsewhere", hold.id, hold.tool
+            )
             with _REGISTRY_LOCK:
                 if _REGISTRY.get(hold.id) is hold:
                     del _REGISTRY[hold.id]

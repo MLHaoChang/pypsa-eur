@@ -24,6 +24,7 @@ import logging
 import math
 import uuid
 from dataclasses import dataclass
+from datetime import UTC
 
 
 logger = logging.getLogger(__name__)
@@ -196,7 +197,7 @@ def live_solve_jobs(project_id: str, kinds: tuple, since: float) -> int:
     """How many of the project's `solve_jobs` rows of these kinds (NULL reads
     `solve`) are not terminal and were enqueued at or after `since` (wall time).
     Raises when a table cannot be read."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from sqlalchemy import or_
 
@@ -215,7 +216,8 @@ def live_solve_jobs(project_id: str, kinds: tuple, since: float) -> int:
             .filter(
                 SolveJobRow.project_key == f"{project.org_id}:{project.id}",
                 SolveJobRow.status.notin_(_TERMINAL),
-                SolveJobRow.enqueued_at >= datetime.fromtimestamp(since, tz=timezone.utc),
+                SolveJobRow.enqueued_at
+                >= datetime.fromtimestamp(since, tz=UTC),
                 kind,
             )
             .count()

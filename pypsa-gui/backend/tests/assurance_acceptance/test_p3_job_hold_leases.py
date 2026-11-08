@@ -273,7 +273,9 @@ def test_a_queue_record_clears_only_after_its_lapse(project, replica):
 
 
 def _window_start(record):
-    return record.opened_at - budget.PER_TOOL_TIMEOUT_SECONDS - job_holds.lease_seconds()
+    return (
+        record.opened_at - budget.PER_TOOL_TIMEOUT_SECONDS - job_holds.lease_seconds()
+    )
 
 
 @pytest.mark.parametrize("offset,held", [(-1.0, False), (1.0, True)])
@@ -332,7 +334,9 @@ def test_an_unreadable_job_store_holds_a_lapsed_queue_record(
 
 
 @pytest.mark.parametrize("offset,cleared", [(-1.0, False), (1.0, True)])
-def test_a_null_lease_lapses_at_its_bound(project, replica, monkeypatch, offset, cleared):
+def test_a_null_lease_lapses_at_its_bound(
+    project, replica, monkeypatch, offset, cleared
+):
     hold = _open(INPROC_TOOL)
     _restart(replica)
     _set_lease(hold.id, None)
@@ -575,7 +579,10 @@ def _jobs_of(project_id):
     with SessionLocal() as db:
         project = db.get(Project, uuid.UUID(project_id))
         key = f"{project.org_id}:{project.id}"
-        return {str(r.id): r.status for r in db.query(SolveJobRow).filter_by(project_key=key)}
+        return {
+            str(r.id): r.status
+            for r in db.query(SolveJobRow).filter_by(project_key=key)
+        }
 
 
 def _run_real(tool, call):
