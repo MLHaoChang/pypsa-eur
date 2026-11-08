@@ -216,8 +216,7 @@ def live_solve_jobs(project_id: str, kinds: tuple, since: float) -> int:
             .filter(
                 SolveJobRow.project_key == f"{project.org_id}:{project.id}",
                 SolveJobRow.status.notin_(_TERMINAL),
-                SolveJobRow.enqueued_at
-                >= datetime.fromtimestamp(since, tz=UTC),
+                SolveJobRow.enqueued_at >= datetime.fromtimestamp(since, tz=UTC),
                 kind,
             )
             .count()
