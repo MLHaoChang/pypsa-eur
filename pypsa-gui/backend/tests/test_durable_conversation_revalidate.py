@@ -454,8 +454,13 @@ def test_each_anchor_alone_reads_changed(acl, anchor, monkeypatch):
     observed = dict(stored)
     observed[anchor] = "different" if anchor != "revision" else 4
     monkeypatch.setattr(
-        re_, "get_run_evidence",
-        lambda run_id, section=None: {"run_id": run_id, "evidence_available": True, **observed},
+        re_,
+        "get_run_evidence",
+        lambda run_id, section=None: {
+            "run_id": run_id,
+            "evidence_available": True,
+            **observed,
+        },
     )
     assert _stamp_of(tid)["state"] == "changed"
 
@@ -465,7 +470,12 @@ def test_second_run_does_not_inherit_first_runs_anchors(acl):
     _publish(acl.root, "run-b", fingerprint="b" * len(FP))
     tid = dc.create_thread()["thread_id"]
     view = dc.set_discussed_run(
-        tid, generation=1, run_id="run-a", fingerprint=FP, status="completed", mode="lopf"
+        tid,
+        generation=1,
+        run_id="run-a",
+        fingerprint=FP,
+        status="completed",
+        mode="lopf",
     )
     dc.set_discussed_run(tid, generation=view["generation"], run_id="run-b")
     stored = json.loads(_thread_file(acl, tid).read_text())["refs"]["discussed"]
