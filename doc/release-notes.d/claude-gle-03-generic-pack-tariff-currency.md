@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A copied `generic` defaults-pack tariff now reads its pack's currency from its `pack_hash` stamp, so a project priced in another currency refuses it (`commercial.currency_mismatch`, and `currency_mismatch` at attach). Nothing stored changes: the copies, their hashes and the stored commercial config stay byte-identical (gridspine-library-eu 03).
