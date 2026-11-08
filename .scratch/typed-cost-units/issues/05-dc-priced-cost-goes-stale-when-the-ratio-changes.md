@@ -1,6 +1,6 @@
 # A DC-priced cost does not go stale when the generator's DC/AC ratio changes
 
-Status: done (#1281, #S2)
+Status: done (#1281, #1293)
 Type: gap
 Found in: TC-02 (issue 02) review condition 6 by GK A, 2026-11-06.
 
