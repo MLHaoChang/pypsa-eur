@@ -68,6 +68,12 @@ A guard whose failure is also caught downstream with a different reason still ne
 
 Each part of an equality guard needs its own killing case: a mutant that drops one compared field survives a test that only changes another (#1257 F1a).
 
+A test that compares bytes of two separately rendered .docx (or any zip) exports pins the zip clock, or compares the members: python-docx stamps each member with the current time to 2 s, and the test flakes on a tick (#1267 F1).
+
+A "no conversion" unit test uses real rescaled units (GW for MW, kt for t), never a made-up prefix like "kMW", which a parser rejects for the wrong reason (#1271 F1).
+
+A declared per-metric basis table ("none" vs a column) is checked both ways: a "none" claim must show the value is the same under every column (#1265 F1).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
