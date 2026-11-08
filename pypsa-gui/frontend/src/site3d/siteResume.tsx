@@ -63,6 +63,8 @@ export default function SiteResume({ siteName, rows, readAt, recheck }: {
     setChecking(null)
     if (fresh === null) { setFailedAt(readAt); return }
     const now = fresh.rows.find(r => r.id === row.id)
+    // Still unknown because the site could not be read: no answer, never "not applied" (U-c, H6).
+    if (now?.status === 'outcome_unknown' && now.receipt_read === false) { setFailedAt(fresh.readAt); return }
     setAnswer({ id: row.id, result: now?.status === 'applied' ? 'applied' : 'not_applied', readAt: fresh.readAt })
   }
 

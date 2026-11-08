@@ -86,6 +86,17 @@ describe.each(['guided', 'expert'] as const)('Resume line (%s)', mode => {
     expect(line()).toBe('Found: a mapping to the model whose outcome is not known yet. The check could not read the site.')
     expect(screen.getByTestId('site-resume-check').textContent).toBe('Check the 3D site')
   })
+
+  it('a check whose site read failed on the server claims nothing either, never "not applied" (H6)', async () => {
+    const blind: ScenePreviewRow = { ...unknown('p-bbbb'), receipt_read: false }
+    const recheck = vi.fn(async () => ({ rows: [blind], readAt: 2 }))
+    const { rerender } = render(<SiteResume siteName="Campus" rows={[unknown('p-bbbb')]} readAt={1} recheck={recheck} />)
+    await act(async () => { fireEvent.click(screen.getByTestId('site-resume-check')) })
+    rerender(<SiteResume siteName="Campus" rows={[blind]} readAt={2} recheck={recheck} />)
+    expect(line()).toBe('Found: a mapping to the model whose outcome is not known yet. The check could not read the site.')
+    expect(screen.queryByTestId('site-resume-prepare-again')).toBeNull()
+    expect(screen.getByTestId('site-resume-check').textContent).toBe('Check the 3D site')
+  })
 })
 
 describe('resume words', () => {

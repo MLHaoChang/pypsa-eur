@@ -52,6 +52,8 @@ export interface ScenePreviewRow {
   status: 'open' | 'outcome_unknown' | 'applied'
   action?: string
   base_revision?: number
+  /** false: the chain could not be read, so an unknown outcome is still unknown (H6). */
+  receipt_read?: false
 }
 
 // ── SC-02a associations (frozen contract, `services/site_scene/associations.py`) ──

@@ -11,7 +11,9 @@ export const SITE3D_OPEN_WORDS: Record<Site3dOpenState, string> = {
   unconfirmed: 'Could not confirm the 3D site opened',
 }
 
-/** A navigate frame that opens Site 3D (the tool takes both map ids). */
+/** A navigate frame that opens Site 3D. The tool takes both map ids, but the server issues the ACK
+ * only for "map" (V1 exact admission), so a "MapCanvas" open still shows a line: it reads "Could not
+ * confirm", never nothing and never "Opened". */
 export function isSite3dNavigate(d: { kind?: string; panel_id?: string; canvas_view?: string }): boolean {
   return d.kind === 'navigate' && d.canvas_view === 'site' && (d.panel_id === 'map' || d.panel_id === 'MapCanvas')
 }

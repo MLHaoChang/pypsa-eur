@@ -598,10 +598,11 @@ def my_previews(project, owner: str | None, site_id: str) -> list[dict[str, Any]
             # change the output.
             break
         entry = entries.get(pid)
+        read = True
         try:
             receipt = proposals._committed(project.directory, site_id, pid)
         except Exception:  # noqa: BLE001 — an unreadable chain is no receipt
-            receipt = None
+            receipt, read = None, False
         if (
             entry is not None
             and isinstance(receipt, dict)
@@ -618,6 +619,9 @@ def my_previews(project, owner: str | None, site_id: str) -> list[dict[str, Any]
             continue  # cancelled with no receipt, applied but gone from the chain, or expired
         acting += status != "applied"
         row = {"id": pid, "status": status}
+        if status == "outcome_unknown" and not read:
+            # H6/U-c: an unreadable chain proves nothing, so a check must not read "not applied".
+            row["receipt_read"] = False
         if entry is not None:
             row.update(action=entry["action"], base_revision=entry["base_revision"])
         out.append(row)

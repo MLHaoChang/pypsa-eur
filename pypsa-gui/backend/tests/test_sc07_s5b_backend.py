@@ -157,3 +157,22 @@ def test_roof_of_a_building_gone_from_the_site_never_shows_its_id():
 @pytest.mark.parametrize("on", ["ground", None, 7, "roofb1", ""])
 def test_anything_else_is_on_the_ground(on):
     assert chat._on_words({"b1": "x"}, on) == "on the ground"
+
+
+@pytest.mark.parametrize("readable", [True, False])
+def test_an_unknown_row_says_when_its_chain_could_not_be_read(monkeypatch, readable):
+    """H6/U-c: a Resume check may read "not applied" only when the chain was read."""
+    monkeypatch.setattr(proposals, "_entries", OrderedDict())
+    monkeypatch.setattr(chat, "_UNKNOWN", {(PROJECT.registry_key, OWNER, SITE, "u0"): None})
+
+    def committed(_directory, _site, _pid):
+        if not readable:
+            raise OSError("chain unreadable")
+        return None
+
+    monkeypatch.setattr(proposals, "_committed", committed)
+    rows = chat.my_previews(PROJECT, OWNER, SITE)
+    expected = {"id": "u0", "status": "outcome_unknown"}
+    if not readable:
+        expected["receipt_read"] = False
+    assert rows == [expected]
