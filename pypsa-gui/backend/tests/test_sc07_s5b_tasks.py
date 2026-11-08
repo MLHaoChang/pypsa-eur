@@ -176,3 +176,55 @@ def test_only_prepare_steps_name_previews_to_cancel():
         ]
     }
     assert tasks._own_previews(task) == [("p", "campus", "p1")]
+
+
+# ── UX (14) ask 2: the edit's receipt rows in the task view ────────────────
+
+
+def _edited(receipt):
+    return {
+        "task_id": "t",
+        "title": "Edit",
+        "project_id": "p",
+        "status": "completed",
+        "steps": [
+            {
+                "id": "e",
+                "tool": "update_component",
+                "status": "completed",
+                "result": {"_edit_receipt": receipt},
+            },
+            {
+                "id": "x",
+                "tool": "update_component",
+                "status": "failed",
+                "args": {},
+                "result": {"_edit_receipt": receipt},
+            },
+        ],
+    }
+
+
+def test_a_task_view_carries_each_edits_rows_beside_its_words():
+    row = {
+        "component_class": "Load",
+        "name": "it",
+        "field": "p_set",
+        "label": "Active power",
+        "role": "typed",
+        "unit": "MW",
+    }
+    view = tasks._view(
+        _edited({"says": "it p_set 3 → 2 MW", "rows": [row], "digest": "d"})
+    )
+    assert view["changes"] == ["it p_set 3 → 2 MW"]
+    assert view["change_edits"] == [
+        {"rows": [row]}
+    ]  # completed steps only, rows and sets only
+
+
+def test_a_large_receipt_leaves_its_rows_out_and_keeps_its_words():
+    rows = [{"field": "p_set", "label": "x" * 50, "role": "typed", "unit": "MW"}] * 60
+    view = tasks._view(_edited({"says": "many", "rows": rows}))
+    assert view["changes"] == ["many"]
+    assert "change_edits" not in view

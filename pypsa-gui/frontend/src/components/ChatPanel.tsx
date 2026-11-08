@@ -33,7 +33,7 @@ import { createPortal } from 'react-dom'
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
-import { isSite3dNavigate, Site3dOpenLine, type Site3dOpenState } from '../site3d/site3dOpen'
+import { isSite3dNavigate, Site3dOpenHeader, Site3dOpenLine, type Site3dOpenState } from '../site3d/site3dOpen'
 import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import { CheckedChart } from './CheckedChart'
 import { CheckedAnswerControl } from './CheckedAnswerControl'
@@ -3667,6 +3667,9 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
             {m.role === 'assistant'
               ? <ChatMarkdown>{m.content}</ChatMarkdown>
               : m.role === 'user' ? <UserMessageText message={m} />
+              // SC-07 S5b R6: a Site 3D open's row says only what the ACK has shown (UX (14) ask 1).
+              : m.role === 'tool' && m.tool_use_id && site3dOpen[m.tool_use_id]
+                ? <Site3dOpenHeader state={site3dOpen[m.tool_use_id]} guided={uiMode === 'guided'} />
               : toolLabel ? (
                 <>
                   {outcomeNow && <OutcomeGlyph mark={outcomeNow.mark} />}

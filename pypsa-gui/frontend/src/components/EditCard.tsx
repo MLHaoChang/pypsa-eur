@@ -231,9 +231,10 @@ function rowValues(r: EditCardRow, guided: boolean, value = cellValue): [string,
  * ("Line 'L1', Capacity 300 → 500 MVA"), never the raw field or the stored unit. */
 export const HEADLINE_CAP = 4
 
-export function editCardWords(card: EditCard): string {
+/** Each typed change in Guided's words, one line per set or row (the headline's parts). */
+export function editCardLines(card: EditCard): string[] {
   const members = setMembers(card)
-  const lines = [...(card.sets ?? []).map(g => cardSetLine(card, g, true)),
+  return [...(card.sets ?? []).map(g => cardSetLine(card, g, true)),
     ...card.rows.filter(r => r.role === 'typed' && !inSet(members, r)).map(r => {
     const asset = assetWords(r.component_class, r.name)
     if (r.field === 'exists') return `${r.new ? 'Adds' : 'Removes'} ${asset}`
@@ -241,6 +242,17 @@ export function editCardWords(card: EditCard): string {
     const unit = r.display?.unit || r.unit
     return `${asset}, ${r.label} ${old} \u2192 ${now}${unit ? ` ${unit}` : ''}`
   })]
+}
+
+/** Guided's lines for a receipt's rows and sets, as a task view carries them; none when malformed. */
+export function editLinesOf(value: unknown): string[] {
+  const o = object(value)
+  if (!o || !rowsOk(o.rows) || !setsOk(o.sets)) return []
+  return editCardLines({ rows: o.rows, sets: o.sets } as EditCard)
+}
+
+export function editCardWords(card: EditCard): string {
+  const lines = editCardLines(card)
   // A long card keeps its headline short; the table below lists every row. One hidden line
   // is not worth "and 1 more", so it shows.
   return lines.length <= HEADLINE_CAP + 1 ? lines.join('; ')

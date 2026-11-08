@@ -6,7 +6,8 @@
  *  R3 partial card (expired; the site changed after it was prepared): the start_task call is real (a real task
  *     with an update_component, site_scene_prepare and site_scene_apply plan, its real task_id).
  *     MOCKED in the browser: a fetch wrapper rewrites that one start_task tool_result frame so
- *     the edit step reads completed with its receipt words in `changes`, and next_step is the
+ *     the edit step reads completed with its receipt words in `changes` and its receipt row in
+ *     `change_edits` (the real Demand label), and next_step is the
  *     apply step stored as the real task layer stores a refused write step: status uncertain
  *     (task status needs_review) with error_kind proposal_expired / revision_conflict. The task view
  *     does carry next_step.error_kind (1a), but this script does not make a preview expire or the
@@ -58,7 +59,10 @@ const SITE = { id: 'campus', name: 'Campus', buses: ['B1'], origin: { lng: 11.58
 const HALL = { id: 'hall', center: [30, -60], width: 20, depth: 12, height: 8, heading: 0, unit: 'm' }
 const SHED = { id: 'shed', center: [55, -90], width: 10, depth: 10, height: 5, heading: 0, unit: 'm' }
 const A = 'greenfield:hall'
-const CHANGE = 'it p_set 3 → 2 MW'  // the mocked edit step's receipt words
+const CHANGE = 'it p_set 3 → 2 MW'  // the mocked edit step's receipt words (its `says`)
+// The mocked receipt row, its label the real field catalogue's (`edit_card._fields('Load')`).
+const EDIT_ROW = { component_class: 'Load', name: 'it', field: 'p_set', label: 'Demand', role: 'typed', unit: 'MW', old: 3, new: 2 }
+const DONE = "Load 'it', Demand 3 → 2 MW"  // Guided's words for that row, in both modes
 const REASONS = { proposal_expired: 'the prepared mapping expired', revision_conflict: 'the site changed after it was prepared' }
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -87,7 +91,7 @@ async function stop(child) {
 }
 
 /** Rewrites one start_task tool_result frame of the chat stream, once, when armed with an error_kind. */
-function streamRewriter(change) {
+function streamRewriter({ change, row }) {
   const real = window.fetch.bind(window)
   window.__sc07 = { kind: null, rewritten: [] }
   const rewrite = block => {
@@ -108,6 +112,7 @@ function streamRewriter(change) {
     task.steps = (task.steps || []).map(s => ({ ...s, status: s.tool === 'site_scene_apply' ? 'uncertain' : 'completed' }))
     task.completed_steps = task.steps.filter(s => s.status === 'completed').length
     task.changes = [change]
+    task.change_edits = [{ rows: [row] }]
     const apply = task.steps.find(s => s.tool === 'site_scene_apply')
     task.next_step = { id: apply ? apply.id : 'apply', tool: 'site_scene_apply', status: 'uncertain', error_kind: kind }
     window.__sc07.rewritten.push(`start_task partial: ${kind}`)
@@ -208,7 +213,7 @@ try {
     if (hold) await held()
     return route.fulfill({ response: resp, json })
   })
-  await page.addInitScript(streamRewriter, CHANGE)
+  await page.addInitScript(streamRewriter, { change: CHANGE, row: EDIT_ROW })
   await page.addInitScript(name => {
     localStorage.setItem('network-diagram:current-project', name)
     localStorage.setItem('network-diagram:assistant-dock', 'open')
@@ -238,8 +243,14 @@ try {
     shots.push(path.join(out, `${name}.png`))
     await page.screenshot({ path: shots.at(-1) })
     shots.push(path.join(out, `${name}-close.png`))
-    // A reload can re-mount the panel once after it first appears: retry the crop once.
-    await target.screenshot({ path: shots.at(-1) }).catch(async () => { await page.waitForTimeout(1000); await target.screenshot({ path: shots.at(-1) }) })
+    // The crop is the page clipped to the element's box: an element shot waits for the element to
+    // settle, which can outlast a held state. A reload can re-mount the panel: read the box again once.
+    const crop = async () => {
+      const box = await target.boundingBox()
+      assert(box, `${name}: no box to crop`)
+      await page.screenshot({ path: shots.at(-1), clip: box })
+    }
+    await crop().catch(async () => { await page.waitForTimeout(1000); await crop() })
     if (holds) assert((await target.innerText()).includes(holds), `${name}: ${holds} ended before the images were taken`)
     report[name] = text
     return text
@@ -274,7 +285,7 @@ try {
       await idle()
       const card = line.locator('xpath=ancestor::*[@data-testid="assistant-task-card"][1]')
       assert.equal(await line.locator('p').innerText(),
-        `Done: ${CHANGE}. Not done: the 3D site mapping (${REASONS[kind]}).`)
+        `Done: ${DONE}. Not done: the 3D site mapping (${REASONS[kind]}).`)
       assert.equal(await line.getByTestId('task-prepare-mapping-again').innerText(), 'Prepare the mapping again')
       await shoot(`r3-partial-${kind === 'proposal_expired' ? 'expired' : 'site-changed'}-${mode}`, card)
       // Collected now: a later reload (R5) starts the page's record afresh.
@@ -375,7 +386,7 @@ try {
     await page.waitForFunction(() => document.querySelector('[data-testid="site-resume-check"]')?.textContent === 'Checking…', null, { timeout: 2500 })
     await shoot(`r5-checking-${mode}`, panel, 'Checking…')
     gate.release()
-    await expectLine('Found: your placement was applied.')
+    await expectLine('Checked: your placement was applied.')
     await shoot(`r5-applied-${mode}`, panel)
 
     // Not applied: Y shown as unknown (mocked), the refetch real (Y is still open).

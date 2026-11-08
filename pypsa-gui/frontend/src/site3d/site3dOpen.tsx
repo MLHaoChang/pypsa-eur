@@ -18,6 +18,19 @@ export function isSite3dNavigate(d: { kind?: string; panel_id?: string; canvas_v
   return d.kind === 'navigate' && d.canvas_view === 'site' && (d.panel_id === 'map' || d.panel_id === 'MapCanvas')
 }
 
+/** The tool row's header for a Site 3D open (UX (14) ask 1): Guided's plain words, Expert's tool
+ * name. The "✓" shows only once the ACK completed; pending has no mark; unconfirmed takes the warning
+ * mark. It replaces the generic row, whose "Done:" or "✓" would claim the open before the ACK. */
+export function Site3dOpenHeader({ state, guided }: { state: Site3dOpenState; guided: boolean }) {
+  return (
+    <span className="font-sans text-[12px] text-text" data-testid="chat-site3d-header" data-state={state}>
+      {state === 'opened' && <span aria-hidden="true" className="mr-1">✓</span>}
+      {state === 'unconfirmed' && <span aria-hidden="true" className="mr-1 text-warn">⚠</span>}
+      {guided ? 'Open the 3D site' : 'ui_open_panel'}
+    </span>
+  )
+}
+
 export function Site3dOpenLine({ state }: { state: Site3dOpenState | undefined }) {
   if (!state) return null
   return (

@@ -32,6 +32,7 @@ SCENE_APPLY_DEAD = frozenset({"proposal_expired", "proposal_cancelled", "revisio
 SCENE_PREPARE = "site_scene_prepare"
 # A prepare that asks the user (services/site_scene/chat.prepare): no preview was made.
 SCENE_PREPARE_ASKS = frozenset({"clarify", "unresolved"})
+CHANGE_EDITS_MAX = 2000  # chars of receipt rows a task view carries (UX (14) ask 2)
 # LC-23 study brief (owner decisions AI-567b, COP-1): a plan labelled with an
 # objective, cards in scope, cases and one phase per card.
 CARDS = ("capacity", "grid", "control", "reliability", "commercial", "hand-off")
@@ -432,11 +433,17 @@ def _view(task, fresh=False, current=None):
             out["next_step"]["error_kind"] = step["error_kind"]
         if brief and step["status"] in ("failed", "uncertain"):
             out["next_step"]["correction"] = _correction(step)
-    changes = [s["result"]["_edit_receipt"]["says"] for s in task["steps"] if s["status"] == "completed"
-               and isinstance(s.get("result"), dict) and isinstance(s["result"].get("_edit_receipt"), dict)
-               and isinstance(s["result"]["_edit_receipt"].get("says"), str)]
+    receipts = [s["result"]["_edit_receipt"] for s in task["steps"] if s["status"] == "completed"
+                and isinstance(s.get("result"), dict) and isinstance(s["result"].get("_edit_receipt"), dict)
+                and isinstance(s["result"]["_edit_receipt"].get("says"), str)]
+    changes = [r["says"] for r in receipts]
     if changes:
         out["changes"] = changes
+        # SC-07 S5b (UX (14) ask 2): each edit's receipt rows, so a card words the change with the
+        # panel's field labels as Guided does; past the cap they are left out and `says` stands.
+        edits = [{k: r[k] for k in ("rows", "sets") if k in r} for r in receipts]
+        if len(json.dumps(edits, default=str)) <= CHANGE_EDITS_MAX:
+            out["change_edits"] = edits
     run = task.get("run") or {}
     out["note"] = ("Wait for the job; the conversation continues when it ends." if state == "waiting_job" else
                    f"The {run['stage']} gate failed: tell the user which rules failed and their facts; "

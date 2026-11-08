@@ -73,7 +73,7 @@ export default function SiteResume({ siteName, rows, readAt, recheck }: {
   if (checked) {
     const what = actionWords((rows ?? []).find(r => r.id === checked.id)?.action ?? pick?.row.action)
     if (checked.result === 'applied') {
-      line = `Found: your ${what} was applied.`
+      line = `Checked: your ${what} was applied.`
     } else {
       line = `Checked: your ${what} was not applied.`
       action = <ActButton testid="site-resume-prepare-again" label="Prepare it again"

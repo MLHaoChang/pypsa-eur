@@ -57,6 +57,18 @@ describe('partial mapping line (R3)', () => {
     expect(container.textContent).toBe('')
   })
 
+  it("words the edit with the panel's field label from the receipt rows, in both modes (UX (14) ask 2)", () => {
+    const row = { component_class: 'Load', name: 'it', field: 'p_set', label: 'Active power', role: 'typed', unit: 'MW', old: 3, new: 2 }
+    const t = { ...task(refused('revision_conflict'), ['it p_set 3 → 2 MW']), change_edits: [{ rows: [row] }] }
+    expect(partialMapping(t)?.done).toBe("Load 'it', Active power 3 → 2 MW")
+    expect(partialMapping(t)?.done).not.toContain('p_set')
+  })
+
+  it('a receipt with malformed rows keeps its own words', () => {
+    const t = { ...task(refused('revision_conflict'), ['it p_set 3 → 2 MW']), change_edits: [{ rows: [{ field: 1 }] }] }
+    expect(partialMapping(t)?.done).toBe('it p_set 3 → 2 MW')
+  })
+
   it('joins several edits with full stops, never a semicolon', () => {
     const p = partialMapping(task(failed('site_scene_apply', 'proposal_expired'), ['Set A to 1 MW;', 'Set B to 2 MW.']))
     expect(p?.done).toBe('Set A to 1 MW. Set B to 2 MW')

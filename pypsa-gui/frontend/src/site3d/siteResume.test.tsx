@@ -60,7 +60,7 @@ describe.each(['guided', 'expert'] as const)('Resume line (%s)', mode => {
     expect(line()).not.toMatch(/applied\./)
     await act(async () => { answer({ rows: [applied('p-bbbb', 'bind_targets')], readAt: 2 }) })
     rerender(<SiteResume siteName="Campus" rows={[applied('p-bbbb', 'bind_targets')]} readAt={2} recheck={recheck} />)
-    expect(line()).toBe('Found: your mapping to the model was applied.')
+    expect(line()).toBe('Checked: your mapping to the model was applied.')
     expect(screen.queryByTestId('site-resume-prepare-again')).toBeNull()
     // The next fresh read clears it (#1183).
     rerender(<SiteResume siteName="Campus" rows={[applied('p-bbbb', 'bind_targets')]} readAt={3} recheck={recheck} />)

@@ -92,6 +92,10 @@ const acknowledgement = {
   target: { panel_id: 'map', canvas_view: 'site' as const },
 }
 
+const HEADER = { guided: 'Open the 3D site', expert: 'ui_open_panel' } as const
+const header = () => screen.getByTestId('chat-site3d-header').textContent
+const row = () => screen.getByTestId('chat-site3d-header').closest('[data-testid="chat-message"]')!.textContent
+
 // SC-07 S5b R6 (UX condition 5; GK B V3): a chat navigate into Site 3D says
 // "Opened" only once its browser ACK completes.
 async function openSite3d(withAck: boolean) {
@@ -117,9 +121,13 @@ it.each(['guided', 'expert'] as const)('%s: pending, then Opened only on the ACK
   await waitFor(() => expect(acknowledgeMountedView).toHaveBeenCalledTimes(1))
   expect(useUIStore.getState().canvasView).toBe('site')
   expect(words()).toBe('Opening the 3D site…')
+  expect(header()).toBe(HEADER[mode])  // no mark and no "Done:" before the ACK (UX (14) ask 1)
+  expect(row()).not.toMatch(/Done:|✓/)
   const [, , onVerified] = vi.mocked(acknowledgeMountedView).mock.calls[0]
   act(() => onVerified!())
   await waitFor(() => expect(words()).toBe('Opened the 3D site'))
+  expect(header()).toBe(`✓${HEADER[mode]}`)
+  expect(row()).not.toContain('(completed)')
 })
 
 it.each(['guided', 'expert'] as const)('%s: an ACK that cannot complete says it could not be confirmed', async mode => {
@@ -129,6 +137,8 @@ it.each(['guided', 'expert'] as const)('%s: an ACK that cannot complete says it 
   const [, , , onUnverified] = vi.mocked(acknowledgeMountedView).mock.calls[0]
   act(() => onUnverified!())
   await waitFor(() => expect(words()).toBe('Could not confirm the 3D site opened'))
+  expect(header()).toBe(`⚠${HEADER[mode]}`)
+  expect(row()).not.toMatch(/Done:|✓/)
 })
 
 it('with no ACK issued (no network open) it is never Opened', async () => {

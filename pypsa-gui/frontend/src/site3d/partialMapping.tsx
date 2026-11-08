@@ -5,6 +5,8 @@
 // done": it keeps S5a's "Check the 3D site" path. "Prepare the mapping again"
 // cancels the task and asks for a fresh mapping-only prepare, never a retry.
 
+import { editLinesOf } from '../components/EditCard'
+
 const SCENE_STEPS = new Set(['site_scene_prepare', 'site_scene_apply'])
 
 /** The reason in plain words, from the refused apply's kind (never shown as a key): the three
@@ -23,7 +25,13 @@ const clause = (s: string) => s.trim().replace(/[.;:\s]+$/, '')
 
 /** The line's parts, or null when the task is not a partial model-edit / mapping outcome. */
 export function partialMapping(task: Obj): { done: string; reason: string } | null {
-  const changes = Array.isArray(task.changes) ? task.changes.filter((c): c is string => typeof c === 'string' && !!c.trim()) : []
+  // The edit's words with the panel's field labels (Guided's words, in both modes), from the
+  // receipt rows the task view carries; the receipt's own `says` only when they are absent.
+  const edits = Array.isArray(task.change_edits) ? task.change_edits : []
+  const changes = (Array.isArray(task.changes) ? task.changes : []).flatMap((c, i) => {
+    const lines = editLinesOf(edits[i])
+    return lines.length ? lines : typeof c === 'string' && c.trim() ? [c] : []
+  })
   const next = object(task.next_step)
   if (!changes.length || !next || !SCENE_STEPS.has(String(next.tool))) return null
   const kind = typeof next.error_kind === 'string' ? next.error_kind : null
