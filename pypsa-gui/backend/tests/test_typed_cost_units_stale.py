@@ -441,3 +441,42 @@ def test_a_product_priced_link_is_rechecked_with_its_technology():
     assert _stale(n, "Link", "hb")["overnight_cost"] is None
     n.links.at["hb", "efficiency"] = 0.75
     assert _stale(n, "Link", "hb")["overnight_cost"]["current"] == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "1.2",
+        {"column": "dc_ac_ratio"},
+        {"column": "dc_ac_ratio", "value": "x", "capacity_basis": "output_electric_dc"},
+        {
+            "column": "dc_ac_ratio",
+            "value": float("nan"),
+            "capacity_basis": "output_electric_dc",
+        },
+        {
+            "column": "dc_ac_ratio",
+            "value": True,
+            "capacity_basis": "output_electric_dc",
+        },
+        {"column": 3, "value": 1.2, "capacity_basis": "output_electric_dc"},
+        {"column": "dc_ac_ratio", "value": 1.2, "capacity_basis": None},
+    ],
+)
+def test_a_malformed_scale_record_reads_stale_not_a_500(
+    tmp_path, monkeypatch, client, install_network, bad
+):
+    """review-gk #1255: a record in n.meta of the wrong shape reads stale, never a KeyError."""
+    n = _pv(tmp_path, monkeypatch)
+    P._root(n)["Generator"]["g"]["overnight_cost"]["scaled_by"] = bad
+    assert (
+        _stale(n, "Generator", "g")["overnight_cost"]["reason"]
+        == "scale input record malformed"
+    )
+    install_network(n)
+    r = client.get("/api/network/asset_schema/Generator/provenance/g")
+    assert r.status_code == 200
+    assert (
+        r.json()["fields"]["overnight_cost"]["stale"]["reason"]
+        == "scale input record malformed"
+    )

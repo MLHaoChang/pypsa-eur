@@ -92,7 +92,7 @@ _NOT_RECORDED = {"field": None, "recorded": None, "current_field": None, "curren
 
 def _recorded_input(entry: dict) -> dict | None:
     """The scale input an entry was priced with: `scaled_by`, or TC-02's `dc_ac_ratio` key."""
-    if isinstance(entry.get("scaled_by"), dict):
+    if entry.get("scaled_by") is not None:
         return entry["scaled_by"]
     if entry.get("dc_ac_ratio") is not None:
         # TC-02 wrote the key on a DC-priced (`output_electric_dc`) overnight cost only.
@@ -101,8 +101,19 @@ def _recorded_input(entry: dict) -> dict | None:
     return None
 
 
-def _verdict(n, component_class: str, name: str, scaled: dict) -> dict | None:
+def _well_formed(scaled) -> bool:
+    """The shape pricing writes: a str column and capacity basis, a finite number value."""
+    return (isinstance(scaled, dict) and isinstance(scaled.get("column"), str)
+            and isinstance(scaled.get("capacity_basis"), str)
+            and isinstance(scaled.get("value"), (int, float)) and not isinstance(scaled["value"], bool)
+            and math.isfinite(scaled["value"]))
+
+
+def _verdict(n, component_class: str, name: str, scaled) -> dict | None:
     from services.library.defaults_pack.pricing import current_scale_input
+
+    if not _well_formed(scaled):          # read as stale, never a KeyError 500 (#1255)
+        return {**_NOT_RECORDED, "reason": "scale input record malformed"}
 
     try:
         column, value = current_scale_input(n, component_class, name, scaled.get("technology"),
