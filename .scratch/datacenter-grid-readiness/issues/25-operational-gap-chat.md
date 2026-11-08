@@ -1,6 +1,6 @@
 # Chat reading of the plan-vs-operation gap
 
-Status: needs-triage
+Status: ready-for-agent (owner decision DC25-POINTER-1: UI pointer, not a read tool)
 Type: task
 Blocked by: 07
 Size: S
