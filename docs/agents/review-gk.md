@@ -117,6 +117,7 @@ A declared per-metric basis table ("none" vs a column) is checked both ways: a "
 - Provider stop reasons map to "truncated" through an allow-list, so an unknown reason reads truncated. An echo bound keeps a spoken answer from its start, and a verified-outcome block goes first in a tool result (GK B (25)).
 - A revalidation or outcome stamp that compared nothing never reads current or completed; it gets its own state (#1170, unanchored).
 - A check compares only the fields its independent read supplies, and names the rest as uncompared (#1170, revision).
+- A read-back lists a field as uncompared (model-facing only) only when the apply does not write it; a field the apply writes and the independent read can supply is compared (#1275: detach and undo_detach write group memberships, which the scene read supplies; refines #1170).
 - A "done" count includes only rows the call changed, never rows already present or left as they were (#1175 E2, the S2 W1 analogue).
 - A reader of the island sidecar states whether it takes the raw or the validated config, and its caller passes that one (#1172).
 - An adequacy proof and its cost leg describe the same fleet. An extendable candidate with no size reads `not_shown`, never `fail` (#1172).
