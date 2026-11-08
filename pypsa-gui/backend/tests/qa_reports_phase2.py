@@ -358,6 +358,7 @@ def section_2_generate(rep: dict, seam: _Seam) -> tuple[str, dict] | None:
               and b.get("text") == "Withheld: 2 numbers could not be checked against the study; "
                                    "see Numbers to check." for b in blocks)
           and not any(WRONG_NUMBER_SENTENCE in json.dumps(b) or "99.9" in json.dumps(b)
+                      or plan["right_number"] in json.dumps(b)  # GK B (33) W3
                       for b in blocks),
           f"blocks={[b.get('type') for b in blocks]}")
 

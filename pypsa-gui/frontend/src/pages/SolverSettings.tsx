@@ -20,6 +20,7 @@ import { invalidateNetworkQueries } from '../utils/projectActions'
 import { PageHeader } from '../components/PageKit'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import CarrierSelect from '../components/CarrierSelect'
+import { ROLLING_WORDS } from './solver/rollingWords'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
 import { useLoadFlowOn, useN1On } from '../components/flowScope/useFlowScope'
@@ -269,7 +270,9 @@ export default function SolverSettings() {
       ? ['network', 'solver-sclopf-panel'] as const
       : blockRequest === 'goal'
         ? ['network', 'solver-reliability-goal'] as const
-        : ['dispatch', 'solver-economic-assumptions'] as const
+        : blockRequest === 'strategy'
+          ? ['general', 'solver-solve-strategy'] as const
+          : ['dispatch', 'solver-economic-assumptions'] as const
     if (tab !== want) { setTab(want); return }
     document.getElementById(target)?.scrollIntoView({ block: 'start' })
     clearBlockRequest()
@@ -367,7 +370,7 @@ export default function SolverSettings() {
           (typically > ~1000 snapshots × > ~100 buses).
           Incompatible with SCLOPF and Load flow — backend validation
           rejects those combinations. */}
-      <section>
+      <section id="solver-solve-strategy">
         <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Solve strategy</h3>
         <div className="space-y-1">
           <label className="flex items-center gap-2 cursor-pointer">
@@ -422,7 +425,7 @@ export default function SolverSettings() {
                 onChange={e => patch({ rolling_horizon: Math.max(1, parseInt(e.target.value || '168', 10) || 168) })}
                 className="bg-bg border border-border rounded px-2 py-1 text-xs font-mono text-text w-24 focus:outline-none focus:border-accent"
               />
-              <span className="text-[10px] text-muted">snapshots per window</span>
+              <span className="text-[10px] text-muted">{ROLLING_WORDS.horizon}</span>
             </div>
             <div className="flex items-center gap-2">
               <label className="text-[11px] text-muted w-20">Overlap</label>
@@ -434,7 +437,7 @@ export default function SolverSettings() {
                 onChange={e => patch({ rolling_overlap: Math.max(0, parseInt(e.target.value || '24', 10) || 0) })}
                 className="bg-bg border border-border rounded px-2 py-1 text-xs font-mono text-text w-24 focus:outline-none focus:border-accent"
               />
-              <span className="text-[10px] text-muted">snapshots of SoC carry between windows</span>
+              <span className="text-[10px] text-muted">{ROLLING_WORDS.overlap}</span>
             </div>
             {/* Surface the SCLOPF / AC PF incompatibility BEFORE the user
                 clicks Run. The backend will also reject these — this is a

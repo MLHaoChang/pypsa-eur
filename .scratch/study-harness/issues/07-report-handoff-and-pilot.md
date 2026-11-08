@@ -3,7 +3,7 @@
 
 # 07 — Report and hand-off stages; eh_site pilot end-to-end
 
-Status: ready-for-agent
+Status: done (#1257)
 Type: task
 Blocked by: 05, 06
 Gated: yes (GK B)

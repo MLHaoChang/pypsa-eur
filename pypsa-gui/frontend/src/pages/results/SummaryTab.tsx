@@ -22,6 +22,7 @@ import type { AdequacyReportPayload } from './adequacy'
 import { CARD_GROUPS, type CardGroupId } from './groups'
 import { freshnessOf } from './GroupHeader'
 import ProductionTiles from './ProductionTiles'
+import OperationalGap from './OperationalGap'
 import { NOT_RECORDED, NotRecordedDash, NotRecordedNote } from './NotRecorded'
 import { StatePill } from '../../components/ResultState'
 import { ScopeGate } from '../../components/flowScope/ScopeGate'
@@ -261,6 +262,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           )}
         </Card>
       </div>
+      <OperationalGap />
       <NotRecordedNote show={notRecorded} />
       <ProductionTiles view={processView} />
       {/* The visible next step (UX-flow rule 3): what follows the answer. */}

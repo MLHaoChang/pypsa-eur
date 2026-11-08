@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A queued solve now records its own project's network revision on the sizing record and logs its save under its own project's organisation, not those of the project in the foreground.

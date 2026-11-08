@@ -149,7 +149,8 @@ def _unbound_keys(project: AuthorizedProject, scene: dict) -> list[str] | None:
 
 
 @router.get("/{name}/sites/{site_id}/scene")
-def get_scene(site_id: str, project: AuthorizedProject = ProjectAccessDep) -> dict:
+def get_scene(site_id: str, project: AuthorizedProject = ProjectAccessDep,
+              user: User | None = Depends(optional_user)) -> dict:
     _site_known(project, site_id)
     with store.project_lock(project.directory):
         scene = store.read_scene(project.directory, site_id)
@@ -158,7 +159,12 @@ def get_scene(site_id: str, project: AuthorizedProject = ProjectAccessDep) -> di
             # The browser cannot rebuild Python's canonical JSON (47.0 reads as 47).
             scene = {**scene, "digest": store.legacy_site_digest(site_service.read_sites(project.directory), site_id)}
     if scene["state"] == "enabled":
-        scene = {**scene, "unbound_keys": _unbound_keys(project, scene), **_read_back(project, scene)}
+        from services.site_scene import chat
+
+        # SC-07 S5 (GK B J4, J5): the caller's own previews a Resume can report; never another
+        # owner's. No server-side cache on this route, so the list is per request and per sign-in.
+        scene = {**scene, "unbound_keys": _unbound_keys(project, scene), **_read_back(project, scene),
+                 "my_previews": chat.my_previews(project, _owner(user), site_id)}
     return scene
 
 

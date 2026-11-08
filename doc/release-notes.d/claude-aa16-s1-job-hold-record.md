@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): An assistant job call whose outcome is unknown is now recorded per project, so a new chat or another tab of the same app process is refused the same operation until the evidence shows it ended; a hold that could not be recorded says so in the call's result.

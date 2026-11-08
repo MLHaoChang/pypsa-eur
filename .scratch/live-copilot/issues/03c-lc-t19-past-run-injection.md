@@ -3,7 +3,7 @@
 
 # LC-03c — LC-T19 injection matrix on a past run's kept sections
 
-Status: ready-for-agent
+Status: done (#1271)
 Type: task
 
 Split from LC-03 at its close-out (acceptance map, `_pending` row). LC-T19 asks that
@@ -36,3 +36,12 @@ current run's facts for the past run fails.
 - Gated: GK B.
 - Size: M.
 - Add the injection matrix per kept family against a past run; tests only unless it finds a leak.
+
+### 2026-11-08: GK B plan verdict, GO WITH CHANGES (M1–M6)
+
+- M1: no vacuous case. Per family, assert run-new's quoted value differs from run-old's; add a (c) variant quoting run-new's value rounded, still outside run-old's.
+- M2: a positive control per family and per case path (same read and draft with the true run-old value passes; (d) reads a stub).
+- M3: assert "limited" exactly and that the injected number is not a checked fact in the receipt or answer record; a typed refusal asserts the exact `error_kind`.
+- M4: (b) uses a dimensionally wrong unit (MWh for MW, EUR for t); add a scale-equivalent unit (GW for MW/1000) and pin what the checker does.
+- M5: mutants: the past run reads the current run's facts; a `not_kept` stub read as evidence. Each is listed with its killing test.
+- M6: a leak goes to GK B with the failing test first; small fix in this PR, else a `_pending` row with a ticket. No xfail or skip.

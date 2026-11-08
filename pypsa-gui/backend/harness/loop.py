@@ -3831,10 +3831,14 @@ def _dispatch_real_tool_call(
             except concurrent.futures.TimeoutError:
                 if checked_turn is not None:
                     checked_turn.effect_pending = True
+                hold_note = None
                 if hold_scope and task_ticket is None:
                     # S5: the orphaned worker may still start the job.
-                    job_holds.open_on_timeout(
-                        session, tool_name, bound_args, tool_use_id, future
+                    # Issue 16 (H4): a hold other chats cannot see says so.
+                    hold_note = job_holds.unshared_note(
+                        job_holds.open_on_timeout(
+                            session, tool_name, bound_args, tool_use_id, future
+                        )
                     )
                 try:
                     assistant_tasks.finish_step(task_ticket, error="tool_timeout")
@@ -3858,6 +3862,7 @@ def _dispatch_real_tool_call(
                             + ("; it may have changed the project." if timeout_effect else ".")
                         ),
                         **_timeout_outcome(timeout_effect, "tool_timeout"),
+                        **({"hold_note": hold_note} if hold_note else {}),
                     },
                 )
                 tool_results_collector.append(
@@ -3865,12 +3870,15 @@ def _dispatch_real_tool_call(
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
                         "is_error": True,
-                        "content": "tool_timeout",
+                        "content": (
+                            f"tool_timeout. {hold_note}" if hold_note else "tool_timeout"
+                        ),
                     }
                 )
                 return
     except Exception as exc:  # noqa: BLE001 — surface as tool_error
         raised_outcome = None
+        hold_note = None
         if handler_started and hold_scope and task_ticket is None:
             # S5 (N9): a solve tool raised on the SSE thread; uncertain only
             # when a new solve thread is alive or the state cannot be read.
@@ -3880,8 +3888,10 @@ def _dispatch_real_tool_call(
                 hold_ctx = turn_ctx or PyPSAService.get_active_context()
             except Exception:  # noqa: BLE001 - open_on_raise reads it as unknown
                 hold_ctx = None
-            job_holds.open_on_raise(
-                session, tool_name, bound_args, tool_use_id, hold_ctx, hold_prior
+            hold_note = job_holds.unshared_note(
+                job_holds.open_on_raise(
+                    session, tool_name, bound_args, tool_use_id, hold_ctx, hold_prior
+                )
             )
         if write_note is not None:
             # Issue 04 S4b (G5): `failed` only when the note's read-back found
@@ -3937,14 +3947,18 @@ def _dispatch_real_tool_call(
                 "error_kind": error_kind,
                 "message": msg,
                 **({"_outcome": raised_outcome} if raised_outcome else {}),
+                **({"hold_note": hold_note} if hold_note else {}),
             },
         )
+        error_content = _error_result_content(detail, exc, error_kind)
+        if hold_note:
+            error_content = f"{error_content}\n{hold_note}"
         tool_results_collector.append(
             {
                 "type": "tool_result",
                 "tool_use_id": tool_use_id,
                 "is_error": True,
-                "content": _error_result_content(detail, exc, error_kind),
+                "content": error_content,
             }
         )
         return
@@ -4409,9 +4423,13 @@ def _dispatch_real_tool_call(
         }
         if hold_scope and task_ticket is None:
             # S5: a returned solve whose outcome is unknown holds its job.
-            job_holds.open_on_outcome(
-                session, tool_name, bound_args, tool_use_id, result_for_model["_outcome"]
+            hold_note = job_holds.unshared_note(
+                job_holds.open_on_outcome(
+                    session, tool_name, bound_args, tool_use_id, result_for_model["_outcome"]
+                )
             )
+            if hold_note:
+                result_for_model["hold_note"] = hold_note
     if session.assurance_turn is not None:
         projection = session.assurance_turn.result_projection(
             tool_name, result_for_model, tool_use_id

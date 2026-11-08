@@ -21,7 +21,8 @@ harness/
   durable.py      bounded network locks and cross-process owner-store transactions
   effects.py      exact confirmed input-write reservations, read-back and reconciliation
   guards.py       issue 04 S4a: REQUIRED_GUARDS (a schema guard per write/destructive tool, fail closed), the confirmation's args fingerprint and the no-progress stop; S4b: lock_refusal, the edit-lock check before any effect seam (denied project_locked / project_lock_unavailable)
-  job_holds.py    issue 04 S5: holds on a job call (execution tiers) whose outcome is unknown, per session, keyed by project binding + tool: a later call is denied operation_pending (same G3 fingerprint) or operation_conflict before any effect seam; cleared only on evidence (worker future, job status, solve thread), a failed read keeps it; a repeat card bound to the hold id + fingerprint runs once; solve_queue_enqueue also reads the solve-queue store
+  job_holds.py    issue 04 S5: holds on a job call (execution tiers) whose outcome is unknown, per session, keyed by project binding + tool: a later call is denied operation_pending (same G3 fingerprint) or operation_conflict before any effect seam; cleared only on evidence (worker future, job status, solve thread), a failed read keeps it; a repeat card bound to the hold id + fingerprint runs once; solve_queue_enqueue also reads the solve-queue store; issue 16 S1: a hold on a saved project is also an `assistant_job_holds` row plus a process registry of its evidence, so a new chat or tab of this process is denied too (rows of another process: S2); a hold that could not be recorded adds `hold_note` to the result
+  job_hold_store.py  issue 16: the one DB seam of the job-hold records (write, set_job, delete, exists, active); every function raises, the caller decides
   outcomes.py     issue 04: each tool result's `_outcome` (completed/partial/failed/uncertain/denied) from an independent read, never the handler's word: jobs (S1), row writes, imports and exports against the whole-state map with extra_edits (S2, S4b), undo_last (S3), the raise and timeout paths (S4b)
   navigation.py   issued view actions and owner/project/turn/generation-bound browser ACKs
   reviewer.py     optional single bounded read-only review of qualitative interpretations
@@ -243,13 +244,23 @@ caller's foreground project, re-authorized on every call. A `site_id` is only a
 key: an unknown, deleted or foreign one is the route's `not_found`.
 - **Read** is capped in items and bytes, names every cut (`truncated`) and gap
   (`unavailable`), lists its user-authored fields (`data_fields`) and returns
-  no coordinates, footprints or meshes.
+  no coordinates, footprints or meshes. `my_previews` lists the caller's own
+  `open` and `outcome_unknown` previews (`chat.my_previews`: owner-scoped,
+  status from the chain first, capped at `MAX_LIVE_PER_OWNER`); the scene GET
+  lists the same, `applied` included. The client drops the cached scene when
+  the signed-in user changes (`USER_SCOPED_ROOTS`).
 - **Prepare** is read-tier with no card, but checks the edit lock and the saved
   chat rule. A caller holds at most `MAX_LIVE_PER_OWNER` open previews, and a
   chat preview never evicts another one (`proposals._admit_owned`); the route
   keeps its evicting behaviour.
 - **Apply** needs `proposal_id`, `input_hash` and `expected_revision`, and its
-  card (`edit_card_site.py`) binds them with the owner, project and Site.
+  card (`edit_card_site.py`) binds them with the owner, project and Site. Each
+  target the card maps is a typed row with a `check`; the receipt reads every
+  target back from disk under the network lock and is `verified` only when each
+  matches the plan, else `uncertain`. A row's `not_compared` names the fields
+  its check does not compare (model-facing only). Features are named in words
+  (`chat.feature_words`), never by scene id. An apply whose outcome is unknown is
+  the `scene_apply_outcome_unknown` error kind, never a receipt.
 - **Cancel** reaches only the caller's own preview and carries no card
   (`GUIDED_UNCARDED`).
 - **Per-turn block.** The browser's `ui_context.site_scene` hint only names the
@@ -1032,6 +1043,15 @@ check that every required disclosure of the version they start from is still
 there. A lost one fails the job, or refuses the export, with
 `report_disclosure_missing` (409), and nothing is saved. A later human
 regenerate of a section rewrites it non-strict and drops its placeholders.
+The assistant's report exports are sealed (AA-05 S4b): after the disclosure
+check and the quarantine check, the file is published with a `report_export`
+manifest naming the stored version by its file's hash, each figure and the
+template by their bytes, the disclosures and the withheld placeholders. A
+download or delivery re-checks it. A seal or byte mismatch quarantines; a
+source still stored but changed refuses with `report_version_changed`; a
+source since deleted is served with `source_status` (`version_missing`,
+`figure_missing`, `template_missing`) and a note. Exports from the Reports
+page carry no manifest.
 The frontend renders task progress, ordinary resume/cancel requests and safe
 file links from existing `tool_result` frames; no new stream vocabulary or
 provider-specific handlers are introduced.
