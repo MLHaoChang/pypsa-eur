@@ -2,6 +2,7 @@
 (`tools/run_trajectory_evaluation.py`): it writes the suite report from the
 scored cases of `tests/test_trajectory_evaluation.py::test_trajectory_case`.
 A case that never ran or whose driver raised is a failed case, never a skip."""
+
 import json
 import os
 from pathlib import Path
@@ -24,17 +25,26 @@ class TrajectoryReport:
             result = getattr(item, "trajectory_result", None)
             outcome = getattr(item, "trajectory_outcome", "not_run")
             if result is None:
-                result = te.failed(case, outcome if outcome != "passed" else "observation_missing")
+                result = te.failed(
+                    case, outcome if outcome != "passed" else "observation_missing"
+                )
             elif outcome != "passed" and "execution_failed" not in result["failures"]:
-                result = dict(result, failures=[*result["failures"], "execution_" + outcome])
+                result = dict(
+                    result, failures=[*result["failures"], "execution_" + outcome]
+                )
             results.append(dict(result, execution=outcome))
         value = te.report(results)
         if failed:
             value["passed"] = False
-        value["source"] = json.loads(os.environ.get("PYPSA_GUI_TRAJECTORY_SOURCE") or "{}")
+        value["source"] = json.loads(
+            os.environ.get("PYPSA_GUI_TRAJECTORY_SOURCE") or "{}"
+        )
         path = Path(os.environ["PYPSA_GUI_TRAJECTORY_REPORT"])
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(value, indent=2, allow_nan=False, default=str) + "\n", encoding="utf-8")
+        temporary.write_text(
+            json.dumps(value, indent=2, allow_nan=False, default=str) + "\n",
+            encoding="utf-8",
+        )
         temporary.replace(path)
         return value
 

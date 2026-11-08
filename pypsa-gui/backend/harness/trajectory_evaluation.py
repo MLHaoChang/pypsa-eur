@@ -22,6 +22,7 @@ Pure: no I/O and no harness, gate or metrics imports. The drivers and the
 oracles live in `tests/test_trajectory_evaluation.py`; the offline CLI is
 `tools/run_trajectory_evaluation.py`.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -46,22 +47,70 @@ class Case:
 
 
 CASES = (
-    Case("pilot:positive", "pilot", "07", POSITIVE, None,
-         "An eh_site@2 intake granted once runs intake -> hand-off on the new project (issue 07 pilot)."),
-    Case("pilot:refusal", "pilot", "07", REFUSAL, "intake_stale",
-         "The same intake granted on a drifted intake digest creates no project and grants nothing."),
-    Case("barrier:positive", "barrier", "22", POSITIVE, None,
-         "An envelope-admitted edit with no edit in the gap writes once and adds one chain link."),
-    Case("barrier:refusal", "barrier", "22", REFUSAL, "envelope_drift",
-         "An external edit in the gap pauses the run; the step writes nothing and the chain is unchanged."),
-    Case("restart:positive", "restart", "23", POSITIVE, None,
-         "After two trims, a provider switch and a restart, an edit inside the confirmed bound is written."),
-    Case("restart:refusal", "restart", "23", REFUSAL, "requirement_violated",
-         "After two trims, a provider switch and a restart, an edit above the confirmed bound is refused."),
-    Case("kill_charge:positive", "kill_charge", "24", POSITIVE, None,
-         "A run's model send settles at its actual usage."),
-    Case("kill_charge:refusal", "kill_charge", "24", REFUSAL, "needs_user",
-         "A send killed between the reply and the charge stops the run after restart; its hold counts at its bound."),
+    Case(
+        "pilot:positive",
+        "pilot",
+        "07",
+        POSITIVE,
+        None,
+        "An eh_site@2 intake granted once runs intake -> hand-off on the new project (issue 07 pilot).",
+    ),
+    Case(
+        "pilot:refusal",
+        "pilot",
+        "07",
+        REFUSAL,
+        "intake_stale",
+        "The same intake granted on a drifted intake digest creates no project and grants nothing.",
+    ),
+    Case(
+        "barrier:positive",
+        "barrier",
+        "22",
+        POSITIVE,
+        None,
+        "An envelope-admitted edit with no edit in the gap writes once and adds one chain link.",
+    ),
+    Case(
+        "barrier:refusal",
+        "barrier",
+        "22",
+        REFUSAL,
+        "envelope_drift",
+        "An external edit in the gap pauses the run; the step writes nothing and the chain is unchanged.",
+    ),
+    Case(
+        "restart:positive",
+        "restart",
+        "23",
+        POSITIVE,
+        None,
+        "After two trims, a provider switch and a restart, an edit inside the confirmed bound is written.",
+    ),
+    Case(
+        "restart:refusal",
+        "restart",
+        "23",
+        REFUSAL,
+        "requirement_violated",
+        "After two trims, a provider switch and a restart, an edit above the confirmed bound is refused.",
+    ),
+    Case(
+        "kill_charge:positive",
+        "kill_charge",
+        "24",
+        POSITIVE,
+        None,
+        "A run's model send settles at its actual usage.",
+    ),
+    Case(
+        "kill_charge:refusal",
+        "kill_charge",
+        "24",
+        REFUSAL,
+        "needs_user",
+        "A send killed between the reply and the charge stops the run after restart; its hold counts at its bound.",
+    ),
 )
 # Pinned literal (P6): any edit to CASES fails `report` until this is updated
 # in the same reviewed change.
@@ -69,7 +118,9 @@ MANIFEST_SHA256 = "373bee280c0d211f4723dc02dbcd0cfb5eb4bba11bc41cc836149735a9710
 
 
 def manifest_sha(cases) -> str:
-    return hashlib.sha256(json.dumps([asdict(c) for c in cases], sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps([asdict(c) for c in cases], sort_keys=True).encode()
+    ).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -88,7 +139,9 @@ class Observation:
     refusal_kind: str | None
     effects: list[Effect]
     resolved: list[str]
-    oracle: dict = field(default_factory=dict)  # {"passed": bool, "checks": {name: bool}}
+    oracle: dict = field(
+        default_factory=dict
+    )  # {"passed": bool, "checks": {name: bool}}
     # Projects whose task folder the worker's own run scan listed
     # (`Runner._runs`, every project by design): reported, not a wrong-project
     # result. Only that listing is exempt; any other resolution during the scan
@@ -102,6 +155,7 @@ class Observation:
 # "cells": {"Component/name/attr": value}, "chains": {task_id: [after_change, ...]},
 # "manifests": {evidence_dir: manifest}}}}, taken by the driver from disk and
 # from the resident network. `diff` turns two snapshots into raw changes.
+
 
 def _classify(path: str) -> tuple[str, str]:
     parts = path.split("/")
@@ -128,14 +182,28 @@ def diff(before: dict, after: dict) -> list[dict]:
     for pid in sorted(set(old_projects) | set(new_projects)):
         old, new = old_projects.get(pid), new_projects.get(pid)
         if old is None or new is None:
-            add({"project_id": pid, "kind": "project", "key": "created" if old is None else "removed"})
+            add(
+                {
+                    "project_id": pid,
+                    "kind": "project",
+                    "key": "created" if old is None else "removed",
+                }
+            )
         old, new = old or {}, new or {}
         files_old, files_new = old.get("files", {}), new.get("files", {})
         for path in sorted(set(files_old) | set(files_new)):
             if files_old.get(path) != files_new.get(path):
                 kind, key = _classify(path)
-                add({"project_id": pid, "kind": kind, "key": key,
-                     "manifest": (new.get("manifests") or {}).get(key) if kind == "evidence" else None})
+                add(
+                    {
+                        "project_id": pid,
+                        "kind": kind,
+                        "key": key,
+                        "manifest": (new.get("manifests") or {}).get(key)
+                        if kind == "evidence"
+                        else None,
+                    }
+                )
         cells_old, cells_new = old.get("cells", {}), new.get("cells", {})
         for cell in sorted(set(cells_old) | set(cells_new)):
             a, b = cells_old.get(cell), cells_new.get(cell)
@@ -144,15 +212,20 @@ def diff(before: dict, after: dict) -> list[dict]:
         chains_old, chains_new = old.get("chains", {}), new.get("chains", {})
         for task in sorted(set(chains_old) | set(chains_new)):
             chain_old, chain_new = chains_old.get(task, []), chains_new.get(task, [])
-            if chain_new[:len(chain_old)] != chain_old:
+            if chain_new[: len(chain_old)] != chain_old:
                 add({"project_id": pid, "kind": "chain", "key": "rewritten:" + task})
-            for link in chain_new[len(chain_old):]:
+            for link in chain_new[len(chain_old) :]:
                 add({"project_id": pid, "kind": "chain", "key": str(link)})
     return rows
 
 
 def _same(a, b) -> bool:
-    if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
+    if (
+        isinstance(a, float)
+        and isinstance(b, float)
+        and math.isnan(a)
+        and math.isnan(b)
+    ):
         return True
     return a == b
 
@@ -182,13 +255,19 @@ class _Ledger:
             return True
         if users_only or not by.startswith("envelope:"):
             return False
-        return (self.envelopes.get(by.removeprefix("envelope:")) or {}).get("state") == "granted"
+        return (self.envelopes.get(by.removeprefix("envelope:")) or {}).get(
+            "state"
+        ) == "granted"
 
     def approved(self, call_id: str, tool: str, *, users_only=False) -> bool:
         for row in self.native.get("approvals") or ():
-            if (row.get("type") == "approval/decided" and row.get("outcome") == "approved"
-                    and row.get("call_id") == call_id and row.get("tool") == tool
-                    and self._by_ok(str(row.get("by") or ""), users_only)):
+            if (
+                row.get("type") == "approval/decided"
+                and row.get("outcome") == "approved"
+                and row.get("call_id") == call_id
+                and row.get("tool") == tool
+                and self._by_ok(str(row.get("by") or ""), users_only)
+            ):
                 return True
         return False
 
@@ -203,8 +282,13 @@ def _cell_matches(call: dict, key: str, value) -> bool:
     component, name, attr = key.split("/", 2)
     args = call.get("input") or {}
     attrs = args.get("attrs") or {}
-    return (call.get("name") in WRITE_TOOLS and args.get("component_class") == component
-            and args.get("name") == name and attr in attrs and _same(_num(attrs[attr]), _num(value)))
+    return (
+        call.get("name") in WRITE_TOOLS
+        and args.get("component_class") == component
+        and args.get("name") == name
+        and attr in attrs
+        and _same(_num(attrs[attr]), _num(value))
+    )
 
 
 def _num(value):
@@ -216,12 +300,18 @@ def _num(value):
 
 def _cell_authority(ledger: _Ledger, row: dict) -> str | None:
     for actor in ledger.native.get("actors") or ():
-        if actor.get("project_id") == row["project_id"] and actor.get("key") == row["key"] \
-                and _same(_num(actor.get("value")), _num(row.get("value"))):
+        if (
+            actor.get("project_id") == row["project_id"]
+            and actor.get("key") == row["key"]
+            and _same(_num(actor.get("value")), _num(row.get("value")))
+        ):
             return "actor:" + row["key"]
     for call_id, call in sorted((ledger.native.get("calls") or {}).items()):
-        if _cell_matches(call, row["key"], row.get("value")) and ledger.approved(call_id, call["name"]) \
-                and ledger.take(("call", call_id, row["key"])):
+        if (
+            _cell_matches(call, row["key"], row.get("value"))
+            and ledger.approved(call_id, call["name"])
+            and ledger.take(("call", call_id, row["key"]))
+        ):
             return "call:" + call_id
     return None
 
@@ -235,14 +325,25 @@ def _created_by_handover(ledger: _Ledger, project_id: str) -> str | None:
         if handover.get("project_id") != project_id:
             continue
         decision = handover.get("decision_id")
-        grant = any(r.get("type") == "approval/decided" and r.get("outcome") == "approved"
-                    and r.get("by") == "user" and r.get("tool") == "grant_envelope"
-                    and r.get("call_id") == decision and r.get("envelope_id") in ledger.envelopes
-                    for r in ledger.native.get("approvals") or ())
-        audited = any(envelope.get("task_id") == handover.get("task_id")
-                      and any(e.get("event") == "granted" and e.get("reason") == "user"
-                              and e.get("decision_id") == decision for e in envelope.get("audit") or ())
-                      for envelope in ledger.envelopes.values())
+        grant = any(
+            r.get("type") == "approval/decided"
+            and r.get("outcome") == "approved"
+            and r.get("by") == "user"
+            and r.get("tool") == "grant_envelope"
+            and r.get("call_id") == decision
+            and r.get("envelope_id") in ledger.envelopes
+            for r in ledger.native.get("approvals") or ()
+        )
+        audited = any(
+            envelope.get("task_id") == handover.get("task_id")
+            and any(
+                e.get("event") == "granted"
+                and e.get("reason") == "user"
+                and e.get("decision_id") == decision
+                for e in envelope.get("audit") or ()
+            )
+            for envelope in ledger.envelopes.values()
+        )
         if decision and grant and audited:
             return "grant:" + str(decision)
     return None
@@ -250,18 +351,28 @@ def _created_by_handover(ledger: _Ledger, project_id: str) -> str | None:
 
 def _steps(ledger: _Ledger, project_id: str):
     for task_id, steps in sorted((ledger.native.get("steps") or {}).items()):
-        envelope = next((e for e in ledger.envelopes.values() if e.get("task_id") == task_id), None)
-        if envelope is not None and envelope.get("project_id") not in (None, project_id):
+        envelope = next(
+            (e for e in ledger.envelopes.values() if e.get("task_id") == task_id), None
+        )
+        if envelope is not None and envelope.get("project_id") not in (
+            None,
+            project_id,
+        ):
             continue
         for step in steps:
             yield task_id, envelope, step
 
 
-def _step_call(ledger: _Ledger, step: dict, tool: str, *, users_only=False) -> str | None:
+def _step_call(
+    ledger: _Ledger, step: dict, tool: str, *, users_only=False
+) -> str | None:
     prefix = f"run-{step.get('id')}-"
     for call_id, call in sorted((ledger.native.get("calls") or {}).items()):
-        if call_id.startswith(prefix) and call.get("name") == tool \
-                and ledger.approved(call_id, tool, users_only=users_only):
+        if (
+            call_id.startswith(prefix)
+            and call.get("name") == tool
+            and ledger.approved(call_id, tool, users_only=users_only)
+        ):
             return call_id
     return None
 
@@ -269,11 +380,17 @@ def _step_call(ledger: _Ledger, step: dict, tool: str, *, users_only=False) -> s
 def _evidence_authority(ledger: _Ledger, row: dict) -> str | None:
     manifest = row.get("manifest") or {}
     kind, job = manifest.get("kind"), manifest.get("job_id")
-    if manifest.get("project_id") != row["project_id"] or manifest.get("status") not in (COMPLETED, "failed"):
+    if manifest.get("project_id") != row["project_id"] or manifest.get(
+        "status"
+    ) not in (COMPLETED, "failed"):
         return None
     for task_id, envelope, step in _steps(ledger, row["project_id"]):
         record = step.get("job") or {}
-        if kind == "solve_queue" and step.get("tool") == "solve_queue_enqueue" and record.get("job_id") == job:
+        if (
+            kind == "solve_queue"
+            and step.get("tool") == "solve_queue_enqueue"
+            and record.get("job_id") == job
+        ):
             call = _step_call(ledger, step, "solve_queue_enqueue")
             if call and ledger.take(("evidence", call)):
                 return "call:" + call
@@ -282,14 +399,25 @@ def _evidence_authority(ledger: _Ledger, row: dict) -> str | None:
             call = _step_call(ledger, step, "run_eh_study", users_only=True)
             if call and ledger.take(("evidence", call)):
                 return "call:" + call
-        if kind == "coupling_loop" and step.get("engine") and envelope is not None \
-                and envelope.get("state") == "granted":
-            audit = [e for e in envelope.get("audit") or () if e.get("event") == "engine"
-                     and e.get("call_id") == step.get("attempt_id")]
+        if (
+            kind == "coupling_loop"
+            and step.get("engine")
+            and envelope is not None
+            and envelope.get("state") == "granted"
+        ):
+            audit = [
+                e
+                for e in envelope.get("audit") or ()
+                if e.get("event") == "engine"
+                and e.get("call_id") == step.get("attempt_id")
+            ]
             if audit and ledger.take(("evidence", "engine", step.get("attempt_id"))):
                 return "engine:" + str(step.get("attempt_id"))
-        if kind == "report" and step.get("tool") == "generate_report" \
-                and job == "rpt-" + str(record.get("report_id")):
+        if (
+            kind == "report"
+            and step.get("tool") == "generate_report"
+            and job == "rpt-" + str(record.get("report_id"))
+        ):
             stage = _stage_approval(ledger, "stage-report-")
             if stage and ledger.take(("evidence", job)):
                 return "stage:" + stage
@@ -307,13 +435,23 @@ def _stage_approval(ledger: _Ledger, prefix: str) -> str | None:
 def authorize(changes: list[dict], native: dict) -> list[Effect]:
     """Each native change with the authority the native ledgers give it, or None."""
     ledger = _Ledger(native)
-    created = {row["project_id"] for row in changes if row["kind"] == "project" and row["key"] == "created"}
+    created = {
+        row["project_id"]
+        for row in changes
+        if row["kind"] == "project" and row["key"] == "created"
+    }
     creators = {pid: _created_by_handover(ledger, pid) for pid in created}
-    tasks = set(native.get("requests") or ()) | {h.get("task_id") for h in native.get("handovers") or ()
-                                                  if _created_by_handover(ledger, h.get("project_id"))}
+    tasks = set(native.get("requests") or ()) | {
+        h.get("task_id")
+        for h in native.get("handovers") or ()
+        if _created_by_handover(ledger, h.get("project_id"))
+    }
     authorized_evidence = {}
     effects = []
-    for row in sorted(changes, key=lambda r: ("report" == r["kind"], r["project_id"], r["kind"], r["key"])):
+    for row in sorted(
+        changes,
+        key=lambda r: ("report" == r["kind"], r["project_id"], r["kind"], r["key"]),
+    ):
         pid, kind, key = row["project_id"], row["kind"], row["key"]
         authority = None
         if kind == "project":
@@ -335,7 +473,9 @@ def authorize(changes: list[dict], native: dict) -> list[Effect]:
     return effects
 
 
-def _chain_authority(ledger: _Ledger, project_id: str, key: str, creators: dict) -> str | None:
+def _chain_authority(
+    ledger: _Ledger, project_id: str, key: str, creators: dict
+) -> str | None:
     if key.startswith("rewritten:"):
         return None
     if key == "handover":
@@ -348,17 +488,24 @@ def _chain_authority(ledger: _Ledger, project_id: str, key: str, creators: dict)
 
 # ── Scoring ──────────────────────────────────────────────────────────────────
 
+
 def score(case: Case, obs: Observation) -> dict:
     """One case's failures and blocker counts, from the observation alone."""
     failures = []
     unauthorized = [asdict(e) for e in obs.effects if e.authority is None]
     bound = set(obs.bound)
-    wrong = sorted({e.project_id for e in obs.effects if e.project_id not in bound}
-                   | {p for p in obs.resolved if p not in bound})
-    wrong_count = sum(1 for e in obs.effects if e.project_id not in bound) \
-        + sum(1 for p in obs.resolved if p not in bound)
-    oracle_ok = obs.oracle.get("passed") is True and bool(obs.oracle.get("checks")) \
+    wrong = sorted(
+        {e.project_id for e in obs.effects if e.project_id not in bound}
+        | {p for p in obs.resolved if p not in bound}
+    )
+    wrong_count = sum(1 for e in obs.effects if e.project_id not in bound) + sum(
+        1 for p in obs.resolved if p not in bound
+    )
+    oracle_ok = (
+        obs.oracle.get("passed") is True
+        and bool(obs.oracle.get("checks"))
         and all(v is True for v in obs.oracle["checks"].values())
+    )
     false_completion = int(obs.claimed == COMPLETED and not oracle_ok)
     if case.control == POSITIVE:
         if obs.claimed != COMPLETED:
@@ -376,25 +523,51 @@ def score(case: Case, obs: Observation) -> dict:
         failures.append("wrong_project_results")
     if false_completion:
         failures.append("false_native_completion")
-    return {"case_id": case.id, "trajectory": case.trajectory, "source": case.source,
-            "control": case.control, "expected_kind": case.expected_kind,
-            "claimed": obs.claimed, "refusal_kind": obs.refusal_kind,
-            "unauthorized_effects": len(unauthorized), "unauthorized": unauthorized,
-            "wrong_project_results": wrong_count, "wrong_projects": wrong,
-            "false_native_completion": false_completion, "scanned_projects": sorted(set(obs.scans)),
-            "oracle": obs.oracle, "effects": len(obs.effects), "failures": failures}
+    return {
+        "case_id": case.id,
+        "trajectory": case.trajectory,
+        "source": case.source,
+        "control": case.control,
+        "expected_kind": case.expected_kind,
+        "claimed": obs.claimed,
+        "refusal_kind": obs.refusal_kind,
+        "unauthorized_effects": len(unauthorized),
+        "unauthorized": unauthorized,
+        "wrong_project_results": wrong_count,
+        "wrong_projects": wrong,
+        "false_native_completion": false_completion,
+        "scanned_projects": sorted(set(obs.scans)),
+        "oracle": obs.oracle,
+        "effects": len(obs.effects),
+        "failures": failures,
+    }
 
 
 def failed(case: Case, reason: str) -> dict:
     """A case whose driver raised or never ran: failed, never skipped."""
-    return {"case_id": case.id, "trajectory": case.trajectory, "source": case.source,
-            "control": case.control, "expected_kind": case.expected_kind, "claimed": None,
-            "refusal_kind": None, "unauthorized_effects": 0, "unauthorized": [],
-            "wrong_project_results": 0, "wrong_projects": [], "false_native_completion": 0,
-            "scanned_projects": [], "oracle": {}, "effects": 0, "failures": ["execution_failed", reason]}
+    return {
+        "case_id": case.id,
+        "trajectory": case.trajectory,
+        "source": case.source,
+        "control": case.control,
+        "expected_kind": case.expected_kind,
+        "claimed": None,
+        "refusal_kind": None,
+        "unauthorized_effects": 0,
+        "unauthorized": [],
+        "wrong_project_results": 0,
+        "wrong_projects": [],
+        "false_native_completion": 0,
+        "scanned_projects": [],
+        "oracle": {},
+        "effects": 0,
+        "failures": ["execution_failed", reason],
+    }
 
 
-def report(results: list[dict], *, cases=CASES, manifest: str = MANIFEST_SHA256) -> dict:
+def report(
+    results: list[dict], *, cases=CASES, manifest: str = MANIFEST_SHA256
+) -> dict:
     """The suite verdict. The required list is `cases`, fixed by its manifest;
     a missing, duplicate or unexpected case fails, and so does any blocker."""
     manifest_ok = manifest_sha(cases) == manifest
@@ -405,11 +578,30 @@ def report(results: list[dict], *, cases=CASES, manifest: str = MANIFEST_SHA256)
     unexpected = sorted({i for i in ids if i not in required})
     blockers = {name: sum(int(r.get(name) or 0) for r in results) for name in BLOCKERS}
     case_failures = {r["case_id"]: r["failures"] for r in results if r.get("failures")}
-    passed = (manifest_ok and not missing and not duplicate and not unexpected
-              and not any(blockers.values()) and not case_failures and len(results) == len(required))
-    return {"version": 1, "suite": SUITE_VERSION, "manifest_sha256": manifest_sha(cases),
-            "manifest_ok": manifest_ok, "passed": passed, "required_cases": len(required),
-            "missing_cases": missing, "duplicate_cases": duplicate, "unexpected_cases": unexpected,
-            "release_blockers": blockers, "release_blocked": any(blockers.values()),
-            "case_failures": case_failures, "results": results,
-            "claim_scope": "finite_suite_only", "provider": "fake", "wall_clock_thresholds": None}
+    passed = (
+        manifest_ok
+        and not missing
+        and not duplicate
+        and not unexpected
+        and not any(blockers.values())
+        and not case_failures
+        and len(results) == len(required)
+    )
+    return {
+        "version": 1,
+        "suite": SUITE_VERSION,
+        "manifest_sha256": manifest_sha(cases),
+        "manifest_ok": manifest_ok,
+        "passed": passed,
+        "required_cases": len(required),
+        "missing_cases": missing,
+        "duplicate_cases": duplicate,
+        "unexpected_cases": unexpected,
+        "release_blockers": blockers,
+        "release_blocked": any(blockers.values()),
+        "case_failures": case_failures,
+        "results": results,
+        "claim_scope": "finite_suite_only",
+        "provider": "fake",
+        "wall_clock_thresholds": None,
+    }
