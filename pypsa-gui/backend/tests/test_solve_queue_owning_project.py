@@ -287,3 +287,14 @@ def test_a_solving_context_that_holds_the_network_reads_no_foreground(
     with PyPSAService.solving_context(solving):
         monkeypatch.setattr(PyPSAService, "get_active_context", no_foreground)
         assert _revision_or_none(solving.network) == 3
+
+
+def test_a_bound_solving_context_still_lets_the_active_network_read_its_own_revision(
+    decoy_foreground,
+):
+    """A private solving context (an adequacy copy) is bound while the active
+    project's own network is solved: the record takes the active revision."""
+    from services.solver_service import _revision_or_none
+
+    with PyPSAService.solving_context(ProjectContext(network=pypsa.Network())):
+        assert _revision_or_none(decoy_foreground.network) == DECOY_REVISION
