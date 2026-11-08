@@ -729,3 +729,13 @@ def test_a_malformed_row_does_not_stop_the_sweep(project, replica, _auth_db):
     assert not job_hold_store.exists(lapsed.id)  # swept
     assert job_hold_store.exists(bad.id)  # left; a read of it denies
     assert _check()[0] == job_holds.PENDING
+
+
+def test_renew_by_another_owner_changes_nothing(project):
+    """K4, GK B (37) T1: the owner filter is part of the renewal."""
+    hold = _open(INPROC_TOOL)
+    before = job_hold_store.get(hold.id).lease_until
+    assert not job_hold_store.renew(hold.id, "replica-x", before + 500)
+    assert job_hold_store.get(hold.id).lease_until == before
+    assert job_hold_store.renew(hold.id, "replica-a", before + 500)
+    assert job_hold_store.get(hold.id).lease_until == before + 500

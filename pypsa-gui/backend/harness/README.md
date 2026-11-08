@@ -2156,6 +2156,13 @@ Assistant-assurance issue 16 S2 (GK B (35) H1-H3, H9; K1-K6), in
   replicas must share wall time (NTP). A replica whose clock runs ahead by more
   than the 60 s between the last renewal and the lapse can clear a live
   owner's in-process row early; the queue window allows one lease of skew.
+- Renewer stall. A renewal that hangs longer than 60 s (a stuck DB call, a
+  long GIL stall) lets a peer read the lease as lapsed and clear a live owner's
+  in-process row; the owner's own chat keeps its hold. On SQLite a renewal waits
+  at most the 30 s busy timeout (`db/session.py`); on Postgres nothing bounds
+  it: no `statement_timeout` is set, only the pool's 30 s checkout wait.
+- A queue record whose job id names no `solve_jobs` row (the row was deleted,
+  or the id is no queue id) holds until its repeat card is approved.
 - Residuals. A lapsed in-process solve may leave its cbc/glpk child running:
   CPU spent with no one to read the result (K1). A dead orchestrator thread
   (run_decision_study, campus_apply_island_cuts) may leave the per-case solves
