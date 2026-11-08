@@ -53,6 +53,10 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
   // LC-07c: the newest unseen server notice (fixed message, never transcript text).
   const [notice, setNotice] = useState('')
   const seenSeq = useRef(-1)
+  // The pending 8 s timer; clearing a notice cancels it so it cannot clear a newer one.
+  const hideTimer = useRef(0)
+  const streaming = useChatStore((s) => s.streaming)
+  const userMessages = useChatStore((s) => s.messages.filter((m) => m.role === 'user').length)
   const session = useRef<LiveSpeechSession | null>(null)
   if (!session.current) {
     session.current = new LiveSpeechSession({
@@ -76,7 +80,6 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
     setNotice('')
     if (state !== 'listening' || !threadId) return
     let live = true
-    let hide = 0
     const poll = () => {
       getSpeechState(threadId).then((r) => {
         if (!live) return
@@ -87,14 +90,25 @@ export function useLiveSpeech(active: boolean): LiveSpeech {
         if (fresh) {
           seenSeq.current = fresh.seq
           setNotice(fresh.message)
-          window.clearTimeout(hide)
-          hide = window.setTimeout(() => setNotice(''), NOTICE_SHOW_MS)
+          window.clearTimeout(hideTimer.current)
+          hideTimer.current = window.setTimeout(() => setNotice(''), NOTICE_SHOW_MS)
         }
       }, () => {})
     }
     const id = window.setInterval(poll, NOTICE_POLL_MS)
-    return () => { live = false; window.clearInterval(id); window.clearTimeout(hide) }
+    return () => { live = false; window.clearInterval(id); window.clearTimeout(hideTimer.current) }
   }, [state, threadId, generation])
+  // The condition ended: a turn started or a new final was admitted (a new user message).
+  const prevTurn = useRef({ streaming, userMessages })
+  useEffect(() => {
+    const prev = prevTurn.current
+    prevTurn.current = { streaming, userMessages }
+    // A turn ending (streaming true to false) is not a clear point.
+    if ((streaming && !prev.streaming) || userMessages > prev.userMessages) {
+      window.clearTimeout(hideTimer.current)
+      setNotice('')
+    }
+  }, [streaming, userMessages])
   const linked = speechMediaLinkConfigured()
   const available = flagOn && linked
   const blocked = flagOn && !linked
