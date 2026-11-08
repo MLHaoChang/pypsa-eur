@@ -739,12 +739,14 @@ def test_a_pack_that_fails_to_load_is_not_swallowed_by_the_energy_price_check(
 ):
     from services.library.defaults_pack import loader
 
+    com = _generic_commercial()  # built before the pack is broken
+
     def boom(*a, **k):
-        raise loader.DefaultsPackError("broken")
+        raise RuntimeError("broken pack")
 
     monkeypatch.setattr(loader, "load_defaults_pack", boom)
-    with pytest.raises(loader.DefaultsPackError):
-        A.tariff_energy_rate(_generic_commercial(), _SNAPS, "EUR")
+    with pytest.raises(RuntimeError, match="broken pack"):
+        A.tariff_energy_rate(com, _SNAPS, "EUR")
 
 
 def test_the_screen_refuses_an_infeasible_own_pue():

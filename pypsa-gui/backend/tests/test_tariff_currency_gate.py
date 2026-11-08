@@ -637,6 +637,11 @@ def test_a_vendored_pack_that_fails_to_load_is_not_read_as_unknown(monkeypatch):
     monkeypatch.setattr(loader, "load_defaults_pack", boom)
     with pytest.raises(RuntimeError):
         loader.stamped_tariff_currency(t)
+    # GLE-04 G4-4: the gate itself never swallows it either.
+    from services.commercial.binding import tariff_currency_mismatch
+
+    with pytest.raises(RuntimeError):
+        tariff_currency_mismatch(t, "GBP")
 
 
 def test_a_stated_currency_wins_over_the_stamp_and_the_stamp_is_normalised(monkeypatch):
