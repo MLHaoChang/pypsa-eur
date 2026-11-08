@@ -154,3 +154,24 @@ GK B (34), `session_01G7qCumPpRCKKA8Rskye7ef`, B3 = option (a), an owner-scoped 
 - J6 (B4). No backend change, agreed. The UI's status read goes through _proposal_status only.
 
 J3 and U4 meet as: two features with the same label get a number in scene order ("Proposed building 1", "Proposed building 2"), never the id. Review of S5a goes to GK B (35), `session_01G7qCunD24gwxQbJ8Fd9cVN`.
+
+### 2026-11-08: S5b plan GO (UX (14) with U-a–U-g; GK B (36) with changes V1–V5)
+
+SC-07 (7), `session_01G7qCumNJ98m4khm55HSi2L`. Plan: R3 the partial outcome line on the task card (frontend only, from the task view's `changes`, steps and next_step error); R5 the Resume line in the S2 companion row, read from the scene GET's `my_previews`; R6 a browser ACK for a chat navigate into Site 3D (`harness/navigation.py`), with pending, then "Opened" only on the ACK. Folded in: the S5a mutant survivor at `chat.py` roof words, and GK W1 (an early stop in `my_previews`).
+
+UX (14), `session_01G7qCujt312zP7jy3ZddHnV`:
+- U-a. "›" (U+203A) marks only "Review it in chat ›". "Prepare the mapping again", "Prepare it again" and "Check the 3D site" are buttons with no mark.
+- U-b. "Found: your <action words> was applied." shows only as the answer to a "Check the 3D site" that finds the change landed, and clears on the next fresh scene read. An applied row with nothing to act on never shows on page load (#1183).
+- U-c. "Prepare it again" shows only after a check finds the change did not land. An open row has one action, "Review it in chat ›".
+- U-d. Several rows: one line. The one to act on first (unknown before open, then newest), the rest as "(N more)" before the full stop. Review it in chat opens the dock on that row.
+- U-e. One ellipsis character in "Opening the 3D site…" and "Checking…". R3 reasons stay in brackets, with no ids or kind keys; a denied card and a cancelled one stay distinct.
+- U-f. scene_apply_outcome_unknown never reads "Not done", on the card or in Resume; it keeps S5a's "Check the 3D site" path.
+- U-g. Shots as listed in condition 7, plus "(N more)" and the check-resolved applied and not-landed states, in both modes. S2's U1–U7 still apply.
+
+GK B (36), `session_01G7qCuinrvGikhfDa18qDRb` (GO stands with GK B (37), `session_01G7qCuiY6AnM2CjmQw3AqmV`); R6 stays in this PR:
+- V1, exact admission. `canvas_view` only with `panel_id: "map"` and the value "site"; another value, another panel or any extra key returns None. The existing key set and the results/loadflow branches stay byte-identical. Tests: canvas_view on another panel, canvas_view "foo", an extra key, each None; a pin that an existing results or loadflow payload issues the same record shape.
+- V2, what "Opened" attests. A navigate that names a Site carries site_id in the target and acknowledge() matches it, so "Opened" means that Site. With no Site named the words claim only that Site 3D opened. input_sha256 is the network fingerprint: the ACK attests no scene revision and no displayed content (said in the README's navigation section). Tests: another site_id refused; another panel refused.
+- V3, no network. issue() returns None when no network is loaded, and the UI then says "Could not confirm the 3D site opened". Backend test for the None.
+- V4, W1. An output-identical early stop. A fixture compares the old and new code on the same entries (8 open plus applied, mixed with markers) and on fewer than 8 non-applied rows (every row read). Hand mutant: a break at the 7th row is killed.
+- V5, R3 and N3. No change to assistant_tasks.py. "Prepare the mapping again" sends cancel_task and a fresh prepare, never resolve_task retry; the old proposal_id refuses to apply after the cancel (tested).
+- Route parity, control matrix and inventory at the trial merge; the error-kind manifest test if any kind changes.
