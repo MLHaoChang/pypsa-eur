@@ -516,41 +516,76 @@ def test_target_rows_are_named_in_words_for_expert(client, site):
 
 
 def _replace_prep(client):
-    chat_tools.site_scene_apply(**args_of(chat_tools.site_scene_prepare(
-        "campus", "place_existing", bindings.revision(client), bindings.PLACE)))
-    r = client.post("/api/network/storage_units", json={"name": "bess2", "bus": "B1", "p_nom": 1.0})
+    chat_tools.site_scene_apply(
+        **args_of(
+            chat_tools.site_scene_prepare(
+                "campus", "place_existing", bindings.revision(client), bindings.PLACE
+            )
+        )
+    )
+    r = client.post(
+        "/api/network/storage_units", json={"name": "bess2", "bus": "B1", "p_nom": 1.0}
+    )
     assert r.status_code in (200, 201), r.text
-    return chat_tools.site_scene_prepare("campus", "rebind", bindings.revision(client), {
-        "placement": "StorageUnit:bess", "confirmed": True,
-        "target": {"class": "StorageUnit", "name": "bess2"}})
+    return chat_tools.site_scene_prepare(
+        "campus",
+        "rebind",
+        bindings.revision(client),
+        {
+            "placement": "StorageUnit:bess",
+            "confirmed": True,
+            "target": {"class": "StorageUnit", "name": "bess2"},
+        },
+    )
 
 
 def test_a_placed_item_attached_again_reads_back_verified(client, site):
     card, args = applied(_replace_prep(client))
     (row,) = targets(card)
-    assert row["check"]["kind"] == "replaced" and row["check"]["at"].startswith("x 60 m")
+    assert row["check"]["kind"] == "replaced" and row["check"]["at"].startswith(
+        "x 60 m"
+    )
     assert row["not_compared"] == ["unit", "capacity"]
     out = edit_card.receipt(card, args)
-    assert out["outcome"] == "verified", [(r["new"], r["readback"]) for r in targets(out)]
+    assert out["outcome"] == "verified", [
+        (r["new"], r["readback"]) for r in targets(out)
+    ]
 
 
 def test_a_placed_item_attached_again_then_moved_reads_back_uncertain(client, site):
     card, args = applied(_replace_prep(client))
-    _apply(client, _propose(client, "place_existing",
-                            {"placements": {"StorageUnit:bess2": {"x": 61.0, "y": -50.0, "heading": 0}}}))
+    _apply(
+        client,
+        _propose(
+            client,
+            "place_existing",
+            {
+                "placements": {
+                    "StorageUnit:bess2": {"x": 61.0, "y": -50.0, "heading": 0}
+                }
+            },
+        ),
+    )
     out = edit_card.receipt(card, args)
     assert out["outcome"] == "uncertain"
     (row,) = targets(out)
-    assert row["readback"].endswith("moved to x 61 m, y -50 m, heading 0°, on the ground")
+    assert row["readback"].endswith(
+        "moved to x 61 m, y -50 m, heading 0°, on the ground"
+    )
 
 
 def test_two_groups_with_the_same_label_stay_apart():
     """J3: groups collide like buildings do, and get a number in scene order, never the id."""
-    scene = {"buildings": [], "groups": [
-        {"id": "g-1", "label": "Roof PV", "members": []},
-        {"id": "g-2", "label": "Roof PV", "members": []},
-        {"id": "g-3", "label": "Chillers", "members": []},
-    ]}
+    scene = {
+        "buildings": [],
+        "groups": [
+            {"id": "g-1", "label": "Roof PV", "members": []},
+            {"id": "g-2", "label": "Roof PV", "members": []},
+            {"id": "g-3", "label": "Chillers", "members": []},
+        ],
+    }
     assert chat.feature_words(scene) == {
-        "g-1": "group “Roof PV” 1", "g-2": "group “Roof PV” 2", "g-3": "group “Chillers”",
+        "g-1": "group “Roof PV” 1",
+        "g-2": "group “Roof PV” 2",
+        "g-3": "group “Chillers”",
     }
