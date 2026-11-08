@@ -241,7 +241,7 @@ def test_every_stored_and_shipped_form_is_byte_identical_to_master():
 
 def test_a_pack_tariff_is_in_its_meta_currency_or_states_none():
     """A `generic` pack tariff keeps no currency: its copies stay byte-identical (C3); the
-    gap is issue 03."""
+    gate reads its pack's from the stamp (issue 03, `stamped_tariff_currency`)."""
     from services.library.defaults_pack.loader import (
         available_versions,
         load_defaults_pack,
