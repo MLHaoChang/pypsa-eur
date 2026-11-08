@@ -403,3 +403,13 @@ it('SC-07 S5a (UX): Expert shows a 3D site card in the same words as Guided, tar
   expect(cells).not.toContain('change')
   expect(cells).not.toContain('revision')
 })
+
+it('heads the columns of a card with typed rows, and not of one with note rows only (study harness 10a)', () => {
+  const note = { role: 'note', field: 'grid_code', unit: '', note: 'Grid-code profile: SAGC data centre' }
+  const { unmount } = render(<EditCardTable card={card as unknown as EditCard} guided={false} />)
+  expect(screen.getAllByRole('columnheader').map(h => h.textContent)).toEqual(['Asset', 'Field', 'Old', 'New', 'Unit'])
+  unmount()
+  render(<EditCardTable card={{ ...card, rows: [note] } as unknown as EditCard} guided={false} />)
+  expect(screen.queryByRole('columnheader')).toBeNull()
+  expect(screen.getByTestId('chat-edit-card-note').textContent).toBe('Grid-code profile: SAGC data centre')
+})
