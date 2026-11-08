@@ -1,6 +1,6 @@
 # Rolling operational optimisation
 
-Status: ready-for-agent
+Status: done (S1 #1218, S2 #1225, C20 #1243, S3 #1255, S4 #1266; chat route held by issue 25)
 Model: Opus
 Type: task
 Blocked by: 03, 06
