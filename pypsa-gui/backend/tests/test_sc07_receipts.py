@@ -589,3 +589,125 @@ def test_two_groups_with_the_same_label_stay_apart():
         "g-2": "group “Roof PV” 2",
         "g-3": "group “Chillers”",
     }
+
+
+# ── J2: each field a check compares tells a different row apart (mutants) ──
+
+
+def _scene_after(monkeypatch, change):
+    """The scene the receipt reads, changed by `change` after the commit."""
+    real = chat.store.read_scene
+
+    def changed(*a, **k):
+        scene = real(*a, **k)
+        change(scene)
+        return scene
+
+    monkeypatch.setattr(chat.store, "read_scene", changed)
+
+
+def _row(out, kind):
+    (row,) = [r for r in targets(out) if r["check"]["kind"] == kind]
+    return row
+
+
+def _gap(scene):
+    return next(a for a in scene["associations"] if not a.get("uid"))
+
+
+@pytest.mark.parametrize(
+    ("kind", "change"),
+    [
+        ("gap", lambda s: _gap(s).update(feature=bindings.B)),
+        ("gap", lambda s: _gap(s).update(carrier="heat")),
+        ("gap", lambda s: _gap(s).update(uid="some-load")),
+        (
+            "attach",
+            lambda s: next(a for a in s["associations"] if a.get("uid")).update(
+                feature=bindings.B
+            ),
+        ),
+    ],
+)
+def test_a_bind_row_on_another_feature_carrier_or_item_reads_back_uncertain(
+    client, site, monkeypatch, kind, change
+):
+    cooling = {"feature": bindings.A, "target": {"class": "Load", "carrier": "cooling"}}
+    card, args = applied(bind(client, IT, cooling))  # no cooling load: a gap row
+    _scene_after(monkeypatch, change)
+    out = edit_card.receipt(card, args)
+    assert out["outcome"] == "uncertain"
+    assert _row(out, kind)["readback"] == (
+        "not marked" if kind == "gap" else "not attached"
+    )
+
+
+def test_a_placement_gone_from_the_site_reads_back_not_placed(
+    client, site, monkeypatch
+):
+    (prep,) = _apply_each(client, "place_existing")
+    card, args = applied(prep)
+    _scene_after(monkeypatch, lambda s: s["site"]["placements"].clear())
+    out = edit_card.receipt(card, args)
+    assert (
+        out["outcome"] == "uncertain" and _row(out, "place")["readback"] == "not placed"
+    )
+
+
+def test_a_detached_item_still_attached_reads_back_on_the_site(
+    client, site, monkeypatch
+):
+    (prep,) = _apply_each(client, "detach")
+    card, args = applied(prep)
+    _scene_after(
+        monkeypatch,
+        lambda s: s["associations"].append(
+            {"id": "left", "feature": "StorageUnit:bess"}
+        ),
+    )
+    out = edit_card.receipt(card, args)
+    assert (
+        out["outcome"] == "uncertain"
+        and _row(out, "detach")["readback"] == "on the site"
+    )
+
+
+def test_a_rebound_load_moved_to_another_bus_reads_back_a_different_item(client, site):
+    (prep,) = _apply_each(client, "rebind")
+    card, args = applied(prep)
+    with PyPSAService.get_lock():
+        n = network(site)
+        bus = n.loads.at["L1", "bus"]
+        n.loads.at["L1", "bus"] = next(b for b in n.buses.index if b != bus)
+    out = edit_card.receipt(card, args)
+    assert (
+        out["outcome"] == "uncertain"
+        and _row(out, "rebind")["readback"] == "a different item"
+    )
+
+
+def test_the_rebind_row_names_the_item_it_replaces(client, site):
+    (prep,) = _apply_each(client, "rebind")
+    card, _ = card_of(prep)
+    assert _row(card, "rebind")["old"] == "it · load"
+
+
+def test_a_detach_row_counts_its_attachments_in_words(client, site):
+    (prep,) = _apply_each(client, "detach")
+    card, _ = card_of(prep)
+    row = _row(card, "detach")
+    count = len(row["check"]["associations"])
+    assert row["label"].endswith(f"with {count} attachment{'' if count == 1 else 's'}")
+    assert count != 1 or row["label"].endswith("with 1 attachment")
+
+
+def test_a_placement_to_where_it_already_stands_counts_no_change(client, site):
+    (prep,) = _apply_each(client, "place_existing")
+    applied(prep)
+    card, _ = card_of(
+        chat_tools.site_scene_prepare(
+            "campus", "place_existing", bindings.revision(client), bindings.PLACE
+        )
+    )
+    assert _row(card, "place")["old"] == _row(card, "place")["new"]
+    assert card["says"] == "Place model items in the 3D site, 0 changes"
