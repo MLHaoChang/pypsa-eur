@@ -755,3 +755,28 @@ def test_the_module_imports_no_harness_gate_or_metrics_code():
     names = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
     names |= {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module}
     assert names <= {"__future__", "dataclasses", "hashlib", "json", "math"}, names
+
+
+def test_a_chain_link_is_authorized_by_its_approved_write_or_the_grant_that_created_the_project():
+    native = {"calls": WRITE, "envelopes": ENVELOPE, "approvals": [_decided("run-inputs.2-a", "update_component")]}
+    link = [{"project_id": P, "kind": "chain", "key": "run-inputs.2-a"}]
+    assert te.authorize(link, native)[0].authority == "call:run-inputs.2-a"
+    assert te.authorize(link, {**native, "approvals": []})[0].authority is None
+    read = {**native, "calls": {"run-inputs.2-a": {"name": "validate_network", "input": {}}},
+            "approvals": [_decided("run-inputs.2-a", "validate_network")]}
+    assert te.authorize(link, read)[0].authority is None
+    handover = [{"project_id": P, "kind": "chain", "key": "handover"}]
+    assert te.authorize(handover, native)[0].authority is None  # no project created by a grant
+    assert te.authorize([{"project_id": P, "kind": "chain", "key": "rewritten:T"}], native)[0].authority is None
+
+
+@pytest.mark.parametrize("path,kind,key", [
+    ("assistant_tasks/T.json", "run_record", "T"), ("assistant_tasks/T.envelope.json", "run_record", "T"),
+    ("assistant_tasks/sub/T.json", "file", "assistant_tasks/sub/T.json"), ("tasks/T.json", "file", "tasks/T.json"),
+    ("run_evidence/q-1/manifest.json", "evidence", "q-1"), ("run_evidence", "file", "run_evidence"),
+    ("reports/r1/v1.json", "report", "r1"), ("reports", "file", "reports"), ("x/reports", "file", "x/reports"),
+])
+def test_each_native_path_falls_in_one_effect_class(path, kind, key):
+    before = {"projects": {P: {"files": {}}}}
+    (row,) = te.diff(before, {"projects": {P: {"files": {path: "h"}}}})
+    assert (row["kind"], row["key"]) == (kind, key)
