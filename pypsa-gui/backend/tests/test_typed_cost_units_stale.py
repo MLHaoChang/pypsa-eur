@@ -600,3 +600,24 @@ def test_a_link_reference_is_never_looked_up(monkeypatch):
         R, "load_europe_technology_reference", lambda *a: pytest.fail("looked up")
     )
     assert _stale(n, "Link", "fc")["overnight_cost"] is None
+
+
+def test_a_reference_with_the_right_hash_but_another_id_reads_not_recorded(monkeypatch):
+    from services.library import europe_reference as R
+
+    h = R.load_europe_technology_reference("solar-utility", 2030).reference_hash[:16]
+    n = _applied_before_this(
+        monkeypatch, dc=False, source=f"eu-other#{h}/solar-utility@2030"
+    )
+    assert _stale(n, "Generator", "pv")["overnight_cost"]["reason"].endswith(
+        "is from another release)"
+    )
+
+
+def test_only_a_customised_entry_is_looked_up_as_a_reference(monkeypatch):
+    n = _applied_before_this(monkeypatch, dc=True)
+    for f in ("overnight_cost", "fom_cost"):
+        P._root(n)["Generator"]["pv"][f]["status"] = (
+            "measured"  # approval kept, not a reference apply
+        )
+    assert _stale(n, "Generator", "pv")["overnight_cost"] is None

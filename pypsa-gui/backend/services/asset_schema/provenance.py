@@ -139,7 +139,7 @@ def _dc_reference_unrecorded(component_class: str, entry: dict) -> str | None:
     an AC or other basis reads fresh (None)."""
     if component_class != "Generator" or entry.get("status") != "customised" or not entry.get("approved_by"):
         return None
-    m = _REFERENCE_SOURCE.match(str(entry.get("source") or ""))
+    m = _REFERENCE_SOURCE.match(str(entry.get("source")))   # None: "None", no match
     if m is None:
         return None
     from services.library import europe_reference as R
