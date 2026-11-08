@@ -5,6 +5,7 @@ import { useUIStore } from '../store/uiStore'
 import { openScenariosHighlight } from './uiNavigate'
 import { CARD_GROUPS } from '../pages/results/groups'
 import RunMonitor from './runMonitor/RunMonitor'
+import { PartialMappingLine } from '../site3d/partialMapping'
 
 /** LC-12: where a plan's waiting job stands in this view. */
 export type ContinuationLine =
@@ -171,6 +172,7 @@ export default function AssistantResultCard({ result, disabled, disabledReason, 
           next.status === 'waiting' ? 'waiting for a background job' : STEP_WORDS[String(next.status)] ?? String(next.status ?? '')})</div>
         : <div>Next: {String(next.tool ?? '')} ({String(next.status ?? '')})</div>)}
       <PlanSteps task={task!} next={next} guided={guided} toolWords={toolWords} />
+      <PartialMappingLine task={task!} taskId={taskId} disabled={disabled} onRequest={onRequest} />
       {status === 'waiting_job' && continuation && <WaitingLine line={continuation} />}
       {status === 'needs_review' && <p>Verify the previous action before retrying. Its effects may already exist.</p>}
       <div className="mt-1 flex gap-2">

@@ -11,6 +11,7 @@ import type { SitePart } from '../api/flow'
 import { ask, ASK_TITLE } from '../pages/hubDesign/delegate'
 import type { SceneBuilding } from '../api/siteScene'
 import { MessageCircleQuestion } from 'lucide-react'
+import type React from 'react'
 
 export const PART_LABEL: Record<SitePart, string> = { map: 'Map', generate: 'Generate', model: 'Model', results: 'Results' }
 
@@ -44,8 +45,10 @@ export function BlockerAsk({ where, reason }: { where: string; reason: string })
   return <AskButton testid="site-companion-blocker" label="Ask for help" prefill={`Help me with what blocks ${where}: ${sentence(reason)}`} />
 }
 
-export default function SiteCompanion({ siteName, part, selected }: {
+export default function SiteCompanion({ siteName, part, selected, resume }: {
   siteName: string; part: SitePart; selected: SceneBuilding | null
+  /** SC-07 S5b R5: the Resume line, on its own line in this row (UX (13)). */
+  resume?: React.ReactNode
 }) {
   const where = whereWords(siteName, part)
   return (
@@ -57,6 +60,7 @@ export default function SiteCompanion({ siteName, part, selected }: {
             prefill={`Explain what I am looking at: ${where}.`} />}
       <AskButton testid="site-companion-prepare" label="Prepare a change"
         prefill={`Prepare a change to the site “${siteName}” in Site 3D: `} />
+      {resume}
     </div>
   )
 }

@@ -590,7 +590,13 @@ def my_previews(project, owner: str | None, site_id: str) -> list[dict[str, Any]
         ]
     order = list(dict.fromkeys([*reversed(list(entries)), *reversed(marked)]))
     out: list[dict[str, Any]] = []
+    acting = 0  # rows to act on so far (open or outcome_unknown)
     for pid in order:
+        if acting >= MAX_LIVE_PER_OWNER:
+            # GK W1: the stable sort below keeps the first MAX_LIVE_PER_OWNER
+            # rows to act on and cuts the rest, so later chain reads cannot
+            # change the output.
+            break
         entry = entries.get(pid)
         try:
             receipt = proposals._committed(project.directory, site_id, pid)
@@ -610,6 +616,7 @@ def my_previews(project, owner: str | None, site_id: str) -> list[dict[str, Any]
             status = "open"
         else:
             continue  # cancelled with no receipt, applied but gone from the chain, or expired
+        acting += status != "applied"
         row = {"id": pid, "status": status}
         if entry is not None:
             row.update(action=entry["action"], base_revision=entry["base_revision"])

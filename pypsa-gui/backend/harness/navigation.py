@@ -33,6 +33,9 @@ PANELS = frozenset(
 )
 
 
+# SC-07 S5b: the one canvas-view target with an ACK (the Site 3D view).
+SITE3D_TARGET = {"panel_id": "map", "canvas_view": "site"}
+
 # Live-voice 07: optional Load flow arguments on a results/loadflow navigate.
 # Source and window bind through the view's own binding; the highlight joins
 # the ACK target.
@@ -137,7 +140,19 @@ def issue(turn, payload):
     """
     target = {k: v for k, v in payload.items() if k in {"panel_id", "results_tab"}}
     loadflow = {k: payload[k] for k in LOADFLOW_KEYS if k in payload}
-    if (
+    if "canvas_view" in payload:
+        # SC-07 S5b (GK B V1): Site 3D is the map panel's "site" canvas view,
+        # admitted only exactly; no Site is named, so the ACK attests only that
+        # Site 3D is mounted (V2), never a scene revision or content.
+        if (
+            payload.get("kind") != "navigate"
+            or payload.get("panel_id") != "map"
+            or payload["canvas_view"] != "site"
+            or set(payload) - {"kind", "panel_id", "canvas_view", "tool_use_id"}
+        ):
+            return None
+        target = dict(SITE3D_TARGET)
+    elif (
         payload.get("kind") != "navigate"
         or target.get("panel_id") not in PANELS
         or set(payload) - {"kind", "panel_id", "results_tab", "tool_use_id", *LOADFLOW_KEYS}

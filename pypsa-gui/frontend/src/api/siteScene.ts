@@ -42,7 +42,17 @@ export type SiteScene =
       /** One summary per bound instance (capacity counted once). */
       targets?: SceneTarget[]
       groups?: SceneGroup[]
+      /** SC-07 S5 (GK B J4): the caller's own previews on this Site, open and unknown first. */
+      my_previews?: ScenePreviewRow[]
     }
+
+/** One `my_previews` row: never another owner's; `applied` read from the chain first (H6). */
+export interface ScenePreviewRow {
+  id: string
+  status: 'open' | 'outcome_unknown' | 'applied'
+  action?: string
+  base_revision?: number
+}
 
 // ── SC-02a associations (frozen contract, `services/site_scene/associations.py`) ──
 
