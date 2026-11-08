@@ -32,6 +32,15 @@ FAMILIES = {
     "results_prices": ("mean_price", "EUR/MWh", 61.4, 73.9, "EUR"),
     "results_emissions": ("co2_emitted", "t", 5400.5, 4950.25, "EUR"),
 }
+# The same quantity in a real unit 1000x larger (value / 1000).
+SCALED_UNIT = {
+    "loadflow": "GW",
+    "results_summary": "kEUR",
+    "results_capacity": "GW",
+    "results_dispatch": "GWh",
+    "results_prices": "EUR/kWh",
+    "results_emissions": "kt",
+}
 OLD, NEW = "run-old", "run-new"
 KEPT_AWAY = "results_gone"  # a section no run records
 
@@ -158,10 +167,14 @@ def test_a_wrong_unit_is_withheld(runs, harness, family):
 
 @pytest.mark.parametrize("family", FAMILIES)
 def test_a_scale_equivalent_unit_is_not_converted(runs, harness, family):
-    """Units match exactly: a rescaled value in another unit never checks."""
+    """Units match exactly: the value rescaled into a real larger unit (GW for MW) is not converted and never checks."""
     metric, unit, old, _n, _b = FAMILIES[family]
     scaled = block(
-        "scaled", metric, old / 1000, f"k{unit}", f"/data/metrics/{metric}/value"
+        "scaled",
+        metric,
+        old / 1000,
+        SCALED_UNIT[family],
+        f"/data/metrics/{metric}/value",
     )
     frames = run_turns(harness, family, [scaled])
     approved = approval(frames)
