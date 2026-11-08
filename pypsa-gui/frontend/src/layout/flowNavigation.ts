@@ -191,6 +191,20 @@ export function openEconomicAssumptions(): void {
   withReturn(null, () => openSectionInExpert('scenarios'))
 }
 
+/** Show Solver settings' Solve strategy block (rolling horizon, its window and
+ *  overlap), scrolled to it: in place in Guided, the section's panel in Expert
+ *  (never flips the mode). Back returns to the view it left, named `from`. */
+export function openSolveStrategy(from?: string): void {
+  withReturn(null, () => {
+    const ui = useUIStore.getState()
+    ui.requestSolverBlock('strategy')
+    if (ui.uiMode === 'guided') {
+      openFlowTargetInPlaceNow({ section: 'scenarios', panel: 'simparams', component: null,
+        entity: null, field: null })
+    } else openSectionInExpert('scenarios')
+  }, false, from)
+}
+
 /** Show the reliability goal's editor (W3b-R): Guided's Goal card (section 8),
  *  or Expert's Solver settings › Network, scrolled to the Reliability block.
  *  Never flips the mode; Back returns to the view it left. */

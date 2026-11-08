@@ -989,7 +989,11 @@ def _cut_coefficients(n, island) -> dict:
     H_v/pf, a spinning genset's H/cos φ·η; ΣK: 1/(R·f0), ·η for a genset;
     headroom: 1 for GFM storage; upward, a spinning genset's credit per MW,
     η·min(max p_max_pu − p_min_pu, load_step_max_pct/100), as the rows
-    credit it)."""
+    credit it).
+
+    A non-spinning genset has no inertia or headroom_up coefficient (not
+    online at 0⁺, I2b); it keeps its droop_gain (ΣK counts gensets once
+    joined)."""
     from services.adequacy.island_config import GFM_CONTROLS
 
     units, f0 = island["units"], _f0(island)
@@ -1366,10 +1370,10 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
     # Island-ups-relief does).
     credit = {}
     for g in online + spinning:
-        x = m.add_variables(lower=0.0, coords=[coord], name=f"Island-event-genset-credit-{g}{tag}")
-        _row(m, genset_room(g), _Lin(sns_p).var(x), f"Island-event-genset-room-{g}{tag}", coord)
+        x = m.add_variables(lower=0.0, coords=[coord], name=f"Island-genset-credit-{g}{tag}")
+        _row(m, genset_room(g), _Lin(sns_p).var(x), f"Island-genset-room-{g}{tag}", coord)
         _row(m, on_out(_Lin(sns_p), g, spec(g)["load_step_max_pct"] / 100.0), _Lin(sns_p).var(x),
-             f"Island-event-genset-step-{g}{tag}", coord)
+             f"Island-genset-step-{g}{tag}", coord)
         credit[g] = _Lin(sns_p).var(x)
 
     # (b↓) downward power: the GFM storage absorbs the surplus.

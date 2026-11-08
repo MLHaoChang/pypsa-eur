@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A cost priced through a scale input (a PV generator's DC/AC ratio, a Link's output efficiency) now records that input, and the asset's provenance reports the cost as stale when the input changes or was never recorded.

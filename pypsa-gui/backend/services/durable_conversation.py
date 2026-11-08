@@ -1160,8 +1160,18 @@ def set_discussed_run(
     window: str | None = None,
     asset_id: str | None = None,
     clear_baseline: bool = False,
+    fingerprint: str | None = None,
+    revision: Any = None,
+    status: str | None = None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
-    """Patch ``refs.discussed`` under generation CAS. Does not bump generation."""
+    """Patch ``refs.discussed`` under generation CAS. Does not bump generation.
+
+    ``fingerprint``, ``revision``, ``status`` and ``mode`` are the run's anchors
+    as the server read them (LV-09); revalidation compares them on resume. They
+    are set from this call alone: an anchor the call omits is dropped, never
+    kept from the run discussed before.
+    """
     if not isinstance(run_id, str) or not run_id:
         _refuse('invalid_discussed_run', 'run_id is required.', 422)
     with _LOCK:
@@ -1180,6 +1190,12 @@ def set_discussed_run(
         ):
             if value is not None:
                 discussed[key] = value
+        supplied = {'fingerprint': fingerprint, 'revision': revision,
+                    'status': status, 'mode': mode}
+        for name in _REVALIDATE_ANCHORS:
+            discussed.pop(name, None)
+            if supplied[name] is not None:
+                discussed[name] = supplied[name]
         if baseline_run_id is not None:
             discussed['baseline_run_id'] = baseline_run_id
         elif clear_baseline:
