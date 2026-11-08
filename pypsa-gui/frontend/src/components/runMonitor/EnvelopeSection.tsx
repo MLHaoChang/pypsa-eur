@@ -5,13 +5,29 @@
 // The user may narrow it (untick an edit or run, lower a budget), never
 // widen it: the server checks again (`run_envelope.narrow`).
 import { useEffect, useState } from 'react'
-import { getRun, type Envelope, type RunMonitorView } from '../../api/runMonitor'
+import { getRun, type Envelope, type EnvelopeGoal, type RunMonitorView } from '../../api/runMonitor'
 import { UNATTENDED_BLOCK_WORDS, editLimits, editSubject, runWords } from './runWords'
 import { fmtCurrency } from '../../utils/format'
 import { useUIStore } from '../../store/uiStore'
+import { RELIABILITY_GOAL_LABEL } from '../../hooks/useReliabilityGoal'
+import { openReliabilityGoal } from '../../layout/flowNavigation'
+
+// P5a: the goal the LOLE rule judges against, with its unit and where it comes from.
+// No engine id in the words (#1194): the template is "the site template".
+const GOAL_SOURCE: Record<string, string> = { stored: "from the project's solver settings", template: "from the site template's default" }
+// UX (13): a missing goal names the input and opens its editor (mode-aware, with Back to this card).
+function GoalRow({ goal }: { goal: EnvelopeGoal }) {
+  if (goal.value === null) return <div data-testid="envelope-goal">No reliability goal is set. Missing:{' '}
+    <button type="button" data-testid="envelope-goal-fix" onClick={openReliabilityGoal}
+      className="text-accent hover:underline whitespace-nowrap">{RELIABILITY_GOAL_LABEL} ›</button></div>
+  return <div data-testid="envelope-goal">
+    {`${RELIABILITY_GOAL_LABEL}: ${goal.value} h/yr, ${GOAL_SOURCE[goal.source] ?? goal.source}`}</div>
+}
+/** The grant refuses `goal_missing`, so unattended waits for a goal; step by step does not need one. */
+const GOAL_BLOCK = 'Set the reliability goal first: see above.'
 
 export type EnvelopeVerdict =
-  | { verdict: 'unattended'; envelope: Record<string, unknown>; notify_email: boolean }
+  | { verdict: 'unattended'; envelope: Record<string, unknown>; notify_email: boolean; goal?: EnvelopeGoal }
   | { verdict: 'stepwise' }
   | { verdict: 'change' }
 
@@ -66,7 +82,8 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
 
   const unattended = view?.monitor.unattended
   const block = !view ? 'Checking whether this server can run it unattended…'
-    : unattended && !unattended.available ? UNATTENDED_BLOCK_WORDS[unattended.reason ?? ''] ?? 'Not available here' : null
+    : unattended && !unattended.available ? UNATTENDED_BLOCK_WORDS[unattended.reason ?? ''] ?? 'Not available here'
+      : envelope.goal?.value === null ? GOAL_BLOCK : null
   const emailOk = view?.monitor.email.available === true
   const costCap = view?.monitor.budgets.cost_eur.limit
 
@@ -76,6 +93,8 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
       edits: envelope.edits.filter((_, i) => edits[i]), runs: envelope.runs.filter((_, i) => runs[i]),
       budget: { solves, rounds: envelope.budget.rounds, wall_time_h: hours }, research: envelope.research,
     },
+    // GK B (34) F1: echo the goal this card shows, so the grant freezes exactly it.
+    ...(envelope.goal ? { goal: envelope.goal } : {}),
   })
 
   return <div data-testid="envelope-section" className="mb-2 rounded border border-border bg-bg-2/40 px-2.5 py-1.5 text-[12px]">
@@ -128,6 +147,7 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
         <span>{costCap !== undefined && costCap > 0 ? `Cost cap ${fmtCurrency(costCap)}` : 'no cost cap'}</span>
       </div>
     </div>
+    {envelope.goal && <GoalRow goal={envelope.goal} />}
     <div data-testid="envelope-research">
       {envelope.research.allowed ? `Research cost cap ${fmtCurrency(envelope.research.cost_cap_eur)}` : 'No research'}
     </div>

@@ -1036,6 +1036,15 @@ check that every required disclosure of the version they start from is still
 there. A lost one fails the job, or refuses the export, with
 `report_disclosure_missing` (409), and nothing is saved. A later human
 regenerate of a section rewrites it non-strict and drops its placeholders.
+The assistant's report exports are sealed (AA-05 S4b): after the disclosure
+check and the quarantine check, the file is published with a `report_export`
+manifest naming the stored version by its file's hash, each figure and the
+template by their bytes, the disclosures and the withheld placeholders. A
+download or delivery re-checks it. A seal or byte mismatch quarantines; a
+source still stored but changed refuses with `report_version_changed`; a
+source since deleted is served with `source_status` (`version_missing`,
+`figure_missing`, `template_missing`) and a note. Exports from the Reports
+page carry no manifest.
 The frontend renders task progress, ordinary resume/cancel requests and safe
 file links from existing `tool_result` frames; no new stream vocabulary or
 provider-specific handlers are introduced.
@@ -1205,10 +1214,16 @@ A harness run is a task of file version 3 with a `run` block
 only: no runner, no envelope, no loops.
 
 - **Start.** `start_task(title, steps=[], request_id, brief, run={"profile":
-  "eh_site@1", "mode": "stepwise"})`. The brief has `objective`, `cards` and
+  "eh_site@2", "mode": "stepwise"})`. The brief has `objective`, `cards` and
   optional `cases`, no `phases`: the profile's stages replace them. Any other
   mode, an unknown profile or caller steps is `invalid_task`. Version 1 and 2
   files are read as before and have no `run` block.
+- **eh_site@2** (issue 07 B3b) is what the catalogue offers new runs:
+  eh_site@1 with `run_coupling_loop` as the LOLE rule's engine, and the
+  intake param `goal.target_lole_h` (h/yr). That param is never a creation
+  param: the grant writes it to the new project's solver config before the
+  freeze, and refuses `goal_missing` without it (`run_profiles.needs_goal`).
+  eh_site@1 stays byte-equal and resolvable, so a run stored on it keeps it.
 - **Profiles** (`services/run_profiles.py`) are data: per stage the actions
   the harness materialises on entry (`<stage>.<n>`, ≤ 24 steps and 32 000
   characters per stage) and the exit gate's rules. Stages a profile leaves out

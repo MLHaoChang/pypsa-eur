@@ -1,0 +1,3 @@
+{"kinds": {
+  "report_version_changed": {"surface": "inline", "why": "Downloading or delivering a sealed assistant report export refuses (409, services/assurance_artifacts.py _verify_report) when the stored report version, a figure or the template it was exported from is still there but has changed since the export; no quarantine marker is written (AA-05 S4b, GK B X3/X4). The model tells the user to export the report again; it stays the gray tool line."}
+}}
