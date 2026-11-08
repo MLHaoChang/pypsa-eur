@@ -24,8 +24,11 @@ and writes the suite report.
 from __future__ import annotations
 
 import contextlib
+import linecache
+import sys
 from types import SimpleNamespace
 import hashlib
+import inspect
 import json
 import math
 from pathlib import Path
@@ -224,11 +227,31 @@ def native_ledgers(before: dict, after: dict, *, requests=(), actors=()) -> dict
     }
 
 
+FOREGROUND_READS = ("get_active_context", "get_network")
+
+
+def identity_site(frame) -> bool:
+    """F1 (GK B ruling): the call site of a foreground read is one of the two
+    pure identity checks: anywhere in `workflow_tools._owning_context`, or the
+    `_is_foreground = network is _PS.get_network()` line of `run_simulation`.
+    Any other frame, the same thread's included, is not exempt."""
+    from services import solver_service, workflow_tools
+
+    code = frame.f_code
+    if code is workflow_tools._owning_context.__code__:
+        return True
+    return code is solver_service.run_simulation.__code__ and (
+        "_is_foreground = network is _PS.get_network()"
+        in linecache.getline(code.co_filename, frame.f_lineno)
+    )
+
+
 class Resolutions:
     """P2: every project id the project-resolution seams resolve in a case."""
 
     def __init__(self, monkeypatch):
         self.ids: list[str] = []
+        self.identity_reads: list[str] = []  # the two identity checks (F1)
         self.scans: list[
             str
         ] = []  # the worker's own run scan (`Runner._runs`): every project's task list
@@ -255,7 +278,12 @@ class Resolutions:
                         pid = project_id(value) if not isinstance(value, str) else value
                         if pid:
                             listing = self.scanning and name == "project_dir"
-                            (self.scans if listing else self.ids).append(pid)
+                            if name in FOREGROUND_READS and identity_site(
+                                sys._getframe(1)
+                            ):
+                                self.identity_reads.append(pid)
+                            else:
+                                (self.scans if listing else self.ids).append(pid)
                 return result
 
             monkeypatch.setattr(owner, name, recorded)
@@ -410,6 +438,7 @@ def _observe(
         list(seen.ids),
         oracle,
         list(seen.scans),
+        list(seen.identity_reads),
     )
 
 
@@ -1487,3 +1516,60 @@ def test_the_report_names_what_the_snapshot_does_not_compare():
         "durable_conversation",
         "network_revision",
     ]
+
+
+# ── F1: the two identity checks are reported, every other read counts ────────
+
+
+def _foreground_line(fn, text):
+    lines, start = inspect.getsourcelines(fn)
+    return next(start + i for i, line in enumerate(lines) if text in line)
+
+
+def test_only_the_two_identity_checks_are_exempt_call_sites():
+    from services import solver_service, workflow_tools
+
+    run = solver_service.run_simulation.__code__
+    line = _foreground_line(
+        solver_service.run_simulation, "_is_foreground = network is _PS.get_network()"
+    )
+    assert identity_site(SimpleNamespace(f_code=run, f_lineno=line))
+    assert identity_site(
+        SimpleNamespace(f_code=workflow_tools._owning_context.__code__, f_lineno=0)
+    )
+    # Another line of run_simulation, or any other function, is not exempt.
+    assert not identity_site(SimpleNamespace(f_code=run, f_lineno=line + 1))
+    assert not identity_site(
+        SimpleNamespace(f_code=solver_service._revision_or_none.__code__, f_lineno=0)
+    )
+
+
+def test_an_identity_check_is_listed_but_another_read_on_its_thread_counts(
+    decoy, monkeypatch
+):
+    """On one unbound thread (as the solve dispatcher runs) with the decoy as
+    the foreground: the identity check is listed, not counted; a plain read
+    of the foreground on that same thread counts (a mutant that exempts the
+    whole thread is killed here)."""
+    import threading
+
+    from services import workflow_tools
+
+    seen = Resolutions(monkeypatch)
+    with foreground(decoy) as ctx:
+
+        def dispatcher():
+            workflow_tools._owning_context(ctx.network)
+            PyPSAService.get_network()
+
+        thread = threading.Thread(target=dispatcher)
+        thread.start()
+        thread.join()
+    assert seen.identity_reads == [decoy]
+    assert seen.ids == [decoy]
+    case = _case("barrier:positive")
+    scored = te.score(
+        case,
+        _obs(case, resolved=[P], identity_reads=[decoy]),
+    )
+    assert scored["wrong_project_results"] == 0 and scored["identity_reads"] == [decoy]

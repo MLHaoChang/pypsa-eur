@@ -147,6 +147,11 @@ class Observation:
     # result. Only that listing is exempt; any other resolution during the scan
     # counts, and a write is still an effect.
     scans: list[str] = field(default_factory=list)
+    # Foreground reads at the two pure identity checks (GK B ruling on F1):
+    # `workflow_tools._owning_context` and `run_simulation`'s `_is_foreground`
+    # compare the foreground's network by identity and never use it as data.
+    # Reported, not a wrong-project result; every other foreground read counts.
+    identity_reads: list[str] = field(default_factory=list)
 
 
 # ── Native diff ──────────────────────────────────────────────────────────────
@@ -554,6 +559,7 @@ def score(case: Case, obs: Observation) -> dict:
         "wrong_projects": wrong,
         "false_native_completion": false_completion,
         "scanned_projects": sorted(set(obs.scans)),
+        "identity_reads": sorted(set(obs.identity_reads)),
         "oracle": obs.oracle,
         "effects": len(obs.effects),
         "failures": failures,
@@ -576,6 +582,7 @@ def failed(case: Case, reason: str) -> dict:
         "wrong_projects": [],
         "false_native_completion": 0,
         "scanned_projects": [],
+        "identity_reads": [],
         "oracle": {},
         "effects": 0,
         "failures": ["execution_failed", reason],
