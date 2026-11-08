@@ -36,7 +36,7 @@ describe('AssetCostsTable out-of-date costs', () => {
     await waitFor(() => screen.getByTestId('asset-cost-prov-Generator-pv_a-stale'))
     expect(screen.queryByTestId('asset-cost-prov-Generator-pv_b-stale')).toBeNull()
     const note = screen.getByTestId('asset-costs-out-of-date').textContent
-    expect(note).toContain('Generator · pv_a: Out of date: DC/AC ratio changed. Priced with DC/AC ratio 1.3, now 1.5.')
+    expect(note).toContain('Generator · pv_a is out of date: DC/AC ratio changed. Priced with DC/AC ratio 1.3, now 1.5.')
     expect(note).toContain('Open the asset and compare with references to re-price.')
     expect(note).not.toContain('pv_b')
   })

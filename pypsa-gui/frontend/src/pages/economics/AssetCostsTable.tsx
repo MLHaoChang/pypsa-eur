@@ -6,7 +6,7 @@
 // branch money stays per MVA (the units catalogues publish).
 import { useQuery } from '@tanstack/react-query'
 import { assetSchemaApi, type AssetCostRow } from '../../api/assetSchema'
-import { ProvenanceChip, StaleChip, staleNote } from '../../components/ProvenanceChip'
+import { ProvenanceChip, StaleChip, staleBody } from '../../components/ProvenanceChip'
 import { useGlobalDefaultLifetime } from '../../layout/properties/cardKit'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -104,7 +104,7 @@ export default function AssetCostsTable() {
         <div className="text-[10px] text-muted flex flex-col gap-0.5" data-testid="asset-costs-out-of-date">
           {outOfDate.map(a => (
             <p key={`${a.component}:${a.name}`}>
-              <span className="text-muted">{a.component} · {a.name}: </span>{staleNote(staleOf(a), 'table')}
+              <span className="text-muted">{a.component} · {a.name}</span> is out of date: {staleBody(staleOf(a), 'table')}
             </p>
           ))}
         </div>

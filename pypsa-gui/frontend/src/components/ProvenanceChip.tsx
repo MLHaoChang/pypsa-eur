@@ -58,6 +58,12 @@ const REPRICE: Record<StaleWhere, string> = {
  * Backend reasons are matched, not echoed, so the words stay ours (no keys, no repr quotes).
  */
 export function staleNote(e: ProvenanceEntry | undefined, where: StaleWhere): string | null {
+  const body = staleBody(e, where)
+  return body === null ? null : `Out of date: ${body}`
+}
+
+/** `staleNote` without its "Out of date: " lead, for a line that names the asset first. */
+export function staleBody(e: ProvenanceEntry | undefined, where: StaleWhere): string | null {
   const s = e?.stale
   if (!s) return null
   const field = labelOf(s.field)
@@ -66,14 +72,14 @@ export function staleNote(e: ProvenanceEntry | undefined, where: StaleWhere): st
     const detail = /\(([^)]*)\)/.exec(s.reason)?.[1]
     const why = s.reason.includes('malformed') ? 'its pricing record is unreadable'
       : `the input it was priced with was not recorded${detail ? ` (${detail})` : ''}`
-    return `Out of date: ${why}. ${REPRICE[where]}`
+    return `${why}. ${REPRICE[where]}`
   }
   const priced = `Priced with ${field} ${num(s.recorded)}`
   if (s.current == null || !now) {
-    return `Out of date: ${field} is no longer available. ${priced}. ${REPRICE[where]}`
+    return `${field} is no longer available. ${priced}. ${REPRICE[where]}`
   }
   const changed = now === field ? `${field} changed` : `the price now reads ${now}`
-  return `Out of date: ${changed}. ${priced}, now ${now === field ? '' : `${now} `}${num(s.current)}. ${REPRICE[where]}`
+  return `${changed}. ${priced}, now ${now === field ? '' : `${now} `}${num(s.current)}. ${REPRICE[where]}`
 }
 
 /** The "out of date" chip; its key is the note line next to it (`staleNote`). */
