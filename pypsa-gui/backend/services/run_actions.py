@@ -63,6 +63,9 @@ EVENT = "dc_campus"  # the envelope ledger row of the campus run's reservation
 # D5: the campus job's row carries no solve count. One campus job, and it runs no
 # PyPSA optimisation (pinned by `test_run_profile_datacenter`), so this bound is stated, never measured.
 SOLVES = 1
+# The data-centre profile's campus study (GK B (36) F2 (a)): N-1 sizing with the
+# investment pass, whatever the project's saved campus settings say.
+CAMPUS_STUDY = {"n_minus_1": True, "invest": True}
 _TERMINAL = ("completed", "failed", "aborted", "interrupted")
 # The attempts this process is running now: a step left `running` by any other
 # (a restart mid-dispatch) is settled uncertain by `settle`, never run again.
@@ -174,18 +177,21 @@ def _core(frozen) -> dict:
     return {k: frozen.get(k) for k in ("grid_code", "settings", "writes", "solves")}
 
 
-def freeze(project) -> dict:
+def freeze(project, study=None) -> dict:
     """The actions' frozen record: the grid-code profile (D1), the campus
-    run's settings (the saved campus settings held to that profile), what
-    the run writes (D6) and the solves it reserves (D5), with their digest."""
+    run's settings (the saved campus settings, with the run profile's own
+    `campus_study` block winning for the keys it names, held to that grid
+    code; GK B (36) F2 (a)), what the run writes (D6) and the solves it
+    reserves (D5), with their digest."""
     from fastapi import HTTPException
 
     from services import campus_electrical_service as ce
 
+    study = CAMPUS_STUDY if study is None else study
     code = choose(project)
     saved = {k: v for k, v in _saved_settings(project).items() if k in ce.DEFAULTS}
     try:
-        settings = ce._settings({**saved, "profile": code["id"]}, ce.profiles(project))
+        settings = ce._settings({**saved, **study, "profile": code["id"]}, ce.profiles(project))
     except HTTPException as exc:
         raise FreezeError(
             "settings", f"the campus settings cannot be used: {exc.detail}"
@@ -210,6 +216,42 @@ def card(frozen) -> dict:
         "writes": list(frozen["writes"]),
         "solves": frozen["solves"],
     }
+
+
+def needs_card(step) -> bool:
+    """GK B (36) F1: an action that writes (the campus run) runs only on its
+    own Confirmation card, approved by the user; a read runs without one."""
+    return is_action(step) and not REGISTRY[step["tool"]]["reads_only"]
+
+
+def _note(field, note) -> dict:
+    return {"role": "note", "field": field, "unit": "", "note": note}
+
+
+def approval_card(step) -> dict | None:
+    """GK B (36) F1: the step's Confirmation card, as an edit card of note
+    rows (the chat's card shows them as they are, no new UI). It names the
+    grid-code profile with its id and short digest, the campus settings that
+    run, each write and the solves reserved. Its digest is the frozen
+    record's, so an approval binds to exactly what the card showed. None
+    when the step has no frozen record."""
+    frozen = step.get("frozen") if isinstance(step, dict) else None
+    if not isinstance(frozen, dict) or not isinstance(frozen.get("digest"), str):
+        return None
+    code, settings, solves = frozen["grid_code"], frozen["settings"], frozen["solves"]
+    on = {True: "on", False: "off"}
+    rows = [
+        _note("grid_code", f"Grid-code profile: {code.get('label') or code['id']} ({code['id']})"),
+        _note("grid_code_digest", f"Profile digest: {str(code.get('digest'))[:12]}"),
+        _note("settings", f"Campus study settings: N-1 {on.get(settings.get('n_minus_1'), '?')}, "
+                          f"investment {on.get(settings.get('invest'), '?')}, "
+                          f"grid code {settings.get('profile')}"),
+        *(_note("writes", f"Writes {w}") for w in frozen["writes"]),
+        _note("solves", f"Reserves {solves} solve{'' if solves == 1 else 's'}"),
+    ]
+    return {"version": 1, "kind": "native", "tool": step["tool"], "rows": rows, "sets": [],
+            "says": f"Run the campus study held to the grid-code profile {code['id']}",
+            "complete": True, "digest": frozen["digest"]}
 
 
 def fill(steps, frozen) -> None:
@@ -246,10 +288,16 @@ def stage_frozen(task) -> dict:
     )
     if prior is not None:
         return copy.deepcopy(prior)
+    from services import run_profiles
+
+    try:
+        study = run_profiles.resolve(task["run"]["profile"]).get("campus_study")
+    except (KeyError, TypeError, run_profiles.ProfileError):
+        study = None
     try:
         with chat_tools._acting() as (db, user):
             return freeze(
-                project_registry.resolve_project(db, user, task["project_id"])
+                project_registry.resolve_project(db, user, task["project_id"]), study
             )
     except FreezeError as exc:
         return {"unfrozen": {"state": exc.state, "message": str(exc)}}
@@ -344,9 +392,11 @@ def release(path, call_id, solves=SOLVES):
     return run_envelope.settle_engine_solves(path, call_id, solves, event=EVENT)
 
 
-def start(path, ctx, step, *, instance) -> str:
+def start(path, ctx, step, *, instance, approved=None) -> str:
     """Run one native action. Returns the action's name when it ran or
-    started, else the refusal reason (the run then needs the user)."""
+    started, else the refusal reason (the run then needs the user).
+    `approved` is the digest of the card the user approved (F1): an action
+    that needs a card runs only when it is the frozen record's digest."""
     from harness import runner
 
     path = Path(path)
@@ -365,12 +415,12 @@ def start(path, ctx, step, *, instance) -> str:
         return "claimed_elsewhere"
     _LIVE.add(attempt)
     try:
-        return _dispatch(path, ctx, step["id"], attempt)
+        return _dispatch(path, ctx, step["id"], attempt, approved)
     finally:
         _LIVE.discard(attempt)
 
 
-def _dispatch(path, ctx, step_id, attempt):
+def _dispatch(path, ctx, step_id, attempt, approved=None):
     from fastapi import HTTPException
 
     from services import chat_tools, project_registry
@@ -399,6 +449,13 @@ def _dispatch(path, ctx, step_id, attempt):
             step["id"],
             "dc_args",
             "the action runs only with the record its card showed",
+        )
+    if needs_card(step) and approved != frozen["digest"]:
+        return _stop(
+            path,
+            step["id"],
+            "dc_card",
+            "the campus study runs only on the card the user approved for this record",
         )
     if str(getattr(ctx, "project_uuid", "")) != task["project_id"]:
         return _stop(

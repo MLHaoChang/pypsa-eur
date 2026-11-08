@@ -616,6 +616,8 @@ def _eh_datacenter() -> dict:
             "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
         },
         "eh_study": copy.deepcopy(EH_SITE["eh_study"]),
+        # GK B (36) F2 (a): the campus run's own settings, winning over the saved ones.
+        "campus_study": dict(run_actions.CAMPUS_STUDY),
         "tunable": [],
         "kpis": copy.deepcopy(EH_SITE["kpis"]),
         "chapters": ["grid_readiness", "mc"],

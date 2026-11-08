@@ -803,7 +803,16 @@ class Runner:
             from harness import run_handoff, run_report
             from services import run_actions
             if run_actions.is_action(step):  # study harness 10a: the closed native-action registry
-                return run_actions.start(path, ctx, step, instance=self.instance)
+                approved = None
+                if run_actions.needs_card(step):  # GK B (36) F1: the campus run's own card
+                    decision = decide(task, step["id"], None)
+                    if decision == "live":
+                        return self._native_card(path, ctx, session, task, step)
+                    if decision != "approve":
+                        self._wait_for_user(path, "card", step["id"])
+                        return "waiting"
+                    approved = (run_actions.approval_card(step) or {}).get("digest")
+                return run_actions.start(path, ctx, step, instance=self.instance, approved=approved)
             if step["native"] == "report":
                 return run_report.start(path, ctx, step, instance=self.instance)
             return run_handoff.run_step(path, ctx, step)
@@ -834,6 +843,57 @@ class Runner:
         self._inflight[task["task_id"]] = (path, thread)
         thread.start()
         return "dispatched"
+
+    def _native_card(self, path, ctx, session, task, step):
+        """GK B (36) F1: a native action that writes waits on its own
+        Confirmation card (`run_actions.approval_card`), issued on the run's
+        session while the user is there, as a chat step's card is. On the
+        user's approval it runs with that card's digest, which dispatch
+        compares with the frozen record's; anything else leaves it to do."""
+        from harness import approvals
+        from harness import session as harness_session
+        from services import run_actions
+        task_id = task["task_id"]
+        edit_card = run_actions.approval_card(step)
+        if edit_card is None:
+            return run_actions.start(path, ctx, step, instance=self.instance)  # stops on the unfrozen reason
+        call_id = f"native-{step['id']}-{uuid.uuid4().hex[:8]}"
+        tier = "write"
+        pc = session.issue_confirmation(tool_name=step["tool"], args={"digest": edit_card["digest"]},
+                                        safety_tier=tier)
+        if not approvals.asked(session, call_id=call_id, tool=step["tool"], tier=tier, token=pc.token):
+            session.withdraw_confirmation(pc.token)  # a card nobody can audit is never shown
+            raise _Stop("needs_user", "approval_unavailable")
+        self._cards[task_id] = {
+            "tool_use_id": call_id, "tool_name": step["tool"], "args": {"digest": edit_card["digest"]},
+            "safety_tier": tier, "confirmation_token": pc.token,
+            "ttl_seconds": harness_session.CONFIRMATION_TTL_SECONDS, "edit_card": edit_card,
+            "session_id": session.session_id,
+            "expires_at_epoch_ms": time.time() * 1000 + harness_session.CONFIRMATION_TTL_SECONDS * 1000}
+        self._wait_for_user(path, "card", step["id"])
+
+        def wait():
+            try:
+                decision = session.wait_for_decision(pc.token)
+                outcome, by = {"approve": ("approved", "user"), "deny": ("rejected", "user"),
+                               "expired": ("expired", "ttl"), "aborted": ("aborted", "session"),
+                               "revoked": ("revoked", "system")}.get(decision, ("unavailable", "system"))
+                recorded = approvals.decided(session, call_id=call_id, tool=step["tool"], tier=tier,
+                                             outcome=outcome, by=by)
+                if (self._cards.get(task_id) or {}).get("confirmation_token") == pc.token:
+                    self._cards.pop(task_id, None)
+                if decision == "approve" and recorded:
+                    self._go_on(path)
+                    run_actions.start(path, ctx, step, instance=self.instance, approved=edit_card["digest"])
+            except Exception:  # noqa: BLE001 — a card that errors leaves the step to do, never run
+                logger.exception("harness runner: the card of %s on %s errored", step["id"], task_id)
+            finally:
+                self.wake(path)
+        context = contextvars.copy_context()
+        thread = threading.Thread(target=context.run, args=(wait,), name=f"harness-card-{task_id[:8]}", daemon=True)
+        self._inflight[task_id] = (path, thread)
+        thread.start()
+        return "waiting"
 
     def _agent_round(self, path, ctx, session, task):
         """An input-loop round (issue 04) on a helper thread, as a step's

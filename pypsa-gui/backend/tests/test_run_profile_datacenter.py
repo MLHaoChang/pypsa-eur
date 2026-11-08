@@ -606,6 +606,14 @@ def _read(path):
     return json.loads(Path(path).read_text())
 
 
+def _start(path, hub, approved=True):  # noqa: F811
+    """Start the stored step as the runner does after the user approved its
+    card (F1): with the digest of the card for the record it stores."""
+    if approved is True:
+        approved = (run_actions.approval_card(_read(path)["steps"][0]) or {}).get("digest")
+    return run_actions.start(path, _ctx(hub), {"id": "solve.3"}, instance="a", approved=approved)
+
+
 def test_a_republish_after_the_freeze_stops_the_campus_study(hub, monkeypatch):  # noqa: F811
     _publish(hub, "sagc_dc")
     frozen = run_actions.freeze(hub)
@@ -618,7 +626,7 @@ def test_a_republish_after_the_freeze_stops_the_campus_study(hub, monkeypatch): 
     monkeypatch.setattr(ce, "enqueue_run", lambda *a, **k: started.append(a))
     path = _task_file(hub, frozen)
     assert (
-        run_actions.start(path, _ctx(hub), {"id": "solve.3"}, instance="a")
+        _start(path, hub)
         == "grid_code_changed"
     )
     task = _read(path)
@@ -642,7 +650,7 @@ def test_the_campus_study_runs_only_with_its_frozen_record(hub, monkeypatch, cha
         path.write_text(json.dumps(task))
     monkeypatch.setattr(ce, "enqueue_run", lambda *a, **k: pytest.fail("never queued"))
     assert (
-        run_actions.start(path, _ctx(hub), {"id": "solve.3"}, instance="a") == "dc_args"
+        _start(path, hub) == "dc_args"
     )
 
 
@@ -651,7 +659,7 @@ def test_a_missing_campus_file_asks_the_user_to_draft_it(hub, monkeypatch):  # n
     path = _task_file(hub, run_actions.freeze(hub))
     monkeypatch.setattr(ce, "enqueue_run", lambda *a, **k: pytest.fail("never queued"))
     assert (
-        run_actions.start(path, _ctx(hub), {"id": "solve.3"}, instance="a")
+        _start(path, hub)
         == "campus_missing"
     )
     assert "draft the campus" in _read(path)["steps"][0]["error"]
@@ -689,7 +697,7 @@ def test_the_campus_study_queues_the_frozen_settings_and_settles_from_its_own_jo
         ),
     )
     assert (
-        run_actions.start(path, _ctx(hub), {"id": "solve.3"}, instance="a")
+        _start(path, hub)
         == run_actions.CAMPUS
     )
     assert queued == [frozen["settings"]]
@@ -774,7 +782,7 @@ def test_no_solve_left_refuses_the_campus_study_before_it_queues(hub, monkeypatc
     _granted(path, 0)
     monkeypatch.setattr(ce, "enqueue_run", lambda *a, **k: pytest.fail("never queued"))
     assert (
-        run_actions.start(path, _ctx(hub), {"id": "solve.3"}, instance="a") == "budget"
+        _start(path, hub) == "budget"
     )
 
 
@@ -785,7 +793,7 @@ def test_the_readiness_step_stores_the_frozen_digest(hub):  # noqa: F811
     ce.run(hub, frozen["settings"])
     path = _task_file(hub, frozen, tool=run_actions.READINESS)
     assert (
-        run_actions.start(path, _ctx(hub), {"id": "solve.3"}, instance="a")
+        _start(path, hub)
         == run_actions.READINESS
     )
     step = _read(path)["steps"][0]
@@ -803,7 +811,7 @@ def test_the_readiness_step_refuses_a_campus_run_held_to_another_profile(hub):  
     ce.run(hub, {**frozen["settings"], "profile": "generic_assumed"})
     path = _task_file(hub, frozen, tool=run_actions.READINESS)
     assert (
-        run_actions.start(path, _ctx(hub), {"id": "solve.3"}, instance="a")
+        _start(path, hub)
         == "campus_run_stale"
     )
 
@@ -924,7 +932,7 @@ def test_the_card_names_the_profile_and_writes_and_an_unfrozen_step_stops_with_i
     task["steps"][0]["unfrozen"] = task["steps"][0].pop("frozen")["unfrozen"]
     path.write_text(json.dumps(task))
     assert (
-        run_actions.start(path, _ctx(hub), {"id": "solve.3"}, instance="a")
+        _start(path, hub)
         == "dc_none_published"
     )
     assert "publish the grid-code profile" in _read(path)["steps"][0]["error"]
@@ -954,3 +962,154 @@ def test_a_scorecard_that_changed_after_the_read_gives_no_evidence(monkeypatch):
     now = {"rows": [{"id": "scr", "verdict": "pass", "assumed": False}], "excluded": []}
     results = _result_gate(monkeypatch, now, steps=[step])
     assert all(r["verdict"] == "not_evaluated" for r in results.values())
+
+
+def test_a_withdrawn_profile_is_not_the_frozen_one(hub):  # noqa: F811
+    from services import campus_grid_code_service as gc
+    _publish(hub, "sagc_dc")
+    code = run_actions.choose(hub)
+    gc.delete_published(hub, "sagc_dc")
+    assert "sagc_dc" not in run_actions.published(hub)
+    assert not run_actions.unchanged(hub, code)
+
+
+# ── GK B (36) F1-F3: the campus run's own card, its settings, no grant ───────
+
+
+def test_the_campus_settings_are_the_profiles_whatever_was_saved(hub):  # noqa: F811
+    """F2 (a): the profile's campus_study block wins over the saved settings."""
+    _publish(hub, "sagc_dc")
+    d = ce.campus_dir(hub)
+    (d / ce.SETTINGS_FILE).write_text(json.dumps({"invest": False, "n_minus_1": False, "k": 2}))
+    assert run_profiles.resolve(REF)["campus_study"] == {"n_minus_1": True, "invest": True}
+    task = _read(_task_file(hub, None))
+    frozen = run_actions.stage_frozen(task)
+    assert frozen["settings"]["invest"] is True and frozen["settings"]["n_minus_1"] is True
+    assert frozen["settings"]["k"] == 2  # a key the block does not name stays the user's
+    card = run_actions.approval_card({"tool": run_actions.CAMPUS, "frozen": frozen})
+    assert "N-1 on, investment on" in " ".join(r["note"] for r in card["rows"])
+
+
+def test_the_approval_card_names_what_the_step_is_held_to(hub):  # noqa: F811
+    """F1: the rows the chat's Confirmation card shows (note rows), bound by the record's digest."""
+    _publish(hub, "sagc_dc", title="SAGC data centre")
+    frozen = run_actions.freeze(hub)
+    card = run_actions.approval_card({"tool": run_actions.CAMPUS, "frozen": frozen})
+    notes = [r["note"] for r in card["rows"]]
+    assert card["digest"] == frozen["digest"] and card["version"] == 1 and card["complete"]
+    assert all(r["role"] == "note" and r["unit"] == "" and isinstance(r["field"], str) for r in card["rows"])
+    assert notes[0] == "Grid-code profile: SAGC data centre (sagc_dc)"
+    assert notes[1] == f"Profile digest: {frozen['grid_code']['digest'][:12]}"
+    assert notes[2] == "Campus study settings: N-1 on, investment on, grid code sagc_dc"
+    assert notes[3:-1] == [f"Writes {w}" for w in frozen["writes"]] and len(frozen["writes"]) == 2
+    assert notes[-1] == "Reserves 1 solve"
+    assert run_actions.approval_card({"tool": run_actions.CAMPUS}) is None
+    assert run_actions.needs_card({"tool": run_actions.CAMPUS, "native": run_actions.KIND})
+    assert not run_actions.needs_card({"tool": run_actions.READINESS, "native": run_actions.KIND})
+
+
+@pytest.mark.parametrize("approved", [None, "0" * 64])
+def test_the_campus_study_never_runs_without_the_approved_cards_digest(hub, monkeypatch, approved):  # noqa: F811
+    _publish(hub, "sagc_dc")
+    path = _task_file(hub, run_actions.freeze(hub))
+    monkeypatch.setattr(ce, "enqueue_run", lambda *a, **k: pytest.fail("never queued"))
+    assert _start(path, hub, approved=approved) == "dc_card"
+    assert _read(path)["steps"][0]["status"] == "failed"
+
+
+class _CardSession:
+    """The run's session, as far as a native card uses it."""
+
+    session_id = "run:t"
+
+    def __init__(self, decision):
+        import threading
+        self.decision, self.go, self.withdrawn = decision, threading.Event(), []
+
+    def issue_confirmation(self, *, tool_name, args, safety_tier):
+        self.issued = (tool_name, args, safety_tier)
+        return SimpleNamespace(token="tok")
+
+    def wait_for_decision(self, token):
+        self.go.wait(10)
+        return self.decision
+
+    def withdraw_confirmation(self, token):
+        self.withdrawn.append(token)
+
+
+def _card_run(hub, monkeypatch, decision, *, change=None):  # noqa: F811
+    from harness import approvals, runner
+    _publish(hub, "sagc_dc")
+    frozen = run_actions.freeze(hub)
+    path = _task_file(hub, frozen)
+    task = _read(path)
+    logged = []
+    monkeypatch.setattr(approvals, "asked", lambda *a, **k: logged.append(("asked", k["tool"])) or True)
+    monkeypatch.setattr(approvals, "decided", lambda *a, **k: logged.append((k["outcome"], k["by"])) or True)
+    queued = []
+    monkeypatch.setattr(ce, "enqueue_run", lambda *a, **k: queued.append(a) or pytest.fail("held here"))
+    r, session = runner.Runner(instance="a"), _CardSession(decision)
+    assert r._native_card(path, _ctx(hub), session, task, task["steps"][0]) == "waiting"
+    live = r.live_card(task["task_id"])
+    if change is not None:
+        change(path)
+    session.go.set()
+    r._inflight[task["task_id"]][1].join(10)
+    return path, frozen, live, logged, queued, r
+
+
+def test_the_runner_issues_the_campus_card_and_runs_on_its_approval(hub, monkeypatch):  # noqa: F811
+    started = []
+    monkeypatch.setattr(run_actions, "start", lambda path, ctx, step, **k: started.append(k) or "ok")
+    path, frozen, live, logged, _, r = _card_run(hub, monkeypatch, "approve")
+    assert live["edit_card"] == run_actions.approval_card(_read(path)["steps"][0])
+    assert live["tool_name"] == run_actions.CAMPUS and live["confirmation_token"] == "tok"
+    assert live["args"] == {"digest": frozen["digest"]}
+    assert started == [{"instance": "a", "approved": frozen["digest"]}]
+    assert logged == [("asked", run_actions.CAMPUS), ("approved", "user")]
+    assert r.live_card(_read(path)["task_id"]) is None  # answered: the card is gone
+
+
+@pytest.mark.parametrize("decision", ["deny", "expired", "revoked"])
+def test_a_campus_card_not_approved_never_runs(hub, monkeypatch, decision):  # noqa: F811
+    monkeypatch.setattr(run_actions, "start", lambda *a, **k: pytest.fail("never started"))
+    path, _, _, logged, _, r = _card_run(hub, monkeypatch, decision)
+    assert logged[-1][0] in ("rejected", "expired", "revoked") and r.live_card(_read(path)["task_id"]) is None
+    assert _read(path)["steps"][0]["status"] == "pending"  # still to do, on a new card
+
+
+def test_an_approval_of_a_card_for_another_record_is_refused_at_dispatch(hub, monkeypatch):  # noqa: F811
+    """F1: the record changed after the card was issued (a consistent record,
+    card and digest): the approval names the old digest, so nothing runs."""
+    def change(path):
+        task = _read(path)
+        step = task["steps"][0]
+        frozen = copy.deepcopy(step["frozen"])
+        frozen["settings"]["k"] = 9
+        frozen["digest"] = run_actions.digest(run_actions._core(frozen))
+        step.update(frozen=frozen, card=run_actions.card(frozen))
+        path.write_text(json.dumps(task))
+    path, _, _, _, queued, _ = _card_run(hub, monkeypatch, "approve", change=change)
+    step = _read(path)["steps"][0]
+    assert not queued and step["status"] == "failed" and "approved" in step["error"]
+
+
+def test_a_grant_naming_the_datacenter_profile_is_refused(hub, monkeypatch):  # noqa: F811
+    """F3 (point 4): 10a is stepwise only; no envelope can be proposed or granted."""
+    from fastapi import HTTPException
+
+    from services import assistant_tasks
+    path = _task_file(hub, None)
+    task = {**_read(path), "title": "t"}
+    assert run_envelope.propose(path, task, run_profiles.resolve(REF)) is None
+    monkeypatch.setattr(assistant_tasks, "_read", lambda task_id: (path, task))
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(SimpleNamespace(), task["task_id"], "unattended")
+    assert exc.value.detail["error_kind"] == "envelope_not_grantable"
+    forged = run_envelope.propose(path, task, run_profiles.resolve("eh_site@2"))  # a block from another profile
+    assert forged["profile"] == REF
+    run_envelope._save(path, forged)
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(SimpleNamespace(), task["task_id"], "unattended")
+    assert exc.value.detail["error_kind"] == "envelope_not_grantable"

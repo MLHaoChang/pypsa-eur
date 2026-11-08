@@ -1420,12 +1420,24 @@ solve stage uses.
   chat tools are in `run_envelope.NEVER_LISTED`.
 - **Frozen grid code (D1).** On solve-stage entry the run freezes one
   published profile: its id, label and digest
-  (`profile_fingerprint`), the campus settings held to it, what the
-  campus run writes and the solves it reserves. With more than one
+  (`profile_fingerprint`), the campus settings held to it (the saved
+  settings, with the run profile's `campus_study` block, N-1 and invest,
+  winning; GK B (36) F2), what the campus run writes and the solves it
+  reserves. With more than one
   published, the user's pick on the campus card decides, never the runner.
   The stage's card is always the user's, in envelope mode too
   (`run_envelope._own_card`). Each dispatch compares the live digest. A
   republished profile stops the run with `grid_code_changed`.
+- **Its own card (F1).** `dc_campus_study` writes, so it runs only on its
+  own Confirmation card (`Runner._native_card`), issued on the run's
+  session while the user is there, like a chat step's. The card is an edit
+  card of note rows (`run_actions.approval_card`): the profile's label and
+  id, its short digest, the campus settings, each write and the solves
+  reserved. Its digest is the frozen record's, and dispatch refuses an
+  approval with any other digest (`dc_card`). `dc_grid_readiness` only
+  reads and needs no card.
+- **No envelope (F3).** `eh_datacenter@1` has no envelope block: 10a runs
+  step by step only, and `run_envelope.decide` refuses a grant for it.
 - **The campus run (D5, D6).** A solve-queue job of kind `campus` (the step records it as `dc_campus`), settled
   on a runner tick from its own job row and the published run's
   `profile_used`. It runs no PyPSA optimisation and writes only

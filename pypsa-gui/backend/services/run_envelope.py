@@ -888,7 +888,10 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
         else:
             if task["status"] in ("cancelled", "completed") or (current["state"] == "granted" and not _suspended(current)):
                 _refuse("envelope_not_grantable", "This run is over or already runs inside a granted envelope.")
-            block = check_block(run_profiles.resolve(task["run"]["profile"])["envelope"])
+            block = run_profiles.resolve(task["run"]["profile"]).get("envelope")
+            if block is None:  # study harness 10a (GK B (36) F3): a stepwise-only profile has none to grant
+                _refuse("envelope_not_grantable", "This run's profile runs step by step only: it has no envelope.")
+            block = check_block(block)
             chosen = narrow(block, envelope if envelope is not None else block)
             if current.get("setup"):
                 setup = (path, task, current, chosen)

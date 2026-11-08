@@ -49,8 +49,8 @@ export const FACT_WORDS: Record<string, string> = {
   // Study harness 10a: the data-centre run.
   'dc.gridcode.published': 'A grid-code profile is published for the run',
   'dc.gridcode.frequency_match': 'The campus runs at the grid frequency you gave',
-  'dc.gridcode.unchanged': 'The grid-code profile is the one the run was held to',
-  'dc.campus.study': 'The campus study finished under that grid code',
+  'dc.gridcode.unchanged': 'The grid-code profile did not change during the run',
+  'dc.campus.study': 'The campus study finished under the published grid code',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,
