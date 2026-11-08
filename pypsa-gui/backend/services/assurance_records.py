@@ -1844,7 +1844,8 @@ def capture_dispatch(owner, entity):
 
 
 def capture_scoped(owner, scope):
-    from harness import calculations
+    from harness import calculations, fact_identity
+    from services.assurance_artifacts import solve_stamp
 
     ctx = PyPSAService.get_active_context()
     if ctx.project_uuid != scope["project_id"]:
@@ -1905,6 +1906,11 @@ def capture_scoped(owner, scope):
             "slots": slots,
             "raw": raw,
             "source_sha256": digest(raw),
+            # AA-05 S5a (A4.6, GK B (34) Q2 (a)): the window's snapshot count and
+            # weight basis per metric, and the solve stamp, as stored keys.
+            # `public` strips both, so existing readers see byte-equal output.
+            "window": fact_identity.window(first["index"], scope),
+            "solve_stamp": solve_stamp(ctx.network),
             "validity": {
                 "coverage": "requested_population",
                 "as_of": time.time(),
@@ -1936,7 +1942,13 @@ def _scoped_read(ctx, scope, owner):
     return raw
 
 
+# AA-05 S5a (A4.6): identity keys an evidence record stores for the
+# cross-surface checks. No existing reader's output carries them (GK B (34) Q2).
+IDENTITY_KEYS = frozenset({"window", "solve_stamp"})
+
+
 def public(record):
+    hidden = IDENTITY_KEYS if record.get("record_kind") == "evidence" else ()
     return {
         k: v
         for k, v in record.items()
@@ -1951,6 +1963,7 @@ def public(record):
             "worker_pid",
             "worker_host",
         }
+        and k not in hidden
     }
 
 
