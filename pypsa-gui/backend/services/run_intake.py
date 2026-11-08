@@ -39,6 +39,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -668,10 +669,36 @@ def params(rows: list) -> dict:
     for r in rows:
         if r.get("write"):
             continue  # a planned write runs on the created network, never a creation param
+        if top(r["param"]) == GOAL:
+            continue  # the user's goal goes to the solver config (`goal`), never the template
         if r["status"] in USABLE and r["param"] not in seen:
             seen.add(r["param"])
             _put(out, r["param"], r["value"])
     return out
+
+
+GOAL = "goal"  # `run_profiles.GOAL_PARAM`'s top: the user's reliability goal (issue 07 B3b, P5)
+
+
+def goal(rows: list) -> float | None:
+    """The LOLE goal (h/yr) the user's usable rows give, unit-checked at
+    read; None when no usable row gives one. Never a default."""
+    for r in rows:
+        if (
+            r.get("param") == f"{GOAL}.target_lole_h"
+            and r["status"] in USABLE
+            and not r.get("write")
+            and r.get("unit") == "h/yr"
+        ):
+            v = r.get("value")
+            if (
+                isinstance(v, (int, float))
+                and not isinstance(v, bool)
+                and math.isfinite(v)
+                and v >= 0
+            ):
+                return float(v)
+    return None
 
 
 def check(rows: list, template_check) -> dict | None:

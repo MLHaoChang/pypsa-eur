@@ -364,3 +364,32 @@ def test_a_settled_reservation_settles_once():
         task, other, None
     )  # unknown: the whole reservation stays spent
     assert task["run"]["budget"]["used"]["solves"] == 3
+
+
+def test_a_denied_engine_card_spends_nothing_and_a_later_continue_runs_it_once(
+    ok, loops, detached, site, monkeypatch
+):
+    """Issue 07 B3b (GK B (33) E2): deny at the engine card waits for the
+    user with zero solves, nothing reserved and no restore; the user's later
+    Continue at that card runs the loop once."""
+    with_rules(monkeypatch, engine_rule(max_solves=4), solves=12)
+    loops.finish_with(status="met", solves_used=3, probe_solves=1)
+    task, path = stepwise(detached, site)
+    to_card(path, task)
+    used = json.loads(path.read_text())["run"]["budget"]["used"].get("solves", 0)
+    deny = Clicks("deny", refs={"result_gate"})
+    runner = harness_runner.Runner("a", agent_provider=Never(), decisions=deny)
+    record = settle(
+        runner,
+        path,
+        task["task_id"],
+        lambda r: bool(deny.used) and (at_engine_card(r) or stopped(r)),
+    )
+    [step] = engine_steps(record)
+    assert deny.used and loops.calls == []
+    assert step["status"] == "pending" and "reserved" not in step
+    assert record["run"]["budget"]["used"].get("solves", 0) == used
+    record, clicks = go_on(path, task)
+    assert clicks.used.count("result_gate") == 1 and len(loops.calls) == 1
+    [step] = engine_steps(record)
+    assert step["status"] == "completed" and step["reserved"]["solves"] == 5

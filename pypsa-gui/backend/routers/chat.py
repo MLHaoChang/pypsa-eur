@@ -45,6 +45,16 @@ logger = logging.getLogger("pypsa_gui.chat")
 router = APIRouter()
 
 
+class CardGoal(BaseModel):
+    """GK B (33) P5a / GK B (34) F1: the reliability goal the plan-review card
+    showed, sent back so the grant freezes exactly what the user saw."""
+
+    model_config = ConfigDict(extra="forbid")
+    value: float | None
+    unit: Literal["h/yr"]
+    source: str = Field(min_length=1, max_length=16)
+
+
 class EnvelopeDecision(BaseModel):
     """Study harness issue 03: the user's verdict on a run's plan-review
     card. Only this request grants, narrows or revokes an approval
@@ -57,6 +67,8 @@ class EnvelopeDecision(BaseModel):
     notify_email: StrictBool = False
     # Issue 21: the digest of the intake rows the card showed (a plan with a setup entry).
     intake_digest: str | None = Field(default=None, min_length=64, max_length=64)
+    # P5a/F1: the goal a plain run's card showed (`envelope.goal`), echoed for the grant.
+    goal: CardGoal | None = None
 
 
 class StreamRequest(BaseModel):

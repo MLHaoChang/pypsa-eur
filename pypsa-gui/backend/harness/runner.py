@@ -349,6 +349,21 @@ def _email(path, task, status, data_items=None, gaps=None):
 # ── The runner ───────────────────────────────────────────────────────────────
 
 
+def step_capture(tool_use_id, args, ctx):
+    """Issue 07 B3b (GK B (33) A, C1-C2): the `write_guard` of a run's own
+    solve step dispatched after its user card. Only the call that is this
+    step (its call id, `solve_queue_enqueue`, its frozen args) runs under
+    `solve_capture.requested(ctx)`, so the enqueue captures its input as an
+    admitted solve does; any other call gets nothing. A capture is evidence,
+    never an admission."""
+    def guard(call_id, tool, call_args):
+        from services import solve_capture
+        if call_id != tool_use_id or tool != "solve_queue_enqueue" or call_args != args:
+            return None
+        return solve_capture.requested(ctx)
+    return guard
+
+
 class Runner:
     """One worker thread driving every harness run it holds the lease of.
 
@@ -1000,6 +1015,8 @@ class Runner:
             session.decision_guard = None if decision is None else take_locks
             if covered:
                 session.write_guard = write_guard
+            elif decision in ("approve", "live") and step["tool"] == "solve_queue_enqueue":
+                session.write_guard = step_capture(tool_use_id, args, ctx)
             eventlog.message(session, {"role": "assistant", "content": [
                 {"type": "tool_use", "id": tool_use_id, "name": step["tool"], "input": args}]})
             frames = loop.dispatch_tool_call(session, {"id": tool_use_id, "name": step["tool"], "input": args},

@@ -172,6 +172,9 @@ Slices: PR 1 = F-a, F-b, F-c with failing-first tests (the data-loss fix lands f
 - P3 (F-c). The one save runs before start() and before any fingerprint or freeze, and changes no solver config. Tests: the first solve of a fresh created project reads verified; the save does not bump the network revision again. The GUI create route is the named remaining risk.
 - P4 (Q1 → A). A multi-period branch in `run_gates._kpi_unserved_mwh` only; `lost_load_calculations.source` and Check answers untouched (B is GK A's ground). Keep every F6 identity check, frame index == n.snapshots, columns ⊆ loads. Per investment period: sum(frame × snapshot_weightings.generators) within the period; never investment_period_weightings. The gate compares the worst period with the cap and names it; never the sum over periods. Tests: non-unit generator weightings differing between periods; cap passes per period but fails on the sum, and the reverse; misaligned frame; other_solve; each refusal NoEvidence. Hand mutants: sum over periods; drop the weightings.
 - P5 (Q2 → A plus B's refusal). The goal is a value the user gave, shown on the grant card, unit-checked in h/yr, never a model default; written to the new project's solver config before the freeze. A profile with an LOLE rule and no resolved goal refuses the grant `goal_missing` (own tool-error-kinds.d fragment). The goal stays out of `_network_input_fingerprint` and the investment-case digest, with a test.
+  - P5a (GK B (33), plain grant). A plain (no-intake) unattended grant whose profile needs the goal: a goal stored in the project's own solver config counts; a goal from template data alone counts only as the grant card shows it, with value, unit (h/yr) and source ("from the eh_site template"); a stored goal is shown with its source too; a code default never counts. Built: `run_envelope.card_goal` / `read_for_card` (the card's `detail` row and `goal` field), the granted envelope freezes `goal`. Tests: a template-sourced goal on the card with its source; a default-only config refuses goal_missing; hand mutant "count the default" killed by a default carrying a value.
+  - F1 (GK B (34), NOT OK on #1257 @4b8bd6f7, blocking). A plain unattended grant re-read `card_goal` at the click and froze that, not the goal the card showed; goal fields are outside the input fingerprint, so `task_brief_stale` never caught a change. Fixed: the card renders `envelope.goal` (`EnvelopeSection`, `envelope-goal`) and sends it back as `EnvelopeDecision.goal` (strict: value, unit h/yr, source); `decide` freezes exactly it and refuses `goal_changed` when it is absent or its value or source differs from the live `card_goal`. Tests: template→stored, stored→template, stored value change, no echo; the model rejects another unit or field; frontend shows and echoes the goal. Hand mutants killed: drop the comparison; drop the value comparison.
+  - W1 (GK B (34), non-blocking). In envelope mode `_loop_converged` never compares the loop record's `target_lole_h` / `goal_sources` with `envelope["goal"]`. Filed as [38](38-loop-goal-matches-grant.md).
 - P6 (Q3 → A under eh_site@2). Switching a granted @1 run's engine is an L8 change: ship eh_site@2 with run_coupling_loop (max_solves 3, restore base); PROFILES keeps @1 byte-equal (pin test against master), resolve keeps @1 for stored runs; new intakes use @2, and P5's goal param lives in @2's intake. A test that every reader of a profile id or version accepts @1 and @2 (#1132 F1). Loop solves = solves_used + probe_solves + closing re-solve, charged to the run; goal via active_loop_goal/horizon_years. Probe `_refusal` with the grant: listing run_coupling_loop for the harness's own step never admits it on a model turn (#1123).
 - P7. fetch_site_context, genset fuel price, import_urdb_tariff and run_investment_case (§9.3 diffs) are follow-ups, each filed under .scratch.
 - P8 (L7). smoke/accept_harness_pilot.py: a hard 300 s timeout in the driver itself; fake provider; a socket guard refusing any non-loopback connect, with a test that it trips; run only through the gui-qa-drivers task.
@@ -179,6 +182,35 @@ Slices: PR 1 = F-a, F-b, F-c with failing-first tests (the data-loss fix lands f
 - P10. Hand mutants plus `scripts/coord/mutants.py` on run_gates.py, killing tests named in the PR body.
 - P11. A report job is tied to a run only by the harness's own explicit launch; nothing infers a run from state.
 - P12. The release-note fragment states that a run granted before the change keeps eh_site@1.
+
+### GK B (33): stepwise pilot design, GO on A (S1–S6, verbatim in substance)
+
+A step-by-step verdict on an intake run creates the project through the same hand-over as the envelope path and grants nothing.
+- S1. Creating the project is a write, so the stepwise verdict card states "creates project <name> from this intake" and the digest. The hand-over runs only on that user click, on exactly the digest the card showed; a drift refuses as in the envelope path (tested in stepwise).
+- S2. Nothing is granted: no envelope reads granted, no approval is on record by an envelope, `run_envelope.admit` returns None for a later write. The pilot counts exactly one user card per write or run from the hand-over to the hand-off (equality).
+- S3. The same hand-over code, no fork: P1, P3 and P5 apply in stepwise. One parametrised test runs both verdicts against the host-unchanged and fingerprint assertions.
+- S4. The early return stays for every non-intake run, pinned by a test that a plain run's stepwise verdict calls no `_grant_setup`.
+- S5. Hand mutants with their killing tests: stepwise also grants the envelope; stepwise skips `_grant_setup` on intake; the digest check dropped in stepwise.
+- S6. L8 is not engaged: a decided run is past `decide()`, and an undecided stepwise intake run dead-ended before. Said in the PR body.
+- S1a. Until the card renders the intake and sends its digest ([37](37-plan-card-intake-rows.md)), an intake run's verdict, stepwise or envelope, refuses an absent digest (`intake_stale`), and a drifted one. The GUI cannot start an intake run until 37 lands.
+
+### GK B (33): capture of a stepwise run's own solve, GO on A (C1–C5)
+
+The stepwise pilot stopped at the result gate: only an envelope-admitted solve was captured, so `kpi.unserved_mwh` read `no_capture`. C (a user-accepted not_evaluated KPI) is refused (#1079).
+- C1. The capture is keyed on the step binding, never session state: only the run's own pending `solve_queue_enqueue` step (its call id, its frozen args), dispatched after its user card was approved. Any other call in a run session gets no capture.
+- C2. One capture path: `solve_capture.requested(run ctx)` with the same identity checks and the project-mismatch 409; the envelope path byte-unchanged, pinned by comparing a capture record from each path.
+- C3. Tests: the stepwise solve carries capture.exact and the pilot reaches hand-off with exactly one card per write or run; an ordinary chat or copilot solve gets no capture; the off-step call gets no capture; a denied card captures and enqueues nothing.
+- C4. Hand mutants with killing tests: drop the wrap; capture every solve in a run session; capture before the card approval.
+- C5. The seam is named in the PR body; a capture is evidence, never an admission.
+
+### GK B (33): stepwise engine card, GO on A (E1–E5)
+
+The engine step is carded in stepwise; `generate_report` (P11's explicit launch, no project input) and `read_handoff` need none.
+- E1. Through the existing confirmation path, recorded as a user approval, bound to the engine step's frozen args; it states the solve bound, the base restore and the charge to the run. Already B3a's `run_loops.card_engine` + `run_envelope.reserve_carded` (the result gate's card).
+- E2. Deny → waits for the user, zero solves, nothing reserved, no restore; a later Continue runs the loop once (`test_harness_engine_card.py`).
+- E3. The gate is "never granted", read from the run's own envelope record (`never_granted`); envelope mode has no card (`test_a_granted_run_never_takes_the_card_branch`). A granted-then-revoked run is not `never_granted`, so it keeps B3a's `no_envelope` stop.
+- E4. Pilot: cards == {solve.1, solve.2, result_gate.1}; harness launches == {report.1, handoff.1}; the engine step's settled solves == solves_used + probe_solves + the closing re-solve.
+- E5. Hand mutants: skip the card in stepwise; card also in envelope mode; deny still runs the loop.
 
 ## Folded from #970
 
