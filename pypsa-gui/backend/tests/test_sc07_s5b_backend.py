@@ -163,7 +163,9 @@ def test_anything_else_is_on_the_ground(on):
 def test_an_unknown_row_says_when_its_chain_could_not_be_read(monkeypatch, readable):
     """H6/U-c: a Resume check may read "not applied" only when the chain was read."""
     monkeypatch.setattr(proposals, "_entries", OrderedDict())
-    monkeypatch.setattr(chat, "_UNKNOWN", {(PROJECT.registry_key, OWNER, SITE, "u0"): None})
+    monkeypatch.setattr(
+        chat, "_UNKNOWN", {(PROJECT.registry_key, OWNER, SITE, "u0"): None}
+    )
 
     def committed(_directory, _site, _pid):
         if not readable:

@@ -161,8 +161,18 @@ def test_only_prepare_steps_name_previews_to_cancel():
     refs = {"apply_with": {"args": {"site_id": "campus", "proposal_id": "p1"}}}
     task = {
         "steps": [
-            {"id": "a", "tool": "site_scene_apply", "status": "completed", "result": refs},
-            {"id": "p", "tool": "site_scene_prepare", "status": "completed", "result": refs},
+            {
+                "id": "a",
+                "tool": "site_scene_apply",
+                "status": "completed",
+                "result": refs,
+            },
+            {
+                "id": "p",
+                "tool": "site_scene_prepare",
+                "status": "completed",
+                "result": refs,
+            },
         ]
     }
     assert tasks._own_previews(task) == [("p", "campus", "p1")]
