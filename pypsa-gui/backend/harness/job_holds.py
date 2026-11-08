@@ -51,9 +51,20 @@ Across sessions (N1; assistant-assurance issue 16, GK B (35) H1-H9):
   when the hold clears: on terminal evidence or an approved repeat card, never
   at the end of a chat. The registry is bounded by that: an entry whose
   future never ends stays until its repeat card is approved.
-- A row another process owns (another replica, or this one before a restart)
-  is left to slice S2, its owner-liveness lease; until then such a row is not
-  read, as before issue 16.
+- A row another process owns (another replica, or this process's own rows
+  from before a restart, read under its new replica id: H3) holds while its
+  owner's lease runs (slice S2, GK B (35) H1-H3, K1-K6). The owner writes
+  `lease_until` = now + `LEASE_SECONDS` at open and one renewer thread per
+  process extends it every `RENEW_SECONDS`. Once the lease has lapsed the row
+  clears by its tool's worker kind (`JOB_KINDS`, H1): in-process work, a solve
+  included (K1), died with its owner and clears; queue-backed work clears only
+  on its terminal `solve_jobs` row, or with no job id when no live row of its
+  kind was enqueued in its window (K3). Every clear of another owner's row is
+  a compare-and-delete on (id, owner, lease_until), so a renewal that landed
+  first wins (H2). A NULL lease (an S1 replica's row) lapses
+  `NULL_LEASE_BOUND_SECONDS` after the later of its opening and this process's
+  start (K2). Nothing clears on boot alone (H3); the renewer also sweeps
+  lapsed rows by the same rules.
 - A hold whose row could not be written (no saved project, or a failed write)
   stays on its chat only, and the call's result says so (H4). The window
   between a call starting and its timeout is unprotected across chats, as it
@@ -68,6 +79,7 @@ re-aborting is idempotent and a hold never blocks an abort (N2).
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 import uuid
@@ -114,13 +126,82 @@ class Hold:
     shared: bool = False  # its record was written; other chats can read it
     share_error: str | None = None  # why not, when it was not
     orphan: bool = False  # a record this process owns with no registry entry
+    foreign: bool = False  # a record another process owns, read by its lease
     unverified: bool = False  # the records could not be read (N4)
 
 
 # Issue 16: every shared hold's evidence in this process, by record id. An
-# entry leaves exactly when its record is deleted (`_forget`).
+# entry leaves exactly when its record is deleted (`_forget`), or when the
+# renewer finds its record cleared elsewhere (K4).
 _REGISTRY: dict[str, Hold] = {}
 _REGISTRY_LOCK = threading.Lock()
+
+# ── Worker kinds (S2, GK B (35) H1) ─────────────────────────────────────────
+# What a lapsed lease means for each job tool. INPROC and INPROC_SOLVER work
+# runs on a thread or future of the owner process and dies with it; a solve's
+# cbc/glpk child may outlive it, spending CPU with no one to read its result
+# (K1, Q1 = (a): a named residual), and so may the queued per-case solves a
+# dead orchestrator thread enqueued (run_decision_study,
+# campus_apply_island_cuts). QUEUE work is a `solve_jobs` row the queue
+# runs, or a restart reconciles to `interrupted`, whoever made the call.
+INPROC = "inproc"
+INPROC_SOLVER = "inproc+solver"
+QUEUE = "queue"
+JOB_KINDS: dict[str, str] = {
+    "apply_project_changes": INPROC,
+    "campus_apply_island_cuts": INPROC,
+    "generate_availability_profile": INPROC,
+    "generate_load_profile": INPROC,
+    "generate_report": INPROC,
+    "generate_series_profile": INPROC,
+    "preview_default_series": INPROC,
+    "propose_report_mapping": INPROC,
+    "refine_generated_profile": INPROC,
+    "regenerate_report_section": INPROC,
+    "run_investment_case": INPROC,  # values a solved dispatch; no LP
+    "run_mc_study": INPROC,  # solves nothing
+    "campus_start_milp": INPROC_SOLVER,
+    "run_ac_pf_stage": INPROC_SOLVER,
+    "run_coupling_loop": INPROC_SOLVER,
+    "run_decision_study": INPROC_SOLVER,
+    "run_eh_study": INPROC_SOLVER,
+    "run_fmea_sweep": INPROC_SOLVER,
+    "run_frontier_study": INPROC_SOLVER,
+    "run_margin_loop": INPROC_SOLVER,
+    "run_simulation": INPROC_SOLVER,
+    "campus_recommend_gfm_settings": QUEUE,
+    "campus_run_study": QUEUE,
+    "generate_renewable_profile": QUEUE,  # a `profile_gen` job
+    "gridspine_run_pipeline": QUEUE,
+    "run_sensitivity_sweep": QUEUE,
+    "solve_queue_enqueue": QUEUE,
+    "solve_queue_requeue": QUEUE,
+}
+# The `solve_jobs.kind` values each QUEUE tool enqueues (NULL reads `solve`).
+QUEUE_JOB_KINDS: dict[str, tuple[str, ...]] = {
+    "campus_recommend_gfm_settings": ("campus",),
+    "campus_run_study": ("campus",),
+    "generate_renewable_profile": ("profile_gen",),
+    "gridspine_run_pipeline": ("gridspine",),
+    "run_sensitivity_sweep": ("solve",),
+    "solve_queue_enqueue": ("solve",),
+    "solve_queue_requeue": ("solve", "gridspine", "campus", "profile_gen"),
+}
+
+RENEW_SECONDS = 30.0  # three renewals per lease
+# K2: how long an S1 replica (which writes NULL leases) can outlive the start
+# of a process that reads leases: a rolling deploy's length, with margin. An
+# S1 hold has no finite end, so the bound runs from the later of the row's
+# opening and this process's start, never from the opening alone.
+NULL_LEASE_BOUND_SECONDS = 3600.0
+_STARTED_AT = time.time()
+
+
+def lease_seconds() -> float:
+    """The lease length, shared with the durable runner (`runner.LEASE_SECONDS`)."""
+    from harness import runner
+
+    return float(runner.LEASE_SECONDS)
 
 UNSHARED_NOTE = (
     "This hold is kept in this chat only: another chat on this project is not "
@@ -202,6 +283,7 @@ def _share(hold: Hold) -> None:
             opened_at=hold.opened_at,
             opened_by=user,
             owner_replica_id=security.replica_id(),
+            lease_until=time.time() + lease_seconds(),
         )
     except Exception as exc:  # noqa: BLE001 - the call already ran; say so (H4)
         hold.share_error = type(exc).__name__
@@ -215,6 +297,10 @@ def _share(hold: Hold) -> None:
     hold.project_id, hold.opened_by, hold.shared = project, user, True
     with _REGISTRY_LOCK:
         _REGISTRY[hold.id] = hold
+    try:
+        ensure_renewer()
+    except Exception as exc:  # noqa: BLE001 - the lease then lapses; say why
+        logger.error("job hold renewer not started: %s", type(exc).__name__)
 
 
 def unshared_note(hold: Hold | None) -> str | None:
@@ -388,6 +474,9 @@ def terminal(hold: Hold) -> bool:
         # Its only evidence is the record: gone once another chat's approved
         # repeat card deleted it.
         return not job_hold_store.exists(hold.id)
+    if hold.foreign:
+        record = job_hold_store.get(hold.id)
+        return record is None or clear_foreign(record, time.time())
     # Chats share a registry hold: read each field once (another chat may
     # hand the future over to the job id meanwhile).
     future = hold.future
@@ -410,6 +499,121 @@ def terminal(hold: Hold) -> bool:
         thread = _live_solve_thread()
         return thread is None or not _alive(thread)
     return False
+
+
+# ── Another owner's records: the lease (S2) ─────────────────────────────────
+
+
+def lapsed(record: job_hold_store.Record, now: float) -> bool:
+    """Whether the record's owner stopped renewing it. A NULL lease (an S1
+    replica's row) lapses only K2's bound after this process started."""
+    if record.lease_until is not None:
+        return now > record.lease_until
+    return now > max(record.opened_at, _STARTED_AT) + NULL_LEASE_BOUND_SECONDS
+
+
+def _ended_with_owner(record: job_hold_store.Record) -> bool:
+    """H1: whether the lapsed owner's operation has ended, by its tool's kind.
+    Any read that fails raises; an unknown tool never ends here."""
+    kind = JOB_KINDS.get(record.tool)
+    if kind in (INPROC, INPROC_SOLVER):
+        return True  # it died with its owner (K1: a solver child may not)
+    if kind != QUEUE:
+        return False
+    if record.job_id is not None:
+        from services.solve_queue import _TERMINAL
+
+        return job_hold_store.solve_job_status(record.job_id) in _TERMINAL
+    from harness import budget
+
+    # K3: the call may have enqueued at any time from its start, which was up
+    # to a tool timeout before the hold opened, give or take the clock skew
+    # between replicas (allowed one lease).
+    since = record.opened_at - budget.PER_TOOL_TIMEOUT_SECONDS - lease_seconds()
+    return not job_hold_store.live_solve_jobs(
+        record.project_id, QUEUE_JOB_KINDS[record.tool], since
+    )
+
+
+def clear_foreign(record: job_hold_store.Record, now: float) -> bool:
+    """Clear another owner's record once its lease lapsed and its operation
+    ended (H1), by compare-and-delete (H2). True when the record is gone;
+    False while it holds. Raises when a read fails."""
+    if not lapsed(record, now) or not _ended_with_owner(record):
+        return False
+    job_hold_store.delete_if(record.id, record.owner_replica_id, record.lease_until)
+    return not job_hold_store.exists(record.id)
+
+
+def _renew() -> None:
+    """Extend this process's leases. A record cleared elsewhere is lost: the
+    log says so and it is never written again (K4)."""
+    import security
+
+    me = security.replica_id()
+    with _REGISTRY_LOCK:
+        holds = list(_REGISTRY.values())
+    for hold in holds:
+        try:
+            kept = job_hold_store.renew(hold.id, me, time.time() + lease_seconds())
+        except Exception as exc:  # noqa: BLE001 - the next tick tries again (H2)
+            logger.warning("job hold %s not renewed: %s", hold.id, type(exc).__name__)
+            continue
+        if not kept:
+            logger.warning("job hold lost: %s on %s was cleared elsewhere", hold.id, hold.tool)
+            with _REGISTRY_LOCK:
+                if _REGISTRY.get(hold.id) is hold:
+                    del _REGISTRY[hold.id]
+
+
+def _sweep() -> None:
+    """Clear other owners' lapsed records by the same rules as a read."""
+    import security
+
+    now = time.time()
+    for record in job_hold_store.foreign(security.replica_id()):
+        try:
+            clear_foreign(record, now)
+        except Exception as exc:  # noqa: BLE001 - the record stays (N4)
+            logger.warning("job hold %s not swept: %s", record.id, type(exc).__name__)
+
+
+def renew_tick() -> None:
+    """One renewer tick: renew, then sweep. Never raises (H2)."""
+    for step in (_renew, _sweep):
+        try:
+            step()
+        except Exception as exc:  # noqa: BLE001 - the renewer keeps running
+            logger.warning("job hold %s failed: %s", step.__name__, type(exc).__name__)
+
+
+_RENEWER_LOCK = threading.Lock()
+_RENEWER: tuple[int, threading.Thread] | None = None
+
+
+def _renew_loop() -> None:
+    while True:
+        time.sleep(RENEW_SECONDS)
+        try:
+            renew_tick()
+        except Exception:  # noqa: BLE001 - never ends the renewer (H2)
+            logger.exception("job hold renewer tick failed")
+
+
+def ensure_renewer() -> threading.Thread:
+    """The process's one renewer, started on its first hold write and keyed by
+    pid, so a forked worker starts its own (K5). Never started at import."""
+    global _RENEWER
+    pid = os.getpid()
+    with _RENEWER_LOCK:
+        if _RENEWER is not None and _RENEWER[0] == pid:
+            return _RENEWER[1]
+        thread = threading.Thread(
+            target=_renew_loop, name="job-hold-renewer", daemon=True
+        )
+        thread.start()
+        _RENEWER = (pid, thread)
+        return thread
 
 
 # ── The check (P2) ───────────────────────────────────────────────────────────
@@ -458,12 +662,29 @@ def _unverified(tool, binding) -> Hold:
     )
 
 
+def _from_record(record, binding, project, **flags) -> Hold:
+    return Hold(
+        id=record.id,
+        tool=record.tool,
+        binding=binding,
+        fingerprint=record.fingerprint,
+        tool_use_id="",
+        opened=record.opened,
+        opened_at=record.opened_at,
+        job_id=record.job_id,
+        project_id=project,
+        opened_by=record.opened_by,
+        shared=True,
+        **flags,
+    )
+
+
 def _record_hold(session, tool, fingerprint) -> Hold | None:
     """Issue 16: a hold another chat of this process opened on this project,
     read from its record. A row this process owns is checked on its
     registry evidence and, while open, adopted into this chat; one with no
     registry entry holds. A failed read holds (N4, H6). Rows of another
-    process wait for S2's lease."""
+    process hold while their owner's lease runs (`clear_foreign`)."""
     binding = _current_binding()
     if binding is _UNREADABLE:
         return _unverified(tool, binding)
@@ -480,24 +701,23 @@ def _record_hold(session, tool, fingerprint) -> Hold | None:
         return _unverified(tool, binding)
     for record in records:
         if record.owner_replica_id != me:
-            continue  # S2: another process's evidence, read by its lease
+            try:
+                gone = clear_foreign(record, time.time())
+            except Exception as exc:  # noqa: BLE001 - unreadable evidence holds (N4)
+                logger.warning(
+                    "job hold %s evidence unreadable: %s", record.id, type(exc).__name__
+                )
+                gone = False
+            if gone:
+                continue
+            hold = _from_record(record, binding, project, foreign=True)
+            with session._lock:
+                _holds(session)[(binding, tool)] = hold
+            return hold
         with _REGISTRY_LOCK:
             hold = _REGISTRY.get(record.id)
         if hold is None:
-            hold = Hold(
-                id=record.id,
-                tool=tool,
-                binding=binding,
-                fingerprint=record.fingerprint,
-                tool_use_id="",
-                opened=record.opened,
-                opened_at=record.opened_at,
-                job_id=record.job_id,
-                project_id=project,
-                opened_by=record.opened_by,
-                shared=True,
-                orphan=True,
-            )
+            hold = _from_record(record, binding, project, orphan=True)
         else:
             try:
                 ended = terminal(hold)
