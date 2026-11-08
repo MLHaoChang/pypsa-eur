@@ -11,6 +11,7 @@ An absent entry means "not recorded", which is not the same as `default` (ADR-00
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterable
 from typing import Any
 
@@ -127,6 +128,31 @@ def _verdict(n, component_class: str, name: str, scaled) -> dict | None:
             "current": value, "reason": "scale input changed"}
 
 
+#: An applied Library reference's source (`reference_apply.source_id`).
+_REFERENCE_SOURCE = re.compile(r"^(?P<id>[^#/]+)#(?P<hash>[0-9a-f]{16})/(?P<technology>.+)@(?P<year>\d{4})$")
+
+
+def _dc_reference_unrecorded(component_class: str, entry: dict) -> str | None:
+    """A Library reference applied before TCU-05 recorded no scale input. Only a Generator takes
+    a DC-priced reference (every other class refuses `output_electric_dc`), so its source is
+    looked up: a DC reference, or one this build cannot read back, is not recorded (a reason);
+    an AC or other basis reads fresh (None)."""
+    if component_class != "Generator" or entry.get("status") != "customised" or not entry.get("approved_by"):
+        return None
+    m = _REFERENCE_SOURCE.match(str(entry.get("source") or ""))
+    if m is None:
+        return None
+    from services.library import europe_reference as R
+
+    try:
+        ref = R.load_europe_technology_reference(m["technology"], int(m["year"]))
+    except Exception:  # noqa: BLE001 - any failure to read it back: the basis is unknown
+        return "scale input not recorded (the applied reference cannot be read back)"
+    if ref.reference_id != m["id"] or ref.reference_hash[:16] != m["hash"]:
+        return "scale input not recorded (the applied reference is from another release)"
+    return "scale input not recorded" if ref.capacity_basis_code == "output_electric_dc" else None
+
+
 def _priced_by_scaling_rule(component_class: str, entry: dict) -> bool:
     """A pack price (status default, annotated with its row's capacity basis) whose rule scales."""
     from services.library.defaults_pack.pricing import _CLASS, SCALED_RULES, scale_rule
@@ -160,6 +186,8 @@ def staleness(n, component_class: str, name: str, entries: dict[str, dict]) -> d
             verdict = _verdict(n, component_class, name, scaled)
         elif _priced_by_scaling_rule(component_class, basis):
             verdict = dict(_NOT_RECORDED)
+        elif (why := _dc_reference_unrecorded(component_class, basis)) is not None:
+            verdict = {**_NOT_RECORDED, "reason": why}
         else:
             verdict = None
         if verdict is not None:

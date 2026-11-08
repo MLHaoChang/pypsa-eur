@@ -24,6 +24,16 @@ from tests.test_library_defaults_pack_typed_units import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_caches():
+    """`_copy_with` edits a tmp pack that the loader caches: clear it so no other module reads it."""
+    from services.library.defaults_pack import loader
+
+    yield
+    loader._cached.cache_clear()
+    loader._cached_region.cache_clear()
+
+
 def _pv(tmp_path, monkeypatch, ratio=1.2):
     from services.library.defaults_pack.pricing import price_from_pack
 
@@ -480,3 +490,113 @@ def test_a_malformed_scale_record_reads_stale_not_a_500(
         r.json()["fields"]["overnight_cost"]["stale"]["reason"]
         == "scale input record malformed"
     )
+
+
+# ── T5-3: a Library reference applied before TCU-05 recorded no scale input ──
+
+
+def _applied_before_this(monkeypatch, *, dc: bool, source=None):
+    from services.library import europe_reference as R
+    from services.library import reference_apply as RA
+
+    real = R.load_europe_technology_reference
+    if dc:
+        monkeypatch.setattr(
+            R,
+            "load_europe_technology_reference",
+            lambda t, y: real(t, y).model_copy(
+                update={"capacity_basis_code": "output_electric_dc"}
+            ),
+        )
+    n = pypsa.Network()
+    n.add("Bus", "b", carrier="AC")
+    n.add("Generator", "pv", bus="b", carrier="solar", p_nom=10.0)
+    n.generators["dc_ac_ratio"] = float("nan")
+    n.generators.at["pv", "dc_ac_ratio"] = 1.3
+    p = {
+        "component_class": "Generator",
+        "name": "pv",
+        "attrs": {"overnight_cost": 1.3e5, "lifetime": 30.0, "fom_cost": 2e3},
+        "source": source or RA.source_id(real("solar-utility", 2030)),
+        "source_year": 2024,
+        "replaces": None,
+        "currency": "EUR",
+        "currency_year": 2024,
+    }  # no scaled_by: as before TCU-05
+    RA.stamp(n, p, approved_by="a@b")
+    return n
+
+
+def test_a_dc_reference_applied_before_this_reads_scale_input_not_recorded(monkeypatch):
+    n = _applied_before_this(monkeypatch, dc=True)
+    s = _stale(n, "Generator", "pv")
+    for field in ("overnight_cost", "fom_cost"):
+        assert (
+            s[field]["reason"] == "scale input not recorded"
+            and s[field]["field"] is None
+        )
+    assert s["lifetime"] is None
+
+
+def test_an_ac_reference_applied_before_this_reads_fresh(monkeypatch):
+    n = _applied_before_this(monkeypatch, dc=False)
+    assert _stale(n, "Generator", "pv") == {
+        f: None for f in P.get(n, "Generator", "pv")
+    }
+
+
+def test_a_reference_from_another_release_reads_not_recorded(monkeypatch):
+    n = _applied_before_this(
+        monkeypatch,
+        dc=False,
+        source="eu-dea-2026-08#" + "0" * 16 + "/solar-utility@2030",
+    )
+    assert _stale(n, "Generator", "pv")["overnight_cost"]["reason"].endswith(
+        "is from another release)"
+    )
+    n = _applied_before_this(
+        monkeypatch,
+        dc=False,
+        source="eu-dea-2025-01#" + "0" * 16 + "/solar-utility@2030",
+    )
+    assert _stale(n, "Generator", "pv")["overnight_cost"]["reason"].endswith(
+        "is from another release)"
+    )
+
+
+def test_a_reference_that_cannot_be_read_back_reads_not_recorded(monkeypatch):
+    n = _applied_before_this(
+        monkeypatch,
+        dc=False,
+        source="eu-dea-2026-08#" + "0" * 16 + "/no-such-tech@2030",
+    )
+    assert _stale(n, "Generator", "pv")["overnight_cost"]["reason"].endswith(
+        "cannot be read back)"
+    )
+
+
+def test_an_edited_reference_value_reads_fresh(monkeypatch):
+    """A later edit drops the approval: the value is the user's own, not the reference's."""
+    n = _applied_before_this(monkeypatch, dc=True)
+    P.mark_customised(n, "Generator", "pv", ["overnight_cost", "fom_cost"])
+    s = _stale(n, "Generator", "pv")
+    assert s["overnight_cost"] is None and s["fom_cost"] is None
+
+
+def test_a_link_reference_is_never_looked_up(monkeypatch):
+    from services.library import europe_reference as R
+
+    n = _fc()
+    P.record(
+        n,
+        "Link",
+        "fc",
+        "overnight_cost",
+        status="customised",
+        approved_by="a@b",
+        source="eu-dea-2026-08#" + "0" * 16 + "/fuel-cell@2030",
+    )
+    monkeypatch.setattr(
+        R, "load_europe_technology_reference", lambda *a: pytest.fail("looked up")
+    )
+    assert _stale(n, "Link", "fc")["overnight_cost"] is None
