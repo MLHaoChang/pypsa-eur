@@ -386,7 +386,10 @@ try {
   report.ack = ack.seen
   report.scene_reads = sceneRoute.reads
   assert.equal(report.rewritten.length, 4, 'four partial task frames rewritten')
-  assert(ack.seen.includes('real') && ack.seen.includes('hold') && ack.seen.includes('409'), `ACK routes used: ${ack.seen}`)
+  // "hold" passes the real ACK through after the delay, so "Opened" rests on a real 2xx answer.
+  assert(ack.seen.includes('hold') && ack.seen.includes('409'), `ACK routes used: ${ack.seen}`)
+  assert(ack.bodies.some(b => /^2\d\d /.test(b)), `a real ACK answered 2xx: ${ack.bodies}`)
+  report.ack_bodies = ack.bodies
   assert.deepEqual(errors, [])
   result = { passed: true, seconds: Math.round((Date.now() - started) / 1000), report, screenshots: shots }
   await context.close()
@@ -396,4 +399,5 @@ try {
   if (process.env.SC07S5B_KEEP) console.error(`kept ${temp}`)
   else await fs.rm(temp, { recursive: true, force: true })
 }
+await fs.writeFile(path.join(out, 'report.json'), JSON.stringify(result, null, 2) + '\n')
 console.log(JSON.stringify(result, null, 2))
