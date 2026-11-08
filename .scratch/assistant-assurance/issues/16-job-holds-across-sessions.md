@@ -94,3 +94,31 @@ H1–H3. One PR each.
   left out of approved-card handling; owner == me without a registry entry
   read as clear; in S2, a lapse clearing a durable family; a renewal ignored in
   the compare-and-delete.
+
+### 2026-11-08: S1 merged (#1274); S2 plan conditions K1–K6 (GK B (36), confirmed by GK B (37))
+
+S2 (the cross-replica lease and restart) builds on the plan above, with H1–H3
+and H9, and these conditions:
+
+- K1 (Q1 = (a)). A tool that solves (it may leave a cbc/glpk child) clears on
+  its owner's lease lapse like in-process work. The orphaned solver child's CPU
+  use is a named residual, in `harness/README.md` and here.
+- K2. A NULL `lease_until` row from another owner is not lapsed at once: a live
+  S1 replica in a rolling deploy writes NULL rows. Either (a) it lapses at
+  `opened_at` + a stated bound, tested at the bound −1 s / +1 s, or (b) evidence
+  that every deploy restarts all replicas together, stated in the README. GK
+  prefers (a). An S1 hold has no finite end (a never-done future is held until
+  its card), so the bound rests on deploy duration, not hold length.
+- K3. A queue tool with no job id compares enqueue time to
+  `opened_at − LEASE_SECONDS`, because of clock skew; a test pins that the
+  hold row is written before the enqueue.
+- K4. Renewal is `UPDATE … WHERE id = ? AND owner_replica_id = <self>`, never
+  an upsert. Zero rows: log "hold lost", never re-create. Tested.
+- K5. The renewer starts lazily on a process's first hold write, keyed by
+  `os.getpid()`, never at import (gunicorn preload forks). Tests: one per pid;
+  a changed pid starts a new one.
+- K6. The PR body cites file:line for each queue and inproc+solver tool's
+  classification; one test per kind runs a real tool of that kind, and the
+  queue one shows a `solve_jobs` row tied to the hold's job id.
+- Also: the sweep uses the same compare-and-delete as the clear; a sweep tick
+  that raises deletes nothing and still renews on the next tick.
