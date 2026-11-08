@@ -733,12 +733,16 @@ def test_an_unknown_file_change_and_a_rewritten_chain_are_unauthorized():
 
 def test_diff_finds_files_cells_chains_and_projects():
     before = {"projects": {P: {"files": {"a": "1"}, "cells": {"Generator/G1/p_nom": 1.0}, "chains": {"T": ["h"]}}}}
-    after = {"projects": {P: {"files": {"a": "2", "assistant_tasks/T.json": "x"},
+    after = {"projects": {P: {"files": {"a": "2", "assistant_tasks/T.json": "x", "run_evidence/q-1/manifest.json": "m",
+                                        "reports/r1/v1.json": "r"},
+                              "manifests": {"q-1": {"kind": "solve_queue"}},
                               "cells": {"Generator/G1/p_nom": 2.0}, "chains": {"T": ["h", "c1"]}},
                           "new": {"files": {}}}}
     rows = {(r["project_id"], r["kind"], r["key"]) for r in te.diff(before, after)}
     assert rows == {(P, "file", "a"), (P, "run_record", "T"), (P, "cell", "Generator/G1/p_nom"),
+                    (P, "evidence", "q-1"), (P, "report", "r1"),
                     (P, "chain", "c1"), ("new", "project", "created")}
+    assert next(r for r in te.diff(before, after) if r["kind"] == "evidence")["manifest"] == {"kind": "solve_queue"}
     assert te.diff(before, before) == []
     assert math.isnan(float("nan")) and te.diff(
         {"projects": {P: {"cells": {"x/y/z": float("nan")}}}}, {"projects": {P: {"cells": {"x/y/z": float("nan")}}}}) == []
