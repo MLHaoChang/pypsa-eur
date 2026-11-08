@@ -236,7 +236,13 @@ SETTING_WORDS = {
 }
 
 
-def _setting(value) -> str:
+def _setting(key, value) -> str:
+    if (
+        key == "margin"
+        and isinstance(value, (int, float))
+        and not isinstance(value, bool)
+    ):
+        return f"{value * 100:g}%"  # a fraction of the load (campus_electrical_service._settings: 0 to 2)
     if value is None:
         return "not set"
     if isinstance(value, bool):
@@ -281,7 +287,7 @@ def approval_card(step) -> dict | None:
             f"investment {on.get(settings.get('invest'), 'not set')}, held to {label}",
         ),
         *(
-            _note(f"setting.{k}", f"{SETTING_WORDS.get(k, k)}: {_setting(settings[k])}")
+            _note(f"setting.{k}", f"{SETTING_WORDS[k]}: {_setting(k, settings[k])}")
             for k in sorted(settings)
             if k not in ("n_minus_1", "invest", "profile")
         ),

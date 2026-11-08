@@ -999,7 +999,7 @@ def test_the_approval_card_names_what_the_step_is_held_to(hub):  # noqa: F811
         "Grid-code profile: SAGC data centre",
         "Campus study settings: N-1 on, investment on, held to SAGC data centre",
         "Contingency depth (k): 3",
-        "Sizing margin: 0.2",
+        "Sizing margin: 20%",
         "PCC switchgear owned by the operator: no",
         "PCC transformer taps moved by: campus",
         "Power factor: not set",
@@ -1380,3 +1380,12 @@ def test_a_seam_deny_starts_nothing(hub, monkeypatch):  # noqa: F811
         hub, monkeypatch, seam=lambda task_id, ref, args: "deny"
     )
     assert out == "waiting" and started == []
+
+
+def test_every_campus_setting_has_its_words():
+    """UX (14): no raw key on the card; each frozen setting outside the settings row has words."""
+    assert set(run_actions.SETTING_WORDS) == set(ce.DEFAULTS) - {
+        "n_minus_1",
+        "invest",
+        "profile",
+    }
