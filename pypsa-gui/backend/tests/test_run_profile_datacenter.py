@@ -419,11 +419,8 @@ def test_the_frequency_rule(tmp_path, monkeypatch, f_hz, given, verdict):
         assert result["reason"] == "draft the campus"
 
 
-def test_the_frequency_param_is_never_a_template_param_and_never_tunable():
-    from services import run_intake
-
-    rows = [{"param": run_gates.FREQUENCY_PARAM, "value": "60", "status": "confirmed"}]
-    assert run_intake.params(rows) == {}
+def test_the_frequency_param_is_never_tunable():
+    # Its intake (and keeping it out of the template's params) comes with 10b's DC chat intake.
     with pytest.raises(run_profiles.ProfileError):
         run_profiles._check_tunable([{"component": "Settings", "attr": "frequency"}])
 
