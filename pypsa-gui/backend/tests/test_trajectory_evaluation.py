@@ -126,15 +126,12 @@ def _lines(root: Path) -> set[str]:
     }
 
 
-def _logs(root: Path) -> dict[str, list[str]]:
-    """Each session event log, its lines in order (a call's project is read
-    from its own log)."""
+def _logs(root: Path) -> list[str]:
+    """Each session event log's path (a call's project is read from its own
+    log, by the harness's own reader)."""
     if not root.is_dir():
-        return {}
-    return {
-        str(path): [line for line in path.read_text().splitlines() if line.strip()]
-        for path in sorted(root.rglob("*.jsonl"))
-    }
+        return []
+    return [str(path) for path in sorted(root.rglob("*.jsonl"))]
 
 
 def snapshot(networks=None, roots=None) -> dict:
@@ -151,7 +148,6 @@ def snapshot(networks=None, roots=None) -> dict:
     return {
         "projects": projects,
         "approvals": _lines(approvals._root()),
-        "events": _lines(eventlog._root()),
         "event_logs": _logs(eventlog._root()),
         "dirs": {
             pid: str(root) for pid, root in {**_project_dirs(), **(roots or {})}.items()
@@ -188,10 +184,13 @@ def native_ledgers(before: dict, after: dict, *, requests=(), actors=()) -> dict
     # session (`run:<task id>`, harness/runner.py) to its task's project, a
     # chat session to its latest `turn/start` project (harness/eventlog.py).
     calls = {}
-    for lines in after["event_logs"].values():
-        records = [json.loads(line) for line in lines]
+    for path in after["event_logs"]:
+        # eventlog's own reader: a torn final write (a batch that never
+        # landed, as another test may leave one) is dropped, anything else
+        # malformed raises.
+        records = eventlog.read_events(Path(path))
         session_id = str(
-            next((r.get("session_id") for r in records if "format" in r), "")
+            (eventlog.read_header(Path(path)) or {}).get("session_id") or ""
         )
         run_project = (
             task_projects.get(session_id.removeprefix(harness_runner.SESSION_PREFIX))
@@ -1573,3 +1572,31 @@ def test_an_identity_check_is_listed_but_another_read_on_its_thread_counts(
         _obs(case, resolved=[P], identity_reads=[decoy]),
     )
     assert scored["wrong_project_results"] == 0 and scored["identity_reads"] == [decoy]
+
+
+def test_a_torn_event_log_beside_the_case_is_read_as_the_harness_reads_it(
+    tmp_path, monkeypatch
+):
+    """CI: another test can leave a session log whose last batch never landed
+    (a torn final line). The ledgers read it with eventlog's own reader, so
+    the torn tail is dropped and the calls before it still count."""
+    monkeypatch.setattr(eventlog, "_root", lambda: tmp_path)
+    header = {"format": eventlog.FORMAT, "session_id": "chat-1"}
+    start = {"seq": 1, "type": "turn/start", "project": P}
+    attempt = {
+        "seq": 2,
+        "type": "assistant/attempt",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "tu-1", "name": "x", "input": {}}],
+        },
+    }
+    log = tmp_path / "o" / "s.jsonl"
+    log.parent.mkdir()
+    log.write_text(
+        "\n".join(json.dumps(r) for r in (header, start, attempt))
+        + '\n{"seq": 3, "type": "tool/res'
+    )
+    after = {"event_logs": _logs(tmp_path), "approvals": set(), "dirs": {}}
+    calls = native_ledgers({"approvals": set()}, after)["calls"]
+    assert calls == {"tu-1": {"name": "x", "input": {}, "project_id": P}}
