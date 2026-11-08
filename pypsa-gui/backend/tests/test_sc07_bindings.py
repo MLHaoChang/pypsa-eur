@@ -138,7 +138,13 @@ def test_a_chat_placement_changes_the_scene_only(client, site):
         "campus", "place_existing", revision(client), PLACE
     )
     assert prep["summary"]["placements"] == [
-        {"item": "StorageUnit:bess", "x": 60.0, "y": -50.0, "heading": 0}
+        {
+            "item": "StorageUnit:bess",
+            "x": 60.0,
+            "y": -50.0,
+            "heading": 0,
+            "where": "on the ground",
+        }
     ]
     before = client.get("/api/network/storage_units").json()
     chat_tools.site_scene_apply(**args_of(prep))
@@ -498,16 +504,13 @@ def test_the_card_names_the_picked_target_and_how_many_it_was_picked_from(
     assert prep["summary"]["associations"][0]["picked_from"] == 2
     text = repr(edit_card.preview("site_scene_apply", args_of(prep)))
     bus = "heat" if picked == "heat_demand" else "B1"
-    assert f"{picked} · load (Load on bus {bus}" in text and "MW" in text
+    assert f"{picked} · load (bus “{bus}”" in text and "MW" in text
     assert "Picked from 2 candidates" in text
 
 
 def test_a_target_named_without_a_clarify_says_nothing_about_a_pick(client, site):
     text = repr(edit_card.preview("site_scene_apply", args_of(bind(client, IT))))
-    assert (
-        "it · load (Load on bus B1, carrier AC, MW)" in text
-        and "Picked from" not in text
-    )
+    assert "it · load (bus “B1”, carrier AC, MW)" in text and "Picked from" not in text
 
 
 def test_a_clarify_answers_one_pick_only(client, site):
@@ -604,6 +607,7 @@ def test_a_scene_apply_of_a_model_action_changes_no_model_value(client, site, ac
             "name": "L1",
             "was": "it",
             "feature": A,
+            "where": "Proposed building 1",
         }
     before = _model_state()
     out = chat_tools.site_scene_apply(**args_of(prep))
@@ -741,7 +745,7 @@ def test_a_placement_and_a_rebind_card_name_the_unit(client, site):
             "campus", "place_existing", revision(client), PLACE
         )
     )
-    assert "bess · storage unit (StorageUnit on bus B1, carrier AC, MW)" in repr(
+    assert "bess · storage unit (bus “B1”, carrier AC, MW)" in repr(
         edit_card.preview("site_scene_apply", place)
     )
     chat_tools.site_scene_apply(**args_of(bind(client, IT)))
@@ -756,7 +760,7 @@ def test_a_placement_and_a_rebind_card_name_the_unit(client, site):
             "confirmed": True,
         },
     )
-    assert "L1 · load (Load on bus B1, carrier AC, MW)" in repr(
+    assert "L1 · load (bus “B1”, carrier AC, MW)" in repr(
         edit_card.preview("site_scene_apply", args_of(rebind))
     )
 

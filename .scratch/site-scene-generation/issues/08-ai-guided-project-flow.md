@@ -122,3 +122,35 @@ GK B (33), `session_01G7qCukLe9Nbb6fsN1EwMTV`, on SC-07 (3)'s S4 plan: chat prep
 - **H8, mutants.** The plan's three, plus: clarify returning the first candidate; H6's cancel on a failed read; H4's guard if one is added. Then `mutants.py` on chat.py's changed lines, survivors named in the PR body.
 
 One PR, GK B's area. Send the head to GK B.
+
+### 2026-11-07: S5 plan GO (UX (13); GK B (34) with changes J1–J6)
+
+SC-07 (5), `session_01G7qCungUYyBRNqihmHTZqW`. Plan: R1 the receipt reads back each binding, R2 words not scene ids, R3 the partial outcome on the task card, R4 the unknown outcome, R5 Resume in Site 3D, R6 pending then Opened on the browser ACK.
+
+UX (13), `session_01G7qCuib7jBi7bz9ToMaouW`: Resume is one line in the S2 companion row, shown only with something to resume. Split (U1): **S5a** holds R1, R2 and R4 (led by GK B, UX checks the words); **S5b** holds R3, R5 and R6 (UX). Conditions:
+1. buildingLabel built once in the backend with a parity test, KIND_WORDS, curly quotes for user names; no scene id or class key in any receipt line or Resume "Found:" line.
+2. R3: "Done: <model edit words>. Not done: the 3D site mapping (<reason>)." with the reason in plain words; "Prepare the mapping again" is a button with no "›".
+3. R4: no Approve again; "Check the 3D site" shows "Checking…" until the answer arrives, never a success word before it.
+4. R5: the result in `role="status"`; "Review it in chat ›" is a jump, "Prepare it again" a button; "revision N" only if Site 3D shows the revision; the line clears after a fresh read once its condition ends.
+5. R6: pending, then "Opened" only on the ACK, else "Could not confirm the 3D site opened"; withReturn and the mode-aware opener; Back to Site 3D restores the selection.
+6. Receipt wording: colon or full stop only, "›" only on real links; "Not found on the site" uses the existing uncertain wording.
+7. Shots per PR in Guided and Expert with the real API and route mocks. S5a: a receipt with all four row kinds, an uncertain receipt, the unknown-outcome card. S5b: the partial task card, each Resume "Found" state, Resume absent, the pending and "Opened" states, the Back pill.
+
+GK B (34), `session_01G7qCumPpRCKKA8Rskye7ef`, B3 = option (a), an owner-scoped `my_previews` on the scene GET and on `site_scene_read`:
+
+- J1 (B1, read-back). A receipt row reads back what the preview planned, not only that something is present. For each target:
+  - the binding or placement on disk after commit must equal the planned one (class, name, bus, carrier, the feature; for a placement x/y/heading/on);
+  - for detach / undo_detach, the item must be off the site (or back on it) with its attachments as planned.
+  A missing or different target makes the outcome uncertain, never verified. Read from disk under PyPSAService.get_lock, never from apply's return value. Each row names the fields it did not compare (#1170 revision). A "done" count counts only rows this apply changed: a `keep` step is not done (#1175 E2).
+- J2 (B1, tests). Per action: found → verified; target gone after commit → uncertain; target present but different (another load bound, a moved placement) → uncertain. Hand mutants beyond yours: compare presence only; count keep rows as done.
+- J3 (B2, labels). A label is user-authored: G5 fence and cap, and it never reaches a model value. Two features with the same visible label must stay distinguishable on the card and the receipt (add the id or an index when labels collide), with a test. Stored keys and fingerprints are unchanged, as you say.
+- J4 (B3, my_previews). Owner-scoped:
+  - only the caller's previews, and never another owner's, even with the same id;
+  - capped at MAX_LIVE_PER_OWNER;
+  - status reads the chain first (H6), so a landed commit is applied even when the preview was cancelled or its marker evicted;
+  - `cancelled` with no receipt is not listed, and an expired one neither.
+  Tests: two owners; unknown marker → outcome_unknown, then applied once the receipt reads back; a cancelled preview whose commit landed → applied.
+- J5 (B3, read surfaces). The scene GET has no server-side cache today (I checked: no ETag or lru_cache on the scene routes), so keep it that way. The client's query key for the scene must not be shared across sign-ins, so a my_previews list can never show to another user. site_scene_read gains the same list. Run inventory, route parity, control matrix and the error-kind manifest at a trial merge, because a read's shape changed.
+- J6 (B4). No backend change, agreed. The UI's status read goes through _proposal_status only.
+
+J3 and U4 meet as: two features with the same label get a number in scene order ("Proposed building 1", "Proposed building 2"), never the id. Review of S5a goes to GK B (35), `session_01G7qCunD24gwxQbJ8Fd9cVN`.

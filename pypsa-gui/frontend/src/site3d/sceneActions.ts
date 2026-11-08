@@ -5,11 +5,11 @@
 // projection and the Site is marked scene-managed (no legacy edits).
 import type { QueryClient } from '@tanstack/react-query'
 import { siteSceneApi, type BuildingsPreview, type Proposal, type ProposalAction, type ProposalInputs, type SiteScene } from '../api/siteScene'
-import { nk } from '../utils/queryKeys'
+import { nk, SITE_SCENE_ROOT } from '../utils/queryKeys'
 import { adoptServerDocument, flushPendingSitesToServer, useSitesStore } from './sitesStore'
 import type { Site } from './types'
 
-export const SITE_SCENE_ROOT = 'site-scene'
+export { SITE_SCENE_ROOT }
 export const sceneKey = (project: string | null, siteId: string | null) => nk(project, SITE_SCENE_ROOT, siteId)
 
 /** Thrown when the pending sites write did not reach the server, so adoption would snapshot a different Site. */

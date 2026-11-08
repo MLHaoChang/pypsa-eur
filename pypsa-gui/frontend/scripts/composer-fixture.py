@@ -30,7 +30,7 @@ def main():
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--decisions", action="store_true")
     parser.add_argument("--no-model", action="store_true", help="configure no model profile (the no-key path)")
-    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h", "lc06d24"],
+    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h", "lc06d24", "sc07s5a"],
                         help="script a finite owner journey on the loopback wire (LC-03 OJ-01)")
     args = parser.parse_args()
     storage = args.storage.resolve()
@@ -43,6 +43,11 @@ def main():
         raise RuntimeError("Use an isolated checkout without backend/.env; fixture credentials must stay isolated")
     if not (dist / "spa.html").is_file():
         raise RuntimeError("Build the current frontend with npm run build first")
+
+    # SC-07 S5a (sc07s5a): the shot script posts each turn's plan (marker -> action,
+    # base_revision, inputs), since keep ids and revisions come from the real scene.
+    sc07_plans = {}
+    sc07 = args.journey == "sc07s5a"  # `args` is rebound inside _journey (LC03H)
 
     class LocalModelBoundary(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -73,6 +78,8 @@ def main():
                         results.append(json.JSONDecoder().raw_decode(text[text.index("{"):])[0])
                     except ValueError:
                         results.append({"unparsed": text[:200]})
+            if sc07:
+                return self._sc07s5a(said, results)
             if "Run the simulation" in said:
                 # OJ-01 solves twice on purpose: the second is a re-run of current
                 # results, which LC-19 asks about first; the user's yes is the flag.
@@ -244,7 +251,41 @@ def main():
             self._stream({"content": text}, "stop")
             return True
 
+        def _sc07s5a(self, said, results):
+            """SC-07 S5a: prepare the posted plan, apply it with the prepare's own
+            apply_with args, then a short text. The status check reads the site."""
+            if "Check the 3D site change" in said:
+                if not results:
+                    time.sleep(4)  # hold the turn so the shot sees "Checking…"
+                    self._stream({"tool_calls": [{"index": 0, "id": "sc07-read", "type": "function",
+                                  "function": {"name": "site_scene_read",
+                                               "arguments": json.dumps({"site_id": "campus"})}}]}, "tool_calls")
+                    return True
+                self._stream({"content": f"The 3D site is at revision {results[0].get('revision')}."}, "stop")
+                return True
+            marker = next((m for m in sc07_plans if m in said), None)
+            if marker is None:
+                return False
+            plan = {k: v for k, v in sc07_plans[marker].items() if k != "say"}
+            if not results:
+                name, arguments = "site_scene_prepare", {"site_id": "campus", **plan}
+            elif len(results) == 1 and (results[0].get("apply_with") or {}).get("args"):
+                name, arguments = "site_scene_apply", results[0]["apply_with"]["args"]
+            else:
+                text = ("The 3D site preview could not be prepared." if len(results) == 1
+                        else sc07_plans[marker].get("say") or "That is the 3D site change.")
+                self._stream({"content": text}, "stop")
+                return True
+            self._stream({"tool_calls": [{"index": 0, "id": f"sc07-{len(results)}", "type": "function",
+                          "function": {"name": name, "arguments": json.dumps(arguments)}}]}, "tool_calls")
+            return True
+
         def do_POST(self):
+            if args.journey == "sc07s5a" and self.path == "/fixture/sc07s5a-plan":
+                sc07_plans.update(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                self.send_response(204)
+                self.end_headers()
+                return
             if args.journey == "lc03h" and self.path in ("/fixture/revoke-access", "/fixture/restore-access"):
                 # LC-T08 in the browser: the signed-in user loses (then regains) their
                 # organisation membership, a real ACL change made in the database.
@@ -413,7 +454,7 @@ with SessionLocal() as db:
             else:
                 raise RuntimeError("Backend readiness timeout")
             ready = {"base": f"http://127.0.0.1:{port}", "credentials_file": str(credentials)}
-            if args.journey == "lc03h":
+            if args.journey in ("lc03h", "sc07s5a"):
                 ready["control"] = f"http://127.0.0.1:{model.server_port}/fixture"
             if args.journey in ("oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h", "lc06d24"):
                 # The same oj-grid the Tier A tests use (tests/oj_grid.py), as NetCDF.
@@ -428,6 +469,15 @@ with SessionLocal() as db:
                         if args.journey == "lc16c" else "")
                 subprocess.run([sys.executable, "-c", "import sys; from tests.oj_grid import build_oj_grid; "
                                 f"n = build_oj_grid(); {more}n.export_to_netcdf(sys.argv[1])", str(network)],
+                               cwd=backend_dir, env=env, check=True, capture_output=True)
+                ready["network_file"] = str(network)
+            if args.journey == "sc07s5a":
+                # The SC-07 test network (tests/test_site_scene_associations.py) without its heat
+                # load, so a heat request on a building is a gap the card marks unavailable.
+                network = storage / "sc07-assoc.nc"
+                subprocess.run([sys.executable, "-c", "import sys; from tests.test_site_scene_associations "
+                                "import _network; n = _network(); n.remove('Load', 'heat_demand'); "
+                                "n.export_to_netcdf(sys.argv[1])", str(network)],
                                cwd=backend_dir, env=env, check=True, capture_output=True)
                 ready["network_file"] = str(network)
             print(json.dumps(ready), flush=True)
