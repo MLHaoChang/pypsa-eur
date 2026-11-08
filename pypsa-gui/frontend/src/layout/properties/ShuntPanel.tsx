@@ -86,7 +86,7 @@ export default function ShuntPanel({ name }: { name: string }) {
       <Section title="Shunt Properties">
         {/* The conductance and susceptance, with their provenance chips. */}
         {assetReadoutItems(schema, asset, undefined, provenance).map(i => (
-          <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+          <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
         ))}
         <p className="text-[10px] text-muted mt-1">Read by the AC power flow only; the optimisation ignores it.</p>
         <button onClick={startEdit}
