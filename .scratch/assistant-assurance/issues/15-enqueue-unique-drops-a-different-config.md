@@ -3,7 +3,7 @@
 
 # `solve_queue.enqueue_unique` silently drops a different solver config
 
-Status: in-review
+Status: done (#1261)
 Type: bug
 Found by: AA-04 S5 plan (`04-action-and-job-outcomes.md`); GK B (30) Q3 (a): outside S5.
 
