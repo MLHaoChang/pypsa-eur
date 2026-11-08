@@ -21,14 +21,14 @@
  *     unknown: MOCKED by a route on the scene GET that marks the real open preview
  *       outcome_unknown (and leaves the other open preview out), since an unknown outcome needs
  *       an apply whose report is lost, which the real server cannot be made to do on demand.
- *     Checking…: the click's refetch is a real scene GET, held ~15 s by the route (delay only).
+ *     Checking…: the click's refetch is a real scene GET, held by the route until its shot is taken (delay only, at most 25 s).
  *     applied after the check: real. The preview is applied through the real route before the
  *       click, and the refetch passes the real my_previews through (status applied).
  *     not applied + Prepare it again: the line before the click is MOCKED (the other real open
  *       preview marked outcome_unknown); the refetch is real (that preview is still open).
  *  R6 Site 3D open line: the ui_open_panel(map, canvas_view site) call, its ACK issue and the
  *     browser's POST /api/chat/ui-ack are real. "Opening the 3D site…" is captured while a route
- *     holds the real ui-ack response ~15 s (delay only); "Opened the 3D site" is the real ACK
+ *     holds the real ui-ack response until its shot is taken (delay only, at most 25 s); "Opened the 3D site" is the real ACK
  *     outcome. "Could not confirm the 3D site opened": MOCKED, the route answers ui-ack 409.
  * Each in Expert and Guided, deviceScaleFactor 2, full page and a close crop. Every state's
  * visible text is asserted, and no crop's text holds a preview id, "outcome_unknown",
@@ -181,6 +181,9 @@ try {
 
   await context.route(url => ['http:', 'https:'].includes(url.protocol) && url.hostname !== '127.0.0.1', route => route.abort())
   // R6: the browser's ACK, passed through, held, or refused.
+  // A held answer waits until its shot is taken (release()), capped below the client's 30 s timeout.
+  const gate = { release: () => {} }
+  const held = () => new Promise(resolve => { gate.release = resolve; setTimeout(resolve, 25000) })
   const ack = { mode: null, seen: [], bodies: [] }
   await page.route(url => url.pathname === '/api/chat/ui-ack', async route => {
     const mode = ack.mode
@@ -188,7 +191,7 @@ try {
     if (mode === '409') return route.fulfill({ status: 409, json: { detail: 'The navigation was not confirmed.' } })
     const resp = await route.fetch()
     ack.bodies.push(`${resp.status()} ${(await resp.text()).slice(0, 300)}`)
-    if (mode === 'hold') await sleep(15000)
+    if (mode === 'hold') await held()
     return route.fulfill({ response: resp })
   })
   // R5: the scene GET, passed through, its my_previews patched, or the next read held.
@@ -202,7 +205,7 @@ try {
     const resp = await route.fetch()
     const json = await resp.json()
     if (patch && Array.isArray(json.my_previews)) json.my_previews = patch(json.my_previews)
-    if (hold) await sleep(hold)
+    if (hold) await held()
     return route.fulfill({ response: resp, json })
   })
   await page.addInitScript(streamRewriter, CHANGE)
@@ -304,6 +307,7 @@ try {
           before, { timeout: 5000 })
         assert.equal(await line.innerText(), 'Opening the 3D site…')
         await shoot(`r6-opening-${mode}`, toolRow(), 'Opening the 3D site…')
+        gate.release()
         await page.waitForFunction(n => document.querySelectorAll('[data-testid="chat-site3d-open"]')[n]?.dataset.state === 'opened',
           before, { timeout: 15000 }).catch(async e => {
           throw new Error(`${e.message}: state ${await line.getAttribute('data-state')}, ACK ${ack.bodies.join(' | ')}`) })
@@ -366,10 +370,11 @@ try {
     await shoot(`r5-unknown-${mode}`, panel)
     await applyPreview(X)
     sceneRoute.patch = null
-    sceneRoute.hold = 15000
+    sceneRoute.hold = 1
     await check.click()
     await page.waitForFunction(() => document.querySelector('[data-testid="site-resume-check"]')?.textContent === 'Checking…', null, { timeout: 2500 })
     await shoot(`r5-checking-${mode}`, panel, 'Checking…')
+    gate.release()
     await expectLine('Found: your placement was applied.')
     await shoot(`r5-applied-${mode}`, panel)
 
