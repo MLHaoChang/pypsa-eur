@@ -625,22 +625,23 @@ def test_a_regional_stamp_reads_that_regional_pack(monkeypatch):
     assert asked == [(uk.version.split("+")[0], "uk")]
 
 
-def test_a_vendored_pack_that_fails_to_load_is_not_read_as_unknown(monkeypatch):
+@pytest.mark.parametrize("exc_name", ["RuntimeError", "DefaultsPackError"])
+def test_a_vendored_pack_that_fails_to_load_is_not_read_as_unknown(monkeypatch, exc_name):
     """GLE3-1: only a lookup miss reads as unknown; a broken pack never switches the gate off."""
+    from services.commercial.binding import tariff_currency_mismatch
     from services.library.defaults_pack import loader
 
+    exc = RuntimeError if exc_name == "RuntimeError" else loader.DefaultsPackError
     _, t = _generic_copy()
 
     def boom(*a, **k):
-        raise RuntimeError("broken pack")
+        raise exc("broken pack")
 
     monkeypatch.setattr(loader, "load_defaults_pack", boom)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(exc):
         loader.stamped_tariff_currency(t)
     # GLE-04 G4-4: the gate itself never swallows it either.
-    from services.commercial.binding import tariff_currency_mismatch
-
-    with pytest.raises(RuntimeError):
+    with pytest.raises(exc):
         tariff_currency_mismatch(t, "GBP")
 
 

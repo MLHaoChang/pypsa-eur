@@ -734,18 +734,21 @@ def test_an_unstamped_tariff_with_no_currency_is_still_assumed_the_finance_curre
     )
 
 
+@pytest.mark.parametrize("exc_name", ["RuntimeError", "DefaultsPackError"])
 def test_a_pack_that_fails_to_load_is_not_swallowed_by_the_energy_price_check(
-    monkeypatch,
+    monkeypatch, exc_name
 ):
     from services.library.defaults_pack import loader
+
+    exc = RuntimeError if exc_name == "RuntimeError" else loader.DefaultsPackError
 
     com = _generic_commercial()  # built before the pack is broken
 
     def boom(*a, **k):
-        raise RuntimeError("broken pack")
+        raise exc("broken pack")
 
     monkeypatch.setattr(loader, "load_defaults_pack", boom)
-    with pytest.raises(RuntimeError, match="broken pack"):
+    with pytest.raises(exc, match="broken pack"):
         A.tariff_energy_rate(com, _SNAPS, "EUR")
 
 
