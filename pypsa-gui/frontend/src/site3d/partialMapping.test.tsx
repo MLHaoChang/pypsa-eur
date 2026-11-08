@@ -17,7 +17,6 @@ describe('partial mapping line (R3)', () => {
     ['proposal_expired', 'the prepared mapping expired'],
     ['proposal_cancelled', 'it was cancelled'],
     ['revision_conflict', 'the site changed after it was prepared'],
-    ['unknown_target', 'a target needs your choice'],
   ])('a refused apply (%s) says what was done and why the mapping was not', (kind, words) => {
     render(<PartialMappingLine task={task(refused(kind))} taskId={TASK} onRequest={vi.fn()} />)
     expect(screen.getByRole('status').textContent)
@@ -38,6 +37,10 @@ describe('partial mapping line (R3)', () => {
 
   it('a prepare that asks for a choice (no kind) names the choice', () => {
     expect(partialMapping(task(failed('site_scene_prepare')))?.reason).toBe('a target needs your choice')
+  })
+
+  it('a prepare refused with a kind never borrows the apply words (nothing was prepared)', () => {
+    expect(partialMapping(task(failed('site_scene_prepare', 'revision_conflict')))?.reason).toBe('it did not complete')
   })
 
   it.each([

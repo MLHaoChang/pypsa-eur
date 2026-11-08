@@ -7,14 +7,14 @@
 
 const SCENE_STEPS = new Set(['site_scene_prepare', 'site_scene_apply'])
 
-/** The reason in plain words, from the failed step's kind (never shown as a key). A denied card
- * never reaches the step (the confirmation gate refuses before it begins), so the apply stays
- * pending and the card's Next line says so; no "Not done" is claimed for it (U-e). */
+/** The reason in plain words, from the refused apply's kind (never shown as a key): the three
+ * typed apply refusals that prove nothing landed. A denied card never reaches the step (the
+ * confirmation gate refuses before it begins), so the apply stays pending and the card's Next line
+ * says so; no "Not done" is claimed for it (U-e). */
 export const MAPPING_REASON: Record<string, string> = {
   proposal_expired: 'the prepared mapping expired',
   proposal_cancelled: 'it was cancelled',
   revision_conflict: 'the site changed after it was prepared',
-  unknown_target: 'a target needs your choice',
 }
 
 type Obj = Record<string, unknown>
@@ -32,9 +32,11 @@ export function partialMapping(task: Obj): { done: string; reason: string } | nu
   // uncertain step, scene_apply_outcome_unknown included, keeps S5a's check (U-f).
   const proven = next.status === 'failed' || (next.status === 'uncertain' && kind !== null && kind in MAPPING_REASON)
   if (!proven || kind === 'scene_apply_outcome_unknown') return null
-  // A prepare that asks for a choice fails with no kind (GK B H3).
-  const reason = (kind && MAPPING_REASON[kind]) ?? (next.tool === 'site_scene_prepare' && !kind
-    ? 'a target needs your choice' : 'it did not complete')
+  // The apply's words name a prepared mapping, so they never describe a failed prepare. A prepare
+  // that asks for a choice fails with no kind (GK B H3).
+  const reason = next.tool === 'site_scene_apply'
+    ? (kind && MAPPING_REASON[kind]) || 'it did not complete'
+    : kind ? 'it did not complete' : 'a target needs your choice'
   return { done: changes.map(clause).join('. '), reason }
 }
 
