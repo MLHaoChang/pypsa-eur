@@ -3,7 +3,7 @@
 
 # LC-03c — LC-T19 injection matrix on a past run's kept sections
 
-Status: in-progress
+Status: done (#1271)
 Type: task
 
 Split from LC-03 at its close-out (acceptance map, `_pending` row). LC-T19 asks that
