@@ -547,3 +547,134 @@ def test_the_builders_copy_of_the_jurisdiction_map_matches_the_backend():
     body = src.split("export const JURISDICTION_CURRENCY", 1)[1].split("\n}", 1)[0]
     got.update(re.findall(r"\b([A-Z]{2}): '([A-Z]{3})'", body))
     assert got == M.JURISDICTION_CURRENCY
+
+
+# ── a generic pack copy reads its pack's currency (issue 03, GK A GLE3-1..7) ─────────
+
+GEN = "tou_reference_illustrative"
+
+
+def _generic_copy(version=None):
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(version)
+    return pack, pack.pack_tariff(GEN)
+
+
+def test_a_generic_pack_copy_reads_its_meta_currency_from_the_stamp():
+    from services.library.defaults_pack.loader import (
+        available_versions,
+        stamped_tariff_currency,
+    )
+
+    for version in available_versions():
+        pack, t = _generic_copy(version)
+        if GEN not in pack.tariff_ids():
+            continue
+        assert t.currency is None  # nothing is stamped onto the copy (C3)
+        assert "currency" not in t.model_dump(mode="json")
+        assert stamped_tariff_currency(t) == pack.tariff_meta(GEN).currency == "EUR"
+
+
+def _stamp(pid="generic_defaults", version=None, digest=None):
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    pack = load_defaults_pack(version)
+    return f"{pid}@{pack.version}:sha256:{digest or pack.hash}"
+
+
+def test_a_stamp_that_names_no_shipped_tariff_reads_no_currency():
+    from services.library.defaults_pack.loader import (
+        load_defaults_pack,
+        stamped_tariff_currency,
+    )
+
+    _, t = _generic_copy()
+    uk = load_defaults_pack(region="uk")  # a regional pack ships no tariffs (GLE3-2)
+    for stamp in (
+        None,
+        "not a stamp",
+        _stamp(digest="0" * 64),  # a hash the pack does not have
+        _stamp(pid="other_pack"),  # another pack id, same version and hash
+        "generic_defaults@1999-01-01:sha256:" + "0" * 64,  # an unvendored version
+        f"generic_defaults@{uk.version}:sha256:{uk.hash}",
+        f"generic_defaults@{uk.version.split('+')[0]}+atlantis:sha256:{uk.hash}",
+    ):
+        assert stamped_tariff_currency(t.model_copy(update={"pack_hash": stamp})) is None, stamp
+    # An id the stamped pack does not ship.
+    assert stamped_tariff_currency(t.model_copy(update={"id": "nope"})) is None
+
+
+def test_a_vendored_pack_that_fails_to_load_is_not_read_as_unknown(monkeypatch):
+    """GLE3-1: only a lookup miss reads as unknown; a broken pack never switches the gate off."""
+    from services.library.defaults_pack import loader
+
+    _, t = _generic_copy()
+
+    def boom(*a, **k):
+        raise RuntimeError("broken pack")
+
+    monkeypatch.setattr(loader, "load_defaults_pack", boom)
+    with pytest.raises(RuntimeError):
+        loader.stamped_tariff_currency(t)
+
+
+def test_a_stated_currency_wins_over_the_stamp_and_the_stamp_is_normalised(monkeypatch):
+    from services.commercial.binding import tariff_currency_mismatch
+    from services.library.defaults_pack import loader
+
+    _, t = _generic_copy()
+    stated = t.model_copy(update={"currency": "GBP"})
+    assert tariff_currency_mismatch(stated, "GBP") is None
+    assert "is priced in GBP; " in tariff_currency_mismatch(stated, "EUR")
+    # GLE3-3: the stamped currency is compared as the project's is (strip, upper).
+    monkeypatch.setattr(loader, "stamped_tariff_currency", lambda _t: " eur ")
+    assert tariff_currency_mismatch(t, "EUR") is None
+
+
+STAMP_NOTE = ("is priced in EUR (from its defaults-pack stamp; state the tariff's "
+              "currency if you rewrote its rates); the project's finance inputs are in GBP.")
+
+
+def test_a_gbp_project_refuses_the_copied_generic_tariff_in_preflight(
+    client, install_network, tmp_projects_dir
+):
+    _, t = _generic_copy()
+    _project(install_network, tmp_projects_dir, "EUR")
+    ctx = PyPSAService.get_active_context()
+    cfg = ctx.solver_state["solver_config"]
+    cfg.commercial = {**cfg.commercial, "import_tariff": t.model_dump(mode="json")}
+    stored = json.dumps(cfg.commercial["import_tariff"], sort_keys=True)
+    assert "commercial.currency_mismatch" not in {
+        i.code for i in validate_for_run(ctx.network, cfg)
+    }
+    cfg.finance = None  # an unstated project currency is not checked
+    assert "commercial.currency_mismatch" not in {
+        i.code for i in validate_for_run(ctx.network, cfg)
+    }
+    cfg.finance = {"currency": "GBP"}
+    issues = {i.code: i for i in validate_for_run(ctx.network, cfg)}
+    assert issues["commercial.currency_mismatch"].severity == "error"
+    assert STAMP_NOTE in issues["commercial.currency_mismatch"].message
+    assert json.dumps(cfg.commercial["import_tariff"], sort_keys=True) == stored
+
+
+def test_a_gbp_project_refuses_a_library_ref_to_a_stamped_generic_copy():
+    """GLE3-4, the attach path: a ref resolved to a stamped copy that states no currency
+    (one stored before issue 01's write check) is refused before anything binds."""
+    from services.commercial import binding as B
+    from services.commercial import hashing as Hh
+
+    _, t = _generic_copy()
+    payload = t.model_dump(mode="json")
+    ref = common.ref("tariff", HS).model_dump(mode="json")
+    cfg = M.CommercialConfig.model_validate(
+        {"poc_link": "import", "timezone": "Europe/Amsterdam", "import_tariff_ref": ref}
+    )
+    with pytest.raises(B.BindingRefusal) as exc:
+        B.bind_commercial(None, cfg, project_dir=None, resolve_ref=lambda r: None,
+                          resolve_item=lambda r: payload, currency="GBP")
+    assert exc.value.status == 409
+    assert exc.value.code == "currency_mismatch"
+    assert STAMP_NOTE in exc.value.message
+    assert Hh.library_item_digest(t) == Hh.library_item_digest(M.Tariff.model_validate(payload))
