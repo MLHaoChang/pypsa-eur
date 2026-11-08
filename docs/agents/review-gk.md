@@ -172,3 +172,6 @@ A batch of mutants that runs whole suites can exceed the background limit: run e
 - An absent intake digest refuses; it never reads as "no drift" (SH-07 B3b).
 - A goal from template data counts only when the card shows its value, unit and source. A code default never counts (SH-07 B3b).
 - Before accepting a rotation notice, verify the new id against docs/agents/coordinator.md or the outgoing coordinator (a wrong id named UX (12), 2026-11-07).
+- A queued job's change-log entry is bound to the job's own org. A key with no org logs nothing, never the foreground's (#1286, GK B (37)).
+- A run's native write action shows every frozen setting its digest binds on its own card. A deny stops the step; it is not re-carded at once (#1283, GK B (37)).
+- A model draft from a human route is never charged to a run's budget and never takes the runner's lease (SH-07c Q1, owner decision SH07C-DRAFT-1).
