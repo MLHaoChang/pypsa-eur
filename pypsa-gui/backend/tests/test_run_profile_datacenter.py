@@ -998,6 +998,11 @@ def test_the_approval_card_names_what_the_step_is_held_to(hub):  # noqa: F811
     assert notes == [
         "Grid-code profile: SAGC data centre",
         "Campus study settings: N-1 on, investment on, held to SAGC data centre",
+        "Contingency depth (k): 3",
+        "Sizing margin: 0.2",
+        "PCC switchgear owned by the operator: no",
+        "PCC transformer taps moved by: campus",
+        "Power factor: not set",
         "Saves the campus study results",
         "Saves the campus study settings, held to SAGC data centre",
         "Reserves 1 solve",
@@ -1005,6 +1010,13 @@ def test_the_approval_card_names_what_the_step_is_held_to(hub):  # noqa: F811
         f"{ce.SUBDIR}/run/, {ce.SUBDIR}/{ce.SETTINGS_FILE}",
     ]
     assert card["says"] == "Run the campus study held to SAGC data centre"
+    # F4: a row for every frozen setting (its digest binds them all).
+    shown = {
+        r["field"].removeprefix("setting.")
+        for r in card["rows"]
+        if r["field"].startswith("setting.")
+    }
+    assert shown | {"n_minus_1", "invest", "profile"} == set(frozen["settings"])
     unset = copy.deepcopy(frozen)
     unset["settings"].pop("invest")
     assert (
@@ -1103,15 +1115,25 @@ def test_the_runner_issues_the_campus_card_and_runs_on_its_approval(hub, monkeyp
 
 @pytest.mark.parametrize("decision", ["deny", "expired", "revoked"])
 def test_a_campus_card_not_approved_never_runs(hub, monkeypatch, decision):  # noqa: F811
-    monkeypatch.setattr(
-        run_actions, "start", lambda *a, **k: pytest.fail("never started")
-    )
+    started = []  # T1: recorded, not failed inside the card's thread (which would swallow it)
+    monkeypatch.setattr(run_actions, "start", lambda *a, **k: started.append(k) or "ok")
     path, _, _, logged, _, r = _card_run(hub, monkeypatch, decision)
+    assert started == []
     assert (
         logged[-1][0] in ("rejected", "expired", "revoked")
         and r.live_card(_read(path)["task_id"]) is None
     )
-    assert _read(path)["steps"][0]["status"] == "pending"  # still to do, on a new card
+    task = _read(path)
+    if (
+        decision == "deny"
+    ):  # W1: the user said no; the step stops for them, no new card while they are there
+        assert (
+            task["steps"][0]["status"] == "failed"
+            and task["run"]["status"] == "needs_user"
+        )
+        assert "denied" in task["steps"][0]["error"]
+    else:  # the user left: still to do, on a new card
+        assert task["steps"][0]["status"] == "pending"
 
 
 def test_an_approval_of_a_card_for_another_record_is_refused_at_dispatch(
@@ -1295,3 +1317,66 @@ def test_a_profile_naming_half_an_action_is_refused(action):
     profile["stages"]["solve"]["actions"].append(action)
     with pytest.raises(run_profiles.ProfileError, match="native actions"):
         run_profiles.load(profile)
+
+
+def _tick(hub, monkeypatch, *, present=False, seam=None):  # noqa: F811
+    """T2: one runner tick (`Runner._step`) on a run whose next step is the campus study."""
+    from harness import approvals, runner
+
+    _publish(hub, "sagc_dc")
+    path = _task_file(hub, run_actions.freeze(hub))
+    task = _read(path)
+    monkeypatch.setattr(approvals, "asked", lambda *a, **k: True)
+    monkeypatch.setattr(approvals, "decided", lambda *a, **k: True)
+    started = []
+    monkeypatch.setattr(
+        run_actions,
+        "start",
+        lambda path, ctx, step, **k: started.append(k) or "started",
+    )
+    r = runner.Runner(instance="a", decisions=seam)
+    if present:
+        r._present[task["task_id"]] = r.clock() + 300
+    session = _CardSession("deny")
+    out = r._step(path, _ctx(hub), session)
+    return path, task, r, session, started, out
+
+
+def test_a_tick_with_the_user_there_issues_the_card_and_starts_nothing(
+    hub, monkeypatch
+):  # noqa: F811
+    path, task, r, session, started, out = _tick(hub, monkeypatch, present=True)
+    assert out == "waiting" and started == []
+    assert (
+        r.live_card(task["task_id"])["edit_card"]["digest"]
+        == task["steps"][0]["frozen"]["digest"]
+    )
+    assert _read(path)["run"]["waiting"]["ref"] == "solve.3"
+    session.go.set()
+    r._inflight[task["task_id"]][1].join(10)
+
+
+def test_a_tick_with_nobody_there_waits_for_the_user(hub, monkeypatch):  # noqa: F811
+    path, task, r, _, started, out = _tick(hub, monkeypatch)
+    assert out == "waiting" and started == [] and r.live_card(task["task_id"]) is None
+    assert _read(path)["run"]["waiting"] == {
+        **_read(path)["run"]["waiting"],
+        "kind": "card",
+        "ref": "solve.3",
+    }
+
+
+def test_a_seam_approval_runs_with_the_frozen_digest(hub, monkeypatch):  # noqa: F811
+    path, task, _, _, started, out = _tick(
+        hub, monkeypatch, seam=lambda task_id, ref, args: "approve"
+    )
+    assert out == "started" and started == [
+        {"instance": "a", "approved": task["steps"][0]["frozen"]["digest"]}
+    ]
+
+
+def test_a_seam_deny_starts_nothing(hub, monkeypatch):  # noqa: F811
+    _, _, _, _, started, out = _tick(
+        hub, monkeypatch, seam=lambda task_id, ref, args: "deny"
+    )
+    assert out == "waiting" and started == []

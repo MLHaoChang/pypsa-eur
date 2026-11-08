@@ -226,6 +226,24 @@ def needs_card(step) -> bool:
     return is_action(step) and not REGISTRY[step["tool"]]["reads_only"]
 
 
+# GK B (37) F4: every frozen setting is on the card (its digest binds them all).
+SETTING_WORDS = {
+    "k": "Contingency depth (k)",
+    "pf": "Power factor",
+    "margin": "Sizing margin",
+    "pcc_switchgear_by_operator": "PCC switchgear owned by the operator",
+    "pcc_tap_control": "PCC transformer taps moved by",
+}
+
+
+def _setting(value) -> str:
+    if value is None:
+        return "not set"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return str(value).replace("_", " ")
+
+
 def _note(field, note) -> dict:
     return {"role": "note", "field": field, "unit": "", "note": note}
 
@@ -261,6 +279,11 @@ def approval_card(step) -> dict | None:
             "settings",
             f"Campus study settings: N-1 {on.get(settings.get('n_minus_1'), 'not set')}, "
             f"investment {on.get(settings.get('invest'), 'not set')}, held to {label}",
+        ),
+        *(
+            _note(f"setting.{k}", f"{SETTING_WORDS.get(k, k)}: {_setting(settings[k])}")
+            for k in sorted(settings)
+            if k not in ("n_minus_1", "invest", "profile")
         ),
         *(_note("writes", saves(w)) for w in frozen["writes"]),
         _note("solves", f"Reserves {solves} solve{'' if solves == 1 else 's'}"),

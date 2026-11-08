@@ -885,6 +885,10 @@ class Runner:
                 if decision == "approve" and recorded:
                     self._go_on(path)
                     run_actions.start(path, ctx, step, instance=self.instance, approved=edit_card["digest"])
+                elif decision == "deny":
+                    # GK B (37) W1: a deny stops the step for the user; no new card while they are there.
+                    run_actions._stop(path, step["id"], "confirmation_denied",
+                                      "the user denied the campus study's card")
             except Exception:  # noqa: BLE001 — a card that errors leaves the step to do, never run
                 logger.exception("harness runner: the card of %s on %s errored", step["id"], task_id)
             finally:

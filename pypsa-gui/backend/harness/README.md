@@ -1443,9 +1443,11 @@ solve stage uses.
   own Confirmation card (`Runner._native_card`), issued on the run's
   session while the user is there, like a chat step's. The card is an edit
   card of note rows (`run_actions.approval_card`): the profile's label and
-  id, its short digest, the campus settings, each write and the solves
-  reserved. Its digest is the frozen record's, and dispatch refuses an
-  approval with any other digest (`dc_card`). `dc_grid_readiness` only
+  id, its short digest, every frozen campus setting (GK B (37) F4), each
+  write and the solves reserved. Its digest is the frozen record's, and
+  dispatch refuses an approval with any other digest (`dc_card`). A deny
+  stops the step for the user (`confirmation_denied`); an expired or
+  revoked card leaves it to do, on a new card. `dc_grid_readiness` only
   reads and needs no card.
 - **No envelope (F3).** `eh_datacenter@1` has no envelope block: 10a runs
   step by step only, and `run_envelope.decide` refuses a grant for it.
