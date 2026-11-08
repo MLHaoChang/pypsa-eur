@@ -8,8 +8,9 @@
  *     MOCKED in the browser: a fetch wrapper rewrites that one start_task tool_result frame so
  *     the edit step reads completed with its receipt words in `changes`, and next_step is the
  *     apply step stored as the real task layer stores a refused write step: status uncertain
- *     (task status needs_review) with error_kind proposal_expired / revision_conflict. The backend
- *     does not expose next_step.error_kind yet, so no real task view can carry it. The
+ *     (task status needs_review) with error_kind proposal_expired / revision_conflict. The task view
+ *     does carry next_step.error_kind (1a), but this script does not make a preview expire or the
+ *     site change in the middle of a real task, so the frame is mocked. The
  *     "you did not approve it" (confirmation_denied) state is not shot: a denied card never
  *     reaches the task step in the real app, so it is unreachable and is not mocked.
  *  R5 Resume line:
@@ -162,6 +163,8 @@ try {
   const imported = await context.request.post(base + '/api/io/import/netcdf', { headers,
     multipart: { file: { name: 'sc07-assoc.nc', mimeType: 'application/x-netcdf', buffer: await fs.readFile(fx.network_file) } } })
   assert(imported.ok(), `NetCDF import failed: ${imported.status()}`)
+  // B1 placed at the site's origin, so Site 3D draws the campus (a real bus edit).
+  await api('PUT', '/api/network/buses/B1', { name: 'B1', x: SITE.origin.lng, y: SITE.origin.lat })
   await api('POST', `/api/projects/${NAME}`)
   const scene = `/api/projects/${NAME}/sites/campus/scene`
   await api('PUT', `/api/projects/${NAME}/sites`, { version: 1, sites: [SITE] })
@@ -218,6 +221,7 @@ try {
   const ids = new Set()
   const shots = []
   const report = {}
+  const rewritten = []
   const clean = (label, text) => {
     for (const id of ids) assert(!text.includes(id), `${label}: shows a preview id`)
     for (const bad of ['outcome_unknown', 'bind_targets', '—', ';']) assert(!text.includes(bad), `${label}: shows ${JSON.stringify(bad)}: ${text}`)
@@ -229,7 +233,8 @@ try {
     shots.push(path.join(out, `${name}.png`))
     await page.screenshot({ path: shots.at(-1) })
     shots.push(path.join(out, `${name}-close.png`))
-    await target.screenshot({ path: shots.at(-1) })
+    // A reload can re-mount the panel once after it first appears: retry the crop once.
+    await target.screenshot({ path: shots.at(-1) }).catch(async () => { await page.waitForTimeout(1000); await target.screenshot({ path: shots.at(-1) }) })
     report[name] = text
     return text
   }
@@ -255,6 +260,10 @@ try {
       await page.evaluate(k => { window.__sc07.kind = k }, kind)
       await send(sentence)
       const line = page.getByTestId('task-partial-mapping').nth(cards)
+      // Guided asks before a task starts: approve it (the real confirmation card).
+      const approve = page.getByRole('button', { name: 'Approve', exact: true })
+      await Promise.race([line.waitFor({ timeout: 60000 }), approve.waitFor({ timeout: 60000 })]).catch(() => {})
+      if (await approve.count()) await approve.click()
       await line.waitFor({ timeout: 60000 }).catch(async error => { throw new Error(`${error.message}\n${await transcript()}`) })
       await idle()
       const card = line.locator('xpath=ancestor::*[@data-testid="assistant-task-card"][1]')
@@ -262,6 +271,8 @@ try {
         `Done: ${CHANGE}. Not done: the 3D site mapping (${REASONS[kind]}).`)
       assert.equal(await line.getByTestId('task-prepare-mapping-again').innerText(), 'Prepare the mapping again')
       await shoot(`r3-partial-${kind === 'proposal_expired' ? 'expired' : 'site-changed'}-${mode}`, card)
+      // Collected now: a later reload (R5) starts the page's record afresh.
+      rewritten.push(...await page.evaluate(() => window.__sc07.rewritten.splice(0)))
     }
 
     // R6: a real ui_open_panel(map, site); the ACK held (pending), real (opened), refused (unconfirmed).
@@ -272,6 +283,7 @@ try {
     const warm = Date.now()
     await page.getByRole('button', { name: 'Site 3D', exact: true }).click()
     await page.locator('[data-assurance-canvas="site"]').first().waitFor({ state: 'attached', timeout: 90000 })
+      .catch(async error => { throw new Error(`${error.message}\n${(await page.locator('body').innerText()).slice(0, 1500)}`) })
     report[`site3d-mount-ms-${mode}`] = Date.now() - warm
     await page.getByRole('button', { name: 'Blank', exact: true }).click()
     await page.locator('[data-assurance-canvas="site"]').first().waitFor({ state: 'detached', timeout: 10000 })
@@ -370,7 +382,7 @@ try {
     await api('POST', `${scene}/proposals/${Y.id}/cancel`)
     await page.getByTestId('chat-input').waitFor()
   }
-  report.rewritten = await page.evaluate(() => window.__sc07.rewritten)
+  report.rewritten = rewritten
   report.ack = ack.seen
   report.scene_reads = sceneRoute.reads
   assert.equal(report.rewritten.length, 4, 'four partial task frames rewritten')
