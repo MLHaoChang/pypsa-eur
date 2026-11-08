@@ -3,6 +3,9 @@
 Only the answer and the checked chart carry a checked fact. Table exports,
 reports and download headers never present a value as checked:
 
+Charts and tables here; the human report and the assistant's report_export in
+test_p4_fact_free_reports.py.
+
 - B4: each download kind sends an exact set of header names (not a word grep:
   a chart legitimately says "evidence re-verified now"), and no header value
   carries a number from the evidence record.

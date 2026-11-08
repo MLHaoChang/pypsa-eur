@@ -418,8 +418,11 @@ GK B (35), as sent at about 01:10Z (resent 01:13Z):
 - `test_p4_fact_free_surfaces.py` (B4/B5): exact header names for checked
   chart, result chart and table downloads; no header value carries a checked
   number; a delivered table item has exactly today's keys and none that names
-  a fact, metric or evidence. The human report and assistant report_export
-  kinds follow once #1267 has merged.
+  a fact, metric or evidence. `test_p4_fact_free_reports.py` does the same for
+  the human report and the assistant's sealed report_export (S4b, merged in
+  from #1267's branch): base headers only, `X-Report-Source` only when a
+  source is gone, no number in any header value, and exact delivery item
+  keys (a human export carries no assurance at all).
 - Mutants: `mutants.py` 17/17 killed (checked_charts 16, calculations 1;
   assurance.py's lines yield none). Hand mutants killed: legacy always taken,
   metrics dropped from verify, warnings from answered slots, K1 removed,
