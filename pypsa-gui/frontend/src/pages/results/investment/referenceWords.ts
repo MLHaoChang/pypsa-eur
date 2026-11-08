@@ -80,7 +80,7 @@ export function spellOutNotes(notes: string[]): string[] {
 }
 
 export const CONFIRM_LABELS: Record<Confirmation, string> = {
-  dc_ac: 'Use the AC-output cost for this generator',
+  dc_ac: 'Capacity is the AC rating, not the MWp: use the AC-output cost',
   grid_connection: 'Use it, knowing the grid connection may be counted twice',
   money_year: 'Use it as it is, without adjusting for inflation',
 }

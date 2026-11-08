@@ -1,6 +1,6 @@
 # The `dc_ac` confirmation's text goes stale once `p_nom` is the AC rating
 
-Status: ready-for-agent
+Status: in-progress (claude/tcu-04-dc-ac-confirmation-text)
 Type: gap
 Found in: TC-02 (issue 02) design review by GK A, 2026-11-06.
 
