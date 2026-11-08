@@ -131,7 +131,18 @@ def test_a_failing_preview_cancel_still_cancels_the_task_and_says_so(
     assert _status(args["proposal_id"]) == "ready"  # not cancelled, and said so above
 
 
-@pytest.mark.parametrize("bad", [None, {}, {"apply_with": {"args": {"site_id": 1}}}])
+@pytest.mark.parametrize(
+    "bad",
+    [
+        None,
+        "not a dict",
+        {},
+        {"apply_with": {"args": ["campus", "p1"]}},
+        {"apply_with": {"args": {"site_id": 1}}},
+        {"apply_with": {"args": {"site_id": 1, "proposal_id": "p1"}}},
+        {"apply_with": {"args": {"site_id": "campus", "proposal_id": 1}}},
+    ],
+)
 def test_a_prepare_result_without_refs_is_skipped(bad):
     task = {
         "steps": [
@@ -144,3 +155,14 @@ def test_a_prepare_result_without_refs_is_skipped(bad):
         ]
     }
     assert tasks._own_previews(task) == []
+
+
+def test_only_prepare_steps_name_previews_to_cancel():
+    refs = {"apply_with": {"args": {"site_id": "campus", "proposal_id": "p1"}}}
+    task = {
+        "steps": [
+            {"id": "a", "tool": "site_scene_apply", "status": "completed", "result": refs},
+            {"id": "p", "tool": "site_scene_prepare", "status": "completed", "result": refs},
+        ]
+    }
+    assert tasks._own_previews(task) == [("p", "campus", "p1")]
