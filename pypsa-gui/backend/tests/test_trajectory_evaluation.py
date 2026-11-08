@@ -1280,6 +1280,32 @@ def test_a_created_project_needs_the_users_grant_on_the_native_record():
     }
     assert all(e.authority is None for e in te.authorize(changes, unaudited))
 
+    # T6 (GK B (37)): each part of the grant is needed; one negative case each.
+    def unauthorized(**patch):
+        return all(
+            e.authority is None for e in te.authorize(changes, {**native, **patch})
+        )
+
+    def grant(**extra):
+        row = _decided("envelope-d", "grant_envelope", by="user", envelope_id="H")
+        return [{**row, **extra}]
+
+    def audited(**entry):
+        audit = [{"event": "granted", "reason": "user", "decision_id": "envelope-d"}]
+        return {
+            "H": envelope["H"],
+            "N": dict(envelope["N"], audit=[{**audit[0], **entry}]),
+        }
+
+    assert unauthorized(approvals=grant(outcome="rejected"))  # A6b
+    assert unauthorized(approvals=grant(type="approval/asked"))  # H1
+    assert unauthorized(approvals=grant(envelope_id="X"))  # H2: no such envelope
+    assert unauthorized(envelopes=audited(reason="envelope"))  # H3
+    assert unauthorized(
+        envelopes={"H": envelope["H"], "N": dict(envelope["N"], task_id="OT")}
+    )  # H4: the audit is on another task's envelope
+    assert unauthorized(approvals=grant(call_id="other-d"))  # H5
+
 
 def test_an_unknown_file_change_and_a_rewritten_chain_are_unauthorized():
     changes = [
