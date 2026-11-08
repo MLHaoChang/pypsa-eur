@@ -312,6 +312,23 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('POST', '/api/network/spectrum/tier_split'),
             ('POST', '/api/spectrum/trace'),
         }),
+    },    {
+        'id': 'report_comment_revisions',
+        'title': 'Report comments and comment revisions',
+        'disposition': 'unbuilt',
+        'reason': 'Commenting on a saved report and revising it from a comment (study harness 07c) is not available from chat yet; the app reaches it through the report comments API only, and no report screen shows it yet.',
+        'page': 'Reports',
+        'panel': None,
+        'keywords': frozenset({
+            'comment',
+            'comments',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/projects/{name}/reports/{report_id}/comments'),
+            ('POST', '/api/projects/{name}/reports/{report_id}/comments'),
+            ('POST', '/api/projects/{name}/reports/{report_id}/comments/{comment_id}/address'),
+            ('POST', '/api/projects/{name}/reports/{report_id}/comments/{comment_id}/withdraw'),
+        }),
     },
 )
 

@@ -141,6 +141,16 @@ ReportMode = Literal["evidence_only", "generated"]
 TemplateMode = Literal["tagged", "untagged"]
 
 
+class RevisedFrom(_Model):
+    """Study harness 07c (GK B R7): the version a comment revision was made
+    from, by its stored file's digest (`store.version_sha256`), and the
+    comment it addressed."""
+
+    version: int
+    digest: str
+    comment_id: str
+
+
 class ReportDocument(_Model):
     schema_version: Literal[1] = 1
     report_id: str
@@ -160,6 +170,10 @@ class ReportDocument(_Model):
     sections: list[Section] = PField(default_factory=list)
     tables: dict[str, Table] = PField(default_factory=dict)
     figures: dict[str, Figure] = PField(default_factory=dict)
+    # 07c: set only on a comment revision, and left out of the stored JSON
+    # when None, so a version that is not a revision is written byte-equal to
+    # before (GK B R7). `store.save_version` sets it on every write.
+    revised_from: RevisedFrom | None = PField(default=None, exclude_if=lambda v: v is None)
 
 
 class ReportMeta(_Model):

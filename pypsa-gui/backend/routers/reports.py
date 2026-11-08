@@ -930,3 +930,142 @@ def diff_report_versions(report_id: str, a: int, b: int,
         raise _http_version(exc) from exc
     return {"a": a_doc.version, "b": b_doc.version,
             "sections": roundtrip_service.diff_versions(a_doc, b_doc)}
+
+
+# ── comments → revisions (study harness 07c) ────────────────────────────────
+
+class CommentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str
+    anchor: dict
+
+
+class AddressBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base_digest: str
+    edit: dict
+
+
+def _revision_http(exc: Exception) -> HTTPException:
+    from services.reports import revisions
+
+    if isinstance(exc, revisions.RevisionError):
+        detail: dict = {"error_kind": exc.kind, "message": exc.message}
+        if exc.reasons:
+            detail["reasons"] = exc.reasons
+        return HTTPException(exc.status, detail)
+    return _http(exc)
+
+
+def _validated(model: Any, value: Any, what: str) -> Any:
+    from pydantic import TypeAdapter, ValidationError
+
+    try:
+        return TypeAdapter(model).validate_python(value)
+    except ValidationError as exc:
+        raise HTTPException(422, {
+            "error_kind": f"invalid_{what}",
+            "message": f"The {what} is not valid: {exc.errors()[0].get('msg')}",
+        }) from exc
+
+
+@router.get("/{name}/reports/{report_id}/comments")
+def list_report_comments(report_id: str,
+                         project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """The report's comments, oldest first, and the latest version's digest
+    a revision is made against: `{report_id, latest_version, digest,
+    comments}`. 409
+    `report_comments_unreadable` when the stored file is malformed."""
+    from services.reports import revisions
+
+    try:
+        store.validate_report_id(report_id)
+        comments = revisions.load_comments(project.directory, report_id)
+        latest = store.load_meta(project.directory, report_id).latest_version
+        digest = store.version_sha256(project.directory, report_id, latest)
+    except (revisions.RevisionError, store.ReportStoreError) as exc:
+        raise _revision_http(exc) from exc
+    return {"report_id": report_id, "latest_version": latest, "digest": digest,
+            "comments": [c.model_dump(mode="json") for c in comments]}
+
+
+@router.post("/{name}/reports/{report_id}/comments")
+def add_report_comment(report_id: str, body: CommentBody,
+                       project: AuthorizedProject = ProjectAccessDep,
+                       db: DBSession = Depends(get_db),
+                       user: User | None = Depends(optional_user)) -> dict:
+    """Store a comment on one part of the latest version: `anchor` is
+    `{section_id, block_index?}` or `{section_id, table_id}`. A comment on a
+    part outside the closed edit set is stored open with its `reason`. 422
+    `report_comment_anchor_invalid` when the anchor names nothing."""
+    from services.reports import revisions
+
+    _latest_or_404(project, report_id)
+    _check_lock(project, db, user)
+    text = body.text.strip()
+    if not text or len(text) > revisions.MAX_COMMENT_CHARS:
+        raise HTTPException(422, {
+            "error_kind": "invalid_comment",
+            "message": f"A comment is 1 to {revisions.MAX_COMMENT_CHARS} characters."})
+    anchor = _validated(revisions.Anchor, body.anchor, "anchor")
+    try:
+        comment = revisions.add_comment(project.directory, report_id, text, anchor,
+                                        user=getattr(user, "email", None))
+    except (revisions.RevisionError, store.ReportStoreError) as exc:
+        raise _revision_http(exc) from exc
+    return comment.model_dump(mode="json")
+
+
+@router.post("/{name}/reports/{report_id}/comments/{comment_id}/withdraw")
+def withdraw_report_comment(report_id: str, comment_id: str,
+                            project: AuthorizedProject = ProjectAccessDep,
+                            db: DBSession = Depends(get_db),
+                            user: User | None = Depends(optional_user)) -> dict:
+    """Withdraw an open comment. 409 `report_comment_closed` when it is
+    already addressed or withdrawn."""
+    from services.reports import revisions
+
+    _latest_or_404(project, report_id)
+    _check_lock(project, db, user)
+    try:
+        comment = revisions.withdraw(project.directory, report_id, comment_id)
+    except (revisions.RevisionError, store.ReportStoreError) as exc:
+        raise _revision_http(exc) from exc
+    return comment.model_dump(mode="json")
+
+
+@router.post("/{name}/reports/{report_id}/comments/{comment_id}/address")
+def address_report_comment(report_id: str, comment_id: str, body: AddressBody,
+                           project: AuthorizedProject = ProjectAccessDep,
+                           db: DBSession = Depends(get_db),
+                           user: User | None = Depends(optional_user)) -> dict:
+    """
+    Address an open comment with one edit of the closed set, saved as the
+    NEXT version against `base_digest` (the latest version's
+    `version_sha256`). `edit` is `{kind: paragraph_text, md}`, `{kind:
+    bullet_text, items}`, `{kind: table_text, caption, columns}` or `{kind:
+    table_cells, rows}`. Returns `{comment, version, digest, document}`.
+
+    409 `revision_stale_base` (another version came first, or the commented
+    block changed; nothing written), 409 `report_comment_closed`, 409
+    `report_job_in_flight`, 422 `report_revision_unsupported` with
+    `reasons` (the comment stays open with them).
+    """
+    from services.reports import revisions
+
+    _latest_or_404(project, report_id)
+    _check_lock(project, db, user)
+    if _job_slot_busy():
+        raise HTTPException(409, {
+            "error_kind": "report_job_in_flight",
+            "message": "A report job is writing this project's reports; wait for it to "
+                       "finish (or abort it) before revising.",
+        })
+    edit = _validated(revisions.Edit, body.edit, "edit")
+    try:
+        comment, doc = revisions.address(project.directory, report_id, comment_id,
+                                         body.base_digest, edit)
+    except (revisions.RevisionError, store.ReportStoreError) as exc:
+        raise _revision_http(exc) from exc
+    return {"comment": comment.model_dump(mode="json"), "version": doc.version,
+            "digest": comment.revision.digest, "document": doc.model_dump(mode="json")}
