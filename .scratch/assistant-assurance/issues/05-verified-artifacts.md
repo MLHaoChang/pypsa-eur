@@ -324,3 +324,51 @@ card through the coordinator.
   `limit` as given; neither is compared against the builder network.
   Follow-up: an oracle that computes `project_value` (and `limit`) for each
   row from the network.
+
+### 2026-11-08 — S5 Q1 owner pick; S5b plan: GK B (35) GO WITH CHANGES (B1–B7, verbatim)
+
+Owner card 2026-11-08 (~01:50 CET), S5 Q1: "Pin them as fact-free
+(Recommended)", recorded as AA05-A46-SCOPE-1 (lands in owner-decisions.md with
+#1268). S5 tests the field lists on the answer and the checked chart, adds the
+metric identity (metric, formula_id, unit, disposition, warnings) to the chart,
+and pins that table exports, reports and download headers never present a
+value as checked.
+
+GK B (35), as sent at about 01:10Z (resent 01:13Z):
+
+> Q1: (a), metrics and warnings go inside `dataset`, so dataset_sha256 covers them and verify() re-derives them.
+> Q2: not_drawn / "other_project" is right. render() runs under for_answer, which never fails the answer. assurance_context_changed is for the answer path when the active project changes mid-turn, and that path already raises it.
+>
+> B1. Unavailable identity comes from the evidence, never from the current code.
+> - A slot does not store formula_id or unit (calculations.py:277 and :652). With the plan as written, verify() would read unavailable slots from today's `calculations.definition`. A later release that bumps a formula_id or unit would then make every stored chart with an unavailable slot fail verify (409), even though nothing about the evidence changed.
+> - So: an unavailable metric carries {metric, disposition, reason}, with formula_id and unit None. That matches the receipt, which names only "metric: reason" for those.
+> - Answered metrics take formula_id and unit from the record's fact.
+> - verify() re-derives only from the unsealed record. Pin it with a test that monkeypatches `calculations.definition` (or DEFINITIONS) to a new formula_id after render, and shows verify() still returns "current".
+>
+> B2. Legacy branch.
+> - Legacy applies only when BOTH `metrics` and `warnings` are absent from the stored dataset. One key without the other is a mismatch (False).
+> - A new render always writes both, even when empty, with a test.
+> - The legacy compare still checks series, window and the rest of the dataset.
+> - Add a hand mutant "legacy taken when only one key is absent" next to "legacy always taken".
+>
+> B3. Warnings text.
+> - One builder for "<metric>: <reason>" is shared by the receipt limitations and the chart. Do not restate the format.
+> - A test compares chart warnings with the receipt's limitations for the same record.
+> - Answered slots produce no warning.
+>
+> B4. The download-header pin is an exact allow-list per kind, not a word grep.
+> - Charts legitimately send X-Checked-Chart ("evidence re-verified now") and X-Chart-Scope; reports send X-Report-Source (S4b). A grep for "evidence"/"checked" would hit those, and it would miss a neutral header name that carries a value.
+> - Pin the exact header-name set for each kind (table, human report, assistant report_export, chart). Then pin that no header value contains a checked number from the record.
+>
+> B5. Download metadata includes the delivery zip.
+> - P4 also pins that a delivery item for a table or report export carries no facts, metrics or checked value. Only `assurance`, dataset_sha256 and render_spec_sha256 are as today.
+> - The report-export pin needs #1267 merged first.
+>
+> B6. K1.
+> - render() compares record["project_id"] with the same id the manifest writes (str(project.id) from assistant_tools._project()). The check runs before _draw and before any file or sidecar write.
+> - Test: no upload, no sidecar, and REASONS["other_project"] in plain words.
+> - grep the frontend for consumers of chart reason codes (CheckedChart.tsx and its test): a new code must render its title, not a raw code.
+>
+> B7. Citation and survivors.
+> - The PR cites the owner's S5 Q1 pick ("Pin them as fact-free", 2026-11-08) by its owner-decisions.md row. If the row has not landed yet, say so in the body.
+> - mutants.py survivors are fixed or listed with a reason.
