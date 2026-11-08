@@ -506,13 +506,13 @@ def _dc_gridcode_frequency(env):
     user gave at intake (`grid.frequency_hz`, Hz). No intake row or no
     campus file is no evidence (Q2: the user drafts the campus)."""
     from services import campus_electrical_service as ce
-    from services.run_intake import USABLE
     from services.solver.island import campus_f_hz
+    # GK B (36): only a row the user confirmed; never campus_f_hz, a template or a code default.
     rows = ((env.task.get("run") or {}).get("intake") or {}).get("rows") or []
     given = next((r.get("value") for r in rows if r.get("param") == FREQUENCY_PARAM
-                  and r.get("status") in USABLE and not r.get("write")), None)
-    if str(given) not in ("50", "60"):
-        return NoEvidence("not_given", "state the grid frequency (Hz) at intake")
+                  and r.get("status") == "confirmed" and not r.get("write")), None)
+    if given not in ("50", "60"):
+        return NoEvidence("not_given", "state the grid frequency (Hz)")
     if env.project_dir is None or not (Path(env.project_dir) / ce.SUBDIR / ce.CAMPUS_FILE).is_file():
         return NoEvidence("campus_missing", "draft the campus")
     return float(campus_f_hz(env.project_dir)) == float(given)

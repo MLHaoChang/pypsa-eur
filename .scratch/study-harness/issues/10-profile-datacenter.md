@@ -61,6 +61,12 @@ Conditions:
 - D8 (the scorecard row table). The "every emitted row id is gated or listed as 'not gated: <reason>'" test runs on the shipped template AND on a project with sidecars (ride_through:, dynamic: rows), so a new engine row fails until it is classified. ride_through: and dynamic: never pass.
 - Also: the wording is "within the screening limit". Run mutants.py on run_gates, run_actions and run_profiles, plus hand mutants of D1–D3.
 
+### GK B (36): grid.frequency_hz in 10a, option A confirmed (2026-11-08), with conditions
+
+- `_dc_gridcode_frequency` reads only the confirmed intake rows. It never falls back to campus_f_hz, a template default, the profile's own data or a parameter default (SH-07 B3b). Test: no intake row while the network and campus both say 60 → not_evaluated.
+- With no row, the block rule is not_evaluated with "state the grid frequency (Hz)", and the run stops at the input gate. It never passes and never reads as a fail on the value. Test that state and its reason.
+- 10b: the opened intake takes grid.frequency_hz as a user-given 50|60 enum, shown on the card with its unit, never tunable, and not a template creation param.
+
 ### Survey for 10a (session_01G7qCuicgzGCQ4BMEZ2uayd, master 5fd5977e)
 
 - **Already on master (issue 05):**

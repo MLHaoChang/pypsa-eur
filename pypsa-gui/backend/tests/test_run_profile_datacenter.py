@@ -858,3 +858,30 @@ def test_a_stage_entered_again_keeps_the_runs_first_freeze(hub):  # noqa: F811
     steps = run_profiles.materialise(_profile(), "solve", str(hub.id), start=5)
     run_actions.fill(steps, again)
     assert [s["frozen"] for s in steps if run_actions.is_action(s)] == [first, first]
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [],
+        [{"param": run_gates.FREQUENCY_PARAM, "value": "60", "status": "proposed"}],
+        [{"param": run_gates.FREQUENCY_PARAM, "value": 60, "status": "confirmed"}],
+    ],
+)
+def test_with_no_confirmed_row_the_frequency_is_never_read_from_the_network(
+    tmp_path, monkeypatch, rows
+):
+    """GK B (36): the campus and the network both say 60, yet no confirmed
+    intake row: not evaluated, with its reason; never a pass, never a fail."""
+    import services.solver.island as island
+
+    monkeypatch.setattr(island, "campus_f_hz", lambda project_dir: 60.0)
+    env = _freq_env(tmp_path, 60, None)
+    env.task["run"]["intake"]["rows"] = rows
+    rule = _rules("input_gate")["dc.gridcode.frequency"]
+    [result] = run_gates.evaluate([rule], env)
+    assert (
+        result["verdict"] == "not_evaluated"
+        and result["reason"] == "state the grid frequency (Hz)"
+    )
+    assert not run_gates.passed([result])
