@@ -576,3 +576,68 @@ def test_a_solve_queue_record_holds_before_the_store_is_read(project, monkeypatc
     assert job_holds.check(ChatSession(), QUEUE, {"project_id": "alpha"}, "F")[0] == (
         job_holds.PENDING
     )
+
+
+# ── Mutant-killing edges ────────────────────────────────────────────────────
+
+
+def test_an_orphan_solve_record_holds_with_no_live_solve_thread(project, monkeypatch):
+    """An orphan is never cleared by the live solver record: that thread is
+    not the evidence the record's call left."""
+    job_holds.open_on_raise(
+        ChatSession(), "run_simulation", "F", "tu", _BrokenCtx(), None
+    )
+    with job_holds._REGISTRY_LOCK:
+        job_holds._REGISTRY.clear()
+    monkeypatch.setattr(job_holds, "_live_solve_thread", lambda: None)
+    later = ChatSession()
+    for _ in range(2):  # the second call reads the adopted hold's evidence
+        assert job_holds.check(later, "run_simulation", {}, "F")[0] == job_holds.PENDING
+
+
+class _BrokenCtx:
+    solver_state_lock = threading.Lock()
+
+    @property
+    def solver_state(self):
+        raise OSError("unreadable")
+
+
+def test_a_chats_own_unshared_hold_names_its_job(monkeypatch):
+    monkeypatch.setattr(job_holds, "_binding", lambda: (None, "scratch"))
+    session = ChatSession()
+    job_holds.open_on_outcome(
+        session,
+        "run_simulation",
+        "F",
+        "tu",
+        {"outcome": "uncertain", "job_id": "fg:3"},
+    )
+    monkeypatch.setattr(job_holds, "job_terminal", lambda job_id: False)
+    assert "job fg:3" in job_holds.check(session, "run_simulation", {}, "F")[1]
+
+
+class _Row:
+    def __init__(self, **over):
+        values = dict(
+            id="r",
+            tool=QUEUE,
+            fingerprint="F",
+            opened="tool_timeout",
+            owner_replica_id="me",
+            job_id=None,
+            opened_at=1.0,
+            opened_by_user_id=None,
+        )
+        values.update(over)
+        self.__dict__.update(values)
+
+
+@pytest.mark.parametrize(
+    "over",
+    [{"job_id": ""}, {"job_id": 7}, {"opened_at": float("nan")}, {"opened_at": "1"}],
+)
+def test_a_row_with_a_bad_job_id_or_time_is_malformed(over):
+    assert job_hold_store._record(_Row()).id == "r"
+    with pytest.raises(job_hold_store.MalformedRecord):
+        job_hold_store._record(_Row(**over))
