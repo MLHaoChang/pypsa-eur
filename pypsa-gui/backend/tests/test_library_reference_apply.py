@@ -128,7 +128,7 @@ def test_ac_pv_on_an_undeclared_generator_needs_confirmation():
     p = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030)
     assert "dc_ac" in p["missing"]
     text = next(x["text"] for x in p["needs"] if x["confirmation"] == "dc_ac")
-    assert "AC rating" in text and "MWp" in text
+    assert "AC rating" in text and "MWp" in text and "Check that" in text
     with pytest.raises(HTTPException) as exc:
         A.require_confirmed(p)
     assert _codes(exc) == ("reference_confirmation_needed", p["missing"])

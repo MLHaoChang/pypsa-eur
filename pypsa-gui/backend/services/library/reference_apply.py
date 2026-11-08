@@ -213,9 +213,9 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
     needs: list[dict] = []
     if ref.capacity_basis_code == "output_electric_ac":
         needs.append({"confirmation": "dc_ac", "text":
-                      "Capacity is the AC rating, and this PV cost is per MW of AC output. Is this plant's Capacity its "
-                      "AC rating (not its MWp)? If it is the DC module rating, the cost per MW is overstated by "
-                      "the DC/AC ratio. "
+                      "This PV cost is per MW of AC output, and Capacity is meant as the AC rating. Check that this "
+                      "plant's Capacity is its AC rating, not its DC module rating (MWp): if it is the DC rating, "
+                      "the cost per MW is overstated by the DC/AC ratio. "
                       f"{LEFT_UNCONFIRMED}"})
     why = _connection_priced(n, commercial) if ref.includes_grid_connection is True else None
     if why:
