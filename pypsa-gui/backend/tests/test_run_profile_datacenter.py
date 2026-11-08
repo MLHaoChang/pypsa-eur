@@ -995,14 +995,24 @@ def test_the_approval_card_names_what_the_step_is_held_to(hub):  # noqa: F811
         r["role"] == "note" and r["unit"] == "" and isinstance(r["field"], str)
         for r in card["rows"]
     )
-    assert notes[0] == "Grid-code profile: SAGC data centre (sagc_dc)"
-    assert notes[1] == f"Profile digest: {frozen['grid_code']['digest'][:12]}"
-    assert notes[2] == "Campus study settings: N-1 on, investment on, grid code sagc_dc"
+    assert notes == [
+        "Grid-code profile: SAGC data centre",
+        "Campus study settings: N-1 on, investment on, held to SAGC data centre",
+        "Saves the campus study results",
+        "Saves the campus study settings, held to SAGC data centre",
+        "Reserves 1 solve",
+        f"Source: grid-code profile sagc_dc · digest {frozen['grid_code']['digest'][:12]} · "
+        f"{ce.SUBDIR}/run/, {ce.SUBDIR}/{ce.SETTINGS_FILE}",
+    ]
+    assert card["says"] == "Run the campus study held to SAGC data centre"
+    unset = copy.deepcopy(frozen)
+    unset["settings"].pop("invest")
     assert (
-        notes[3:-1] == [f"Writes {w}" for w in frozen["writes"]]
-        and len(frozen["writes"]) == 2
+        "investment not set"
+        in run_actions.approval_card({"tool": run_actions.CAMPUS, "frozen": unset})[
+            "rows"
+        ][1]["note"]
     )
-    assert notes[-1] == "Reserves 1 solve"
     assert run_actions.approval_card({"tool": run_actions.CAMPUS}) is None
     assert run_actions.needs_card(
         {"tool": run_actions.CAMPUS, "native": run_actions.KIND}

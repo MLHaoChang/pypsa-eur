@@ -240,22 +240,34 @@ def approval_card(step) -> dict | None:
     frozen = step.get("frozen") if isinstance(step, dict) else None
     if not isinstance(frozen, dict) or not isinstance(frozen.get("digest"), str):
         return None
+    from services import campus_electrical_service as ce
+
     code, settings, solves = frozen["grid_code"], frozen["settings"], frozen["solves"]
+    label = code.get("label") or code["id"]
     on = {True: "on", False: "off"}
+
+    def saves(write):
+        # UX (14): what is saved, in words; the path goes in the Source row.
+        if write.startswith(f"{ce.SUBDIR}/run/"):
+            return "Saves the campus study results"
+        if write.startswith(f"{ce.SUBDIR}/{ce.SETTINGS_FILE}"):
+            return f"Saves the campus study settings, held to {label}"
+        return f"Saves {write}"
+
+    paths = ", ".join(w.split(" (")[0] for w in frozen["writes"])
     rows = [
-        _note(
-            "grid_code",
-            f"Grid-code profile: {code.get('label') or code['id']} ({code['id']})",
-        ),
-        _note("grid_code_digest", f"Profile digest: {str(code.get('digest'))[:12]}"),
+        _note("grid_code", f"Grid-code profile: {label}"),
         _note(
             "settings",
-            f"Campus study settings: N-1 {on.get(settings.get('n_minus_1'), '?')}, "
-            f"investment {on.get(settings.get('invest'), '?')}, "
-            f"grid code {settings.get('profile')}",
+            f"Campus study settings: N-1 {on.get(settings.get('n_minus_1'), 'not set')}, "
+            f"investment {on.get(settings.get('invest'), 'not set')}, held to {label}",
         ),
-        *(_note("writes", f"Writes {w}") for w in frozen["writes"]),
+        *(_note("writes", saves(w)) for w in frozen["writes"]),
         _note("solves", f"Reserves {solves} solve{'' if solves == 1 else 's'}"),
+        _note(
+            "source",
+            f"Source: grid-code profile {code['id']} · digest {str(code.get('digest'))[:12]} · {paths}",
+        ),
     ]
     return {
         "version": 1,
@@ -263,7 +275,7 @@ def approval_card(step) -> dict | None:
         "tool": step["tool"],
         "rows": rows,
         "sets": [],
-        "says": f"Run the campus study held to the grid-code profile {code['id']}",
+        "says": f"Run the campus study held to {label}",
         "complete": True,
         "digest": frozen["digest"],
     }
