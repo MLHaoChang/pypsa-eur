@@ -242,13 +242,23 @@ caller's foreground project, re-authorized on every call. A `site_id` is only a
 key: an unknown, deleted or foreign one is the route's `not_found`.
 - **Read** is capped in items and bytes, names every cut (`truncated`) and gap
   (`unavailable`), lists its user-authored fields (`data_fields`) and returns
-  no coordinates, footprints or meshes.
+  no coordinates, footprints or meshes. `my_previews` lists the caller's own
+  `open` and `outcome_unknown` previews (`chat.my_previews`: owner-scoped,
+  status from the chain first, capped at `MAX_LIVE_PER_OWNER`); the scene GET
+  lists the same, `applied` included. The client drops the cached scene when
+  the signed-in user changes (`USER_SCOPED_ROOTS`).
 - **Prepare** is read-tier with no card, but checks the edit lock and the saved
   chat rule. A caller holds at most `MAX_LIVE_PER_OWNER` open previews, and a
   chat preview never evicts another one (`proposals._admit_owned`); the route
   keeps its evicting behaviour.
 - **Apply** needs `proposal_id`, `input_hash` and `expected_revision`, and its
-  card (`edit_card_site.py`) binds them with the owner, project and Site.
+  card (`edit_card_site.py`) binds them with the owner, project and Site. Each
+  target the card maps is a typed row with a `check`; the receipt reads every
+  target back from disk under the network lock and is `verified` only when each
+  matches the plan, else `uncertain`. A row's `not_compared` names the fields
+  its check does not compare (model-facing only). Features are named in words
+  (`chat.feature_words`), never by scene id. An apply whose outcome is unknown is
+  the `scene_apply_outcome_unknown` error kind, never a receipt.
 - **Cancel** reaches only the caller's own preview and carries no card
   (`GUIDED_UNCARDED`).
 - **Per-turn block.** The browser's `ui_context.site_scene` hint only names the

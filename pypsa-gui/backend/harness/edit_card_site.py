@@ -871,8 +871,11 @@ def _model_rows(project, owner, entry: dict, scene: dict) -> list[dict]:
         new = associations._label(None, expect["class"], expect["name"])
         if "placement" in stored:
             was = associations._label(None, preview.get("class") or expect["class"], preview.get("was") or "")
+            at = ((scene.get("site") or {}).get("placements") or {}).get(stored["placement"])
             add(f"Attach again: the placed item {chat._text(was)} becomes {_target_text(expect, units.get(None))}",
-                chat._text(was), chat._text(new), {"kind": "replaced", "key": stored["placement"], **_expect(expect)})
+                chat._text(was), chat._text(new), {"kind": "replaced", "key": stored["placement"], **_expect(expect),
+                                                   "at": _where_placed(at, words) if at else None},
+                ("unit", "capacity"))
         else:
             where = chat.feature_word(words, preview.get("feature"))
             was = labels.get(stored["association"]) or preview.get("was")
@@ -951,7 +954,12 @@ def _read_target(n, check: dict, scene: dict, recorded: dict, words: dict, row: 
         if name is None:
             return NOT_ATTACHED
         label = chat._text(associations._label(None, check["class"], name))
-        return label if _same_target(n, check, name) else OTHER_ITEM
+        if not _same_target(n, check, name):
+            return OTHER_ITEM
+        # The new item keeps the old one's place (J1: a placement's x/y/heading/on).
+        if kind == "replaced" and check.get("at") and _where_placed(placed[new_key], words) != check["at"]:
+            return f"{label}, moved to {_where_placed(placed[new_key], words)}"
+        return label
     key = check["key"]
     left = sorted(a_id for a_id, a in assoc.items() if a.get("feature") == key)
     if kind == "detach":

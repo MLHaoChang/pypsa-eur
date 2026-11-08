@@ -271,19 +271,21 @@ def feature_words(scene: dict[str, Any], n=None) -> dict[str, str]:
     from services.site_scene import associations
 
     out: dict[str, str] = {}
-    buildings = [
-        b for b in scene.get("buildings") or [] if isinstance(b, dict) and b.get("id")
-    ]
-    labels = [building_label(b) for b in buildings]
-    seen: dict[str, int] = {}
-    for b, label in zip(buildings, labels):
-        if labels.count(label) > 1:
-            seen[label] = seen.get(label, 0) + 1
-            label = f"{label} {seen[label]}"
-        out[b["id"]] = label
-    for g in scene.get("groups") or []:
-        if isinstance(g, dict) and g.get("id"):
-            out[g["id"]] = f"group “{_text(g.get('label') or 'unnamed')}”"
+
+    def numbered(features: list[dict], labels: list[str]) -> None:
+        seen: dict[str, int] = {}
+        for f, label in zip(features, labels):
+            if labels.count(label) > 1:
+                seen[label] = seen.get(label, 0) + 1
+                label = f"{label} {seen[label]}"
+            out[f["id"]] = label
+
+    def listed(key: str) -> list[dict]:
+        return [f for f in scene.get(key) or [] if isinstance(f, dict) and f.get("id")]
+
+    buildings, groups = listed("buildings"), listed("groups")
+    numbered(buildings, [building_label(b) for b in buildings])
+    numbered(groups, [f"group “{_text(g.get('label') or 'unnamed')}”" for g in groups])
     for key in (scene.get("site") or {}).get("placements") or {}:
         if isinstance(key, str) and ":" in key:
             cls, name = key.split(":", 1)

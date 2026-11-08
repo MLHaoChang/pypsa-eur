@@ -37,6 +37,11 @@ export interface EditCardRow {
     raw: Scalar; raw_unit: string; formula?: boolean }
   /** A cost's stated money basis. */
   money?: { currency: string; money_year: number }
+  /** SC-07 J1: a 3D site target row's read-back check (harness/edit_card_site.py _target_row); its kind and
+   *  identity are the server's, read only for presence here. */
+  check?: Record<string, unknown>
+  /** SC-07 J1: the fields that check does not compare, for the model; never shown. */
+  not_compared?: string[]
 }
 
 /** A set the server resolved for one change (LC-16 OJ-22): what it selects, how many, by what factor. */
@@ -344,7 +349,7 @@ export function EditCardTable({ card, guided, labels }: { card: EditCard; guided
 
 /** SC-07 S5a: a 3D site card's target rows carry their read-back check (GK B J1). */
 const sceneTargets = (rows: EditCardRow[]) =>
-  rows.filter(r => r.role === 'typed' && (r as { check?: unknown }).check != null)
+  rows.filter(r => r.role === 'typed' && r.check != null)
 
 export function EditReceiptLine({ receipt, disabled, onRequest, guided = false }: {
   receipt: EditReceipt; disabled: boolean; onRequest: (text: string) => void
