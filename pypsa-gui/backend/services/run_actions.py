@@ -191,7 +191,9 @@ def freeze(project, study=None) -> dict:
     code = choose(project)
     saved = {k: v for k, v in _saved_settings(project).items() if k in ce.DEFAULTS}
     try:
-        settings = ce._settings({**saved, **study, "profile": code["id"]}, ce.profiles(project))
+        settings = ce._settings(
+            {**saved, **study, "profile": code["id"]}, ce.profiles(project)
+        )
     except HTTPException as exc:
         raise FreezeError(
             "settings", f"the campus settings cannot be used: {exc.detail}"
@@ -241,17 +243,30 @@ def approval_card(step) -> dict | None:
     code, settings, solves = frozen["grid_code"], frozen["settings"], frozen["solves"]
     on = {True: "on", False: "off"}
     rows = [
-        _note("grid_code", f"Grid-code profile: {code.get('label') or code['id']} ({code['id']})"),
+        _note(
+            "grid_code",
+            f"Grid-code profile: {code.get('label') or code['id']} ({code['id']})",
+        ),
         _note("grid_code_digest", f"Profile digest: {str(code.get('digest'))[:12]}"),
-        _note("settings", f"Campus study settings: N-1 {on.get(settings.get('n_minus_1'), '?')}, "
-                          f"investment {on.get(settings.get('invest'), '?')}, "
-                          f"grid code {settings.get('profile')}"),
+        _note(
+            "settings",
+            f"Campus study settings: N-1 {on.get(settings.get('n_minus_1'), '?')}, "
+            f"investment {on.get(settings.get('invest'), '?')}, "
+            f"grid code {settings.get('profile')}",
+        ),
         *(_note("writes", f"Writes {w}") for w in frozen["writes"]),
         _note("solves", f"Reserves {solves} solve{'' if solves == 1 else 's'}"),
     ]
-    return {"version": 1, "kind": "native", "tool": step["tool"], "rows": rows, "sets": [],
-            "says": f"Run the campus study held to the grid-code profile {code['id']}",
-            "complete": True, "digest": frozen["digest"]}
+    return {
+        "version": 1,
+        "kind": "native",
+        "tool": step["tool"],
+        "rows": rows,
+        "sets": [],
+        "says": f"Run the campus study held to the grid-code profile {code['id']}",
+        "complete": True,
+        "digest": frozen["digest"],
+    }
 
 
 def fill(steps, frozen) -> None:
