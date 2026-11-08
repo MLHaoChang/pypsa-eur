@@ -315,6 +315,12 @@ def definition(metric, profile=None):
     )
 
 
+def slot_warnings(slots):
+    """The "<metric>: <reason>" line for each slot not answered: the answer's
+    receipt limitations and the checked chart's warnings (AA-05 S5b B3)."""
+    return [s["metric"] + ": " + s["reason"] for s in slots if s["disposition"] != "answered"]
+
+
 def requested_metrics(scope):
     return scope.get("metrics", PROFILES[scope["profile"]])
 
