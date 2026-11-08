@@ -267,6 +267,14 @@ try {
     // R6: a real ui_open_panel(map, site); the ACK held (pending), real (opened), refused (unconfirmed).
     const toolRow = () => page.locator('[data-testid="chat-message"][data-role="tool"]')
       .filter({ has: page.getByTestId('chat-site3d-open') }).last()
+    // Warm-up (real, by the user's own Site 3D toggle): the view's code and 3D scene load once, so
+    // the chat's open mounts within the 5 s ACK window; then back to Blank so the chat opens it.
+    const warm = Date.now()
+    await page.getByRole('button', { name: 'Site 3D', exact: true }).click()
+    await page.locator('[data-assurance-canvas="site"]').first().waitFor({ state: 'attached', timeout: 90000 })
+    report[`site3d-mount-ms-${mode}`] = Date.now() - warm
+    await page.getByRole('button', { name: 'Blank', exact: true }).click()
+    await page.locator('[data-assurance-canvas="site"]').first().waitFor({ state: 'detached', timeout: 10000 })
     for (const [step, ackMode] of [['open', 'hold'], ['refused', '409']]) {
       const sentence = `Open the 3D site (${mode} ${step}).`
       await plan({ [sentence]: { calls: [{ name: 'ui_open_panel', arguments: { panel_id: 'map', canvas_view: 'site' } }],
