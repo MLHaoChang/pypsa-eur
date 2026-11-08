@@ -62,6 +62,11 @@ export function goalText(goal: ReliabilityGoal | null, k: GoalNumberField): stri
   return String(f.value)
 }
 
+/** The goal's name where a run or a readiness row asks for it: the run
+ *  profile's intake field and the template ledgers' `lole_goal` row use the
+ *  same words (parity test in EnvelopeSection.test.tsx). */
+export const RELIABILITY_GOAL_LABEL = 'Reliability goal (LOLE)'
+
 /** What an unset field reads, in both modes and in the Results summary. */
 export const GOAL_UNSET: Record<'target_lole_h' | 'ens_cap_permyriad', string> = {
   target_lole_h: 'not set', ens_cap_permyriad: 'off',

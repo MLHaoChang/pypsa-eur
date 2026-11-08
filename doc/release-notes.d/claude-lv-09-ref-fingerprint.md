@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): the discussed run ref now stores the run's fingerprint, revision, status and mode, so a run that changed while the conversation was away reads as changed on resume instead of unanchored.

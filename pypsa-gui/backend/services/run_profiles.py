@@ -488,7 +488,37 @@ EH_SITE = {
     "missing_tools": [],
 }
 
-PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE}
+
+# Issue 07 B3b (GK B (33) P5, P6): eh_site@2. The LOLE rule's engine is the
+# coupling loop (the margin loop refuses the shipped eh_site network), and the
+# intake asks for the user's reliability goal (h/yr), which the grant writes to
+# the new project's solver config before the freeze. A goal param is never a
+# creation param (`run_intake.params`). eh_site@1 stays byte-equal for the
+# runs started on it (L8).
+GOAL_PARAM = "goal.target_lole_h"
+
+
+def _eh_site_v2() -> dict:
+    profile = copy.deepcopy(EH_SITE)
+    profile["version"] = 2
+    profile["params"]["ask"].append(GOAL_PARAM)
+    profile["params"]["fields"][GOAL_PARAM] = _num(
+        "Reliability goal (LOLE)", {"native_type": "float", "unit_storage": "h/yr"})
+    for rule in profile["stages"]["result_gate"]["rules"]:
+        if rule.get("engine"):
+            rule["engine"] = {"tool": "run_coupling_loop", "max_solves": 3, "restore": "base"}
+    return profile
+
+
+EH_SITE_V2 = _eh_site_v2()
+
+PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2}
+
+
+def needs_goal(profile: dict) -> bool:
+    """P5: the profile asks for a goal and an engine rule judges LOLE against it."""
+    return GOAL_PARAM in profile["params"].get("fields", {}) and any(
+        r.get("engine") for r in profile["stages"]["result_gate"]["rules"])
 
 
 def resolve(ref: str) -> dict:

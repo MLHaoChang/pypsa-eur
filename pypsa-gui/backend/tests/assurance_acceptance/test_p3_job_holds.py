@@ -921,7 +921,7 @@ def test_an_approval_whose_hold_has_cleared_admits_the_call():
 def test_an_other_args_call_never_gets_a_repeat_card():
     session = ChatSession()
     hold = job_holds._open(session, TOOL, "F", "tu", "x", future=_NeverDone())
-    hold.told = True
+    job_holds._told(session).add(hold.id)
     assert job_holds.repeat_card(session, TOOL, ARGS, "F2") is None
     assert job_holds.repeat_card(session, TOOL, ARGS, "F")["hold_id"] == hold.id
 

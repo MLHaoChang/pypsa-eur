@@ -510,7 +510,8 @@ def test_no_new_catalogue_tool():
     from harness.catalogue import TOOLS
     start_task = next(t for t in TOOLS if t['name'] == 'start_task')
     schema = start_task.get('input_schema') or start_task.get('parameters')
-    assert schema['properties']['run']['properties']['profile']['enum'] == sorted(run_profiles.PROFILES)
+    # Issue 07 B3b (GK B (33) P6): new runs are offered eh_site@2 only; every offered profile is a known one.
+    assert set(schema['properties']['run']['properties']['profile']['enum']) <= set(run_profiles.PROFILES)
     assert not any(t['name'].startswith(('run_profile', 'harness_run', 'evaluate_gate')) for t in TOOLS)
 
 

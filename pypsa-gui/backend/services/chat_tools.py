@@ -6248,6 +6248,7 @@ def discuss_project_run(
             section=section,
             source=results_tab,
             clear_baseline=baseline_run_id is None,
+            **{k: summary[k] for k in dc._REVALIDATE_ANCHORS if k in summary},
         )
 
     if not open_ui:

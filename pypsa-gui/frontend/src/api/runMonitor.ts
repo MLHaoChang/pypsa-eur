@@ -30,6 +30,9 @@ export interface EnvelopeGap {
 }
 export interface EnvelopeRun { tool: string; kind?: string }
 export interface EnvelopeBudget { solves: number; rounds: number; wall_time_h: number }
+/** GK B (33) P5a: the reliability goal a plain run's LOLE rule judges against,
+ *  as the card shows it; `value` null when only a default is set. */
+export interface EnvelopeGoal { value: number | null; unit: 'h/yr'; source: string }
 export interface Envelope {
   id: string; state: 'proposed' | 'granted' | 'expired' | 'revoked' | 'exhausted'
   expires_at: string | null
@@ -37,6 +40,7 @@ export interface Envelope {
   research: { allowed: boolean; cost_cap_eur: number }
   notify: { email: boolean }
   used: number; refused: number
+  goal?: EnvelopeGoal
 }
 /** The run session's live card: the same payload the chat's
  *  `tool_pending_confirmation` frame carries, plus its session. */

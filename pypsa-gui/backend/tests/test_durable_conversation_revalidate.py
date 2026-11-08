@@ -415,3 +415,79 @@ def test_hydration_never_trusts_a_stamp_from_another_generation(acl):
     dc._hydrate_discussed_refs(target, dict(view, revalidation=stale))
     assert target.discussed_refs["revalidation"] == "unreadable"
     assert "fingerprint" not in target.discussed_refs
+
+
+# ── LV-09 (issue 15): the discussed ref stores the run's anchors ────────────
+
+_ANCHORS = ("fingerprint", "revision", "status", "mode")
+
+
+def _stamp_of(tid):
+    view, _session = dc.resume_episode(tid, generation=dc.get_thread(tid)["generation"])
+    return view["revalidation"]["refs"]["discussed"]
+
+
+def test_discussed_ref_stores_anchors_and_resume_reads_current(acl):
+    _publish(acl.root, "run-a")
+    tid = dc.create_thread()["thread_id"]
+    anchors = {"fingerprint": FP, "status": "completed", "mode": "lopf"}
+    dc.set_discussed_run(tid, generation=1, run_id="run-a", **anchors)
+    stored = json.loads(_thread_file(acl, tid).read_text())["refs"]["discussed"]
+    assert {k: stored[k] for k in anchors} == anchors
+    stamp = _stamp_of(tid)
+    assert stamp["state"] == "current" and stamp["uncompared"] == []
+
+
+def test_discussed_ref_without_anchors_stays_unanchored(acl):
+    _publish(acl.root, "run-a")
+    tid = dc.create_thread()["thread_id"]
+    dc.set_discussed_run(tid, generation=1, run_id="run-a")
+    assert _stamp_of(tid)["state"] == "unanchored"
+
+
+@pytest.mark.parametrize("anchor", _ANCHORS)
+def test_each_anchor_alone_reads_changed(acl, anchor, monkeypatch):
+    _publish(acl.root, "run-a")
+    tid = dc.create_thread()["thread_id"]
+    stored = {"fingerprint": FP, "revision": 3, "status": "completed", "mode": "lopf"}
+    dc.set_discussed_run(tid, generation=1, run_id="run-a", **stored)
+    observed = dict(stored)
+    observed[anchor] = "different" if anchor != "revision" else 4
+    monkeypatch.setattr(
+        re_,
+        "get_run_evidence",
+        lambda run_id, section=None: {
+            "run_id": run_id,
+            "evidence_available": True,
+            **observed,
+        },
+    )
+    assert _stamp_of(tid)["state"] == "changed"
+
+
+def test_second_run_does_not_inherit_first_runs_anchors(acl):
+    _publish(acl.root, "run-a")
+    _publish(acl.root, "run-b", fingerprint="b" * len(FP))
+    tid = dc.create_thread()["thread_id"]
+    view = dc.set_discussed_run(
+        tid,
+        generation=1,
+        run_id="run-a",
+        fingerprint=FP,
+        status="completed",
+        mode="lopf",
+    )
+    dc.set_discussed_run(tid, generation=view["generation"], run_id="run-b")
+    stored = json.loads(_thread_file(acl, tid).read_text())["refs"]["discussed"]
+    assert stored["run_id"] == "run-b" and not any(k in stored for k in _ANCHORS)
+    assert _stamp_of(tid)["state"] == "unanchored"
+
+
+def test_absent_anchor_is_not_stored_as_none(acl):
+    _publish(acl.root, "run-a")
+    tid = dc.create_thread()["thread_id"]
+    dc.set_discussed_run(tid, generation=1, run_id="run-a", fingerprint=FP)
+    stored = json.loads(_thread_file(acl, tid).read_text())["refs"]["discussed"]
+    assert stored["fingerprint"] == FP
+    assert all(k not in stored for k in ("revision", "status", "mode"))
+    assert _stamp_of(tid)["uncompared"] == []

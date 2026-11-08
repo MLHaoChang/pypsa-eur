@@ -20,6 +20,7 @@ import json
 import uuid
 
 import pandas as pd
+import pytest
 
 from db import session as db_session
 from db.models import Project
@@ -54,12 +55,12 @@ def _in_a_chat_turn(ctx):
     return leave
 
 
-def _grant(host, session, site, name):
+def _grant(host, session, site, name, verdict="unattended"):
     view = _start(host, name)
     run_envelope.decide(
         session,
         view["task_id"],
-        "unattended",
+        verdict,
         intake_digest=view["run"]["intake"]["digest"],
     )
     intent = run_handover.read_intent(task_path(site[1], view))
@@ -92,15 +93,18 @@ def _profiled_host():
     return front
 
 
+# GK B (33) S3: a stepwise intake verdict runs the same hand-over, so both
+# verdicts leave the host as it was and start from the new project's inputs.
+@pytest.mark.parametrize("verdict", ["unattended", "stepwise"])
 def test_a_grant_inside_the_hosts_chat_turn_fingerprints_the_new_project_and_leaves_the_host(
-    host, session, site
+    host, session, site, verdict
 ):
     front = _profiled_host()
     before = _host_state(front)
     leave = _in_a_chat_turn(front)
     try:
         path, task, ctx, _ = _grant(
-            host, session, site, f"Pilot {uuid.uuid4().hex[:6]}"
+            host, session, site, f"Pilot {uuid.uuid4().hex[:6]}", verdict
         )
         # The host's cell is the bound one again once the grant returns.
         assert PyPSAService.get_active_context() is front
@@ -111,10 +115,12 @@ def test_a_grant_inside_the_hosts_chat_turn_fingerprints_the_new_project_and_lea
     assert _host_state(front) == before
     # The run and its grant start from the new project's inputs.
     new = workflow_tools._network_input_fingerprint(ctx)
-    envelope = json.loads(run_envelope.path_for(path).read_text())
     assert new != before[-1]
-    assert task["fingerprint"] == envelope["fingerprint"] == new
-    assert envelope["chain"][-1]["fingerprint"] == new
+    assert task["fingerprint"] == new
+    if verdict == "unattended":
+        envelope = json.loads(run_envelope.path_for(path).read_text())
+        assert envelope["fingerprint"] == new
+        assert envelope["chain"][-1]["fingerprint"] == new
 
 
 def test_a_grant_that_raises_mid_setup_leaves_the_hosts_cell_bound(

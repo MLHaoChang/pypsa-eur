@@ -89,10 +89,17 @@ def tariff_currency_mismatch(tariff, currency: str | None) -> str | None:
     """Why `tariff` cannot price a project in `currency` (the #499 `currency_mismatch`
     rule, gridspine-library-eu 01), or None: both known and equal, or either unknown.
     Nothing is converted."""
-    have = getattr(tariff, "currency", None)
+    have, how = getattr(tariff, "currency", None), ""
+    if not have and getattr(tariff, "pack_hash", None):
+        # A `generic` pack copy states none: its stamp names the pack's (issue 03).
+        from services.library.defaults_pack.loader import stamped_tariff_currency
+
+        have = (stamped_tariff_currency(tariff) or "").strip().upper()
+        how = (" (from its defaults-pack stamp; state the tariff's currency if you rewrote "
+               "its rates)")
     if not currency or not have or have == currency:
         return None
-    return (f"Tariff \u201c{getattr(tariff, 'id', '')}\u201d is priced in {have}; the project's finance "
+    return (f"Tariff \u201c{getattr(tariff, 'id', '')}\u201d is priced in {have}{how}; the project's finance "
             f"inputs are in {currency}. Nothing is converted: use a {currency} tariff, or "
             "change the project's currency.")
 

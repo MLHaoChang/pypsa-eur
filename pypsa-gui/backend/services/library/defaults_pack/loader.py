@@ -65,7 +65,7 @@ __all__ = [
     "UnknownPackValue", "UnknownPackVersion", "UnknownTechnology",
     "MissingRegionalRow", "RegionInfo", "UnknownPackRegion", "available_regions",
     "available_versions", "canonical_payload", "derive", "load_defaults_pack", "parse_pack_dir",
-    "parse_pack_stamp",
+    "parse_pack_stamp", "stamped_tariff_currency",
     "version_dir",
     "CAPACITY_BASES", "LEGACY_VERSIONS", "CapacityBasisCode", "GridConnection",
     "LegacyPackVersion", "typed_successor",
@@ -798,6 +798,26 @@ def parse_pack_stamp(stamp: str) -> tuple[str, str, str]:
     if m is None:
         raise DefaultsPackError(f"not a defaults pack stamp: {stamp!r}")
     return m["id"], m["version"], m["hash"]
+
+
+def stamped_tariff_currency(tariff: Tariff) -> str | None:
+    """The currency a pack copy's `pack_hash` stamp names (gridspine-library-eu 03): the
+    stamped pack's meta currency for `tariff.id`. A `generic` copy states none, and
+    stamping one would move every stored hash, so the currency gate reads it here and
+    nothing is written. None when no vendored pack of that id, version and hash ships
+    the tariff. Only a lookup miss is None; a pack that fails to load raises (GK A GLE3-1)."""
+    try:
+        _, version, _ = parse_pack_stamp(tariff.pack_hash)
+    except DefaultsPackError:
+        return None
+    date_part, _, region = version.partition("+")
+    try:
+        pack = load_defaults_pack(date_part, region=region or None)
+        if pack.stamp != tariff.pack_hash:
+            return None
+        return pack.tariff_meta(tariff.id).currency
+    except DefaultsPackLookupError:
+        return None
 
 
 # ── parsing ─────────────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { EditReceiptLine, editReceiptOf, setLine, type EditCardSet } from './EditCard'
 import { formatElapsed, useElapsed } from '../hooks/useElapsed'
 import { useUIStore } from '../store/uiStore'
@@ -89,8 +90,48 @@ function WaitingLine({ line }: { line: ContinuationLine }) {
   </div>
 }
 
+/** SC-07 S5a (UX R4): the kind of a 3D site apply whose effect is unknown, and the key its tool row carries. */
+export const SCENE_APPLY_OUTCOME_UNKNOWN = 'scene_apply_outcome_unknown'
+export const SCENE_UNKNOWN_KEY = '_scene_outcome_unknown'
+export const CHECK_START_MS = 15_000
+/** What the transcript shows for the check (the prompt, which names a tool, stays in Details). */
+export const SCENE_CHECK_LABEL = 'Check the 3D site'
+export const SCENE_CHECK_PROMPT = 'Check the 3D site change that may not have landed: read its status with '
+  + 'site_scene_read for that preview and tell me what the site shows. Do not apply it again.'
+
+/**
+ * One status check for an unknown 3D site apply (UX R4): it asks the assistant
+ * to read the preview's status (`_proposal_status`, GK B J6) and never offers
+ * an apply. "Checking…" shows from the click until that turn ends, never a
+ * success word before the answer.
+ */
+export function SceneUnknownCheck({ disabled, onRequest }: { disabled: boolean; onRequest: (text: string, label?: string) => void }) {
+  const [asked, setAsked] = useState(false)
+  const [busySeen, setBusySeen] = useState(false)
+  useEffect(() => {
+    if (asked && disabled) setBusySeen(true)
+    if (asked && busySeen && !disabled) { setAsked(false); setBusySeen(false) }
+  }, [asked, busySeen, disabled])
+  useEffect(() => {
+    // A request that never started a turn must not leave "Checking…" up (UX #1183: no stale notice).
+    if (!asked || busySeen) return
+    const t = setTimeout(() => setAsked(false), CHECK_START_MS)
+    return () => clearTimeout(t)
+  }, [asked, busySeen])
+  const checking = asked
+  return <div className="mt-1 font-sans text-xs" data-testid="scene-unknown-check">
+    {/* "Checking…" is a state, not a dead control: it keeps full contrast (UX, S5a shots). */}
+    <button type="button" disabled={disabled || checking}
+      className={checking ? 'text-muted' : 'text-accent disabled:opacity-40'}
+      data-testid="scene-unknown-check-button" onClick={() => { setAsked(true); onRequest(SCENE_CHECK_PROMPT, SCENE_CHECK_LABEL) }}>
+      {checking ? 'Checking…' : 'Check the 3D site'}
+    </button>
+    <span role="status" className="sr-only">{checking ? 'Checking the 3D site' : ''}</span>
+  </div>
+}
+
 export default function AssistantResultCard({ result, disabled, disabledReason, onRequest, continuation, toolWords }: {
-  result: unknown; disabled: boolean; onRequest: (text: string) => void
+  result: unknown; disabled: boolean; onRequest: (text: string, label?: string) => void
   /** Why `disabled` holds, in words, when it is not passing (chat off, project mismatch). */
   disabledReason?: string
   /** LC-02: names a plan step's tool in words (Guided); the tool name otherwise. */
@@ -107,6 +148,7 @@ export default function AssistantResultCard({ result, disabled, disabledReason, 
   if (object(data._assurance)) return null
   const receipt = editReceiptOf(data._edit_receipt)
   if (receipt) return <EditReceiptLine receipt={receipt} disabled={disabled} onRequest={onRequest} guided={guided} />
+  if (data[SCENE_UNKNOWN_KEY] === true) return <SceneUnknownCheck disabled={disabled} onRequest={onRequest} />
   const task = object(data._task) ?? (typeof data.task_id === 'string' ? data : null)
   const taskId = typeof task?.task_id === 'string' && /^[0-9a-f-]{36}$/.test(task.task_id) ? task.task_id : null
   const status = typeof task?.status === 'string' ? task.status : ''

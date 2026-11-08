@@ -1,6 +1,6 @@
 # 02. The tariff builder has no currency input
 
-Status: in-review
+Status: done (#1259)
 Type: task
 Raised by: GK B (27), plan verdict on issue 01 (condition C4), 2026-11-06.
 Gated: no (UI; UX review).

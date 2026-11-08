@@ -3,7 +3,7 @@
 
 # LC-07c: the speech-notice caption is not cleared
 
-Status: ready-for-agent
+Status: done (#1272)
 Type: bug
 Found by: LC-07c (`07c-speech-notices-caption.md`); owner list DOCS-1.
 
