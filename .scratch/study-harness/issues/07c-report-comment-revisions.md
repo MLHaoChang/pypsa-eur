@@ -8,7 +8,7 @@ Type: task
 Blocked by: 07
 Gated: yes (GK B)
 Model tier: opus
-Owner decisions: HARNESS-970-1
+Owner decisions: HARNESS-970-1, SH07C-DRAFT-1
 Folded from: #970 HH-08A, through issue 07's "Folded from #970" item 2 (coordinator decision under HARNESS-970-1: filed as its own issue)
 
 ## What to build
@@ -37,13 +37,17 @@ stay out.
 - [ ] An addressed comment yields a new report copy whose numbers, formulas, chart ranges, evidence references and disclosures equal the base's.
 - [ ] A comment outside the closed edit set stays open with its reason.
 - [ ] A revision against a stale digest is refused.
-- [ ] A model call for a revision is reserved through issue 24's `send_reservation`.
+- ~~A model call for a revision is reserved through issue 24's `send_reservation`.~~ Moved to [07d](07d-report-revision-drafts.md) (owner decision SH07C-DRAFT-1); 07c closes on the four above.
 
 ## Likely files
 
 `pypsa-gui/backend/services/reports/` (a revisions module), `pypsa-gui/backend/routers/reports.py`, tests beside them
 
 ## Comments
+
+### Owner decision SH07C-DRAFT-1 (2026-11-08, ASK card via the coordinator)
+
+GK B (37) ruled model drafts out of this slice: under SH-07, a human route never infers a run or charges the run's budget. The owner chose option 1, "Move criterion 5 to 07d (Recommended)". Model drafting moves to [07d](07d-report-revision-drafts.md): the harness drafts the edit as a runner stage it launches itself, so the send is the run's own and goes through `send_reservation`. The user confirms each draft against its digest. 07c closes on criteria 1–4.
 
 ### GK B (37): plan verdict, GO WITH CHANGES (R1–R10, verbatim in substance)
 
