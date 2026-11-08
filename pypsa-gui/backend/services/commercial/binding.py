@@ -94,7 +94,7 @@ def tariff_currency_mismatch(tariff, currency: str | None) -> str | None:
         # A `generic` pack copy states none: its stamp names the pack's (issue 03).
         from services.library.defaults_pack.loader import stamped_tariff_currency
 
-        have = (stamped_tariff_currency(tariff) or "").strip().upper() or None
+        have = (stamped_tariff_currency(tariff) or "").strip().upper()
         how = (" (from its defaults-pack stamp; state the tariff's currency if you rewrote "
                "its rates)")
     if not currency or not have or have == currency:

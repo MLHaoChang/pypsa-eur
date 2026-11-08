@@ -632,6 +632,21 @@ def test_a_stated_currency_wins_over_the_stamp_and_the_stamp_is_normalised(monke
     assert tariff_currency_mismatch(t, "EUR") is None
 
 
+def test_an_unread_stamp_or_no_stamp_leaves_the_tariff_unchecked(monkeypatch):
+    from services.commercial.binding import tariff_currency_mismatch
+    from services.library.defaults_pack import loader
+
+    _, t = _generic_copy()
+    forged = t.model_copy(update={"pack_hash": _stamp(digest="0" * 64)})
+    assert tariff_currency_mismatch(forged, "GBP") is None
+
+    def never(_t):
+        raise AssertionError("an unstamped tariff never reads a pack")
+
+    monkeypatch.setattr(loader, "stamped_tariff_currency", never)
+    assert tariff_currency_mismatch(t.model_copy(update={"pack_hash": None}), "GBP") is None
+
+
 STAMP_NOTE = ("is priced in EUR (from its defaults-pack stamp; state the tariff's "
               "currency if you rewrote its rates); the project's finance inputs are in GBP.")
 
