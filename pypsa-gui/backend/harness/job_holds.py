@@ -382,20 +382,28 @@ def _live_solve_thread() -> Any:
 def terminal(hold: Hold) -> bool:
     """Whether independent evidence shows the held operation has ended. Any
     read that fails raises, and the caller keeps the hold (N4)."""
-    if hold.from_store or hold.orphan or hold.unverified:
+    if hold.from_store or hold.unverified:
         return False
-    if hold.future is not None:
-        if not hold.future.done():
+    if hold.orphan:
+        # Its only evidence is the record: gone once another chat's approved
+        # repeat card deleted it.
+        return not job_hold_store.exists(hold.id)
+    # Chats share a registry hold: read each field once (another chat may
+    # hand the future over to the job id meanwhile).
+    future = hold.future
+    if future is not None:
+        if not future.done():
             return False
-        if hold.future.cancelled() or hold.future.exception() is not None:
+        if future.cancelled() or future.exception() is not None:
             return True
-        job_id = _job_id_in(hold.tool, hold.future.result())
+        job_id = _job_id_in(hold.tool, future.result())
         if job_id is None:
             return True
         hold.future, hold.job_id = None, job_id  # the late result names its job
         _record_job(hold, job_id)
-    if hold.job_id is not None:
-        return job_terminal(hold.job_id)
+    job_id = hold.job_id
+    if job_id is not None:
+        return job_terminal(job_id)
     if hold.worker is not None:
         return not _alive(hold.worker)
     if hold.tool in SSE_TOOLS:
@@ -437,6 +445,19 @@ def _held(session, tool) -> Hold | None:
     return None
 
 
+def _unverified(tool, binding) -> Hold:
+    """The hold a chat meets when the records cannot be read (N4, H6)."""
+    return Hold(
+        id="unverified",
+        tool=tool,
+        binding=binding,
+        fingerprint="",
+        tool_use_id="",
+        opened="unverified",
+        unverified=True,
+    )
+
+
 def _record_hold(session, tool, fingerprint) -> Hold | None:
     """Issue 16: a hold another chat of this process opened on this project,
     read from its record. A row this process owns is checked on its
@@ -445,15 +466,7 @@ def _record_hold(session, tool, fingerprint) -> Hold | None:
     process wait for S2's lease."""
     binding = _current_binding()
     if binding is _UNREADABLE:
-        return Hold(
-            id="unverified",
-            tool=tool,
-            binding=binding,
-            fingerprint="",
-            tool_use_id="",
-            opened="unverified",
-            unverified=True,
-        )
+        return _unverified(tool, binding)
     project = _project_of(binding)
     if project is None:
         return None
@@ -464,15 +477,7 @@ def _record_hold(session, tool, fingerprint) -> Hold | None:
         records = job_hold_store.active(project, tool)
     except Exception as exc:  # noqa: BLE001 - an unreadable record denies (N4, H6)
         logger.warning("job hold records unreadable: %s", type(exc).__name__)
-        return Hold(
-            id="unverified",
-            tool=tool,
-            binding=binding,
-            fingerprint="",
-            tool_use_id="",
-            opened="unverified",
-            unverified=True,
-        )
+        return _unverified(tool, binding)
     for record in records:
         if record.owner_replica_id != me:
             continue  # S2: another process's evidence, read by its lease
@@ -509,12 +514,13 @@ def _record_hold(session, tool, fingerprint) -> Hold | None:
 
 def _viewer_opened(hold: Hold) -> bool:
     """Whether the acting user made the held call (H7: only they see its ids).
-    A hold of this chat's own call always counts."""
-    if hold.opened_by is None:
-        return not hold.orphan
+    A shared hold whose maker is unknown shows its ids to no one."""
+    if not hold.shared:
+        return True  # it never left the chat that made the call
     from services import chat_tools
 
-    return chat_tools.acting_user_id() == hold.opened_by
+    user = chat_tools.acting_user_id()
+    return user is not None and user == hold.opened_by
 
 
 def _store_hold(tool, args, fingerprint) -> Hold | None:

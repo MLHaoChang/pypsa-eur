@@ -96,6 +96,13 @@ def delete(record_id: str) -> None:
         db.commit()
 
 
+def exists(record_id: str) -> bool:
+    from db.models import AssistantJobHold
+
+    with _session() as db:
+        return db.get(AssistantJobHold, record_id) is not None
+
+
 def _record(row) -> Record:
     texts = (row.id, row.tool, row.fingerprint, row.opened, row.owner_replica_id)
     if not all(isinstance(value, str) and value for value in texts):

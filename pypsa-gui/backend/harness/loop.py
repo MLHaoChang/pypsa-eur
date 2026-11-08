@@ -3951,7 +3951,7 @@ def _dispatch_real_tool_call(
             },
         )
         error_content = _error_result_content(detail, exc, error_kind)
-        if hold_note and isinstance(error_content, str):
+        if hold_note:
             error_content = f"{error_content}\n{hold_note}"
         tool_results_collector.append(
             {

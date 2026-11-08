@@ -652,3 +652,48 @@ def test_a_hold_opened_on_an_unreadable_binding_stays_on_its_chat(monkeypatch):
     hold = job_holds.open_on_timeout(session, QUEUE, "F", "tu", _NeverDone())
     assert not hold.shared and hold.share_error == "no_saved_project"
     assert job_holds.check(session, QUEUE, {}, "F")[0] == job_holds.PENDING
+
+
+def test_a_shared_hold_whose_maker_is_unknown_shows_its_ids_to_no_one(
+    project, seeded_identity, monkeypatch
+):
+    """H7, fail closed: a record written with no acting user names no job."""
+    future = _Future()
+    future.result = lambda: {"id": "q-8", "status": "queued"}
+    chat_tools.set_acting_user(None)
+    session = ChatSession()
+    job_holds.open_on_timeout(session, QUEUE, "F", "tu", future)
+    chat_tools.set_acting_user(seeded_identity["user_id"])
+    future.finished = True
+    monkeypatch.setattr(job_holds, "job_terminal", lambda job_id: False)
+    assert _rows(project)[0].opened_by is None
+    for chat in (session, ChatSession()):
+        kind, message = job_holds.check(chat, QUEUE, {}, "F")
+        assert kind == job_holds.PENDING and "q-8" not in message
+
+
+def test_an_adopted_orphan_clears_once_another_chats_card_deleted_its_record(project):
+    job_holds.open_on_timeout(ChatSession(), QUEUE, "F", "tu", _NeverDone())
+    with job_holds._REGISTRY_LOCK:
+        job_holds._REGISTRY.clear()
+    first, second = ChatSession(), ChatSession()
+    assert _held_by_record(first)[0] == job_holds.PENDING
+    assert _held_by_record(second)[0] == job_holds.PENDING
+    card = job_holds.repeat_card(second, QUEUE, {}, "F")
+    assert job_holds.check(second, QUEUE, {}, "F", card=card) is None
+    assert _rows(project) == []
+    assert _held_by_record(first) is None
+
+
+def test_an_orphan_whose_record_cannot_be_read_holds(project, monkeypatch):
+    job_holds.open_on_timeout(ChatSession(), QUEUE, "F", "tu", _NeverDone())
+    with job_holds._REGISTRY_LOCK:
+        job_holds._REGISTRY.clear()
+    later = ChatSession()
+    assert _held_by_record(later)[0] == job_holds.PENDING
+
+    def broken(_id):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(job_hold_store, "exists", broken)
+    assert _held_by_record(later)[0] == job_holds.PENDING
