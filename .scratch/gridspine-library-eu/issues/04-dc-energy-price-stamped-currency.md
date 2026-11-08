@@ -1,6 +1,6 @@
 # 04. The DC energy-price check trusts only a stated tariff currency
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Raised by: GLE-03 session (issue 03, PR #1279), GK A follow-up, 2026-11-08.
 Gated: yes (money semantics).
