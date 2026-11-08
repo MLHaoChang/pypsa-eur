@@ -3,7 +3,7 @@
 
 # Job holds across sessions, tabs, replicas and restarts
 
-Status: ready-for-agent
+Status: done (#1274, #1288)
 Type: task
 Found by: AA-04 S5 (`04-action-and-job-outcomes.md`); GK B (30) N1.
 
