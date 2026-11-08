@@ -8,6 +8,7 @@ record's revision (`solver_service._revision_or_none`) and the org of the
 change-log "save" entry the queue's write-back leaves (`_active_org_id`). Both
 must come from the solving project, and fail closed when it has none.
 """
+
 from __future__ import annotations
 
 import time
@@ -54,12 +55,19 @@ def decoy_foreground(monkeypatch):
 
 
 def test_a_queued_solve_stamps_its_own_projects_revision_and_org(
-    client, install_network, tmp_projects_dir, registry_key_for, monkeypatch,
+    client,
+    install_network,
+    tmp_projects_dir,
+    registry_key_for,
+    monkeypatch,
 ):
     install_network(build_network(solve=False), name="SQA")
-    assert client.post(
-        "/api/projects/SQA", params={"force": True, "rebind": True}
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/projects/SQA", params={"force": True, "rebind": True}
+        ).status_code
+        == 200
+    )
     key = registry_key_for("SQA")
     org_a = key.partition(":")[0]
     assert org_a != DECOY_ORG
@@ -82,12 +90,17 @@ def test_a_queued_solve_stamps_its_own_projects_revision_and_org(
 
     # The foreground gets nothing (GK B, Q4).
     assert int(decoy_foreground.network_revision) == DECOY_REVISION
-    assert change_log_service.get_all(org_id=DECOY_ORG) == [
-        e for e in change_log_service.get_all() if e["org_id"] is None
-    ] == [], "the decoy's org gained a change-log entry from A's solve"
+    assert (
+        change_log_service.get_all(org_id=DECOY_ORG)
+        == [e for e in change_log_service.get_all() if e["org_id"] is None]
+        == []
+    ), "the decoy's org gained a change-log entry from A's solve"
 
-    saves = [e for e in change_log_service.get_all()
-             if e["action"] == "save" and e["name"] == "SQA"]
+    saves = [
+        e
+        for e in change_log_service.get_all()
+        if e["action"] == "save" and e["name"] == "SQA"
+    ]
     assert saves, "the queued solve's write-back left no save entry"
     assert {e["org_id"] for e in saves} == {org_a}, (
         f"the save entry was logged under {[e['org_id'] for e in saves]!r}, not A's org"
@@ -142,22 +155,34 @@ def test_a_record_without_a_revision_reads_as_no_provenance():
     from services.solver_service import SolverConfig
 
     n = pypsa.Network()
-    n.meta["sizing_record"] = {"revision": None, "solved_at": "2026-11-08T00:00:00+00:00",
-                               "sha256": "x", "sizes": {}, "topology": "t"}
+    n.meta["sizing_record"] = {
+        "revision": None,
+        "solved_at": "2026-11-08T00:00:00+00:00",
+        "sha256": "x",
+        "sizes": {},
+        "topology": "t",
+    }
     label = fixed_sizes.run_label(n, SolverConfig(fixed_sizes="capacity_run"))
     assert label["source_revision"] is None and label["source"] == "capacity_run"
     assert _solve_stamp(n) == {"solved_at": "2026-11-08T00:00:00+00:00"}
 
 
 def test_an_unresolvable_key_writes_no_save_entry(
-    client, install_network, tmp_projects_dir, registry_key_for, monkeypatch,
+    client,
+    install_network,
+    tmp_projects_dir,
+    registry_key_for,
+    monkeypatch,
 ):
     """A job whose key names no org (a hand-made job) has no owner to log under:
     its write-back saves the project and logs nothing (GK B, Q3)."""
     install_network(build_network(solve=False), name="SQN")
-    assert client.post(
-        "/api/projects/SQN", params={"force": True, "rebind": True}
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/projects/SQN", params={"force": True, "rebind": True}
+        ).status_code
+        == 200
+    )
     real_enqueue = solve_queue.enqueue_unique
 
     def org_less(project_id, *, project_key=None, **kw):
@@ -173,7 +198,10 @@ def test_an_unresolvable_key_writes_no_save_entry(
 
 
 def test_local_mode_still_logs_the_queued_save_under_its_one_org(
-    tmp_path, monkeypatch, _auth_db, install_network,
+    tmp_path,
+    monkeypatch,
+    _auth_db,
+    install_network,
 ):
     """Local mode keys every job `LOCAL_ORG_ID:uuid`, so the save entry is the
     one master wrote (the foreground there is the same project)."""
@@ -191,20 +219,30 @@ def test_local_mode_still_logs_the_queued_save_under_its_one_org(
         with TestClient(main.app) as local_client:
             local_client.cookies.clear()
             install_network(build_network(solve=False), name="SQL")
-            assert local_client.post(
-                "/api/projects/SQL", params={"force": True, "rebind": True}
-            ).status_code == 200
+            assert (
+                local_client.post(
+                    "/api/projects/SQL", params={"force": True, "rebind": True}
+                ).status_code
+                == 200
+            )
             change_log_service.clear()
             r = local_client.post("/api/simulation/queue", json={"project_id": "SQL"})
             assert r.status_code == 200, r.text
             assert _wait_for_terminal(r.json()["id"])["status"] == "completed"
-            saves = [{k: v for k, v in e.items() if k not in ("id", "timestamp")}
-                     for e in change_log_service.get_all() if e["action"] == "save"]
-            assert saves == [{
-                "action": "save", "component_type": "Project", "name": "SQL",
-                "description": saves[0]["description"] if saves else None,
-                "org_id": str(local_mode.LOCAL_ORG_ID),
-            }], saves
+            saves = [
+                {k: v for k, v in e.items() if k not in ("id", "timestamp")}
+                for e in change_log_service.get_all()
+                if e["action"] == "save"
+            ]
+            assert saves == [
+                {
+                    "action": "save",
+                    "component_type": "Project",
+                    "name": "SQL",
+                    "description": saves[0]["description"] if saves else None,
+                    "org_id": str(local_mode.LOCAL_ORG_ID),
+                }
+            ], saves
             assert saves[0]["description"].startswith("Saved project 'SQL' (")
     finally:
         with session_local() as db:
@@ -212,10 +250,17 @@ def test_local_mode_still_logs_the_queued_save_under_its_one_org(
         solve_queue.reset_for_tests()
 
 
-@pytest.mark.parametrize("key, org", [
-    ("org-a:1234", "org-a"),
-    (None, None), ("", None), ("Baseline", None), (":1234", None), ("org-a:", None),
-])
+@pytest.mark.parametrize(
+    "key, org",
+    [
+        ("org-a:1234", "org-a"),
+        (None, None),
+        ("", None),
+        ("Baseline", None),
+        (":1234", None),
+        ("org-a:", None),
+    ],
+)
 def test_only_an_org_and_uuid_key_names_an_owner(decoy_foreground, key, org):
     from services.solve_queue import _owning_org
 
