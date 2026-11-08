@@ -14,7 +14,12 @@ import zipfile
 
 from services import assistant_tools as A
 from services import chat_tools as T
-from tests.assurance_acceptance.test_p4_fact_free_surfaces import BASE, CHECKED_KEYS, keys_in, numbers_in
+from tests.assurance_acceptance.test_p4_fact_free_surfaces import (
+    BASE,
+    CHECKED_KEYS,
+    keys_in,
+    numbers_in,
+)
 from tests.assurance_acceptance.test_p4_report_manifest import (  # noqa: F401
     PROJECT,
     _assistant_report,
@@ -33,12 +38,38 @@ HEADERS = {
     "assistant report_export, source gone": BASE | {"x-report-source"},
 }
 # The delivery item of a sealed export: the same keys as a table's (S4b X5).
-SEALED_ITEM = {"archive_path", "assurance", "dataset_sha256", "file_id", "filename", "mime",
-               "provenance", "render_spec_sha256", "sha256", "size"}
-SEALED_ASSURANCE = {"artifact_sha256", "dataset", "dataset_sha256", "project_id", "render_spec",
-                    "render_spec_sha256", "schema_version", "source_kind", "validity"}
-SEALED_DATASET = {"figures", "mapping_plan_sha256", "report_id", "template", "version",
-                  "version_hash_basis", "version_sha256"}
+SEALED_ITEM = {
+    "archive_path",
+    "assurance",
+    "dataset_sha256",
+    "file_id",
+    "filename",
+    "mime",
+    "provenance",
+    "render_spec_sha256",
+    "sha256",
+    "size",
+}
+SEALED_ASSURANCE = {
+    "artifact_sha256",
+    "dataset",
+    "dataset_sha256",
+    "project_id",
+    "render_spec",
+    "render_spec_sha256",
+    "schema_version",
+    "source_kind",
+    "validity",
+}
+SEALED_DATASET = {
+    "figures",
+    "mapping_plan_sha256",
+    "report_id",
+    "template",
+    "version",
+    "version_hash_basis",
+    "version_sha256",
+}
 SEALED_RENDER_SPEC = {"format", "disclosures", "withheld"}
 # A human export is a plain file: no assurance at all.
 PLAIN_ITEM = {"archive_path", "file_id", "filename", "mime", "sha256", "size"}
@@ -46,7 +77,9 @@ PLAIN_ITEM = {"archive_path", "file_id", "filename", "mime", "sha256", "size"}
 
 def _human_export(client, monkeypatch):
     rid = _human_report(client, monkeypatch)
-    response = client.post(f"/api/projects/{PROJECT}/reports/{rid}/export", json={"version": None})
+    response = client.post(
+        f"/api/projects/{PROJECT}/reports/{rid}/export", json={"version": None}
+    )
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -57,10 +90,14 @@ def _items(client, *file_ids):
     assert response.status_code == 200
     assert not numbers_in(response.headers)
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-        return {i["file_id"]: i for i in json.loads(archive.read("manifest.json"))["files"]}
+        return {
+            i["file_id"]: i for i in json.loads(archive.read("manifest.json"))["files"]
+        }
 
 
-def test_a_human_report_download_sends_no_checked_header_or_number(project, client, monkeypatch):
+def test_a_human_report_download_sends_no_checked_header_or_number(
+    project, client, monkeypatch
+):
     meta = _human_export(client, monkeypatch)
     response = _blob(client, meta["file_id"])
     assert response.status_code == 200
@@ -69,7 +106,9 @@ def test_a_human_report_download_sends_no_checked_header_or_number(project, clie
     assert not set(meta) & CHECKED_KEYS
 
 
-def test_an_assistant_report_export_sends_no_checked_header_or_number(project, client, monkeypatch):
+def test_an_assistant_report_export_sends_no_checked_header_or_number(
+    project, client, monkeypatch
+):
     meta = T.export_report_docx(_assistant_report(monkeypatch))
     response = _blob(client, meta["file_id"])
     assert response.status_code == 200
@@ -78,7 +117,9 @@ def test_an_assistant_report_export_sends_no_checked_header_or_number(project, c
     assert not set(meta) & CHECKED_KEYS
 
 
-def test_a_report_export_whose_version_is_gone_names_only_its_source_status(project, client, monkeypatch):
+def test_a_report_export_whose_version_is_gone_names_only_its_source_status(
+    project, client, monkeypatch
+):
     rid = _assistant_report(monkeypatch)
     meta = T.export_report_docx(rid)
     _version_file(project, rid).unlink()

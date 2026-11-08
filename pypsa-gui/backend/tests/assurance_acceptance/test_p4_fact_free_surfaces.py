@@ -27,7 +27,13 @@ from tests.assurance_acceptance.fact_profiles import owner
 from tests.test_checked_charts import GENERATOR, ask
 
 # Every response of the app carries these (content and middleware headers).
-BASE = {"content-disposition", "content-length", "content-type", "x-pypsa-replica", "vary"}
+BASE = {
+    "content-disposition",
+    "content-length",
+    "content-type",
+    "x-pypsa-replica",
+    "vary",
+}
 HEADERS = {
     "table": BASE,
     "chart": BASE | {"x-checked-chart"},
@@ -35,12 +41,41 @@ HEADERS = {
     "result chart": BASE | {"x-chart-scope"},
 }
 # Keys that would present a value as checked, anywhere in a delivery item.
-CHECKED_KEYS = {"facts", "metrics", "warnings", "blocks", "evidence_id", "evidence_ids",
-                "evidence_status", "evidence_note", "result_slots", "slots"}
-TABLE_ITEM = {"archive_path", "assurance", "dataset_sha256", "file_id", "filename", "mime",
-              "provenance", "render_spec_sha256", "sha256", "size"}
-TABLE_ASSURANCE = {"artifact_sha256", "dataset", "dataset_sha256", "project_id", "render_spec",
-                   "render_spec_sha256", "schema_version", "source_kind", "validity"}
+CHECKED_KEYS = {
+    "facts",
+    "metrics",
+    "warnings",
+    "blocks",
+    "evidence_id",
+    "evidence_ids",
+    "evidence_status",
+    "evidence_note",
+    "result_slots",
+    "slots",
+}
+TABLE_ITEM = {
+    "archive_path",
+    "assurance",
+    "dataset_sha256",
+    "file_id",
+    "filename",
+    "mime",
+    "provenance",
+    "render_spec_sha256",
+    "sha256",
+    "size",
+}
+TABLE_ASSURANCE = {
+    "artifact_sha256",
+    "dataset",
+    "dataset_sha256",
+    "project_id",
+    "render_spec",
+    "render_spec_sha256",
+    "schema_version",
+    "source_kind",
+    "validity",
+}
 NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?(?:e[-+]?\d+)?(?![\w.])")
 
 
@@ -58,8 +93,12 @@ def checked_numbers(record):
 def numbers_in(headers):
     """Numbers in every header value except content-length, the body's byte
     count, which the framework sets and which could equal a fact by chance."""
-    return {n for name, value in headers.items() if name.lower() != "content-length"
-            for n in NUMBER.findall(value)}
+    return {
+        n
+        for name, value in headers.items()
+        if name.lower() != "content-length"
+        for n in NUMBER.findall(value)
+    }
 
 
 def keys_in(value):
@@ -82,7 +121,9 @@ def _table_of(record):
     return chat_tools.export_to_csv(rows, ["metric", "value"], "facts.csv")
 
 
-def test_a_chart_download_sends_only_its_header_names_and_no_checked_number(solved, checked):
+def test_a_chart_download_sends_only_its_header_names_and_no_checked_number(
+    solved, checked
+):
     receipt, record = _checked(solved, checked)
     response = checked.client.get(receipt["chart"]["download_url"])
     assert response.status_code == 200
@@ -119,7 +160,9 @@ def test_a_delivered_table_carries_no_checked_fact(solved, checked):
     assert response.status_code == 200
     assert not numbers_in(response.headers) & checked_numbers(record)
     with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-        items = {i["file_id"]: i for i in json.loads(archive.read("manifest.json"))["files"]}
+        items = {
+            i["file_id"]: i for i in json.loads(archive.read("manifest.json"))["files"]
+        }
     item = items[table["file_id"]]
     assert set(item) == TABLE_ITEM
     assert set(item["assurance"]) == TABLE_ASSURANCE

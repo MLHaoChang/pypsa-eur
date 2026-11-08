@@ -34,7 +34,9 @@ PROFILES = sorted(DRIVERS)
 
 def _answer(checked, scope, record):
     values = {f["metric"]: f["value"] for f in record["facts"]}
-    frames = checked.run(NumericalProvider(values), message="Check results.", checked_scope=scope)
+    frames = checked.run(
+        NumericalProvider(values), message="Check results.", checked_scope=scope
+    )
     published = approval(frames)
     answer = checked.client.get("/api/chat/answers/" + published["answer_id"])
     assert answer.status_code == 200, answer.text
@@ -46,25 +48,40 @@ def _answer(checked, scope, record):
 @pytest.mark.parametrize("profile", PROFILES)
 def test_the_chart_identity_is_the_records_and_the_answers(request, checked, profile):
     _ctx, scope = build(request, profile)
-    receipt, answer, stored = _answer(checked, scope, records.capture_scoped(owner(checked), scope))
+    receipt, answer, stored = _answer(
+        checked, scope, records.capture_scoped(owner(checked), scope)
+    )
     metrics = checked_charts.identity(stored)
     facts = {f["metric"]: f for f in stored["facts"]}
     blocks = {b["metric"]: b for b in answer["blocks"]}
     # One entry per requested slot, in the slots' order, with the slot's disposition.
     assert [m["metric"] for m in metrics] == list(calculations.requested_metrics(scope))
     assert [(m["metric"], m["disposition"]) for m in metrics] == [
-        (s["metric"], s["disposition"]) for s in receipt["result_slots"]]
+        (s["metric"], s["disposition"]) for s in receipt["result_slots"]
+    ]
     for entry in metrics:
         if entry["disposition"] == "answered":
             fact = facts[entry["metric"]]
-            assert entry == {"metric": fact["metric"], "disposition": "answered",
-                             "formula_id": fact["formula_id"], "unit": fact["unit"]}
+            assert entry == {
+                "metric": fact["metric"],
+                "disposition": "answered",
+                "formula_id": fact["formula_id"],
+                "unit": fact["unit"],
+            }
             block = blocks[entry["metric"]]
-            assert (block["formula_id"], block["unit"]) == (entry["formula_id"], entry["unit"])
+            assert (block["formula_id"], block["unit"]) == (
+                entry["formula_id"],
+                entry["unit"],
+            )
         else:
             slot = next(s for s in stored["slots"] if s["metric"] == entry["metric"])
-            assert entry == {"metric": slot["metric"], "disposition": slot["disposition"],
-                             "formula_id": None, "unit": None, "reason": slot["reason"]}
+            assert entry == {
+                "metric": slot["metric"],
+                "disposition": slot["disposition"],
+                "formula_id": None,
+                "unit": None,
+                "reason": slot["reason"],
+            }
             assert entry["metric"] not in blocks and entry["reason"].strip()
     # B3: the chart's warnings are the receipt's limitations, line for line.
     assert calculations.slot_warnings(stored["slots"]) == receipt["limitations"]
@@ -76,8 +93,14 @@ def test_a_drawn_chart_carries_the_identity_of_its_evidence(solved, checked):
     record = records.evidence(owner(checked), receipt["evidence_ids"][0])
     assert manifest["dataset"]["metrics"] == checked_charts.identity(record)
     assert manifest["dataset"]["metrics"] == [
-        {"metric": f["metric"], "disposition": "answered", "formula_id": f["formula_id"], "unit": f["unit"]}
-        for f in record["facts"]]
+        {
+            "metric": f["metric"],
+            "disposition": "answered",
+            "formula_id": f["formula_id"],
+            "unit": f["unit"],
+        }
+        for f in record["facts"]
+    ]
     assert {m["metric"] for m in manifest["dataset"]["metrics"]} == set(GENERATOR)
     # Every slot answered: the key is present and empty, as the receipt has none.
     assert manifest["dataset"]["warnings"] == [] == receipt["limitations"]
@@ -89,9 +112,17 @@ def _branch_chart(grid, checked):
     ctx = solve_grid(grid)
     first, second = (v.isoformat() for v in ctx.network.snapshots[:2])
     ctx.network.lines_t.p0.iloc[0, 0] = float("nan")
-    receipt = ask(checked, ctx, "branch-loading/1", "L12",
-                  {"branch_rating": LINE["branch_rating"]}, ["p1", "loading"],
-                  component_class="Line", start=first, end=second)
+    receipt = ask(
+        checked,
+        ctx,
+        "branch-loading/1",
+        "L12",
+        {"branch_rating": LINE["branch_rating"]},
+        ["p1", "loading"],
+        component_class="Line",
+        start=first,
+        end=second,
+    )
     assert receipt["chart"]["status"] == "drawn", receipt["chart"]
     return receipt
 
@@ -109,24 +140,37 @@ def test_a_branch_chart_names_an_unavailable_slot_and_warns(grid, checked):
     record = records.evidence(owner(checked), receipt["evidence_ids"][0])
     unavailable = [s for s in record["slots"] if s["disposition"] != "answered"]
     assert unavailable, record["slots"]
-    assert manifest["dataset"]["warnings"] == [f"{s['metric']}: {s['reason']}" for s in unavailable]
+    assert manifest["dataset"]["warnings"] == [
+        f"{s['metric']}: {s['reason']}" for s in unavailable
+    ]
     assert manifest["dataset"]["warnings"] == receipt["limitations"]
     named = {m["metric"]: m for m in manifest["dataset"]["metrics"]}
     for slot in unavailable:
-        assert named[slot["metric"]] == {"metric": slot["metric"], "disposition": slot["disposition"],
-                                         "formula_id": None, "unit": None, "reason": slot["reason"]}
+        assert named[slot["metric"]] == {
+            "metric": slot["metric"],
+            "disposition": slot["disposition"],
+            "formula_id": None,
+            "unit": None,
+            "reason": slot["reason"],
+        }
     assert checked_charts.verify(manifest) == "current"
 
 
 @pytest.mark.parametrize("kind", sorted(CHARTS))
-def test_a_definition_changed_after_drawing_still_verifies(request, checked, monkeypatch, kind):
+def test_a_definition_changed_after_drawing_still_verifies(
+    request, checked, monkeypatch, kind
+):
     """B1: the identity comes from the sealed record, never the live definitions,
     for answered slots and for unavailable ones (the branch chart has both)."""
     fixture, draw = CHARTS[kind]
     receipt = draw(request.getfixturevalue(fixture), checked)
     manifest = sidecar(receipt["chart"])
     for metric in [m["metric"] for m in manifest["dataset"]["metrics"]]:
-        changed = {**calculations.DEFINITIONS[metric], "formula_id": metric + "/changed", "unit": "changed"}
+        changed = {
+            **calculations.DEFINITIONS[metric],
+            "formula_id": metric + "/changed",
+            "unit": "changed",
+        }
         monkeypatch.setitem(calculations.DEFINITIONS, metric, changed)
     assert checked_charts.verify(manifest) == "current"
 
@@ -147,12 +191,16 @@ def test_each_drawable_profile_draws_its_records_identity(request, checked, prof
     assert set(SERIES) <= set(DRIVERS)
     _ctx, scope = build(request, profile)
     record = records.capture_scoped(owner(checked), scope)
-    receipt, _answer_json, stored = _answer(checked, {**scope, "chart": SERIES[profile]}, record)
+    receipt, _answer_json, stored = _answer(
+        checked, {**scope, "chart": SERIES[profile]}, record
+    )
     chart = receipt["chart"]
     assert chart["status"] == "drawn", chart
     manifest = sidecar(chart)
     assert manifest["dataset"]["metrics"] == checked_charts.identity(stored)
-    assert [m["metric"] for m in manifest["dataset"]["metrics"]] == [s["metric"] for s in stored["slots"]]
+    assert [m["metric"] for m in manifest["dataset"]["metrics"]] == [
+        s["metric"] for s in stored["slots"]
+    ]
     assert manifest["dataset"]["warnings"] == receipt["limitations"]
     assert checked_charts.verify(manifest) == "current"
 
@@ -179,13 +227,16 @@ def test_a_chart_drawn_before_the_identity_still_verifies(solved, checked):
     assert manifest["dataset"]["warnings"] == []
 
 
-@pytest.mark.parametrize("change", [
-    lambda d: d["metrics"].pop(),
-    lambda d: d["metrics"][0].update(formula_id="other"),
-    lambda d: d["metrics"][0].update(unit="GW"),
-    lambda d: d["metrics"][0].update(disposition="unavailable"),
-    lambda d: d["warnings"].append("dispatch_energy: made up"),
-])
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d["metrics"].pop(),
+        lambda d: d["metrics"][0].update(formula_id="other"),
+        lambda d: d["metrics"][0].update(unit="GW"),
+        lambda d: d["metrics"][0].update(disposition="unavailable"),
+        lambda d: d["warnings"].append("dispatch_energy: made up"),
+    ],
+)
 def test_a_changed_identity_does_not_verify(solved, checked, change):
     receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
     manifest = json.loads(json.dumps(sidecar(receipt["chart"])))
@@ -193,7 +244,9 @@ def test_a_changed_identity_does_not_verify(solved, checked, change):
     assert checked_charts.verify(manifest) is False
 
 
-def test_evidence_from_another_project_draws_and_writes_nothing(solved, checked, monkeypatch):
+def test_evidence_from_another_project_draws_and_writes_nothing(
+    solved, checked, monkeypatch
+):
     """K1/B6: refused before drawing, saving the file or the sidecar."""
     from services import chat_tools
     from services.assistant_tools import _project
