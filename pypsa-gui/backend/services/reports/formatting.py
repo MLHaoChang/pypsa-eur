@@ -8,6 +8,7 @@ document-level form of ADR-0001 ("unresolvable figures ship as null").
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
 NOT_ESTABLISHED = "not established"
@@ -99,6 +100,15 @@ def withheld_placeholder(count: int) -> str:
     return f"{WITHHELD_PREFIX}{count} {noun} could not be checked against the study; see {APPENDIX_NAME}."
 
 
+# GK B W1: only the exact text `withheld_placeholder` writes marks a
+# placeholder; any other gap callout that starts "Withheld: " is ordinary text.
+_WITHHELD_TEXT = re.compile(
+    re.escape(WITHHELD_PREFIX)
+    + r"(?:a statement|1 number|(?:[2-9]|[1-9][0-9]+) numbers) could not be checked against the study; see "
+    + re.escape(APPENDIX_NAME) + r"\."
+)
+
+
 def _get(obj: Any, key: str) -> Any:
     return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
 
@@ -110,7 +120,7 @@ def is_withheld_block(block: Any) -> bool:
         _get(block, "type") == "callout"
         and _get(block, "kind") == "gap"
         and isinstance(text, str)
-        and text.startswith(WITHHELD_PREFIX)
+        and _WITHHELD_TEXT.fullmatch(text) is not None
     )
 
 

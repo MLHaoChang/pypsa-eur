@@ -1027,10 +1027,11 @@ def build_delivery(file_ids: list[str], filename: str = "delivery.zip") -> dict:
                 record, view = checked
                 item["assurance"] = record["manifest"]
                 item["provenance"] = record
-                for key in ("scope_status", "evidence_status", "evidence_note"):
+                for key in ("scope_status", "evidence_status", "evidence_note", "source_status", "source_note"):
                     if key in view:
                         item[key] = view[key]
-                if view.get("source_kind") == "table_export":  # verified table sidecar (R7)
+                # Verified table (R7) and report (S4b X5) sidecars; neither joins _one_run.
+                if view.get("source_kind") in ("table_export", "report_export"):
                     item["dataset_sha256"] = view["dataset_sha256"]
                     item["render_spec_sha256"] = view["render_spec_sha256"]
                 if "scope_status" in view:
