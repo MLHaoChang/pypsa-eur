@@ -150,6 +150,13 @@ def _env(steps):
 
 def _result_gate(monkeypatch, card, steps=None, live=CODE["digest"]):
     monkeypatch.setattr(G, "grid_readiness_for", lambda project, profile=None: card)
+    for step in [_read_step()] if steps is None else steps:
+        step.setdefault("result", {}).setdefault(
+            "rows_digest", run_actions.rows_digest(card)
+        )
+    if steps is None:
+        steps = [_read_step()]
+        steps[0]["result"]["rows_digest"] = run_actions.rows_digest(card)
     monkeypatch.setattr(
         run_actions, "unchanged", lambda project, code: code["digest"] == live
     )
@@ -566,6 +573,11 @@ def _task_file(hub, frozen, tool=run_actions.CAMPUS, status="pending"):  # noqa:
         "args": dict(run_actions.FROZEN),
         "status": status,
         "frozen": frozen,
+        **(
+            {"card": run_actions.card(frozen)}
+            if isinstance(frozen, dict) and "grid_code" in frozen
+            else {}
+        ),
     }
     stages = {s: {"status": "pending", "attempts": 0} for s in run_profiles.STAGES}
     stages["solve"]["status"] = "active"
@@ -833,8 +845,8 @@ def test_the_campus_run_optimises_nothing_and_writes_only_its_run_and_settings(
 def test_the_campus_stage_card_is_always_the_users(hub):  # noqa: F811
     _publish(hub, "sagc_dc")
     path = _task_file(hub, run_actions.freeze(hub))
-    assert run_envelope._own_card(path, "solve")
-    assert not run_envelope._own_card(path, "report")
+    assert run_envelope.stage_card_is_users(path, "solve")
+    assert not run_envelope.stage_card_is_users(path, "report")
     from services import assistant_tasks
 
     task = _read(path)
@@ -885,3 +897,60 @@ def test_with_no_confirmed_row_the_frequency_is_never_read_from_the_network(
         and result["reason"] == "state the grid frequency (Hz)"
     )
     assert not run_gates.passed([result])
+
+
+def test_the_card_names_the_profile_and_writes_and_an_unfrozen_step_stops_with_its_reason(
+    hub,
+):
+    _publish(hub, "sagc_dc", title="SAGC data centre")
+    frozen = run_actions.freeze(hub)
+    steps = run_profiles.materialise(_profile(), "solve", str(hub.id))
+    run_actions.fill(steps, frozen)
+    shown = [s["card"] for s in steps if run_actions.is_action(s)]
+    assert shown and all(
+        c["grid_code"] == frozen["grid_code"] and c["writes"] == frozen["writes"]
+        for c in shown
+    )
+    path = _task_file(
+        hub,
+        {
+            "unfrozen": {
+                "state": "none_published",
+                "message": "publish the grid-code profile",
+            }
+        },
+    )
+    task = _read(path)
+    task["steps"][0]["unfrozen"] = task["steps"][0].pop("frozen")["unfrozen"]
+    path.write_text(json.dumps(task))
+    assert (
+        run_actions.start(path, _ctx(hub), {"id": "solve.3"}, instance="a")
+        == "dc_none_published"
+    )
+    assert "publish the grid-code profile" in _read(path)["steps"][0]["error"]
+
+
+def test_a_step_left_running_by_a_restart_is_uncertain_and_never_run_again(
+    hub, monkeypatch
+):
+    _publish(hub, "sagc_dc")
+    path = _task_file(hub, run_actions.freeze(hub), status="running")
+    monkeypatch.setattr(ce, "enqueue_run", lambda *a, **k: pytest.fail("never queued"))
+    assert run_actions.settle(path) == "uncertain"
+    task = _read(path)
+    assert (
+        task["steps"][0]["status"] == "uncertain"
+        and task["run"]["status"] == "needs_user"
+    )
+
+
+def test_a_scorecard_that_changed_after_the_read_gives_no_evidence(monkeypatch):
+    read = {
+        "rows": [{"id": "scr", "verdict": "fail", "assumed": False}],
+        "excluded": [],
+    }
+    step = _read_step()
+    step["result"]["rows_digest"] = run_actions.rows_digest(read)
+    now = {"rows": [{"id": "scr", "verdict": "pass", "assumed": False}], "excluded": []}
+    results = _result_gate(monkeypatch, now, steps=[step])
+    assert all(r["verdict"] == "not_evaluated" for r in results.values())

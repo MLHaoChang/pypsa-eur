@@ -1169,7 +1169,8 @@ def _native_evidence(path, task, step):
         except Exception:  # noqa: BLE001 — an unreadable report is no evidence (C3)
             return False, None
         return True, {"kind": run_report.KIND, "report_id": job["report_id"], "version": job.get("version")}
-    if (step.get("job") or {}).get("kind") == "dc_campus":
+    from services import run_actions
+    if (step.get("job") or {}).get("kind") == run_actions.JOB_KIND:
         # Study harness 10a: only a runner tick settles the campus job from its own
         # row (`run_actions.settle`); a lost one is never reconciled or queued again.
         return False, None

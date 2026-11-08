@@ -21,7 +21,7 @@ READ = {
     "status": "completed",
     "args": {"frozen": "dc_grid_code"},
     "frozen": {"grid_code": CODE},
-    "result": {"profile": CODE["id"], "digest": CODE["digest"]},
+    "result": {"profile": CODE["id"], "digest": CODE["digest"], "rows_digest": "rows"},
 }
 ENV = dict(task={"steps": [READ]}, ctx=None, project=object(), project_dir=None)
 
@@ -31,6 +31,8 @@ def _frozen_profile_unchanged(monkeypatch):
     from services import run_actions
 
     monkeypatch.setattr(run_actions, "unchanged", lambda project, code: code == CODE)
+    # the rows' digest is pinned in test_run_profile_datacenter; here every read matches the step's
+    monkeypatch.setattr(run_actions, "rows_digest", lambda card: "rows")
 
 
 def _row(id_, verdict, assumed=False):

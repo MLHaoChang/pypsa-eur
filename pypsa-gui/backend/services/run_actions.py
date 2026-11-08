@@ -64,6 +64,12 @@ EVENT = "dc_campus"  # the envelope ledger row of the campus run's reservation
 # PyPSA optimisation (pinned by `test_run_profile_datacenter`), so this bound is stated, never measured.
 SOLVES = 1
 _TERMINAL = ("completed", "failed", "aborted", "interrupted")
+# The attempts this process is running now: a step left `running` by any other
+# (a restart mid-dispatch) is settled uncertain by `settle`, never run again.
+_LIVE: set = set()
+UNCERTAIN = (
+    "The native action was interrupted mid-dispatch; its outcome cannot be verified."
+)
 
 
 class FreezeError(ValueError):
@@ -196,17 +202,34 @@ def freeze(project) -> dict:
     return {**frozen, "digest": digest(frozen)}
 
 
+def card(frozen) -> dict:
+    """What the step's card names (D1, D6): the profile with its id, label and
+    digest, what the campus run writes, and the solves it reserves."""
+    return {
+        "grid_code": dict(frozen["grid_code"]),
+        "writes": list(frozen["writes"]),
+        "solves": frozen["solves"],
+    }
+
+
 def fill(steps, frozen) -> None:
-    """Put the frozen record on freshly materialised actions (in place). With
-    none, a step keeps the marker alone, which `start` refuses."""
+    """Put the frozen record, and the card it shows, on freshly materialised
+    actions (in place). A record that could not be fixed (`unfrozen`) is kept
+    with its reason, which `start` stops on for the user."""
     for step in steps:
-        if is_action(step) and step["args"] == FROZEN and frozen is not None:
+        if not is_action(step) or step["args"] != FROZEN or frozen is None:
+            continue
+        if "unfrozen" in frozen:
+            step["unfrozen"] = dict(frozen["unfrozen"])
+        else:
             step["frozen"] = copy.deepcopy(frozen)
+            step["card"] = card(frozen)
 
 
-def stage_frozen(task) -> dict | None:
-    """At solve-stage entry, as the run's owner: the frozen record, or None
-    when it cannot be fixed (the step then stops for the user). A stage
+def stage_frozen(task) -> dict:
+    """At solve-stage entry, as the run's owner: the frozen record, or
+    `{"unfrozen": {state, message}}` when it cannot be fixed (the step then
+    stops for the user with that reason). A stage
     entered again (L2's re-solve) keeps the run's first record, so a profile
     republished meanwhile is caught at dispatch, never frozen anew (D1)."""
     from fastapi import HTTPException
@@ -228,11 +251,18 @@ def stage_frozen(task) -> dict | None:
             return freeze(
                 project_registry.resolve_project(db, user, task["project_id"])
             )
-    except (FreezeError, HTTPException):
+    except FreezeError as exc:
+        return {"unfrozen": {"state": exc.state, "message": str(exc)}}
+    except HTTPException:
         logger.info(
             "run %s: the grid-code profile could not be frozen", task.get("task_id")
         )
-        return None
+        return {
+            "unfrozen": {
+                "state": "unreadable",
+                "message": "the run's project cannot be read",
+            }
+        }
 
 
 def latest(task, tool) -> dict | None:
@@ -317,10 +347,7 @@ def release(path, call_id, solves=SOLVES):
 def start(path, ctx, step, *, instance) -> str:
     """Run one native action. Returns the action's name when it ran or
     started, else the refusal reason (the run then needs the user)."""
-    from fastapi import HTTPException
-
     from harness import runner
-    from services import chat_tools, project_registry
 
     path = Path(path)
     attempt = uuid.uuid4().hex
@@ -336,14 +363,36 @@ def start(path, ctx, step, *, instance) -> str:
     runner._update(path, claim)
     if not claimed:
         return "claimed_elsewhere"
+    _LIVE.add(attempt)
+    try:
+        return _dispatch(path, ctx, step["id"], attempt)
+    finally:
+        _LIVE.discard(attempt)
+
+
+def _dispatch(path, ctx, step_id, attempt):
+    from fastapi import HTTPException
+
+    from services import chat_tools, project_registry
+
     task = json.loads(path.read_text())
-    step = next(s for s in task["steps"] if s["id"] == step["id"])
+    step = next(s for s in task["steps"] if s["id"] == step_id)
+    if isinstance(
+        step.get("unfrozen"), dict
+    ):  # the freeze's own reason, e.g. "publish the grid-code profile"
+        return _stop(
+            path,
+            step["id"],
+            "dc_" + str(step["unfrozen"].get("state")),
+            step["unfrozen"].get("message"),
+        )
     frozen = step.get("frozen")
     if (
         not is_action(step)
         or step.get("args") != FROZEN
         or not isinstance(frozen, dict)
         or digest(_core(frozen)) != frozen.get("digest")
+        or step.get("card") != card(frozen)
     ):
         return _stop(
             path,
@@ -385,6 +434,22 @@ def start(path, ctx, step, *, instance) -> str:
         return _stop(path, step["id"], "dc_start_failed", type(exc).__name__)
 
 
+def rows_digest(card) -> str:
+    """D2: the digest of a scorecard's rows and exclusions (id, verdict,
+    assumed; id, reason), which the result gate compares with its own read."""
+    return digest(
+        {
+            "rows": [
+                [r["id"], r["verdict"], bool(r.get("assumed"))]
+                for r in card.get("rows") or []
+            ],
+            "excluded": [
+                [r["id"], r.get("reason")] for r in card.get("excluded") or []
+            ],
+        }
+    )
+
+
 def _readiness(path, step, project, code):
     """The scorecard with the frozen profile, from a campus run held to it."""
     from harness import runner
@@ -402,7 +467,10 @@ def _readiness(path, step, project, code):
     card = grid_readiness.grid_readiness_for(project, code["id"])
     result = {
         "profile": code["id"],
-        "digest": code["digest"],
+        "digest": ce.profile_fingerprint(
+            project, code["id"]
+        ),  # read now, next to the rows
+        "rows_digest": rows_digest(card),
         "summary": card.get("summary"),
         "rows": [
             {"id": r["id"], "verdict": r["verdict"], "assumed": bool(r.get("assumed"))}
@@ -460,8 +528,23 @@ def _campus(path, step, project, user, frozen, attempt):
         if t["status"] != "cancelled":
             t["status"] = "waiting_job"
 
-    runner._update(path, wait)
+    try:
+        runner._update(path, wait)
+    except BaseException:
+        _abort(
+            job["id"]
+        )  # a queued job the step cannot follow is stopped; its reservation stays charged
+        raise
     return CAMPUS
+
+
+def _abort(job_id):
+    from services import solve_queue as sq
+
+    try:
+        sq.solve_queue.abort(uuid.UUID(str(job_id)))
+    except Exception:  # noqa: BLE001 — best effort; the step fails for the user either way
+        logger.exception("campus job %s could not be aborted", job_id)
 
 
 def _job(job_id):
@@ -491,6 +574,47 @@ def outcome(job, used, code) -> tuple[str, str | None]:
     return "done", None
 
 
+def _interrupted(path, task) -> bool:
+    """A step left `running` by a dispatch this process is not running (a
+    restart mid-dispatch) is uncertain: the run waits for the user, any
+    reservation stays charged in full, and nothing is queued again."""
+    from harness import runner
+
+    stuck = [
+        s["id"]
+        for s in task.get("steps") or []
+        if is_action(s)
+        and s["status"] == "running"
+        and s.get("attempt_id") not in _LIVE
+    ]
+    if not stuck:
+        return False
+    for step in task["steps"]:
+        if step["id"] in stuck:
+            release(
+                path, step.get("attempt_id")
+            )  # unverifiable: the whole stated bound
+
+    def change(t):
+        hit = False
+        for s in t["steps"]:
+            if (
+                s["id"] in stuck
+                and s["status"] == "running"
+                and s.get("attempt_id") not in _LIVE
+            ):
+                s.update(status="uncertain", error=UNCERTAIN)
+                hit = True
+        if not hit:
+            return False
+        t["run"]["stages"][STAGE].update(status="failed", reason="uncertain")
+        if t["run"]["status"] in ("running", "waiting_job"):
+            t["run"]["status"], t["status"] = "needs_user", "needs_review"
+
+    runner._update(path, change)
+    return True
+
+
 def settle(path, ctx=None) -> str | None:
     """Each tick: settle the run's waiting campus step once its job ended,
     from the job's own row (matched by id) and the published run's
@@ -501,6 +625,8 @@ def settle(path, ctx=None) -> str | None:
 
     path = Path(path)
     task = json.loads(path.read_text())
+    if _interrupted(path, task):
+        return "uncertain"
     step = next(
         (
             s

@@ -622,7 +622,11 @@ def _frozen_scorecard(env):
     if not code.get("id") or (step.get("result") or {}).get("digest") != code.get("digest") \
             or not run_actions.unchanged(env.project, code):
         return NoEvidence("grid_code_changed", "the run's grid-code profile changed since its scorecard was read")
-    return grid_readiness.grid_readiness_for(env.project, code["id"])
+    card = grid_readiness.grid_readiness_for(env.project, code["id"])
+    if run_actions.rows_digest(card) != step["result"].get("rows_digest"):
+        # A campus run again, or an edited sidecar, between the read and the gate: never a fresh pass.
+        return NoEvidence("scorecard_changed", "the scorecard changed since the run's own readiness step read it")
+    return card
 
 
 def _scorecard_reader(name):

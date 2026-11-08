@@ -534,7 +534,7 @@ def _dc_action(tool):
 # project, with its severity, its one-line basis and the run that produces its
 # input; every emitted row is here or in `DC_NOT_GATED` (a test pins both, on
 # the shipped template and on a project with sidecars). No wildcard.
-_CAMPUS_RUN = "dc_campus_study (the campus run held to the run's grid-code profile)"
+_CAMPUS_RUN = "the campus study, held to the run's grid-code profile"
 _DC_LOAD = "the AI-training load profile stored at project creation (no run)"
 _ISLAND = "the island study (island_config.json, island_study.json; no run here)"
 DC_SCORECARD = (
@@ -562,7 +562,7 @@ DC_SCORECARD = (
     ("dynamic:", "warn", "Dynamic requirements need an RMS/EMT study; they never pass here.",
      "an RMS/EMT study outside the app (none)"),
 )
-DC_NOT_GATED = {"lole": "not gated: the coupling-loop rule eh.adequacy.lole judges LOLE against the goal"}
+DC_NOT_GATED = {"lole": "not gated: the reliability rule judges LOLE against the project's goal"}
 
 
 def _dc_scorecard_rules():
@@ -608,7 +608,7 @@ def _eh_datacenter() -> dict:
             "result_gate": {**GENERIC["result_gate"], "rules": [
                 *CORE_RESULT_RULES,
                 _rule("dc.gridcode.unchanged", "dc.gridcode.unchanged", "eq", True,
-                      basis="The grid-code profile is the one the run froze (D1)."),
+                      basis="The grid-code profile is still the one the run was held to."),
                 *_dc_scorecard_rules(),
                 lole,
             ]},

@@ -1532,7 +1532,7 @@ def refused_before_gate(task_path, call_id, tool, reason):
             _count_solves(task_path, envelope)  # a solve refused at pickup is no job
 
 
-def _own_card(task_path, card):
+def stage_card_is_users(task_path, card):
     """A stage whose unstarted steps include a runner native write action (the
     campus run): its card names the grid-code profile and the writes, so no
     envelope crosses it."""
@@ -1555,7 +1555,7 @@ def cross(session, task_path, card, ctx):
     from services import assistant_tasks
     if not live(task_path):
         return None
-    if _own_card(task_path, card):
+    if stage_card_is_users(task_path, card):
         return None  # study harness 10a (D1, D6): the campus run's stage card is always the user's
     if card == "report" and not any(r["tool"] in REPORT_TOOLS for r in (_load(task_path) or {}).get("runs", [])):
         # GK B B1-b: a grant made before stage 7 existed, or one that leaves the

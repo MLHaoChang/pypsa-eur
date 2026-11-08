@@ -761,7 +761,7 @@ class Runner:
             stage = waiting["ref"] in run_profiles.STAGES
             # Issue 03: an envelope granted meanwhile goes on for what it covers.
             inside = not waiting.get("envelope_refused") and (
-                (run_envelope.live(path) and not run_envelope._own_card(path, waiting["ref"])) if stage else
+                (run_envelope.live(path) and not run_envelope.stage_card_is_users(path, waiting["ref"])) if stage else
                 bool(step) and step["id"] == waiting["ref"] and run_envelope.covers(path, step["tool"]))
             if not inside and (decision is None or (decision == "live" and stage)):
                 return "waiting"  # a stage's Continue comes only from the plan card (COP-1)

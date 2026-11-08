@@ -1426,7 +1426,7 @@ solve stage uses.
   The stage's card is always the user's, in envelope mode too
   (`run_envelope._own_card`). Each dispatch compares the live digest. A
   republished profile stops the run with `grid_code_changed`.
-- **The campus run (D5, D6).** A solve-queue job of kind `campus`, settled
+- **The campus run (D5, D6).** A solve-queue job of kind `campus` (the step records it as `dc_campus`), settled
   on a runner tick from its own job row and the published run's
   `profile_used`. It runs no PyPSA optimisation and writes only
   `campus_electrical/run/` and `campus_electrical/settings.json`. Its row
