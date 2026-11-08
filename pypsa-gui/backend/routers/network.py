@@ -799,20 +799,23 @@ def get_asset_costs() -> dict:
     rate = _global_discount_rate()
     rows = asset_cost_rows(n, discount_rate=rate, keep=filter_transient_names)
     for row in rows:
-        row["provenance"] = asset_provenance.get(n, row["component"], row["name"])
+        row["provenance"] = asset_provenance.staleness(
+            n, row["component"], row["name"], asset_provenance.get(n, row["component"], row["name"]))
     return {"discount_rate": rate, "assets": rows}
 
 
 @router.get("/asset_schema/{component}/provenance/{name}")
 def get_asset_provenance(component: str, name: str) -> dict:
-    """Per-field provenance of one asset (`n.meta["asset_params"]`); fields never recorded are absent."""
+    """Per-field provenance of one asset (`n.meta["asset_params"]`); fields never recorded are absent. A cost
+    priced through a scale input that has since changed carries `stale` (TCU-05, `provenance.staleness`)."""
     attr = CLASS_ATTR.get(component)
     if attr is None:
         raise HTTPException(400, f"No asset schema for '{component}'.")
     n = PyPSAService.get_network()
     if name not in getattr(n, attr).index:
         raise HTTPException(404, f"{component} '{name}' not found")
-    return {"component": component, "name": name, "fields": asset_provenance.get(n, component, name)}
+    return {"component": component, "name": name,
+            "fields": asset_provenance.staleness(n, component, name, asset_provenance.get(n, component, name))}
 
 
 # ── Time Series ───────────────────────────────────────────────────────────────

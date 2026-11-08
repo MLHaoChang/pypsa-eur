@@ -10,6 +10,7 @@ An absent entry means "not recorded", which is not the same as `default` (ADR-00
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from typing import Any
 
@@ -81,13 +82,88 @@ def annotate(n, component_class: str, name: str, field: str, **extra: Any) -> No
         entry.update(extra)
 
 
+_DROPPED_ON_EDIT = ("approved_by", "approved_at", "scaled_by", "dc_ac_ratio")
+
+#: The money fields a scaled price writes (pricing: overnight × scale, FOM = overnight × share).
+_SCALED_FIELDS = ("overnight_cost", "fom_cost")
+_NOT_RECORDED = {"field": None, "recorded": None, "current_field": None, "current": None,
+                 "reason": "scale input not recorded"}
+
+
+def _recorded_input(entry: dict) -> dict | None:
+    """The scale input an entry was priced with: `scaled_by`, or TC-02's `dc_ac_ratio` key."""
+    if isinstance(entry.get("scaled_by"), dict):
+        return entry["scaled_by"]
+    if entry.get("dc_ac_ratio") is not None:
+        # TC-02 wrote the key on a DC-priced (`output_electric_dc`) overnight cost only.
+        return {"column": "dc_ac_ratio", "value": entry["dc_ac_ratio"], "technology": None,
+                "capacity_basis": "output_electric_dc"}
+    return None
+
+
+def _verdict(n, component_class: str, name: str, scaled: dict) -> dict | None:
+    from services.library.defaults_pack.pricing import current_scale_input
+
+    try:
+        column, value = current_scale_input(n, component_class, name, scaled.get("technology"),
+                                            scaled["capacity_basis"])
+    except (ValueError, KeyError, TypeError, StopIteration) as exc:
+        return {"field": scaled["column"], "recorded": scaled["value"], "current_field": None,
+                "current": None, "reason": f"cannot be priced now: {exc}"}
+    if column == scaled["column"] and math.isclose(float(value), float(scaled["value"]), rel_tol=1e-9):
+        return None
+    return {"field": scaled["column"], "recorded": scaled["value"], "current_field": column,
+            "current": value, "reason": "scale input changed"}
+
+
+def _priced_by_scaling_rule(component_class: str, entry: dict) -> bool:
+    """A pack price (status default, annotated with its row's capacity basis) whose rule scales."""
+    from services.library.defaults_pack.pricing import _CLASS, SCALED_RULES, scale_rule
+
+    component = next((c for c, cls in _CLASS.items() if cls == component_class), None)
+    return entry.get("status") == "default" and \
+        scale_rule(component, entry.get("capacity_basis")) in SCALED_RULES   # unknown: "refuse"
+
+
+def staleness(n, component_class: str, name: str, entries: dict[str, dict]) -> dict[str, dict]:
+    """`entries` (from `get`) with `stale` added to each money field whose price was scaled by a
+    column of the asset (TCU-05: a PV Generator's `dc_ac_ratio`, a Link's output efficiency) that
+    now differs, in column or value (math.isclose rel 1e-9), from what pricing would read; or that
+    pricing would now refuse (`current` None). A scaled pack price that recorded no input reads
+    `stale` with reason "scale input not recorded", never fresh. Pure: the store is not changed;
+    a field with nothing to say is returned as it was."""
+    out = dict(entries)
+    over = entries.get("overnight_cost") or {}
+    for field in _SCALED_FIELDS:
+        entry = entries.get(field)
+        if entry is None:
+            continue
+        scaled = _recorded_input(entry)
+        basis = entry
+        # fom_cost carries no annotation of its own before TCU-05: it shares the overnight
+        # cost's when both are the same pack price.
+        if scaled is None and field == "fom_cost" and entry.get("status") == over.get("status") \
+                and entry.get("source") == over.get("source"):
+            scaled, basis = _recorded_input(over), over
+        if scaled is not None:
+            verdict = _verdict(n, component_class, name, scaled)
+        elif _priced_by_scaling_rule(component_class, basis):
+            verdict = dict(_NOT_RECORDED)
+        else:
+            verdict = None
+        if verdict is not None:
+            out[field] = {**entry, "stale": verdict}
+    return out
+
+
 def mark_customised(n, component_class: str, name: str, fields: Iterable[str]) -> None:
     """A person changed these fields. The source they overrode stays, so the card can say what it replaced."""
     asset = _root(n).setdefault(component_class, {}).setdefault(name, {})
     for f in fields:
         entry = asset.get(f) or {"source": None, "source_year": None, "currency_year": None, "range": None}
-        # A later edit is not the approval of an applied reference: that approval goes.
-        entry = {k: v for k, v in entry.items() if k not in ("approved_by", "approved_at")}
+        # A later edit is not the approval of an applied reference: that approval goes, and so
+        # does the scale input it was priced with (a typed value has none, TCU-05).
+        entry = {k: v for k, v in entry.items() if k not in _DROPPED_ON_EDIT}
         asset[f] = {**entry, "status": "customised", "illustrative": False}
     _prune(n, component_class, name)
 
