@@ -1067,8 +1067,9 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
       : <SiteEmptyState loading />
   }
   if (!layout || !ground || !siteExtent || !plotExtent || !fit) {
+    // SC-07 S5b R6: a site with no placed bus is Site 3D opened too (its own empty state).
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-center px-8">
+      <div className="flex h-full flex-col items-center justify-center gap-2 text-center px-8" {...site3dAssurance(currentProject)}>
         <div className="text-[13px] font-medium text-text">{site.name} has no placed bus</div>
         <div className="text-[12px] text-muted max-w-md">Add a placed bus to this site (Satellite view → click the boundary → Edit buses).</div>
       </div>

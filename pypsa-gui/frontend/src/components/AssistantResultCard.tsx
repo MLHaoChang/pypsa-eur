@@ -5,7 +5,7 @@ import { useUIStore } from '../store/uiStore'
 import { openScenariosHighlight } from './uiNavigate'
 import { CARD_GROUPS } from '../pages/results/groups'
 import RunMonitor from './runMonitor/RunMonitor'
-import { PartialMappingLine } from '../site3d/partialMapping'
+import { PartialMappingLine, partialMapping } from '../site3d/partialMapping'
 
 /** LC-12: where a plan's waiting job stands in this view. */
 export type ContinuationLine =
@@ -174,7 +174,8 @@ export default function AssistantResultCard({ result, disabled, disabledReason, 
       <PlanSteps task={task!} next={next} guided={guided} toolWords={toolWords} />
       <PartialMappingLine task={task!} taskId={taskId} disabled={disabled} onRequest={onRequest} />
       {status === 'waiting_job' && continuation && <WaitingLine line={continuation} />}
-      {status === 'needs_review' && <p>Verify the previous action before retrying. Its effects may already exist.</p>}
+      {/* A proven partial (R3) says what did not land; "may already exist" would contradict it. */}
+      {status === 'needs_review' && !partialMapping(task!) && <p>Verify the previous action before retrying. Its effects may already exist.</p>}
       <div className="mt-1 flex gap-2">
         {status !== 'completed' && status !== 'cancelled' && <>
           {status !== 'waiting_job' && <button type="button" disabled={disabled} className="text-accent disabled:opacity-40"
