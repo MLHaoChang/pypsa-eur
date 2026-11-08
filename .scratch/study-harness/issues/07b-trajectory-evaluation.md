@@ -3,7 +3,7 @@
 
 # 07b — Trajectory evaluation (HH-05B)
 
-Status: ready-for-agent
+Status: done (#1282)
 Type: task
 Blocked by: 07
 Gated: yes (GK B)

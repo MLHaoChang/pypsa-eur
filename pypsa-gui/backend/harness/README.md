@@ -28,6 +28,7 @@ harness/
   publication.py  JSON/ZIP from the same validated answer, facts and evidence
   rollout.py      capabilities, profile/effect rollback and bounded shadow observation
   pilot_evaluation.py  independent finite-suite cases, release scoring and live resource ceilings
+  trajectory_evaluation.py  issue 07b: closed suite of harness trajectories (positive + refusal control) scored from native state only; no runtime authority
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
