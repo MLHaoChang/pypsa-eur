@@ -210,3 +210,16 @@ def test_local_mode_still_logs_the_queued_save_under_its_one_org(
         with session_local() as db:
             local_mode.remove_local_identity(db)
         solve_queue.reset_for_tests()
+
+
+@pytest.mark.parametrize("key, org", [
+    ("org-a:1234", "org-a"),
+    (None, None), ("", None), ("Baseline", None), (":1234", None), ("org-a:", None),
+])
+def test_only_an_org_and_uuid_key_names_an_owner(decoy_foreground, key, org):
+    from services.solve_queue import _owning_org
+
+    change_log_service.clear()
+    with _owning_org(key):
+        change_log_service.log("save", "Project", "P", "x")
+    assert [e["org_id"] for e in change_log_service.get_all()] == ([org] if org else [])

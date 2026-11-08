@@ -153,8 +153,8 @@ def _owning_org(project_key: str | None):
     None) has no owner to log under, so its writes log nothing (SQ-FG)."""
     from services import change_log_service
 
-    org, sep, rest = (project_key or "").partition(":")
-    with (change_log_service.owning_org(org) if sep and org and rest
+    org, _, rest = (project_key or "").partition(":")
+    with (change_log_service.owning_org(org) if org and rest
           else change_log_service.suppressed()):
         yield
 
