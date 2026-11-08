@@ -334,6 +334,9 @@ def get_upload_blob(
             headers["X-Checked-Chart"] = checked.get("evidence_note") or "evidence re-verified now"
         if isinstance(checked, dict) and checked.get("scope_status"):
             headers["X-Chart-Scope"] = checked["scope_status"]
+        if isinstance(checked, dict) and checked.get("source_status"):
+            # A report export whose stored source is gone is served with its note (S4b X3).
+            headers["X-Report-Source"] = checked["source_status"]
         # Send the exact checked bytes, avoiding a second file open after validation.
         return Response(content=data, media_type=meta.mime, headers=headers)
     return FileResponse(

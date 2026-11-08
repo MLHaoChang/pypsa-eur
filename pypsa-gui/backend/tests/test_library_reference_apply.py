@@ -493,6 +493,12 @@ def test_a_dc_reference_writes_overnight_times_the_ratio_and_fom_from_it(dc_sola
     assert p["attrs"]["fom_cost"] == pytest.approx(over * dc_solar.cost_part.fom_share.value, rel=1e-12)
     assert "dc_ac" not in p["missing"], "the declared ratio makes a DC price exact"
     assert any("DC/AC ratio (1.3)" in note for note in p["notes"])
+    assert p["scaled_by"] == {"column": "dc_ac_ratio", "value": 1.3, "technology": "solar-utility",
+                              "capacity_basis": "output_electric_dc"}, "TCU-05: recorded on apply"
+    A.stamp(n, p, approved_by="a@b")
+    n.generators.at["pv", "dc_ac_ratio"] = 1.1
+    from services.asset_schema import provenance as P
+    assert P.staleness(n, "Generator", "pv", P.get(n, "Generator", "pv"))["overnight_cost"]["stale"]["current"] == 1.1
 
 
 @pytest.mark.parametrize("ratio", ["absent", float("nan"), 4.0, "abc"])

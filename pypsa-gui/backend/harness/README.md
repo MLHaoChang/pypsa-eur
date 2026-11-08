@@ -1047,6 +1047,15 @@ check that every required disclosure of the version they start from is still
 there. A lost one fails the job, or refuses the export, with
 `report_disclosure_missing` (409), and nothing is saved. A later human
 regenerate of a section rewrites it non-strict and drops its placeholders.
+The assistant's report exports are sealed (AA-05 S4b): after the disclosure
+check and the quarantine check, the file is published with a `report_export`
+manifest naming the stored version by its file's hash, each figure and the
+template by their bytes, the disclosures and the withheld placeholders. A
+download or delivery re-checks it. A seal or byte mismatch quarantines; a
+source still stored but changed refuses with `report_version_changed`; a
+source since deleted is served with `source_status` (`version_missing`,
+`figure_missing`, `template_missing`) and a note. Exports from the Reports
+page carry no manifest.
 The frontend renders task progress, ordinary resume/cancel requests and safe
 file links from existing `tool_result` frames; no new stream vocabulary or
 provider-specific handlers are introduced.

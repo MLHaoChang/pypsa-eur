@@ -15,9 +15,13 @@ an annualised literal.
     A Link's `p_nom` is its input (`bus0`), so a price per kW of electrical OUTPUT (the fuel cell) is
     scaled by the efficiency of the bus that carries the output, a price per kW of electrical INPUT
     (electrolysis) is not, and a price per kW of PRODUCT (Haber-Bosch NH3) is scaled by the product
-    bus's efficiency. A Generator's `p_nom` is its AC rating, so a price per kW of DC module rating
-    (`output_electric_dc`, PV) is scaled by the Generator's declared `dc_ac_ratio` (TC-02), recorded on
-    the overnight cost's provenance; an undeclared or invalid ratio refuses, never assumed 1. A pair
+    bus's efficiency (the static `efficiency`/`efficiencyN` column only; a `links_t.efficiency` series
+    is never read). A Generator's `p_nom` is its AC rating, so a price per kW of DC module rating
+    (`output_electric_dc`, PV) is scaled by the Generator's declared `dc_ac_ratio` (TC-02); an
+    undeclared or invalid ratio refuses, never assumed 1. A scale read from a column is recorded on
+    the overnight and FOM costs' provenance (`scaled_by`: column, value, technology, capacity basis),
+    so `asset_schema.provenance.staleness` flags the cost when that column or its value changes
+    (TCU-05). A pair
     that cannot be converted unambiguously raises `CapacityBasisMismatch` before anything is written,
     never a guess;
   * a version without typed cost units (`LEGACY_VERSIONS`) cannot price: `LegacyPackVersion`.
@@ -92,17 +96,19 @@ def _carrier(n, bus) -> str:
     return str(n.buses.at[bus, "carrier"]) if bus in n.buses.index else ""
 
 
-def _link_outputs(n, df, name) -> list[tuple[str, float]]:
-    """(carrier, efficiency) of each bus a Link delivers to, bus1 upwards. A bus with an efficiency
-    of zero or less (e.g. `efficiency2` -0.3) is drawn from, an input, and never an output."""
+def _link_outputs(n, df, name) -> list[tuple[str, float, str]]:
+    """(carrier, efficiency, efficiency column) of each bus a Link delivers to, bus1 upwards. A bus
+    with an efficiency of zero or less (e.g. `efficiency2` -0.3) is drawn from, an input, and never
+    an output. The static efficiency column only: a `links_t.efficiency` series is not read."""
     out = []
     for i in range(1, 10):
         col = f"bus{i}"
         if col not in df.columns or not str(df.at[name, col]).strip():
             continue
-        eff = float(df.at[name, "efficiency" if i == 1 else f"efficiency{i}"])
+        eff_col = "efficiency" if i == 1 else f"efficiency{i}"
+        eff = float(df.at[name, eff_col])
         if eff > 0:
-            out.append((_carrier(n, df.at[name, col]), eff))
+            out.append((_carrier(n, df.at[name, col]), eff, eff_col))
     return out
 
 
@@ -119,6 +125,24 @@ def _dc_ac_ratio(df, name: str, refuse) -> float:
 
 
 def _scale_for(n, component: str, name: str, technology: str, capacity_basis: str) -> float:
+    return _scale_input(n, component, name, technology, capacity_basis)[1]
+
+
+#: The rules whose scale is read from a column of the asset (TCU-05): a cost priced through one
+#: records that column and value (`scaled_by`), and reads stale when either changes.
+SCALED_RULES = frozenset({"dc_ac_ratio", "link_output_electric", "link_output_product"})
+
+
+def scale_rule(component: str, capacity_basis: str) -> str:
+    return SCALING_RULES.get((component, _rule_basis(capacity_basis)), "refuse")
+
+
+def _scale_input(n, component: str, name: str, technology: str | None,
+                 capacity_basis: str) -> tuple[str | None, float]:
+    """(column, scale): the column of the asset the scale is read from (`dc_ac_ratio`, or a Link's
+    `efficiency`/`efficiencyN` of the bus carrying the priced output; a Link's static efficiency
+    only, never `links_t.efficiency`), None for a unit rule (scale 1). Raises
+    `CapacityBasisMismatch` for a pair that cannot be converted."""
     df, basis = getattr(n, component), _rule_basis(capacity_basis)
     rule = SCALING_RULES.get((component, basis), "refuse")
 
@@ -128,27 +152,35 @@ def _scale_for(n, component: str, name: str, technology: str, capacity_basis: st
             f"(capacity_basis {capacity_basis}): {why}")
 
     if rule == "unit":
-        return 1.0
+        return None, 1.0
     if rule == "refuse":
         refuse("the component's nominal does not measure what the row's capacity measures")
     if rule == "dc_ac_ratio":
-        return _dc_ac_ratio(df, name, refuse)
+        return "dc_ac_ratio", _dc_ac_ratio(df, name, refuse)
     product = PRODUCT_CARRIER.get(technology)
     if rule == "unit_on_product_bus":
         if product is None or _carrier(n, df.at[name, "bus"]) != product:
             refuse(f"its bus does not carry the product {product!r}")
-        return 1.0
+        return None, 1.0
     if rule == "link_input_electric":
         if _carrier(n, df.at[name, "bus0"]) not in ELECTRIC_CARRIERS:
             refuse("bus0 is not an electricity bus, so p_nom is not the electrical input")
-        return 1.0
+        return None, 1.0
     wanted = ELECTRIC_CARRIERS if rule == "link_output_electric" else {product}
     if rule == "link_output_product" and product is None:
         refuse("the pack names no product carrier for this technology")
-    hits = [eff for carrier, eff in _link_outputs(n, df, name) if carrier in wanted]
+    hits = [(col, eff) for carrier, eff, col in _link_outputs(n, df, name) if carrier in wanted]
     if len(hits) != 1:
         refuse(f"{len(hits)} of its output buses carry {sorted(wanted)}; exactly one must")
     return hits[0]
+
+
+def current_scale_input(n, component_class: str, name: str, technology: str | None,
+                        capacity_basis: str) -> tuple[str | None, float]:
+    """`_scale_input` by component class (`Generator`, `Link`), for `provenance.staleness`: the one
+    reader of the current scale input, so the check cannot drift from what pricing would do."""
+    component = next(c for c, cls in _CLASS.items() if cls == component_class)
+    return _scale_input(n, component, name, technology, capacity_basis)
 
 
 def _refuse_unpriced(pack, key: str) -> None:
@@ -268,7 +300,7 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
                 "connection_fee_review": any(_review(f) for f in flags),
                 annual_key: capital + fom}
     over_row = _row(pack, f"{technology}.investment.overnight")
-    scale = _scale_for(n, component, name, technology, over_row.capacity_basis)
+    scale_col, scale = _scale_input(n, component, name, technology, over_row.capacity_basis)
     overnight = _value(pack, f"{technology}.investment.overnight") * scale
     written = {"overnight_cost": overnight,
                "lifetime": _value(pack, f"{technology}.investment.lifetime"),
@@ -284,11 +316,19 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
             "discount_rate": (None, 1.0)},   # capital_cost: derived on every class
            money=("overnight_cost", "fom_cost"))
     _annotate(n, _CLASS.get(component, component), name, "overnight_cost", over_row)
-    if over_row.capacity_basis == "output_electric_dc":
+    if scale_col is not None:
         from services.asset_schema import provenance
 
-        # The ratio this price was scaled by, so a later ratio change can be told from it.
-        provenance.annotate(n, _CLASS.get(component, component), name, "overnight_cost", dc_ac_ratio=scale)
+        # The input this price was scaled by, on both money fields it scales, so a later change of
+        # the column or its value reads stale (TCU-05). `dc_ac_ratio` is TC-02's key, kept.
+        scaled_by = {"column": scale_col, "value": scale, "technology": technology,
+                     "capacity_basis": over_row.capacity_basis}
+        for field in ("overnight_cost", "fom_cost"):
+            provenance.annotate(n, _CLASS.get(component, component), name, field,
+                                scaled_by=dict(scaled_by))
+        if scale_col == "dc_ac_ratio":
+            provenance.annotate(n, _CLASS.get(component, component), name, "overnight_cost",
+                                dc_ac_ratio=scale)
     from pypsa.costs import annuity as _annuity   # PyPSA's own; an IC package never imports the solver
 
     # The disclosure states what the LP charges per MW-year: `capital_cost` the annuity alone
