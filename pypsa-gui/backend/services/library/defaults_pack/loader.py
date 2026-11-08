@@ -800,7 +800,6 @@ def parse_pack_stamp(stamp: str) -> tuple[str, str, str]:
     return m["id"], m["version"], m["hash"]
 
 
-
 def stamped_tariff_currency(tariff: Tariff) -> str | None:
     """The currency a pack copy's `pack_hash` stamp names (gridspine-library-eu 03): the
     stamped pack's meta currency for `tariff.id`. A `generic` copy states none, and
@@ -808,17 +807,18 @@ def stamped_tariff_currency(tariff: Tariff) -> str | None:
     nothing is written. None when no vendored pack of that id, version and hash ships
     the tariff. Only a lookup miss is None; a pack that fails to load raises (GK A GLE3-1)."""
     try:
-        pid, version, digest = parse_pack_stamp(tariff.pack_hash)
+        _, version, _ = parse_pack_stamp(tariff.pack_hash)
     except DefaultsPackError:
         return None
     date_part, _, region = version.partition("+")
     try:
         pack = load_defaults_pack(date_part, region=region or None)
-        if (pack.pack_id, pack.version, pack.hash) != (pid, version, digest):
+        if pack.stamp != tariff.pack_hash:
             return None
         return pack.tariff_meta(tariff.id).currency
     except DefaultsPackLookupError:
         return None
+
 
 # ── parsing ─────────────────────────────────────────────────────────────────
 
