@@ -1,6 +1,6 @@
 # 03. A `generic` pack tariff carries no currency, so the currency gate cannot check it
 
-Status: ready-for-agent
+Status: done (#1279)
 Type: task
 Raised by: GS-01 session, issue 01 (GK B condition C3), 2026-11-06.
 Gated: yes (money semantics; hash).
