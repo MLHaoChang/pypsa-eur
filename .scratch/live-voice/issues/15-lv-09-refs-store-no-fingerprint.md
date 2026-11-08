@@ -3,7 +3,7 @@
 
 # LV-09: stored refs carry no fingerprint
 
-Status: ready-for-agent
+Status: done (#1277)
 Type: task
 Found by: LV-09 (`09-durable-conversation.md`); owner list DOCS-1.
 
