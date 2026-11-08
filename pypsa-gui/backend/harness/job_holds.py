@@ -40,10 +40,26 @@ What clears a hold (N3; never time alone):
 
 A read that fails counts as not terminal, so the hold stays (N4, #1079).
 
-Across sessions (N1) the only persisted record is the solve-queue store:
-`solve_queue_enqueue` with no hold in this session reads the store's queued
-and running rows for the project, strictly (a failed read denies). Every
-other job tool's cross-session replay is a `_pending` row in issue 04.
+Across sessions (N1; assistant-assurance issue 16, GK B (35) H1-H9):
+- Each hold on a saved project is also written as an `assistant_job_holds`
+  row (`harness.job_hold_store`) and its evidence is kept in this process's
+  registry, so the hold outlives its chat. A chat with no hold of its own
+  reads the rows for the project and tool: a row this process owns is
+  checked on its registry evidence, the same evidence that clears it here,
+  and adopted into that chat; a row this process owns with no registry entry
+  holds (fail closed). A failed read denies (N4). The row is deleted exactly
+  when the hold clears: on terminal evidence or an approved repeat card, never
+  at the end of a chat. The registry is bounded by that: an entry whose
+  future never ends stays until its repeat card is approved.
+- A row another process owns (another replica, or this one before a restart)
+  is left to slice S2, its owner-liveness lease; until then such a row is not
+  read, as before issue 16.
+- A hold whose row could not be written (no saved project, or a failed write)
+  stays on its chat only, and the call's result says so (H4). The window
+  between a call starting and its timeout is unprotected across chats, as it
+  always was.
+- `solve_queue_enqueue` also reads the solve-queue store's queued and
+  running rows for the project, strictly (a failed read denies).
 
 abort_simulation (destructive) and wait_for_job (read) are not job calls here:
 re-aborting is idempotent and a hold never blocks an abort (N2).
@@ -51,6 +67,7 @@ re-aborting is idempotent and a hold never blocks an abort (N2).
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -58,6 +75,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import HTTPException
+
+from harness import job_hold_store
+
+logger = logging.getLogger(__name__)
 
 PENDING = "operation_pending"
 CONFLICT = "operation_conflict"
@@ -87,7 +108,24 @@ class Hold:
     job_id: str | None = None
     worker: Any = None  # the solve thread a raise left alive
     from_store: bool = False
-    told: bool = False  # a same-fingerprint call was denied operation_pending
+    # Issue 16: the persisted record (`job_hold_store`).
+    project_id: str | None = None
+    opened_by: str | None = None  # the acting user who made the call
+    shared: bool = False  # its record was written; other chats can read it
+    share_error: str | None = None  # why not, when it was not
+    orphan: bool = False  # a record this process owns with no registry entry
+    unverified: bool = False  # the records could not be read (N4)
+
+
+# Issue 16: every shared hold's evidence in this process, by record id. An
+# entry leaves exactly when its record is deleted (`_forget`).
+_REGISTRY: dict[str, Hold] = {}
+_REGISTRY_LOCK = threading.Lock()
+
+UNSHARED_NOTE = (
+    "This hold is kept in this chat only: another chat on this project is not "
+    "told that the operation may still be running."
+)
 
 
 def is_job_tool(tool: str) -> bool:
@@ -123,12 +161,104 @@ def _holds(session) -> dict:
     return holds
 
 
+def _told(session) -> set:
+    """Ids of the holds a same-fingerprint call of this chat was told
+    operation_pending about (a hold read from a record is shared by chats)."""
+    told = getattr(session, "job_holds_told", None)
+    if told is None:
+        told = set()
+        session.job_holds_told = told
+    return told
+
+
+# ── The persisted record (issue 16) ─────────────────────────────────────────
+
+
+def _project_of(binding) -> str | None:
+    if isinstance(binding, tuple) and binding and binding[0]:
+        return str(binding[0])
+    return None
+
+
+def _share(hold: Hold) -> None:
+    """Write the hold's record and register its evidence. A failure leaves
+    the hold on its chat only and says why (H4)."""
+    project = _project_of(hold.binding)
+    if project is None:
+        hold.share_error = "no_saved_project"
+        return
+    try:
+        import security
+        from services import chat_tools
+
+        user = chat_tools.acting_user_id()
+        job_hold_store.write(
+            record_id=hold.id,
+            project_id=project,
+            tool=hold.tool,
+            fingerprint=hold.fingerprint,
+            job_id=hold.job_id,
+            opened=hold.opened,
+            opened_at=hold.opened_at,
+            opened_by=user,
+            owner_replica_id=security.replica_id(),
+        )
+    except Exception as exc:  # noqa: BLE001 - the call already ran; say so (H4)
+        hold.share_error = type(exc).__name__
+        logger.warning(
+            "job hold %s on %s not shared with other chats: %s",
+            hold.id,
+            hold.tool,
+            hold.share_error,
+        )
+        return
+    hold.project_id, hold.opened_by, hold.shared = project, user, True
+    with _REGISTRY_LOCK:
+        _REGISTRY[hold.id] = hold
+
+
+def unshared_note(hold: Hold | None) -> str | None:
+    """The plain-words note for a call whose hold other chats cannot see."""
+    if hold is None or hold.shared:
+        return None
+    return UNSHARED_NOTE
+
+
+def _forget(hold: Hold) -> None:
+    """The hold cleared: delete its record, then its registry entry. A failed
+    delete keeps the entry, so the next reader finds the evidence, reads it
+    terminal and deletes the record then."""
+    if not hold.shared:
+        return
+    try:
+        job_hold_store.delete(hold.id)
+    except Exception as exc:  # noqa: BLE001 - the entry stays for the next reader
+        logger.warning(
+            "job hold %s record not deleted: %s", hold.id, type(exc).__name__
+        )
+        return
+    with _REGISTRY_LOCK:
+        if _REGISTRY.get(hold.id) is hold:
+            del _REGISTRY[hold.id]
+
+
+def _record_job(hold: Hold, job_id: str) -> None:
+    if not hold.shared:
+        return
+    try:
+        job_hold_store.set_job(hold.id, job_id)
+    except Exception as exc:  # noqa: BLE001 - this process keeps the evidence
+        logger.warning(
+            "job hold %s record kept no job id: %s", hold.id, type(exc).__name__
+        )
+
+
 # ── Opening ──────────────────────────────────────────────────────────────────
 
 
 def _open(session, tool, fingerprint, tool_use_id, opened, **evidence) -> Hold:
     hold = Hold(
-        id=uuid.uuid4().hex[:12],
+        id=uuid.uuid4().hex,
         tool=tool,
         binding=_current_binding(),
         fingerprint=fingerprint,
@@ -136,6 +266,7 @@ def _open(session, tool, fingerprint, tool_use_id, opened, **evidence) -> Hold:
         opened=opened,
         **evidence,
     )
+    _share(hold)
     with session._lock:
         _holds(session)[(hold.binding, tool)] = hold
     return hold
@@ -251,19 +382,28 @@ def _live_solve_thread() -> Any:
 def terminal(hold: Hold) -> bool:
     """Whether independent evidence shows the held operation has ended. Any
     read that fails raises, and the caller keeps the hold (N4)."""
-    if hold.from_store:
+    if hold.from_store or hold.unverified:
         return False
-    if hold.future is not None:
-        if not hold.future.done():
+    if hold.orphan:
+        # Its only evidence is the record: gone once another chat's approved
+        # repeat card deleted it.
+        return not job_hold_store.exists(hold.id)
+    # Chats share a registry hold: read each field once (another chat may
+    # hand the future over to the job id meanwhile).
+    future = hold.future
+    if future is not None:
+        if not future.done():
             return False
-        if hold.future.cancelled() or hold.future.exception() is not None:
+        if future.cancelled() or future.exception() is not None:
             return True
-        job_id = _job_id_in(hold.tool, hold.future.result())
+        job_id = _job_id_in(hold.tool, future.result())
         if job_id is None:
             return True
         hold.future, hold.job_id = None, job_id  # the late result names its job
-    if hold.job_id is not None:
-        return job_terminal(hold.job_id)
+        _record_job(hold, job_id)
+    job_id = hold.job_id
+    if job_id is not None:
+        return job_terminal(job_id)
     if hold.worker is not None:
         return not _alive(hold.worker)
     if hold.tool in SSE_TOOLS:
@@ -299,9 +439,88 @@ def _held(session, tool) -> Hold | None:
             with session._lock:
                 if _holds(session).get(key) is hold:
                     del _holds(session)[key]
+            _forget(hold)
             continue
         return hold
     return None
+
+
+def _unverified(tool, binding) -> Hold:
+    """The hold a chat meets when the records cannot be read (N4, H6)."""
+    return Hold(
+        id="unverified",
+        tool=tool,
+        binding=binding,
+        fingerprint="",
+        tool_use_id="",
+        opened="unverified",
+        unverified=True,
+    )
+
+
+def _record_hold(session, tool, fingerprint) -> Hold | None:
+    """Issue 16: a hold another chat of this process opened on this project,
+    read from its record. A row this process owns is checked on its
+    registry evidence and, while open, adopted into this chat; one with no
+    registry entry holds. A failed read holds (N4, H6). Rows of another
+    process wait for S2's lease."""
+    binding = _current_binding()
+    if binding is _UNREADABLE:
+        return _unverified(tool, binding)
+    project = _project_of(binding)
+    if project is None:
+        return None
+    try:
+        import security
+
+        me = security.replica_id()
+        records = job_hold_store.active(project, tool)
+    except Exception as exc:  # noqa: BLE001 - an unreadable record denies (N4, H6)
+        logger.warning("job hold records unreadable: %s", type(exc).__name__)
+        return _unverified(tool, binding)
+    for record in records:
+        if record.owner_replica_id != me:
+            continue  # S2: another process's evidence, read by its lease
+        with _REGISTRY_LOCK:
+            hold = _REGISTRY.get(record.id)
+        if hold is None:
+            hold = Hold(
+                id=record.id,
+                tool=tool,
+                binding=binding,
+                fingerprint=record.fingerprint,
+                tool_use_id="",
+                opened=record.opened,
+                opened_at=record.opened_at,
+                job_id=record.job_id,
+                project_id=project,
+                opened_by=record.opened_by,
+                shared=True,
+                orphan=True,
+            )
+        else:
+            try:
+                ended = terminal(hold)
+            except Exception:  # noqa: BLE001 - unreadable evidence is not terminal (N4)
+                ended = False
+            if ended:
+                _forget(hold)
+                continue
+        with session._lock:
+            _holds(session)[(binding, tool)] = hold
+        return hold
+    return None
+
+
+def _viewer_opened(hold: Hold) -> bool:
+    """Whether the acting user made the held call (H7: only they see its ids).
+    A shared hold whose maker is unknown shows its ids to no one."""
+    if not hold.shared:
+        return True  # it never left the chat that made the call
+    from services import chat_tools
+
+    user = chat_tools.acting_user_id()
+    return user is not None and user == hold.opened_by
 
 
 def _store_hold(tool, args, fingerprint) -> Hold | None:
@@ -360,20 +579,21 @@ def repeat_card(session, tool, args, fingerprint) -> dict | None:
     if not is_job_tool(tool):
         return None
     hold = _held(session, tool)
-    if hold is None or hold.fingerprint != fingerprint or not hold.told:
+    if hold is None or hold.fingerprint != fingerprint or hold.id not in _told(session):
         return None
+    own = _viewer_opened(hold)
     return {
         "hold_id": hold.id,
         "fingerprint": fingerprint,
-        "tool_use_id": hold.tool_use_id,
+        "tool_use_id": hold.tool_use_id if own else "",
         "opened": hold.opened,
         "opened_at": hold.opened_at,
-        "job_id": hold.job_id,
+        "job_id": hold.job_id if own else None,
     }
 
 
 def _pointer(hold: Hold) -> str:
-    if hold.job_id:
+    if hold.job_id and _viewer_opened(hold):
         return f"Check it with wait_for_job (job {hold.job_id})"
     if hold.tool in SSE_TOOLS:
         return "Check the solve's status"
@@ -407,6 +627,8 @@ def check(session, tool, args, fingerprint, card: dict | None = None):
             holds = _holds(session)
             for key in [k for k, h in holds.items() if h is hold]:
                 del holds[key]
+            _told(session).discard(hold.id)
+        _forget(hold)
         return None
     if hold is None:
         from services import assistant_tasks
@@ -415,9 +637,17 @@ def check(session, tool, args, fingerprint, card: dict | None = None):
         # own duplicate refusal and begin_step's record; session holds above
         # still apply to it (T1).
         if not assistant_tasks.admits_next_step(session, tool, args or {}):
-            hold = _store_hold(tool, args, fingerprint)
+            hold = _record_hold(session, tool, fingerprint) or _store_hold(
+                tool, args, fingerprint
+            )
     if hold is None:
         return None
+    if hold.unverified:
+        return PENDING, (
+            f"Whether an earlier {tool} request on this project may still be "
+            f"running could not be checked, so this one was not started. Try "
+            f"again shortly."
+        )
     if hold.fingerprint == fingerprint:
         if hold.from_store:
             return PENDING, (
@@ -426,7 +656,7 @@ def check(session, tool, args, fingerprint, card: dict | None = None):
                 f"it with {_stop(hold)}."
             )
         with session._lock:
-            hold.told = True
+            _told(session).add(hold.id)
         return PENDING, (
             f"The same {tool} request from earlier may still be running; its "
             f"outcome is unknown, so it was not started again. {_pointer(hold)}, "

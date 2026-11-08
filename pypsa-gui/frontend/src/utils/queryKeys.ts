@@ -23,3 +23,9 @@
 export function nk(projectId: string | null, root: string, ...rest: unknown[]): unknown[] {
   return [root, projectId, ...rest]
 }
+
+/** The scene's query root. Its GET carries the caller's own `my_previews`, so it is per user (SC-07 J5). */
+export const SITE_SCENE_ROOT = 'site-scene'
+
+/** Query roots whose data belongs to the signed-in user: dropped when that user changes (SC-07 J5). */
+export const USER_SCOPED_ROOTS: readonly string[] = [SITE_SCENE_ROOT]

@@ -276,3 +276,30 @@ class LibraryItem(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AssistantJobHold(Base):
+    """An assistant job call whose outcome is unknown (assistant-assurance
+    issue 16; `harness/job_hold_store.py`).
+
+    Written when the in-chat hold opens and deleted on the evidence that clears
+    it, so a new chat, another tab, a second replica or a restart can read it.
+    `owner_replica_id` is the process that holds the call's evidence (the
+    worker future or solve thread); `lease_until` is that owner's liveness
+    lease (wall time; NULL until the owner renews it).
+    """
+
+    __tablename__ = 'assistant_job_holds'
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey('projects.id', ondelete='CASCADE'), index=True)
+    tool: Mapped[str] = mapped_column(String(64), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    job_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    opened: Mapped[str] = mapped_column(String(32), nullable=False)
+    opened_at: Mapped[float] = mapped_column(Float, nullable=False)
+    opened_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    owner_replica_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    lease_until: Mapped[float | None] = mapped_column(Float, nullable=True)

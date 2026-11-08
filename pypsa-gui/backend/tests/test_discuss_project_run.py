@@ -192,3 +192,21 @@ def test_invalid_results_tab_refused(roots):
             run_id='run-a', results_tab='not-a-tab',
         )
     assert failure.value.detail['error_kind'] == 'invalid_navigation'
+
+
+def test_discuss_stores_anchors_from_the_server_read_only(roots, monkeypatch):
+    root = roots['root_for'](PROJECT)
+    _publish(root, 'run-a')
+    thread = dc.create_thread()
+    updated, episode = dc.resume_episode(thread['thread_id'], generation=1)
+    chat_tools.set_chat_session(episode)
+    read = re_.get_run_evidence('run-a')
+    without_revision = {k: v for k, v in read.items() if k != 'revision'}
+    monkeypatch.setattr(re_, 'get_run_evidence', lambda run_id, section=None: without_revision)
+
+    chat_tools.DISPATCHERS['discuss_project_run'](run_id='run-a', open_ui=False)
+
+    stored = dc.get_thread(updated['thread_id'])['refs']['discussed']
+    assert stored['fingerprint'] == read['fingerprint']
+    assert stored['status'] == read['status'] and stored['mode'] == read['mode']
+    assert 'revision' not in stored
