@@ -579,7 +579,7 @@ FACTS: dict[str, Fact] = {
                                         _dc_gridcode_frequency),
     "dc.gridcode.unchanged": Fact("services.campus_electrical_service.profile_fingerprint", "sha256", None,
                                   _dc_gridcode_unchanged),
-    "dc.campus.study": Fact("services.solve_queue.get_job", "status", None, _dc_campus_study),
+    "dc.campus.study": Fact("services.run_actions.outcome", "outcome", None, _dc_campus_study),
 }
 
 
