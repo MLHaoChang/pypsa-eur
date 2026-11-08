@@ -340,9 +340,7 @@ def tariff_energy_rate(
     _, cur_source = resolved_tariff_currency(tariff)
     why = tariff_currency_mismatch(tariff, finance_currency)
     if why:
-        raise _err(
-            f"Energy price: {why}", "currency_mismatch", "energy_price_per_mwh"
-        )
+        raise _err(f"Energy price: {why}", "currency_mismatch", "energy_price_per_mwh")
     items = [i for i in tariff.items if i.kind == "energy"]
     if not items or any(
         i.unit != "per_kwh"
