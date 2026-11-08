@@ -99,11 +99,11 @@ def delete(record_id: str) -> None:
 def _record(row) -> Record:
     texts = (row.id, row.tool, row.fingerprint, row.opened, row.owner_replica_id)
     if not all(isinstance(value, str) and value for value in texts):
-        raise MalformedRecord(f"hold record {row.id!r}: a required field is empty")
+        raise MalformedRecord(f"hold record {row.id}: a required field is empty")
     if row.job_id is not None and not (isinstance(row.job_id, str) and row.job_id):
-        raise MalformedRecord(f"hold record {row.id!r}: job_id")
+        raise MalformedRecord(f"hold record {row.id}: job_id")
     if not isinstance(row.opened_at, (int, float)) or not math.isfinite(row.opened_at):
-        raise MalformedRecord(f"hold record {row.id!r}: opened_at")
+        raise MalformedRecord(f"hold record {row.id}: opened_at")
     return Record(
         id=row.id,
         tool=row.tool,
