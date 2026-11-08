@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { editCardWords, HEADLINE_CAP, type EditCard } from './EditCard'
+import { EditCardTable, editCardWords, HEADLINE_CAP, type EditCard } from './EditCard'
 import { ConfirmationCard } from './ConfirmationCard'
 import AssistantResultCard from './AssistantResultCard'
 import { useChatStore } from '../store/chatStore'
@@ -366,7 +366,7 @@ const sceneRow = (field: string, label: string, readback: string) => ({
   component_class: 'Settings', name: '3D site', field, label, old: 'not attached', new: 'attached', unit: '',
   role: 'typed', readback, check: { kind: 'attach' } })
 const sceneReceipt = (outcome: 'verified' | 'uncertain', readback: string) => ({ _edit_receipt: {
-  version: 1, digest: 'd', outcome, says: 'Attach model items in the 3D site, 1 change', results_stale: false,
+  version: 1, digest: 'd', outcome, says: 'Attach model items in the 3D site (1 change)', results_stale: false,
   undo: { tool: 'undo_last', available: false },
   rows: [sceneRow('Item 1', 'Attach it · load (bus “B1”, carrier AC, MW) to Proposed building 1', readback)] } })
 
@@ -374,7 +374,7 @@ it.each(['guided', 'expert'] as const)('SC-07 S5a: an uncertain 3D site receipt 
   useUIStore.setState({ uiMode: mode })
   render(<AssistantResultCard result={sceneReceipt('uncertain', 'not attached')} disabled={false} onRequest={vi.fn()} />)
   const receipt = screen.getByTestId('chat-edit-receipt')
-  expect(receipt.textContent).toContain('Attach model items in the 3D site, 1 change: the project does not show')
+  expect(receipt.textContent).toContain('Attach model items in the 3D site (1 change): the project does not show')
   expect(screen.getByTestId('chat-edit-receipt-differs').textContent)
     .toBe('Attach it · load (bus “B1”, carrier AC, MW) to Proposed building 1: not attached.')
   expect(receipt.textContent).not.toMatch(/;|—|Item 1/)
@@ -384,6 +384,22 @@ it('SC-07 S5a: a verified 3D site receipt says its one line and lists nothing', 
   useUIStore.setState({ uiMode: 'guided' })
   render(<AssistantResultCard result={sceneReceipt('verified', 'attached')} disabled={false} onRequest={vi.fn()} />)
   expect(screen.getByTestId('chat-edit-receipt').textContent)
-    .toContain('Attach model items in the 3D site, 1 change. Read back from the project.')
+    .toContain('Attach model items in the 3D site (1 change). Read back from the project.')
   expect(screen.queryByTestId('chat-edit-receipt-differs')).toBeNull()
+})
+
+it('SC-07 S5a (UX): Expert shows a 3D site card in the same words as Guided, target rows prefixed "Item N"', () => {
+  const label = 'Attach it · load (bus “B1”, carrier AC, MW) to Proposed building 1'
+  const rows = [
+    { component_class: 'Settings', name: '3D site', field: 'change', label: 'Change', old: null, new: 'Attach model items',
+      unit: '', role: 'typed' as const },
+    { ...sceneRow('Item 1', label, 'attached'), role: 'typed' as const },
+    { component_class: 'Settings', name: '3D site', field: 'revision', label: 'Scene revision', old: 3, new: 4,
+      unit: '', role: 'typed' as const },
+  ]
+  render(<EditCardTable card={{ rows, sets: [] } as unknown as EditCard} guided={false} />)
+  const cells = screen.getAllByRole('cell').map(c => c.textContent)
+  expect(cells).toEqual(expect.arrayContaining([`Item 1: ${label}`, 'Change', 'Scene revision']))
+  expect(cells).not.toContain('change')
+  expect(cells).not.toContain('revision')
 })

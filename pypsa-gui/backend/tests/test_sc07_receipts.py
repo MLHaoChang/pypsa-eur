@@ -86,7 +86,12 @@ def _remove(project, cls, name):
     ("action", "cls", "name", "word"),
     [
         ("bind_targets", "Load", "it", "not attached"),
-        ("place_existing", "StorageUnit", "bess", "a different item"),
+        (
+            "place_existing",
+            "StorageUnit",
+            "bess",
+            "the site shows a different item there",
+        ),
         ("rebind", "Load", "L1", "not attached"),
         ("detach", "StorageUnit", "bess", "off the site and not in the model"),
     ],
@@ -156,7 +161,7 @@ def test_a_placement_whose_binding_names_another_instance_reads_back_uncertain(
     out = edit_card.receipt(card, args)
     assert (
         out["outcome"] == "uncertain"
-        and targets(out)[0]["readback"] == "a different item"
+        and targets(out)[0]["readback"] == "the site shows a different item there"
     )
 
 
@@ -232,7 +237,7 @@ def test_a_kept_attachment_is_a_note_and_never_counted_done(client, site):
     assert any(
         "Keeps it · load attached to" in (r.get("note") or "") for r in card["rows"]
     )
-    assert card["says"] == "Attach model items in the 3D site, 1 change"
+    assert card["says"] == "Attach model items in the 3D site (1 change)"
     chat_tools.site_scene_apply(**args)
     assert edit_card.receipt(card, args)["outcome"] == "verified"
 
@@ -248,7 +253,7 @@ def test_a_bind_that_drops_an_attachment_shows_it_and_reads_it_back(client, site
         and dropped[0]["new"] == "not attached"
     )
     assert dropped[0]["label"].startswith("Take it · load off Proposed building")
-    assert card["says"] == "Attach model items in the 3D site, 2 changes"
+    assert card["says"] == "Attach model items in the 3D site (2 changes)"
     chat_tools.site_scene_apply(**args)
     assert edit_card.receipt(card, args)["outcome"] == "verified"
 
@@ -682,7 +687,7 @@ def test_a_rebound_load_moved_to_another_bus_reads_back_a_different_item(client,
     out = edit_card.receipt(card, args)
     assert (
         out["outcome"] == "uncertain"
-        and _row(out, "rebind")["readback"] == "a different item"
+        and _row(out, "rebind")["readback"] == "the site shows a different item there"
     )
 
 
@@ -710,4 +715,4 @@ def test_a_placement_to_where_it_already_stands_counts_no_change(client, site):
         )
     )
     assert _row(card, "place")["old"] == _row(card, "place")["new"]
-    assert card["says"] == "Place model items in the 3D site, 0 changes"
+    assert card["says"] == "Place model items in the 3D site (0 changes)"

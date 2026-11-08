@@ -786,7 +786,7 @@ def _units(n, expects: list[dict]) -> dict:
 # A target that is missing or different reads back other words: uncertain.
 ATTACHED, NOT_ATTACHED = "attached", "not attached"
 MARKED, NOT_MARKED = "marked unavailable", "not marked"
-NOT_PLACED, OTHER_ITEM = "not placed", "a different item"
+NOT_PLACED, OTHER_ITEM = "not placed", "the site shows a different item there"
 ON_SITE, OFF_SITE, OFF_MODEL = "on the site", "off the site, still in the model", "off the site and not in the model"
 NOT_READ = "not read back: the project is not open"
 
@@ -1038,8 +1038,8 @@ def _scene_says(args: dict, rows: list[dict]) -> str:
     if "buildings" not in new:
         change = new.get("change", (None, None))[1]
         done = sum(1 for r in rows if r.get("check") and r["old"] != r["new"])  # J1: a kept row is not done
-        # No clause after it: the receipt adds ". Read back …" or ": the project does not show …".
-        return f"{change} in the 3D site, {done} change{'' if done == 1 else 's'}"
+        # No clause after it (UX: the count in brackets): the receipt adds ". Read back …" or ": the project does not show …".
+        return f"{change} in the 3D site ({done} change{'' if done == 1 else 's'})"
     before, after = new.get("buildings", (None, None))
     return f"Applies the reviewed 3D site preview: {before} → {after} buildings. The model is unchanged"
 

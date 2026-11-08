@@ -7,7 +7,7 @@
  *  2. place_existing receipt "uncertain": MOCKED in the browser. The read-back runs in the same
  *     server worker right after the commit, so nothing can change the placement in between; a
  *     fetch wrapper rewrites only that tool_result frame's _edit_receipt (outcome "uncertain",
- *     the placement row read back as "a different item"). The apply itself is real.
+ *     the placement row read back as "the site shows a different item there"). The apply itself is real.
  *  3. Unknown outcome: MOCKED the same way; the real site_scene_apply tool_result frame is
  *     replaced by a tool_error frame (error_kind scene_apply_outcome_unknown, the backend's own
  *     message). The "Check the 3D site" click sends a real turn (held 4 s by the wire).
@@ -91,7 +91,7 @@ function streamRewriter(unknownMessage) {
     const row = receipt && receipt.rows.find(r => r.check != null)
     if (!row) return block
     receipt.outcome = 'uncertain'
-    row.readback = 'a different item'
+    row.readback = 'the site shows a different item there'
     window.__sc07.rewritten.push(`receipt uncertain: ${row.field}`)
     return `event: tool_result\ndata: ${JSON.stringify(frame)}`
   }

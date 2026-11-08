@@ -300,7 +300,7 @@ export function EditCardTable({ card, guided, labels }: { card: EditCard; guided
               <tr key={i} className={follows ? 'text-muted' : ''} data-testid={`chat-edit-row-${r.role}`}>
                 <td className="p-1 border-b border-border break-words">{asset(r)}</td>
                 <td className="p-1 border-b border-border break-words">
-                  {exists ? (r.new ? 'Created by this change' : 'Removed by this change') : guided ? r.label : r.field}
+                  {exists ? (r.new ? 'Created by this change' : 'Removed by this change') : guided ? r.label : expertField(r)}
                   {r.role === 'typed' && r.target && (r.target.panel || r.target.component) && (
                     <button type="button" className="block text-[10px] text-accent underline"
                       data-testid="chat-edit-show" onClick={() => showInProperties(r.target!)}>
@@ -346,6 +346,10 @@ export function EditCardTable({ card, guided, labels }: { card: EditCard; guided
     </div>
   )
 }
+
+/** SC-07 S5a (UX): a 3D site row shows Expert the same words as Guided; a target row keeps its "Item N" prefix. */
+const expertField = (r: EditCardRow) =>
+  r.name !== '3D site' ? r.field : r.check != null ? `${r.field}: ${r.label}` : r.label
 
 /** SC-07 S5a: a 3D site card's target rows carry their read-back check (GK B J1). */
 const sceneTargets = (rows: EditCardRow[]) =>
