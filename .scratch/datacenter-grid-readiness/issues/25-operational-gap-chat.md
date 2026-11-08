@@ -21,4 +21,4 @@ Decide (owner) between a typed read tool and a UI pointer only (as DC20-POINTER-
 
 ### 2026-11-08: done
 
-Owner (card, DC25-POINTER-1): "UI pointer", as DC20-POINTER-1. The held-by-spec declaration is replaced by a ui-pointer one in `claude-dc25-pointer.json`; the `dc_operational_gap` row in `services/not_via_chat.py` stays as the pointer chat reads (Results › Summary, Plan vs operation card). PR: PRNUM.
+Owner (card, DC25-POINTER-1): "UI pointer", as DC20-POINTER-1. The held-by-spec declaration is replaced by a ui-pointer one in `claude-dc25-pointer.json`; the `dc_operational_gap` row in `services/not_via_chat.py` stays as the pointer chat reads (Results › Summary, Plan vs operation card). PR: #1297.
