@@ -234,7 +234,8 @@ def _same(a, b) -> bool:
 #
 # `native` holds what the case added to the native ledgers:
 #   approvals: the approval log's `approval/decided` records;
-#   calls: {call_id: {"name", "input"}} from the event log's tool_use blocks;
+#   calls: {call_id: {"name", "input", "project_id"}} from the event log's tool_use
+#     blocks, each on the project of its log (`turn/start`, or its run's task);
 #   envelopes: {envelope_id: {"state", "audit", "task_id", "project_id"}};
 #   handovers: the hand-over records ({"project_id", "task_id", "decision_id"});
 #   steps: {task_id: [step records]} from the run records on disk;
@@ -278,12 +279,20 @@ class _Ledger:
         return True
 
 
-def _cell_matches(call: dict, key: str, value) -> bool:
+def _in_project(call: dict, project_id) -> bool:
+    """A call authorizes effects only in the project it was logged on (the
+    `turn/start` project of its chat log, or its run's own project); a call
+    with no project on record authorizes nothing."""
+    return call.get("project_id") is not None and call.get("project_id") == project_id
+
+
+def _cell_matches(call: dict, project_id, key: str, value) -> bool:
     component, name, attr = key.split("/", 2)
     args = call.get("input") or {}
     attrs = args.get("attrs") or {}
     return (
         call.get("name") in WRITE_TOOLS
+        and _in_project(call, project_id)
         and args.get("component_class") == component
         and args.get("name") == name
         and attr in attrs
@@ -308,9 +317,9 @@ def _cell_authority(ledger: _Ledger, row: dict) -> str | None:
             return "actor:" + row["key"]
     for call_id, call in sorted((ledger.native.get("calls") or {}).items()):
         if (
-            _cell_matches(call, row["key"], row.get("value"))
+            _cell_matches(call, row["project_id"], row["key"], row.get("value"))
             and ledger.approved(call_id, call["name"])
-            and ledger.take(("call", call_id, row["key"]))
+            and ledger.take(("call", call_id, row["project_id"], row["key"]))
         ):
             return "call:" + call_id
     return None
@@ -364,13 +373,14 @@ def _steps(ledger: _Ledger, project_id: str):
 
 
 def _step_call(
-    ledger: _Ledger, step: dict, tool: str, *, users_only=False
+    ledger: _Ledger, step: dict, tool: str, project_id, *, users_only=False
 ) -> str | None:
     prefix = f"run-{step.get('id')}-"
     for call_id, call in sorted((ledger.native.get("calls") or {}).items()):
         if (
             call_id.startswith(prefix)
             and call.get("name") == tool
+            and _in_project(call, project_id)
             and ledger.approved(call_id, tool, users_only=users_only)
         ):
             return call_id
@@ -391,12 +401,14 @@ def _evidence_authority(ledger: _Ledger, row: dict) -> str | None:
             and step.get("tool") == "solve_queue_enqueue"
             and record.get("job_id") == job
         ):
-            call = _step_call(ledger, step, "solve_queue_enqueue")
+            call = _step_call(ledger, step, "solve_queue_enqueue", row["project_id"])
             if call and ledger.take(("evidence", call)):
                 return "call:" + call
         if kind == "eh_study" and step.get("tool") == "run_eh_study":
             # run_eh_study is never listed: only the user's own card admits it.
-            call = _step_call(ledger, step, "run_eh_study", users_only=True)
+            call = _step_call(
+                ledger, step, "run_eh_study", row["project_id"], users_only=True
+            )
             if call and ledger.take(("evidence", call)):
                 return "call:" + call
         if (
@@ -481,7 +493,12 @@ def _chain_authority(
     if key == "handover":
         return creators.get(project_id)
     call = (ledger.native.get("calls") or {}).get(key)
-    if call and call.get("name") in WRITE_TOOLS and ledger.approved(key, call["name"]):
+    if (
+        call
+        and call.get("name") in WRITE_TOOLS
+        and _in_project(call, project_id)
+        and ledger.approved(key, call["name"])
+    ):
         return "call:" + key
     return None
 
@@ -604,4 +621,8 @@ def report(
         "claim_scope": "finite_suite_only",
         "provider": "fake",
         "wall_clock_thresholds": None,
+        # What the snapshot does not compare (GK B ruling on point 3): the
+        # durable conversation store, and the resident network's revision
+        # (its cells are compared instead).
+        "not_diffed": ["durable_conversation", "network_revision"],
     }
