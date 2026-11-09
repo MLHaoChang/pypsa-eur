@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass
 
 from services.asset_schema import provenance
 from services.provenance_graph.types import Broken, Edge, Node, Unrecorded
@@ -28,6 +30,16 @@ ANNUALISED = "capital_cost"
 #: The surfaces that show an asset's money fields (`surface_id`).
 ASSET_SURFACES = ("asset_card", "asset_readout", "economics_costs")
 NOT_RECORDED = "scale input not recorded"
+
+
+@dataclass(frozen=True)
+class ScaleRecord:
+    """What a `priced_through` edge recorded: the asset it priced, and the scale input pricing wrote (`scaled_by`,
+    as stored, so a malformed record is compared, not dropped)."""
+
+    component_class: str
+    name: str
+    scaled: object
 
 
 def input_id(cls: str, name: str, field: str) -> str:
@@ -134,7 +146,8 @@ def add_asset(b, component_class: str, name: str, entries: dict[str, dict] | Non
             column = priced.get("column") if isinstance(priced, dict) and _well_formed(priced) else "scale_input"
             b.node(Node("derived", node))
             b.node(Node("input", input_id(component_class, name, column)))
-            b.edge(Edge("priced_through", node, input_id(component_class, name, column), recorded=priced))
+            recorded = priced if isinstance(priced, Unrecorded) else ScaleRecord(component_class, name, priced)
+            b.edge(Edge("priced_through", node, input_id(component_class, name, column), recorded=recorded))
         money.append(node)
         for surface in ASSET_SURFACES:
             sid = surface_id(surface, component_class, name, field)
@@ -159,17 +172,32 @@ def compare_priced_through(g, edge: Edge) -> Broken | None:
     def broken(field, recorded, current_field, current, reason) -> Broken:
         return Broken("priced_through", edge.src, edge.dst, field, recorded, current_field, current, reason)
 
-    scaled = edge.recorded
-    if isinstance(scaled, Unrecorded):
-        return broken(None, None, None, None, scaled.reason)
+    if isinstance(edge.recorded, Unrecorded):
+        return broken(None, None, None, None, edge.recorded.reason)
+    scaled = edge.recorded.scaled
     if not _well_formed(scaled):          # read as stale, never a KeyError 500 (#1255)
         return broken(None, None, None, None, "scale input record malformed")
-    cls, _, rest = edge.src.partition(":")[2].partition("/")
-    name = rest.rsplit("/", 1)[0]
     try:
-        column, value = current_scale_input(g.ctx, cls, name, scaled.get("technology"), scaled["capacity_basis"])
+        column, value = current_scale_input(g.ctx, edge.recorded.component_class, edge.recorded.name, scaled.get("technology"), scaled["capacity_basis"])
     except (ValueError, KeyError, TypeError, StopIteration) as exc:
         return broken(scaled["column"], scaled["value"], None, None, f"cannot be priced now: {exc}")
     if column == scaled["column"] and math.isclose(float(value), float(scaled["value"]), rel_tol=1e-9):
         return None
     return broken(scaled["column"], scaled["value"], column, value, "scale input changed")
+
+
+def ledger_row_id(key: str) -> str:
+    return f"ledger_row:{key}"
+
+
+def add_ledger_rows(b, rows: Iterable[tuple[str, str, str, str]]) -> None:
+    """The Guided ledger's rows (`asset_view.LEDGER_FIELDS`: key, component class, name, field): an `input` node
+    per row shown in its `ledger_row` surface, and the asset's money field shown there too, so the row reads the
+    verdict the asset card reads. Call after `add_asset` for each asset the rows compile to."""
+    for key, cls, name, field in rows:
+        row = ledger_row_id(key)
+        b.node(Node("input", f"input:ledger/{key}"))
+        b.node(Node("surface", row))
+        b.edge(Edge("shown_in", f"input:ledger/{key}", row))
+        if field in SCALED_FIELDS and b.has(derived_id(cls, name, field)):
+            b.edge(Edge("shown_in", derived_id(cls, name, field), row))

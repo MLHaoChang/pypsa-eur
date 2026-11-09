@@ -40,7 +40,6 @@ from models.study import AssumptionsLedger, LedgerRow
 import services.asset_schema.provenance as provenance
 from services import provenance_graph
 from services.provenance_graph import money
-from services.provenance_graph.types import Edge, Node
 
 __all__ = ["AssetSnapshot", "ExpertEdit", "LEDGER_FIELDS", "LedgerField", "asset_snapshot",
            "compiled_value", "expert_edits", "ledger_stale", "mark_expert_edits", "record_pack_defaults"]
@@ -190,19 +189,11 @@ def _ledger_stale(n) -> dict[str, Mapping]:
     for cls, name in dict.fromkeys((m.component, m.name) for m in LEDGER_FIELDS
                                    if m.name in _table(n, m.component).index):
         money.add_asset(b, cls, name)
-    for m in LEDGER_FIELDS:
-        row = f"ledger_row:{m.key}"
-        b.node(Node("input", f"input:ledger/{m.key}"))
-        b.node(Node("surface", row))
-        b.edge(Edge("shown_in", f"input:ledger/{m.key}", row))
-        if m.field in money.SCALED_FIELDS:
-            node = money.derived_id(m.component, m.name, m.field)
-            if b.has(node):
-                b.edge(Edge("shown_in", node, row))
+    money.add_ledger_rows(b, ((m.key, m.component, m.name, m.field) for m in LEDGER_FIELDS))
     g = b.build()
     out: dict[str, Mapping] = {}
     for m in LEDGER_FIELDS:
-        broke = [v.broken[0] for v in provenance_graph.surface_verdicts(g, f"ledger_row:{m.key}")
+        broke = [v.broken[0] for v in provenance_graph.surface_verdicts(g, money.ledger_row_id(m.key))
                  if v.state == "stale"]
         if broke:
             out[m.key] = {"component": m.component, "name": m.name, "field": m.field, "stale": broke[0].wire()}

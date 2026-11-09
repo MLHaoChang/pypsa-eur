@@ -119,17 +119,13 @@ def why(g: Graph, node_id: str) -> Walk:
     return Walk(node_id, tuple(steps))
 
 
-def stale_entries(n, component_class: str, name: str, g: Graph | None = None) -> dict[str, dict]:
+def stale_entries(n, component_class: str, name: str) -> dict[str, dict]:
     """The wire every money surface reads (`routers/network.py`, the Guided ledger): one asset's recorded
     entries (`provenance.get`), with `stale` (TCU-05's shape: field, recorded, current_field, current, reason)
     added to each money field whose verdict is stale. A field with nothing to say is returned as it was."""
-    if g is None:
-        b = Builder(n)
-        entries = money.add_asset(b, component_class, name)
-        g = b.build()
-    else:
-        from services.asset_schema import provenance
-        entries = provenance.get(n, component_class, name)
+    b = Builder(n)
+    entries = money.add_asset(b, component_class, name)
+    g = b.build()
     out = dict(entries)
     for field in money.SCALED_FIELDS:
         if field not in entries:
