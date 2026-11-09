@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Spec and issues for a provenance graph that replaces the hand-rolled staleness checks with one query and gives the assistant a "why this number" walk (`.scratch/provenance-graph/`).
