@@ -3,7 +3,7 @@
 
 # 07c — Report comments become revisions (HH-08A)
 
-Status: ready-for-agent
+Status: done (#1300)
 Type: task
 Blocked by: 07
 Gated: yes (GK B)
