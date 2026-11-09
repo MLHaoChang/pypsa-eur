@@ -3,8 +3,8 @@
 
 # P4: charts, tables, reports and delivery provenance
 
-Status: ready-for-agent
-Progress: PNG integrity and JSON/ZIP export shipped; checked chart, report, import and general-export adapters pending
+Status: done (S1–S5b and Y merged; #1292 is the last PR; the readiness oracle's project_value/limit stays a recorded follow-up)
+Progress: all slices shipped: checked chart (S1), delivery (S2), imports (S3), reports (S4a, S4b), fact identity (S5a), chart identity and fact-free tables/reports/headers (S5b), summary facts (Y)
 Type: task
 Blocked by: 02, 03
 
@@ -463,3 +463,20 @@ GK B (35), as sent at about 01:10Z (resent 01:13Z):
   reason dropped, unit dropped. "Legacy taken when only one key is absent" is
   equivalent: stripping both keys from the re-derived data still mismatches a
   manifest that holds one.
+
+### 2026-11-09 — completion (AA-05 (10))
+
+Issue 05 is done. Merged: S1 #1224, S2 #1227, S3 #1230, S4a #1234, S5a #1265,
+S4b #1267, Y #1289 (64686f9d), and S5b #1292 (the last).
+
+- S5 froze the field lists per AA05-A46-SCOPE-1: the answer and the checked
+  chart carry a checked fact; table exports, reports and download headers are
+  pinned fact-free (`test_p4_fact_free_surfaces.py`, `…_reports.py`).
+- #1292's CI shards 1/4 and 4/4 failed on six header pins that listed `vary`
+  as always present. The CORS middleware adds it only when an origin is
+  configured, so CI had none. Fixed in b7abf519: the pins compare header names
+  without `vary`; every other header stays pinned.
+- Remaining (recorded, not blocking): the readiness oracle does not compute
+  project_value/limit (S5a, GK B (35) ruling); SH-07c adds `revised_from` to
+  sealed exports, which #1292's exact-key pin keeps green while it is only
+  present when carried.
