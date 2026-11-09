@@ -80,6 +80,10 @@ A staleness or "unchanged" check also covers the legacy writers that recorded no
 
 A batch of mutants that runs whole suites can exceed the background limit: run each surviving or slow mutant against its targeted test with -x and a timeout (#1255).
 
+A broken-dependency test builds its inputs before injecting the fault; otherwise the fixture raises and the code under test never runs (#1290 F1, GK A (19)).
+
+A "never swallowed" test injects the module's own error class (e.g. `DefaultsPackError`) as well as a foreign one: a narrow `except` survives a RuntimeError-only test (#1290 F2, GK A (19)).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
