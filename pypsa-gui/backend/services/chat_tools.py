@@ -8308,6 +8308,7 @@ def generate_report(
     sections: list | None = None,
     instruction: str | None = None,
     template_file_id: str | None = None,
+    summaries: list | None = None,
 ) -> dict:
     """
     Start the report job for the active project on the active LLM profile.
@@ -8335,6 +8336,7 @@ def generate_report(
         title=title, language=language or None,
         sections=[str(s) for s in sections] if sections else None,
         instruction=instruction, template_file_id=template_file_id or None,
+        summaries=list(summaries) if summaries else None,
     )
     with _assistant_strict():  # AA-05 S4 (P1): the assistant's report is strict
         result = _route(_h, body, project=project)

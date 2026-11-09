@@ -16,7 +16,7 @@ from __future__ import annotations
 import copy
 import json
 
-from services import run_gates
+from services import run_actions, run_gates
 
 STAGES = ("intake", "setup", "inputs", "input_gate", "solve", "result_gate", "explore", "report", "handoff")
 STAGE_STEPS, STAGE_CHARS = 24, 32000  # the LC-23 brief limit, per stage
@@ -256,6 +256,13 @@ def load(profile: dict) -> dict:
         for action in actions:
             if set(action) - {"native"} != {"tool", "args"} or not isinstance(action["args"], dict):
                 raise ProfileError(f"Stage {name}: each action has tool and args.")
+            if action.get("native") == run_actions.KIND or action["tool"] in run_actions.REGISTRY:
+                # Study harness 10a (GK B (36) D7): the runner's closed native-action registry.
+                try:
+                    run_actions.check(action, name)
+                except ValueError as exc:
+                    raise ProfileError(f"Stage {name}: {exc}") from exc
+                continue
             if "native" in action:
                 if action["native"] != name or NATIVE_STEPS.get(name) != action["tool"] or action["args"]:
                     raise ProfileError(f"Stage {name}: a native step is its own stage's, {NATIVE_STEPS.get(name)}.")
@@ -512,7 +519,115 @@ def _eh_site_v2() -> dict:
 
 EH_SITE_V2 = _eh_site_v2()
 
-PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2}
+# Study harness 10a (GK B (36) D1-D8, Q1-Q5): eh_datacenter@1. The solve stage
+# runs the solve, the EH study (LOLE as eh_site@2, Q5), the campus run held to
+# the run's frozen grid-code profile and the scorecard read with it
+# (`services/run_actions.py`). No envelope yet: every write and run is carded.
+FREQUENCY_PARAM = run_gates.FREQUENCY_PARAM
+
+
+def _dc_action(tool):
+    return {"tool": tool, "args": dict(run_actions.FROZEN), "native": run_actions.KIND}
+
+
+# D8: each scorecard row id or family the engine emits on a data-centre
+# project, with its severity, its one-line basis and the run that produces its
+# input; every emitted row is here or in `DC_NOT_GATED` (a test pins both, on
+# the shipped template and on a project with sidecars). No wildcard.
+_CAMPUS_RUN = "the campus study, held to the run's grid-code profile"
+_DC_LOAD = "the AI-training load profile stored at project creation (no run)"
+_ISLAND = "the island study (island_config.json, island_study.json; no run here)"
+DC_SCORECARD = (
+    ("scr", "block", "The short-circuit ratio at the PoC meets the profile's minimum.",
+     "the saved network's PoC fault level (no run)"),
+    ("energization_peak:", "block", "Each stage's peak fits the connection energized that year.",
+     "the template's energization schedule and the load (no run)"),
+    ("reactive_range", "block", "The campus holds the profile's reactive range at the PoC.", _DC_LOAD),
+    ("ramp_rate", "warn", "Load ramps stay within the connection's ramp limit.", _DC_LOAD),
+    ("oscillation", "warn", "Load power swings stay within the oscillation limit.", _DC_LOAD),
+    ("rapid_voltage_change", "warn", "Frequent voltage steps stay within the limit.", _DC_LOAD),
+    ("rapid_voltage_change_infrequent", "warn", "Infrequent voltage steps stay within the limit.", _DC_LOAD),
+    ("harmonic_distortion", "warn", "Voltage THD at the PoC within the planning level.", _CAMPUS_RUN),
+    ("current_distortion", "warn", "Current TDD at the PoC within the limit.", _CAMPUS_RUN),
+    ("flicker", "warn", "Flicker severity within the planning level.", _CAMPUS_RUN),
+    ("motor_start", "warn", "A motor start's voltage dip within the limit.", "the project's motor data (no run)"),
+    ("motor_start:", "warn", "Each named motor's start dip within the limit.", "the project's motor data (no run)"),
+    ("voltage_unbalance", "warn", "Negative-sequence unbalance within the limit.", _CAMPUS_RUN),
+    # Acceptance (issue 18): a P-V/Q-V margin is screening, so it warns.
+    ("voltage_stability_pv", "warn", "P-V margin at the PoC (screening).", _CAMPUS_RUN),
+    ("voltage_stability_qv", "warn", "Q-V margin at the PoC (screening).", _CAMPUS_RUN),
+    ("frequency_support", "warn", "The campus offers the frequency support the code asks.", _ISLAND),
+    ("grid_former", "warn", "A unit forms the island's voltage.", _ISLAND),
+    ("ride_through:", "warn", "Ride-through needs the operator's study; it never passes here.", _ISLAND),
+    ("dynamic:", "warn", "Dynamic requirements need an RMS/EMT study; they never pass here.",
+     "an RMS/EMT study outside the app (none)"),
+)
+DC_NOT_GATED = {"lole": "not gated: the reliability rule judges LOLE against the project's goal"}
+
+
+def _dc_scorecard_rules():
+    return [_rule(f"dc.{row.rstrip(':')}", run_gates.SCORECARD + row, "eq", "pass", severity=severity,
+                  basis=f"{basis} Input: {source}.")
+            for row, severity, basis, source in DC_SCORECARD]
+
+
+def _eh_datacenter() -> dict:
+    lole = copy.deepcopy(next(r for r in EH_RESULT_RULES if r.get("engine")))
+    lole["engine"] = {"tool": "run_coupling_loop", "max_solves": 3, "restore": "base"}
+    return {
+        "id": "eh_datacenter", "version": 1,
+        "templates": ["eh_datacenter"],
+        "scope": "flow_scope.preset_for",
+        "params": {"required": [], "ask": [GOAL_PARAM, FREQUENCY_PARAM], "fields": {
+            GOAL_PARAM: _num("Reliability goal (LOLE)", {"native_type": "float", "unit_storage": "h/yr"}),
+            # Q1 = A: the user's own, never tunable; the card shows its value in Hz.
+            FREQUENCY_PARAM: {**_enum("Grid frequency (Hz)", ("50", "60")), "unit_storage": "Hz"},
+        }},
+        "inputs": {"required": []},
+        "stages": {
+            "setup": {"actions": [], "rules": [
+                *GENERIC["setup"]["rules"],
+                _rule("set.project.template", "project.template", "eq", "eh_datacenter",
+                      basis="The profile serves the eh_datacenter template only."),
+            ]},
+            # Issue 10: stage 2 waits for the user until a grid-code profile is published.
+            "inputs": {"actions": list(GENERIC["inputs"]["actions"]), "rules": [
+                _rule("dc.gridcode.published", "dc.gridcode.published", "eq", True,
+                      basis="The run is held to a grid-code profile the user published (never drafted here)."),
+            ]},
+            "input_gate": {**GENERIC["input_gate"], "rules": [
+                *CORE_INPUT_RULES,
+                _rule("dc.gridcode.frequency", "dc.gridcode.frequency_match", "eq", True,
+                      basis="The campus's nominal frequency is the grid frequency the user gave (Hz)."),
+            ]},
+            "solve": {"actions": [*GENERIC["solve"]["actions"], EH_STUDY_ACTION,
+                                  _dc_action(run_actions.CAMPUS), _dc_action(run_actions.READINESS)],
+                      "rules": [*GENERIC["solve"]["rules"], *EH_SOLVE_RULES,
+                                _rule("dc.campus.study", "dc.campus.study", "eq", "done",
+                                      basis="The run's own campus run finished, held to its grid-code profile.")]},
+            "result_gate": {**GENERIC["result_gate"], "rules": [
+                *CORE_RESULT_RULES,
+                _rule("dc.gridcode.unchanged", "dc.gridcode.unchanged", "eq", True,
+                      basis="The grid-code profile is still the one the run was held to."),
+                *_dc_scorecard_rules(),
+                lole,
+            ]},
+            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
+        },
+        "eh_study": copy.deepcopy(EH_SITE["eh_study"]),
+        # GK B (36) F2 (a): the campus run's own settings, winning over the saved ones.
+        "campus_study": dict(run_actions.CAMPUS_STUDY),
+        "tunable": [],
+        "kpis": copy.deepcopy(EH_SITE["kpis"]),
+        "chapters": ["grid_readiness", "mc"],
+        "missing_tools": [],
+    }
+
+
+EH_DATACENTER = _eh_datacenter()
+
+PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_datacenter@1": EH_DATACENTER}
 
 
 def needs_goal(profile: dict) -> bool:
