@@ -871,6 +871,17 @@ def test_a_stage_entered_again_keeps_the_runs_first_freeze(hub):  # noqa: F811
         [],
         [{"param": run_gates.FREQUENCY_PARAM, "value": "60", "status": "proposed"}],
         [{"param": run_gates.FREQUENCY_PARAM, "value": 60, "status": "confirmed"}],
+        # Mutant gaps (run_gates.py:512): a confirmed "60" for another param,
+        # and a confirmed frequency row that is still a write.
+        [{"param": "grid.voltage_kv", "value": "60", "status": "confirmed"}],
+        [
+            {
+                "param": run_gates.FREQUENCY_PARAM,
+                "value": "60",
+                "status": "confirmed",
+                "write": {"component": "Settings", "attr": "frequency"},
+            }
+        ],
     ],
 )
 def test_with_no_confirmed_row_the_frequency_is_never_read_from_the_network(
