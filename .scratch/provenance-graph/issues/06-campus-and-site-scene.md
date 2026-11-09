@@ -6,7 +6,7 @@ Spec: `.scratch/provenance-graph/spec.md`
 
 Model tier: sonnet.
 Gated: GK B; UI parts need the UX reviewer's OK.
-Blocked by: 02.
+Blocked by: 02, and #1295 merged (P7).
 
 ## What to build
 

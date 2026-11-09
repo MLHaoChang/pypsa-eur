@@ -50,7 +50,8 @@ does not recompute anything.
 
 1. **`staleness(node) -> Verdict`**: walk the `derived_from`, `priced_through` and `computed_in` edges. The node is
    stale when any edge's recorded value no longer matches its current value, or when the current value cannot be read
-   (fail closed, ADR-0001: unknown is not current). The verdict lists every edge that broke, with the input and the
+   (fail closed, ADR-0001: unknown is not current). An input the graph does not model, or a node with no recorded
+   input, reads `uncompared` and is named in the verdict, never fresh (GK B P1, #1170). The verdict lists every edge that broke, with the input and the
    two values, so the wording is the same on every surface (`staleNote` in
    `frontend/src/components/ProvenanceChip.tsx:60` becomes a formatter of this verdict).
 2. **`why(node) -> Walk`**: the same walk, returned as an ordered list of steps (value, unit, source stamp, the edge
@@ -84,7 +85,7 @@ Found with `grep -rnE "_stale|stale_keys|staleNote|out[- ]of[- ]date|staleness|f
 | `pypsa-gui/frontend/src/layout/properties/AssetFields.tsx:57`, `:351` | asset card and read-out call `staleNote` per field |
 | `pypsa-gui/frontend/src/pages/economics/AssetCostsTable.tsx:28` `staleOf` | first stale scaled money field of a row |
 | `pypsa-gui/frontend/src/pages/decision/LedgerReview.tsx:67` | ledger row shows provenance label only, no out-of-date note (TCU-07) |
-| `pypsa-gui/backend/services/document_values_commercial.py:584` `provenance`, `:653` `_live` | `commercial.provenance` cell entries and whether the cell still holds the approved value |
+| `pypsa-gui/backend/services/document_values_commercial.py:584` `provenance`, `:653` `_live` (slice 08) | `commercial.provenance` cell entries and whether the cell still holds the approved value |
 
 ### Runs and results (slice 04)
 
@@ -133,8 +134,8 @@ Found with `grep -rnE "_stale|stale_keys|staleNote|out[- ]of[- ]date|staleness|f
 | `pypsa-gui/frontend/src/components/series/SeriesKit.tsx:399` | `current_changed_since_refinement` error kind (an edit conflict: leave alone) |
 | `pypsa-gui/frontend/src/components/GuidedTour.tsx:419` | tour belongs to another project (UI state: leave alone) |
 
-Cache keys (adequacy, time aggregation, previews) are not shown to a person. The design plan (issue 01) decides
-whether they join the graph or stay as they are.
+Cache keys (adequacy, time aggregation, previews) are not shown to a person and stay out of the graph (GK B plan GO,
+ruling (c)); a test holds that no cache key reads a graph node.
 
 ## Slices
 
@@ -148,8 +149,9 @@ OK as well.
 | 03 | "Why this number": the assistant's read tool over `why(node)` | needs-triage, blocked by 02 |
 | 04 | Runs and results freshness | needs-triage, blocked by 02 |
 | 05 | Studies, reports and the investment case | needs-triage, blocked by 04 |
-| 06 | Campus and site-scene checks | needs-triage, blocked by 02 |
+| 06 | Campus and site-scene checks | needs-triage, blocked by 02 and #1295 |
 | 07 | Memory nodes (`recalled_from`) | needs-triage, blocked by 02 and the MEMORY-1 build |
+| 08 | `commercial.provenance` cells (GK B ruling (b)) | needs-triage, blocked by 02 |
 
 ## Acceptance (whole feature)
 
@@ -168,3 +170,5 @@ OK as well.
   TCU07-TRIAGE-1)
 - Memory: `.scratch/assistant-memory/spec.md` (MEMORY-1)
 - Harness contract: `pypsa-gui/backend/harness/README.md`
+
+Plan GO from GK B, 2026-11-09, with conditions P1–P8: `issues/01-design-plan.md`, `## Comments`.

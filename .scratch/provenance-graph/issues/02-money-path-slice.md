@@ -29,8 +29,8 @@ Then move these readers onto the graph (spec survey, "Money path"):
 - `frontend/src/components/ProvenanceChip.tsx`, `layout/properties/AssetFields.tsx` and
   `pages/economics/AssetCostsTable.tsx` keep their wording, read from the verdict.
 
-`commercial.provenance` cells (`services/document_values_commercial.py:584`) join only if the plan GO puts them in
-this slice; otherwise they go to a later slice.
+`commercial.provenance` cells stay out (issue 08). A cost whose commercial input the graph does not model reads
+`uncompared`, never fresh. Conditions P1–P3, P5 and P8 of the plan GO (issue 01, `## Comments`) apply.
 
 ## Acceptance
 
