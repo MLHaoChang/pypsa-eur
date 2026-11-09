@@ -784,6 +784,25 @@ def _engine_stop(path, step_id, reason, detail=None, status="failed"):
     runner._update(path, change)
 
 
+def _gate_on_refusal(path, ctx):
+    """A refused loop stops the run at the result gate with the gate read as it
+    stands, so the engine rule shows the refusal's typed reason beside the
+    other rules (GK A (19) SH11-L1: `eh.adequacy.lole` reads
+    `loop_cannot_sample_link_outages`, never passed or not_started). The stage
+    stays failed with `engine_refused`; the read changes no verdict."""
+    from harness import runner
+    from services import assistant_tasks, run_profiles
+    task = json.loads(path.read_text())
+    profile = run_profiles.resolve(task["run"]["profile"])
+    # Every rule, the engine ones included: the refused step is settled (`failed`).
+    gate = assistant_tasks._gate_now(task, profile["stages"][RESULT_STAGE]["rules"], ctx)
+
+    def change(t):
+        stage = t["run"]["stages"][RESULT_STAGE]
+        stage["attempts"], stage["gate"] = stage.get("attempts", 0) + 1, gate
+    runner._update(path, change)
+
+
 def _overhead(tool):
     """The solves a loop spends outside its `max_solves`: the margin loop's
     probe, and the closing re-solve every loop runs (GK A (12) Q1)."""
@@ -847,6 +866,7 @@ def start_engine(path, ctx, step, *, instance):
             runner._update(path, lambda t: run_envelope.settle_carded(
                 t, next(s for s in t["steps"] if s["id"] == step["id"]), 0))
         _engine_stop(path, step["id"], "engine_refused", str(exc.detail))
+        _gate_on_refusal(path, ctx)
         return "engine_refused"
     except BaseException:
         _engine_stop(path, step["id"], "engine_error", "the engine start raised", status="uncertain")

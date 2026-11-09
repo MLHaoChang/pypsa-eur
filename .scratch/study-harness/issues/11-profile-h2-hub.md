@@ -50,6 +50,21 @@ Design: [design.md](../design.md) §9.3 "eh_h2_hub"
   - A3: check what _compute_run_objective returns for the staged mode. If it is None, stop and send GK B the finding.
   - A4: leave experiment_execution.py:211 out of this PR and file a .scratch ticket with the repro numbers (manifest 506,529,579.17 vs saved 505,116,197.62; diff = objective_constant 1,413,381.55).
 
+### GK A (19), on blocker 1 (verbatim, relayed in the SH-11 (2) hand-off)
+
+- Option A, conditions SH11-L1..L5.
+  - L1: eh.adequacy.lole stays block with the same engine. On an H2 hub it reads a typed NoEvidence naming the cause, and the run stops at result_gate. Map the runner's "nothing to sample" refusal at the fact reader; no separate template pre-check.
+  - L2: the refused loop charges no solves.
+  - L3: tests on both templates: the run stops with that reason, never "passed" or "not_started". Plus a test that a done EH study whose MC LOLE meets the goal still doesn't pass (F9). Mutate the mapping to pass/warn and show it killed.
+  - L4: file the engine issue. Done: .scratch/adequacy-loops/issues/01-loops-sample-link-outages.md.
+  - L5: SH-11 may merge with acceptance 1 marked blocked-by that issue; the PR body says so; no template data changes.
+  - GK A wants the plan and the PR head: a GK A review.
+
+### GK B (38), on blocker 2 (verbatim, relayed in the SH-11 (2) hand-off)
+
+- Option B. The hydrate fix goes in its own PR, SH-11 stacks on it, and GK B's successor reviews it. Conditions (1)–(5): build the full network, then swap under mutation_lock and the netCDF lock, and a failed import leaves the old network intact; match load_project/reset_network and list long-lived references in the PR body; keep network.name, user_ts and transient state, with tests; the red tests plus an end-to-end test; regression suites in separate runs under 590 s; a release fragment.
+- Done as PR #1307 (claude/hydrate-fresh-network); SH-11 stacks on it.
+
 ### Builder notes (SH-11 (2), 9 Nov)
 
 - Blocker 2 (staged utilisation 1.23), root cause: `solve_queue._apply_capture` re-hydrates the resident context with `_hydrate_context_from_disk`, which imported the saved netCDF into the populated network. PyPSA skips every component the network already has (keeping its old static row) and takes the new series, so the live network held the solve's dispatch next to its pre-solve `p_nom_opt` (0 for `electrolyser_new_2035`, dispatching 11.1 MW). Fixed by importing into a fresh network (`tests/test_hydrate_replaces_resident_network.py`, red first); the reader now also fails closed (`dispatch_exceeds_capacity`) and reads only a current solve.
