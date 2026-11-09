@@ -222,11 +222,14 @@ def test_an_electrolyser_beyond_the_envelopes_bound_is_refused_and_nothing_chang
 
 
 @pytest.mark.parametrize("template", list(REFS), indirect=True)
-def test_a_run_on_each_template_reaches_the_hand_off_with_the_offtake_and_lole_passing(
+def test_a_run_on_each_template_stops_at_the_result_gate_on_the_loops_typed_refusal(
         goal_granted, rated, fake_report, template):
-    """Acceptance: the shipped profile, EH study and coupling loop real; the
-    EH study is the user's card. The offtake and LOLE rules pass; the
-    investment rule is not evaluated (no case was run) and the run passes."""
+    """Acceptance 1 is blocked by .scratch/adequacy-loops/issues/01 (GK A (19)
+    SH11-L1, L2, L3, L5): the shipped profile, EH study and coupling loop
+    real. The offtake passes on the run's own solve; the coupling loop
+    refuses (the templates' outages sit on Links), the LOLE rule reads that
+    typed reason, never passed or not_started, and the run stops at the
+    result gate. The refused loop charges no solve."""
     from tests.test_harness_run_report_handoff import runner as run_runner
     from tests.test_harness_runner import Clicks
 
@@ -234,20 +237,27 @@ def test_a_run_on_each_template_reaches_the_hand_off_with_the_offtake_and_lole_p
     clicks = Clicks(refs={"solve.2"})
     record = go(run_runner(clicks), path, task)
     run = record["run"]
-    assert run["status"] == "completed", json.dumps([run["stage"], run.get("reason"), run.get("waiting"), [
-        (r["rule"], r["verdict"], r.get("reason"), r["facts"][0]["value"])
-        for r in (run["stages"]["result_gate"].get("gate") or {}).get("rules", [])],
-        [(s["id"], s["tool"], s["status"], s.get("error")) for s in record["steps"][5:]]], default=str)
+    verdicts = {r["rule"]: r for r in (run["stages"]["result_gate"].get("gate") or {}).get("rules", [])}
+    assert run["stage"] == "result_gate" and run["status"] == "needs_user", (run["stage"], run["status"])
+    assert run["stages"]["result_gate"]["status"] == "failed" and run["stages"]["handoff"]["status"] != "passed"
     assert clicks.used == ["solve.2"]
-    verdicts = {r["rule"]: r for r in run["stages"]["result_gate"]["gate"]["rules"]}
-    assert verdicts["h2.offtake.met"]["verdict"] == verdicts["eh.adequacy.lole"]["verdict"] == "pass"
+    lole = verdicts["eh.adequacy.lole"]
+    assert lole["verdict"] == "not_evaluated" and lole["severity"] == "block"
+    assert lole["facts"][0]["value"] == run_gates.LOOP_CANNOT_SAMPLE
+    assert lole["facts"][0]["value"] not in ("passed", "not_started") and not run_gates.passed([lole])
+    assert verdicts["h2.offtake.met"]["verdict"] == "pass"
     assert verdicts["h2.ic.counterfactual"]["verdict"] == "not_evaluated"
     assert verdicts["h2.ic.counterfactual"]["reason"].startswith("not_run")
     use = verdicts["h2.electrolyser.utilisation"]
     assert use["verdict"] in ("pass", "fail") and 0.0 < use["facts"][0]["value"] <= 1.0
     engine = next(s for s in record["steps"] if s.get("engine"))
-    assert engine["tool"] == "run_coupling_loop" and engine["status"] == "completed"
-    assert run["stages"]["handoff"]["status"] == "passed"
+    assert engine["tool"] == "run_coupling_loop" and engine["status"] == "failed"
+    assert "nothing to sample" in engine["error"]
+    # L2: the refused loop's reservation is released; only the solve and the EH study are charged.
+    envelope = envelope_of(path)
+    [row] = [a for a in envelope["audit"] if a.get("tool") == "run_coupling_loop" and "reserved" in a]
+    assert row["solves"] == 0
+    assert run_envelope.solves_used(envelope) == 2
 
 
 # ── the readers, on solved networks (no run) ─────────────────────────────────

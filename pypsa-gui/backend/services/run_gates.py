@@ -198,6 +198,11 @@ def _loads_without_series(env):
 LOOP_FACT = "adequacy.loop.converged"
 ENGINE_TOOLS = {"run_margin_loop": "margin_loop", "run_coupling_loop": "coupling_loop"}
 RESTORES = ("base", "final")
+# The loops' shared refusal of a network with no sampleable electrical
+# generator (`coupling_loop_runner`, `margin_loop_runner`, `eh_stages`), and
+# the typed reason the gate reads it as (GK A (19) SH11-L1).
+NOTHING_TO_SAMPLE = "nothing to sample: no electrical generator carries resolvable occurrence data"
+LOOP_CANNOT_SAMPLE = "loop_cannot_sample_link_outages"
 # The fields of a finished loop's record a settled engine step keeps, and the
 # gate shows: the verdict, what it cost, how the network was left, and the
 # goal it was judged against with where each part came from.
@@ -235,6 +240,11 @@ def _loop_converged(env, rule):
     loop = (step.get("result") or {}).get("loop")
     if not isinstance(loop, dict):
         reason = step.get("error") or "the engine loop left no record"
+        if NOTHING_TO_SAMPLE in str(reason):
+            # GK A (19) SH11-L1: the runner's own refusal, typed by its cause.
+            return NoEvidence(LOOP_CANNOT_SAMPLE, "the loop cannot sample this network's outages: they are "
+                                                  "carried on Links (firm backup, grid import), not on "
+                                                  "electrical generators (.scratch/adequacy-loops/issues/01)")
         return NoEvidence((step.get("job") or {}).get("outcome") or step["status"], str(reason)[:240])
     if loop.get("applied") is False:  # a user edit landed while the loop ran (H3): not this project's
         return NoEvidence("inputs_changed", "the inputs changed while the engine loop ran")
