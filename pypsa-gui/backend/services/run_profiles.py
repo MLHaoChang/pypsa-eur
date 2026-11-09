@@ -705,7 +705,11 @@ def _eh_h2_hub(staged: bool) -> dict:
         "envelope": {
             "edits": edits,
             "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
-            "budget": {"solves": 8, "rounds": 6, "wall_time_h": 8.0},
+            # GK B (38) H7: the worst case, every reservation at its cap. The
+            # solve and its EH study (budget_solves 2), each L2 round's re-solve
+            # and re-run EH study (L2_ROUNDS = 2), the coupling loop's 3 and its
+            # closing re-solve: 1 + 2 + 2 x (1 + 2) + 3 + 1 = 13.
+            "budget": {"solves": 13, "rounds": 6, "wall_time_h": 8.0},
         },
         "kpis": copy.deepcopy(EH_SITE["kpis"]),
         "chapters": ["sizing", "mc", "investment_case"],

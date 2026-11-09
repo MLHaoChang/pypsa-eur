@@ -193,6 +193,9 @@ def test_an_undersized_electrolyser_fails_the_offtake_and_l2_sizes_it_within_bou
     assert "loop" in run, (run["status"], run["stage"], [(s["id"], s["status"], s.get("error")) for s in record["steps"]])
     first = next(c for c in run["loop"]["history"])
     assert {f["rule"] for f in first["findings"]} >= {"h2.offtake.met"}
+    # H1: the finding is a shed read from the run's own (real) solve, never a missing reading.
+    offtake = next(f for f in first["findings"] if f["rule"] == "h2.offtake.met")
+    assert offtake["verdict"] == "fail" and offtake["facts"][0]["value"] > 0
     assert run["status"] == "completed", (run["stage"], run["stages"][run["stage"]].get("reason"))
     assert run["loop"]["kind"] == "L2" and run["loop"]["rounds"] <= 2 and run["loop"]["ended"] == "passed"
     [row] = run["ledger"]
@@ -568,3 +571,175 @@ def test_a_staged_electrolyser_cap_above_its_bound_is_refused(granted, monkeypat
     assert _admit(granted, ref, {"component_class": "Link", "name": "electrolyser_new_2035",
                                  "attrs": {"p_nom_max": 81.0}}) == "out_of_bounds"
     assert float(_ctx().network.links.at["electrolyser_new_2035", "p_nom_max"]) == 40.0
+
+
+# ── H1, H2: the readers' F6 guards and their weightings, on two periods ──────
+
+
+def _h2_env(tmp_path, monkeypatch, *, loads=("h2_offtake",), shed=((1.0, 0.0), (0.0, 1.0)),
+            dispatch=((6.0, 6.0), (1.0, 10.0)), job=None, exact="x1"):
+    """Two investment periods of two snapshots: generator weightings (2, 2)
+    and (3, 1), objective weightings 1 and period years 10 (neither ever
+    enters); an H2 bus with `loads`, a 10 MW electrolyser feeding it."""
+    from contextlib import nullcontext
+
+    from harness import calculations, durable
+    from tests.test_harness_run_eh import DONE_JOB, ctx_for, env_for
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.investment_periods = [2030, 2040]
+    n.snapshot_weightings.loc[:, "generators"] = [2.0, 2.0, 3.0, 1.0]
+    n.snapshot_weightings.loc[:, "objective"] = 1.0
+    n.investment_period_weightings.loc[:, "years"] = 10.0
+    n.add("Bus", "el")
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Load", "site", bus="el", p_set=5.0)
+    for name in loads:
+        n.add("Load", name, bus="h2", p_set=1.0)
+    n.add("Link", "electrolyser", bus0="el", bus1="h2", p_nom=10.0, carrier="electrolysis")
+    n.links_t.p0 = pd.DataFrame({"electrolyser": [v for p in dispatch for v in p]}, index=n.snapshots)
+    n.meta = {"assistant_solve_exact_input_fingerprint": exact}
+    frame = pd.DataFrame({name: [v for p in shed for v in p] for name in ("site", *loads)}, index=n.snapshots)
+    ctx = ctx_for(tmp_path, last_lost_load={"lost_load_t": frame, "voll_eur_per_mwh": 1000.0})
+    ctx.network = n
+    monkeypatch.setattr(run_gates, "_on", lambda c, fn, *a: fn(*a))
+    monkeypatch.setattr(durable, "network_guard", lambda: nullcontext())
+    monkeypatch.setattr(calculations, "solve_matches_inputs", lambda c: True)
+    monkeypatch.setattr(run_gates, "_solve_job", lambda env: DONE_JOB if job is None else job)
+    return env_for(tmp_path, ctx=ctx)
+
+
+def _gate(env, rid, ref="eh_h2_hub_staged@1"):
+    [result] = run_gates.evaluate([_rules(ref)[rid]], env)
+    return result
+
+
+def test_shed_hours_weigh_each_snapshot_by_its_generator_weighting_and_read_the_worst_period(
+        tmp_path, monkeypatch):
+    """H2: 2030 sheds one 2 h snapshot, 2040 one 1 h snapshot. Unit weights
+    read 1 and 1; objective weights 1 and 1; years or a sum over periods 3."""
+    scored = run_gates.FACTS["h2.offtake.shed_hours"].read(_h2_env(tmp_path, monkeypatch))
+    assert scored.value == 2.0
+    assert [(r["period"], r["shed_hours"], r["worst"]) for r in scored.rows] == [(2030, 2.0, True), (2040, 1.0, False)]
+    result = _gate(_h2_env(tmp_path, monkeypatch), "h2.offtake.met")
+    assert result["verdict"] == "fail" and not run_gates.passed([result])
+
+
+def test_utilisation_weighs_each_snapshot_by_its_generator_weighting_and_reads_the_period_outside_the_band(
+        tmp_path, monkeypatch):
+    """H2: 2030 (6, 6) on (2, 2) reads 0.6; 2040 (1, 10) on (3, 1) reads
+    13/40 = 0.325, below the band, though unit weights would read 0.55."""
+    result = _gate(_h2_env(tmp_path, monkeypatch), "h2.electrolyser.utilisation")
+    rows = {r["period"]: r for r in result["facts"][0]["rows"]}
+    assert rows[2030]["utilisation"] == pytest.approx(0.6) and rows[2030]["verdict"] == "pass"
+    assert rows[2040]["utilisation"] == pytest.approx(0.325) and rows[2040]["verdict"] == "fail"
+    assert rows[2040]["worst"] and result["facts"][0]["value"] == pytest.approx(0.325)
+    assert result["verdict"] == "fail" and result["severity"] == "warn" and run_gates.passed([result])
+
+
+@pytest.mark.parametrize("loads, expected", [
+    ((), "offtake_loads:0"),  # the offtake is missing
+    (("h2_offtake", "h2_export"), "offtake_loads:2"),  # several
+])
+def test_a_missing_or_second_offtake_is_no_evidence(tmp_path, monkeypatch, loads, expected):
+    result = _gate(_h2_env(tmp_path, monkeypatch, loads=loads), "h2.offtake.met")
+    assert result["verdict"] == "not_evaluated" and result["facts"][0]["value"] == expected
+    assert not run_gates.passed([result])
+
+
+def test_a_renamed_offtake_is_found_by_its_h2_bus(tmp_path, monkeypatch):
+    scored = run_gates.FACTS["h2.offtake.shed_hours"].read(_h2_env(tmp_path, monkeypatch, loads=("ammonia_plant",)))
+    assert scored.value == 2.0
+
+
+@pytest.mark.parametrize("change, reason", [
+    ("infeasible", None),  # the run's solve did not complete (an infeasible LP fails the job)
+    ("not_applied", "inputs_changed"),
+    ("no_identity", "no_capture"),
+    ("other_solve", "other_solve"),
+    ("no_capture", "no_lost_load_capture"),
+    ("stale", None),
+])
+@pytest.mark.parametrize("rid", ["h2.offtake.met", "h2.electrolyser.utilisation"])
+def test_without_the_runs_own_solve_neither_reader_has_evidence(tmp_path, monkeypatch, change, reason, rid):
+    """H1: never a value from a failed, unapplied, unidentified, other or
+    stale solve, nor from a missing capture: the offtake rule never passes."""
+    from harness import calculations
+    job = {"infeasible": {"status": "failed", "capture": {"applied": True, "exact": "x1"}},
+           "not_applied": {"status": "completed", "capture": {"applied": False, "reason": "inputs_changed"}},
+           "no_identity": {"status": "completed", "capture": {"applied": True}}}.get(change)
+    env = _h2_env(tmp_path, monkeypatch, job=job, exact="x2" if change == "other_solve" else "x1")
+    if change == "no_capture":
+        env.ctx.solver_state.pop("last_lost_load")
+    if change == "stale":
+        monkeypatch.setattr(calculations, "solve_matches_inputs", lambda c: False)
+    result = _gate(env, rid)
+    if rid == "h2.electrolyser.utilisation" and change == "no_capture":
+        return  # utilisation reads the dispatch, never the shed capture
+    assert result["verdict"] == "not_evaluated", result
+    if reason is not None:
+        assert result["facts"][0]["value"] == reason
+    if rid == "h2.offtake.met":
+        assert not run_gates.passed([result])
+
+
+@pytest.mark.parametrize("template", list(REFS))
+def test_the_lole_target_is_the_goal_on_each_hubs_horizon(template):
+    """H6: the goal's h/yr target goes on the template's horizon through
+    `loop_goal` with `metrics.horizon_years` (the run's card and the loop
+    read the same); the staged hub's horizon is longer than a year."""
+    import types
+
+    from harness import run_loops
+    from services.adequacy.metrics import horizon_years
+    from services.solver_service import SolverConfig
+    n = T.BUILDERS[template]()
+    years = float(horizon_years(n))
+    assert (years > 1.5) == (template == "eh_h2_hub_staged")
+    ctx = types.SimpleNamespace(network=n, solver_state={"solver_config": SolverConfig(
+        **{**T.SOLVER_CONFIG, **T.SOLVER_CONFIG_EXTRA.get(template, {}), "target_lole_h": 2.0})})
+    assert run_loops._card_target(ctx) == pytest.approx(2.0 * years)
+
+
+# ── H7: the solve budget ─────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("ref", REFS.values())
+def test_the_budget_covers_the_solve_two_l2_rounds_the_loop_and_its_restore(ref):
+    """H7: every reservation at its cap. The solve stage runs the queued
+    solve and the EH study, again in each L2 round; then the coupling loop
+    and its closing re-solve."""
+    from harness import run_loops
+    profile = run_profiles.resolve(ref)
+    eh = profile["eh_study"]["budget_solves"]
+    lole = _rules(ref)["eh.adequacy.lole"]["engine"]
+    solve_stage = 1 + eh
+    worst = solve_stage + run_profiles.L2_ROUNDS * solve_stage + lole["max_solves"] + run_loops._overhead(lole["tool"])
+    assert (eh, run_profiles.L2_ROUNDS, lole["max_solves"], run_loops._overhead(lole["tool"])) == (2, 2, 3, 1)
+    assert profile["envelope"]["budget"]["solves"] == worst == 13
+
+
+def _spend(path, solves):
+    envelope = run_envelope._load(path)
+    envelope["audit"] += [{"event": "used", "tool": "solve_queue_enqueue", "call_id": f"spent-{i}"}
+                          for i in range(solves)]
+    run_envelope._save(path, envelope)
+
+
+@pytest.mark.parametrize("template", ["eh_h2_hub"], indirect=True)
+def test_the_loop_reserves_within_the_budget_and_stops_typed_when_it_is_spent(granted, monkeypatch, template):
+    """H7: with 4 solves left the coupling loop reserves 3 and its closing
+    re-solve; with 1 left nothing, `budget_spent`."""
+    ref = REFS[template]
+    lole = _rules(ref)["eh.adequacy.lole"]["engine"]
+    monkeypatch.setitem(run_profiles.PROFILES, ref, _without_eh(ref))
+    task, path, _ = granted(run={**RUN, "profile": ref}, detach=False)
+    budget = run_envelope._load(path)["budget"]["solves"]
+
+    def reserve(call_id):
+        return run_envelope.reserve_engine(path, call_id=call_id, tool=lole["tool"], rule="eh.adequacy.lole",
+                                           max_solves=lole["max_solves"], overhead=1, restore=lole["restore"])
+    _spend(path, budget - 4)
+    assert reserve("loop-1") == (3, None)
+    assert run_envelope.solves_used(run_envelope._load(path)) == budget
+    assert reserve("loop-2") == (None, "budget_spent")

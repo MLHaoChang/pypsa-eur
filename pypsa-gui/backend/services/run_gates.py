@@ -606,6 +606,7 @@ def _electrolyser_utilisation(env, rule):
     """The fleet's utilisation (p.u.). Multi-period: one row per investment
     period over the Links active in it, each with its verdict against the
     rule's band; the value the period furthest outside it."""
+    from harness.calculations import solve_matches_inputs
     lo, hi = rule["value"]
 
     def read(ctx):
@@ -613,6 +614,8 @@ def _electrolyser_utilisation(env, rule):
         fleet = _electrolysers(n)
         if not fleet:
             return NoEvidence("no_electrolyser", "the network has no electrolyser")
+        if not solve_matches_inputs(ctx):
+            return None  # a capacity edited since the solve is not the dispatch's
         if not len(n.investment_periods):
             return _utilisation(n, fleet, None, n.snapshot_weightings["generators"].reindex(n.snapshots))
 
