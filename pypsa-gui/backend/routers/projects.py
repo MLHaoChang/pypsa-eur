@@ -3147,6 +3147,10 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str, *, allow_netwo
             with PyPSAService.get_netcdf_io_lock():
                 PyPSAService.import_network_from_netcdf(fresh, nc_path)
                 ctx.network = fresh
+            # As every swap does (`set_network`, `reset_network`, activation):
+            # the freed old network's `id` may be reused by a later one, which
+            # must not read the old network's id-keyed derived results.
+            PyPSAService._clear_swap_caches()
         ctx.loaded_project = name
 
     # User-uploaded series for THIS project, into THIS context's store.
