@@ -986,17 +986,21 @@ def _own_previews(task):
     return out
 
 
-def _cancel_previews(previews):
-    """Cancel each through the owner-scoped G4 path (`site_scene_cancel`): idempotent, never another
-    owner's, never relabels an applied proposal. Its claim and this cancel share `proposals._lock`, so
-    an apply that claimed first wins and one that comes after refuses proposal_cancelled. A failure
-    never blocks the task cancel; the step ids that failed are returned to say so."""
+def _cancel_previews(previews, project_uuid):
+    """Cancel each through the owner-scoped G4 path (`site_scene_cancel`) in the task's own project,
+    not whichever is in the foreground: idempotent, never another owner's, never relabels an applied
+    proposal. Its claim and this cancel share `proposals._lock`, so an apply that claimed first wins
+    and one that comes after refuses proposal_cancelled. A failure never blocks the task cancel; the
+    step ids whose preview is not now cancelled or applied (a raise, `applying`, `not_found`) are
+    returned to say so."""
     from services.site_scene import chat as scene_chat
     failed = []
     for step_id, site_id, pid in previews:
         try:
-            scene_chat.cancel(site_id, pid)
+            result = scene_chat.cancel(site_id, pid, project_uuid=project_uuid)
         except Exception:  # noqa: BLE001 — reported in the cancel's result, never silent
+            result = None
+        if not isinstance(result, dict) or result.get("status") not in ("cancelled", "applied"):
             failed.append(step_id)
     return failed
 
@@ -1006,6 +1010,8 @@ def cancel_task(task_id: str) -> dict:
     previews = []
     with _LOCK:
         path, task = _read(task_id)
+        # _read's own project: the run's when bound, else the foreground one
+        project_uuid = (RUN_CONTEXT.get() or PyPSAService.get_active_context()).project_uuid
         if task["status"] != "completed":
             previews = _own_previews(task)
             task["status"] = "cancelled"
@@ -1025,7 +1031,7 @@ def cancel_task(task_id: str) -> dict:
         view = _view(task)
     _wake(path)  # the runner lets go of the project
     # Outside the task lock: the scene cancel takes its own project and proposal locks.
-    failed = _cancel_previews(previews)
+    failed = _cancel_previews(previews, project_uuid)
     if failed:
         view["previews_not_cancelled"] = failed
     return view

@@ -6,10 +6,14 @@ cancel_task cancelling the previews its own completed prepare steps made."""
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from services import assistant_tasks as tasks, chat_tools
+from services.pypsa_service import PyPSAService
 from services.site_scene import chat
+from tests.test_sc07_scene_tools import _save
 from tests.test_sc07_task_step import (  # noqa: F401
     PREPARE,
     REFS,
@@ -129,6 +133,57 @@ def test_a_failing_preview_cancel_still_cancels_the_task_and_says_so(
     assert view["previews_not_cancelled"] == ["prep"]
     assert tasks._read(task_id)[1]["status"] == "cancelled"
     assert _status(args["proposal_id"]) == "ready"  # not cancelled, and said so above
+
+
+@pytest.mark.parametrize("answer", ["applying", "not_found"])
+def test_a_preview_cancel_answered_but_not_cancelled_is_said(
+    session, monkeypatch, answer
+):
+    """GK B F1: an apply in flight (`applying`, which a failed apply puts back to `ready`) or a
+    lookup that missed (`not_found`) returns without raising, and the preview is not cancelled."""
+    plan(request_id=f"answer-{answer}")
+    prepared(session, monkeypatch)
+    task_id = session.task_id
+
+    def answered(_site_id, proposal_id, **_k):
+        return {"proposal_id": proposal_id, "status": answer, "changed": False}
+
+    with monkeypatch.context() as patched:
+        patched.setattr(chat, "cancel", answered)
+        view = chat_tools.cancel_task(task_id)
+    assert view["status"] == "cancelled"
+    assert view["previews_not_cancelled"] == ["prep"]
+
+
+def test_a_run_bound_cancel_reaches_the_tasks_own_project(
+    session, monkeypatch, client, install_network, project_row
+):
+    """GK B F1: under a run context bound to the task's project while another project is in the
+    foreground, the preview is cancelled in the task's project, not looked up in the other one."""
+    plan(request_id="bound")
+    args = prepared(session, monkeypatch)
+    task_id = session.task_id
+    geo = PyPSAService.get_active_context()
+    bound = SimpleNamespace(
+        loaded_project=geo.loaded_project, project_uuid=geo.project_uuid
+    )
+    _save(client, install_network, "other")
+    other = SimpleNamespace(
+        loaded_project="other", project_uuid=str(project_row("other").id)
+    )
+    token = tasks.RUN_CONTEXT.set(bound)
+    try:
+        with monkeypatch.context() as patched:
+            patched.setattr(
+                PyPSAService, "get_active_context", classmethod(lambda _cls: other)
+            )
+            view = chat_tools.cancel_task(task_id)
+    finally:
+        tasks.RUN_CONTEXT.reset(token)
+    assert view["status"] == "cancelled" and "previews_not_cancelled" not in view
+    with chat.scope(project_uuid=bound.project_uuid) as (_db, _user, project, owner):
+        status = chat._proposal_status(project, owner, "campus", args["proposal_id"])
+    assert status["status"] == "cancelled"
 
 
 @pytest.mark.parametrize(
