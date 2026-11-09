@@ -1029,3 +1029,18 @@ wait_for_job on ad:/rpt:/queue jobs (adapter_pending), nonblocking jobs
 (live-voice 11), display (S1b), S2–S5; S4/S5 wait for the owner's A3.5–A3.6
 freeze. Next runnable tracer: S1b, a chat tool line for a failed
 run_simulation shows "✕ … (failed)", not "✓".
+
+## 2026-11-09 — AA-05 (verified artifacts) complete
+
+Commands: `pytest tests/assurance_acceptance -k p4` in `pypsa-gui/backend`
+(test env `/root/.venv-pypsa-gui`) on the tree with #1289 merged and #1292's
+head: 455 passed, 0 failed (red before S5b/Y; green after each merged slice).
+`scripts/coord/mutants.py` on the changed modules: S5b 17/17 killed, Y 38
+killed (two documented equivalent survivors). Policy version unchanged.
+Remaining blockers: none for issue 05. Not run: the full backend suite
+locally (CI shards cover it). Follow-ups: the readiness oracle does not
+compute project_value/limit; the Y "prose admitted" mutant is an
+approximation; the B4 number scan reads tokens, so a number inside a word is
+not seen. Next runnable tracer: SH-07c's `revised_from` on sealed exports must
+keep `test_p4_fact_free_reports.py`'s exact-key pin green.
+

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A checked chart now names what each metric of its evidence is (metric, formula, unit, whether it was answered, and why not) and carries the same warnings as the answer. Charts drawn before keep verifying, and evidence from another project is never drawn. Tests pin that table exports, reports and download headers never present a value as checked.
