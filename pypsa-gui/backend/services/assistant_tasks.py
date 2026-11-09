@@ -440,8 +440,13 @@ def _view(task, fresh=False, current=None):
     changes = [r["says"] for r in receipts]
     if changes:
         out["changes"] = changes
-        # SC-07 S5b (UX (14) ask 2): each edit's receipt rows, so a card words the change with the
-        # panel's field labels as Guided does; past the cap they are left out and `says` stands.
+    # SC-07 S5b (UX (14) ask 2): each edit's receipt rows, so the partial-mapping line words the
+    # change with the panel's field labels as Guided does. Only a task stopped at a failed or
+    # uncertain scene step can show that line, so only it carries them: on every other `_task` a
+    # result rides with they would only grow it (past the result cap, into a spill). Past the cap
+    # they are left out and `says` stands.
+    stop = out.get("next_step") or {}
+    if changes and stop.get("tool") in (SCENE_PREPARE, SCENE_APPLY) and stop.get("status") in ("failed", "uncertain"):
         edits = [{k: r[k] for k in ("rows", "sets") if k in r} for r in receipts]
         if len(json.dumps(edits, default=str)) <= CHANGE_EDITS_MAX:
             out["change_edits"] = edits

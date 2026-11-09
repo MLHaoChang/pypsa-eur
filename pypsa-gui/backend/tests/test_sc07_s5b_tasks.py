@@ -236,7 +236,7 @@ def test_only_prepare_steps_name_previews_to_cancel():
 # ── UX (14) ask 2: the edit's receipt rows in the task view ────────────────
 
 
-def _edited(receipt):
+def _edited(receipt, next_tool="site_scene_apply"):
     return {
         "task_id": "t",
         "title": "Edit",
@@ -251,7 +251,7 @@ def _edited(receipt):
             },
             {
                 "id": "x",
-                "tool": "update_component",
+                "tool": next_tool,
                 "status": "failed",
                 "args": {},
                 "result": {"_edit_receipt": receipt},
@@ -282,4 +282,19 @@ def test_a_large_receipt_leaves_its_rows_out_and_keeps_its_words():
     rows = [{"field": "p_set", "label": "x" * 50, "role": "typed", "unit": "MW"}] * 60
     view = tasks._view(_edited({"says": "many", "rows": rows}))
     assert view["changes"] == ["many"]
+    assert "change_edits" not in view
+
+
+@pytest.mark.parametrize("next_tool", ["update_component", "run_simulation"])
+def test_rows_ride_only_on_a_task_stopped_at_a_scene_step(next_tool):
+    """Only the partial-mapping line reads the rows, so every other `_task` a tool result carries
+    stays as before: the rows would push a result past the 4000-char cap into a spill (oj07)."""
+    row = {
+        "component_class": "Load",
+        "name": "it",
+        "field": "p_set",
+        "label": "Active power",
+    }
+    view = tasks._view(_edited({"says": "it p_set 3 → 2 MW", "rows": [row]}, next_tool))
+    assert view["changes"] == ["it p_set 3 → 2 MW"]
     assert "change_edits" not in view
