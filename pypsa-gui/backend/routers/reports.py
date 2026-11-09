@@ -129,6 +129,12 @@ def _http(exc: store.ReportStoreError) -> HTTPException:
             "error_kind": "report_busy",
             "message": "Another process is writing this report; try again in a moment.",
         })
+    if isinstance(exc, store.ReportVersionConflict):
+        return HTTPException(409, {
+            "error_kind": "report_version_conflict",
+            "message": "The report changed while this was being saved (a newer "
+                       "version exists); nothing was written. Reload and try again.",
+        })
     if isinstance(exc, store.ReportNotFound):
         return HTTPException(404, {
             "error_kind": "report_not_found",
@@ -701,7 +707,8 @@ def bind_template(report_id: str, body: BindTemplateBody,
     bound (then nothing changes). The meta records the mode and the detected
     language; a change of template clears the stored mapping plan (its
     heading indices belong to the old outline). Edit-lock checked, like the
-    evidence-only POST.
+    evidence-only POST. 409 `report_version_conflict` when another writer saved
+    a version after this one read its base (nothing written).
     """
     doc = _latest_or_404(project, report_id)
     _check_lock(project, db, user)
@@ -709,7 +716,8 @@ def bind_template(report_id: str, body: BindTemplateBody,
         if doc.template_file_id is not None:
             try:
                 store.save_version(project.directory,
-                                   doc.model_copy(update={"template_file_id": None}))
+                                   doc.model_copy(update={"template_file_id": None}),
+                                   expected_base=doc.version)
                 store.update_meta(project.directory, report_id, template_mode=None,
                                   template_language=None, mapping_plan=None)
             except store.ReportStoreError as exc:
@@ -721,7 +729,8 @@ def bind_template(report_id: str, body: BindTemplateBody,
     try:
         if changed:
             store.save_version(project.directory,
-                               doc.model_copy(update={"template_file_id": body.file_id}))
+                               doc.model_copy(update={"template_file_id": body.file_id}),
+                               expected_base=doc.version)
         meta_updates: dict[str, Any] = {"template_mode": outline.mode,
                                         "template_language": outline.language}
         if changed:
@@ -886,7 +895,9 @@ def roundtrip_report(report_id: str, body: RoundTripBody,
     all before anything is written: 404 `report_not_found` /
     `upload_not_found`, 400 `roundtrip_unreadable` (not a Word document),
     400 `roundtrip_not_a_report` (nothing matched a section), 409
-    `project_locked`, 409 `report_job_in_flight`.
+    `project_locked`, 409 `report_job_in_flight`, and 409
+    `report_version_conflict` when another writer saved a version after this
+    one read its base (nothing written).
     """
     from services import upload_service
 

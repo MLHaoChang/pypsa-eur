@@ -131,7 +131,7 @@ def run_round_trip(project_dir: pathlib.Path, report_id: str, upload_bytes: byte
     if bind_as_template and file_id is not None:
         template_changed = merged.template_file_id != file_id
         merged = merged.model_copy(update={"template_file_id": file_id})
-    version = store.save_version(project_dir, merged)
+    version = store.save_version(project_dir, merged, expected_base=base.version)
     meta_updates: dict[str, Any] = {}
     if bind_as_template and file_id is not None:
         try:

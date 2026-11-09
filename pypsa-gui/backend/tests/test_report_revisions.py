@@ -601,6 +601,70 @@ def test_the_store_lock_is_re_entrant_and_shared(pdir):
     assert saved == [3]
 
 
+# ── GK B F1: every read-then-save writer names its base ──────────────────────
+
+
+def _interleave(pdir):
+    """Another writer's save, landing between a writer's read and its save."""
+    store.save_version(pdir, store.load_report(pdir, RID).model_copy(
+        update={"title": "saved in between"}))
+
+
+def test_save_version_refuses_a_base_that_is_not_the_latest(pdir):
+    _interleave(pdir)  # latest is now v2
+    with pytest.raises(store.ReportVersionConflict):
+        store.save_version(pdir, store.load_report(pdir, RID, 1), expected_base=1)
+    assert store.load_meta(pdir, RID).latest_version == 2
+    assert store.save_version(pdir, store.load_report(pdir, RID), expected_base=2) == 3
+
+
+def test_a_round_trip_over_a_superseded_base_writes_nothing(pdir, monkeypatch):
+    from services.reports import roundtrip_service
+
+    def read_then_interleave(base, data, read=None):
+        _interleave(pdir)
+        return object()
+
+    monkeypatch.setattr(roundtrip_service, "_read_edited_docx", lambda: None)
+    monkeypatch.setattr(roundtrip_service, "read_edited_copy", read_then_interleave)
+    monkeypatch.setattr(roundtrip_service, "_merge_round_trip",
+                        lambda: lambda base, result: base.model_copy(
+                            update={"title": "merged copy"}))
+    with pytest.raises(store.ReportVersionConflict):
+        roundtrip_service.run_round_trip(pdir, RID, b"docx", bind_as_template=False)
+    meta = store.load_meta(pdir, RID)
+    assert meta.latest_version == 2
+    assert store.load_report(pdir, RID).title == "saved in between"
+
+
+@pytest.mark.parametrize("bound, file_id", [(None, "tpl-new"), ("tpl-old", None)])
+def test_binding_a_template_over_a_superseded_base_is_409(
+    client, api_project, project_storage_dir, monkeypatch, bound, file_id
+):
+    from types import SimpleNamespace
+
+    from routers import reports as reports_router
+
+    name = api_project(f"rev-bind-{file_id}")
+    pdir = project_storage_dir(name)
+    store.create_report(pdir, _doc().model_copy(update={"template_file_id": bound}))
+    check_lock = reports_router._check_lock
+
+    def check_then_interleave(*a):
+        check_lock(*a)
+        _interleave(pdir)
+
+    monkeypatch.setattr(reports_router, "_check_lock", check_then_interleave)
+    monkeypatch.setattr(reports_router, "_resolve_template", lambda project, fid: (
+        b"", SimpleNamespace(mode="styles", language="en")))
+    r = client.post(f"/api/projects/{name}/reports/{RID}/template",
+                    json={"file_id": file_id})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["error_kind"] == "report_version_conflict"
+    assert store.load_meta(pdir, RID).latest_version == 2
+    assert store.load_report(pdir, RID).template_file_id == bound
+
+
 # ── the routes ──────────────────────────────────────────────────────────────
 
 

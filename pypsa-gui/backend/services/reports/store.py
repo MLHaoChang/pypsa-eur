@@ -261,6 +261,11 @@ class ReportBusy(ReportStoreError):
     """Another process held the report's lock past `LOCK_TIMEOUT_S`."""
 
 
+class ReportVersionConflict(ReportStoreError):
+    """`save_version(expected_base=n)` found a later version than `n`: another
+    writer saved in between, so this one would silently supersede it."""
+
+
 @contextmanager
 def report_lock(project_dir: pathlib.Path, report_id: str):
     """The one lock for every writer of `reports/<report_id>/` (study harness
@@ -316,19 +321,29 @@ def create_report(project_dir: pathlib.Path, doc: ReportDocument) -> ReportMeta:
 
 
 def save_version(project_dir: pathlib.Path, doc: ReportDocument, *,
-                 revised_from: RevisedFrom | None = None) -> int:
+                 revised_from: RevisedFrom | None = None,
+                 expected_base: int | None = None) -> int:
     """
     Write the next version of an existing report and return its number.
 
     The caller does not choose the number: whatever `doc.version` carries, the
     file written is `v<latest+1>.json`, where `latest` is the highest of the
     meta's `latest_version` and the version files actually on disk.
+
+    `expected_base` is the version the caller read and edited. When it is
+    given and `latest` is not it, another writer saved in between: nothing is
+    written and `ReportVersionConflict` is raised (study harness 07c, GK B F1).
     """
     rdir = _existing_report_dir(project_dir, doc.report_id)
     with report_lock(project_dir, doc.report_id):
         meta = load_meta(project_dir, doc.report_id)
         on_disk = _version_numbers(rdir)
-        next_version = max([meta.latest_version, *on_disk]) + 1
+        latest = max([meta.latest_version, *on_disk])
+        if expected_base is not None and latest != expected_base:
+            raise ReportVersionConflict(
+                f"report {doc.report_id} is at version {latest}, "
+                f"not {expected_base}: another writer saved first")
+        next_version = latest + 1
         # `revised_from` is the caller's statement, never carried over from the
         # base (07c R7): a regenerate of a revision is not itself a revision.
         bumped = doc.model_copy(update={"version": next_version, "revised_from": revised_from})
