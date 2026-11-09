@@ -793,3 +793,150 @@ def test_the_sealed_export_names_the_revision_and_an_unrevised_one_does_not(proj
         "digest": digest,
         "comment_id": c.comment_id,
     }
+
+
+# ── mutant triage: each test kills a mutants.py survivor ────────────────────
+
+
+def test_an_eur_prefix_and_the_euro_sign_are_one_unit():
+    assert R.numbers("EUR 3.2") == R.numbers("€3.2")
+
+
+def test_no_text_states_no_numbers():
+    assert R.numbers(None) == R.numbers("") == {}
+
+
+def test_a_lower_case_unit_word_is_a_unit():
+    assert R.numbers("240 min") != R.numbers("240 s")
+    assert R.numbers("4 hours") == R.numbers("4 hours")
+
+
+def test_a_number_in_a_table_or_figure_caption_counts():
+    base, new = _mutated(lambda d: None)
+    new.sections[0].blocks[3] = TableRef(table_id="t1", caption="Assets in 2035")
+    assert R._number_reason(base, new) == "changes_number"
+
+
+def test_a_block_added_with_a_number_is_a_change_not_a_drop():
+    base, new = _mutated(
+        lambda d: d.sections[1].blocks.append(Paragraph(md="Add 5 MW."))
+    )
+    assert R.check_invariants(base, new)[0] == "changes_number"
+
+
+def test_an_edit_in_another_section_at_the_same_index_is_outside_the_anchor():
+    base, new = _mutated(lambda d: None)
+    new.sections[1].blocks[0] = Paragraph(
+        md="Charge window 240 min, a 0.2 share, revised."
+    )
+    assert R.check_invariants(base, new, _anchor()) == ["edit_outside_anchor"]
+
+
+def test_an_anchor_past_the_last_block_names_nothing(pdir):
+    e = _refused(R.add_comment, pdir, RID, "x", _anchor(block=len(_grid().blocks)))
+    assert e.kind == "report_comment_anchor_invalid"
+
+
+def test_an_out_of_range_or_vanished_anchor_never_crashes_the_check():
+    assert R.check_invariants(_doc(), _doc(), _anchor(block=9)) == []
+    base, gone = _mutated(lambda d: d.sections.pop(0))
+    assert "changes_structure" in R.check_invariants(base, gone, _anchor())
+    base, extra = _mutated(
+        lambda d: d.sections.append(
+            Section(
+                section_id="x",
+                heading="X",
+                source="code",
+                status="ok",
+                blocks=[Paragraph(md="New.")],
+            )
+        )
+    )
+    assert "changes_structure" in R.check_invariants(base, extra, _anchor(section="x"))
+
+
+def test_a_comment_id_that_is_not_sixteen_hex_is_unreadable(pdir):
+    c = _comment(pdir)
+    path = store.report_dir(pdir, RID) / R.COMMENTS_FILE
+    raw = json.loads(path.read_text())
+    raw["comments"][0]["comment_id"] = "../../etc-passwd!"
+    path.write_text(json.dumps(raw))
+    assert (
+        c and _refused(R.load_comments, pdir, RID).kind == "report_comments_unreadable"
+    )
+
+
+def test_an_anchor_block_removed_since_the_comment_is_stale(pdir):
+    c = _comment(pdir, _anchor(block=1))
+    doc = store.load_report(pdir, RID)
+    doc.sections[0].blocks = doc.sections[0].blocks[:1]
+    store.save_version(pdir, doc)
+    e = _refused(
+        R.address,
+        pdir,
+        RID,
+        c.comment_id,
+        _digest(pdir),
+        R.BulletEdit(kind="bullet_text", items=["x"]),
+    )
+    assert e.kind == "revision_stale_base"
+
+
+def test_an_unaudited_section_takes_an_equal_re_spelling(pdir):
+    c = _comment(pdir, _anchor(section="summary"))
+    _, doc = R.address(
+        pdir,
+        RID,
+        c.comment_id,
+        _digest(pdir),
+        _para("Charge window 240 min, a 0.20 share."),
+    )
+    assert doc.version == 2 and doc.sections[1].audit == _doc().sections[1].audit
+
+
+def _seed_with_grid_audit(pdir, audit):
+    doc = _doc()
+    doc.sections[0] = doc.sections[0].model_copy(update={"audit": audit})
+    store.create_report(pdir, doc)
+
+
+@pytest.mark.parametrize("facts", [FACTS, []], ids=["verified-only", "unverified-only"])
+def test_a_one_sided_audit_is_still_re_run(tmp_path, facts):
+    """A section whose audit has only verified numbers, or only unverified
+    ones, is an audited section: its audit is re-run, never copied."""
+    text = "Grid of 1234 MW and 4.5 h."
+    audit = number_audit.audit([text], facts)
+    assert bool(audit.verified) != bool(audit.unverified)
+    doc = _doc()
+    doc.sections[0].blocks[0] = Paragraph(md=text)
+    doc.sections[0].blocks[1] = Bullets(items=["Storage"])
+    doc.sections[0] = doc.sections[0].model_copy(update={"audit": audit})
+    store.create_report(tmp_path, doc)
+    c = R.add_comment(tmp_path, RID, "x", _anchor())
+    _, out = R.address(
+        tmp_path,
+        RID,
+        c.comment_id,
+        _digest(tmp_path),
+        _para("Grid of 1,234 MW and 4.5 h."),
+    )
+    a = out.sections[0].audit
+    assert "1,234 MW" in [v.text for v in a.verified] + list(a.unverified)
+
+
+def test_a_table_edit_does_not_re_judge_a_sections_stored_audit(tmp_path):
+    """The stored audit of a section the edit does not touch is compared as
+    stored (`edit_outside_anchor`), never re-run: a job audit the re-run
+    cannot reproduce (here an unverified number from a withheld statement)
+    must not block a table edit."""
+    grid = _grid()
+    audit = grid.audit.model_copy(
+        update={"unverified": [*grid.audit.unverified, "99 MW"]}
+    )
+    _seed_with_grid_audit(tmp_path, audit)
+    c = R.add_comment(tmp_path, RID, "x", _anchor(block=None, table="t1"))
+    edit = R.TableCellsEdit(
+        kind="table_cells", rows=[["BESS", "1,200 MW"], ["PV", "350"]]
+    )
+    _, doc = R.address(tmp_path, RID, c.comment_id, _digest(tmp_path), edit)
+    assert doc.version == 2

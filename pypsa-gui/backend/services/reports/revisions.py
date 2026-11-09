@@ -91,18 +91,18 @@ EDIT_KIND_MISMATCH = "edit_kind_mismatch"
 
 REASON_TEXT = {
     NO_EDIT_TARGET: "The comment names a whole section, not one paragraph, bullet list or "
-                    "table, so no edit of the closed set can address it.",
+    "table, so no edit of the closed set can address it.",
     OUTSIDE_EDIT_SET: "The comment names a part a revision may not edit: a disclosure, gap "
-                      "or not-established box, a figure or a field.",
+    "or not-established box, a figure or a field.",
     EDIT_KIND_MISMATCH: "The edit's kind does not fit the commented block.",
     "changes_number": "The edit changes a number. A revision may re-spell a number to an "
-                      "equal value, never round, convert, move or change it.",
+    "equal value, never round, convert, move or change it.",
     "drops_number": "The edit drops a number the base states.",
     "changes_structure": "The edit adds, removes or reorders blocks or sections.",
     "changes_disclosure": "The edit changes a disclosure, gap or not-established box.",
     "changes_audit": "The number audit of the new text differs from the base's.",
     "changes_evidence_ref": "The edit changes an evidence reference (a table or figure ref, "
-                            "or a source path).",
+    "or a source path).",
     "changes_chart": "The edit changes a figure.",
     "changes_evidence_hash": "The edit changes the evidence the report was made from.",
     "changes_table_shape": "The edit changes a table's shape.",
@@ -121,8 +121,9 @@ _ANCHOR_KINDS = {
 class RevisionError(ValueError):
     """A typed refusal: `kind` is the HTTP `error_kind`, `status` its code."""
 
-    def __init__(self, kind: str, status: int, message: str, *,
-                 reasons: list[str] | None = None) -> None:
+    def __init__(
+        self, kind: str, status: int, message: str, *, reasons: list[str] | None = None
+    ) -> None:
         super().__init__(message)
         self.kind, self.status, self.message = kind, status, message
         self.reasons = list(reasons or [])
@@ -130,8 +131,10 @@ class RevisionError(ValueError):
 
 def _comments_unreadable(report_id: str, why: str) -> RevisionError:
     return RevisionError(
-        "report_comments_unreadable", 409,
-        f"The comments of report {report_id} cannot be read ({why}). Nothing was changed.")
+        "report_comments_unreadable",
+        409,
+        f"The comments of report {report_id} cannot be read ({why}). Nothing was changed.",
+    )
 
 
 # ── the stored shape ────────────────────────────────────────────────────────
@@ -195,8 +198,10 @@ class TableCellsEdit(_Strict):
     rows: list[list[str]]
 
 
-Edit = Annotated[ParagraphEdit | BulletEdit | TableTextEdit | TableCellsEdit,
-                 Field(discriminator="kind")]
+Edit = Annotated[
+    ParagraphEdit | BulletEdit | TableTextEdit | TableCellsEdit,
+    Field(discriminator="kind"),
+]
 
 
 # ── the comments file ───────────────────────────────────────────────────────
@@ -231,7 +236,9 @@ def load_comments(project_dir, report_id: str) -> list[Comment]:
 
 
 def _write_comments(project_dir, report_id: str, comments: list[Comment]) -> None:
-    body = CommentsFile(schema_version=SCHEMA_VERSION, report_id=report_id, comments=comments)
+    body = CommentsFile(
+        schema_version=SCHEMA_VERSION, report_id=report_id, comments=comments
+    )
     atomic_write_text(_path(project_dir, report_id), body.model_dump_json(indent=2))
 
 
@@ -256,8 +263,10 @@ def _anchored(doc: ReportDocument, anchor: Anchor) -> tuple[str, Any] | None:
     if anchor.table_id is not None:
         if anchor.block_index is not None:
             return None
-        referenced = any(isinstance(b, TableRef) and b.table_id == anchor.table_id
-                         for b in section.blocks)
+        referenced = any(
+            isinstance(b, TableRef) and b.table_id == anchor.table_id
+            for b in section.blocks
+        )
         table = doc.tables.get(anchor.table_id)
         return ("table", table) if referenced and table is not None else None
     if anchor.block_index is None:
@@ -290,7 +299,13 @@ def _fits(found: tuple[str, Any], edit: Any) -> bool:
 
 # ── numbers ─────────────────────────────────────────────────────────────────
 
-_UNIT_SPELLING = {"EUR": "€", "h/a": "h/yr", "MWh/a": "MWh/yr", "€/a": "€/yr", "/a": "/yr"}
+_UNIT_SPELLING = {
+    "EUR": "€",
+    "h/a": "h/yr",
+    "MWh/a": "MWh/yr",
+    "€/a": "€/yr",
+    "/a": "/yr",
+}
 _MINUS = "-−–"
 _DIGIT_WORD = re.compile(r"[\w.,]*\d[\w.,]*")
 
@@ -299,12 +314,48 @@ _DIGIT_WORD = re.compile(r"[\w.,]*\d[\w.,]*")
 # it carries a capital or a symbol (`MWh/a`, `kV`, `€/t`), or it is a common
 # lower-case unit. The audit's own unit list is not the guard (GK B Q2).
 _UNIT_WORD = re.compile(r"\A[ \u2009\u00a0]?([A-Za-z€%‰‱°/²³·]+(?:/[A-Za-z]+)?)")
-_LOWER_UNITS = frozenset({
-    "s", "sec", "secs", "second", "seconds", "min", "mins", "minute", "minutes", "h",
-    "hr", "hrs", "hour", "hours", "d", "day", "days", "week", "weeks", "month", "months",
-    "yr", "yrs", "year", "years", "a", "t", "kt", "kg", "g", "m", "km", "km²", "m²", "ha",
-    "x", "pu", "p.u",
-})
+_LOWER_UNITS = frozenset(
+    {
+        "s",
+        "sec",
+        "secs",
+        "second",
+        "seconds",
+        "min",
+        "mins",
+        "minute",
+        "minutes",
+        "h",
+        "hr",
+        "hrs",
+        "hour",
+        "hours",
+        "d",
+        "day",
+        "days",
+        "week",
+        "weeks",
+        "month",
+        "months",
+        "yr",
+        "yrs",
+        "year",
+        "years",
+        "a",
+        "t",
+        "kt",
+        "kg",
+        "g",
+        "m",
+        "km",
+        "km²",
+        "m²",
+        "ha",
+        "x",
+        "pu",
+        "p.u",
+    }
+)
 
 
 def _unit_word(text: str, end: int) -> str | None:
@@ -360,7 +411,8 @@ def _number_parts(doc: ReportDocument) -> dict[tuple, Counter]:
     for section in doc.sections:
         for i, block in enumerate(section.blocks):
             parts[("block", section.section_id, i)] = sum(
-                (numbers(t) for t in _block_texts(block)), Counter())
+                (numbers(t) for t in _block_texts(block)), Counter()
+            )
     for table_id, table in doc.tables.items():
         parts[("caption", table_id)] = numbers(table.caption or "")
         for c, column in enumerate(table.columns):
@@ -389,8 +441,11 @@ def _facts(section) -> list[NumberFact]:
     for verified in section.audit.verified:
         tokens = number_audit.extract_numbers(verified.text)
         if tokens:
-            facts.append(NumberFact(path=verified.path, value=tokens[0].value,
-                                    unit=tokens[0].unit_hint))
+            facts.append(
+                NumberFact(
+                    path=verified.path, value=tokens[0].value, unit=tokens[0].unit_hint
+                )
+            )
     return facts
 
 
@@ -425,8 +480,10 @@ def _audits_equal(base_section, new_section) -> bool:
         return not _audited(new_section)
     facts = _facts(base_section)
     rerun = reaudit(new_section, facts)
-    return (_audit_key(reaudit(base_section, facts)) == _audit_key(rerun)
-            and new_section.audit.model_dump() == rerun.model_dump())
+    return (
+        _audit_key(reaudit(base_section, facts)) == _audit_key(rerun)
+        and new_section.audit.model_dump() == rerun.model_dump()
+    )
 
 
 # ── the invariants (R6) ─────────────────────────────────────────────────────
@@ -437,16 +494,33 @@ def _structure(doc: ReportDocument) -> list:
 
 
 def _callouts(doc: ReportDocument) -> list:
-    return [(s.section_id, i, b.kind, b.text) for s in doc.sections
-            for i, b in enumerate(s.blocks) if isinstance(b, Callout)]
+    return [
+        (s.section_id, i, b.kind, b.text)
+        for s in doc.sections
+        for i, b in enumerate(s.blocks)
+        if isinstance(b, Callout)
+    ]
 
 
 def _evidence_refs(doc: ReportDocument) -> list:
-    refs = [(s.section_id, i, b.type, getattr(b, "table_id", None) or getattr(b, "figure_id", None))
-            for s in doc.sections for i, b in enumerate(s.blocks)
-            if isinstance(b, (TableRef, FigureRef))]
-    refs += [("table", k, t.table_id, t.source_path) for k, t in sorted(doc.tables.items())]
-    refs += [("figure", k, f.figure_id, f.source_path) for k, f in sorted(doc.figures.items())]
+    refs = [
+        (
+            s.section_id,
+            i,
+            b.type,
+            getattr(b, "table_id", None) or getattr(b, "figure_id", None),
+        )
+        for s in doc.sections
+        for i, b in enumerate(s.blocks)
+        if isinstance(b, (TableRef, FigureRef))
+    ]
+    refs += [
+        ("table", k, t.table_id, t.source_path) for k, t in sorted(doc.tables.items())
+    ]
+    refs += [
+        ("figure", k, f.figure_id, f.source_path)
+        for k, f in sorted(doc.figures.items())
+    ]
     return refs
 
 
@@ -455,7 +529,9 @@ def _figures(doc: ReportDocument) -> dict:
 
 
 def _table_shape(doc: ReportDocument) -> dict:
-    return {k: (len(t.columns), [len(r) for r in t.rows]) for k, t in doc.tables.items()}
+    return {
+        k: (len(t.columns), [len(r) for r in t.rows]) for k, t in doc.tables.items()
+    }
 
 
 def _number_reason(base: ReportDocument, new: ReportDocument) -> str | None:
@@ -476,16 +552,19 @@ def _outside(doc: ReportDocument, anchor: Anchor | None) -> dict:
         if section["section_id"] != anchor.section_id:
             continue
         section["source"] = None
-        if anchor.block_index is not None and anchor.block_index < len(section["blocks"]):
+        if anchor.block_index is not None and anchor.block_index < len(
+            section["blocks"]
+        ):
             section["blocks"][anchor.block_index] = None
             section["audit"] = None
-    if anchor.table_id is not None and anchor.table_id in raw["tables"]:
+    if anchor.table_id in raw["tables"]:
         raw["tables"][anchor.table_id] = None
     return raw
 
 
-def check_invariants(base: ReportDocument, new: ReportDocument,
-                     anchor: Anchor | None = None) -> list[str]:
+def check_invariants(
+    base: ReportDocument, new: ReportDocument, anchor: Anchor | None = None
+) -> list[str]:
     """Every reason `new` is not a closed-set revision of `base` at `anchor`,
     in a fixed order; [] when it is one."""
     reasons: list[str] = []
@@ -499,7 +578,10 @@ def check_invariants(base: ReportDocument, new: ReportDocument,
     # The anchored section's audit is re-run (R4); every other section's
     # stored audit must stay as it is (`edit_outside_anchor`).
     if anchor is not None and anchor.block_index is not None:
-        old_s, new_s = _section(base, anchor.section_id), _section(new, anchor.section_id)
+        old_s, new_s = (
+            _section(base, anchor.section_id),
+            _section(new, anchor.section_id),
+        )
         if old_s is None or new_s is None or not _audits_equal(old_s, new_s):
             reasons.append("changes_audit")
     if _evidence_refs(base) != _evidence_refs(new):
@@ -530,13 +612,17 @@ def apply_edit(base: ReportDocument, anchor: Anchor, edit: Any) -> ReportDocumen
             update = {"rows": copy.deepcopy(edit.rows)}
         doc.tables[anchor.table_id] = table.model_copy(update=update)
         return doc
-    index = next(i for i, s in enumerate(doc.sections) if s.section_id == anchor.section_id)
+    index = next(
+        i for i, s in enumerate(doc.sections) if s.section_id == anchor.section_id
+    )
     section = doc.sections[index]
     blocks = list(section.blocks)
     old = blocks[anchor.block_index]
-    blocks[anchor.block_index] = (old.model_copy(update={"md": edit.md})
-                                  if edit.kind == "paragraph_text"
-                                  else old.model_copy(update={"items": list(edit.items)}))
+    blocks[anchor.block_index] = (
+        old.model_copy(update={"md": edit.md})
+        if edit.kind == "paragraph_text"
+        else old.model_copy(update={"items": list(edit.items)})
+    )
     edited = section.model_copy(update={"blocks": blocks, "source": "user_edit"})
     if _audited(section):
         edited = edited.model_copy(update={"audit": reaudit(edited, _facts(section))})
@@ -556,17 +642,23 @@ def _find(comments: list[Comment], comment_id: str) -> int:
     for i, c in enumerate(comments):
         if c.comment_id == comment_id:
             return i
-    raise RevisionError("report_comment_not_found", 404, f"No comment {comment_id!r} on this report.")
+    raise RevisionError(
+        "report_comment_not_found", 404, f"No comment {comment_id!r} on this report."
+    )
 
 
 def _open_or_409(comment: Comment) -> None:
     if comment.status != "open":
-        raise RevisionError("report_comment_closed", 409,
-                            f"Comment {comment.comment_id} is {comment.status}; it cannot change again.")
+        raise RevisionError(
+            "report_comment_closed",
+            409,
+            f"Comment {comment.comment_id} is {comment.status}; it cannot change again.",
+        )
 
 
-def add_comment(project_dir, report_id: str, text: str, anchor: Anchor, *,
-                user: str | None = None) -> Comment:
+def add_comment(
+    project_dir, report_id: str, text: str, anchor: Anchor, *, user: str | None = None
+) -> Comment:
     """Store a new open comment on the latest version. An anchor that names
     no section, block or table of it is refused `report_comment_anchor_invalid`
     and nothing is stored; one outside the closed set is stored open with
@@ -576,16 +668,27 @@ def add_comment(project_dir, report_id: str, text: str, anchor: Anchor, *,
         doc, digest = _latest(project_dir, report_id)
         found = _anchored(doc, anchor)
         if found is None:
-            raise RevisionError("report_comment_anchor_invalid", 422,
-                                "The comment's anchor names no section, block or table of the "
-                                "report's latest version.")
+            raise RevisionError(
+                "report_comment_anchor_invalid",
+                422,
+                "The comment's anchor names no section, block or table of the "
+                "report's latest version.",
+            )
         reason = _unsupported_reason(found)
         now = _now()
         comment = Comment(
-            comment_id=secrets.token_hex(8), text=text, anchor=anchor,
-            base_version=doc.version, base_digest=digest, anchor_sha=_anchor_sha(found),
-            status="open", reason=reason, reasons=[reason] if reason else [],
-            created_at=now, updated_at=now, created_by=user,
+            comment_id=secrets.token_hex(8),
+            text=text,
+            anchor=anchor,
+            base_version=doc.version,
+            base_digest=digest,
+            anchor_sha=_anchor_sha(found),
+            status="open",
+            reason=reason,
+            reasons=[reason] if reason else [],
+            created_at=now,
+            updated_at=now,
+            created_by=user,
         )
         _write_comments(project_dir, report_id, [*comments, comment])
         return comment
@@ -596,21 +699,31 @@ def withdraw(project_dir, report_id: str, comment_id: str) -> Comment:
         comments = load_comments(project_dir, report_id)
         i = _find(comments, comment_id)
         _open_or_409(comments[i])
-        comments[i] = comments[i].model_copy(update={"status": "withdrawn", "updated_at": _now()})
+        comments[i] = comments[i].model_copy(
+            update={"status": "withdrawn", "updated_at": _now()}
+        )
         _write_comments(project_dir, report_id, comments)
         return comments[i]
 
 
-def _keep_open(project_dir, report_id, comments, i, reasons: list[str]) -> RevisionError:
-    comments[i] = comments[i].model_copy(update={
-        "reason": reasons[0], "reasons": reasons, "updated_at": _now()})
+def _keep_open(
+    project_dir, report_id, comments, i, reasons: list[str]
+) -> RevisionError:
+    comments[i] = comments[i].model_copy(
+        update={"reason": reasons[0], "reasons": reasons, "updated_at": _now()}
+    )
     _write_comments(project_dir, report_id, comments)
-    return RevisionError("report_revision_unsupported", 422,
-                         REASON_TEXT.get(reasons[0], reasons[0]), reasons=reasons)
+    return RevisionError(
+        "report_revision_unsupported",
+        422,
+        REASON_TEXT.get(reasons[0], reasons[0]),
+        reasons=reasons,
+    )
 
 
-def address(project_dir, report_id: str, comment_id: str, base_digest: str,
-            edit: Any) -> tuple[Comment, ReportDocument]:
+def address(
+    project_dir, report_id: str, comment_id: str, base_digest: str, edit: Any
+) -> tuple[Comment, ReportDocument]:
     """Address an open comment with `edit`, as a new version made against
     `base_digest`. Returns the addressed comment and the saved version.
 
@@ -627,12 +740,18 @@ def address(project_dir, report_id: str, comment_id: str, base_digest: str,
         _open_or_409(comment)
         base, digest = _latest(project_dir, report_id)
         found = _anchored(base, comment.anchor)
-        if base_digest != digest or found is None or _anchor_sha(found) != comment.anchor_sha:
+        if (
+            base_digest != digest
+            or found is None
+            or _anchor_sha(found) != comment.anchor_sha
+        ):
             raise RevisionError(
-                "revision_stale_base", 409,
+                "revision_stale_base",
+                409,
                 "The report changed since this revision was prepared (its digest or the "
                 "commented block differs). Reload the latest version and try again; nothing "
-                "was written.")
+                "was written.",
+            )
         unsupported = _unsupported_reason(found)
         if unsupported:
             raise _keep_open(project_dir, report_id, comments, i, [unsupported])
@@ -642,14 +761,25 @@ def address(project_dir, report_id: str, comment_id: str, base_digest: str,
         reasons = check_invariants(base, revised, comment.anchor)
         if reasons:
             raise _keep_open(project_dir, report_id, comments, i, reasons)
-        version = store.save_version(project_dir, revised, revised_from=RevisedFrom(
-            version=base.version, digest=digest, comment_id=comment_id))
+        version = store.save_version(
+            project_dir,
+            revised,
+            revised_from=RevisedFrom(
+                version=base.version, digest=digest, comment_id=comment_id
+            ),
+        )
         saved = store.load_report(project_dir, report_id, version)
-        comments[i] = comment.model_copy(update={
-            "status": "addressed", "reason": None, "reasons": [],
-            "revision": RevisionRef(version=version,
-                                    digest=store.version_sha256(project_dir, report_id, version)),
-            "updated_at": _now(),
-        })
+        comments[i] = comment.model_copy(
+            update={
+                "status": "addressed",
+                "reason": None,
+                "reasons": [],
+                "revision": RevisionRef(
+                    version=version,
+                    digest=store.version_sha256(project_dir, report_id, version),
+                ),
+                "updated_at": _now(),
+            }
+        )
         _write_comments(project_dir, report_id, comments)
         return comments[i], saved
