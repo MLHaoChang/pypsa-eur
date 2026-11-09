@@ -26,13 +26,13 @@ from tests.assurance_acceptance.fact_profiles import *  # noqa: F401,F403
 from tests.assurance_acceptance.fact_profiles import owner
 from tests.test_checked_charts import GENERATOR, ask
 
-# Every response of the app carries these (content and middleware headers).
+# Every response of the app carries these (content and middleware headers). `vary` is
+# left out of the comparison: the CORS middleware adds it only when an origin is configured.
 BASE = {
     "content-disposition",
     "content-length",
     "content-type",
     "x-pypsa-replica",
-    "vary",
 }
 HEADERS = {
     "table": BASE,
@@ -127,7 +127,7 @@ def test_a_chart_download_sends_only_its_header_names_and_no_checked_number(
     receipt, record = _checked(solved, checked)
     response = checked.client.get(receipt["chart"]["download_url"])
     assert response.status_code == 200
-    assert set(response.headers) == HEADERS["chart"]
+    assert set(response.headers) - {"vary"} == HEADERS["chart"]
     assert response.headers["x-checked-chart"] == "evidence re-verified now"
     assert not numbers_in(response.headers) & checked_numbers(record)
 
@@ -137,7 +137,7 @@ def test_a_result_chart_download_sends_only_its_header_names(solved, checked):
     chart = chat_tools.create_chart("Generator", "p", ["G1"], source="result")
     response = checked.client.get(chart["download_url"])
     assert response.status_code == 200
-    assert set(response.headers) == HEADERS["result chart"]
+    assert set(response.headers) - {"vary"} == HEADERS["result chart"]
     assert not numbers_in(response.headers) & checked_numbers(record)
 
 
@@ -146,7 +146,7 @@ def test_a_table_download_sends_no_checked_header_or_number(solved, checked):
     table = _table_of(record)
     response = checked.client.get(table["download_url"])
     assert response.status_code == 200
-    assert set(response.headers) == HEADERS["table"]
+    assert set(response.headers) - {"vary"} == HEADERS["table"]
     assert not numbers_in(response.headers) & checked_numbers(record)
     # The export's own reply names no evidence either.
     assert not set(table) & CHECKED_KEYS

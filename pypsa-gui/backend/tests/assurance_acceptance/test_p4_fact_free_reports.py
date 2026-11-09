@@ -101,7 +101,7 @@ def test_a_human_report_download_sends_no_checked_header_or_number(
     meta = _human_export(client, monkeypatch)
     response = _blob(client, meta["file_id"])
     assert response.status_code == 200
-    assert set(response.headers) == HEADERS["human report"]
+    assert set(response.headers) - {"vary"} == HEADERS["human report"]
     assert not numbers_in(response.headers)
     assert not set(meta) & CHECKED_KEYS
 
@@ -112,7 +112,7 @@ def test_an_assistant_report_export_sends_no_checked_header_or_number(
     meta = T.export_report_docx(_assistant_report(monkeypatch))
     response = _blob(client, meta["file_id"])
     assert response.status_code == 200
-    assert set(response.headers) == HEADERS["assistant report_export"]
+    assert set(response.headers) - {"vary"} == HEADERS["assistant report_export"]
     assert not numbers_in(response.headers)
     assert not set(meta) & CHECKED_KEYS
 
@@ -125,7 +125,10 @@ def test_a_report_export_whose_version_is_gone_names_only_its_source_status(
     _version_file(project, rid).unlink()
     response = _blob(client, meta["file_id"])
     assert response.status_code == 200
-    assert set(response.headers) == HEADERS["assistant report_export, source gone"]
+    assert (
+        set(response.headers) - {"vary"}
+        == HEADERS["assistant report_export, source gone"]
+    )
     assert response.headers["x-report-source"] == "version_missing"
     assert not numbers_in(response.headers)
 
