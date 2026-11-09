@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A cost priced through a scale input (a PV generator's DC/AC ratio, a Link's efficiency) now shows an "out of date" chip and a visible note on the asset card, its read-out and the Economics costs table when that input has changed since the price was set.

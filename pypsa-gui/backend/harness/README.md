@@ -21,8 +21,8 @@ harness/
   durable.py      bounded network locks and cross-process owner-store transactions
   effects.py      exact confirmed input-write reservations, read-back and reconciliation
   guards.py       issue 04 S4a: REQUIRED_GUARDS (a schema guard per write/destructive tool, fail closed), the confirmation's args fingerprint and the no-progress stop; S4b: lock_refusal, the edit-lock check before any effect seam (denied project_locked / project_lock_unavailable)
-  job_holds.py    issue 04 S5: holds on a job call (execution tiers) whose outcome is unknown, per session, keyed by project binding + tool: a later call is denied operation_pending (same G3 fingerprint) or operation_conflict before any effect seam; cleared only on evidence (worker future, job status, solve thread), a failed read keeps it; a repeat card bound to the hold id + fingerprint runs once; solve_queue_enqueue also reads the solve-queue store; issue 16 S1: a hold on a saved project is also an `assistant_job_holds` row plus a process registry of its evidence, so a new chat or tab of this process is denied too (rows of another process: S2); a hold that could not be recorded adds `hold_note` to the result
-  job_hold_store.py  issue 16: the one DB seam of the job-hold records (write, set_job, delete, exists, active); every function raises, the caller decides
+  job_holds.py    issue 04 S5: holds on a job call (execution tiers) whose outcome is unknown, per session, keyed by project binding + tool: a later call is denied operation_pending (same G3 fingerprint) or operation_conflict before any effect seam; cleared only on evidence (worker future, job status, solve thread), a failed read keeps it; a repeat card bound to the hold id + fingerprint runs once; solve_queue_enqueue also reads the solve-queue store; issue 16 S1: a hold on a saved project is also an `assistant_job_holds` row plus a process registry of its evidence, so a new chat or tab of this process is denied too; issue 16 S2: another replica or a restart reads a row by its owner's lease (below, "Job holds across replicas"); a hold that could not be recorded adds `hold_note` to the result
+  job_hold_store.py  issue 16: the one DB seam of the job-hold records (write, set_job, delete, exists, get, active; S2: renew, delete_if, foreign, and the strict solve_jobs reads solve_job_status, live_solve_jobs); every function raises, the caller decides
   outcomes.py     issue 04: each tool result's `_outcome` (completed/partial/failed/uncertain/denied) from an independent read, never the handler's word: jobs (S1), row writes, imports and exports against the whole-state map with extra_edits (S2, S4b), undo_last (S3), the raise and timeout paths (S4b)
   navigation.py   issued view actions and owner/project/turn/generation-bound browser ACKs
   reviewer.py     optional single bounded read-only review of qualitative interpretations
@@ -1042,6 +1042,15 @@ check that every required disclosure of the version they start from is still
 there. A lost one fails the job, or refuses the export, with
 `report_disclosure_missing` (409), and nothing is saved. A later human
 regenerate of a section rewrites it non-strict and drops its placeholders.
+The assistant's report exports are sealed (AA-05 S4b): after the disclosure
+check and the quarantine check, the file is published with a `report_export`
+manifest naming the stored version by its file's hash, each figure and the
+template by their bytes, the disclosures and the withheld placeholders. A
+download or delivery re-checks it. A seal or byte mismatch quarantines; a
+source still stored but changed refuses with `report_version_changed`; a
+source since deleted is served with `source_status` (`version_missing`,
+`figure_missing`, `template_missing`) and a note. Exports from the Reports
+page carry no manifest.
 The frontend renders task progress, ordinary resume/cancel requests and safe
 file links from existing `tool_result` frames; no new stream vocabulary or
 provider-specific handlers are introduced.
@@ -2133,3 +2142,47 @@ under a 0.1 % tie tolerance, with at most 12 `why` facts; `show` carries the
 existing Compare navigation, offered only. `export_sensitivity_comparison`
 writes the same report while its `comparison_sha256` is current. See
 `.scratch/live-copilot/issues/18-sensitivity-comparison.md`.
+
+## Job holds across replicas
+
+Assistant-assurance issue 16 S2 (GK B (35) H1-H3, H9; K1-K6), in
+`harness/job_holds.py`:
+
+- The lease. The process that owns a hold record (`owner_replica_id`,
+  `security.replica_id()`: pid plus boot nonce, so a restart is a new owner)
+  writes `lease_until` = now + `runner.LEASE_SECONDS` (90 s). One renewer
+  thread per process (`ensure_renewer`, started on the first hold write and
+  keyed by pid, never at import, so a preload fork starts its own) renews every
+  30 s with `UPDATE ... WHERE id AND owner`: a row cleared elsewhere is logged
+  "job hold lost" and never written again. Every exception in a tick is caught;
+  the next tick tries again.
+- Another owner's row holds while its lease runs. Once lapsed, it clears by its
+  tool's worker kind (`JOB_KINDS`, one entry per job tool): `inproc` and
+  `inproc+solver` work died with its owner and clears; `queue` work (a
+  `solve_jobs` row) clears only when that row is terminal (a restart's
+  `reconcile_on_boot` marks a dead owner's running job `interrupted`), or, with
+  no job id, when no live row of its kinds was enqueued from a tool timeout
+  plus one lease before the hold opened. A missing job row, an unknown tool or
+  a failed read holds; the repeat card still releases it.
+- Every clear of another owner's row is a compare-and-delete on (id, owner,
+  lease_until), so a renewal that lands first wins. The renewer also sweeps
+  other owners' lapsed rows by the same rules. Nothing clears on boot.
+- A NULL lease is an S1 replica's row, live during a rolling deploy. It lapses
+  `NULL_LEASE_BOUND_SECONDS` (1 h) after the later of its opening and this
+  process's start: an S1 hold has no finite end, so the bound rests on how long
+  a deploy keeps an S1 replica running, not on hold length.
+- Clock. Renewal and lapse compare `time.time()` on different replicas, so the
+  replicas must share wall time (NTP). A replica whose clock runs ahead by more
+  than the 60 s between the last renewal and the lapse can clear a live
+  owner's in-process row early; the queue window allows one lease of skew.
+- Renewer stall. A renewal that hangs longer than 60 s (a stuck DB call, a
+  long GIL stall) lets a peer read the lease as lapsed and clear a live owner's
+  in-process row; the owner's own chat keeps its hold. On SQLite a renewal waits
+  at most the 30 s busy timeout (`db/session.py`); on Postgres nothing bounds
+  it: no `statement_timeout` is set, only the pool's 30 s checkout wait.
+- A queue record whose job id names no `solve_jobs` row (the row was deleted,
+  or the id is no queue id) holds until its repeat card is approved.
+- Residuals. A lapsed in-process solve may leave its cbc/glpk child running:
+  CPU spent with no one to read the result (K1). A dead orchestrator thread
+  (run_decision_study, campus_apply_island_cuts) may leave the per-case solves
+  it queued to run out. Neither writes the held operation's result.

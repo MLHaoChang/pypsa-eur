@@ -218,7 +218,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Generator Properties'}>
           <Row label="Carrier" value={gen.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
           ))}
         </Section>
         {showChart && hasProfile && (
@@ -396,7 +396,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Storage Properties'}>
           <Row label="Carrier" value={su.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
           ))}
         </Section>
         <DetailFooter
@@ -558,7 +558,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Store Properties'}>
           <Row label="Carrier" value={store.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
           ))}
         </Section>
         <DetailFooter
@@ -709,7 +709,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Load Properties'}>
           <Row label="Carrier" value={load.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
           ))}
           <Row
             label="Profile"
@@ -939,7 +939,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
           <Row label="Carrier" value={link.carrier} tip={fieldHelp(schema, 'carrier')} />
           {categoryLabel && <Row label="Category" value={categoryLabel} />}
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
           ))}
         </Section>
         {showChart && hasProfile && (
@@ -1388,7 +1388,7 @@ function BusPanel({ name }: { name: string }) {
         <Section title="Bus Properties">
           {/* The schema's non-identity fields (the nominal voltage), with their provenance chips. */}
           {assetReadoutItems(schema, bus as unknown as Record<string, unknown>, undefined, provenance).map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
           ))}
           <Row label="Carrier"     value={bus.carrier}  tip={fieldHelp(schema, 'carrier')} />
           <Row label="Control"     value={bus.control}  tip={fieldHelp(schema, 'control')} />
@@ -1670,7 +1670,7 @@ export function LinePanel({ name }: { name: string }) {
         <>
           <Section title="Parameters">
             {items.map(i => (
-              <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+              <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
             ))}
             {/* Per-km + total pairs. PyPSA stores absolute Ohm / Siemens, but
                 the natural physical quantity is per-km — show both so the user
@@ -1818,7 +1818,7 @@ export function TransformerPanel({ name }: { name: string }) {
         <>
           <Section title="Parameters">
             {items.map(i => (
-              <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+              <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
             ))}
           </Section>
           <button onClick={startEdit}

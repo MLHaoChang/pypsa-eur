@@ -305,6 +305,22 @@ def load_report(project_dir: pathlib.Path, report_id: str,
         ) from exc
 
 
+def version_sha256(project_dir: pathlib.Path, report_id: str, version: int) -> str:
+    """SHA-256 of one version's stored file, as written (AA-05 S4b, GK B X2).
+
+    A version file is written once and never rewritten, so its raw bytes are
+    the stable basis: a release that changes how a version loads or
+    normalises does not change this hash. `ReportNotFound` when the report or
+    the version is gone; an `OSError` reading it propagates."""
+    import hashlib
+
+    rdir = _existing_report_dir(project_dir, report_id)
+    path = _version_file(rdir, version) if isinstance(version, int) else None
+    if path is None:
+        raise ReportNotFound(f"report {report_id} has no version {version}")
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def list_reports(project_dir: pathlib.Path) -> list[ReportMeta]:
     """Every readable report, newest first by `created_at`. No `reports/` → []."""
     root = reports_dir(project_dir)
