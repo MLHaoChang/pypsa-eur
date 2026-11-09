@@ -1,0 +1,10 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/results/operational_gap",
+   "reason": "ui-pointer",
+   "decision": "DC25-POINTER-1"
+  }
+ ]
+}

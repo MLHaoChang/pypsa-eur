@@ -3,7 +3,7 @@
 
 # 10 — Harness profile: eh_datacenter and eh_datacenter_staged
 
-Status: ready-for-agent
+Status: ready-for-agent (10a done: PR #1283 and its test follow-up merged; 10b is next)
 Type: task
 Blocked by: 07
 Gated: yes (GK A for the engine gates and the grid-readiness actions; GK B for the harness parts)
@@ -101,3 +101,10 @@ Conditions:
 - D2–D4 and the never-pass families are in `services/run_gates.py` (`_frozen_scorecard`, `_scored_problem`, `NEVER_PASS`).
 - What the campus run writes (D6): `services/campus_electrical_service.py` `run`. It writes `campus_electrical/run/` (via `_publish_run`, plus `used_library` and the cost basis when investing) and `campus_electrical/settings.json` (`(d / SETTINGS_FILE).write_text`). It runs no PyPSA optimisation. `test_the_campus_run_optimises_nothing_and_writes_only_its_run_and_settings` pins both.
 - `grid.frequency_hz` while the chat intake serves eh_site only: the coordinator ruled option A (2026-11-08). 10a reads it only from the run's confirmed intake rows and fails closed at the input gate ("state the grid frequency (Hz)"). `run_intake.py` stays out of 10a. 10b opens the chat intake to eh_datacenter for this field, and keeps `grid.*` out of the template's creation params (`run_intake.params`). Sent to GK B (36) to confirm or redirect in its review.
+
+### 10a done (session_01G7qCumiAjUAfL7g4XFgqek)
+
+- PR #1283 merged with UX (14) OK and GK B (37) OK @1a40c2c0. GK B (37)'s findings F1–F4 are built (the campus study on its own Confirmation card bound to the frozen digest; `EH_DATACENTER["campus_study"]` wins over saved settings; no grant for a profile with no envelope; every frozen setting a card row).
+- The follow-up PR adds the two `_dc_gridcode_frequency` tests the module mutants found missing (another param's confirmed row; a confirmed `grid.frequency_hz` row that carries `write`).
+- Left for 10b: eh_datacenter_staged@1 (per-period rules; IC NPV/IRR in the result gate), `dc.campus.contingency` (Q3) and L2's DC13-SCOPE restriction, the TOOLSEL-1 count test (Q4), the chat intake for `grid.frequency_hz` (50|60 enum on the card, never tunable, not a template creation param), and step-card rendering in the frontend.
+- Risk carried: no test drives the native card through the real `/confirm` route end to end.

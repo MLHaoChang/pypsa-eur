@@ -1,6 +1,6 @@
 # The `dc_ac` confirmation's text goes stale once `p_nom` is the AC rating
 
-Status: ready-for-agent
+Status: done (#1298)
 Type: gap
 Found in: TC-02 (issue 02) design review by GK A, 2026-11-06.
 
@@ -20,3 +20,12 @@ unchanged (AC rows unchanged). Reword it to the new definition, or retire the co
 - Gated: GK A; GK B for the `catalogue.py` enum.
 - Size: S.
 - Reword to the AC `p_nom` definition or retire the confirmation; the plan says which. Error-kind/catalogue JSON fragments as steward requires.
+
+### 2026-11-08: TCU-04 plan verdicts
+
+- Direction: reword (option A); retire (B) is an owner question sent to the coordinator.
+- GK A (19), TCU4-1..4: grep `dc_ac` over envelopes/profiles/flows/smoke (no hits beyond reference_apply, catalogue, error-kind text, frontend, tests); error-kinds only edit existing text; catalogue lines only, run inventory and control-matrix `--check` at the trial merge; (B) only: unknown-name test.
+- GK B (37), C1-C4: catalogue `confirm` enums pinned equal to `reference_apply.CONFIRMATIONS` (test added); description truthful; `--check` runs at the trial merge.
+- Owner decision TCU04-REWORD-1 (2026-11-08): reword the `dc_ac` confirmation, keep the check, AC wording.
+- TCU4-5 (applies only if retire were chosen; not taken): a pre-deploy preview card or digest carrying `dc_ac` in its confirmed rows is refused and re-previewed, never applied, with a test.
+- UX (14): first wording NOT OK (self-contradicting); the shipped wording is UX's suggestion.
