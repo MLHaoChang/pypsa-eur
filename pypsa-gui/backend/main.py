@@ -647,6 +647,17 @@ async def lifespan(app: FastAPI):
         harness_runner.start_default()
     except Exception:  # noqa: BLE001 — runs wait for the user instead
         logger.exception("harness runner did not start; runs advance only from chat")
+    # Assistant memory §1.3 / §9 M7: drop the body of every proposal dismissed
+    # 30 days ago or more (its dismissed_hash stays). Once per boot; a failure
+    # leaves the bodies for the next boot and never fails this one.
+    try:
+        from db.session import SessionLocal
+        from services import memory_store
+
+        with SessionLocal() as _db:
+            memory_store.sweep_dismissed(_db)
+    except Exception:  # noqa: BLE001 — a sweep must never fail boot
+        logger.exception("memory: dismissed-proposal sweep did not run")
     _load_skills_at_startup()
     # Ask macOS for the projects root NOW, on a thread, rather than letting
     # the first data request discover it is gated. On a granted machine this

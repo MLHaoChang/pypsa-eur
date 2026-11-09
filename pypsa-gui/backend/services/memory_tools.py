@@ -25,6 +25,19 @@ def _refuse(kind: str, message: str, status: int = 422):
     raise HTTPException(status, {"error_kind": kind, "message": message})
 
 
+def _store_refusal(exc) -> None:
+    """A store refusal as the tool's typed kind; each kind a literal, so the
+    error-kind manifest sees every one."""
+    message = str(exc)
+    if exc.kind == "chart_spec_invalid":
+        _refuse("chart_spec_invalid", message)
+    if exc.kind == "memory_kind_unavailable":
+        _refuse("memory_kind_unavailable", message)
+    if exc.kind == "memory_no_org":
+        _refuse("memory_no_org", message, 403)
+    _refuse("memory_invalid", message)
+
+
 def _user(db):
     from db.models import User
     from services import chat_tools
@@ -67,7 +80,7 @@ def _checked(args: dict):
         if pk is not None and pk not in M.PROJECT_KINDS:
             raise M.MemoryError("project_kind is not a project kind")
     except M.MemoryError as exc:
-        _refuse(exc.kind, str(exc))
+        _store_refusal(exc)
     return kind, body, keys, summary, pk
 
 
@@ -150,7 +163,7 @@ def propose_memory(
                 origin="chat",
             )
         except M.MemoryError as exc:
-            _refuse(exc.kind, str(exc), exc.status if exc.status != 404 else 422)
+            _store_refusal(exc)
     return {
         "id": item.public_id,
         "status": item.status,
@@ -179,7 +192,7 @@ def recall_memory(
         try:
             keys = M.validate_concept_keys(concept_keys)
         except M.MemoryError as exc:
-            _refuse(exc.kind, str(exc))
+            _store_refusal(exc)
     with SessionLocal() as db:
         user = _user(db)
         org, pk = _bound_project(db)

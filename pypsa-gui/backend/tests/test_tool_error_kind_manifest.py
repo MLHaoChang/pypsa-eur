@@ -55,6 +55,7 @@ _REFUSE_HELPER_MODULES: tuple[str, ...] = (
     "services/assistant_tasks.py",
     "services/experiments.py",
     "services/live_speech.py",
+    "services/memory_tools.py",
     "services/library/reference_apply.py",
     "services/run_evidence.py",
     "services/run_envelope.py",
