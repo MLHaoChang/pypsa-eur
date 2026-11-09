@@ -6,8 +6,8 @@
 Issue: `issues/01-design-plan.md`. Spec: `spec.md`. Owner decisions: MEMORY-1, MEMORY-DREAM-1, COPILOT-1,
 DASHBOARD-1, PR-SIZE-1. Reviewer: GK B. No code in this package.
 
-The plan answers the seven bullets of issue 01 in order (§1–§7), then names the three build slices (§8). Every rule
-below is a contract for slices 02–04; a slice that needs to break one comes back to GK B first.
+The plan answers the seven bullets of issue 01 in order (§1–§7), names the build slices (§8) and records GK B's
+plan-review conditions (§9). Every rule below is a contract for slices 02–04; a slice that needs to break one comes back to GK B first.
 
 Words used here: an **item** is one memory entry; its **owner scope** says whose it is (a user or an org); its
 **applicability** says where it may be recalled (a project kind and concept keys); **recall** puts an item into a
@@ -189,13 +189,15 @@ Constants live in `budget.py` next to the other caps. A test pins the block leng
 ### 3.3 Filter and ranking
 
 Filter: `status = confirmed`; owner scope is the user's own items or the user's org's org items; `project_kind` is
-the bound project's kind or NULL. Ranking, first difference wins:
+the bound project's kind or NULL; and the org rule of §9 M1 (only `preference` and `chart_spec` items cross orgs).
+Ranking, first difference wins:
 
 1. a concept-key match with the screen (turn block only);
 2. user over org (a user's own choice beats the org default for the same concept key, and the org item is then
    dropped, not shown twice);
 3. a specific `project_kind` over NULL;
-4. `apply_count`, then `last_used_at`, then `updated_at`.
+4. `apply_count`, then `last_used_at`, then `updated_at`. The standing block ranks on a snapshot of these taken
+   once per session, so an apply between two turns does not reorder it (§9 M5).
 
 `recall_count` is bumped once per item per session (not per turn), so it measures reach, not chat length.
 
@@ -303,8 +305,10 @@ records the app stores. Memory provides those records; it does not edit the grap
 - **Staleness**: retiring or editing the item does not make the accepted value stale (the value keeps its stamp,
   as provenance issue 07 says). The memory service exposes `memory_store.node(id, version)` (summary, kind, owner
   scope, evidence) as the read the graph calls.
-- **Who builds what**: slice 03 writes the stamp and `node()`; provenance 07 builds the node and edge. To be agreed
-  with the provenance-graph session through GK B; this plan does not touch `.scratch/provenance-graph/`.
+- **Own provenance state** (§9 M9): a memory-applied value reads "from memory v<n>, user-approved" in the graph,
+  never "fresh" against a project input it does not have.
+- **Who builds what**: slice 03 writes the stamp and `node()`; provenance 07 builds the node and edge. GK B agreed
+  this and sent it to the provenance-graph session; this plan does not touch `.scratch/provenance-graph/`.
 
 ### 7.2 DASHBOARD-1 chart specs
 
@@ -319,35 +323,74 @@ dashboard code or spec schema exists on master yet, so one schema must be first.
 - The memory `chart_spec` kind stores that object. The dashboard package reuses the module for its added charts
   and owns any `@2`; memory follows. Drawing for each sensitivity case is the dashboard's, not memory's.
 - If the dashboard package lands a spec schema first, slice 02 uses it instead and drops its own.
+- When a DASHBOARD-1 package is opened, its issue notes that it reuses `services/chart_spec.py` and owns `@2`
+  (GK B, point 2). The slice 02a PR body carries the same note for the coordinator.
 
 ### 7.3 Other neighbours
 
 - `create_chart` (PNG export) is left alone in these slices.
 - Guided step ids and report section ids are read, not changed.
 
-## 8. Slices (PR-SIZE-1: one PR each, about 1 500 changed lines or fewer)
+## 8. Slices (PR-SIZE-1: one reviewer area and about 1 500 changed lines or fewer per PR)
 
-Each slice is one PR, reviewer GK B; slices 02 and 03 also need UX's OK for their UI (the issue files say so).
-Line estimates exclude shots and fixtures.
+Every slice has GK B as reviewer, and every PR that changes UI also needs UX's OK. Line estimates exclude shots and
+fixtures. Slice 02 is split now, before anything is built: with the tests that §9 adds, a single PR would go over
+the cap and would also span two reviewer areas. 02a and 02b are the two PRs of issue 02.
 
-| Slice | Issue | Builds | Est. lines | Tests |
+| PR | Issue | Builds | Est. lines | Tests |
 |---|---|---|---|---|
-| **02** Preferences and chart specs | `issues/02-preferences-and-chart-specs.md` | Migration (`memory_items`, `memory_item_versions`); `services/memory_store.py` (schemas, CRUD, recall, revision, nominate/promote); `services/chart_spec.py`; compose standing block and turn block; `propose_memory`, `recall_memory`, memory card; caps and error kinds; `/api/memory/*`; Memory page (Items, Proposals, nominate/promote); Save as default on result views; view opens with the saved default | ~1 400 | store unit tests (scope, ranking, status machine, version immutability, cross-user 404); prompt tests (block pinned under budget, byte-stable across navigation, fenced, tools-off names no tool); card approval through `approvals.py`; route parity; Vitest for page and card; shots Guided/Expert |
-| **03** Parameter suggestions | `issues/03-parameter-suggestions.md` | `parameter` kind; Save for reuse on a field; `GET /api/memory/suggestions?class&field&project_kind`; chips next to the field ("Used before: 7 % · project A ›" with date and currency stamp); accept writes through the field's edit path with the `memory:` provenance stamp (§7.1); `memory_store.node()`; unit mismatch refuses the chip, currency mismatch shows the stamp and never converts silently | ~900 | unit check on apply; stamp written exactly as §7.1; never applied without the click (COPILOT-1); chip hidden when no item; shots |
-| **04** Run lessons via the dream job | `issues/04-dream-run-lessons.md` | `lesson` capture at run end (§2.4); `memory_dream_jobs` table; `harness/dream.py` worker (lease, triggers, opt-in); analyzer and organizer prompts under `harness/prompts/`; budget caps; Proposals tab hookup and Memory settings toggle | ~1 200 | fake-provider job end to end (analyze → organize → proposals only); budget stop keeps cursor; lease takeover; invalid analyzer JSON dropped; access re-check skips a lost project; injection text in a transcript lands only as a proposal |
+| **02a** Memory backend | `issues/02-preferences-and-chart-specs.md` | Migration (`memory_items`, `memory_item_versions`, user and org revision counters); `services/memory_store.py` (schemas, CRUD, recall with the M1 org rule, revisions, nominate/promote with M2 checks, the dismissed-body sweeper); `services/chart_spec.py`; compose standing block and turn block (M3, M5); `propose_memory`, `recall_memory`, `ALWAYS_CARD_TOOLS` (M4); caps and error kinds in `pypsa-gui/tool-error-kinds.d/<branch>.json`; `/api/memory/*` with route declarations (M8) | ~1 300 | store: scope, ranking, status machine, version immutability, cross-user 404, cross-org user (M1), org-admin cross-org and non-admin 404 (M2), sweeper (M7); prompt: under budget, byte-stable across navigation and across an apply (M5), org revision invalidates (M5), fence-breaker summary (M5), tools-off names no tool, run and agent-stage turns carry neither block nor tool (M3); `ALWAYS_CARD_TOOLS` against every auto-approve tier and saved rule, Guided and Expert (M4); route_parity, inventory and control_matrix `--check` (M8) |
+| **02b** Memory UI | same | Memory page (Items, Proposals, History, nominate/promote, hidden in a one-member workspace); memory card in the chat panel; Save as default on result views; a view opens with its saved default; evidence labels that re-check access (M1) | ~900 | Vitest for page, card and button; evidence label for a project the user lost access to (M1); shots Guided/Expert, light/dark |
+| **03** Parameter suggestions | `issues/03-parameter-suggestions.md` | `parameter` kind; Save for reuse on a field; `GET /api/memory/suggestions?class&field&project_kind` (M1 org rule, M8 declarations); chips next to the field ("Used before: 7 % · project A ›" with date and currency stamp, label re-checks access); accept writes through the field's edit path, validators and card with the `memory:` provenance stamp (§7.1); `memory_store.node()`; unit mismatch and a vanished field refused with typed kinds (M6); currency never converted | ~1 000 | unit check on apply; vanished `component_class.field` refused (M6); stamp written exactly as §7.1; never applied without the click (COPILOT-1); no chip from another org (M1); chip hidden when no item; shots |
+| **04** Run lessons via the dream job | `issues/04-dream-run-lessons.md` | `lesson` capture at run end through `continuation.py` only (M3); `memory_dream_jobs` table; `harness/dream.py` worker (compare-and-set lease, triggers, opt-in default off, access re-check before each read: M7); analyzer and organizer prompts under `harness/prompts/`; budget caps; Proposals tab hookup and the Memory settings toggle | ~1 200 | fake-provider job end to end (analyze → organize → proposals only); lease take-over with two DB connections on SQLite, and on Postgres where CI has it (M7); opt-in off by default (M7); a lost project is skipped before its transcript is read (M7); budget stop keeps the cursor; invalid analyzer JSON dropped; injection text in a transcript lands only as a proposal |
 
-If slice 02 measures over the cap when built, it splits before review into 02a (backend: store, prompt, tools,
-routes) and 02b (UI: page, card, button), with GK B's GO.
+Each PR that changes UI is in the UI area (02b; the chips in 03 are a small UI part of a backend slice, so 03 tells
+UX where they sit before building). If any estimate grows past the cap when built, the slice sends GK B a split
+before building on.
 
-Order: 02, then 03 and 04 in either order (both depend only on 02). Provenance issue 07 waits on 03.
+Order: 02a, 02b, then 03 and 04 in either order (both need only 02a; 03's chips also need 02b's page for Save for
+reuse to be editable). Provenance issue 07 waits on 03.
 
-## Open points for GK B
+## 9. GK B conditions (plan review 38, PR #1305)
 
-1. The two-block split (§3.1) departs from the spec's "next to `_skills_block`" for the screen-filtered half, to
-   keep the system prompt cache stable. Agree?
-2. `chart_spec@1` lives in memory slice 02 because no dashboard schema exists (§7.2). Agree, or wait for a
-   DASHBOARD-1 package?
-3. The dream job uses its own table and worker with the runner's lease rules rather than an `assistant_tasks` run
-   (§6). Agree?
-4. The provenance stamp reuses the Library-apply fields with `source = "memory:<id>@v<n>"` (§7.1): to be confirmed
-   with the provenance-graph session.
+GK B gave a GO with changes. The four open points were agreed with the conditions below, and these are binding on
+slices 02a–04. Where a condition and an earlier section differ, the condition wins.
+
+- **M1 Organisation separation.** A user's own `parameter` and `lesson` items, and every org item, are recalled,
+  offered as chips and listed in a turn or standing block only when the bound project's `org_id` equals the item's
+  `org_id`. Only `preference` and `chart_spec` items, which hold no project data, cross orgs. A user in two orgs never
+  sees org A's prices or lessons in org B's projects. Every evidence label ("project A"), in a chip or block as well
+  as on the Memory page, re-checks project access when it renders and shows no name without it. Tests: a cross-org
+  user, and a label for a project the user lost access to. Letting parameters cross orgs would be an owner question
+  through the coordinator; this plan does not ask it.
+- **M2 Org admin checks** run server-side against the item's own `org_id` (an `OrgMembership` admin of that org),
+  never "any admin". Nominated and declined items stay invisible to other members. Cross-org and non-admin requests
+  get 404.
+- **M3 Headless runs get no memory.** Runner turns and agent-stage turns (L1/L2, `AGENT_STAGES`) get neither block
+  and neither `propose_memory` nor `recall_memory`: their inputs are the frozen grant, and memory text would steer a
+  run outside its digest. Run-end lessons (§2.4) come only from the `continuation.py` hook, onto a card in the
+  user's chat or the Proposals tab. A test asserts that a run's prompt and tool list contain neither.
+- **M4 `propose_memory` is always carded.** A test runs `ALWAYS_CARD_TOOLS` against every `AUTO_APPROVE_TIERS`
+  value and saved-rule combination, in Guided and in Expert. `memory_proposal_capped` and
+  `memory_proposal_dismissed` go in the branch's error-kind fragment, and the two manifest tests run at the trial
+  merge.
+- **M5 Cache stability.** The standing block's cache key is `(owner, org, project_kind, user memory revision, org
+  memory revision)`. An admin's promote, edit or retire bumps the org revision, which invalidates each member's block.
+  Counter updates (`recall_count`, `apply_count`, `last_used_at`) bump no revision. The standing block ranks on a
+  per-session snapshot (§3.3). The byte-stable test includes an apply between two turns, and a `fence.fenced` test
+  uses a summary that contains the fence's closing marker.
+- **M6 Validation on apply** stays as written (unit equal to the stored schema unit; the field's own edit path,
+  validators and card; currency never converted). Also, a stored `parameter` whose `component_class.field` no longer
+  exists in the schema is refused with a typed kind (`memory_field_unknown`) and never applied.
+- **M7 The dream lease is cross-process.** Take-over is an atomic compare-and-set on the row (`UPDATE
+  memory_dream_jobs SET lease_until=?, … WHERE id=? AND (lease_until IS NULL OR lease_until < now)`, accepted only
+  when rowcount is 1). An in-process lock is not enough (#1070). It is tested with two connections on SQLite, and on
+  Postgres where CI has it. The 30-day dismissed-body drop is a named sweeper (`memory_store.sweep_dismissed`) with a
+  test. The nightly and session-count triggers default to off, with a test. The per-project access re-check happens
+  before a transcript is read, not after.
+- **M8 Routes.** `/api/memory/*` are not project routes. They are declared in `route_chat_disposition` and in the ACL
+  and write-surface policies, and each slice runs route_parity, inventory and control_matrix `--check`. A cross-user
+  id gets 404.
+- **M9 Provenance.** A memory-applied value is its own provenance state in the graph ("from memory v<n>,
+  user-approved"), never "fresh" against a project input it does not have (#1170; PG-01 condition P1). Slice 03
+  writes the stamp and `memory_store.node()`; provenance 07 builds the node and edge.
