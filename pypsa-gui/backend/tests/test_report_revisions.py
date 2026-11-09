@@ -606,8 +606,10 @@ def test_the_store_lock_is_re_entrant_and_shared(pdir):
 
 def _interleave(pdir):
     """Another writer's save, landing between a writer's read and its save."""
-    store.save_version(pdir, store.load_report(pdir, RID).model_copy(
-        update={"title": "saved in between"}))
+    store.save_version(
+        pdir,
+        store.load_report(pdir, RID).model_copy(update={"title": "saved in between"}),
+    )
 
 
 def test_save_version_refuses_a_base_that_is_not_the_latest(pdir):
@@ -627,9 +629,11 @@ def test_a_round_trip_over_a_superseded_base_writes_nothing(pdir, monkeypatch):
 
     monkeypatch.setattr(roundtrip_service, "_read_edited_docx", lambda: None)
     monkeypatch.setattr(roundtrip_service, "read_edited_copy", read_then_interleave)
-    monkeypatch.setattr(roundtrip_service, "_merge_round_trip",
-                        lambda: lambda base, result: base.model_copy(
-                            update={"title": "merged copy"}))
+    monkeypatch.setattr(
+        roundtrip_service,
+        "_merge_round_trip",
+        lambda: lambda base, result: base.model_copy(update={"title": "merged copy"}),
+    )
     with pytest.raises(store.ReportVersionConflict):
         roundtrip_service.run_round_trip(pdir, RID, b"docx", bind_as_template=False)
     meta = store.load_meta(pdir, RID)
@@ -655,10 +659,14 @@ def test_binding_a_template_over_a_superseded_base_is_409(
         _interleave(pdir)
 
     monkeypatch.setattr(reports_router, "_check_lock", check_then_interleave)
-    monkeypatch.setattr(reports_router, "_resolve_template", lambda project, fid: (
-        b"", SimpleNamespace(mode="styles", language="en")))
-    r = client.post(f"/api/projects/{name}/reports/{RID}/template",
-                    json={"file_id": file_id})
+    monkeypatch.setattr(
+        reports_router,
+        "_resolve_template",
+        lambda project, fid: (b"", SimpleNamespace(mode="styles", language="en")),
+    )
+    r = client.post(
+        f"/api/projects/{name}/reports/{RID}/template", json={"file_id": file_id}
+    )
     assert r.status_code == 409, r.text
     assert r.json()["detail"]["error_kind"] == "report_version_conflict"
     assert store.load_meta(pdir, RID).latest_version == 2
