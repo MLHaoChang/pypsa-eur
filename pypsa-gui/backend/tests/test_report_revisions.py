@@ -612,6 +612,12 @@ def _interleave(pdir):
     )
 
 
+def test_creating_a_report_that_exists_is_refused_and_keeps_it(pdir):
+    with pytest.raises(store.ReportExists):
+        store.create_report(pdir, _doc().model_copy(update={"title": "a second one"}))
+    assert store.load_report(pdir, RID).title == _doc().title
+
+
 def test_save_version_refuses_a_base_that_is_not_the_latest(pdir):
     _interleave(pdir)  # latest is now v2
     with pytest.raises(store.ReportVersionConflict):
@@ -1074,6 +1080,12 @@ def _stored(pdir):
         {"revision": {"version": 2, "digest": "d"}},  # open with a revision
         {"reason": "outside_edit_set"},  # reason without reasons
         {"reason": "made_up", "reasons": ["made_up"]},
+        {  # addressed, yet still carrying an open reason
+            "status": "addressed",
+            "revision": {"version": 2, "digest": "d"},
+            "reason": "outside_edit_set",
+            "reasons": ["outside_edit_set"],
+        },
     ],
 )
 def test_a_comment_whose_fields_disagree_is_unreadable(pdir, change):
