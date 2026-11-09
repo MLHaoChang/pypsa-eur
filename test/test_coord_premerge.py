@@ -93,7 +93,7 @@ def run(clone, runs=GREEN, gh_exit=0, with_gh=True, comments=None, **env):
         path = f"{bin_dir}:{os.environ['PATH']}"
     else:
         # Only the tools the script needs, so a real gh cannot leak in.
-        for tool in ("git", "bash", "awk", "grep", "sed", "comm", "sort", "mktemp"):
+        for tool in ("git", "bash", "awk", "grep", "sed", "comm", "sort", "mktemp", "dirname"):
             (bin_dir / tool).symlink_to(shutil.which(tool))
         path = str(bin_dir)
     return subprocess.run(
