@@ -1,6 +1,6 @@
 # The Guided ledger view does not show an out-of-date cost
 
-Status: needs-triage
+Status: ready-for-agent (owner decision TCU07-TRIAGE-1: open later, queued behind current work)
 Type: gap
 Found in: TCU-05 S2 (issue 05), 2026-11-08.
 
