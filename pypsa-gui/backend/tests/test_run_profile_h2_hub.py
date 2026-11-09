@@ -11,6 +11,7 @@ The runs install the shipped template networks in place of the baseline."""
 from __future__ import annotations
 
 import copy
+import functools
 import json
 import sys
 from pathlib import Path
@@ -253,6 +254,13 @@ def test_a_run_on_each_template_reaches_the_hand_off_with_the_offtake_and_lole_p
 
 
 def _solved(template, **links):
+    """A copy of the template solved once per (template, links): the readers' tests edit it."""
+    return _solved_once(template, tuple(sorted(links.items()))).copy()
+
+
+@functools.lru_cache(maxsize=None)
+def _solved_once(template, links):
+    links = dict(links)
     import logging
     logging.disable(logging.WARNING)
     try:
@@ -263,6 +271,7 @@ def _solved(template, **links):
                    multi_investment_periods=bool(len(n.investment_periods)))
     finally:
         logging.disable(logging.NOTSET)
+    n.model.solver_model = None  # a copy of a solved network carries no solver model
     return n
 
 
