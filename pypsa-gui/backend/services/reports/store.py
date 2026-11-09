@@ -37,11 +37,13 @@ import pathlib
 import re
 import secrets
 import shutil
+import threading
+from contextlib import contextmanager
 from datetime import datetime, UTC
 
 from pydantic import ValidationError
 
-from models.report import ReportDocument, ReportMeta
+from models.report import ReportDocument, ReportMeta, RevisedFrom
 from services.atomic_io import atomic_write_bytes, atomic_write_text
 
 logger = logging.getLogger(__name__)
@@ -197,9 +199,10 @@ def update_meta(project_dir: pathlib.Path, report_id: str, **fields: object) -> 
     if unknown:
         raise TypeError(f"update_meta: not a carried meta field: {', '.join(unknown)}")
     rdir = _existing_report_dir(project_dir, report_id)
-    meta = load_meta(project_dir, report_id)
-    updated = meta.model_copy(update={**fields, "updated_at": _now_iso()})
-    _write_meta(rdir, updated)
+    with report_lock(project_dir, report_id):
+        meta = load_meta(project_dir, report_id)
+        updated = meta.model_copy(update={**fields, "updated_at": _now_iso()})
+        _write_meta(rdir, updated)
     return updated
 
 
@@ -248,40 +251,110 @@ def _write_version(rdir: pathlib.Path, doc: ReportDocument) -> None:
     atomic_write_text(path, doc.model_dump_json(indent=2))
 
 
+_REPORT_LOCKS: dict[str, threading.RLock] = {}
+_REPORT_LOCKS_GUARD = threading.Lock()
+_HELD = threading.local()
+LOCK_TIMEOUT_S = 30
+
+
+class ReportBusy(ReportStoreError):
+    """Another process held the report's lock past `LOCK_TIMEOUT_S`."""
+
+
+class ReportVersionConflict(ReportStoreError):
+    """`save_version(expected_base=n)` found a later version than `n`: another
+    writer saved in between, so this one would silently supersede it."""
+
+
+@contextmanager
+def report_lock(project_dir: pathlib.Path, report_id: str):
+    """The one lock for every writer of `reports/<report_id>/` (study harness
+    07c, GK B R5): `create_report`, `save_version`, `update_meta`,
+    `write_figure`, `delete_report` and the job's generation meta take it,
+    and a comment revision holds it across its digest check, its save and
+    its comment update.
+
+    Cross-process: the file lock `reports/.<report_id>.lock`
+    (`harness.durable.file_lock`, GK B's #1070 ruling), taken once per
+    thread; a thread lock in front of it makes it re-entrant, so a holder
+    may call `save_version`. `ReportBusy` when another process keeps it past
+    `LOCK_TIMEOUT_S`."""
+    from harness.durable import file_lock
+
+    rid = validate_report_id(report_id)
+    root = reports_dir(project_dir)
+    key = str((root / rid).resolve())
+    with _REPORT_LOCKS_GUARD:
+        lock = _REPORT_LOCKS.setdefault(key, threading.RLock())
+    with lock:
+        held = getattr(_HELD, "keys", None)
+        if held is None:
+            held = _HELD.keys = set()
+        if key in held:
+            yield
+            return
+        root.mkdir(parents=True, exist_ok=True)
+        try:
+            with file_lock(str(root / f".{rid}.lock"), timeout=LOCK_TIMEOUT_S,
+                           busy=f"report {rid} is being written"):
+                held.add(key)
+                try:
+                    yield
+                finally:
+                    held.discard(key)
+        except TimeoutError as exc:
+            raise ReportBusy(f"report {rid} is being written by another process") from exc
+
+
 def create_report(project_dir: pathlib.Path, doc: ReportDocument) -> ReportMeta:
     """Create `reports/<id>/` with `v1.json` and `meta.json`. The id must be new."""
     rdir = report_dir(project_dir, doc.report_id)
-    if rdir.exists():
-        raise ReportExists(f"report {doc.report_id} already exists")
-    rdir.mkdir(parents=True, exist_ok=False)
-    first = doc.model_copy(update={"version": 1})
-    _write_version(rdir, first)
-    meta = _meta_from_doc(first, latest_version=1)
-    _write_meta(rdir, meta)
+    with report_lock(project_dir, doc.report_id):
+        if rdir.exists():
+            raise ReportExists(f"report {doc.report_id} already exists")
+        rdir.mkdir(parents=True, exist_ok=False)
+        first = doc.model_copy(update={"version": 1})
+        _write_version(rdir, first)
+        meta = _meta_from_doc(first, latest_version=1)
+        _write_meta(rdir, meta)
     return meta
 
 
-def save_version(project_dir: pathlib.Path, doc: ReportDocument) -> int:
+def save_version(project_dir: pathlib.Path, doc: ReportDocument, *,
+                 revised_from: RevisedFrom | None = None,
+                 expected_base: int | None = None) -> int:
     """
     Write the next version of an existing report and return its number.
 
     The caller does not choose the number: whatever `doc.version` carries, the
     file written is `v<latest+1>.json`, where `latest` is the highest of the
     meta's `latest_version` and the version files actually on disk.
+
+    `expected_base` is the version the caller read and edited. When it is
+    given and `latest` is not it, another writer saved in between: nothing is
+    written and `ReportVersionConflict` is raised (study harness 07c, GK B F1).
     """
     rdir = _existing_report_dir(project_dir, doc.report_id)
-    meta = load_meta(project_dir, doc.report_id)
-    on_disk = _version_numbers(rdir)
-    next_version = max([meta.latest_version, *on_disk]) + 1
-    bumped = doc.model_copy(update={"version": next_version})
-    _write_version(rdir, bumped)
-    # `generation` is the job's, written after ITS save (WP3); the template
-    # binding and the mapping plan are the template routes' (WP11). A later
-    # version from any caller keeps them rather than silently dropping them.
-    _write_meta(rdir, _meta_from_doc(
-        bumped, latest_version=next_version, created_at=meta.created_at,
-        carried=meta,
-    ))
+    with report_lock(project_dir, doc.report_id):
+        meta = load_meta(project_dir, doc.report_id)
+        on_disk = _version_numbers(rdir)
+        latest = max([meta.latest_version, *on_disk])
+        if expected_base is not None and latest != expected_base:
+            raise ReportVersionConflict(
+                f"report {doc.report_id} is at version {latest}, "
+                f"not {expected_base}: another writer saved first")
+        next_version = latest + 1
+        # `revised_from` is the caller's statement, never carried over from the
+        # base (07c R7): a regenerate of a revision is not itself a revision.
+        bumped = doc.model_copy(update={"version": next_version, "revised_from": revised_from})
+        _write_version(rdir, bumped)
+        # `generation` is the job's, written after ITS save (WP3); the template
+        # binding and the mapping plan are the template routes' (WP11). A later
+        # version from any caller keeps them rather than silently dropping them.
+        _write_meta(rdir, _meta_from_doc(
+            bumped, latest_version=next_version, created_at=meta.created_at,
+            carried=meta,
+        ))
     return next_version
 
 
@@ -340,7 +413,8 @@ def list_reports(project_dir: pathlib.Path) -> list[ReportMeta]:
 
 def delete_report(project_dir: pathlib.Path, report_id: str) -> None:
     rdir = _existing_report_dir(project_dir, report_id)
-    shutil.rmtree(rdir)
+    with report_lock(project_dir, report_id):
+        shutil.rmtree(rdir)
 
 
 # ── figures ─────────────────────────────────────────────────────────────────
@@ -354,9 +428,10 @@ def write_figure(project_dir: pathlib.Path, report_id: str, figure_id: str,
     fid = validate_figure_id(figure_id)
     fdir = figures_dir(project_dir, report_id)
     _existing_report_dir(project_dir, report_id)
-    fdir.mkdir(parents=True, exist_ok=True)
     path = fdir / f"{fid}.png"
-    atomic_write_bytes(path, png_bytes)
+    with report_lock(project_dir, report_id):
+        fdir.mkdir(parents=True, exist_ok=True)
+        atomic_write_bytes(path, png_bytes)
     return path
 
 

@@ -32,6 +32,7 @@ SCENE_APPLY_DEAD = frozenset({"proposal_expired", "proposal_cancelled", "revisio
 SCENE_PREPARE = "site_scene_prepare"
 # A prepare that asks the user (services/site_scene/chat.prepare): no preview was made.
 SCENE_PREPARE_ASKS = frozenset({"clarify", "unresolved"})
+CHANGE_EDITS_MAX = 2000  # chars of receipt rows a task view carries (UX (14) ask 2)
 # LC-23 study brief (owner decisions AI-567b, COP-1): a plan labelled with an
 # objective, cards in scope, cases and one phase per card.
 CARDS = ("capacity", "grid", "control", "reliability", "commercial", "hand-off")
@@ -427,13 +428,28 @@ def _view(task, fresh=False, current=None):
                 out["next_step"]["blocked"] = exc.detail
         if step.get("error"):
             out["next_step"]["error"] = step["error"]
+        if isinstance(step.get("error_kind"), str):
+            # SC-07 S5b (GK B 1a): the stored kind finish_step took from the tool's own typed
+            # refusal (N3), read-only and never derived from the message; absent when none.
+            out["next_step"]["error_kind"] = step["error_kind"]
         if brief and step["status"] in ("failed", "uncertain"):
             out["next_step"]["correction"] = _correction(step)
-    changes = [s["result"]["_edit_receipt"]["says"] for s in task["steps"] if s["status"] == "completed"
-               and isinstance(s.get("result"), dict) and isinstance(s["result"].get("_edit_receipt"), dict)
-               and isinstance(s["result"]["_edit_receipt"].get("says"), str)]
+    receipts = [s["result"]["_edit_receipt"] for s in task["steps"] if s["status"] == "completed"
+                and isinstance(s.get("result"), dict) and isinstance(s["result"].get("_edit_receipt"), dict)
+                and isinstance(s["result"]["_edit_receipt"].get("says"), str)]
+    changes = [r["says"] for r in receipts]
     if changes:
         out["changes"] = changes
+    # SC-07 S5b (UX (14) ask 2): each edit's receipt rows, so the partial-mapping line words the
+    # change with the panel's field labels as Guided does. Only a task stopped at a failed or
+    # uncertain scene step can show that line, so only it carries them: on every other `_task` a
+    # result rides with they would only grow it (past the result cap, into a spill). Past the cap
+    # they are left out and `says` stands.
+    stop = out.get("next_step") or {}
+    if changes and stop.get("tool") in (SCENE_PREPARE, SCENE_APPLY) and stop.get("status") in ("failed", "uncertain"):
+        edits = [{k: r[k] for k in ("rows", "sets") if k in r} for r in receipts]
+        if len(json.dumps(edits, default=str)) <= CHANGE_EDITS_MAX:
+            out["change_edits"] = edits
     run = task.get("run") or {}
     out["note"] = ("Wait for the job; the conversation continues when it ends." if state == "waiting_job" else
                    f"The {run['stage']} gate failed: tell the user which rules failed and their facts; "
@@ -967,11 +983,47 @@ def resume_task(task_id: str) -> dict:
     return _view(task, fresh=True)
 
 
+def _own_previews(task):
+    """SC-07 S5b (GK B 2a): the (step id, site_id, proposal_id) of the previews this task's own
+    completed site_scene_prepare steps made, read from their stored results only."""
+    out = []
+    for step in task["steps"]:
+        if step["tool"] != SCENE_PREPARE or step["status"] != "completed" or not isinstance(step.get("result"), dict):
+            continue
+        args = (step["result"].get("apply_with") or {}).get("args") or {}
+        if isinstance(args, dict) and isinstance(args.get("site_id"), str) and isinstance(args.get("proposal_id"), str):
+            out.append((step["id"], args["site_id"], args["proposal_id"]))
+    return out
+
+
+def _cancel_previews(previews, project_uuid):
+    """Cancel each through the owner-scoped G4 path (`site_scene_cancel`) in the task's own project,
+    not whichever is in the foreground: idempotent, never another owner's, never relabels an applied
+    proposal. Its claim and this cancel share `proposals._lock`, so an apply that claimed first wins
+    and one that comes after refuses proposal_cancelled. A failure never blocks the task cancel; the
+    step ids whose preview is not now cancelled or applied (a raise, `applying`, `not_found`) are
+    returned to say so."""
+    from services.site_scene import chat as scene_chat
+    failed = []
+    for step_id, site_id, pid in previews:
+        try:
+            result = scene_chat.cancel(site_id, pid, project_uuid=project_uuid)
+        except Exception:  # noqa: BLE001 — reported in the cancel's result, never silent
+            result = None
+        if not isinstance(result, dict) or result.get("status") not in ("cancelled", "applied"):
+            failed.append(step_id)
+    return failed
+
+
 def cancel_task(task_id: str) -> dict:
     from services import chat_tools
+    previews = []
     with _LOCK:
         path, task = _read(task_id)
+        # _read's own project: the run's when bound, else the foreground one
+        project_uuid = (RUN_CONTEXT.get() or PyPSAService.get_active_context()).project_uuid
         if task["status"] != "completed":
+            previews = _own_previews(task)
             task["status"] = "cancelled"
             if task.get("run"):
                 task["run"]["status"] = "cancelled"
@@ -988,6 +1040,10 @@ def cancel_task(task_id: str) -> dict:
             session.task_id = None
         view = _view(task)
     _wake(path)  # the runner lets go of the project
+    # Outside the task lock: the scene cancel takes its own project and proposal locks.
+    failed = _cancel_previews(previews, project_uuid)
+    if failed:
+        view["previews_not_cancelled"] = failed
     return view
 
 

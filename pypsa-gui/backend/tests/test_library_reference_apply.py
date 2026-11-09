@@ -127,6 +127,8 @@ def test_ac_pv_on_an_undeclared_generator_needs_confirmation():
     n = _net()
     p = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030)
     assert "dc_ac" in p["missing"]
+    text = next(x["text"] for x in p["needs"] if x["confirmation"] == "dc_ac")
+    assert "AC rating" in text and "MWp" in text and "Check that" in text
     with pytest.raises(HTTPException) as exc:
         A.require_confirmed(p)
     assert _codes(exc) == ("reference_confirmation_needed", p["missing"])
@@ -543,3 +545,19 @@ def test_the_routes_and_the_chat_card_refuse_a_dc_reference_without_a_ratio_type
     for r in (client.post(PREVIEW, json=pv), client.post(f"{ROUTE}/apply", json={**pv, "digest": "x"})):
         assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "dc_ac_ratio_missing", r.text
     assert n.generators.equals(before)
+
+
+def test_catalogue_confirm_enums_equal_the_backend_confirmations():
+    from harness.catalogue import TOOLS
+
+    for name in ("apply_library_reference", "preview_library_reference"):
+        tool = next(t for t in TOOLS if t["name"] == name)
+        enum = tool["input_schema"]["properties"]["confirm"]["items"]["enum"]
+        assert tuple(enum) == A.CONFIRMATIONS, name
+
+
+def test_an_unknown_confirmation_is_refused_on_the_plan_path():
+    n = _net()
+    with pytest.raises(HTTPException) as exc:
+        A.plan(n, {}, "Generator", "pv", "solar-utility", 2030, confirm=["dc_ac_old"])
+    assert _codes(exc)[0] == "invalid_edit_value"

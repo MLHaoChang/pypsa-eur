@@ -1,0 +1,24 @@
+# Studies, reports and the investment case on the graph
+
+Status: needs-triage
+Type: task
+Spec: `.scratch/provenance-graph/spec.md`
+
+Model tier: opus.
+Gated: GK B; UI parts need the UX reviewer's OK.
+Blocked by: 04.
+
+## What to build
+
+Study forks and investment-case reports as `run` nodes. Move the checks in the spec survey's "Studies, reports and
+the investment case" table onto `staleness`: `study/report.stale_reasons`, `routers/studies._report_stale`,
+`finance/investment_case_runner.staleness`, `routers/results._ic_campus_digest`, `participants._stale_hub`. The
+client stops OR-ing three `stale` flags (`financeModel.studyStale`, `hubDesign/chapters.ts`, `ResultsCard.tsx`) and
+stops parsing reason text with a regex (`ReportStep.tsx:26`): the verdict says which edge broke.
+
+## Acceptance
+
+- Each report and the investment case show one verdict, with the edges that broke as reasons.
+- One PR within PR-SIZE-1, or the slices the plan GO names.
+
+## Comments

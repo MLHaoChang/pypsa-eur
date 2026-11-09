@@ -32,7 +32,11 @@ REASONS = {
     "draft_not_checked": "The answer could not be checked",
     "render_failed": "The chart could not be saved",
     "current_run_only": "Charts are drawn from the current run's evidence only",
+    "other_project": "The checked evidence belongs to another project",
 }
+# AA-05 S5b: the metric identity the dataset carries. A chart stored before
+# them has neither key and is compared without both (B2).
+IDENTITY_KEYS = ("metrics", "warnings")
 
 
 def _window(index, scope):
@@ -86,8 +90,27 @@ def series_table(record, window=None):
     return raw.get("index") or [], {}
 
 
+def identity(record):
+    """One entry per evidence slot (AA-05 S5b, A4.6), read from the sealed
+    record only (B1): an answered metric names its fact's formula_id and unit;
+    one not answered names its reason, with formula_id and unit None."""
+    facts = {f["metric"]: f for f in record["facts"]}
+    out = []
+    for slot in record["slots"]:
+        fact = facts.get(slot["metric"]) if slot["disposition"] == "answered" else None
+        entry = {"metric": slot["metric"], "disposition": slot["disposition"],
+                 "formula_id": None if fact is None else fact["formula_id"],
+                 "unit": None if fact is None else fact["unit"]}
+        if fact is None:
+            entry["reason"] = slot["reason"]
+        out.append(entry)
+    return out
+
+
 def dataset(record, requested):
     """The drawn dataset and a slot per requested series."""
+    from harness.calculations import slot_warnings
+
     index, _ = series_table(record)
     a, b = _window(index, record["request_scope"])
     _, table = series_table(record, (a, b))
@@ -108,7 +131,8 @@ def dataset(record, requested):
             continue
         slots.append({"series": name, "disposition": "not_drawn", "reason": reason, "title": REASONS[reason]})
     data = {"index": list(window), "columns": list(drawn), "values": [drawn[c][2] for c in drawn],
-            "units": {c: drawn[c][0] for c in drawn}, "axis_labels": {c: drawn[c][1] for c in drawn}}
+            "units": {c: drawn[c][0] for c in drawn}, "axis_labels": {c: drawn[c][1] for c in drawn},
+            "metrics": identity(record), "warnings": slot_warnings(record["slots"])}
     return data, slots, {"start": window[0] if window else None, "end": window[-1] if window else None,
                          "snapshots": len(window)}
 
@@ -157,6 +181,9 @@ def render(ctx, record, requested):
     requested = list(dict.fromkeys(requested))[:MAX_SERIES]
     if not common.lp_outputs_live(ctx):  # the evidence is re-checked at render time
         return refused(requested, "outdated_evidence")
+    project, root, _owner = assistant_tools._project()
+    if record["project_id"] != str(project.id):  # K1: before any drawing or write
+        return refused(requested, "other_project")
     data, slots, window = dataset(record, requested)
     if not data["columns"]:
         return {"status": "not_drawn", "reason": "nothing_drawable", "title": "No requested series could be drawn",
@@ -167,7 +194,6 @@ def render(ctx, record, requested):
     # The drawing is as of this solve; an image outlives its evidence and must say when.
     lines = caption(slots, window, record["request_scope"]["entity_id"]) + [f"Drawn {readable_stamp(drawn_at)} from checked evidence · evidence {record['evidence_id']}"]
     png = _draw(record, data, lines)
-    project, root, _owner = assistant_tools._project()
     byte_hash = hashlib.sha256(png).hexdigest()
     manifest = {
         "schema_version": 1, "project_id": str(project.id), "source_kind": "checked_evidence",
@@ -286,5 +312,7 @@ def verify(manifest):
     if record["expires_at"] <= time.time():
         return "expired"
     data, slots, window = dataset(record, manifest["requested"])
+    if not any(k in manifest["dataset"] for k in IDENTITY_KEYS):  # drawn before S5b
+        data = {k: v for k, v in data.items() if k not in IDENTITY_KEYS}
     same = data == manifest["dataset"] and slots == manifest["series"] and window == manifest["window"]
     return "current" if same else False

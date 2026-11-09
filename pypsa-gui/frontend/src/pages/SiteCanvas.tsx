@@ -657,6 +657,10 @@ function SelectedPivot({ obj, enabled, onCommit, children }: {
 // (including each snapshot step); the site must not (Phase 2 plan Task 2.2).
 export default React.memo(SiteCanvas)
 
+/** SC-07 S5b R6 (GK B V1–V2): the mounted-view marker a chat navigate into Site 3D is acknowledged by. */
+const site3dAssurance = (project: string | null) =>
+  ({ 'data-assurance-panel': 'map', 'data-assurance-canvas': 'site', 'data-assurance-project': project ?? '' })
+
 function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: boolean }) {
   countRender('SiteCanvas')
   useEffect(() => { preloadHeroes() }, [])
@@ -1057,11 +1061,15 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
     return <div className="flex h-full items-center justify-center text-[12px] text-muted">Loading network…</div>
   }
   if (!site) {
-    return <SiteEmptyState loading={!allLoaded} />
+    // SC-07 S5b R6: an empty Site 3D is still Site 3D opened (the ACK target); a loading one is not.
+    return allLoaded
+      ? <div className="contents" {...site3dAssurance(currentProject)}><SiteEmptyState loading={false} /></div>
+      : <SiteEmptyState loading />
   }
   if (!layout || !ground || !siteExtent || !plotExtent || !fit) {
+    // SC-07 S5b R6: a site with no placed bus is Site 3D opened too (its own empty state).
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-center px-8">
+      <div className="flex h-full flex-col items-center justify-center gap-2 text-center px-8" {...site3dAssurance(currentProject)}>
         <div className="text-[13px] font-medium text-text">{site.name} has no placed bus</div>
         <div className="text-[12px] text-muted max-w-md">Add a placed bus to this site (Satellite view → click the boundary → Edit buses).</div>
       </div>
@@ -1080,7 +1088,7 @@ function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: bool
 
   return (
     // tabIndex -1: a click gives the view focus, so Esc here clears the picks (never stopping another Esc handler).
-    <div className="relative h-full w-full bg-canvas outline-none" data-site-pane tabIndex={-1}
+    <div className="relative h-full w-full bg-canvas outline-none" data-site-pane tabIndex={-1} {...site3dAssurance(currentProject)}
       onKeyDown={e => { if (e.key === 'Escape' && pickedSet.size > 0) clearPicked() }}>
       {/* key: a new site gets a fresh camera; a parameter edit does not. */}
       <Canvas

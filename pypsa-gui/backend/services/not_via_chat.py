@@ -254,6 +254,8 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        # Owner decision DC25-POINTER-1: chat points to the Plan vs operation
+        # card; no typed read tool.
         'id': 'dc_operational_gap',
         'title': 'Plan-vs-operation gap of the operational run',
         'disposition': 'manual',
@@ -311,6 +313,23 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'routes': frozenset({
             ('POST', '/api/network/spectrum/tier_split'),
             ('POST', '/api/spectrum/trace'),
+        }),
+    },    {
+        'id': 'report_comment_revisions',
+        'title': 'Report comments and comment revisions',
+        'disposition': 'unbuilt',
+        'reason': 'Commenting on a saved report and revising it from a comment is not available from chat yet. No report screen offers it yet either; only the report comments API does.',
+        'page': 'Reports',
+        'panel': None,
+        'keywords': frozenset({
+            'comment',
+            'comments',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/projects/{name}/reports/{report_id}/comments'),
+            ('POST', '/api/projects/{name}/reports/{report_id}/comments'),
+            ('POST', '/api/projects/{name}/reports/{report_id}/comments/{comment_id}/address'),
+            ('POST', '/api/projects/{name}/reports/{report_id}/comments/{comment_id}/withdraw'),
         }),
     },
 )
