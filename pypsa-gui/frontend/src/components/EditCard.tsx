@@ -292,9 +292,12 @@ export function EditCardTable({ card, guided, labels }: { card: EditCard; guided
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <caption className="text-left font-semibold mb-1">{labels?.caption ?? 'Changes to apply'}</caption>
-          <thead><tr>{['Asset', 'Field', labels?.old ?? 'Old', labels?.new ?? 'New', 'Unit'].map(h => (
-            <th key={h} scope="col" className="p-1 border-b border-border">{h}</th>
-          ))}</tr></thead>
+          {/* Study harness 10a (UX (14)): a card of note rows only has no columns to head. */}
+          {card.rows.some(r => r.role !== 'note') && (
+            <thead><tr>{['Asset', 'Field', labels?.old ?? 'Old', labels?.new ?? 'New', 'Unit'].map(h => (
+              <th key={h} scope="col" className="p-1 border-b border-border">{h}</th>
+            ))}</tr></thead>
+          )}
           <tbody>{card.rows.map((r, i) => {
             if (r.role === 'note' && !r.component_class && !r.name) return null
             if (r.role === 'note') {

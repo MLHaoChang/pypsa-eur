@@ -57,6 +57,22 @@ def suppressed():
         _SUPPRESSED.reset(token)
 
 
+# The org a worker's writes belong to, bound by the worker that knows it (the
+# solve queue binds its job's org around the write-back). The dispatcher thread
+# has no request, so the active context there is the process foreground, which
+# may be another org's project (SQ-FG).
+_OWNING_ORG: ContextVar[str | None] = ContextVar("change_log_owning_org", default=None)
+
+
+@contextmanager
+def owning_org(org_id: str):
+    token = _OWNING_ORG.set(org_id)
+    try:
+        yield
+    finally:
+        _OWNING_ORG.reset(token)
+
+
 def _active_org_id() -> str | None:
     """
     Org of the context the write belongs to.
@@ -67,6 +83,9 @@ def _active_org_id() -> str | None:
     is exactly the owning org; Step 0b, which moves the active-project pointer
     into the session, is what makes it correct under concurrent users too.
     """
+    bound = _OWNING_ORG.get()
+    if bound is not None:
+        return bound
     try:
         from services.pypsa_service import PyPSAService
 

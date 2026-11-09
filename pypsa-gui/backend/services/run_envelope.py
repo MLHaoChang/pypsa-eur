@@ -65,7 +65,11 @@ ENGINE_TOOLS = frozenset({"run_margin_loop", "run_coupling_loop"})
 REPORT_TOOLS = frozenset({"generate_report"})
 # Counted as solves when admitted, but no envelope lists them (issue 08, GK B (8)):
 # a sweep or an EH study is always the user's own card.
-NEVER_LISTED = frozenset({"run_sensitivity_sweep", "run_eh_study"})
+NEVER_LISTED = frozenset({"run_sensitivity_sweep", "run_eh_study",
+                          # Study harness 10a (GK B (36)): the grid code is always the user's own.
+                          "campus_publish_grid_code", "campus_save_grid_code_draft", "campus_new_grid_code_draft",
+                          "campus_delete_grid_code_draft", "campus_confirm_grid_code_limit",
+                          "campus_extract_grid_code", "campus_delete_published_grid_code"})
 # Always its own card, even when listed: others rely on the publication (§7).
 NEVER_ADMITTED = frozenset({"campus_publish_grid_code"})
 # A researched value is never written without the user's card (SH-RESEARCH-1).
@@ -884,7 +888,10 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
         else:
             if task["status"] in ("cancelled", "completed") or (current["state"] == "granted" and not _suspended(current)):
                 _refuse("envelope_not_grantable", "This run is over or already runs inside a granted envelope.")
-            block = check_block(run_profiles.resolve(task["run"]["profile"])["envelope"])
+            block = run_profiles.resolve(task["run"]["profile"]).get("envelope")
+            if block is None:  # study harness 10a (GK B (36) F3): a stepwise-only profile has none to grant
+                _refuse("envelope_not_grantable", "This run's profile runs step by step only: it has no envelope.")
+            block = check_block(block)
             chosen = narrow(block, envelope if envelope is not None else block)
             if current.get("setup"):
                 setup = (path, task, current, chosen)
@@ -1528,6 +1535,19 @@ def refused_before_gate(task_path, call_id, tool, reason):
             _count_solves(task_path, envelope)  # a solve refused at pickup is no job
 
 
+def stage_card_is_users(task_path, card):
+    """A stage whose unstarted steps include a runner native write action (the
+    campus run): its card names the grid-code profile and the writes, so no
+    envelope crosses it."""
+    from services import run_actions
+    try:
+        task = json.loads(Path(task_path).read_text())
+    except (OSError, ValueError):
+        return True
+    return any(run_actions.is_action(s) and not run_actions.reads_only(s) and s["status"] == "pending"
+               and s["id"].split(".")[0] == card for s in task.get("steps") or [])
+
+
 def cross(session, task_path, card, ctx):
     """COP-1's card boundary inside a live envelope: the runner goes on, on
     record as the envelope's decision, only while the envelope still stands
@@ -1538,6 +1558,8 @@ def cross(session, task_path, card, ctx):
     from services import assistant_tasks
     if not live(task_path):
         return None
+    if stage_card_is_users(task_path, card):
+        return None  # study harness 10a (D1, D6): the campus run's stage card is always the user's
     if card == "report" and not any(r["tool"] in REPORT_TOOLS for r in (_load(task_path) or {}).get("runs", [])):
         # GK B B1-b: a grant made before stage 7 existed, or one that leaves the
         # report out, does not cover its card: the stage pauses for the user.

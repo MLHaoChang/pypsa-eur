@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): An assistant report can declare its summary section's sources: `generate_report` takes `summaries`, naming the sections whose evidence numbers the summary may quote. The summary notes those sections, and the sealed export records them. Prose from those sections is still checked, and an unknown section id is refused (`summary_section_unknown`).

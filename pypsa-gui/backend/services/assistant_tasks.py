@@ -315,7 +315,8 @@ def _carded(step):
     """COP-1: a stage pauses at its card before a step that writes or runs.
     The hand-off's native read-back writes nothing to the project (issue 07);
     its revert preview is a stored proposal the user applies on a card."""
-    return step.get("native") != "handoff" and _effectful(step["tool"])
+    from services import run_actions
+    return step.get("native") != "handoff" and not run_actions.reads_only(step) and _effectful(step["tool"])
 
 
 # The skip reason the generic profile gave the report before issue 07 (§9.2):
@@ -804,6 +805,10 @@ def _advance_run(path, ctx=None):
                 if any(run_eh.is_eh_step(s) for s in steps):
                     # Issue 07 B2 (C1, Q2 = A): the EH study's args, frozen at the grant or now.
                     run_eh.fill(steps, run_eh.stage_frozen(path, task, profile, ctx))
+                from services import run_actions
+                if any(run_actions.is_action(s) for s in steps):
+                    # Study harness 10a (GK B (36) D1): the grid-code profile, frozen now, shown on the stage card.
+                    run_actions.fill(steps, run_actions.stage_frozen(task))
                 stage.update(status="active", entered_at=_now())
                 task["steps"].extend(steps)
                 if any(_carded(s) for s in steps):
@@ -1215,6 +1220,11 @@ def _native_evidence(path, task, step):
         except Exception:  # noqa: BLE001 — an unreadable report is no evidence (C3)
             return False, None
         return True, {"kind": run_report.KIND, "report_id": job["report_id"], "version": job.get("version")}
+    from services import run_actions
+    if (step.get("job") or {}).get("kind") == run_actions.JOB_KIND:
+        # Study harness 10a: only a runner tick settles the campus job from its own
+        # row (`run_actions.settle`); a lost one is never reconciled or queued again.
+        return False, None
     if (step.get("job") or {}).get("kind") == "eh_study":
         # Issue 07 B3a (GK B (32) L4): only the run's own Energy Hub study
         # record; never the solve-run branch below.
