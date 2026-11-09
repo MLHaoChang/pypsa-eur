@@ -1051,6 +1051,14 @@ source still stored but changed refuses with `report_version_changed`; a
 source since deleted is served with `source_status` (`version_missing`,
 `figure_missing`, `template_missing`) and a note. Exports from the Reports
 page carry no manifest.
+A summary declaration (AA-05 Y1–Y7; `generate_report`'s `summaries`, the route
+body's `summaries`, stage 7's optional `run_report.start(summaries=...)`) is
+stored on the section as `summarises`. In a strict job,
+`report_job.admitted_facts` then also admits the evidence payload facts of each
+listed section: one level only, and never their prose. The summary's note names
+those sections, and the sealed manifest's `dataset.summaries` records them. An
+id the report does not have refuses with `summary_section_unknown` (400). A
+non-strict job stores the declaration but writes the same output.
 The frontend renders task progress, ordinary resume/cancel requests and safe
 file links from existing `tool_result` frames; no new stream vocabulary or
 provider-specific handlers are introduced.
