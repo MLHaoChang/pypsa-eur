@@ -690,8 +690,9 @@ def _eh_h2_hub(staged: bool) -> dict:
                  "tunable": [f"{c}.{a}" for c, a in tunable]},
                 _rule("h2.electrolyser.utilisation", "h2.electrolyser.utilisation", "within",
                       list(H2_UTILISATION_BAND), severity="warn",
-                      basis="Electrolyser utilisation within the profile band: below it the electrolyser is "
-                            "oversized for the offtake; above it no headroom is left to serve it every hour."),
+                      basis="Electrolyser utilisation within the profile band, a sizing screen, not a design "
+                            "limit: below it the electrolyser looks oversized for the offtake; above it little "
+                            "headroom looks left to serve it every hour."),
                 _rule("h2.ic.counterfactual", "ic.counterfactual", "eq", "established", severity="warn",
                       basis="The investment case compares against an established counterfactual (the grey-H2 "
                             "reference purchase); until then it is not evaluated and never blocks the run."),
