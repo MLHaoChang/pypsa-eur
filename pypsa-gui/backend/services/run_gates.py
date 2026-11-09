@@ -399,6 +399,25 @@ def _kpi_unserved_mwh(env):
     the live results were solved from, and those results match the inputs
     (`solve_matches_inputs`). Energy uses the solve's snapshot weightings."""
     from harness import lost_load_calculations as lost_load
+
+    def read(ctx):
+        if len(ctx.network.investment_periods):
+            return _unserved_by_period(ctx)
+        try:
+            return lost_load.source(ctx, "network")
+        except ValueError as exc:
+            return NoEvidence(str(exc), f"{exc}: unserved energy cannot be read")
+    raw = _own_solve(env, read)
+    if not isinstance(raw, dict):
+        return raw
+    facts, _ = lost_load.calculate(raw, {"profile": lost_load.PROFILE, "entity_id": "network", "metrics": ["lost_load_energy"]})
+    return facts[0]["value"] if facts else None
+
+
+def _own_solve(env, read):
+    """F6: `read(ctx)` under the network guard, on the run's ctx, only when
+    the run's own solve job finished, its capture is applied and the live
+    results carry its exact input identity; else None or no evidence."""
     from harness.durable import network_guard
     if env.ctx is None or env.case is not None:
         return None
@@ -412,19 +431,12 @@ def _kpi_unserved_mwh(env):
     if not exact:
         return NoEvidence("no_capture", "the run's solve recorded no input identity")
 
-    def read():
+    def guarded():
         with network_guard():
             if (getattr(env.ctx.network, "meta", None) or {}).get("assistant_solve_exact_input_fingerprint") != exact:
                 return NoEvidence("other_solve", "the live results are not the run's own solve")
-            if len(env.ctx.network.investment_periods):
-                return _unserved_by_period(env.ctx)
-            try:
-                raw = lost_load.source(env.ctx, "network")
-            except ValueError as exc:
-                return NoEvidence(str(exc), f"{exc}: unserved energy cannot be read")
-        facts, _ = lost_load.calculate(raw, {"profile": lost_load.PROFILE, "entity_id": "network", "metrics": ["lost_load_energy"]})
-        return facts[0]["value"] if facts else None
-    return _on(env.ctx, read)
+            return read(env.ctx)
+    return _on(env.ctx, guarded)
 
 
 def _unserved_by_period(ctx):
@@ -474,6 +486,135 @@ def _unserved_by_period(ctx):
     for r in rows:
         r["worst"] = r is worst
     return Scored(value=worst["unserved_mwh"], rows=rows)
+
+
+# Study harness 11 (design §9.3 "eh_h2_hub"): the H2 hub's offtake and
+# electrolyser facts, read from the run's own solve (`_own_solve`). The
+# offtake is demand, never a lever (§6.0): its shed is the per-Load VoLL
+# slack the solve captured (`solver/assumptions.py` P6(b)).
+H2_CARRIER = "H2"
+ELECTROLYSER_ROLE, ELECTROLYSER_CARRIER = "electrolyser", "electrolysis"
+
+
+def _offtake_load(n):
+    """The hub's one H2 offtake: the Load on a bus whose carrier is H2."""
+    loads = [str(name) for name, bus in n.loads["bus"].items()
+             if bus in n.buses.index and n.buses.at[bus, "carrier"] == H2_CARRIER]
+    if len(loads) != 1:
+        return NoEvidence(f"offtake_loads:{len(loads)}", f"the network has {len(loads)} H2 offtake loads, not one")
+    return loads[0]
+
+
+def _period_rows(n, values):
+    """Per investment period, `values(mask, weights)` (None: not readable)."""
+    index = n.snapshots
+    weights = n.snapshot_weightings["generators"].reindex(index)
+    rows = []
+    for period in index.get_level_values(0).unique():
+        mask = index.get_level_values(0) == period
+        value = values(mask, weights[mask], int(period))
+        if value is None:
+            return None
+        rows.append({"period": int(period), **value})
+    return rows
+
+
+def _offtake_shed_hours(env):
+    """Hours (generator weights) in which the offtake's VoLL slack shed more
+    than `SHED_THRESHOLD_MW`. Multi-period: one row per investment period,
+    the value the worst period's."""
+    import pandas as pd
+
+    from harness import lost_load_calculations as lost_load
+    from harness.calculations import solve_matches_inputs
+
+    def read(ctx):
+        n = ctx.network
+        load = _offtake_load(n)
+        if isinstance(load, NoEvidence):
+            return load
+        if not len(n.investment_periods):
+            try:
+                raw = lost_load.source(ctx, load)
+            except ValueError as exc:
+                return NoEvidence(str(exc), f"{exc}: the offtake's shed cannot be read")
+            facts, _ = lost_load.calculate(raw, {"profile": lost_load.PROFILE, "entity_id": load,
+                                                 "metrics": ["shed_hours"]})
+            return facts[0]["value"] if facts else None
+        frame = (ctx.solver_state.get("last_lost_load") or {}).get("lost_load_t")
+        if not isinstance(frame, pd.DataFrame) or not frame.index.equals(n.snapshots) or load not in frame.columns:
+            return NoEvidence("no_lost_load_capture", "no_lost_load_capture: the offtake's shed cannot be read")
+        if not solve_matches_inputs(ctx):
+            return None
+
+        def hours(mask, w, _period):
+            shed = [float(v) for v in frame.loc[mask, load]]
+            w = [float(v) for v in w]
+            if not all(math.isfinite(v) for v in shed + w) or any(v < 0 for v in w):
+                return None
+            return {"shed_hours": math.fsum(a for a, s in zip(w, shed) if s > lost_load.SHED_THRESHOLD_MW),
+                    "assumed": False}
+        rows = _period_rows(n, hours)
+        if not rows:
+            return None
+        worst = max(rows, key=lambda r: r["shed_hours"])
+        for r in rows:
+            r["worst"] = r is worst
+        return Scored(value=worst["shed_hours"], rows=rows)
+    return _own_solve(env, read)
+
+
+def _electrolysers(n):
+    """The electrolyser fleet: Links whose `eh_role` says so, else whose carrier is electrolysis."""
+    role = n.links["eh_role"] if "eh_role" in n.links.columns else None
+    named = [str(link) for link in n.links.index if role is not None and role.get(link) == ELECTROLYSER_ROLE]
+    return named or [str(link) for link in n.links.index if n.links.at[link, "carrier"] == ELECTROLYSER_CARRIER]
+
+
+def _utilisation(n, links, mask, w):
+    """Σ p0·w over Σ capacity·w (the input side, as `results/asset_economics`
+    measures a Link's capacity factor; the capacity the adequacy engines read,
+    `copt.solved_capacity`: a built Link's p_nom, an extendable one's
+    p_nom_opt); None when the fleet has no capacity."""
+    from services.adequacy.copt import solved_capacity
+    w = [float(v) for v in w]
+    capacity = math.fsum(solved_capacity(n.links.loc[link]) for link in links)
+    if not links or not capacity > 0 or not all(math.isfinite(v) and v >= 0 for v in w):
+        return None
+    p0 = n.links_t.p0.reindex(columns=links)[mask] if mask is not None else n.links_t.p0.reindex(columns=links)
+    energy = math.fsum(a * max(float(v), 0.0) for col in links for a, v in zip(w, p0[col]))
+    total = capacity * math.fsum(w)
+    return energy / total if total > 0 and math.isfinite(energy) else None
+
+
+def _electrolyser_utilisation(env, rule):
+    """The fleet's utilisation (p.u.). Multi-period: one row per investment
+    period over the Links active in it, each with its verdict against the
+    rule's band; the value the period furthest outside it."""
+    lo, hi = rule["value"]
+
+    def read(ctx):
+        n = ctx.network
+        fleet = _electrolysers(n)
+        if not fleet:
+            return NoEvidence("no_electrolyser", "the network has no electrolyser")
+        if not len(n.investment_periods):
+            return _utilisation(n, fleet, None, n.snapshot_weightings["generators"].reindex(n.snapshots))
+
+        def one(mask, w, period):
+            active = n.get_active_assets("Link", period)
+            u = _utilisation(n, [link for link in fleet if active.get(link, False)], mask, w)
+            return None if u is None else {"utilisation": u, "verdict": "pass" if lo <= u <= hi else "fail",
+                                           "assumed": False}
+        rows = _period_rows(n, one)
+        if not rows:
+            return None
+        worst = max(rows, key=lambda r: (max(lo - r["utilisation"], r["utilisation"] - hi, 0.0),
+                                         -r["utilisation"]))
+        for r in rows:
+            r["worst"] = r is worst
+        return Scored(value=worst["utilisation"], rows=rows)
+    return _own_solve(env, read)
 
 
 def _handoff_kpis_read(env):
@@ -573,6 +714,11 @@ FACTS: dict[str, Fact] = {
     "eh.review.blockers": Fact("services.adequacy.eh_review.review_report", "findings", None, _eh_review_blockers),
     "kpi.unserved_mwh": Fact("harness.lost_load_calculations.calculate", "lost_load_energy", "MWh",
                              _kpi_unserved_mwh),
+    # Study harness 11: the H2 hub's offtake and electrolyser.
+    "h2.offtake.shed_hours": Fact("harness.lost_load_calculations.calculate", "shed_hours", "h",
+                                  _offtake_shed_hours),
+    "h2.electrolyser.utilisation": Fact("services.run_gates._utilisation", "utilisation", "p.u.",
+                                        _electrolyser_utilisation, per_rule=True),
     # Study harness 10a: the data-centre run (GK B (36) D1, Q1, Q2).
     "dc.gridcode.published": Fact("services.run_actions.choose", "id", None, _dc_gridcode_published),
     "dc.gridcode.frequency_match": Fact("services.solver.island.campus_f_hz", "f_hz", None,
