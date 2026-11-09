@@ -144,8 +144,8 @@ OK as well.
 
 | Issue | Slice | Status |
 |---|---|---|
-| 01 | Design plan: module, types, the two queries, the slice list, plan GO from GK B | ready-for-agent |
-| 02 | Money path: graph core plus the asset card, Economics costs table and Guided ledger; absorbs TCU-07 | needs-triage, blocked by 01 |
+| 01 | Design plan: module, types, the two queries, the slice list, plan GO from GK B | done (#1302) |
+| 02 | Money path: graph core plus the asset card, Economics costs table and Guided ledger; absorbs TCU-07 | ready-for-agent |
 | 03 | "Why this number": the assistant's read tool over `why(node)` | needs-triage, blocked by 02 |
 | 04 | Runs and results freshness | needs-triage, blocked by 02 |
 | 05 | Studies, reports and the investment case | needs-triage, blocked by 04 |

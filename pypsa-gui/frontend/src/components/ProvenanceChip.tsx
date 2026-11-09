@@ -44,12 +44,13 @@ function num(v: number): string {
 const labelOf = (key: string | null): string | null => (key ? FIELD_LABELS[key] ?? key.replace(/_/g, ' ') : null)
 
 /** Where a person re-prices: the edit form has the compare control beside the cost; the read-out and the table do not. */
-export type StaleWhere = 'card' | 'readout' | 'table'
+export type StaleWhere = 'card' | 'readout' | 'table' | 'ledger'
 
 const REPRICE: Record<StaleWhere, string> = {
   card: 'Compare with references to re-price.',
   readout: 'Edit the asset, then compare with references to re-price.',
   table: 'Open the asset and compare with references to re-price.',
+  ledger: 'Open the option in Expert and compare with references to re-price.',
 }
 
 /**
@@ -57,13 +58,13 @@ const REPRICE: Record<StaleWhere, string> = {
  * never hover-only). Form: "Out of date: <reason>. Priced with <Field> <recorded>, now <current>."
  * Backend reasons are matched, not echoed, so the words stay ours (no keys, no repr quotes).
  */
-export function staleNote(e: ProvenanceEntry | undefined, where: StaleWhere): string | null {
+export function staleNote(e: Pick<ProvenanceEntry, 'stale'> | undefined, where: StaleWhere): string | null {
   const body = staleBody(e, where)
   return body === null ? null : `Out of date: ${body}`
 }
 
 /** `staleNote` without its "Out of date: " lead, for a line that names the asset first. */
-export function staleBody(e: ProvenanceEntry | undefined, where: StaleWhere): string | null {
+export function staleBody(e: Pick<ProvenanceEntry, 'stale'> | undefined, where: StaleWhere): string | null {
   const s = e?.stale
   if (!s) return null
   const field = labelOf(s.field)

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Guided assumptions ledger now shows when a cost priced through a scale input (a PV generator's DC/AC ratio, a Link's output efficiency) is out of date on an option, with the same note as the asset card and the Economics costs table. One provenance graph now answers whether a priced cost is still current for all three.

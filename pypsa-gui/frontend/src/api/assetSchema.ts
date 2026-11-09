@@ -69,8 +69,9 @@ export interface ProvenanceEntry {
   stale?: StaleVerdict
 }
 
-/** `services/asset_schema/provenance.py` `staleness`: `field`/`recorded` are what the price was made
- *  with, `current_field`/`current` what pricing would read now (null: nothing readable). */
+/** The provenance graph's verdict on a priced cost (`services/provenance_graph`, a broken `priced_through` edge):
+ *  `field`/`recorded` are what the price was made with, `current_field`/`current` what pricing would read now
+ *  (null: nothing readable). */
 export interface StaleVerdict {
   field: string | null
   recorded: number | null

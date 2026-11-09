@@ -1010,7 +1010,7 @@ def _current_ledger(study: DecisionStudy):
     return study_ledger.with_study_currency_year(seeded, study.currency_year), False
 
 
-def _ledger_out(study: DecisionStudy, ledger, stored: bool, maturity=None) -> dict:
+def _ledger_out(study: DecisionStudy, ledger, stored: bool, maturity=None, stale=None) -> dict:
     maturity = maturity or study_ledger.maturity_from_ledger(
         ledger, study_ledger.load_provenance(study.intake))
     return {
@@ -1018,6 +1018,9 @@ def _ledger_out(study: DecisionStudy, ledger, stored: bool, maturity=None) -> di
         "stored": stored,
         "ledger": ledger.model_dump(mode="json", by_alias=True),
         "maturity": maturity.model_dump(mode="json", by_alias=True),
+        # provenance-graph 02 (TCU-07): rows whose asset field is out of date on an option fork, as the
+        # asset card says it. Beside the ledger, not on its rows, so a stored ledger and its hash stay as they are.
+        "stale": stale or {},
     }
 
 
@@ -1074,6 +1077,22 @@ def _with_expert_edits(study: DecisionStudy, ledger, project: AuthorizedProject,
     return asset_view.mark_expert_edits(ledger, edits)
 
 
+def _ledger_stale(study: DecisionStudy, ledger, project: AuthorizedProject,
+                  db: DBSession, user: User | None) -> dict[str, list[dict]]:
+    """Per ledger row, each owned fork whose asset field the row compiles to reads out of date (the provenance
+    graph's verdict, the one the fork's asset card shows): `{key: [{option_id, component, name, field, stale}]}`."""
+    from services.study import asset_view
+
+    out: dict[str, list[dict]] = {}
+    for row in _owned_fork_rows(study, project, db, user):
+        snap = _fork_snapshot(row)
+        if snap is None:
+            continue
+        for key, hit in sorted(asset_view.ledger_stale(snap, ledger).items()):
+            out.setdefault(key, []).append({"option_id": snap.option_id or row.name, **hit})
+    return out
+
+
 @router.get("/{study_id}/ledger")
 def get_ledger(study_id: str,
                project: AuthorizedProject = ProjectAccessDep,
@@ -1087,7 +1106,7 @@ def get_ledger(study_id: str,
     maturity = study_ledger.maturity_from_ledger(
         ledger, study_ledger.load_provenance(study.intake))
     return _ledger_out(study, _with_expert_edits(study, ledger, project, db, user), stored,
-                       maturity)
+                       maturity, _ledger_stale(study, ledger, project, db, user))
 
 
 def _ledger_after(study: DecisionStudy, ledger, body: "LedgerPut", changed_by: str | None, now):
@@ -1143,7 +1162,8 @@ def put_ledger(study_id: str, body: LedgerPut,
             "ledger": ledger, "ledger_version": ledger.ledger_version,
             "maturity": maturity, "updated_at": _now()})
         _save(project, updated)
-        return _ledger_out(updated, ledger, True, maturity)
+        return _ledger_out(updated, ledger, True, maturity,
+                           _ledger_stale(updated, ledger, project, db, user))
 
 
 @router.get("/{study_id}/ledger.csv")

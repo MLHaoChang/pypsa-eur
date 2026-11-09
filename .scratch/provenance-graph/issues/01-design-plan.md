@@ -1,6 +1,6 @@
 # Design plan for the provenance graph
 
-Status: ready-for-agent
+Status: done (#1302)
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 

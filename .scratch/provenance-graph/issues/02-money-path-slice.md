@@ -1,6 +1,6 @@
 # Money path: the graph core, the asset card, the Economics table and the Guided ledger
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 

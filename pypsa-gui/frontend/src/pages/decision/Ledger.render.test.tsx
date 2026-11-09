@@ -10,6 +10,7 @@ import LedgerReview from './LedgerReview'
 import TariffStep from './TariffStep'
 import { ledger, library, previewUpload, study } from './__fixtures__/payloads'
 import type { LedgerPayload } from '../../api/decisionStudies'
+import { staleNote } from '../../components/ProvenanceChip'
 import { CHANGED_IN_EXPERT_LABEL, KEY_PARAMETER_LABELS, ROW_MEANING, helpFor } from '../../utils/decisionVocabulary'
 
 afterEach(() => cleanup())
@@ -66,6 +67,23 @@ describe('the assumptions review', () => {
     const r = row('pv_rooftop_eur_per_kw')
     expect(within(r).getByTestId('ledger-unused').textContent).toContain('PV is off')
     expect(within(r).queryByRole('spinbutton')).toBeNull()
+  })
+
+  it('shows the asset card’s out-of-date note on the row its cost compiles from, once (TCU-07)', () => {
+    const verdict = { field: 'dc_ac_ratio', recorded: 1.2, current_field: 'dc_ac_ratio', current: 1.3, reason: 'scale input changed' }
+    const hit = (option_id: string) => ({ option_id, component: 'Generator', name: 'pv', field: 'overnight_cost', stale: verdict })
+    const payload: LedgerPayload = { ...ledger, stale: { pv_rooftop_eur_per_kw: [hit('bess_pv_2h'), hit('bess_pv_4h')] } }
+    render(<LedgerReview payload={payload} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    const notes = within(row('pv_rooftop_eur_per_kw')).getAllByTestId('ledger-stale')
+    expect(notes.map(n => n.textContent)).toEqual([staleNote({ stale: verdict }, 'ledger')])
+    expect(notes[0].textContent).toBe('Out of date: DC/AC ratio changed. Priced with DC/AC ratio 1.2, now 1.3. '
+      + 'Open the option in Expert and compare with references to re-price.')
+    expect(within(row('battery_storage_eur_per_kwh')).queryByTestId('ledger-stale')).toBeNull()
+  })
+
+  it('shows no out-of-date note when the payload carries none', () => {
+    render(<LedgerReview payload={ledger} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    expect(screen.queryByTestId('ledger-stale')).toBeNull()
   })
 
   it('states what the energy price level means', () => {

@@ -20,6 +20,7 @@ import {
 } from '../../utils/decisionVocabulary'
 import { isMoneyUnit, isPvRowUnused, ledgerCurrencyYearLabel, parseNeedsAttention } from './decisionModel'
 import { Button, Card, Chip, Refusal } from './DecisionUi'
+import { staleNote } from '../../components/ProvenanceChip'
 
 export interface LedgerEditOut { key: string; value: number; unit: string; currency_year?: number }
 
@@ -32,10 +33,12 @@ function shown(r: LedgerRow): string {
 
 const RECENTRED = 'range_recentred_on_user_value'
 
-function Row({ r, intake, attention, onSave, onReset, saving, tested }: {
+function Row({ r, intake, attention, stale, onSave, onReset, saving, tested }: {
   r: LedgerRow
   intake: StudyIntake
   attention: string | null
+  /** The out-of-date notes of the asset field this row compiles to, one per distinct note (TCU-07). */
+  stale: string[]
   tested: TornadoRow | null
   onSave: (e: LedgerEditOut[]) => void
   onReset: (keys: string[]) => void
@@ -73,6 +76,10 @@ function Row({ r, intake, attention, onSave, onReset, saving, tested }: {
           </span>
         )}
       </div>
+      {/* provenance-graph 02 (TCU-07): the note the option's asset card shows for this row's cost. */}
+      {stale.map(note => (
+        <p key={note} data-testid="ledger-stale" className="text-[11.5px] text-warn">{note}</p>
+      ))}
       {r.technical_name && <span className="font-mono text-[10px] text-muted">{r.technical_name}</span>}
       {meaning && <p className="text-[11.5px] text-muted">{meaning}</p>}
       {unused ? (
@@ -118,6 +125,8 @@ function Row({ r, intake, attention, onSave, onReset, saving, tested }: {
   )
 }
 
+const NO_NOTES: string[] = []
+
 function shownRange(r: LedgerRow, low: number, high: number): string {
   const f = (v: number) => (PERCENT(r) ? `${Number((v * 100).toFixed(2))} %` : `${Number(v.toFixed(4))} ${r.unit}`)
   return `${f(low)} to ${f(high)}`
@@ -141,6 +150,14 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
     for (const r of rows) if (r.status === 'needs_attention' && !m.has(r.key)) m.set(r.key, 'needs_attention')
     return m
   }, [payload, rows])
+  const staleNotes = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const [key, hits] of Object.entries(payload.stale ?? {})) {
+      const notes = hits.map(h => staleNote(h, 'ledger')).filter((n): n is string => n !== null)
+      if (notes.length) m.set(key, [...new Set(notes)])
+    }
+    return m
+  }, [payload])
   const keyRows = rows.filter(r => r.sensitivity_flag)
   const others = rows.filter(r => !r.sensitivity_flag)
   const changed = others.filter(r => r.status !== 'default' || attention.has(r.key))
@@ -148,6 +165,7 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
   const keyCount = keyRows.length
   const rowOf = (r: LedgerRow) => (
     <Row key={r.key} r={r} intake={intake} attention={attention.get(r.key) ?? null}
+      stale={staleNotes.get(r.key) ?? NO_NOTES}
       onSave={onSave} onReset={onReset} saving={saving}
       tested={tested.find(t => t.key === r.key) ?? null} />
   )
