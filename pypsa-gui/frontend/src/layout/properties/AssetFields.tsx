@@ -5,7 +5,7 @@
 // a battery's lifetime and fixed O&M) are shown read-only, never typed.
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
-import { ProvenanceChip } from '../../components/ProvenanceChip'
+import { ProvenanceChip, staleNote } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
 import { ReferenceApplyDrawer } from '../../pages/results/investment/ReferenceApplyDrawer'
 import { derivedStored, displayValue, isRevealed, tidy, unitLabel, visibleUnit } from '../../utils/assetForm'
@@ -54,7 +54,8 @@ export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record
   const out: ExpandedItem[] = []
   const push = (f: AssetFieldSpec, item: ExpandedItem) => {
     const badge = chipOf(stamps, f.key)
-    out.push(badge ? { ...item, badge } : item)
+    const note = staleNote(stamps?.[f.key], 'readout')
+    out.push(badge ? { ...item, badge, ...(note ? { note } : {}) } : item)
   }
   for (const f of schemaFields(schema)) {
     if (f.group === 'identity' || hidden.has(f.key) || !isRevealed(f, fs)) continue
@@ -346,6 +347,10 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                 ) : MONEY_FIELDS.has(f.key) && moneyYear(f.key, provenance) && (
                   <div className="col-span-2 -mt-0.5 text-[9px] text-muted" data-testid={`asset-money-${f.key}`}>
                     In {moneyYear(f.key, provenance)}</div>
+                )}
+                {staleNote(provenance?.[f.key], 'card') && (
+                  <div className="col-span-2 -mt-0.5 text-[9px] text-muted" data-testid={`asset-stale-${f.key}`}>
+                    {staleNote(provenance?.[f.key], 'card')}</div>
                 )}
                 {f.key === 'lifetime' && <LifetimeInherit fs={fs} set={set} />}
                 {f.key === 'i_start_pu' && <StartMultipleDefault fs={fs} />}

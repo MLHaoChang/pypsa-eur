@@ -456,7 +456,9 @@ export function ConfirmationCard() {
       ) : (
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
-            {pending.external ? shortMcpToolName(pending.tool_name) : guidedCardSummary(pending.tool_name, pending.args)}
+            {/* Study harness 10a (UX (14)): a runner-issued native card says what it runs, not "The assistant wants". */}
+            {(edit?.kind === 'native' && edit.says) || (pending.external
+              ? shortMcpToolName(pending.tool_name) : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
           {Object.keys(pending.args ?? {}).length > 0 && (
             <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">

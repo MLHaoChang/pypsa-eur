@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The assistant's hold on a job call whose outcome is unknown now reaches a second app replica and survives a restart. The owner renews a lease on the hold record; another process holds the call until that lease lapses, then clears it only when the work died with its owner or its queued job has ended.

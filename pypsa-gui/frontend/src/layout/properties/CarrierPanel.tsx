@@ -94,7 +94,7 @@ export default function CarrierPanel({ name }: { name: string }) {
         <Row label="Unit" value={carrier.unit} tip={fieldHelp(schema, 'unit')} />
         {/* The schema's non-identity fields (the CO₂ intensity), with their provenance chips. */}
         {assetReadoutItems(schema, asset, undefined, provenance).map(i => (
-          <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} />
+          <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
         ))}
         <button onClick={startEdit}
           className="w-full mt-2 py-1.5 border border-border rounded text-xs text-muted hover:border-accent hover:text-accent transition-colors flex items-center justify-center gap-1.5">
