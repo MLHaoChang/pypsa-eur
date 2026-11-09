@@ -21,8 +21,8 @@ Refusals (`error_kind`): a target class the references do not price
 (`currency_mismatch`, nothing is converted), and a confirmation the plan needs and
 was not given (`reference_confirmation_needed`, naming each one):
 
-- `dc_ac`: an AC-output PV price on a generator whose capacity basis is DC or not
-  declared;
+- `dc_ac`: an AC-output PV price: the user confirms the generator's Capacity is its AC
+  rating, not its MWp (nothing enforces it on a hand-built network);
 - `grid_connection`: a reference that already includes grid connection, on a
   project that prices its connection (a PoC Link cost or a connection fee);
 - `money_year`: the reference's money year is not the money the project reads it in:
@@ -213,8 +213,9 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
     needs: list[dict] = []
     if ref.capacity_basis_code == "output_electric_ac":
         needs.append({"confirmation": "dc_ac", "text":
-                      "This PV cost is per MW of AC output. This generator's capacity isn't marked as AC or DC; "
-                      "if it is the DC module rating, the cost per MW is overstated by the DC/AC ratio. "
+                      "This PV cost is per MW of AC output, and Capacity is meant as the AC rating. Check that this "
+                      "plant's Capacity is its AC rating, not its DC module rating (MWp): if it is the DC rating, "
+                      "the cost per MW is overstated by the DC/AC ratio. "
                       f"{LEFT_UNCONFIRMED}"})
     why = _connection_priced(n, commercial) if ref.includes_grid_connection is True else None
     if why:
