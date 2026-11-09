@@ -1,6 +1,6 @@
 # Chat reading of the plan-vs-operation gap
 
-Status: ready-for-agent (owner decision DC25-POINTER-1: UI pointer, not a read tool)
+Status: done
 Type: task
 Blocked by: 07
 Size: S
@@ -16,3 +16,9 @@ Decide (owner) between a typed read tool and a UI pointer only (as DC20-POINTER-
 ## Done when
 
 - The route is served by a tool, or carries a `ui-pointer` declaration naming an owner decision, and the `held-by-spec` declaration in `pypsa-gui/backend/smoke/assistant_route_parity_declarations.d/claude-dc07-s4-gap-table.json` is gone.
+
+## Comments
+
+### 2026-11-08: done
+
+Owner (card, DC25-POINTER-1): "UI pointer", as DC20-POINTER-1. The held-by-spec declaration is replaced by a ui-pointer one in `claude-dc25-pointer.json`; the `dc_operational_gap` row in `services/not_via_chat.py` stays as the pointer chat reads (Results › Summary, Plan vs operation card). PR: #1297.
