@@ -3133,8 +3133,20 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str, *, allow_netwo
     nc_path = src / "network.nc"
     with ctx.mutation_lock:
         if nc_path.exists() or not allow_networkless:
+            # Into a fresh network, never the one the context holds: PyPSA's
+            # import skips every component a populated network already has
+            # (keeping its old static row, `p_nom_opt` included) while it
+            # takes the new series. A queued solve's write-back re-hydrates the
+            # RESIDENT context, which then read the solve's dispatch against
+            # its pre-solve capacities. Built in full first, then swapped
+            # (as `load_project` and `reset_network` do): a failed import
+            # leaves the context's network as it was.
+            import pypsa
+
+            fresh = pypsa.Network()
             with PyPSAService.get_netcdf_io_lock():
-                PyPSAService.import_network_from_netcdf(ctx.network, nc_path)
+                PyPSAService.import_network_from_netcdf(fresh, nc_path)
+                ctx.network = fresh
         ctx.loaded_project = name
 
     # User-uploaded series for THIS project, into THIS context's store.
