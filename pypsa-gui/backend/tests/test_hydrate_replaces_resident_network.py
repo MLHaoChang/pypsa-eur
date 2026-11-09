@@ -13,6 +13,7 @@ import path resets the network first (`load_project`, `network_undo`).
 
 Written before the fix and proven red against it.
 """
+
 from __future__ import annotations
 
 import logging
@@ -30,7 +31,14 @@ def _network(*, extra: bool = False) -> pypsa.Network:
     n.set_snapshots(pd.date_range("2025-01-01", periods=3, freq="h"))
     n.add("Bus", "b")
     n.add("Load", "d", bus="b", p_set=[5.0, 7.0, 6.0])
-    n.add("Generator", "g", bus="b", p_nom_extendable=True, capital_cost=1.0, marginal_cost=1.0)
+    n.add(
+        "Generator",
+        "g",
+        bus="b",
+        p_nom_extendable=True,
+        capital_cost=1.0,
+        marginal_cost=1.0,
+    )
     if extra:
         n.add("Generator", "only_in_memory", bus="b", p_nom=1.0)
     return n
@@ -58,7 +66,8 @@ def test_a_resident_context_takes_the_saved_solves_static_outputs(tmp_projects_d
 
     n = resident.network
     assert float(n.generators.at["g", "p_nom_opt"]) == 7.0, (
-        "the resident kept its pre-solve p_nom_opt next to the solve's dispatch")
+        "the resident kept its pre-solve p_nom_opt next to the solve's dispatch"
+    )
     assert float(n.generators_t.p["g"].max()) == 7.0
 
 
@@ -71,11 +80,14 @@ def test_a_resident_context_holds_only_the_saved_components(tmp_projects_dir):
     assert list(resident.network.generators.index) == ["g"]
 
 
-def test_a_failed_import_leaves_the_residents_network_as_it_was(tmp_projects_dir, monkeypatch):
+def test_a_failed_import_leaves_the_residents_network_as_it_was(
+    tmp_projects_dir, monkeypatch
+):
     """GK B (1): the new network is built in full before the swap."""
     import pytest
 
     from services.pypsa_service import PyPSAService
+
     src = _solved_on_disk(tmp_projects_dir)
     before = _network()
     resident = ProjectContext(network=before)
@@ -83,7 +95,10 @@ def test_a_failed_import_leaves_the_residents_network_as_it_was(tmp_projects_dir
     def broken(n, path):
         n.add("Bus", "half_imported")
         raise OSError("disk went away")
-    monkeypatch.setattr(PyPSAService, "import_network_from_netcdf", staticmethod(broken))
+
+    monkeypatch.setattr(
+        PyPSAService, "import_network_from_netcdf", staticmethod(broken)
+    )
     with pytest.raises(OSError):
         _hydrate_context_from_disk(resident, src, "Hub")
     assert resident.network is before
@@ -108,7 +123,8 @@ def test_the_name_and_the_series_store_survive_the_swap(tmp_projects_dir):
 
 
 def test_a_captured_queued_solve_on_the_resident_project_shows_its_solved_capacity(
-        client, install_network, tmp_projects_dir, session_ctx, monkeypatch):
+    client, install_network, tmp_projects_dir, session_ctx, monkeypatch
+):
     """GK B (4), end to end: the open project's queued solve is captured (as
     an envelope-admitted run's is, HH-10), solved apart and written back;
     then its live network and the asset economics view read the solve's
@@ -118,8 +134,12 @@ def test_a_captured_queued_solve_on_the_resident_project_shows_its_solved_capaci
     from tests.test_solve_queue import _save_project, _wait_for_terminal
 
     n = build_network()
-    n.generators.at["gas", "p_nom_extendable"] = True  # 100 MW of load less 30 MW of solar
-    n.generators.at["gas", "p_nom_max"] = 500.0  # a finite LP bound (the solve preflight refuses inf)
+    n.generators.at["gas", "p_nom_extendable"] = (
+        True  # 100 MW of load less 30 MW of solar
+    )
+    n.generators.at["gas", "p_nom_max"] = (
+        500.0  # a finite LP bound (the solve preflight refuses inf)
+    )
     install_network(n, name="P1")
     _save_project(client, "P1")
     resident = session_ctx(client)
@@ -128,7 +148,9 @@ def test_a_captured_queued_solve_on_the_resident_project_shows_its_solved_capaci
     monkeypatch.setattr(solve_capture, "request", lambda: {"ctx": resident})
     job = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
     done = _wait_for_terminal(job["id"])
-    assert done["status"] == "completed" and done["capture"]["applied"] is True, done.get("capture")
+    assert done["status"] == "completed" and done["capture"]["applied"] is True, (
+        done.get("capture")
+    )
 
     live = session_ctx(client)
     assert live is resident
