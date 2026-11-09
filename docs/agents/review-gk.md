@@ -74,6 +74,16 @@ A "no conversion" unit test uses real rescaled units (GW for MW, kt for t), neve
 
 A declared per-metric basis table ("none" vs a column) is checked both ways: a "none" claim must show the value is the same under every column (#1265 F1).
 
+A test module that imports another module's pack-copy helper (`_copy_with`) also needs that module's cache-clear fixture: an autouse fixture applies only in its own module (#1281: `loader._cached` leaked into test_library_reference_apply).
+
+A staleness or "unchanged" check also covers the legacy writers that recorded no input, including Library reference applies (status customised + approved_by), not only pack prices (#1281 T5-3).
+
+A batch of mutants that runs whole suites can exceed the background limit: run each surviving or slow mutant against its targeted test with -x and a timeout (#1255).
+
+A broken-dependency test builds its inputs before injecting the fault; otherwise the fixture raises and the code under test never runs (#1290 F1, GK A (19)).
+
+A "never swallowed" test injects the module's own error class (e.g. `DefaultsPackError`) as well as a foreign one: a narrow `except` survives a RuntimeError-only test (#1290 F2, GK A (19)).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
@@ -166,3 +176,6 @@ A declared per-metric basis table ("none" vs a column) is checked both ways: a "
 - An absent intake digest refuses; it never reads as "no drift" (SH-07 B3b).
 - A goal from template data counts only when the card shows its value, unit and source. A code default never counts (SH-07 B3b).
 - Before accepting a rotation notice, verify the new id against docs/agents/coordinator.md or the outgoing coordinator (a wrong id named UX (12), 2026-11-07).
+- A queued job's change-log entry is bound to the job's own org. A key with no org logs nothing, never the foreground's (#1286, GK B (37)).
+- A run's native write action shows every frozen setting its digest binds on its own card. A deny stops the step; it is not re-carded at once (#1283, GK B (37)).
+- A model draft from a human route is never charged to a run's budget and never takes the runner's lease (SH-07c Q1, owner decision SH07C-DRAFT-1).

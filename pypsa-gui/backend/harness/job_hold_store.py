@@ -11,16 +11,23 @@ failure; the caller decides what a failure means (a failed write leaves the
 hold on its chat only, a failed read denies: N4, GK B (35) H4/H6).
 
 `owner_replica_id` names the process that holds the call's evidence (the
-worker future or solve thread). `lease_until` stays NULL in S1: the
-owner-liveness lease that lets another replica or a restart read a record is
-slice S2 (GK B (35) H1-H3).
+worker future or solve thread). `lease_until` is that owner's liveness lease
+(slice S2, GK B (35) H1-H3): written at open, renewed by the owner only
+(`renew`, never an upsert: K4) and compared on every clear of another owner's
+record (`delete_if`), so a renewal that lands first wins (H2). Rows written by
+an S1 replica carry NULL.
 """
 
 from __future__ import annotations
 
+import logging
 import math
 import uuid
 from dataclasses import dataclass
+from datetime import UTC
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -33,6 +40,8 @@ class Record:
     opened_at: float
     opened_by: str | None
     owner_replica_id: str
+    project_id: str = ""
+    lease_until: float | None = None
 
 
 class MalformedRecord(ValueError):
@@ -56,6 +65,7 @@ def write(
     opened_at: float,
     opened_by: str | None,
     owner_replica_id: str,
+    lease_until: float,
 ) -> None:
     from db.models import AssistantJobHold
 
@@ -71,7 +81,7 @@ def write(
                 opened_at=float(opened_at),
                 opened_by_user_id=uuid.UUID(str(opened_by)) if opened_by else None,
                 owner_replica_id=owner_replica_id,
-                lease_until=None,
+                lease_until=float(lease_until),
             )
         )
         db.commit()
@@ -96,6 +106,123 @@ def delete(record_id: str) -> None:
         db.commit()
 
 
+def renew(record_id: str, owner_replica_id: str, lease_until: float) -> bool:
+    """Extend the owner's own lease. Never re-creates a cleared record (K4):
+    False when no row of this id and owner is left."""
+    from db.models import AssistantJobHold
+
+    with _session() as db:
+        count = (
+            db.query(AssistantJobHold)
+            .filter(
+                AssistantJobHold.id == record_id,
+                AssistantJobHold.owner_replica_id == owner_replica_id,
+            )
+            .update({AssistantJobHold.lease_until: float(lease_until)})
+        )
+        db.commit()
+        return count == 1
+
+
+def delete_if(record_id: str, owner_replica_id: str, lease_until: float | None) -> bool:
+    """Delete the record only while it still has this owner and this lease
+    (H2): a renewal that landed after the read leaves it. True when deleted."""
+    from db.models import AssistantJobHold
+
+    lease = (
+        AssistantJobHold.lease_until.is_(None)
+        if lease_until is None
+        else AssistantJobHold.lease_until == float(lease_until)
+    )
+    with _session() as db:
+        count = (
+            db.query(AssistantJobHold)
+            .filter(
+                AssistantJobHold.id == record_id,
+                AssistantJobHold.owner_replica_id == owner_replica_id,
+                lease,
+            )
+            .delete()
+        )
+        db.commit()
+        return count == 1
+
+
+def get(record_id: str) -> Record | None:
+    from db.models import AssistantJobHold
+
+    with _session() as db:
+        row = db.get(AssistantJobHold, record_id)
+        return None if row is None else _record(row)
+
+
+def foreign(owner_replica_id: str) -> list[Record]:
+    """Every readable record another process owns, on any project (the
+    renewer's sweep). A malformed row is left out, so it stays (a read of it
+    denies) and the other rows are still swept. Raises when the table cannot
+    be read."""
+    from db.models import AssistantJobHold
+
+    with _session() as db:
+        rows = (
+            db.query(AssistantJobHold)
+            .filter(AssistantJobHold.owner_replica_id != owner_replica_id)
+            .order_by(AssistantJobHold.opened_at, AssistantJobHold.id)
+            .all()
+        )
+        records = []
+        for row in rows:
+            try:
+                records.append(_record(row))
+            except MalformedRecord as exc:
+                logger.warning("job hold sweep left a malformed row: %s", exc)
+        return records
+
+
+def solve_job_status(job_id: str) -> str | None:
+    """The `solve_jobs` row's status, read strictly: None when no row has this
+    id (or the id is no solve-queue id), raises when the table cannot be read."""
+    from db.models import SolveJobRow
+
+    try:
+        key = uuid.UUID(str(job_id))
+    except ValueError:
+        return None
+    with _session() as db:
+        row = db.get(SolveJobRow, key)
+        return None if row is None else row.status
+
+
+def live_solve_jobs(project_id: str, kinds: tuple, since: float) -> int:
+    """How many of the project's `solve_jobs` rows of these kinds (NULL reads
+    `solve`) are not terminal and were enqueued at or after `since` (wall time).
+    Raises when a table cannot be read."""
+    from datetime import datetime
+
+    from sqlalchemy import or_
+
+    from db.models import Project, SolveJobRow
+    from services.solve_queue import _TERMINAL
+
+    with _session() as db:
+        project = db.get(Project, uuid.UUID(str(project_id)))
+        if project is None:
+            return 0
+        kind = SolveJobRow.kind.in_(kinds)
+        if "solve" in kinds:
+            kind = or_(kind, SolveJobRow.kind.is_(None))
+        return (
+            db.query(SolveJobRow)
+            .filter(
+                SolveJobRow.project_key == f"{project.org_id}:{project.id}",
+                SolveJobRow.status.notin_(_TERMINAL),
+                SolveJobRow.enqueued_at >= datetime.fromtimestamp(since, tz=UTC),
+                kind,
+            )
+            .count()
+        )
+
+
 def exists(record_id: str) -> bool:
     from db.models import AssistantJobHold
 
@@ -111,6 +238,11 @@ def _record(row) -> Record:
         raise MalformedRecord(f"hold record {row.id}: job_id")
     if not isinstance(row.opened_at, (int, float)) or not math.isfinite(row.opened_at):
         raise MalformedRecord(f"hold record {row.id}: opened_at")
+    lease = row.lease_until
+    if lease is not None and not (
+        isinstance(lease, (int, float)) and math.isfinite(lease)
+    ):
+        raise MalformedRecord(f"hold record {row.id}: lease_until")
     return Record(
         id=row.id,
         tool=row.tool,
@@ -120,6 +252,8 @@ def _record(row) -> Record:
         opened_at=float(row.opened_at),
         opened_by=str(row.opened_by_user_id) if row.opened_by_user_id else None,
         owner_replica_id=row.owner_replica_id,
+        project_id=str(row.project_id),
+        lease_until=None if lease is None else float(lease),
     )
 
 

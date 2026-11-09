@@ -46,6 +46,11 @@ export const FACT_WORDS: Record<string, string> = {
   'report.status': 'The report is saved',
   'report.unsupported_listed': 'The report names every chapter it cannot back up',
   'handoff.kpis_read': 'Every headline result was read back from the model',
+  // Study harness 10a: the data-centre run.
+  'dc.gridcode.published': 'A grid-code profile is published for the run',
+  'dc.gridcode.frequency_match': 'The campus runs at the grid frequency you gave',
+  'dc.gridcode.unchanged': 'The grid-code profile did not change during the run',
+  'dc.campus.study': 'The campus study finished under the published grid code',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,

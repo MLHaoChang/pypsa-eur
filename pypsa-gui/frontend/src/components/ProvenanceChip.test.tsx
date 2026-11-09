@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ProvenanceChip, provenanceTitle } from './ProvenanceChip'
+import { ProvenanceChip, provenanceTitle, staleNote } from './ProvenanceChip'
 import { assetProvenanceKey, useAssetProvenance } from '../hooks/useAssetProvenance'
 import { useUIStore } from '../store/uiStore'
 import { invalidateAssetQueries } from '../utils/assetWrite'
@@ -71,5 +71,42 @@ describe('useAssetProvenance', () => {
     render(<QueryClientProvider client={new QueryClient()}><Probe cls="SubNetwork" name="b1" /></QueryClientProvider>)
     expect(provenance).not.toHaveBeenCalled()
     expect(screen.getByTestId('out').textContent).toBe('')
+  })
+})
+
+describe('out of date (TCU-05)', () => {
+  const stale = (s: Partial<NonNullable<ProvenanceEntry['stale']>>): ProvenanceEntry => ({
+    ...DEFAULT, status: 'customised', stale: { field: 'dc_ac_ratio', recorded: 1.3, current_field: 'dc_ac_ratio',
+      current: 1.5, reason: 'scale input changed', ...s } })
+
+  it('adds an out-of-date chip beside the status chip, never the word stale', () => {
+    render(<ProvenanceChip entry={stale({})} testId="c" />)
+    expect(screen.getByTestId('c').textContent).toContain('Customised')
+    expect(screen.getByTestId('c-stale').textContent).toBe('out of date')
+    expect(document.body.textContent).not.toMatch(/stale/i)
+  })
+
+  it('shows no chip for a fresh cost', () => {
+    render(<ProvenanceChip entry={DEFAULT} testId="c" />)
+    expect(screen.queryByTestId('c-stale')).toBeNull()
+  })
+
+  it('says what changed in the panel words', () => {
+    expect(staleNote(stale({}), 'card')).toBe(
+      'Out of date: DC/AC ratio changed. Priced with DC/AC ratio 1.3, now 1.5. Compare with references to re-price.')
+    expect(staleNote(stale({ field: 'efficiency', current_field: 'efficiency', recorded: 0.9, current: 0.8 }), 'table'))
+      .toBe('Out of date: Efficiency changed. Priced with Efficiency 0.9, now 0.8. '
+        + 'Open the asset and compare with references to re-price.')
+  })
+
+  it('names a field that is gone, an unrecorded input and a malformed record', () => {
+    expect(staleNote(stale({ current: null, current_field: null, reason: 'cannot be priced now: x' }), 'card'))
+      .toContain('Out of date: DC/AC ratio is no longer available. Priced with DC/AC ratio 1.3.')
+    const unrecorded = staleNote(stale({ field: null, recorded: null, current_field: null, current: null,
+      reason: 'scale input not recorded (the applied reference is from another release)' }), 'card')
+    expect(unrecorded).toContain('the input it was priced with was not recorded (the applied reference is from another release)')
+    expect(staleNote(stale({ field: null, recorded: null, current_field: null, current: null,
+      reason: 'scale input record malformed' }), 'card')).toContain('its pricing record is unreadable')
+    expect(staleNote(DEFAULT, 'card')).toBeNull()
   })
 })
