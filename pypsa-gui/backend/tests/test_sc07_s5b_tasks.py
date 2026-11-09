@@ -236,7 +236,7 @@ def test_only_prepare_steps_name_previews_to_cancel():
 # ── UX (14) ask 2: the edit's receipt rows in the task view ────────────────
 
 
-def _edited(receipt, next_tool="site_scene_apply"):
+def _edited(receipt, next_tool="site_scene_apply", next_status="failed"):
     return {
         "task_id": "t",
         "title": "Edit",
@@ -252,7 +252,7 @@ def _edited(receipt, next_tool="site_scene_apply"):
             {
                 "id": "x",
                 "tool": next_tool,
-                "status": "failed",
+                "status": next_status,
                 "args": {},
                 "result": {"_edit_receipt": receipt},
             },
@@ -285,8 +285,15 @@ def test_a_large_receipt_leaves_its_rows_out_and_keeps_its_words():
     assert "change_edits" not in view
 
 
-@pytest.mark.parametrize("next_tool", ["update_component", "run_simulation"])
-def test_rows_ride_only_on_a_task_stopped_at_a_scene_step(next_tool):
+@pytest.mark.parametrize(
+    "stop",
+    [
+        ("update_component", "failed"),
+        ("run_simulation", "failed"),
+        ("site_scene_apply", "pending"),  # a denied card: no partial line
+    ],
+)
+def test_rows_ride_only_on_a_task_stopped_at_a_scene_step(stop):
     """Only the partial-mapping line reads the rows, so every other `_task` a tool result carries
     stays as before: the rows would push a result past the 4000-char cap into a spill (oj07)."""
     row = {
@@ -295,6 +302,11 @@ def test_rows_ride_only_on_a_task_stopped_at_a_scene_step(next_tool):
         "field": "p_set",
         "label": "Active power",
     }
-    view = tasks._view(_edited({"says": "it p_set 3 → 2 MW", "rows": [row]}, next_tool))
+    view = tasks._view(_edited({"says": "it p_set 3 → 2 MW", "rows": [row]}, *stop))
     assert view["changes"] == ["it p_set 3 → 2 MW"]
     assert "change_edits" not in view
+
+
+def test_a_scene_stop_with_no_edit_carries_no_rows():
+    view = tasks._view(_edited({"rows": []}, "site_scene_apply", "uncertain"))
+    assert "changes" not in view and "change_edits" not in view
