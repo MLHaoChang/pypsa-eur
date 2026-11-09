@@ -77,6 +77,10 @@ def publish_sealed_report(
     # version's dataset (and its dataset_sha256) is unchanged.
     if doc.revised_from is not None:
         dataset["revised_from"] = doc.revised_from.model_dump(mode="json")
+    # AA-05 Y5: a declared summary names the sections its numbers may come from.
+    summaries = {s.section_id: list(s.summarises) for s in doc.sections if s.summarises}
+    if summaries:
+        dataset["summaries"] = summaries
     withheld = [
         {"section_id": s.section_id, "placeholders": n}
         for s in doc.sections

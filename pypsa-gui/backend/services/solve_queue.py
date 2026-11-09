@@ -143,6 +143,22 @@ def _capture_public(record: dict) -> dict:
     return solve_capture.public(record)
 
 
+
+@contextlib.contextmanager
+def _owning_org(project_key: str | None):
+    """Bind the change log to the org a job was queued for, never the
+    foreground's (the dispatcher thread has no request, so the active context
+    is the process foreground). Every route queues an `org:uuid` key, local
+    mode included (its one org). A key with no org (a hand-made job's name, or
+    None) has no owner to log under, so its writes log nothing (SQ-FG)."""
+    from services import change_log_service
+
+    org, _, rest = (project_key or "").partition(":")
+    with (change_log_service.owning_org(org) if org and rest
+          else change_log_service.suppressed()):
+        yield
+
+
 @dataclass
 class SolveJob:
     """One queued solve of a single saved project."""
@@ -1609,22 +1625,24 @@ class SolveQueue:
                 #    foreground). network.nc carries the LOPF dispatch;
                 #    results_state.pkl carries AC-PF + lost-load (built from
                 #    ctx.solver_state). expect=project_id arms the identity guard.
-                if manifest is not None:
-                    self._apply_capture(job, ctx, config, manifest, final_status)
-                elif final_status == "completed":
-                    _save_context(
-                        ctx, project_id, expect=project_id,
-                        # THIS job's config — the snapshot it actually solved
-                        # with — so `solver_config.json` describes the solve
-                        # that `network.nc` holds. Without it the two files
-                        # disagreed whenever the context's config had moved on.
-                        solver_config_override=config,
-                        # The solved project's own series; see `may_rewrite_user_ts`.
-                        persist_user_ts=may_rewrite_user_ts(ctx),
-                        storage_dir=(
-                            pathlib.Path(job.storage_dir) if job.storage_dir else None
-                        ),
-                    )
+                #    The save is logged under THIS job's org (`_owning_org`).
+                with _owning_org(job.project_key):
+                    if manifest is not None:
+                        self._apply_capture(job, ctx, config, manifest, final_status)
+                    elif final_status == "completed":
+                        _save_context(
+                            ctx, project_id, expect=project_id,
+                            # THIS job's config — the snapshot it actually solved
+                            # with — so `solver_config.json` describes the solve
+                            # that `network.nc` holds. Without it the two files
+                            # disagreed whenever the context's config had moved on.
+                            solver_config_override=config,
+                            # The solved project's own series; see `may_rewrite_user_ts`.
+                            persist_user_ts=may_rewrite_user_ts(ctx),
+                            storage_dir=(
+                                pathlib.Path(job.storage_dir) if job.storage_dir else None
+                            ),
+                        )
         except Exception as exc:  # noqa: BLE001 — record + continue draining
             final_status = "failed"
             error = f"{type(exc).__name__}: {exc}"

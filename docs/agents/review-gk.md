@@ -74,6 +74,12 @@ A "no conversion" unit test uses real rescaled units (GW for MW, kt for t), neve
 
 A declared per-metric basis table ("none" vs a column) is checked both ways: a "none" claim must show the value is the same under every column (#1265 F1).
 
+A test module that imports another module's pack-copy helper (`_copy_with`) also needs that module's cache-clear fixture: an autouse fixture applies only in its own module (#1281: `loader._cached` leaked into test_library_reference_apply).
+
+A staleness or "unchanged" check also covers the legacy writers that recorded no input, including Library reference applies (status customised + approved_by), not only pack prices (#1281 T5-3).
+
+A batch of mutants that runs whole suites can exceed the background limit: run each surviving or slow mutant against its targeted test with -x and a timeout (#1255).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).

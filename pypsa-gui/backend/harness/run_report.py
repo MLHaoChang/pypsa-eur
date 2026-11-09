@@ -71,9 +71,12 @@ def harness_source(path, task: dict, profile: dict) -> dict:
     }
 
 
-def start(path, ctx, step, *, instance) -> str:
+def start(
+    path, ctx, step, *, instance, summaries: dict[str, list[str]] | None = None
+) -> str:
     """Start the run's report job (the runner, on the run's bound context).
-    Returns "report" when it started, else the refusal reason."""
+    Returns "report" when it started, else the refusal reason. `summaries`
+    (AA-05 Y1/Y2) is a caller's summary declaration; the runner passes none."""
     from fastapi import HTTPException
 
     from harness import runner
@@ -122,6 +125,7 @@ def start(path, ctx, step, *, instance) -> str:
             provider=provider,
             language=LANGUAGE,
             strict=True,
+            summaries=summaries,
             run_binding=(path, instance),
         )
     except HTTPException as exc:

@@ -75,6 +75,31 @@ class ReportJobInFlight(RuntimeError):
     """A report job is already running (→ 409 `report_job_in_flight`)."""
 
 
+class SummarySectionUnknown(ValueError):
+    """A summary declaration names a section the document does not have
+    (→ 400 `summary_section_unknown`, AA-05 Y1); never skipped."""
+
+
+def declare_summaries(document: ReportDocument,
+                      summaries: dict[str, list[str]] | None) -> ReportDocument:
+    """The document with each summary declaration applied (AA-05 Y1), then
+    every stored declaration checked: a declared or listed id the document
+    does not have raises `SummarySectionUnknown`. None keeps the stored ones."""
+    if summaries:
+        sections = [s.model_copy(update={"summarises": list(dict.fromkeys(summaries[s.section_id]))})
+                    if s.section_id in summaries else s for s in document.sections]
+        document = document.model_copy(update={"sections": sections})
+    known = {s.section_id for s in document.sections}
+    for sid in summaries or {}:
+        if sid not in known:
+            raise SummarySectionUnknown(sid)
+    for section in document.sections:
+        for listed in section.summarises or ():
+            if listed not in known:
+                raise SummarySectionUnknown(listed)
+    return document
+
+
 @dataclass
 class ReportJob:
     project_name: str
@@ -142,6 +167,7 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
                        template_file_id: str | None = None,
                        meta_updates: dict[str, Any] | None = None,
                        strict: bool = False,
+                       summaries: dict[str, list[str]] | None = None,
                        run_binding: tuple[pathlib.Path, str] | None = None) -> ReportJob:
     """
     Everything `run_report_job` needs, validated, with the record it will
@@ -160,6 +186,7 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
             report_id=report_id, figure_pngs=figure_pngs)
         if template_file_id is not None:
             document = document.model_copy(update={"template_file_id": template_file_id})
+    document = declare_summaries(document, summaries)
     known = {s.section_id for s in document.sections}
     if regenerate_section is not None:
         wanted = [regenerate_section]
@@ -321,14 +348,30 @@ WITHHELD_NOTE = ("{n} statement(s) withheld: each quoted a number that is not am
 
 def admitted_facts(job: ReportJob, section: Section):
     """The numbers one section's prose may quote in a strict job: those of
-    its own slice (payload and headline), nothing from another section."""
-    from services.reports.evidence import _walk
+    its own slice (payload and headline), and for a declared summary (AA-05
+    Y1) the payload facts of each section it lists, one level: never their
+    prose, and never what a listed summary itself lists."""
+    from services.reports.evidence import _escape, _walk
 
     sl = _slice(job, section)
     out: list = []
     _walk(sl.get("payload") or {}, f"/sections/{section.section_id}/payload", "", out)
     _walk(sl.get("headline") or {}, "/headline", "", out)
+    by_id = {s.section_id: s for s in job.document.sections}
+    for sid in section.summarises or ():  # a listed summary's own list is not followed
+        listed = _slice(job, by_id[sid])
+        _walk(listed.get("payload") or {}, f"/sections/{_escape(sid)}/payload", "", out)
     return out
+
+
+def summary_sources_note(job: ReportJob, section: Section) -> str | None:
+    """The note a strict declared summary carries (AA-05 Y5): the sections
+    its numbers may come from, so it never draws on them silently."""
+    if not section.summarises:
+        return None
+    by_id = {s.section_id: s for s in job.document.sections}
+    names = ", ".join(by_id[sid].heading for sid in section.summarises)
+    return f"This summary may quote numbers from: {names}."
 
 
 def withhold_unverified(draft: SectionDraft, facts,
@@ -458,6 +501,10 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
                     "source": "code", "note": _clean_note(section.note),
                     "blocks": ([Callout(kind="gap", text=withheld_placeholder(0))]
                                + _code_blocks(section))})
+            sources = summary_sources_note(job, section)
+            if sources:
+                written = written.model_copy(update={
+                    "note": f"{written.note} {sources}" if written.note else sources})
             if withheld:
                 n = len(result.paragraphs) + len(result.bullets) - len(kept.paragraphs) - len(kept.bullets)
                 note = WITHHELD_NOTE.format(n=n)
@@ -837,6 +884,7 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
                      template_file_id: str | None = None,
                      meta_updates: dict[str, Any] | None = None,
                      strict: bool = False,
+                     summaries: dict[str, list[str]] | None = None,
                      run_binding: tuple[pathlib.Path, str] | None = None,
                      lock: threading.Lock, state: dict[str, Any]) -> str:
     """
@@ -852,7 +900,7 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
             instruction=instruction, base_document=base_document,
             regenerate_section=regenerate_section, title=title,
             template_file_id=template_file_id, meta_updates=meta_updates, strict=strict,
-            run_binding=run_binding),
+            summaries=summaries, run_binding=run_binding),
         run=run_report_job, lock=lock, state=state)
 
 
