@@ -74,6 +74,12 @@ A "no conversion" unit test uses real rescaled units (GW for MW, kt for t), neve
 
 A declared per-metric basis table ("none" vs a column) is checked both ways: a "none" claim must show the value is the same under every column (#1265 F1).
 
+A test module that imports another module's pack-copy helper (`_copy_with`) also needs that module's cache-clear fixture: an autouse fixture applies only in its own module (#1281: `loader._cached` leaked into test_library_reference_apply).
+
+A staleness or "unchanged" check also covers the legacy writers that recorded no input, including Library reference applies (status customised + approved_by), not only pack prices (#1281 T5-3).
+
+A batch of mutants that runs whole suites can exceed the background limit: run each surviving or slow mutant against its targeted test with -x and a timeout (#1255).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
@@ -142,7 +148,7 @@ A declared per-metric basis table ("none" vs a column) is checked both ways: a "
 - A storage availability rule treats inflow-fed hydro separately: an inflow-fed StorageUnit keeps dispatch-only availability and is named in `storage_notes` (#1010).
 - A PR that rewords an exception message runs `git grep "<old text>"` for substring matches on it; a change to `adequacy/levers.py` also runs the EH suites (#1010).
 - A split-storage reader handles a split whose charger and discharger sit on different buses; `storage_inventory.results_splits` keeps such splits out (#1012).
-- A report job is tied to a harness run (strict mode, run_binding) only by the harness's own explicit launch. The route and the chat tool never infer a run from state, so a human request is never strict and never charged to a run's budget, even while a run sits at its report stage (SH-07).
+- A report job is tied to a harness run (run_binding, charged to the run's budget) only by the harness's own explicit launch; the route and the chat tool never infer a run from state (SH-07). A human request is never strict. The assistant's own chat report tools run strict (AA-05 S4 P1) through an in-process switch no route field reaches, without a run binding.
 - Pin the publish point, not `Thread.start` (#1077, #1085).
 - A unit-precedence rule needs a case where the units disagree (#1057).
 - Frontend types follow the server's return shape (#1060).

@@ -6,7 +6,7 @@
 // branch money stays per MVA (the units catalogues publish).
 import { useQuery } from '@tanstack/react-query'
 import { assetSchemaApi, type AssetCostRow } from '../../api/assetSchema'
-import { ProvenanceChip } from '../../components/ProvenanceChip'
+import { ProvenanceChip, StaleChip, staleBody } from '../../components/ProvenanceChip'
 import { useGlobalDefaultLifetime } from '../../layout/properties/cardKit'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -16,10 +16,17 @@ const DISPLAY: Record<AssetCostRow['basis'], { unit: string; scale: number }> = 
   'EUR/MWh': { unit: '€/kWh', scale: 1e-3 },
   'EUR/MVA': { unit: '€/MVA', scale: 1 },
 }
+/** The money fields a scale input can price (backend `_SCALED_FIELDS`). */
+const SCALED = ['overnight_cost', 'fom_cost']
 const OVERNIGHT_FIELDS = ['overnight_cost', 'inv_power_overnight', 'inv_energy_overnight', 'inv_per_km_overnight']
 
 function money(v: number | null, scale: number): string {
   return v == null ? '—' : (v * scale).toLocaleString(undefined, { maximumFractionDigits: v * scale >= 100 ? 0 : 2 })
+}
+
+/** The first scaled money field of an asset that is out of date, if any. */
+function staleOf(a: AssetCostRow) {
+  return SCALED.map(k => a.provenance[k]).find(e => e?.stale)
 }
 
 function Row({ a, onOpen, defaultLife }: { a: AssetCostRow; onOpen: () => void; defaultLife?: number }) {
@@ -46,6 +53,7 @@ function Row({ a, onOpen, defaultLife }: { a: AssetCostRow; onOpen: () => void; 
           </span>
         )}
         <ProvenanceChip entry={stamp} testId={`asset-cost-prov-${a.component}-${a.name}`} />
+        {!stamp?.stale && <StaleChip entry={staleOf(a)} testId={`asset-cost-prov-${a.component}-${a.name}-stale`} />}
       </td>
       <td className="px-2 py-1 text-xs font-mono">{priced ? life : '—'}</td>
       <td className="px-2 py-1 text-xs font-mono">{priced ? `${money(a.capital_cost, d.scale)} ${d.unit}/yr` : '—'}</td>
@@ -65,6 +73,7 @@ export default function AssetCostsTable() {
   if (isLoading) return <p className="p-3 text-xs text-muted">Loading…</p>
   if (isError || !data) return <p className="p-3 text-xs text-danger">Could not load the asset costs.</p>
   if (!data.assets.length) return <p className="p-3 text-xs text-muted">No generators, links, storage, stores, lines or transformers yet.</p>
+  const outOfDate = data.assets.filter(a => staleOf(a))
   const unpriced = data.assets.filter(a => !a.parts.length).length
   return (
     <div className="p-3 flex flex-col gap-2">
@@ -91,6 +100,15 @@ export default function AssetCostsTable() {
           ))}
         </tbody>
       </table>
+      {outOfDate.length > 0 && (
+        <div className="text-[10px] text-muted flex flex-col gap-0.5" data-testid="asset-costs-out-of-date">
+          {outOfDate.map(a => (
+            <p key={`${a.component}:${a.name}`}>
+              <span className="text-muted">{a.component} · {a.name}</span> is out of date: {staleBody(staleOf(a), 'table')}
+            </p>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

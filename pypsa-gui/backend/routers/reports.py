@@ -555,8 +555,8 @@ def export_report(report_id: str, body: ExportReportBody,
         }) from exc
     except templates.TemplateReadError as exc:
         raise _template_unreadable(exc) from exc
-    if assistant_strict_active():
-        _check_disclosures(doc, data)
+    strict = assistant_strict_active()
+    docx = data
     ext, mime = (".pdf", pdf.PDF_MIME) if body.format == "pdf" else (".docx", DOCX_MIME)
     if body.format == "pdf":
         try:
@@ -572,6 +572,14 @@ def export_report(report_id: str, body: ExportReportBody,
     target = (body.filename or "").strip() or f"report_{report_id}_v{doc.version}{ext}"
     if not target.lower().endswith(ext):
         target += ext
+    if strict:
+        # AA-05 S4b (GK B X1): render, convert, check the disclosures, then
+        # the quarantine, then seal. No unsealed upload exists on this path.
+        _check_disclosures(doc, docx)
+        from services.reports.sealed_export import publish_sealed_report
+
+        return publish_sealed_report(project, doc, body.format, data, target, mime,
+                                     figure_bytes=figure_bytes, template=template, plan=plan)
     meta = upload_service.add_upload(project.name, data, target, mime,
                                      kind="agent_export", project_dir=project.directory)
     return meta.model_dump()

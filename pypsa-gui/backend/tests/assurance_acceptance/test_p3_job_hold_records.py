@@ -7,7 +7,7 @@ the same operation until the evidence that clears the hold reads terminal.
 The row goes exactly when the hold clears (H5); every read failure denies
 (H6); only the user who made the call sees its ids (H7); a failed write
 leaves the hold on its chat and says so (H4). Rows of another process are
-slice S2.
+slice S2 (test_p3_job_hold_leases.py).
 """
 
 from __future__ import annotations
@@ -81,6 +81,8 @@ def project(monkeypatch, seeded_identity):
     """A saved project the active context is bound to."""
     project_id = _make_project(seeded_identity)
     monkeypatch.setattr(job_holds, "_binding", lambda: (project_id, "alpha"))
+    # S2: no renewer thread sweeps these tests' rows; its tests drive it.
+    monkeypatch.setattr(job_holds, "ensure_renewer", lambda: None)
     yield project_id
     with job_holds._REGISTRY_LOCK:
         job_holds._REGISTRY.clear()
@@ -254,12 +256,14 @@ def test_an_owned_record_with_no_registry_entry_holds(project):
     assert len(_rows(project)) == 1
 
 
-def test_a_record_of_another_process_is_left_to_s2(project, monkeypatch):
+def test_a_record_of_another_process_holds_while_its_lease_runs(project, monkeypatch):
+    """S2 (H3): another process's row, read under another replica id, holds
+    until its owner's lease lapses (test_p3_job_hold_leases.py)."""
     import security
 
     job_holds.open_on_timeout(ChatSession(), QUEUE, "F", "tu", _NeverDone())
     monkeypatch.setattr(security, "replica_id", lambda: "another-replica")
-    assert _held_by_record(ChatSession()) is None
+    assert _held_by_record(ChatSession())[0] == job_holds.PENDING
 
 
 # ── The repeat card across chats (N5/N6, H5) ────────────────────────────────
@@ -628,6 +632,8 @@ class _Row:
             job_id=None,
             opened_at=1.0,
             opened_by_user_id=None,
+            project_id="p",
+            lease_until=None,
         )
         values.update(over)
         self.__dict__.update(values)

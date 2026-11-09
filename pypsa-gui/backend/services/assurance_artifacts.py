@@ -216,6 +216,8 @@ def _verify(root, meta, data, project_id):
         manifest = {**manifest, "scope_status": scope}
     if manifest.get("source_kind") == "table_export":
         _verify_table(manifest, data)  # seal and bytes already passed (R6)
+    if manifest.get("source_kind") == "report_export":
+        manifest = _verify_report(root, manifest, data)  # seal and bytes already passed (X4)
     if manifest.get("source_kind") == "checked_evidence":
         # A checked chart is still its evidence's: same source hash, same values.
         from services import checked_charts
@@ -428,3 +430,78 @@ def _verify_table(manifest, data):
     if not same:
         logger.warning("table re-parse disagrees with its dataset hash")
         raise ValueError("table re-parse mismatch")
+
+
+# Report exports (AA-05 S4b, GK B X1-X6)
+
+REPORT_SOURCE_NOTES = {
+    "version_missing": "The report version this file was exported from is no longer stored; "
+                       "the file is as exported, but it can no longer be traced to a stored version.",
+    "figure_missing": "A figure this file was exported with is no longer stored; "
+                      "the file is as exported.",
+    "template_missing": "The template this file was exported with is no longer stored; "
+                        "the file is as exported.",
+}
+
+
+def report_version_changed():
+    return HTTPException(409, {
+        "error_kind": "report_version_changed",
+        "message": "The stored report version, figure or template this file was exported from has "
+                   "changed since the export; export the report again.",
+    })
+
+
+def _verify_report(root, manifest, data):
+    """X3/X4: runs after the seal and byte checks, so nothing here quarantines.
+
+    A source that is gone is noted (`source_status`) and the bytes are served;
+    a source present with another hash refuses (`report_version_changed`); a
+    Word export whose disclosures no longer read back is parser drift on
+    matching bytes: refused and logged."""
+    from services import upload_service
+    from services.reports import store
+    from services.reports.docx_reader import body_text
+    from services.reports.report_job import missing_disclosures
+
+    dataset = manifest["dataset"]
+    report_id = dataset["report_id"]
+    status = None
+    try:
+        current = store.version_sha256(root, report_id, dataset["version"])
+    except store.ReportNotFound:
+        status = "version_missing"
+    else:
+        if current != dataset["version_sha256"]:
+            raise report_version_changed()
+    for figure_id, sha in sorted(dataset["figures"].items()):
+        try:
+            figure = store.figure_path(root, report_id, figure_id).read_bytes()
+        except store.ReportStoreError:
+            status = status or "figure_missing"
+            continue
+        if hashlib.sha256(figure).hexdigest() != sha:
+            raise report_version_changed()
+    template = dataset["template"]
+    if template is not None:
+        try:
+            raw = upload_service.get_upload_bytes("", template["file_id"], project_dir=root)
+        except HTTPException as error:
+            if error.status_code != 404:
+                raise
+            status = status or "template_missing"
+        else:
+            if hashlib.sha256(raw).hexdigest() != template["sha256"]:
+                raise report_version_changed()
+    if manifest["render_spec"]["format"] == "docx":
+        try:
+            lost = missing_disclosures(manifest["render_spec"]["disclosures"], body_text(data))
+        except Exception as error:  # noqa: BLE001 -- any read-back failure refuses
+            logger.warning("report export read-back failed (%s)", type(error).__name__)
+            raise ValueError("report export read-back failed") from None
+        if lost:
+            logger.warning("report export read-back lost %d disclosure(s) on matching bytes", len(lost))
+            raise ValueError("report export disclosure drift")
+    if status is not None:
+        manifest = {**manifest, "source_status": status, "source_note": REPORT_SOURCE_NOTES[status]}
+    return manifest

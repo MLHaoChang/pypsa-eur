@@ -269,6 +269,10 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
             "replaces": (stamps.get("overnight_cost") or {}).get("replaces")
             or (stamps.get("overnight_cost") or {}).get("source"),
             "currency": ref.currency, "currency_year": ref.currency_year,
+            # The DC/AC ratio the price was scaled by, recorded so a later change reads stale (TCU-05).
+            "scaled_by": None if ratio is None else {
+                "column": "dc_ac_ratio", "value": ratio, "technology": technology,
+                "capacity_basis": ref.capacity_basis_code},
             "licence": ref.licence, "attribution": ref.attribution}
 
 
@@ -307,3 +311,5 @@ def stamp(n, p: dict, *, approved_by: str | None, approved_at: str | None = None
                           currency_year=p["currency_year"] if field in ("overnight_cost", "fom_cost") else None,
                           currency=p["currency"] if field in ("overnight_cost", "fom_cost") else None,
                           approved_by=approved_by, approved_at=when)
+        if p.get("scaled_by") and field in ("overnight_cost", "fom_cost"):
+            provenance.annotate(n, p["component_class"], p["name"], field, scaled_by=dict(p["scaled_by"]))
