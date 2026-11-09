@@ -626,7 +626,9 @@ def test_a_regional_stamp_reads_that_regional_pack(monkeypatch):
 
 
 @pytest.mark.parametrize("exc_name", ["RuntimeError", "DefaultsPackError"])
-def test_a_vendored_pack_that_fails_to_load_is_not_read_as_unknown(monkeypatch, exc_name):
+def test_a_vendored_pack_that_fails_to_load_is_not_read_as_unknown(
+    monkeypatch, exc_name
+):
     """GLE3-1: only a lookup miss reads as unknown; a broken pack never switches the gate off."""
     from services.commercial.binding import tariff_currency_mismatch
     from services.library.defaults_pack import loader
