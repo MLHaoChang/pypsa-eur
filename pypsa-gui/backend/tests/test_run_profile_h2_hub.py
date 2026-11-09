@@ -320,10 +320,33 @@ def test_no_electrolyser_or_no_capacity_is_no_evidence_never_zero(monkeypatch):
     n.links.at["electrolyser", "p_nom_opt"] = 0.0  # a built Link reads its p_nom (as the app's solve leaves it)
     assert _read_on(monkeypatch, n, run_gates._electrolyser_utilisation, _rule("h2.electrolyser.utilisation")) > 0
     n.links.at["electrolyser", "p_nom"] = 0.0
+    n.links_t.p0["electrolyser"] = 0.0
     assert _read_on(monkeypatch, n, run_gates._electrolyser_utilisation, _rule("h2.electrolyser.utilisation")) is None
     n.links["eh_role"], n.links["carrier"] = "", "AC"
     read = _read_on(monkeypatch, n, run_gates._electrolyser_utilisation, _rule("h2.electrolyser.utilisation"))
     assert isinstance(read, run_gates.NoEvidence) and read.value == "no_electrolyser"
+
+
+@pytest.mark.parametrize("flow", [11.0, -1.0])
+def test_dispatch_outside_the_capacity_it_was_solved_against_is_no_evidence(monkeypatch, flow):
+    """Blocker 2: the staged run read 1.23 when the live p_nom_opt of an
+    extendable electrolyser was its pre-solve 0 next to the solve's 11.1 MW
+    dispatch. A capacity the dispatch exceeds is not the solve's: never a
+    utilisation above 1 (nor one from a reversed flow)."""
+    n = _solved("eh_h2_hub_staged")
+    rule = _rule("h2.electrolyser.utilisation")
+    assert not isinstance(_read_on(monkeypatch, n, run_gates._electrolyser_utilisation, rule), run_gates.NoEvidence)
+    cap = float(n.links.at["electrolyser", "p_nom"])
+    n.links_t.p0.loc[n.snapshots[-1], "electrolyser"] = cap + flow if flow > 0 else flow
+    read = _read_on(monkeypatch, n, run_gates._electrolyser_utilisation, rule)
+    assert isinstance(read, run_gates.NoEvidence) and read.value == "dispatch_exceeds_capacity"
+
+
+def test_utilisation_is_the_capacity_factor_asset_economics_gives_a_link():
+    """H3: one formula, `asset_economics.link_capacity_factor`."""
+    from services.results.asset_economics import link_capacity_factor
+    assert link_capacity_factor(300.0, 10.0, 60.0) == 0.5
+    assert link_capacity_factor(300.0, 0.0, 60.0) is None and link_capacity_factor(300.0, 10.0, 0.0) is None
 
 
 def _staged_capture(n, shed_2030=0.0):
@@ -379,3 +402,169 @@ def test_the_investment_rule_is_evaluated_once_established_and_never_blocks(monk
     if verdict == "not_evaluated":
         assert result["reason"] == f"{state}: {', '.join(reasons)}"
     assert run_gates.passed([result])
+
+
+# ── GK B (38) amendment A1–A3: the queued solve's objective compare ──────────
+
+
+@pytest.fixture
+def queued_job(site, template):
+    """The project's own queued solve, run to completion (as the run's solve.1)."""
+    from harness import continuation
+    from services.study.runner import _on_ctx
+    from tests.test_assistant_tasks_study_brief import wait_until
+
+    cell = PyPSAService._turn_cell.set(None)  # as the runner's thread: no chat turn
+    try:
+        queued = _on_ctx(_ctx(), chat_tools.solve_queue_enqueue, site[0])
+    finally:
+        PyPSAService._turn_cell.reset(cell)
+    job = {"job_id": queued["id"], "project_id": site[0]}
+    assert wait_until(lambda: continuation._queue_job_status(job) == "completed", 300)
+    return job
+
+
+@pytest.mark.parametrize("template", list(REFS), indirect=True)
+def test_a_queued_h2_hub_solve_is_verified_on_the_runs_total_with_its_constant(queued_job, template):
+    """A2 (a), A3: the manifest's objective is the queue's total
+    (`_compute_run_objective`, the LP objective plus its constant), never the
+    bare LP objective; it is not None for the staged (multi-period) hub."""
+    from harness import continuation
+    from routers.simulation import _compute_run_objective
+    from services import workflow_tools as wt
+
+    evidence = continuation._queue_run(queued_job)
+    assert evidence is not None, "a granted H2 hub solve read unverified"
+    with chat_tools._acting() as (db, user):
+        saved = wt._load_context(project_registry.resolve_project(db, user, queued_job["project_id"]))
+    total = _compute_run_objective(saved.network, saved.solver_state["solver_config"])
+    assert total is not None and evidence["objective"] == total
+    if template == "eh_h2_hub":  # its constant carries the built assets' CAPEX
+        assert float(saved.network.objective) != total
+
+
+@pytest.mark.parametrize("change", ["objective_off_by_one", "no_config", "no_total"])
+def test_a_queued_solve_whose_total_cannot_be_matched_stays_unverified(queued_job, monkeypatch, change):
+    """A1, A2 (b): a manifest objective off by 1.0, a saved project with no
+    solver config (the total would be priced with the foreground's) or no
+    total at all is no evidence."""
+    from harness import continuation
+    from routers import simulation
+    from services import run_evidence, workflow_tools as wt
+
+    if change == "objective_off_by_one":
+        load = run_evidence._load_run
+
+        def off(root, project_id, run_id):
+            manifest = copy.deepcopy(load(root, project_id, run_id))
+            manifest["metrics"]["objective"]["value"] += 1.0
+            return manifest
+        monkeypatch.setattr(run_evidence, "_load_run", off)
+    elif change == "no_config":
+        load_ctx = wt._load_context
+
+        def bare(child):
+            saved = load_ctx(child)
+            saved.solver_state.pop("solver_config", None)
+            return saved
+        monkeypatch.setattr(wt, "_load_context", bare)
+    else:
+        monkeypatch.setattr(simulation, "_compute_run_objective", lambda n, cfg=None: None)
+    assert continuation._queue_run(queued_job) is None
+
+
+# ── H4, H5: the envelope's levers ────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("ref", REFS.values())
+def test_each_envelope_attr_is_the_active_one(ref):
+    """H4: a fixed asset is sized by p_nom (e_nom), an extendable one by its
+    cap p_nom_max: every listed instance of the template is the kind its attr moves."""
+    import fnmatch
+    n = T.BUILDERS[ref.split("@")[0]]()
+    for e in run_profiles.resolve(ref)["envelope"]["edits"]:
+        component, glob, attr = e["target"]["component"], e["target"]["name"], e["target"]["attr"]
+        static = n.c[component].static
+        names = [x for x in static.index if fnmatch.fnmatchcase(x, glob)]
+        assert names, glob
+        extendable = "e_nom_extendable" if component == "Store" else "p_nom_extendable"
+        assert all(bool(static.at[x, extendable]) == attr.endswith("_max") for x in names), (glob, attr)
+        assert all(e["bounds"]["min"] <= float(static.at[x, attr]) <= e["bounds"]["max"] for x in names), glob
+
+
+def _objective(template, component, name, attr, value):
+    import logging
+    n = T.BUILDERS[template]()
+    if value is not None:
+        n.c[component].static.at[name, attr] = value
+    logging.disable(logging.WARNING)
+    try:
+        n.optimize(solver_name="highs", solver_options={"output_flag": False},
+                   multi_investment_periods=bool(len(n.investment_periods)))
+    finally:
+        logging.disable(logging.NOTSET)
+    return float(n.objective)
+
+
+@pytest.mark.parametrize("template, target, value", [
+    ("eh_h2_hub", ("Link", "electrolyser", "p_nom"), 40.0),
+    ("eh_h2_hub_staged", ("Link", "electrolyser_new_2035", "p_nom_max"), 5.0),
+])
+def test_a_bounded_edit_changes_the_solve(template, target, value):
+    """H4: a lever within its bounds moves the optimum on each template."""
+    entry = next(e for e in run_profiles.resolve(REFS[template])["envelope"]["edits"]
+                 if e["target"]["attr"] == target[2] and e["target"]["name"].rstrip("*") in target[1])
+    assert entry["bounds"]["min"] <= value <= entry["bounds"]["max"]
+    assert _objective(template, *target, value) != pytest.approx(_objective(template, *target, None), rel=1e-6)
+
+
+def _admit(granted, ref, args):
+    from tests.test_harness_envelope import ask, on_run, refusals
+    task, path, _ = granted(run={**RUN, "profile": ref}, detach=False)
+    with on_run(task, path) as run:
+        assert ask(run, "update_component", args) is None
+    return refusals(path)[-1]
+
+
+@pytest.mark.parametrize("template, name, attrs", [
+    ("eh_h2_hub", "fuel_cell", {"p_nom_max": 50.0}),  # extendable: its cap is the active attr
+    ("eh_h2_hub", "grid_import", {"p_nom": 100.0}),
+    ("eh_h2_hub_staged", "fuel_cell", {"p_nom_max": 50.0}),
+    ("eh_h2_hub_staged", "grid_import", {"p_nom": 100.0}),
+    ("eh_h2_hub_staged", "electrolyser", {"p_nom": 25.0}),  # the staged hub's built one
+], indirect=["template"])
+def test_the_connection_the_backup_and_the_built_staged_electrolyser_are_outside_the_entry(
+        granted, monkeypatch, template, name, attrs):
+    """H5, at `_match_edit`: the grant names none of them."""
+    ref = REFS[template]
+    monkeypatch.setitem(run_profiles.PROFILES, ref, _without_eh(ref))
+    [(attr, value)] = attrs.items()
+    before = float(_ctx().network.links.at[name, attr])
+    assert before != value
+    assert _admit(granted, ref, {"component_class": "Link", "name": name, "attrs": attrs}) == "outside_entry"
+    assert float(_ctx().network.links.at[name, attr]) == before
+
+
+@pytest.mark.parametrize("template", list(REFS), indirect=True)
+def test_the_offtake_is_never_tunable_and_never_admitted(granted, monkeypatch, template):
+    """H5: the offtake's p_set is outside any grant, and an envelope that
+    lists it is refused as never tunable."""
+    ref = REFS[template]
+    monkeypatch.setitem(run_profiles.PROFILES, ref, _without_eh(ref))
+    before = _ctx().network.loads.at["h2_offtake", "p_set"]
+    assert _admit(granted, ref, {"component_class": "Load", "name": "h2_offtake",
+                                 "attrs": {"p_set": 1.0}}) == "outside_entry"
+    assert _ctx().network.loads.at["h2_offtake", "p_set"] == before
+    with pytest.raises(run_envelope.EnvelopeError, match="never tunable"):
+        run_envelope._check_edit({"tool": "update_component", "bounds": {"min": 0.0, "max": 30.0},
+                                  "target": {"component": "Load", "name": "h2_offtake", "attr": "p_set"}})
+
+
+@pytest.mark.parametrize("template", ["eh_h2_hub_staged"], indirect=True)
+def test_a_staged_electrolyser_cap_above_its_bound_is_refused(granted, monkeypatch, template):
+    """H4: above the bound is out_of_bounds (the single-year hub's: above)."""
+    ref = REFS[template]
+    monkeypatch.setitem(run_profiles.PROFILES, ref, _without_eh(ref))
+    assert _admit(granted, ref, {"component_class": "Link", "name": "electrolyser_new_2035",
+                                 "attrs": {"p_nom_max": 81.0}}) == "out_of_bounds"
+    assert float(_ctx().network.links.at["electrolyser_new_2035", "p_nom_max"]) == 40.0

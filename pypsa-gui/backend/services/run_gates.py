@@ -506,15 +506,16 @@ def _offtake_load(n):
 
 
 def _period_rows(n, values):
-    """Per investment period, `values(mask, weights)` (None: not readable)."""
+    """Per investment period, `values(mask, weights, period)` (None: not
+    readable; a NoEvidence from any period is the answer)."""
     index = n.snapshots
     weights = n.snapshot_weightings["generators"].reindex(index)
     rows = []
     for period in index.get_level_values(0).unique():
         mask = index.get_level_values(0) == period
         value = values(mask, weights[mask], int(period))
-        if value is None:
-            return None
+        if value is None or isinstance(value, NoEvidence):
+            return value
         rows.append({"period": int(period), **value})
     return rows
 
@@ -555,8 +556,8 @@ def _offtake_shed_hours(env):
             return {"shed_hours": math.fsum(a for a, s in zip(w, shed) if s > lost_load.SHED_THRESHOLD_MW),
                     "assumed": False}
         rows = _period_rows(n, hours)
-        if not rows:
-            return None
+        if not rows or isinstance(rows, NoEvidence):
+            return rows or None
         worst = max(rows, key=lambda r: r["shed_hours"])
         for r in rows:
             r["worst"] = r is worst
@@ -572,19 +573,33 @@ def _electrolysers(n):
 
 
 def _utilisation(n, links, mask, w):
-    """Σ p0·w over Σ capacity·w (the input side, as `results/asset_economics`
-    measures a Link's capacity factor; the capacity the adequacy engines read,
-    `copt.solved_capacity`: a built Link's p_nom, an extendable one's
-    p_nom_opt); None when the fleet has no capacity."""
+    """The fleet's capacity factor on the input side, the one
+    `results/asset_economics.link_capacity_factor` gives a Link: Σ p0·w over
+    Σ capacity·Σ w, the capacity the adequacy engines read
+    (`copt.solved_capacity`: a built Link's p_nom, an extendable one's
+    p_nom_opt). None when the fleet has no capacity; no evidence when any
+    hour's dispatch leaves [0, capacity] (the capacity is not the one the
+    dispatch was solved against)."""
     from services.adequacy.copt import solved_capacity
+    from services.results.asset_economics import link_capacity_factor
     w = [float(v) for v in w]
-    capacity = math.fsum(solved_capacity(n.links.loc[link]) for link in links)
-    if not links or not capacity > 0 or not all(math.isfinite(v) and v >= 0 for v in w):
+    if not links or not all(math.isfinite(v) and v >= 0 for v in w):
         return None
-    p0 = n.links_t.p0.reindex(columns=links)[mask] if mask is not None else n.links_t.p0.reindex(columns=links)
-    energy = math.fsum(a * max(float(v), 0.0) for col in links for a, v in zip(w, p0[col]))
-    total = capacity * math.fsum(w)
-    return energy / total if total > 0 and math.isfinite(energy) else None
+    p0 = n.links_t.p0.reindex(columns=links)
+    p0 = p0[mask] if mask is not None else p0
+    energy = 0.0
+    for link in links:
+        cap = solved_capacity(n.links.loc[link])
+        flows = [float(v) for v in p0[link]]
+        if not all(math.isfinite(v) for v in flows):
+            return None
+        tol = 1e-6 * max(cap, 1.0)
+        if any(v < -tol or v > cap + tol for v in flows):
+            return NoEvidence("dispatch_exceeds_capacity",
+                              f"{link}'s dispatch leaves [0, {cap:g}] MW: its capacity is not the solve's")
+        energy += math.fsum(a * v for a, v in zip(w, flows))
+    capacity = math.fsum(solved_capacity(n.links.loc[link]) for link in links)
+    return link_capacity_factor(energy, capacity, math.fsum(w))
 
 
 def _electrolyser_utilisation(env, rule):
@@ -604,11 +619,12 @@ def _electrolyser_utilisation(env, rule):
         def one(mask, w, period):
             active = n.get_active_assets("Link", period)
             u = _utilisation(n, [link for link in fleet if active.get(link, False)], mask, w)
-            return None if u is None else {"utilisation": u, "verdict": "pass" if lo <= u <= hi else "fail",
-                                           "assumed": False}
+            if u is None or isinstance(u, NoEvidence):
+                return u
+            return {"utilisation": u, "verdict": "pass" if lo <= u <= hi else "fail", "assumed": False}
         rows = _period_rows(n, one)
-        if not rows:
-            return None
+        if not rows or isinstance(rows, NoEvidence):
+            return rows or None
         worst = max(rows, key=lambda r: (max(lo - r["utilisation"], r["utilisation"] - hi, 0.0),
                                          -r["utilisation"]))
         for r in rows:
