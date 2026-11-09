@@ -122,6 +122,26 @@ def test_the_name_and_the_series_store_survive_the_swap(tmp_projects_dir):
     assert resident.transient_rows is marks and marks == {"Generator": {"g@2030"}}
 
 
+def test_the_swap_clears_the_caches_keyed_by_the_old_networks_id(tmp_projects_dir):
+    """GK B (39) F1: the freed old network's `id` may be reused by a later
+    network, so the swap drops the id-keyed derived results, as every other
+    swap does (`PyPSAService._clear_swap_caches`)."""
+    from services import time_aggregation_service as tas
+
+    src = _solved_on_disk(tmp_projects_dir)
+    resident = ProjectContext(network=_network())
+    key = (id(resident.network), 2030, "cfg")
+    with tas._cache_lock:
+        tas._cache[key] = object()
+    try:
+        _hydrate_context_from_disk(resident, src, "Hub")
+        with tas._cache_lock:
+            assert key not in tas._cache
+    finally:
+        with tas._cache_lock:
+            tas._cache.pop(key, None)
+
+
 def test_a_captured_queued_solve_on_the_resident_project_shows_its_solved_capacity(
     client, install_network, tmp_projects_dir, session_ctx, monkeypatch
 ):
