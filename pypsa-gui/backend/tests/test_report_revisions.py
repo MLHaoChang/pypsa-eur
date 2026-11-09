@@ -392,6 +392,10 @@ def _figure_ref(d):
     d.sections[0].blocks[4] = FigureRef(figure_id="fig2", caption="Dispatch")
 
 
+def _table_ref(d):
+    d.sections[0].blocks[3] = TableRef(table_id="t2", caption="Assets")
+
+
 @pytest.mark.parametrize(
     "change,reason",
     [
@@ -399,6 +403,7 @@ def _figure_ref(d):
         (_callout, "changes_disclosure"),
         (_source_path, "changes_evidence_ref"),
         (_figure_ref, "changes_evidence_ref"),
+        (_table_ref, "changes_evidence_ref"),
         (_figure, "changes_chart"),
         (_evidence, "changes_evidence_hash"),
         (_shape, "changes_table_shape"),
@@ -408,6 +413,26 @@ def _figure_ref(d):
 def test_each_invariant_part_refuses_by_name(change, reason):
     base, new = _mutated(change)
     assert reason in R.check_invariants(base, new, _anchor(section="summary", block=0))
+
+
+def test_a_number_changed_in_a_table_caption_is_refused():
+    base = _doc()
+    base.tables["t1"] = base.tables["t1"].model_copy(
+        update={"caption": "Assets at 5 MW"}
+    )
+    new = base.model_copy(deep=True)
+    new.tables["t1"] = new.tables["t1"].model_copy(update={"caption": "Assets at 6 MW"})
+    reasons = R.check_invariants(base, new, _anchor(block=None, table="t1"))
+    assert "changes_number" in reasons
+
+
+def test_a_minus_at_the_end_of_the_text_does_not_sign_a_leading_number():
+    assert R.numbers("5 MW -") == R.numbers("5 MW")
+
+
+def test_an_anchor_one_past_the_last_block_leaves_the_section_compared():
+    base, new = _mutated(lambda d: None)
+    assert R.check_invariants(base, new, _anchor(section="summary", block=2)) == []
 
 
 def test_a_copied_audit_refuses_changes_audit():
@@ -501,6 +526,26 @@ def test_two_addresses_on_one_base_make_exactly_one_version(pdir):
 
 
 # ── R8: anchors and the file are read strictly ──────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "tables",
+    [
+        {},  # the section's TableRef names a table the report does not hold
+        "t2",  # the report holds t2, but the section only references t1
+    ],
+)
+def test_a_table_anchor_needs_its_own_reference_and_table(tmp_path, tables):
+    doc = _doc()
+    if tables == "t2":
+        doc.tables["t2"] = doc.tables["t1"].model_copy(update={"table_id": "t2"})
+        anchor = _anchor(block=None, table="t2")
+    else:
+        doc = doc.model_copy(update={"tables": tables})
+        anchor = _anchor(block=None, table="t1")
+    store.create_report(tmp_path, doc)
+    e = _refused(R.add_comment, tmp_path, RID, "x", anchor)
+    assert (e.kind, e.status) == ("report_comment_anchor_invalid", 422)
 
 
 @pytest.mark.parametrize(
@@ -1071,6 +1116,15 @@ def test_a_per_year_suffix_re_spelling_is_addressed(tmp_path):
 
 def _stored(pdir):
     return store.report_dir(pdir, RID) / R.COMMENTS_FILE
+
+
+def test_a_comment_may_carry_every_known_reason(pdir):
+    _comment(pdir)
+    raw = json.loads(_stored(pdir).read_text())
+    every = sorted(R.KNOWN_REASONS)
+    raw["comments"][0].update(reason=every[0], reasons=every)
+    _stored(pdir).write_text(json.dumps(raw))
+    assert R.load_comments(pdir, RID)[0].reasons == every
 
 
 @pytest.mark.parametrize(
