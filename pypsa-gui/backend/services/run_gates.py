@@ -492,10 +492,16 @@ def _unserved_by_period(ctx):
         totals = [math.fsum(max(col[i], 0.0) for col in shed) for i in range(len(w))]
         rows.append({"period": int(period), "unserved_mwh": math.fsum(a * t for a, t in zip(w, totals)),
                      "assumed": False})
-    worst = max(rows, key=lambda r: r["unserved_mwh"])
+    return _worst(rows, "unserved_mwh")
+
+
+def _worst(rows, field, key=None):
+    """Per-period rows scored by their worst: the row `key` ranks highest
+    (by default the largest `field`) is marked `worst` and gives the value."""
+    worst = max(rows, key=key or (lambda r: r[field]))
     for r in rows:
         r["worst"] = r is worst
-    return Scored(value=worst["unserved_mwh"], rows=rows)
+    return Scored(value=worst[field], rows=rows)
 
 
 # Study harness 11 (design §9.3 "eh_h2_hub"): the H2 hub's offtake and
@@ -568,10 +574,7 @@ def _offtake_shed_hours(env):
         rows = _period_rows(n, hours)
         if not rows or isinstance(rows, NoEvidence):
             return rows or None
-        worst = max(rows, key=lambda r: r["shed_hours"])
-        for r in rows:
-            r["worst"] = r is worst
-        return Scored(value=worst["shed_hours"], rows=rows)
+        return _worst(rows, "shed_hours")
     return _own_solve(env, read)
 
 
@@ -638,11 +641,8 @@ def _electrolyser_utilisation(env, rule):
         rows = _period_rows(n, one)
         if not rows or isinstance(rows, NoEvidence):
             return rows or None
-        worst = max(rows, key=lambda r: (max(lo - r["utilisation"], r["utilisation"] - hi, 0.0),
-                                         -r["utilisation"]))
-        for r in rows:
-            r["worst"] = r is worst
-        return Scored(value=worst["utilisation"], rows=rows)
+        return _worst(rows, "utilisation", key=lambda r: (max(lo - r["utilisation"], r["utilisation"] - hi, 0.0),
+                                                          -r["utilisation"]))
     return _own_solve(env, read)
 
 

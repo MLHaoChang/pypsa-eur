@@ -955,8 +955,8 @@ def _h2_env(
     exact="x1",
 ):
     """Two investment periods of two snapshots: generator weightings (2, 2)
-    and (3, 1), objective weightings 1 and period years 10 (neither ever
-    enters); an H2 bus with `loads`, a 10 MW electrolyser feeding it."""
+    and (3, 1); objective weightings (1, 1) and (4, 4) and period years 5
+    and 20, unequal so that neither may enter; an H2 bus with `loads`, a 10 MW electrolyser feeding it."""
     from contextlib import nullcontext
 
     from harness import calculations, durable
@@ -966,8 +966,8 @@ def _h2_env(
     n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
     n.investment_periods = [2030, 2040]
     n.snapshot_weightings.loc[:, "generators"] = [2.0, 2.0, 3.0, 1.0]
-    n.snapshot_weightings.loc[:, "objective"] = 1.0
-    n.investment_period_weightings.loc[:, "years"] = 10.0
+    n.snapshot_weightings.loc[:, "objective"] = [1.0, 1.0, 4.0, 4.0]
+    n.investment_period_weightings.loc[:, "years"] = [5.0, 20.0]
     n.add("Bus", "el")
     n.add("Bus", "h2", carrier="H2")
     n.add("Load", "site", bus="el", p_set=5.0)
@@ -1006,7 +1006,8 @@ def test_shed_hours_weigh_each_snapshot_by_its_generator_weighting_and_read_the_
     tmp_path, monkeypatch
 ):
     """H2: 2030 sheds one 2 h snapshot, 2040 one 1 h snapshot. Unit weights
-    read 1 and 1; objective weights 1 and 1; years or a sum over periods 3."""
+    read 1 and 1; objective weights 1 and 4; years 10 and 20 (2040 worst
+    on each); a sum over periods 3."""
     scored = run_gates.FACTS["h2.offtake.shed_hours"].read(
         _h2_env(tmp_path, monkeypatch)
     )
@@ -1023,7 +1024,8 @@ def test_utilisation_weighs_each_snapshot_by_its_generator_weighting_and_reads_t
     tmp_path, monkeypatch
 ):
     """H2: 2030 (6, 6) on (2, 2) reads 0.6; 2040 (1, 10) on (3, 1) reads
-    13/40 = 0.325, below the band, though unit weights would read 0.55."""
+    13/40 = 0.325, below the band, though unit or objective weights would
+    read 0.55."""
     result = _gate(_h2_env(tmp_path, monkeypatch), "h2.electrolyser.utilisation")
     rows = {r["period"]: r for r in result["facts"][0]["rows"]}
     assert (
