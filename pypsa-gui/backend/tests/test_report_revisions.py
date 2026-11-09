@@ -940,3 +940,95 @@ def test_a_table_edit_does_not_re_judge_a_sections_stored_audit(tmp_path):
     )
     _, doc = R.address(tmp_path, RID, c.comment_id, _digest(tmp_path), edit)
     assert doc.version == 2
+
+
+# ── review follow-ups (mp-code-review) ──────────────────────────────────────
+
+
+def test_a_spaced_minus_is_a_sign():
+    assert R.numbers("5 MW") != R.numbers("- 5 MW")
+    assert R.numbers("-5 MW") == R.numbers("- 5 MW")
+
+
+# The stored version format before 07c (master 307dbd38): a version that is
+# not a revision keeps exactly these keys, in this order (GK B R7).
+V1_KEYS = [
+    "schema_version",
+    "report_id",
+    "version",
+    "title",
+    "language",
+    "created_at",
+    "evidence_hash",
+    "profile_id",
+    "model",
+    "mode",
+    "template_file_id",
+    "sections",
+    "tables",
+    "figures",
+]
+
+
+def test_an_unrevised_version_keeps_the_pre_07c_key_set(pdir):
+    raw = json.loads((store.report_dir(pdir, RID) / "v1.json").read_text())
+    assert list(raw) == V1_KEYS
+    store.save_version(pdir, store.load_report(pdir, RID))
+    assert (
+        list(json.loads((store.report_dir(pdir, RID) / "v2.json").read_text()))
+        == V1_KEYS
+    )
+
+
+def test_a_per_year_suffix_re_spelling_is_addressed(tmp_path):
+    doc = _doc()
+    doc.sections[1].blocks[0] = Paragraph(md="LOLE of 4 h/a.")
+    store.create_report(tmp_path, doc)
+    c = R.add_comment(tmp_path, RID, "x", _anchor(section="summary"))
+    _, out = R.address(
+        tmp_path, RID, c.comment_id, _digest(tmp_path), _para("LOLE of 4 h/yr.")
+    )
+    assert out.version == 2
+
+
+def _stored(pdir):
+    return store.report_dir(pdir, RID) / R.COMMENTS_FILE
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"status": "addressed"},  # no revision
+        {"revision": {"version": 2, "digest": "d"}},  # open with a revision
+        {"reason": "outside_edit_set"},  # reason without reasons
+        {"reason": "made_up", "reasons": ["made_up"]},
+    ],
+)
+def test_a_comment_whose_fields_disagree_is_unreadable(pdir, change):
+    _comment(pdir)
+    raw = json.loads(_stored(pdir).read_text())
+    raw["comments"][0].update(change)
+    _stored(pdir).write_text(json.dumps(raw))
+    assert _refused(R.load_comments, pdir, RID).kind == "report_comments_unreadable"
+
+
+def test_the_report_lock_is_a_file_lock_beside_the_report(pdir):
+    with store.report_lock(pdir, RID):
+        assert (store.reports_dir(pdir) / f".{RID}.lock").exists()
+    assert store.list_reports(pdir)[0].report_id == RID  # the lock file is no report
+
+
+def test_a_lock_held_by_another_process_times_out_as_report_busy(pdir, monkeypatch):
+    from contextlib import contextmanager
+
+    from harness import durable
+
+    @contextmanager
+    def busy(*a, **k):
+        raise TimeoutError("busy")
+        yield
+
+    monkeypatch.setattr(durable, "file_lock", busy)
+    with pytest.raises(store.ReportBusy):
+        store.save_version(pdir, store.load_report(pdir, RID))
+    assert store.load_meta(pdir, RID).latest_version == 1

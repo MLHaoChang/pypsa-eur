@@ -512,20 +512,23 @@ def _write_generation_meta(job: ReportJob, *, aborted: bool) -> None:
     and drops it, which is why the same facts also live in the job record.
     """
     path = store.report_dir(job.project_dir, job.report_id) / "meta.json"
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        logger.warning("reports: meta.json unreadable after save (%s)", path)
-        return
-    with job.lock:
-        raw["generation"] = {
-            "repairs": job.record["repairs"],
-            "prose_failures": list(job.record["prose_failures"]),
-            "sections": list(job.section_ids),
-            "language": job.language,
-            "aborted": aborted,
-        }
-    atomic_write_text(path, json.dumps(raw, indent=2, ensure_ascii=False))
+    # Read-modify-write under the report's lock (study harness 07c R5), so a
+    # comment revision saved meanwhile is not rolled back in the meta.
+    with store.report_lock(job.project_dir, job.report_id):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            logger.warning("reports: meta.json unreadable after save (%s)", path)
+            return
+        with job.lock:
+            raw["generation"] = {
+                "repairs": job.record["repairs"],
+                "prose_failures": list(job.record["prose_failures"]),
+                "sections": list(job.section_ids),
+                "language": job.language,
+                "aborted": aborted,
+            }
+        atomic_write_text(path, json.dumps(raw, indent=2, ensure_ascii=False))
 
 
 # AA-05 S4 (P1, V2): the assistant's report tools run the job strict. The

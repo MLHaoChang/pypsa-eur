@@ -55,15 +55,13 @@ No model call is made here (GK B R1): the edit is the user's own text.
 from __future__ import annotations
 
 import copy
-import hashlib
-import json
 import re
 import secrets
 from collections import Counter
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from models.report import (
     Bullets,
@@ -75,6 +73,7 @@ from models.report import (
     SectionAudit,
     TableRef,
 )
+from services.assurance_artifacts import canonical_sha256
 from services.atomic_io import atomic_write_text
 from services.reports import number_audit, store
 from services.reports.evidence import NumberFact
@@ -170,6 +169,26 @@ class Comment(_Strict):
     updated_at: str
     created_by: str | None = None
 
+    @model_validator(mode="after")
+    def _fields_agree(self) -> Comment:
+        return _consistent(self)
+
+
+KNOWN_REASONS = frozenset(REASON_TEXT)
+
+
+def _consistent(comment: Comment) -> Comment:
+    """R8: a status and its fields agree; a reason is one this module gives."""
+    if (comment.status == "addressed") != (comment.revision is not None):
+        raise ValueError("an addressed comment, and only one, carries its revision")
+    if comment.status == "addressed" and (comment.reason or comment.reasons):
+        raise ValueError("an addressed comment has no open reason")
+    if comment.reason != (comment.reasons[0] if comment.reasons else None):
+        raise ValueError("reason is the first of reasons")
+    if not set(comment.reasons) <= KNOWN_REASONS:
+        raise ValueError("unknown reason")
+    return comment
+
 
 class CommentsFile(_Strict):
     schema_version: Literal[1]
@@ -245,11 +264,6 @@ def _write_comments(project_dir, report_id: str, comments: list[Comment]) -> Non
 # ── anchors ─────────────────────────────────────────────────────────────────
 
 
-def _canonical_sha(value: Any) -> str:
-    raw = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
 def _section(doc: ReportDocument, section_id: str):
     return next((s for s in doc.sections if s.section_id == section_id), None)
 
@@ -278,7 +292,7 @@ def _anchored(doc: ReportDocument, anchor: Anchor) -> tuple[str, Any] | None:
 
 def _anchor_sha(found: tuple[str, Any]) -> str | None:
     what, obj = found
-    return None if what == "section" else _canonical_sha(obj.model_dump(mode="json"))
+    return None if what == "section" else canonical_sha256(obj.model_dump(mode="json"))
 
 
 def _unsupported_reason(found: tuple[str, Any]) -> str | None:
@@ -376,6 +390,17 @@ def _unit(token: number_audit.NumberToken, text: str = "") -> str | None:
     return _UNIT_SPELLING.get(unit, unit)
 
 
+def _negative(text: str, start: int) -> bool:
+    """A minus right before the number, or one space before it ("- 5 MW").
+    A hyphen ("N-1") or a subtraction ("8 - 5") reads negative too; the
+    reading is the same on both sides of an edit, so only a minus added or
+    removed shows as a change."""
+    i = start - 1
+    if i >= 0 and text[i] in " \u2009\u00a0":
+        i -= 1
+    return i >= 0 and text[i] in _MINUS
+
+
 def numbers(text: str) -> Counter:
     """The numbers `text` states, as a multiset of `(signed value, unit)`,
     plus every digit run the audit exempts (a year, an ordinal, digits inside
@@ -384,7 +409,7 @@ def numbers(text: str) -> Counter:
     out: Counter = Counter()
     spans: list[tuple[int, int]] = []
     for token in number_audit.extract_numbers(text):
-        sign = -1.0 if token.start > 0 and text[token.start - 1] in _MINUS else 1.0
+        sign = -1.0 if _negative(text, token.start) else 1.0
         value = float(f"{sign * token.value:.12g}")
         out[("number", value, _unit(token, text))] += 1
         spans.append((token.start, token.end))

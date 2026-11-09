@@ -124,6 +124,11 @@ def _http(exc: store.ReportStoreError) -> HTTPException:
             "error_kind": "figure_not_found",
             "message": "This report has no such figure.",
         })
+    if isinstance(exc, store.ReportBusy):
+        return HTTPException(409, {
+            "error_kind": "report_busy",
+            "message": "Another process is writing this report; try again in a moment.",
+        })
     if isinstance(exc, store.ReportNotFound):
         return HTTPException(404, {
             "error_kind": "report_not_found",
