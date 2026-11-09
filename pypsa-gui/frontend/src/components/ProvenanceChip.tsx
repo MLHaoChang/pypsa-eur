@@ -46,41 +46,45 @@ const labelOf = (key: string | null): string | null => (key ? FIELD_LABELS[key] 
 /** Where a person re-prices: the edit form has the compare control beside the cost; the read-out and the table do not. */
 export type StaleWhere = 'card' | 'readout' | 'table' | 'ledger'
 
-const REPRICE: Record<StaleWhere, string> = {
+const REPRICE: Record<Exclude<StaleWhere, 'ledger'>, string> = {
   card: 'Compare with references to re-price.',
   readout: 'Edit the asset, then compare with references to re-price.',
   table: 'Open the asset and compare with references to re-price.',
-  ledger: 'Open the option in Expert and compare with references to re-price.',
 }
+
+/** The ledger row is not the asset, so its hint names the asset to open (UX, provenance-graph 02). */
+const hintFor = (where: StaleWhere, asset?: string) =>
+  where === 'ledger' ? `Open ${asset ?? 'the asset'} in Expert and compare with references to re-price.` : REPRICE[where]
 
 /**
  * The visible line for a cost priced through a scale input that no longer matches (TCU-05; reasons are
  * never hover-only). Form: "Out of date: <reason>. Priced with <Field> <recorded>, now <current>."
  * Backend reasons are matched, not echoed, so the words stay ours (no keys, no repr quotes).
  */
-export function staleNote(e: Pick<ProvenanceEntry, 'stale'> | undefined, where: StaleWhere): string | null {
-  const body = staleBody(e, where)
+export function staleNote(e: Pick<ProvenanceEntry, 'stale'> | undefined, where: StaleWhere, asset?: string): string | null {
+  const body = staleBody(e, where, asset)
   return body === null ? null : `Out of date: ${body}`
 }
 
 /** `staleNote` without its "Out of date: " lead, for a line that names the asset first. */
-export function staleBody(e: Pick<ProvenanceEntry, 'stale'> | undefined, where: StaleWhere): string | null {
+export function staleBody(e: Pick<ProvenanceEntry, 'stale'> | undefined, where: StaleWhere, asset?: string): string | null {
   const s = e?.stale
   if (!s) return null
+  const hint = hintFor(where, asset)
   const field = labelOf(s.field)
   const now = labelOf(s.current_field)
   if (s.recorded == null || !field) {
     const detail = /\(([^)]*)\)/.exec(s.reason)?.[1]
     const why = s.reason.includes('malformed') ? 'its pricing record is unreadable'
       : `the input it was priced with was not recorded${detail ? ` (${detail})` : ''}`
-    return `${why}. ${REPRICE[where]}`
+    return `${why}. ${hint}`
   }
   const priced = `Priced with ${field} ${num(s.recorded)}`
   if (s.current == null || !now) {
-    return `${field} is no longer available. ${priced}. ${REPRICE[where]}`
+    return `${field} is no longer available. ${priced}. ${hint}`
   }
   const changed = now === field ? `${field} changed` : `the price now reads ${now}`
-  return `${changed}. ${priced}, now ${now === field ? '' : `${now} `}${num(s.current)}. ${REPRICE[where]}`
+  return `${changed}. ${priced}, now ${now === field ? '' : `${now} `}${num(s.current)}. ${hint}`
 }
 
 /** The "out of date" chip; its key is the note line next to it (`staleNote`). */

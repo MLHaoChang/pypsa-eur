@@ -57,10 +57,7 @@ def _fc():
 
 
 def _stale(n, cls, name):
-    return {
-        f: e.get("stale")
-        for f, e in G.stale_entries(n, cls, name).items()
-    }
+    return {f: e.get("stale") for f, e in G.stale_entries(n, cls, name).items()}
 
 
 # ── recording ───────────────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ import LedgerReview from './LedgerReview'
 import TariffStep from './TariffStep'
 import { ledger, library, previewUpload, study } from './__fixtures__/payloads'
 import type { LedgerPayload } from '../../api/decisionStudies'
-import { staleNote } from '../../components/ProvenanceChip'
+import { staleBody } from '../../components/ProvenanceChip'
 import { CHANGED_IN_EXPERT_LABEL, KEY_PARAMETER_LABELS, ROW_MEANING, helpFor } from '../../utils/decisionVocabulary'
 
 afterEach(() => cleanup())
@@ -75,9 +75,9 @@ describe('the assumptions review', () => {
     const payload: LedgerPayload = { ...ledger, stale: { pv_rooftop_eur_per_kw: [hit('bess_pv_2h'), hit('bess_pv_4h')] } }
     render(<LedgerReview payload={payload} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
     const notes = within(row('pv_rooftop_eur_per_kw')).getAllByTestId('ledger-stale')
-    expect(notes.map(n => n.textContent)).toEqual([staleNote({ stale: verdict }, 'ledger')])
-    expect(notes[0].textContent).toBe('Out of date: DC/AC ratio changed. Priced with DC/AC ratio 1.2, now 1.3. '
-      + 'Open the option in Expert and compare with references to re-price.')
+    expect(notes.map(n => n.textContent)).toEqual([`Generator · pv is out of date: ${staleBody({ stale: verdict }, 'ledger', 'pv')}`])
+    expect(notes[0].textContent).toBe('Generator · pv is out of date: DC/AC ratio changed. Priced with DC/AC ratio 1.2, '
+      + 'now 1.3. Open pv in Expert and compare with references to re-price.')
     expect(within(row('battery_storage_eur_per_kwh')).queryByTestId('ledger-stale')).toBeNull()
   })
 

@@ -4,6 +4,7 @@ Plan GO conditions (issue 01, `## Comments`): P1 no vacuous fresh, P2 legacy wri
 master's `provenance.staleness` (frozen in `tests/provenance_graph_oracle.py`), P5 rebuilt per query, P8 a test per
 edge kind that kills a mutant of its comparison.
 """
+
 from __future__ import annotations
 
 import ast
@@ -19,10 +20,21 @@ from services.asset_schema import provenance as P
 from services.provenance_graph import money
 from services.provenance_graph.types import RESERVED_EDGE_KINDS, RESERVED_NODE_KINDS
 from tests import provenance_graph_oracle as oracle
-from tests.test_typed_cost_units_stale import _applied_before_this, _clear_caches, _fc, _pv, _strip_scaled_by  # noqa: F401,E501
+from tests.test_typed_cost_units_stale import (
+    _applied_before_this,
+    _clear_caches,  # noqa: F401 - the autouse fixture
+    _fc,
+    _pv,
+    _strip_scaled_by,
+)
 
 BACKEND = Path(__file__).resolve().parents[1]
-DC = {"column": "dc_ac_ratio", "value": 1.2, "technology": None, "capacity_basis": "output_electric_dc"}
+DC = {
+    "column": "dc_ac_ratio",
+    "value": 1.2,
+    "technology": None,
+    "capacity_basis": "output_electric_dc",
+}
 
 
 def _gen(ratio=1.2, scaled=DC, **entry):
@@ -36,12 +48,22 @@ def _gen(ratio=1.2, scaled=DC, **entry):
     P.record(n, "Generator", "g", "overnight_cost", status="customised", source="s")
     P.record(n, "Generator", "g", "lifetime", status="default", source="pack")
     if scaled is not None:
-        P.annotate(n, "Generator", "g", "overnight_cost", scaled_by=copy.deepcopy(scaled), **entry)
+        P.annotate(
+            n,
+            "Generator",
+            "g",
+            "overnight_cost",
+            scaled_by=copy.deepcopy(scaled),
+            **entry,
+        )
     return n
 
 
 def _verdict(n, field="overnight_cost"):
-    return G.staleness(G.money_graph(n, [("Generator", "g")]), money.derived_id("Generator", "g", field))
+    return G.staleness(
+        G.money_graph(n, [("Generator", "g")]),
+        money.derived_id("Generator", "g", field),
+    )
 
 
 # ── types ───────────────────────────────────────────────────────────────────
@@ -62,8 +84,12 @@ def test_a_node_added_under_two_kinds_is_refused():
 
 
 def test_the_reserved_kinds_build_an_empty_set_today(tmp_path, monkeypatch):
-    g = G.money_graph(_pv(tmp_path, monkeypatch), [("Generator", "g"), ("Generator", "absent")])
-    assert g.nodes and not [x for x in g.nodes.values() if x.kind in RESERVED_NODE_KINDS]
+    g = G.money_graph(
+        _pv(tmp_path, monkeypatch), [("Generator", "g"), ("Generator", "absent")]
+    )
+    assert g.nodes and not [
+        x for x in g.nodes.values() if x.kind in RESERVED_NODE_KINDS
+    ]
     assert not [e for e in g.edges if e.kind in RESERVED_EDGE_KINDS]
 
 
@@ -80,8 +106,13 @@ def test_priced_through_stale_when_the_scale_input_changed(ratio):
     v = _verdict(_gen(ratio=ratio))
     assert v.state == "stale"
     (b,) = v.broken
-    assert (b.edge, b.field, b.recorded, b.current_field, b.reason) == \
-        ("priced_through", "dc_ac_ratio", 1.2, "dc_ac_ratio", "scale input changed")
+    assert (b.edge, b.field, b.recorded, b.current_field, b.reason) == (
+        "priced_through",
+        "dc_ac_ratio",
+        1.2,
+        "dc_ac_ratio",
+        "scale input changed",
+    )
     assert b.current == pytest.approx(ratio)
     assert b.dst == money.input_id("Generator", "g", "dc_ac_ratio")
 
@@ -89,7 +120,11 @@ def test_priced_through_stale_when_the_scale_input_changed(ratio):
 def test_priced_through_stale_when_another_column_prices_it_now():
     v = _verdict(_gen(scaled={**DC, "column": "efficiency"}))
     (b,) = v.broken
-    assert (b.field, b.current_field, b.reason) == ("efficiency", "dc_ac_ratio", "scale input changed")
+    assert (b.field, b.current_field, b.reason) == (
+        "efficiency",
+        "dc_ac_ratio",
+        "scale input changed",
+    )
 
 
 def test_priced_through_stale_when_the_scale_input_cannot_be_read_now():
@@ -99,14 +134,18 @@ def test_priced_through_stale_when_the_scale_input_cannot_be_read_now():
     assert b.reason.startswith("cannot be priced now:") and b.recorded == 1.2
 
 
-@pytest.mark.parametrize("bad", ["1.2", {"column": "dc_ac_ratio"}, {**DC, "value": float("inf")}])
+@pytest.mark.parametrize(
+    "bad", ["1.2", {"column": "dc_ac_ratio"}, {**DC, "value": float("inf")}]
+)
 def test_priced_through_stale_when_the_record_is_malformed(bad):
     v = _verdict(_gen(scaled=bad))
     assert v.state == "stale" and v.broken[0].reason == "scale input record malformed"
     assert v.broken[0].dst == money.input_id("Generator", "g", "scale_input")
 
 
-def test_priced_through_stale_when_a_scaling_pack_price_recorded_nothing(tmp_path, monkeypatch):
+def test_priced_through_stale_when_a_scaling_pack_price_recorded_nothing(
+    tmp_path, monkeypatch
+):
     """P2: a pack price from before TCU-05 (annotated with its basis, no `scaled_by`)."""
     n = _pv(tmp_path, monkeypatch)
     _strip_scaled_by(n, "Generator", "g")
@@ -116,7 +155,9 @@ def test_priced_through_stale_when_a_scaling_pack_price_recorded_nothing(tmp_pat
         assert v.state == "stale" and v.broken[0].reason == "scale input not recorded"
 
 
-@pytest.mark.parametrize("dc, reason", [(True, "scale input not recorded"), (False, None)])
+@pytest.mark.parametrize(
+    "dc, reason", [(True, "scale input not recorded"), (False, None)]
+)
 def test_a_library_reference_applied_before_tcu05(monkeypatch, dc, reason):
     """P2: a customised value with `approved_by` and no scale input: DC reads not recorded, AC compares nothing."""
     n = _applied_before_this(monkeypatch, dc=dc)
@@ -136,30 +177,56 @@ def test_derived_from_carries_a_broken_price_to_the_annualised_cost():
     P.record(n, "Generator", "g", "fom_cost", status="customised", source="other")
     g = G.money_graph(n, [("Generator", "g")])
     v = G.staleness(g, money.derived_id("Generator", "g", "capital_cost"))
-    assert v.state == "stale" and [b.src for b in v.broken] == [money.derived_id("Generator", "g", "overnight_cost")]
+    assert v.state == "stale" and [b.src for b in v.broken] == [
+        money.derived_id("Generator", "g", "overnight_cost")
+    ]
     # The plain fom_cost compared nothing: named, never fresh (P1).
     assert v.uncompared == (money.input_id("Generator", "g", "fom_cost"),)
 
 
 def test_derived_from_reads_fresh_only_when_every_input_compared():
     g = G.money_graph(_gen(), [("Generator", "g")])
-    assert G.staleness(g, money.derived_id("Generator", "g", "capital_cost")).state == "fresh"
+    assert (
+        G.staleness(g, money.derived_id("Generator", "g", "capital_cost")).state
+        == "fresh"
+    )
 
 
 def test_derived_from_unreadable_input_is_stale_on_the_annualised_cost():
     g = G.money_graph(_gen(ratio=None), [("Generator", "g")])
-    assert G.staleness(g, money.derived_id("Generator", "g", "capital_cost")).state == "stale"
+    assert (
+        G.staleness(g, money.derived_id("Generator", "g", "capital_cost")).state
+        == "stale"
+    )
 
 
 def test_stamped_with_and_shown_in_never_break_and_compare_nothing():
     n = _gen(scaled=None)
     g = G.money_graph(n, [("Generator", "g")])
     assert {e.kind for e in g.edges} == {"stamped_with", "shown_in", "derived_from"}
-    for nid in (money.input_id("Generator", "g", "overnight_cost"), money.derived_id("Generator", "g", "capital_cost")):
+    for nid in (
+        money.input_id("Generator", "g", "overnight_cost"),
+        money.derived_id("Generator", "g", "capital_cost"),
+    ):
         v = G.staleness(g, nid)
-        assert v.state == "uncompared" and v.broken == () and v.uncompared   # P1: no vacuous fresh
-    stamp = next(e for e in g.edges if e.kind == "stamped_with" and e.src.endswith("/overnight_cost"))
-    assert stamp.recorded == P.get(n, "Generator", "g")["overnight_cost"] and stamp.dst == "source:s"
+        assert (
+            v.state == "uncompared" and v.broken == () and v.uncompared
+        )  # P1: no vacuous fresh
+    assert G.staleness(
+        g, money.input_id("Generator", "g", "overnight_cost")
+    ).uncompared == (money.input_id("Generator", "g", "overnight_cost"),)
+    assert G.stale_entries(n, "Generator", "g") == P.get(
+        n, "Generator", "g"
+    )  # G2: no `stale` key on the wire
+    stamp = next(
+        e
+        for e in g.edges
+        if e.kind == "stamped_with" and e.src.endswith("/overnight_cost")
+    )
+    assert (
+        stamp.recorded == P.get(n, "Generator", "g")["overnight_cost"]
+        and stamp.dst == "source:s"
+    )
 
 
 def test_an_unknown_node_reads_uncompared_never_fresh():
@@ -170,9 +237,13 @@ def test_an_unknown_node_reads_uncompared_never_fresh():
 def test_each_money_surface_asks_through_its_shown_in_edge():
     g = G.money_graph(_gen(ratio=1.3), [("Generator", "g")])
     for surface in money.ASSET_SURFACES:
-        (v,) = G.surface_verdicts(g, money.surface_id(surface, "Generator", "g", "overnight_cost"))
+        (v,) = G.surface_verdicts(
+            g, money.surface_id(surface, "Generator", "g", "overnight_cost")
+        )
         assert v.state == "stale"
-    (v,) = G.surface_verdicts(g, money.surface_id("economics_costs", "Generator", "g", "capital_cost"))
+    (v,) = G.surface_verdicts(
+        g, money.surface_id("economics_costs", "Generator", "g", "capital_cost")
+    )
     assert v.state == "stale"
 
 
@@ -193,7 +264,9 @@ def test_the_graph_writes_nothing_and_is_rebuilt_per_query():
     before = copy.deepcopy(P._root(n))
     assert "stale" not in G.stale_entries(n, "Generator", "g")["overnight_cost"]
     n.generators.at["g", "dc_ac_ratio"] = 1.3
-    assert G.stale_entries(n, "Generator", "g")["overnight_cost"]["stale"]["current"] == pytest.approx(1.3)
+    assert G.stale_entries(n, "Generator", "g")["overnight_cost"]["stale"][
+        "current"
+    ] == pytest.approx(1.3)
     assert P._root(n) == before
 
 
@@ -220,8 +293,15 @@ def _scenarios(tmp_path, monkeypatch):
     _strip_scaled_by(n, "Generator", "g")
     yield "pack price with no input", n, "Generator", "g"
     n = pv()
-    P._root(n)["Generator"]["g"]["overnight_cost"]["scaled_by"] = {"column": "dc_ac_ratio"}
+    P._root(n)["Generator"]["g"]["overnight_cost"]["scaled_by"] = {
+        "column": "dc_ac_ratio"
+    }
     yield "malformed", n, "Generator", "g"
+    for ratio in (1.2, 1.3):
+        n = pv()
+        P._root(n)["Generator"]["g"]["fom_cost"].pop("scaled_by")
+        n.generators.at["g", "dc_ac_ratio"] = ratio
+        yield f"fom inherits the overnight annotation at {ratio}", n, "Generator", "g"
     n = _fc()
     yield "link fresh", n, "Link", "fc"
     n = _fc()
@@ -229,8 +309,16 @@ def _scenarios(tmp_path, monkeypatch):
     yield "link edited", n, "Link", "fc"
     yield "dc reference", _applied_before_this(monkeypatch, dc=True), "Generator", "pv"
     yield "ac reference", _applied_before_this(monkeypatch, dc=False), "Generator", "pv"
-    yield "other release", _applied_before_this(
-        monkeypatch, dc=False, source="eu-dea-2026-08#" + "0" * 16 + "/solar-utility@2030"), "Generator", "pv"
+    yield (
+        "other release",
+        _applied_before_this(
+            monkeypatch,
+            dc=False,
+            source="eu-dea-2026-08#" + "0" * 16 + "/solar-utility@2030",
+        ),
+        "Generator",
+        "pv",
+    )
     n = _gen(scaled=None)
     yield "in memory, nothing scaled", n, "Generator", "g"
     yield "in memory, nothing recorded", pypsa.Network(), "Generator", "none"
@@ -250,26 +338,37 @@ def test_the_graph_wire_is_byte_equal_to_the_old_staleness(tmp_path, monkeypatch
 
 
 def test_both_routes_are_byte_equal_to_the_old_staleness_on_an_edited_network(
-        tmp_path, monkeypatch, client, install_network):
+    tmp_path, monkeypatch, client, install_network
+):
     from services.library.defaults_pack.pricing import price_from_pack
     from tests.test_library_defaults_pack_typed_units import TYPED
 
     n = install_network(_pv(tmp_path, monkeypatch))
     price_from_pack(n, "links", "fc", "fuel-cell", version=TYPED)
     # Edit through the API, as a person would, then off the API (in memory).
-    r = client.put("/api/network/generators/g", json={"name": "g", "bus": "ac", "carrier": "solar",
-                                                      "dc_ac_ratio": 1.35})
+    r = client.put(
+        "/api/network/generators/g",
+        json={"name": "g", "bus": "ac", "carrier": "solar", "dc_ac_ratio": 1.35},
+    )
     assert r.status_code == 200, r.text
     assert n.generators.at["g", "dc_ac_ratio"] == pytest.approx(1.35)
     n.links.at["fc", "efficiency"] = 0.45
     rows = client.get("/api/network/asset_costs").json()["assets"]
     assert rows
     for row in rows:
-        old = oracle.staleness(n, row["component"], row["name"], P.get(n, row["component"], row["name"]))
-        assert _wire(row["provenance"]) == _wire(json.loads(json.dumps(old))), row["name"]
+        old = oracle.staleness(
+            n, row["component"], row["name"], P.get(n, row["component"], row["name"])
+        )
+        assert _wire(row["provenance"]) == _wire(json.loads(json.dumps(old))), row[
+            "name"
+        ]
     for cls, name in (("Generator", "g"), ("Link", "fc")):
-        got = client.get(f"/api/network/asset_schema/{cls}/provenance/{name}").json()["fields"]
-        assert _wire(got) == _wire(json.loads(json.dumps(oracle.staleness(n, cls, name, P.get(n, cls, name)))))
+        got = client.get(f"/api/network/asset_schema/{cls}/provenance/{name}").json()[
+            "fields"
+        ]
+        assert _wire(got) == _wire(
+            json.loads(json.dumps(oracle.staleness(n, cls, name, P.get(n, cls, name))))
+        )
         assert "stale" in got["overnight_cost"]
 
 
@@ -290,24 +389,42 @@ def test_no_reader_keeps_its_own_scale_comparison():
     for p in _sources():
         tree = ast.parse(p.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr == "staleness" and isinstance(node.value, ast.Name) \
-                    and "provenance" in node.value.id:
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr == "staleness"
+                and isinstance(node.value, ast.Name)
+                and "provenance" in node.value.id
+                and node.value.id != "provenance_graph"
+            ):
                 offenders.append(f"{p}:{node.lineno}")
-            name = node.attr if isinstance(node, ast.Attribute) else node.id if isinstance(node, ast.Name) else None
+            name = (
+                node.attr
+                if isinstance(node, ast.Attribute)
+                else node.id
+                if isinstance(node, ast.Name)
+                else None
+            )
             if name == "current_scale_input" and p.name != "pricing.py":
                 offenders.append(f"{p}:{node.lineno}")
     assert offenders == []
 
 
 def test_no_production_module_imports_the_oracle():
-    assert not [p for p in _sources() if "provenance_graph_oracle" in p.read_text(encoding="utf-8")]
+    assert not [
+        p
+        for p in _sources()
+        if "provenance_graph_oracle" in p.read_text(encoding="utf-8")
+    ]
 
 
-@pytest.mark.parametrize("module", [
-    "services/adequacy/portfolio.py",
-    "services/time_aggregation_service.py",
-    "services/assistant_tools.py",
-])
+@pytest.mark.parametrize(
+    "module",
+    [
+        "services/adequacy/portfolio.py",
+        "services/time_aggregation_service.py",
+        "services/assistant_tools.py",
+    ],
+)
 def test_no_cache_key_reads_a_graph_node(module):
     """GK B ruling (c): cache keys (adequacy, time aggregation, previews) stay out of the graph."""
     assert "provenance_graph" not in (BACKEND / module).read_text(encoding="utf-8")
@@ -325,7 +442,9 @@ def pv_fork():
 
     library = study_library.load_defaults()
     ledger = study_library.seed_ledger(Q.BESS_AT_SITE, INTAKE, library)
-    return packs.build_site_network(INTAKE, ledger, "bess_pv_2h", library=library), ledger
+    return packs.build_site_network(
+        INTAKE, ledger, "bess_pv_2h", library=library
+    ), ledger
 
 
 def _price_pv_through_its_ratio(n, ratio=1.2):
@@ -355,8 +474,14 @@ def test_a_ratio_change_reads_the_same_stale_on_the_ledger_row_as_on_the_card(pv
     card = G.stale_entries(m, "Generator", "pv")["overnight_cost"]["stale"]
     assert card["reason"] == "scale input changed"
     got = asset_view.ledger_stale(m, ledger)
-    assert got == {"pv_rooftop_eur_per_kw": {"component": "Generator", "name": "pv", "field": "overnight_cost",
-                                             "stale": card}}
+    assert got == {
+        "pv_rooftop_eur_per_kw": {
+            "component": "Generator",
+            "name": "pv",
+            "field": "overnight_cost",
+            "stale": card,
+        }
+    }
     # The PV kind the pack did not read is not this fork's row.
     assert "pv_utility_eur_per_kw" in asset_view.asset_snapshot(m).stale
 
@@ -367,15 +492,30 @@ def test_an_unrecorded_scale_input_reads_stale_on_the_ledger_row_too(pv_fork):
     n, ledger = pv_fork
     m = n.copy()
     _price_pv_through_its_ratio(m)
-    P._root(m)["Generator"]["pv"]["overnight_cost"]["scaled_by"] = {"column": "dc_ac_ratio"}
-    assert asset_view.ledger_stale(m, ledger)["pv_rooftop_eur_per_kw"]["stale"]["reason"] == \
-        "scale input record malformed"
+    P._root(m)["Generator"]["pv"]["overnight_cost"]["scaled_by"] = {
+        "column": "dc_ac_ratio"
+    }
+    assert (
+        asset_view.ledger_stale(m, ledger)["pv_rooftop_eur_per_kw"]["stale"]["reason"]
+        == "scale input record malformed"
+    )
     del P._root(m)["Generator"]["pv"]["overnight_cost"]["scaled_by"]
-    P.annotate(m, "Generator", "pv", "overnight_cost", status="default", capacity_basis="output_electric_dc")
-    assert G.stale_entries(m, "Generator", "pv")["overnight_cost"]["stale"]["reason"] == \
-        "scale input not recorded"
-    assert asset_view.ledger_stale(m, ledger)["pv_rooftop_eur_per_kw"]["stale"]["reason"] == \
-        "scale input not recorded"
+    P.annotate(
+        m,
+        "Generator",
+        "pv",
+        "overnight_cost",
+        status="default",
+        capacity_basis="output_electric_dc",
+    )
+    assert (
+        G.stale_entries(m, "Generator", "pv")["overnight_cost"]["stale"]["reason"]
+        == "scale input not recorded"
+    )
+    assert (
+        asset_view.ledger_stale(m, ledger)["pv_rooftop_eur_per_kw"]["stale"]["reason"]
+        == "scale input not recorded"
+    )
 
 
 @pytest.fixture
@@ -386,11 +526,13 @@ def studies_on(monkeypatch):
 
 
 def test_the_ledger_routes_show_the_fork_card_s_stale_after_a_ratio_change(
-        client, api_project, monkeypatch, project_storage_dir, studies_on):
+    client, api_project, monkeypatch, project_storage_dir, studies_on
+):
     """TCU-07 acceptance, through the routes: GET and PUT `/ledger` carry, for the PV price row, the `stale`
     the option fork's asset card reads (the graph's verdict on the fork network as saved)."""
     from services import solver_service
     from services.pypsa_service import PyPSAService
+    from services.study import store
     from tests.study_s4_support import create_pack_study, wait_run
     from tests.test_study_expert_edits_routes import INTAKE
     from tests.test_study_runner import FakeSolver
@@ -398,11 +540,18 @@ def test_the_ledger_routes_show_the_fork_card_s_stale_after_a_ratio_change(
     monkeypatch.setattr(solver_service, "run_simulation", FakeSolver())
     name = "pg02-ledger"
     api_project(f"{name}-src")
-    r = create_pack_study(client, f"{name}-src", name,
-                          intake={**INTAKE, "pv": {"enabled": True, "kind": "rooftop"}})
+    r = create_pack_study(
+        client,
+        f"{name}-src",
+        name,
+        intake={**INTAKE, "pv": {"enabled": True, "kind": "rooftop"}},
+    )
     assert r.status_code == 201, r.text
     sid = r.json()["study_id"]
-    assert client.post(f"/api/projects/{name}/studies/{sid}/run", json={}).status_code == 202
+    assert (
+        client.post(f"/api/projects/{name}/studies/{sid}/run", json={}).status_code
+        == 202
+    )
     assert wait_run(client, name, sid)["status"] == "done"
     url = f"/api/projects/{name}/studies/{sid}/ledger"
     assert client.get(url).json()["stale"] == {}
@@ -418,14 +567,70 @@ def test_the_ledger_routes_show_the_fork_card_s_stale_after_a_ratio_change(
     saved = pypsa.Network()
     with PyPSAService.get_netcdf_io_lock():
         PyPSAService.import_network_from_netcdf(saved, path)
-    card = json.loads(json.dumps(G.stale_entries(saved, "Generator", "pv")["overnight_cost"]["stale"]))
+    card = json.loads(
+        json.dumps(G.stale_entries(saved, "Generator", "pv")["overnight_cost"]["stale"])
+    )
     assert card["reason"] == "scale input changed"
 
-    want = {"pv_rooftop_eur_per_kw": [{"option_id": "bess_pv_2h", "component": "Generator", "name": "pv",
-                                       "field": "overnight_cost", "stale": card}]}
+    want = {
+        "pv_rooftop_eur_per_kw": [
+            {
+                "option_id": "bess_pv_2h",
+                "component": "Generator",
+                "name": "pv",
+                "field": "overnight_cost",
+                "stale": card,
+            }
+        ]
+    }
+    # G4: the stored study (and its ledger hash) is what a GET reads, untouched by the sibling `stale`.
+    from services.study import packs
+
+    study_file = project_storage_dir(name) / "studies" / f"{sid}.json"
+    stored_bytes = study_file.read_bytes()
+    got = client.get(url).json()
+    assert got["stale"] == want
+    assert study_file.read_bytes() == stored_bytes
+    stored = store.load_study(project_storage_dir(name), sid).ledger
+    assert "stale" not in stored.model_dump(mode="json")
+    assert packs.ledger_hash(stored) == packs.ledger_hash(
+        type(stored).model_validate(got["ledger"])
+    )
+
+    # G1: an Expert edit that rewrites the fork flips the verdict on the next GET (the snapshot cache is keyed on
+    # the fork file, so it cannot serve the old one), both ways.
+    _rewrite_ratio(path, 1.2)
+    assert client.get(url).json()["stale"] == {}
+    _rewrite_ratio(path, 1.3)
     assert client.get(url).json()["stale"] == want
-    put = client.put(url, json={"rows": [{"key": "discount_rate", "value": 0.06, "unit": "per unit"}]})
+    put = client.put(
+        url,
+        json={"rows": [{"key": "discount_rate", "value": 0.06, "unit": "per unit"}]},
+    )
     assert put.status_code == 200, put.text
     assert put.json()["stale"] == want
     # A view beside the ledger: the stored rows carry no `stale`.
     assert all("stale" not in r for r in put.json()["ledger"]["rows"])
+    after = store.load_study(project_storage_dir(name), sid).ledger
+    assert packs.ledger_hash(after) == packs.ledger_hash(
+        type(after).model_validate(put.json()["ledger"])
+    )
+
+
+def _rewrite_ratio(path, ratio):
+    """What a saved Expert edit of the fork's DC/AC ratio leaves on disk."""
+    import os
+    import time
+
+    from services.pypsa_service import PyPSAService
+
+    n = pypsa.Network()
+    with PyPSAService.get_netcdf_io_lock():
+        PyPSAService.import_network_from_netcdf(n, path)
+    n.generators.at["pv", "dc_ac_ratio"] = ratio
+    before = path.stat().st_mtime_ns
+    with PyPSAService.get_netcdf_io_lock():
+        PyPSAService.export_network_to_netcdf(n, path)
+    if path.stat().st_mtime_ns == before:  # a coarse clock: a real save is later
+        t = time.time_ns() + 1_000_000
+        os.utime(path, ns=(t, t))

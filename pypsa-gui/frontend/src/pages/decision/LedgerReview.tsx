@@ -20,7 +20,7 @@ import {
 } from '../../utils/decisionVocabulary'
 import { isMoneyUnit, isPvRowUnused, ledgerCurrencyYearLabel, parseNeedsAttention } from './decisionModel'
 import { Button, Card, Chip, Refusal } from './DecisionUi'
-import { staleNote } from '../../components/ProvenanceChip'
+import { staleBody } from '../../components/ProvenanceChip'
 
 export interface LedgerEditOut { key: string; value: number; unit: string; currency_year?: number }
 
@@ -37,7 +37,7 @@ function Row({ r, intake, attention, stale, onSave, onReset, saving, tested }: {
   r: LedgerRow
   intake: StudyIntake
   attention: string | null
-  /** The out-of-date notes of the asset field this row compiles to, one per distinct note (TCU-07). */
+  /** The out-of-date lines of the asset field this row compiles to, one per distinct line (TCU-07). */
   stale: string[]
   tested: TornadoRow | null
   onSave: (e: LedgerEditOut[]) => void
@@ -153,7 +153,11 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
   const staleNotes = useMemo(() => {
     const m = new Map<string, string[]>()
     for (const [key, hits] of Object.entries(payload.stale ?? {})) {
-      const notes = hits.map(h => staleNote(h, 'ledger')).filter((n): n is string => n !== null)
+      // The table's form, which names the asset: the row is not the asset (UX P1).
+      const notes = hits.flatMap(h => {
+        const body = staleBody(h, 'ledger', h.name)
+        return body === null ? [] : [`${h.component} · ${h.name} is out of date: ${body}`]
+      })
       if (notes.length) m.set(key, [...new Set(notes)])
     }
     return m
