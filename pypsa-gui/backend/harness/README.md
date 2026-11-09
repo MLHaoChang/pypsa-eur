@@ -622,6 +622,11 @@ never silently retry. Supported navigation stays submitted until an issued,
 current browser ACK arrives. Legacy version-1 ACKs certify a mounted view only.
 Version-2 load-flow ACKs additionally require fetched/rendered matching source
 binding and a current raw-data/input read-back; neither grants domain approval.
+Site 3D (SC-07 S5b) is the one canvas view with an ACK: exactly
+`{panel_id: "map", canvas_view: "site"}` and no other key, target
+`{panel_id: "map", canvas_view: "site"}`. It is version 1: it certifies that
+Site 3D is mounted, not which Site, scene revision or content it shows (its
+`input_sha256` is the network fingerprint), and with no network open none is issued.
 Authenticated JSON/ZIP exports and the
 evidence card consume the same answer/receipt; existing PNG integrity is separate.
 

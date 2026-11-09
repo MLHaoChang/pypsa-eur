@@ -22,6 +22,13 @@ it('requires review for uncertain writes and disables controls during streaming'
   expect(onRequest).not.toHaveBeenCalled()
   expect(screen.getByText(/effects may already exist/)).toBeTruthy()
 })
+it('a proven partial mapping (R3) drops the "may already exist" warning it would contradict', () => {
+  render(<AssistantResultCard result={{ ...task, status: 'needs_review', changes: ['it p_set 3 → 2 MW'],
+    next_step: { id: 'apply', tool: 'site_scene_apply', status: 'uncertain', error_kind: 'revision_conflict' } }}
+    disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getByTestId('task-partial-mapping')).toBeTruthy()
+  expect(screen.queryByText(/effects may already exist/)).toBeNull()
+})
 it('offers only authenticated project blob links', () => {
   const url = '/api/projects/project-id/uploads/0123456789abcdef/blob'
   const { rerender } = render(<AssistantResultCard result={{ download_url: url, filename: 'chart.png' }} disabled={false} onRequest={vi.fn()} />)

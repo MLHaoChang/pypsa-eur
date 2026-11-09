@@ -4383,6 +4383,10 @@ def _dispatch_real_tool_call(
                 ui_event_payload.update(
                     acknowledgement=acknowledgement, tool_use_id=tool_use_id
                 )
+        if ui_event_payload.get("canvas_view") == "site":
+            # SC-07 S5b (GK B V3): a Site 3D navigate names its call even with no
+            # ACK, so its row can say the opening could not be confirmed.
+            ui_event_payload["tool_use_id"] = tool_use_id
         yield "ui_event", ui_event_payload
         if ui_event_payload.get("kind") == "navigate":
             from services.result_views import note_shown
