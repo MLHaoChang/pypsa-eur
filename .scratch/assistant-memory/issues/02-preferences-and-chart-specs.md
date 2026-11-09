@@ -3,7 +3,7 @@
 
 # Slice 1: preferences and saved chart specs
 
-Status: needs-triage
+Status: ready-for-agent (split: 02a backend in progress, branch claude/assistant-memory-02a; 02b UI later)
 Blocked by: 01
 Type: feature
 Model: Opus. Reviewers: GK B, and UX for the UI.

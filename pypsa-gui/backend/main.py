@@ -92,6 +92,7 @@ from routers import (
     library,
     library_references,
     local_settings,
+    memory,
     network,
     operational_gap,
     profiles,
@@ -1470,6 +1471,9 @@ app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
 app.include_router(
     local_settings.router, prefix="/api/local-settings", tags=["local-settings"],
 )
+# Assistant memory (plan §4): the Memory page's API. Not a project route;
+# every item is checked against its owner scope in services/memory_store.py.
+app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
 
 
 @app.on_event("startup")

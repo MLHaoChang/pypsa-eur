@@ -137,6 +137,8 @@ _R_SKILL_REGISTRY = (
     "`<app data>/skills/` into the in-process registry (chat harness issue 14). "
     "Writes nothing to disk and touches no project. Not project data."
 )
+_R_MEMORY = ("assistant memory (`services/memory_store.py`): app-database rows owned by a user or "
+             "an org, never a project's files; no project holder applies.")
 _R_LOCAL = "desktop-only (`reject_unless_local_mode` on the router); one identity, no holder."
 _R_MCP = (
     "local MCP exposure (issue 11): acts on the caller's own `mcp-` chat "
@@ -282,6 +284,9 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/chat/settings/mcp/servers/{server_id}/keys/{key_name}"): (NOT_PROJECT_DATA, _R_MCP_SETTINGS),
     ("DELETE", "/api/chat/settings/mcp/servers/{server_id}/keys/{key_name}"): (NOT_PROJECT_DATA, _R_MCP_SETTINGS),
     ("PUT", "/api/local-settings/anthropic-key"): (NOT_PROJECT_DATA, _R_LOCAL),
+    ("POST", "/api/memory/items"): (NOT_PROJECT_DATA, _R_MEMORY),
+    ("PATCH", "/api/memory/items/{item_id}"): (NOT_PROJECT_DATA, _R_MEMORY),
+    ("POST", "/api/memory/items/{item_id}/{action}"): (NOT_PROJECT_DATA, _R_MEMORY),
     ("POST", "/api/local-settings/reveal-log"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/dictation/transcribe"): (NOT_PROJECT_DATA, _R_NO_PROJECT),
     ("POST", "/api/projects/{name}/intent-comparison"): (NOT_PROJECT_DATA, _R_INTENT_COMPARISON),
@@ -364,6 +369,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
 # routeless (`_service_call_`), which the seam's route-derived rule cannot see.
 TOOL_POLICY: dict[str, tuple[str, str]] = {
     "load_project": (LOCK_PROTOCOL, _R_LOCK_PROTOCOL),
+    "propose_memory": (NOT_PROJECT_DATA, _R_MEMORY),
     "set_active_profile": (NOT_PROJECT_DATA, (
         "selects among already-configured LLM profiles; super-admin-only, "
         "matching `POST /api/chat/settings/llm/active`. Instance scope."

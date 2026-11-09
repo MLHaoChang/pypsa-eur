@@ -1,0 +1,9 @@
+{"kinds": {
+  "memory_invalid": {"surface": "inline", "why": "propose_memory or recall_memory refused its arguments: a body outside its kind's schema or the preference registry, an unknown concept key, a summary over 160 characters, or a call in a harness run's turn (services/memory_store.py). Nothing was saved and no card was shown; the assistant corrects the arguments the message names."},
+  "memory_not_found": {"surface": "inline", "why": "A memory item id that does not exist or that the caller may not read or change (services/memory_store.py); every access miss reads the same, so ids cannot be probed. Nothing changed; the assistant does not guess another id."},
+  "memory_kind_unavailable": {"surface": "inline", "why": "propose_memory was asked for a parameter item, which arrives with assistant-memory slice 03. Nothing was saved; the assistant says so or proposes a preference or lesson instead."},
+  "memory_no_org": {"surface": "inline", "why": "The user has no organisation membership, so memory cannot store an item for them. Nothing was saved; the assistant tells the user."},
+  "chart_spec_invalid": {"surface": "inline", "why": "A chart_spec memory body is not a valid chart_spec@1 (services/chart_spec.py): an unknown key, view, component class, chart type or unit. Nothing was saved; the assistant corrects the spec the message names."},
+  "memory_proposal_capped": {"surface": "inline", "why": "propose_memory was called past its cap: one memory card per turn and three per chat (harness/budget.py). No card was shown; the assistant tells the user they can save it on the Memory page."},
+  "memory_proposal_dismissed": {"surface": "inline", "why": "The user dismissed this same proposal (kind, concept keys and body) less than 30 days ago. No card was shown; the assistant does not offer it again."}
+}}
