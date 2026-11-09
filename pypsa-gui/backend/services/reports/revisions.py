@@ -668,7 +668,7 @@ def _find(comments: list[Comment], comment_id: str) -> int:
         if c.comment_id == comment_id:
             return i
     raise RevisionError(
-        "report_comment_not_found", 404, f"No comment {comment_id!r} on this report."
+        "report_comment_not_found", 404, f"No comment {comment_id} on this report."
     )
 
 
