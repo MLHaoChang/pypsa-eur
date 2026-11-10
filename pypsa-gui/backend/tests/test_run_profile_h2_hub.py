@@ -368,7 +368,9 @@ def test_a_run_on_each_template_stops_at_the_result_gate_on_the_loops_typed_refu
     assert clicks.used == ["solve.2"]
     lole = verdicts["eh.adequacy.lole"]
     assert lole["verdict"] == "not_evaluated" and lole["severity"] == "block"
-    assert lole["facts"][0]["value"] == run_gates.LOOP_CANNOT_SAMPLE
+    assert lole["facts"][0]["value"] == run_gates.LOOP_NOTHING_TO_SAMPLE
+    # GK A (19) F1: the reason names both causes, never only the Links.
+    assert lole["reason"] == run_gates.NOTHING_TO_SAMPLE_DETAIL
     assert lole["facts"][0]["value"] not in (
         "passed",
         "not_started",
@@ -426,7 +428,7 @@ def test_a_done_eh_study_meeting_the_goal_never_passes_the_refused_loops_lole_ru
     rule = _rules(ref)["eh.adequacy.lole"]
     [result] = run_gates.evaluate([rule], env)
     assert result["verdict"] == "not_evaluated" and result["severity"] == "block"
-    assert result["facts"][0]["value"] == run_gates.LOOP_CANNOT_SAMPLE
+    assert result["facts"][0]["value"] == run_gates.LOOP_NOTHING_TO_SAMPLE
     assert not run_gates.passed([result])
 
 

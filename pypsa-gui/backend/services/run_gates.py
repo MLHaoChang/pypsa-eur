@@ -201,8 +201,13 @@ ENGINE_TOOLS = {"run_margin_loop": "margin_loop", "run_coupling_loop": "coupling
 RESTORES = ("base", "final")
 # The loops' shared refusal of a network with no sampleable electrical
 # generator is `NOTHING_TO_SAMPLE`, defined once in the adequacy layer (GK A
-# (19) SH11-L6); the typed reason the gate reads it as (SH11-L1):
-LOOP_CANNOT_SAMPLE = "loop_cannot_sample_link_outages"
+# (19) SH11-L6); the typed reason the gate reads it as (SH11-L1). The
+# refusal names no cause, so neither does the reading (GK A (19) F1): a
+# network's generators may lack outage data, or its outages may sit on Links.
+LOOP_NOTHING_TO_SAMPLE = "loop_nothing_to_sample"
+NOTHING_TO_SAMPLE_DETAIL = ("the loop found no outage to sample: no electrical generator has outage data "
+                            "(unavailability or repair time). Outages carried on Links, as on the H2 hubs, "
+                            "cannot be sampled yet.")
 # The fields of a finished loop's record a settled engine step keeps, and the
 # gate shows: the verdict, what it cost, how the network was left, and the
 # goal it was judged against with where each part came from.
@@ -242,10 +247,8 @@ def _loop_converged(env, rule):
     if not isinstance(loop, dict):
         reason = step.get("error") or "the engine loop left no record"
         if NOTHING_TO_SAMPLE in str(reason):
-            # GK A (19) SH11-L1: the runner's own refusal, typed by its cause.
-            return NoEvidence(LOOP_CANNOT_SAMPLE, "the loop cannot sample this network's outages: they are "
-                                                  "carried on Links (firm backup, grid import), not on "
-                                                  "electrical generators")
+            # GK A (19) SH11-L1: the runner's own refusal, typed (F1: cause-neutral).
+            return NoEvidence(LOOP_NOTHING_TO_SAMPLE, NOTHING_TO_SAMPLE_DETAIL)
         return NoEvidence((step.get("job") or {}).get("outcome") or step["status"], str(reason)[:240])
     if loop.get("applied") is False:  # a user edit landed while the loop ran (H3): not this project's
         return NoEvidence("inputs_changed", "the inputs changed while the engine loop ran")

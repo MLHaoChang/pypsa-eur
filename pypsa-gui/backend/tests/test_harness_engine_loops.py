@@ -1093,13 +1093,13 @@ def test_another_refusal_keeps_its_own_reason_in_the_gate(
     granted, ok, loops, monkeypatch, exc
 ):
     """SH11-L7: only the runner's nothing-to-sample refusal reads as
-    `loop_cannot_sample_link_outages`; any other refusal keeps its own
+    `loop_nothing_to_sample`; any other refusal keeps its own
     outcome and reason, and never passes."""
     record, _, returned = _refused(granted, loops, monkeypatch, exc)
     row = _engine_row(record)
     assert returned == ["engine_refused"]
     assert row["verdict"] == "not_evaluated" and row["severity"] == "block"
-    assert row["facts"][0]["value"] == "failed" != run_gates.LOOP_CANNOT_SAMPLE
+    assert row["facts"][0]["value"] == "failed" != run_gates.LOOP_NOTHING_TO_SAMPLE
     assert str(exc.detail) in row["reason"]
     assert not run_gates.passed([row])
 
@@ -1115,7 +1115,14 @@ def test_the_nothing_to_sample_refusal_reads_as_its_typed_reason(
     assert returned == ["engine_refused"]
     assert (
         row["verdict"] == "not_evaluated"
-        and row["facts"][0]["value"] == run_gates.LOOP_CANNOT_SAMPLE
+        and row["facts"][0]["value"] == run_gates.LOOP_NOTHING_TO_SAMPLE
+    )
+    # GK A (19) F1: on a network with generators and no Link outages (eh_site's
+    # shapes), the reading never claims the outages sit on Links: it names the
+    # generators' missing outage data first, as on the H2 hubs.
+    assert row["reason"] == run_gates.NOTHING_TO_SAMPLE_DETAIL
+    assert row["reason"].startswith(
+        "the loop found no outage to sample: no electrical generator has outage data"
     )
 
 

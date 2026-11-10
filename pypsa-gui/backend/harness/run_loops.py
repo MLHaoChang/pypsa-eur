@@ -788,7 +788,7 @@ def _gate_on_refusal(path, ctx):
     """A refused loop stops the run at the result gate with the gate read as it
     stands, so the engine rule shows the refusal's typed reason beside the
     other rules (GK A (19) SH11-L1: `eh.adequacy.lole` reads
-    `loop_cannot_sample_link_outages`, never passed or not_started). The stop
+    `loop_nothing_to_sample`, never passed or not_started). The stop
     is `_engine_stop`'s alone: the read changes no status, reason or attempt
     count (SH11-L9), and a read that fails leaves the stop as it is and says
     so on the stage (SH11-L8)."""
