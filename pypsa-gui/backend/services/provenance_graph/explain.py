@@ -48,7 +48,9 @@ STAMP_REQUIRED = ("source", "source_year", "currency_year")
 #: Money units are written in EUR by the schema; a stamp naming another currency is shown in that one.
 _SCHEMA_CURRENCY = "EUR"
 NOT_ESTABLISHED = "not_established"
-ARITHMETIC = "arithmetic: the value ÷ the scale recorded at pricing, not a re-read of the pack"
+ARITHMETIC = (
+    "arithmetic: the value ÷ the scale recorded at pricing, not a re-read of the pack"
+)
 
 
 class TargetUnknown(LookupError):
@@ -114,7 +116,11 @@ def _recorded(edge: Edge) -> Any:
     if isinstance(rec, Unrecorded):
         return {"unrecorded": rec.reason}
     if isinstance(rec, money.ScaleRecord):
-        return rec.scaled if isinstance(rec.scaled, dict) else {"malformed": repr(rec.scaled)}
+        return (
+            rec.scaled
+            if isinstance(rec.scaled, dict)
+            else {"malformed": repr(rec.scaled)}
+        )
     return rec
 
 
@@ -152,7 +158,9 @@ def _not_established(reason: str) -> dict:
     return {"status": NOT_ESTABLISHED, "reason": reason, "basis": ARITHMETIC}
 
 
-def _pack_price(g: Graph, step: Step, value: float | None, unit: str | None) -> dict | None:
+def _pack_price(
+    g: Graph, step: Step, value: float | None, unit: str | None
+) -> dict | None:
     """A scaled price's pack price: the value ÷ the scale its `priced_through` edge recorded, with that price's
     source. None when no scale priced it; `not_established` when the division cannot be made (X3)."""
     edge = next(iter(g.out(step.node.id, ("priced_through",))), None)
@@ -272,7 +280,11 @@ def ledger_fields(key: str, pv_kind: str | None = None) -> list:
     if not rows:
         raise TargetUnknown(f"no ledger row '{key}'")
     if pv_kind is not None:
-        rows = [m for m in rows if not m.key.startswith("pv_") or m.key.startswith(f"pv_{pv_kind}_")]
+        rows = [
+            m
+            for m in rows
+            if not m.key.startswith("pv_") or m.key.startswith(f"pv_{pv_kind}_")
+        ]
     return rows
 
 
@@ -288,9 +300,17 @@ def explain_ledger_row(n, key: str) -> dict:
         except TargetUnknown:
             continue  # the asset is not on this network, or the field was never recorded on it
     if not fields:
-        raise TargetUnknown(f"ledger row '{key}' compiles to no recorded field on this network")
+        raise TargetUnknown(
+            f"ledger row '{key}' compiles to no recorded field on this network"
+        )
     states = [f["outcome"]["state"] for f in fields]
-    state = "stale" if "stale" in states else "uncompared" if "uncompared" in states else "fresh"
+    state = (
+        "stale"
+        if "stale" in states
+        else "uncompared"
+        if "uncompared" in states
+        else "fresh"
+    )
     return {
         "outcome": {
             "state": state,

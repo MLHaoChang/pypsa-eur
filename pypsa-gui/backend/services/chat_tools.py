@@ -1370,13 +1370,13 @@ def why_this_number(component: str | None = None, name: str | None = None, field
     asset = (component, name, field)
     ledger = (project, study_id, ledger_key, option_id)
     if all(v is not None for v in asset) and all(v is None for v in ledger):
-        from routers.network import get_asset_provenance_why as _h
+        from routers.network import get_asset_provenance_why as _asset_why
 
-        return _h(component, name, field)
+        return _asset_why(component, name, field)
     if all(v is not None for v in ledger) and all(v is None for v in asset):
-        from routers.studies import get_ledger_row_why as _h
+        from routers.studies import get_ledger_row_why as _row_why
 
-        return _route(_h, study_id, ledger_key, option_id, project=_authorized_project(project))
+        return _route(_row_why, study_id, ledger_key, option_id, project=_authorized_project(project))
     raise HTTPException(status_code=422, detail={
         "error_kind": "invalid_tool_args",
         "message": "pass component, name and field (an asset field), or project, study_id, "

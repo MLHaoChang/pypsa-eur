@@ -81,7 +81,9 @@ def test_why_a_pv_cost_walks_to_the_pack_price_and_the_ratio_with_their_stamps(
     assert pack["value"] == pytest.approx(cost["value"] / 1.2)
     assert pack["source"] == stamp["source"] and pack["basis"] == E.ARITHMETIC
     assert ratio["node"] == RATIO and ratio["value"] == pytest.approx(1.2)
-    assert ratio["unit"] is None  # a ratio: the schema names no unit, and none is made up
+    assert (
+        ratio["unit"] is None
+    )  # a ratio: the schema names no unit, and none is made up
     assert ratio["via"]["edge"] == "priced_through"
     assert ratio["via"]["recorded"]["column"] == "dc_ac_ratio"
     assert ratio["via"]["recorded"]["value"] == pytest.approx(1.2)
@@ -161,7 +163,9 @@ def test_state_stale_when_the_current_value_cannot_be_read(tmp_path, monkeypatch
 
 def test_state_broken_record_reads_stale_and_compares_nothing(tmp_path, monkeypatch):
     n = _pv(tmp_path, monkeypatch)
-    P._root(n)["Generator"]["g"]["overnight_cost"]["scaled_by"] = {"column": "dc_ac_ratio"}
+    P._root(n)["Generator"]["g"]["overnight_cost"]["scaled_by"] = {
+        "column": "dc_ac_ratio"
+    }
     out = explain(n, "Generator", "g", "overnight_cost")
     scale = out["steps"][1]
     assert out["outcome"]["state"] == "stale" and scale["state"] == "stale"
@@ -176,7 +180,9 @@ def test_state_uncompared_never_fresh(tmp_path, monkeypatch):
     n = _pv(tmp_path, monkeypatch)
     out = explain(n, "Generator", "g", "lifetime")
     assert out["outcome"]["state"] == "uncompared"
-    assert out["outcome"]["uncompared"] == [money.input_id("Generator", "g", "lifetime")]
+    assert out["outcome"]["uncompared"] == [
+        money.input_id("Generator", "g", "lifetime")
+    ]
     (step,) = out["steps"]
     assert step["state"] == "uncompared" and step["broken"] is None
     assert step["stamp"]["status"] == "default"
@@ -245,7 +251,9 @@ def test_stamp_gaps_are_named_never_filled(tmp_path, monkeypatch):
     cost = explain(n, "Generator", "g", "overnight_cost")["steps"][0]
     assert cost["stamp_missing"] == ["currency_year"]
     assert cost["unit"] == "GBP/MW" and cost["pack_price"]["unit"] == "GBP/MW"
-    assert "currency_year" not in cost["stamp"] or cost["stamp"]["currency_year"] is None
+    assert (
+        "currency_year" not in cost["stamp"] or cost["stamp"]["currency_year"] is None
+    )
 
 
 # ── X4: targets ─────────────────────────────────────────────────────────────
@@ -260,7 +268,9 @@ def test_stamp_gaps_are_named_never_filled(tmp_path, monkeypatch):
         ("Generator", "g", "p_nom", 404),  # a column with no provenance
     ],
 )
-def test_an_unknown_target_is_refused(tmp_path, monkeypatch, component, name, field, status):
+def test_an_unknown_target_is_refused(
+    tmp_path, monkeypatch, component, name, field, status
+):
     n = _pv(tmp_path, monkeypatch)
     with pytest.raises(TargetUnknown) as exc:
         explain(n, component, name, field)
@@ -286,8 +296,23 @@ def _ledger_pv(tmp_path, monkeypatch):
     """A pack-priced PV named as the Guided study names it (`asset_view.PV`)."""
     n = _pv(tmp_path, monkeypatch)
     g = n.generators.loc["g"]
-    n.add("Generator", "pv", **{c: g[c] for c in ("bus", "carrier", "p_nom", "lifetime", "overnight_cost",
-                                                  "fom_cost", "capital_cost", "dc_ac_ratio")})
+    n.add(
+        "Generator",
+        "pv",
+        **{
+            c: g[c]
+            for c in (
+                "bus",
+                "carrier",
+                "p_nom",
+                "lifetime",
+                "overnight_cost",
+                "fom_cost",
+                "capital_cost",
+                "dc_ac_ratio",
+            )
+        },
+    )
     n.remove("Generator", "g")
     root = P._root(n)["Generator"]
     root["pv"] = root.pop("g")
@@ -310,7 +335,9 @@ def test_a_ledger_row_walks_the_field_it_compiles_to(tmp_path, monkeypatch):
             explain_ledger_row(n, key)
 
 
-def test_a_ledger_row_reads_uncompared_when_a_field_compared_nothing(tmp_path, monkeypatch):
+def test_a_ledger_row_reads_uncompared_when_a_field_compared_nothing(
+    tmp_path, monkeypatch
+):
     n = _ledger_pv(tmp_path, monkeypatch)
     out = explain_ledger_row(n, "pv_utility_lifetime_years")
     assert out["outcome"]["state"] == "uncompared"
@@ -326,7 +353,9 @@ def test_a_capped_walk_is_marked_truncated_and_never_complete(tmp_path, monkeypa
     assert out["outcome"]["truncated"] is True and out["outcome"]["complete"] is False
     assert out["outcome"]["steps_total"] == 4 and len(out["steps"]) == 2
     monkeypatch.setattr(E, "MAX_STEPS", 1)
-    row = explain_ledger_row(_ledger_pv(tmp_path / "pv", monkeypatch), "pv_utility_eur_per_kw")
+    row = explain_ledger_row(
+        _ledger_pv(tmp_path / "pv", monkeypatch), "pv_utility_eur_per_kw"
+    )
     assert row["outcome"]["complete"] is False and row["outcome"]["truncated"] is True
 
 
@@ -468,11 +497,17 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
     name = "pg03-why"
     api_project(f"{name}-src")
     r = create_pack_study(
-        client, f"{name}-src", name, intake={**INTAKE, "pv": {"enabled": True, "kind": "rooftop"}}
+        client,
+        f"{name}-src",
+        name,
+        intake={**INTAKE, "pv": {"enabled": True, "kind": "rooftop"}},
     )
     assert r.status_code == 201, r.text
     sid = r.json()["study_id"]
-    assert client.post(f"/api/projects/{name}/studies/{sid}/run", json={}).status_code == 202
+    assert (
+        client.post(f"/api/projects/{name}/studies/{sid}/run", json={}).status_code
+        == 202
+    )
     assert wait_run(client, name, sid)["status"] == "done"
 
     path = project_storage_dir(f"{name}-opt-bess_pv_2h") / "network.nc"
@@ -492,34 +527,67 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
     assert r.status_code == 200, r.text
     got = r.json()
     assert next(iter(got)) == "outcome" and got["outcome"]["state"] == "stale"
-    assert got["target"] == {"ledger_key": "pv_rooftop_eur_per_kw", "study_id": sid, "option_id": "bess_pv_2h"}
+    assert got["target"] == {
+        "ledger_key": "pv_rooftop_eur_per_kw",
+        "study_id": sid,
+        "option_id": "bess_pv_2h",
+    }
     (field,) = got["fields"]
-    assert field["target"] == {"component": "Generator", "name": "pv", "field": "overnight_cost"}
+    assert field["target"] == {
+        "component": "Generator",
+        "name": "pv",
+        "field": "overnight_cost",
+    }
     ratio = field["steps"][1]
     assert ratio["node"] == "input:Generator/pv/dc_ac_ratio"
     assert ratio["broken"]["compared"]["current"] == pytest.approx(1.3)
 
     via_tool = chat_tools.DISPATCHERS["why_this_number"](
-        project=name, study_id=sid, ledger_key="pv_rooftop_eur_per_kw", option_id="bess_pv_2h"
+        project=name,
+        study_id=sid,
+        ledger_key="pv_rooftop_eur_per_kw",
+        option_id="bess_pv_2h",
     )
     assert json.loads(json.dumps(via_tool)) == got
 
     for key, option, code in (
         ("no_such_row", "bess_pv_2h", 404),
         ("pv_rooftop_eur_per_kw", "no_such_option", 404),
-        ("pv_utility_eur_per_kw", "bess_pv_2h", 404),  # the PV kind this study's pack did not read
+        (
+            "pv_utility_eur_per_kw",
+            "bess_pv_2h",
+            404,
+        ),  # the PV kind this study's pack did not read
     ):
-        r = client.get(f"/api/projects/{name}/studies/{sid}/ledger/{key}/why", params={"option_id": option})
+        r = client.get(
+            f"/api/projects/{name}/studies/{sid}/ledger/{key}/why",
+            params={"option_id": option},
+        )
         assert r.status_code == code, (key, option)
         assert r.json()["detail"]["error_kind"] == "why_target_unknown"
     assert path.read_bytes() == fork_bytes and study_file.read_bytes() == study_bytes
 
 
 def test_only_input_and_derived_ids_name_an_asset_field():
-    assert E._parse("input:Generator/g/dc_ac_ratio") == ("Generator", "g", "dc_ac_ratio")
-    assert E._parse("derived:Link/a/b/overnight_cost") == ("Link", "a/b", "overnight_cost")
-    for nid in ("asset_card:Generator/g/overnight_cost", "ledger_row:pv_x", "input:nowhere", "source:s",
-                "input:/g/f", "input:Generator//f", "input:Generator/g/"):
+    assert E._parse("input:Generator/g/dc_ac_ratio") == (
+        "Generator",
+        "g",
+        "dc_ac_ratio",
+    )
+    assert E._parse("derived:Link/a/b/overnight_cost") == (
+        "Link",
+        "a/b",
+        "overnight_cost",
+    )
+    for nid in (
+        "asset_card:Generator/g/overnight_cost",
+        "ledger_row:pv_x",
+        "input:nowhere",
+        "source:s",
+        "input:/g/f",
+        "input:Generator//f",
+        "input:Generator/g/",
+    ):
         assert E._parse(nid) is None, nid
 
 
@@ -533,11 +601,18 @@ def test_unit_and_value_reads_never_raise_on_an_absent_target(tmp_path, monkeypa
     assert E._value(n, "Generator", "g", "no_such_field") is None
     assert E._unit("Nope", "overnight_cost", {"currency": "GBP"}) is None
     # Only a money unit takes the stamp's currency.
-    assert E._unit("Generator", "lifetime", {"currency": "GBP"}) == E._schema_unit("Generator", "lifetime")
-    assert E._stamp_missing({"source": "s", "source_year": 1, "currency_year": 1}, None) == []
+    assert E._unit("Generator", "lifetime", {"currency": "GBP"}) == E._schema_unit(
+        "Generator", "lifetime"
+    )
+    assert (
+        E._stamp_missing({"source": "s", "source_year": 1, "currency_year": 1}, None)
+        == []
+    )
 
 
-def test_currency_is_missing_only_on_a_money_unit_whose_stamp_names_none(tmp_path, monkeypatch):
+def test_currency_is_missing_only_on_a_money_unit_whose_stamp_names_none(
+    tmp_path, monkeypatch
+):
     n = _pv(tmp_path, monkeypatch)
     lifetime = explain(n, "Generator", "g", "lifetime")["steps"][0]
     assert "currency" not in lifetime["stamp_missing"]
@@ -588,7 +663,9 @@ def test_a_ledger_key_matches_whole_never_a_part():
         (("fresh", "fresh"), "fresh"),
     ],
 )
-def test_a_two_field_row_reads_stale_over_uncompared_over_fresh(monkeypatch, states, want):
+def test_a_two_field_row_reads_stale_over_uncompared_over_fresh(
+    monkeypatch, states, want
+):
     """The round-trip efficiency row compiles to two fields: any stale is stale, else any uncompared is."""
     it = iter(states)
 

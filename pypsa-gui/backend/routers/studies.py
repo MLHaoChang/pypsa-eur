@@ -1155,7 +1155,7 @@ def get_ledger_row_why(study_id: str, key: str, option_id: str,
     fork = next((r for r in _owned_fork_rows(study, project, db, user)
                  if r.name.rsplit(study_forks.FORK_SEPARATOR, 1)[-1] == option_id), None)
     if fork is None:
-        raise unknown(f"option {option_id!r} has no fork this study owns")
+        raise unknown(f"option {option_id} has no fork this study owns")
     network, _hash = study_runner.fork_network_from_disk(fork)
     try:
         out = explain_ledger_row(network, key)
