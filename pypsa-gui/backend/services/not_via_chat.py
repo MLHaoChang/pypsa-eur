@@ -368,12 +368,12 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'id': 'memory_parameter_suggestions',
         'title': 'Saving a field value for reuse, or applying a saved one',
         'disposition': 'out of chat',
-        'reason': ('A value is saved for reuse with the Save for reuse button beside its field, and a '
-                   'saved value is applied only when you pick its chip next to the same field and '
-                   'approve the card there. The assistant never applies one.'),
+        'reason': ('Save a value with the Save for reuse button beside its field. A saved value is '
+                   'applied only when you pick its chip beside the same field and approve the card. '
+                   'The assistant never applies one.'),
         'page': 'Asset card (Properties)',
         'panel': None,
-        'keywords': frozenset({'reuse', 'suggestion', 'saved value'}),
+        'keywords': frozenset({'reuse', 'suggestion', 'saved'}),
         'routes': frozenset({
             ('GET', '/api/memory/suggestions'),
             ('POST', '/api/memory/parameters'),
