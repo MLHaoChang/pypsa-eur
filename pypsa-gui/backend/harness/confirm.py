@@ -86,6 +86,12 @@ def _is_guided(ui_context: Any) -> bool:
 # Tools no policy, task, brief or run envelope ever approves: the user's card only.
 CARD_ONLY_TOOLS: frozenset[str] = frozenset({"site_scene_apply"})
 
+# Assistant memory §2.2, §9 M4: a memory proposal is only ever the user's own
+# card, in Guided and Expert. A write-tier tool Expert would run uncarded, so
+# this set also lifts it past the `none` policy, and no auto-approve tier,
+# saved rule, task, brief or run envelope stands in for the card.
+ALWAYS_CARD_TOOLS: frozenset[str] = frozenset({"propose_memory"})
+
 # Per-tier auto-approve policy (#18). A comma-separated list of safety tiers
 # (intersected with DESTRUCTIVE_TIERS — only destructive/execution tiers are
 # confirmable) that the runtime auto-approves WITHOUT the human round-trip.
@@ -216,7 +222,7 @@ def _confirm_destructive_tool(
     # Issue 04 S5 (P4): repeating a held job call is only ever the user's own card.
     # SC-07 S3 (GK B N1): a 3D site apply is only ever its own card, in a task or not.
     confirm_only = violated or tool_name == _requirements.TOOL or repeat_card is not None \
-        or tool_name in CARD_ONLY_TOOLS
+        or tool_name in CARD_ONLY_TOOLS or tool_name in ALWAYS_CARD_TOOLS
     if policy == 'none' and not confirm_only:
         return True
     from harness import approvals

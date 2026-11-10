@@ -332,6 +332,22 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('POST', '/api/projects/{name}/reports/{report_id}/comments/{comment_id}/withdraw'),
         }),
     },
+    {
+        'id': 'memory_page_edits',
+        'title': 'Editing, retiring or sharing saved memory',
+        'disposition': 'out of chat',
+        'reason': ('The assistant only proposes memory (on a card you decide) and reads it. Editing, '
+                   'retiring, restoring and sharing items with your organisation are done on the '
+                   'Memory page.'),
+        'page': 'Memory page (account menu)',
+        'panel': None,
+        'keywords': frozenset({'forget', 'unremember', 'memories'}),
+        'routes': frozenset({
+            ('PATCH', '/api/memory/items/{item_id}'),
+            ('POST', '/api/memory/items/{item_id}/{action}'),
+            ('GET', '/api/memory/items/{item_id}/versions'),
+        }),
+    },
 )
 
 NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the reason and the page; "

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -303,3 +303,72 @@ class AssistantJobHold(Base):
         ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     owner_replica_id: Mapped[str] = mapped_column(String(32), nullable=False)
     lease_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class MemoryItem(Base):
+    """One assistant-memory item (assistant-memory plan §1; `services/memory_store.py`).
+
+    Spans projects, so it lives here and not in a project directory. The body
+    lives in `MemoryItemVersion`; `current_version` names the live one. A
+    confirmed or retired item is never deleted, so a `memory:<id>@v<n>`
+    provenance stamp always resolves. `kind`, `status` and `origin` are plain
+    strings; the store is the validating edge.
+    """
+
+    __tablename__ = "memory_items"
+    __table_args__ = (
+        Index("ix_memory_items_user_status", "user_id", "status"),
+        Index("ix_memory_items_org_scope_status", "org_id", "owner_scope", "status"),
+        Index("ix_memory_items_org_kind", "org_id", "project_kind"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    kind: Mapped[str] = mapped_column(String(32))
+    owner_scope: Mapped[str] = mapped_column(String(8))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    org_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    project_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    concept_keys: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16))
+    current_version: Mapped[int] = mapped_column(Integer)
+    origin: Mapped[str] = mapped_column(String(16))
+    promoted_from: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # A user's nomination to their org (§5): NULL, 'pending' or 'declined'.
+    nomination: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    recall_count: Mapped[int] = mapped_column(Integer, default=0)
+    apply_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dismissed_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryItemVersion(Base):
+    """One immutable version of a memory item's body (plan §1)."""
+
+    __tablename__ = "memory_item_versions"
+    __table_args__ = (UniqueConstraint("item_id", "version"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("memory_items.id", ondelete="CASCADE"))
+    version: Mapped[int] = mapped_column(Integer)
+    body_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[str] = mapped_column(String(160))
+    evidence_json: Mapped[str] = mapped_column(Text)
+    edited_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    edited_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryRevision(Base):
+    """Per-owner memory revision (plan §3.1, §9 M5): bumped on every write
+    that changes what a prompt block shows, never on a counter update.
+    `scope_key` is ``user:<uuid>`` or ``org:<uuid>``."""
+
+    __tablename__ = "memory_revisions"
+
+    scope_key: Mapped[str] = mapped_column(String(48), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
