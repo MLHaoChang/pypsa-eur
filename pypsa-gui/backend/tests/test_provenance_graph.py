@@ -255,6 +255,8 @@ def test_why_walks_from_the_annualised_cost_to_the_scale_input():
         (money.derived_id("Generator", "g", "overnight_cost"), "derived_from", "stale"),
         (money.input_id("Generator", "g", "dc_ac_ratio"), "priced_through", "stale"),
     ]
+    assert [s.node.kind for s in w.steps] == ["derived", "derived", "input"]
+    assert G.why(g, "input:nowhere").steps[0].node == G.Node("input", "input:nowhere")
     assert w.steps[0].stamp is None  # the annualised cost carries no stamp of its own
     assert w.steps[1].stamp["source"] == "s" and w.steps[1].stamp["scaled_by"] == DC
 
