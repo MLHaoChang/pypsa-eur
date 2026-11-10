@@ -820,20 +820,15 @@ def get_asset_provenance(component: str, name: str) -> dict:
 @router.get("/asset_schema/{component}/provenance/{name}/why/{field}")
 def get_asset_provenance_why(component: str, name: str, field: str) -> dict:
     """Why one asset field has its value (provenance-graph 03): the provenance graph's walk from the field to
-    what priced it, each step's value, unit, stamp, the edge that reached it and whether it is current.
-    `field` = `capital_cost` is the Economics row's annualised cost. Reads only (COPILOT-1)."""
-    from services.provenance_graph.explain import explain
+    what priced it, outcome first, then each step's value, unit, stamp, the edge that reached it and whether it is
+    current. `field` = `capital_cost` is the Economics row's annualised cost. Reads only (COPILOT-1). A target
+    the graph cannot answer for is `why_target_unknown` (422 an unknown class, else 404)."""
+    from services.provenance_graph.explain import TargetUnknown, explain
 
-    attr = CLASS_ATTR.get(component)
-    if attr is None:
-        raise HTTPException(400, f"No asset schema for '{component}'.")
-    n = PyPSAService.get_network()
-    table = getattr(n, attr)
-    if name not in table.index:
-        raise HTTPException(404, f"{component} '{name}' not found")
-    if field not in table.columns:
-        raise HTTPException(404, f"{component} has no field '{field}'")
-    return explain(n, component, name, field)
+    try:
+        return explain(PyPSAService.get_network(), component, name, field)
+    except TargetUnknown as exc:
+        raise HTTPException(exc.status, {"error_kind": "why_target_unknown", "message": str(exc)}) from exc
 
 
 # ── Time Series ───────────────────────────────────────────────────────────────

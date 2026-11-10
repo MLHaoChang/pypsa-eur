@@ -4883,20 +4883,28 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "why_this_number",
-        "Explain why one asset field has its value, step by step, from the provenance graph: "
-        "the field (field='capital_cost' is the Economics row's annualised cost), what it was "
-        "derived from or priced through (a pack price scaled by dc_ac_ratio or a Link's "
-        "efficiency), each step's value and unit as stored now, its provenance stamp (status, "
-        "source, source_year, currency_year, approver), the edge to it with the value that edge "
-        "recorded, and state fresh|stale|uncompared. A stale step carries `broken` (recorded vs "
-        "current: say the input changed since pricing); a scaled price carries `pack_price`, "
-        "worked back as value ÷ the recorded scale. uncompared means nothing was compared, "
-        "never that it is current. Values are in storage units (EUR/MW). Changes nothing. "
-        "Safety: read.",
+        "Explain why one number has its value, step by step, from the provenance graph. "
+        "Target either an asset field (component, name, field; field='capital_cost' is the "
+        "Economics row's annualised cost) or a Guided ledger row (project, study_id, ledger_key, "
+        "option_id: the row on that option's network). The result starts with `outcome` "
+        "(state fresh|stale|uncompared, complete, truncated), then each step: what the value "
+        "was derived from or priced through (a pack price scaled by dc_ac_ratio or a Link's "
+        "efficiency), its value and unit as stored now, its provenance stamp (status, source, "
+        "source_year, currency_year, approver) and `stamp_missing` (name those, never assume "
+        "them), the edge to it with what that edge recorded, and its state. A stale step's "
+        "`broken` lists what was compared (recorded vs current: say the input changed since "
+        "pricing) and what was not. A scaled price carries `pack_price`: arithmetic (value ÷ "
+        "the recorded scale), or not_established. uncompared means nothing was compared, never "
+        "that it is current; a truncated answer is not complete. Values are in storage units "
+        "(EUR/MW). Changes nothing. Safety: read.",
         {"component": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
          "name": {"type": "string", "minLength": 1},
-         "field": {"type": "string", "minLength": 1}},
-        ["component", "name", "field"],
+         "field": {"type": "string", "minLength": 1},
+         "project": {"type": "string", "minLength": 1},
+         "study_id": {"type": "string", "minLength": 1},
+         "ledger_key": {"type": "string", "minLength": 1},
+         "option_id": {"type": "string", "minLength": 1}},
+        [],
     ),
     _t(
         "geocode_place",
@@ -5378,7 +5386,8 @@ TOOL_ROUTES: dict[str, list] = {
     "cluster_network": [("POST", "/api/network/cluster")],
     "recalculate_line_lengths": [("POST", "/api/network/lines/recalculate_lengths")],
     # network topology and sites (8) — LV08 B1, in process through `_route`.
-    "why_this_number": [("GET", "/api/network/asset_schema/{component}/provenance/{name}/why/{field}")],
+    "why_this_number": [("GET", "/api/network/asset_schema/{component}/provenance/{name}/why/{field}"),
+                        ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why")],
     "get_asset_reference": [("GET", "/api/network/asset_costs"),
                             ("GET", "/api/network/asset_schema/{component}"),
                             ("GET", "/api/network/catalog/{component}")],

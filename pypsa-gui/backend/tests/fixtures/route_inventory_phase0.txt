@@ -365,6 +365,7 @@ POST    /api/projects/{name}/studies/{study_id}/findings/tornado                
 POST    /api/projects/{name}/studies/{study_id}/findings/tornado/abort             -> abort_findings_tornado_api_projects__name__studies__study_id__findings_tornado_abort_post
 GET     /api/projects/{name}/studies/{study_id}/ledger                             -> get_ledger_api_projects__name__studies__study_id__ledger_get
 PUT     /api/projects/{name}/studies/{study_id}/ledger                             -> put_ledger_api_projects__name__studies__study_id__ledger_put
+GET     /api/projects/{name}/studies/{study_id}/ledger/{key}/why                   -> get_ledger_row_why_api_projects__name__studies__study_id__ledger__key__why_get
 GET     /api/projects/{name}/studies/{study_id}/ledger.csv                         -> get_ledger_csv_api_projects__name__studies__study_id__ledger_csv_get
 GET     /api/projects/{name}/studies/{study_id}/options/{option_id}/case           -> get_option_case_api_projects__name__studies__study_id__options__option_id__case_get
 GET     /api/projects/{name}/studies/{study_id}/options/{option_id}/case.xlsx      -> get_option_case_xlsx_api_projects__name__studies__study_id__options__option_id__case_xlsx_get
