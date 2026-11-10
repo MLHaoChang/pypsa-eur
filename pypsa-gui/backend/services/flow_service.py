@@ -873,7 +873,7 @@ def acknowledge_many(project_dir: pathlib.Path, items: list[dict],
         match = [it for it in items if it["code"] == code and (it["target"]["entity"] or "") == ent]
         if not match:
             raise FlowAckError(404, "flow_item_unknown",
-                               f"no flow item {code!r} for {ent or 'the project'!r}")
+                               f"no flow item {code} for {ent or 'the project'}")
         if any(it["severity"] != "warning" for it in match):
             raise FlowAckError(422, "flow_ack_not_warning",
                                "only a warning can be acknowledged; fix an error instead")
