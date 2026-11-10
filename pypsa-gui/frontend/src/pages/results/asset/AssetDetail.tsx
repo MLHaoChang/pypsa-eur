@@ -322,14 +322,14 @@ export default function AssetDetail() {
                     <button type="button" disabled={!series.length || isDefault}
                       onClick={() => void saveDefault(asset, series, mode, projectKind)}
                       data-testid="asset-save-default"
-                      className="flex items-center gap-1 text-[11px] text-muted hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted">
+                      className="flex items-center gap-1 whitespace-nowrap text-[11px] text-muted hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted">
                       <Pin size={11} /> Save as default
                     </button>
                     {!series.length && (
                       <span className="text-[10.5px] text-muted">Tick a series to save a default</span>
                     )}
                     {isDefault && (
-                      <span className="text-[10.5px] text-muted" data-testid="asset-default-line">
+                      <span className="whitespace-nowrap text-[10.5px] text-muted" data-testid="asset-default-line">
                         {onDefault ? 'Your default' : 'Already your default'}
                         {' · '}
                         <button type="button" className="hover:text-accent hover:underline"
