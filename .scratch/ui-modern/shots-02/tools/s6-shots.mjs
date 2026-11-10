@@ -125,7 +125,7 @@ for (const s of steps) {
     }
     else if (op === 'at') {
       const ok = await p.evaluate(text => {
-        const els = [...document.querySelectorAll('h2, h3, h4, header span, [data-chart-frame] span, div.font-semibold, span.font-semibold')]
+        const els = [...document.querySelectorAll('h2, h3, h4, header span, [data-chart-frame] span, [class*="font-semibold"]')]
         const el = els.find(e => e.getBoundingClientRect().width > 0 && e.textContent.replace(/\s+/g, ' ').includes(text))
         if (!el) return false
         ;(el.closest('[data-chart-frame]') || el).scrollIntoView({ block: 'start' }); return true
