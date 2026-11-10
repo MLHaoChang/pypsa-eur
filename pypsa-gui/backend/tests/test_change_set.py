@@ -594,11 +594,13 @@ def _pending(session, tool_name, args):
     )
 
 
-def test_ticked_on_a_single_card_is_a_400_and_the_token_stays_alive(world):
+@pytest.mark.parametrize("ticked", [["tu-0"], []])
+def test_ticked_on_a_single_card_is_a_400_and_the_token_stays_alive(world, ticked):
+    """GK B (44) F4: an empty list is still `ticked`, so still a 400."""
     session = chat_service.ChatSession()
     pc = _pending(session, "update_component", {})
     with pytest.raises(HTTPException) as exc:
-        session.record_decision(pc.token, "approve", ["tu-0"])
+        session.record_decision(pc.token, "approve", ticked)
     assert (
         exc.value.status_code == 400
         and exc.value.detail["error_kind"] == "invalid_decision"
@@ -1031,3 +1033,215 @@ def test_the_card_says_the_rows_were_checked_together(world, monkeypatch):
     monkeypatch.setattr(requirements, "active_for", lambda session: ("t", []))
     payload = change_set.card_payload(_members(s, [B1_POC, B2_CRIT]))
     assert payload["requirements"]["checked"] == 0
+
+
+# ── GK B (44) F1–F6: the turn ends mid-set, revoked rules, unrecordable approvals ──
+
+B3_CRIT = (
+    "update_component",
+    {"component_class": "Bus", "name": "B3", "attrs": {"eh_critical": True}},
+)
+
+
+def test_the_tool_call_cap_mid_set_reads_not_run_and_the_receipt_precedes_session_done(
+    world, monkeypatch
+):
+    """F1: a ticked member the cap stopped never ran. It reads `not_run`,
+    never `uncertain`, and the receipt comes before `session_done` (the
+    client stops reading there)."""
+    from harness import budget
+
+    monkeypatch.setattr(budget, "MAX_TOOL_CALLS_PER_TURN", 1)
+    session = chat_service.ChatSession()
+    events = _run(session, [B1_POC, B2_CRIT, B3_CRIT], EXPERT, [("approve", None)])
+    statuses, receipt = _receipt(events)
+    assert statuses == {"tu-0": "applied", "tu-1": "not_run", "tu-2": "not_run"}
+    assert (receipt["ticked"], receipt["landed"], receipt["failed"]) == (3, 1, 0)
+    assert receipt["all_applied"] is False
+    kinds = {r["tool_use_id"]: r["error_kind"] for r in receipt["rows"]}
+    assert kinds == {"tu-0": None, "tu-1": "tool_call_cap_exceeded", "tu-2": None}
+    names = [e for e, _ in events]
+    assert names.index("change_set_receipt") < names.index("session_done")
+    assert _flag("B1", "eh_poc")
+    assert not _flag("B2", "eh_critical") and not _flag("B3", "eh_critical")
+    _one_result_per_call(session, 3)
+
+
+def test_an_unticked_row_the_cap_stopped_is_not_counted_as_ticked(world, monkeypatch):
+    """F1: `not_run` is only for a ticked, approved row."""
+    from harness import budget
+
+    monkeypatch.setattr(budget, "MAX_TOOL_CALLS_PER_TURN", 1)
+    events = _run(
+        chat_service.ChatSession(),
+        [B1_POC, B2_CRIT, B3_CRIT],
+        EXPERT,
+        [("approve", ["tu-0", "tu-1"])],
+    )
+    statuses, receipt = _receipt(events)
+    assert statuses == {"tu-0": "applied", "tu-1": "not_run", "tu-2": "failed"}
+
+
+def test_a_reached_member_without_a_receipt_stays_uncertain():
+    """F1: only a member that never reached its gate reads `not_run`."""
+    row = {
+        "tool": "t", "digest": "d", "ticked": True, "status": None,
+        "reached": True, "card": {}, "error_kind": None, "label": None,
+    }  # fmt: skip
+    state = {"decision": "approve", "order": ["a", "b"],
+             "rows": {"a": row, "b": {**row, "reached": False}}}  # fmt: skip
+    session = type("S", (), {"change_set": state})()
+    rows = change_set.receipt_frame(session)["rows"]
+    assert [r["status"] for r in rows] == ["uncertain", "not_run"]
+
+
+def test_a_member_that_ran_but_left_no_receipt_reads_uncertain_not_not_run(
+    world, monkeypatch
+):
+    """F1: past its gate a member may have written, so it is never `not_run`."""
+    monkeypatch.setattr(change_set, "note_receipt", lambda *a, **k: None)
+    events = _run(
+        chat_service.ChatSession(), [B1_POC, B2_CRIT], EXPERT, [("approve", None)]
+    )
+    statuses, receipt = _receipt(events)
+    assert statuses == {"tu-0": "uncertain", "tu-1": "uncertain"}
+    assert receipt["landed"] == 0 and receipt["all_applied"] is False
+
+
+def _revision(monkeypatch):
+    now = ["before"]
+    monkeypatch.setattr(confirm, "confirmation_revision", lambda: (now[0],))
+    return now
+
+
+def test_rules_changed_while_the_card_is_open_revoke_the_whole_set(world, monkeypatch):
+    """F2, the card's own check: the decision is revoked for every member,
+    the unticked one included, and nothing is written."""
+    now = _revision(monkeypatch)
+    session = chat_service.ChatSession()
+    wait = session.wait_for_decision
+
+    def waiting(token):
+        decision = wait(token)
+        now[0] = "after"  # the rules change while the card is open
+        return decision
+
+    session.wait_for_decision = waiting
+    events = _run(session, [B1_POC, B2_CRIT, VOLL], EXPERT, [("approve", ["tu-0", "tu-1"])])
+    assert _errors(events) == dict.fromkeys(["tu-0", "tu-1", "tu-2"], "confirmation_revoked")
+    statuses, receipt = _receipt(events)
+    assert receipt["decision"] == "revoked" and receipt["landed"] == 0
+    assert set(statuses.values()) == {"failed"}
+    assert not _flag("B1", "eh_poc") and not _flag("B2", "eh_critical")
+    _one_result_per_call(session, 3)
+
+
+def test_rules_changed_between_two_members_revoke_the_later_one(world, monkeypatch):
+    """F2, the member's own check: the card was approved under the old rules;
+    a member dispatched after they changed is revoked and not written."""
+    now = _revision(monkeypatch)
+    noted = change_set.note_receipt
+
+    def after_the_first_write(session, tool_use_id, receipt):
+        noted(session, tool_use_id, receipt)
+        now[0] = "after"
+
+    monkeypatch.setattr(change_set, "note_receipt", after_the_first_write)
+    session = chat_service.ChatSession()
+    events = _run(session, [B1_POC, B2_CRIT], EXPERT, [("approve", None)])
+    assert _errors(events) == {"tu-1": "confirmation_revoked"}
+    statuses, receipt = _receipt(events)
+    assert statuses == {"tu-0": "applied", "tu-1": "failed"}
+    assert receipt["decision"] == "approve"
+    assert _flag("B1", "eh_poc") and not _flag("B2", "eh_critical")
+
+
+def test_a_set_whose_ask_cannot_be_recorded_shows_no_card_and_writes_nothing(
+    world, monkeypatch
+):
+    """F3 (K8): a card nobody can audit is never shown."""
+    monkeypatch.setattr(approvals, "asked", lambda s, **k: k["call_id"] != "tu-1")
+    session = chat_service.ChatSession()
+    events = _run(session, [B1_POC, B2_CRIT], EXPERT, [])
+    assert _cards(events) == []
+    assert not session.pending_confirmations
+    assert _errors(events) == dict.fromkeys(["tu-0", "tu-1"], "approval_unavailable")
+    assert not _flag("B1", "eh_poc") and not _flag("B2", "eh_critical")
+    _one_result_per_call(session, 2)
+
+
+def test_a_member_whose_approval_cannot_be_recorded_does_not_run(world, monkeypatch):
+    """F3 (K8): `decided` false for one ticked row: that row is refused, the
+    other still runs."""
+    real = approvals.decided
+    monkeypatch.setattr(
+        approvals,
+        "decided",
+        lambda s, **k: (
+            False
+            if k["call_id"] == "tu-0" and k["outcome"] == "approved"
+            else real(s, **k)
+        ),
+    )
+    session = chat_service.ChatSession()
+    events = _run(session, [B1_POC, B2_CRIT], EXPERT, [("approve", None)])
+    assert _errors(events) == {"tu-0": "approval_unavailable"}
+    statuses, _ = _receipt(events)
+    assert statuses == {"tu-0": "failed", "tu-1": "applied"}
+    assert not _flag("B1", "eh_poc") and _flag("B2", "eh_critical")
+
+
+def _shown(args, **fresh):
+    """A held row and a fresh preview that differ from it only by `fresh`."""
+    rows = [{"component_class": "Bus", "name": "B1", "field": "eh_poc",
+             "role": "typed", "old": False, "new": True}]  # fmt: skip
+    card = {"digest": "shown", "binding": "p1", "complete": True, "rows": rows}
+    held_row = {"card": card, "args": args,
+                "digest": change_set.item_digest("update_component", args, card)}  # fmt: skip
+    return held_row, {**card, "digest": "fresh", **fresh}
+
+
+@pytest.mark.parametrize(
+    ("fresh", "args", "still"),
+    [
+        ({}, {"a": 1}, True),  # control: only the preview's digest differs
+        ({"binding": "p2"}, {"a": 1}, False),
+        ({"complete": False}, {"a": 1}, False),
+        ({"digest": "shown"}, {"a": 2}, False),  # the same preview, other arguments
+    ],
+)
+def test_binding_completeness_and_arguments_each_make_a_row_stale(fresh, args, still):
+    """F5 (K3): one killing case per compared part, with equal rows."""
+    held_row, preview = _shown({"a": 1}, **fresh)
+    state = {"created": {}}
+    assert (
+        change_set._still_shown(state, held_row, "update_component", args, preview)
+        is still
+    )
+
+
+def test_a_restriction_changed_after_the_card_revokes_at_the_member_gate(
+    world, monkeypatch
+):
+    """F6: the member's own restriction recheck refuses before any approval
+    is recorded, with the change-set card's reason."""
+    from harness import restrictions
+
+    # The saved rule reads differently at every look, so the snapshot taken
+    # at a member's admission is already out of date at its gate.
+    looks = iter(range(1000))
+    monkeypatch.setattr(
+        restrictions, "capture", lambda s: {"mode": "standard", "rev": next(looks)}
+    )
+    decided = []
+    real = approvals.decided
+    monkeypatch.setattr(
+        approvals, "decided", lambda s, **k: (decided.append(k), real(s, **k))[1]
+    )
+    session = chat_service.ChatSession()
+    events = _run(session, [B1_POC, B2_CRIT], EXPERT, [("approve", None)])
+    assert _errors(events) == dict.fromkeys(["tu-0", "tu-1"], "confirmation_revoked")
+    messages = [p["message"] for e, p in events if e == "tool_error"]
+    assert all("on the change-set card" in m for m in messages)
+    assert [(d["outcome"], d["by"]) for d in decided] == [("revoked", "system")] * 2
+    assert not _flag("B1", "eh_poc") and not _flag("B2", "eh_critical")

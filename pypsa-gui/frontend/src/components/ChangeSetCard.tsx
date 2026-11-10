@@ -23,7 +23,7 @@ export interface ChangeSet {
   requirements: { checked: number; says: string }
 }
 
-export type ChangeSetRowStatus = 'applied' | 'unchanged' | 'uncertain' | 'failed' | 'stale' | 'unticked'
+export type ChangeSetRowStatus = 'applied' | 'unchanged' | 'uncertain' | 'failed' | 'stale' | 'unticked' | 'not_run'
 
 export interface ChangeSetReceiptRow {
   tool_use_id: string
@@ -63,7 +63,7 @@ export function changeSetOf(value: unknown): ChangeSet | null {
   return o as unknown as ChangeSet
 }
 
-const STATUSES: ReadonlySet<string> = new Set(['applied', 'unchanged', 'uncertain', 'failed', 'stale', 'unticked'])
+const STATUSES: ReadonlySet<string> = new Set(['applied', 'unchanged', 'uncertain', 'failed', 'stale', 'unticked', 'not_run'])
 
 export function changeSetReceiptOf(value: unknown): ChangeSetReceipt | null {
   const o = object(value)
@@ -148,6 +148,7 @@ function statusWords(row: ChangeSetReceiptRow, reason: string | undefined): stri
     case 'stale': return `Failed: ${STALE_REASON}`
     case 'failed': return `Failed: ${reason || 'the change was refused'}`
     case 'unticked': return 'Not applied (unticked)'
+    case 'not_run': return 'Not applied: the turn ended before this change ran'
   }
 }
 
@@ -155,10 +156,12 @@ function statusWords(row: ChangeSetReceiptRow, reason: string | undefined): stri
 export function changeSetCountLine(receipt: ChangeSetReceipt): string {
   const unchanged = receipt.rows.filter(r => r.status === 'unchanged').length
   const uncertain = receipt.rows.filter(r => r.status === 'uncertain').length
+  const notRun = receipt.rows.filter(r => r.status === 'not_run').length
   return [
     `${receipt.landed} of ${receipt.ticked} applied`,
     receipt.failed ? `${receipt.failed} failed` : null,
     uncertain ? `${uncertain} not confirmed yet` : null,
+    notRun ? `${notRun} not run` : null,
     unchanged ? `${unchanged} already had the value` : null,
   ].filter(Boolean).join(' · ')
 }

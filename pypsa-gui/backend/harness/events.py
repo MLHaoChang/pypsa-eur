@@ -62,7 +62,8 @@ FRAME_PAYLOADS: dict[str, tuple[str, ...]] = {
     "goal_state": ("goal",),
     # LC-47: after a change-set card's rows were dispatched, one receipt:
     # each row's status (applied, unchanged, uncertain, failed, stale,
-    # unticked) and how many landed (`harness/change_set.py`).
+    # unticked, not_run) and how many landed (`harness/change_set.py`). It
+    # precedes a `session_done` the dispatch itself sends.
     "change_set_receipt": ("version", "decision", "rows", "ticked", "landed", "failed", "all_applied"),
 }
 

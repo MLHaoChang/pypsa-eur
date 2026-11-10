@@ -475,7 +475,8 @@ component (`frontend/src/components/EditCard.tsx`).
   row field, otherwise "proposed by the assistant". `POST /chat/{id}/confirm`
   takes `ticked` (tool_use ids): it is a 400 on any other card or for an id not
   on the card, and keeps the token. A missing `ticked` means all rows; `[]`
-  denies. In `confirm._confirm_destructive_tool` each member is admitted by
+  denies. A `ticked` that is not a list is the route's own 422, before the
+  session sees it: nothing runs and the token stays. In `confirm._confirm_destructive_tool` each member is admitted by
   `member_gate` in place of its own card. A ticked row runs only while its fresh
   preview still writes what the card showed: an old value may differ only on a
   column an earlier verified write of the response created (absent when the
@@ -487,8 +488,12 @@ component (`frontend/src/components/EditCard.tsx`).
   ordinary write path then runs unchanged (require_current, handler, native
   read-back, `_edit_receipt`). One `change_set_receipt` frame follows the batch.
   Each row is applied (verified and changed), unchanged, uncertain, failed,
-  stale or unticked, with `landed`; `all_applied` holds only when every ticked
-  row landed. A failed row does not stop the later rows. The browser shows the
+  stale, unticked or not_run, with `landed`; `all_applied` holds only when every
+  ticked row landed. A failed row does not stop the later rows. `not_run` is a
+  ticked row the turn ended before (the tool-call cap): it never reached its
+  gate, so nothing was written; a row past its gate with no receipt stays
+  uncertain. When the dispatch ends the turn itself, the receipt is sent before
+  `session_done`, where the browser stops reading. The browser shows the
   card and the receipt in `frontend/src/components/ChangeSetCard.tsx`; `/confirm`
   carries the ticked ids as `ticked`. `ENABLED` switches membership off.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of

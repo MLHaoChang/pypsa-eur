@@ -22,7 +22,8 @@ The seam has four parts, all keyed by the response's `tool_use_id`s:
   native read-back) is unchanged, so each row is read back on its own.
 - `receipt_frame` is one `change_set_receipt` frame after the batch. Each row
   is applied (verified and changed), unchanged (verified, nothing differed),
-  uncertain (not confirmed by read-back), failed, stale or unticked, plus a
+  uncertain (not confirmed by read-back), failed, stale, unticked or not_run
+  (the turn ended before the member's gate), plus a
   `landed` count. `all_applied` is true only when every ticked row landed.
 
 Destructive rows (deletes, imports), `CARD_ONLY_TOOLS`, memory proposals and
@@ -379,6 +380,8 @@ def _state(
                 "digest": i["digest"],
                 "ticked": i["tool_use_id"] in ticked,
                 "status": None,
+                "reached": False,
+                "args": i["args"],
                 "card": i["edit_card"],
                 "error_kind": None,
                 "label": i["edit_card"].get("says"),
@@ -478,6 +481,8 @@ def _still_shown(
     if item_digest(tool, args, fresh) == held_row["digest"]:
         return True
     shown = held_row["card"]
+    if args != held_row["args"]:
+        return False
     if fresh.get("binding") != shown.get("binding") or fresh.get(
         "complete"
     ) != shown.get("complete"):
@@ -530,6 +535,7 @@ def member_gate(
     state = session.change_set
     decision = state["decision"]
     token6 = state["token"][:6]
+    row["reached"] = True  # K7: from here on the member may write
     if decision == "approve" and not row["ticked"]:
         approvals.decided(
             session,
@@ -662,14 +668,29 @@ def note_error(session, tool_use_id: str, error_kind: str | None) -> None:
     row = held(session, tool_use_id)
     if row is None or row["status"] is not None:
         return
+    state = session.change_set
     row["error_kind"] = error_kind
-    row["status"] = {"change_unticked": "unticked", "edit_preview_stale": "stale"}.get(
-        error_kind or "", "failed"
+    row["status"] = {
+        "change_unticked": "unticked",
+        "edit_preview_stale": "stale",
+        # The cap refuses the call before its gate: it never ran.
+        "tool_call_cap_exceeded": _unreached(state, row),
+    }.get(error_kind or "", "failed")
+
+
+def _unreached(state: dict, row: dict) -> str:
+    """K7: a member the dispatch never brought to its gate (the turn ended
+    first, as at the tool-call cap). Nothing was written, so a
+    ticked, approved row reads `not_run`, never `uncertain`."""
+    return (
+        "not_run" if row["ticked"] and state["decision"] == "approve" else "failed"
     )
 
 
 def observe(session, frames: Generator) -> Generator[tuple[str, dict], None, Any]:
-    """Pass a dispatch's frames through, noting each member's refusal."""
+    """Pass a dispatch's frames through, noting each member's refusal. A
+    dispatch that ends the turn itself gets the set's receipt first: the
+    client stops reading at `session_done`."""
     while True:
         try:
             event, payload = next(frames)
@@ -677,6 +698,11 @@ def observe(session, frames: Generator) -> Generator[tuple[str, dict], None, Any
             return stop.value
         if event == "tool_error" and isinstance(payload, dict):
             note_error(session, payload.get("tool_use_id"), payload.get("error_kind"))
+        if event == "session_done":
+            receipt = receipt_frame(session)
+            session.change_set = None
+            if receipt is not None:
+                yield "change_set_receipt", receipt
         yield event, payload
 
 
@@ -688,8 +714,11 @@ def receipt_frame(session) -> dict | None:
     rows = []
     for tool_use_id in state["order"]:
         row = state["rows"][tool_use_id]
+        # A reached member with no receipt and no refusal may have written.
         status = row["status"] or (
-            "uncertain"
+            _unreached(state, row)
+            if not row["reached"]
+            else "uncertain"
             if row["ticked"] and state["decision"] == "approve"
             else "failed"
         )

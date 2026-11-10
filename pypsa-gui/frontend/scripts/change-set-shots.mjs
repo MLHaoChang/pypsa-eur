@@ -81,6 +81,7 @@ const settle = (r: any, reasons: any = {}) => messages.push({ id: 'r', role: 'to
 if (state === 'partial') settle(receipt('approve', [['applied', null], ['failed', 'validation_error'], ['unticked', 'change_unticked'], ['applied', null]]),
   { 'tu-1': 'Short-circuit power must be above the import capacity of 3000 MVA' })
 if (state === 'all') settle(receipt('approve', [['applied', null], ['applied', null], ['uncertain', null], ['stale', 'edit_preview_stale']]))
+if (state === 'notrun') settle(receipt('approve', [['applied', null], ['applied', null], ['not_run', 'tool_call_cap_exceeded'], ['not_run', null]]))
 if (state === 'cancelled') settle(receipt('deny', [['failed', null], ['failed', null], ['failed', null], ['failed', null]]))
 if (state === 'timeout') settle(receipt('expired', [['failed', null], ['failed', null], ['failed', null], ['failed', null]]))
 if (state === 'stopped') settle(receipt('aborted', []))
@@ -106,6 +107,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     ['profiles', 'profiles', [], ['guided', 'expert'], ['dark']],
     ['receipt-partial', 'partial', [], ['guided', 'expert'], ['dark', 'light']],
     ['receipt-every-status', 'all', [], ['guided', 'expert'], ['dark']],
+    ['receipt-not-run', 'notrun', [], ['guided', 'expert'], ['dark']],
     ['settled-cancelled', 'cancelled', [], ['guided', 'expert'], ['dark']],
     ['settled-timeout', 'timeout', [], ['guided', 'expert'], ['dark']],
     ['settled-stopped', 'stopped', [], ['guided', 'expert'], ['dark']],

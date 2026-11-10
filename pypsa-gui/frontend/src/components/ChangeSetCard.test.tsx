@@ -155,11 +155,12 @@ const receipt = (decision: string, rows: ReturnType<typeof row>[], ticked: numbe
 
 it('words each row of the receipt and keeps a failed row’s reason on its row', () => {
   const r = receipt('approve', [row('a', 'applied'), row('b', 'failed', 'validation_error'), row('c', 'unticked', 'change_unticked'),
-    row('d', 'uncertain'), row('e', 'stale', 'edit_preview_stale'), row('f', 'unchanged')], 5, 1, 2)
+    row('d', 'uncertain'), row('e', 'stale', 'edit_preview_stale'), row('f', 'unchanged'),
+    row('g', 'not_run', 'tool_call_cap_exceeded')], 6, 1, 2)
   render(<ChangeSetReceiptCard receipt={r} labels={{ a: 'Bus “POC”' }} reasons={{ b: 'Short-circuit power must be above 0' }} />)
   const count = screen.getByTestId('chat-change-set-receipt-count')
   expect(count.getAttribute('role')).toBe('status')
-  expect(count.textContent).toBe('1 of 5 applied · 2 failed · 1 not confirmed yet · 1 already had the value')
+  expect(count.textContent).toBe('1 of 6 applied · 2 failed · 1 not confirmed yet · 1 not run · 1 already had the value')
   expect(screen.getAllByTestId('chat-change-set-receipt-row').map(li => li.textContent)).toEqual([
     'Bus “POC”Applied',
     'backend bFailed: Short-circuit power must be above 0',
@@ -167,7 +168,10 @@ it('words each row of the receipt and keeps a failed row’s reason on its row',
     'backend dApplied: not confirmed yet',
     'backend eFailed: the project changed after the card was shown',
     'backend fNo change: the project already had this value',
+    // GK B (44) F1: the turn ended first; nothing was written, so it is not a failure.
+    'backend gNot applied: the turn ended before this change ran',
   ])
+  expect(screen.getAllByTestId('chat-change-set-receipt-row')[6].querySelector('.text-warn')).toBeNull()
 })
 
 it('counts what landed out of what was ticked', () => {
