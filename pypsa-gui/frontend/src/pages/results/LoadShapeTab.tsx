@@ -21,11 +21,11 @@ import {
   ChartFrame, CHART_HEIGHT, chartFigure, CHART_LEGEND, carrierColour, seriesDash,
 } from './shared'
 import {
-  GROUP_COLOR, GROUP_LABEL, MONTH_STACK, WEEKDAYS, annualStack, cellTitle, fmtMw, fmtMwh, heatBackground,
+  GROUP_COLOR, GROUP_LABEL, MONTH_STACK, WEEKDAYS, annualStack, cellTitle, fmtMw, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH,
   heatMax, missingGroups, monthRows, periodLabel, socRows, weekRows,
 } from './loadShape'
 
-function Heatmap({ title, testId, heat, rgb }: { title: string; testId: string; heat: HeatmapState; rgb: string }) {
+function Heatmap({ title, testId, heat, colour }: { title: string; testId: string; heat: HeatmapState; colour: string }) {
   if (heat.status !== 'ok') {
     return (
       <div data-testid={testId} className="space-y-1">
@@ -49,12 +49,25 @@ function Heatmap({ title, testId, heat, rgb }: { title: string; testId: string; 
             {heat.mean_mw[di].map((v, h) => (
               <span key={h} className="h-4 border border-border/40" data-cell={`${di}-${h}`}
                     data-value={v ?? ''} title={cellTitle(di, h, v, heat.snapshots[di][h])}
-                    style={{ background: heatBackground(v, max, rgb) }} />
+                    style={{ background: heatBackground(v, max, colour) }} />
             ))}
           </div>
         ))}
       </div>
-      <p className="text-[10px] text-muted">Mean MW per weekday and hour; a hatched cell has no snapshot. Peak cell {fmtMw(max)}.</p>
+      {/* The key: both ends of the scale and the hatch, in text (as the hour-by-day maps). */}
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted" data-heat-key="">
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono tabular-nums">{fmtMw(0)}</span>
+          <span aria-hidden className="h-2 w-24 rounded-sm border border-border"
+            style={{ background: `linear-gradient(to right, ${heatColor(0, max, colour)}, ${heatColor(max, max, colour)})` }} />
+          <span className="font-mono tabular-nums">{fmtMw(max)}</span>
+          <span>mean MW per weekday and hour; stronger colour is higher</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden className="h-2 w-4 rounded-sm border border-border" style={{ background: NO_SNAPSHOT_HATCH }} />
+          no snapshot
+        </span>
+      </p>
     </div>
   )
 }
@@ -132,15 +145,14 @@ export default function LoadShapeTab() {
       </div>
       <Missing status={data.series_status} />
 
-      <section className="space-y-2" data-testid="ls-heatmaps">
-        <h3 className="text-[12px] font-semibold">Import and export by weekday and hour</h3>
+      <ChartFrame testId="ls-heatmaps" title="Import and export by weekday and hour" bodyClassName="p-3 space-y-2">
         <WindowSlider testId="ls-window" snapshots={win.snapshots} from={win.from} to={win.to}
                       start={win.start} end={win.end} drag={drag} setDrag={setDrag} whole={whole} />
         <div className="grid gap-4 md:grid-cols-2">
-          <Heatmap title="Grid import" testId="ls-heat-import" heat={data.heatmaps!.import} rgb="59, 130, 246" />
-          <Heatmap title="Export" testId="ls-heat-export" heat={data.heatmaps!.export} rgb="8, 145, 178" />
+          <Heatmap title="Grid import" testId="ls-heat-import" heat={data.heatmaps!.import} colour={carrierColour('grid')} />
+          <Heatmap title="Export" testId="ls-heat-export" heat={data.heatmaps!.export} colour={carrierColour('link_outflows')} />
         </div>
-      </section>
+      </ChartFrame>
 
       <ChartFrame testId="ls-week" title="Profile snapshot"
         figure={wk ? chartFigure(fmtMw(wk.rows.reduce((a, r) => Math.max(a, ...wk.keys.map(k => Math.abs(Number(r[k]) || 0))), 0)), 'peak') : undefined}

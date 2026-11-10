@@ -20,6 +20,12 @@ describe('ValueFlowsView', () => {
     expect(within(dev).getByText(/-800\.00|−800\.00/)).toBeTruthy()
     expect(screen.getByTestId('vf-stream-developer-dr_availability').textContent)
       .toContain('300.00')
+    // ui-modern 02 slice 6: the shared frame, the SVG action and a key for the node colours.
+    const frame = screen.getByTestId('vf-flow')
+    expect(frame.hasAttribute('data-chart-frame')).toBe(true)
+    expect(within(frame).getByRole('heading', { name: /^Money flows · / })).toBeTruthy()
+    expect(within(frame).getByRole('button', { name: 'SVG' })).toBeTruthy()
+    expect(screen.getByTestId('vf-key').textContent).toBe('Blue: a participant of this projectGrey: external')
     const svg = screen.getByTestId('vf-sankey').querySelector('svg')
     expect(svg).toBeTruthy()
     // Five nodes drawn (the pair dso ↔ developer is two payer and two payee
@@ -44,6 +50,7 @@ describe('ValueFlowsView', () => {
     expect(screen.getByTestId('vf-conservation').textContent)
       .toContain('not established (reconciliation)')
     expect(screen.queryByTestId('vf-sankey')).toBeNull()
+    expect(within(screen.getByTestId('vf-flow')).queryByRole('button', { name: 'SVG' })).toBeNull()
     expect(screen.getByTestId('vf-sankey-unavailable').textContent).toContain('ledger_incomplete:2')
     expect(within(screen.getByTestId('vf-row-dso')).getAllByText('unavailable').length).toBe(1)
   })

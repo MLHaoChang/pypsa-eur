@@ -30,8 +30,8 @@ describe('heatmap colours', () => {
     const peak = heatColor(10, 10), zero = heatColor(0, 10), none = heatColor(null, 10)
     expect(none).toBe('transparent')
     expect(zero).not.toBe(none)                       // a zero is data, a gap is not
-    expect(peak).toContain('0.900')
-    expect(zero).toContain('0.050')
+    expect(peak).toContain(' 90.0%')
+    expect(zero).toContain(' 5.0%')
   })
   it('hatches a cell with no snapshot, so it never reads as the lightest shade', () => {
     expect(heatBackground(null, 10)).toBe(NO_SNAPSHOT_HATCH)

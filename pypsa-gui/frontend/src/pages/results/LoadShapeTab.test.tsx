@@ -56,6 +56,12 @@ describe('LoadShapeTab', () => {
     expect(imp.querySelector('[data-cell="0-1"]')!.getAttribute('title')).toContain('no snapshot')
     expect((imp.querySelector('[data-cell="0-1"]') as HTMLElement).style.background).toContain('repeating-linear-gradient')
     expect((imp.querySelector('[data-cell="0-0"]') as HTMLElement).style.background).not.toContain('repeating')
+    // ui-modern 02 slice 6: the shared frame, and a key that writes both ends of the scale.
+    expect(screen.getByTestId('ls-heatmaps').hasAttribute('data-chart-frame')).toBe(true)
+    const key = imp.querySelector('[data-heat-key]')!.textContent!
+    expect(key).toContain('stronger colour is higher')
+    expect(key).toContain('no snapshot')
+    expect(key).toMatch(/0(\.0+)? MW.*MW/)
     expect(within(screen.getByTestId('ls-heat-export')).getByText(/no grid connection/)).toBeTruthy()
     expect(screen.queryByTestId('ls-heat-export')!.querySelector('[data-cell]')).toBeNull()
     expectAllButtonsNamed(container)

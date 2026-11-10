@@ -8,14 +8,15 @@ import { useUIStore } from '../../../store/uiStore'
 import { ResponsiveContainer, Sankey, Tooltip, Layer, Rectangle } from 'recharts'
 import type { ValueFlowsPayload } from '../../../api/commercial'
 import { useResultsFilter } from '../filterContext'
-import { downloadCSV, downloadSVG, UnavailableBlock, UnavailableCell } from '../shared'
+import { downloadCSV, ChartFrame, ChartActions, ChartZero, UnavailableBlock, UnavailableCell } from '../shared'
 import {
   conservationState, csvRows, CSV_HEADER, fmtAmount, participantRows, periodKeys, periodLabel,
   sankeyData, streamLabel, type ConservationState, type SankeyNodeDatum,
 } from './valueFlows'
 
-const INTERNAL = '#2563eb'
-const EXTERNAL = '#9ca3af'
+// Theme tokens, so the diagram follows light and dark (ui-modern 02 slice 6).
+const INTERNAL = 'var(--color-info)'
+const EXTERNAL = 'var(--color-axis)'
 
 function Money({ v }: { v: number | null | undefined }) {
   return v == null ? <UnavailableCell /> : <>{fmtAmount(v)}</>
@@ -74,7 +75,7 @@ export function ValueFlowSankey({ period, width }: {
 }) {
   const data = sankeyData(period.sankey)
   if (!data.links.length) {
-    return <p className="text-[11px] text-muted py-2">No money flows in this period.</p>
+    return <ChartZero>No money flows in this period.</ChartZero>
   }
   const height = Math.max(160, 28 * Math.max(
     data.nodes.filter(n => n.side === 'payer').length,
@@ -82,7 +83,7 @@ export function ValueFlowSankey({ period, width }: {
   const chart = (w?: number) => (
     <Sankey width={w} height={height} data={data} nodePadding={14} nodeWidth={10}
             margin={{ left: 120, right: 120, top: 8, bottom: 8 }}
-            node={SankeyNode as never} link={{ stroke: '#94a3b8', strokeOpacity: 0.35 }}>
+            node={SankeyNode as never} link={{ stroke: 'var(--color-axis)', strokeOpacity: 0.35 }}>
       <Tooltip content={<SankeyTip />} />
     </Sankey>
   )
@@ -187,20 +188,23 @@ export default function ValueFlowsView({ payload, sankeyWidth }: {
         </span>
       </div>
       <ParticipantTable payload={payload} periodKey={periodKey} />
-      <div className="space-y-1">
-        <div className="flex justify-between">
-          <h3 className="text-[11px] font-semibold">Money flows</h3>
-          {state.status === 'ok' && (
-            <button type="button" className="text-[11px] underline"
-                    onClick={() => downloadSVG(chart.current, `value_flows_${periodKey}.svg`)}>
-              Export SVG
-            </button>
-          )}
-        </div>
+      <ChartFrame testId="vf-flow" title={`Money flows · ${periodLabel(periodKey)}`} hint="payer → payee"
+        right={state.status === 'ok' && period
+          ? <ChartActions chartRef={chart} filename={`value_flows_${periodKey}`} /> : undefined}>
         {state.status === 'ok' && period ? (
-          <div ref={chart} data-testid="vf-sankey">
+          <><div ref={chart} data-testid="vf-sankey">
             <ValueFlowSankey period={period} width={sankeyWidth} />
           </div>
+          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted" data-testid="vf-key">
+            <span className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className="inline-block w-2.5 h-2.5 rounded-[2px]" style={{ background: INTERNAL }} />
+              Blue: a participant of this project
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className="inline-block w-2.5 h-2.5 rounded-[2px]" style={{ background: EXTERNAL }} />
+              Grey: external
+            </span>
+          </p></>
         ) : (
           // An incomplete or failed ledger is not drawn: a partial picture of
           // who pays whom reads as the whole one.
@@ -214,7 +218,7 @@ export default function ValueFlowsView({ payload, sankeyWidth }: {
             )}
           </div>
         )}
-      </div>
+      </ChartFrame>
     </div>
   )
 }

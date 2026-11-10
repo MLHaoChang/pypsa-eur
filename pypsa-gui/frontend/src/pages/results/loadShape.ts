@@ -45,18 +45,23 @@ export function heatMax(h: HeatmapState): number {
 }
 
 /** A cell colour: empty (no snapshot) is blank, never the zero shade. */
-export function heatColor(v: number | null, max: number, rgb = '59, 130, 246'): string {
+/** The lightest and the strongest shade of a heat cell, as a share of the colour (%). */
+export const HEAT_SHADE = { min: 5, max: 90 } as const
+
+/** A cell's shade of `colour` (a theme token), so the map follows light and dark. */
+export function heatColor(v: number | null, max: number, colour = 'var(--color-carrier-grid)'): string {
   if (v == null || !Number.isFinite(v)) return 'transparent'
-  if (max <= 0) return `rgba(${rgb}, 0.05)`
-  return `rgba(${rgb}, ${(0.05 + 0.85 * Math.min(1, Math.max(0, v) / max)).toFixed(3)})`
+  const share = max <= 0 ? 0 : Math.min(1, Math.max(0, v) / max)
+  const pct = HEAT_SHADE.min + (HEAT_SHADE.max - HEAT_SHADE.min) * share
+  return `color-mix(in srgb, ${colour} ${pct.toFixed(1)}%, transparent)`
 }
 
 /** A cell with no snapshot is hatched, so it cannot be read as the lightest shade. */
 export const NO_SNAPSHOT_HATCH =
-  'repeating-linear-gradient(45deg, #9ca3af 0, #9ca3af 1px, transparent 1px, transparent 4px)'
+  'repeating-linear-gradient(45deg, var(--color-axis) 0, var(--color-axis) 1px, transparent 1px, transparent 4px)'
 
-export function heatBackground(v: number | null, max: number, rgb = '59, 130, 246'): string {
-  return v == null || !Number.isFinite(v) ? NO_SNAPSHOT_HATCH : heatColor(v, max, rgb)
+export function heatBackground(v: number | null, max: number, colour?: string): string {
+  return v == null || !Number.isFinite(v) ? NO_SNAPSHOT_HATCH : heatColor(v, max, colour)
 }
 
 export function cellTitle(day: number, hour: number, v: number | null, n: number): string {
