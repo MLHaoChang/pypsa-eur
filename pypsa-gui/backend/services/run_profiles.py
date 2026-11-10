@@ -627,7 +627,102 @@ def _eh_datacenter() -> dict:
 
 EH_DATACENTER = _eh_datacenter()
 
-PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_datacenter@1": EH_DATACENTER}
+# Study harness 11 (design §9.3 "eh_h2_hub"): eh_h2_hub@1 and
+# eh_h2_hub_staged@1, one self-contained block (SH-17 splits per-type
+# packages later). The solve, the EH study (archetype strong_grid, from the
+# template's own card) and LOLE as eh_datacenter (Q5); the offtake is met in
+# every hour (block), the electrolyser's utilisation is reported against a
+# band (warn), and the investment case's counterfactual (issue 19) is
+# evaluated once established and never blocks the run. The offtake is demand
+# and never a lever (§6.0): the envelope names candidate caps, the
+# electrolyser and the H2 store only, never grid_import or the fuel cell.
+H2_UTILISATION_BAND = [0.40, 0.95]
+
+
+def _h2_edit(component, name, attr, top):
+    return {"tool": "update_component", "target": {"component": component, "name": name, "attr": attr},
+            "bounds": {"min": 0.0, "max": top}}
+
+
+def _h2_levers(staged: bool):
+    """The envelope's edits, each within absolute bounds: the candidates up
+    to the single-year template's caps; the single-year hub's electrolyser
+    is one built Link (p_nom, up to three quarters of its 200 MW connection),
+    the staged hub sizes its new electrolysers by their caps (twice a
+    period's 40 MW candidate) and keeps the built one; the H2 store up to
+    three times the template's 2,000 MWh."""
+    electrolyser = (_h2_edit("Link", "electrolyser_new_*", "p_nom_max", 80.0) if staged
+                    else _h2_edit("Link", "electrolyser", "p_nom", 150.0))
+    return [_h2_edit("Generator", "wind_new*", "p_nom_max", 300.0),
+            _h2_edit("Generator", "solar_new*", "p_nom_max", 150.0),
+            _h2_edit("StorageUnit", "bess_new*", "p_nom_max", 200.0),
+            electrolyser,
+            _h2_edit("Store", "h2_storage", "e_nom", 6000.0)]
+
+
+def _eh_h2_hub(staged: bool) -> dict:
+    template = "eh_h2_hub_staged" if staged else "eh_h2_hub"
+    lole = copy.deepcopy(next(r for r in EH_RESULT_RULES if r.get("engine")))
+    lole["engine"] = {"tool": "run_coupling_loop", "max_solves": 3, "restore": "base"}
+    unserved = next(r for r in EH_RESULT_RULES if r["id"] == "kpi.unserved_mwh")
+    edits = _h2_levers(staged)
+    tunable = sorted({(e["target"]["component"], e["target"]["attr"]) for e in edits})
+    return {
+        "id": template, "version": 1,
+        "templates": [template],
+        "scope": "flow_scope.preset_for",
+        "params": {"required": [], "ask": [GOAL_PARAM], "fields": {
+            GOAL_PARAM: _num("Reliability goal (LOLE)", {"native_type": "float", "unit_storage": "h/yr"})}},
+        "inputs": {"required": []},
+        "stages": {
+            "setup": {"actions": [], "rules": [
+                *GENERIC["setup"]["rules"],
+                _rule("set.project.template", "project.template", "eq", template,
+                      basis=f"The profile serves the {template} template only."),
+            ]},
+            "solve": {"actions": [*GENERIC["solve"]["actions"], EH_STUDY_ACTION],
+                      "rules": [*GENERIC["solve"]["rules"], *EH_SOLVE_RULES]},
+            "result_gate": {**GENERIC["result_gate"], "rules": [
+                *CORE_RESULT_RULES,
+                unserved,
+                {**_rule("h2.offtake.met", "h2.offtake.shed_hours", "eq", 0.0,
+                         basis="The H2 offtake is served in every hour (the run's own solve; no hour shed)."),
+                 "tunable": [f"{c}.{a}" for c, a in tunable]},
+                _rule("h2.electrolyser.utilisation", "h2.electrolyser.utilisation", "within",
+                      list(H2_UTILISATION_BAND), severity="warn",
+                      basis="Electrolyser utilisation within the profile band, a sizing screen, not a design "
+                            "limit: below it the electrolyser looks oversized for the offtake; above it little "
+                            "headroom looks left to serve it every hour."),
+                _rule("h2.ic.counterfactual", "ic.counterfactual", "eq", "established", severity="warn",
+                      basis="The investment case compares against an established counterfactual (the grey-H2 "
+                            "reference purchase); until then it is not evaluated and never blocks the run."),
+                lole,
+            ]},
+            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
+        },
+        "eh_study": copy.deepcopy(EH_SITE["eh_study"]),
+        "tunable": [{"component": c, "attr": a} for c, a in tunable],
+        "envelope": {
+            "edits": edits,
+            "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
+            # GK B (38) H7: the worst case, every reservation at its cap. The
+            # solve and its EH study (budget_solves 2), each L2 round's re-solve
+            # and re-run EH study (L2_ROUNDS = 2), the coupling loop's 3 and its
+            # closing re-solve: 1 + 2 + 2 x (1 + 2) + 3 + 1 = 13.
+            "budget": {"solves": 13, "rounds": 6, "wall_time_h": 8.0},
+        },
+        "kpis": copy.deepcopy(EH_SITE["kpis"]),
+        "chapters": ["sizing", "mc", "investment_case"],
+        "missing_tools": [],
+    }
+
+
+EH_H2_HUB = _eh_h2_hub(staged=False)
+EH_H2_HUB_STAGED = _eh_h2_hub(staged=True)
+
+PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_datacenter@1": EH_DATACENTER,
+                              "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED}
 
 
 def needs_goal(profile: dict) -> bool:
