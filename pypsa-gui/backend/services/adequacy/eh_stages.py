@@ -1120,8 +1120,7 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
 
     ``boundary``: the EH study's gated hub boundary (``hub_fleet_scope``).
     """
-    from services.adequacy.link_supply import firm_backup_units
-    from services.adequacy.mc import snapshot_inputs
+    from services.adequacy.link_supply import assemble_fleet
 
     if import_model not in ("auto", "sampled_unit", "firm_block"):
         raise ValueError(f"unknown import_model {import_model!r}")
@@ -1134,21 +1133,11 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
                      if overlay is not None
                      else FleetScope(mode="whole_network",
                                      note="no import overlay given"))
+            # Adequacy loops 01 (Q1 = a): the loops' own assembly of units,
+            # residual and notes, on this route's scope (pack overlay and
+            # carrier fallback).
+            inputs = assemble_fleet(network, scope, cfg=cfg)
             if scope.mode == "hub_side":
-                side = _hub_side_copy(network, scope.excluded_buses)
-                inputs = snapshot_inputs(side, cfg=cfg)
-                firm = np.asarray(scope.import_firm_mw, dtype=np.float64)
-                # Adequacy loops 01 (Q1 = a): the loops' firm-backup rule,
-                # appended after the import Links.
-                fb_units, fb_notes, fb_cands = firm_backup_units(side)
-                inputs = dataclasses.replace(
-                    inputs,
-                    units=(tuple(inputs.units) + tuple(scope.import_units)
-                           + tuple(fb_units)),
-                    residual=np.ascontiguousarray(inputs.residual - firm),
-                    fleet_notes=tuple(fb_notes),
-                    supply_links=tuple(str(x) for x in scope.import_links)
-                    + tuple(fb_cands))
                 why = None
                 if import_model == "auto":
                     snap.zonal_inputs, why = _grid_areas(network, cfg, scope,
@@ -1163,13 +1152,6 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
                 # AFTER the loop: the note states import_firmness, which
                 # reads the `applied` flags the loop may just have cleared.
                 scope.note = _scope_note(scope, why)
-            else:
-                inputs = snapshot_inputs(network, cfg=cfg)
-                fb_units, fb_notes, fb_cands = firm_backup_units(network)
-                if fb_cands:
-                    inputs = dataclasses.replace(
-                        inputs, units=tuple(inputs.units) + tuple(fb_units),
-                        fleet_notes=tuple(fb_notes), supply_links=tuple(fb_cands))
         except Exception as exc:  # noqa: BLE001 — the reason is the payload
             snap.mc_error = f"MC snapshot refused: {exc}"
             snap.copt_error = snap.mc_error

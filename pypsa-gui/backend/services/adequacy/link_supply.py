@@ -16,12 +16,22 @@ the Links that SUPPLY an electrical bus, in two roles:
   chainable outage record is a firm block netted from the residual, and the
   inputs say so ("grid import taken as never failing: …").
 * **Firm backup** (AL-1). A non-slack Link from a non-electrical bus0 into an
-  electrical bus1 that is not a split storage's power Link. It is credited
-  only when bus0 has an unlimited fuel: a non-slack Generator with no
-  ``e_sum_max``, and no Store, StorageUnit, Load or other delivering Link on
-  bus0. A store-fed fuel cell is NOT credited (0 MW, with a note): full
-  output in every hour overstates adequacy whenever the store is empty, and a
-  storage model would double-count a store that also feeds an offtake.
+  electrical bus1 that is not a split storage's power Link, with a positive
+  ``efficiency`` in some hour. It is credited only when EVERY bus it draws
+  from (bus0, and each busN with a negative ``efficiencyN``) has an unlimited
+  fuel: a non-slack Generator with no ``e_sum_max``, and no Store,
+  StorageUnit, Load or other Link on that bus. A store-fed fuel cell is NOT
+  credited (0 MW, with a note): full output in every hour overstates
+  adequacy whenever the store is empty, and a storage model would
+  double-count a store that also feeds an offtake. The fuel side must also be
+  free of limits the unit's two states cannot carry, so each of these
+  withholds the credit, with a note: a GlobalConstraint that caps the fuel
+  Generator's carrier (``operational_limit`` on the carrier, or
+  ``primary_energy`` on an attribute the carrier has), and outage data set
+  on the fuel Generator itself (only the Link's outage is sampled; a carrier
+  default is a plant-class figure and says nothing about a fuel supply, so
+  it is not read). An input port on an electrical bus withholds it too.
+  The credit is the delivered MW, never below zero.
 
 Occurrence data comes from ``resolve_outage_params(n, "links")`` only; a rate
 outside ``[0, 1)`` raises ``OutageRateError``. Units are ordered generators,
@@ -29,6 +39,10 @@ then import Links, then firm Links, each by sorted name (AL-4), so every
 generator keeps its positional CRN substream. A network with no trusted
 import Link and no firm-backup candidate gets ``snapshot_inputs``' result
 unchanged (AL-5).
+
+``assemble_fleet`` is the one builder of units, residual and notes;
+``sampled_fleet`` (the loops) and ``eh_stages.freeze_fixed_plan`` both call
+it, each with its own ``hub_fleet_scope``.
 
 ``nothing_to_sample`` is the refusal every loop site shares (AL-7).
 """
@@ -45,6 +59,7 @@ from services.adequacy.coupling import NOTHING_TO_SAMPLE
 
 __all__ = [
     "NOTHING_TO_SAMPLE",
+    "assemble_fleet",
     "firm_backup_units",
     "nothing_to_sample",
     "sampled_fleet",
@@ -53,11 +68,12 @@ __all__ = [
 
 def _never_failing(model) -> str:
     """AL-2's disclosure for an import Link taken as a firm block."""
-    why = (
-        "no outage data"
-        if model.source == "missing"
-        else "no finite MTTR in its outage data"
-    )
+    if model.source == "missing":
+        why = "no outage data"
+    elif "sampling disabled" in str(getattr(model, "reason", "") or ""):
+        why = "Link sampling disabled (firm-block comparison)"
+    else:
+        why = "no finite MTTR in its outage data"
     return f"grid import taken as never failing: {why} for {model.name}"
 
 
@@ -71,8 +87,7 @@ def sampled_fleet(
     """``MCInputs`` for the loops: ``snapshot_inputs`` plus the supplying
     Links (module docstring). Call under the PyPSAService lock."""
     from models.energy_hub import ImportOverlaySpec
-    from services.adequacy.eh_stages import _hub_side_copy, hub_fleet_scope
-    from services.adequacy.mc import snapshot_inputs
+    from services.adequacy.eh_stages import hub_fleet_scope
 
     # No carrier fallback: only a Link the network itself names is a boundary.
     scope = hub_fleet_scope(
@@ -81,6 +96,30 @@ def sampled_fleet(
         sample_links=True,
         keep_zero_capacity=keep_zero_capacity,
     )
+    return assemble_fleet(
+        n,
+        scope,
+        keep_zero_capacity=keep_zero_capacity,
+        cfg=cfg,
+        demand_scaled_in_place=demand_scaled_in_place,
+    )
+
+
+def assemble_fleet(
+    n,
+    scope,
+    *,
+    keep_zero_capacity: bool = False,
+    cfg=None,
+    demand_scaled_in_place: bool = False,
+):
+    """``MCInputs`` for ``scope`` (a ``hub_fleet_scope`` result): the units in
+    AL-4 order, the residual net of the firm-block imports, and the notes.
+    The one assembly behind the loops and ``freeze_fixed_plan``, so the same
+    network and scope give both the same fleet and the same CRN substreams."""
+    from services.adequacy.eh_stages import _hub_side_copy
+    from services.adequacy.mc import snapshot_inputs
+
     notes: list[str] = []
     candidates: list[str] = []
     import_units: list = []
@@ -114,7 +153,7 @@ def sampled_fleet(
     firm_units, firm_notes, firm_cands = firm_backup_units(
         side, keep_zero_capacity=keep_zero_capacity
     )
-    if not candidates and not firm_cands and not notes:
+    if firm is None and not candidates and not firm_cands and not notes:
         return inputs  # AL-5: byte-equal
     residual = inputs.residual
     if firm is not None:
@@ -140,10 +179,58 @@ def _gen_series(n, name: str, attr: str, default: float) -> np.ndarray:
     return np.full(len(n.snapshots), v if math.isfinite(v) else default, dtype=float)
 
 
-def _fuel_exclusions(n, lk: str, bus: str) -> tuple[list[str], list[str]]:
-    """``(why_not, fuel_generators)`` for a firm Link's bus0. ``why_not``
-    lists EVERY failed condition of the unlimited-fuel rule (each test reads
-    its own words, #1257 F1a); empty means the Link is credited."""
+def _energy_cap_on(n, carrier: str) -> list[str]:
+    """The GlobalConstraints that cap the energy of ``carrier``: an
+    ``operational_limit`` on the carrier itself, or a ``primary_energy`` on a
+    carrier attribute this carrier has. A ``>=`` constraint is a floor."""
+    gcs = getattr(n, "global_constraints", None)
+    if gcs is None or gcs.empty or not carrier:
+        return []
+    carriers = getattr(n, "carriers", None)
+    out: list[str] = []
+    for gc in gcs.index:
+        if str(gcs.at[gc, "sense"]).strip() == ">=":
+            continue
+        kind = str(gcs.at[gc, "type"])
+        attr = str(gcs.at[gc, "carrier_attribute"])
+        if kind == "operational_limit":
+            hit = attr == carrier
+        elif kind == "primary_energy":
+            try:
+                hit = float(carriers.at[carrier, attr]) > 0.0
+            except (AttributeError, KeyError, TypeError, ValueError):
+                hit = False
+        else:
+            hit = False
+        if hit:
+            out.append(str(gc))
+    return sorted(out)
+
+
+def _input_ports(n, lk: str) -> list[tuple[str, str, np.ndarray]]:
+    """``(port, bus, draw)`` for every bus the Link draws from: bus0 at 1 per
+    MW sent, and each busN (N >= 2) whose ``efficiencyN`` is negative in some
+    hour, at ``-efficiencyN`` per MW sent."""
+    from services.adequacy.eh_stages import _series
+
+    ldf = n.links
+    ports = [("bus0", str(ldf.at[lk, "bus0"]), np.ones(len(n.snapshots)))]
+    for col in sorted(c for c in ldf.columns if re.fullmatch(r"bus([2-9]|[1-9]\d+)", c)):
+        bus = ldf.at[lk, col]
+        if not isinstance(bus, str) or not bus:
+            continue
+        draw = np.clip(-_series(n, lk, "efficiency" + col[3:], 1.0), 0.0, None)
+        if draw.max(initial=0.0) > 0.0:
+            ports.append((col, bus, draw))
+    return ports
+
+
+def _fuel_exclusions(
+    n, lk: str, bus: str, port: str = "bus0", fuel_outage=None
+) -> tuple[list[str], list[str]]:
+    """``(why_not, fuel_generators)`` for one input ``port`` of a firm Link.
+    ``why_not`` lists EVERY failed condition of the unlimited-fuel rule (each
+    test reads its own words, #1257 F1a); empty means the port is fine."""
     from services.adequacy.slack import slack_generator_mask
 
     why: list[str] = []
@@ -156,13 +243,13 @@ def _fuel_exclusions(n, lk: str, bus: str) -> tuple[list[str], list[str]]:
         if df is not None and not df.empty and "bus" in df.columns:
             on = sorted(str(i) for i in df.index if str(df.at[i, "bus"]) == bus)
             if on:
-                why.append(f"bus0 {bus} carries {label}: {', '.join(on)}")
+                why.append(f"{port} {bus} carries {label}: {', '.join(on)}")
     ldf = n.links
     feeders = sorted(
         str(i) for i in ldf.index if str(i) != lk and str(ldf.at[i, "bus1"]) == bus
     )
     if feeders:
-        why.append(f"bus0 {bus} is fed by another Link: {', '.join(feeders)}")
+        why.append(f"{port} {bus} is fed by another Link: {', '.join(feeders)}")
     # The fuel is credited whole to one Link, so a second Link drawing on the
     # same bus (any port but bus1, named above) would count it twice.
     ports = [c for c in ldf.columns if c.startswith("bus") and c != "bus1"]
@@ -172,7 +259,7 @@ def _fuel_exclusions(n, lk: str, bus: str) -> tuple[list[str], list[str]]:
         if str(i) != lk and any(str(ldf.at[i, c]) == bus for c in ports)
     )
     if sharers:
-        why.append(f"bus0 {bus} is shared with another Link: {', '.join(sharers)}")
+        why.append(f"{port} {bus} is shared with another Link: {', '.join(sharers)}")
     gens = getattr(n, "generators", None)
     fuel: list[str] = []
     if gens is not None and not gens.empty:
@@ -192,8 +279,21 @@ def _fuel_exclusions(n, lk: str, bus: str) -> tuple[list[str], list[str]]:
                 fuel.append(str(g))
     if not fuel:
         why.append(
-            f"bus0 {bus} has no fuel Generator without an energy cap (e_sum_max)"
+            f"{port} {bus} has no fuel Generator without an energy cap (e_sum_max)"
         )
+    for g in fuel:
+        carrier = str(gens.at[g, "carrier"]) if "carrier" in gens.columns else ""
+        caps = _energy_cap_on(n, carrier)
+        if caps:
+            why.append(
+                f"{port} {bus} fuel Generator {g} (carrier {carrier}) is under "
+                f"an energy cap (GlobalConstraint {', '.join(caps)})"
+            )
+        if fuel_outage is not None and str(fuel_outage.at[g, "source"]) == "asset":
+            why.append(
+                f"{port} {bus} fuel Generator {g} has its own outage data, "
+                "which the Link's outage does not carry"
+            )
     return why, fuel
 
 
@@ -225,12 +325,17 @@ def firm_backup_units(n, *, keep_zero_capacity: bool = False):
             continue
         if str(lk) in split:
             continue
-        if str(ldf.at[lk, "bus1"]) in elec and str(ldf.at[lk, "bus0"]) not in elec:
+        if str(ldf.at[lk, "bus1"]) not in elec or str(ldf.at[lk, "bus0"]) in elec:
+            continue
+        # A Link that never delivers (efficiency <= 0 in every hour) is a
+        # consumer on bus1, not supply.
+        if np.any(_series(n, lk, "efficiency", 1.0) > 0.0):
             cands.append(str(lk))
     if not cands:
         return [], [], []
     cands.sort()
     params = resolve_outage_params(n, "links")
+    fuel_outage = resolve_outage_params(n, "generators")
     blocks = period_blocks(n.snapshots)
     lctx = ActivityContext(n, "links", blocks)
     gctx = ActivityContext(n, "generators", blocks)
@@ -239,8 +344,16 @@ def firm_backup_units(n, *, keep_zero_capacity: bool = False):
     notes: list[str] = []
     bad: list[str] = []
     for lk in cands:
-        bus0 = str(ldf.at[lk, "bus0"])
-        why, fuel = _fuel_exclusions(n, lk, bus0)
+        ports = _input_ports(n, lk)
+        why: list[str] = []
+        fuels: list[tuple[list[str], np.ndarray]] = []
+        for port, bus, draw in ports:
+            if bus in elec:
+                why.append(f"{port} {bus} is an electrical bus the Link draws from")
+                continue
+            port_why, fuel = _fuel_exclusions(n, lk, bus, port, fuel_outage)
+            why += port_why
+            fuels.append((fuel, draw))
         if why:
             notes.append(f"firm Link {lk}: not credited (0 MW) — {'; '.join(why)}")
             continue
@@ -264,12 +377,22 @@ def firm_backup_units(n, *, keep_zero_capacity: bool = False):
         sending = capped_mw(
             n, lk, cap * np.clip(_series(n, lk, "p_max_pu", 1.0), 0.0, None)
         )
-        fuel_mw = np.zeros(H, dtype=float)
-        for g in fuel:
-            g_max, g_series = gctx.capacity_series(g, n.generators.loc[g])
-            g_cap = g_max if g_series is None else g_series
-            fuel_mw += g_cap * np.clip(_gen_series(n, g, "p_max_pu", 1.0), 0.0, None)
-        delivered = np.minimum(sending, fuel_mw) * eff
+        for fuel, draw in fuels:
+            fuel_mw = np.zeros(H, dtype=float)
+            for g in fuel:
+                g_max, g_series = gctx.capacity_series(g, n.generators.loc[g])
+                g_cap = g_max if g_series is None else g_series
+                fuel_mw += g_cap * np.clip(
+                    _gen_series(n, g, "p_max_pu", 1.0), 0.0, None
+                )
+            # The port takes `draw` per MW sent, so its fuel bounds the MW sent.
+            sending = np.minimum(
+                sending,
+                np.divide(fuel_mw, draw, out=np.full(H, np.inf), where=draw > 0.0),
+            )
+        # Never below zero: a negative efficiency in some hour is no delivery
+        # then, not a load the unit adds while it is up.
+        delivered = np.clip(sending * eff, 0.0, None)
         c_max = float(delivered.max()) if H else 0.0
         if c_max <= 0.0 and not keep_zero_capacity:
             continue

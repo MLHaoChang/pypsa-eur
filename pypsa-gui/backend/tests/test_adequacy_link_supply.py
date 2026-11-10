@@ -645,3 +645,321 @@ def test_a_bad_import_rate_is_a_typed_refusal_at_both_loops(
     assert "outage rate outside [0, 1) on import Link(s): grid_import" in str(
         r.json()["detail"]
     )
+
+
+# ── GK A (21) review of #1341: F1–F6 ──────────────────────────────────────
+
+
+def _with_h2_port(*, fuel=True, eff2=-1.0):
+    n = _net()
+    n.add("Bus", "h2", carrier="H2")
+    if fuel:
+        n.add("Generator", "h2_supply", bus="h2", p_nom=1000.0)
+    return _fuel_cell(n, bus2="h2", efficiency2=eff2)
+
+
+def test_a_fuel_cell_drawing_on_a_store_through_a_second_port_is_not_credited():
+    """F1: bus0 has an unlimited fuel, bus2 (efficiency2 = -1) has only a
+    1 MWh Store. The store bounds the output, so no credit."""
+    n = _with_h2_port(fuel=False)
+    n.add("Store", "tank", bus="h2", e_nom=1.0)
+    b = sampled_fleet(n)
+    assert "link:fuel_cell" not in _names(b)
+    assert (
+        "firm Link fuel_cell: not credited (0 MW) — "
+        "bus2 h2 carries a Store (energy-limited): tank; "
+        "bus2 h2 has no fuel Generator without an energy cap (e_sum_max)"
+    ) in b.fleet_notes
+
+
+@pytest.mark.parametrize(
+    "exclusion, words",
+    [
+        ("storage_unit", "bus2 h2 carries a StorageUnit (energy-limited): su"),
+        ("load", "bus2 h2 carries a Load: h2_use"),
+        ("feeder", "bus2 h2 is fed by another Link: ely"),
+        ("sharer", "bus2 h2 is shared with another Link: burner"),
+        ("capped_fuel", "bus2 h2 has no fuel Generator without an energy cap (e_sum_max)"),
+    ],
+)
+def test_each_exclusion_applies_to_a_second_input_port(exclusion, words):
+    n = _with_h2_port()
+    if exclusion == "storage_unit":
+        n.add("StorageUnit", "su", bus="h2", p_nom=10.0, max_hours=1.0)
+    elif exclusion == "load":
+        n.add("Load", "h2_use", bus="h2", p_set=1.0)
+    elif exclusion == "feeder":
+        n.add("Link", "ely", bus0="hub", bus1="h2", p_nom=5.0)
+    elif exclusion == "sharer":
+        n.add("Bus", "heat", carrier="heat")
+        n.add("Link", "burner", bus0="h2", bus1="heat", p_nom=5.0)
+    elif exclusion == "capped_fuel":
+        n.generators.at["h2_supply", "e_sum_max"] = 100.0
+    b = sampled_fleet(n)
+    assert "link:fuel_cell" not in _names(b)
+    [note] = [s for s in b.fleet_notes if "fuel_cell" in s]
+    assert note == f"firm Link fuel_cell: not credited (0 MW) — {words}"
+
+
+def test_a_second_input_port_with_its_own_fuel_bounds_the_credit():
+    """F1: both ports fuelled. bus2 takes 2 per MW sent and has 30 MW of
+    fuel, so 15 MW is sent and 7.5 MW delivered (not 40 x 0.5)."""
+    n = _with_h2_port(eff2=-2.0)
+    n.generators.at["h2_supply", "p_nom"] = 30.0
+    b = sampled_fleet(n)
+    assert _names(b)[-1] == "link:fuel_cell"
+    assert b.units[-1].capacity_mw == pytest.approx(7.5)
+    assert not b.fleet_notes
+
+
+def test_a_second_port_that_delivers_is_not_an_input_port():
+    """F1: efficiency2 > 0 is an output (waste heat), so a Store there does
+    not withhold the credit."""
+    n = _net()
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Store", "heat_tank", bus="heat", e_nom=1.0)
+    n = _fuel_cell(n, bus2="heat", efficiency2=0.3)
+    b = sampled_fleet(n)
+    assert b.units[-1].name == "link:fuel_cell"
+    assert b.units[-1].capacity_mw == pytest.approx(20.0)
+
+
+def test_an_input_port_on_an_electrical_bus_withholds_the_credit():
+    n = _net()
+    n = _fuel_cell(n, bus2="hub", efficiency2=-0.1)
+    b = sampled_fleet(n)
+    assert "link:fuel_cell" not in _names(b)
+    assert (
+        "firm Link fuel_cell: not credited (0 MW) — "
+        "bus2 hub is an electrical bus the Link draws from"
+    ) in b.fleet_notes
+
+
+def test_delivered_capacity_is_never_negative():
+    """F2: a negative efficiency in some hours is no delivery then; the unit
+    being up must not add shortfall."""
+    n = _fuel_cell(_net())
+    eff = pd.Series(0.5, index=n.snapshots)
+    eff.iloc[:4] = -0.5
+    n.links_t.efficiency["fuel_cell"] = eff
+    b = sampled_fleet(n)
+    unit = b.units[-1]
+    assert unit.name == "link:fuel_cell" and unit.capacity_mw == pytest.approx(20.0)
+    assert unit.capacity_series.min() == 0.0
+    assert list(unit.capacity_series[:5]) == [0.0, 0.0, 0.0, 0.0, 20.0]
+
+
+@pytest.mark.parametrize("eff", [0.0, -0.5])
+def test_a_link_that_never_delivers_is_not_a_firm_candidate(eff):
+    """F2: efficiency <= 0 in every hour is a consumer on bus1."""
+    n = _fuel_cell(_net(), eff=eff)
+    b = sampled_fleet(n, keep_zero_capacity=True)
+    assert "link:fuel_cell" not in _names(b)
+    assert b.supply_links == ("grid_import",)
+    assert not any("fuel_cell" in s for s in b.fleet_notes)
+
+
+@pytest.mark.parametrize(
+    "kind, attr, sense, capped",
+    [
+        ("operational_limit", "gas", "<=", True),
+        ("operational_limit", "gas", "==", True),
+        ("operational_limit", "gas", ">=", False),
+        ("operational_limit", "coal", "<=", False),
+        ("primary_energy", "co2_emissions", "<=", True),
+        ("primary_energy", "other_emissions", "<=", False),
+        ("transmission_volume_expansion_limit", "gas", "<=", False),
+    ],
+)
+def test_a_global_constraint_on_the_fuel_carrier_withholds_the_credit(
+    kind, attr, sense, capped
+):
+    """F3: an energy cap on the fuel carrier is an energy limit like
+    `e_sum_max`; a floor, another carrier or another type is not."""
+    n = _fuel_cell(_net())
+    n.add("Carrier", "gas", co2_emissions=0.2)
+    n.carriers["other_emissions"] = 0.0
+    n.generators.at["gas_supply", "carrier"] = "gas"
+    n.add(
+        "GlobalConstraint",
+        "cap",
+        type=kind,
+        carrier_attribute=attr,
+        sense=sense,
+        constant=100.0,
+    )
+    b = sampled_fleet(n)
+    assert ("link:fuel_cell" in _names(b)) is (not capped)
+    notes = [s for s in b.fleet_notes if "fuel_cell" in s]
+    if capped:
+        assert notes == [
+            "firm Link fuel_cell: not credited (0 MW) — bus0 gas fuel Generator "
+            "gas_supply (carrier gas) is under an energy cap (GlobalConstraint cap)"
+        ]
+    else:
+        assert not notes
+
+
+def test_a_fuel_generator_with_its_own_outage_data_withholds_the_credit():
+    """F3: only the Link's outage is sampled, so a fuel supply that fails
+    half the time cannot be credited as always there."""
+    n = _fuel_cell(_net())
+    _outage(n.generators, "gas_supply", 0.5, 24.0)
+    b = sampled_fleet(n)
+    assert "link:fuel_cell" not in _names(b)
+    assert (
+        "firm Link fuel_cell: not credited (0 MW) — bus0 gas fuel Generator "
+        "gas_supply has its own outage data, which the Link's outage does not carry"
+    ) in b.fleet_notes
+
+
+def test_a_carrier_default_on_the_fuel_generator_is_not_outage_data():
+    """F3: a plant-class carrier default says nothing about a fuel supply."""
+    n = _fuel_cell(_net())
+    n.add("Carrier", "gas")
+    n.generators.at["gas_supply", "carrier"] = "gas"
+    b = sampled_fleet(n)
+    assert b.units[-1].name == "link:fuel_cell"
+    assert b.units[-1].capacity_mw == pytest.approx(20.0)
+
+
+def _two_imports():
+    """Two import Links in reverse name order in the network, and two
+    credited firm Links on separate fuel buses, also in reverse order."""
+    n = _net()
+    n.remove("Link", "grid_import")
+    for lk, data in (("z_imp", (0.01, 12.0)), ("a_imp", (0.02, 6.0))):
+        n.add("Link", lk, bus0="grid", bus1="hub", p_nom=20.0, efficiency=1.0)
+        n.links.at[lk, "eh_role"] = "grid_import"
+        _outage(n.links, lk, *data)
+    for lk, bus in (("z_cell", "gas_z"), ("a_cell", "gas_a")):
+        n.add("Bus", bus, carrier="gas")
+        n.add("Generator", f"{bus}_supply", bus=bus, p_nom=1000.0)
+        n.add("Link", lk, bus0=bus, bus1="hub", p_nom=10.0, efficiency=0.5)
+        n.links.at[lk, "eh_role"] = "fuel_cell"
+        _outage(n.links, lk, 0.03, 24.0)
+    n.links["eh_role"] = n.links["eh_role"].fillna("")
+    return n
+
+
+def test_import_and_firm_links_are_each_in_sorted_name_order():
+    """F5 (AL-4): generators, then import Links, then firm Links, each
+    sorted, whatever the order in the network."""
+    n = _two_imports()
+    assert list(n.links.index) == ["z_imp", "a_imp", "z_cell", "a_cell"]
+    b = sampled_fleet(n)
+    assert _names(b) == [
+        "diesel",
+        "link:a_imp",
+        "link:z_imp",
+        "link:a_cell",
+        "link:z_cell",
+    ]
+    assert [u.q for u in b.units[1:]] == [0.02, 0.01, 0.03, 0.03]
+    assert b.supply_links == ("a_imp", "z_imp", "a_cell", "z_cell")
+
+
+def _freeze(n, **kw):
+    import threading
+
+    from models.energy_hub import ImportOverlaySpec
+    from services.adequacy.eh_stages import freeze_fixed_plan
+
+    class _Cfg:
+        voll = 1000.0
+
+    return freeze_fixed_plan(
+        n,
+        _Cfg(),
+        threading.Lock(),
+        overlay=ImportOverlaySpec(import_carriers=[]),
+        import_model="sampled_unit",
+        **kw,
+    )
+
+
+def _same_units(a, b):
+    assert len(a) == len(b)
+    for x, y in zip(a, b):
+        fx, fy = dataclasses.asdict(x), dataclasses.asdict(y)
+        sx, sy = fx.pop("capacity_series"), fy.pop("capacity_series")
+        assert fx == fy
+        assert (sx is None) == (sy is None)
+        if sx is not None:
+            np.testing.assert_array_equal(sx, sy)
+
+
+def test_freeze_and_the_loops_sample_one_fleet():
+    """F4 (Q1): the same network gives `freeze_fixed_plan` and
+    `sampled_fleet` the same units in the same order (so the same CRN
+    substreams), the same residual and the same notes."""
+    n = _two_imports()
+    n.add("Link", "c_imp", bus0="grid", bus1="hub", p_nom=5.0, efficiency=1.0)
+    n.links.at["c_imp", "eh_role"] = "grid_import"  # no outage data: firm block
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Store", "tank", bus="h2", e_nom=1.0)
+    n.add("Link", "h2_cell", bus0="h2", bus1="hub", p_nom=10.0, efficiency=0.5)
+    n.links["eh_role"] = n.links["eh_role"].fillna("")
+    _outage(n.links, "h2_cell", 0.03, 24.0)
+    loops = sampled_fleet(n)
+    snap = _freeze(n)
+    assert snap.mc_error is None
+    frozen = snap.mc_inputs
+    assert _names(frozen) == _names(loops) == [
+        "diesel",
+        "link:a_imp",
+        "link:z_imp",
+        "link:a_cell",
+        "link:z_cell",
+    ]
+    _same_units(frozen.units, loops.units)
+    np.testing.assert_array_equal(frozen.residual, loops.residual)
+    assert frozen.fleet_notes == loops.fleet_notes
+    assert frozen.supply_links == loops.supply_links
+    assert [s.split(":")[0] for s in loops.fleet_notes] == [
+        "grid import taken as never failing",
+        "firm Link h2_cell",
+    ]
+
+
+def test_freeze_carries_the_note_about_links_that_do_not_separate_the_sides():
+    """F4 (AL-6): the shared assembly, so freeze no longer drops the note."""
+    n = _net()
+    n.add("Line", "bypass", bus0="grid", bus1="hub", x=0.1, s_nom=10.0)
+    loops = sampled_fleet(n)
+    frozen = _freeze(n).mc_inputs
+    assert loops.fleet_notes and frozen.fleet_notes == loops.fleet_notes
+    assert _names(frozen) == _names(loops)
+
+
+def test_freeze_refuses_an_import_rate_outside_the_unit_interval():
+    """F6 (AL-6)."""
+    snap = _freeze(_net(import_data=(1.5, 12.0)))
+    assert snap.mc_error.startswith(
+        "MC snapshot refused: outage rate outside [0, 1) on import Link(s): "
+        "grid_import (rate 1.5)"
+    )
+    assert snap.copt_error == snap.mc_error and snap.mc_inputs is None
+
+
+@pytest.mark.parametrize(
+    "url", ["/api/results/coupling_loop", "/api/results/margin_loop"]
+)
+def test_a_bad_firm_rate_is_a_typed_refusal_at_both_loops(
+    client, install_network, url
+):
+    """F6 (AL-6): the firm-backup role refuses like the import role."""
+    n = _h2_hub()
+    n.add("Bus", "backup_gas", carrier="gas")
+    n.add("Generator", "backup_gas_supply", bus="backup_gas", p_nom=1000.0)
+    # An availability profile, so the margin's coverage check prices it.
+    n.generators_t.p_max_pu["backup_gas_supply"] = 0.99
+    n.add("Link", "backup", bus0="backup_gas", bus1="hub", p_nom=10.0, efficiency=0.5)
+    n.links.at["backup", "eh_role"] = "fuel_cell"
+    _outage(n.links, "backup", 1.5, 24.0)
+    _install(client, install_network, n)
+    r = client.post(url, json={"max_solves": 2, "target_lole_h": 2.0})
+    assert r.status_code == 422, r.text
+    assert "outage rate outside [0, 1) on firm Link(s): backup (rate 1.5)" in str(
+        r.json()["detail"]
+    )
