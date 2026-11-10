@@ -1114,6 +1114,15 @@ def test_a_field_with_a_time_series_is_neither_saved_nor_applied(client, proj):
     assert "time series" in r.json()["detail"]["message"]
 
 
+def test_a_series_added_after_the_preview_refuses_the_apply(client, proj):
+    proj.stamp()
+    chip = _saved_chip(client, proj, field="marginal_cost", then=70.0)
+    card = _preview(client, proj, chip).json()
+    proj.net().generators_t.marginal_cost["gas"] = 5.0
+    r = _apply(client, proj, chip, card["digest"])
+    assert r.json()["detail"]["error_kind"] == "memory_field_has_series"
+
+
 def test_a_parameter_items_keys_are_not_edited(client, proj, _auth_db, seeded_identity):
     from db.models import User
     from services import memory_store as M
@@ -1366,3 +1375,214 @@ def test_a_malformed_class_or_field_is_named_as_such(change):
     with pytest.raises(M.MemoryError) as exc:
         M.validate_body("parameter", _BODY | change, parameter_ok=True)
     assert "needs a component class and a field" in str(exc.value)
+
+
+# ── GK B (45) N1–N8 ───────────────────────────────────────────────────────────
+
+
+def _on_bus(proj, name, unit):
+    """Put the asset on a bus of its own that counts in `unit`."""
+    n = proj.net()
+    bus = f"bus_{name}"
+    if bus not in n.buses.index:
+        n.add("Bus", bus)
+    n.buses.at[bus, "unit"] = unit
+    n.generators.at[name, "bus"] = bus
+
+
+def _no_carrier(proj, *names):
+    for name in names:
+        proj.net().generators.at[name, "carrier"] = ""
+
+
+def test_a_value_saved_on_a_tonnes_bus_keeps_its_real_unit(client, proj):
+    _no_carrier(proj, "gas", "solar")
+    _on_bus(proj, "gas", "t/h")
+    r = _save(client, proj, field="p_nom", name="gas")
+    assert r.status_code == 201, r.text
+    assert r.json()["body"]["bus_unit"] == "t/h" and r.json()["body"]["unit"] == "MW"
+    _set_value(proj, 10.0, "p_nom")
+    chip = _chips(client, proj, "gas")["p_nom"][0]
+    assert chip["unit"] == "t/h"
+    assert "p_nom" not in _chips(client, proj, "solar")  # an MW asset
+    r = _preview(client, proj, chip, name="solar")
+    assert r.status_code == 422 and r.json()["detail"]["error_kind"] == (
+        "memory_unit_mismatch"
+    )
+    assert "t/h" in r.json()["detail"]["message"]
+    card = _preview(client, proj, chip).json()
+    assert card["memory"]["unit"] == "t/h"
+    assert any(row.get("unit") == "t/h" for row in card["rows"])
+
+
+def test_an_mw_value_is_not_applied_onto_a_bus_with_its_own_unit(client, proj):
+    _no_carrier(proj, "gas", "solar")
+    chip = _saved_chip(client, proj)  # gas p_nom on an MW bus
+    assert chip["unit"] == "MW"
+    _on_bus(proj, "solar", "MW_th")  # the bus states its own unit
+    assert "p_nom" not in _chips(client, proj, "solar")
+    r = _preview(client, proj, chip, name="solar")
+    assert r.json()["detail"]["error_kind"] == "memory_unit_mismatch"
+    card = _preview(client, proj, chip).json()
+    _on_bus(proj, "gas", "t/h")  # the target's unit moves after the preview
+    r = _apply(client, proj, chip, card["digest"])
+    assert r.json()["detail"]["error_kind"] == "memory_unit_mismatch"
+    assert proj.net().generators.at["gas", "p_nom"] == 10.0
+
+
+def test_the_real_unit_reads_mw_as_the_buses_rate_and_mwh_as_its_amount():
+    from services.memory_parameters import real_unit
+
+    assert real_unit("MW", None) == "MW"
+    assert real_unit("MW", "t/h") == "t/h" and real_unit("MWh", "t/h") == "t"
+    assert real_unit("EUR/MWh", "t/h") == "EUR/t"
+    assert real_unit("MWh", "MW_th") == "MW_th·h"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"bus_unit": "MW"},
+        {"bus_unit": "t/h\n"},
+        {"bus_unit": " t/h"},
+        {"bus_unit": 5},
+        {"bus_unit": "x" * 33},
+        {"field": "efficiency", "unit": "p.u.", "bus_unit": "t/h"},
+    ],
+)
+def test_the_parameter_body_refuses_a_bus_unit_it_cannot_hold(change):
+    from services import memory_store as M
+
+    with pytest.raises(M.MemoryError) as exc:
+        M.validate_body("parameter", _BODY | change, parameter_ok=True)
+    assert exc.value.kind == "memory_unit_mismatch"
+    body = M.validate_body("parameter", _BODY | {"bus_unit": "t/h"}, parameter_ok=True)
+    assert body["bus_unit"] == "t/h"
+
+
+def test_a_held_user_series_is_neither_saved_nor_applied(client, proj, bound_ctx):
+    import pandas as pd
+
+    proj.stamp()
+    chip = _saved_chip(client, proj, field="marginal_cost", then=70.0)
+    card = _preview(client, proj, chip).json()
+    with bound_ctx(client):
+        from services.pypsa_service import PyPSAService
+
+        # Held for another year: it does not overlap the snapshots, so it is not
+        # in the network's own table, and a reapply puts it back later.
+        idx = pd.date_range("1990-01-01", periods=3, freq="h")
+        PyPSAService.get_user_ts()[("generators", "marginal_cost", "gas")] = pd.Series(
+            5.0, index=idx
+        )
+    assert "gas" not in proj.net().generators_t.marginal_cost.columns
+    r = _save(client, proj)
+    assert r.json()["detail"]["error_kind"] == "memory_field_has_series"
+    r = _preview(client, proj, chip)
+    assert r.json()["detail"]["error_kind"] == "memory_field_has_series"
+    r = _apply(client, proj, chip, card["digest"])
+    assert r.json()["detail"]["error_kind"] == "memory_field_has_series"
+    assert proj.net().generators.at["gas", "marginal_cost"] == 70.0
+
+
+def test_a_card_only_change_after_the_preview_makes_the_apply_stale(client, proj):
+    chip = _saved_chip(client, proj)
+    card = _preview(client, proj, chip).json()
+    n = proj.net()
+    if "gas" not in n.carriers.index:
+        n.add("Carrier", "gas")
+    again = _preview(client, proj, chip).json()
+    assert again["memory"] == card["memory"]  # the memory block did not move
+    r = _apply(client, proj, chip, card["digest"])
+    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == (
+        "edit_preview_stale"
+    )
+    assert proj.net().generators.at["gas", "p_nom"] == 10.0
+
+
+def test_the_card_names_the_source_the_apply_replaces(client, proj):
+    proj.stamp(field="p_nom", source="pack:before")
+    chip = _saved_chip(client, proj)
+    proj.stamp(field="p_nom", source="pack:before")
+    card = _preview(client, proj, chip).json()
+    assert card["memory"]["target"]["source"] == "pack:before"
+    assert "pack:before" in card["memory_note"]
+    assert _apply(client, proj, chip, card["digest"]).status_code == 200
+    entry = PV.get(proj.net(), "Generator", "gas")["p_nom"]
+    assert entry["replaces"] == "pack:before"
+
+
+@pytest.mark.parametrize("carrier", ["gas\n", "gas\r"])
+def test_a_carrier_with_a_line_break_is_a_typed_422(client, proj, carrier):
+    proj.net().generators.at["gas", "carrier"] = carrier
+    r = _save(client, proj, field="p_nom")
+    assert r.json()["detail"]["error_kind"] == "memory_carrier_unsupported"
+
+
+def test_an_org_item_is_not_suggested_to_someone_outside_its_org(
+    client, proj, _auth_db, monkeypatch
+):
+    from services import memory_store as M
+
+    item = _save(client, proj, field="p_nom").json()
+    _set(_auth_db, item["id"], owner_scope="org", user_id=None)
+    assert _chips(client, proj)["p_nom"]
+    monkeypatch.setattr(M, "org_of", lambda *_a, **_k: uuid.uuid4())
+    assert "p_nom" not in _chips(client, proj)
+
+
+def test_a_failing_apply_count_rolls_back_and_the_session_stays_usable(
+    client, proj, monkeypatch, bound_ctx, _auth_db, seeded_identity
+):
+    from db.models import MemoryItem, Project, User
+    from services import memory_parameters as P
+    from services import memory_store as M
+
+    chip = _saved_chip(client, proj)
+    card = _preview(client, proj, chip).json()
+
+    def broken(db, *_a, **_k):
+        db.add(MemoryItem(id=uuid.uuid4()))  # no kind, no owner: the flush fails
+        db.flush()
+
+    monkeypatch.setattr(M, "record_apply", broken)
+    with bound_ctx(client), _db(_auth_db) as db:
+        user = db.get(User, seeded_identity["user_id"])
+        project = db.get(Project, uuid.UUID(proj.id))
+        out = P.apply(
+            db,
+            user,
+            project,
+            chip["id"],
+            chip["version"],
+            "Generator",
+            "gas",
+            card["digest"],
+        )
+        assert out["apply_counted"] is False
+        # The failed flush was rolled back: the same session still reads.
+        assert db.get(MemoryItem, uuid.UUID(chip["id"][4:])).apply_count == 0
+    assert proj.net().generators.at["gas", "p_nom"] == 200.0
+
+
+def test_another_orgs_or_users_item_answers_the_same_404_as_a_ghost(
+    client, proj, _auth_db
+):
+    from tests.conftest import _seed_org_and_user
+
+    other_user, other_org = _seed_org_and_user(
+        _auth_db[1],
+        email=f"m{uuid.uuid4().hex[:6]}@example.com",
+        org_name=f"Org {uuid.uuid4().hex[:6]}",
+    )
+    item = _save(client, proj, field="p_nom").json()
+    _set_value(proj, 10.0, "p_nom")
+    chip = _chips(client, proj)["p_nom"][0]
+    ghost = _preview(client, proj, {**chip, "id": "mem_" + uuid.uuid4().hex})
+    _set(_auth_db, item["id"], org_id=other_org)
+    other_org_reply = _preview(client, proj, chip)
+    _set(_auth_db, item["id"], org_id=proj.org_id, user_id=other_user)
+    other_user = _preview(client, proj, chip)
+    assert ghost.status_code == other_org_reply.status_code == 404
+    assert other_user.status_code == 404
+    assert ghost.content == other_org_reply.content == other_user.content

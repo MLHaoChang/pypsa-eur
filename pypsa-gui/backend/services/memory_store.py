@@ -44,6 +44,7 @@ PARAMETER_KEYS = (
     "currency",
     "currency_year",
     "carrier",
+    "bus_unit",
 )
 # Kinds that hold no project data and so may be recalled in another org's
 # project (§9 M1). Everything else needs the bound project's org.
@@ -84,6 +85,8 @@ TRANSITIONS: dict[str, tuple[tuple[str, ...], str]] = {
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$")
 # PyPSA carrier names carry spaces ("solar rooftop", "urban central heat").
 _CARRIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_. \-]{0,63}$")
+# A bus's own unit (t/h, MW_th, kg/h, …) that a rate, amount or price counts in.
+_BUS_UNIT = re.compile(r"[A-Za-z0-9_/·. \-]{1,32}")
 _PARAM = re.compile(r"^[A-Z][A-Za-z]{0,47}\.[a-z][a-z0-9_]{0,63}$")
 
 
@@ -281,7 +284,7 @@ def carrier_ok(value: Any) -> bool:
     """A carrier name a concept key and a parameter body can hold verbatim."""
     return (
         isinstance(value, str)
-        and bool(_CARRIER.match(value))
+        and bool(_CARRIER.fullmatch(value))
         and not value.endswith(" ")
     )
 
@@ -374,6 +377,22 @@ def _parameter(body: Any) -> dict:
                 422,
             )
         out["carrier"] = b["carrier"]
+    if b.get("bus_unit") is not None:
+        # The source asset's own bus unit when the field counts in it (GK B N1).
+        if not (
+            "MW" in spec.unit_storage
+            and isinstance(b["bus_unit"], str)
+            and _BUS_UNIT.fullmatch(b["bus_unit"])
+            and b["bus_unit"].strip() == b["bus_unit"]
+            and b["bus_unit"] != "MW"
+        ):
+            raise MemoryError(
+                f"{b['component_class']}.{b['field']} cannot be saved in "
+                f"{b['bus_unit']!r}",
+                "memory_unit_mismatch",
+                422,
+            )
+        out["bus_unit"] = b["bus_unit"]
     return out
 
 

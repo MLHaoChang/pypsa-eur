@@ -88,6 +88,9 @@ def test_the_issue_rows_are_declared():
     ('Unpause the solve queue', 'solve_queue_instance_controls'),
     ('Resume the paused solve queue', 'solve_queue_instance_controls'), ('Replace the site thumbnail', 'map_layout_and_sites'),
     ('Make this capex reusable in my next project', 'memory_parameter_suggestions'),
+    ('Apply my saved value to this generator', 'memory_parameter_suggestions'),
+    ('Use my saved efficiency', 'memory_parameter_suggestions'),
+    ('Reuse a parameter I saved', 'memory_parameter_suggestions'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -104,7 +107,7 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Set the load profile from the uploaded file', 'Resume my task', 'Resume the plan',
     'Switch to my OpenAI profile', 'Switch to my Anthropic profile', 'Pause my goal', 'Pause the plan',
     'Extract the grid code from this PDF', 'Geocode the site address',
-    'List my saved snapshots', 'Reuse the last run settings', 'Any suggestion for the battery size',
+    'List my saved snapshots', 'Reuse the last run settings', 'Any suggestion for the battery size', 'Save the project', 'Saved project list', 'Show saved scenarios',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)

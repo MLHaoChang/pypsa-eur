@@ -387,7 +387,9 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
                    'The assistant never applies one.'),
         'page': 'Asset card (Properties)',
         'panel': None,
-        'keywords': frozenset({'reusable', 'chip', 'chips'}),
+        # 'saved' and 'reuse' alone are in project, scenario and snapshot asks:
+        # `matches` also needs `_asks_for_a_saved_value` (GK B N4).
+        'keywords': frozenset({'reusable', 'chip', 'chips', 'saved', 'reuse'}),
         'routes': frozenset({
             ('GET', '/api/memory/suggestions'),
             ('POST', '/api/memory/parameters'),
@@ -401,6 +403,19 @@ NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the 
         "if panel is set you may open it with ui_open_panel. Do not look for another tool or an API for them.")
 
 
+# A saved field value: a chip, or "saved"/"reuse" together with a value or a field.
+_SAVED_VALUE_NAMES = frozenset({'reusable', 'chip', 'chips'})
+_SAVED_WORDS = frozenset({'saved', 'reuse'})
+_VALUE_WORDS = frozenset({
+    'value', 'values', 'parameter', 'parameters', 'efficiency', 'capex', 'opex',
+    'cost', 'costs', 'price', 'prices', 'capacity',
+})
+
+
+def _asks_for_a_saved_value(words: set[str]) -> bool:
+    return bool(words & _SAVED_VALUE_NAMES or (words & _SAVED_WORDS and words & _VALUE_WORDS))
+
+
 def matches(words: set[str], limit: int = 2) -> list[dict]:
     """Keyword hits, ranked by count then declaration order; return public copies.
 
@@ -411,6 +426,8 @@ def matches(words: set[str], limit: int = 2) -> list[dict]:
     for index, entry in enumerate(NOT_VIA_CHAT):
         if (entry['id'] == 'solve_queue_instance_controls' and words & {'goal', 'task', 'plan'}
                 and 'queue' not in words):
+            continue
+        if entry['id'] == 'memory_parameter_suggestions' and not _asks_for_a_saved_value(words):
             continue
         hits = len(words & entry['keywords'])
         if hits:
