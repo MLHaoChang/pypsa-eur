@@ -8,7 +8,7 @@ Blocked by: 01
 Type: feature
 Model: Opus for the shared theme API, Sonnet for each chart. Reviewer: UX.
 
-The issue is cut into slices (PR-SIZE-1). Slices 1 to 3 are done in their PRs; the
+The issue is cut into slices (PR-SIZE-1). Slices 1 to 4 are done in their PRs; the
 rest are ready for an agent and build on their API.
 
 ## Slice 1: shared chart theme (this PR)
@@ -37,9 +37,14 @@ Used by Prices ("Price by hour and day", lowest to highest price), Curtailment (
 
 Full-year runs: see `06-full-year-charts-block-the-tab.md`.
 
+## Slice 4: Energy-flow Sankey (done in its PR)
+
+`EnergyFlowsTab.tsx`: the Sankey sits in a `ChartFrame` ("Energy flow · <period>") with the total delivered or lost as its header number, the shared SVG and CSV actions, `ChartZero` for a window where no energy moved, and the frame's source line. The strip above keeps the conservation chip, the period picker, the losses share and the undelivered marks. The Value flows Sankey in Investment keeps its own card until slice 6.
+
+For slice 6 (UX, #1354): on a multi-period run with "Aggregated" selected the diagram shows the first period (title "Energy flow · 2027") while the source line says "all periods". Left as on master in slice 4.
+
 ## Later slices
 
-4. **Energy-flow Sankey** on the theme (the Energy flow tab's Sankey moves into `ChartFrame`).
 5. **Tornado / delta for sensitivities**, with shared axes, scales, colours and order across base and sensitivity cases (VISUALS-1).
 6. **The rest of Results on the theme**: Prices, Economics, AC power flow, Investment, Aggregated overview (they already get the tokens and ticks through the shared constants, not `ChartFrame`).
 7. **Reports reuse the exact chart specs** the user saw.
