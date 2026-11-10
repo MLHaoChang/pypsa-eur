@@ -1003,6 +1003,33 @@ def test_an_unreadable_flow_or_weight_reads_no_utilisation(
     assert result["verdict"] == "not_evaluated" and result["facts"][0]["value"] is None
 
 
+def test_a_zero_weight_snapshot_is_read_and_counts_nothing(tmp_path, monkeypatch):
+    """A weight of 0 is a valid weighting (only negative or unreadable is
+    not): 2040's (3, 1) becomes (3, 0), so its 10 MW hour counts nothing."""
+    env = _h2_env(tmp_path, monkeypatch)
+    sw = env.ctx.network.snapshot_weightings
+    sw.iloc[3, sw.columns.get_loc("generators")] = 0.0
+    rows = {
+        r["period"]: r
+        for r in _gate(env, "h2.electrolyser.utilisation")["facts"][0]["rows"]
+    }
+    assert rows[2040]["utilisation"] == pytest.approx(3.0 / 30.0)
+
+
+def test_dispatch_within_a_relative_tolerance_of_a_large_capacity_is_read(
+    tmp_path, monkeypatch
+):
+    """The capacity check's tolerance scales with the capacity (1e-6 of it):
+    a 10 MW electrolyser at 10.000005 MW is the solver's rounding, not
+    another capacity."""
+    env = _h2_env(tmp_path, monkeypatch, dispatch=((6.0, 6.0), (1.0, 10.000005)))
+    rows = {
+        r["period"]: r
+        for r in _gate(env, "h2.electrolyser.utilisation")["facts"][0]["rows"]
+    }
+    assert rows[2040]["utilisation"] == pytest.approx(0.325, rel=1e-6)
+
+
 def test_a_capture_on_other_snapshots_is_no_evidence_of_shed(tmp_path, monkeypatch):
     """The capture's frame must be on the network's own snapshots."""
     env = _h2_env(tmp_path, monkeypatch)
