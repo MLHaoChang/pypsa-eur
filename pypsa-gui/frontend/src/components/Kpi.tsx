@@ -92,7 +92,7 @@ export default function Kpi({
       {state !== 'ready' && state !== 'zero' && <StatePill state={state} />}
       {fromStudy && showsFigure && <StatePill state="study_only" />}
       {delta && showsFigure && (
-        <div className={`text-[11px] font-medium tabular-nums ${deltaTone ? TONE[deltaTone] : 'text-muted'}`}>
+        <div className={`text-[11px] font-medium tabular-nums ${deltaTone ? TONE[deltaTone] : 'text-muted'} ${dimmed ? 'opacity-60' : ''}`}>
           {delta}
         </div>
       )}

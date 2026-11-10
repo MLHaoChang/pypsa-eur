@@ -2804,7 +2804,8 @@ def _headline_comparison(cards: list[dict], actor_id) -> dict | None:
             base_cards = _headline_cards()["cards"]
         except Exception:  # noqa: BLE001 — the strip still answers, without deltas
             logger.exception("headline strip: the base case's figures could not be read")
-            return dict(comparison, comparable=False, reason=headline_delta.BASE_UNREADABLE)
+            return dict(comparison, comparable=False, basis=None,
+                        reason=headline_delta.BASE_UNREADABLE)
         finally:
             PyPSAService._turn_cell.reset(cell)
             PyPSAService.reset_request_context(binding)
@@ -2815,17 +2816,22 @@ def _headline_comparison(cards: list[dict], actor_id) -> dict | None:
 
 
 @results_router.get("/headline_kpis")
-def get_headline_kpis(request: Request):
+def get_headline_kpis(request: Request, compare: bool = Query(default=False)):
     """
     The headline figures at the top of Results for the open project's type
     (ui-modern 03; `services.results.headline_kpis`). 204 when nothing is solved.
-    `comparison` names the base case and whether the open case compares with it.
+
+    `compare=1` also reads the base case: `comparison` names it and says
+    whether the open case compares with it, and each card carries its `delta`.
+    The strip asks for that after it has painted, so a slow or busy base never
+    holds the figures back; without it `comparison` and every `delta` are null.
     """
     if not _dispatch_ready(PyPSAService.get_network()):
         return _not_solved()
     payload = _headline_cards()
     payload["comparison"] = _headline_comparison(
-        payload["cards"], getattr(getattr(request.state, "auth_user", None), "id", None))
+        payload["cards"], getattr(getattr(request.state, "auth_user", None), "id", None)
+    ) if compare else None
     return payload
 
 

@@ -507,7 +507,12 @@ def test_card_sets_are_short_and_reasons_carry_no_engine_identifier():
 
 # --- S3: the delta against the base case, and the trend over periods ---------
 
+from contextlib import contextmanager  # noqa: E402
+
 from harness import sensitivity_comparison as sc  # noqa: E402
+from services import chat_tools, project_registry  # noqa: E402
+from services import workflow_tools as wt  # noqa: E402
+from services.pypsa_service import PyPSAService  # noqa: E402
 from services.results import headline_delta as hd  # noqa: E402
 from tests.test_sensitivity_comparison import (  # noqa: E402, F401
     edit_saved,
@@ -517,13 +522,15 @@ from tests.test_sensitivity_comparison import (  # noqa: E402, F401
 )
 from tests.test_sensitivity_comparison import solve as solve_saved  # noqa: E402
 
+COMPARE = URL + "?compare=1"
 
-def strip(client, name=None):
+
+def strip(client, name=None, url=COMPARE):
     """The strip's answer, after opening the saved project `name` if given."""
     if name is not None:
         opened = client.get(f"/api/projects/{name}")
         assert opened.status_code == 200, opened.text
-    response = client.get(URL)
+    response = client.get(url)
     assert response.status_code == 200, response.text
     body = response.json()
     return body, {c["id"]: c for c in body["cards"]}
@@ -533,17 +540,50 @@ def no_deltas(by_id):
     return all(card["delta"] is None for card in by_id.values())
 
 
-def test_a_case_reads_each_cards_change_against_its_base(swept, client):
-    """G1 serves 5 MW for 2 h: 100 at the base's price of 10, 200 at 20."""
-    base_id, _cases = swept
-    body, by_id = strip(client, "Gas 20")
-    assert body["comparison"] == {
+def reads_as_no_base(client, name=None):
+    """The compared answer is the plain strip's, byte for byte: no base, no
+    name, no id and nothing that says one was looked for."""
+    if name is not None:
+        assert client.get(f"/api/projects/{name}").status_code == 200
+    compared, plain = client.get(COMPARE), client.get(URL)
+    assert compared.status_code == plain.status_code == 200
+    assert compared.content == plain.content
+    assert compared.json()["comparison"] is None
+    return True
+
+
+@contextmanager
+def open_saved(project_id):
+    """The saved project as the request's context, as a request on it has it."""
+    with chat_tools._acting() as (db, user):
+        row = project_registry.resolve_project(db, user, project_id)
+    ctx = wt._load_context(row)
+    binding = PyPSAService.bind_request_context(ctx)
+    cell = PyPSAService.bind_turn_cell()
+    try:
+        yield ctx
+    finally:
+        PyPSAService._turn_cell.reset(cell)
+        PyPSAService.reset_request_context(binding)
+
+
+def case_block(base_id, **over):
+    return {
         "role": "case",
         "base_name": "Tool Baseline",
         "base_project_id": base_id,
         "comparable": True,
         "reason": None,
+        "basis": hd.BASIS,
+        **over,
     }
+
+
+def test_a_case_reads_each_cards_change_against_its_base(swept, client):
+    """G1 serves 5 MW for 2 h: 100 at the base's price of 10, 200 at 20."""
+    base_id, _cases = swept
+    body, by_id = strip(client, "Gas 20")
+    assert body["comparison"] == case_block(base_id)
     assert by_id["system_cost"]["value"] == pytest.approx(200)
     assert by_id["system_cost"]["delta"] == {
         "value": pytest.approx(100),
@@ -567,6 +607,36 @@ def test_a_cheaper_case_reads_a_negative_change(swept, client):
     }
 
 
+def test_the_plain_fetch_never_reads_the_base(swept, client, monkeypatch):
+    """The base is read on `compare=1` only, so the strip paints without it."""
+    strip(client, "Gas 20")
+    monkeypatch.setattr(hd, "base_case", lambda ctx: pytest.fail("the base was read"))
+    body, by_id = strip(client, url=URL)
+    assert body["comparison"] is None and no_deltas(by_id)
+    assert by_id["system_cost"]["value"] == pytest.approx(200)
+
+
+def test_a_plain_projects_answer_is_s2s_with_the_new_keys_null(baseline, client):
+    _ctx, base_id, _root = baseline
+    solve_saved(base_id)
+    body, by_id = strip(client, url=URL)
+    assert list(body) == ["kind", "cards", "comparison"] and body["comparison"] is None
+    for card in body["cards"]:
+        assert list(card) == [
+            "id",
+            "value",
+            "unit",
+            "state",
+            "reason",
+            "formula_id",
+            "detail",
+            "delta",
+            "trend",
+        ]
+        assert card["delta"] is None and card["trend"] is None
+    assert reads_as_no_base(client)
+
+
 def test_the_base_says_it_is_the_base_and_carries_no_delta(swept, client):
     base_id, _cases = swept
     body, by_id = strip(client)
@@ -576,17 +646,9 @@ def test_the_base_says_it_is_the_base_and_carries_no_delta(swept, client):
         "base_project_id": base_id,
         "comparable": True,
         "reason": None,
+        "basis": None,
     }
     assert no_deltas(by_id)
-
-
-def test_a_project_with_no_cases_has_no_comparison(baseline, client):
-    _ctx, base_id, _root = baseline
-    solve_saved(base_id)
-    body, by_id = strip(client)
-    assert body["comparison"] is None
-    assert no_deltas(by_id)
-    assert all(card["trend"] is None for card in by_id.values())
 
 
 def test_a_case_whose_base_changed_says_why_and_carries_no_delta(swept, client):
@@ -594,12 +656,14 @@ def test_a_case_whose_base_changed_says_why_and_carries_no_delta(swept, client):
     edit_saved(base_id, set_price(11))
     solve_saved(base_id)
     body, by_id = strip(client, "Gas 20")
-    assert body["comparison"]["role"] == "case"
-    assert body["comparison"]["base_name"] == "Tool Baseline"
-    assert body["comparison"]["comparable"] is False
-    assert body["comparison"]["reason"] == (
-        "Not compared with the base case: the base's inputs or finance "
-        "settings changed since this case was branched."
+    assert body["comparison"] == case_block(
+        base_id,
+        comparable=False,
+        basis=None,
+        reason=(
+            "Not compared with the base case: the base's inputs or finance "
+            "settings changed since this case was branched."
+        ),
     )
     assert no_deltas(by_id)
     assert by_id["system_cost"]["value"] == pytest.approx(200)
@@ -617,25 +681,43 @@ def test_a_base_out_of_date_is_named_first(swept, client):
     assert no_deltas(by_id)
 
 
-def test_a_base_the_user_cannot_open_is_not_named(swept, client, monkeypatch):
+@pytest.mark.parametrize("status", [403, 404])
+def test_a_base_the_user_cannot_open_reads_as_no_base(
+    swept, client, monkeypatch, status
+):
+    """GK B S1: closed to the user, in another workspace, deleted or never
+    there, the answer is the one a project without a base gets."""
     base_id, _cases = swept
-    resolve = sc._resolve
+    resolve = project_registry.resolve_project
 
     def closed(db, user, ref):
-        if ref == base_id:
-            raise HTTPException(404, {"error_kind": "sensitivity_project_not_found"})
+        if str(ref) == base_id:
+            raise HTTPException(status, "no")
         return resolve(db, user, ref)
 
-    monkeypatch.setattr(sc, "_resolve", closed)
-    body, by_id = strip(client, "Gas 20")
-    assert body["comparison"] == {
-        "role": "case",
-        "base_name": None,
-        "base_project_id": None,
-        "comparable": False,
-        "reason": hd.NO_BASE_ACCESS,
-    }
-    assert no_deltas(by_id)
+    monkeypatch.setattr(project_registry, "resolve_project", closed)
+    assert reads_as_no_base(client, "Gas 20")
+
+
+def test_a_case_whose_base_row_is_gone_reads_as_no_base(swept, client, monkeypatch):
+    spec = hd._spec
+    monkeypatch.setattr(
+        hd, "_spec", lambda project: dict(spec(project), baseline_id="gone")
+    )
+    assert reads_as_no_base(client, "Gas 20")
+
+
+def test_a_base_counts_only_the_cases_the_user_can_open(swept, client, monkeypatch):
+    base_id, cases = swept
+    resolve = project_registry.resolve_project
+
+    def closed(db, user, ref):
+        if str(ref) in cases.values():
+            raise HTTPException(404, "no")
+        return resolve(db, user, ref)
+
+    monkeypatch.setattr(project_registry, "resolve_project", closed)
+    assert reads_as_no_base(client)
 
 
 @pytest.mark.parametrize("error", [KeyError("x"), OSError("x"), HTTPException(409)])
@@ -645,12 +727,13 @@ def test_a_base_that_cannot_be_read_costs_the_deltas_only(
     def broken(project):
         raise error
 
+    base_id, _cases = swept
     strip(client, "Gas 20")
     monkeypatch.setattr(sc, "_read", broken)
     body, by_id = strip(client)
-    assert body["comparison"]["comparable"] is False
-    assert body["comparison"]["reason"] == hd.BASE_UNREADABLE
-    assert body["comparison"]["base_name"] == "Tool Baseline"
+    assert body["comparison"] == case_block(
+        base_id, comparable=False, basis=None, reason=hd.BASE_UNREADABLE
+    )
     assert no_deltas(by_id)
     assert by_id["system_cost"]["value"] == pytest.approx(200)
 
@@ -669,55 +752,175 @@ def test_base_figures_that_fail_cost_the_deltas_only(swept, client, monkeypatch)
     body, by_id = strip(client)
     assert body["comparison"]["comparable"] is False
     assert body["comparison"]["reason"] == hd.BASE_UNREADABLE
+    assert body["comparison"]["basis"] is None
     assert no_deltas(by_id)
     # The base's context is unbound again: the next read is the case's.
     monkeypatch.setattr(results_router, "_headline_cards", build)
     assert strip(client)[1]["system_cost"]["value"] == pytest.approx(200)
 
 
-def test_the_comparison_leaves_the_acting_user_as_it_found_it(swept):
-    from services import chat_tools
+@pytest.mark.parametrize("broken", [None, "read", "cards"])
+def test_the_comparison_leaves_the_user_and_the_open_project_as_it_found_them(
+    swept, monkeypatch, broken
+):
+    """GK B S2: whatever the base read does, the acting user and the request's
+    project are the ones the request came with."""
+    _base_id, cases = swept
+    actor = chat_tools.acting_user_id()
+    if broken == "read":
+        monkeypatch.setattr(sc, "_read", lambda project: 1 / 0)
+    with open_saved(cases["Gas 20"]) as ctx:
+        cards = results_router._headline_cards()["cards"]
+        if broken == "cards":
+            monkeypatch.setattr(results_router, "_headline_cards", lambda: 1 / 0)
+        chat_tools.set_acting_user("someone-else")
+        try:
+            if broken == "read":
+                with pytest.raises(ZeroDivisionError):
+                    results_router._headline_comparison(cards, actor)
+            else:
+                block = results_router._headline_comparison(cards, actor)
+                assert block["comparable"] is (broken is None)
+            assert chat_tools.acting_user_id() == "someone-else"
+            assert PyPSAService.get_active_context() is ctx
+        finally:
+            chat_tools.set_acting_user(actor)
 
-    before = chat_tools.acting_user_id()
-    assert results_router._headline_comparison([], None) is None
-    assert chat_tools.acting_user_id() == before
+
+def test_the_comparison_acts_as_the_requests_user_only(swept):
+    """A request with no signed-in user compares nothing, whoever a chat turn
+    left bound as the acting user."""
+    _base_id, cases = swept
+    actor = chat_tools.acting_user_id()
+    assert actor is not None
+    with open_saved(cases["Gas 20"]):
+        cards = results_router._headline_cards()["cards"]
+        assert results_router._headline_comparison(cards, None) is None
+        assert no_deltas({c["id"]: c for c in cards})
+    assert chat_tools.acting_user_id() == actor
+
+
+def _saved_files(project_id):
+    with chat_tools._acting() as (db, user):
+        row = project_registry.resolve_project(db, user, project_id)
+        root = project_registry.project_dir(row)
+    return {
+        str(f.relative_to(root)): (f.stat().st_mtime_ns, f.stat().st_size)
+        for f in sorted(root.rglob("*"))
+        if f.is_file()
+    }, wt._network_input_fingerprint(wt._load_context(row))
+
+
+def test_comparing_only_reads_the_base(swept):
+    """GK B S3: no file of the base is written, its input fingerprint stays,
+    and the request's project is still the case."""
+    base_id, cases = swept
+    before = _saved_files(base_id)
+    with open_saved(cases["Gas 20"]) as ctx:
+        cards = results_router._headline_cards()["cards"]
+        revision = ctx.network_revision
+        block = results_router._headline_comparison(cards, chat_tools.acting_user_id())
+        assert block["comparable"] is True
+        assert cards[0]["delta"] is not None
+        assert PyPSAService.get_active_context() is ctx
+        assert ctx.network_revision == revision
+    assert _saved_files(base_id) == before
+
+
+def test_a_case_in_another_currency_is_not_compared(swept, client):
+    """GK B S6: the money cards carry the literal unit `currency`. The currency
+    and money year are finance settings, and those are in the fingerprint the
+    comparison checks, so a case whose money differs never gets a delta."""
+    base_id, cases = swept
+
+    def other_money(ctx):
+        cfg = ctx.solver_state["solver_config"]
+        cfg.finance = dict(cfg.finance or {}, currency="USD", currency_year=2031)
+
+    edit_saved(cases["Gas 20"], other_money)
+    body, by_id = strip(client, "Gas 20")
+    assert body["comparison"]["comparable"] is False
+    assert "inputs or finance settings changed" in body["comparison"]["reason"]
+    assert body["comparison"]["basis"] is None
+    assert no_deltas(by_id)
 
 
 def test_a_scratch_network_has_no_comparison():
     assert hd.base_case(SimpleNamespace(project_uuid=None)) == (None, None)
 
 
-def card(card_id, value, unit="currency"):
-    return {"id": card_id, "value": value, "unit": unit, "delta": None}
+def card(card_id, value, unit="currency", state="ready"):
+    return {"id": card_id, "value": value, "unit": unit, "state": state, "delta": None}
 
 
-def test_a_delta_needs_both_values_in_one_unit():
-    cards = [
-        card("a", 90.0),
-        card("b", None),
-        card("c", 1.0),
-        card("d", 1.0, "currency/yr"),
-        card("e", 1.0),
-        card("f", -30.0),
-    ]
-    base = [
-        card("a", 120.0),
-        card("b", 1.0),
-        card("c", None),
-        card("d", 1.0, "currency"),
-        card("f", -20.0),
-    ]
+def deltas(cards, base):
     hd.add_deltas(cards, base)
-    deltas = {c["id"]: c["delta"] for c in cards}
-    assert deltas["a"] == {"value": -30.0, "pct": -25.0, "note": None}
+    return {c["id"]: c["delta"] for c in cards}
+
+
+def test_a_delta_is_the_case_minus_the_base_over_the_bases_size():
+    got = deltas(
+        [card("a", 90.0), card("f", -30.0), card("z", 0.0, state="zero")],
+        [card("a", 120.0), card("f", -20.0), card("z", 4.0)],
+    )
+    assert got["a"] == {"value": -30.0, "pct": -25.0, "note": None}
     # Over the base's size: a more negative figure is a negative change.
-    assert deltas["f"] == {"value": -10.0, "pct": -50.0, "note": None}
-    assert [deltas[k] for k in "bcde"] == [None] * 4
+    assert got["f"] == {"value": -10.0, "pct": -50.0, "note": None}
+    assert got["z"] == {"value": -4.0, "pct": -100.0, "note": None}
 
 
-def periods(*totals):
+def test_no_rounding_on_the_server():
+    got = deltas([card("a", 1 / 3)], [card("a", 1 / 7)])
+    assert got["a"]["value"] == 1 / 3 - 1 / 7
+    assert got["a"]["pct"] == (1 / 3 - 1 / 7) / (1 / 7) * 100
+
+
+NO_NUMBER = {"value": None, "pct": None}
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        None,
+        card("a", None, state="unavailable"),
+        card("a", None, state="not_run"),
+        card("a", 5.0, state="stale"),
+        card("a", 5.0, state="unavailable"),
+        card("a", float("nan")),
+        card("a", float("inf")),
+    ],
+)
+def test_a_base_card_without_a_figure_gives_a_reason_never_a_number(other):
+    """GK B S5, S7: only `ready` and `zero` are subtracted; the other cards
+    keep their deltas."""
+    got = deltas(
+        [card("a", 1.0), card("b", 3.0)],
+        [c for c in (other, card("b", 2.0)) if c is not None],
+    )
+    assert got["a"] == {**NO_NUMBER, "note": hd.NO_BASE_FIGURE}
+    assert got["b"] == {"value": 1.0, "pct": 50.0, "note": None}
+
+
+def test_another_unit_gives_a_reason_never_a_number():
+    got = deltas([card("d", 1.0, "currency/yr")], [card("d", 1.0, "currency")])
+    assert got["d"] == {**NO_NUMBER, "note": hd.OTHER_UNIT}
+
+
+@pytest.mark.parametrize(
+    "mine",
+    [
+        card("a", None, state="unavailable"),
+        card("a", 5.0, state="stale"),
+        card("a", float("nan")),
+    ],
+)
+def test_a_card_without_a_figure_of_its_own_has_no_delta(mine):
+    assert deltas([mine], [card("a", 2.0)])["a"] is None
+
+
+def periods(*totals, total=None):
     return {
-        "total": sum(totals),
+        "total": sum(totals) if total is None else total,
         "capex_expansion": 1.0,
         "by_period": [
             {"period": 2030 + 10 * i, "total": t} for i, t in enumerate(totals)
@@ -725,7 +928,7 @@ def periods(*totals):
     }
 
 
-def cost_cards(cost, investment_periods=(2030, 2040)):
+def cost_cards(cost, investment_periods=(2030, 2040, 2050)):
     ctx = SimpleNamespace(
         network=SimpleNamespace(investment_periods=investment_periods)
     )
@@ -736,18 +939,72 @@ def cost_cards(cost, investment_periods=(2030, 2040)):
 def test_system_cost_carries_its_total_per_investment_period(monkeypatch):
     monkeypatch.setattr(hk, "_checked", lambda ctx, cid: hk._card(cid))
     by_id = cost_cards(periods(41.0, 37.5, 33.0))
-    assert by_id["system_cost"]["trend"] == [
-        {"period": 2030, "value": 41.0},
-        {"period": 2040, "value": 37.5},
-        {"period": 2050, "value": 33.0},
-    ]
+    assert by_id["system_cost"]["trend"] == {
+        "basis": hk.TREND_BASIS,
+        "points": [
+            {"period": 2030, "value": 41.0},
+            {"period": 2040, "value": 37.5},
+            {"period": 2050, "value": 33.0},
+        ],
+    }
+    assert "undiscounted" in hk.TREND_BASIS
     assert by_id["new_build_capital"]["trend"] is None
 
 
 @pytest.mark.parametrize(
-    "cost",
-    [periods(41.0), periods(), periods(41.0, float("nan")), {"total": 1.0}],
+    "cost, investment_periods",
+    [
+        (periods(41.0), (2030,)),
+        (periods(), ()),
+        (periods(41.0, float("nan")), (2030, 2040)),
+        ({"total": 1.0}, (2030, 2040)),
+        # A period with no cost row: the series would read complete.
+        (periods(41.0, 37.5), (2030, 2040, 2050)),
+        (periods(41.0, 37.5), (2030, 2045)),
+        # A cost with no period is in the total and in no point.
+        (periods(41.0, 37.5, total=80.0), (2030, 2040)),
+    ],
 )
-def test_no_trend_without_two_finite_periods(monkeypatch, cost):
+def test_no_trend_without_a_complete_finite_series(
+    monkeypatch, cost, investment_periods
+):
     monkeypatch.setattr(hk, "_checked", lambda ctx, cid: hk._card(cid))
-    assert cost_cards(cost)["system_cost"]["trend"] is None
+    assert cost_cards(cost, investment_periods)["system_cost"]["trend"] is None
+
+
+def test_the_trend_of_a_solved_multi_period_run_adds_up_with_uneven_periods(
+    monkeypatch,
+):
+    """GK B S9: periods of 10 and 5 years; each point is its period's cost over
+    its years, and the points are the card's total."""
+    import pypsa
+
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = pypsa.Network()
+    n.set_snapshots(
+        pd.MultiIndex.from_product(
+            [[2030, 2040], pd.date_range("2030-01-01", periods=2, freq="h")]
+        )
+    )
+    n.investment_periods = [2030, 2040]
+    n.investment_period_weightings["years"] = [10.0, 5.0]
+    n.investment_period_weightings["objective"] = [10.0, 5.0]
+    n.add("Bus", "B1")
+    n.add("Generator", "G1", bus="B1", p_nom=20, marginal_cost=10)
+    n.add("Load", "L1", bus="B1", p_set=5)
+    n.optimize(multi_investment_period=True)
+    cost = compute_cost_breakdown(n, SolverConfig())
+    monkeypatch.setattr(hk, "_checked", lambda ctx, cid: hk._card(cid))
+    payload = hk.headline_kpis(
+        SimpleNamespace(network=n), template=None, cost=cost, lost_load=None
+    )
+    system = next(c for c in payload["cards"] if c["id"] == "system_cost")
+    points = system["trend"]["points"]
+    # 5 MW for 2 h at 10 per MWh is 100 a year: 1,000 over ten years, 500 over five.
+    assert [(p["period"], p["value"]) for p in points] == [
+        (2030, pytest.approx(1000)),
+        (2040, pytest.approx(500)),
+    ]
+    assert sum(p["value"] for p in points) == pytest.approx(system["value"])

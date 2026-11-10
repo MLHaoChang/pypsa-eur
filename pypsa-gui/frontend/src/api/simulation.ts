@@ -1296,10 +1296,14 @@ export interface HeadlineCard {
   formula_id: string | null
   /** What the figure belongs to, e.g. the line at the peak loading. */
   detail: string | null
-  /** This case minus its base case, in the card's unit; `pct` is null over a zero base. */
-  delta?: { value: number; pct: number | null; note: string | null } | null
-  /** The figure per investment period, for a run with two or more. */
-  trend?: { period: number | string; value: number }[] | null
+  /**
+   * This case minus its base case, in the card's unit (`?compare=1` only).
+   * `pct` is null over a zero base; `value` is null, with `note` saying why,
+   * when the base has no figure to subtract.
+   */
+  delta: { value: number | null; pct: number | null; note: string | null } | null
+  /** The figure per investment period, for a run with two or more; `basis` says what a point is. */
+  trend: { basis: string; points: { period: number | string; value: number }[] } | null
 }
 /** The open project against its base case: the base itself, or a sensitivity case of it. */
 export interface HeadlineComparison {
@@ -1310,16 +1314,21 @@ export interface HeadlineComparison {
   comparable: boolean
   /** One plain sentence when the case is not compared with its base. */
   reason: string | null
+  /** What each change is a change of, on a case that compares. */
+  basis: string | null
 }
 export interface HeadlineKpis {
   kind: 'energy_hub' | 'microgrid' | 'network'
   cards: HeadlineCard[]
-  comparison?: HeadlineComparison | null
+  /** Null on the plain fetch; `?compare=1` reads the base case. */
+  comparison: HeadlineComparison | null
 }
 
 export const resultsApi = {
   // The strip says so itself when this fails (one message, not a toast as well).
   getHeadlineKpis: () => client.get<HeadlineKpis>('/results/headline_kpis', { skipErrorToast: true }).then(r => r.status === 204 ? null : r.data),
+  // The same cards with the base case read as well; slower, so the strip asks after it has painted.
+  getHeadlineComparison: () => client.get<HeadlineKpis>('/results/headline_kpis', { params: { compare: 1 }, skipErrorToast: true }).then(r => r.status === 204 ? null : r.data),
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
   getGeneratorResults: (source?: ResultSource, range?: TSRange) => client.get('/results/generators', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),

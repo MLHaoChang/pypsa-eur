@@ -15,26 +15,33 @@ base's cards with `headline_kpis` on the base's saved context, and
 from __future__ import annotations
 
 import logging
+import math
 
 from fastapi import HTTPException
 
 logger = logging.getLogger("pypsa_gui.results")
 
-NO_BASE_ACCESS = (
-    "The base case is not open to you, so this case is not compared with it."
-)
 BASE_UNREADABLE = (
     "The base case could not be read, so this case is not compared with it."
 )
+#: What a change is a change of (the chat comparison reports other metrics).
+BASIS = (
+    "Each change is this case's figure minus the base case's, in the card's own unit."
+)
+NO_BASE_FIGURE = "The base case has no figure here to compare with."
+OTHER_UNIT = "The base case reports this figure in another unit."
+#: The card states that carry a figure; no other state is ever subtracted.
+VALUE_STATES = ("ready", "zero")
 
 
 def _block(role, base, comparable, reason):
     return {
         "role": role,
-        "base_name": None if base is None else base.name,
-        "base_project_id": None if base is None else str(base.id),
+        "base_name": base.name,
+        "base_project_id": str(base.id),
         "comparable": comparable,
         "reason": reason,
+        "basis": BASIS if role == "case" and comparable else None,
     }
 
 
@@ -67,31 +74,33 @@ def _has_case(db, user, project) -> bool:
 
 def _relation(ctx):
     """(role, project, spec, base): role None when the open project is neither
-    a case nor a base; base None for a case whose base the user cannot open."""
+    a case nor a base for this user. A base the user cannot open, one that is
+    gone and one that never was all read as no base at all."""
     from harness import sensitivity_comparison as sc
     from services import chat_tools
 
+    nothing = (None, None, None, None)
     if not getattr(ctx, "project_uuid", None):
-        return None, None, None, None
+        return nothing
     with chat_tools._acting() as (db, user):
         project = sc._resolve(db, user, str(ctx.project_uuid))
         spec = _spec(project)
         parent = project.parent_project_id
         if spec and parent is not None and spec.get("baseline_id") == str(parent):
             try:
-                base = sc._resolve(db, user, str(parent))
+                return "case", project, spec, sc._resolve(db, user, str(parent))
             except HTTPException:
-                base = None
-            return "case", project, spec, base
+                return nothing
         if _has_case(db, user, project):
             return "base", project, None, project
-    return None, None, None, None
+    return nothing
 
 
 def base_case(ctx):
     """``(comparison, base_read)`` for the open project.
 
-    `comparison` is None for a project that is neither a case nor a base.
+    `comparison` is None for a project that is neither a case nor a base, and
+    for a case whose base this user cannot open (no name, no id, no hint).
     `base_read` is `sensitivity_comparison._read`'s for the base, and only
     there when the case compares with it.
     """
@@ -105,8 +114,6 @@ def base_case(ctx):
         return None, None
     if role == "base":
         return _block("base", base, True, None), None
-    if base is None:
-        return _block("case", None, False, NO_BASE_ACCESS), None
     try:
         base_read, read = sc._read(base), sc._read(project)
         reasons = sc._reasons(base_read, read, spec, base_read["fingerprint"])
@@ -123,21 +130,38 @@ def base_case(ctx):
     return _block("case", base, True, None), base_read
 
 
+def _figure(card) -> float | None:
+    value = card.get("value") if card else None
+    if card is None or card.get("state") not in VALUE_STATES or value is None:
+        return None
+    return value if math.isfinite(value) else None
+
+
 def add_deltas(cards: list[dict], base_cards: list[dict]) -> None:
-    """Set `delta` (case − base) on each card whose base card carries a value
-    in the same unit; the arithmetic is the sensitivity comparison's."""
+    """Set `delta` (case − base, unrounded) on each card that carries a figure.
+
+    A figure is subtracted only when the base's card carries one too, in the
+    same unit; otherwise the delta holds no number and `note` says why. The
+    arithmetic is the sensitivity comparison's (`_cell`): the percentage is
+    over the base's size, and a zero base has none.
+    """
     from harness import sensitivity_comparison as sc
 
     base = {card["id"]: card for card in base_cards}
     for card in cards:
+        value = _figure(card)
+        if value is None:
+            continue  # the card says itself why it has no figure
         other = base.get(card["id"])
-        if other is None or card["value"] is None or other["value"] is None:
-            continue
-        if card["unit"] != other["unit"]:
-            continue
-        cell = sc._cell(("", 1.0), other["value"], card["value"])
-        card["delta"] = {
-            "value": cell["delta"],
-            "pct": cell["delta_pct"],
-            "note": cell.get("delta_pct_note"),
-        }
+        base_value = _figure(other)
+        if base_value is None:
+            card["delta"] = {"value": None, "pct": None, "note": NO_BASE_FIGURE}
+        elif card["unit"] != other["unit"]:
+            card["delta"] = {"value": None, "pct": None, "note": OTHER_UNIT}
+        else:
+            cell = sc._cell(("", 1.0), base_value, value)
+            card["delta"] = {
+                "value": cell["delta"],
+                "pct": cell["delta_pct"],
+                "note": cell.get("delta_pct_note"),
+            }

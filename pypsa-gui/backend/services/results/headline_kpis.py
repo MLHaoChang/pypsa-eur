@@ -273,14 +273,32 @@ def _cost(card_id, cost, field, per_year, trend=None):
     )
 
 
-def _period_totals(cost):
-    """The cost breakdown's total per investment period, in the card's unit:
-    the trend of a run with two or more periods, else None."""
-    periods = (cost or {}).get("by_period") or []
-    points = [{"period": p["period"], "value": float(p["total"])} for p in periods]
+#: What the trend's points are (`compute_cost_breakdown` `by_period`).
+TREND_BASIS = (
+    "Each investment period's annualised fixed cost and operating cost over "
+    "its years, undiscounted, in the money of the input costs."
+)
+
+
+def _period_totals(cost, investment_periods):
+    """The cost breakdown's total per investment period: the trend of a run
+    with two or more periods, else None. A series that misses a period, or
+    whose points do not add up to the card's total (a cost with no period),
+    would read complete when it is not, so it is None too."""
+    rows = (cost or {}).get("by_period") or []
+    points = [{"period": p["period"], "value": float(p["total"])} for p in rows]
     if len(points) < 2 or not all(math.isfinite(p["value"]) for p in points):
         return None
-    return points
+    if [p["period"] for p in points] != list(investment_periods):
+        return None
+    if not math.isclose(
+        sum(p["value"] for p in points),
+        float(cost["total"]),
+        rel_tol=1e-9,
+        abs_tol=1e-6,
+    ):
+        return None
+    return {"basis": TREND_BASIS, "points": points}
 
 
 def _unserved(lost_load):
@@ -306,7 +324,11 @@ def headline_kpis(
         # year's cost only when they cover a year, so it carries no "/yr" (the
         # Capacity expansion tab's "Total system cost" has none either).
         "system_cost": lambda: _cost(
-            "system_cost", cost, "total", False, _period_totals(cost)
+            "system_cost",
+            cost,
+            "total",
+            False,
+            _period_totals(cost, ctx.network.investment_periods),
         ),
         # Annualised: a year's in a single-period run, the horizon's otherwise.
         "new_build_capital": lambda: _cost(

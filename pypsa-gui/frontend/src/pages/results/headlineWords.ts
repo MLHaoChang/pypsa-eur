@@ -62,11 +62,13 @@ export const BASE_CASE = 'Base case'
 /**
  * The card's change against the base case, sign first: "−4.2 % vs Base case".
  * A share reads in percentage points, and a zero base, which has no
- * percentage, in the card's own unit.
+ * percentage, in the card's own unit. Where the base has no figure to
+ * subtract, the server's sentence says so.
  */
 export function headlineDelta(card: HeadlineCard): string | undefined {
   const d = card.delta
   if (!d || card.value == null) return undefined
+  if (d.value == null) return d.note ?? undefined
   if (d.value === 0) return `No change vs ${BASE_CASE}`
   const sign = d.value > 0 ? '+' : '−'
   if (card.unit === '%') return `${sign}${Math.abs(d.value).toFixed(1)} percentage points vs ${BASE_CASE}`
@@ -82,8 +84,8 @@ export function comparisonBasis(c: HeadlineComparison | null | undefined): strin
 }
 
 /** The card's trend over the investment periods: its ends in words, and the points. */
-export function headlineTrend(card: HeadlineCard): { first: string; last: string; label: string; data: number[] } | null {
-  const t = card.trend
+export function headlineTrend(card: HeadlineCard): { first: string; last: string; label: string; basis: string; data: number[] } | null {
+  const t = card.trend?.points
   if (!t || t.length < 2 || card.value == null) return null
   const a = t[0], b = t[t.length - 1]
   const from = inTileWords(card, a.value), to = inTileWords(card, b.value)
@@ -91,6 +93,7 @@ export function headlineTrend(card: HeadlineCard): { first: string; last: string
     first: `${a.period} · ${from}`,
     last: `${b.period} · ${to}`,
     label: `${a.period} to ${b.period}: ${from} to ${to}`,
+    basis: card.trend!.basis,
     data: t.map(p => p.value),
   }
 }
