@@ -105,12 +105,36 @@ export function impliedCurrency(jurisdiction: string, validFrom?: string): strin
 /** The tariff header's field words, one map: `text` is the visible label, `aria` the
  *  accessible name and the error list's prefix. A tariff-level error is "Tariff". */
 export const FIELD_WORDS = {
-  id: { text: 'id', aria: 'Tariff id' },
-  name: { text: 'name', aria: 'Tariff name' },
-  jurisdiction: { text: 'jurisdiction', aria: 'Jurisdiction' },
-  currency: { text: 'currency', aria: 'Currency' },
-  valid_from: { text: 'valid from', aria: 'Valid from' },
+  id: { text: 'Tariff ID', aria: 'Tariff id' },
+  name: { text: 'Name', aria: 'Tariff name' },
+  jurisdiction: { text: 'Jurisdiction', aria: 'Jurisdiction' },
+  currency: { text: 'Currency', aria: 'Currency' },
+  valid_from: { text: 'Valid from', aria: 'Valid from' },
 } as const
+
+/** An item's field words: `text` is the visible label, `aria` the suffix of the
+ *  accessible name ("Item energy kind"). */
+export const ITEM_WORDS = {
+  id: { text: 'Item ID', aria: 'id' },
+  kind: { text: 'Charge type', aria: 'kind' },
+  unit: { text: 'Unit', aria: 'unit' },
+  measured_on: { text: 'Measured on', aria: 'measured on' },
+  direction: { text: 'Direction', aria: 'direction' },
+  settlement: { text: 'Settlement interval', aria: 'settlement' },
+} as const
+
+/** The words shown for a stored option value (a kind, unit, measure or settlement). */
+export const OPTION_WORDS: Record<Item['kind'] | Item['unit'] | NonNullable<Item['measured_on']>
+  | NonNullable<Item['settlement']>, string> = {
+  energy: 'energy', demand: 'demand', capacity: 'capacity', fixed: 'fixed', certificate: 'certificate',
+  tax_levy: 'tax or levy',
+  per_kwh: 'per kWh', per_kw_month: 'per kW-month', per_kw_year: 'per kW-year', per_month: 'per month',
+  per_kva_year: 'per kVA-year', per_day: 'per day',
+  import: 'import', export: 'export', net: 'net', peak_import: 'peak import',
+  '15min': '15 min', '30min': '30 min', h: '1 hour',
+}
+/** An option's words; a stored value the map does not know shows as stored. */
+export const optionWords = (value: string): string => (OPTION_WORDS as Record<string, string>)[value] ?? value
 export function fieldLabel(key: string): string {
   const [head, ...rest] = key.split('.')
   const word = head === 'tariff' ? 'Tariff' : (FIELD_WORDS as Record<string, { aria: string }>)[head]?.aria

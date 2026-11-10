@@ -28,13 +28,13 @@ describe('TariffSection', () => {
     vi.mocked(commercialApi.getPocState).mockResolvedValue({ poc_link: 'import', open: true })
     renderSection()
     expect((await screen.findByTestId('ic-tariff-island')).textContent).toMatch(/island buys no grid power/)
-    expect(screen.queryByText('The project has no import tariff: build one.')).toBeNull()
+    expect(screen.queryByText('No import tariff is set. It is optional: to bill imports under one, fill this in and choose Save as the project tariff.')).toBeNull()
   })
 
   it('offers to build a tariff when the project has none', async () => {
     vi.mocked(commercialApi.getCommercial).mockResolvedValue({ poc_link: 'import' } as never)
     renderSection()
-    expect(await screen.findByText('The project has no import tariff: build one.')).toBeTruthy()
+    expect(await screen.findByText('No import tariff is set. It is optional: to bill imports under one, fill this in and choose Save as the project tariff.')).toBeTruthy()
   })
 
   it('never opens a blank builder over a tariff it could not read', async () => {

@@ -12,11 +12,14 @@ import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { fmtAmount } from './valueFlows'
 import {
-  blankItem, errorsByField, FIELD_WORDS, fieldLabel, impliedCurrency, errorsUnder, isWindowed, KINDS, listText, MEASURED,
-  normaliseTariff, parseIntList, parseNumberList, SETTLEMENTS, UNITS, type Item, type Period,
+  blankItem, errorsByField, FIELD_WORDS, fieldLabel, impliedCurrency, errorsUnder, isWindowed, ITEM_WORDS, KINDS, listText,
+  MEASURED, normaliseTariff, optionWords, parseIntList, parseNumberList, SETTLEMENTS, UNITS, type Item, type Period,
 } from './tariffModel'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
+// The small actions and the tables, in the Guided cards' own style (ui-modern 05).
+const action = 'rounded border border-border px-2 py-0.5 text-[11px] text-muted hover:border-accent hover:text-accent'
+const table = 'text-[11px] [&_caption]:pb-1 [&_caption]:text-muted [&_th]:pr-2 [&_th]:pb-0.5 [&_th]:text-left [&_th]:font-medium [&_th]:text-muted [&_td]:pr-2 [&_td]:py-0.5'
 
 function Errors({ list }: { list: string[] }) {
   if (!list.length) return null
@@ -89,21 +92,21 @@ function RatchetEditor({ item, set, label }: {
         </select>
       </label>
       {r && (
-        <label>share{' '}
+        <label>Share{' '}
           <input type="number" step="any" min={0} max={1} aria-label={`${label} ratchet share`}
                  className={`${input} w-16`} value={r.share}
                  onChange={e => set({ ...r, share: num(e.target.value) })} />
         </label>
       )}
       {r && !r.months && (
-        <label>lookback months{' '}
+        <label>Lookback months{' '}
           <input type="number" min={1} max={36} aria-label={`${label} ratchet lookback months`}
                  className={`${input} w-16`} value={r.lookback_months ?? ''}
                  onChange={e => set({ ...r, lookback_months: num(e.target.value) })} />
         </label>
       )}
       {r?.months && (
-        <label>months{' '}
+        <label>Months{' '}
           <ListInput label={`${label} ratchet months`} value={r.months} parse={parseIntList}
                      onChange={v => set({ ...r, months: v ?? [] })} />
         </label>
@@ -154,12 +157,12 @@ export function ItemEditor({ item, idx, set, remove, errors, kinds = KINDS, unit
   const windowed = isWindowed(item)
   const tiers = item.tiers ?? []
   return (
-    <fieldset className="border border-border rounded p-2 space-y-2" data-testid={`tb-item-${idx}`}>
-      <legend className="font-semibold">{label}</legend>
+    <fieldset className="border border-border rounded p-3 space-y-2" data-testid={`tb-item-${idx}`}>
+      <legend className="px-1 text-[12px] font-semibold text-text">{label}</legend>
       <div className="flex flex-wrap gap-2 items-center">
-        <label>id <input aria-label={`${label} id`} className={`${input} w-24`} value={item.id}
+        <label>{ITEM_WORDS.id.text} <input aria-label={`${label} ${ITEM_WORDS.id.aria}`} className={`${input} w-24`} value={item.id}
                          onChange={e => set({ ...item, id: e.target.value })} /></label>
-        <label>kind <select aria-label={`${label} kind`} className={input} value={item.kind}
+        <label>{ITEM_WORDS.kind.text} <select aria-label={`${label} ${ITEM_WORDS.kind.aria}`} className={input} value={item.kind}
                             onChange={e => {
                               // A kind change keeps nothing another kind cannot carry (review #8).
                               const kind = e.target.value as Item['kind']
@@ -167,31 +170,31 @@ export function ItemEditor({ item, idx, set, remove, errors, kinds = KINDS, unit
                               if (kind !== 'demand') delete next.ratchet
                               set(next)
                             }}>
-          {[...new Set([...kinds, item.kind])].map(k => <option key={k} value={k}>{k}</option>)}</select></label>
-        <label>unit <select aria-label={`${label} unit`} className={input} value={item.unit}
+          {[...new Set([...kinds, item.kind])].map(k => <option key={k} value={k}>{optionWords(k)}</option>)}</select></label>
+        <label>{ITEM_WORDS.unit.text} <select aria-label={`${label} ${ITEM_WORDS.unit.aria}`} className={input} value={item.unit}
                             onChange={e => set({ ...item, unit: e.target.value as Item['unit'] })}>
-          {[...new Set([...units, item.unit])].map(k => <option key={k} value={k}>{k}</option>)}</select></label>
-        <label>measured on <select aria-label={`${label} measured on`} className={input}
+          {[...new Set([...units, item.unit])].map(k => <option key={k} value={k}>{optionWords(k)}</option>)}</select></label>
+        <label>{ITEM_WORDS.measured_on.text} <select aria-label={`${label} ${ITEM_WORDS.measured_on.aria}`} className={input}
                                    value={item.measured_on ?? 'import'}
                                    onChange={e => set({ ...item, measured_on: e.target.value as Item['measured_on'] })}>
-          {MEASURED.map(k => <option key={k} value={k}>{k}</option>)}</select></label>
-        <label>direction <select aria-label={`${label} direction`} className={input}
+          {MEASURED.map(k => <option key={k} value={k}>{optionWords(k)}</option>)}</select></label>
+        <label>{ITEM_WORDS.direction.text} <select aria-label={`${label} ${ITEM_WORDS.direction.aria}`} className={input}
                                  value={item.direction ?? 'cost'}
                                  onChange={e => set({ ...item, direction: e.target.value as Item['direction'] })}>
           <option value="cost">cost</option><option value="revenue">revenue</option></select></label>
         {(item.kind === 'demand' || item.kind === 'capacity' || item.measured_on === 'peak_import') && (
-          <label>settlement <select aria-label={`${label} settlement`} className={input}
+          <label>{ITEM_WORDS.settlement.text} <select aria-label={`${label} ${ITEM_WORDS.settlement.aria}`} className={input}
                                     value={item.settlement ?? '15min'}
                                     onChange={e => set({ ...item, settlement: e.target.value as Item['settlement'] })}>
-            {SETTLEMENTS.map(k => <option key={k} value={k}>{k}</option>)}</select></label>
+            {SETTLEMENTS.map(k => <option key={k} value={k}>{optionWords(k)}</option>)}</select></label>
         )}
-        <button type="button" aria-label={`Remove ${label}`} onClick={remove}>Remove item</button>
+        <button type="button" className={action} aria-label={`Remove ${label}`} onClick={remove}>Remove item</button>
       </div>
-      <table className="text-[11px]">
+      <table className={table}>
         <caption className="text-left">Periods (months 1–12, weekdays 0 = Monday, hours [start, end))</caption>
-        <thead><tr><th scope="col">name</th><th scope="col">rate</th><th scope="col">months</th>
-          <th scope="col">weekdays</th><th scope="col">start</th><th scope="col">end</th>
-          {windowed && <th scope="col">tier rates</th>}<th scope="col"><span className="sr-only">Remove</span></th></tr></thead>
+        <thead><tr><th scope="col">Name</th><th scope="col">Rate</th><th scope="col">Months</th>
+          <th scope="col">Weekdays</th><th scope="col">Start hour</th><th scope="col">End hour</th>
+          {windowed && <th scope="col">Tier rates</th>}<th scope="col"><span className="sr-only">Remove</span></th></tr></thead>
         <tbody>
           {item.periods.map((p, j) => (
             <PeriodRow key={j} p={p} i={j} label={label} windowed={windowed}
@@ -200,14 +203,14 @@ export function ItemEditor({ item, idx, set, remove, errors, kinds = KINDS, unit
           ))}
         </tbody>
       </table>
-      <button type="button" className="underline" onClick={() => set({ ...item, periods: [
+      <button type="button" className={action} onClick={() => set({ ...item, periods: [
         ...item.periods, { name: `p${item.periods.length + 1}`, rate: 0,
                            ...(windowed ? { tier_rates: tiers.map(() => 0) } : {}) }] })}>
         Add period to {label}
       </button>
       {(item.kind === 'energy' || item.kind === 'demand') && (
         <div className="space-y-1">
-          <div>Tiers (threshold in kWh a month, or kW for demand){windowed ? ' — each period has its own tier rates' : ''}</div>
+          <div>Tiers (threshold in kWh a month, or kW for demand){windowed ? ': each period has its own tier rates' : ''}</div>
           {tiers.map((t, k) => (
             <div key={k} className="flex gap-2 items-center">
               <input type="number" step="any" min={0} aria-label={`${label} tier ${k + 1} threshold`}
@@ -224,7 +227,7 @@ export function ItemEditor({ item, idx, set, remove, errors, kinds = KINDS, unit
             </div>
           ))}
           <div className="flex gap-2">
-            <button type="button" className="underline" onClick={() => set({ ...item,
+            <button type="button" className={action} onClick={() => set({ ...item,
               tiers: [...tiers, { threshold: tiers.length ? (tiers[tiers.length - 1].threshold || 0) + 1000 : 0, rate: 0 }],
               periods: item.periods.map(p => (p.tier_rates ? { ...p, tier_rates: [...p.tier_rates, 0] } : p)) })}>
               Add tier to {label}</button>
@@ -244,7 +247,7 @@ export function ItemEditor({ item, idx, set, remove, errors, kinds = KINDS, unit
                                  tiers: tiers.map((t, k) => ({ ...t, rate: first[k] ?? t.rate })) })
                          }
                        }} />
-                tier rates per period
+                Tier rates per period
                 {windowed && !sameTierRates(item) && (
                   <span id={whyId} className="text-muted">
                     (the periods' tier rates differ; make them equal to use one set)</span>
@@ -269,7 +272,7 @@ function Preview({ bill }: { bill: BillingPayload }) {
         The last solve's dispatch billed under this draft. The dispatch was optimised for the
         attached tariff, not this one; no settlement or gap is computed.</p>
       {Object.entries(bill.summary).map(([p, s]) => (
-        <table key={p} className="text-[11px] max-w-md w-full">
+        <table key={p} className={`${table} max-w-md w-full`}>
           <caption className="text-left">{p === '_' ? 'Modelled year' : p}</caption>
           <tbody>
             {s === null ? <tr><td>not established</td></tr> : (
@@ -309,6 +312,7 @@ export default function TariffBuilder({ initial, onSaved }: {
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [preview, setPreview] = useState<BillingPayload | null>(null)
   const [libName, setLibName] = useState(initial.id)
+  const [addKind, setAddKind] = useState<Item['kind']>(KINDS[0])
   const setItem = (i: number, it: Item) => setT({ ...t, items: t.items.map((x, j) => (j === i ? it : x)) })
 
   const fail = (e: unknown, what: string) => {
@@ -374,12 +378,14 @@ export default function TariffBuilder({ initial, onSaved }: {
                     remove={() => setT({ ...t, items: t.items.filter((_, j) => j !== i) })}
                     errors={errorsUnder(errors, `items.${i}`)} />
       ))}
-      <div className="flex flex-wrap gap-2">
-        {KINDS.map(k => (
-          <button key={k} type="button" className="underline"
-                  onClick={() => setT({ ...t, items: [...t.items, blankItem(k, nextId(t, k))] })}>
-            Add {k.replace('_', ' ')} item</button>
-        ))}
+      {/* One add control for every charge type (ui-modern 05; one entry point per feature). */}
+      <div className="flex flex-wrap gap-2 items-center" data-testid="tb-add-item">
+        <label>Add an item <select aria-label="Charge type of the item to add" className={input} value={addKind}
+                                   onChange={e => setAddKind(e.target.value as Item['kind'])}>
+          {KINDS.map(k => <option key={k} value={k}>{optionWords(k)}</option>)}</select></label>
+        <button type="button" className={action}
+                onClick={() => setT({ ...t, items: [...t.items, blankItem(addKind, nextId(t, addKind))] })}>
+          Add item</button>
       </div>
       {message && <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>
         {message.text}</p>}
