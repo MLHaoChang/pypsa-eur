@@ -6,7 +6,7 @@ import { InvalidDecisionError, postChatConfirm } from '../api/chat'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { mismatchSentence } from '../utils/projectMismatch'
-import { CHANGE_SET_NONE_TICKED, ChangeSetRows, changeSetApplyLabel, changeSetOf } from './ChangeSetCard'
+import { CHANGE_SET_NONE_TICKED, ChangeSetRows, changeSetApplyLabel, changeSetOf, settledChangeSet } from './ChangeSetCard'
 import { EditCardTable, editCardOf, editCardWords } from './EditCard'
 import { SweepCardTable, sweepCardOf } from './SweepCard'
 
@@ -340,8 +340,9 @@ export function ConfirmationCard() {
         // Deny — the rest of that click's queued actions are dropped.
         const lapsedGroup = useChatStore.getState().activeRequest?.group
         if (lapsedGroup) useChatStore.getState().dropRequestGroup(lapsedGroup)
-        // LC-47 (UX C4): a change set's own receipt says "Timed out: nothing changed".
-        if (pending.change_set === undefined) setError({
+        // LC-47 (UX C4): a change set says "Timed out: nothing changed" in the transcript.
+        if (pending.change_set !== undefined) appendMessage(settledChangeSet('expired'))
+        else setError({
           error_kind: 'confirmation_expired',
           message: `The confirmation for ${pending.tool_name} expired before it was answered. Ask again to retry.`,
         })
@@ -396,8 +397,9 @@ export function ConfirmationCard() {
       // queued actions (Improve: one message per action) are dropped.
       const group = useChatStore.getState().activeRequest?.group
       if (group) useChatStore.getState().dropRequestGroup(group)
-      // LC-47 (UX C4): a change set's own receipt says "Cancelled: nothing changed".
-      if (pending.change_set === undefined) appendMessage({
+      // LC-47 (UX C4): a change set says "Cancelled: nothing changed".
+      if (pending.change_set !== undefined) appendMessage(settledChangeSet('deny'))
+      else appendMessage({
         role: 'tool', content: `denied: ${pending.tool_name}`,
         tool_use_id: pending.tool_use_id, tool_name: pending.tool_name,
       })

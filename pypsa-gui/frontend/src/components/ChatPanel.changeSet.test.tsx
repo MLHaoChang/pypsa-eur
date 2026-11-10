@@ -126,8 +126,10 @@ it('Stop with the card open withdraws it and says nothing changed, once', async 
   fireEvent.click(screen.getByTestId('chat-abort'))
   await waitFor(() => expect(useChatStore.getState().pending).toBeNull())
   expect(screen.getByTestId('chat-change-set-settled').textContent).toBe('Stopped: nothing changed.')
-  // the server's own "aborted" receipt, if it still arrives, adds no second line
-  emit('change_set_receipt', receiptFrame('aborted', [['failed', 'confirmation_denied'], ['failed', 'confirmation_denied']]))
+  // the server's own receipt for a set the browser already settled adds no second line
+  for (const decision of ['aborted', 'deny', 'expired']) {
+    emit('change_set_receipt', receiptFrame(decision, [['failed', 'confirmation_denied'], ['failed', 'confirmation_denied']]))
+  }
   expect(screen.getAllByTestId('chat-change-set-settled')).toHaveLength(1)
 })
 

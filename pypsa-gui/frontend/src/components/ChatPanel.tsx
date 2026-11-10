@@ -2,7 +2,7 @@ import { navigationEpoch, manualNavigation } from '../utils/navigationEpoch'
 import AssistantResultCard, { SCENE_APPLY_OUTCOME_UNKNOWN, SCENE_UNKNOWN_KEY } from './AssistantResultCard'
 import { TOOL_OUTCOME_DENIED_DETAIL_WORDS } from './activityWords'
 import { ChangeSetReceiptCard, changeSetItemLabel, changeSetOf, changeSetReceiptOf, changeSetReceiptText,
-  type ChangeSetReceipt } from './ChangeSetCard'
+  settledChangeSet } from './ChangeSetCard'
 import EnvelopeSection, { type EnvelopeVerdict } from './runMonitor/EnvelopeSection'
 import { runUnderReview } from './runMonitor/planReview'
 import { UNATTENDED_BLOCK_WORDS } from './runMonitor/runWords'
@@ -168,10 +168,6 @@ interface ModelFallbackFrame {
   reason: string
   profile_id?: string
 }
-
-/** LC-47 (UX C4): what Stop leaves in place of an open change-set card. */
-const STOPPED_CHANGE_SET: ChangeSetReceipt = { version: 1, decision: 'aborted', rows: [], ticked: 0, landed: 0,
-  failed: 0, all_applied: false }
 
 interface ThinkingFrame {
   delta: string
@@ -2337,8 +2333,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         const { labels, reasons } = changeSetRef.current
         changeSetRef.current = { labels: {}, reasons: {} }
         const card = useChatStore.getState().pending
-        // Stop already said "Stopped: nothing changed" and withdrew the card.
-        if (!receipt || (receipt.decision === 'aborted' && card?.change_set === undefined)) break
+        // Cancel all, the card's own timeout and Stop each withdrew the card and said their line already.
+        if (!receipt || (receipt.decision !== 'approve' && card?.change_set === undefined)) break
         // A set the server settled on its own (timed out, withdrawn) takes its card with it.
         if (card?.change_set !== undefined) setPending(null)
         appendMessage({ role: 'tool', content: changeSetReceiptText(receipt),
@@ -3036,8 +3032,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
     // LC-47 (UX C4): Stop with a change-set card open withdraws it; no row was applied.
     if (useChatStore.getState().pending?.change_set !== undefined) {
       setPending(null)
-      appendMessage({ role: 'tool', content: changeSetReceiptText(STOPPED_CHANGE_SET),
-        change_set_receipt: { receipt: STOPPED_CHANGE_SET, labels: {}, reasons: {} } })
+      appendMessage(settledChangeSet('aborted'))
     }
     if (!sessionId) return
     try {

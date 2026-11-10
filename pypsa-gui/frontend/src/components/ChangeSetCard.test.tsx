@@ -1,7 +1,7 @@
 // LC-47: one change-set card. A tick box per proposed change, one approval for
 // the ticked ones, and one receipt in words.
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { ConfirmationCard } from './ConfirmationCard'
 import { CHANGE_SET_NONE_TICKED, ChangeSetReceiptCard, changeSetCountLine, changeSetOf, changeSetReceiptOf,
   changeSetReceiptText, type ChangeSetReceipt } from './ChangeSetCard'
@@ -97,13 +97,26 @@ it('says why Apply is off when no row is ticked, and sends nothing', () => {
   expect(screen.queryByTestId('chat-change-set-none')).toBeNull()
 })
 
-it('Cancel all denies the whole set and leaves the settled line to the receipt', async () => {
+it('Cancel all denies the whole set and says nothing changed', async () => {
   setPending(SET)
   render(<ConfirmationCard />)
   fireEvent.click(screen.getByTestId('chat-confirm-deny'))
   await waitFor(() => expect(postChatConfirm).toHaveBeenCalledWith('session-1', { token: 'token-1', decision: 'deny' }))
   await waitFor(() => expect(useChatStore.getState().pending).toBeNull())
-  expect(useChatStore.getState().messages).toEqual([])
+  expect(useChatStore.getState().messages.map(m => m.content)).toEqual(['Cancelled: nothing changed'])
+})
+
+it('a card left to time out is withdrawn and says nothing changed, with no error banner', () => {
+  vi.useFakeTimers()
+  try {
+    setPending(SET)
+    useChatStore.setState({ pending: { ...useChatStore.getState().pending!, expires_at_epoch_ms: Date.now() + 1000 } })
+    render(<ConfirmationCard />)
+    act(() => { vi.advanceTimersByTime(1500) })
+    expect(useChatStore.getState().pending).toBeNull()
+    expect(useChatStore.getState().messages.map(m => m.content)).toEqual(['Timed out: nothing changed'])
+    expect(useChatStore.getState().error).toBeNull()
+  } finally { vi.useRealTimers() }
 })
 
 it('keeps the card and says so when the server refuses the ticks', async () => {

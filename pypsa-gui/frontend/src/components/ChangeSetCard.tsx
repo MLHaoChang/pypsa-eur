@@ -169,6 +169,14 @@ export function changeSetReceiptText(receipt: ChangeSetReceipt): string {
     : NOTHING_CHANGED[receipt.decision] ?? NOTHING_CHANGED.unavailable
 }
 
+/** The line a set leaves when the browser itself settles it (Cancel all, its own timeout, Stop): no row was
+ * applied. The server's receipt for the same decision is then not shown a second time (ChatPanel). */
+export function settledChangeSet(decision: 'deny' | 'expired' | 'aborted') {
+  const receipt: ChangeSetReceipt = { version: 1, decision, rows: [], ticked: 0, landed: 0, failed: 0, all_applied: false }
+  return { role: 'tool' as const, content: changeSetReceiptText(receipt),
+    change_set_receipt: { receipt, labels: {}, reasons: {} } }
+}
+
 /** The set's one receipt: a count line, then each row's outcome in words, its reason on its row. */
 export function ChangeSetReceiptCard({ receipt, reasons, labels }: {
   receipt: ChangeSetReceipt
