@@ -4,7 +4,7 @@
 // `{detail: {error_kind: 'project_mismatch', message}}`. Reads always pass
 // (`projectsApi.load` is a GET, so the Reload button can never deadlock), and
 // the allowlist keeps the way out open: `POST /projects/<x>/activate` (Switch),
-// `/chat/*`, `/local-settings/*`, `/auth/*`, plus the tab's own layout PUT.
+// `/chat/*`, `/local-settings/*`, `/auth/*`, `/memory/*`, plus the tab's own layout PUT.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios'
 
@@ -95,6 +95,8 @@ describe('the client-side write block while the tab and the backend disagree', (
     ['put', '/chat/settings/llm/profiles/p'],
     ['put', '/local-settings/anthropic-key'],
     ['post', '/auth/logout'],
+    ['post', '/memory/dismissals'],
+    ['patch', '/memory/items/mem_1'],
   ] as const)('%s %s passes (allowlisted)', async (m, url) => {
     await expect((client[m] as (u: string) => Promise<unknown>)(url)).resolves.toBeTruthy()
     expect(adapter).toHaveBeenCalledTimes(1)

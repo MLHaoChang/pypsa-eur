@@ -3,7 +3,7 @@
 
 # Slice 1: preferences and saved chart specs
 
-Status: ready-for-agent (split: 02a backend in progress, branch claude/assistant-memory-02a; 02b UI later)
+Status: ready-for-agent (split: 02a backend merged in #1309; 02b UI in progress, branch claude/assistant-memory-02b)
 Blocked by: 01
 Type: feature
 Model: Opus. Reviewers: GK B, and UX for the UI.

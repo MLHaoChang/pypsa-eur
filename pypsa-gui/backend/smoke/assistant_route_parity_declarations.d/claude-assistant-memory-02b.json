@@ -1,0 +1,33 @@
+{
+ "service_matches": [
+  {
+   "service": "services.memory_store:create_item"
+  }
+ ],
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/memory/items",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-1"
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/memory/items/{item_id}",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-1"
+  },
+  {
+   "method": "GET",
+   "path": "/api/memory/items/{item_id}/versions",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/memory/items/{item_id}/{action}",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-1"
+  }
+ ]
+}

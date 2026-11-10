@@ -1,4 +1,5 @@
 import { shortMcpToolName } from '../api/mcpSettings'
+import MemoryCard, { MEMORY_TOOL, memoryProposalOf } from './memory/MemoryCard'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
@@ -341,23 +342,25 @@ export function ConfirmationCard() {
     if (useChatStore.getState().pending?.confirmation_token === token) setPending(null)
   }, [setPending])
 
-  const onApprove = useCallback(async () => {
-    if (!pending || !target) return
-    if (reviewUnavailable) return
-    if (useUIStore.getState().projectMismatch) return
+  const onApprove = useCallback(async (): Promise<boolean> => {
+    if (!pending || !target) return false
+    if (reviewUnavailable) return false
+    if (useUIStore.getState().projectMismatch) return false
     const token = pending.confirmation_token
     try {
       await postChatConfirm(target, {
         token, decision: 'approve',
       })
       clearIfStill(token)
+      return true
     } catch (err) {
       toast.error(`confirmation failed: ${(err as Error).message}`)
+      return false
     }
   }, [pending, target, clearIfStill, reviewUnavailable])
 
-  const onDeny = useCallback(async () => {
-    if (!pending || !target) return
+  const onDeny = useCallback(async (): Promise<boolean> => {
+    if (!pending || !target) return false
     const token = pending.confirmation_token
     try {
       await postChatConfirm(target, {
@@ -372,12 +375,18 @@ export function ConfirmationCard() {
         tool_use_id: pending.tool_use_id, tool_name: pending.tool_name,
       })
       clearIfStill(token)
+      return true
     } catch (err) {
       toast.error(`confirmation failed: ${(err as Error).message}`)
+      return false
     }
   }, [pending, target, clearIfStill, appendMessage])
 
   if (!pending) return null
+
+  // Assistant memory (plan §2.2): `propose_memory` gets the memory card, in
+  // both modes. Args that are not a proposal fall through to the plain card.
+  const memoryProposal = pending.tool_name === MEMORY_TOOL ? memoryProposalOf(pending.args) : null
 
   // Phase 4 — typed confirmation widget for the highest-risk tools.
   // v4-MAJOR-1 / v6-F1: save_project + save_project_as (force-overwrite path),
@@ -413,10 +422,17 @@ export function ConfirmationCard() {
         : 'text-[11px] uppercase tracking-wider text-amber-500 mb-1'}
         data-testid="chat-confirmation-header">
         {/* P25 re-gate note 2 / P26: plain words in Guided; Expert unchanged. */}
-        {guidedWording
-          ? guidedWording.header
-          : <>Confirm · {pending.safety_tier}</>}
+        {memoryProposal
+          ? 'Remember this?'
+          : guidedWording
+            ? guidedWording.header
+            : <>Confirm · {pending.safety_tier}</>}
       </div>
+      {memoryProposal ? (
+        <MemoryCard proposal={memoryProposal} toolUseId={pending.tool_use_id}
+          secondsLeft={secondsLeft} blockReason={mismatchLine}
+          onApprove={onApprove} onDeny={onDeny} />
+      ) : <>
       {pending.external && (
         <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-external">
           External tool · MCP server {pending.external.server}
@@ -535,6 +551,7 @@ export function ConfirmationCard() {
           {secondsLeft}s
         </span>
       </div>
+      </>}
     </div>
   )
 }

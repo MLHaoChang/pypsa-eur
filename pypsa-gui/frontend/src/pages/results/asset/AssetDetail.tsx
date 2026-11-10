@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Download } from 'lucide-react'
+import { Download, Pin } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
@@ -16,6 +16,9 @@ import ScalarTable, { type ScalarRow } from './ScalarTable'
 import { assetResultsApi, type AssetQueryParams } from './api'
 import { allApplicable, loadSelection, reconcileSelection, saveSelection }
   from './selectionMemory'
+import {
+  pickDefault, savableSeries, useChartDefaults, useProjectKind, useSaveAssetDefault,
+} from './assetDefault'
 import { CATEGORY_ORDER, type AssetRef, type Remedy, type ViewMode } from './types'
 
 export default function AssetDetail() {
@@ -63,12 +66,25 @@ export default function AssetDetail() {
   // already-fetched `assets` list so `asset` stays a real AssetRef. Declared
   // AFTER the auto-select effect above so it always wins the race when both
   // fire in the same commit (asset arrives at the same time as a request).
+  // Assistant memory (plan §2.1): a saved "Save as default" opens this asset
+  // in chart view with its metrics and mode. A chat or link request that
+  // names settings wins, and the default is applied once per asset.
+  const projectKind = useProjectKind()
+  const chartDefaults = useChartDefaults()
+  const saveDefault = useSaveAssetDefault()
+  const savedDefault = asset
+    ? pickDefault(chartDefaults.data?.items ?? [], asset, projectKind) : null
+  const appliedFor = useRef<string | null>(null)
+
   useEffect(() => {
     if (!assetDetailRequest || assets.length === 0) return
     const match = assets.find(a => a.class === assetDetailRequest.componentClass
       && a.name === assetDetailRequest.name)
     if (match) {
       setAsset(match)
+      if (assetDetailRequest.metrics || assetDetailRequest.mode || assetDetailRequest.chart !== undefined) {
+        appliedFor.current = `${match.class}/${match.name}`
+      }
       if (assetDetailRequest.category) setCategory(assetDetailRequest.category)
       if (assetDetailRequest.mode) setMode(assetDetailRequest.mode)
       if (assetDetailRequest.metrics) setSelected(assetDetailRequest.metrics)
@@ -136,6 +152,21 @@ export default function AssetDetail() {
       prev.length && prev.every(id => next.includes(id) || data.metrics
         .some(m => m.id === id && m.status === 'ok')) ? prev : next)
   }, [data?.metrics, asset?.class, asset?.name, category])
+
+  // Declared after the reconcile effect so the saved default wins over the
+  // remembered tick-set on arrival; afterwards the user's own ticks stand.
+  useEffect(() => {
+    if (!data || !asset || !savedDefault || category === 'summary') return
+    const key = `${asset.class}/${asset.name}`
+    if (appliedFor.current === key) return
+    const ok = savedDefault.settings.metrics.filter(id =>
+      data.metrics.some(m => m.id === id && m.status === 'ok'))
+    if (!ok.length) return
+    appliedFor.current = key
+    setSelected(ok)
+    setMode(savedDefault.settings.mode)
+    setView('chart')
+  }, [data?.metrics, asset?.class, asset?.name, category, savedDefault?.item.id])
 
   // A category that is not `ok` for the newly-picked asset falls back to the
   // first that is — summary at worst, which works even unsolved.
@@ -274,6 +305,22 @@ export default function AssetDetail() {
                               { value: 'monthly', label: 'Monthly' }]} />
                 </>
               )}
+              {category !== 'summary' && view === 'chart' && asset && data && (() => {
+                const series = savableSeries(data.metrics, selected)
+                return (
+                  <>
+                    <button type="button" disabled={!series.length}
+                      onClick={() => void saveDefault(asset, series, mode, projectKind)}
+                      data-testid="asset-save-default"
+                      className="flex items-center gap-1 text-[11px] text-muted hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted">
+                      <Pin size={11} /> Save as default
+                    </button>
+                    {!series.length && (
+                      <span className="text-[10.5px] text-muted">Tick a series to save a default</span>
+                    )}
+                  </>
+                )
+              })()}
               <span className="flex-1" />
               {category !== 'summary' && (
                 <button onClick={exportCsv}

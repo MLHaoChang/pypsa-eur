@@ -138,6 +138,36 @@ def create_item(
     return _out(db, user, v)
 
 
+@router.post("/dismissals", status_code=201)
+def dismiss_proposal(
+    payload: NewItem,
+    db: DBSession = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict:
+    """"Not now" on a memory card (§2.2): the card's deny writes nothing, so the
+    UI records the declined proposal here. It is stored dismissed (its body is
+    dropped after 30 days by `sweep_dismissed`; its hash stays), so
+    `propose_memory` does not offer the same proposal again for 30 days. The
+    caller's own item only, validated as any new item."""
+    try:
+        v = M.create_item(
+            db,
+            user,
+            kind=payload.kind,
+            body=payload.body,
+            concept_keys=payload.concept_keys,
+            project_kind=payload.project_kind,
+            summary=payload.summary,
+            evidence=payload.evidence,
+            status="proposed",
+            origin="chat",
+        )
+        v = M.transition(db, user, v.public_id, "dismiss")
+    except M.MemoryError as exc:
+        _raise(exc)
+    return _out(db, user, v)
+
+
 @router.patch("/items/{item_id}")
 def edit_item(
     item_id: str,

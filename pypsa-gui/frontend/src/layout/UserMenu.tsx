@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, LogOut, User as UserIcon } from 'lucide-react'
+import { Brain, ChevronDown, LogOut, User as UserIcon } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
 import { redirectAfterLogout } from '../auth/logoutRedirect'
 import { useUIStore } from '../store/uiStore'
+import { useMemoryStore } from '../store/memoryStore'
+import MemoryDialog from '../components/memory/MemoryDialog'
 import { releaseProjectLock } from '../utils/projectActions'
 
 // Workbench user menu (Task 14). Header dropdown carrying the signed-in
@@ -68,6 +70,13 @@ export default function UserMenu() {
 
           <div className="my-1 border-t border-border" />
           <button
+            onClick={() => { setOpen(false); useMemoryStore.getState().openMemory() }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] text-text hover:bg-bg-2 transition-colors"
+          >
+            <Brain size={13} className="shrink-0" /> Memory
+          </button>
+          <div className="my-1 border-t border-border" />
+          <button
             onClick={handleLogout}
             className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] text-danger hover:bg-danger/10 transition-colors"
           >
@@ -75,6 +84,7 @@ export default function UserMenu() {
           </button>
         </div>
       )}
+      <MemoryDialog />
     </div>
   )
 }
