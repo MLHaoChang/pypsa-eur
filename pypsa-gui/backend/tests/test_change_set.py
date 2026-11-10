@@ -1249,3 +1249,164 @@ def test_a_restriction_changed_after_the_card_revokes_at_the_member_gate(
     assert all("on the change-set card" in m for m in messages)
     assert [(d["outcome"], d["by"]) for d in decided] == [("revoked", "system")] * 2
     assert not _flag("B1", "eh_poc") and not _flag("B2", "eh_critical")
+
+
+# ── mutants.py survivors on change_set.py (GK B (44)) ───────────────────────
+
+
+def test_a_tool_tier_that_is_not_write_is_dropped_by_members_itself(world):
+    """`members` applies `exclusion`: a read-tier call with a valid preview stays out."""
+    tus = [
+        {"id": f"tu-{i}", "name": n, "input": a}
+        for i, (n, a) in enumerate([B1_POC, VOLL, B2_CRIT])
+    ]
+    tus.append({"id": "tu-3", "name": "update_component", "input": "not a dict"})
+    got = change_set.members(
+        chat_service.ChatSession(),
+        tus,
+        tier_of=lambda n: "read" if n == "update_solver_config" else "write",
+        external_of=lambda n: False,
+        redirects=None,
+    )
+    assert [i["tool_use_id"] for i in got] == ["tu-0", "tu-2"]
+
+
+def test_a_call_its_validator_passes_may_join(world, monkeypatch):
+    """A validator that finds nothing does not keep the call out."""
+    monkeypatch.setitem(
+        chat_tools.PRE_DISPATCH_VALIDATORS, "update_solver_config", lambda args: None
+    )
+    got = _members(chat_service.ChatSession(), [B1_POC, B2_CRIT, VOLL])
+    assert [i["tool_use_id"] for i in got] == ["tu-0", "tu-1", "tu-2"]
+
+
+@pytest.mark.parametrize(
+    ("extra", "shown"),
+    [
+        (None, True),
+        ({"role": "note", "field": "more"}, False),
+        ({"role": "note", "field": "source"}, True),
+        ({"role": "typed", "field": "more"}, True),
+    ],
+)
+def test_only_a_more_note_makes_a_preview_incomplete(extra, shown):
+    rows = [{"role": "typed", "field": "eh_poc"}] + ([extra] if extra else [])
+    assert change_set._shows_everything({"complete": True, "rows": rows}) is shown
+
+
+def test_ticking_every_row_by_id_applies_them_all(world):
+    """The browser always sends the ticked ids, also when all are ticked."""
+    events = _run(
+        chat_service.ChatSession(),
+        [B1_POC, B2_CRIT],
+        EXPERT,
+        [("approve", ["tu-0", "tu-1"])],
+    )
+    statuses, receipt = _receipt(events)
+    assert statuses == {"tu-0": "applied", "tu-1": "applied"}
+    assert receipt["all_applied"] is True
+
+
+def test_a_deny_stays_a_deny_when_the_rules_also_changed(world, monkeypatch):
+    now = _revision(monkeypatch)
+    session = chat_service.ChatSession()
+    wait = session.wait_for_decision
+
+    def waiting(token):
+        decision = wait(token)
+        now[0] = "after"
+        return decision
+
+    session.wait_for_decision = waiting
+    events = _run(session, [B1_POC, B2_CRIT], EXPERT, [("deny", None)])
+    assert set(_errors(events).values()) == {"confirmation_denied"}
+    assert _receipt(events)[1]["decision"] == "deny"
+
+
+def test_a_cell_reads_as_the_edit_card_shows_it():
+    import numpy as np
+
+    plain = change_set._plain
+    assert plain(None) is None and plain(float("nan")) is None
+    assert plain(np.float64("nan")) is None
+    assert plain(0) == 0 and plain(False) is False
+    assert type(plain(np.int64(3))) is int
+
+
+def test_the_digest_binds_the_tool_and_a_missing_preview_is_stale():
+    card = {"digest": "d"}
+    assert change_set.item_digest("a", {}, card) != change_set.item_digest(
+        "b", {}, card
+    )
+    held_row, _ = _shown({"a": 1})
+    assert (
+        change_set._still_shown(
+            {"created": {}}, held_row, "update_component", {"a": 1}, None
+        )
+        is False
+    )
+
+
+def test_a_created_column_excuses_only_an_old_value_that_was_not_set():
+    """K3: shown True, now the default False, is a moved value, not a new column."""
+    held_row, fresh = _shown({"a": 1})
+    held_row["card"]["rows"] = [{**held_row["card"]["rows"][0], "old": True}]
+    state = {"created": {("Bus", "eh_poc"): False}}
+    assert (
+        change_set._still_shown(state, held_row, "update_component", {"a": 1}, fresh)
+        is False
+    )
+    held_row["card"]["rows"] = [{**held_row["card"]["rows"][0], "old": None}]
+    assert (
+        change_set._still_shown(state, held_row, "update_component", {"a": 1}, fresh)
+        is True
+    )
+
+
+def _held(**row):
+    base = {
+        "tool": "t", "digest": "d", "ticked": True, "status": None, "reached": True,
+        "card": {}, "error_kind": None, "label": None,
+    }  # fmt: skip
+    state = {"decision": "approve", "order": ["a"], "columns": None, "created": {},
+             "rows": {"a": {**base, **row}}}  # fmt: skip
+    return type("S", (), {"change_set": state})()
+
+
+def test_a_receipt_whose_only_moved_rows_are_derived_reads_unchanged():
+    session = _held()
+    rows = [
+        {"role": "typed", "old": 1, "new": 1},
+        {"role": "derived", "old": 1, "new": 2},
+        {"role": "note", "old": None, "new": "x"},
+    ]
+    change_set.note_receipt(session, "a", {"outcome": "verified", "rows": rows})
+    assert session.change_set["rows"]["a"]["status"] == "unchanged"
+    change_set.note_receipt(session, "zz", {"outcome": "verified", "rows": rows})
+
+
+def test_a_refusal_never_overwrites_an_outcome_already_noted():
+    session = _held(status="applied")
+    change_set.note_error(session, "a", "internal_error")
+    change_set.note_error(session, "zz", "internal_error")  # not a member: ignored
+    row = session.change_set["rows"]["a"]
+    assert (row["status"], row["error_kind"]) == ("applied", None)
+
+
+@pytest.mark.parametrize(
+    ("decision", "ticked", "reached", "status"),
+    [
+        ("approve", True, True, "uncertain"),
+        ("approve", False, True, "failed"),
+        ("deny", True, True, "failed"),
+        ("approve", True, False, "not_run"),
+        ("approve", False, False, "failed"),
+        ("deny", True, False, "failed"),
+    ],
+)
+def test_a_row_with_no_outcome_reads_by_what_could_have_happened(
+    decision, ticked, reached, status
+):
+    session = _held(ticked=ticked, reached=reached)
+    session.change_set["decision"] = decision
+    assert change_set.receipt_frame(session)["rows"][0]["status"] == status
