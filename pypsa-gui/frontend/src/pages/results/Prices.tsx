@@ -423,7 +423,7 @@ export default function Prices() {
       {durationCurve && durationCurve.length > 0 && (
         <DurationCurve
           title="Price duration curve"
-          figure={chartFigure(`${durationCurve[0].price.toFixed(2)} €/MWh`, 'peak')}
+          figure={chartFigure(`${durationCurve[0].price.toFixed(2)} €/MWh`, 'highest hourly mean')}
           hint="system mean, sorted descending"
           rows={durationCurve}
           series={[PRICE_SERIES]}

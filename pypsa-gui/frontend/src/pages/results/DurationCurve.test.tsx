@@ -71,7 +71,9 @@ describe('<DurationCurve>', () => {
       .map(t => t.textContent)
     // jsdom measures no text, so recharts keeps only the end tick; its words are separate tspans.
     expect(ticks[ticks.length - 1]).toBe('100%')
-    expect(Array.from(container.querySelectorAll('text')).some(t => t.textContent === 'MW')).toBe(true)
+    const words = Array.from(container.querySelectorAll('text')).map(t => t.textContent)
+    expect(words).toContain('MW')
+    expect(words).toContain('% of hours')
   })
 
   it('tells two series apart by more than hue: a dash, a name on each line, a key', () => {
@@ -139,6 +141,22 @@ describe('<DurationCurve>', () => {
     expect(header).toEqual(['pct_of_hours', 'load_MW', 'residual_load_MW'])
     expect(body[0]).toEqual([0, 30, 12])
     expect(body.length).toBe(4)
+  })
+
+  it('says why there is no curve, in the frame, instead of a blank plot', () => {
+    const one = render(
+      <DurationCurve title="Load duration curve" rows={[]} series={[LOAD]}
+        unit="MW" format={mw} filename="load_duration_curve" />,
+    )
+    expect(screen.getByRole('heading', { name: 'Load duration curve' })).toBeTruthy()
+    expect(screen.getByTestId('chart-zero').textContent).toBe('No hours in this window.')
+    expect(one.container.querySelector('path.recharts-area-curve')).toBeNull()
+    cleanup()
+    render(
+      <DurationCurve title="Load duration curve" rows={durationRows({ load: [0, 0, 0] })} series={[LOAD]}
+        unit="MW" format={mw} filename="load_duration_curve" />,
+    )
+    expect(screen.getByTestId('chart-zero').textContent).toBe('Every hour is zero in this window.')
   })
 
   it('shows a note above the plot when the chart needs explaining', () => {

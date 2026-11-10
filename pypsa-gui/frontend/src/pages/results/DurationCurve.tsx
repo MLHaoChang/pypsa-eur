@@ -14,7 +14,7 @@ import toast from 'react-hot-toast'
 import {
   durationCurvePoints, downloadCSV, ChartActions, ChartFrame, CHART_HEIGHT,
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel, refLine,
-  directLabel, seriesDash,
+  directLabel, seriesDash, isAllZero, ChartZero,
 } from './shared'
 
 export interface DurationSeries {
@@ -80,6 +80,17 @@ export default function DurationCurve({
   // Gradient ids are document-wide: two curves on one page must not share one.
   const gid = useId().replace(/[^a-zA-Z0-9_-]/g, '')
   const several = series.length > 1
+  // Nothing to sort, or nothing above zero: say so in the frame, never a blank plot.
+  const reason = rows.length === 0 ? 'No hours in this window.'
+    : isAllZero(rows, series.map(s => s.key)) ? 'Every hour is zero in this window.'
+    : null
+  if (reason) {
+    return (
+      <ChartFrame testId={testId} title={title} hint={hint} bodyClassName="p-3">
+        <ChartZero>{reason}</ChartZero>
+      </ChartFrame>
+    )
+  }
   return (
     <ChartFrame
       testId={testId}
@@ -102,7 +113,7 @@ export default function DurationCurve({
       {note && <p className="text-[11px] text-muted mb-2">{note}</p>}
       <div ref={chartRef}>
         <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-          <AreaChart data={rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+          <AreaChart data={rows} margin={{ top: 18, right: 8, left: 0, bottom: 12 }}>
             <defs>
               {series.map((s, i) => (
                 <linearGradient key={s.key} id={`dc-${gid}-${i}`} x1="0" x2="0" y1="0" y2="1">
@@ -113,7 +124,9 @@ export default function DurationCurve({
             </defs>
             <CartesianGrid {...CHART_GRID} />
             <XAxis dataKey="pct" type="number" domain={[0, 100]}
-              tickFormatter={(v: number) => `${v.toFixed(0)} %`} {...CHART_AXIS} />
+              tickFormatter={(v: number) => `${v.toFixed(0)} %`} {...CHART_AXIS}
+              label={{ value: '% of hours', position: 'insideBottom', offset: -8,
+                       style: { fontSize: 10.5, fill: 'var(--color-axis)' } }} />
             <YAxis {...CHART_AXIS} {...(yWidth != null ? { width: yWidth } : {})}
               tickFormatter={tickFormat} label={yAxisLabel(unit)} />
             <RTooltip {...CHART_TOOLTIP}
