@@ -7,6 +7,9 @@ import { AuthProvider } from './auth/AuthProvider'
 import AppRoutes from './routes'
 import ToasterHost from './components/ToasterHost'
 import './index.css'
+import { applyReducedMotion } from './components/charts/chartTheme'
+
+applyReducedMotion()
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -136,3 +136,23 @@ describe('time ticks (S4b)', () => {
     expect(shortStamp('2030-07-01 23:00:00')).toBe('07-01 23:00')
   })
 })
+
+// ui-modern 02 slice 1: the Operation and Build charts are on the chart theme.
+describe('the chart theme on Operation and Build (ui-modern 02)', () => {
+  const THEMED = ['CapacityExpansion', 'Dispatch', 'DispatchStack', 'EnergyFlowsTab', 'LoadShapeTab',
+    'StorageCycling', 'LostLoadTab']
+  it('sizes every chart with CHART_HEIGHT, never a one-off pixel height', () => {
+    const offenders = THEMED.flatMap(f => [...readFileSync(resolve(here, `${f}.tsx`), 'utf8')
+      .matchAll(/<ResponsiveContainer[^>]*height=\{(\d+)/g)].map(m => `${f}: ${m[1]}`))
+    expect(offenders).toEqual([])
+  })
+  it('heads its run charts with ChartFrame, not the plain ChartCard', () => {
+    const offenders = THEMED.filter(f => /<ChartCard\b/.test(readFileSync(resolve(here, `${f}.tsx`), 'utf8')))
+    expect(offenders).toEqual([])
+  })
+  it('colours with theme tokens, not hex literals, on the chart marks', () => {
+    const offenders = THEMED.flatMap(f => [...readFileSync(resolve(here, `${f}.tsx`), 'utf8')
+      .matchAll(/(?:stroke|fill|stopColor)="#[0-9a-fA-F]{3,6}"/g)].map(m => `${f}: ${m[0]}`))
+    expect(offenders).toEqual([])
+  })
+})
