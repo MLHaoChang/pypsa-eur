@@ -238,6 +238,20 @@ def test_a_period_the_rows_do_not_cover_is_no_evidence(tmp_path, monkeypatch):
     assert _energization(monkeypatch, card, fewer)["verdict"] == "not_evaluated"
 
 
+@pytest.mark.parametrize(
+    "network",
+    [None, SimpleNamespace(investment_periods=pd.Index([]))],
+    ids=["no_network", "single_period"],
+)
+def test_a_network_without_periods_is_judged_on_the_rows_alone(
+    tmp_path, monkeypatch, network
+):
+    """ST-1: the period check applies only on a multi-period network; with no
+    network or no periods at the gate the family is read from its rows."""
+    card, _ = _staged_card(tmp_path)
+    assert _energization(monkeypatch, _confirmed(card), network)["verdict"] == "pass"
+
+
 def test_rows_from_the_edited_network_cover_its_new_period(tmp_path, monkeypatch):
     """ST-1: the scorecard reads the network, so a staged network re-planned on
     2027/2028/2035 has rows for exactly those periods, and they are judged."""
@@ -353,6 +367,18 @@ def test_an_irr_the_case_could_not_establish_is_never_a_zero(monkeypatch):
     assert fact["state"] == ic.NOT_ESTABLISHED and fact["reasons"] == [
         "irr_not_established"
     ]
+    assert fact["returns"] is None
+
+
+@pytest.mark.parametrize("report", ["response", ["not", "a", "dict"]])
+def test_an_unreadable_report_has_no_returns(monkeypatch, report):
+    """E1: an established case whose report route answers an error or no dict
+    has no returns, never a guess."""
+    from fastapi import Response
+
+    report = Response(status_code=404) if report == "response" else report
+    fact = _returns(monkeypatch, DONE, report)
+    assert fact["state"] == ic.NOT_RUN and fact["reasons"] == ["no_report"]
     assert fact["returns"] is None
 
 
@@ -719,6 +745,20 @@ def test_no_campus_step_is_no_evidence(hub):
 def test_a_boolean_revision_is_never_a_match(hub):
     _, step = _campus(hub, revision=True)
     assert _contingency(hub, step, revision=1)["verdict"] == "not_evaluated"
+
+
+def test_no_project_or_no_edit_counter_is_no_evidence(hub):
+    _, step = _campus(hub)
+    rule = _rules(REFS[0])["dc.campus.contingency"]
+    for project, ctx, words in (
+        (None, SimpleNamespace(network_revision=7), "no project"),
+        (hub, SimpleNamespace(), "edit counter"),
+    ):
+        env = run_gates.Env(
+            task={"steps": [step]}, ctx=ctx, project=project, project_dir=None
+        )
+        [result] = run_gates.evaluate([rule], env)
+        assert result["verdict"] == "not_evaluated" and words in result["reason"]
 
 
 @pytest.mark.parametrize("recorded", [7.0, "7"])
