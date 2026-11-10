@@ -153,3 +153,9 @@ def test_confirm_is_not_a_chat_tool():
     assert not [t for t in TOOLS if "unrecorded" in str(t.get("name", t)).lower()
                 and "readiness" not in str(t.get("name", t))]
     assert not [r for r in TOOL_ROUTES.values() if "unrecorded" in str(r)]
+
+
+def test_a_component_with_no_series_is_refused_not_stamped(client, ctx):
+    r = _confirm(client, "0" * 16, name="g_b")
+    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "not_unrecorded"
+    assert ("generators", "p_max_pu", "g_b") not in ctx.user_ts_meta
