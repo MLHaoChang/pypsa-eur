@@ -779,6 +779,17 @@ def test_a_row_with_no_detail_is_read(hub):
     assert result["verdict"] == "pass" and result["facts"][0]["measures"] == []
 
 
+def test_a_measure_with_no_detail_is_named_by_its_check(hub):
+    """CT-5d: a check that fails as-is and passes after the measures is named
+    in the note even when its row carries no detail."""
+    _, step = _campus(
+        hub, {**ROWS, "pcc_voltage": ("fail", "pass", "code", "intact", None)}
+    )
+    result = _contingency(hub, step)
+    assert result["verdict"] == "pass"
+    assert result["note"] == run_gates.MEASURED_PASS + "pcc_voltage"
+
+
 @pytest.mark.parametrize("source", ["extracted", "code", None])
 def test_a_transformer_limit_with_another_tag_never_counts(hub, source):
     """CT-5a: only the engine's own `assumed` tag on the unit-rating clause

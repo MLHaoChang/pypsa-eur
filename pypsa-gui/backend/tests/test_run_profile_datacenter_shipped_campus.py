@@ -57,7 +57,7 @@ def test_on_the_shipped_templates_the_contingency_waits_for_the_users_bands(hub,
     assert set(pd.read_csv(run / ce.cs.LF_PCC_CSV)["case"]) == {"intact"}
     # CT-5c/d: with the user's own bands and an N-1 case the pass names the resize the study bought.
     table = pd.read_csv(run / ce.cs.COMPLIANCE_INVESTED_CSV)
-    table.loc[table["check"].isin(["pcc_voltage", "campus_voltage"]), "source"] = "user"
+    table.loc[table["check"].isin(["pcc_voltage", "campus_voltage"]), "source"] = "code"
     table.to_csv(run / ce.cs.COMPLIANCE_INVESTED_CSV, index=False)
     _cases(run)
     _settle(run, step)
