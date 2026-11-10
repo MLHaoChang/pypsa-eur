@@ -355,7 +355,9 @@ def save_parameter(
 
     try:
         project = P.bound_project(db, user, payload.project_id)
-        v = P.save(db, user, project, payload.component_class, payload.name, payload.field)
+        v = P.save(
+            db, user, project, payload.component_class, payload.name, payload.field
+        )
     except M.MemoryError as exc:
         _raise(exc)
     return _out(db, user, v)
@@ -374,7 +376,14 @@ def preview_suggestion(
 
     try:
         project = P.bound_project(db, user, payload.project_id)
-        return P.preview(db, user, project, item_id, payload.version,
-                         payload.component_class, payload.name)
+        return P.preview(
+            db,
+            user,
+            project,
+            item_id,
+            payload.version,
+            payload.component_class,
+            payload.name,
+        )
     except M.MemoryError as exc:
         _raise(exc)

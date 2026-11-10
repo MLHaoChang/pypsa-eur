@@ -5,6 +5,7 @@ under `/api/network`, like `library_reference/apply`, so it gets the same foreig
 gate, undo snapshot, edit-counter bump, results invalidation and change-log entry.
 See `services/memory_parameters.py`.
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
@@ -41,7 +42,15 @@ def apply_memory_parameter(
 
     try:
         project = P.bound_project(db, user, body.project_id)
-        return P.apply(db, user, project, body.item_id, body.version, body.component_class,
-                       body.name, body.digest)
+        return P.apply(
+            db,
+            user,
+            project,
+            body.item_id,
+            body.version,
+            body.component_class,
+            body.name,
+            body.digest,
+        )
     except M.MemoryError as exc:
         _raise(exc)

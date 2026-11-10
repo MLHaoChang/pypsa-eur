@@ -36,7 +36,15 @@ KINDS = ("preference", "chart_spec", "parameter", "lesson")
 # from the project itself (`services/memory_parameters.py`; GK B P1): a body a
 # client or the model chose is refused, and only its summary may be edited.
 WRITABLE_KINDS = ("preference", "chart_spec", "lesson")
-PARAMETER_KEYS = ("component_class", "field", "value", "unit", "currency", "currency_year", "carrier")
+PARAMETER_KEYS = (
+    "component_class",
+    "field",
+    "value",
+    "unit",
+    "currency",
+    "currency_year",
+    "carrier",
+)
 # Kinds that hold no project data and so may be recalled in another org's
 # project (§9 M1). Everything else needs the bound project's org.
 CROSS_ORG_KINDS = frozenset({"preference", "chart_spec"})
@@ -274,7 +282,11 @@ def parameter_spec(component_class: Any, field: Any):
         or not isinstance(field, str)
         or not _PARAM.match(f"{component_class}.{field}")
     ):
-        raise MemoryError("a parameter needs a component class and a field", "memory_field_unknown", 422)
+        raise MemoryError(
+            "a parameter needs a component class and a field",
+            "memory_field_unknown",
+            422,
+        )
     try:
         spec = next((f for f in fields_for(component_class) if f.key == field), None)
     except KeyError:
@@ -294,10 +306,16 @@ def _parameter(body: Any) -> dict:
     stored unit (§9 M6); the apply checks both again."""
     import math
 
-    b = _closed(body, "parameter", PARAMETER_KEYS, ("component_class", "field", "value", "unit"))
+    b = _closed(
+        body, "parameter", PARAMETER_KEYS, ("component_class", "field", "value", "unit")
+    )
     spec = parameter_spec(b["component_class"], b["field"])
     value = b["value"]
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
         raise MemoryError("a parameter value must be a finite number")
     if b["unit"] != spec.unit_storage:
         raise MemoryError(
@@ -317,7 +335,11 @@ def _parameter(body: Any) -> dict:
             raise MemoryError("currency must be an ISO 4217 code")
         out["currency"] = cur
     if year is not None:
-        if isinstance(year, bool) or not isinstance(year, int) or not 1900 <= year <= 2200:
+        if (
+            isinstance(year, bool)
+            or not isinstance(year, int)
+            or not 1900 <= year <= 2200
+        ):
             raise MemoryError("currency_year must be a year")
         out["currency_year"] = year
     if b.get("carrier") is not None:
@@ -686,7 +708,9 @@ def _write_version(db, item, *, version, body, summary, evidence, actor, now) ->
     )
 
 
-def _checked(kind, body, concept_keys, summary, evidence, project_kind, parameter_ok=False):
+def _checked(
+    kind, body, concept_keys, summary, evidence, project_kind, parameter_ok=False
+):
     body = validate_body(kind, body, parameter_ok=parameter_ok)
     keys = validate_concept_keys(concept_keys)
     summary = (
