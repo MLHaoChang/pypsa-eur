@@ -5976,6 +5976,7 @@ def ui_open_panel(
     compare_b: str | None = None,
     compare_tab: str | None = None,
     canvas_view: str | None = None,
+    guided_step: str | None = None,
     loadflow_source: str | None = None,
     window_from: int | None = None,
     window_to: int | None = None,
@@ -6026,6 +6027,16 @@ def ui_open_panel(
             "error_kind": "invalid_navigation", "field": "canvas_view",
             "message": "Choose blank for topology, or satellite, hybrid or site for map.",
         })
+    if guided_step is not None:
+        from harness import workflows
+
+        steps = [step.id for step in workflows.get("hub-design").steps]
+        if panel_id not in {"HubDesign", "hubDesign"} or not isinstance(guided_step, str) or guided_step not in steps:
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": "guided_step",
+                "message": f"Choose a Guided card: {', '.join(steps[:-1])} or {steps[-1]}. "
+                           "Cards exist only in the hub design.",
+            })
     if highlight_projects is not None:
         if (panel_id not in {"Scenarios", "scenarios"} or not isinstance(highlight_projects, list)
                 or not 1 <= len(highlight_projects) <= 4 or not all(isinstance(p, str) for p in highlight_projects)):
@@ -6066,6 +6077,8 @@ def ui_open_panel(
         event["compare_tab"] = compare_tab
     if canvas_view is not None:
         event["canvas_view"] = canvas_view
+    if guided_step is not None:
+        event["guided_step"] = guided_step
     if highlight_projects:
         event["highlight_projects"] = highlight_projects
     return event

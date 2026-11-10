@@ -781,7 +781,7 @@ adequacy/FMEA, workspace/settings/GridSpine/reports/campus electrical. Invalid
 navigation IDs/types are refused by the shared handler before a UI event emits.
 It also sets the canvas snapshot (refusing one not on the time axis), opens a
 component's Edit form with `open_editor` at read tier without saving, and switches
-to every canvas view.
+to every canvas view. `ui_open_panel` with `guided_step` opens one Guided card.
 
 Official OpenAI requests offer at most 128 tools per turn. Wiring selects from
 the eligible registry using always-available controls, pending plan tools,

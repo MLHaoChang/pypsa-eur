@@ -94,3 +94,31 @@ describe.each(['expert', 'guided'] as const)('navigation reach in %s', mode => {
     }
   })
 })
+
+describe.each(['expert', 'guided'] as const)('guided_step in %s', mode => {
+  beforeEach(() => useUIStore.setState({ uiMode: mode }))
+
+  it('opens the named card with Back to the view it left, and keeps the mode', async () => {
+    const { useHubDesignStore } = await import('../pages/hubDesign/hubDesignStore')
+    useHubDesignStore.setState({ step: 'start' })
+    useUIStore.setState({ activeSlidePanel: 'results' })
+    applyUiNavigate({ kind: 'navigate', panel_id: 'hubDesign', guided_step: 'goal' })
+    const ui = useUIStore.getState()
+    expect(ui.activeSlidePanel).toBe('hubDesign')
+    expect(useHubDesignStore.getState().step).toBe('goal')
+    expect(useHubDesignStore.getState().userMovedRail).toBe(true)
+    expect(ui.activeSection).toBe('scenarios')
+    expect(ui.flowReturn?.panel).toBe('results')
+    expect(ui.uiMode).toBe(mode)
+  })
+
+  it('ignores an unknown card and sets no Back when the card is already showing', async () => {
+    const { useHubDesignStore } = await import('../pages/hubDesign/hubDesignStore')
+    useHubDesignStore.setState({ step: 'site' })
+    useUIStore.setState({ activeSlidePanel: 'hubDesign', flowReturn: null })
+    applyUiNavigate({ kind: 'navigate', panel_id: 'hubDesign', guided_step: 'nope' })
+    applyUiNavigate({ kind: 'navigate', panel_id: 'hubDesign', guided_step: 'site' })
+    expect(useUIStore.getState().flowReturn).toBeNull()
+    expect(useHubDesignStore.getState().step).toBe('site')
+  })
+})

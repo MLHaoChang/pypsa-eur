@@ -123,3 +123,24 @@ def test_schema_matches_dispatchers():
     assert _errors(_tool('ui_select_component')['input_schema'], {
         'component_class': 'Line', 'name': 'L1', 'open_editor': 'true',
     })
+
+
+def _hub_steps():
+    from harness import workflows
+    return [s.id for s in workflows.get("hub-design").steps]
+
+
+def test_guided_step_pairs():
+    for step in _hub_steps():
+        assert chat_tools.ui_open_panel('hubDesign', guided_step=step)['guided_step'] == step
+    assert chat_tools.ui_open_panel('HubDesign', guided_step='goal')['guided_step'] == 'goal'
+    for panel, step in [('hubDesign', 'nope'), ('results', 'goal'), ('hubDesign', 3)]:
+        _refusal(lambda: chat_tools.ui_open_panel(panel, guided_step=step), 'guided_step')
+    import json
+    assert json.dumps(chat_tools.ui_open_panel('hubDesign')) == json.dumps(
+        {"_ui_event": True, "kind": "navigate", "panel_id": "hubDesign"})
+
+
+def test_guided_steps_match_the_workflow():
+    enum = _tool('ui_open_panel')['input_schema']['properties']['guided_step']['enum']
+    assert enum == _hub_steps()
