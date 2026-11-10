@@ -531,7 +531,7 @@ def _dispatch(path, ctx, step_id, attempt, approved=None):
                 )
             if step["tool"] == READINESS:
                 return _readiness(path, step, project, code)
-            return _campus(path, step, project, user, frozen, attempt)
+            return _campus(path, step, project, user, frozen, attempt, ctx)
     except HTTPException as exc:
         detail = (
             exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
@@ -605,11 +605,14 @@ def _readiness(path, step, project, code):
     return READINESS
 
 
-def _campus(path, step, project, user, frozen, attempt):
+def _campus(path, step, project, user, frozen, attempt, ctx=None):
     """Q2: no campus file is the user's to draft. Then the reservation, the
-    job, and the step waiting on it."""
+    job, and the step waiting on it. SH-10b CT-3: the network revision the
+    job reads is recorded before it queues (the campus service keeps none),
+    so the result gate can tell an edit since."""
     from harness import runner
     from services import campus_electrical_service as ce
+    from services import dirty_state
 
     if not (_project_dir(project) / ce.SUBDIR / ce.CAMPUS_FILE).is_file():
         return _stop(path, step["id"], "campus_missing", "draft the campus")
@@ -620,6 +623,8 @@ def _campus(path, step, project, user, frozen, attempt):
             "budget",
             f"the campus run needs {SOLVES} solve and the run has none left",
         )
+    # None (no context that counts edits) reads as edited at the gate: never a pass.
+    revision = dirty_state.revision(ctx) if hasattr(ctx, "network_revision") else None
     try:
         job = ce.enqueue_run(project, frozen["settings"], user)
     except BaseException:
@@ -637,6 +642,7 @@ def _campus(path, step, project, user, frozen, attempt):
             "job_id": str(job["id"]),
             "call_id": attempt,
             "started_at": begun,
+            "network_revision": revision,
         }
         if t["status"] != "cancelled":
             t["status"] = "waiting_job"
@@ -759,6 +765,9 @@ def settle(path, ctx=None) -> str | None:
         path.parent.parent / ce.SUBDIR / "run"
     )  # the task file's project
     result, error = outcome(job, used, step["frozen"]["grid_code"])
+    # CT-3: the published run this job made, by its compliance tables' digests,
+    # so a later campus run (a user's) is never read as this one.
+    files = run_files(path.parent.parent / ce.SUBDIR / "run") if result == "done" else None
     release(path, step["job"]["call_id"])
 
     def done(t):
@@ -778,6 +787,8 @@ def settle(path, ctx=None) -> str | None:
                     "job_id": s["job"]["job_id"],
                     "solves": SOLVES,
                     "grid_code": s["frozen"]["grid_code"],
+                    "run_files": files,
+                    "network_revision": s["job"].get("network_revision"),
                 },
             )
             if t["run"]["status"] == "waiting_job":
@@ -790,3 +801,151 @@ def settle(path, ctx=None) -> str | None:
 
     runner._update(path, done)
     return result
+
+
+# ── SH-10b: the planning-contingency read (GK A CT-1..CT-6, DC13-SCOPE) ──────
+# The campus run's checks that the intact case and transformer N-1 decide:
+# the worst transformer loading of both, and the PCC and campus voltages in
+# every case. Read from the invested table (`invest` is frozen on): the
+# re-solved AC result with the on-load taps and the compensation the study
+# bought, which is DC13-SCOPE's stage 2 (taps and shunts only; the study has
+# no redispatch). The as-is table is never read: a completed job with
+# `invest` on always writes the invested one (`campus_electrical_service.run`).
+CONTINGENCY_CHECKS = ("transformer_loading", "pcc_voltage", "campus_voltage")
+# Each check's limit kind (CT-5, D3): a voltage band is the grid code's (or an
+# assumed design band) and counts only with its own source. The loading limit
+# is 100 % of each unit's own rating in the campus file, which the engine tags
+# `assumed` with the clause "equipment rating (not a grid-code clause)"
+# (`gridspine/static/campus_compliance.py` `_transformer_row`): it counts only
+# with that clause (CT-5a), so a changed clause or tag fails closed.
+EQUIPMENT_LIMIT = frozenset({"transformer_loading"})
+EQUIPMENT_CLAUSE = "equipment rating"
+_BAND = {"pcc_voltage": "the PCC voltage band", "campus_voltage": "the campus voltage band"}
+_NOT_READ = ("not_rechecked", "unknown", "not_rated")
+_NO_TRANSFORMER = "no transformer between the PCC and the site buses"
+
+
+def run_files(run: Path) -> dict | None:
+    """The digests of the published run's compliance tables (CT-3), None
+    when the invested one is missing."""
+    from services import campus_electrical_service as ce
+
+    out = {}
+    for name in (ce.cs.COMPLIANCE_INVESTED_CSV, ce.cs.COMPLIANCE_CSV, ce.cs.LF_PCC_CSV):
+        try:
+            out[name] = hashlib.sha256((run / name).read_bytes()).hexdigest()
+        except OSError:
+            out[name] = None
+    return out if out[ce.cs.COMPLIANCE_INVESTED_CSV] else None
+
+
+def _cases(run: Path, transformer: bool) -> str | None:
+    """Why the study's cases do not cover the planning set (GK B E3), or
+    None: every case converged, the intact one and, for a campus with a
+    transformer, at least one transformer N-1 (the engine solves N-1 only for
+    a group with a parallel unit, `campus_flow.solve_cases`)."""
+    import pandas as pd
+
+    from services import campus_electrical_service as ce
+
+    try:
+        pcc = pd.read_csv(run / ce.cs.LF_PCC_CSV)
+        cases = pcc["case"].astype(str)
+        converged = pcc["converged"].astype(str).str.lower() == "true"
+    except (OSError, ValueError, KeyError):
+        return "the campus run's case table cannot be read"
+    if not len(pcc) or not converged.all():
+        return "a case of the campus study did not converge"
+    if not (cases == "intact").any():
+        return "the campus study solved no intact case"
+    if transformer and not cases.str.startswith("N-1:").any():
+        return ("the campus study solved no transformer N-1 case: no transformer group has a parallel "
+                "unit to lose")
+    return None
+
+
+def contingency(project, task, revision: int) -> dict:
+    """The run's own campus study against the planning contingencies:
+    `{"failing": [...], "measures": [...]}` (each failing check with its case,
+    period, value and limit; each measure the pass rests on, CT-5d), else
+    `{"state", "reason"}` for no evidence. Bound to the run (CT-3):
+    the step completed, the published run is held to the frozen profile id
+    and content, its tables are the ones the step settled on, and the network
+    is at the revision the job read."""
+    import pandas as pd
+
+    from services import campus_electrical_service as ce
+
+    step = latest(task, CAMPUS)
+    if step is None or step.get("status") != "completed":
+        return {"state": "not_run", "reason": "the run's own campus study has not finished"}
+    result, code = step.get("result") or {}, (step.get("frozen") or {}).get("grid_code") or {}
+    run = _project_dir(project) / ce.SUBDIR / "run"
+    if ce._profile_used(run) != {"profile": code.get("id"), "sha256": code.get("digest")}:
+        return {"state": "grid_code_changed",
+                "reason": "the published campus run is not held to the run's grid-code profile"}
+    files = result.get("run_files")
+    if not files or run_files(run) != files:
+        return {"state": "campus_rerun", "reason": "the published campus run is not the run's own campus study"}
+    recorded = result.get("network_revision")
+    if not isinstance(recorded, int) or isinstance(recorded, bool) or recorded != revision:
+        return {"state": "edited", "reason": "the network was edited since the run's campus study read it"}
+    try:
+        table = pd.read_csv(run / ce.cs.COMPLIANCE_INVESTED_CSV)
+    except (OSError, ValueError):
+        return {"state": "unreadable", "reason": "the campus run's compliance table cannot be read"}
+    rows = {str(r["check"]): r for r in table.to_dict("records")}
+    failing, waiting, measures = [], [], []
+    for check in CONTINGENCY_CHECKS:
+        row = rows.get(check)
+        if row is None:
+            voltage = rows.get("campus_voltage") or rows.get("pcc_voltage") or {}
+            if check == "transformer_loading" and _NO_TRANSFORMER in str(voltage.get("detail") or ""):
+                continue  # not applicable: the voltage row says the campus has no transformer
+            return {"state": "no_row", "reason": f"the campus run has no {check} row"}
+        status = row.get("status_with_measures")
+        status = status if isinstance(status, str) else None
+        if status is None or status in _NOT_READ or status not in ("pass", "fail"):
+            return {"state": "not_evaluated", "reason": f"{check}: {status or 'no status'} after the measures"}
+        if status == "fail":
+            failing.append({"check": check, "worst_case": _text(row.get("worst_case")),
+                            "worst_period": _int(row.get("worst_period")), "value": _num(row.get("value")),
+                            "limit": _num(row.get("limit")), "unit": _text(row.get("unit"))})
+            continue
+        source = str(row.get("source"))
+        if check in EQUIPMENT_LIMIT:
+            if not str(row.get("clause") or "").startswith(EQUIPMENT_CLAUSE) or source == "extracted":
+                waiting.append(f"{check} is not read against the unit's own rating")
+        elif source == "assumed":
+            # D3 (#1079): a pass on an assumed design band never passes a block row (CT-5b).
+            waiting.append(f"{check} passes only on an assumed band: state {_BAND[check]} in the grid-code profile")
+        elif source == "extracted":
+            waiting.append(f"{check} passes only on an unconfirmed band: confirm {_BAND[check]} in the grid-code profile")
+        detail = _text(row.get("detail")) or ""
+        if row.get("status_as_is") != "pass" or "recommended" in detail:
+            measures.append({"check": check, "detail": detail})
+    if failing:
+        return {"failing": failing, "measures": []}
+    if waiting:
+        return {"state": "not_evaluated", "reason": "; ".join(waiting)}
+    why = _cases(run, "transformer_loading" in rows)
+    if why is not None:
+        return {"state": "cases", "reason": why}
+    return {"failing": [], "measures": measures}
+
+
+def _text(v):
+    return v if isinstance(v, str) else None
+
+
+def _num(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f else None
+
+
+def _int(v):
+    f = _num(v)
+    return int(f) if f is not None else None

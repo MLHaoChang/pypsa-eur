@@ -49,8 +49,12 @@ NEVER_TUNABLE = frozenset({
     "eh_poc", "eh_ibr_mva", "fault_level_mva", "sk_mva", "sk_min_mva", "c_max", "c_min",  # fault levels
     "frequency", "tdd_standard", "contingencies", "stress_scenarios",
     "solver_options", "solver_name", "tolerance", "assumed", "verdict",
+    # DC13-SCOPE (GK A L2-1): taps and shunts move only in the campus study's
+    # stage 2 after an outage, never as a lever of the agent.
+    "tap_position", "tap_ratio", "tap_side", "tap_step", "tap_pos", "b", "g", "b_pu", "g_pu",
+    "compensation", "compensation_mvar", "q_comp_mvar",
 })
-_NEVER_COMPONENTS = frozenset({"grid_code", "solver", "gate", "profile", "envelope"})
+_NEVER_COMPONENTS = frozenset({"grid_code", "solver", "gate", "profile", "envelope", "ShuntImpedance"})
 
 # §6.3: an agent turn offers its stage's allowlist only. The input loop L1
 # (§6.1) gets reads, Library reads and the data-gap and edit tools; the
@@ -571,12 +575,34 @@ def _dc_scorecard_rules():
             for row, severity, basis, source in DC_SCORECARD]
 
 
-def _eh_datacenter() -> dict:
+# SH-10b (GK A Q3, CT-1..CT-6; DC13-SCOPE): the run's own campus study meets
+# the planning contingencies, intact and transformer N-1, after the taps and
+# the compensation it bought; redispatch is never a remedy (the study has none).
+_DC_CONTINGENCY = _rule(
+    "dc.campus.contingency", "dc.campus.contingency", "empty",
+    basis="No check fails in the intact case or a transformer N-1 after the campus study's taps and "
+          "compensation (DC13-SCOPE: taps and shunts only after an outage; no redispatch). "
+          f"Input: {_CAMPUS_RUN}.")
+# Staged (design §9.3): the investment case is in the result gate. Its
+# counterfactual and its returns are read from the stored case, current for
+# this network; both only warn, and the returns are never judged against a hurdle.
+_DC_IC_RULES = [
+    _rule("dc.ic.counterfactual", "ic.counterfactual", "eq", "established", severity="warn",
+          basis="The investment case compares against an established counterfactual; until then it is "
+                "not evaluated and never blocks the run."),
+    _rule("dc.ic.returns", "ic.returns", "nonempty", severity="warn",
+          basis="The investment case's project post-tax NPV at the WACC and IRR, read from the stored "
+                "case for this network; reported, never compared with a hurdle."),
+]
+
+
+def _eh_datacenter(staged: bool = False) -> dict:
+    template = "eh_datacenter_staged" if staged else "eh_datacenter"
     lole = copy.deepcopy(next(r for r in EH_RESULT_RULES if r.get("engine")))
     lole["engine"] = {"tool": "run_coupling_loop", "max_solves": 3, "restore": "base"}
     return {
-        "id": "eh_datacenter", "version": 1,
-        "templates": ["eh_datacenter"],
+        "id": template, "version": 1,
+        "templates": [template],
         "scope": "flow_scope.preset_for",
         "params": {"required": [], "ask": [GOAL_PARAM, FREQUENCY_PARAM], "fields": {
             GOAL_PARAM: _num("Reliability goal (LOLE)", {"native_type": "float", "unit_storage": "h/yr"}),
@@ -587,8 +613,8 @@ def _eh_datacenter() -> dict:
         "stages": {
             "setup": {"actions": [], "rules": [
                 *GENERIC["setup"]["rules"],
-                _rule("set.project.template", "project.template", "eq", "eh_datacenter",
-                      basis="The profile serves the eh_datacenter template only."),
+                _rule("set.project.template", "project.template", "eq", template,
+                      basis=f"The profile serves the {template} template only."),
             ]},
             # Issue 10: stage 2 waits for the user until a grid-code profile is published.
             "inputs": {"actions": list(GENERIC["inputs"]["actions"]), "rules": [
@@ -610,6 +636,8 @@ def _eh_datacenter() -> dict:
                 _rule("dc.gridcode.unchanged", "dc.gridcode.unchanged", "eq", True,
                       basis="The grid-code profile is still the one the run was held to."),
                 *_dc_scorecard_rules(),
+                _DC_CONTINGENCY,
+                *(_DC_IC_RULES if staged else []),
                 lole,
             ]},
             "report": {"actions": [_native("report")], "rules": REPORT_RULES},
@@ -620,12 +648,13 @@ def _eh_datacenter() -> dict:
         "campus_study": dict(run_actions.CAMPUS_STUDY),
         "tunable": [],
         "kpis": copy.deepcopy(EH_SITE["kpis"]),
-        "chapters": ["grid_readiness", "mc"],
+        "chapters": ["grid_readiness", "mc", *(["investment_case"] if staged else [])],
         "missing_tools": [],
     }
 
 
 EH_DATACENTER = _eh_datacenter()
+EH_DATACENTER_STAGED = _eh_datacenter(staged=True)
 
 # Study harness 11 (design §9.3 "eh_h2_hub"): eh_h2_hub@1 and
 # eh_h2_hub_staged@1, one self-contained block (SH-17 splits per-type
@@ -722,6 +751,7 @@ EH_H2_HUB = _eh_h2_hub(staged=False)
 EH_H2_HUB_STAGED = _eh_h2_hub(staged=True)
 
 PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_datacenter@1": EH_DATACENTER,
+                              "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED}
 
 

@@ -223,3 +223,21 @@ def test_a_compound_scores_names_only_never_descriptions():
     """GK B K2: a compound found only in a description adds nothing."""
     assert not _probe_selection("Show its load flow.", "probe_tool", "loadflow")
     assert _probe_selection("Show its load flow.", "probe_tool", "show load flow")
+
+
+@pytest.mark.parametrize("query", [
+    "Run the staged data-centre study: grid readiness, SCR and ESCR, power quality (TDD, unbalance, harmonic "
+    "scan), planning contingencies N-1 with taps and shunts, P-V and Q-V margin, then check the network",
+    "dc_campus_study dc_grid_readiness grid_readiness_study eh_datacenter_staged contingency validate",
+])
+def test_a_data_centre_grid_readiness_request_keeps_validate_network_within_the_limit(query):
+    """TOOLSEL-1 (study harness 10b, GK B (36) Q4): the data-centre runs add no
+    chat tool, so a grid-readiness request stays within the 128-tool offer
+    with validate_network still selected; the native actions are never offered."""
+    from services import run_actions
+
+    selected = wiring._bounded_tools(TOOLS, query)
+    names = {t["name"] for t in selected}
+    assert len(selected) <= 128 and "validate_network" in names
+    assert not set(run_actions.REGISTRY) & {t["name"] for t in TOOLS}
+    assert "grid_readiness_study" not in {t["name"] for t in TOOLS}  # Q4: no chat tool

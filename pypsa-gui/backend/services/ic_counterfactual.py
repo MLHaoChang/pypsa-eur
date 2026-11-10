@@ -81,6 +81,40 @@ def read(ctx, on) -> dict:
     return classify(*_case(ctx, on))
 
 
+# ── `ic.returns` (study harness 10b, GK A ST-3) ─────────────────────────────
+
+
+def read_returns(ctx, on) -> dict:
+    """The stored case's project post-tax NPV at the WACC and IRR, read only
+    when `classify` finds the case current for this network with an
+    established counterfactual: ``{"state", "reasons", "returns"}``, where
+    ``returns`` is ``{"npv_at_wacc", "irr", "currency"}`` or None. A figure
+    the case could not establish (an IRR with no sign change) is
+    `not_established` with its reason, never a zero. Never compared with a
+    hurdle: the gate reports it."""
+    from functools import partial
+
+    from fastapi import Response
+
+    from routers.results import get_investment_case_report
+    from services.chat_tools import _NE, _ic_headlines, _section
+
+    fact = classify(*_case(ctx, on))
+    if fact["state"] != ESTABLISHED:
+        return {**fact, "returns": None}
+    report = on(partial(get_investment_case_report, detail="full"))
+    if isinstance(report, Response) or not isinstance(report, dict):
+        return {"state": NOT_RUN, "basis": fact["basis"], "reasons": ["no_report"], "returns": None}
+    heads = _ic_headlines(report)
+    npv, irr = heads["project_post_tax_npv_at_wacc"], heads["project_post_tax_irr"]
+    missing = [name for name, v in (("npv", npv), ("irr", irr)) if v == _NE or v is None]
+    if missing:
+        return {"state": NOT_ESTABLISHED, "basis": fact["basis"],
+                "reasons": [f"{m}_not_established" for m in missing], "returns": None}
+    currency = (_section(report, "project").get("payload") or {}).get("currency")
+    return {**fact, "returns": {"npv_at_wacc": npv, "irr": irr, "currency": currency}}
+
+
 # ── `ic.baseline_keeps` (study harness issue 20) ─────────────────────────────
 
 def existing_assets(template_id: str | None) -> tuple[str, ...] | None:
