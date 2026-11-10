@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import type { GridRiskLine, GridRiskProduction } from '../../api/types'
-import { GridRiskBody, moneyForGridRisk, fmtTonnesYear, flagWords, missingWord } from './GridRiskTab'
+import { GridRiskBody, boundReason, moneyForGridRisk, fmtTonnesYear, flagWords, missingWord } from './GridRiskTab'
 
 const nav = vi.hoisted(() => ({ openFlowTarget: vi.fn(), openFlowTargetInPlace: vi.fn(), showResultsTab: vi.fn() }))
 vi.mock('../../layout/flowNavigation', () => nav)
@@ -222,5 +222,26 @@ describe('Grid risk to production (G2P-13)', () => {
     render(<GridRiskBody data={data([n1])} mode="expert" />)
     const notes = screen.getByTestId('grid-risk-row-n_1-trafo_a').children[5].textContent
     expect(notes).toBe('the outage is longer than the period, so this is a lower bound')
+  })
+  it('the N-1 line bounded by an outage longer than the period says so, in Expert and in Guided (G2P-13)', () => {
+    const n1 = line('n_1', { status: 'partial', flags: ['no_inventory_credit', 'outage_longer_than_period', 'lower_bound'] })
+    const { unmount } = render(<GridRiskBody data={data([n1])} mode="expert" />)
+    expect(screen.getByTestId('grid-risk-row-n_1').children[5].textContent)
+      .toBe('no inventory credit, so it is conservative; the outage is longer than the period, so this is a lower bound')
+    unmount()
+    render(<GridRiskBody data={data([n1, line('ride_through', { status: 'partial', flags: ['lower_bound'] })])} mode="guided" />)
+    const tile = screen.getByTestId('grid-risk-n_1').textContent
+    expect(tile).toContain('lower bound')
+    expect(tile).toContain('the outage is longer than the period')
+    expect(tile).not.toContain('some units are not known')
+    expect(screen.getByTestId('grid-risk-ride_through').textContent).toContain('some units are not known')
+    expect(screen.getByTestId('grid-risk-ride_through').textContent).not.toContain('the outage is longer')
+  })
+  it('a lower-bound line without that reason keeps the generic words in Expert (GK A N28-4)', () => {
+    render(<GridRiskBody data={data([line('ride_through', { status: 'partial', flags: ['lower_bound'] })])} mode="expert" />)
+    expect(screen.getByTestId('grid-risk-row-ride_through').children[5].textContent)
+      .toBe('some units are not known, so this is a lower bound')
+    expect(boundReason(['lower_bound'])).toBe('some units are not known')
+    expect(boundReason(['outage_longer_than_period', 'lower_bound'])).toBe('the outage is longer than the period')
   })
 })
