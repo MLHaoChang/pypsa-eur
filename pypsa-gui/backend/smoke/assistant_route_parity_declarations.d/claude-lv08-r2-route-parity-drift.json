@@ -1,12 +1,6 @@
 {
  "limitations": [
   {
-   "method": "GET",
-   "path": "/api/projects/{name}/sites/{site_id}/scene",
-   "reason": "held-by-spec",
-   "issue": ".scratch/site-scene-generation/issues/08-ai-guided-project-flow.md"
-  },
-  {
    "method": "POST",
    "path": "/api/projects/{name}/sites/{site_id}/scene/adopt",
    "reason": "held-by-spec",
@@ -15,18 +9,6 @@
   {
    "method": "POST",
    "path": "/api/projects/{name}/sites/{site_id}/scene/proposals",
-   "reason": "held-by-spec",
-   "issue": ".scratch/site-scene-generation/issues/08-ai-guided-project-flow.md"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply",
-   "reason": "held-by-spec",
-   "issue": ".scratch/site-scene-generation/issues/08-ai-guided-project-flow.md"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/sites/{site_id}/scene/proposals/{proposal_id}/cancel",
    "reason": "held-by-spec",
    "issue": ".scratch/site-scene-generation/issues/08-ai-guided-project-flow.md"
   }

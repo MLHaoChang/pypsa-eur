@@ -174,7 +174,21 @@
   "v1": "3052e1cf1727b21c",
   "v2": "43b6d7ae4b5bc08e"
  },
+ "services/library/defaults_pack/versions/2026-11-10/tariffs.json:de_industrial_illustrative": {
+  "dump": "e05a203a4649dc02",
+  "lib": "b37ea8c8c13dd294",
+  "stored_cfg": "61ec7f3d8f5e4096",
+  "v1": "3052e1cf1727b21c",
+  "v2": "43b6d7ae4b5bc08e"
+ },
  "services/library/defaults_pack/versions/2026-11-07/tariffs.json:tou_reference_illustrative": {
+  "dump": "0f6a553edc7b5451",
+  "lib": "7a0dfd34e785c908",
+  "stored_cfg": "dfb5f62fb658faa6",
+  "v1": "5262e13a15eb1f58",
+  "v2": "6397787ac722121e"
+ },
+ "services/library/defaults_pack/versions/2026-11-10/tariffs.json:tou_reference_illustrative": {
   "dump": "0f6a553edc7b5451",
   "lib": "7a0dfd34e785c908",
   "stored_cfg": "dfb5f62fb658faa6",

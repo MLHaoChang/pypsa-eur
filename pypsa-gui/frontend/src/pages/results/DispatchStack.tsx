@@ -5,8 +5,9 @@ import {
 } from 'recharts'
 import type { Generator, Load, StorageUnit, Link as LinkT } from '../../api/types'
 import { type TSPayload, shortStamp, stampWithPeriod, fmtPower, isRenewableCarrier,
-  ChartActions, downloadCSV, ChartCard, colourForCarrier,
-  CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel } from './shared'
+  ChartActions, downloadCSV, colourForCarrier,
+  CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
+  ChartFrame, CHART_HEIGHT, chartFigure, LABEL_PASS, directLabel, bandLabelIndices, legendName } from './shared'
 
 // ── Per-period generation dispatch stack ────────────────────────────────────
 // Carrier-stacked area chart showing hourly generation by fuel type, with the
@@ -134,9 +135,9 @@ export default function DispatchStack({
     stack.forEach((c, i) => { colours[c] = colourForCarrier(c, i) })
     colours['storage_discharge'] = colourForCarrier('storage')
     colours['storage_charge']    = colourForCarrier('storage')
-    colours['electrolyzer_consume'] = '#0ea5e9'   // sky-blue, matches Links style
-    colours['link_inflows']      = '#16a34a'      // emerald — cross-carrier production
-    colours['link_outflows']     = '#dc2626'      // red — cross-carrier consumption
+    colours['electrolyzer_consume'] = colourForCarrier('electrolysis')
+    colours['link_inflows']      = colourForCarrier('link_inflows')   // cross-carrier production
+    colours['link_outflows']     = colourForCarrier('link_outflows')  // cross-carrier consumption
     colours['load']              = colourForCarrier('load')
     return {
       genCarriers: carrierByGen,
@@ -317,11 +318,11 @@ export default function DispatchStack({
 
   if (!gensTS || rows.length === 0) {
     return (
-      <ChartCard title="Generation Dispatch Stack">
+      <ChartFrame title="Dispatch stack">
         <div className="py-7 text-center text-[11.5px] text-muted">
           No dispatch data for the selected period.
         </div>
-      </ChartCard>
+      </ChartFrame>
     )
   }
 
@@ -341,9 +342,19 @@ export default function DispatchStack({
     downloadCSV('dispatch_stack.csv', header, csvRows)
   }
 
+  const peakLoad = rows.reduce((a, r) => Math.max(a, Number(r['load_total'] ?? 0)), 0)
+  // Name a band on the band itself (not hue alone, audit finding 5); the
+  // legend alone when names could collide or the stack is dense.
+  const labelAt = bandLabelIndices(rows, stackOrder, peakLoad)
+  const bandLabel = (key: string) => {
+    const i = labelAt.get(key)
+    return i == null ? undefined : directLabel(legendName(key), i)
+  }
+
   return (
-    <ChartCard
-      title={`Generation Dispatch Stack — ${carrierLabel}`}
+    <ChartFrame
+      title={`Dispatch stack · ${carrierLabel}`}
+      figure={chartFigure(fmtPower(peakLoad), 'peak load')}
       hint={`${carrierLabel}-bus balance · carrier-stacked hourly generation · dashed line = total consumption (load + storage charge + link outflows)${
         hasStorage ? ` · storage discharge above zero, charge below` : ''}${
         hasLinkContribs ? ` · cross-carrier link inflows in emerald, outflows in red below zero` : ''}`}
@@ -351,7 +362,7 @@ export default function DispatchStack({
       bodyClassName="p-3"
     >
       <div ref={chartRef}>
-        <ResponsiveContainer width="100%" height={300}>
+        <ResponsiveContainer width="100%" height={CHART_HEIGHT.lg}>
           <ComposedChart data={rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}
             stackOffset="sign">
             <CartesianGrid {...CHART_GRID} />
@@ -456,6 +467,11 @@ export default function DispatchStack({
                 name="electrolyzer_consume"
                 isAnimationActive={false} />
             )}
+            {/* Band names, painted above every band (chart theme LABEL_PASS). */}
+            {stackOrder.map(carrier => (
+              <Area key={`label:${carrier}`} type="monotone" dataKey={carrier} stackId="labels"
+                {...LABEL_PASS} label={bandLabel(carrier)} />
+            ))}
             {/* System load — drawn as a dashed line ON TOP of the stack so
                 operators can read at a glance where dispatch covers demand. */}
             <Line type="monotone" dataKey="load_total"
@@ -467,15 +483,9 @@ export default function DispatchStack({
               name={hasElectricalFilter ? `Load (${carrierLabel})` : 'Load (total)'} />
           </ComposedChart>
         </ResponsiveContainer>
-        {/* Per-carrier colours live in the Recharts <Legend> above. A static
-            category strip used to sit here but was dropped — its hardcoded
-            Thermal/Renewables/Storage swatches didn't match the chart's
-            per-carrier palette, which was confusing on multi-carrier runs. */}
-        <div className="mt-1.5 flex items-center justify-end text-[10px] text-muted font-mono">
-          <span>{fmtPower(rows.reduce((a, r) =>
-            Math.max(a, Number(r['load_total'] ?? 0)), 0))} peak load</span>
-        </div>
+        {/* Per-carrier colours live in the Recharts <Legend> above; the peak
+            load now sits in the header figure (chart theme, ui-modern 02). */}
       </div>
-    </ChartCard>
+    </ChartFrame>
   )
 }

@@ -14,6 +14,7 @@ import {
   type TSPayload, type WeightCtx, weightedSumSplit, aggregateTS,
   shortStamp, useWeightCtx, WindowCapBanner,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, extremeDot, extremeOf,
+  ChartFrame, CHART_HEIGHT, fmtPower, chartFigure,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
@@ -44,7 +45,7 @@ const ADEQUACY_CROSSLINK =
   'Adequacy studies — targets, screening, the frontier, Monte Carlo and the '
   + 'coupling loop — moved to the Adequacy tab.'
 
-const ACCENT = '#dc2626'   // danger red — VOLL slack = LP failure to serve demand
+const ACCENT = 'var(--color-danger)'   // danger red — VOLL slack = LP failure to serve demand
 
 const LOAD_ELECTRICAL_ALIASES = new Set(['', 'ac', 'electricity', 'electric', 'electrical', 'el'])
 const LOAD_HYDROGEN_ALIASES   = new Set(['h2', 'hydrogen'])
@@ -243,7 +244,7 @@ export default function LostLoadTab() {
   const periodLabel = filter.selectedPeriod != null ? `period ${filter.selectedPeriod}` : 'horizon'
 
   return (
-    <div className="flex flex-col h-full overflow-auto p-4 gap-4">
+    <div className="flex flex-col h-full overflow-auto p-4 gap-4 results-scroll-clear">
       {/* Truncated-window banner — see FIX 1 secondary in the
           results-tabs-window final review: a narrow-but-wide window can
           still hit the server's MAX_RESPONSE_VALUES cap. */}
@@ -306,16 +307,10 @@ export default function LostLoadTab() {
       <PerBusLostLoadSection rows={byBus ?? null} />
 
 
-      <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
-        <header className="px-4 py-2.5 border-b border-border bg-bg-2">
-          <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
-            Lost load over time
-          </span>
-          <span className="ml-2 text-[10px] text-muted">aggregated MW · {periodLabel}</span>
-        </header>
-        <div className="p-3">
+      <ChartFrame title="Lost load over time" hint={`aggregated MW · ${periodLabel}`}
+        figure={worst ? chartFigure(fmtPower(worst.value), 'worst hour') : undefined}>
           {agg && agg.length > 0 ? (
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
               <AreaChart data={agg} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="llGrad" x1="0" y1="0" x2="0" y2="1">
@@ -337,8 +332,7 @@ export default function LostLoadTab() {
               </AreaChart>
             </ResponsiveContainer>
           ) : <p className="text-[11px] text-muted">No time series for the selected range.</p>}
-        </div>
-      </section>
+      </ChartFrame>
     </div>
   )
 }

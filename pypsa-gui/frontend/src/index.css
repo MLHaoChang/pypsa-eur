@@ -86,6 +86,39 @@
   --color-carrier-dc: #d97706;
   --color-carrier-heat: #ea580c;
   --color-carrier-gas: #0369a1;
+  /* Chart carrier tokens (components/charts/chartTheme.tsx, ui-modern 02).
+     Every chart colours a carrier through carrierColour(), which returns one
+     of these; the dark theme lifts the ones that sink into it. Each reaches
+     3:1 on the chart surface and every pair differs by ΔE ≥ 10 in both
+     themes (chartThemeTokens.test.ts); dc and load are one carrier. */
+  --color-carrier-ccgt: #0284c7;
+  --color-carrier-coal: #57534e;
+  --color-carrier-lignite: #8a6f5a;
+  --color-carrier-oil: #1f2937;
+  --color-carrier-nuclear: #b91c1c;
+  --color-carrier-biomass: #65a30d;
+  --color-carrier-geothermal: #0d9488;
+  --color-carrier-hydro: #1e40af;
+  --color-carrier-ror: #0e7490;
+  --color-carrier-wind: #16a34a;
+  --color-carrier-offwind: #166534;
+  --color-carrier-solar: #b45309;
+  --color-carrier-rooftop: #a16207;
+  --color-carrier-load: #d97706;
+  --color-carrier-storage: #5b21b6;
+  --color-carrier-electricity: #2563eb;
+  --color-carrier-grid: #475569;
+  --color-carrier-link-in: #4d7c0f;
+  --color-carrier-link-out: #dc2626;
+  /* Carriers with no token of their own, in order. */
+  --color-series-1: #6a7384;
+  --color-series-2: #9a3412;
+  --color-series-3: #db2777;
+  --color-series-4: #854d0e;
+  --color-series-5: #c026d3;
+  --color-series-6: #4f46e5;
+  --color-series-7: #e11d48;
+  --color-series-8: #047857;
 
   /* Asset-category coding */
   --color-cat-thermal: #dc2626;
@@ -200,6 +233,26 @@
   /* Tell the browser to render native form controls (date pickers, scrollbar
      thumbs, autofill rendering) in dark variants. */
   color-scheme: dark;
+
+  /* Chart carriers that are too dark to read on the dark surfaces. */
+  --color-carrier-h2: #c084fc;
+  --color-carrier-gas: #0ea5e9;
+  --color-carrier-ccgt: #38bdf8;
+  --color-carrier-coal: #a8a29e;
+  --color-carrier-lignite: #d6c3b0;
+  --color-carrier-oil: #cbd5e1;
+  --color-carrier-nuclear: #f87171;
+  --color-carrier-hydro: #3b82f6;
+  --color-carrier-ror: #22d3ee;
+  --color-carrier-electricity: #60a5fa;
+  --color-carrier-offwind: #22c55e;
+  --color-carrier-storage: #a78bfa;
+  --color-carrier-grid: #94a3b8;
+  --color-series-1: #e7e5e4;
+  --color-series-2: #fdba74;
+  --color-series-4: #eab308;
+  --color-series-6: #818cf8;
+  --color-series-8: #64748b;
 }
 
 /* ── Compact density overrides ─────────────────────────────────────────────
@@ -395,6 +448,14 @@ html {
 
 /* Stay inside the relative workbench body, below header/tabs. Scroll long
    answers/decisions locally without covering application header controls. */
+/* Room below the last chart of a Results scroll view, so the floating
+   "Chat here" launcher (about 150 px tall, bottom-right) never covers it
+   (ui-modern audit findings 5 and 8), only while the launcher is on screen.
+   Unlayered, so it wins over p-5. */
+body:has(.companion-launcher) .results-scroll-clear {
+  padding-bottom: 160px;
+}
+
 .companion-launcher {
   max-height: 100%;
   overflow-y: auto;

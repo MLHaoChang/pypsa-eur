@@ -60,6 +60,13 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A muted pre-save note hides while the matching refusal shows (#1259).
 - A "—" needs its reason as visible text, not a tooltip (#1266).
 - The reviewer re-reads suggested wording against these rules before sending it (#1266).
+- Run-chart source lines use ResultState words ("solved", "all periods", "Out of date"), never solver terms (#1336).
+- A carrier colour has one token, and canvas hex maps are pinned to it by a test (#1336).
+- Skeletons appear after about 200 ms in an `aria-busy` status region of the same size; animations honour `prefers-reduced-motion` (#1335).
+- A long list in a banner folds after 5 with "(N more) Show all", and a bulk action over folded rows stays off until they are shown (#1332).
+- Hashes and digests never show in user rows (#1332).
+- An auto-fit or auto-scroll stops at the first user pan, zoom or select (#1335).
+- Dates display ISO (2026-11-08) (#1327).
 
 ## Master merges
 

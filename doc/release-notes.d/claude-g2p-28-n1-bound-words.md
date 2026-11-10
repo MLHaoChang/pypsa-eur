@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Grid risk to production gives the true reason for an N-1 lower bound ("the outage is longer than the period") on the line, the tile and in the report; the report's Source cell no longer shows an empty "()", and its grid-risk disclosures join clauses with a colon.
