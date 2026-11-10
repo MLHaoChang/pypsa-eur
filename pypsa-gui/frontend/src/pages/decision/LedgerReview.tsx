@@ -153,11 +153,19 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
   const staleNotes = useMemo(() => {
     const m = new Map<string, string[]>()
     for (const [key, hits] of Object.entries(payload.stale ?? {})) {
+      // One line per distinct verdict (UX P4), naming every option fork that carries it: the cost lives on
+      // the fork, so the hint says which option to open (UX, provenance-graph 02).
+      const groups = new Map<string, { hit: (typeof hits)[number]; options: string[] }>()
+      for (const h of hits) {
+        if (staleBody(h, 'ledger') === null) continue
+        const g = `${h.component}\u0000${h.name}\u0000${JSON.stringify(h.stale)}`
+        const at = groups.get(g) ?? groups.set(g, { hit: h, options: [] }).get(g)!
+        const option = h.option_label || h.option_id
+        if (!at.options.includes(option)) at.options.push(option)
+      }
       // The table's form, which names the asset: the row is not the asset (UX P1).
-      const notes = hits.flatMap(h => {
-        const body = staleBody(h, 'ledger', h.name)
-        return body === null ? [] : [`${h.component} · ${h.name} is out of date: ${body}`]
-      })
+      const notes = [...groups.values()].map(({ hit: h, options }) =>
+        `${h.component} · ${h.name} is out of date: ${staleBody(h, 'ledger', { asset: h.name, options })}`)
       if (notes.length) m.set(key, [...new Set(notes)])
     }
     return m

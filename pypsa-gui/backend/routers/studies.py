@@ -1080,16 +1080,27 @@ def _with_expert_edits(study: DecisionStudy, ledger, project: AuthorizedProject,
 def _ledger_stale(study: DecisionStudy, ledger, project: AuthorizedProject,
                   db: DBSession, user: User | None) -> dict[str, list[dict]]:
     """Per ledger row, each owned fork whose asset field the row compiles to reads out of date (the provenance
-    graph's verdict, the one the fork's asset card shows): `{key: [{option_id, component, name, field, stale}]}`."""
+    graph's verdict, the one the fork's asset card shows):
+    `{key: [{option_id, option_label, component, name, field, stale}]}`. The label names the option the
+    person opens to re-price, since the cost lives on that fork, not on the base (UX, provenance-graph 02)."""
     from services.study import asset_view
+
+    question = study_questions.get_question(study.question_id)
+
+    def label(option_id: str) -> str:
+        try:
+            return study_questions.option(question, option_id).label if question else option_id
+        except KeyError:
+            return option_id
 
     out: dict[str, list[dict]] = {}
     for row in _owned_fork_rows(study, project, db, user):
         snap = _fork_snapshot(row)
         if snap is None:
             continue
+        option_id = snap.option_id or row.name
         for key, hit in sorted(asset_view.ledger_stale(snap, ledger).items()):
-            out.setdefault(key, []).append({"option_id": snap.option_id or row.name, **hit})
+            out.setdefault(key, []).append({"option_id": option_id, "option_label": label(option_id), **hit})
     return out
 
 

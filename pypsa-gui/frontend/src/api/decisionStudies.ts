@@ -214,6 +214,8 @@ export interface DecisionStudy {
  *  verdict the fork's asset card shows, so `staleNote` words it the same. */
 export interface LedgerStale {
   option_id: string
+  /** The option's name: the fork the person opens to re-price this cost. */
+  option_label: string
   component: string
   name: string
   field: string

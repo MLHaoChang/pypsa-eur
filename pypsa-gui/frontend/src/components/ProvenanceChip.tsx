@@ -52,25 +52,36 @@ const REPRICE: Record<Exclude<StaleWhere, 'ledger'>, string> = {
   table: 'Open the asset and compare with references to re-price.',
 }
 
-/** The ledger row is not the asset, so its hint names the asset to open (UX, provenance-graph 02). */
-const hintFor = (where: StaleWhere, asset?: string) =>
-  where === 'ledger' ? `Open ${asset ?? 'the asset'} in Expert and compare with references to re-price.` : REPRICE[where]
+/** Where a ledger row's cost lives: the asset, on the option forks that priced it. */
+export interface StaleAt { asset?: string; options?: string[] }
+
+/** The ledger row is not the asset, and the cost lives on an option fork, not the open project: the hint
+ *  names the option(s) to open, then the asset (UX, provenance-graph 02). */
+function hintFor(where: StaleWhere, at: StaleAt = {}): string {
+  if (where !== 'ledger') return REPRICE[where]
+  const asset = at.asset ?? 'the asset'
+  const opts = at.options ?? []
+  if (!opts.length) return `Open ${asset} in Expert and compare with references to re-price.`
+  const which = opts.length === 1 ? `the ${opts[0]} option`
+    : `each of the ${opts.slice(0, -1).join(', ')} and ${opts[opts.length - 1]} options`
+  return `Open ${which} in Expert, then ${asset}, and compare with references to re-price.`
+}
 
 /**
  * The visible line for a cost priced through a scale input that no longer matches (TCU-05; reasons are
  * never hover-only). Form: "Out of date: <reason>. Priced with <Field> <recorded>, now <current>."
  * Backend reasons are matched, not echoed, so the words stay ours (no keys, no repr quotes).
  */
-export function staleNote(e: Pick<ProvenanceEntry, 'stale'> | undefined, where: StaleWhere, asset?: string): string | null {
-  const body = staleBody(e, where, asset)
+export function staleNote(e: Pick<ProvenanceEntry, 'stale'> | undefined, where: StaleWhere, at?: StaleAt): string | null {
+  const body = staleBody(e, where, at)
   return body === null ? null : `Out of date: ${body}`
 }
 
 /** `staleNote` without its "Out of date: " lead, for a line that names the asset first. */
-export function staleBody(e: Pick<ProvenanceEntry, 'stale'> | undefined, where: StaleWhere, asset?: string): string | null {
+export function staleBody(e: Pick<ProvenanceEntry, 'stale'> | undefined, where: StaleWhere, at?: StaleAt): string | null {
   const s = e?.stale
   if (!s) return null
-  const hint = hintFor(where, asset)
+  const hint = hintFor(where, at)
   const field = labelOf(s.field)
   const now = labelOf(s.current_field)
   if (s.recorded == null || !field) {

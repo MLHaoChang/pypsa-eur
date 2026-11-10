@@ -72,6 +72,7 @@ def test_the_ledger_routes_show_the_fork_card_s_stale_after_a_ratio_change(
         "pv_rooftop_eur_per_kw": [
             {
                 "option_id": "bess_pv_2h",
+                "option_label": "Battery (2 hours) with PV",
                 "component": "Generator",
                 "name": "pv",
                 "field": "overnight_cost",
