@@ -468,3 +468,19 @@ def test_save_preview_and_apply_refuse_a_project_that_is_no_longer_open(client, 
     assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "memory_project_not_active"
     assert _preview(client, proj, chip).status_code == 409
     assert _apply(client, proj, chip, card["digest"]).status_code == 409
+
+
+@pytest.mark.parametrize(("change", "kind"), [
+    ({"unit": "kW"}, "memory_unit_mismatch"),
+    ({"field": "p_nom_gone"}, "memory_field_unknown"),
+    ({"field": "carrier"}, "memory_field_unknown"),
+])
+def test_the_parameter_body_itself_checks_field_and_stored_unit(change, kind):
+    from services import memory_store as M
+
+    body = {"component_class": "Generator", "field": "p_nom", "value": 1.0, "unit": "MW", **change}
+    with pytest.raises(M.MemoryError) as exc:
+        M.validate_body("parameter", body, parameter_ok=True)
+    assert exc.value.kind == kind and exc.value.status == 422
+    assert M.validate_body("parameter", {**body, **{"unit": "MW", "field": "p_nom"}},
+                           parameter_ok=True)["unit"] == "MW"
