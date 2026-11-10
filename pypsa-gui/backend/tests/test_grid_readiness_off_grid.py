@@ -35,14 +35,27 @@ def test_the_fault_level_builders_are_read_from_the_code():
     derived = {b for b in G._BUILDERS if _reads_the_poc_fault_level(b)} | {G._scr_rows}
     assert derived == set(G.SK_BUILDERS)
     named = {b.__name__ for b in G.SK_BUILDERS}
-    assert named == {"_scr_rows", "_rvc_row", "_rvc_infrequent_row", "_harmonic_row", "_tdd_row",
-                     "_flicker_row", "_motor_start_rows", "_unbalance_row"}
+    assert named == {
+        "_scr_rows",
+        "_rvc_row",
+        "_rvc_infrequent_row",
+        "_harmonic_row",
+        "_tdd_row",
+        "_flicker_row",
+        "_motor_start_rows",
+        "_unbalance_row",
+    }
 
 
 def test_every_scorecard_builder_is_listed_once():
-    builders = {name for name, f in vars(G).items()
-                if inspect.isfunction(f) and name.startswith("_") and name.endswith(("_row", "_rows"))
-                and list(inspect.signature(f).parameters) == ["inp"]}
+    builders = {
+        name
+        for name, f in vars(G).items()
+        if inspect.isfunction(f)
+        and name.startswith("_")
+        and name.endswith(("_row", "_rows"))
+        and list(inspect.signature(f).parameters) == ["inp"]
+    }
     assert builders == {b.__name__ for b in G._BUILDERS}
     assert len(G._BUILDERS) == len(set(G._BUILDERS))
 
@@ -51,15 +64,27 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
     _template(tmp_path, "off_grid")
     _write(tmp_path)
     sk = _sk_ids(tmp_path)
-    assert {"scr", "rapid_voltage_change", "rapid_voltage_change_infrequent", "harmonic_distortion",
-            "current_distortion", "flicker", "voltage_unbalance"} <= sk
+    assert {
+        "scr",
+        "rapid_voltage_change",
+        "rapid_voltage_change_infrequent",
+        "harmonic_distortion",
+        "current_distortion",
+        "flicker",
+        "voltage_unbalance",
+    } <= sk
     assert any(i == "motor_start" or i.startswith("motor_start:") for i in sk)
     out = G.grid_readiness(tmp_path, _site(), PROFILE)
     excluded = {e["id"]: e for e in out["excluded"]}
     assert set(excluded) == sk | set(VS_IDS)
-    assert all(excluded[i]["reason"] == G.SK_OFF_GRID and excluded[i]["requirement"] for i in sk)
-    assert G.SK_OFF_GRID == ("off-grid: the tie is open, so the PoC's fault level does not apply; "
-                             "the island's fault level comes from its own units")
+    assert all(
+        excluded[i]["reason"] == G.SK_OFF_GRID and excluded[i]["requirement"]
+        for i in sk
+    )
+    assert G.SK_OFF_GRID == (
+        "off-grid: the tie is open, so the PoC's fault level does not apply; "
+        "the island's fault level comes from its own units"
+    )
     assert not sk & {r["id"] for r in out["rows"]}
     # An excluded row is never counted, as a pass or as anything else.
     assert sum(out["summary"][v] for v in G.VERDICTS) == len(out["rows"])

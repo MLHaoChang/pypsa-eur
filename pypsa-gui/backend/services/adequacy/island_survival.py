@@ -30,14 +30,25 @@ import pandas as pd
 
 from services.adequacy.sweep import _CAPACITY_ATTRS
 
-SURVIVES, FAILS, NOT_EVALUATED, NOT_SOLVED = "survives", "fails", "not_evaluated", "not_solved"
+SURVIVES, FAILS, NOT_EVALUATED, NOT_SOLVED = (
+    "survives",
+    "fails",
+    "not_evaluated",
+    "not_solved",
+)
 #: The solver conditions that say the rows cannot be held by the fixed sizes.
 _INFEASIBLE = ("infeasible", "infeasible_or_unbounded")
 
 
 #: The solved dispatch table an asset of each class is in after a solve.
-_DISPATCH = {"generators": "p", "storage_units": "p", "stores": "e", "links": "p0",
-             "lines": "p0", "transformers": "p0"}
+_DISPATCH = {
+    "generators": "p",
+    "storage_units": "p",
+    "stores": "e",
+    "links": "p0",
+    "lines": "p0",
+    "transformers": "p0",
+}
 
 
 class NotSolved(ValueError):
@@ -64,8 +75,12 @@ def fix_design(n) -> list[str]:
             continue
         for name in df.index[df[ext].astype(bool)]:
             opt = df.at[name, f"{nom}_opt"] if f"{nom}_opt" in df.columns else None
-            if opt is None or pd.isna(opt) or not math.isfinite(float(opt)) \
-                    or name not in getattr(n, f"{table}_t")[_DISPATCH[table]].columns:
+            if (
+                opt is None
+                or pd.isna(opt)
+                or not math.isfinite(float(opt))
+                or name not in getattr(n, f"{table}_t")[_DISPATCH[table]].columns
+            ):
                 raise NotSolved(f"{name} is extendable and has no solved size")
             df.at[name, nom] = float(opt)
             df.at[name, ext] = False
@@ -95,18 +110,26 @@ def _solved(n) -> bool:
 def _solve(n, extra_functionality, **kw):
     if isinstance(n.snapshots, pd.MultiIndex):
         kw["multi_investment_periods"] = True
-    return n.optimize(solver_name="highs", extra_functionality=extra_functionality, **kw)
+    return n.optimize(
+        solver_name="highs", extra_functionality=extra_functionality, **kw
+    )
 
 
 def _facts(facts) -> dict:
     facts = facts or {}
-    return {"periods": {str(p): {"window_snapshots": v.get("window_snapshots"),
-                                 "critical_peak_mw": v.get("critical_peak_mw")}
-                        for p, v in (facts.get("periods") or {}).items()},
-            "critical_loads": list(facts.get("critical_loads") or []),
-            "seamless_bridge": facts.get("seamless_bridge"),
-            "fuel": dict(facts.get("fuel") or {}),
-            "missing": dict(facts.get("missing") or {})}
+    return {
+        "periods": {
+            str(p): {
+                "window_snapshots": v.get("window_snapshots"),
+                "critical_peak_mw": v.get("critical_peak_mw"),
+            }
+            for p, v in (facts.get("periods") or {}).items()
+        },
+        "critical_loads": list(facts.get("critical_loads") or []),
+        "seamless_bridge": facts.get("seamless_bridge"),
+        "fuel": dict(facts.get("fuel") or {}),
+        "missing": dict(facts.get("missing") or {}),
+    }
 
 
 def survival(n, island, *, solve=None) -> dict:
@@ -121,16 +144,23 @@ def survival(n, island, *, solve=None) -> dict:
     from services.solver import island as rows
 
     req = island["requirements"]
-    out = {"state": NOT_SOLVED, "reason": None, "shortfalls": [], "binding": [], "fixed": [],
-           "sustained_h": float(req["values"]["sustained_h"]), "scenarios": list(req["scenarios"]),
-           **_facts(None)}
+    out = {
+        "state": NOT_SOLVED,
+        "reason": None,
+        "shortfalls": [],
+        "binding": [],
+        "fixed": [],
+        "sustained_h": float(req["values"]["sustained_h"]),
+        "scenarios": list(req["scenarios"]),
+        **_facts(None),
+    }
     if not _solved(n):
         return {**out, "reason": "the network has no solved plan"}
     from services.study.findings import copy_network
 
     c = copy_network(n)
     if isinstance(n.snapshots, pd.MultiIndex):
-        c.snapshots.name = "snapshot"   # PyPSA's copy() drops the MultiIndex name
+        c.snapshots.name = "snapshot"  # PyPSA's copy() drops the MultiIndex name
     try:
         out["fixed"] = fix_design(c)
     except NotSolved as exc:
@@ -143,29 +173,59 @@ def survival(n, island, *, solve=None) -> dict:
     try:
         with rows.linearised_uc(c, island) as kw:
             status, condition = (solve or _solve)(
-                c, rows.island_extra_functionality(island, check=True), **kw)
+                c, rows.island_extra_functionality(island, check=True), **kw
+            )
     except rows.IslandRefusal as exc:
         short = getattr(exc, "short", None)
-        if short is None:   # the rows could not be built: a bad input is not a failed plan
-            return {**out, "state": NOT_EVALUATED, "reason": f"the island rows could not be built: {exc}"}
-        return {**out, "state": FAILS, "reason": f"{exc.row}: the plan as built is short by {short:.4g}"}
+        if (
+            short is None
+        ):  # the rows could not be built: a bad input is not a failed plan
+            return {
+                **out,
+                "state": NOT_EVALUATED,
+                "reason": f"the island rows could not be built: {exc}",
+            }
+        return {
+            **out,
+            "state": FAILS,
+            "reason": f"{exc.row}: the plan as built is short by {short:.4g}",
+        }
     except Exception as exc:  # noqa: BLE001 — a solver that broke is no verdict, in words
-        return {**out, "state": NOT_EVALUATED,
-                "reason": f"the island check's solve stopped with an error ({type(exc).__name__})"}
+        return {
+            **out,
+            "state": NOT_EVALUATED,
+            "reason": f"the island check's solve stopped with an error ({type(exc).__name__})",
+        }
     facts = getattr(c, "_island_facts", None)
     out.update(_facts(facts))
-    short = [{"row": sh["row"], "sentence": rows.shortfall_sentence(sh)}
-             for sh in rows.island_shortfalls(facts)]
+    short = [
+        {"row": sh["row"], "sentence": rows.shortfall_sentence(sh)}
+        for sh in rows.island_shortfalls(facts)
+    ]
     if status == "ok" and not short:
         if (facts or {}).get("skipped") or not facts:
-            return {**out, "state": NOT_EVALUATED, "reason": "the island rows were not added to the solve"}
+            return {
+                **out,
+                "state": NOT_EVALUATED,
+                "reason": "the island rows were not added to the solve",
+            }
         return {**out, "state": SURVIVES, "binding": rows.binding_rows(c)}
     if short or str(condition) in _INFEASIBLE:
-        return {**out, "state": FAILS, "shortfalls": short,
-                "reason": ("; ".join(f"{s['row']}: {s['sentence']}" for s in short) if short else
-                           "the plan as built cannot hold the island rows (the solve with them is infeasible)")}
-    return {**out, "state": NOT_EVALUATED,
-            "reason": f"the island check's solve ended {str(condition).replace('_', ' ')}, not optimal"}
+        return {
+            **out,
+            "state": FAILS,
+            "shortfalls": short,
+            "reason": (
+                "; ".join(f"{s['row']}: {s['sentence']}" for s in short)
+                if short
+                else "the plan as built cannot hold the island rows (the solve with them is infeasible)"
+            ),
+        }
+    return {
+        **out,
+        "state": NOT_EVALUATED,
+        "reason": f"the island check's solve ended {str(condition).replace('_', ' ')}, not optimal",
+    }
 
 
 # ── the input rules (GK A I8, I9) ──────────────────────────────────────────
@@ -181,22 +241,34 @@ def _ties(n) -> list[tuple[str, str]]:
 
     poc = _poc_buses(n)
     out = []
-    for comp, table in (("Link", "links"), ("Line", "lines"), ("Transformer", "transformers")):
+    for comp, table in (
+        ("Link", "links"),
+        ("Line", "lines"),
+        ("Transformer", "transformers"),
+    ):
         df = getattr(n, table)
         for name in df.index:
-            ends = {str(df.at[name, col]) for col in df.columns
-                    if col.startswith("bus") and col[3:].isdigit()} - {"", "nan"}
+            ends = {
+                str(df.at[name, col])
+                for col in df.columns
+                if col.startswith("bus") and col[3:].isdigit()
+            } - {"", "nan"}
             if ends & poc and ends - poc:
                 out.append((comp, str(name)))
     pcc = _pcc_links(n)
-    out += [("Link", x) for x in (*pcc["import"], *pcc["export"]) if ("Link", x) not in out]
+    out += [
+        ("Link", x) for x in (*pcc["import"], *pcc["export"]) if ("Link", x) not in out
+    ]
     return out
 
 
 def _carries(n, comp, name) -> bool:
     """True when the branch can carry power in either direction in any hour."""
-    table, nom = {"Link": ("links", "p_nom"), "Line": ("lines", "s_nom"),
-                  "Transformer": ("transformers", "s_nom")}[comp]
+    table, nom = {
+        "Link": ("links", "p_nom"),
+        "Line": ("lines", "s_nom"),
+        "Transformer": ("transformers", "s_nom"),
+    }[comp]
     df = getattr(n, table)
     size = f"{nom}_max" if bool(df.at[name, f"{nom}_extendable"]) else nom
     if float(df.at[name, size]) == 0.0:
@@ -218,8 +290,11 @@ def tie_state(n) -> dict:
     if not ties:
         return {"state": "no_tie", "ties": [], "carrying": []}
     carrying = [name for comp, name in ties if _carries(n, comp, name)]
-    return {"state": "closed" if carrying else "open", "ties": [name for _c, name in ties],
-            "carrying": carrying}
+    return {
+        "state": "closed" if carrying else "open",
+        "ties": [name for _c, name in ties],
+        "carrying": carrying,
+    }
 
 
 def critical_state(n, island) -> dict:
@@ -231,8 +306,16 @@ def critical_state(n, island) -> dict:
     from services.solver.process_uc import flag_column
 
     buses = set(n.buses.index[flag_column(n.buses, "eh_critical")].astype(str))
-    net = {str(i) for i, b in n.loads["bus"].items() if str(b) in buses} if len(n.loads) else set()
+    net = (
+        {str(i) for i, b in n.loads["bus"].items() if str(b) in buses}
+        if len(n.loads)
+        else set()
+    )
     side = set(critical_loads(island))
     state = "none" if not net and not side else "tagged" if net == side else "mismatch"
-    return {"state": state, "loads": sorted(net & side), "network_only": sorted(net - side),
-            "sidecar_only": sorted(side - net)}
+    return {
+        "state": state,
+        "loads": sorted(net & side),
+        "network_only": sorted(net - side),
+        "sidecar_only": sorted(side - net),
+    }
