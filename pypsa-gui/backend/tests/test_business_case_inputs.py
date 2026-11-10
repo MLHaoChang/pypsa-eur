@@ -114,7 +114,7 @@ def test_assumed_must_match_its_field():
 
 
 def test_assumed_names_only_cost_fields():
-    with pytest.raises(ValidationError, match="gpu_hour.price_per_gpu_hour"):
+    with pytest.raises(ValidationError, match=r"\['gpu_hour.price_per_gpu_hour'\], which are not defaultable"):
         B.BusinessCaseInputs.model_validate({"assumed": {"gpu_hour.price_per_gpu_hour": {
             "key": "k", "value": 1, "unit": "u", "source": "s", "source_year": 2026, "pack": "p"}}})
 
@@ -227,8 +227,13 @@ def test_it_capex_per_gpu_and_per_mw():
 def test_unit_helpers_refuse_without_their_input():
     with pytest.raises(B.PriceNotEstablished):
         B.ColocationRevenue().rent_per_kw_year()
-    with pytest.raises(B.PriceNotEstablished):
-        B.GpuHourRevenue().gpu_hours(1.0)
+    for call in (lambda g: g.gpu_hours(1.0), lambda g: g.gpu_count(1.0)):
+        with pytest.raises(B.PriceNotEstablished) as exc:
+            call(B.GpuHourRevenue())
+        assert exc.value.field == "gpu_hour.kw_per_gpu"
+    with pytest.raises(B.PriceNotEstablished) as exc:            # per GPU, kW per GPU unset
+        B.ItHardware(capex_basis="per_gpu", capex=1.0).capex_total(1.0, B.GpuHourRevenue())
+    assert exc.value.field == "gpu_hour.kw_per_gpu"
 
 
 # ---------------------------------------------------------------- pack defaults (BC9)
