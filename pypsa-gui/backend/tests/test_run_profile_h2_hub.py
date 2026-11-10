@@ -31,6 +31,7 @@ from services import (
     run_gates,
     run_profiles,
 )
+from services.adequacy.coupling import NOTHING_TO_SAMPLE
 from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import helpers_state, session  # noqa: F401
 from tests.test_harness_envelope import envelope_of, granted, profile  # noqa: F401
@@ -416,7 +417,7 @@ def test_a_done_eh_study_meeting_the_goal_never_passes_the_refused_loops_lole_ru
         "tool": "run_coupling_loop",
         "engine": "eh.adequacy.lole",
         "status": "failed",
-        "error": f"engine_refused: {run_gates.NOTHING_TO_SAMPLE}",
+        "error": f"engine_refused: {NOTHING_TO_SAMPLE}",
     }
     env = env_for(
         tmp_path, ctx=ctx_for(tmp_path, eh_study=eh), steps=[eh_done(), refused_loop]
