@@ -5,6 +5,7 @@ Read-time only: reading changes nothing (R2). Every reader treats it as
 measured, so a default never replaces it (R1). The user confirms a series is the
 network's own through one route that writes only the provenance meta (R3).
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -34,7 +35,9 @@ def _network() -> pypsa.Network:
 @pytest.fixture
 def project(client, install_network):
     install_network(_network())
-    resp = client.post("/api/projects/Legacy Farm", params={"force": True, "rebind": True})
+    resp = client.post(
+        "/api/projects/Legacy Farm", params={"force": True, "rebind": True}
+    )
     assert resp.status_code == 200, resp.text
     return "Legacy Farm"
 
@@ -54,6 +57,7 @@ def _row(client, name="g_a"):
 
 
 # --- R1: every reader ---------------------------------------------------
+
 
 def test_profile_kind_says_unrecorded(ctx):
     assert rd.profile_kind(ctx, "g_a") == "unrecorded"
@@ -82,6 +86,7 @@ def test_readiness_row_names_it_and_carries_a_digest(client, ctx):
 
 def test_current_reader_treats_it_as_an_upload_not_network(ctx):
     from services.profile_gen.current import describe_current
+
     d = describe_current(ctx, *KEY)
     assert d["provenance"] == "uploaded" and d["source"] == "upload"
 
@@ -93,6 +98,7 @@ def test_batch_apply_refuses_it_as_measured(client, ctx):
 
 # --- R2: no write on read -------------------------------------------------
 
+
 def test_a_readiness_read_changes_nothing(client, ctx):
     before_series = ctx.user_ts[KEY].copy()
     before_meta = dict(ctx.user_ts_meta)
@@ -103,9 +109,12 @@ def test_a_readiness_read_changes_nothing(client, ctx):
 
 # --- R3: the confirmation write ---------------------------------------------
 
+
 def _confirm(client, digest, name="g_a"):
-    return client.post(f"{BASE}/profiles/unrecorded/confirm",
-                       json={"items": [{"component": name, "digest": digest}]})
+    return client.post(
+        f"{BASE}/profiles/unrecorded/confirm",
+        json={"items": [{"component": name, "digest": digest}]},
+    )
 
 
 def test_confirm_writes_only_the_meta(client, ctx):
@@ -121,15 +130,24 @@ def test_a_changed_series_is_refused_stale_and_nothing_is_stamped(client, ctx):
     digest = current_digest(ctx.user_ts[KEY])
     ctx.user_ts[KEY] = pd.Series(0.1, index=SNAPS)
     r = _confirm(client, digest)
-    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "unrecorded_stale"
+    assert (
+        r.status_code == 409 and r.json()["detail"]["error_kind"] == "unrecorded_stale"
+    )
     assert ctx.user_ts_meta.get(KEY) is None
 
 
 def test_one_stale_item_refuses_the_whole_batch(client, ctx):
     ctx.user_ts[("generators", "p_max_pu", "g_b")] = pd.Series(0.5, index=SNAPS)
     good = current_digest(ctx.user_ts[KEY])
-    r = client.post(f"{BASE}/profiles/unrecorded/confirm", json={"items": [
-        {"component": "g_a", "digest": good}, {"component": "g_b", "digest": "0" * 16}]})
+    r = client.post(
+        f"{BASE}/profiles/unrecorded/confirm",
+        json={
+            "items": [
+                {"component": "g_a", "digest": good},
+                {"component": "g_b", "digest": "0" * 16},
+            ]
+        },
+    )
     assert r.status_code == 409
     assert ctx.user_ts_meta.get(KEY) is None
 
@@ -150,8 +168,13 @@ def test_one_undo_restores_the_empty_meta(client, ctx, session_ctx):
 
 def test_confirm_is_not_a_chat_tool():
     from harness.catalogue import TOOL_ROUTES, TOOLS
-    assert not [t for t in TOOLS if "unrecorded" in str(t.get("name", t)).lower()
-                and "readiness" not in str(t.get("name", t))]
+
+    assert not [
+        t
+        for t in TOOLS
+        if "unrecorded" in str(t.get("name", t)).lower()
+        and "readiness" not in str(t.get("name", t))
+    ]
     assert not [r for r in TOOL_ROUTES.values() if "unrecorded" in str(r)]
 
 

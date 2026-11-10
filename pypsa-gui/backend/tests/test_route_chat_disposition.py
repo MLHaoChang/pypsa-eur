@@ -78,6 +78,13 @@ SERVED_BY_TOOL: dict[tuple[str, str], str] = {
 }
 
 UI_INTERNAL: dict[str, dict] = {
+    'profiles_unrecorded_confirm': {
+        "reason": ("The user's own decision that a series with no provenance record is the "
+                   "network's (RP-18, GK B R3): the model has no tool for it."),
+        "routes": frozenset({
+            ('POST', '/api/projects/{name}/profiles/unrecorded/confirm'),
+        }),
+    },
     'spa': {
         "reason": "Serves the built frontend's pages.",
         "routes": frozenset({

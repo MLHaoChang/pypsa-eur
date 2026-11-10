@@ -1491,12 +1491,12 @@ def confirm_unrecorded_series(
         if series is None or ctx.user_ts_meta.get(key):
             raise HTTPException(status_code=409, detail={
                 "error_kind": "not_unrecorded", "component": item.component,
-                "message": f"{item.component!r} no longer has a series with no "
+                "message": f"{item.component} no longer has a series with no "
                            "record; reload the list"})
         if current_digest(series) != item.digest:
             raise HTTPException(status_code=409, detail={
                 "error_kind": "unrecorded_stale", "component": item.component,
-                "message": f"{item.component!r} changed since the list was shown; "
+                "message": f"{item.component} changed since the list was shown; "
                            "reload it and confirm again"})
         keys.append(key)
     push_undo_snapshot()
