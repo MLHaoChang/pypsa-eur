@@ -440,7 +440,8 @@ class BusinessCaseInputs(BaseModel):
         `pack` and recorded in `assumed`. A stated value is never overwritten; a revenue line
         has no defaults. A money row in another currency is skipped, never converted. A price
         default carries its row's money year into the line (G-C1); a line whose stated
-        money year differs is skipped, never converted (GK B Q4). A skipped price stays None
+        money year differs, or whose typed price cells are in base-year money (no stated
+        money year), is skipped, never converted or relabelled (GK B Q4, F1). A skipped price stays None
         and the run refuses it `cost_not_established` (GK B P1)."""
         lines = []
         for ln in self.lines:
@@ -456,6 +457,10 @@ class BusinessCaseInputs(BaseModel):
                     continue
                 if col == "price" and row.money_year is not None:
                     if data["money_year"] is None:
+                        # Typed cells are in base-year money; the row's year would relabel
+                        # them (GK B F1 on #1320 @15efa912): skip, never relabel.
+                        if data["price_by_year"]:
+                            continue
                         data["money_year"] = row.money_year
                     elif data["money_year"] != row.money_year:
                         continue

@@ -892,6 +892,28 @@ def test_a_stated_different_money_year_is_skipped_not_converted():
     assert filled.lines[0].price == pytest.approx(10.7e6 / 1.13, rel=1e-4)
 
 
+def test_typed_price_cells_are_never_relabelled_by_a_default():
+    """GK B F1 on #1320 @15efa912: cells typed in base-year money keep the base year; the
+    default is skipped and the run refuses the gap."""
+    pack = loader.load_defaults_pack(NEW)
+    line = _capex(
+        price=None,
+        price_by_year={2027: 50_000.0},
+        default_keys={"price": DC_KEYS["facility_capex"]},
+    )
+    filled = _case(_rev(), line).with_cost_defaults(pack, currency="EUR")
+    ln = filled.lines[1]
+    assert ln.price is None and "price" not in ln.assumed and ln.money_year is None
+    assert ln.cell("price", 2027) == B.Cell(50_000.0, None, False)
+    assert _refusals(filled) == NOT_ESTABLISHED
+    # A stated money year equal to the row's still takes the default beside the cells.
+    stated = _case(_rev(), {**line, "money_year": 2025}).with_cost_defaults(
+        pack, currency="EUR"
+    )
+    assert stated.lines[1].price == pytest.approx(10.7e6 / 1.13, rel=1e-4)
+    assert stated.lines[1].cell("price", 2027) == B.Cell(50_000.0, 2025, False)
+
+
 def _patched(update: dict) -> Any:
     real = loader.load_defaults_pack(NEW)
     bad = real.value(DC_KEYS["facility_capex"]).model_copy(update=update)
