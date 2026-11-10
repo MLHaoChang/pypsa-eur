@@ -201,8 +201,7 @@ def baseline(client, session_ctx, install_network, template, tmp_path):
     # The template's own solver settings (its VoLL slacks) and a stored reliability goal (h/yr).
     ctx.solver_state["solver_config"] = SolverConfig(
         **{
-            **T.SOLVER_CONFIG,
-            **T.SOLVER_CONFIG_EXTRA.get(template, {}),
+            **T.solver_config(template),
             "target_lole_h": 2.0,
         }
     )
@@ -341,17 +340,24 @@ def test_a_run_on_each_template_reaches_a_loop_verdict_on_the_sampled_grid_impor
     goal_granted, rated, fake_report, template
 ):
     """Adequacy loops 01 (closes the loop half of study-harness 11's
-    acceptance 1): the shipped profile, EH study and coupling loop real.
+    acceptance 1): the shipped profile, EH study and coupling loop real, on
+    the template's own solver settings (its tariff moves the electrolyser's
+    dispatch, and with it what an import outage sheds).
     The loop samples the hub side, its grid_import Link a two-state unit, and
     the store-fed fuel cell is not credited (GK A (20) AL-1). The loop runs to
-    a verdict and the LOLE rule evaluates it: on the shipped hub the import's
-    outages alone miss the goal and no lever moves them, so the rule reads
-    fail and the run stops at the result gate (block before, block now).
+    a verdict and the LOLE rule evaluates it (GK A (21) AL-8):
+    - eh_h2_hub meets the goal on the first solve, the rule passes and the
+      run completes (block before, pass now). Its 1.46 h/yr is two sampled
+      shortfall events; a third would miss the 2 h/yr goal;
+    - eh_h2_hub_staged misses on the import's outages alone and no lever
+      moves them, so the rule reads fail and the run stops at the result gate
+      (block before, block now).
     The solve count is the loop's own: solves used + probe solves + the
     closing re-solve."""
     from tests.test_harness_run_report_handoff import runner as run_runner
     from tests.test_harness_runner import Clicks
 
+    met = template == "eh_h2_hub"
     task, path = goal_granted(REFS[template])
     clicks = Clicks(refs={"solve.2"})
     record = go(run_runner(clicks), path, task)
@@ -360,19 +366,21 @@ def test_a_run_on_each_template_reaches_a_loop_verdict_on_the_sampled_grid_impor
         r["rule"]: r
         for r in (run["stages"]["result_gate"].get("gate") or {}).get("rules", [])
     }
-    assert run["stage"] == "result_gate" and run["status"] == "needs_user", (
-        run["stage"],
-        run["status"],
+    assert (run["stage"], run["status"]) == (
+        ("handoff", "completed") if met else ("result_gate", "needs_user")
     )
     assert clicks.used == ["solve.2"]
     engine = next(s for s in record["steps"] if s.get("engine"))
     assert engine["tool"] == "run_coupling_loop" and engine["status"] == "completed"
     lole = verdicts["eh.adequacy.lole"]
     loop = lole["facts"][0]["loop"]
-    assert loop["status"] == "unreachable" and loop["error"] is None
-    assert lole["facts"][0]["value"] is False
-    assert lole["verdict"] == "fail" and lole["severity"] == "block"
-    assert not run_gates.passed([lole])
+    assert loop["status"] == ("met" if met else "unreachable") and loop["error"] is None
+    assert loop["solves_used"] == (1 if met else 2)
+    assert lole["facts"][0]["value"] is met
+    assert (
+        lole["verdict"] == ("pass" if met else "fail") and lole["severity"] == "block"
+    )
+    assert run_gates.passed([lole]) is met
     assert verdicts["h2.offtake.met"]["verdict"] == "pass"
     envelope = envelope_of(path)
     [row] = [
