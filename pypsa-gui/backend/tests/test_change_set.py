@@ -1067,8 +1067,28 @@ def test_the_tool_call_cap_mid_set_reads_not_run_and_the_receipt_precedes_sessio
     _one_result_per_call(session, 3)
 
 
-def test_an_unticked_row_the_cap_stopped_is_not_counted_as_ticked(world, monkeypatch):
-    """F1: `not_run` is only for a ticked, approved row."""
+@pytest.mark.parametrize(
+    ("ticked", "statuses", "landed"),
+    [
+        # the unticked row is one the cap never reached
+        (
+            ["tu-0", "tu-1"],
+            {"tu-0": "applied", "tu-1": "not_run", "tu-2": "unticked"},
+            1,
+        ),
+        # the capped call itself is the unticked one
+        (
+            ["tu-0", "tu-2"],
+            {"tu-0": "applied", "tu-1": "unticked", "tu-2": "not_run"},
+            1,
+        ),
+    ],
+)
+def test_an_unticked_row_the_cap_stopped_stays_unticked_and_uncounted(
+    world, monkeypatch, ticked, statuses, landed
+):
+    """GK B (44) R1: an unticked row is `unticked` whatever stopped the set,
+    and is never counted as ticked or failed."""
     from harness import budget
 
     monkeypatch.setattr(budget, "MAX_TOOL_CALLS_PER_TURN", 1)
@@ -1076,10 +1096,109 @@ def test_an_unticked_row_the_cap_stopped_is_not_counted_as_ticked(world, monkeyp
         chat_service.ChatSession(),
         [B1_POC, B2_CRIT, B3_CRIT],
         EXPERT,
-        [("approve", ["tu-0", "tu-1"])],
+        [("approve", ticked)],
+    )
+    got, receipt = _receipt(events)
+    assert got == statuses
+    assert (receipt["ticked"], receipt["landed"], receipt["failed"]) == (2, landed, 0)
+
+
+def test_a_denied_set_the_cap_also_stops_reads_denied_not_not_run(world, monkeypatch):
+    """GK B (44) R3: `not_run` is only for an approved set."""
+    from harness import budget
+
+    monkeypatch.setattr(budget, "MAX_TOOL_CALLS_PER_TURN", 1)
+    events = _run(
+        chat_service.ChatSession(), [B1_POC, B2_CRIT, B3_CRIT], EXPERT, [("deny", None)]
     )
     statuses, receipt = _receipt(events)
-    assert statuses == {"tu-0": "applied", "tu-1": "not_run", "tu-2": "failed"}
+    assert set(statuses.values()) == {"failed"}
+    assert (receipt["decision"], receipt["ticked"], receipt["landed"]) == ("deny", 0, 0)
+    assert not _flag("B1", "eh_poc")
+
+
+def test_a_denied_set_whose_row_also_moved_is_recorded_as_the_users_deny(
+    world, monkeypatch
+):
+    """GK B (44) R2: neither the stale check nor the restriction recheck
+    speaks for a set the user rejected."""
+    from harness import restrictions
+
+    looks = iter(range(1000))
+    monkeypatch.setattr(
+        restrictions, "capture", lambda s: {"mode": "standard", "rev": next(looks)}
+    )
+    decided = []
+    real = approvals.decided
+    monkeypatch.setattr(
+        approvals, "decided", lambda s, **k: (decided.append(k), real(s, **k))[1]
+    )
+    session = chat_service.ChatSession()
+    wait = session.wait_for_decision
+
+    def waiting(token):
+        decision = wait(token)
+        PyPSAService.get_network().buses.loc["B2", "v_nom"] = 33.0  # an outside edit
+        return decision
+
+    session.wait_for_decision = waiting
+    calls = [
+        (
+            "update_component",
+            {"component_class": "Bus", "name": n, "attrs": {"v_nom": 20.0}},
+        )
+        for n in ("B1", "B2")
+    ]
+    events = _run(session, calls, EXPERT, [("deny", None)])
+    assert _errors(events) == dict.fromkeys(["tu-0", "tu-1"], "confirmation_denied")
+    assert [(d["outcome"], d["by"]) for d in decided] == [("rejected", "user")] * 2
+    assert PyPSAService.get_network().buses.at["B1", "v_nom"] != 20.0
+
+
+def test_a_project_switch_mid_set_reads_not_run_for_the_rows_left(world, monkeypatch):
+    """GK B (44) R4: the dispatch refuses the rest against another project;
+    nothing was written, so a ticked row reads `not_run`."""
+    real = PyPSAService.get_active_context
+
+    class Elsewhere:
+        loaded_project = "another project"
+
+        def __getattr__(self, name):
+            return getattr(real(), name)
+
+    _moving(
+        monkeypatch,
+        lambda: monkeypatch.setattr(PyPSAService, "get_active_context", Elsewhere),
+    )
+    session = chat_service.ChatSession()
+    events = _run(
+        session, [B1_POC, B2_CRIT, B3_CRIT], EXPERT, [("approve", ["tu-0", "tu-1"])]
+    )
+    statuses, receipt = _receipt(events)
+    assert statuses == {"tu-0": "applied", "tu-1": "not_run", "tu-2": "unticked"}
+    assert (receipt["ticked"], receipt["landed"], receipt["failed"]) == (2, 1, 0)
+    assert not _flag("B2", "eh_critical")
+
+
+def test_an_error_that_escapes_the_dispatch_still_gets_the_receipt():
+    """The receipt precedes the error, saying which rows may have landed."""
+    session = _held(status="applied")
+    session.change_set["order"].append("b")
+    session.change_set["rows"]["b"] = {
+        **session.change_set["rows"]["a"], "status": None, "reached": False,
+    }  # fmt: skip
+
+    def frames():
+        yield "tool_result", {"tool_use_id": "a"}
+        raise RuntimeError("dispatch broke")
+
+    seen = []
+    with pytest.raises(RuntimeError):
+        for frame in change_set.observe(session, frames()):
+            seen.append(frame)
+    assert [e for e, _ in seen] == ["tool_result", "change_set_receipt"]
+    assert [r["status"] for r in seen[1][1]["rows"]] == ["applied", "not_run"]
+    assert session.change_set is None
 
 
 def test_a_reached_member_without_a_receipt_stays_uncertain():
@@ -1397,10 +1516,10 @@ def test_a_refusal_never_overwrites_an_outcome_already_noted():
     ("decision", "ticked", "reached", "status"),
     [
         ("approve", True, True, "uncertain"),
-        ("approve", False, True, "failed"),
+        ("approve", False, True, "unticked"),
         ("deny", True, True, "failed"),
         ("approve", True, False, "not_run"),
-        ("approve", False, False, "failed"),
+        ("approve", False, False, "unticked"),
         ("deny", True, False, "failed"),
     ],
 )

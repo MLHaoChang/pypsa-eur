@@ -670,19 +670,24 @@ def note_error(session, tool_use_id: str, error_kind: str | None) -> None:
         return
     state = session.change_set
     row["error_kind"] = error_kind
+    if state["decision"] == "approve" and not row["ticked"]:
+        row["status"] = "unticked"  # whatever refused it, the user left it out
+        return
     row["status"] = {
         "change_unticked": "unticked",
         "edit_preview_stale": "stale",
-        # The cap refuses the call before its gate: it never ran.
+        # Refused before the gate, with the turn ending: the call never ran.
         "tool_call_cap_exceeded": _unreached(state, row),
+        "project_switched_mid_turn": _unreached(state, row),
     }.get(error_kind or "", "failed")
 
 
 def _unreached(state: dict, row: dict) -> str:
     """K7: a member the dispatch never brought to its gate (the turn ended
-    first, as at the tool-call cap). Nothing was written, so a
-    ticked, approved row reads `not_run`, never `uncertain`."""
-    return "not_run" if row["ticked"] and state["decision"] == "approve" else "failed"
+    first: the tool-call cap, a project switch, an error). Nothing was
+    written, so a ticked, approved row reads `not_run`, never `uncertain`; a
+    set that was not approved reads as refused."""
+    return "not_run" if state["decision"] == "approve" else "failed"
 
 
 def observe(session, frames: Generator) -> Generator[tuple[str, dict], None, Any]:
@@ -694,14 +699,23 @@ def observe(session, frames: Generator) -> Generator[tuple[str, dict], None, Any
             event, payload = next(frames)
         except StopIteration as stop:
             return stop.value
+        except Exception:
+            # An error that escapes the dispatch ends the turn too: say first
+            # which rows landed and which never ran.
+            yield from _settle(session)
+            raise
         if event == "tool_error" and isinstance(payload, dict):
             note_error(session, payload.get("tool_use_id"), payload.get("error_kind"))
         if event == "session_done":
-            receipt = receipt_frame(session)
-            session.change_set = None
-            if receipt is not None:
-                yield "change_set_receipt", receipt
+            yield from _settle(session)
         yield event, payload
+
+
+def _settle(session) -> Generator[tuple[str, dict], None, None]:
+    receipt = receipt_frame(session)
+    session.change_set = None
+    if receipt is not None:
+        yield "change_set_receipt", receipt
 
 
 def receipt_frame(session) -> dict | None:
@@ -712,14 +726,16 @@ def receipt_frame(session) -> dict | None:
     rows = []
     for tool_use_id in state["order"]:
         row = state["rows"][tool_use_id]
-        # A reached member with no receipt and no refusal may have written.
-        status = row["status"] or (
-            _unreached(state, row)
-            if not row["reached"]
-            else "uncertain"
-            if row["ticked"] and state["decision"] == "approve"
-            else "failed"
-        )
+        approved = state["decision"] == "approve"
+        if row["status"]:
+            status = row["status"]
+        elif approved and not row["ticked"]:
+            status = "unticked"
+        elif not row["reached"]:
+            status = _unreached(state, row)
+        else:
+            # A reached member with no receipt and no refusal may have written.
+            status = "uncertain" if approved else "failed"
         rows.append(
             {
                 "tool_use_id": tool_use_id,

@@ -490,10 +490,13 @@ component (`frontend/src/components/EditCard.tsx`).
   Each row is applied (verified and changed), unchanged, uncertain, failed,
   stale, unticked or not_run, with `landed`; `all_applied` holds only when every
   ticked row landed. A failed row does not stop the later rows. `not_run` is a
-  ticked row the turn ended before (the tool-call cap): it never reached its
+  ticked row of an approved set that the turn ended before (the tool-call cap,
+  a project switch, an error escaping the dispatch): it never reached its
   gate, so nothing was written; a row past its gate with no receipt stays
-  uncertain. When the dispatch ends the turn itself, the receipt is sent before
-  `session_done`, where the browser stops reading. The browser shows the
+  uncertain. An unticked row reads unticked whatever stopped the set and is
+  never counted as ticked or failed. When the dispatch ends the turn itself,
+  or raises, the receipt is sent first: the browser stops reading at
+  `session_done` and `error`. The browser shows the
   card and the receipt in `frontend/src/components/ChangeSetCard.tsx`; `/confirm`
   carries the ticked ids as `ticked`. `ENABLED` switches membership off.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
