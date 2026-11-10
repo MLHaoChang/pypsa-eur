@@ -254,7 +254,11 @@ def test_an_uncertain_read_back_never_counts_as_landed(world, monkeypatch):
 
 
 def test_a_row_that_changes_nothing_is_not_counted_as_landed(world):
-    PyPSAService.get_network().buses.loc["B1", "eh_poc"] = True
+    # A fully set column: a half-set one (B2 not set) would be normalised by
+    # row 1's write, which moves row 2's preview and is stale under K3.
+    buses = PyPSAService.get_network().buses
+    buses["eh_poc"] = False
+    buses.loc["B1", "eh_poc"] = True
     events = _run(
         chat_service.ChatSession(), [B1_POC, B2_CRIT], EXPERT, [("approve", None)]
     )
@@ -302,6 +306,111 @@ def test_a_column_an_earlier_row_created_is_not_stale(world):
     events = _run(chat_service.ChatSession(), calls, EXPERT, [("approve", None)])
     assert _errors(events) == {}
     assert _flag("B1", "eh_critical") and _flag("B2", "eh_critical")
+
+
+def _moving(monkeypatch, move):
+    """`update_component` that also runs `move()` after each write (an outside edit)."""
+    real = chat_tools.DISPATCHERS["update_component"]
+
+    def moving(*a, **k):
+        out = real(*a, **k)
+        move()
+        return out
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "update_component", moving)
+
+
+def test_an_outside_edit_on_a_field_an_earlier_row_wrote_is_stale(world, monkeypatch):
+    """K3 (GK B F1): rows 1 and 2 write the same existing (class, field) on two
+    components. An outside edit moves row 2's old value after the card: row 2
+    is refused, never applied as 33 → 20 under a tick that showed 1 → 20."""
+
+    def move():
+        PyPSAService.get_network().buses.loc["B2", "v_nom"] = 33.0
+
+    _moving(monkeypatch, move)
+    calls = [
+        (
+            "update_component",
+            {"component_class": "Bus", "name": name, "attrs": {"v_nom": 20.0}},
+        )
+        for name in ("B1", "B2")
+    ]
+    events = _run(chat_service.ChatSession(), calls, EXPERT, [("approve", None)])
+    assert _errors(events) == {"tu-1": "edit_preview_stale"}
+    buses = PyPSAService.get_network().buses
+    assert buses.at["B1", "v_nom"] == 20.0 and buses.at["B2", "v_nom"] == 33.0
+    statuses, _ = _receipt(events)
+    assert statuses == {"tu-0": "applied", "tu-1": "stale"}
+
+
+def test_a_created_column_that_is_not_at_its_default_is_stale(world, monkeypatch):
+    """K3 (GK B F1): row 1 creates `eh_critical`; an outside edit then sets it
+    on B3, so row 2 (B3) no longer goes from not set to the column default."""
+
+    real = change_set.note_receipt
+
+    def then_move(session, tool_use_id, receipt):
+        real(session, tool_use_id, receipt)  # row 1's creation is recorded first
+        PyPSAService.get_network().buses.loc["B3", "eh_critical"] = True
+
+    monkeypatch.setattr(change_set, "note_receipt", then_move)
+    calls = [
+        (
+            "update_component",
+            {"component_class": "Bus", "name": "B1", "attrs": {"eh_critical": True}},
+        ),
+        (
+            "update_component",
+            {"component_class": "Bus", "name": "B3", "attrs": {"eh_critical": False}},
+        ),
+    ]
+    events = _run(chat_service.ChatSession(), calls, EXPERT, [("approve", None)])
+    assert _errors(events) == {"tu-1": "edit_preview_stale"}
+    assert _flag("B3", "eh_critical")  # the outside edit stands; row 2 wrote nothing
+    statuses, _ = _receipt(events)
+    assert statuses == {"tu-0": "applied", "tu-1": "stale"}
+
+
+def test_a_column_that_already_existed_is_not_a_created_column(world):
+    """K3 (GK B F1): the loosening is for a column the write created. Here
+    `eh_critical` exists before the card, set on B1 only; row 1's write fills
+    B2's cell, and row 2's moved old value is stale like any other."""
+    PyPSAService.get_network().buses.loc["B1", "eh_critical"] = False
+    calls = [
+        (
+            "update_component",
+            {"component_class": "Bus", "name": "B1", "attrs": {"eh_critical": True}},
+        ),
+        B2_CRIT,
+    ]
+    events = _run(chat_service.ChatSession(), calls, EXPERT, [("approve", None)])
+    assert _errors(events) == {"tu-1": "edit_preview_stale"}
+    assert not _flag("B2", "eh_critical")
+
+
+def test_an_uncertain_earlier_write_does_not_excuse_a_moved_old_value(
+    world, monkeypatch
+):
+    """K3 (GK B F1): only a verified write opens the created-column case."""
+    real = edit_card.receipt
+    monkeypatch.setattr(
+        edit_card,
+        "receipt",
+        lambda card, args: {**real(card, args), "outcome": "uncertain"},
+    )
+    calls = [
+        (
+            "update_component",
+            {"component_class": "Bus", "name": "B1", "attrs": {"eh_critical": True}},
+        ),
+        B2_CRIT,
+    ]
+    events = _run(chat_service.ChatSession(), calls, EXPERT, [("approve", None)])
+    assert _errors(events) == {"tu-1": "edit_preview_stale"}
+    assert not _flag("B2", "eh_critical")
+    statuses, _ = _receipt(events)
+    assert statuses == {"tu-0": "uncertain", "tu-1": "stale"}
 
 
 def test_two_writes_on_one_component_never_share_a_set(world):
