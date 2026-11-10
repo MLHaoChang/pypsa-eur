@@ -17,6 +17,7 @@ import {
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
   isRenewableCarrier, colourForCarrier, COST_UNAVAILABLE,
 } from './shared'
+import { money } from '../../utils/money'
 import { useResultsFilter } from './filterContext'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
 import { useUIStore } from '../../store/uiStore'
@@ -788,7 +789,7 @@ export default function Economics() {
       {profitChartData.length > 0 && (
         <ChartFrame
           title="Top profitable & loss-making assets"
-          hint="Bar height = net profit; green > 0, red < 0."
+          hint="Bar height is net profit. Green is above 0, red is below."
           right={<ChartActions chartRef={profitChartRef} onExportCSV={onExportCSV} filename={`asset_economics_profit${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} />}
         >
           <div ref={profitChartRef}>
@@ -797,10 +798,7 @@ export default function Economics() {
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} angle={-30} textAnchor="end" height={80} interval={0} />
                 <YAxis {...CHART_AXIS} label={yAxisLabel('€')}
-                  tickFormatter={(v: number) =>
-                    Math.abs(v) >= 1e9 ? `${(v / 1e9).toFixed(1)}B` :
-                    Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(1)}M` :
-                    Math.abs(v) >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : `${v.toFixed(0)}`} />
+                  tickFormatter={(v: number) => `${v < 0 ? '\u2212' : ''}${money(v)}`} />
                 <RTooltip {...CHART_TOOLTIP}
                   formatter={(v: number) => [fmtCurrency(v), 'Net profit']} />
                 <Bar dataKey="value">
@@ -818,7 +816,7 @@ export default function Economics() {
       {lcoeChartData.length > 0 && (
         <ChartFrame
           title="Per-asset LCOE / LCOS"
-          hint="Ranked low → high. Storage shows LCOS (includes charging electricity cost). Electrolysers are Link components — their LCOH lives in the Hydrogen panel below, so an H₂ storage bar here is a different asset, not the electrolyser."
+          hint="Ranked low → high. Storage shows LCOS (includes charging electricity cost). Electrolysers are Link components and their LCOH is in the Hydrogen panel below, so an H₂ storage bar here is a different asset, not the electrolyser."
           right={<ChartActions chartRef={lcoeChartRef} onExportCSV={onExportCSV} filename={`asset_lcoe_lcos${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} />}
         >
           <div ref={lcoeChartRef}>

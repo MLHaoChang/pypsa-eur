@@ -613,7 +613,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       {economicsBars && economicsBars.length > 0
         && economicsBars.some(r => r.CAPEX > 0 || r.OPEX > 0 || r.VOLL == null || r.VOLL > 0) && (
         <ChartFrame
-          title="Economics — system cost per period"
+          title="Economics · system cost per period"
           hint={vollNotRecorded ? 'CAPEX · OPEX' : 'CAPEX · OPEX · VOLL'}
           right={
             <ChartActions
@@ -662,7 +662,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       {/* ── Generation: energy mix per period ────────────────── */}
       {generationMix && generationRows && (
         <ChartFrame
-          title="Generation — energy mix per period"
+          title="Generation · energy mix per period"
           right={
             <>
               <div className="inline-flex items-center rounded-[7px] bg-panel border border-border p-0.5 text-[10px]">
@@ -714,7 +714,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       {/* ── Storage: charged / discharged per period (by carrier) ── */}
       {storageBars && storageBars.rows.length > 0 && (
         <ChartFrame
-          title="Storage — energy charged & discharged per period"
+          title="Storage · energy charged & discharged per period"
           hint={storageBars.carriers.length > 1
             ? `by carrier · ${storageBars.carriers.join(' · ')}`
             : 'discharge vs. charge'}
@@ -773,7 +773,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       {curtailmentBars && curtailmentBars.rows.length > 0
         && curtailmentBars.rows.some(r => curtailmentBars.carriers.some(c => Number(r[c] ?? 0) > 0)) && (
         <ChartFrame
-          title="Renewables — curtailment per period"
+          title="Renewables · curtailment per period"
           hint={curtailmentBars.carriers.length > 1
             ? `by carrier · ${curtailmentBars.carriers.join(' · ')}`
             : 'Σ max(p_max_pu × p_nom − p, 0)'}
@@ -812,7 +812,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       {/* ── Load: by carrier per period ──────────────────────── */}
       {loadByCarrier && loadByCarrier.rows.length > 0 && (
         <ChartFrame
-          title="Load — energy demand per period by carrier"
+          title="Load · energy demand per period by carrier"
           hint="electricity · heat · H₂"
           right={
             <ChartActions

@@ -261,6 +261,11 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
             }} />
         }
         bodyClassName="p-3">
+        {frameSource !== source && (
+          <p className="mb-2 text-[11px] text-muted" data-testid="ef-one-period">
+            All periods are selected above. The diagram draws one period: {periodLabel(data.period)}.
+          </p>
+        )}
         {graph.links.length ? (
           <div ref={chartRef} data-testid="ef-sankey"><FlowSankeyChart data={graph} width={sankeyWidth} /></div>
         ) : (

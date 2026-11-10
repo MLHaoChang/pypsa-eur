@@ -1085,6 +1085,7 @@ export default function LoadFlow() {
                     rows={voltageChart.rows}
                     cols={voltageChart.cols}
                     colors={SERIES_COLOURS}
+                    dashed
                     unit="p.u."
                     valueFormatter={(v: number) => `${v.toFixed(4)} p.u.`}
                     height={170}
@@ -1100,7 +1101,7 @@ export default function LoadFlow() {
                       <Legend {...CHART_LEGEND} />
                       {voltageChart.cols.map((c, i) => (
                         <Line key={c} type="monotone" dataKey={c} name={c}
-                              stroke={SERIES_COLOURS[i % SERIES_TOKENS]} strokeDasharray={seriesDash(Math.floor(i / SERIES_TOKENS))}
+                              stroke={SERIES_COLOURS[i % SERIES_TOKENS]} strokeDasharray={seriesDash(i + Math.floor(i / SERIES_TOKENS))}
                               strokeWidth={1.4} dot={false} />
                       ))}
                     </LineChart>
@@ -1268,7 +1269,7 @@ export default function LoadFlow() {
               ) : (
                 priceChart.cols.map((c, i) => (
                   <Line key={c} type="monotone" dataKey={c} name={c}
-                        stroke={SERIES_COLOURS[i % SERIES_TOKENS]} strokeDasharray={seriesDash(Math.floor(i / SERIES_TOKENS))}
+                        stroke={SERIES_COLOURS[i % SERIES_TOKENS]} strokeDasharray={seriesDash(i + Math.floor(i / SERIES_TOKENS))}
                         strokeWidth={1.2} dot={false} />
                 ))
               )}

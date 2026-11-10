@@ -158,6 +158,7 @@ describe('the source line on a multi-period run', () => {
     const source = frame.querySelector('[data-chart-source]')!.textContent!
     expect(source).toContain('period 2027')
     expect(source).not.toContain('all periods')
+    expect(screen.getByTestId('ef-one-period').textContent).toBe('All periods are selected above. The diagram draws one period: 2027.')
     // The supply and demand charts below read the same period.
     expect(screen.getByTestId('ef-series-supply').querySelector('[data-chart-source]')!.textContent).toContain('period 2027')
   })
@@ -166,6 +167,7 @@ describe('the source line on a multi-period run', () => {
     mountIn()
     const frame = await screen.findByTestId('ef-flow')
     expect(frame.querySelector('[data-chart-source]')!.textContent).toBe(line)
+    expect(screen.queryByTestId('ef-one-period')).toBeNull()
   })
 })
 

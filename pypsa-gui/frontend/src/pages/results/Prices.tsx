@@ -383,6 +383,7 @@ export default function Prices() {
                 colors={priceView === 'avg' ? [PRICE_SERIES.colour] : SERIES_COLOURS}
                 unit="€/MWh"
                 valueFormatter={(v: number) => `${v.toFixed(2)} €/MWh`}
+                dashed={priceView !== 'avg'}
                 height={170}
               />
             ) : (
@@ -408,7 +409,7 @@ export default function Prices() {
                     priceChart.cols.map((c, i) => (
                       <Line key={c} type="monotone" dataKey={c} name={c}
                             stroke={SERIES_COLOURS[i % SERIES_TOKENS]}
-                            strokeDasharray={seriesDash(Math.floor(i / SERIES_TOKENS))}
+                            strokeDasharray={seriesDash(i + Math.floor(i / SERIES_TOKENS))}
                             strokeWidth={1.2} dot={false} />
                     ))
                   )}

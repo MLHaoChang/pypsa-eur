@@ -97,7 +97,7 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
         {(data.series ?? []).map((s, i) => <Line key={s.asset_key ?? `${s.class}:${s.name}`}
           dataKey={s.asset_key ?? `${s.class}: ${s.name}`}
           name={`${s.class}: ${s.name}${s.name_truncated ? `… [${s.asset_key?.slice(0, 8)}]` : ''}`}
-          stroke={carrierColour(null, i)} strokeDasharray={seriesDash(Math.floor(i / SERIES_TOKENS))} dot={false} connectNulls={false} />)}
+          stroke={carrierColour(null, i)} strokeDasharray={seriesDash(i + Math.floor(i / SERIES_TOKENS))} dot={false} connectNulls={false} />)}
       </LineChart></ResponsiveContainer></ChartFrame>}
   </section>
 }

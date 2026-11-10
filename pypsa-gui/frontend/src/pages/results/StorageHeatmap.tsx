@@ -145,7 +145,7 @@ export default function StorageHeatmap({
     toast.success('Exported')
   }
 
-  const headerTitle = title ?? 'Power heatmap — daily charge / discharge pattern'
+  const headerTitle = title ?? 'Power heatmap · daily charge and discharge pattern'
   const headerSubtitle = subtitle ?? '1 row per day, 24 cells per row · red = discharge, blue = charge'
   const negLabel = legendLabels?.negative ?? (effMode === 'unsigned-blue' ? 'Idle' : 'Charge')
   const posLabel = legendLabels?.positive ?? (effMode === 'unsigned-blue' ? 'Consume' : effMode === 'unsigned-red' ? 'Produce' : 'Discharge')
@@ -161,7 +161,7 @@ export default function StorageHeatmap({
     >
       {grid.truncated && (
         <p className="px-3 pt-2 text-[10.5px] text-warn font-mono">
-          Showing first {MAX_DAYS} of {grid.totalDays} days — pick a shorter period to see the rest
+          Showing the first {MAX_DAYS} of {grid.totalDays} days. Pick a shorter period to see the rest.
         </p>
       )}
       <div className="px-3 py-3 overflow-auto" style={{ position: 'relative' }}>
@@ -189,7 +189,7 @@ export default function StorageHeatmap({
                     background: colourForValue(mw, grid.maxAbs, effMode),
                     border: '1px solid rgba(0,0,0,0.04)',
                   }}
-                  title={`${grid.dayDates[d]} ${String(h).padStart(2, '0')}:00 — ${
+                  title={`${grid.dayDates[d]} ${String(h).padStart(2, '0')}:00 · ${
                     Number.isFinite(mw)
                       ? (mw > 0 ? `${posLabel}: ${mw.toFixed(1)} MW` : mw < 0 ? `${negLabel}: ${(-mw).toFixed(1)} MW` : '0 MW')
                       : 'no data'
@@ -202,7 +202,7 @@ export default function StorageHeatmap({
         {/* Colour legend — switches between diverging (blue ↔ red) and
             single-hue gradients depending on the heatmap mode. */}
         <div className="flex items-center gap-2 mt-3 text-[10px] text-muted">
-          <span>{negLabel}{effMode === 'diverging' ? ` ${grid.maxAbs.toFixed(1)} MW` : ' 0 MW'}</span>
+          <span>{negLabel}{effMode === 'diverging' ? ` \u2212${grid.maxAbs.toFixed(1)} MW` : ' 0 MW'}</span>
           {effMode === 'diverging' && (
             <>
               <div className="flex">
@@ -234,7 +234,7 @@ export default function StorageHeatmap({
           <span>{posLabel} {grid.maxAbs.toFixed(1)} MW · stronger colour is higher</span>
           {hover && (
             <span className="ml-auto font-mono text-text">
-              D{hover.day} {String(hover.hour).padStart(2, '0')}:00 — {
+              D{hover.day} {String(hover.hour).padStart(2, '0')}:00 · {
                 Number.isFinite(hover.mw)
                   ? (hover.mw > 0 ? `${posLabel}: ${hover.mw.toFixed(1)} MW` : hover.mw < 0 ? `${negLabel}: ${(-hover.mw).toFixed(1)} MW` : '0 MW')
                   : 'no data'
