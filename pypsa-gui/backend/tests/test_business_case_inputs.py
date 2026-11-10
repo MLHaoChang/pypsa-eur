@@ -331,3 +331,25 @@ def test_facility_capex_default_is_the_converted_jll_figure():
     assert row.unit == "EUR/MW" and row.value == pytest.approx(10.7e6 / 1.13, rel=1e-4)
     assert row.range.low == pytest.approx(8.9e6 / 1.13, rel=1e-4)
     assert row.range.high == pytest.approx(23.3e6 / 1.13, rel=1e-4)
+
+
+def test_a_pack_row_without_a_value_is_skipped():
+    """A `not_available` row (value None) fills nothing, never a None default."""
+    real = loader.load_defaults_pack(NEW)
+    blank = real.value("dc-business-case.sga_share").model_copy(
+        update={"value": None, "original_value": None, "status": "not_available"})
+
+    class _Pack:
+        stamp = real.stamp
+
+        def value(self, key):
+            return blank if key == blank.key else real.value(key)
+
+    filled = B.BusinessCaseInputs().with_cost_defaults(_Pack(), currency="EUR")
+    assert filled.opex.sga_share is None and "opex.sga_share" not in filled.assumed
+    assert "opex.insurance_share" in filled.assumed
+
+
+def test_lease_up_bounds_are_inclusive():
+    ramp = B.ColocationRevenue(lease_up_by_phase=[[0.0, 0.5, 1.0]])
+    assert ramp.lease_up_by_phase == [[0.0, 0.5, 1.0]]
