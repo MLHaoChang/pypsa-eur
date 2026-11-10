@@ -12,6 +12,7 @@ CONTROL_TOOLS = frozenset({
     "get_file_delivery", "inspect_import", "preview_project_changes", "apply_project_changes", "create_chart", "build_delivery",
     "ask_user", "use_skill", "start_workflow", "advance_workflow", "end_workflow",
     "set_goal", "pause_goal", "complete_goal",
+    "propose_memory", "recall_memory",
     "read_result",
     "get_component_schema",
     "resolve_project_target",

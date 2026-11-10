@@ -3,7 +3,7 @@
 
 # 06 — Business-case view
 
-Status: needs-triage (blocked by 05)
+Status: wontfix (superseded by ../../business-case/issues/09 (line-item editor) and 10 (P&L view); owner BC-ALL-1, 2026-11-10)
 Type: task
 Blocked by: 05
 Gated: yes (UX; GK B for the figures shown)
