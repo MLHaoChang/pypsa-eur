@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import re
 
 import numpy as np
 
@@ -127,6 +128,18 @@ def sampled_fleet(
     )
 
 
+def _gen_series(n, name: str, attr: str, default: float) -> np.ndarray:
+    """A Generator's per-snapshot ``attr`` (its series when it has one)."""
+    frame = getattr(getattr(n, "generators_t", None), attr, None)
+    if frame is not None and name in getattr(frame, "columns", []):
+        return frame[name].reindex(n.snapshots).fillna(default).to_numpy(float)
+    try:
+        v = float(n.generators.at[name, attr])
+    except (KeyError, TypeError, ValueError):
+        v = default
+    return np.full(len(n.snapshots), v if math.isfinite(v) else default, dtype=float)
+
+
 def _fuel_exclusions(n, lk: str, bus: str) -> tuple[list[str], list[str]]:
     """``(why_not, fuel_generators)`` for a firm Link's bus0. ``why_not``
     lists EVERY failed condition of the unlimited-fuel rule (each test reads
@@ -150,6 +163,16 @@ def _fuel_exclusions(n, lk: str, bus: str) -> tuple[list[str], list[str]]:
     )
     if feeders:
         why.append(f"bus0 {bus} is fed by another Link: {', '.join(feeders)}")
+    # The fuel is credited whole to one Link, so a second Link drawing on the
+    # same bus (any port but bus1, named above) would count it twice.
+    ports = [c for c in ldf.columns if c.startswith("bus") and c != "bus1"]
+    sharers = sorted(
+        str(i)
+        for i in ldf.index
+        if str(i) != lk and any(str(ldf.at[i, c]) == bus for c in ports)
+    )
+    if sharers:
+        why.append(f"bus0 {bus} is shared with another Link: {', '.join(sharers)}")
     gens = getattr(n, "generators", None)
     fuel: list[str] = []
     if gens is not None and not gens.empty:
@@ -244,7 +267,8 @@ def firm_backup_units(n, *, keep_zero_capacity: bool = False):
         fuel_mw = np.zeros(H, dtype=float)
         for g in fuel:
             g_max, g_series = gctx.capacity_series(g, n.generators.loc[g])
-            fuel_mw += g_max if g_series is None else g_series
+            g_cap = g_max if g_series is None else g_series
+            fuel_mw += g_cap * np.clip(_gen_series(n, g, "p_max_pu", 1.0), 0.0, None)
         delivered = np.minimum(sending, fuel_mw) * eff
         c_max = float(delivered.max()) if H else 0.0
         if c_max <= 0.0 and not keep_zero_capacity:
@@ -287,7 +311,7 @@ def nothing_to_sample(inputs) -> str | None:
         about = [
             s
             for s in (getattr(inputs, "fleet_notes", ()) or ())
-            if any(lk in s for lk in links)
+            if any(re.search(rf"(?<![\w-]){re.escape(lk)}(?![\w-])", s) for lk in links)
         ]
         clause = (
             " — and no Link supplying an electrical bus is sampled ("

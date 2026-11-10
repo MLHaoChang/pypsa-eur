@@ -5,6 +5,7 @@ bus (`services.adequacy.link_supply`), under GK A (20) AL-1..AL-9."""
 
 from __future__ import annotations
 
+import dataclasses
 import math
 import pickle
 
@@ -257,6 +258,8 @@ def test_a_store_fed_fuel_cell_is_not_credited_and_lole_shows_it():
         ("storage_unit", "bus0 gas carries a StorageUnit (energy-limited): su"),
         ("load", "bus0 gas carries a Load: gas_use"),
         ("feeder", "bus0 gas is fed by another Link: p2g"),
+        ("sharer", "bus0 gas is shared with another Link: boiler"),
+        ("sharer_port2", "bus0 gas is shared with another Link: chp"),
         (
             "capped_fuel",
             "bus0 gas has no fuel Generator without an energy cap (e_sum_max)",
@@ -277,6 +280,13 @@ def test_each_exclusion_of_the_unlimited_fuel_rule_alone_withholds_credit(
         n.add("Load", "gas_use", bus="gas", p_set=1.0)
     elif exclusion == "feeder":
         n.add("Link", "p2g", bus0="hub", bus1="gas", p_nom=5.0)
+    elif exclusion == "sharer":
+        n.add("Bus", "heat", carrier="heat")
+        n.add("Link", "boiler", bus0="gas", bus1="heat", p_nom=5.0)
+    elif exclusion == "sharer_port2":
+        n.add("Bus", "heat", carrier="heat")
+        n.add("Bus", "steam", carrier="heat")
+        n.add("Link", "chp", bus0="heat", bus1="steam", bus2="gas", p_nom=5.0)
     elif exclusion == "capped_fuel":
         n.generators.at["gas_supply", "e_sum_max"] = 100.0
     b = sampled_fleet(n)
@@ -385,6 +395,36 @@ def test_the_refusal_without_any_supplying_link_says_only_that():
         "so the sampled fleet is empty"
     )
     assert "Link" not in msg  # nothing about Links was established
+
+
+def test_two_firm_links_on_one_fuel_bus_are_not_each_credited_the_whole_fuel():
+    """Review of adequacy loops 01: the fuel would be counted twice."""
+    n = _fuel_cell(_net())
+    n.add("Link", "fuel_cell_2", bus0="gas", bus1="hub", p_nom=40.0, efficiency=0.5)
+    _outage(n.links, "fuel_cell_2", 0.0, 24.0)
+    b = sampled_fleet(n)
+    assert _names(b) == ["diesel", "link:grid_import"]
+    for lk, other in (("fuel_cell", "fuel_cell_2"), ("fuel_cell_2", "fuel_cell")):
+        assert (
+            f"firm Link {lk}: not credited (0 MW) — "
+            f"bus0 gas is shared with another Link: {other}"
+        ) in b.fleet_notes
+
+
+def test_the_fuel_generators_availability_bounds_the_credit():
+    n = _fuel_cell(_net())
+    n.generators.at["gas_supply", "p_nom"] = 10.0
+    n.generators.at["gas_supply", "p_max_pu"] = 0.2
+    assert sampled_fleet(n).units[-1].capacity_mw == pytest.approx(1.0)  # 2 x 0.5
+
+
+def test_the_refusal_does_not_borrow_a_note_about_a_longer_link_name():
+    n = _fuel_cell(_net(import_data=None), data=None)
+    n.generators.loc["diesel", ["outage_rate_value", "mttr_hours"]] = float("nan")
+    b = dataclasses.replace(sampled_fleet(n), supply_links=("fuel",))
+    assert not b.units
+    msg = nothing_to_sample(b)
+    assert "and no Link supplying an electrical bus is sampled (fuel)" in msg
 
 
 def test_the_refusal_names_each_supplying_links_own_reason():
