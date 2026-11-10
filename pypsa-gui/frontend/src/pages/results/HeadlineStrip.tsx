@@ -61,13 +61,14 @@ function Tile({ card, dimmed }: { card: HeadlineCard; dimmed: boolean }) {
   if (!words) return null
   const { value, basis } = headlineFigure(card)
   // "Out of date" is said once, on the source line; a card it leaves without a figure says why.
+  // An out-of-date figure is not compared: its change would be against inputs the solve no longer has.
   const state = card.state === 'stale' ? 'unavailable' : card.state
   return (
     <div className={TILE_MIN}>
       <Kpi
         headline testId={`headline-${card.id}`} label={words.label} value={value} basis={basis}
         state={state} reason={card.reason ?? undefined} dimmed={dimmed}
-        delta={headlineDelta(card)} trend={<Trend card={card} />}
+        delta={dimmed ? undefined : headlineDelta(card)} trend={<Trend card={card} />}
         action={card.state === 'not_run' || (card.id === 'lcoe' && card.value == null && card.state !== 'running')
           ? { label: `${words.tabLabel} ›`, onClick: () => showResultsTab(words.tab, { from: 'Summary' }) }
           : undefined}

@@ -224,6 +224,16 @@ describe('HeadlineStrip against the base case', () => {
     expect(screen.getByTestId('headline-strip').querySelector('[data-chart-source]')?.textContent).toContain('Base case: Campus')
   })
 
+  it('an out-of-date strip shows no change beside its dimmed figures', async () => {
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'network', comparison: CASE, cards: [
+      card('system_cost', { value: 33_240_000, unit: 'currency', delta: delta(-1_460_000, -4.21) }),
+    ] })
+    renderStrip({ line: 'Latest solve · solved', stale: true })
+    const strip = await screen.findByTestId('headline-strip')
+    expect(strip.textContent).not.toContain('vs Base case')
+    expect(strip.querySelector('[data-chart-source]')?.textContent).toContain('Base case: Campus')
+  })
+
   it('a project with no base case says nothing about one', async () => {
     renderStrip()
     const strip = await screen.findByTestId('headline-strip')
