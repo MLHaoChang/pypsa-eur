@@ -86,9 +86,10 @@ export const memoryApi = {
     client.get<{ id: string; versions: MemoryVersion[] }>(
       `/memory/items/${encodeURIComponent(id)}/versions`,
     ).then(r => r.data),
-  /** "Not now" on a memory card: the same proposal is not offered for 30 days. */
-  dismiss: (item: NewMemoryItem) =>
-    client.post<MemoryItem>('/memory/dismissals', item).then(r => r.data),
+  /** "Not now" on a memory card: the server reads the card's proposal from the
+   * caller's own chat, and the same proposal is not offered for 30 days. */
+  dismiss: (card: { chat_id: string; tool_use_id: string }) =>
+    client.post<MemoryItem>('/memory/dismissals', card).then(r => r.data),
 }
 
 export const KIND_WORDS: Record<MemoryKind, string> = {
@@ -112,10 +113,26 @@ export function appliesToWords(kind: ProjectKind | null | undefined): string {
 }
 
 /** A concept key as plain words: `view:asset` → "Asset Detail". */
-const VIEW_WORDS: Record<string, string> = { asset: 'Asset Detail' }
+// Plain words for concept keys (UX M2). Keys match the backend registries
+// (`result_views.RESULT_VIEWS` labels, `memory_store.TOPICS`); the backend
+// test `test_memory_concept_words_parity` holds them in step.
+export const VIEW_WORDS: Record<string, string> = {
+  summary: 'Summary', overview: 'Overview', capex: 'Capacity expansion', dispatch: 'Dispatch',
+  flows: 'Energy flow', loadshape: 'Load shape', loadflow: 'Load Flow',
+  grid_code: 'Grid code & connection', electrical_design: 'Electrical design',
+  island: 'Island & ride-through', grid_forming: 'Grid-forming', prices: 'Prices',
+  economics: 'Economics', emissions: 'Emissions', curtailment: 'Curtailment',
+  lostload: 'Lost load', adequacy: 'Adequacy', storage: 'Storage cycling', fmea: 'FMEA',
+  grid_risk: 'Grid risk to production', investment: 'Investment case', asset: 'Asset Detail',
+  profiles_pending: 'Profile studio', profile_preview: 'Profile studio',
+}
+export const TOPIC_WORDS: Record<string, string> = {
+  units: 'Units', currency: 'Currency', style: 'Style', sensitivity: 'Sensitivity',
+}
 export function conceptWords(key: string): string {
   const [ns, id = ''] = key.split(':', 2)
   if (ns === 'view') return VIEW_WORDS[id] ?? id.replace(/_/g, ' ')
+  if (ns === 'topic') return TOPIC_WORDS[id] ?? id.replace(/_/g, ' ')
   if (ns === 'param') return id
   return id.replace(/_/g, ' ')
 }

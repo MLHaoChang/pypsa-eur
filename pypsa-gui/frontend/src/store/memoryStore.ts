@@ -14,6 +14,9 @@ interface MemoryUIState {
   closeMemory: () => void
   setTab: (tab: MemoryTab) => void
   clearEdit: () => void
+  /** Memory cards (tool_use ids) whose "Not now" was recorded in this tab. */
+  dismissed: ReadonlySet<string>
+  noteDismissed: (toolUseId: string) => void
 }
 
 export const useMemoryStore = create<MemoryUIState>(set => ({
@@ -26,4 +29,6 @@ export const useMemoryStore = create<MemoryUIState>(set => ({
   closeMemory: () => set({ open: false, editId: null }),
   setTab: tab => set({ tab }),
   clearEdit: () => set({ editId: null }),
+  dismissed: new Set(),
+  noteDismissed: toolUseId => set(s => ({ dismissed: new Set(s.dismissed).add(toolUseId) })),
 }))

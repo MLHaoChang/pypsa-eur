@@ -429,7 +429,7 @@ export function ConfirmationCard() {
             : <>Confirm · {pending.safety_tier}</>}
       </div>
       {memoryProposal ? (
-        <MemoryCard proposal={memoryProposal} toolUseId={pending.tool_use_id}
+        <MemoryCard proposal={memoryProposal} toolUseId={pending.tool_use_id} chatId={target ?? null}
           secondsLeft={secondsLeft} blockReason={mismatchLine}
           onApprove={onApprove} onDeny={onDeny} />
       ) : <>

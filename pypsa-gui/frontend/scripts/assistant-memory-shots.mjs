@@ -3,7 +3,8 @@
 /** Dev-only UX-review shots for assistant-memory 02b: the account menu's Memory
  * entry, the Memory dialog (items, proposals, edit, history, empty, admin
  * queue), the memory card (Guided and Expert) and Save as default on the Asset
- * Detail chart with its toast. Component-level harness; every /api route is
+ * Detail chart with its toast, the settled memory-card lines and Asset Detail
+ * opened on a saved default. Component-level harness; every /api route is
  * mocked. Light and dark.
  * node scripts/assistant-memory-shots.mjs [out-dir]   (default: a new temp dir)
  */
@@ -84,7 +85,7 @@ function api(url, scene) {
     if (scene === 'dialog-empty') return { items: [], can_promote: false }
     if (s.get('nominated') === 'true') return { items: [item({ id: 'mem_n', summary: 'Answer briefly', concept_keys: ['topic:style'], body: { key: 'answer.style', value: 'brief' }, nomination: 'pending', evidence: [{ kind: 'chat', id: 's9', label: 'from a chat' }] })], can_promote: true }
     if (s.get('status') === 'proposed') return { items: PROPOSALS, can_promote: true }
-    if (s.get('kind') === 'chart_spec') return { items: [], can_promote: true }
+    if (s.get('kind') === 'chart_spec') return { items: scene === 'asset-default' ? [ITEMS[1]] : [], can_promote: true }
     return { items: ITEMS, can_promote: true }
   }
   if (p.startsWith('/memory/items/') && p.endsWith('/versions')) return VERSIONS
@@ -108,6 +109,7 @@ import {AuthProvider} from './auth/AuthProvider'
 import {ConfirmationCard} from './components/ConfirmationCard'
 import UserMenu from './layout/UserMenu'
 import MemoryDialog from './components/memory/MemoryDialog'
+import MemorySettledLine from './components/memory/MemorySettledLine'
 import AssetDetail from './pages/results/asset/AssetDetail'
 import {useUIStore} from './store/uiStore'
 import {useChatStore} from './store/chatStore'
@@ -127,7 +129,16 @@ if (scene === 'card') {
     safety_tier: 'write', confirmation_token: 't', ttl_seconds: 300, expires_at_epoch_ms: Date.now() + 300_000 } } as any)
   body = <div style={{width: 400, padding: 8}} className="bg-bg"><ConfirmationCard/></div>
 } else if (scene === 'menu') {
-  body = <div style={{width: 520, height: 300, padding: 8, display: 'flex', justifyContent: 'flex-end'}} className="bg-bg"><UserMenu/></div>
+  // alignItems: the menu's root must not stretch to the box, or its dropdown
+  // (top-full) opens at the bottom of the viewport.
+  body = <div style={{width: 520, height: 300, padding: 8, display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-start'}} className="bg-bg"><UserMenu/></div>
+} else if (scene === 'settled') {
+  useMemoryStore.getState().noteDismissed('c2')
+  const rows: [string, any][] = [['c1', { state: 'remembered', id: 'mem_1' }], ['c2', { state: 'not_now' }],
+    ['c3', { state: 'not_now' }], ['c4', { state: 'expired' }], ['c5', { state: 'no_answer' }]]
+  body = <div style={{width: 400, padding: 8}} className="bg-bg">{rows.map(([id, st]) => (
+    <div key={id} className="px-3 py-1.5 text-muted text-[11px] leading-snug border-b border-border/40">
+      <MemorySettledLine settled={st} toolUseId={id}/></div>))}</div>
 } else if (scene.startsWith('asset')) {
   body = <div style={{width: 1200, height: 560}} className="bg-bg text-text"><AssetDetail/></div>
 } else {
@@ -146,12 +157,13 @@ createRoot(document.getElementById('root')!).render(
   const shots = [
     ['menu', 'guided'], ['dialog-items', 'guided'], ['dialog-history', 'guided'], ['dialog-edit', 'guided'],
     ['dialog-proposals', 'guided'], ['dialog-admin', 'guided'], ['dialog-empty', 'guided'],
-    ['card', 'guided'], ['card', 'expert'], ['asset-save', 'expert'], ['asset-save', 'guided'],
+    ['card', 'guided'], ['card', 'expert'], ['settled', 'guided'], ['asset-save', 'expert'], ['asset-save', 'guided'],
+    ['asset-default', 'guided'],
   ].filter(([s]) => !process.env.ONLY || s === process.env.ONLY)
   for (const theme of ['light', 'dark']) {
     for (const [scene, mode] of shots) {
-      const vw = scene === 'card' ? 420 : scene === 'menu' ? 540 : scene.startsWith('asset') ? 1220 : 1120
-      const vh = scene === 'card' ? 320 : scene === 'menu' ? 320 : scene.startsWith('asset') ? 640 : 780
+      const vw = scene === 'card' || scene === 'settled' ? 420 : scene === 'menu' ? 540 : scene.startsWith('asset') ? 1220 : 1120
+      const vh = scene === 'settled' ? 200 : scene === 'card' ? 320 : scene === 'menu' ? 320 : scene.startsWith('asset') ? 640 : 780
       const page = await browser.newPage({ viewport: { width: vw, height: vh }, deviceScaleFactor: 2 })
       await page.emulateMedia({ reducedMotion: 'reduce' })
       await page.route(url => url.protocol.startsWith('http') && url.hostname !== '127.0.0.1', r => r.abort())
@@ -162,13 +174,15 @@ createRoot(document.getElementById('root')!).render(
       if (scene.startsWith('dialog')) await page.getByRole('dialog').waitFor()
       if (scene === 'dialog-history') { await page.getByRole('button', { name: 'History' }).first().click(); await page.getByTestId('memory-history').waitFor() }
       if (scene === 'dialog-edit') await page.getByTestId('memory-edit-form').waitFor()
-      if (scene.startsWith('asset')) {
+      if (scene === 'settled') await page.getByTestId('memory-settled').first().waitFor()
+      if (scene === 'asset-default') await page.getByTestId('asset-default-line').waitFor()
+      if (scene === 'asset-save') {
         await page.getByRole('button', { name: 'Chart' }).click()
         await page.getByTestId('asset-save-default').click()
         await page.getByTestId('asset-default-toast').waitFor()
       }
       await page.waitForTimeout(400)
-      const file = path.join(out, `memory-${scene}${scene === 'card' || scene.startsWith('asset') ? `-${mode}` : ''}-${theme}.png`)
+      const file = path.join(out, `memory-${scene}${scene === 'card' || scene === 'asset-save' ? `-${mode}` : ''}-${theme}.png`)
       await page.screenshot({ path: file })
       console.log(file)
       await page.close()

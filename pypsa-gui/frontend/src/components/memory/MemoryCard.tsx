@@ -2,7 +2,7 @@ import { useState } from 'react'
 import toast from 'react-hot-toast'
 import {
   memoryApi, errorWords, KIND_WORDS, appliesToWords, conceptWords,
-  type MemoryKind, type NewMemoryItem, type ProjectKind,
+  type MemoryKind, type ProjectKind,
 } from '../../api/memory'
 import { useChatStore } from '../../store/chatStore'
 import { useMemoryStore } from '../../store/memoryStore'
@@ -61,10 +61,12 @@ export function savedItemId(toolUseId: string, ms = 20_000): Promise<string | nu
 }
 
 export default function MemoryCard({
-  proposal, toolUseId, secondsLeft, blockReason, onApprove, onDeny,
+  proposal, toolUseId, chatId, secondsLeft, blockReason, onApprove, onDeny,
 }: {
   proposal: MemoryProposal
   toolUseId: string
+  /** The chat the card belongs to; "Not now" names it to the server. */
+  chatId: string | null
   secondsLeft: number
   blockReason: string | null
   onApprove: () => Promise<boolean>
@@ -85,15 +87,10 @@ export default function MemoryCard({
   })
   const notNow = () => run(async () => {
     if (!(await onDeny())) return
-    const item: NewMemoryItem = {
-      kind: proposal.kind as NewMemoryItem['kind'],
-      body: proposal.body,
-      concept_keys: proposal.concept_keys,
-      project_kind: proposal.project_kind,
-      summary: proposal.summary,
-    }
     try {
-      await memoryApi.dismiss(item)
+      if (!chatId) throw new Error('no chat')
+      await memoryApi.dismiss({ chat_id: chatId, tool_use_id: toolUseId })
+      useMemoryStore.getState().noteDismissed(toolUseId)
     } catch (err) {
       toast.error(`Not saved. The assistant may offer this again: ${errorWords(err)}`)
     }
@@ -118,7 +115,7 @@ export default function MemoryCard({
       {proposal.concept_keys.length > 0 && (
         <div className="flex flex-wrap gap-1 mb-2">
           {proposal.concept_keys.map(k => (
-            <span key={k} title={k}
+            <span key={k}
               className="px-1 rounded bg-panel border border-border text-[9.5px] text-muted">
               {conceptWords(k)}
             </span>

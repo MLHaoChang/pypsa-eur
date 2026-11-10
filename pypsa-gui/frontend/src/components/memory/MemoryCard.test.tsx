@@ -69,10 +69,11 @@ it('Not now denies the card and records the dismissal', async () => {
   setPending()
   render(<ConfirmationCard />)
   fireEvent.click(screen.getByTestId('memory-card-not-now'))
+  // The card is named; the server reads the proposal from the chat.
   await waitFor(() => expect(memoryApi.dismiss).toHaveBeenCalledWith({
-    kind: 'preference', body: ARGS.body, concept_keys: ARGS.concept_keys,
-    project_kind: 'capacity_expansion', summary: 'Show power in GW',
+    chat_id: 'session-1', tool_use_id: 'call-m',
   }))
+  await waitFor(() => expect(useMemoryStore.getState().dismissed.has('call-m')).toBe(true))
   expect(postChatConfirm).toHaveBeenCalledWith('session-1', { token: 'token-m', decision: 'deny' })
 })
 

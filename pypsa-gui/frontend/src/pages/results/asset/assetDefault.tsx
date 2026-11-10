@@ -115,11 +115,37 @@ export function useChartDefaults() {
   })
 }
 
+/** Do the chart's savable series and mode equal the saved settings? Saved
+ * metrics this asset cannot draw now are left out, as on opening. */
+export function sameSettings(
+  saved: AssetChartSettings, series: MetricRow[], mode: ViewMode, metrics: MetricRow[],
+): boolean {
+  if (saved.mode !== mode) return false
+  const drawable = new Set(metrics.filter(m => m.status === 'ok').map(m => m.id))
+  const want = new Set(saved.metrics.filter(id => drawable.has(id)))
+  const have = new Set(series.map(m => m.id))
+  return want.size === have.size && [...want].every(id => have.has(id))
+}
+
+/** Undo a save: a re-save that made a new version of the same default goes
+ * back to the version before it; a first save is retired, so the previous
+ * default (another scope's, or none) applies again (UX M6). */
+async function undoSave(saved: MemoryItem): Promise<void> {
+  if (saved.version > 1) {
+    const { versions } = await memoryApi.versions(saved.id)
+    const before = versions.find(v => v.version === saved.version - 1)
+    if (before?.body) {
+      await memoryApi.edit(saved.id, { body: before.body, summary: before.summary })
+      return
+    }
+  }
+  await memoryApi.act(saved.id, 'retire')
+}
+
 export function useSaveAssetDefault() {
   const qc = useQueryClient()
   return async (asset: AssetRef, series: MetricRow[], mode: ViewMode, kind: ProjectKind) => {
-    const what = asset.carrier ? `Asset Detail · ${asset.carrier}` : 'Asset Detail'
-    const scope = `all ${PROJECT_KIND_WORDS[kind]} projects`
+    const what = asset.carrier ? `Asset detail · ${asset.carrier}` : 'Asset detail'
     let saved: MemoryItem
     try {
       saved = await memoryApi.create({
@@ -134,20 +160,24 @@ export function useSaveAssetDefault() {
       return
     }
     qc.invalidateQueries({ queryKey: ['memory'] })
+    // UX M6: one status line that clears on its own; "›" separators.
     toast.success(t => (
-      <span className="flex items-center gap-2" data-testid="asset-default-toast">
-        <span>Saved as your default for {what}, {scope}</span>
+      <span className="flex items-center gap-1.5" data-testid="asset-default-toast">
+        <span>Saved as your default for {what} ·</span>
         <button type="button" className="underline font-medium whitespace-nowrap"
           onClick={() => { toast.dismiss(t.id); useMemoryStore.getState().openMemory({ editId: saved.id }) }}>
           Edit ›
         </button>
+        <span aria-hidden="true">·</span>
         <button type="button" className="underline font-medium whitespace-nowrap"
+          data-testid="asset-default-undo"
           onClick={async () => {
             toast.dismiss(t.id)
             try {
-              await memoryApi.act(saved.id, 'retire')
+              await undoSave(saved)
               qc.invalidateQueries({ queryKey: ['memory'] })
-              toast.success('Default removed')
+              toast.success(saved.version > 1 ? 'Previous default restored' : 'Default removed',
+                { ariaProps: { role: 'status', 'aria-live': 'polite' } })
             } catch (err) {
               toast.error(`Undo failed: ${errorWords(err)}`)
             }
@@ -155,6 +185,6 @@ export function useSaveAssetDefault() {
           Undo
         </button>
       </span>
-    ), { duration: 8000 })
+    ), { duration: 8000, ariaProps: { role: 'status', 'aria-live': 'polite' } })
   }
 }

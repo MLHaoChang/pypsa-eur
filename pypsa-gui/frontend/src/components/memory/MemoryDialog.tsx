@@ -19,7 +19,7 @@ import MemoryHistory from './MemoryHistory'
 // leaves their project or chat to reach it.
 
 export const MEMORY_EMPTY =
-  'Nothing saved yet. Use Save as default on a chart, or say “remember this” in chat.'
+  'Nothing saved yet. Use Save as default on an Asset detail chart in Results, or say “remember this” in chat.'
 
 const STATUS_WORDS: Record<MemoryStatus, string> = {
   proposed: 'Proposed', confirmed: 'Saved', retired: 'Retired', dismissed: 'Dismissed',
@@ -276,7 +276,7 @@ function MemoryRow({
         <td className="px-2 py-1.5">
           <div className="flex flex-wrap gap-1">
             {item.concept_keys.map(k => (
-              <span key={k} title={k}
+              <span key={k}
                 className="px-1 rounded bg-panel border border-border text-[9.5px] text-muted">
                 {conceptWords(k)}
               </span>

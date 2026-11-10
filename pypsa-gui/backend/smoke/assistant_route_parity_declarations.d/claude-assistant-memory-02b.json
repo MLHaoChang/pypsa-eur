@@ -6,6 +6,12 @@
  ],
  "limitations": [
   {
+   "method": "POST",
+   "path": "/api/memory/dismissals",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-1"
+  },
+  {
    "method": "GET",
    "path": "/api/memory/items",
    "reason": "ui-pointer",

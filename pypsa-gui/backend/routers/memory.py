@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session as DBSession
 
@@ -138,33 +138,70 @@ def create_item(
     return _out(db, user, v)
 
 
+class Dismissal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    chat_id: str = Field(min_length=1, max_length=128)
+    tool_use_id: str = Field(min_length=1, max_length=128)
+
+
+def _denied_proposal(chat_id: str, tool_use_id: str, user: User) -> dict:
+    """The `propose_memory` input of `tool_use_id` in the caller's own live
+    chat. The client names the card; the server reads what it proposed, so
+    the client never supplies the content. Anything else is a 404."""
+    from harness.session import get_session, session_owner_allows
+
+    session = get_session(chat_id)
+    if session is None or not session_owner_allows(session, getattr(user, "id", None)):
+        _raise(M.MemoryError("memory proposal not found", "memory_not_found", 404))
+    for message in list(session.messages):
+        content = message.get("content") if isinstance(message, dict) else None
+        if message.get("role") != "assistant" or not isinstance(content, list):
+            continue
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_use"
+                and block.get("id") == tool_use_id
+                and block.get("name") == "propose_memory"
+                and isinstance(block.get("input"), dict)
+            ):
+                return block["input"]
+    _raise(M.MemoryError("memory proposal not found", "memory_not_found", 404))
+
+
 @router.post("/dismissals", status_code=201)
 def dismiss_proposal(
-    payload: NewItem,
+    payload: Dismissal,
+    response: Response,
     db: DBSession = Depends(get_db),
     user: User = Depends(require_user),
 ) -> dict:
-    """Record "Not now" on a memory card (§2.2): the card's deny writes nothing, so the
-    UI records the declined proposal here. It is stored dismissed (its body is
-    dropped after 30 days by `sweep_dismissed`; its hash stays), so
-    `propose_memory` does not offer the same proposal again for 30 days. The
-    caller's own item only, validated as any new item."""
+    """Record "Not now" on a memory card (§2.2): the card's deny writes nothing,
+    so the UI names the denied card here and the server reads its proposal from
+    the caller's chat. It is stored dismissed in one commit (its body is dropped
+    after 30 days by `sweep_dismissed`; its hash stays), so `propose_memory`
+    does not offer the same proposal again for 30 days. A repeat is a 200 on
+    the same row."""
+    from services import memory_tools
+
+    args = _denied_proposal(payload.chat_id, payload.tool_use_id, user)
+    kind, body, keys, summary, pk = memory_tools._checked(args)
+    evidence = [{"kind": "chat", "id": payload.chat_id, "label": "from this chat"}]
     try:
-        v = M.create_item(
+        v, created = M.dismiss_proposal(
             db,
             user,
-            kind=payload.kind,
-            body=payload.body,
-            concept_keys=payload.concept_keys,
-            project_kind=payload.project_kind,
-            summary=payload.summary,
-            evidence=payload.evidence,
-            status="proposed",
-            origin="chat",
+            kind=kind,
+            body=body,
+            concept_keys=keys,
+            project_kind=pk,
+            summary=summary,
+            evidence=evidence,
         )
-        v = M.transition(db, user, v.public_id, "dismiss")
     except M.MemoryError as exc:
         _raise(exc)
+    if not created:
+        response.status_code = 200
     return _out(db, user, v)
 
 

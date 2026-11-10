@@ -17,8 +17,9 @@ import { assetResultsApi, type AssetQueryParams } from './api'
 import { allApplicable, loadSelection, reconcileSelection, saveSelection }
   from './selectionMemory'
 import {
-  pickDefault, savableSeries, useChartDefaults, useProjectKind, useSaveAssetDefault,
+  pickDefault, sameSettings, savableSeries, useChartDefaults, useProjectKind, useSaveAssetDefault,
 } from './assetDefault'
+import { useMemoryStore } from '../../../store/memoryStore'
 import { CATEGORY_ORDER, type AssetRef, type Remedy, type ViewMode } from './types'
 
 export default function AssetDetail() {
@@ -75,6 +76,9 @@ export default function AssetDetail() {
   const savedDefault = asset
     ? pickDefault(chartDefaults.data?.items ?? [], asset, projectKind) : null
   const appliedFor = useRef<string | null>(null)
+  // UX M7: the asset this view opened on the saved default for; a chat or
+  // link request that names settings clears it.
+  const [openedOnDefault, setOpenedOnDefault] = useState<string | null>(null)
 
   useEffect(() => {
     if (!assetDetailRequest || assets.length === 0) return
@@ -84,6 +88,7 @@ export default function AssetDetail() {
       setAsset(match)
       if (assetDetailRequest.metrics || assetDetailRequest.mode || assetDetailRequest.chart !== undefined) {
         appliedFor.current = `${match.class}/${match.name}`
+        setOpenedOnDefault(null)
       }
       if (assetDetailRequest.category) setCategory(assetDetailRequest.category)
       if (assetDetailRequest.mode) setMode(assetDetailRequest.mode)
@@ -163,6 +168,7 @@ export default function AssetDetail() {
       data.metrics.some(m => m.id === id && m.status === 'ok'))
     if (!ok.length) return
     appliedFor.current = key
+    setOpenedOnDefault(key)
     setSelected(ok)
     setMode(savedDefault.settings.mode)
     setView('chart')
@@ -307,9 +313,13 @@ export default function AssetDetail() {
               )}
               {category !== 'summary' && view === 'chart' && asset && data && (() => {
                 const series = savableSeries(data.metrics, selected)
+                // UX M5/M7: the chart already shows the saved default.
+                const isDefault = !!savedDefault && series.length > 0
+                  && sameSettings(savedDefault.settings, series, mode, data.metrics)
+                const onDefault = isDefault && openedOnDefault === `${asset.class}/${asset.name}`
                 return (
                   <>
-                    <button type="button" disabled={!series.length}
+                    <button type="button" disabled={!series.length || isDefault}
                       onClick={() => void saveDefault(asset, series, mode, projectKind)}
                       data-testid="asset-save-default"
                       className="flex items-center gap-1 text-[11px] text-muted hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-muted">
@@ -317,6 +327,17 @@ export default function AssetDetail() {
                     </button>
                     {!series.length && (
                       <span className="text-[10.5px] text-muted">Tick a series to save a default</span>
+                    )}
+                    {isDefault && (
+                      <span className="text-[10.5px] text-muted" data-testid="asset-default-line">
+                        {onDefault ? 'Your default' : 'Already your default'}
+                        {' · '}
+                        <button type="button" className="hover:text-accent hover:underline"
+                          onClick={() => useMemoryStore.getState().openMemory({ editId: savedDefault!.item.id })}
+                          data-testid="asset-default-edit">
+                          Edit ›
+                        </button>
+                      </span>
                     )}
                   </>
                 )
