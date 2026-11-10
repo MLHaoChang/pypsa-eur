@@ -570,3 +570,31 @@ def test_a_ledger_row_on_a_network_with_no_study_pack_meta(tmp_path, monkeypatch
     del n.meta["decision_study_pack"]
     out = explain_ledger_row(n, "pv_utility_eur_per_kw")
     assert out["outcome"]["state"] == "fresh"
+
+
+def test_a_ledger_key_matches_whole_never_a_part():
+    for part in ("pv", "battery", "eur_per_kw", "discount", "pv_utility"):
+        with pytest.raises(TargetUnknown):
+            E.ledger_fields(part)
+
+
+@pytest.mark.parametrize(
+    "states, want",
+    [
+        (("uncompared", "stale"), "stale"),
+        (("stale", "uncompared"), "stale"),
+        (("fresh", "uncompared"), "uncompared"),
+        (("fresh", "stale"), "stale"),
+        (("fresh", "fresh"), "fresh"),
+    ],
+)
+def test_a_two_field_row_reads_stale_over_uncompared_over_fresh(monkeypatch, states, want):
+    """The round-trip efficiency row compiles to two fields: any stale is stale, else any uncompared is."""
+    it = iter(states)
+
+    def fake(_n, component, name, field):
+        return {"outcome": {"state": next(it), "complete": True, "truncated": False}}
+
+    monkeypatch.setattr(E, "explain", fake)
+    out = explain_ledger_row(pypsa.Network(), "battery_round_trip_efficiency")
+    assert len(out["fields"]) == 2 and out["outcome"]["state"] == want
