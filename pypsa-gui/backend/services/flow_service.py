@@ -411,7 +411,9 @@ def _held(component: str, entity: str, *, carrier=None, field_name: str | None =
           value=None, unit: str | None = None, extendable: bool = False) -> dict:
     carrier = str(carrier) if carrier is not None and str(carrier) not in ("", "nan") else None
     return {"component": component, "entity": entity, "carrier": carrier, "field": field_name,
-            "value": _number(value), "unit": unit, "extendable": bool(extendable)}
+            "value": _number(value), "unit": unit,
+            # A blank (NaN) flag is not extendable.
+            "extendable": bool(_number(extendable))}
 
 
 def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]) -> dict[str, list[dict]]:

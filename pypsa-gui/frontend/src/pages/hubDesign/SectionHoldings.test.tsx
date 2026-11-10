@@ -92,4 +92,15 @@ describe('SectionHoldings', () => {
     act(() => { vi.advanceTimersByTime(200) })
     expect(loading.children).toHaveLength(3)
   })
+
+  it('a deferred flow says the list comes back, and a failed refetch keeps the list', () => {
+    const { rerender } = render(<SectionHoldings id="assets" pending={false} failed={false}
+      holds={undefined} deferred />)
+    expect(screen.getByTestId('section-held-deferred').textContent).toContain('once the project check has run')
+    expect(screen.queryByTestId('section-held-loading')).toBeNull()
+
+    rerender(<SectionHoldings id="assets" pending={false} failed holds={[held({})]} />)
+    expect(screen.getByTestId('section-held-list')).toBeTruthy()
+    expect(screen.queryByTestId('section-held-failed')).toBeNull()
+  })
 })

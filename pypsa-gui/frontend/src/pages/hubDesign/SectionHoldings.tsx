@@ -62,19 +62,26 @@ function Loading() {
     return () => clearTimeout(t)
   }, [])
   return (
-    <div data-testid="section-held-loading" aria-busy="true" aria-label="Loading what this section holds"
+    <div data-testid="section-held-loading" role="status" aria-busy="true" aria-label="Loading what this section holds"
       className="flex min-h-[4.5rem] flex-col gap-2">
       {show && [0, 1, 2].map(i => <div key={i} className="h-4 animate-pulse rounded bg-border" />)}
     </div>
   )
 }
 
-export function SectionHoldings({ id, holds, pending, failed }: {
-  id: FlowSectionId; holds: FlowHeld[] | undefined; pending: boolean; failed: boolean
+export function SectionHoldings({ id, holds, pending, failed, deferred = false }: {
+  id: FlowSectionId; holds: FlowHeld[] | undefined; pending: boolean; failed: boolean; deferred?: boolean
 }) {
-  if (failed) {
+  // A failed refetch keeps the last good list on screen.
+  if (failed && !holds) {
     return <p data-testid="section-held-failed" className="text-[12px] text-muted">
       What this section holds could not be read. Its editor is still in Expert.
+    </p>
+  }
+  // A deferred flow (a run holds the project) carries no list until the check runs again.
+  if (!pending && !holds && deferred) {
+    return <p data-testid="section-held-deferred" className="text-[12px] text-muted">
+      The list shows again once the project check has run.
     </p>
   }
   if (pending || !holds) return <Loading />

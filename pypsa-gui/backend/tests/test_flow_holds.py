@@ -153,6 +153,14 @@ def test_a_value_that_is_not_a_finite_number_is_null(bad):
     assert S._number(0) == 0.0 and S._number("3.5") == 3.5
 
 
+@pytest.mark.parametrize(
+    "flag, expected",
+    [(float("nan"), False), (None, False), (False, False), (True, True)],
+)
+def test_a_blank_extendable_flag_is_not_extendable(flag, expected):
+    assert S._held("Generator", "g", extendable=flag)["extendable"] is expected
+
+
 def test_a_multi_period_axis_and_an_empty_frame_list_names_only(
     client, tmp_projects_dir
 ):

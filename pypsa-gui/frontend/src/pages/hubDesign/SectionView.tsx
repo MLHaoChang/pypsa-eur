@@ -165,7 +165,8 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   if (id === 'commercial') return <CommercialCard />
   return (
     <div data-testid={`hub-card-${id}`} className="flex flex-col gap-3 rounded border border-border bg-panel p-4">
-      <SectionHoldings id={id} holds={s?.holds} pending={isPending} failed={isError} />
+      <SectionHoldings id={id} holds={s?.holds} pending={isPending} failed={isError}
+        deferred={flow?.deferred === true} />
       <div>
         <button type="button" data-testid={`section-open-expert-${id}`} onClick={() => openSectionInExpert(id)}
           className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
