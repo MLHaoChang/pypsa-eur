@@ -18,9 +18,12 @@ plain sentence; it never carries 0 for a figure the run did not produce.
 
 from __future__ import annotations
 
+import logging
 import math
 
 from harness import calculations
+
+logger = logging.getLogger("pypsa_gui.results")
 
 MICROGRID_TEMPLATES = frozenset({"eh_microgrid", "eh_microgrid_staged"})
 
@@ -64,6 +67,10 @@ _UNAVAILABLE = ("unavailable", "This run cannot give this figure.")
 BUSY = ("unavailable", "The project is busy. Try again in a moment.")
 INPUTS_CHANGED = ("stale", "The inputs changed since this solve.")
 LOAD_FLOW_REPLACED = ("unavailable", "A load flow replaced the results of this solve.")
+NOT_COMPARED = (
+    "unavailable",
+    "This solve did not record its inputs, so this figure is not checked.",
+)
 NOT_OPTIMAL = ("unavailable", "The solve did not finish with an optimal result.")
 CASE_NOT_RUN = ("not_run", "The investment case has not run on this solve.")
 # "stale" is kept for the solve itself: the strip marks every figure out of
@@ -124,6 +131,12 @@ def _card(card_id, value=None, unit=None, *, state="ready", reason=None, **extra
     }
 
 
+SOLVE_FINGERPRINTS = (
+    "assistant_solve_input_fingerprint",
+    "assistant_solve_exact_input_fingerprint",
+)
+
+
 def _unverified(ctx):
     """Why `calculations.solve_matches_inputs` said no, in its own order."""
     state = ctx.solver_state
@@ -131,6 +144,9 @@ def _unverified(ctx):
         return LOAD_FLOW_REPLACED
     if state.get("status") != "completed" or state.get("condition") != "optimal":
         return NOT_OPTIMAL
+    # Nothing recorded, nothing compared: not the same as a comparison that failed.
+    if not all(ctx.network.meta.get(key) for key in SOLVE_FINGERPRINTS):
+        return NOT_COMPARED
     return INPUTS_CHANGED
 
 
@@ -146,6 +162,9 @@ def _case_not_current(ctx):
         return CASE_NOT_RUN
     if state["status"] == "running":
         return CASE_RUNNING
+    # No key to compare against: the case's age is not known.
+    if not state["assumptions_hash"] or not state["current_hash"]:
+        return CASE_UNREAD
     if state["stale"] or state["assumptions_hash"] != state["current_hash"]:
         return CASE_STALE
     # Current now: it changed during the read, or it holds no years.
@@ -226,6 +245,7 @@ def _checked(ctx, card_id):
     except HTTPException:
         return _card(card_id, state=BUSY[0], reason=BUSY[1])
     except (KeyError, TypeError):
+        logger.exception("headline card %s could not be read", card_id)
         return _card(card_id, state=_UNAVAILABLE[0], reason=_UNAVAILABLE[1])
 
 

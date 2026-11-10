@@ -102,13 +102,17 @@ def test_inputs_changed_since_the_solve_reads_out_of_date(windy, client):
     assert share["reason"] == "The inputs changed since this solve."
 
 
+LOAD_FLOW = "A load flow replaced the results of this solve."
+NOT_OPTIMAL = "The solve did not finish with an optimal result."
+
+
 @pytest.mark.parametrize(
     "change, expected",
     [
-        ({"ac_pf_results": {"converged": True}}, hk.LOAD_FLOW_REPLACED),
-        ({"lopf_results": {"kept": True}}, hk.LOAD_FLOW_REPLACED),
-        ({"condition": "suboptimal"}, hk.NOT_OPTIMAL),
-        ({"status": "failed"}, hk.NOT_OPTIMAL),
+        ({"ac_pf_results": {"converged": True}}, ("unavailable", LOAD_FLOW)),
+        ({"lopf_results": {"kept": True}}, ("unavailable", LOAD_FLOW)),
+        ({"condition": "suboptimal"}, ("unavailable", NOT_OPTIMAL)),
+        ({"status": "failed"}, ("unavailable", NOT_OPTIMAL)),
     ],
 )
 def test_an_unverified_solve_says_which_check_failed(
@@ -152,13 +156,35 @@ CASE = {
 @pytest.mark.parametrize(
     "state, expected",
     [
-        (None, hk.CASE_NOT_RUN),
-        ({**CASE, "present": False}, hk.CASE_NOT_RUN),
-        ({**CASE, "status": "running"}, hk.CASE_RUNNING),
-        ({**CASE, "stale": True}, hk.CASE_STALE),
-        ({**CASE, "current_hash": "b"}, hk.CASE_STALE),
+        # Literal states: only a changed solve is "stale" (it dims the strip).
+        (None, ("not_run", "The investment case has not run on this solve.")),
+        (
+            {**CASE, "present": False},
+            ("not_run", "The investment case has not run on this solve."),
+        ),
+        (
+            {**CASE, "status": "running"},
+            ("not_run", "The investment case is still running."),
+        ),
+        (
+            {**CASE, "stale": True},
+            ("not_run", "The investment case is older than its inputs."),
+        ),
+        (
+            {**CASE, "current_hash": "b"},
+            ("not_run", "The investment case is older than its inputs."),
+        ),
+        # No key to compare against: its age is unknown, so it is not called old.
+        (
+            {**CASE, "stale": True, "current_hash": None},
+            ("unavailable", "The investment case could not be read just now."),
+        ),
+        (
+            {**CASE, "stale": True, "assumptions_hash": None},
+            ("unavailable", "The investment case could not be read just now."),
+        ),
         # Current, but the stored report is not this one.
-        (CASE, hk.CASE_UNREAD),
+        (CASE, ("unavailable", "The investment case could not be read just now.")),
     ],
 )
 def test_an_lcoe_card_says_why_the_case_is_not_current(
@@ -170,12 +196,59 @@ def test_an_lcoe_card_says_why_the_case_is_not_current(
     assert (lcoe["value"], lcoe["state"], lcoe["reason"]) == (None, *expected)
 
 
-def test_a_case_that_cannot_be_read_says_so(windy, monkeypatch):
-    def busy(ctx):
-        raise HTTPException(409, "busy")
+@pytest.mark.parametrize(
+    "error",
+    [HTTPException(409, "busy"), ValueError("v"), KeyError("k"), TypeError("t")],
+)
+def test_a_case_that_cannot_be_read_says_so(windy, monkeypatch, error):
+    def failing(ctx):
+        raise error
 
-    monkeypatch.setattr(hk.calculations.investment, "current", busy)
-    assert hk._case_not_current(windy) == hk.CASE_UNREAD
+    monkeypatch.setattr(hk.calculations.investment, "current", failing)
+    assert hk._case_not_current(windy) == (
+        "unavailable",
+        "The investment case could not be read just now.",
+    )
+
+
+def test_a_solve_that_recorded_no_inputs_is_not_called_changed(windy, client):
+    solve(windy)
+    for key in hk.SOLVE_FINGERPRINTS:
+        assert windy.network.meta.pop(key)
+    _, by_id, _ = cards(client)
+    share = by_id["curtailed_share"]
+    # Nothing was compared, so neither "stale" nor "the inputs changed".
+    assert (share["value"], share["state"], share["reason"]) == (
+        None,
+        "unavailable",
+        "This solve did not record its inputs, so this figure is not checked.",
+    )
+
+
+@pytest.mark.parametrize("missing", hk.SOLVE_FINGERPRINTS)
+def test_one_missing_fingerprint_is_also_not_compared(windy, missing):
+    solve(windy)
+    del windy.network.meta[missing]
+    assert hk._unverified(windy) == hk.NOT_COMPARED
+
+
+def test_a_peak_line_name_that_cannot_be_read_costs_one_card(
+    windy, client, monkeypatch
+):
+    n = windy.network
+    n.add("Bus", "B2", v_nom=110)
+    n.add("Line", "North tie", bus0="B1", bus1="B2", x=0.1, r=0.01, s_nom=10)
+    n.add("Load", "L2", bus="B2", p_set=2)
+    solve(windy)
+
+    def odd(raw, scope, peak):
+        raise KeyError("branches")
+
+    monkeypatch.setattr(hk, "_peak_branch", odd)
+    _, by_id, _ = cards(client)
+    line = by_id["peak_line_loading"]
+    assert (line["value"], line["state"]) == (None, "unavailable")
+    assert by_id["system_cost"]["state"] == "ready"
 
 
 def test_a_ready_lcoe_card_carries_the_checked_figure(project, client, monkeypatch):
@@ -212,7 +285,9 @@ def test_a_busy_network_costs_one_card_not_the_strip(windy, client, monkeypatch)
 
 
 @pytest.mark.parametrize("error", [KeyError("p"), TypeError("odd frame")])
-def test_an_odd_source_costs_one_card_not_the_strip(windy, client, monkeypatch, error):
+def test_an_odd_source_costs_one_card_not_the_strip(
+    windy, client, monkeypatch, error, caplog
+):
     solve(windy)
 
     def odd(raw, scope):
@@ -226,6 +301,9 @@ def test_an_odd_source_costs_one_card_not_the_strip(windy, client, monkeypatch, 
         *hk._UNAVAILABLE,
     )
     assert by_id["system_cost"]["state"] == "ready"
+    # A programming error is logged, not only turned into a sentence.
+    logged = [r for r in caplog.records if "curtailed_share" in r.getMessage()]
+    assert logged and logged[0].exc_info[1] is error
 
 
 def test_a_failing_cost_breakdown_leaves_the_checked_cards(windy, client, monkeypatch):
@@ -370,6 +448,7 @@ def test_card_sets_are_short_and_reasons_carry_no_engine_identifier():
         hk.INPUTS_CHANGED,
         hk.LOAD_FLOW_REPLACED,
         hk.NOT_OPTIMAL,
+        hk.NOT_COMPARED,
         hk.CASE_NOT_RUN,
         hk.CASE_RUNNING,
         hk.CASE_STALE,

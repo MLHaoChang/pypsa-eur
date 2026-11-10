@@ -87,6 +87,7 @@ def test_the_issue_rows_are_declared():
     ('Unpause the solve queue', 'solve_queue_instance_controls'),
     ('Resume the paused solve queue', 'solve_queue_instance_controls'), ('Replace the site thumbnail', 'map_layout_and_sites'),
     ('Read me the headline strip', 'results_headline_strip'), ('What is in the KPI strip', 'results_headline_strip'),
+    ('Which KPIs are in the strip', 'results_headline_strip'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -105,6 +106,8 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Extract the grid code from this PDF', 'Geocode the site address',
     # ui-modern 03 (GK B F3): 'headline' and 'strip' each belong to real tools.
     'Headline KPIs for run A vs run B', 'Show the investment case headlines', 'List the files in the chat file strip',
+    'Export the headline results to the file strip', 'Compare headline KPIs of run A and run B and export to the file strip',
+    'Put the KPI report in the file strip',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)
