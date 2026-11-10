@@ -494,3 +494,94 @@ def test_a_non_parameter_item_is_not_found_by_preview_or_apply(client, proj):
     chip = {"id": pref.json()["id"], "version": 1}
     assert _preview(client, proj, chip).status_code == 404
     assert _apply(client, proj, chip, "any").status_code == 404
+
+
+# ── Survivors of scripts/coord/mutants.py (GK B P7) ──────────────────────────
+
+def test_another_members_private_item_in_the_same_org_is_never_suggested(client, proj, _auth_db):
+    from tests.conftest import _seed_org_and_user
+
+    other_user, _other_org = _seed_org_and_user(_auth_db[1], email=f"m{uuid.uuid4().hex[:6]}@example.com",
+                                                org_name=f"Org {uuid.uuid4().hex[:6]}")
+    item = _save(client, proj, field="p_nom").json()
+    _set(_auth_db, item["id"], user_id=other_user)  # same org, someone else's own item
+    assert _chips(client, proj) == {}
+
+
+def _direct_item(_auth_db, seeded_identity, proj, body):
+    from db.models import User
+    from services import memory_store as M
+
+    with _db(_auth_db) as db:
+        user = db.get(User, seeded_identity["user_id"])
+        return M.create_item(db, user, kind="parameter", body=body,
+                             concept_keys=[f"param:{body['component_class']}.{body['field']}"],
+                             org_id=proj.org_id, parameter_ok=True).public_id
+
+
+def test_an_item_of_another_class_is_neither_suggested_nor_applied(client, proj, _auth_db, seeded_identity):
+    iid = _direct_item(_auth_db, seeded_identity, proj,
+                       {"component_class": "Link", "field": "p_nom", "value": 7.0, "unit": "MW"})
+    assert _chips(client, proj) == {}
+    r = _preview(client, proj, {"id": iid, "version": 1})
+    assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "memory_field_unknown"
+
+
+def test_an_item_with_no_carrier_applies_to_any_carrier(client, proj, _auth_db, seeded_identity):
+    iid = _direct_item(_auth_db, seeded_identity, proj,
+                       {"component_class": "Generator", "field": "p_nom", "value": 7.0, "unit": "MW"})
+    assert [c["id"] for c in _chips(client, proj, "solar")["p_nom"]] == [iid]
+    r = _preview(client, proj, {"id": iid, "version": 1}, name="solar")
+    assert r.status_code == 200, r.text
+
+
+def test_a_field_with_no_finite_value_is_not_saved(client, proj):
+    _set_value(proj, float("inf"), "p_nom_max")
+    r = _save(client, proj, field="p_nom_max")
+    assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "memory_value_missing"
+
+
+def test_an_unknown_asset_is_a_404_by_kind(client, proj):
+    r = _save(client, proj, field="p_nom", name="nope")
+    assert r.status_code == 404 and r.json()["detail"]["error_kind"] == "memory_target_unknown"
+
+
+@pytest.mark.parametrize(("currency", "year"), [(None, 2024), ("EUR", None)])
+def test_save_needs_both_currency_and_money_year(client, proj, currency, year):
+    proj.stamp(currency=currency, year=year)
+    r = _save(client, proj)
+    assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "memory_money_basis_missing"
+
+
+def test_an_unknown_class_frame_is_refused_by_kind():
+    import pypsa
+
+    from services import memory_parameters as P
+    from services import memory_store as M
+
+    with pytest.raises(M.MemoryError) as exc:
+        P._frame(pypsa.Network(), "Gadget")
+    assert exc.value.kind == "memory_field_unknown" and exc.value.status == 422
+
+
+class _Fin:
+    def __init__(self, currency="CHF", currency_year=None):
+        self.currency, self.currency_year = currency, currency_year
+
+
+@pytest.mark.parametrize(("entry", "fin", "base", "want"), [
+    ({}, None, 2030, (None, None)),                          # nothing states it: nothing guessed
+    ({}, _Fin("CHF", 2022), 2030, ("CHF", 2022)),             # the case's currency and money year
+    ({}, _Fin("CHF", None), 2030, ("CHF", 2030)),             # the case's base year when no money year
+    ({"currency": "USD", "currency_year": 2019}, _Fin("CHF", 2022), 2030, ("USD", 2019)),  # provenance first
+])
+def test_money_stamp_reads_provenance_then_the_case(monkeypatch, entry, fin, base, want):
+    from services import memory_parameters as P
+    from services.asset_schema import provenance
+    from services.library import reference_apply
+
+    monkeypatch.setattr(provenance, "get", lambda *_a: {"marginal_cost": entry})
+    monkeypatch.setattr(P, "_finance", lambda: fin)
+    monkeypatch.setattr(P, "_finance_config", lambda: object())
+    monkeypatch.setattr(reference_apply, "case_base_year", lambda *_a: base)
+    assert P.money_stamp(None, "Generator", "gas", "marginal_cost") == want

@@ -194,10 +194,7 @@ def suggestions(db: DBSession, user: User, project: Project, component_class: st
         or_(MemoryItem.project_kind.is_(None), MemoryItem.project_kind == project.project_kind),
     )).all()
     out: dict[str, list[tuple]] = {}
-    prefix = f"param:{component_class}."
     for item in rows:
-        if not any(k.startswith(prefix) for k in json.loads(item.concept_keys)):
-            continue
         if not M._can_read(db, user, item):
             continue
         v = M._version(db, item)
