@@ -1914,6 +1914,8 @@ const LEGEND_KEY = 'pypsa.canvasLegendOpen'
 // legend card covers the network and crowds the left toolbar, so it starts
 // folded; the user's own choice, once made, wins.
 const LEGEND_OPEN_MIN_CANVAS_PX = 520
+const prefersReducedMotion = (): boolean =>
+  typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 function readLegendOpen(): boolean | null {
   try {
     const v = localStorage.getItem(LEGEND_KEY)
@@ -2021,7 +2023,7 @@ export default function TopologyCanvas() {
   legendOpenRef.current = legendOpen
   const fitOpts = (duration: number): FitViewOptions => ({
     padding: { top: '40px', right: '40px', bottom: '40px', left: legendOpenRef.current ? '250px' : '70px' },
-    duration, maxZoom: 0.85,
+    duration: prefersReducedMotion() ? 0 : duration, maxZoom: 0.85,
   })
   // The canvas opens fitted to the network and stays fitted while the layout
   // settles (saved positions arriving, the sidebar and properties panel
@@ -3108,7 +3110,8 @@ export default function TopologyCanvas() {
         nodes={nodes} edges={edges}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onNodeClick={onNodeClick} onEdgeClick={onEdgeClick}
+        onNodeClick={(e, n) => { userMoved.current = true; onNodeClick(e, n) }}
+        onEdgeClick={(e, ed) => { userMoved.current = true; onEdgeClick(e, ed) }}
         onNodeDoubleClick={onNodeDoubleClick}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
