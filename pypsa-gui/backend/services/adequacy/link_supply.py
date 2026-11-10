@@ -42,19 +42,31 @@ import numpy as np
 
 from services.adequacy.coupling import NOTHING_TO_SAMPLE
 
-__all__ = ["NOTHING_TO_SAMPLE", "firm_backup_units", "nothing_to_sample",
-           "sampled_fleet"]
+__all__ = [
+    "NOTHING_TO_SAMPLE",
+    "firm_backup_units",
+    "nothing_to_sample",
+    "sampled_fleet",
+]
 
 
 def _never_failing(model) -> str:
     """AL-2's disclosure for an import Link taken as a firm block."""
-    why = ("no outage data" if model.source == "missing"
-           else "no finite MTTR in its outage data")
+    why = (
+        "no outage data"
+        if model.source == "missing"
+        else "no finite MTTR in its outage data"
+    )
     return f"grid import taken as never failing: {why} for {model.name}"
 
 
-def sampled_fleet(n, *, keep_zero_capacity: bool = False, cfg=None,
-                  demand_scaled_in_place: bool = False):
+def sampled_fleet(
+    n,
+    *,
+    keep_zero_capacity: bool = False,
+    cfg=None,
+    demand_scaled_in_place: bool = False,
+):
     """``MCInputs`` for the loops: ``snapshot_inputs`` plus the supplying
     Links (module docstring). Call under the PyPSAService lock."""
     from models.energy_hub import ImportOverlaySpec
@@ -62,9 +74,12 @@ def sampled_fleet(n, *, keep_zero_capacity: bool = False, cfg=None,
     from services.adequacy.mc import snapshot_inputs
 
     # No carrier fallback: only a Link the network itself names is a boundary.
-    scope = hub_fleet_scope(n, ImportOverlaySpec(import_carriers=[]),
-                            sample_links=True,
-                            keep_zero_capacity=keep_zero_capacity)
+    scope = hub_fleet_scope(
+        n,
+        ImportOverlaySpec(import_carriers=[]),
+        sample_links=True,
+        keep_zero_capacity=keep_zero_capacity,
+    )
     notes: list[str] = []
     candidates: list[str] = []
     import_units: list = []
@@ -78,7 +93,9 @@ def sampled_fleet(n, *, keep_zero_capacity: bool = False, cfg=None,
             if m.model == "firm_block":
                 notes.append(_never_failing(m))
             elif m.model == "islanded":
-                notes.append(f"import Link {m.name}: no capacity in any hour; not counted")
+                notes.append(
+                    f"import Link {m.name}: no capacity in any hour; not counted"
+                )
             elif m.model == "excluded":
                 notes.append(f"import Link {m.name}: not counted — {m.reason}")
     else:
@@ -87,11 +104,15 @@ def sampled_fleet(n, *, keep_zero_capacity: bool = False, cfg=None,
             # AL-6: a trusted Link that does not separate the sides is a
             # branch inside the copper plate, not supply.
             notes.append(scope.note)
-    inputs = snapshot_inputs(side, keep_zero_capacity=keep_zero_capacity,
-                             cfg=cfg,
-                             demand_scaled_in_place=demand_scaled_in_place)
+    inputs = snapshot_inputs(
+        side,
+        keep_zero_capacity=keep_zero_capacity,
+        cfg=cfg,
+        demand_scaled_in_place=demand_scaled_in_place,
+    )
     firm_units, firm_notes, firm_cands = firm_backup_units(
-        side, keep_zero_capacity=keep_zero_capacity)
+        side, keep_zero_capacity=keep_zero_capacity
+    )
     if not candidates and not firm_cands and not notes:
         return inputs  # AL-5: byte-equal
     residual = inputs.residual
@@ -102,7 +123,8 @@ def sampled_fleet(n, *, keep_zero_capacity: bool = False, cfg=None,
         units=tuple(inputs.units) + tuple(import_units) + tuple(firm_units),
         residual=residual,
         fleet_notes=tuple(notes + firm_notes),
-        supply_links=tuple(candidates + firm_cands))
+        supply_links=tuple(candidates + firm_cands),
+    )
 
 
 def _fuel_exclusions(n, lk: str, bus: str) -> tuple[list[str], list[str]]:
@@ -112,17 +134,20 @@ def _fuel_exclusions(n, lk: str, bus: str) -> tuple[list[str], list[str]]:
     from services.adequacy.slack import slack_generator_mask
 
     why: list[str] = []
-    for attr, label in (("stores", "a Store (energy-limited)"),
-                        ("storage_units", "a StorageUnit (energy-limited)"),
-                        ("loads", "a Load")):
+    for attr, label in (
+        ("stores", "a Store (energy-limited)"),
+        ("storage_units", "a StorageUnit (energy-limited)"),
+        ("loads", "a Load"),
+    ):
         df = getattr(n, attr, None)
         if df is not None and not df.empty and "bus" in df.columns:
             on = sorted(str(i) for i in df.index if str(df.at[i, "bus"]) == bus)
             if on:
                 why.append(f"bus0 {bus} carries {label}: {', '.join(on)}")
     ldf = n.links
-    feeders = sorted(str(i) for i in ldf.index
-                     if str(i) != lk and str(ldf.at[i, "bus1"]) == bus)
+    feeders = sorted(
+        str(i) for i in ldf.index if str(i) != lk and str(ldf.at[i, "bus1"]) == bus
+    )
     if feeders:
         why.append(f"bus0 {bus} is fed by another Link: {', '.join(feeders)}")
     gens = getattr(n, "generators", None)
@@ -133,13 +158,19 @@ def _fuel_exclusions(n, lk: str, bus: str) -> tuple[list[str], list[str]]:
             if str(gens.at[g, "bus"]) != bus or bool(slack.get(g, False)):
                 continue
             try:
-                cap = float(gens.at[g, "e_sum_max"]) if "e_sum_max" in gens.columns else math.inf
+                cap = (
+                    float(gens.at[g, "e_sum_max"])
+                    if "e_sum_max" in gens.columns
+                    else math.inf
+                )
             except (TypeError, ValueError):
                 cap = math.inf
             if math.isnan(cap) or cap == math.inf:
                 fuel.append(str(g))
     if not fuel:
-        why.append(f"bus0 {bus} has no fuel Generator without an energy cap (e_sum_max)")
+        why.append(
+            f"bus0 {bus} has no fuel Generator without an energy cap (e_sum_max)"
+        )
     return why, fuel
 
 
@@ -200,12 +231,16 @@ def firm_backup_units(n, *, keep_zero_capacity: bool = False):
             continue
         mttr = float(occ["mttr_hours"])
         if not (math.isfinite(mttr) and mttr > 0):
-            notes.append(f"firm Link {lk}: not credited (0 MW) — no finite MTTR in its outage data")
+            notes.append(
+                f"firm Link {lk}: not credited (0 MW) — no finite MTTR in its outage data"
+            )
             continue
         cap_max, series = lctx.capacity_series(lk, ldf.loc[lk])
         cap = cap_max if series is None else series
         eff = _series(n, lk, "efficiency", 1.0)
-        sending = capped_mw(n, lk, cap * np.clip(_series(n, lk, "p_max_pu", 1.0), 0.0, None))
+        sending = capped_mw(
+            n, lk, cap * np.clip(_series(n, lk, "p_max_pu", 1.0), 0.0, None)
+        )
         fuel_mw = np.zeros(H, dtype=float)
         for g in fuel:
             g_max, g_series = gctx.capacity_series(g, n.generators.loc[g])
@@ -215,16 +250,24 @@ def firm_backup_units(n, *, keep_zero_capacity: bool = False):
         if c_max <= 0.0 and not keep_zero_capacity:
             continue
         constant = c_max <= 0.0 or bool(np.all(delivered == delivered[0]))
-        units.append(CoptUnit(
-            name=f"link:{lk}", capacity_mw=max(c_max, 0.0), q=float(occ["rate"]),
-            basis=str(occ["basis"] or "FOR"), mttr_hours=mttr, source=src,
-            capacity_series=None if constant else delivered.copy()))
+        units.append(
+            CoptUnit(
+                name=f"link:{lk}",
+                capacity_mw=max(c_max, 0.0),
+                q=float(occ["rate"]),
+                basis=str(occ["basis"] or "FOR"),
+                mttr_hours=mttr,
+                source=src,
+                capacity_series=None if constant else delivered.copy(),
+            )
+        )
     if bad:
         raise OutageRateError(
             f"outage rate outside [0, 1) on firm Link(s): {', '.join(bad)}. "
             "An outage rate is a probability-like unavailability; fix the "
             "value (or clear it) before running an adequacy engine on this "
-            "network.")
+            "network."
+        )
     return units, notes, cands
 
 
@@ -241,11 +284,19 @@ def nothing_to_sample(inputs) -> str | None:
     if links:
         # Only a fleet the Link walk built names Links; a generator-only
         # fleet (mc_loop's `snapshot_inputs`) claims nothing about them.
-        about = [s for s in (getattr(inputs, "fleet_notes", ()) or ())
-                 if any(lk in s for lk in links)]
-        clause = (" — and no Link supplying an electrical bus is sampled ("
-                  + ("; ".join(about) if about else ", ".join(links)) + ")")
-    return (f"{NOTHING_TO_SAMPLE} (unavailability + MTTR), so the sampled "
-            f"fleet is empty{clause}. An empty fleet would report the entire "
-            "horizon as loss of load, which is a statement about missing "
-            "input data, not about the system")
+        about = [
+            s
+            for s in (getattr(inputs, "fleet_notes", ()) or ())
+            if any(lk in s for lk in links)
+        ]
+        clause = (
+            " — and no Link supplying an electrical bus is sampled ("
+            + ("; ".join(about) if about else ", ".join(links))
+            + ")"
+        )
+    return (
+        f"{NOTHING_TO_SAMPLE} (unavailability + MTTR), so the sampled "
+        f"fleet is empty{clause}. An empty fleet would report the entire "
+        "horizon as loss of load, which is a statement about missing "
+        "input data, not about the system"
+    )

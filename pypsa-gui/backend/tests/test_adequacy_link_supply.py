@@ -29,8 +29,9 @@ def _outage(df, name, rate, mttr):
     df.at[name, "mttr_hours"] = mttr
 
 
-def _net(*, periods=False, load=50.0, import_mw=40.0, diesel_mw=5.0,
-         import_data=(0.01, 12.0)):
+def _net(
+    *, periods=False, load=50.0, import_mw=40.0, diesel_mw=5.0, import_data=(0.01, 12.0)
+):
     """A template-like hub: a 1000 MW grid generator (no outage data) behind
     an `eh_role=grid_import` Link, a hub load and a small diesel unit."""
     n = pypsa.Network()
@@ -46,8 +47,9 @@ def _net(*, periods=False, load=50.0, import_mw=40.0, diesel_mw=5.0,
     n.add("Load", "site", bus="hub", p_set=load)
     n.add("Generator", "diesel", bus="hub", p_nom=diesel_mw)
     _outage(n.generators, "diesel", 0.05, 24.0)
-    n.add("Link", "grid_import", bus0="grid", bus1="hub", p_nom=import_mw,
-          efficiency=1.0)
+    n.add(
+        "Link", "grid_import", bus0="grid", bus1="hub", p_nom=import_mw, efficiency=1.0
+    )
     n.links["eh_role"] = ""
     n.links.at["grid_import", "eh_role"] = "grid_import"
     if import_data is not None:
@@ -55,14 +57,22 @@ def _net(*, periods=False, load=50.0, import_mw=40.0, diesel_mw=5.0,
     return n
 
 
-def _fuel_cell(n, *, bus0="gas", carrier="gas", p_nom=40.0, eff=0.5,
-               data=(0.0, 24.0), fuel=True, **kw):
+def _fuel_cell(
+    n,
+    *,
+    bus0="gas",
+    carrier="gas",
+    p_nom=40.0,
+    eff=0.5,
+    data=(0.0, 24.0),
+    fuel=True,
+    **kw,
+):
     if bus0 not in n.buses.index:
         n.add("Bus", bus0, carrier=carrier)
     if fuel:
         n.add("Generator", f"{bus0}_supply", bus=bus0, p_nom=1000.0)
-    n.add("Link", "fuel_cell", bus0=bus0, bus1="hub", p_nom=p_nom,
-          efficiency=eff, **kw)
+    n.add("Link", "fuel_cell", bus0=bus0, bus1="hub", p_nom=p_nom, efficiency=eff, **kw)
     if "eh_role" in n.links.columns:
         n.links.at["fuel_cell", "eh_role"] = "fuel_cell"
     if data is not None:
@@ -71,7 +81,9 @@ def _fuel_cell(n, *, bus0="gas", carrier="gas", p_nom=40.0, eff=0.5,
 
 
 def _lole(inputs, draws=200):
-    return float(mc_adequacy(inputs, draws=draws, seed=7, max_draws=draws)["lole_hours"])
+    return float(
+        mc_adequacy(inputs, draws=draws, seed=7, max_draws=draws)["lole_hours"]
+    )
 
 
 def _names(inputs):
@@ -79,6 +91,7 @@ def _names(inputs):
 
 
 # ── AL-5: byte-equal ──────────────────────────────────────────────────────
+
 
 def test_a_generator_only_network_gets_snapshot_inputs_unchanged():
     n = _net()
@@ -101,7 +114,8 @@ def test_shipped_templates_without_a_trusted_import_link_are_byte_equal(builder)
     n = getattr(_build, builder)()
     for kz in (False, True):
         assert pickle.dumps(snapshot_inputs(n, keep_zero_capacity=kz)) == pickle.dumps(
-            sampled_fleet(n, keep_zero_capacity=kz))
+            sampled_fleet(n, keep_zero_capacity=kz)
+        )
 
 
 def test_an_untrusted_import_link_leaves_the_fleet_byte_equal():
@@ -113,6 +127,7 @@ def test_an_untrusted_import_link_leaves_the_fleet_byte_equal():
 
 
 # ── Grid import (AL-2, AL-3, AL-9) ────────────────────────────────────────
+
 
 def test_grid_import_is_sampled_on_the_hub_side_and_the_grid_drops_out():
     n = _net()
@@ -141,7 +156,8 @@ def test_an_import_link_without_outage_data_is_a_disclosed_firm_block():
     assert _names(b) == ["diesel"]
     np.testing.assert_allclose(b.residual, 50.0 - 40.0)
     assert b.fleet_notes == (
-        "grid import taken as never failing: no outage data for grid_import",)
+        "grid import taken as never failing: no outage data for grid_import",
+    )
     assert mc_adequacy(b, draws=50, max_draws=50)["fleet_notes"] == list(b.fleet_notes)
 
 
@@ -153,7 +169,10 @@ def test_eh_h2_hub_names_its_firm_grid_import():
     n = T.BUILDERS["eh_h2_hub"]()
     n.links.loc["grid_import", ["outage_rate_value", "mttr_hours"]] = float("nan")
     b = sampled_fleet(n, keep_zero_capacity=True)
-    assert "grid import taken as never failing: no outage data for grid_import" in b.fleet_notes
+    assert (
+        "grid import taken as never failing: no outage data for grid_import"
+        in b.fleet_notes
+    )
     msg = nothing_to_sample(b)
     assert msg.startswith(coupling.NOTHING_TO_SAMPLE)
     assert "grid import taken as never failing: no outage data for grid_import" in msg
@@ -198,6 +217,7 @@ def test_a_bad_import_rate_is_refused():
 
 # ── Firm backup (AL-1) ────────────────────────────────────────────────────
 
+
 def test_a_fuel_cell_on_an_unlimited_fuel_is_credited_at_its_delivered_cap():
     n = _fuel_cell(_net())
     b = sampled_fleet(n)
@@ -208,6 +228,7 @@ def test_a_fuel_cell_on_an_unlimited_fuel_is_credited_at_its_delivered_cap():
 
 def test_a_store_fed_fuel_cell_is_not_credited_and_lole_shows_it():
     """AL-1: full output in every hour would hide the empty store."""
+
     def hub(store_fed):
         n = _net(load=10.0, import_mw=0.0, diesel_mw=5.0)
         n.remove("Link", "grid_import")
@@ -221,20 +242,31 @@ def test_a_store_fed_fuel_cell_is_not_credited_and_lole_shows_it():
 
     limited, unlimited = hub(True), hub(False)
     assert _names(limited) == ["diesel"]
-    assert any(s.startswith("firm Link fuel_cell: not credited (0 MW)") for s in limited.fleet_notes)
+    assert any(
+        s.startswith("firm Link fuel_cell: not credited (0 MW)")
+        for s in limited.fleet_notes
+    )
     assert _lole(unlimited) == 0.0
     assert _lole(limited) > 0.0
 
 
-@pytest.mark.parametrize("exclusion, words", [
-    ("store", "bus0 gas carries a Store (energy-limited): s"),
-    ("storage_unit", "bus0 gas carries a StorageUnit (energy-limited): su"),
-    ("load", "bus0 gas carries a Load: gas_use"),
-    ("feeder", "bus0 gas is fed by another Link: p2g"),
-    ("capped_fuel", "bus0 gas has no fuel Generator without an energy cap (e_sum_max)"),
-    ("no_fuel", "bus0 gas has no fuel Generator without an energy cap (e_sum_max)"),
-])
-def test_each_exclusion_of_the_unlimited_fuel_rule_alone_withholds_credit(exclusion, words):
+@pytest.mark.parametrize(
+    "exclusion, words",
+    [
+        ("store", "bus0 gas carries a Store (energy-limited): s"),
+        ("storage_unit", "bus0 gas carries a StorageUnit (energy-limited): su"),
+        ("load", "bus0 gas carries a Load: gas_use"),
+        ("feeder", "bus0 gas is fed by another Link: p2g"),
+        (
+            "capped_fuel",
+            "bus0 gas has no fuel Generator without an energy cap (e_sum_max)",
+        ),
+        ("no_fuel", "bus0 gas has no fuel Generator without an energy cap (e_sum_max)"),
+    ],
+)
+def test_each_exclusion_of_the_unlimited_fuel_rule_alone_withholds_credit(
+    exclusion, words
+):
     """#1257 F1a: every condition of the rule, one at a time."""
     n = _fuel_cell(_net(), fuel=exclusion != "no_fuel")
     if exclusion == "store":
@@ -301,6 +333,7 @@ def test_a_bad_firm_rate_is_refused():
 
 # ── AL-4: CRN and membership ──────────────────────────────────────────────
 
+
 def test_generator_substreams_are_unchanged_by_the_appended_links():
     n = _fuel_cell(_net())
     b = sampled_fleet(n)
@@ -326,6 +359,7 @@ def test_link_membership_is_stable_across_iterates_that_build_differently():
 
 # ── The shared refusal (AL-7, #1318 F1) ───────────────────────────────────
 
+
 def test_every_loop_site_imports_the_one_predicate():
     from services.adequacy import (
         coupling_loop_runner,
@@ -337,7 +371,8 @@ def test_every_loop_site_imports_the_one_predicate():
     for mod in (coupling_loop_runner, margin_loop_runner, mc_loop_runner, eh_stages):
         assert mod.nothing_to_sample is link_supply.nothing_to_sample
     assert coupling.NOTHING_TO_SAMPLE == (
-        "nothing to sample: no electrical generator carries resolvable occurrence data")
+        "nothing to sample: no electrical generator carries resolvable occurrence data"
+    )
 
 
 def test_the_refusal_without_any_supplying_link_says_only_that():
@@ -345,8 +380,10 @@ def test_the_refusal_without_any_supplying_link_says_only_that():
     n.remove("Link", "grid_import")
     n.generators.loc["diesel", ["outage_rate_value", "mttr_hours"]] = float("nan")
     msg = nothing_to_sample(sampled_fleet(n))
-    assert msg.startswith(f"{coupling.NOTHING_TO_SAMPLE} (unavailability + MTTR), "
-                          "so the sampled fleet is empty")
+    assert msg.startswith(
+        f"{coupling.NOTHING_TO_SAMPLE} (unavailability + MTTR), "
+        "so the sampled fleet is empty"
+    )
     assert "Link" not in msg  # nothing about Links was established
 
 
@@ -374,7 +411,9 @@ def test_freeze_fixed_plan_refuses_with_the_shared_message_and_reads_bad_rates()
     assert snap.mc_error == nothing_to_sample(snapshot_inputs(n))
     bad = _fuel_cell(_net(), data=(2.0, 24.0))
     snap = freeze_fixed_plan(bad, _Cfg(), threading.Lock())
-    assert snap.mc_error.startswith("MC snapshot refused: outage rate outside [0, 1) on firm Link(s)")
+    assert snap.mc_error.startswith(
+        "MC snapshot refused: outage rate outside [0, 1) on firm Link(s)"
+    )
 
 
 def test_freeze_fixed_plan_samples_the_same_firm_backup():
@@ -394,6 +433,7 @@ def test_freeze_fixed_plan_samples_the_same_firm_backup():
 
 # ── The routes: each site refuses on the fleet it samples (GK A (20)) ─────
 
+
 def _h2_hub():
     from project_templates import eh_templates as T
 
@@ -404,13 +444,21 @@ def _install(client, install_network, n):
     from project_templates import eh_templates as T
 
     install_network(n)
-    body = {k: v for k, v in {**T.SOLVER_CONFIG, **T.SOLVER_CONFIG_EXTRA.get("eh_h2_hub", {})}.items()
-            if k in ("solver_name", "voll", "solve_strategy")}
+    body = {
+        k: v
+        for k, v in {
+            **T.SOLVER_CONFIG,
+            **T.SOLVER_CONFIG_EXTRA.get("eh_h2_hub", {}),
+        }.items()
+        if k in ("solver_name", "voll", "solve_strategy")
+    }
     body.setdefault("voll", 3000.0)
     assert client.put("/api/simulation/solver_config", json=body).status_code == 200
 
 
-def test_the_mc_study_refuses_the_h2_hub_on_its_own_generator_only_fleet(client, install_network):
+def test_the_mc_study_refuses_the_h2_hub_on_its_own_generator_only_fleet(
+    client, install_network
+):
     """mc_loop keeps `snapshot_inputs` (follow-up 03): it refuses the H2 hub
     and its reason claims nothing about Links (#1318 F1)."""
     _install(client, install_network, _h2_hub())
@@ -420,11 +468,17 @@ def test_the_mc_study_refuses_the_h2_hub_on_its_own_generator_only_fleet(client,
     assert detail.startswith(coupling.NOTHING_TO_SAMPLE) and "Link" not in detail
 
 
-@pytest.mark.parametrize("url", ["/api/results/coupling_loop", "/api/results/margin_loop"])
-def test_a_bad_import_rate_is_a_typed_refusal_at_both_loops(client, install_network, url):
+@pytest.mark.parametrize(
+    "url", ["/api/results/coupling_loop", "/api/results/margin_loop"]
+)
+def test_a_bad_import_rate_is_a_typed_refusal_at_both_loops(
+    client, install_network, url
+):
     n = _h2_hub()
     n.links.at["grid_import", "outage_rate_value"] = 1.5
     _install(client, install_network, n)
     r = client.post(url, json={"max_solves": 2, "target_lole_h": 2.0})
     assert r.status_code == 422, r.text
-    assert "outage rate outside [0, 1) on import Link(s): grid_import" in str(r.json()["detail"])
+    assert "outage rate outside [0, 1) on import Link(s): grid_import" in str(
+        r.json()["detail"]
+    )

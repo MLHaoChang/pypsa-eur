@@ -381,7 +381,10 @@ def test_a_run_on_each_template_reaches_a_loop_verdict_on_the_sampled_grid_impor
         if a.get("tool") == "run_coupling_loop" and "reserved" in a
     ]
     closing = 1 if loop["restore"] == "base" else 0
-    assert row["solves"] == loop["solves_used"] + int(loop.get("probe_solves") or 0) + closing
+    assert (
+        row["solves"]
+        == loop["solves_used"] + int(loop.get("probe_solves") or 0) + closing
+    )
     assert run_envelope.solves_used(envelope) == 2 + row["solves"]
 
 
