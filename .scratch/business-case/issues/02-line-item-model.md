@@ -57,6 +57,9 @@ the LineItem columns; the `money_year` column (G-C1) in this slice's model.
   cycle, an excluded capex (#1320 F2), a pass-through under
   `price_includes_energy`.
 - A preset default's `money_year` survives into the line (G-C1).
+- Per-year override (GK B, 2026-11-10): a grid cell is that year's value in the
+  line's `money_year` money, the row's escalation does not apply to that year, and
+  every cell is `Finite`; a test pins all three.
 - The pack's previous version byte-equal (BC9).
 
 ## Not in this slice

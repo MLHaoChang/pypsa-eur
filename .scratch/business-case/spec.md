@@ -77,8 +77,9 @@ LO-1..LO-10, both 2026-11-10):
   from the IC case unchanged (B1). The view shows them as locked rows "from the
   energy model" beside the line table. A line whose quantity source is **linked**
   to an output a ledger stream already prices (export MWh with an export price or a
-  PPA, a product bus the IC values) is refused `double_count:<stream>`, never
-  warned (GK B (b)). A **typed** line cannot be checked; the locked rows are what
+  PPA, PPA/CfD settlement, the bill streams) is refused `double_count:<stream>`,
+  never warned (GK B (b)). A product bus is not a G2 case: the IC values it only
+  through `lost_production`, which G3 drops instead (GK A F1). A **typed** line cannot be checked; the locked rows are what
   stop a user typing the PPA in twice, and the line table's help says so.
 - **G3 Lost production.** When a revenue line reads a product bus's served
   quantity, that bus's `lost_production` lines are dropped from the business-case
@@ -158,9 +159,9 @@ finite (`models.schemas.Finite`, #1320 F1), `extra=forbid`.
 | `unit` | S | `MWh`, `MWh_H2`, `kg`, `t`, `GPU_h`, `kW_month`, `kW_year`, `MW_year`, `unit`, `unit_month`, `lump`, `share` | `unit_not_allowed` for the source (below) |
 | `quantity_source` | S | `typed`, `linked:<output id>` (§5, only the outputs this project has), `share_of:<kind>[/<category>]` | `linked_output_missing:<id>`, `share_cycle` |
 | `quantity` | T | a number (typed); none when linked; a share in [0, 1] for `share_of` | `quantity_missing`, `share_out_of_range` |
-| `quantity_by_year` | T | optional per-year override grid, year → number (BCA-SCOPE-1 Q2) | years inside start..end, `year_out_of_range` |
+| `quantity_by_year` | T | optional per-year override grid, year → number (BCA-SCOPE-1 Q2) | years inside start..end, `year_out_of_range`; every cell `Finite` |
 | `price` | T | currency per `unit`, in `money_year` money; revenue: none = **not established** (DCBC Q4), never a default | `price_not_established` blocks the run (BC7) |
-| `price_by_year` | T | optional per-year override grid (BCA-SCOPE-1 Q2) | as `quantity_by_year` |
+| `price_by_year` | T | optional per-year override grid (BCA-SCOPE-1 Q2): the cell is that year's price in the line's `money_year` money, and the row's escalation does not apply to that year (GK B) | as `quantity_by_year` |
 | `money_year` | T | default the case's base year; a preset default carries its source's year (G-C1) | 1990..base year + 5 |
 | `escalation` | S | one of `ESCALATION_CLASSES` (opex, fuel, tariff, ppa, export, capex), or `contract` | — |
 | `indexation` | T | % per year, only with `contract` | `indexation_missing` |
