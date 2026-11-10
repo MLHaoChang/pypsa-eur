@@ -23,6 +23,7 @@ facts.
 
 ``workload_shift_window_h`` moves no load (DC 06), so nothing here reads it.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -113,9 +114,12 @@ def unserved_facility_mw(n) -> pd.Series:
     loads = n.get_switchable_as_dense("Load", "p_set")
     mv_loads = loads.loc[:, n.loads.index[n.loads.bus == MV_BUS]]
     total = mv_loads.sum(axis=1)
-    cooling = (mv_loads[COOLING_LOAD] if COOLING_LOAD in mv_loads.columns
-               else pd.Series(0.0, index=n.snapshots))
-    share = (cooling / total).fillna(0.0)               # 0/0 (no MV load) → 0
+    cooling = (
+        mv_loads[COOLING_LOAD]
+        if COOLING_LOAD in mv_loads.columns
+        else pd.Series(0.0, index=n.snapshots)
+    )
+    share = (cooling / total).fillna(0.0)  # 0/0 (no MV load) → 0
     return (on_it + share * on_mv).reindex(n.snapshots).fillna(0.0)
 
 
@@ -133,8 +137,14 @@ class ItEnergy:
     hourly: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
-def it_energy(spec: DataCentreLoadSpec, snapshots, weights, unserved=None, *,
-              timezone: str | None = None) -> ItEnergy:
+def it_energy(
+    spec: DataCentreLoadSpec,
+    snapshots,
+    weights,
+    unserved=None,
+    *,
+    timezone: str | None = None,
+) -> ItEnergy:
     """The billable IT energy per period (module docstring). ``weights`` are
     the generators' snapshot weightings (h per snapshot); ``unserved`` the
     involuntary unserved facility MW per snapshot (``unserved_facility_mw``),
@@ -143,8 +153,11 @@ def it_energy(spec: DataCentreLoadSpec, snapshots, weights, unserved=None, *,
     from services.dc_load_profile import ambient_c, pue, utilisation
 
     steps = _timesteps(snapshots)
-    w = (weights.reindex(snapshots).to_numpy(dtype=float) if isinstance(weights, pd.Series)
-         else np.broadcast_to(np.asarray(weights, dtype=float), (len(snapshots),)))
+    w = (
+        weights.reindex(snapshots).to_numpy(dtype=float)
+        if isinstance(weights, pd.Series)
+        else np.broadcast_to(np.asarray(weights, dtype=float), (len(snapshots),))
+    )
     idx = _phase_index(spec, snapshots)
     it_mw = _it_mw(spec, idx)
     u = utilisation(spec, steps, timezone)
@@ -152,14 +165,26 @@ def it_energy(spec: DataCentreLoadSpec, snapshots, weights, unserved=None, *,
     if unserved is None:
         lost = np.zeros(len(snapshots))
     else:
-        facility = (unserved.reindex(snapshots).fillna(0.0).to_numpy(dtype=float)
-                    if isinstance(unserved, pd.Series) else np.asarray(unserved, dtype=float))
-        lost = np.clip(facility * w / pue(spec, ambient_c(spec, steps, timezone)), 0.0, it_mwh)
-    hourly = pd.DataFrame({
-        "period": _periods(snapshots), "it_mw": it_mw, "weight": w,
-        "it_mwh": it_mwh, "unserved_it_mwh": lost, "billable_it_mwh": it_mwh - lost,
-        "it_kw_h": it_mw * 1000.0 * w,
-    }, index=snapshots)
+        facility = (
+            unserved.reindex(snapshots).fillna(0.0).to_numpy(dtype=float)
+            if isinstance(unserved, pd.Series)
+            else np.asarray(unserved, dtype=float)
+        )
+        lost = np.clip(
+            facility * w / pue(spec, ambient_c(spec, steps, timezone)), 0.0, it_mwh
+        )
+    hourly = pd.DataFrame(
+        {
+            "period": _periods(snapshots),
+            "it_mw": it_mw,
+            "weight": w,
+            "it_mwh": it_mwh,
+            "unserved_it_mwh": lost,
+            "billable_it_mwh": it_mwh - lost,
+            "it_kw_h": it_mw * 1000.0 * w,
+        },
+        index=snapshots,
+    )
     g = hourly.groupby(pd.Index(hourly["period"].to_numpy(), name="period"))
     periods = g[["it_mwh", "unserved_it_mwh", "billable_it_mwh"]].sum()
     hours = g["weight"].sum()
@@ -167,9 +192,14 @@ def it_energy(spec: DataCentreLoadSpec, snapshots, weights, unserved=None, *,
     phases = []
     for k, p in enumerate(spec.phases):
         live = np.flatnonzero(idx >= k)
-        phases.append({
-            "cod": p.cod.isoformat(), "it_kw": p.it_mw * 1000.0,
-            "first_in_service": snapshots[live[0]] if len(live) else None,
-            "rack_count": p.it_mw / p.rack_kw * 1000.0 if p.rack_kw else NOT_SET,
-        })
-    return ItEnergy(periods=periods, phases=phases, hourly=hourly.drop(columns="it_kw_h"))
+        phases.append(
+            {
+                "cod": p.cod.isoformat(),
+                "it_kw": p.it_mw * 1000.0,
+                "first_in_service": snapshots[live[0]] if len(live) else None,
+                "rack_count": p.it_mw / p.rack_kw * 1000.0 if p.rack_kw else NOT_SET,
+            }
+        )
+    return ItEnergy(
+        periods=periods, phases=phases, hourly=hourly.drop(columns="it_kw_h")
+    )
