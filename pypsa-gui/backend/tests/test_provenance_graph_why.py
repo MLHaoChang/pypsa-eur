@@ -512,3 +512,10 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
         assert r.status_code == code, (key, option)
         assert r.json()["detail"]["error_kind"] == "why_target_unknown"
     assert path.read_bytes() == fork_bytes and study_file.read_bytes() == study_bytes
+
+
+def test_only_input_and_derived_ids_name_an_asset_field():
+    assert E._parse("input:Generator/g/dc_ac_ratio") == ("Generator", "g", "dc_ac_ratio")
+    assert E._parse("derived:Link/a/b/overnight_cost") == ("Link", "a/b", "overnight_cost")
+    for nid in ("asset_card:Generator/g/overnight_cost", "ledger_row:pv_x", "input:nowhere", "source:s"):
+        assert E._parse(nid) is None, nid
