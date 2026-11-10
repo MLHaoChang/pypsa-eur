@@ -24,6 +24,7 @@ Rules (ADR-0001, DCBC-SCOPE-1 Q4):
 
 Nothing here imports ``services``: the pack is passed in.
 """
+
 from __future__ import annotations
 
 from typing import Any, Literal, Protocol
@@ -42,7 +43,9 @@ MONTHS_PER_YEAR = 12
 KW_PER_MW = 1000.0
 
 _Share = Field(default=None, ge=0.0, le=1.0)
-_FORBID = ConfigDict(extra="forbid")     # a typo is refused, never dropped (as FinanceInputs)
+_FORBID = ConfigDict(
+    extra="forbid"
+)  # a typo is refused, never dropped (as FinanceInputs)
 
 
 class GpuHourRevenue(BaseModel):
@@ -50,6 +53,7 @@ class GpuHourRevenue(BaseModel):
     (spec §4). u(t) is already in the IT MWh, so `sold_share` is the sold share of the
     utilised capacity, never a second utilisation. A `reserved_share` of the sold hours is
     billed at the contract price, the rest at the on-demand price."""
+
     model_config = _FORBID
 
     # Case currency per GPU-hour. No default (DCBC-SCOPE-1 Q4).
@@ -77,6 +81,7 @@ class GpuHourRevenue(BaseModel):
 class ColocationRevenue(BaseModel):
     """R2: contracted IT kW per phase × lease-up × price per kW-month × 12; take-or-pay,
     independent of u(t) (spec §4)."""
+
     model_config = _FORBID
 
     # Case currency per kW of contracted IT per month. No default (DCBC-SCOPE-1 Q4).
@@ -87,13 +92,17 @@ class ColocationRevenue(BaseModel):
     lease_up_by_phase: list[list[float]] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _lease_up_shares(self) -> "ColocationRevenue":
+    def _lease_up_shares(self) -> ColocationRevenue:
         for i, ramp in enumerate(self.lease_up_by_phase):
             if not ramp:
-                raise ValueError(f"lease_up_by_phase[{i}] is empty; omit the phase for 100 % from COD")
+                raise ValueError(
+                    f"lease_up_by_phase[{i}] is empty; omit the phase for 100 % from COD"
+                )
             bad = [s for s in ramp if not 0.0 <= s <= 1.0]
             if bad:
-                raise ValueError(f"lease_up_by_phase[{i}] shares must be in [0, 1], got {bad}")
+                raise ValueError(
+                    f"lease_up_by_phase[{i}] shares must be in [0, 1], got {bad}"
+                )
         return self
 
     def rent_per_kw_year(self) -> float:
@@ -106,6 +115,7 @@ class ColocationRevenue(BaseModel):
 class PowerPassThrough(BaseModel):
     """R3: the tenant pays `share` of the energy bill × (1 + `margin`), presented gross
     (GK B plan answer 2): the bill stays a cost, the recovery is revenue."""
+
     model_config = _FORBID
 
     enabled: bool = False
@@ -113,7 +123,7 @@ class PowerPassThrough(BaseModel):
     margin: float = Field(default=0.0, ge=0.0)
 
     @model_validator(mode="after")
-    def _share_when_enabled(self) -> "PowerPassThrough":
+    def _share_when_enabled(self) -> PowerPassThrough:
         if self.enabled and self.share is None:
             raise ValueError("share is required when the power pass-through is enabled")
         return self
@@ -123,6 +133,7 @@ class ItHardware(BaseModel):
     """IT hardware (R1 only): a lump per GPU or per MW of IT (DCBC-SCOPE-1 Q1), straight-line
     over `life_years` (pack default 5, sensitivity 4–6), re-bought every `refresh_years`
     (None: at the end of its life)."""
+
     model_config = _FORBID
 
     capex_basis: ItCapexBasis = "per_mw_it"
@@ -144,6 +155,7 @@ class ItHardware(BaseModel):
 
 class Facility(BaseModel):
     """Building, shell and M&E fit-out per MW of IT (spec §5), straight-line."""
+
     model_config = _FORBID
 
     capex_per_mw_it: float | None = Field(default=None, ge=0.0)
@@ -153,19 +165,21 @@ class Facility(BaseModel):
 class NonEnergyOpex(BaseModel):
     """The operating costs the energy model does not see (spec §5). Money per MW of IT per
     year; shares as fractions of their base."""
+
     model_config = _FORBID
 
     staff_per_mw_year: float | None = Field(default=None, ge=0.0)
-    maintenance_share: float | None = _Share          # of facility capex, per year
-    insurance_share: float | None = _Share            # of capex, per year
-    property_tax_share: float | None = _Share         # of asset value, per year
+    maintenance_share: float | None = _Share  # of facility capex, per year
+    insurance_share: float | None = _Share  # of capex, per year
+    property_tax_share: float | None = _Share  # of asset value, per year
     network_per_mw_year: float | None = Field(default=None, ge=0.0)
-    sga_share: float | None = _Share                  # of revenue
+    sga_share: float | None = _Share  # of revenue
 
 
 class CostDefault(BaseModel):
     """Where a defaulted cost field came from: the pack row, its source and year. Always
     `assumed` (GK B BC9)."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     key: str
@@ -175,13 +189,14 @@ class CostDefault(BaseModel):
     source_year: int
     currency: str | None = None
     money_year: int | None = None
-    pack: str = Field(min_length=1)          # the pack's stamp: id, version and hash
+    pack: str = Field(min_length=1)  # the pack's stamp: id, version and hash
     status: Literal["assumed"] = "assumed"
 
 
 class BusinessCaseInputs(BaseModel):
     """The business case's inputs (spec §4–§5). Saved partial: a missing price or cost is
     `None` (not established) until stated; `require_runnable` says what is missing."""
+
     model_config = _FORBID
 
     revenue_model: RevenueModel | None = None
@@ -199,14 +214,18 @@ class BusinessCaseInputs(BaseModel):
     assumed: dict[str, CostDefault] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _assumed_names_cost_fields(self) -> "BusinessCaseInputs":
+    def _assumed_names_cost_fields(self) -> BusinessCaseInputs:
         unknown = sorted(set(self.assumed) - set(COST_DEFAULT_KEYS))
         if unknown:
-            raise ValueError(f"assumed names {unknown}, which are not defaultable cost fields "
-                             f"{sorted(COST_DEFAULT_KEYS)}")
+            raise ValueError(
+                f"assumed names {unknown}, which are not defaultable cost fields "
+                f"{sorted(COST_DEFAULT_KEYS)}"
+            )
         for path, d in self.assumed.items():
             if _get(self, path) != d.value:
-                raise ValueError(f"assumed[{path!r}] holds {d.value} but the field is {_get(self, path)}")
+                raise ValueError(
+                    f"assumed[{path}] holds {d.value} but the field is {_get(self, path)}"
+                )
         return self
 
     def require_runnable(self) -> None:
@@ -216,7 +235,10 @@ class BusinessCaseInputs(BaseModel):
         if self.revenue_model == "gpu_hour":
             if self.gpu_hour.price_per_gpu_hour is None:
                 raise PriceNotEstablished("gpu_hour.price_per_gpu_hour")
-            if self.gpu_hour.reserved_share > 0 and self.gpu_hour.reserved_price_per_gpu_hour is None:
+            if (
+                self.gpu_hour.reserved_share > 0
+                and self.gpu_hour.reserved_price_per_gpu_hour is None
+            ):
                 raise PriceNotEstablished("gpu_hour.reserved_price_per_gpu_hour")
             if self.gpu_hour.kw_per_gpu is None:
                 raise PriceNotEstablished("gpu_hour.kw_per_gpu")
@@ -232,7 +254,7 @@ class BusinessCaseInputs(BaseModel):
         if self.facility.life_years is None:
             raise LifeMissing("facility.life_years")
 
-    def with_cost_defaults(self, pack: _Pack, *, currency: str) -> "BusinessCaseInputs":
+    def with_cost_defaults(self, pack: _Pack, *, currency: str) -> BusinessCaseInputs:
         """A copy with each unset cost field filled from `pack`'s `dc-business-case.*` row and
         listed in `assumed`. A stated field is never overwritten; a revenue price is never
         filled. A money row in another currency than the case's is skipped, never converted."""
@@ -248,9 +270,15 @@ class BusinessCaseInputs(BaseModel):
                 continue
             _set(out, path, row.value)
             assumed[path] = CostDefault(
-                key=key, value=row.value, unit=row.unit, source=row.source,
-                source_year=row.source_year, currency=row.currency,
-                money_year=row.money_year, pack=pack.stamp)
+                key=key,
+                value=row.value,
+                unit=row.unit,
+                source=row.source,
+                source_year=row.source_year,
+                currency=row.currency,
+                money_year=row.money_year,
+                pack=pack.stamp,
+            )
         # Re-validate: a pack value outside a field's range is refused, never stored.
         return type(self).model_validate({**out.model_dump(), "assumed": assumed})
 
@@ -274,6 +302,7 @@ COST_DEFAULT_KEYS: dict[str, str] = {
 class BusinessCaseRefused(ValueError):
     """The business case cannot run; `field` names the input (dotted path) and `kind` the
     reason, as `business_case_refused:<kind>`."""
+
     kind = "refused"
 
     def __init__(self, field: str):
@@ -328,7 +357,7 @@ def _pack_row(pack: _Pack, key: str) -> _PackRow | None:
     """The pack's row `key`, or None in a pack version before 2026-11-10."""
     try:
         return pack.value(key)
-    except LookupError:          # UnknownPackValue; a regional pack without the row
+    except LookupError:  # UnknownPackValue; a regional pack without the row
         return None
 
 

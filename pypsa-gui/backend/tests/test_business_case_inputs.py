@@ -3,6 +3,7 @@
 Spec .scratch/dc-business-case/spec.md §4, §5, §9 (DCBC-SCOPE-1); GK B BC7 (typed refusals,
 real units) and BC9 (defaults pack: previous rows byte-equal, defaults sourced and assumed).
 """
+
 from __future__ import annotations
 
 import json
@@ -21,18 +22,32 @@ VERSIONS = Path(loader.__file__).parent / "versions"
 def _full() -> B.BusinessCaseInputs:
     return B.BusinessCaseInputs(
         revenue_model="gpu_hour",
-        gpu_hour=B.GpuHourRevenue(price_per_gpu_hour=2.5, reserved_share=0.6,
-                                  reserved_price_per_gpu_hour=2.0, kw_per_gpu=1.28,
-                                  sold_share=0.9, indexation=-0.05),
-        colocation=B.ColocationRevenue(price_per_kw_month=150.0, indexation=0.02,
-                                       lease_up_by_phase=[[0.5, 0.8, 1.0], [1.0]]),
+        gpu_hour=B.GpuHourRevenue(
+            price_per_gpu_hour=2.5,
+            reserved_share=0.6,
+            reserved_price_per_gpu_hour=2.0,
+            kw_per_gpu=1.28,
+            sold_share=0.9,
+            indexation=-0.05,
+        ),
+        colocation=B.ColocationRevenue(
+            price_per_kw_month=150.0,
+            indexation=0.02,
+            lease_up_by_phase=[[0.5, 0.8, 1.0], [1.0]],
+        ),
         pass_through=B.PowerPassThrough(enabled=True, share=1.0, margin=0.05),
         facility=B.Facility(capex_per_mw_it=9.0e6, life_years=20),
-        it_hardware=B.ItHardware(capex_basis="per_gpu", capex=30_000.0, life_years=5,
-                                 refresh_years=5),
-        opex=B.NonEnergyOpex(staff_per_mw_year=40_000.0, maintenance_share=0.015,
-                             insurance_share=0.005, property_tax_share=0.01,
-                             network_per_mw_year=10_000.0, sga_share=0.15),
+        it_hardware=B.ItHardware(
+            capex_basis="per_gpu", capex=30_000.0, life_years=5, refresh_years=5
+        ),
+        opex=B.NonEnergyOpex(
+            staff_per_mw_year=40_000.0,
+            maintenance_share=0.015,
+            insurance_share=0.005,
+            property_tax_share=0.01,
+            network_per_mw_year=10_000.0,
+            sga_share=0.15,
+        ),
         receivable_days=45,
     )
 
@@ -44,11 +59,15 @@ def test_round_trip_json():
     full = _full()
     again = B.BusinessCaseInputs.model_validate_json(full.model_dump_json())
     assert again == full
-    assert B.BusinessCaseInputs.model_validate(json.loads(full.model_dump_json())) == full
+    assert (
+        B.BusinessCaseInputs.model_validate(json.loads(full.model_dump_json())) == full
+    )
 
 
 def test_round_trip_with_assumed_defaults():
-    filled = B.BusinessCaseInputs().with_cost_defaults(loader.load_defaults_pack(NEW), currency="EUR")
+    filled = B.BusinessCaseInputs().with_cost_defaults(
+        loader.load_defaults_pack(NEW), currency="EUR"
+    )
     assert filled.assumed
     assert B.BusinessCaseInputs.model_validate_json(filled.model_dump_json()) == filled
 
@@ -68,34 +87,40 @@ def test_empty_inputs_are_valid_and_not_established():
 # ---------------------------------------------------------------- validation names its field
 
 
-@pytest.mark.parametrize("payload, field", [
-    ({"gpu_hour": {"reserved_share": 1.2}}, "reserved_share"),
-    ({"gpu_hour": {"sold_share": -0.1}}, "sold_share"),
-    ({"gpu_hour": {"price_per_gpu_hour": -1}}, "price_per_gpu_hour"),
-    ({"gpu_hour": {"kw_per_gpu": 0}}, "kw_per_gpu"),
-    ({"gpu_hour": {"indexation": -1.0}}, "indexation"),
-    ({"colocation": {"price_per_kw_month": -5}}, "price_per_kw_month"),
-    ({"colocation": {"lease_up_by_phase": [[0.5, 1.5]]}}, "lease_up_by_phase[0]"),
-    ({"colocation": {"lease_up_by_phase": [[]]}}, "lease_up_by_phase[0]"),
-    ({"pass_through": {"enabled": True}}, "share"),
-    ({"pass_through": {"share": 1.1}}, "share"),
-    ({"pass_through": {"margin": -0.1}}, "margin"),
-    ({"facility": {"life_years": 0.5}}, "life_years"),
-    ({"facility": {"capex_per_mw_it": -1}}, "capex_per_mw_it"),
-    ({"it_hardware": {"life_years": 0}}, "life_years"),
-    ({"it_hardware": {"refresh_years": 0}}, "refresh_years"),
-    ({"it_hardware": {"capex_basis": "per_rack"}}, "capex_basis"),
-    ({"opex": {"maintenance_share": 1.5}}, "maintenance_share"),
-    ({"opex": {"insurance_share": -0.1}}, "insurance_share"),
-    ({"opex": {"property_tax_share": 2}}, "property_tax_share"),
-    ({"opex": {"sga_share": 1.01}}, "sga_share"),
-    ({"opex": {"staff_per_mw_year": -1}}, "staff_per_mw_year"),
-    ({"opex": {"network_per_mw_year": -1}}, "network_per_mw_year"),
-    ({"receivable_days": -1}, "receivable_days"),
-    ({"receivable_days": 400}, "receivable_days"),
-    ({"revenue_model": "services"}, "revenue_model"),
-    ({"gpu_hour": {"price_per_gpu_hours": 2}}, "price_per_gpu_hours"),     # a typo is refused
-])
+@pytest.mark.parametrize(
+    "payload, field",
+    [
+        ({"gpu_hour": {"reserved_share": 1.2}}, "reserved_share"),
+        ({"gpu_hour": {"sold_share": -0.1}}, "sold_share"),
+        ({"gpu_hour": {"price_per_gpu_hour": -1}}, "price_per_gpu_hour"),
+        ({"gpu_hour": {"kw_per_gpu": 0}}, "kw_per_gpu"),
+        ({"gpu_hour": {"indexation": -1.0}}, "indexation"),
+        ({"colocation": {"price_per_kw_month": -5}}, "price_per_kw_month"),
+        ({"colocation": {"lease_up_by_phase": [[0.5, 1.5]]}}, "lease_up_by_phase[0]"),
+        ({"colocation": {"lease_up_by_phase": [[]]}}, "lease_up_by_phase[0]"),
+        ({"pass_through": {"enabled": True}}, "share"),
+        ({"pass_through": {"share": 1.1}}, "share"),
+        ({"pass_through": {"margin": -0.1}}, "margin"),
+        ({"facility": {"life_years": 0.5}}, "life_years"),
+        ({"facility": {"capex_per_mw_it": -1}}, "capex_per_mw_it"),
+        ({"it_hardware": {"life_years": 0}}, "life_years"),
+        ({"it_hardware": {"refresh_years": 0}}, "refresh_years"),
+        ({"it_hardware": {"capex_basis": "per_rack"}}, "capex_basis"),
+        ({"opex": {"maintenance_share": 1.5}}, "maintenance_share"),
+        ({"opex": {"insurance_share": -0.1}}, "insurance_share"),
+        ({"opex": {"property_tax_share": 2}}, "property_tax_share"),
+        ({"opex": {"sga_share": 1.01}}, "sga_share"),
+        ({"opex": {"staff_per_mw_year": -1}}, "staff_per_mw_year"),
+        ({"opex": {"network_per_mw_year": -1}}, "network_per_mw_year"),
+        ({"receivable_days": -1}, "receivable_days"),
+        ({"receivable_days": 400}, "receivable_days"),
+        ({"revenue_model": "services"}, "revenue_model"),
+        (
+            {"gpu_hour": {"price_per_gpu_hours": 2}},
+            "price_per_gpu_hours",
+        ),  # a typo is refused
+    ],
+)
 def test_every_invalid_field_is_named(payload, field):
     with pytest.raises(ValidationError) as exc:
         B.BusinessCaseInputs.model_validate(payload)
@@ -104,19 +129,38 @@ def test_every_invalid_field_is_named(payload, field):
 
 
 def test_assumed_must_match_its_field():
-    filled = B.BusinessCaseInputs().with_cost_defaults(loader.load_defaults_pack(NEW), currency="EUR")
+    filled = B.BusinessCaseInputs().with_cost_defaults(
+        loader.load_defaults_pack(NEW), currency="EUR"
+    )
     data = filled.model_dump()
-    data["facility"]["life_years"] = 25          # edited, entry kept: refused
+    data["facility"]["life_years"] = 25  # edited, entry kept: refused
     with pytest.raises(ValidationError, match="facility.life_years"):
         B.BusinessCaseInputs.model_validate(data)
-    del data["assumed"]["facility.life_years"]   # edited, entry dropped: the user's figure
+    del data["assumed"][
+        "facility.life_years"
+    ]  # edited, entry dropped: the user's figure
     assert B.BusinessCaseInputs.model_validate(data).facility.life_years == 25
 
 
 def test_assumed_names_only_cost_fields():
-    with pytest.raises(ValidationError, match=r"\['gpu_hour.price_per_gpu_hour'\], which are not defaultable"):
-        B.BusinessCaseInputs.model_validate({"assumed": {"gpu_hour.price_per_gpu_hour": {
-            "key": "k", "value": 1, "unit": "u", "source": "s", "source_year": 2026, "pack": "p"}}})
+    with pytest.raises(
+        ValidationError,
+        match=r"\['gpu_hour.price_per_gpu_hour'\], which are not defaultable",
+    ):
+        B.BusinessCaseInputs.model_validate(
+            {
+                "assumed": {
+                    "gpu_hour.price_per_gpu_hour": {
+                        "key": "k",
+                        "value": 1,
+                        "unit": "u",
+                        "source": "s",
+                        "source_year": 2026,
+                        "pack": "p",
+                    }
+                }
+            }
+        )
 
 
 # ---------------------------------------------------------------- typed refusals (BC7)
@@ -126,7 +170,8 @@ def _runnable_colocation() -> B.BusinessCaseInputs:
     return B.BusinessCaseInputs(
         revenue_model="colocation",
         colocation=B.ColocationRevenue(price_per_kw_month=150.0),
-        facility=B.Facility(capex_per_mw_it=9.0e6, life_years=20))
+        facility=B.Facility(capex_per_mw_it=9.0e6, life_years=20),
+    )
 
 
 def _drop(inputs: B.BusinessCaseInputs, path: str) -> B.BusinessCaseInputs:
@@ -141,21 +186,49 @@ def test_runnable_cases_pass():
     _runnable_colocation().require_runnable()
 
 
-@pytest.mark.parametrize("inputs, cls, field", [
-    (B.BusinessCaseInputs(), B.RevenueModelMissing, "revenue_model"),
-    (_drop(_full(), "gpu_hour.price_per_gpu_hour"), B.PriceNotEstablished, "gpu_hour.price_per_gpu_hour"),
-    (_drop(_full(), "gpu_hour.reserved_price_per_gpu_hour"), B.PriceNotEstablished,
-     "gpu_hour.reserved_price_per_gpu_hour"),
-    (_drop(_full(), "gpu_hour.kw_per_gpu"), B.PriceNotEstablished, "gpu_hour.kw_per_gpu"),
-    (_drop(_full(), "it_hardware.capex"), B.ItCapexMissing, "it_hardware.capex"),
-    (_drop(_full(), "it_hardware.life_years"), B.LifeMissing, "it_hardware.life_years"),
-    (_drop(_full(), "facility.capex_per_mw_it"), B.FacilityCapexMissing, "facility.capex_per_mw_it"),
-    (_drop(_full(), "facility.life_years"), B.LifeMissing, "facility.life_years"),
-    (_drop(_runnable_colocation(), "colocation.price_per_kw_month"), B.PriceNotEstablished,
-     "colocation.price_per_kw_month"),
-    (_drop(_runnable_colocation(), "facility.capex_per_mw_it"), B.FacilityCapexMissing,
-     "facility.capex_per_mw_it"),
-])
+@pytest.mark.parametrize(
+    "inputs, cls, field",
+    [
+        (B.BusinessCaseInputs(), B.RevenueModelMissing, "revenue_model"),
+        (
+            _drop(_full(), "gpu_hour.price_per_gpu_hour"),
+            B.PriceNotEstablished,
+            "gpu_hour.price_per_gpu_hour",
+        ),
+        (
+            _drop(_full(), "gpu_hour.reserved_price_per_gpu_hour"),
+            B.PriceNotEstablished,
+            "gpu_hour.reserved_price_per_gpu_hour",
+        ),
+        (
+            _drop(_full(), "gpu_hour.kw_per_gpu"),
+            B.PriceNotEstablished,
+            "gpu_hour.kw_per_gpu",
+        ),
+        (_drop(_full(), "it_hardware.capex"), B.ItCapexMissing, "it_hardware.capex"),
+        (
+            _drop(_full(), "it_hardware.life_years"),
+            B.LifeMissing,
+            "it_hardware.life_years",
+        ),
+        (
+            _drop(_full(), "facility.capex_per_mw_it"),
+            B.FacilityCapexMissing,
+            "facility.capex_per_mw_it",
+        ),
+        (_drop(_full(), "facility.life_years"), B.LifeMissing, "facility.life_years"),
+        (
+            _drop(_runnable_colocation(), "colocation.price_per_kw_month"),
+            B.PriceNotEstablished,
+            "colocation.price_per_kw_month",
+        ),
+        (
+            _drop(_runnable_colocation(), "facility.capex_per_mw_it"),
+            B.FacilityCapexMissing,
+            "facility.capex_per_mw_it",
+        ),
+    ],
+)
 def test_each_refusal_is_typed_and_names_its_field(inputs, cls, field):
     """Fail-closed: the exact subclass (a base-class mutant fails), the field and the code."""
     with pytest.raises(B.BusinessCaseRefused) as exc:
@@ -167,8 +240,16 @@ def test_each_refusal_is_typed_and_names_its_field(inputs, cls, field):
 
 
 def test_kinds_are_distinct():
-    kinds = [c.kind for c in (B.RevenueModelMissing, B.PriceNotEstablished, B.ItCapexMissing,
-                              B.FacilityCapexMissing, B.LifeMissing)]
+    kinds = [
+        c.kind
+        for c in (
+            B.RevenueModelMissing,
+            B.PriceNotEstablished,
+            B.ItCapexMissing,
+            B.FacilityCapexMissing,
+            B.LifeMissing,
+        )
+    ]
     assert len(set(kinds)) == len(kinds) and B.BusinessCaseRefused.kind not in kinds
 
 
@@ -188,7 +269,8 @@ def test_colocation_never_needs_it_hardware():
 def test_defaults_never_make_a_case_runnable_without_a_price():
     """Cost defaults fill costs only (DCBC-SCOPE-1 Q4): the price is still refused."""
     filled = B.BusinessCaseInputs(revenue_model="colocation").with_cost_defaults(
-        loader.load_defaults_pack(NEW), currency="EUR")
+        loader.load_defaults_pack(NEW), currency="EUR"
+    )
     with pytest.raises(B.PriceNotEstablished):
         filled.require_runnable()
 
@@ -209,7 +291,9 @@ def test_gpu_count_and_gpu_hours_in_kw_per_gpu():
     gpu = B.GpuHourRevenue(kw_per_gpu=1.28, sold_share=0.8)
     assert gpu.gpu_count(1.0) == pytest.approx(781.25)
     assert gpu.gpu_hours(1.0) == pytest.approx(781.25 * 0.8)
-    assert gpu.gpu_hours(8760.0) == pytest.approx(gpu.gpu_count(1.0) * B.HOURS_PER_YEAR * 0.8)
+    assert gpu.gpu_hours(8760.0) == pytest.approx(
+        gpu.gpu_count(1.0) * B.HOURS_PER_YEAR * 0.8
+    )
 
 
 def test_it_capex_per_gpu_and_per_mw():
@@ -219,7 +303,7 @@ def test_it_capex_per_gpu_and_per_mw():
     assert per_gpu.capex_total(2.0, gpu) == pytest.approx(1600 * 40_000.0)
     assert per_mw.capex_total(2.0) == pytest.approx(64.0e6)
     with pytest.raises(B.PriceNotEstablished):
-        per_gpu.capex_total(2.0)                       # per GPU without kW per GPU
+        per_gpu.capex_total(2.0)  # per GPU without kW per GPU
     with pytest.raises(B.ItCapexMissing):
         B.ItHardware().capex_total(2.0)
 
@@ -231,8 +315,10 @@ def test_unit_helpers_refuse_without_their_input():
         with pytest.raises(B.PriceNotEstablished) as exc:
             call(B.GpuHourRevenue())
         assert exc.value.field == "gpu_hour.kw_per_gpu"
-    with pytest.raises(B.PriceNotEstablished) as exc:            # per GPU, kW per GPU unset
-        B.ItHardware(capex_basis="per_gpu", capex=1.0).capex_total(1.0, B.GpuHourRevenue())
+    with pytest.raises(B.PriceNotEstablished) as exc:  # per GPU, kW per GPU unset
+        B.ItHardware(capex_basis="per_gpu", capex=1.0).capex_total(
+            1.0, B.GpuHourRevenue()
+        )
     assert exc.value.field == "gpu_hour.kw_per_gpu"
 
 
@@ -264,35 +350,49 @@ def test_defaults_carry_source_year_and_assumed():
 
 
 def test_defaults_never_fill_a_revenue_price_or_an_unsourced_line():
-    filled = B.BusinessCaseInputs().with_cost_defaults(loader.load_defaults_pack(NEW), currency="EUR")
+    filled = B.BusinessCaseInputs().with_cost_defaults(
+        loader.load_defaults_pack(NEW), currency="EUR"
+    )
     assert filled.gpu_hour.price_per_gpu_hour is None
     assert filled.gpu_hour.kw_per_gpu is None
     assert filled.colocation.price_per_kw_month is None
-    assert filled.it_hardware.capex is None             # no primary price list
-    assert filled.opex.staff_per_mw_year is None         # no primary per-MW source
+    assert filled.it_hardware.capex is None  # no primary price list
+    assert filled.opex.staff_per_mw_year is None  # no primary per-MW source
     assert filled.opex.network_per_mw_year is None
     assert filled.receivable_days is None
 
 
 def test_defaults_never_overwrite_a_stated_value():
-    stated = B.BusinessCaseInputs(facility=B.Facility(capex_per_mw_it=1.0, life_years=30),
-                                  opex=B.NonEnergyOpex(sga_share=0.0))
+    stated = B.BusinessCaseInputs(
+        facility=B.Facility(capex_per_mw_it=1.0, life_years=30),
+        opex=B.NonEnergyOpex(sga_share=0.0),
+    )
     filled = stated.with_cost_defaults(loader.load_defaults_pack(NEW), currency="EUR")
     assert filled.facility.capex_per_mw_it == 1.0 and filled.facility.life_years == 30
-    assert filled.opex.sga_share == 0.0                  # a stated 0 is the user's, kept
-    assert not {"facility.capex_per_mw_it", "facility.life_years", "opex.sga_share"} & set(filled.assumed)
-    assert stated.assumed == {} and stated.facility.capex_per_mw_it == 1.0   # input untouched
+    assert filled.opex.sga_share == 0.0  # a stated 0 is the user's, kept
+    assert not {
+        "facility.capex_per_mw_it",
+        "facility.life_years",
+        "opex.sga_share",
+    } & set(filled.assumed)
+    assert (
+        stated.assumed == {} and stated.facility.capex_per_mw_it == 1.0
+    )  # input untouched
 
 
 def test_a_money_default_in_another_currency_is_skipped_not_converted():
-    filled = B.BusinessCaseInputs().with_cost_defaults(loader.load_defaults_pack(NEW), currency="USD")
+    filled = B.BusinessCaseInputs().with_cost_defaults(
+        loader.load_defaults_pack(NEW), currency="USD"
+    )
     assert filled.facility.capex_per_mw_it is None
     assert "facility.capex_per_mw_it" not in filled.assumed
-    assert filled.facility.life_years == 20               # a life has no currency
+    assert filled.facility.life_years == 20  # a life has no currency
 
 
 def test_an_older_pack_gives_no_defaults():
-    filled = B.BusinessCaseInputs().with_cost_defaults(loader.load_defaults_pack(PREV), currency="EUR")
+    filled = B.BusinessCaseInputs().with_cost_defaults(
+        loader.load_defaults_pack(PREV), currency="EUR"
+    )
     assert filled.assumed == {} and filled == B.BusinessCaseInputs()
 
 
@@ -300,19 +400,24 @@ def test_new_pack_keeps_every_previous_row_byte_equal():
     """AS-02 / BC9: 2026-11-10 = 2026-11-07 + appended rows; every other file byte-identical;
     both hashes pinned and the old one unchanged."""
     old, new = VERSIONS / PREV, VERSIONS / NEW
-    old_csv, new_csv = (old / "values.csv").read_bytes(), (new / "values.csv").read_bytes()
+    old_csv, new_csv = (
+        (old / "values.csv").read_bytes(),
+        (new / "values.csv").read_bytes(),
+    )
     assert new_csv.startswith(old_csv)
-    added = new_csv[len(old_csv):].decode().splitlines()
+    added = new_csv[len(old_csv) :].decode().splitlines()
     assert added and all(line.startswith("dc-business-case.") for line in added)
     for f in sorted(p.relative_to(old) for p in old.rglob("*") if p.is_file()):
         if f.name not in ("values.csv", "manifest.json"):
             assert (new / f).read_bytes() == (old / f).read_bytes(), f
     m_old = json.loads((old / "manifest.json").read_text())
     m_new = json.loads((new / "manifest.json").read_text())
-    assert {k: v for k, v in m_new.items() if k not in ("version", "dc_business_case_costs")} == \
-        {k: v for k, v in m_old.items() if k != "version"}
-    pins = json.loads((Path(__file__).parent / "fixtures/defaults_pack/pack_hashes.json")
-                      .read_text())["generic_defaults"]
+    assert {
+        k: v for k, v in m_new.items() if k not in ("version", "dc_business_case_costs")
+    } == {k: v for k, v in m_old.items() if k != "version"}
+    pins = json.loads(
+        (Path(__file__).parent / "fixtures/defaults_pack/pack_hashes.json").read_text()
+    )["generic_defaults"]
     assert loader.load_defaults_pack(PREV).hash == pins[PREV]
     assert loader.load_defaults_pack(NEW).hash == pins[NEW]
     assert loader.load_defaults_pack().version == NEW
@@ -328,7 +433,9 @@ def test_new_rows_price_no_part_and_no_revenue():
     assert pack.cost_parts("dc-business-case") == []
     assert not any("price" in v.key or "revenue" in v.key for v in rows)
     prev = loader.load_defaults_pack(PREV)
-    assert [v for v in pack.cost_values if v.technology != "dc-business-case"] == prev.cost_values
+    assert [
+        v for v in pack.cost_values if v.technology != "dc-business-case"
+    ] == prev.cost_values
     assert pack.finance == prev.finance and pack.tariffs == prev.tariffs
 
 
@@ -344,7 +451,8 @@ def test_a_pack_row_without_a_value_is_skipped():
     """A `not_available` row (value None) fills nothing, never a None default."""
     real = loader.load_defaults_pack(NEW)
     blank = real.value("dc-business-case.sga_share").model_copy(
-        update={"value": None, "original_value": None, "status": "not_available"})
+        update={"value": None, "original_value": None, "status": "not_available"}
+    )
 
     class _Pack:
         stamp = real.stamp
