@@ -43,9 +43,9 @@ MONTHS_PER_YEAR = 12
 KW_PER_MW = 1000.0
 
 _Share = Field(default=None, ge=0.0, le=1.0)
-_FORBID = ConfigDict(
-    extra="forbid"
-)  # a typo is refused, never dropped (as FinanceInputs)
+# A typo is refused, never dropped (as FinanceInputs); inf and NaN are refused in every float
+# field, so an unbounded field (a price, a capex, a margin) can never carry a non-finite value.
+_FORBID = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class GpuHourRevenue(BaseModel):
@@ -180,7 +180,7 @@ class CostDefault(BaseModel):
     """Where a defaulted cost field came from: the pack row, its source and year. Always
     `assumed` (GK B BC9)."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     key: str
     value: float
@@ -233,6 +233,9 @@ class BusinessCaseInputs(BaseModel):
         if self.revenue_model is None:
             raise RevenueModelMissing("revenue_model")
         if self.revenue_model == "gpu_hour":
+            # R3 is a colocation recovery; a GPU-hour price is all-in (GK B ruling on #1320).
+            if self.pass_through.enabled:
+                raise PassThroughNotColocation("pass_through.enabled")
             if self.gpu_hour.price_per_gpu_hour is None:
                 raise PriceNotEstablished("gpu_hour.price_per_gpu_hour")
             if (
@@ -249,6 +252,10 @@ class BusinessCaseInputs(BaseModel):
         else:
             if self.colocation.price_per_kw_month is None:
                 raise PriceNotEstablished("colocation.price_per_kw_month")
+            # The tenant owns the IT under colocation: owned IT capex would be priced with no
+            # revenue that needs it (B5: capex priced exactly once).
+            if self.it_hardware.capex is not None:
+                raise ItCapexNotOwned("it_hardware.capex")
         if self.facility.capex_per_mw_it is None:
             raise FacilityCapexMissing("facility.capex_per_mw_it")
         if self.facility.life_years is None:
@@ -332,6 +339,14 @@ class FacilityCapexMissing(BusinessCaseRefused):
 
 class LifeMissing(BusinessCaseRefused):
     kind = "life_missing"
+
+
+class ItCapexNotOwned(BusinessCaseRefused):
+    kind = "it_capex_not_owned"
+
+
+class PassThroughNotColocation(BusinessCaseRefused):
+    kind = "pass_through_not_colocation"
 
 
 # ------------------------------------------------------------------ helpers

@@ -35,7 +35,7 @@ def _full() -> B.BusinessCaseInputs:
             indexation=0.02,
             lease_up_by_phase=[[0.5, 0.8, 1.0], [1.0]],
         ),
-        pass_through=B.PowerPassThrough(enabled=True, share=1.0, margin=0.05),
+        pass_through=B.PowerPassThrough(enabled=False, share=1.0, margin=0.05),
         facility=B.Facility(capex_per_mw_it=9.0e6, life_years=20),
         it_hardware=B.ItHardware(
             capex_basis="per_gpu", capex=30_000.0, life_years=5, refresh_years=5
@@ -170,6 +170,7 @@ def _runnable_colocation() -> B.BusinessCaseInputs:
     return B.BusinessCaseInputs(
         revenue_model="colocation",
         colocation=B.ColocationRevenue(price_per_kw_month=150.0),
+        pass_through=B.PowerPassThrough(enabled=True, share=1.0, margin=0.05),
         facility=B.Facility(capex_per_mw_it=9.0e6, life_years=20),
     )
 
@@ -248,6 +249,8 @@ def test_kinds_are_distinct():
             B.ItCapexMissing,
             B.FacilityCapexMissing,
             B.LifeMissing,
+            B.ItCapexNotOwned,
+            B.PassThroughNotColocation,
         )
     ]
     assert len(set(kinds)) == len(kinds) and B.BusinessCaseRefused.kind not in kinds
@@ -496,3 +499,116 @@ def test_a_pack_value_outside_its_field_range_is_refused():
 
     with pytest.raises(ValidationError, match="sga_share"):
         B.BusinessCaseInputs().with_cost_defaults(_Pack(), currency="EUR")
+
+
+# ---------------------------------------------------------------- GK B #1320 F1, F2, ruling (2)
+
+#: Every float field of the inputs (dotted path in a payload), unbounded or not.
+FLOAT_FIELDS = [
+    ("gpu_hour", "price_per_gpu_hour"),
+    ("gpu_hour", "reserved_share"),
+    ("gpu_hour", "reserved_price_per_gpu_hour"),
+    ("gpu_hour", "kw_per_gpu"),
+    ("gpu_hour", "sold_share"),
+    ("gpu_hour", "indexation"),
+    ("colocation", "price_per_kw_month"),
+    ("colocation", "indexation"),
+    ("pass_through", "share"),
+    ("pass_through", "margin"),
+    ("facility", "capex_per_mw_it"),
+    ("facility", "life_years"),
+    ("it_hardware", "capex"),
+    ("it_hardware", "life_years"),
+    ("opex", "staff_per_mw_year"),
+    ("opex", "maintenance_share"),
+    ("opex", "insurance_share"),
+    ("opex", "property_tax_share"),
+    ("opex", "network_per_mw_year"),
+    ("opex", "sga_share"),
+]
+
+
+def test_float_field_list_is_complete():
+    """A new float field must join FLOAT_FIELDS (the lease-up list is tested on its own)."""
+    found = {
+        (g, n)
+        for g, sub in B.BusinessCaseInputs.model_fields.items()
+        if hasattr(sub.annotation, "model_fields")
+        for n, f in sub.annotation.model_fields.items()
+        if "float" in str(f.annotation) and "list" not in str(f.annotation)
+    }
+    assert found == set(FLOAT_FIELDS)
+
+
+@pytest.mark.parametrize("group, name", FLOAT_FIELDS)
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan")])
+def test_every_float_field_refuses_non_finite(group, name, bad):
+    with pytest.raises(ValidationError) as exc:
+        B.BusinessCaseInputs.model_validate({group: {name: bad}})
+    assert exc.value.errors()[0]["loc"] == (group, name)
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("nan")])
+def test_receivable_days_and_lease_up_refuse_non_finite(bad):
+    with pytest.raises(ValidationError, match="receivable_days"):
+        B.BusinessCaseInputs.model_validate({"receivable_days": bad})
+    with pytest.raises(ValidationError, match="lease_up_by_phase"):
+        B.BusinessCaseInputs.model_validate(
+            {"colocation": {"lease_up_by_phase": [[bad]]}}
+        )
+
+
+def test_a_json_infinity_is_refused():
+    with pytest.raises(ValidationError, match="price_per_kw_month"):
+        B.BusinessCaseInputs.model_validate_json(
+            '{"colocation": {"price_per_kw_month": Infinity}}'
+        )
+
+
+def test_a_cost_default_refuses_non_finite():
+    with pytest.raises(ValidationError, match="value"):
+        B.CostDefault(
+            key="k",
+            value=float("inf"),
+            unit="u",
+            source="s",
+            source_year=2026,
+            pack="p",
+        )
+
+
+def test_colocation_with_owned_it_capex_is_refused():
+    """F2 (B5): the tenant owns the IT under colocation; stated IT capex is a typed refusal."""
+    data = _runnable_colocation().model_dump()
+    data["it_hardware"]["capex"] = 30.0e6
+    with pytest.raises(B.BusinessCaseRefused) as exc:
+        B.BusinessCaseInputs.model_validate(data).require_runnable()
+    assert type(exc.value) is B.ItCapexNotOwned
+    assert exc.value.field == "it_hardware.capex"
+    assert exc.value.code == "business_case_refused:it_capex_not_owned"
+
+
+def test_colocation_keeps_an_it_life_without_capex():
+    """Only stated capex is refused: a defaulted IT life alone prices nothing."""
+    filled = _runnable_colocation().with_cost_defaults(
+        loader.load_defaults_pack(NEW), currency="EUR"
+    )
+    assert filled.it_hardware.life_years == 5 and filled.it_hardware.capex is None
+    filled.require_runnable()
+
+
+def test_pass_through_under_gpu_hour_is_refused():
+    """Ruling (2): R3 is a colocation recovery; under GPU-hour it is a typed refusal."""
+    data = _full().model_dump()
+    data["pass_through"]["enabled"] = True
+    with pytest.raises(B.BusinessCaseRefused) as exc:
+        B.BusinessCaseInputs.model_validate(data).require_runnable()
+    assert type(exc.value) is B.PassThroughNotColocation
+    assert exc.value.field == "pass_through.enabled"
+    assert exc.value.code == "business_case_refused:pass_through_not_colocation"
+
+
+def test_pass_through_under_colocation_runs():
+    inputs = _runnable_colocation()
+    assert inputs.pass_through.enabled
+    inputs.require_runnable()
