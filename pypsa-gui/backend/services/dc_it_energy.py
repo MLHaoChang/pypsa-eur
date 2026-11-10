@@ -68,19 +68,19 @@ def _periods(snapshots: pd.Index) -> np.ndarray:
 def _phase_index(spec: DataCentreLoadSpec, snapshots: pd.Index) -> np.ndarray:
     """The index into ``spec.phases`` of the phase in service on each snapshot
     (-1 before the first COD); see ``in_service_it_mw`` for the rule."""
-    if isinstance(snapshots, pd.MultiIndex):
-        days = [date(int(y), 12, 31) for y in _periods(snapshots)]
-    else:
+
+    def index_on(day: date) -> int:
+        live = phase_in_service(spec, day)
+        return -1 if live is None else spec.phases.index(live)
+
+    if not isinstance(snapshots, pd.MultiIndex):
         steps = pd.DatetimeIndex(snapshots)
-        days = [steps[0].date()] * len(steps) if len(steps) else []
-    cache: dict[date, int] = {}
-    out = np.empty(len(days), dtype=int)
-    for i, d in enumerate(days):
-        if d not in cache:
-            live = phase_in_service(spec, d)
-            cache[d] = -1 if live is None else spec.phases.index(live)
-        out[i] = cache[d]
-    return out
+        return np.full(
+            len(steps), index_on(steps[0].date()) if len(steps) else -1, dtype=int
+        )
+    periods = _periods(snapshots)
+    by_period = {y: index_on(date(int(y), 12, 31)) for y in np.unique(periods)}
+    return np.array([by_period[y] for y in periods], dtype=int)
 
 
 def in_service_it_mw(spec: DataCentreLoadSpec, snapshots) -> np.ndarray:
