@@ -304,6 +304,7 @@ def test_a_dismissal_needs_an_organisation(seeded_identity, _auth_db, monkeypatc
     "result, status",
     [
         ({"content": "{}"}, 409),  # Remember ran
+        ({"content": "confirmation_denied"}, 409),  # a result, not a refusal
         ({"is_error": True, "content": "confirmation_expired"}, 409),
         ({"is_error": True, "content": "memory_proposal_capped\nfenced"}, 409),
         ({"is_error": True, "content": "memory_proposal_dismissed\nfenced"}, 409),

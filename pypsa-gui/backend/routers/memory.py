@@ -171,54 +171,34 @@ def _denied_proposal(chat_id: str, tool_use_id: str, user: User) -> dict:
     session = get_session(chat_id)
     if session is None or not session_owner_allows(session, getattr(user, "id", None)):
         _raise(M.MemoryError("memory proposal not found", "memory_not_found", 404))
-    messages = list(session.messages)
+    blocks = [
+        (message.get("role"), block)
+        for message in list(session.messages)
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        for block in message["content"]
+        if isinstance(block, dict)
+    ]
     # Only a card still waiting (no result yet) or one the user declined
     # (`confirmation_denied`) is dismissed. A card that ran, expired, or was
     # refused before it showed (capped, already dismissed, invalid) is not.
-    for message in messages:
-        content = message.get("content") if isinstance(message, dict) else None
-        if message.get("role") != "user" or not isinstance(content, list):
-            continue
-        for block in content:
-            if (
-                isinstance(block, dict)
-                and block.get("type") == "tool_result"
-                and block.get("tool_use_id") == tool_use_id
-                and _result_kind(block) != "confirmation_denied"
-            ):
-                _raise(
-                    M.MemoryError(
-                        "this memory card was not declined", "memory_status", 409
-                    )
-                )
-    for message in messages:
-        content = message.get("content") if isinstance(message, dict) else None
-        if message.get("role") == "user" and isinstance(content, list):
-            for block in content:
-                if (
-                    isinstance(block, dict)
-                    and block.get("type") == "tool_result"
-                    and block.get("tool_use_id") == tool_use_id
-                    and not block.get("is_error")
-                ):
-                    _raise(
-                        M.MemoryError(
-                            "this memory card was not declined", "memory_status", 409
-                        )
-                    )
-    for message in messages:
-        content = message.get("content") if isinstance(message, dict) else None
-        if message.get("role") != "assistant" or not isinstance(content, list):
-            continue
-        for block in content:
-            if (
-                isinstance(block, dict)
-                and block.get("type") == "tool_use"
-                and block.get("id") == tool_use_id
-                and block.get("name") == "propose_memory"
-                and isinstance(block.get("input"), dict)
-            ):
-                return block["input"]
+    for _role, block in blocks:
+        if (
+            block.get("type") == "tool_result"
+            and block.get("tool_use_id") == tool_use_id
+            and _result_kind(block) != "confirmation_denied"
+        ):
+            _raise(
+                M.MemoryError("this memory card was not declined", "memory_status", 409)
+            )
+    for role, block in blocks:
+        if (
+            role == "assistant"
+            and block.get("type") == "tool_use"
+            and block.get("id") == tool_use_id
+            and block.get("name") == "propose_memory"
+            and isinstance(block.get("input"), dict)
+        ):
+            return block["input"]
     _raise(M.MemoryError("memory proposal not found", "memory_not_found", 404))
 
 
