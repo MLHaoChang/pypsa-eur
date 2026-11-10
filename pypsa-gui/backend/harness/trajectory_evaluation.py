@@ -173,6 +173,18 @@ def _classify(path: str) -> tuple[str, str]:
     return "file", path
 
 
+def _transient(path: str) -> bool:
+    """A report's lock file (`reports/.<id>.lock`, services/reports/store.py):
+    a concurrency guard the store creates on every write, not an effect."""
+    parts = path.split("/")
+    return (
+        len(parts) == 2
+        and parts[0] == "reports"
+        and parts[1].startswith(".")
+        and parts[1].endswith(".lock")
+    )
+
+
 def diff(before: dict, after: dict) -> list[dict]:
     """Every native change between two snapshots, one row per effect key."""
     rows, seen = [], set()
@@ -197,7 +209,7 @@ def diff(before: dict, after: dict) -> list[dict]:
         old, new = old or {}, new or {}
         files_old, files_new = old.get("files", {}), new.get("files", {})
         for path in sorted(set(files_old) | set(files_new)):
-            if files_old.get(path) != files_new.get(path):
+            if files_old.get(path) != files_new.get(path) and not _transient(path):
                 kind, key = _classify(path)
                 add(
                     {
