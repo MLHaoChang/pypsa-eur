@@ -3,7 +3,7 @@
 
 # 01 — run_coupling_loop / margin loop cannot sample outages carried on Links (firm Link backup, grid-import Link)
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Gated: yes (GK A)
 Model tier: opus
