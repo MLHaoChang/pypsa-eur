@@ -192,6 +192,22 @@ def test_import_capacity_is_per_period_on_a_multi_period_network():
     np.testing.assert_allclose(unit.capacity_series[6:], 40.0)
 
 
+def test_eh_h2_hub_staged_import_is_per_period_under_its_own_weightings():
+    """AL-3 on the shipped staged hub (weightings of 52 h): an import Link
+    built for 2030 delivers nothing in 2027."""
+    from project_templates import eh_templates as T
+
+    n = T.BUILDERS["eh_h2_hub_staged"]()
+    assert float(n.snapshot_weightings.objective.iloc[0]) > 1.0
+    n.links.at["grid_import", "build_year"] = 2030
+    n.links.at["grid_import", "lifetime"] = 30
+    [unit] = [u for u in sampled_fleet(n).units if u.name == "link:grid_import"]
+    period = n.snapshots.get_level_values(0)
+    assert unit.capacity_mw == pytest.approx(200.0)
+    np.testing.assert_allclose(unit.capacity_series[period == 2027], 0.0)
+    np.testing.assert_allclose(unit.capacity_series[period != 2027], 200.0)
+
+
 def test_an_extendable_import_link_uses_its_solved_capacity():
     n = _net()
     n.links.at["grid_import", "p_nom_extendable"] = True
@@ -409,6 +425,28 @@ def test_two_firm_links_on_one_fuel_bus_are_not_each_credited_the_whole_fuel():
             f"firm Link {lk}: not credited (0 MW) — "
             f"bus0 gas is shared with another Link: {other}"
         ) in b.fleet_notes
+
+
+def test_a_slack_generator_on_the_fuel_bus_is_not_a_fuel():
+    from services.adequacy.slack import SLACK_NAME_PREFIXES
+
+    n = _fuel_cell(_net(), fuel=False)
+    n.add("Generator", f"{SLACK_NAME_PREFIXES[0]}gas", bus="gas", p_nom=1000.0)
+    b = sampled_fleet(n)
+    assert "link:fuel_cell" not in _names(b)
+    assert (
+        "firm Link fuel_cell: not credited (0 MW) — "
+        "bus0 gas has no fuel Generator without an energy cap (e_sum_max)"
+    ) in b.fleet_notes
+
+
+def test_a_fuel_cell_without_a_finite_mttr_is_not_credited():
+    n = _fuel_cell(_net(), data=(0.05, float("inf")))
+    b = sampled_fleet(n)
+    assert "link:fuel_cell" not in _names(b)
+    assert (
+        "firm Link fuel_cell: not credited (0 MW) — no finite MTTR in its outage data"
+    ) in b.fleet_notes
 
 
 def test_the_fuel_generators_availability_bounds_the_credit():
