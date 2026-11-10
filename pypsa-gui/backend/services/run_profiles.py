@@ -581,7 +581,7 @@ def _dc_scorecard_rules():
 _DC_CONTINGENCY = _rule(
     "dc.campus.contingency", "dc.campus.contingency", "empty",
     basis="No check fails in the intact case or a transformer N-1 after the campus study's taps and "
-          "compensation (DC13-SCOPE: taps and shunts only after an outage; no redispatch). "
+          "compensation (taps and shunts only after an outage; no redispatch). "
           f"Input: {_CAMPUS_RUN}.")
 # Staged (design §9.3): the investment case is in the result gate. Its
 # counterfactual and its returns are read from the stored case, current for

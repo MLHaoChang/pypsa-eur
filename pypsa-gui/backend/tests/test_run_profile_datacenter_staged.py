@@ -599,7 +599,9 @@ def test_a_missing_invested_table_is_no_evidence_and_the_as_is_table_is_never_re
     """CT-2: `invest` is frozen on, so the job writes the invested table; without it there is no evidence."""
     run, step = _campus(hub)
     (run / ce.cs.COMPLIANCE_INVESTED_CSV).unlink()
-    assert _contingency(hub, step)["verdict"] == "not_evaluated"
+    result = _contingency(hub, step)
+    assert result["verdict"] == "not_evaluated"
+    assert "no compliance table after the measures" in result["reason"]
     assert (
         run_actions.run_files(run) is None
     )  # a settle with no invested table records no run
@@ -639,11 +641,12 @@ def test_no_transformer_row_is_not_applicable_only_when_the_voltage_row_says_so(
 
 
 @pytest.mark.parametrize("check", ["pcc_voltage", "campus_voltage"])
-@pytest.mark.parametrize("source", ["assumed", "extracted"])
+@pytest.mark.parametrize("source", ["assumed", "extracted", None, "user"])
 def test_a_voltage_pass_on_an_assumed_or_unconfirmed_band_never_passes(
     hub, check, source
 ):
-    """CT-5 (D3, #1079)."""
+    """CT-5, CT-5b (D3, #1079): only a band the code states passes; an
+    assumed, unconfirmed, missing or unknown tag fails closed."""
     status, _, _, case, detail = ROWS[check]
     _, step = _campus(hub, {**ROWS, check: (status, "pass", source, case, detail)})
     result = _contingency(hub, step)
@@ -776,10 +779,13 @@ def test_a_row_with_no_detail_is_read(hub):
     assert result["verdict"] == "pass" and result["facts"][0]["measures"] == []
 
 
-def test_an_extracted_transformer_limit_never_counts(hub):
+@pytest.mark.parametrize("source", ["extracted", "code", None])
+def test_a_transformer_limit_with_another_tag_never_counts(hub, source):
+    """CT-5a: only the engine's own `assumed` tag on the unit-rating clause
+    counts; any other tag, or none, fails closed."""
     _, step = _campus(
         hub,
-        {**ROWS, "transformer_loading": ("pass", "pass", "extracted", "N-1:T1", "")},
+        {**ROWS, "transformer_loading": ("pass", "pass", source, "N-1:T1", "")},
     )
     result = _contingency(hub, step)
     assert result["verdict"] == "not_evaluated" and "own rating" in result["reason"]
@@ -979,9 +985,7 @@ def test_the_runs_own_restore_base_coupling_loop_keeps_the_contingency_readable(
     assert _poll(client)["status"] == "met"
     ctx, at_start = seen[0]
     _, step = _campus(hub, revision=at_start)
-    env = run_gates.Env(
-        task={"steps": [step]}, ctx=ctx, project=hub, project_dir=None
-    )
+    env = run_gates.Env(task={"steps": [step]}, ctx=ctx, project=hub, project_dir=None)
     result = run_gates.evaluate([_rules(REFS[0])["dc.campus.contingency"]], env)[0]
     if readable:
         assert result["verdict"] == "pass", result

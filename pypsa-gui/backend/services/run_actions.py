@@ -822,6 +822,7 @@ CONTINGENCY_CHECKS = ("transformer_loading", "pcc_voltage", "campus_voltage")
 # with that clause (CT-5a), so a changed clause or tag fails closed.
 EQUIPMENT_LIMIT = frozenset({"transformer_loading"})
 EQUIPMENT_CLAUSE = "equipment rating"
+EQUIPMENT_SOURCE = "assumed"  # the engine's only tag on a unit-rating limit
 _BAND = {
     "pcc_voltage": "the PCC voltage band",
     "campus_voltage": "the campus voltage band",
@@ -901,6 +902,12 @@ def contingency(project, task, revision: int) -> dict:
             "state": "grid_code_changed",
             "reason": "the published campus run is not held to the run's grid-code profile",
         }
+    if not (run / ce.cs.COMPLIANCE_INVESTED_CSV).is_file():
+        # CT-2, E4: `invest` is frozen on, so no fallback to the as-is table.
+        return {
+            "state": "no_invested_table",
+            "reason": "the campus run wrote no compliance table after the measures",
+        }
     files = result.get("run_files")
     if not files or run_files(run) != files:
         return {
@@ -959,11 +966,11 @@ def contingency(project, task, revision: int) -> dict:
                 }
             )
             continue
-        source = str(row.get("source"))
+        source = row.get("source")
         if check in EQUIPMENT_LIMIT:
             if (
                 not str(row.get("clause") or "").startswith(EQUIPMENT_CLAUSE)
-                or source == "extracted"
+                or source != EQUIPMENT_SOURCE
             ):
                 waiting.append(f"{check} is not read against the unit's own rating")
         elif source == "assumed":
@@ -974,6 +981,11 @@ def contingency(project, task, revision: int) -> dict:
         elif source == "extracted":
             waiting.append(
                 f"{check} passes only on an unconfirmed band: confirm {_BAND[check]} in the grid-code profile"
+            )
+        elif source != "code":
+            # A missing or unknown tag fails closed: only a band the code states passes (CT-5b).
+            waiting.append(
+                f"{check} names no source for its band: state {_BAND[check]} in the grid-code profile"
             )
         detail = _text(row.get("detail")) or ""
         if row.get("status_as_is") != "pass" or "recommended" in detail:
