@@ -173,6 +173,24 @@ def _classify(path: str) -> tuple[str, str]:
     return "file", path
 
 
+# `services.reports.store.REPORT_ID_RE` (16 lower-case hex), spelled here so
+# this module stays stdlib-only; a test pins the two together.
+REPORT_ID_LEN, REPORT_ID_CHARS = 16, frozenset("0123456789abcdef")
+
+
+def _transient(path: str) -> bool:
+    """A report's lock file (`reports/.<id>.lock`, services/reports/store.py):
+    a concurrency guard the store creates on every write, not an effect."""
+    parts = path.split("/")
+    if len(parts) != 2 or parts[0] != "reports":
+        return False
+    name = parts[1]
+    if not (name.startswith(".") and name.endswith(".lock")):
+        return False
+    rid = name[1 : -len(".lock")]
+    return len(rid) == REPORT_ID_LEN and set(rid) <= REPORT_ID_CHARS
+
+
 def diff(before: dict, after: dict) -> list[dict]:
     """Every native change between two snapshots, one row per effect key."""
     rows, seen = [], set()
@@ -197,7 +215,7 @@ def diff(before: dict, after: dict) -> list[dict]:
         old, new = old or {}, new or {}
         files_old, files_new = old.get("files", {}), new.get("files", {})
         for path in sorted(set(files_old) | set(files_new)):
-            if files_old.get(path) != files_new.get(path):
+            if files_old.get(path) != files_new.get(path) and not _transient(path):
                 kind, key = _classify(path)
                 add(
                     {
