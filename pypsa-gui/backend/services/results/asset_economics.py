@@ -30,6 +30,16 @@ from services.solver_service import fom_per_horizon, periodized_capital_costs
 # asserts on the channel name.
 logger = logging.getLogger("pypsa_gui.results")
 
+
+def link_capacity_factor(input_energy_mwh: float, p_nom_mw: float, hours: float) -> float | None:
+    """A Link's capacity factor: p_nom bounds the INPUT (p0), so utilisation
+    is measured there, as input energy over p_nom times the modelled hours
+    (weighted). None when there is no capacity or no hours. The H2 hub's
+    electrolyser utilisation (`services/run_gates`) reads it too."""
+    if p_nom_mw > 1e-6 and hours > 0:
+        return input_energy_mwh / (p_nom_mw * hours)
+    return None
+
 def compute_asset_economics(n, cfg, *, result_df):
     """
     Per-asset economics for Generator / StorageUnit / Store / Link.
@@ -883,15 +893,7 @@ def compute_asset_economics(n, cfg, *, result_df):
                 lcoe = None
                 avg_price = None
 
-            # p_nom bounds the INPUT (p0), so utilisation is measured there.
-            if p_nom_l > 1e-6:
-                total_hours_modelled = float(w_vals_energy.sum())
-                cap_factor = (
-                    input_energy_total / (p_nom_l * total_hours_modelled)
-                    if total_hours_modelled > 0 else None
-                )
-            else:
-                cap_factor = None
+            cap_factor = link_capacity_factor(input_energy_total, p_nom_l, float(w_vals_energy.sum()))
 
             by_period_rows = []
             if is_multi and energy_per_p:

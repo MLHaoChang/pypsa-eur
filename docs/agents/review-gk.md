@@ -92,6 +92,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
 - A project-scoped result-view read carries `project_id` = the active project, and 404/409 count as `no_data`.
+- A source tag is read for what it means, keyed narrowly. gridspine's transformer_loading row is tagged `assumed` but its limit is the unit's own rating, so it counts under D3 only when check and clause ('equipment rating') both match; anything else fails closed. A pass that rests on recommended measures shows them and says whether the IC costs them (#1172).
 - A run profile whose approval envelope lists `run_sensitivity_sweep` or `run_eh_study` needs its own GK review. A sweep's cases[].changes create child projects with arbitrary edits that no edit bound limits; admit such a run only with per-case bounds or a card per case. An envelope admission must also refuse any `*project*` argument that is not the run's own project (#875).
 - Builders record a GK plan GO's conditions in the issue file's `## Comments`, so a rotation does not drop them.
 - A plan GO for work over one reviewer area or about 1,500 changed lines (excluding generated files, shots and fixtures) names the slices, one PR each (PR-SIZE-1).

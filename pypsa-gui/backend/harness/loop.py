@@ -4354,6 +4354,8 @@ def _dispatch_real_tool_call(
             "period": ui_event_payload.get("period"),
             "snapshot_index": ui_event_payload.get("snapshot_index"),
             "canvas_view": ui_event_payload.get("canvas_view"),
+            "guided_step": ui_event_payload.get("guided_step"),
+            "panel_section": ui_event_payload.get("panel_section"),
             # Live-voice 07 — Load flow source, window and highlighted branch.
             "loadflow_source": ui_event_payload.get("loadflow_source"),
             "window_from": ui_event_payload.get("window_from"),

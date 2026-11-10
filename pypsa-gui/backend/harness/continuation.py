@@ -210,11 +210,20 @@ def _queue_run(job) -> dict | None:
         return None
     except Exception:  # noqa: BLE001 — unreadable evidence is no evidence
         return None
-    # The manifest stores the job's objective unrounded, the same float the
-    # solve saved on the network: compared exactly.
-    if (isinstance(objective, bool) or not isinstance(objective, (int, float))
+    # The manifest stores the job's objective unrounded: the queue's own total
+    # (`_compute_run_objective`: the LP's objective plus its constant, which
+    # carries existing-capacity CAPEX), recomputed here on the saved network
+    # with the project's saved config and compared exactly. No saved config
+    # (the function would price with the foreground's) or no total is no
+    # evidence (GK B 38, A1).
+    from routers.simulation import _compute_run_objective
+    cfg = saved.solver_state.get("solver_config")
+    if (isinstance(objective, bool) or not isinstance(objective, (int, float)) or cfg is None
             or wt.solve_freshness(saved)["inputs_changed_since_solve"] is not False
-            or getattr(saved.network, "objective", None) != objective):
+            or getattr(saved.network, "objective", None) is None):
+        return None
+    total = _compute_run_objective(saved.network, cfg)
+    if total is None or total != objective:
         return None
     return {"job_id": job["job_id"], "run_id": run_id, "project_id": job["project_id"], "objective": objective}
 

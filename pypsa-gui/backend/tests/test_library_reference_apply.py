@@ -499,8 +499,8 @@ def test_a_dc_reference_writes_overnight_times_the_ratio_and_fom_from_it(dc_sola
                               "capacity_basis": "output_electric_dc"}, "TCU-05: recorded on apply"
     A.stamp(n, p, approved_by="a@b")
     n.generators.at["pv", "dc_ac_ratio"] = 1.1
-    from services.asset_schema import provenance as P
-    assert P.staleness(n, "Generator", "pv", P.get(n, "Generator", "pv"))["overnight_cost"]["stale"]["current"] == 1.1
+    from services import provenance_graph as G  # provenance-graph 02: staleness moved to the graph
+    assert G.stale_entries(n, "Generator", "pv")["overnight_cost"]["stale"]["current"] == 1.1
 
 
 @pytest.mark.parametrize("ratio", ["absent", float("nan"), 4.0, "abc"])

@@ -287,6 +287,9 @@ describe('refusal details (issue 04 S4a)', () => {
       'An earlier request with the same settings may still be running, so it was not started again. Ask the assistant to check it or stop it.'],
     ["An earlier run_simulation request with other settings may still be running.", 'operation_conflict',
       'An earlier request with other settings may still be running, so this one was not started. Ask the assistant to check it or stop it first.'],
+    // LC-14 (UX #1328): section ids are for the model; the visible Details read plain words.
+    ['Choose a section of the grid study: study_settings or island.', 'invalid_navigation',
+      'The assistant asked to open a screen or section that does not exist, so nothing changed on screen.'],
   ])('%s → %s', (message, kind, detail) => {
     expect(refusalDetail(message, kind)).toBe(detail)
   })

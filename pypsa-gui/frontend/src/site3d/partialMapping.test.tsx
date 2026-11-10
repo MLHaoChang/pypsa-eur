@@ -60,7 +60,7 @@ describe('partial mapping line (R3)', () => {
   it("words the edit with the panel's field label from the receipt rows, in both modes (UX (14) ask 2)", () => {
     const row = { component_class: 'Load', name: 'it', field: 'p_set', label: 'Active power', role: 'typed', unit: 'MW', old: 3, new: 2 }
     const t = { ...task(refused('revision_conflict'), ['it p_set 3 → 2 MW']), change_edits: [{ rows: [row] }] }
-    expect(partialMapping(t)?.done).toBe("Load 'it', Active power 3 → 2 MW")
+    expect(partialMapping(t)?.done).toBe("Load “it”, Active power 3 → 2 MW")
     expect(partialMapping(t)?.done).not.toContain('p_set')
   })
 

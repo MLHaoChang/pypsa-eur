@@ -404,6 +404,82 @@ def test_an_error_cannot_be_acknowledged(client, site, edit):
     assert r.json()["detail"]["error_kind"] == "flow_item_unknown"
 
 
+def test_ack_many_stores_all_in_one_write_or_none(client, site, project_storage_dir, edit):
+    name = site()
+    with edit() as n:
+        n.snapshot_weightings.loc[:, ["objective", "generators", "stores"]] = 3.0
+    bad = client.post(f"/api/projects/{name}/flow/ack-many", json={"items": [
+        {"code": "snapshot_weights_nyears_off", "entity": None},
+        {"code": "no_such_code", "entity": None}]})
+    assert bad.status_code == 404
+    assert not (project_storage_dir(name) / "flow_acks.json").exists()    # all or none
+    r = client.post(f"/api/projects/{name}/flow/ack-many", json={"items": [
+        {"code": "snapshot_weights_nyears_off", "entity": None}]})
+    assert r.status_code == 200, r.text
+    assert [a["code"] for a in r.json()["acks"]] == ["snapshot_weights_nyears_off"]
+    assert _states(_flow(client, name))["project"] == "complete"
+
+
+def _acks_file(project_storage_dir, name):
+    return project_storage_dir(name) / "flow_acks.json"
+
+
+def test_ack_many_refuses_an_error_pair_and_writes_nothing(client, site, project_storage_dir, edit):
+    name = site()
+    with edit() as n:
+        n.loads.loc["it", "p_set"] = float("nan")
+        n.snapshot_weightings.loc[:, ["objective", "generators", "stores"]] = 3.0
+    r = client.post(f"/api/projects/{name}/flow/ack-many", json={"items": [
+        {"code": "snapshot_weights_nyears_off", "entity": None},
+        {"code": "load_p_set_invalid", "entity": "it"}]})
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_kind"] == "flow_ack_not_warning"
+    assert not _acks_file(project_storage_dir, name).exists()
+
+
+def test_ack_many_is_refused_while_the_preflight_is_deferred(tmp_path, monkeypatch):
+    # The route's solver guard answers 409 first while a solve runs, so the
+    # service's own deferred check is pinned directly.
+    from services import flow_service
+
+    monkeypatch.setattr(flow_service, "_collect", lambda *a, **k: (
+        {"deferred": True, "deferred_reason": "busy"},
+        [{"code": "c", "severity": "warning", "target": {"entity": None, "section": "project"}}]))
+    with pytest.raises(flow_service.FlowAckError) as exc:
+        flow_service.acknowledge_items(tmp_path, [("c", None)], cache_key="k")
+    assert exc.value.status == 409 and exc.value.error_kind == "flow_deferred"
+    assert not (tmp_path / flow_service.ACKS_FILE).exists()
+
+
+def test_ack_many_on_a_project_that_is_not_open_answers_409(client, site, project_storage_dir):
+    first = site(name="first")
+    site(name="second")
+    r = client.post(f"/api/projects/{first}/flow/ack-many",
+                    json={"items": [{"code": "snapshot_weights_nyears_off"}]})
+    assert r.status_code == 409
+    assert r.json()["detail"]["error_kind"] == "flow_project_not_open"
+    assert not _acks_file(project_storage_dir, first).exists()
+
+
+def test_ack_many_stores_a_pair_listed_twice_once(client, site, project_storage_dir, edit):
+    name = site()
+    with edit() as n:
+        n.snapshot_weightings.loc[:, ["objective", "generators", "stores"]] = 3.0
+    item = {"code": "snapshot_weights_nyears_off", "entity": None}
+    r = client.post(f"/api/projects/{name}/flow/ack-many", json={"items": [item, item]})
+    assert r.status_code == 200, r.text
+    assert len(r.json()["acks"]) == 1
+    stored = json.loads(_acks_file(project_storage_dir, name).read_text())["acks"]
+    assert [a["code"] for a in stored] == ["snapshot_weights_nyears_off"]
+
+
+def test_ack_many_with_no_items_is_refused_and_writes_nothing(client, site, project_storage_dir):
+    name = site()
+    r = client.post(f"/api/projects/{name}/flow/ack-many", json={"items": []})
+    assert r.status_code == 422
+    assert not _acks_file(project_storage_dir, name).exists()
+
+
 # ── deferred ────────────────────────────────────────────────────────────────
 
 def test_a_deferred_preflight_is_unknown_everywhere(client, site, monkeypatch):

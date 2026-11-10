@@ -686,6 +686,72 @@ def test_a_tariff_in_another_currency_is_refused(monkeypatch):
     assert e.value.kind == "dc_architecture_currency_mismatch"
 
 
+_GEN = "tou_reference_illustrative"
+_SNAPS = pd.date_range("2030-01-01", periods=24, freq="h")
+
+
+def _generic_commercial(**over):
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    t = load_defaults_pack().pack_tariff(_GEN).model_dump(mode="json")
+    t.update(over)
+    return {"poc_link": "poc", "import_tariff": t}
+
+
+def test_a_stamped_generic_copy_is_refused_in_a_gbp_case_and_read_in_an_eur_case():
+    """GLE-04: the energy-price check reads the stamp like the currency gate (issue 03),
+    and writes nothing, so the copy keeps its hash."""
+    import json
+
+    com = _generic_commercial()
+    assert "currency" not in com["import_tariff"]  # nothing is stamped onto the copy
+    before = json.dumps(com, sort_keys=True)
+    with pytest.raises(A.DcArchitectureError) as e:
+        A.tariff_energy_rate(com, _SNAPS, "GBP")
+    assert e.value.kind == "dc_architecture_currency_mismatch"
+    assert "priced in EUR (from its defaults-pack stamp" in str(e.value)
+    out = A.tariff_energy_rate(com, _SNAPS, "EUR")
+    assert out["currency"] == "EUR"
+    assert out["currency_note"] == (
+        "the tariff states no currency: read from its defaults-pack stamp"
+    )
+    assert json.dumps(com, sort_keys=True) == before
+
+
+def test_a_stated_currency_wins_over_the_stamp_and_has_no_note():
+    com = _generic_commercial(currency="GBP")
+    out = A.tariff_energy_rate(com, _SNAPS, "GBP")
+    assert out["currency"] == "GBP" and out["currency_note"] is None
+    with pytest.raises(A.DcArchitectureError):
+        A.tariff_energy_rate(com, _SNAPS, "EUR")
+
+
+def test_an_unstamped_tariff_with_no_currency_is_still_assumed_the_finance_currency():
+    out = A.tariff_energy_rate(_tou(), _SNAPS, "GBP")
+    assert out["currency"] == "GBP"
+    assert out["currency_note"] == (
+        "the tariff states no currency: read as the finance currency (assumed)"
+    )
+
+
+@pytest.mark.parametrize("exc_name", ["RuntimeError", "DefaultsPackError"])
+def test_a_pack_that_fails_to_load_is_not_swallowed_by_the_energy_price_check(
+    monkeypatch, exc_name
+):
+    from services.library.defaults_pack import loader
+
+    exc = RuntimeError if exc_name == "RuntimeError" else loader.DefaultsPackError
+
+    com = _generic_commercial()  # built before the pack is broken
+
+    def boom(*a, **k):
+        raise exc("broken pack")
+
+    monkeypatch.setattr(loader, "load_defaults_pack", boom)
+    with pytest.raises(exc, match="broken pack"):
+        A.tariff_energy_rate(com, _SNAPS, "EUR")
+
+
 def test_the_screen_refuses_an_infeasible_own_pue():
     with pytest.raises(A.DcArchitectureError) as e:
         _compare(_net()[0], _spec(pue_at_design=1.05))

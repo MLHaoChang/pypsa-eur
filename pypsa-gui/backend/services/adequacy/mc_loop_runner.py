@@ -16,6 +16,7 @@ from pydantic import BaseModel as _BaseModel
 
 from models.schemas import Finite as _Finite
 from services.pypsa_service import PyPSAService
+from services.adequacy.coupling import NOTHING_TO_SAMPLE
 
 logger = logging.getLogger("pypsa_gui.results")
 
@@ -183,8 +184,7 @@ def start_mc(
     if not inputs.units:
         raise HTTPException(
             422,
-            "nothing to sample: no electrical generator carries resolvable "
-            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            f"{NOTHING_TO_SAMPLE} (unavailability + MTTR), so the sampled fleet is "
             "empty — an empty fleet would report the entire horizon as loss of "
             "load, which is a statement about missing input data, not about "
             "the system")

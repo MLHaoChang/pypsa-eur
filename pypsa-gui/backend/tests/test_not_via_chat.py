@@ -62,6 +62,7 @@ def test_the_issue_rows_are_declared():
         'assistant_keys_and_profiles': ('out of chat', 'settings'), 'assistant_access_rule': ('out of chat', 'chat'),
         'solve_queue_instance_controls': ('out of chat', 'solveQueue'), 'map_layout_and_sites': ('manual', 'map'),
         'site_scene': ('unbuilt', 'map'),
+        'accept_assumed_defaults': ('unbuilt', None),
         'intent_comparison': ('unbuilt', None),
         'dc_backup': ('unbuilt', None),
         'dc_architecture': ('unbuilt', None),

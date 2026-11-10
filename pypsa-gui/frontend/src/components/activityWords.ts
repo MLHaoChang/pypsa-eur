@@ -66,6 +66,8 @@ export const TOOL_OUTCOME_DENIED_DETAIL_WORDS: Record<string, string> = {
   operation_pending: 'An earlier request with the same settings may still be running, so it was not started again. Ask the assistant to check it or stop it.',
   operation_conflict: 'An earlier request with other settings may still be running, so this one was not started. Ask the assistant to check it or stop it first.',
   // SC-07 S5a (UX R4): no tool or kind words; the backend message stays for the model.
+  // LC-14 (UX #1328): the backend message names section ids for the model; the user reads no ids.
+  invalid_navigation: 'The assistant asked to open a screen or section that does not exist, so nothing changed on screen.',
   scene_apply_outcome_unknown: 'The 3D site change may not have landed. Check before trying again.',
 }
 

@@ -51,6 +51,9 @@ export const FACT_WORDS: Record<string, string> = {
   'dc.gridcode.frequency_match': 'The campus runs at the grid frequency you gave',
   'dc.gridcode.unchanged': 'The grid-code profile did not change during the run',
   'dc.campus.study': 'The campus study finished under the published grid code',
+  // Study harness 11: the hydrogen hubs.
+  'h2.offtake.shed_hours': 'The hydrogen offtake is served in every hour',
+  'h2.electrolyser.utilisation': 'The electrolyser runs within its sizing band',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,
@@ -81,6 +84,9 @@ export const COMPONENT_WORDS: Record<string, { words: string }> = {
 /** The names a profile's envelope globs over, in words. */
 export const NAME_WORDS: Record<string, string> = {
   'genset_new_*': 'New gensets', 'pv_new_*': 'New PV', 'bess_new_*': 'New batteries',
+  // Study harness 11: the hydrogen hubs' levers.
+  'wind_new*': 'New wind', 'solar_new*': 'New solar', 'bess_new*': 'New batteries',
+  electrolyser: 'The electrolyser', 'electrolyser_new_*': 'New electrolysers', h2_storage: 'The hydrogen store',
 }
 
 /** An envelope edit's field: the panels' own word (`FIELD_LABELS`) and its unit. */
@@ -89,6 +95,7 @@ export const FIELD_WORDS: Record<string, { words: string; unit: string }> = {
   p_nom_max: { words: FIELD_LABELS.p_nom_max, unit: 'MW' },
   p_nom_min: { words: FIELD_LABELS.p_nom_min, unit: 'MW' },
   max_hours: { words: FIELD_LABELS.max_hours, unit: 'h' },
+  e_nom: { words: FIELD_LABELS.e_nom, unit: 'MWh' },
   marginal_cost: { words: FIELD_LABELS.marginal_cost, unit: '€/MWh' },
 }
 

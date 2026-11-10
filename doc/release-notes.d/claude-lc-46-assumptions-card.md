@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Guided sections list every assumed default in one Assumptions card with "Keep all defaults" (one write, `POST /flow/ack-many`) and an edit per row, and the investment-decision and renewable-profile chat workflows ask for their defaults once, as the same card.

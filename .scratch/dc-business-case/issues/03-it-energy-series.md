@@ -3,7 +3,7 @@
 
 # 03 — The IT energy series for revenue
 
-Status: ready-for-agent after 01 merges (GK A plan GO 2026-11-10, BC3-1..8 below)
+Status: done (#1319)
 Type: task
 Blocked by: 01
 Gated: yes (GK A)

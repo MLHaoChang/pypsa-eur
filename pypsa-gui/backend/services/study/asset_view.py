@@ -34,13 +34,15 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from models.study import AssumptionsLedger, LedgerRow
 import services.asset_schema.provenance as provenance
+from services import provenance_graph
+from services.provenance_graph import money
 
 __all__ = ["AssetSnapshot", "ExpertEdit", "LEDGER_FIELDS", "LedgerField", "asset_snapshot",
-           "compiled_value", "expert_edits", "mark_expert_edits", "record_pack_defaults"]
+           "compiled_value", "expert_edits", "ledger_stale", "mark_expert_edits", "record_pack_defaults"]
 
 BATTERY = ("StorageUnit", "battery")
 PV = ("Generator", "pv")
@@ -157,6 +159,8 @@ class AssetSnapshot:
     pv_kind: str | None
     values: Mapping[tuple[str, str, str], float]
     stamps: Mapping[tuple[str, str, str], Mapping]
+    # provenance-graph 02 (TCU-07): the `stale` the asset card shows for each ledger row's field, by row key.
+    stale: Mapping[str, Mapping] = field(default_factory=dict)
 
 
 def asset_snapshot(n) -> AssetSnapshot:
@@ -175,7 +179,36 @@ def asset_snapshot(n) -> AssetSnapshot:
         entry = provenance.get(n, m.component, m.name).get(m.field)
         if entry:
             stamps[k] = entry
-    return AssetSnapshot(meta.get("option_id"), meta.get("pv_kind"), values, stamps)
+    return AssetSnapshot(meta.get("option_id"), meta.get("pv_kind"), values, stamps, _ledger_stale(n))
+
+
+def _ledger_stale(n) -> dict[str, Mapping]:
+    """Each ledger row's `shown_in` edges in the provenance graph: the row shows the asset field it compiles
+    to (`LEDGER_FIELDS`), so it reads that field's verdict, the one the asset card reads. Only stale is kept."""
+    b = provenance_graph.Builder(n)
+    for cls, name in dict.fromkeys((m.component, m.name) for m in LEDGER_FIELDS
+                                   if m.name in _table(n, m.component).index):
+        money.add_asset(b, cls, name)
+    money.add_ledger_rows(b, ((m.key, m.component, m.name, m.field) for m in LEDGER_FIELDS))
+    g = b.build()
+    out: dict[str, Mapping] = {}
+    for m in LEDGER_FIELDS:
+        broke = [v.broken[0] for v in provenance_graph.surface_verdicts(g, money.ledger_row_id(m.key))
+                 if v.state == "stale"]
+        if broke:
+            out[m.key] = {"component": m.component, "name": m.name, "field": m.field, "stale": broke[0].wire()}
+    return out
+
+
+def ledger_stale(n_or_snapshot, ledger: AssumptionsLedger) -> dict[str, Mapping]:
+    """The ledger rows of this network whose asset field reads out of date, by row key (the PV kind its
+    pack did not read is skipped, as in `expert_edits`)."""
+    snap = (n_or_snapshot if isinstance(n_or_snapshot, AssetSnapshot)
+            else asset_snapshot(n_or_snapshot))
+    rows = _rows(ledger)
+    return {k: v for k, v in snap.stale.items()
+            if k in rows and not (k.startswith("pv_") and snap.pv_kind is not None
+                                  and not k.startswith(f"pv_{snap.pv_kind}_"))}
 
 
 def expert_edits(n_or_snapshot, ledger: AssumptionsLedger) -> list[ExpertEdit]:

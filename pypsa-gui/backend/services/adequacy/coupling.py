@@ -102,6 +102,11 @@ logger = logging.getLogger(__name__)
 # network — beyond that the user wants a queued job, not a request-scoped
 # worker thread.
 MAX_LOOP_SOLVES = 8
+# The loops' shared refusal of a network whose sampled fleet would be empty
+# (`coupling_loop_runner`, `margin_loop_runner`, `mc_loop_runner`,
+# `eh_stages`): each message starts with this text, and the study harness's
+# gate reads it as a typed reason (`run_gates`, GK A (19) SH11-L6).
+NOTHING_TO_SAMPLE = "nothing to sample: no electrical generator carries resolvable occurrence data"
 
 # Every status a finished loop's record can carry: the verdicts
 # `run_coupling_loop` returns, and the runners' "failed" when the controller

@@ -1010,7 +1010,7 @@ def _current_ledger(study: DecisionStudy):
     return study_ledger.with_study_currency_year(seeded, study.currency_year), False
 
 
-def _ledger_out(study: DecisionStudy, ledger, stored: bool, maturity=None) -> dict:
+def _ledger_out(study: DecisionStudy, ledger, stored: bool, maturity=None, stale=None, unchecked=None) -> dict:
     maturity = maturity or study_ledger.maturity_from_ledger(
         ledger, study_ledger.load_provenance(study.intake))
     return {
@@ -1018,6 +1018,12 @@ def _ledger_out(study: DecisionStudy, ledger, stored: bool, maturity=None) -> di
         "stored": stored,
         "ledger": ledger.model_dump(mode="json", by_alias=True),
         "maturity": maturity.model_dump(mode="json", by_alias=True),
+        # provenance-graph 02 (TCU-07): rows whose asset field is out of date on an option fork, as the
+        # asset card says it. Beside the ledger, not on its rows, so a stored ledger and its hash stay as they are.
+        "stale": stale or {},
+        # GK B F1 (P1): the option forks whose costs could not be checked (unreadable, or the graph build
+        # raised). Named, never read as fresh, never a 500; their rows get no made-up `stale` verdict.
+        "stale_unchecked": unchecked or [],
     }
 
 
@@ -1041,12 +1047,14 @@ def _fork_snapshot(row):
     key = (str(path), st.st_mtime_ns, st.st_size)
     snap = _SNAPSHOTS.get(key)
     if snap is None:
+        # The snapshot's graph build sits under the same catch as the read (GK B F1): a fork that cannot be
+        # read or checked is logged and left out (the ledger names it in `stale_unchecked`), never a 500.
         try:
             n, _hash = study_runner.fork_network_from_disk(row)
+            snap = asset_view.asset_snapshot(n)
         except Exception:  # noqa: BLE001 — an unreadable fork shows no edit, never a 500
             logger.warning("rule 5: could not read fork %s", row.name, exc_info=True)
             return None
-        snap = asset_view.asset_snapshot(n)
         if len(_SNAPSHOTS) >= _SNAPSHOTS_MAX:
             _SNAPSHOTS.pop(next(iter(_SNAPSHOTS)))
         _SNAPSHOTS[key] = snap
@@ -1074,6 +1082,39 @@ def _with_expert_edits(study: DecisionStudy, ledger, project: AuthorizedProject,
     return asset_view.mark_expert_edits(ledger, edits)
 
 
+def _ledger_stale(study: DecisionStudy, ledger, project: AuthorizedProject,
+                  db: DBSession, user: User | None) -> tuple[dict[str, list[dict]], list[dict]]:
+    """Per ledger row, each owned fork whose asset field the row compiles to reads out of date (the provenance
+    graph's verdict, the one the fork's asset card shows):
+    `{key: [{option_id, option_label, component, name, field, stale}]}`. The label names the option the
+    person opens to re-price, since the cost lives on that fork, not on the base (UX, provenance-graph 02).
+    Second, the forks it could not check, `[{option_id, option_label}]` (GK B F1): an unreadable fork is
+    named there and contributes nothing to the first, so it never reads as fresh."""
+    from services.study import asset_view
+
+    question = study_questions.get_question(study.question_id)
+
+    def label(option_id: str) -> str:
+        try:
+            return study_questions.option(question, option_id).label if question else option_id
+        except KeyError:
+            return option_id
+
+    out: dict[str, list[dict]] = {}
+    unchecked: list[dict] = []
+    for row in _owned_fork_rows(study, project, db, user):
+        snap = _fork_snapshot(row)
+        if snap is None:
+            # No network meta to read the option from: the fork's name carries it (`forks.fork_name`).
+            option_id = row.name.rsplit(study_forks.FORK_SEPARATOR, 1)[-1]
+            unchecked.append({"option_id": option_id, "option_label": label(option_id)})
+            continue
+        option_id = snap.option_id or row.name
+        for key, hit in sorted(asset_view.ledger_stale(snap, ledger).items()):
+            out.setdefault(key, []).append({"option_id": option_id, "option_label": label(option_id), **hit})
+    return out, sorted(unchecked, key=lambda u: u["option_id"])
+
+
 @router.get("/{study_id}/ledger")
 def get_ledger(study_id: str,
                project: AuthorizedProject = ProjectAccessDep,
@@ -1087,7 +1128,7 @@ def get_ledger(study_id: str,
     maturity = study_ledger.maturity_from_ledger(
         ledger, study_ledger.load_provenance(study.intake))
     return _ledger_out(study, _with_expert_edits(study, ledger, project, db, user), stored,
-                       maturity)
+                       maturity, *_ledger_stale(study, ledger, project, db, user))
 
 
 def _ledger_after(study: DecisionStudy, ledger, body: "LedgerPut", changed_by: str | None, now):
@@ -1143,7 +1184,8 @@ def put_ledger(study_id: str, body: LedgerPut,
             "ledger": ledger, "ledger_version": ledger.ledger_version,
             "maturity": maturity, "updated_at": _now()})
         _save(project, updated)
-        return _ledger_out(updated, ledger, True, maturity)
+        return _ledger_out(updated, ledger, True, maturity,
+                           *_ledger_stale(updated, ledger, project, db, user))
 
 
 @router.get("/{study_id}/ledger.csv")
