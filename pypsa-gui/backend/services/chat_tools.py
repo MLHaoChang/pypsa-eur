@@ -4051,7 +4051,14 @@ def get_project_flow(name: str) -> dict:
     notes, through the same handler as ``GET /api/projects/{name}/flow``."""
     from routers.flow import get_project_flow as _h
 
-    return _route(_h, project=_authorized_project(name))
+    out = _route(_h, project=_authorized_project(name))
+    # The per-section component lists are for Guided's cards. They grow with the
+    # network, so the model's copy leaves them out (list_components has them).
+    if isinstance(out, dict):
+        for row in out.get("sections") or []:
+            if isinstance(row, dict):
+                row.pop("holds", None)
+    return out
 
 
 def get_reliability_goal(name: str) -> dict:

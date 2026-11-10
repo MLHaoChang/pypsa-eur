@@ -341,6 +341,36 @@ def test_a_section_the_scope_leaves_out_says_so(client, tmp_projects_dir, monkey
     assert all(i["in_scope"] for i in by_id["loads"]["items"])
 
 
+def test_a_grid_connection_the_scope_leaves_out_keeps_its_defaults(client, tmp_projects_dir,
+                                                                   monkeypatch):
+    """Not needed by the scope is not off-grid: the connection's defaults still count."""
+    real = S.S.needed_sections
+    monkeypatch.setattr(S.S, "needed_sections", lambda scope: set(real(scope)) - {"connection"})
+    name = _create(client, "eh_datacenter", "dc_scope")
+    conn, defaults = _connection_defaults(client.get(f"/api/projects/{name}/flow").json())
+    assert conn["state"] == "not_needed"
+    assert conn["summary"] == "Not needed by the cards in scope"
+    assert defaults and all(i["in_scope"] for i in defaults)
+
+
+def test_an_off_grid_site_tags_the_connection_section_only(client, tmp_projects_dir, monkeypatch):
+    """A default on the connection link that is filed to another not-needed
+    section stays in scope: the rule is section 3's."""
+    flow = _microgrid_flow(client, "mg_first")
+    _conn, defaults = _connection_defaults(flow)
+    link = next(i["target"]["entity"] for i in defaults
+                if i["target"]["entity"] != S._POC_ITEM)
+    real_needed, real_assumed = S.S.needed_sections, S._assumed_items
+    monkeypatch.setattr(S.S, "needed_sections", lambda scope: set(real_needed(scope)) - {"loads"})
+    monkeypatch.setattr(S, "_assumed_items", lambda *a, **k: real_assumed(*a, **k) + [
+        S._item("assumed_default", "warning", "m", "template", "loads", entity=link)])
+    S._readiness_cache.clear()
+    by_id = {s["section"]: s for s in _microgrid_flow(client, "mg_second")["sections"]}
+    assert by_id["loads"]["state"] == "not_needed"
+    stray = [i for i in by_id["loads"]["items"] if i["target"]["entity"] == link]
+    assert stray and all(i["in_scope"] for i in stray)
+
+
 def _row(code: str, entity: str, severity: str = "warning") -> dict:
     return S._item(code, severity, "m", "template", "connection", entity=entity)
 
@@ -369,3 +399,11 @@ def test_a_grid_connection_brings_the_connection_defaults_back(client, tmp_proje
 def test_a_summary_count_uses_a_real_plural(n, words):
     assert S._count(n, "asset") == words
     assert "(s)" not in words
+
+
+@pytest.mark.parametrize("names, words", [(["a"], "1 unit has no outage data (a)."),
+                                          (["a", "b"], "2 units have no outage data (a, b).")])
+def test_the_outage_sentence_agrees_with_its_count(names, words):
+    report = {"outage_units": {"missing": [{"name": n} for n in names]}}
+    items = S._readiness_items(report, voll_noted=True)
+    assert [i["message"] for i in items if i["code"] == "eh_outage_data_missing"] == [words]

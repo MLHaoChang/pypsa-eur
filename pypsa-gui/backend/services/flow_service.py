@@ -72,6 +72,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import pathlib
 import re
 import threading
@@ -190,6 +191,8 @@ class _Facts:
     connection_links: list[str]
     import_p_nom_mw: float | None
     asset_count: int
+    # What sections 2, 4, 5 and 6 hold, for display only (`_holds`).
+    holds: dict[str, list[dict]]
     buses: int
     buses_placed: int
     voll: float
@@ -367,20 +370,94 @@ def section_for_component(n, config, project_dir: pathlib.Path | None,
     return F.section_for(component_class, entity, frozenset(connection))
 
 
+# The table of each asset class, and the size field a section list shows for it.
+_ASSET_TABLES = (("Generator", "generators", "p_nom", "MW"),
+                 ("StorageUnit", "storage_units", "p_nom", "MW"),
+                 ("Store", "stores", "e_nom", "MWh"),
+                 ("Link", "links", "p_nom", "MW"))
+# Input series a component can carry, in the order section 6 lists them.
+_PROFILE_FIELDS = ("p_set", "q_set", "p_max_pu", "p_min_pu", "e_max_pu", "e_min_pu",
+                   "inflow", "marginal_cost", "efficiency")
+
+
+def _site_assets(n, imports, connection) -> list[tuple[str, str]]:
+    """``(class, name)`` of every asset of the site, in table order: the one
+    set the asset count and section 5's list both come from. The supply behind
+    the fence (a market Generator on an import Link's grid side) and the
+    connection's own Links are the connection's, not assets of the site."""
+    grid_side = {str(n.links.at[i, "bus0"]) for i in imports if i in n.links.index}
+    out: list[tuple[str, str]] = []
+    for klass, table, _field, _unit in _ASSET_TABLES:
+        df = getattr(n, table)
+        for name in df.index:
+            if klass == "Generator" and str(df.at[name, "bus"]) in grid_side:
+                continue
+            if klass == "Link" and str(name) in connection:
+                continue
+            out.append((klass, str(name)))
+    return out
+
+
+def _number(value) -> float | None:
+    """A finite number, or None: a missing or non-finite value is never 0."""
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    return x if math.isfinite(x) else None
+
+
+def _held(component: str, entity: str, *, carrier=None, field_name: str | None = None,
+          value=None, unit: str | None = None, extendable: bool = False) -> dict:
+    carrier = str(carrier) if carrier is not None and str(carrier) not in ("", "nan") else None
+    return {"component": component, "entity": entity, "carrier": carrier, "field": field_name,
+            "value": _number(value), "unit": unit, "extendable": bool(extendable)}
+
+
+def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]) -> dict[str, list[dict]]:
+    """What sections 2, 4, 5 and 6 hold, one entry per row a Guided list shows:
+    raw values only, the words are the frontend's. Display only: no state,
+    count, blocker, verdict, acknowledgement or fingerprint reads it. An
+    extendable asset carries the size as entered, never a solved one."""
+    tables = {klass: (table, fld, unit) for klass, table, fld, unit in _ASSET_TABLES}
+    assets = []
+    for klass, name in site_assets:
+        table, fld, unit = tables[klass]
+        df = getattr(n, table)
+        assets.append(_held(klass, name, carrier=df.at[name, "carrier"] if "carrier" in df else None,
+                            field_name=fld, value=df.at[name, fld], unit=unit,
+                            extendable=df.at[name, f"{fld}_extendable"]))
+    series = n.loads_t.p_set
+    loads = []
+    for name in n.loads.index:
+        # The peak of the load's series where it has one, else its fixed value.
+        # A series with no rows has no peak: null, not the unused fixed value.
+        value = series[name].max() if name in series.columns else n.loads.at[name, "p_set"]
+        loads.append(_held("Load", str(name), field_name="p_set", value=value, unit="MW",
+                           carrier=n.loads.at[name, "carrier"] if "carrier" in n.loads else None))
+    profiles = []
+    for klass, table in (("Load", "loads"), *((k, t) for k, t, _f, _u in _ASSET_TABLES)):
+        frames = getattr(n, f"{table}_t")
+        for fld in _PROFILE_FIELDS:
+            frame = frames.get(fld) if hasattr(frames, "get") else None
+            if frame is None:
+                continue
+            # The attribute's name only, never the series' values.
+            profiles += [_held(klass, str(name), field_name=fld) for name in frame.columns]
+    return {"carriers": [_held("Carrier", c) for c in carriers], "loads": loads,
+            "assets": assets, "profiles": profiles}
+
+
 def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     from services import dirty_state
     from services.network_geometry import _bus_coord
 
     imports, connection = _connection(n, config, template)
     commercial = getattr(config, "commercial", None)
-    links = [str(i) for i in n.links.index]
     # The supply behind the fence (a market Generator on an import Link's grid
     # side) is the connection's, not an asset of the site.
-    grid_side = {str(n.links.at[i, "bus0"]) for i in imports if i in n.links.index}
-    gens = sum(1 for b in n.generators["bus"] if str(b) not in grid_side) \
-        if len(n.generators) else 0
-    assets = (gens + len(n.storage_units) + len(n.stores)
-              + sum(1 for i in links if i not in connection))
+    site_assets = _site_assets(n, imports, connection)
+    assets = len(site_assets)
     # The RP-01 rule (NaN, out of range and 0/0 all count as missing), so the
     # flow and the profile refusal agree on what "placed" means.
     placed = sum(1 for b in n.buses.index if _bus_coord(n, b) is not None)
@@ -410,12 +487,14 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
             from services.adequacy.eh_study import _private_copy
 
             copy = _private_copy(n)
+    carriers = [str(c) for c in n.carriers.index] if len(n.carriers) else \
+        sorted({str(b) for b in n.buses.get("carrier", []) if str(b)})
     return _Facts(
         revision=revision, snapshots=len(n.snapshots), loads=len(n.loads),
-        carriers=[str(c) for c in n.carriers.index] if len(n.carriers) else
-        sorted({str(b) for b in n.buses.get("carrier", []) if str(b)}),
+        carriers=carriers,
         connection_links=sorted(connection), import_p_nom_mw=p_nom,
-        asset_count=assets, buses=len(n.buses), buses_placed=placed,
+        asset_count=assets, holds=_holds(n, carriers, site_assets),
+        buses=len(n.buses), buses_placed=placed,
         renewables_unplaced=unplaced_renewables(n, supplied), voll=voll,
         ens_cap=getattr(config, "ens_cap_permyriad", None),
         commercial=commercial, finance=getattr(config, "finance", None),
@@ -1201,6 +1280,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
         row: dict[str, Any] = {"section": s, "label": F.SECTION_LABELS[s],
                                "items": [_strip(it) for it in mine],
                                "summary": _summary(s, facts)}
+        if s in facts.holds:
+            row["holds"] = facts.holds[s]
         if s in F.INPUT_SECTIONS:
             # Only what the scope holds counts (W4a, §5.2).
             counted = [it for it in mine if it["in_scope"]]

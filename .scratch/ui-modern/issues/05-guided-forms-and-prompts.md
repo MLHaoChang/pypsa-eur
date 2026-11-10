@@ -45,3 +45,25 @@ Shots: `.scratch/ui-modern/shots-05/`, `before-` and `after-`, dark and light, `
 - Each slice-1 point has before and after shots in dark and light on the data centre and microgrid templates.
 - Tests pin the label map, the single add control, the plurals, the plain ledger words and the not-needed rule.
 - The PR merges with the UX reviewer's OK.
+
+## Comments
+
+### Slice 2 plan verdicts (10 Nov 2026)
+
+UX (16): GO with S1–S7.
+- S1. A row's "Edit ›" opens its Guided home where one exists (the field drawer over the card; time-series rows through `openTimeSeriesFor`). Only where none exists does it go to Expert, with the Back pill set. The PR says which kind goes where, with a test per kind.
+- S2. One link per row, "›" as U+203A.
+- S3. Kind and figure words come from the owning panel's word maps, with a parity test; figures carry units; an extendable asset reads "sized by the study"; a missing figure says why.
+- S4. The list has a loading state, a failed-query sentence and the empty state "Nothing here yet"; the heading count equals the rows listed.
+- S5. Section 7 on the microgrid: sub-head words from a map shared with Expert Economics; no select changes meaning or order within its group; the three actions keep their names; shots in both modes.
+- S6. Em dashes become colons or two sentences, option labels too. No raw key or `diesel_1`-style name reaches an assumed message.
+- S7. Shots: a folded group, the Back pill, the time-series drawer from a row, the empty state, Expert Economics, the staged microgrid's section 3.
+- A group longer than 8 folds to "(N more) Show all". If the PR passes the size limit, section 7 becomes its own PR.
+
+GK B (43): GO with H1–H6.
+- H1. `holds` rides the flow payload. The list and the count call one shared function (`_site_assets`); `len(holds) == asset_count` is pinned on every shipped template and on a hand-built network.
+- H2. `holds` feeds no state, count, blocker, verdict, note, acknowledgement or fingerprint (test on all templates).
+- H3. Raw numbers only; a missing or non-finite value is null, never 0; an extendable asset shows the size as entered, flagged `extendable`.
+- H4. Profiles list attribute names only, and handle a multi-period axis and an empty frame.
+- H5. The assistant's copy of the flow leaves `holds` out.
+- H6. Plain words only from `_LEDGER_PLAIN`; `git grep` the old text before rewording a refusal; hand mutants of the shared set and the null rule.
