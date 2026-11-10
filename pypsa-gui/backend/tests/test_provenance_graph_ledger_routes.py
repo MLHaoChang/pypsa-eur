@@ -117,7 +117,9 @@ def test_the_ledger_routes_show_the_fork_card_s_stale_after_a_ratio_change(
 
     # GK B F1 (P1): a fork the ledger cannot check is named in `stale_unchecked`, never read as fresh, and
     # contributes no made-up `stale`; GET and PUT alike, and never a 500.
-    unchecked = [{"option_id": "bess_pv_2h", "option_label": "Battery (2 hours) with PV"}]
+    unchecked = [
+        {"option_id": "bess_pv_2h", "option_label": "Battery (2 hours) with PV"}
+    ]
     good = path.read_bytes()
     path.write_bytes(b"not a netcdf file")
     got = client.get(url)
