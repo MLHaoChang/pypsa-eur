@@ -411,6 +411,21 @@ def test_the_save_itself_takes_the_locks_before_it_writes(
     assert not (project_registry.project_dir(row) / "network.nc").exists()
 
 
+def test_a_save_over_another_project_locks_that_projects_reports_first(
+    client, project, project_storage_dir
+):
+    """The destination's reports are held before the save writes to it."""
+    resp = client.post("/api/projects/lockme_copy", params={"rebind": False})
+    assert resp.status_code == 200, resp.text
+    copy = project_storage_dir("lockme_copy")
+    (copy / "network.nc").write_bytes(b"the copy as it was")
+    before = _tree(copy)
+    with held_elsewhere(copy, RID_A):
+        _busy(client.post("/api/projects/lockme_copy", params={"rebind": False}))
+        assert _tree(copy) == before
+    assert _leftovers(copy) == []
+
+
 def test_a_busy_backstop_is_never_a_silent_skip_in_a_save_as(
     client, project, monkeypatch
 ):
