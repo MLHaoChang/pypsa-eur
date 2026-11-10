@@ -29,3 +29,19 @@ Split from: [07e](07e-report-copies-take-the-report-lock.md), GK B (43)'s findin
 1. Deleting or renaming a project while a report writer holds its lock waits or refuses; no `reports/<id>/` reappears after a delete. Tested with a held lock.
 2. Snapshot delete and prune do not remove a snapshot a restore is reading from.
 3. A study option fork carries the reports and no `.lock` file.
+
+## Added by GK B (44) on #1345 (condition of its OK)
+
+Not directory operations, but left open by 07e's longer holds:
+
+- **Typed kind on the job record.** A report job that meets `ReportBusy` ends `failed` with the plain text "report <id> is being written" and no `error_kind` (`services/reports/report_job.py`, the `except Exception` around the store writes; only `ReportDisclosureMissing` sets a kind). Put `report_busy` on the record.
+- **Failed though saved.** When `update_meta` or the generation-meta write is the call that is refused, `save_version` has already written the version, yet the job reports `failed` with no `version` on its record. Decide what the record says and test it.
+- **Timeout branches with no test.** These wait about 5 s for the network lock, which a save to another name now keeps for the whole save:
+  - `services/run_envelope.py` `answering` (near :2217): yields without the lock, so the user's write runs as an ordinary write;
+  - `harness/run_loops.py` `agent_turn` guard (near :491): returns False, the card is withdrawn and the tool does not run;
+  - `harness/continuation.py` `settle_engine` (near :432): returns `"running"` and the next poll retries.
+
+Acceptance, added:
+
+4. A busy report gives the job record `error_kind: report_busy`; the saved-then-refused case has a stated outcome and a test.
+5. Each of the three timeout branches has a test of what it does.
