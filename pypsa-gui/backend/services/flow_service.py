@@ -747,17 +747,23 @@ def _humanise(item: str) -> str:
 #: Ledger rows whose record names engineering keys, said in plain words for the
 #: flow message: ``item -> (label or None, ((key text, plain words), …))``. The
 #: ledger itself (the report's appendix, the acknowledgement) keeps the record.
+_Q_OF_U, _Q_OF_U_WORDS = "Q(U)", "voltage-dependent reactive power"
 _LEDGER_PLAIN: dict[str, tuple[str | None, tuple[tuple[str, str], ...]]] = {
     "point of connection": (None, ((" (p_max_pu 0)", ""),)),
     "battery inverter replacement": (None, ((" (inv_power_lifetime)", ""),)),
-    "island sidecar": ("Island control set-up", ()),
+    "island sidecar": ("Island control set-up", (
+        ("blocks on the plain unit names", "settings for each unit"), (_Q_OF_U, _Q_OF_U_WORDS))),
     "island unit data": ("Island unit settings", (
+        (_Q_OF_U, _Q_OF_U_WORDS),
         ("tau_f", "frequency filter time"), ("i_max", "current limit"),
         ("k_gfm_min", "grid-forming current at least"), (", H ", ", inertia constant "),
         (" pu", " p.u."), ("pf ", "power factor "))),
     # The island panel's own word for RoCoF ("Rate of change (Hz/s)"); a test pins the two.
     "transition RoCoF limit": ("Rate-of-change limit during the transition", ()),
     "island rows": ("Island limits in the optimisation", ((" (island_constraints false)", ""),)),
+    "unit commitment in planning": (None, ((" (process_uc auto)", ""),)),
+    "discount rate": (None, (("discount_rate", "discount rate"),)),
+    "tax": (None, ((" (pack eu_de)", ""),)),
 }
 
 

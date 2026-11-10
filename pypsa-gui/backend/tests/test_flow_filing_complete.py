@@ -244,7 +244,7 @@ def test_an_assumed_value_shows_at_full_precision():
 
 #: Engineering keys a user-facing assumed row must not carry (audit finding 4).
 RAW_KEYS = ("p_max_pu", "tau_f", "i_max", "k_gfm", "island_constraints", "inv_power_lifetime",
-            "RoCoF", "sidecar")
+            "RoCoF", "sidecar", "Q(U)", "plain unit names", "process_uc", "discount_rate", "eu_de")
 
 
 @pytest.mark.parametrize("tid", sorted(_ledgers()))

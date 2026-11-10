@@ -15,10 +15,11 @@ import {
   blankItem, errorsByField, FIELD_WORDS, fieldLabel, impliedCurrency, errorsUnder, isWindowed, ITEM_WORDS, KINDS, listText,
   MEASURED, normaliseTariff, optionWords, parseIntList, parseNumberList, SETTLEMENTS, UNITS, type Item, type Period,
 } from './tariffModel'
+import { ACTION } from './actionStyle'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
 // The small actions and the tables, in the Guided cards' own style (ui-modern 05).
-const action = 'rounded border border-border px-2 py-0.5 text-[11px] text-muted hover:border-accent hover:text-accent'
+const action = ACTION
 const table = 'text-[11px] [&_caption]:pb-1 [&_caption]:text-muted [&_th]:pr-2 [&_th]:pb-0.5 [&_th]:text-left [&_th]:font-medium [&_th]:text-muted [&_td]:pr-2 [&_td]:py-0.5'
 
 function Errors({ list }: { list: string[] }) {
