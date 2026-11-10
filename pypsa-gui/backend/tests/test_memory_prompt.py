@@ -110,6 +110,8 @@ def test_the_standing_block_stays_under_budget_with_50_items(db, alice, project)
     block = R.standing_block(_session(alice), _ctx(project), include_tools=True)
     items = _items_part(block)
     assert len(items) <= 1500
+    # The whole block, tools hint included, stays inside the cap (§3.2).
+    assert len(block) <= 1500
     shown = [ln for ln in items.splitlines() if ln.startswith("- mem_")]
     assert 1 <= len(shown) <= 8
     assert f"+{50 - len(shown)} more items (recall_memory)" in items
@@ -156,6 +158,25 @@ def test_screen_lessons_go_to_the_turn_block_and_nothing_is_shown_twice(
     turn = R.turn_block(session, _ctx(project), {"results_card": "commercial"}, False)
     assert screen.public_id in turn and pref.public_id not in turn
     assert R.turn_block(session, _ctx(project), {"results_card": "grid"}, False) is None
+
+
+def test_a_first_turn_block_does_not_repeat_a_standing_item(db, alice, project):
+    # loop.py builds the turn block before the standing block on a chat's first turn.
+    pref = M.create_item(
+        db,
+        alice,
+        kind="preference",
+        body={"key": "units.power", "value": "GW"},
+        concept_keys=["topic:units", "card:commercial"],
+    )
+    screen = _lesson(
+        db, alice, "Commercial: state the tariff currency", keys=["card:commercial"]
+    )
+    session = _session(alice)
+    turn = R.turn_block(session, _ctx(project), {"results_card": "commercial"}, True)
+    assert screen.public_id in turn
+    assert pref.public_id not in turn
+    assert pref.public_id in R.standing_block(session, _ctx(project), True)
 
 
 def test_recall_count_moves_once_per_item_per_session(db, alice, project):
@@ -504,3 +525,69 @@ def test_the_approved_handler_saves_a_confirmed_chat_item(
     assert (item.status, item.origin) == ("confirmed", "chat")
     assert item.evidence[0]["kind"] == "chat"
     assert [i["id"] for i in got["items"]] == [out["id"]]
+
+
+def test_a_lesson_proposed_in_another_orgs_project_takes_that_projects_org(
+    db, alice, monkeypatch, seeded_identity
+):
+    """M1: the handler stamps the bound project's org on a lesson, the home org
+    on a preference, so the lesson never recalls in the user's home-org projects."""
+    from db.models import Organization
+    from services import chat_tools, memory_tools
+    from services.pypsa_service import PyPSAService
+
+    other = Organization(id=uuid.uuid4(), name="other", created_at=datetime.now(UTC))
+    db.add(other)
+    db.commit()
+    shared = _project(db, other.id, alice.id)
+    monkeypatch.setattr(chat_tools, "acting_user_id", lambda: str(alice.id))
+    monkeypatch.setattr(
+        PyPSAService, "get_active_context", staticmethod(lambda: _ctx(shared))
+    )
+    chat_tools.set_chat_session(_session(alice))
+    try:
+        lesson = memory_tools.propose_memory(**_args())
+        pref = memory_tools.propose_memory(
+            kind="preference",
+            summary="GW",
+            body={"key": "units.power", "value": "GW"},
+            concept_keys=["topic:units"],
+        )
+    finally:
+        chat_tools.set_chat_session(None)
+    assert M.get_item(db, alice, lesson["id"]).org_id == other.id
+    assert M.get_item(db, alice, pref["id"]).org_id == seeded_identity["org_id"]
+
+
+def test_a_precheck_that_cannot_run_refuses_the_proposal(db, alice, monkeypatch):
+    """Fail closed at the catching site (harness/loop.py): a precheck that raises
+    something other than a typed refusal gives memory_check_unavailable, shows
+    no card and saves nothing."""
+    from services import chat_service, chat_tools, memory_tools
+
+    def broken(*a, **k):
+        raise RuntimeError("store unreadable")
+
+    ran = []
+    monkeypatch.setattr(chat_tools, "acting_user_id", lambda: str(alice.id))
+    monkeypatch.setattr(memory_tools, "precheck", broken)
+    monkeypatch.setattr(memory_tools, "propose_memory", lambda **k: ran.append(k))
+    session = _session(alice)
+    chat_tools.set_chat_session(session)
+    frames, collector = [], []
+    try:
+        for event, data in chat_service._dispatch_real_tool_call(
+            session,
+            {"id": "tu-1", "name": "propose_memory", "input": _args()},
+            collector,
+        ):
+            frames.append((event, data))
+            if event == "tool_pending_confirmation":
+                session.record_decision(data["confirmation_token"], "approve")
+    finally:
+        chat_tools.set_chat_session(None)
+    assert [d["error_kind"] for e, d in frames if e == "tool_error"] == [
+        "memory_check_unavailable"
+    ]
+    assert not any(e == "tool_pending_confirmation" for e, _ in frames)
+    assert ran == [] and M.list_items(db, alice) == []

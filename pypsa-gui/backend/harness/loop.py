@@ -75,6 +75,10 @@ from services.project_context import ProjectContext
 
 logger = logging.getLogger("pypsa_gui.chat")
 
+# propose_memory's precheck failed for a reason that is not a typed refusal:
+# refuse closed (a dict literal, so the error-kind manifest scan sees it).
+_MEMORY_CHECK_UNAVAILABLE = {"error_kind": "memory_check_unavailable"}
+
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
     _message_is_tool_results,
     _is_turn_start,
@@ -3424,9 +3428,9 @@ def _dispatch_real_tool_call(
         except Exception as exc:
             detail = getattr(exc, "detail", None)
             kind = (
-                detail.get("error_kind", "memory_invalid")
+                detail.get("error_kind", _MEMORY_CHECK_UNAVAILABLE["error_kind"])
                 if isinstance(detail, dict)
-                else "memory_invalid"
+                else _MEMORY_CHECK_UNAVAILABLE["error_kind"]
             )
             yield (
                 "tool_error",

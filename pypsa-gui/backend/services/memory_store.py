@@ -634,19 +634,26 @@ def create_item(
     evidence: Any = None,
     status: str = "confirmed",
     origin: str = "button",
+    org_id: uuid.UUID | None = None,
 ) -> ItemView:
     """Write a user's own item. A confirmed `button` save on the same
-    (owner, kind, concept keys, project kind) is a new version of the
-    existing item, not a second item (§2.1)."""
+    (owner, org, kind, concept keys, project kind) is a new version of the
+    existing item, not a second item (§2.1).
+
+    `org_id` is the org the item recalls in (§9 M1); it defaults to the user's
+    membership org. A caller saving from a bound project passes that project's
+    org for kinds outside `CROSS_ORG_KINDS`."""
     if status not in ("proposed", "confirmed"):
         raise MemoryError("a new item is proposed or confirmed")
     if origin not in ORIGINS or origin == "promoted":
         raise MemoryError("unknown origin")
-    org_id = org_of(db, user)
-    if org_id is None:
+    home_org = org_of(db, user)
+    if home_org is None:
         raise MemoryError(
             "memory needs an organisation membership", "memory_no_org", 403
         )
+    if org_id is None or kind in CROSS_ORG_KINDS:
+        org_id = home_org
     body, keys, summary, evidence = _checked(
         kind, body, concept_keys, summary, evidence, project_kind
     )
@@ -655,6 +662,7 @@ def create_item(
             select(MemoryItem).where(
                 MemoryItem.owner_scope == "user",
                 MemoryItem.user_id == user.id,
+                MemoryItem.org_id == org_id,
                 MemoryItem.kind == kind,
                 MemoryItem.concept_keys == json.dumps(keys),
                 MemoryItem.status == "confirmed",
@@ -857,6 +865,12 @@ def nominate(db: DBSession, user: User, item_id: str | uuid.UUID) -> ItemView:
     if item.nomination == "pending":
         raise MemoryError(
             "already suggested to your organisation", "memory_status", 409
+        )
+    if item.org_id != org_of(db, user):
+        # Saved in another org's project (§9 M1): your own org's admins must not
+        # receive another org's lesson.
+        raise MemoryError(
+            "this item belongs to another organisation's project", "memory_status", 409
         )
     item.nomination = "pending"
     item.updated_at = _now()

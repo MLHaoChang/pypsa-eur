@@ -898,13 +898,17 @@ never breaks the package skills. The listing shows each skill's provenance
   unchanged.
 - **Turn block**: `memory_recall.turn_block(...)`, appended to the ui-context slot and logged as the
   `memory` context event: items whose concept keys meet `memory_store.concepts_for(ui_context)` and
-  that the standing block does not carry.
+  that the standing block does not carry. It builds the (cached) standing block first, so a chat's
+  first turn never lists an item twice. Each block's text, tools hint included, stays within its cap.
 - Item text is always inside one `fence.fenced(...)`; the one hint naming the two tools is added only
   when tools are offered. A runner or agent-stage turn (`session.task_id` or `session.stage_tools`)
   gets neither block and neither tool (M3).
 - `propose_memory` is in `confirm.ALWAYS_CARD_TOOLS`: no auto-approve tier, saved rule, task or run
   envelope admits it (M4). `memory_tools.precheck` runs before its card (validation, one card per
-  turn and three per chat, a dismissal younger than 30 days).
+  turn and three per chat, a dismissal younger than 30 days); a precheck that cannot run refuses
+  closed with `memory_check_unavailable`. A `lesson` saved from a bound project takes that project's
+  org, so a lesson saved in another org's shared project recalls only there and cannot be suggested
+  to the user's own org; `preference` and `chart_spec` items keep the user's own org (M1).
 
 ## Durable assistant tasks and file delivery
 

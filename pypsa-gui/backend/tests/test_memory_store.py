@@ -157,6 +157,31 @@ def test_a_body_over_4kb_and_a_parameter_item_are_refused(world):
     assert e.value.kind == "memory_kind_unavailable"
 
 
+def test_lesson_text_is_trimmed_and_blank_text_is_refused(world):
+    db, alice = world["db"], world["alice"]
+    item = _lesson(db, alice, text="  Check   the\nslack bus  ")
+    assert item.body["text"] == "Check the slack bus"
+    for blank in ("", "   ", None, 5):
+        with pytest.raises(M.MemoryError) as e:
+            _lesson(db, alice, text=blank, keys=["topic:units"])
+        assert e.value.kind == "memory_invalid"
+    # Exactly the limit is accepted.
+    assert (
+        len(_lesson(db, alice, text="y" * 280, keys=["topic:units"]).body["text"])
+        == 280
+    )
+
+
+def test_a_non_object_body_or_a_missing_key_is_refused(world):
+    db, alice = world["db"], world["alice"]
+    for body in (["text"], "text", None, {}, {"situation": "s"}):
+        with pytest.raises(M.MemoryError) as e:
+            M.create_item(
+                db, alice, kind="lesson", body=body, concept_keys=["topic:style"]
+            )
+        assert e.value.kind == "memory_invalid"
+
+
 def test_a_chart_spec_is_validated_by_the_chart_spec_module(world):
     db, alice = world["db"], world["alice"]
     spec = {
@@ -321,6 +346,33 @@ def test_a_user_in_another_orgs_project_gets_only_preferences_and_chart_specs(wo
         v.id for v in M.recall(db, alice, project_org_id=pa.org_id, project_kind=None)
     }
     assert in_a == {pref.id, lesson.id, org_pref.id}
+
+
+def test_a_lesson_saved_in_another_orgs_project_recalls_only_there(world):
+    """M1: Alice (org A) saves a lesson while in an org-B project. It recalls in
+    org-B projects, never in her own org-A projects, and cannot be suggested to
+    org A's admins. A preference saved there stays with her home org."""
+    db, alice = world["db"], world["alice"]
+    pa = _project(db, world["A"], alice)
+    pb = _project(db, world["B"], world["carol"], name="b-project")
+    lesson = _lesson(db, alice, org_id=pb.org_id)
+    pref = _pref(db, alice, org_id=pb.org_id)
+    in_a = {
+        v.id for v in M.recall(db, alice, project_org_id=pa.org_id, project_kind=None)
+    }
+    in_b = {
+        v.id for v in M.recall(db, alice, project_org_id=pb.org_id, project_kind=None)
+    }
+    assert lesson.id in in_b and lesson.id not in in_a
+    assert pref.id in in_a and pref.id in in_b
+    # A home-org button save on the same keys is a new item, not a version of it.
+    home = _lesson(db, alice)
+    assert home.id != lesson.id
+    with pytest.raises(M.MemoryError) as e:
+        M.nominate(db, alice, lesson.id)
+    assert e.value.kind == "memory_status"
+    assert M.list_items(db, world["admin_a"], nominated=True) == []
+    assert M.nominate(db, alice, home.id).id == home.id
 
 
 def test_an_unbound_turn_recalls_only_own_any_kind_preferences(world):

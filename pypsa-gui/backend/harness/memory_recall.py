@@ -168,7 +168,9 @@ def standing_block(session: Any, turn_ctx: Any, include_tools: bool) -> str:
                 STANDING_HEADER,
                 items,
                 budget.MEMORY_STANDING_ITEMS,
-                budget.MEMORY_STANDING_CHARS,
+                # The tools hint and its newline count against the same cap (§3.2).
+                budget.MEMORY_STANDING_CHARS
+                - (len(TOOLS_HINT) + 1 if include_tools else 0),
                 include_tools,
             )
             if include_tools:
@@ -200,6 +202,9 @@ def turn_block(
             if bound is None:
                 return None
             user, project_org, project_kind = bound
+            # The standing block (cached) decides first, so a chat's first turn
+            # never lists an item twice; loop.py builds the turn block before it.
+            standing_block(session, turn_ctx, include_tools)
             standing = _state(session)["standing"]
             in_standing = standing[2] if standing is not None else frozenset()
             items = [

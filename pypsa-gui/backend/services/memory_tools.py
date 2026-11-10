@@ -149,6 +149,8 @@ def propose_memory(
             {"kind": "chat", "id": str(sid)[:128], "label": "from this chat"}
         )
     with SessionLocal() as db:
+        # A lesson saved in another org's (shared) project recalls only there (§9 M1).
+        bound_org, _ = _bound_project(db)
         try:
             item = M.create_item(
                 db,
@@ -161,6 +163,7 @@ def propose_memory(
                 evidence=evidence,
                 status="confirmed",
                 origin="chat",
+                org_id=bound_org if kind not in M.CROSS_ORG_KINDS else None,
             )
         except M.MemoryError as exc:
             _store_refusal(exc)
