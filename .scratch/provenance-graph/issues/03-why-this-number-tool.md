@@ -1,6 +1,6 @@
 # "Why this number": the assistant's read tool over the graph
 
-Status: needs-triage
+Status: in progress
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 

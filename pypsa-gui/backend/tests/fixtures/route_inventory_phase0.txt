@@ -162,6 +162,7 @@ PATCH   /api/network/_bulk                                                      
 GET     /api/network/asset_costs                                                   -> get_asset_costs_api_network_asset_costs_get
 GET     /api/network/asset_schema/{component}                                      -> get_asset_schema_api_network_asset_schema__component__get
 GET     /api/network/asset_schema/{component}/provenance/{name}                    -> get_asset_provenance_api_network_asset_schema__component__provenance__name__get
+GET     /api/network/asset_schema/{component}/provenance/{name}/why/{field}        -> get_asset_provenance_why_api_network_asset_schema__component__provenance__name__why__field__get
 GET     /api/network/buses                                                         -> get_buses_api_network_buses_get
 POST    /api/network/buses                                                         -> create_bus_api_network_buses_post
 DELETE  /api/network/buses/{name}                                                  -> delete_bus_api_network_buses__name__delete

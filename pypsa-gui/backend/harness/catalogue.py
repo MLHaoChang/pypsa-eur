@@ -4882,6 +4882,23 @@ TOOLS: list[dict[str, Any]] = [
         ["view"],
     ),
     _t(
+        "why_this_number",
+        "Explain why one asset field has its value, step by step, from the provenance graph: "
+        "the field (field='capital_cost' is the Economics row's annualised cost), what it was "
+        "derived from or priced through (a pack price scaled by dc_ac_ratio or a Link's "
+        "efficiency), each step's value and unit as stored now, its provenance stamp (status, "
+        "source, source_year, currency_year, approver), the edge to it with the value that edge "
+        "recorded, and state fresh|stale|uncompared. A stale step carries `broken` (recorded vs "
+        "current: say the input changed since pricing); a scaled price carries `pack_price`, "
+        "worked back as value ÷ the recorded scale. uncompared means nothing was compared, "
+        "never that it is current. Values are in storage units (EUR/MW). Changes nothing. "
+        "Safety: read.",
+        {"component": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+         "name": {"type": "string", "minLength": 1},
+         "field": {"type": "string", "minLength": 1}},
+        ["component", "name", "field"],
+    ),
+    _t(
         "geocode_place",
         "Look up a place name or address with the configured geocoder (Nominatim-compatible) "
         "and return its candidate matches with coordinates, to place a site or bus on the "
@@ -5361,6 +5378,7 @@ TOOL_ROUTES: dict[str, list] = {
     "cluster_network": [("POST", "/api/network/cluster")],
     "recalculate_line_lengths": [("POST", "/api/network/lines/recalculate_lengths")],
     # network topology and sites (8) — LV08 B1, in process through `_route`.
+    "why_this_number": [("GET", "/api/network/asset_schema/{component}/provenance/{name}/why/{field}")],
     "get_asset_reference": [("GET", "/api/network/asset_costs"),
                             ("GET", "/api/network/asset_schema/{component}"),
                             ("GET", "/api/network/catalog/{component}")],

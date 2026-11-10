@@ -1360,6 +1360,14 @@ def get_asset_reference(view: str, component: str | None = None) -> dict:
     return R.get_attribute_catalog(component)
 
 
+def why_this_number(component: str, name: str, field: str) -> dict:
+    """`GET /api/network/asset_schema/{component}/provenance/{name}/why/{field}`: the provenance graph's walk
+    for one asset field (provenance-graph 03). Reads only (COPILOT-1)."""
+    from routers.network import get_asset_provenance_why as _h
+
+    return _h(component, name, field)
+
+
 def geocode_place(query: str) -> list[dict]:
     """`GET /api/geocode`: the configured geocoder's matches (its own timeout)."""
     from routers.geocode import geocode_search as _h
@@ -9873,6 +9881,7 @@ DISPATCHERS: dict[str, Any] = {
     "attach_tariff": attach_tariff,
     "list_library_references": list_library_references,
     "get_library_reference": get_library_reference,
+    "why_this_number": why_this_number,
     "apply_library_reference": apply_library_reference,
     "preview_equipment_mapping": preview_equipment_mapping,
     "apply_equipment_mapping": apply_equipment_mapping,
