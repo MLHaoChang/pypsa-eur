@@ -1635,13 +1635,13 @@ def test_a_report_lock_is_not_an_effect_but_an_undeclared_report_write_is():
     def snap(files):
         return {"projects": {P: {"files": files}}}
 
-    lock, doc = ".r1.lock", "r1/v1.json"
-    before = snap({"reports/" + lock: "a", "reports/" + doc: "a"})
-    lock_only = te.diff(before, snap({"reports/" + doc: "a", "reports/" + lock: "b"}))
-    assert lock_only == []
-    written = te.diff(before, snap({"reports/" + lock: "b", "reports/" + doc: "b"}))
+    rid = "0123456789abcdef"
+    lock, doc = f"reports/.{rid}.lock", f"reports/{rid}/v1.json"
+    before = snap({lock: "a", doc: "a"})
+    assert te.diff(before, snap({doc: "a", lock: "b"})) == []
+    written = te.diff(before, snap({lock: "b", doc: "b"}))
     effects = te.authorize(written, {})
-    assert [(e.kind, e.key, e.authority) for e in effects] == [("report", "r1", None)]
+    assert [(e.kind, e.key, e.authority) for e in effects] == [("report", rid, None)]
     result = te.score(te.CASES[0], _obs(te.CASES[0], effects=effects))
     assert "unauthorized_effects" in result["failures"]
 
@@ -1656,3 +1656,33 @@ def test_only_the_logs_a_case_wrote_are_read(tmp_path):
     stale.write_text(stale.read_text() + '{"seq": 3}\n')  # written by the case
     with pytest.raises(json.JSONDecodeError):
         native_ledgers(before, {**after, "event_logs": _logs(tmp_path)})
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "reports/.r1.json",
+        "reports/.notanid.lock",
+        "reports/.0123456789abcdef.json",
+        "reports/.0123456789abcdef.lock.bak",
+        "reports/.0123456789abcdef.lock/x",
+        "reports/x0123456789abcdef.lock",
+        "reports/.abc.lock",
+        "reports/.0123456789ABCDEF.lock",
+        "reports/0123456789abcdef.lock",
+        "reports/sub/.0123456789abcdef.lock",
+        "other/.0123456789abcdef.lock",
+    ],
+)
+def test_only_the_stores_exact_lock_shape_is_not_an_effect(path):
+    before = {"projects": {P: {"files": {path: "a"}}}}
+    after = {"projects": {P: {"files": {path: "b"}}}}
+    assert [r["key"] for r in te.diff(before, after)] != []
+
+
+def test_the_lock_shape_is_the_report_stores_own():
+    from services.reports import store
+
+    assert store.REPORT_ID_RE == r"\A[0-9a-f]{16}\Z"
+    assert te.REPORT_ID_LEN == 16
+    assert te.REPORT_ID_CHARS == frozenset("0123456789abcdef")

@@ -173,16 +173,22 @@ def _classify(path: str) -> tuple[str, str]:
     return "file", path
 
 
+# `services.reports.store.REPORT_ID_RE` (16 lower-case hex), spelled here so
+# this module stays stdlib-only; a test pins the two together.
+REPORT_ID_LEN, REPORT_ID_CHARS = 16, frozenset("0123456789abcdef")
+
+
 def _transient(path: str) -> bool:
     """A report's lock file (`reports/.<id>.lock`, services/reports/store.py):
     a concurrency guard the store creates on every write, not an effect."""
     parts = path.split("/")
-    return (
-        len(parts) == 2
-        and parts[0] == "reports"
-        and parts[1].startswith(".")
-        and parts[1].endswith(".lock")
-    )
+    if len(parts) != 2 or parts[0] != "reports":
+        return False
+    name = parts[1]
+    if not (name.startswith(".") and name.endswith(".lock")):
+        return False
+    rid = name[1 : -len(".lock")]
+    return len(rid) == REPORT_ID_LEN and set(rid) <= REPORT_ID_CHARS
 
 
 def diff(before: dict, after: dict) -> list[dict]:
