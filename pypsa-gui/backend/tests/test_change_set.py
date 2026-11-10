@@ -1410,3 +1410,14 @@ def test_a_row_with_no_outcome_reads_by_what_could_have_happened(
     session = _held(ticked=ticked, reached=reached)
     session.change_set["decision"] = decision
     assert change_set.receipt_frame(session)["rows"][0]["status"] == status
+
+
+def test_a_source_comes_from_a_row_or_is_the_assistant():
+    """K9: `rows` only when a row carries its own source."""
+    sourced = {"rows": [{"field": "p_max_pu", "source": {"filename": "ERA5 2019"}}]}
+    assert change_set._source(sourced) == "rows"
+    assert (
+        change_set._source({"rows": [{"field": "eh_poc"}]})
+        == change_set.SOURCE_ASSISTANT
+    )
+    assert change_set._source({}) == change_set.SOURCE_ASSISTANT
