@@ -7,6 +7,7 @@ unserved IT energy is the involuntary unserved facility energy ÷ PUE(T(t)).
 from __future__ import annotations
 
 import ast
+import functools
 import pathlib
 import sys
 from datetime import date
@@ -25,6 +26,18 @@ import eh_templates as T  # noqa: E402
 
 DC_IDS = ("eh_datacenter", "eh_datacenter_staged")
 TZ = "Europe/Berlin"
+
+
+@functools.lru_cache(maxsize=None)
+def _template_built(tid: str):
+    spec = T.dc_load_spec(tid, {})
+    return spec, T.BUILDERS[tid](load_spec=spec)
+
+
+def _built(tid: str):
+    """The template built with its preset spec, a fresh copy each call."""
+    spec, n = _template_built(tid)
+    return spec, n.copy()
 
 
 def _spec(**kw) -> DataCentreLoadSpec:
@@ -75,8 +88,7 @@ def test_facility_load_over_pue_is_the_it_series():
 
 @pytest.mark.parametrize("tid", DC_IDS)
 def test_built_network_loads_over_pue_equal_the_it_series(tid):
-    spec = T.dc_load_spec(tid, {})
-    n = T.BUILDERS[tid](load_spec=spec)
+    spec, n = _built(tid)
     tz = T._dc_timezone(tid)
     p = n.loads_t.p_set
     steps = E._timesteps(n.snapshots)
@@ -92,8 +104,7 @@ def test_built_network_loads_over_pue_equal_the_it_series(tid):
 
 
 def test_staged_contracted_kw_follows_each_period_phase():
-    spec = T.dc_load_spec("eh_datacenter_staged", {})
-    n = T.build_eh_datacenter_staged(load_spec=spec)
+    spec, n = _built("eh_datacenter_staged")
     got = E.it_energy(spec, n.snapshots, n.snapshot_weightings.generators, timezone="UTC")
     want = {y: it * 1000.0 for y, it, _pue in T.DC_PHASES}
     assert got.periods["contracted_it_kw"].to_dict() == pytest.approx(want)
@@ -107,8 +118,7 @@ def test_staged_contracted_kw_follows_each_period_phase():
 def _solved_like(slack: dict[str, tuple[str, str, float]], tid="eh_datacenter"):
     """The template with slack rows dispatched at a fixed MW: {name: (bus,
     carrier, MW)}. Stands in for a solve's ``generators_t.p``."""
-    spec = T.dc_load_spec(tid, {})
-    n = T.BUILDERS[tid](load_spec=spec)
+    spec, n = _built(tid)
     for name, (bus, carrier, _mw) in slack.items():
         n.add("Generator", name, bus=bus, carrier=carrier, p_nom=100.0)
     p = pd.DataFrame(0.0, index=n.snapshots, columns=n.generators.index)
@@ -197,9 +207,9 @@ def test_no_adequacy_or_solver_module_reads_the_it_energy():
 
 @pytest.mark.parametrize("tid", DC_IDS)
 def test_workload_shift_window_changes_neither_it_energy_nor_the_built_loads(tid):
-    plain = T.dc_load_spec(tid, {})
+    plain, a = _built(tid)
     shifted = T.dc_load_spec(tid, {"workload_shift_window_h": 6.0})
-    a, b = T.BUILDERS[tid](load_spec=plain), T.BUILDERS[tid](load_spec=shifted)
+    b = T.BUILDERS[tid](load_spec=shifted)
     pd.testing.assert_frame_equal(a.loads_t.p_set, b.loads_t.p_set)
     w, tz = a.snapshot_weightings.generators, T._dc_timezone(tid)
     pd.testing.assert_frame_equal(E.it_energy(plain, a.snapshots, w, timezone=tz).periods,
