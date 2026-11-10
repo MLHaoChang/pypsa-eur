@@ -33,6 +33,7 @@ import { createPortal } from 'react-dom'
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
+import { isSite3dNavigate, Site3dOpenHeader, Site3dOpenLine, type Site3dOpenState } from '../site3d/site3dOpen'
 import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import { CheckedChart } from './CheckedChart'
 import { CheckedAnswerControl } from './CheckedAnswerControl'
@@ -1396,6 +1397,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
     try { progressCleanupRef.current?.() } catch { /* idempotent */ }
     progressCleanupRef.current = null
   }, [])
+  // SC-07 S5b R6: each Site 3D navigate's ACK state, by tool_use_id.
+  const [site3dOpen, setSite3dOpen] = useState<Record<string, Site3dOpenState>>({})
   const assuranceRef = useRef<{
     strict: boolean; text: string; approved: ApprovedAnswerFrame | null;
     requested?: boolean;
@@ -2496,6 +2499,11 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         }>(frame)
         try {
           if (!applyUiNavigate(d, streamNavigationEpoch.current, { fromModelTurn: true })) break
+          // SC-07 S5b R6: Site 3D says "Opened" only on its ACK; with none issued
+          // (no network open, GK B V3) it cannot be confirmed.
+          const siteNav = isSite3dNavigate(d) && d.tool_use_id ? d.tool_use_id : null
+          const setSiteNav = (state: Site3dOpenState) => { if (siteNav) setSite3dOpen(s => ({ ...s, [siteNav]: state })) }
+          setSiteNav(d.acknowledgement ? 'pending' : 'unconfirmed')
           // LC-03: every turn's source-bound navigation is acknowledged, so an
           // ordinary answer can say "showing" only for data actually shown.
           if (d.acknowledgement) {
@@ -2506,12 +2514,13 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
               && useUIStore.getState().currentProject === expected.project_name
               && streamNavigationEpoch.current === navigationEpoch(), () => {
               if (!d.tool_use_id) return
+              setSiteNav('opened')
               state.navigationCompleted ??= new Set()
               state.navigationCompleted.add(d.tool_use_id)
               useChatStore.setState(s => ({ messages: s.messages.map(m =>
                 m.role === 'tool' && m.tool_use_id === d.tool_use_id
                   ? { ...m, content: '✓ ui_open_panel (completed)' } : m) }))
-            })
+            }, () => setSiteNav('unconfirmed'))
           }
         } catch (e) {
           console.warn('ui_event apply failed', e)
@@ -3658,6 +3667,9 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
             {m.role === 'assistant'
               ? <ChatMarkdown>{m.content}</ChatMarkdown>
               : m.role === 'user' ? <UserMessageText message={m} />
+              // SC-07 S5b R6: a Site 3D open's row says only what the ACK has shown (UX (14) ask 1).
+              : m.role === 'tool' && m.tool_use_id && site3dOpen[m.tool_use_id]
+                ? <Site3dOpenHeader state={site3dOpen[m.tool_use_id]} guided={uiMode === 'guided'} />
               : toolLabel ? (
                 <>
                   {outcomeNow && <OutcomeGlyph mark={outcomeNow.mark} />}
@@ -3698,6 +3710,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
             {m.role === 'assistant' && m.answer_id && m.receipt?.chart && <CheckedChart chart={m.receipt.chart} profile={m.receipt.request_scope?.profile} entity={m.receipt.request_scope?.entity_id} />}
             {m.role === 'tool' && m.tool_use_id && (
               <>
+                <Site3dOpenLine state={site3dOpen[m.tool_use_id]} />
                 <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}
                   disabledReason={notReady ? UNATTENDED_BLOCK_WORDS.no_provider : mismatchLine ?? undefined}
                   continuation={continuationLine(m.tool_result, m.origin_project)}

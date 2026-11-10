@@ -181,11 +181,14 @@ def refusal(exc: SceneError) -> HTTPException:
 
 
 @contextlib.contextmanager
-def scope(*, write: bool = False) -> Iterator[tuple[Any, Any, Any, str | None]]:
+def scope(
+    *, write: bool = False, project_uuid: str | None = None
+) -> Iterator[tuple[Any, Any, Any, str | None]]:
     """
     `(db, user, project, owner)` for the caller's foreground project.
 
-    The project is resolved from the server's active context and authorized as
+    The project is resolved from the server's active context, or is `project_uuid`
+    when a caller already holds its project (a task cancel), and authorized as
     the routes authorize `{name}` (404 for one the caller may not see). A
     `write` scope also checks the native edit lock and the caller's saved chat
     restriction, which a read-tier prepare would otherwise skip (G2/G3).
@@ -195,7 +198,7 @@ def scope(*, write: bool = False) -> Iterator[tuple[Any, Any, Any, str | None]]:
     from services import chat_tools
     from services.pypsa_service import PyPSAService
 
-    project_uuid = PyPSAService.get_active_context().project_uuid
+    project_uuid = project_uuid or PyPSAService.get_active_context().project_uuid
     if not project_uuid:
         raise HTTPException(
             400,
@@ -590,12 +593,19 @@ def my_previews(project, owner: str | None, site_id: str) -> list[dict[str, Any]
         ]
     order = list(dict.fromkeys([*reversed(list(entries)), *reversed(marked)]))
     out: list[dict[str, Any]] = []
+    acting = 0  # rows to act on so far (open or outcome_unknown)
     for pid in order:
+        if acting >= MAX_LIVE_PER_OWNER:
+            # GK W1: the stable sort below keeps the first MAX_LIVE_PER_OWNER
+            # rows to act on and cuts the rest, so later chain reads cannot
+            # change the output.
+            break
         entry = entries.get(pid)
+        read = True
         try:
             receipt = proposals._committed(project.directory, site_id, pid)
         except Exception:  # noqa: BLE001 — an unreadable chain is no receipt
-            receipt = None
+            receipt, read = None, False
         if (
             entry is not None
             and isinstance(receipt, dict)
@@ -610,7 +620,11 @@ def my_previews(project, owner: str | None, site_id: str) -> list[dict[str, Any]
             status = "open"
         else:
             continue  # cancelled with no receipt, applied but gone from the chain, or expired
+        acting += status != "applied"
         row = {"id": pid, "status": status}
+        if status == "outcome_unknown" and not read:
+            # H6/U-c: an unreadable chain proves nothing, so a check must not read "not applied".
+            row["receipt_read"] = False
         if entry is not None:
             row.update(action=entry["action"], base_revision=entry["base_revision"])
         out.append(row)
@@ -1065,9 +1079,12 @@ def apply(
         }
 
 
-def cancel(site_id: str, proposal_id: str) -> dict[str, Any]:
-    """`site_scene_cancel`: the caller's own preview only (G4); unknown or expired changes nothing."""
-    with scope(write=True) as (_db, _user, project, owner):
+def cancel(
+    site_id: str, proposal_id: str, *, project_uuid: str | None = None
+) -> dict[str, Any]:
+    """`site_scene_cancel`: the caller's own preview only (G4); unknown or expired changes nothing.
+    `project_uuid` binds it to that project instead of the foreground one (a task's own previews)."""
+    with scope(write=True, project_uuid=project_uuid) as (_db, _user, project, owner):
         _site_known(project, site_id)
         if not isinstance(proposal_id, str) or not store.PROPOSAL_ID_RE.match(
             proposal_id

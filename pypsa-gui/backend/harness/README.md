@@ -29,6 +29,7 @@ harness/
   publication.py  JSON/ZIP from the same validated answer, facts and evidence
   rollout.py      capabilities, profile/effect rollback and bounded shadow observation
   pilot_evaluation.py  independent finite-suite cases, release scoring and live resource ceilings
+  trajectory_evaluation.py  issue 07b: closed suite of harness trajectories (positive + refusal control) scored from native state only; no runtime authority
   workflows/      the start menu and the step-by-step flows (Markdown + front matter)
   skills/         procedures the model loads on demand (<name>/SKILL.md)
   prompts/        the system-prompt fragments as Markdown, byte-identical to the old constants
@@ -580,6 +581,11 @@ draws only per-snapshot series the request's evidence holds (generator `p`; Stor
 profile's own `utilisation_series`), every value as stored, and binds the PNG to the answer's receipt
 (`receipt.chart`: series slots, the not-drawn list, the evidence id). The evidence is re-checked at render
 time, and `verify_chart` re-extracts the dataset from the evidence on every download.
+The dataset also names each evidence slot (`metrics`: metric, disposition, and the fact's formula_id and
+unit, or the reason when not answered) and its `warnings`, the receipt's limitation lines
+(`calculations.slot_warnings`), both read from the sealed record only. A chart stored without both keys
+verifies as before. Evidence from another project is refused (`other_project`) before anything is drawn
+or written. Table exports, reports and download headers carry no checked fact (AA05-A46-SCOPE-1).
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
@@ -616,6 +622,11 @@ never silently retry. Supported navigation stays submitted until an issued,
 current browser ACK arrives. Legacy version-1 ACKs certify a mounted view only.
 Version-2 load-flow ACKs additionally require fetched/rendered matching source
 binding and a current raw-data/input read-back; neither grants domain approval.
+Site 3D (SC-07 S5b) is the one canvas view with an ACK: exactly
+`{panel_id: "map", canvas_view: "site"}` and no other key, target
+`{panel_id: "map", canvas_view: "site"}`. It is version 1: it certifies that
+Site 3D is mounted, not which Site, scene revision or content it shows (its
+`input_sha256` is the network fingerprint), and with no network open none is issued.
 Authenticated JSON/ZIP exports and the
 evidence card consume the same answer/receipt; existing PNG integrity is separate.
 

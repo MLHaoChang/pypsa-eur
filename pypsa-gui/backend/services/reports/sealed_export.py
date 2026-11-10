@@ -72,6 +72,11 @@ def publish_sealed_report(
         ),
         "mapping_plan_sha256": None if plan is None else canonical_sha256(plan),
     }
+    # Study harness 07c (GK B R7): a comment revision names the version and
+    # digest it was made from, and the comment. Only then, so an unrevised
+    # version's dataset (and its dataset_sha256) is unchanged.
+    if doc.revised_from is not None:
+        dataset["revised_from"] = doc.revised_from.model_dump(mode="json")
     # AA-05 Y5: a declared summary names the sections its numbers may come from.
     summaries = {s.section_id: list(s.summarises) for s in doc.sections if s.summarises}
     if summaries:

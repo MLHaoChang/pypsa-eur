@@ -30,7 +30,7 @@ def main():
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--decisions", action="store_true")
     parser.add_argument("--no-model", action="store_true", help="configure no model profile (the no-key path)")
-    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h", "lc06d24", "sc07s5a"],
+    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h", "lc06d24", "sc07s5a", "sc07s5b"],
                         help="script a finite owner journey on the loopback wire (LC-03 OJ-01)")
     args = parser.parse_args()
     storage = args.storage.resolve()
@@ -48,6 +48,9 @@ def main():
     # base_revision, inputs), since keep ids and revisions come from the real scene.
     sc07_plans = {}
     sc07 = args.journey == "sc07s5a"  # `args` is rebound inside _journey (LC03H)
+    # SC-07 S5b (sc07s5b): the shot script posts each turn's calls (marker -> {calls:
+    # [{name, arguments}], say}); the wire plays them in order, then says `say`.
+    sc07b = args.journey == "sc07s5b"
 
     class LocalModelBoundary(BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -80,6 +83,8 @@ def main():
                         results.append({"unparsed": text[:200]})
             if sc07:
                 return self._sc07s5a(said, results)
+            if sc07b:
+                return self._sc07s5b(said, results)
             if "Run the simulation" in said:
                 # OJ-01 solves twice on purpose: the second is a re-run of current
                 # results, which LC-19 asks about first; the user's yes is the flag.
@@ -280,7 +285,27 @@ def main():
                           "function": {"name": name, "arguments": json.dumps(arguments)}}]}, "tool_calls")
             return True
 
+        def _sc07s5b(self, said, results):
+            """SC-07 S5b: play the posted turn's tool calls in order, then its text."""
+            marker = next((m for m in sc07_plans if m in said), None)
+            if marker is None:
+                return False
+            calls = sc07_plans[marker].get("calls") or []
+            if len(results) < len(calls):
+                call = calls[len(results)]
+                self._stream({"tool_calls": [{"index": 0, "id": f"sc07b-{len(results)}", "type": "function",
+                              "function": {"name": call["name"], "arguments": json.dumps(call["arguments"])}}]},
+                             "tool_calls")
+                return True
+            self._stream({"content": sc07_plans[marker].get("say") or "Done."}, "stop")
+            return True
+
         def do_POST(self):
+            if sc07b and self.path == "/fixture/sc07s5b-plan":
+                sc07_plans.update(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                self.send_response(204)
+                self.end_headers()
+                return
             if args.journey == "sc07s5a" and self.path == "/fixture/sc07s5a-plan":
                 sc07_plans.update(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
                 self.send_response(204)
@@ -454,7 +479,7 @@ with SessionLocal() as db:
             else:
                 raise RuntimeError("Backend readiness timeout")
             ready = {"base": f"http://127.0.0.1:{port}", "credentials_file": str(credentials)}
-            if args.journey in ("lc03h", "sc07s5a"):
+            if args.journey in ("lc03h", "sc07s5a", "sc07s5b"):
                 ready["control"] = f"http://127.0.0.1:{model.server_port}/fixture"
             if args.journey in ("oj01", "oj05", "oj21", "oj22", "lc16c", "lc03h", "lc06d24"):
                 # The same oj-grid the Tier A tests use (tests/oj_grid.py), as NetCDF.
@@ -471,7 +496,7 @@ with SessionLocal() as db:
                                 f"n = build_oj_grid(); {more}n.export_to_netcdf(sys.argv[1])", str(network)],
                                cwd=backend_dir, env=env, check=True, capture_output=True)
                 ready["network_file"] = str(network)
-            if args.journey == "sc07s5a":
+            if args.journey in ("sc07s5a", "sc07s5b"):
                 # The SC-07 test network (tests/test_site_scene_associations.py) without its heat
                 # load, so a heat request on a building is a gap the card marks unavailable.
                 network = storage / "sc07-assoc.nc"

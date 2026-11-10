@@ -1323,11 +1323,9 @@ class Turn:
                         else self.request_scope["reason"]
                     ]
                 else:
-                    limitations = [
-                        s["metric"] + ": " + s["reason"]
-                        for s in self.request_evidence["slots"]
-                        if s["disposition"] != "answered"
-                    ]
+                    from harness.calculations import slot_warnings
+
+                    limitations = slot_warnings(self.request_evidence["slots"])
             if _redact_for_persist(text) != text:
                 raise ValueError("sensitive content")
             if self.reviewer_status == "passed":
