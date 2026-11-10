@@ -67,6 +67,12 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - Hashes and digests never show in user rows (#1332).
 - An auto-fit or auto-scroll stops at the first user pan, zoom or select (#1335).
 - Dates display ISO (2026-11-08) (#1327).
+- A chart header never gives two units: the figure and its hint agree (#1354).
+- A confirmation card for a change set shows no raw arguments or tool ids; the rows are the detail (#1352).
+- A ticked change that did not happen is warn-coloured; muted is only for the user's own choice (#1352).
+- A new x axis gets a visible label; a tooltip is not enough (#1342).
+- An Expert-only tab needs no Guided shot; the PR says which `Results.tsx` flag makes it so (#1342).
+- A heatmap scale runs from the data's lowest value where values can be negative, and its key gives both ends with the unit (#1349).
 
 ## Master merges
 
