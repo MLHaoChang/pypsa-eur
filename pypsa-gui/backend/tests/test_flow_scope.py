@@ -386,7 +386,13 @@ def test_no_scope_file_reads_exactly_as_before(client, tmp_projects_dir, project
     assert preset["run_request"] == {"optimisation": True, "study": not generation_only,
                                     "loadflow": False}
     items = [i for s in preset["sections"] for i in s["items"]]
-    assert all(i["in_scope"] for i in items)
+    # Every item is in scope, except an off-grid site's unused connection
+    # defaults: the open point of connection's own assumed rows (ui-modern 05).
+    out = [i for i in items if not i["in_scope"]]
+    off_grid = template.get("recommended_archetype") == "off_grid"
+    assert bool(out) == off_grid
+    assert all(i["target"]["section"] == "connection" and i["code"].startswith("assumed_")
+               and i["target"]["entity"] in ("subsea_tie", "point of connection") for i in out)
     (project_storage_dir(name) / S.SCOPE_FILE).write_text(json.dumps(_all_on(template)))
     everything = _flow(client, name)
     assert _strip_scope(preset) == _strip_scope(everything)

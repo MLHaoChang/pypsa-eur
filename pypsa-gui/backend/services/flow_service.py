@@ -767,6 +767,20 @@ def _is_assumed(it: dict) -> bool:
     return it["severity"] == "warning" and it["code"].startswith("assumed_")
 
 
+#: The ledger item that describes the point of connection itself.
+_POC_ITEM = "point of connection"
+
+
+def _unused_connection_defaults(items: list[dict], links: frozenset[str]) -> None:
+    """Off-grid, section 3 is "not needed": the open point of connection's own
+    defaults (its description, and the assumed rows on a connection link) carry
+    no flow, so they stay listed but out of scope and count nowhere. Any other
+    row there (a feeder's losses, a warning that is not a default) is untouched."""
+    for it in items:
+        if _is_assumed(it) and it["target"]["entity"] in links | {_POC_ITEM}:
+            it["in_scope"] = False
+
+
 def _money_year_items(facts: _Facts) -> list[dict]:
     """B9: asset costs in more than one money year. A Library reference is applied
     as-is in its own money year (no index is declared), so mixed years stay
@@ -1206,12 +1220,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             else:
                 state = "complete"
             row.update(state=state, required=required[s] and state != "not_needed")
-            if state == "not_needed":
-                # A section the project does not need asks for no defaults: its
-                # assumed rows stay listed, out of scope, and count nowhere.
-                for it in mine:
-                    if _is_assumed(it):
-                        it["in_scope"] = False
+            if state == "not_needed" and s == "connection" and islanded:
+                _unused_connection_defaults(mine, frozenset(facts.connection_links))
                 row["items"] = [_strip(it) for it in mine]
                 row["summary"] = ("Not needed by the cards in scope" if s not in needed
                                   else "Generation-only: export through the POI in section 3"

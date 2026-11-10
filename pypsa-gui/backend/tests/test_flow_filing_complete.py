@@ -283,8 +283,8 @@ def test_the_rate_of_change_word_is_the_island_panels():
 CONFIG_URL = "/api/simulation/solver_config"
 
 
-def _microgrid_flow(client, name: str) -> dict:
-    r = client.post("/api/projects/from_template/eh_microgrid", params={"name": name})
+def _microgrid_flow(client, name: str, tid: str = "eh_microgrid") -> dict:
+    r = client.post(f"/api/projects/from_template/{tid}", params={"name": name})
     assert r.status_code == 200, r.text
     return client.get(f"/api/projects/{name}/flow").json()
 
@@ -312,6 +312,33 @@ def test_an_off_grid_section_keeps_its_defaults_out_of_scope(client, tmp_project
                for i in by_id[s]["items"] if i["code"].startswith("assumed_"))
     assert flow["run_ready"] is True and flow["run_blocker"] is None
     assert flow["verdicts"]["optimisation"] == {"ready": True, "blocker": None}
+
+
+def test_the_staged_microgrid_keeps_its_feeder_losses_counted(client, tmp_projects_dir):
+    """The staged island files a fifth row to section 3, the hospital feeder's
+    losses: that link carries flow, so its default is still asked for."""
+    flow = _microgrid_flow(client, "mg_staged", "eh_microgrid_staged")
+    conn, defaults = _connection_defaults(flow)
+    assert conn["state"] == "not_needed"
+    scope = {i["target"]["entity"]: i["in_scope"] for i in defaults}
+    assert scope == {"hospital feeder losses": True, "point of connection": False,
+                     "subsea_tie": False}
+    assert len(defaults) == 5
+    readiness = next(s for s in flow["sections"] if s["section"] == "readiness")
+    assert readiness["summary"] == "0 to do, 11 to check"
+
+
+def _row(code: str, entity: str, severity: str = "warning") -> dict:
+    return S._item(code, severity, "m", "template", "connection", entity=entity)
+
+
+def test_only_the_open_connections_own_defaults_leave_the_scope():
+    rows = [_row("assumed_connection_ramp", "tie"), _row("assumed_default", "point of connection"),
+            _row("assumed_default", "hospital feeder losses"),      # another link: has flow
+            _row("link_efficiency_out_of_range", "tie"),             # a warning, not a default
+            _row("assumed_default", "tie", severity="error")]
+    S._unused_connection_defaults(rows, frozenset({"tie"}))
+    assert [r["in_scope"] for r in rows] == [False, False, True, True, True]
 
 
 def test_a_grid_connection_brings_the_connection_defaults_back(client, tmp_projects_dir):
