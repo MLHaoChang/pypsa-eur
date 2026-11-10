@@ -525,13 +525,46 @@ def test_an_objective_off_by_one_from_the_recomputed_total_stays_a_mismatch(base
     assert case['status'] == 'unavailable' and case['last_error'] == 'experiment_result_mismatch'
 
 
-def test_a_child_without_a_saved_solver_config_or_total_stays_a_mismatch(baseline, monkeypatch):
-    from harness import continuation
+def _completed_child(monkeypatch):
+    """A completed experiment child; returns a refresh that reads it after `damage(saved)` is applied."""
+    from services import workflow_tools as wt
     eid = prepared_pair()
     session, state = arm(eid)
     invoke(session, state['next_call'])
     job = tool('refresh_experiment', experiment_id=eid)['cases'][0]['job_id']
     assert chat_tools.wait_for_job(job, 25)['completed']
-    monkeypatch.setattr(continuation, 'saved_queue_total', lambda saved: None)
-    case = tool('refresh_experiment', experiment_id=eid)['cases'][0]
-    assert case['status'] == 'unavailable' and case['last_error'] == 'experiment_result_mismatch'
+    real = wt._load_context
+
+    def refresh(damage):
+        def damaged(project):
+            saved = real(project)
+            damage(saved)
+            return saved
+        monkeypatch.setattr(wt, '_load_context', damaged)
+        return tool('refresh_experiment', experiment_id=eid)['cases'][0]
+    return refresh
+
+
+def _total_with(monkeypatch, *, solver_state, objective):
+    """`saved_queue_total` on a saved network that is fresh and prices to 5.0 whenever it is asked to."""
+    from types import SimpleNamespace
+    from routers import simulation
+    from harness.continuation import saved_queue_total
+    from services import workflow_tools as wt
+    monkeypatch.setattr(wt, 'solve_freshness', lambda saved: {'inputs_changed_since_solve': False})
+    monkeypatch.setattr(simulation, '_compute_run_objective', lambda n, cfg=None: 5.0)
+    return saved_queue_total(SimpleNamespace(solver_state=solver_state, network=SimpleNamespace(objective=objective)))
+
+
+def test_the_queue_total_is_told_for_a_saved_config_and_objective(baseline, monkeypatch):
+    assert _total_with(monkeypatch, solver_state={'solver_config': {}}, objective=1.0) == 5.0
+
+
+def test_a_saved_network_with_no_solver_config_has_no_queue_total(baseline, monkeypatch):
+    """Without the cfg guard `_compute_run_objective` prices with the foreground's config and returns a total."""
+    assert _total_with(monkeypatch, solver_state={}, objective=1.0) is None
+
+
+def test_a_saved_network_with_no_objective_has_no_queue_total(baseline, monkeypatch):
+    """Without the objective guard a network that holds no LP objective is priced all the same."""
+    assert _total_with(monkeypatch, solver_state={'solver_config': {}}, objective=None) is None
