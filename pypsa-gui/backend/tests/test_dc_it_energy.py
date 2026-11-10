@@ -270,7 +270,9 @@ def test_rack_count_only_where_rack_kw_is_set():
     assert [ph["it_kw"] for ph in got.phases] == [13000.0, 26000.0]
 
 
-def test_a_mid_horizon_cod_bills_from_its_first_in_service_snapshot():
+def test_a_cod_inside_a_single_index_week_follows_the_week_start_phase():
+    # The single-year template loads the phase in service on its week's first
+    # day for the whole week; revenue reads the same rule (GK A F1).
     spec = _spec(
         phases=[
             DcPhase(cod=date(2030, 1, 1), it_mw=10.0),
@@ -280,13 +282,65 @@ def test_a_mid_horizon_cod_bills_from_its_first_in_service_snapshot():
     snaps = _week()
     w = _weights(snaps)
     got = E.it_energy(spec, snaps, w, timezone=TZ)
-    cod = snaps.get_loc(pd.Timestamp("2030-07-04"))
-    assert got.phases[1]["first_in_service"] == snaps[cod]
+    assert (got.hourly["it_mw"] == 10.0).all()
     assert got.phases[0]["first_in_service"] == snaps[0]
-    it_mw = got.hourly["it_mw"].to_numpy()
-    assert (it_mw[:cod] == 10.0).all() and (it_mw[cod:] == 30.0).all()
-    kw = (10.0 * w.iloc[:cod].sum() + 30.0 * w.iloc[cod:].sum()) / w.sum() * 1000.0
-    assert got.periods.loc[2030, "contracted_it_kw"] == pytest.approx(kw, rel=1e-12)
+    assert got.phases[1]["first_in_service"] is None
+    assert got.periods.loc[2030, "contracted_it_kw"] == pytest.approx(
+        10000.0, rel=1e-12
+    )
+    # A week that starts on or after the COD bills the later phase throughout.
+    later = E.it_energy(spec, _week("2030-07-04"), 1.0, timezone=TZ)
+    assert (later.hourly["it_mw"] == 30.0).all()
+
+
+def test_a_mid_horizon_cod_bills_from_its_period_first_snapshot():
+    spec = _spec(
+        phases=[
+            DcPhase(cod=date(2030, 1, 1), it_mw=10.0),
+            DcPhase(cod=date(2035, 6, 1), it_mw=30.0),
+        ]
+    )
+    week = _week()
+    snaps = pd.MultiIndex.from_product(
+        [[2030, 2035], week], names=["period", "timestep"]
+    )
+    w = pd.Series(np.tile(_weights(week).to_numpy(), 2), index=snaps)
+    got = E.it_energy(spec, snaps, w, timezone=TZ)
+    assert got.phases[1]["first_in_service"] == (2035, week[0])
+    assert got.periods["contracted_it_kw"].to_dict() == pytest.approx(
+        {2030: 1e4, 2035: 3e4}
+    )
+    u = P.utilisation(spec, week, TZ)
+    assert got.periods.loc[2035, "it_mwh"] == pytest.approx(
+        (30.0 * u * _weights(week).to_numpy()).sum(), rel=1e-12
+    )
+
+
+def test_built_single_year_network_matches_on_a_week_straddling_a_cod():
+    tid = "eh_datacenter"
+    spec = T.dc_load_spec(
+        tid,
+        {
+            "phases": [
+                {"cod": "2030-01-01", "it_mw": 24.0},
+                {"cod": "2030-07-03", "it_mw": 36.0},
+            ]
+        },
+    )
+    assert T.SNAPSHOTS[0] < pd.Timestamp("2030-07-03") < T.SNAPSHOTS[-1]
+    n = T.BUILDERS[tid](load_spec=spec)
+    tz = T._dc_timezone(tid)
+    p = n.loads_t.p_set
+    pue = P.pue(spec, P.ambient_c(spec, n.snapshots, tz))
+    built_it = (p["it_load"] + p["cooling"]).to_numpy() / pue
+    got = E.it_energy(spec, n.snapshots, n.snapshot_weightings.generators, timezone=tz)
+    assert np.allclose(
+        built_it,
+        got.hourly["it_mw"] * P.utilisation(spec, n.snapshots, tz),
+        rtol=1e-12,
+        atol=0,
+    )
+    assert (got.hourly["it_mw"] == 24.0).all()
 
 
 def test_a_plain_list_of_snapshots_reads_like_its_index():

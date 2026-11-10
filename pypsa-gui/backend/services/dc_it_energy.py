@@ -71,7 +71,8 @@ def _phase_index(spec: DataCentreLoadSpec, snapshots: pd.Index) -> np.ndarray:
     if isinstance(snapshots, pd.MultiIndex):
         days = [date(int(y), 12, 31) for y in _periods(snapshots)]
     else:
-        days = [t.date() for t in pd.DatetimeIndex(snapshots)]
+        steps = pd.DatetimeIndex(snapshots)
+        days = [steps[0].date()] * len(steps) if len(steps) else []
     cache: dict[date, int] = {}
     out = np.empty(len(days), dtype=int)
     for i, d in enumerate(days):
@@ -85,9 +86,11 @@ def _phase_index(spec: DataCentreLoadSpec, snapshots: pd.Index) -> np.ndarray:
 def in_service_it_mw(spec: DataCentreLoadSpec, snapshots) -> np.ndarray:
     """The IT MW in service on each snapshot. A multi-period index takes, for
     the whole period, the phase in service by the period's year end (the staged
-    template's rule: one phase per period, by COD year); a single index takes
-    each snapshot's own date, so a COD bills from its first in-service snapshot.
-    0 before the first COD."""
+    template's rule: one phase per period, by COD year); a single index (the
+    single-year template's modelled week) takes the phase in service on its
+    first snapshot for every snapshot, as that template builds its load. So a
+    mid-horizon COD bills from its period's first snapshot, and a COD inside a
+    single-index week does not bill in that week. 0 before the first COD."""
     idx = _phase_index(spec, snapshots)
     return _it_mw(spec, idx)
 
@@ -128,7 +131,7 @@ class ItEnergy:
     """Per period: ``it_mwh`` (IT MW in service × u × w), ``unserved_it_mwh``
     (a quantity, never priced), ``billable_it_mwh`` (their difference) and
     ``contracted_it_kw`` (the in-service IT kW, weighted over the period's
-    snapshots, so a phase bills from its COD). ``phases``: per phase its COD,
+    snapshots, by the in-service rule of ``in_service_it_mw``). ``phases``: per phase its COD,
     contracted IT kW, first in-service snapshot and rack count (``it_mw`` ÷
     ``rack_kw`` × 1000, or "not set")."""
 
