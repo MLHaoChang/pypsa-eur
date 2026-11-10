@@ -17,7 +17,7 @@ export interface FlowSankey { nodes: FlowNode[]; links: FlowLink[] }
 
 // Literal hex on purpose: `var(--…)` does not resolve inside SVG attributes.
 // Shared carriers match the charts' light-theme tokens (--color-carrier-*;
-// pinned by components/charts/chartTheme.test.tsx).
+// pinned by components/charts/chartThemeTokens.test.ts).
 export const SOURCE_COLORS: Record<string, string> = {
   'Grid import': '#475569', solar: '#b45309', wind: '#16a34a', gas: '#0369a1',
   diesel: '#7c2d12', hydro: '#1e40af',

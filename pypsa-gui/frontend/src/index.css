@@ -90,7 +90,7 @@
      Every chart colours a carrier through carrierColour(), which returns one
      of these; the dark theme lifts the ones that sink into it. Each reaches
      3:1 on the chart surface and every pair differs by ΔE ≥ 10 in both
-     themes (chartTheme.test.tsx); dc and load are one carrier. */
+     themes (chartThemeTokens.test.ts); dc and load are one carrier. */
   --color-carrier-ccgt: #0284c7;
   --color-carrier-coal: #57534e;
   --color-carrier-lignite: #8a6f5a;
