@@ -50,11 +50,6 @@ def phase_in_service(spec: DataCentreLoadSpec, on: date) -> DcPhase | None:
     return live[-1] if live else None
 
 
-def _index(snapshots) -> pd.Index:
-    # pd.Index() flattens a MultiIndex to tuples; keep the investment periods.
-    return snapshots if isinstance(snapshots, pd.Index) else pd.Index(snapshots)
-
-
 def _timesteps(snapshots: pd.Index) -> pd.DatetimeIndex:
     if isinstance(snapshots, pd.MultiIndex):
         return pd.DatetimeIndex(snapshots.get_level_values(-1))
@@ -92,9 +87,13 @@ def in_service_it_mw(spec: DataCentreLoadSpec, snapshots) -> np.ndarray:
     template's rule: one phase per period, by COD year); a single index takes
     each snapshot's own date, so a COD bills from its first in-service snapshot.
     0 before the first COD."""
-    idx = _phase_index(spec, _index(snapshots))
-    mw = np.array([p.it_mw for p in spec.phases] + [0.0])
-    return mw[idx]                                      # -1 picks the trailing 0
+    idx = _phase_index(spec, snapshots)
+    return _it_mw(spec, idx)
+
+
+def _it_mw(spec: DataCentreLoadSpec, idx: np.ndarray) -> np.ndarray:
+    # A trailing 0 so idx -1 (before the first COD) reads 0 MW.
+    return np.array([p.it_mw for p in spec.phases] + [0.0])[idx]
 
 
 def unserved_facility_mw(n) -> pd.Series:
@@ -105,14 +104,9 @@ def unserved_facility_mw(n) -> pd.Series:
     Zero when the solve added no slack."""
     from services.adequacy.slack import involuntary_slack_mask
 
-    zero = pd.Series(0.0, index=n.snapshots)
     gens = n.generators
-    if gens.empty:
-        return zero
     slack = gens.index[involuntary_slack_mask(gens).to_numpy()]
-    p = n.generators_t.p.reindex(columns=slack).fillna(0.0)
-    if p.empty:
-        return zero
+    p = n.generators_t.p.reindex(index=n.snapshots, columns=slack).fillna(0.0)
     bus = gens.loc[slack, "bus"]
     on_it = p.loc[:, bus.index[bus == IT_BUS]].sum(axis=1)
     on_mv = p.loc[:, bus.index[bus == MV_BUS]].sum(axis=1)
@@ -121,7 +115,7 @@ def unserved_facility_mw(n) -> pd.Series:
     total = mv_loads.sum(axis=1)
     cooling = (mv_loads[COOLING_LOAD] if COOLING_LOAD in mv_loads.columns
                else pd.Series(0.0, index=n.snapshots))
-    share = (cooling / total.where(total > 0)).fillna(0.0)
+    share = (cooling / total).fillna(0.0)               # 0/0 (no MV load) → 0
     return (on_it + share * on_mv).reindex(n.snapshots).fillna(0.0)
 
 
@@ -136,7 +130,7 @@ class ItEnergy:
 
     periods: pd.DataFrame
     phases: list[dict] = field(default_factory=list)
-    hourly: pd.DataFrame | None = None
+    hourly: pd.DataFrame = field(default_factory=pd.DataFrame)
 
 
 def it_energy(spec: DataCentreLoadSpec, snapshots, weights, unserved=None, *,
@@ -148,12 +142,11 @@ def it_energy(spec: DataCentreLoadSpec, snapshots, weights, unserved=None, *,
     each snapshot's IT energy, so it never makes billable energy negative."""
     from services.dc_load_profile import ambient_c, pue, utilisation
 
-    snapshots = _index(snapshots)
     steps = _timesteps(snapshots)
     w = (weights.reindex(snapshots).to_numpy(dtype=float) if isinstance(weights, pd.Series)
          else np.broadcast_to(np.asarray(weights, dtype=float), (len(snapshots),)))
     idx = _phase_index(spec, snapshots)
-    it_mw = np.array([p.it_mw for p in spec.phases] + [0.0])[idx]
+    it_mw = _it_mw(spec, idx)
     u = utilisation(spec, steps, timezone)
     it_mwh = it_mw * u * w
     if unserved is None:

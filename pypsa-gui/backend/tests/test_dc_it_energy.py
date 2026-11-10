@@ -184,8 +184,10 @@ def test_unserved_is_a_quantity_never_a_price():
     assert not {"marginal_cost", "voll", "cfg"} & names
 
 
-def test_no_ic_or_adequacy_module_reads_the_it_energy():
-    for pkg in ("services/finance", "services/adequacy", "services/solver"):
+def test_no_adequacy_or_solver_module_reads_the_it_energy():
+    # The business-case engine (issue 04) reads it in services/finance and
+    # carries its own no-price test; the adequacy facts and the solve never do.
+    for pkg in ("services/adequacy", "services/solver"):
         for path in (BACKEND / pkg).rglob("*.py"):
             assert "dc_it_energy" not in path.read_text(), path
 
@@ -229,6 +231,13 @@ def test_a_mid_horizon_cod_bills_from_its_first_in_service_snapshot():
     assert (it_mw[:cod] == 10.0).all() and (it_mw[cod:] == 30.0).all()
     kw = (10.0 * w.iloc[:cod].sum() + 30.0 * w.iloc[cod:].sum()) / w.sum() * 1000.0
     assert got.periods.loc[2030, "contracted_it_kw"] == pytest.approx(kw, rel=1e-12)
+
+
+def test_a_plain_list_of_snapshots_reads_like_its_index():
+    spec, snaps = _spec(), _week()
+    a = E.it_energy(spec, list(snaps), 2.0, timezone=TZ)
+    b = E.it_energy(spec, snaps, 2.0, timezone=TZ)
+    pd.testing.assert_frame_equal(a.periods, b.periods)
 
 
 def test_before_the_first_cod_nothing_is_in_service():
