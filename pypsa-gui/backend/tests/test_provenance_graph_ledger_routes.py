@@ -50,7 +50,9 @@ def test_the_ledger_routes_show_the_fork_card_s_stale_after_a_ratio_change(
     )
     assert wait_run(client, name, sid)["status"] == "done"
     url = f"/api/projects/{name}/studies/{sid}/ledger"
-    assert client.get(url).json()["stale"] == {}
+    first = client.get(url).json()
+    assert first["stale"] == {}
+    assert first["stale_unchecked"] == []
 
     path = project_storage_dir(f"{name}-opt-bess_pv_2h") / "network.nc"
     n = pypsa.Network()
@@ -112,6 +114,43 @@ def test_the_ledger_routes_show_the_fork_card_s_stale_after_a_ratio_change(
     assert packs.ledger_hash(after) == packs.ledger_hash(
         type(after).model_validate(put.json()["ledger"])
     )
+
+    # GK B F1 (P1): a fork the ledger cannot check is named in `stale_unchecked`, never read as fresh, and
+    # contributes no made-up `stale`; GET and PUT alike, and never a 500.
+    unchecked = [{"option_id": "bess_pv_2h", "option_label": "Battery (2 hours) with PV"}]
+    good = path.read_bytes()
+    path.write_bytes(b"not a netcdf file")
+    got = client.get(url)
+    assert got.status_code == 200, got.text
+    assert got.json()["stale_unchecked"] == unchecked
+    assert got.json()["stale"] == {}
+    put = client.put(
+        url,
+        json={"rows": [{"key": "discount_rate", "value": 0.07, "unit": "per unit"}]},
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["stale_unchecked"] == unchecked
+    assert put.json()["stale"] == {}
+
+    # A graph build that raises on a readable fork lands in the same catch (moved under it).
+    import os
+    import time
+
+    from services.study import asset_view
+
+    path.write_bytes(good)
+    t = time.time_ns() + 2_000_000
+    os.utime(path, ns=(t, t))  # a new file key, so the snapshot is rebuilt
+
+    def broken_snapshot(n):
+        raise RuntimeError("graph build failed")
+
+    monkeypatch.setattr(asset_view, "asset_snapshot", broken_snapshot)
+    got = client.get(url)
+    assert got.status_code == 200, got.text
+    # The other forks' files are unchanged, so their cached snapshots stand; only the rewritten one is rebuilt.
+    assert got.json()["stale_unchecked"] == unchecked
+    assert got.json()["stale"] == {}
 
 
 def _rewrite_ratio(path, ratio):

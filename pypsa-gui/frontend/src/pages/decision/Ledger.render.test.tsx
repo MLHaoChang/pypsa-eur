@@ -99,6 +99,15 @@ describe('the assumptions review', () => {
   it('shows no out-of-date note when the payload carries none', () => {
     render(<LedgerReview payload={ledger} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
     expect(screen.queryByTestId('ledger-stale')).toBeNull()
+    expect(screen.queryByTestId('ledger-stale-unchecked')).toBeNull()
+  })
+
+  it('names an option whose costs could not be checked (GK B F1)', () => {
+    const payload: LedgerPayload = { ...ledger, stale_unchecked: [{ option_id: 'bess_pv_2h', option_label: 'Battery (2 hours) with PV' }] }
+    render(<LedgerReview payload={payload} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    expect(screen.getByTestId('ledger-stale-unchecked').textContent).toBe(
+      'Could not check whether the Battery (2 hours) with PV option\'s costs are out of date: its network could not be read. '
+      + 'Open the Battery (2 hours) with PV option in Expert to check.')
   })
 
   it('states what the energy price level means', () => {

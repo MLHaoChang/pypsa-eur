@@ -229,6 +229,8 @@ export interface LedgerPayload {
   maturity: StudyMaturity
   /** By row key; absent or empty when no row's asset field is out of date. */
   stale?: Record<string, LedgerStale[]>
+  /** The option forks whose costs could not be checked (unreadable): never read as fresh (GK B F1). */
+  stale_unchecked?: { option_id: string; option_label: string }[]
 }
 
 // ── run and tornado records (`services/study/runner.py`, `tornado_runner.py`) ──

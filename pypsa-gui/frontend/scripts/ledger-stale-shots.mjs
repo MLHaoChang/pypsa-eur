@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 /** Dev-only UX-review shots for provenance-graph 02 (TCU-07): LedgerReview's out-of-date line on the PV cost
  * row, priced on the option forks, and the same view after re-price, when the GET carries no `stale` for the
- * row and the line is gone. Component-level harness on the render test's fixture payloads, no API calls.
+ * row and the line is gone; and the note naming an option fork the ledger could not check (GK B F1). Component-level harness on the render test's fixture payloads, no API calls.
  * LedgerReview is one view for Guided and Expert (UX P5), so one mode is shot.
  * node scripts/ledger-stale-shots.mjs [out-dir]   (default: a new temp dir)
  */
@@ -37,7 +37,9 @@ const hit = (option_id: string, option_label: string) =>
 const state = new URLSearchParams(location.search).get('state')
 const payload = state === 'stale'
   ? { ...ledger, stale: { pv_rooftop_eur_per_kw: [hit('bess_pv_2h', 'Battery (2 hours) with PV'), hit('bess_pv_4h', 'Battery (4 hours) with PV')] } }
-  : { ...ledger, stale: {} }
+  : state === 'unchecked'
+    ? { ...ledger, stale: {}, stale_unchecked: [{ option_id: 'bess_pv_2h', option_label: 'Battery (2 hours) with PV' }] }
+    : { ...ledger, stale: {} }
 const intake = { ...study.intake, pv: { enabled: true, kind: 'rooftop' as const } }
 useUIStore.setState({ uiMode: 'guided' } as any)
 createRoot(document.getElementById('root')!).render(<div style={{width: 760, padding: 8}}>
@@ -48,12 +50,24 @@ createRoot(document.getElementById('root')!).render(<div style={{width: 760, pad
     server: { host: '127.0.0.1', port: 0 } })
   await server.listen()
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] })
-  for (const [n, state] of [[1, 'stale'], [2, 'repriced']]) {
+  for (const [n, state] of [[1, 'stale'], [2, 'repriced'], [3, 'unchecked']]) {
     const page = await browser.newPage({ viewport: { width: 780, height: 1400 }, deviceScaleFactor: 2 })
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.route(url => url.protocol.startsWith('http') && url.hostname !== '127.0.0.1', route => route.abort())
     await page.route(url => url.pathname.startsWith('/api/'), route => route.fulfill({ json: {} }))
     await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${entry}.html?state=${state}`)
+    if (state === 'unchecked') {
+      // GK B F1: the ledger names a fork it could not check, above the rows.
+      const note = page.getByTestId('ledger-stale-unchecked')
+      await note.waitFor()
+      await page.waitForTimeout(300)
+      const file = path.join(out, `pg02-${n}-ledger-${state}.png`)
+      const box = await note.boundingBox()
+      await page.screenshot({ path: file, clip: { x: 0, y: 0, width: 780, height: box.y + box.height + 200 } })
+      console.log(file)
+      await page.close()
+      continue
+    }
     const row = page.getByTestId('ledger-row-pv_rooftop_eur_per_kw')
     await row.waitFor({ state: 'attached' })
     // An unchanged row sits under the collapsed defaults; open it the way a person would.
