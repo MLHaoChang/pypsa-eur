@@ -2263,6 +2263,10 @@ def save_project(
     # after it would leave the row behind and the retry would fail with
     # "already exists" — the Phase 11 review's own finding, in the save path.
     _refuse_save_during_study(PyPSAService.get_active_context())
+    # Likewise a Save-As / Save-a-Copy whose source has a report being written
+    # (study harness 07e). `_save_context` takes the locks again, and holds
+    # them, around its writes.
+    _refuse_copy_of_busy_reports(PyPSAService.get_active_context(), name, db, user)
     project = project_registry.find_project(db, user, name)
     if project is None:
         # First save of a new project — register a root row in the DB.
@@ -2344,6 +2348,15 @@ def _save_source_dir(loaded: str, db=None, user=None) -> pathlib.Path:
         if src_project is not None:
             src_dir = project_registry.project_dir(src_project)
     return src_dir
+
+
+def _refuse_copy_of_busy_reports(ctx, name: str, db=None, user=None) -> None:
+    """409 `report_busy` when a save to another name would copy a report that
+    is being written. A save to the bound project copies none."""
+    loaded = ctx.loaded_project
+    if loaded is not None and loaded != name:
+        with ctx.mutation_lock, _reports_copy_guard(_save_source_dir(loaded, db, user)):
+            pass
 
 
 def _carry_sidecars_on_move(

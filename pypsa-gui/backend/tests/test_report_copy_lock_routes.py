@@ -152,10 +152,7 @@ def test_a_save_to_another_name_refuses_and_writes_nothing(
     name, pdir = project
     with held_elsewhere(pdir, RID_A):
         _busy(client.post("/api/projects/lockme_copy", params={"rebind": rebind}))
-    row = project_row("lockme_copy")
-    assert (
-        row is None or not (project_registry.project_dir(row) / "network.nc").exists()
-    )
+    assert project_row("lockme_copy") is None  # no row for the retry to trip on
 
 
 @pytest.mark.parametrize("rebind", [True, False], ids=["save-as", "save-a-copy"])
@@ -371,6 +368,20 @@ def test_a_busy_backstop_is_never_a_silent_skip_in_a_restore(
     monkeypatch.setattr(snapshots, "_create_snapshot_internal", lambda *a, **k: None)
     monkeypatch.setattr(projects, "_copy_bundle_dirs", _raise_busy)
     _busy(client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore"))
+
+
+def test_the_save_itself_takes_the_locks_before_it_writes(
+    client, project, project_row, monkeypatch
+):
+    """Without the route's early refusal in front of it."""
+    from routers import projects
+
+    name, pdir = project
+    monkeypatch.setattr(projects, "_refuse_copy_of_busy_reports", lambda *a, **k: None)
+    with held_elsewhere(pdir, RID_A):
+        _busy(client.post("/api/projects/lockme_copy", params={"rebind": True}))
+    row = project_row("lockme_copy")
+    assert not (project_registry.project_dir(row) / "network.nc").exists()
 
 
 def test_a_busy_backstop_is_never_a_silent_skip_in_a_save_as(

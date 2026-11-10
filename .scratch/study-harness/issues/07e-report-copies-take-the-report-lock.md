@@ -42,7 +42,8 @@ The gap predates 07c, which didn't widen it.
 What a refusal can still leave behind:
 
 - Restore checks the locks first, before it saves unsaved live edits and makes the "before-restore" snapshot, then takes them again around its own writes. A writer that arrives between the two gets the restore refused with that save and that snapshot already made; no project file is replaced.
-- Save-As and Save a Copy refuse before the network is written, but the route has already made the new project's row and empty directory, as it has for the save's other refusals. Bundle import likewise: it writes into a new project directory, so its refusal can only be forced in a test, and the row made just before it stays.
+- Save-As and Save a Copy check the locks before the new project's row is made, then take them again around the save. A writer that arrives between the two leaves that row and an empty directory.
+- Bundle import writes into a new project directory, so its refusal can only be forced in a test, and the row made just before it stays.
 
 Side effects to know about:
 

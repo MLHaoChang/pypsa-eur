@@ -504,3 +504,38 @@ def test_only_reports_are_copied_or_removed(tmp_path):
         f".{RID_A}.lock",
         f".{RID_B}.lock",
     }
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        (f".{RID_A}.lock", True),
+        (f"x{RID_A}.lock", False),
+        (f".{RID_A}.tmpX", False),
+        (".x.lock", False),
+        (RID_A, False),
+    ],
+)
+def test_only_a_reports_own_lock_file_is_a_lock_file(name, expected):
+    assert store.is_lock_file(name) is expected
+
+
+def test_clear_reports_without_a_reports_folder_does_nothing(tmp_path):
+    store.clear_reports(tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_report_that_is_a_file_or_a_link_is_removed_as_one(tmp_path):
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    _seed(src, "00000000000000cc")
+    kept = tmp_path / "elsewhere"
+    kept.mkdir()
+    (kept / "meta.json").write_text("not the project's")
+    store.reports_dir(dst).mkdir(parents=True)
+    (store.reports_dir(dst) / RID_A).write_text("a file where a report would be")
+    (store.reports_dir(dst) / RID_B).symlink_to(kept, target_is_directory=True)
+    store.copy_reports(src, dst)
+    assert sorted(p.name for p in store.reports_dir(dst).iterdir() if p.is_dir()) == [
+        "00000000000000cc"
+    ]
+    assert (kept / "meta.json").exists()  # the link went, not what it pointed at
