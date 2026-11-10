@@ -3,7 +3,7 @@
 
 # LC-14 — navigation reach: the pages a human can open that chat cannot
 
-Status: done 2026-11-10 (items 1, 2, 3, 6: #700; item 4: #1308; item 5: #1328; follow-up: already in #1142)
+Status: done 2026-11-10 (items 1, 2, 3, 6: #700; item 4: #1308; item 5: #1328; follow-up: already on master)
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
 Dependencies: none (each item is its own PR); inside LC-03 scope, feeds LC-11
@@ -60,7 +60,7 @@ selection the same `component_not_found` refusal.
     section was shown; `navigation.py` unchanged (ACK option a).
 - 2026-11-10, outcome: every item is merged. Item 4 #1308 (`guided_step`), item 5 #1328 (`panel_section`), items
   1, 2, 3, 6 #700. The `ui_select_component` follow-up (GK condition 8) was already done: plain selection
-  refuses a component not in the network with `component_not_found` (landed with #1142, tested in
-  `tests/test_lc06_d24_ui_events.py`), so no PR was needed.
+  refuses a component not in the network with `component_not_found` (on master before #1142, the oldest
+  merge in the first-parent history checked; tested in `tests/test_lc06_d24_ui_events.py`), so no PR was needed.
 - Known and not part of this issue: in Guided, a jump can show both "Back to Results" (header) and "Back to the
   cards" (floating); UX logged it as its own follow-up.
