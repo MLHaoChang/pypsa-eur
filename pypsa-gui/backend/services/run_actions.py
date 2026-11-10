@@ -864,7 +864,12 @@ def run_files(run: Path) -> dict | None:
     from services import campus_electrical_service as ce
 
     out = {}
-    for name in (ce.cs.COMPLIANCE_INVESTED_CSV, ce.cs.COMPLIANCE_CSV, ce.cs.LF_PCC_CSV):
+    for name in (
+        ce.cs.COMPLIANCE_INVESTED_CSV,
+        ce.cs.COMPLIANCE_CSV,
+        ce.cs.LF_PCC_CSV,
+        ce.cs.INVEST_HISTORY_CSV,
+    ):
         try:
             out[name] = hashlib.sha256((run / name).read_bytes()).hexdigest()
         except OSError:
@@ -874,9 +879,10 @@ def run_files(run: Path) -> dict | None:
 
 def _cases(run: Path, transformer: bool) -> str | None:
     """Why the study's cases do not cover the planning set (GK B E3), or
-    None: every case converged, the intact one and, for a campus with a
-    transformer, at least one transformer N-1 (the engine solves N-1 only for
-    a group with a parallel unit, `campus_flow.solve_cases`)."""
+    None: the intact case and, for a campus with a transformer, at least one
+    transformer N-1 (the engine solves N-1 only for a group with a parallel
+    unit, `campus_flow.solve_cases`). Convergence is the re-check's, read
+    from the invest history (GK B F2), never this as-is table's."""
     import pandas as pd
 
     from services import campus_electrical_service as ce
@@ -884,11 +890,10 @@ def _cases(run: Path, transformer: bool) -> str | None:
     try:
         pcc = pd.read_csv(run / ce.cs.LF_PCC_CSV)
         cases = pcc["case"].astype(str)
-        converged = pcc["converged"].astype(str).str.lower() == "true"
     except (OSError, ValueError, KeyError):
         return "the campus run's case table cannot be read"
-    if not len(pcc) or not converged.all():
-        return "a case of the campus study did not converge"
+    if not len(pcc):
+        return "the campus study solved no case"
     if not (cases == "intact").any():
         return "the campus study solved no intact case"
     if transformer and not cases.str.startswith("N-1:").any():
@@ -959,6 +964,21 @@ def contingency(project, task, revision: int) -> dict:
             "state": "unreadable",
             "reason": "the campus run's compliance table cannot be read",
         }
+    # GK B F2: the re-check with the measures converged everywhere. `select_assets`
+    # stops on a re-solve that did not converge with a history row `load_flow`.
+    try:
+        history = pd.read_csv(run / ce.cs.INVEST_HISTORY_CSV)
+        unconverged = bool((history["check"].astype(str) == "load_flow").any())
+    except (OSError, ValueError, KeyError):
+        return {
+            "state": "unreadable",
+            "reason": "the campus run's record of its re-check cannot be read",
+        }
+    if unconverged:
+        return {
+            "state": "not_converged",
+            "reason": "the campus re-check with the measures did not converge",
+        }
     rows = {str(r["check"]): r for r in table.to_dict("records")}
     failing, waiting, measures = [], [], []
     for check in CONTINGENCY_CHECKS:
@@ -989,9 +1009,10 @@ def contingency(project, task, revision: int) -> dict:
             failing.append(
                 {
                     "check": check,
-                    "worst_case": _text(row.get("worst_case")),
-                    "worst_period": _int(row.get("worst_period")),
-                    "value": _num(row.get("value")),
+                    # GK B F1: where and what the re-check read, never the as-is worst.
+                    "worst_case": _text(row.get("worst_case_with_measures")),
+                    "worst_period": _int(row.get("worst_period_with_measures")),
+                    "value": _num(row.get("value_with_measures")),
                     "limit": _num(row.get("limit")),
                     "unit": _text(row.get("unit")),
                 }

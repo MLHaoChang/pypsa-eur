@@ -298,11 +298,16 @@ def test_staged_lole_goal_is_on_the_networks_horizon_with_its_period_weights(
 
 # ── ic.returns (ST-3) ────────────────────────────────────────────────────────
 
-DONE = {"status": "done", "flags": [], "report": {"present": True, "stale": False}}
+DONE = {
+    "status": "done",
+    "flags": [],
+    "report": {"present": True, "stale": False, "assumptions_hash": "h1"},
+}
 
 
-def _report(npv=1.5e6, irr=0.081):
+def _report(npv=1.5e6, irr=0.081, assumptions_hash="h1"):
     return {
+        "assumptions_hash": assumptions_hash,
         "sections": {
             "project": {
                 "payload": {
@@ -311,22 +316,68 @@ def _report(npv=1.5e6, irr=0.081):
                     "currency": "EUR",
                 }
             }
-        }
+        },
     }
 
 
-def _returns(monkeypatch, body, report, current=True):
+def _routes(monkeypatch, body, report):
     from routers import results
-    from services import workflow_tools
 
     monkeypatch.setattr(results, "get_investment_case", lambda: body)
     monkeypatch.setattr(
         results, "get_investment_case_report", lambda detail="export": report
     )
+
+
+def _returns(monkeypatch, body, report, current=True):
+    from services import workflow_tools
+
+    _routes(monkeypatch, body, report)
     monkeypatch.setattr(
         workflow_tools, "solve_freshness", lambda ctx: {"results_current": current}
     )
     return ic.read_returns(None, lambda fn: fn())
+
+
+@pytest.mark.parametrize("stored", [None, "h2"])
+def test_returns_are_read_only_from_the_report_the_case_judged_current(
+    monkeypatch, stored
+):
+    """GK B F3: the status call and the report call are bound by the report's
+    assumptions hash; a report stored between them (or one with no hash) is
+    not the one judged current."""
+    fact = _returns(monkeypatch, DONE, _report(assumptions_hash=stored))
+    assert fact["returns"] is None and fact["reasons"] == ["report_changed"]
+
+
+def test_a_real_network_edit_after_the_case_has_no_returns(
+    monkeypatch, install_network
+):
+    """GK B F4: no patched freshness. The solve's fingerprints are recorded on
+    the live project's network; an edit to a load after the case leaves no returns."""
+    import pypsa
+
+    from services import workflow_tools as wt
+    from services.pypsa_service import PyPSAService
+
+    n = pypsa.Network()
+    n.set_snapshots(range(2))
+    n.add("Bus", "b")
+    n.add("Load", "l", bus="b", p_set=1.0)
+    n.add("Generator", "g", bus="b", p_nom=2.0, marginal_cost=1.0)
+    install_network(n)
+    ctx = PyPSAService.get_active_context()
+    ctx.solver_state.update(status="completed", condition="optimal")
+    n = ctx.network
+    n.meta["assistant_solve_input_fingerprint"] = wt._network_input_fingerprint(ctx)
+    n.meta["assistant_solve_exact_input_fingerprint"] = wt._network_input_fingerprint(
+        ctx, exact=True
+    )
+    _routes(monkeypatch, DONE, _report())
+    assert ic.read_returns(ctx, lambda fn: fn())["returns"] is not None
+    n.loads.loc["l", "p_set"] = 2.0
+    fact = ic.read_returns(ctx, lambda fn: fn())
+    assert fact["returns"] is None and "results_not_current" in fact["reasons"]
 
 
 def test_returns_are_read_from_a_current_established_case(monkeypatch):
@@ -442,6 +493,10 @@ def _table(rows):
                 "check": c,
                 "status_as_is": a,
                 "status_with_measures": w,
+                "value_with_measures": 0.8,
+                "worst_period_with_measures": 2035,
+                "worst_hour_with_measures": 7,
+                "worst_case_with_measures": case,
                 "value": 0.5,
                 "limit": 1.0,
                 "unit": "pu",
@@ -476,6 +531,15 @@ def _cases(run, cases=CASES):
     ).to_csv(run / ce.cs.LF_PCC_CSV, index=False)
 
 
+HISTORY_COLUMNS = ("iteration", "need", "from", "to", "check", "detail")
+
+
+def _history(run, rows=()):
+    pd.DataFrame(list(rows), columns=list(HISTORY_COLUMNS)).to_csv(
+        run / ce.cs.INVEST_HISTORY_CSV, index=False
+    )
+
+
 def _settle(run, step):
     step["result"]["run_files"] = run_actions.run_files(run)
 
@@ -497,6 +561,7 @@ def _campus(hub, rows=ROWS, as_is=None, revision=7, cases=CASES):
         _table(rows).to_csv(run / ce.cs.COMPLIANCE_INVESTED_CSV, index=False)
     _table(as_is or ROWS).to_csv(run / ce.cs.COMPLIANCE_CSV, index=False)
     _cases(run, cases)
+    _history(run)
     step = {
         "id": "solve.3",
         "tool": run_actions.CAMPUS,
@@ -561,15 +626,22 @@ def test_a_failing_n_minus_1_check_blocks_with_its_case_period_value_and_limit(h
         **ROWS,
         "transformer_loading": ("pass", "fail", "assumed", "N-1:T1", "T2 at 112 %"),
     }
-    _, step = _campus(hub, rows)
+    run, step = _campus(hub, rows)
+    # GK B F1: the re-check's worst differs from the as-is worst; the re-check's is read.
+    table = pd.read_csv(run / ce.cs.COMPLIANCE_INVESTED_CSV)
+    table.loc[table["check"] == "transformer_loading", "worst_case_with_measures"] = (
+        "N-1:T2"
+    )
+    table.to_csv(run / ce.cs.COMPLIANCE_INVESTED_CSV, index=False)
+    _settle(run, step)
     result = _contingency(hub, step)
     assert result["verdict"] == "fail"
     assert result["facts"][0]["value"] == [
         {
             "check": "transformer_loading",
-            "worst_case": "N-1:T1",
-            "worst_period": 2030,
-            "value": 0.5,
+            "worst_case": "N-1:T2",
+            "worst_period": 2035,
+            "value": 0.8,
             "limit": 1.0,
             "unit": "pu",
         }
@@ -702,14 +774,13 @@ def test_an_assumed_band_asks_the_user_to_state_it(hub, check, words):
     "cases, why",
     [
         ([("intact", True)], "no transformer N-1 case"),
-        ([("intact", True), ("N-1:T1", False)], "did not converge"),
         ([("N-1:T1", True)], "no intact case"),
         ([], "cannot be read"),
     ],
 )
 def test_the_cases_must_cover_intact_and_transformer_n_minus_1(hub, cases, why):
-    """GK B E3: a pass on a study that solved no N-1 case, or a case that did
-    not converge, is no evidence (#1079)."""
+    """GK B E3: a pass on a study that solved no intact or N-1 case is no
+    evidence (#1079)."""
     _, step = _campus(hub, cases=cases)
     result = _contingency(hub, step)
     assert result["verdict"] == "not_evaluated" and why in result["reason"]
@@ -732,9 +803,48 @@ def test_a_header_only_case_table_is_no_evidence(hub):
     )
     _settle(run, step)
     result = _contingency(hub, step)
-    assert (
-        result["verdict"] == "not_evaluated" and "did not converge" in result["reason"]
+    assert result["verdict"] == "not_evaluated" and "solved no case" in result["reason"]
+
+
+def test_a_re_check_that_did_not_converge_is_no_evidence(hub):
+    """GK B F2: the as-is cases all converged and every check passes, but the
+    re-check with the measures stopped on a load flow that did not converge."""
+    run, step = _campus(hub)
+    _history(
+        run,
+        [
+            {
+                "iteration": 1,
+                "need": "load flow",
+                "from": "",
+                "to": "",
+                "check": "load_flow",
+                "detail": "did not converge at 2030 h3",
+            }
+        ],
     )
+    _settle(run, step)
+    result = _contingency(hub, step)
+    assert result["verdict"] == "not_evaluated"
+    assert "re-check with the measures did not converge" in result["reason"]
+
+
+def test_convergence_is_the_re_checks_not_the_as_is_cases(hub):
+    """GK A F2: an as-is case that did not converge with a clean re-check is read."""
+    _, step = _campus(hub, cases=[("intact", True), ("N-1:T1", False)])
+    assert _contingency(hub, step)["verdict"] == "pass"
+
+
+@pytest.mark.parametrize("content", [None, "iteration,need\n"])
+def test_an_unreadable_re_check_record_is_no_evidence(hub, content):
+    run, step = _campus(hub)
+    if content is None:
+        (run / ce.cs.INVEST_HISTORY_CSV).unlink()
+    else:
+        (run / ce.cs.INVEST_HISTORY_CSV).write_text(content)
+    _settle(run, step)
+    result = _contingency(hub, step)
+    assert result["verdict"] == "not_evaluated" and "re-check" in result["reason"]
 
 
 def test_no_campus_step_is_no_evidence(hub):
