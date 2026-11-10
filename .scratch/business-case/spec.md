@@ -3,7 +3,7 @@
 
 # Business case on every template: one engine, user-entered line items, plant presets
 
-Status: ready-for-agent once the design PR merges (GK B plan GO G-C1..G-C8, GK A plan GO LO-1..10, owner BC-ALL-1, 2026-11-10; owner choices §9 pending)
+Status: ready-for-agent once the design PR merges (GK B plan GO G-C1..G-C8, GK A plan GO LO-1..10, owners BC-ALL-1 and BCA-SCOPE-1, 2026-11-10)
 Owner request: 2026-11-10 (coordinator brief), owner decision **BC-ALL-1**
 Research: [research.md](research.md)
 Builds on: [the DC business case](../dc-business-case/spec.md) (B1–B8, DCBC-SCOPE-1) and its GK conditions BC1–BC10 ([DC 01](../dc-business-case/issues/01-design-plan.md) ## Comments)
@@ -84,7 +84,8 @@ LO-1..LO-10, both 2026-11-10):
   quantity, that bus's `lost_production` lines are dropped from the business-case
   case: served already excludes the shortfall, so both would charge it twice. With
   no line on the bus, `lost_production` stays (the contracted-delivery penalty).
-  Pin test (slice 06; GK A GO pending).
+  Pin test (slice 06). GK A aligned LO-4 to this (2026-11-10): the shortfall's
+  loss counts exactly once, as lower served revenue; the line is not refused.
 - **G4 Reference purchases** are counterfactual-side and vanish with
   `counterfactual=()`; a pin that no reference-purchase value reaches the business
   case (slice 06).
@@ -98,9 +99,13 @@ LO-1..LO-10, both 2026-11-10):
 - **G7 What a preset owns (G-C3, G-C4).** A preset revenue row declares
   `requires` (capex categories it needs: `capex_missing:<category>`), `excludes`
   (capex categories it must not carry: `capex_not_owned:<category>`) and
-  `price_includes_energy` (a pass-through line is then refused). The DC kinds keep
-  their names from #1320 (`it_capex_missing`, `facility_capex_missing`,
-  `it_capex_not_owned`, `pass_through_not_colocation`). Capex is priced once.
+  `price_includes_energy` (a pass-through line is then refused
+  `pass_through_price_includes_energy`). One kind per refusal, no aliases (GK B
+  ruling 2026-11-10): the DC presets use `capex_not_owned` with the category in
+  the field path and `pass_through_price_includes_energy`; only
+  `it_capex_missing` and `facility_capex_missing` keep their DC names, because the
+  DC spec names them. Every kind that reaches a tool is registered once in its
+  slice's error-kind fragment. Capex is priced once.
 - **G8 Break-even** on any named revenue line, on the BC8 rule: the solve brackets
   its root; no root is `break_even_not_bracketed`, never an extrapolation; DSCR
   reads n/a without debt.
@@ -153,9 +158,9 @@ finite (`models.schemas.Finite`, #1320 F1), `extra=forbid`.
 | `unit` | S | `MWh`, `MWh_H2`, `kg`, `t`, `GPU_h`, `kW_month`, `kW_year`, `MW_year`, `unit`, `unit_month`, `lump`, `share` | `unit_not_allowed` for the source (below) |
 | `quantity_source` | S | `typed`, `linked:<output id>` (§5, only the outputs this project has), `share_of:<kind>[/<category>]` | `linked_output_missing:<id>`, `share_cycle` |
 | `quantity` | T | a number (typed); none when linked; a share in [0, 1] for `share_of` | `quantity_missing`, `share_out_of_range` |
-| `quantity_by_year` | T | optional per-year override grid, year → number (BCA-Q2) | years inside start..end, `year_out_of_range` |
+| `quantity_by_year` | T | optional per-year override grid, year → number (BCA-SCOPE-1 Q2) | years inside start..end, `year_out_of_range` |
 | `price` | T | currency per `unit`, in `money_year` money; revenue: none = **not established** (DCBC Q4), never a default | `price_not_established` blocks the run (BC7) |
-| `price_by_year` | T | optional per-year override grid (BCA-Q2) | as `quantity_by_year` |
+| `price_by_year` | T | optional per-year override grid (BCA-SCOPE-1 Q2) | as `quantity_by_year` |
 | `money_year` | T | default the case's base year; a preset default carries its source's year (G-C1) | 1990..base year + 5 |
 | `escalation` | S | one of `ESCALATION_CLASSES` (opex, fuel, tariff, ppa, export, capex), or `contract` | — |
 | `indexation` | T | % per year, only with `contract` | `indexation_missing` |
@@ -251,9 +256,9 @@ The DC spec §4–§5 and DCBC-SCOPE-1 are the preset, expressed as rows:
 
 | Row | Kind / category | Unit | Quantity | Rule |
 |---|---|---|---|---|
-| R1 GPU-hour (reserved, on-demand) | revenue / service_fee | GPU_h | `it_energy` × 1000 ÷ kW per GPU × sold share (DC GK A note) | requires it_hardware + facility; price_includes_energy |
-| R2 Colocation lease | revenue / lease | kW_month | `contracted_it_kw` × lease-up | requires facility; excludes it_hardware |
-| R3 Power pass-through | revenue / cost_recovery | share | `share_of` the bill streams × (1 + margin) | refused under R1 (G-C4) |
+| R1 GPU-hour (reserved, on-demand) | revenue / service_fee | GPU_h | `it_energy` × 1000 ÷ kW per GPU × sold share (DC GK A note) | requires it_hardware + facility (`it_capex_missing`, `facility_capex_missing`); price_includes_energy |
+| R2 Colocation lease | revenue / lease | kW_month | `contracted_it_kw` × lease-up | requires facility; excludes it_hardware (`capex_not_owned`, field `…category=it_hardware`) |
+| R3 Power pass-through | revenue / cost_recovery | share | `share_of` the bill streams × (1 + margin) | refused under R1, `pass_through_price_includes_energy` (G-C4) |
 | Facility, M&E | capex / facility | lump per MW IT | typed per COD phase | default from pack 2026-11-10, assumed (2025 money) |
 | IT hardware | capex / it_hardware | lump per GPU or MW IT | typed | life 5 (4–6), refresh |
 | Staff, network | opex / staff, network | MW_year | `contracted_it_kw` | pack, assumed |
@@ -263,7 +268,7 @@ The DC spec §4–§5 and DCBC-SCOPE-1 are the preset, expressed as rows:
 
 | Row | Kind / category | Unit | Quantity | Default / note |
 |---|---|---|---|---|
-| H2 offtake | revenue / product_sale | kg | `served_h2:h2_offtake` | — (hint per BCA-Q1: no public offtake benchmark; research §1) |
+| H2 offtake | revenue / product_sale | kg | `served_h2:h2_offtake` | — (hint per BCA-SCOPE-1 Q1: no public offtake benchmark; research §1) |
 | Production premium | revenue / incentive | kg | `served_h2:h2_offtake`, tenor ≤ 10 years | — (hint: EU Hydrogen Bank pilot cleared €0.37–0.48/kg, 2024) |
 | Oxygen sales (off by default) | revenue / by_product | t | `derived_o2:electrolyser` | — (rarely sold; needs an on-site offtaker) |
 | Stack replacement | capex / equipment | share of electrolyser capex | refresh by operating hours → years | assumed, DOE 2022: 15 % of direct capex per replacement at 40,000 h |
@@ -290,7 +295,7 @@ the business case (G4).
 
 | Row | Kind / category | Unit | Quantity | Default / note |
 |---|---|---|---|---|
-| Concentrate sales (net) | revenue / product_sale | t | `shipped:shipments` | — (BCA-Q3; the row's note: grade × payable × metal price − TC/RC − freight; 2026 copper TC/RC benchmark $0/dmt, 0 ¢/lb) |
+| Concentrate sales (net) | revenue / product_sale | t | `shipped:shipments` | — (BCA-SCOPE-1 Q3; the row's note: grade × payable × metal price − TC/RC − freight; 2026 copper TC/RC benchmark $0/dmt, 0 ¢/lb) |
 | Process plant cost | opex / consumables | t (milled) | typed (mill throughput) | no sourced split → no default; research gives US$5.6–11.3/t milled (2025 reports) as a hint |
 | Freight | opex / other | t | `shipped:shipments` | — |
 | Staff, maintenance, insurance | opex | — | typed / share | — / pack |
@@ -362,18 +367,20 @@ business-case NN; BC-ALL-1)` line in this PR; DC 03 is untouched.
 
 ## 9. Owner choices
 
-BC-ALL-1 sets the scope. Asked through the coordinator on 2026-11-10 (05:26 CET),
-each changing what users see; the recommended answer is written into the slices
-and is replaced by the owner's answer when it arrives:
+BC-ALL-1 sets the scope. Owner decision **BCA-SCOPE-1** (2026-11-10 04:27Z, via
+the coordinator): the recommended answer on all four.
 
-- **BCA-Q1 Revenue price hints**: *recommended* empty cell with a public reference
-  range shown as hint text (source, year), never filled in.
-- **BCA-Q2 Per-year values**: *recommended* one value + escalation + start/end per
-  row, with an optional per-year grid (paste from a spreadsheet) that overrides it.
-- **BCA-Q3 Mining revenue**: *recommended* one net €/t concentrate line, with the
-  build-up in the row's note; no NSR calculator.
-- **BCA-Q4 Order**: *recommended* engine + generic first, then DC presets, then H2
-  and ammonia, then IPP and microgrid, then mining (the §10 order).
+- **Q1 Revenue price hints: A.** Preset revenue prices start empty, with a
+  researched public reference range as hint text beside the cell (source and
+  year), never filled in.
+- **Q2 Per-year values: A.** One value per row + escalation + start/end year; a
+  row can expand to a per-year grid (paste from a spreadsheet) that overrides it.
+- **Q3 Mining revenue: A.** One net €/t concentrate line the user types, with the
+  preset note on how it is built (grade × payable × metal price − TC/RC − freight).
+  No NSR calculator.
+- **Q4 Order: A.** Engine + generic `eh_site` line items first, then the DC presets
+  (finishes DCBC), then H2 hub + ammonia, then IPP / IPP hybrid + microgrid, then
+  mining: the §10 order.
 
 ## 10. Slices (one PR each, PR-SIZE-1)
 
@@ -404,5 +411,5 @@ their own slice (06).
 - Recoverable heat as a linked output (GK A).
 - Pricing unserved energy or downtime (B4, owner 2026-10-15).
 - Forecasting any product or metal price; prices are user-entered.
-- An NSR calculator for concentrate (unless BCA-Q3 picks it).
+- An NSR calculator for concentrate (BCA-SCOPE-1 Q3).
 - Changing any template's IC: basis, numbers and hash stay as they are (BC1).

@@ -21,7 +21,10 @@ retitle that PR; GK B re-reviews it). Keep `BusinessCaseRefused` (kind + field
 path), `require_runnable`, `CostDefault`, the `assumed` provenance,
 `with_cost_defaults` and the defaults pack 2026-11-10 rows with their byte-equal
 test. Move the DC classes (`GpuHourRevenue`, `ColocationRevenue`, `ItHardware`,
-`Facility` per MW IT) out: they become rows of the DC preset in 07.
+`Facility` per MW IT) out: they become rows of the DC preset in 07. GK B's delta
+review of the re-scoped #1320 needs: the TDD plan first (G-C8); the 2026-11-10
+pack rows unchanged, or re-proved by byte prefix; the F1/F2 tests carried onto
+the LineItem columns; the `money_year` column (G-C1) in this slice's model.
 
 ## What to build
 
@@ -38,8 +41,11 @@ test. Move the DC classes (`GpuHourRevenue`, `ColocationRevenue`, `ItHardware`,
    `rate_missing`, `price_not_established` (saved, blocks the run).
 4. `preset_rule` (`requires`, `excludes`, `price_includes_energy`) as a field the
    model checks: `capex_missing:<category>`, `capex_not_owned:<category>`,
-   pass-through refused under `price_includes_energy` (G7; the DC kinds keep
-   their #1320 names as the DC preset's).
+   `pass_through_price_includes_energy` (G7). One kind per refusal, no aliases
+   (GK B 2026-11-10): #1320's `it_capex_not_owned` becomes `capex_not_owned` with
+   the category in the field path and `pass_through_not_colocation` (never
+   shipped) becomes `pass_through_price_includes_energy`; `it_capex_missing` and
+   `facility_capex_missing` stay.
 5. Linked sources are stored as `linked:<id>@<catalogue version>`; this slice
    checks the syntax only; 04 resolves them.
 

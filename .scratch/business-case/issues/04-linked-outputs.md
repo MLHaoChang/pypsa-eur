@@ -85,6 +85,15 @@ the preset's 8 "assumed").
   lines.
 - LO-10 L7 is DC 03 as merged (it_energy). No second IT reader.
 
+### 2026-11-10: GK A (19) LO-4 aligned to GK B G2/G3
+
+For product `lost_production`, follow GK B G3: when a revenue line reads served
+product, the BC drops lost_production rather than refusing the line; test that
+the shortfall's loss is counted exactly once, as lower served revenue. For export
+and bill streams LO-4's refusal stays as G2 says. Where G2/G3 and LO-4 differ,
+G2/G3 win. LO-1..3 and LO-5..10 unchanged. GK A (20, session
+`session_01G7qCuj9VQMra1QJZv5J1s3`) confirms the GO stands as narrowed.
+
 Also: the catalogue ids are a stored contract (lines link to them). Version them,
 and add a test that every reader accepts each version (#1132 F1).
 

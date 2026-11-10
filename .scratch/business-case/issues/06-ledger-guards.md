@@ -3,7 +3,7 @@
 
 # 06 — Ledger guards: double count, lost production, reference purchases
 
-Status: needs-triage (blocked by 05; GK A GO on G3/G4 asked 2026-11-10)
+Status: needs-triage (blocked by 05; GK A (20) GO on G3/G4 asked 2026-11-10)
 Type: task
 Blocked by: 05
 Gated: yes (GK B, GK A)
@@ -21,7 +21,8 @@ In `build_business_case` (05):
    PPA/CfD settlement, bill streams, a product bus valued by the IC) is refused
    `double_count:<stream>`, never warned.
 2. G3: when a revenue line reads a product bus's served quantity, that bus's
-   `lost_production` lines leave the business-case case; kept otherwise.
+   `lost_production` lines leave the business-case case; kept otherwise. The
+   line is not refused (GK A LO-4 aligned to G3, 2026-11-10).
 3. G4: no reference-purchase value reaches the business case.
 4. The locked "from the energy model" rows: a read-only list of the ledger streams
    the case carries, for 09 to show.

@@ -22,7 +22,7 @@ superseded (spec §8).
 ## Done when
 
 - GK B has given a plan GO on spec §3–§4 and GK A on §5 and G3–G4.
-- The owner's answers to spec §9 BCA-Q1..Q4 are recorded and the slices adjusted.
+- The owner's answers (BCA-SCOPE-1, A on all four) are recorded in spec §9 and the slices.
 - This PR merges.
 
 ## Comments
@@ -74,3 +74,24 @@ Note on numbering: GK B's G-C7/G-C8 name slices by the plan message's numbers
 
 Recorded in [04](04-linked-outputs.md) ## Comments with GK A's answers and
 standing points. GK A's GO on G3/G4 (slice 06) asked 2026-11-10.
+
+### 2026-11-10: GK B (40) rulings on the addendum
+
+Reusing #1320's branch is fine. (1) One kind per refusal, no aliases:
+`pass_through_price_includes_energy` and `capex_not_owned:<category>` (category in
+the field path), for DC too; `it_capex_missing` and `facility_capex_missing` stay
+because the DC spec names them; `pass_through_not_colocation` never shipped and
+does not survive. Every kind that reaches a tool is registered once in its PR's
+error-kind fragment. (2) The re-scoped #1320's delta review needs the TDD plan
+first (G-C8), the 2026-11-10 pack rows unchanged or re-proved by byte prefix, the
+F1/F2 tests on the LineItem columns, and the `money_year` column in 02's model.
+
+### 2026-11-10: owner decision BCA-SCOPE-1
+
+A on all four (04:27Z, via the coordinator); recorded in spec §9.
+
+### 2026-11-10: GK A rotation
+
+GK A (19) handed off; GK A (20) is `session_01G7qCuj9VQMra1QJZv5J1s3`. The plan GO
+stands as narrowed (LO-4 aligned to GK B G2/G3, [04](04-linked-outputs.md) ##
+Comments). The slice 06 G3/G4 GO is asked of GK A (20).

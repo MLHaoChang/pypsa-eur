@@ -21,11 +21,12 @@ first. Send the TDD plan to GK B before building.
 2. `eh_site`: no forced rows; the offered rows of §6.1 for the "add line" picker.
 3. The DC preset (both DC templates): R1 GPU-hour (`price_includes_energy`;
    requires it_hardware + facility), R2 colocation (requires facility, excludes
-   it_hardware), R3 pass-through, facility and IT hardware capex, staff, network,
+   it_hardware, `capex_not_owned`), R3 pass-through (refused under R1,
+   `pass_through_price_includes_energy`), facility and IT hardware capex, staff, network,
    maintenance, insurance, property tax, from #1320's pack rows with their
-   `money_year` (G-C1). The DC refusal names stay (spec G7).
-4. BCA-Q1: if the owner picks hints, a `hint` (range, source, year) per revenue
-   row, never a value.
+   `money_year` (G-C1). Refusal kinds per spec G7 (no aliases).
+4. BCA-SCOPE-1 Q1: a `hint` (range, source, year) per revenue row, shown beside
+   the empty cell, never a value.
 
 ## Tests
 
