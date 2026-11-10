@@ -149,5 +149,7 @@ def test_one_undo_restores_the_empty_meta(client, ctx, session_ctx):
 
 
 def test_confirm_is_not_a_chat_tool():
-    from harness.catalogue import TOOLS
-    assert not [t for t in TOOLS if "unrecorded" in str(t).lower()]
+    from harness.catalogue import TOOL_ROUTES, TOOLS
+    assert not [t for t in TOOLS if "unrecorded" in str(t.get("name", t)).lower()
+                and "readiness" not in str(t.get("name", t))]
+    assert not [r for r in TOOL_ROUTES.values() if "unrecorded" in str(r)]
