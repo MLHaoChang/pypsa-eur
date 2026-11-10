@@ -93,6 +93,14 @@ def test_a_lone_snapshot_between_equal_gaps_is_accepted():
     assert meta["step_hours"] == 3
 
 
+def test_two_lone_snapshots_at_unequal_gaps_are_accepted():
+    s = _year_series()
+    snaps = pd.DatetimeIndex(["2023-01-01 00:00", "2023-01-01 03:00", "2023-01-02 03:00",
+                              "2023-01-04 03:00", "2023-01-05 03:00", "2023-01-05 06:00"])
+    _, meta = ap._align_to_snapshots(s, snaps, family="renewable")
+    assert meta["step_hours"] == 3
+
+
 def test_four_snapshots_at_a_longer_step_are_still_refused():
     s = _year_series()
     snaps = pd.DatetimeIndex(["2023-01-01 00:00", "2023-01-01 03:00", "2023-01-02 03:00",
