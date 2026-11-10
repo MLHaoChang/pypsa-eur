@@ -33,12 +33,14 @@ Rules:
 from __future__ import annotations
 
 import logging
+import os
 import pathlib
 import re
 import secrets
 import shutil
 import threading
-from contextlib import contextmanager
+import time
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, UTC
 
 from pydantic import ValidationError
@@ -267,7 +269,7 @@ class ReportVersionConflict(ReportStoreError):
 
 
 @contextmanager
-def report_lock(project_dir: pathlib.Path, report_id: str):
+def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | None = None):
     """The one lock for every writer of `reports/<report_id>/` (study harness
     07c, GK B R5): `create_report`, `save_version`, `update_meta`,
     `write_figure`, `delete_report` and the job's generation meta take it,
@@ -278,7 +280,8 @@ def report_lock(project_dir: pathlib.Path, report_id: str):
     (`harness.durable.file_lock`, GK B's #1070 ruling), taken once per
     thread; a thread lock in front of it makes it re-entrant, so a holder
     may call `save_version`. `ReportBusy` when another process keeps it past
-    `LOCK_TIMEOUT_S`."""
+    `LOCK_TIMEOUT_S` (or `timeout`, for a caller sharing one deadline over
+    several reports)."""
     from harness.durable import file_lock
 
     rid = validate_report_id(report_id)
@@ -295,7 +298,8 @@ def report_lock(project_dir: pathlib.Path, report_id: str):
             return
         root.mkdir(parents=True, exist_ok=True)
         try:
-            with file_lock(str(root / f".{rid}.lock"), timeout=LOCK_TIMEOUT_S,
+            with file_lock(str(root / f".{rid}.lock"),
+                           timeout=LOCK_TIMEOUT_S if timeout is None else timeout,
                            busy=f"report {rid} is being written"):
                 held.add(key)
                 try:
@@ -304,6 +308,137 @@ def report_lock(project_dir: pathlib.Path, report_id: str):
                     held.discard(key)
         except TimeoutError as exc:
             raise ReportBusy(f"report {rid} is being written by another process") from exc
+
+
+# ── bundle copies (study harness 07e) ───────────────────────────────────────
+
+def _lock_file_id(name: str) -> str | None:
+    """The report id a `reports/.<id>.lock` file name belongs to, else None."""
+    if name.startswith(".") and name.endswith(".lock") and _REPORT_ID.fullmatch(name[1:-5]):
+        return name[1:-5]
+    return None
+
+
+def _lockable_ids(project_dir: pathlib.Path | None) -> set[str]:
+    """Every report id with a directory or a lock file under `reports/`. A
+    lock file alone counts: `create_report` holds it before its directory
+    exists."""
+    if project_dir is None:
+        return set()
+    root = reports_dir(project_dir)
+    if not root.is_dir():
+        return set()
+    ids = set()
+    for entry in root.iterdir():
+        rid = _lock_file_id(entry.name) or entry.name
+        if _REPORT_ID.fullmatch(rid):
+            ids.add(rid)
+    return ids
+
+
+@contextmanager
+def reports_copy_lock(src: pathlib.Path | None = None, dst: pathlib.Path | None = None,
+                      *, incoming: tuple[str, ...] | frozenset[str] | set[str] = ()):
+    """`report_lock` on every report a bundle copy reads or replaces (study
+    harness 07e), so a snapshot, restore, import or save-as never interleaves
+    with a report writer.
+
+    `src` is read: its own reports are locked. `dst` is written: its reports,
+    `src`'s and the `incoming` ids (an import's archive) are locked there.
+    Yields `{"src": ids, "dst": ids}`, the ids held on each side; a copy
+    touches only those, so a report created after the set was taken is left
+    alone and serialises after the copy.
+
+    Locks are taken in sorted `(reports dir, id)` order, so two copies cannot
+    deadlock; a report writer holds one lock and takes nothing inside it. All
+    of them share one `LOCK_TIMEOUT_S` deadline. A report that appears while
+    they are being taken releases the set and starts over, to keep the order.
+    `ReportBusy`, with every lock released, when the deadline passes."""
+    extra = {validate_report_id(rid) for rid in incoming}
+    deadline = time.monotonic() + LOCK_TIMEOUT_S
+
+    def wanted() -> tuple[set[str], set[str]]:
+        src_ids = _lockable_ids(src)
+        dst_ids = (_lockable_ids(dst) | src_ids | extra) if dst is not None else set()
+        return src_ids, dst_ids
+
+    while True:
+        src_ids, dst_ids = wanted()
+        keys = sorted(
+            {(str(reports_dir(src).resolve()), rid, "src") for rid in src_ids}
+            | {(str(reports_dir(dst).resolve()), rid, "dst") for rid in dst_ids}
+        )
+        with ExitStack() as stack:
+            for _root, rid, side in keys:
+                stack.enter_context(report_lock(
+                    src if side == "src" else dst, rid,
+                    timeout=max(0.0, deadline - time.monotonic()),
+                ))
+            if wanted() != (src_ids, dst_ids):
+                continue
+            yield {"src": frozenset(src_ids), "dst": frozenset(dst_ids)}
+            return
+
+
+def _swap_in(build, target: pathlib.Path) -> None:
+    """Build `target`'s replacement in a temp sibling with `build(tmp)`, then
+    swap it in. An I/O error leaves `target` as it was."""
+    stamp = f"{os.getpid()}-{time.time_ns()}"
+    tmp = target.with_name(f".{target.name}.tmp-{stamp}")
+    old = target.with_name(f".{target.name}.old-{stamp}")
+    try:
+        build(tmp)
+        if target.exists():
+            os.replace(target, old)
+        try:
+            os.replace(tmp, target)
+        except OSError:
+            if old.exists():
+                os.replace(old, target)
+            raise
+    finally:
+        for leftover in (tmp, old):
+            if leftover.is_dir():
+                shutil.rmtree(leftover, ignore_errors=True)
+            else:
+                leftover.unlink(missing_ok=True)
+
+
+def copy_reports(src: pathlib.Path, dst: pathlib.Path) -> None:
+    """Make `dst`'s `reports/` a copy of `src`'s, one report at a time under
+    `reports_copy_lock`. No `reports/` in `src` → nothing changes.
+
+    Each report directory is built beside its destination and swapped in, and
+    a destination report `src` lacks is removed. Lock files are neither
+    copied nor removed: deleting a held `.<id>.lock` would let a second
+    process lock a fresh file. `ReportBusy` before anything is written."""
+    src_root, dst_root = reports_dir(src), reports_dir(dst)
+    if not src_root.is_dir():
+        return
+    with reports_copy_lock(src, dst) as held:
+        dst_root.mkdir(parents=True, exist_ok=True)
+
+        def ours(entry: pathlib.Path, side: str) -> bool:
+            if _lock_file_id(entry.name):
+                return False
+            return not _REPORT_ID.fullmatch(entry.name) or entry.name in held[side]
+
+        names = {e.name for e in src_root.iterdir() if ours(e, "src")}
+        for entry in list(dst_root.iterdir()):
+            if entry.name in names or not ours(entry, "dst"):
+                continue
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+        for name in sorted(names):
+            entry = src_root / name
+            if entry.is_dir():
+                _swap_in(lambda tmp, entry=entry: shutil.copytree(str(entry), str(tmp)),
+                         dst_root / name)
+            else:
+                _swap_in(lambda tmp, entry=entry: shutil.copy2(str(entry), str(tmp)),
+                         dst_root / name)
 
 
 def create_report(project_dir: pathlib.Path, doc: ReportDocument) -> ReportMeta:
