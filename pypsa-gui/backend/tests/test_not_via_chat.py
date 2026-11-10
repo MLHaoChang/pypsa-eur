@@ -88,6 +88,8 @@ def test_the_issue_rows_are_declared():
     ('Resume the paused solve queue', 'solve_queue_instance_controls'), ('Replace the site thumbnail', 'map_layout_and_sites'),
     ('Read me the headline strip', 'results_headline_strip'), ('What is in the KPI strip', 'results_headline_strip'),
     ('Which KPIs are in the strip', 'results_headline_strip'),
+    ('Why is the LCOE KPI not shown in the strip?', 'results_headline_strip'), ('Add a KPI to the strip', 'results_headline_strip'),
+    ('Hide the headline strip', 'results_headline_strip'), ('What does the headline strip show?', 'results_headline_strip'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -108,6 +110,12 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Headline KPIs for run A vs run B', 'Show the investment case headlines', 'List the files in the chat file strip',
     'Export the headline results to the file strip', 'Compare headline KPIs of run A and run B and export to the file strip',
     'Put the KPI report in the file strip',
+    # GK B R1: export, report, compare and the verb "strip" are chat tools' work.
+    'Export the headline strip to Excel', 'Export the KPI strip', 'Download the KPI strip as CSV',
+    'Put the headline strip in the report', 'Add the headline strip KPIs to the Word report',
+    'Compare the headline strip of two runs', 'Compare the KPI strip of run A and run B',
+    'Strip the headline from the report', 'Strip KPI names of units in the export', 'Save the KPI strip to my files',
+    'Add the KPI strip to the export', 'What is in the chat file strip',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)
