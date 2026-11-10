@@ -11,6 +11,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - Backend tests: `PYTHONPATH=<wt>:<wt>/pypsa-gui/backend /root/.venv-pypsa-gui/bin/python -m pytest -p no:warnings -q -rfE <files>`, no xdist. Check the exit code. Keep each run under 590 s and split files (`test_pilot_evaluation` and broad finance sweeps time out).
 - pytest `-k` filters every path collected in the same invocation, so explicit node ids from another file are silently deselected. Run node ids in their own invocation.
 - Frontend: symlink `node_modules` from `/home/user/pypsa-eur/pypsa-gui/frontend`, put `/home/user/pypsa-eur/.pixi/envs/default/bin` on `PATH`, then `npx vitest run <paths>` and `npx tsc --noEmit -p .`.
+- In a shallow clone, `git log -S/-G` names the history edge, not the introducing PR. Attribute a change with `gh api search/issues` (`is:pr is:merged`) plus that PR's diff (#1329).
 
 ## Delta reviews
 
@@ -87,6 +88,7 @@ A broken-dependency test builds its inputs before injecting the fault; otherwise
 A "never swallowed" test injects the module's own error class (e.g. `DefaultsPackError`) as well as a foreign one: a narrow `except` survives a RuntimeError-only test (#1290 F2, GK A (19)).
 
 Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded float for `Finite` (#1320 F1).
+- A cleanup that reads a render-time ref after unmount acts on stale state; read the store at cleanup (#1328 F5).
 
 ## Rulings
 
