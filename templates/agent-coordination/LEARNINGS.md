@@ -299,3 +299,11 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Big PRs multiplied re-OK rounds** (+5352 lines: 4 NOT OK, 16 OK comments; +4397 lines, 25 commits).
   - Fix (owner decision PR-SIZE-1): one reviewer area and about 1,500 changed lines per PR, excluding generated files, shots and fixtures; a plan GO names the slices.
   - Lives in: steward "Gatekeeper checkpoints", `docs/agents/review-gk.md`, `docs/agents/session-brief.md`.
+
+## 10 Nov 2026: session start size (owner decision RETRO-1110)
+
+- **Every session started at 82–89k tokens before any work, and 98–99 % of tokens are cache reads**, so cost is turns × context. About 67k of the start was tool schemas; the skill list was ~5k, AGENTS.md ~1k, the brief ~2k. The SessionStart hook adds nothing: its output never enters the context.
+  - Fix: `permissions.deny` in `.claude/settings.json` names the tools no procedure calls (cloud-environment, credential, computer-folder and webhook tools of `claude-code-remote`; `Workflow`, `ScheduleWakeup`, the plugin and skill suggestion tools, `SendUserFile`, `ListAgents`). A denied tool's schema is not sent at all. `skillOverrides: "user-invocable-only"` hides unused bundled and claude.ai skills from the model and keeps `/name` for the owner.
+  - Measured with one-turn Haiku probes (`create_session`, then `get_session` `context_usage.used_tokens` read from outside after the turn; inside its own turn a session reads 0): 82.6k on the base branch, 61.5k with the deny list, 58.1k with the skills hidden too.
+  - Before adding a deny entry, grep the steward, coordinator and reviewer procedures for the tool. The coordinator needs `Artifact` (~8k) and the session and trigger tools, and project settings cannot differ by role, so those stay loaded for builders.
+  - Lives in: `.claude/settings.json`, live and template copies.
