@@ -524,7 +524,7 @@ def member_gate(
             tool_use_id,
             tool_name,
             confirm._UNAVAILABLE["error_kind"],
-            f"approval for {tool_name!r} could not be recorded",
+            f"approval for {tool_name} could not be recorded",
             tool_results_collector,
         )
         return False
@@ -543,7 +543,7 @@ def member_gate(
             tool_use_id,
             tool_name,
             confirm._UNAVAILABLE["error_kind"],
-            f"approval for {tool_name!r} could not be recorded",
+            f"approval for {tool_name} could not be recorded",
             tool_results_collector,
         )
         return False
@@ -562,7 +562,7 @@ def member_gate(
         tool_use_id,
         tool_name,
         kind,
-        f"{decision} on the change-set card for {tool_name!r}",
+        f"{decision} on the change-set card for {tool_name}",
         tool_results_collector,
     )
     return False
