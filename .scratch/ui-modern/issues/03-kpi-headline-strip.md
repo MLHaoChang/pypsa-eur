@@ -19,4 +19,4 @@ The strip sits at the top of Results › Summary, in Guided and Expert. One PR p
 - S1 (backend): `GET /api/results/headline_kpis`, the ordered cards for the project's type. Energy hubs and data centres: LCOE, system cost, new-build capital cost, curtailed share, unserved energy. Microgrids: unserved energy first. Plain networks: system cost, new-build capital cost, curtailed share, peak line loading.
 - S2 (UI): the strip on that route, with its source line, the "Out of date" mark, loading, failed and empty states; "per year" in place of "(annualised)"; the Results header says "solved" and "all periods".
 - S3 (UI): the delta against the base case, and a trend line over the investment periods of a multi-period run.
-- Time to power: no run computes it, so it has no card. Raised with the coordinator as a separate engine task.
+- Time to power: no run computes it, so it has no card (owner decision TTP-1). The engine task is `.scratch/datacenter-grid-readiness/issues/27-time-to-power-fact.md`; the card follows in `03b-time-to-power-card.md`.
