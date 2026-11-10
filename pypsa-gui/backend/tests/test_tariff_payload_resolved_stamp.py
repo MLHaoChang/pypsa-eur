@@ -312,8 +312,10 @@ def test_a_marked_solver_config_put_with_a_broken_pack_is_a_typed_422(
     r = client.put("/api/simulation/solver_config", json={"commercial": commercial})
 
     assert r.status_code == 422, r.text
-    assert "cannot be read now" in r.text
-    assert commercial["import_tariff"]["pack_hash"] in r.text
+    err = r.json()["detail"][0]
+    assert err["type"] == "tariff_stamp_unreadable"
+    assert commercial["import_tariff"]["pack_hash"] in err["msg"]
+    assert "cannot be read now" in err["msg"]
     monkeypatch.undo()
     assert _stored(session_ctx, client) == before
 
@@ -332,3 +334,17 @@ def test_a_marked_library_put_with_a_broken_pack_is_a_typed_422(client, monkeypa
     assert r.status_code == 422, r.text
     assert r.json()["detail"]["code"] == "tariff_stamp_unreadable"
     assert item["pack_hash"] in r.json()["detail"]["message"]
+
+
+def test_an_ordinary_invalid_tariff_is_still_a_plain_422_on_both_routes(client):
+    """Only the stamp refusal is re-typed: a payload pydantic refuses for any other
+    reason (here a context-free `list_type` error) keeps its own kind, never a 500."""
+    bad = {**_generic_copy_payload(), "currency": "USD", "items": "not a list"}
+
+    lib = client.put("/api/library/items/tariff/bad1", json={"payload": bad})
+    assert lib.status_code == 422, lib.text
+    assert "tariff_stamp_unreadable" not in lib.text
+
+    sim = _put_tariff(client, bad)
+    assert sim.status_code == 422, sim.text
+    assert sim.json()["detail"][0]["type"] != "tariff_stamp_unreadable"
