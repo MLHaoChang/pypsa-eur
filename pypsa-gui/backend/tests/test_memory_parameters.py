@@ -712,6 +712,8 @@ def test_save_preview_and_apply_refuse_a_project_that_is_no_longer_open(
         ({"unit": "kW"}, "memory_unit_mismatch"),
         ({"field": "p_nom_gone"}, "memory_field_unknown"),
         ({"field": "carrier"}, "memory_field_unknown"),
+        ({"carrier": "wind(on)"}, "memory_carrier_unsupported"),
+        ({"carrier": "solar "}, "memory_carrier_unsupported"),
     ],
 )
 def test_the_parameter_body_itself_checks_field_and_stored_unit(change, kind):
@@ -729,7 +731,10 @@ def test_the_parameter_body_itself_checks_field_and_stored_unit(change, kind):
     assert exc.value.kind == kind and exc.value.status == 422
     assert (
         M.validate_body(
-            "parameter", {**body, **{"unit": "MW", "field": "p_nom"}}, parameter_ok=True
+            "parameter",
+            {k: v for k, v in body.items() if k not in change}
+            | {"unit": "MW", "field": "p_nom"},
+            parameter_ok=True,
         )["unit"]
         == "MW"
     )
