@@ -55,7 +55,7 @@ export const FACT_WORDS: Record<string, string> = {
   'h2.offtake.shed_hours': 'The hydrogen offtake is served in every hour',
   'h2.electrolyser.utilisation': 'The electrolyser runs within its sizing band',
   // Study harness 10b: the staged data-centre run.
-  'dc.campus.contingency': 'The campus checks pass with every transformer in service and with any one out',
+  'dc.campus.contingency': 'The campus checks pass in the intact case and in each transformer outage the study solves',
   'ic.returns': 'The investment case reports its NPV and IRR',
 }
 
