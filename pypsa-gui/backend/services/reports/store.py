@@ -263,7 +263,8 @@ _COPY_LOCK_ROUNDS = 5
 
 
 class ReportBusy(ReportStoreError):
-    """Another process held the report's lock past `LOCK_TIMEOUT_S`."""
+    """Another holder, a process or a thread of this one, kept the report's
+    lock past the caller's bound (`LOCK_TIMEOUT_S`, or a copy's deadline)."""
 
 
 class ReportVersionConflict(ReportStoreError):
