@@ -1174,7 +1174,7 @@ export default function CapacityExpansion() {
               New capacity and incremental investment the optimiser placed in
               each investment period (asset <code>build_year</code>). Capacity
               is a nameplate sum across component classes (MW · MVA · MWh);
-              CAPEX is {costMode === 'lifetime' ? 'present-value upfront investment' : 'per year'}.
+              the cost is {costMode === 'lifetime' ? 'present-value upfront investment' : 'per year'}.
             </p>
             <div ref={perPeriodCapRef}>
               <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>

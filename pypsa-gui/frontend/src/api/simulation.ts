@@ -1290,7 +1290,7 @@ export interface HeadlineCard {
   value: number | null
   /** "currency/yr", "currency" (whole horizon), "%", "MWh" or "<ISO code>/MWh". */
   unit: string | null
-  state: 'ready' | 'zero' | 'not_run' | 'not_modelled' | 'not_applicable' | 'stale' | 'unavailable'
+  state: 'ready' | 'zero' | 'not_run' | 'running' | 'not_modelled' | 'not_applicable' | 'stale' | 'unavailable'
   /** One plain sentence when there is no figure. */
   reason: string | null
   formula_id: string | null
@@ -1300,7 +1300,8 @@ export interface HeadlineCard {
 export interface HeadlineKpis { kind: 'energy_hub' | 'microgrid' | 'network'; cards: HeadlineCard[] }
 
 export const resultsApi = {
-  getHeadlineKpis: () => client.get<HeadlineKpis>('/results/headline_kpis').then(r => r.status === 204 ? null : r.data),
+  // The strip says so itself when this fails (one message, not a toast as well).
+  getHeadlineKpis: () => client.get<HeadlineKpis>('/results/headline_kpis', { skipErrorToast: true }).then(r => r.status === 204 ? null : r.data),
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
   getGeneratorResults: (source?: ResultSource, range?: TSRange) => client.get('/results/generators', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),

@@ -6,8 +6,13 @@ const has = f => flags.includes(f)
   const width = has('narrow') ? 1100 : 1440
   const ctx = await browser.newContext({ storageState: 'state.json', viewport: { width, height: 900 }, deviceScaleFactor: 1 })
   const page = await ctx.newPage()
-  if (has('slow')) await page.route('**/api/results/headline_kpis', async r => { await new Promise(x => setTimeout(x, 6000)); r.continue() })
+  // The placeholder remembers the last row's tile count, so `slow` loads once, then reloads with the delay.
+  let slow = false
+  if (has('slow')) await page.route('**/api/results/headline_kpis', async r => { if (slow) await new Promise(x => setTimeout(x, 6000)); r.continue() })
   if (has('stale')) await page.route('**/api/simulation/status', async r => { const res = await r.fetch(); const j = await res.json(); j.dispatch = 'stale'; r.fulfill({ response: res, json: j }) })
+  const lcoe = (state, reason) => page.route('**/api/results/headline_kpis', async r => { const res = await r.fetch(); const j = await res.json(); Object.assign(j.cards.find(c => c.id === 'lcoe') || {}, { value: null, state, reason }); r.fulfill({ response: res, json: j }) })
+  if (has('caserun')) await lcoe('running', 'The investment case is still running.')
+  if (has('casestale')) await lcoe('unavailable', 'The investment case is out of date: run it again.')
   if (has('fail')) await page.route('**/api/results/headline_kpis', r => r.fulfill({ status: 500, body: '{}' }))
   await page.goto('http://127.0.0.1:' + (process.env.PORT || 5173) + '/')
   const card = page.locator(`text=${project}`).first()
@@ -28,7 +33,14 @@ const has = f => flags.includes(f)
     const res = page.getByText('Results', { exact: true }).first()
     await res.scrollIntoViewIfNeeded(); await res.click()
   }
-  await page.waitForTimeout(has('slow') ? 1200 : 3500)
+  await page.waitForTimeout(3500)
+  if (has('slow')) {
+    slow = true
+    await page.reload(); await page.waitForTimeout(2500)
+    const again = page.getByText('Results', { exact: true }).first()
+    await again.scrollIntoViewIfNeeded(); await again.click()
+    await page.waitForTimeout(1500)
+  }
   await page.screenshot({ path: `shots/${tag}.png` })
   console.log(tag, 'strip:', await page.locator('[data-testid="headline-strip"]').count(), 'title:', await page.title())
   await browser.close()

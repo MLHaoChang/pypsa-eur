@@ -157,7 +157,9 @@ describe('the Summary under the headline strip (ui-modern 03)', () => {
     expect(adequacy.querySelector('[data-kpi-value]')).toBeNull()
     expect(adequacy.textContent).toContain('Cost at VoLL')
     expect(screen.getByTestId('summary-row-capacity').textContent).toContain('What was built, and the cost by asset')
-    expect(screen.getByTestId('summary-row-capacity').textContent).not.toContain('a year')
+    expect(screen.getByTestId('summary-row-capacity').textContent).not.toContain('in this solve')
+    // The objective would repeat the strip's Total system cost under another name (K1).
+    expect(screen.getByTestId('summary-status').textContent).not.toContain('LP objective')
   })
 
   it('a card narrowed to one period keeps its own headline', async () => {
@@ -212,7 +214,7 @@ describe('the Summary card rows (W10 R1)', () => {
     const onOpen = renderTab()
     const rows = await screen.findByTestId('summary-card-rows')
     await screen.findByTestId('summary-out-grid')
-    expect(within(rows).getByTestId('summary-row-capacity').textContent).toContain('a year')
+    expect(within(rows).getByTestId('summary-row-capacity').textContent).toContain('in this solve')
     expect(within(rows).queryByTestId('summary-row-grid')).toBeNull()
     expect(within(rows).getByTestId('summary-not-in-scope').textContent).toContain('AC power flow')
     fireEvent.click(within(rows).getByTestId('summary-row-open-capacity'))

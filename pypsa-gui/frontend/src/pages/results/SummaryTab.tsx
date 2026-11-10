@@ -161,7 +161,8 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-muted" data-testid="summary-status">
           <span>Solve: <span className="text-text font-medium">{status.condition ? solveWords(status.condition) : status.status ?? 'not run yet'}</span></span>
           {status.solve_time != null && <span>{Number(status.solve_time).toFixed(1)} s</span>}
-          {status.objective != null && (
+          {/* The strip's Total system cost is the cost figure; the objective would repeat it under another name. */}
+          {status.objective != null && !inStrip('system_cost') && (
             <span title="The LP objective (n.objective + its constant). The cost card below is the reported system cost from n.statistics(); the two differ by what the objective counts (e.g. existing fixed costs, shed load).">
               LP objective <span className="font-mono text-text">{fmtCurrency(status.objective)}</span>
             </span>
@@ -175,7 +176,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
         headline={{
           // The strip above already carries the total cost and the unserved energy.
           capacity: !c ? null
-            : [inStrip('system_cost') ? 'What was built, and the cost by asset' : `${fmtCurrency(c.total)} a year`,
+            : [inStrip('system_cost') ? 'What was built, and the cost by asset' : `${fmtCurrency(c.total)} in this solve`,
               ll?.total_mwh != null && ll.total_mwh > 0 && !inStrip('unserved_energy') ? `${fmtEnergy(ll.total_mwh)} unserved` : null,
             ].filter(Boolean).join(' · '),
           reliability: target
@@ -195,7 +196,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           hint="From /results/cost_breakdown (n.statistics(): annualised capital cost with fixed O&M, plus operating cost). Shed load is not included; see Adequacy.">
           {c ? (
             <>
-              {!inStrip('system_cost') && <Headline value={fmtCurrency(c.total)} sub="total system cost per year" />}
+              {!inStrip('system_cost') && <Headline value={fmtCurrency(c.total)} sub="total system cost in this solve" />}
               <Line label={COST_WORDS.capital} value={fmtCurrency(c.capital)} />
               <Line label="Operating cost" value={fmtCurrency(c.operating)} />
               {c.newBuild != null && !inStrip('new_build_capital') && (

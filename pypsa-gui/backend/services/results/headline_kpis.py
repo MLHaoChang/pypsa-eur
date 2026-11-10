@@ -74,9 +74,14 @@ NOT_COMPARED = (
 NOT_OPTIMAL = ("unavailable", "The solve did not finish with an optimal result.")
 CASE_NOT_RUN = ("not_run", "The investment case has not run on this solve.")
 # "stale" is kept for the solve itself: the strip marks every figure out of
-# date on it. A case to run or re-run is "not_run", which links to its tab.
-CASE_RUNNING = ("not_run", "The investment case is still running.")
-CASE_STALE = ("not_run", "The investment case is older than its inputs.")
+# date on it. A case that ran but is out of date is "unavailable" with its own
+# sentence (UX (17), #1359); the strip links any LCOE card without a figure
+# to the Investment case tab.
+CASE_RUNNING = ("running", "The investment case is still running.")
+CASE_STALE = (
+    "unavailable",
+    "The investment case is out of date: run it again.",
+)
 CASE_NO_KEY = (
     "unavailable",
     "The investment case cannot be compared with its inputs.",

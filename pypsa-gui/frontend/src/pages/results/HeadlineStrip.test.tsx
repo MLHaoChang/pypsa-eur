@@ -115,16 +115,38 @@ describe('HeadlineStrip', () => {
   })
 
   it('holds the row with placeholders while the figures load, and shows no value', async () => {
+    // The placeholder has as many tiles as the last row shown (five here), plus the source line's bar.
+    api.getHeadlineKpis.mockResolvedValue(HUB)
+    renderStrip()
+    await screen.findByTestId('headline-strip')
+    cleanup()
     let answer: (v: unknown) => void = () => {}
     api.getHeadlineKpis.mockReturnValue(new Promise(r => { answer = r }))
     renderStrip()
     const loading = screen.getByTestId('headline-strip-loading')
     expect(loading.getAttribute('aria-busy')).toBe('true')
     expect(loading.textContent).toBe('Loading the headline figures…')
-    expect(loading.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThanOrEqual(4)
+    expect(loading.querySelectorAll('[aria-hidden="true"]')).toHaveLength(HUB.cards.length + 1)
     answer(HUB)
     await screen.findByTestId('headline-strip')
     expect(screen.queryByTestId('headline-strip-loading')).toBeNull()
+  })
+
+  it('links an LCOE card without a figure to the Investment case, except while the case runs', async () => {
+    const stale = { state: 'unavailable' as const, reason: 'The investment case is out of date: run it again.' }
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'energy_hub', cards: [card('lcoe', stale), card('curtailed_share', { state: 'unavailable', reason: 'This run cannot give this figure.' })] })
+    renderStrip()
+    const lcoe = await screen.findByTestId('headline-lcoe')
+    expect(lcoe.textContent).toContain('out of date: run it again')
+    expect(lcoe.textContent).toContain('Investment case ›')
+    // Another card that is unavailable has no tab to send the reader to.
+    expect(screen.getByTestId('headline-curtailed_share').querySelector('button')).toBeNull()
+    cleanup()
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'energy_hub', cards: [card('lcoe', { state: 'running', reason: 'The investment case is still running.' })] })
+    renderStrip()
+    const running = await screen.findByTestId('headline-lcoe')
+    expect(running.textContent).toContain('still running')
+    expect(running.querySelector('button')).toBeNull()
   })
 
   it('says so when the figures cannot be read, and draws nothing when nothing is solved', async () => {
