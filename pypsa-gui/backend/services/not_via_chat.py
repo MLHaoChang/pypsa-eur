@@ -286,6 +286,22 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        # ui-modern 03: the strip is a screen layout over figures chat already
+        # reads (get_results cost_breakdown and lost_load, the checked answers).
+        'id': 'results_headline_strip',
+        'title': 'Results headline strip',
+        'disposition': 'manual',
+        'reason': "The Results headline strip's own card list is not read from chat. Chat reads the same figures one by one (cost breakdown, lost load, the checked answers). Open Results › Summary to see the strip.",
+        'page': 'Results › Summary',
+        'panel': 'results',
+        'keywords': frozenset({
+            'headline',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/results/headline_kpis'),
+        }),
+    },
+    {
         'id': 'site_scene',
         'title': 'Site 3D: legacy Site adoption and results overlay',
         'disposition': 'unbuilt',

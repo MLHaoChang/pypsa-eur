@@ -66,7 +66,7 @@ def test_the_issue_rows_are_declared():
         'intent_comparison': ('unbuilt', None),
         'dc_backup': ('unbuilt', None),
         'dc_architecture': ('unbuilt', None),
-        'dc_operational_gap': ('manual', 'results'),
+        'dc_operational_gap': ('manual', 'results'), 'results_headline_strip': ('manual', 'results'),
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
         'unrecorded_series_confirm': ('manual', None),
