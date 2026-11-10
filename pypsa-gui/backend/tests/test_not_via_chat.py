@@ -56,6 +56,7 @@ def test_the_issue_rows_are_declared():
     entries = {e['id']: e for e in NOT_VIA_CHAT}
     expected = {
         'admin_users_and_orgs': ('out of chat', None), 'legacy_project_import': ('out of chat', None),
+        'memory_page_edits': ('out of chat', None),
         'sign_in_and_password': ('out of chat', None),
         'project_members': ('unbuilt; owner to decide later', 'workspace'),
         'assistant_keys_and_profiles': ('out of chat', 'settings'), 'assistant_access_rule': ('out of chat', 'chat'),
