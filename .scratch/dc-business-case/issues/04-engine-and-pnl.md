@@ -3,7 +3,7 @@
 
 # 04 — Business-case engine and P&L
 
-Status: needs-triage (blocked by 02, 03)
+Status: wontfix (superseded by ../../business-case/issues/05 (engine and P&L); owner BC-ALL-1, 2026-11-10)
 Type: task
 Blocked by: 02, 03
 Gated: yes (GK B)
