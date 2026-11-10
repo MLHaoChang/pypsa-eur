@@ -119,6 +119,9 @@ def test_a_stamp_read_sent_back_drops_the_echo_and_a_stated_currency_stays():
     # Any other marker is dropped and states nothing.
     unread = {**stored, "currency_source": "pack_unreadable"}
     assert _hashes(unread) == _hashes(stored)
+    # Only a "stamp" marker strips: another marker leaves an equal currency stated.
+    other = {**stored, "currency": "EUR", "currency_source": "pack_unreadable"}
+    assert M.Tariff.model_validate(other).currency == "EUR"
 
 
 @pytest.mark.parametrize("exc_name", ["RuntimeError", "DefaultsPackError"])
@@ -156,6 +159,9 @@ def test_the_app_registers_the_stamp_lookup_and_none_refuses_a_marked_write():
         with pytest.raises(ValidationError) as info:
             M.Tariff.model_validate(read)
         assert info.value.errors()[0]["type"] == "tariff_stamp_unreadable"
+        # A marker with no currency has nothing to check, so it is not refused.
+        bare = {k: v for k, v in read.items() if k != "currency"}
+        assert M.Tariff.model_validate(bare).currency is None
         # Unmarked: the stored copy, and a deliberately stated currency.
         assert M.Tariff.model_validate(stored).currency is None
         assert M.Tariff.model_validate({**stored, "currency": "EUR"}).currency == "EUR"
