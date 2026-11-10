@@ -37,6 +37,12 @@ two faces" §3 rule 4). The pack holds:
   ECB 2018 average rate, so 2018 EUR) and the high-C-rate battery (`high-c-battery`: the `battery`
   rows, with energy at 1.75 x for the LTO premium PNNL-28866 states). Every range is assumed. The
   build script is `.scratch/asset-sizing-loop/make_pack_2026-10-30.py`;
+- from version 2026-11-10, the data-centre business-case cost defaults (`dc-business-case.*`, no
+  `part`, so no `CostPart`): facility capex per MW of IT (JLL 2026, 2025 USD at the ECB 2025 average
+  rate, so 2025 EUR), facility and IT hardware lives, and maintenance, insurance, property-tax and
+  SG&A shares. Every value is assumed with a source, a year and a range; no revenue price
+  (DCBC-SCOPE-1). Read by `models/business_case.py`. The build script is
+  `.scratch/dc-business-case/make_pack_2026-11-10.py`;
 - finance defaults;
 - regional cost overlays (see [Regional versions](#regional-versions));
 - two illustrative tariffs;

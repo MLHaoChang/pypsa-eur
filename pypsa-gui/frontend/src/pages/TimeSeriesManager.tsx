@@ -30,8 +30,8 @@ import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
 import { WeatherBar } from '../components/series/WeatherBar'
 import { generateAndApply, notReadyReason, readyRows } from '../components/series/renewableGeneration'
-import { MissingCoordinatesBanner, ReadinessBadge } from '../components/series/RenewableReadiness'
-import { profilesApi, type ReadinessRow } from '../api/profiles'
+import { MissingCoordinatesBanner, ReadinessBadge, UnrecordedSourceBanner } from '../components/series/RenewableReadiness'
+import { profilesApi, seriesApi, type ReadinessRow } from '../api/profiles'
 
 const EDITOR_TITLE = { load: 'Profile', availability: 'Availability', price: 'Price' } as const
 
@@ -2011,6 +2011,12 @@ export default function TimeSeriesManager() {
                   </p>
                 )}
                 {activeTab === 'renewable' && <MissingCoordinatesBanner rows={readinessRows} onUploadInstead={focusUploadZone} onSetCoordinates={setBusCoordinates} />}
+                {activeTab === 'renewable' && currentProject && (
+                  <UnrecordedSourceBanner rows={readinessRows} onConfirm={async items => {
+                    await seriesApi.confirmUnrecorded(currentProject, items)
+                    await qc.invalidateQueries()
+                  }} />
+                )}
                 {gensWithProfile.map(g => (
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
                     readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}

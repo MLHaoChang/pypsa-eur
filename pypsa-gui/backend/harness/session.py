@@ -260,6 +260,10 @@ class ChatSession:
     # response in flight refused toward the preview.
     turn_single_edit_applied: bool = False
     turn_redirects: dict[str, str] = field(default_factory=dict)
+    # LC-47: the change-set decision of the response being dispatched
+    # (`harness/change_set.py`), and the rows a /confirm ticked, by token.
+    change_set: dict | None = None
+    confirmation_ticks: dict[str, list[str]] = field(default_factory=dict)
     # Issue 04 S4a (G7, harness/guards.py): failing calls per (tool, args
     # fingerprint), this turn and across the session's turns.
     turn_no_progress: dict = field(default_factory=dict)
@@ -364,7 +368,8 @@ class ChatSession:
             self._decision_events[token] = threading.Event()
         return pc
 
-    def record_decision(self, token: str, decision: str) -> PendingConfirmation:
+    def record_decision(self, token: str, decision: str,
+                        ticked: list[str] | None = None) -> PendingConfirmation:
         """
         Atomically pop a pending token + record the decision. Idempotent on
         re-call: returns 404 (replay defence) if the token was already
@@ -425,6 +430,17 @@ class ChatSession:
                         "message": "decision must be 'approve' or 'deny'",
                     },
                 )
+            if ticked is not None:
+                # LC-47 K5: rows of a change-set card only; a bad list keeps the token.
+                from harness import change_set
+                try:
+                    ticks = change_set.validate_ticks(pc, decision, ticked)
+                except HTTPException:
+                    self.pending_confirmations[token] = pc
+                    if event is not None:
+                        self._decision_events[token] = event
+                    raise
+                self.confirmation_ticks[token] = ticks
             self.confirmation_decisions[token] = decision
         if event is not None:
             event.set()

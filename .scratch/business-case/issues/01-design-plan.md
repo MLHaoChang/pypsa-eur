@@ -3,7 +3,7 @@
 
 # 01 — Design plan: a business case on every template
 
-Status: ready-for-agent (GK B plan GO G-C1..G-C8, GK A plan GO LO-1..LO-10, 2026-11-10; this PR)
+Status: done (merged in #1322)
 Type: task
 Blocked by: —
 Gated: yes (GK B finance plan GO; GK A for the template and IC reads)

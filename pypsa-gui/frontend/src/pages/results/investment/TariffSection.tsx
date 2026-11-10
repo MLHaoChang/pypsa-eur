@@ -33,7 +33,7 @@ export default function TariffSection() {
       {current.data && <MarketPricesBlock cfg={current.data} />}
       <p className="text-[11px] text-muted">
         {tariff ? `Editing the project's import tariff ${tariff.id}.`
-          : 'The project has no import tariff: build one.'}</p>
+          : 'No import tariff is set. It is optional: to bill imports under one, fill this in and choose Save as the project tariff.'}</p>
       {ref && (
         <p className="text-[11px] text-warn" data-testid="ic-tariff-library-ref">
           This tariff is Library item {ref.id} v{ref.version}. Saving it as the project tariff

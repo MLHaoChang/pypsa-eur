@@ -2716,10 +2716,21 @@ def _run_turn_body(
             or not edit_routing.preview_available()
             else edit_routing.redirects(routable, session.turn_single_edit_applied)
         )
+        # LC-47: this response's ordinary writes as one change-set card.
+        from harness import change_set
+        from harness import mcp_client as _mcp
+
+        yield from change_set.offer(
+            session,
+            tool_uses,
+            tier_of=lambda name: _tool_tier(session, name),
+            external_of=lambda name: bool(_mcp.server_for(session, name)),
+            redirects=session.turn_redirects,
+        )
         tool_results_for_next_turn: list[dict[str, Any]] = []
         # A7 — one budget shared across every tool in this assistant step.
         tool_result_char_budget = {"used": 0}
-        dispatch = yield from _dispatch_tool_uses(
+        dispatch = yield from change_set.observe(session, _dispatch_tool_uses(
             session,
             tool_uses,
             tool_call_count=tool_call_count,
@@ -2730,7 +2741,11 @@ def _run_turn_body(
             char_budget=tool_result_char_budget,
             offered_tool_names=offered_tool_names,
             guided=_is_guided(ui_context),
-        )
+        ))
+        set_receipt = change_set.receipt_frame(session)
+        session.change_set = None
+        if set_receipt is not None:
+            yield "change_set_receipt", set_receipt
         tool_call_count = dispatch.tool_call_count
         if dispatch.stop_turn:
             # Record whatever was collected BEFORE bailing out. Returning first
@@ -3729,6 +3744,11 @@ def _dispatch_real_tool_call(
                                 ),
                                 **out,
                             }
+                            from harness import change_set
+
+                            change_set.note_receipt(
+                                session, tool_use_id, out["_edit_receipt"]
+                            )
                         return out
                     if sweep_card is not None:
                         sweep_cards.require_current(args or {}, sweep_card)

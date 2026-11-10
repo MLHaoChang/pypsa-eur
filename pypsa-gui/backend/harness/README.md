@@ -457,6 +457,39 @@ component (`frontend/src/components/EditCard.tsx`).
   by `tariff:<item>` and `ppa:<field>` (`document_values_commercial.wanted`). The
   dialog opens from section 7's Import tariff and Contracts blocks ("Fill values
   from a PDF…").
+- **Change-set card (LC-47, `harness/change_set.py`).** A model response with
+  two or more ordinary edits gets ONE card with a tick box per row, not one
+  card each. After LC-16 routing and before any tool frame, `offer` picks the
+  members: edit tools of tier `write` only. Destructive tools (deletes,
+  imports), `CARD_ONLY_TOOLS`, `ALWAYS_CARD_TOOLS` and `set_requirement` stay
+  out, and so do external, job-hold and task-step calls, assurance turns, a
+  run's own session, calls routed to the preview, and calls the guards, the
+  validator, a restriction or the preview would refuse. Two members never touch
+  the same component (derived rows included); the later one keeps its own card.
+  Confirmed requirements are checked on the union of the members' native rows.
+  Only `scalar_bound` is allow-listed: any other active kind, including
+  `preserve_horizon` and any kind added later, means no set. The card says in
+  `requirements.says` that the rows were checked together. The card is one
+  `tool_pending_confirmation` frame carrying `change_set: {version, items,
+  digest}` under one token. Each item's `source` comes only from an adapter's
+  row field, otherwise "proposed by the assistant". `POST /chat/{id}/confirm`
+  takes `ticked` (tool_use ids): it is a 400 on any other card or for an id not
+  on the card, and keeps the token. A missing `ticked` means all rows; `[]`
+  denies. In `confirm._confirm_destructive_tool` each member is admitted by
+  `member_gate` in place of its own card. A ticked row runs only while its fresh
+  preview still writes what the card showed: an old value may differ only on a
+  column an earlier verified write of the response created (absent when the
+  card was raised), and only from not set to that column's declared default
+  (`eh_columns`; a column with none opens nothing). Otherwise
+  it is `edit_preview_stale`. An unticked row is refused with `change_unticked`, and a
+  deny or expiry denies every row. Approvals: one `asked` per member with the
+  set's token; `decided(by="change_set:<token6>")` only for ticked rows. The
+  ordinary write path then runs unchanged (require_current, handler, native
+  read-back, `_edit_receipt`). One `change_set_receipt` frame follows the batch.
+  Each row is applied (verified and changed), unchanged, uncertain, failed,
+  stale or unticked, with `landed`; `all_applied` holds only when every ticked
+  row landed. A failed row does not stop the later rows. Off (`ENABLED`) until
+  the browser card ships (S2).
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path

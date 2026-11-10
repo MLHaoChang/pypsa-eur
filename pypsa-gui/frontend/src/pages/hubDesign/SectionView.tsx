@@ -72,7 +72,7 @@ export function SectionView({ id, onNext, children }: {
         <span className="text-[12px] text-muted" data-testid="section-summary">
           {isError ? 'The flow could not be read from the server.'
             : stateless ? (s?.summary ?? '')
-              : `${FLOW_STATE_WORDS[s?.state ?? 'unknown']}${s?.summary ? ` — ${s.summary}` : ''}`}
+              : `${FLOW_STATE_WORDS[s?.state ?? 'unknown']}${s?.summary ? ` · ${s.summary}` : ''}`}
         </span>
       </div>
       {items.length > 0 && (

@@ -16,7 +16,7 @@ import { fieldWords } from '../../utils/flowItems'
  *  same words; `backend/tests/test_assumptions_wording_parity.py` fails when they drift. */
 export const KEEP_ALL_DEFAULTS = 'Keep all defaults'
 
-const ASSUMED_HINT = /\s*—\s*confirm it[^.]*\.?$/
+const ASSUMED_HINT = /\s*[—:]\s*confirm it[^.]*\.?$/
 
 /** A flow item the server raised for a template default the user has not confirmed. */
 export const isAssumedItem = (it: FlowItem): boolean =>
