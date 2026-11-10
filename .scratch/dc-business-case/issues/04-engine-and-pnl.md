@@ -10,7 +10,7 @@ Gated: yes (GK B)
 Model tier: opus
 Size: M
 
-Read [the spec](../spec.md) §3 (B1–B7), §5 and §6 first.
+Read [the spec](../spec.md) §3 (B1–B7), §5 and §6, and GK B conditions BC1–BC8 in [01](01-design-plan.md) ## Comments, first. Send the TDD plan to GK B before building.
 
 ## What to build
 

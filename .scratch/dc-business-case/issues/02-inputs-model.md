@@ -10,7 +10,7 @@ Gated: yes (GK B)
 Model tier: opus
 Size: S
 
-Read [the spec](../spec.md) §4, §5 and §9 first.
+Read [the spec](../spec.md) §4, §5 and §9, and GK B conditions BC7 and BC9 in [01](01-design-plan.md) ## Comments, first.
 
 ## What to build
 

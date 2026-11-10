@@ -3,7 +3,7 @@
 
 # Data-centre business case: a standalone project P&L beside the investment case
 
-Status: needs-triage (design; GK A plan GO 2026-11-10 with BC3-1..8; GK B plan and owner scope answers pending, §9)
+Status: needs-triage (design; GK B plan GO with BC1–BC10 and GK A with BC3-1..8, 2026-11-10; owner scope answers pending, §9)
 Owner request: 2026-11-10 (coordinator brief, session `session_01G7qCujw1M4yEuv53K2qCpG`)
 Research: [research.md](research.md)
 Reviewers: GK B (finance engine, lead), GK A (DC load and engine parts), UX (the view, slice 06)
@@ -136,10 +136,10 @@ no default** (§9 Q4), because prices are the case.
 | Property tax | `tax` stream is levies on the bill; a new `property_tax` stream, class `opex` | share of asset value | — |
 | Network / bandwidth | `other` | per MW-year | — |
 | SG&A | `other` | share of revenue | — |
-| Working capital | new: a change-in-working-capital line | receivable days on revenue | — |
+| Working capital | cash bridge only, below EBITDA, never a stream (GK B BC3) | receivable days on revenue; released at end of life | — |
 
 New streams (`compute_revenue`, `colocation_revenue`, `power_passthrough`,
-`services_revenue`, `sla_credit`, `property_tax`, `working_capital`) are rows in
+`services_revenue`, `sla_credit`, `property_tax`) are rows in
 `STREAM_CLASS`; revenue streams are contract or `export` class, cost streams
 `opex`. Each new non-energy cost has a researched default with its source and
 year, marked assumed (as G2's region-tagged defaults); prices of revenue have

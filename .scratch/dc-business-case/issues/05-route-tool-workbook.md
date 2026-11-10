@@ -10,7 +10,7 @@ Gated: yes (GK B)
 Model tier: opus
 Size: M
 
-Read [the spec](../spec.md) §6–§7 and `harness/README.md` first.
+Read [the spec](../spec.md) §6–§7, `harness/README.md` and GK B condition BC10 in [01](01-design-plan.md) ## Comments first.
 
 ## What to build
 
