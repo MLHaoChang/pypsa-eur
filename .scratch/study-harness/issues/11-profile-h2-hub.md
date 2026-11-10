@@ -65,6 +65,20 @@ Design: [design.md](../design.md) §9.3 "eh_h2_hub"
 - Option B. The hydrate fix goes in its own PR, SH-11 stacks on it, and GK B's successor reviews it. Conditions (1)–(5): build the full network, then swap under mutation_lock and the netCDF lock, and a failed import leaves the old network intact; match load_project/reset_network and list long-lived references in the PR body; keep network.name, user_ts and transient state, with tests; the red tests plus an end-to-end test; regression suites in separate runs under 590 s; a release fragment.
 - Done as PR #1307 (claude/hydrate-fresh-network); SH-11 stacks on it.
 
+### GK A (19), plan GO for the LOLE part @8177da1a (verbatim, 10 Nov)
+
+- GO with L1–L5 as planned plus SH11-L6..L9.
+  - L6 (one source for the refusal). The gate matches a copy of the runner's message. Define NOTHING_TO_SAMPLE once, in the adequacy layer (e.g. services/adequacy/coupling.py), use it at all three refusal sites (coupling_loop_runner:250, margin_loop_runner:223, eh_stages:1150), and have run_gates import it. The message text must stay byte-equal: run `git grep` for the old text. Also add one end-to-end test: on an H2 template, run the real start_engine → route refusal → step error path with no fabricated "error" string, and show the gate reads `loop_cannot_sample_link_outages`. Today's test at test_run_profile_h2_hub.py:419 fabricates the error, so a runner rewording would silently drop the typed reason.
+  - L7 (specificity). Only that refusal maps. Add a test that a different engine refusal (e.g. a 409 or another 422 detail) keeps its own outcome/reason, and kill a mutant that maps every refusal to LOOP_CANNOT_SAMPLE.
+  - L8 (`_gate_on_refusal` is contained). It runs inside the `except` after `_engine_stop`, so if a fact reader raises there, start_engine raises instead of returning "engine_refused". Wrap it: a gate-read failure leaves the stop as it is and records that the gate read failed. Test it with a raising reader: start_engine still returns "engine_refused", and the stage is failed with `engine_refused`.
+  - L9 (no change for other profiles). It now runs on every engine refusal (eh_site@2, datacenter, any profile with an engine rule), and it bumps stage["attempts"]. (a) State in the PR whether a refused engine counting a result-gate attempt changes any attempts reader (caps, needs_user wording, continuation). If one changes, don't bump. (b) List the result-gate fact readers that this now calls on a refusal, and confirm each is read-only, with no solve, job or review compute. (c) Test, on a non-H2 engine profile, that a refusal leaves run status, stage status, failure reason and the ledger as master does; only the stored gate rows may differ.
+
+### GK B (39), on Q3 (verbatim, 10 Nov)
+
+- Confirmed A. Q3 ruled which electrolyser the staged hub may size: electrolyser_new_* only, never the built one. It did not remove the other levers, and keeping one envelope shape for both hubs is right.
+  - Q3-A1: the staged envelope test covers each of the five levers: its bound, an over-bound refusal, and the built (non-_new_) asset of each class refused at _match_edit. Testing only the electrolyser is not enough.
+  - Q3-A2: a test that the staged and single-year hubs' L2 envelopes have the same (component, field) set, so they cannot drift apart. Mutate it once by dropping one lever from the staged profile; the test must fail.
+
 ### Builder notes (SH-11 (2), 9 Nov)
 
 - Blocker 2 (staged utilisation 1.23), root cause: `solve_queue._apply_capture` re-hydrates the resident context with `_hydrate_context_from_disk`, which imported the saved netCDF into the populated network. PyPSA skips every component the network already has (keeping its old static row) and takes the new series, so the live network held the solve's dispatch next to its pre-solve `p_nom_opt` (0 for `electrolyser_new_2035`, dispatching 11.1 MW). Fixed by importing into a fresh network (`tests/test_hydrate_replaces_resident_network.py`, red first); the reader now also fails closed (`dispatch_exceeds_capacity`) and reads only a current solve.

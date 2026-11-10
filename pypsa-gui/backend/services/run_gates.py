@@ -33,6 +33,8 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 
+from services.adequacy.coupling import NOTHING_TO_SAMPLE
+
 FACTS_VERSION = 1
 OPS = ("eq", "ne", "lt", "le", "gt", "ge", "in", "not_in", "empty", "nonempty", "within")
 SEVERITIES = ("block", "warn")
@@ -199,9 +201,8 @@ LOOP_FACT = "adequacy.loop.converged"
 ENGINE_TOOLS = {"run_margin_loop": "margin_loop", "run_coupling_loop": "coupling_loop"}
 RESTORES = ("base", "final")
 # The loops' shared refusal of a network with no sampleable electrical
-# generator (`coupling_loop_runner`, `margin_loop_runner`, `eh_stages`), and
-# the typed reason the gate reads it as (GK A (19) SH11-L1).
-NOTHING_TO_SAMPLE = "nothing to sample: no electrical generator carries resolvable occurrence data"
+# generator is `NOTHING_TO_SAMPLE`, defined once in the adequacy layer (GK A
+# (19) SH11-L6); the typed reason the gate reads it as (SH11-L1):
 LOOP_CANNOT_SAMPLE = "loop_cannot_sample_link_outages"
 # The fields of a finished loop's record a settled engine step keeps, and the
 # gate shows: the verdict, what it cost, how the network was left, and the

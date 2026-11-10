@@ -941,6 +941,92 @@ def test_a_staged_electrolyser_cap_above_its_bound_is_refused(
     assert float(_ctx().network.links.at["electrolyser_new_2035", "p_nom_max"]) == 40.0
 
 
+# ── Q3-A1, Q3-A2 (GK B (39)): the staged envelope, lever by lever ────────────
+
+# (component, name glob, attr) -> (upper bound, an instance, the class's built asset or None)
+STAGED_LEVERS = {
+    ("Generator", "wind_new*", "p_nom_max"): (300.0, "wind_new_2027", "wind_farm"),
+    ("Generator", "solar_new*", "p_nom_max"): (150.0, "solar_new_2027", "solar_park"),
+    ("StorageUnit", "bess_new*", "p_nom_max"): (200.0, "bess_new_2027", "site_battery"),
+    ("Link", "electrolyser_new_*", "p_nom_max"): (
+        80.0,
+        "electrolyser_new_2035",
+        "electrolyser",
+    ),
+    # The H2 store is one built asset and is itself the lever: no other Store to refuse.
+    ("Store", "h2_storage", "e_nom"): (6000.0, "h2_storage", None),
+}
+
+
+def _static(component, name, attr):
+    return float(_ctx().network.c[component].static.at[name, attr])
+
+
+def test_the_staged_envelope_is_the_five_levers_with_their_bounds():
+    """Q3-A1: each lever and its bound, and nothing else."""
+    edits = {
+        (e["target"]["component"], e["target"]["name"], e["target"]["attr"]): e[
+            "bounds"
+        ]
+        for e in run_profiles.resolve(REFS["eh_h2_hub_staged"])["envelope"]["edits"]
+    }
+    assert edits == {k: {"min": 0.0, "max": v[0]} for k, v in STAGED_LEVERS.items()}
+
+
+@pytest.mark.parametrize("template", ["eh_h2_hub_staged"], indirect=True)
+@pytest.mark.parametrize("lever", list(STAGED_LEVERS), ids=lambda k: k[1])
+def test_each_staged_lever_above_its_bound_is_refused(
+    granted, monkeypatch, template, lever
+):
+    """Q3-A1: above each lever's bound is out_of_bounds and nothing changes."""
+    ref = REFS[template]
+    monkeypatch.setitem(run_profiles.PROFILES, ref, _without_eh(ref))
+    component, _, attr = lever
+    bound, name, _ = STAGED_LEVERS[lever]
+    before = _static(component, name, attr)
+    args = {"component_class": component, "name": name, "attrs": {attr: bound + 1.0}}
+    assert _admit(granted, ref, args) == "out_of_bounds"
+    assert _static(component, name, attr) == before
+
+
+@pytest.mark.parametrize("template", ["eh_h2_hub_staged"], indirect=True)
+@pytest.mark.parametrize(
+    "lever",
+    [k for k, v in STAGED_LEVERS.items() if v[2] is not None],
+    ids=lambda k: k[1],
+)
+def test_each_classes_built_asset_is_outside_the_staged_entry(
+    granted, monkeypatch, template, lever
+):
+    """Q3-A1, at `_match_edit`: the built (non-_new_) asset of each lever's
+    class is outside the entry, even at a value within the lever's bound."""
+    ref = REFS[template]
+    monkeypatch.setitem(run_profiles.PROFILES, ref, _without_eh(ref))
+    component, _, attr = lever
+    built = STAGED_LEVERS[lever][2]
+    before = _static(component, built, attr)
+    args = {"component_class": component, "name": built, "attrs": {attr: 10.0}}
+    assert before != 10.0 and _admit(granted, ref, args) == "outside_entry"
+    assert _static(component, built, attr) == before
+
+
+def test_both_hubs_offer_the_same_levers():
+    """Q3-A2: the staged and single-year envelopes size the same component
+    classes by the same capacity field, so they cannot drift apart. The
+    active attr differs only by `_max` (H4: the single-year hub's built
+    electrolyser by p_nom, the staged hub's new ones by their cap)."""
+
+    def shape(ref):
+        edits = run_profiles.resolve(ref)["envelope"]["edits"]
+        return sorted(
+            (e["target"]["component"], e["target"]["attr"].removesuffix("_max"))
+            for e in edits
+        )
+
+    assert shape(REFS["eh_h2_hub_staged"]) == shape(REFS["eh_h2_hub"])
+    assert len(shape(REFS["eh_h2_hub"])) == len(STAGED_LEVERS)
+
+
 # ── H1, H2: the readers' F6 guards and their weightings, on two periods ──────
 
 

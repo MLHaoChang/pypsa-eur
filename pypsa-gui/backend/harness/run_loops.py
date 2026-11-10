@@ -788,18 +788,23 @@ def _gate_on_refusal(path, ctx):
     """A refused loop stops the run at the result gate with the gate read as it
     stands, so the engine rule shows the refusal's typed reason beside the
     other rules (GK A (19) SH11-L1: `eh.adequacy.lole` reads
-    `loop_cannot_sample_link_outages`, never passed or not_started). The stage
-    stays failed with `engine_refused`; the read changes no verdict."""
+    `loop_cannot_sample_link_outages`, never passed or not_started). The stop
+    is `_engine_stop`'s alone: the read changes no status, reason or attempt
+    count (SH11-L9), and a read that fails leaves the stop as it is and says
+    so on the stage (SH11-L8)."""
     from harness import runner
     from services import assistant_tasks, run_profiles
-    task = json.loads(path.read_text())
-    profile = run_profiles.resolve(task["run"]["profile"])
-    # Every rule, the engine ones included: the refused step is settled (`failed`).
-    gate = assistant_tasks._gate_now(task, profile["stages"][RESULT_STAGE]["rules"], ctx)
+    try:
+        task = json.loads(path.read_text())
+        profile = run_profiles.resolve(task["run"]["profile"])
+        # Every rule, the engine ones included: the refused step is settled (`failed`).
+        record = {"gate": assistant_tasks._gate_now(task, profile["stages"][RESULT_STAGE]["rules"], ctx)}
+    except Exception as exc:  # noqa: BLE001 - the stop stands; the stage names the failed read
+        logger.warning("result gate read after an engine refusal failed: %s", type(exc).__name__)
+        record = {"gate_error": f"the gate read after the refusal failed: {type(exc).__name__}"}
 
     def change(t):
-        stage = t["run"]["stages"][RESULT_STAGE]
-        stage["attempts"], stage["gate"] = stage.get("attempts", 0) + 1, gate
+        t["run"]["stages"][RESULT_STAGE].update(record)
     runner._update(path, change)
 
 
