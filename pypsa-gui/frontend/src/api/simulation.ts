@@ -1284,7 +1284,23 @@ export type CurtailmentByCausePayload =
 // for that snapshot (unknown: neither converged nor failed).
 export type AcPfConvergenceRow = { snapshot: string; period?: number | string | null; ok: boolean | null }
 
+/** One card of the Results headline strip (`GET /results/headline_kpis`). */
+export interface HeadlineCard {
+  id: string
+  value: number | null
+  /** "currency/yr", "currency" (whole horizon), "%", "MWh" or "<ISO code>/MWh". */
+  unit: string | null
+  state: 'ready' | 'zero' | 'not_run' | 'not_modelled' | 'not_applicable' | 'stale' | 'unavailable'
+  /** One plain sentence when there is no figure. */
+  reason: string | null
+  formula_id: string | null
+  /** What the figure belongs to, e.g. the line at the peak loading. */
+  detail: string | null
+}
+export interface HeadlineKpis { kind: 'energy_hub' | 'microgrid' | 'network'; cards: HeadlineCard[] }
+
 export const resultsApi = {
+  getHeadlineKpis: () => client.get<HeadlineKpis>('/results/headline_kpis').then(r => r.status === 204 ? null : r.data),
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
   getGeneratorResults: (source?: ResultSource, range?: TSRange) => client.get('/results/generators', tsParams(source, range)).then(r => r.status === 204 ? null : r.data),

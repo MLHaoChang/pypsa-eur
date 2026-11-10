@@ -22,7 +22,9 @@ import type { AdequacyReportPayload } from './adequacy'
 import { CARD_GROUPS, type CardGroupId } from './groups'
 import { freshnessOf } from './GroupHeader'
 import ProductionTiles from './ProductionTiles'
-import OperationalGap from './OperationalGap'
+import OperationalGap, { solveWords } from './OperationalGap'
+import HeadlineStrip, { useHeadlineKpis } from './HeadlineStrip'
+import { COST_WORDS } from './headlineWords'
 import { NOT_RECORDED, NotRecordedDash, NotRecordedNote } from './NotRecorded'
 import { StatePill } from '../../components/ResultState'
 import { ScopeGate } from '../../components/flowScope/ScopeGate'
@@ -125,6 +127,11 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   const { data: readiness } = useGridReadiness()
   const { data: stats } = useQuery({ queryKey: nk(project, 'results_statistics'), queryFn: resultsApi.getStatistics })
 
+  // A figure the headline strip shows is not repeated as a card headline below
+  // (one figure, one place). A card narrowed to one period keeps its own.
+  const { data: headline } = useHeadlineKpis()
+  const inStrip = (id: string) => selectedPeriod == null && !!headline?.cards.some(k => k.id === id && k.value != null)
+
   const c = costView(cost, selectedPeriod)
   const e = emissionsView(emissions as EmissionsPayload | null | undefined, selectedPeriod)
   const caps = capacityRows(stats as Record<string, unknown>[] | null | undefined, selectedPeriod)
@@ -149,9 +156,10 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
 
   return (
     <div className="p-4 flex flex-col gap-3" data-testid="results-summary">
+      <HeadlineStrip />
       {status && (
         <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[11px] text-muted" data-testid="summary-status">
-          <span>Solve: <span className="text-text font-medium">{status.condition ?? status.status ?? '—'}</span></span>
+          <span>Solve: <span className="text-text font-medium">{status.condition ? solveWords(status.condition) : status.status ?? 'not run yet'}</span></span>
           {status.solve_time != null && <span>{Number(status.solve_time).toFixed(1)} s</span>}
           {status.objective != null && (
             <span title="The LP objective (n.objective + its constant). The cost card below is the reported system cost from n.statistics(); the two differ by what the objective counts (e.g. existing fixed costs, shed load).">
@@ -183,10 +191,10 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           hint="From /results/cost_breakdown (n.statistics(): annualised capital cost with fixed O&M, plus operating cost). Shed load is not included; see Adequacy.">
           {c ? (
             <>
-              <Headline value={fmtCurrency(c.total)} sub="total system cost per year" />
-              <Line label="Capital cost (annualised)" value={fmtCurrency(c.capital)} />
+              {!inStrip('system_cost') && <Headline value={fmtCurrency(c.total)} sub="total system cost per year" />}
+              <Line label={COST_WORDS.capital} value={fmtCurrency(c.capital)} />
               <Line label="Operating cost" value={fmtCurrency(c.operating)} />
-              {c.newBuild != null && (
+              {c.newBuild != null && !inStrip('new_build_capital') && (
                 <span title="Annualised capital of capacity this solve built: max(0, optimal − installed) × capital cost, as on the Capacity expansion tab.">
                   <Line label="of which new build" value={fmtCurrency(c.newBuild)} />
                 </span>
@@ -216,8 +224,10 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           hint="Unserved energy is the VoLL slack dispatch the solve captured (/results/lost_load). LOLE and EUE come from an adequacy study: open the Adequacy tab.">
           {ll ? (
             <>
-              <Headline value={fmtEnergy(ll.total_mwh)} sub={`unserved energy${selectedPeriod != null ? ' (horizon)' : ''}`}
-                valueLabel={ll.total_mwh == null ? NOT_RECORDED : undefined} />
+              {!inStrip('unserved_energy') && (
+                <Headline value={fmtEnergy(ll.total_mwh)} sub={`unserved energy${selectedPeriod != null ? ' (horizon)' : ''}`}
+                  valueLabel={ll.total_mwh == null ? NOT_RECORDED : undefined} />
+              )}
               <Line label="Cost at VoLL (not in the total)"
                 value={ll.total_cost_eur != null ? fmtCurrency(ll.total_cost_eur) : <NotRecordedDash />} />
               {shedHours != null && <Line label="Hours with shed load" value={shedHours.toFixed(1)} tone={shedHours > 0 ? 'warn' : 'ok'} />}

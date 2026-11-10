@@ -10,7 +10,7 @@ import { nk } from '../utils/queryKeys'
 import { readableWindow } from '../utils/readableTime'
 import { ResultsFilterProvider, defaultWindow } from './results/filterContext'
 import { ChartSourceProvider, type ChartSource } from '../components/charts/chartTheme'
-import { REFERENCE_CONDITION_WORDS } from './results/OperationalGap'
+import { solveWords } from './results/OperationalGap'
 import { type TSPayload, type WeightCtx } from './results/shared'
 import CompareView, { type Tab as CompareTab } from './CompareView'
 import { ErrorBoundary } from '../components/ErrorBoundary'
@@ -653,13 +653,12 @@ export default function Results() {
   // (chart theme, ui-modern 02; VISUALS-1).
   // Plain words, no solver terms (#1194): "solved", "all periods".
   const stamp = (iso: string) => toDisplay(iso).replace('T', ' ')
-  const solveWords = status?.condition === 'optimal' ? 'solved'
-    : (status?.condition && REFERENCE_CONDITION_WORDS[status.condition]) || 'did not solve'
+  // The page header and every source line say the solve, window and period in the same words.
+  const solved = solveWords(status?.condition)
+  const windowWords = `${stamp(fromIso || firstSnap16 || '') || 'start'} → ${stamp(toIso || lastSnap16 || '') || 'end'}`
+  const periodWords = selectedPeriod === 'all' ? 'all periods' : `period ${selectedPeriod}`
   const chartSource: ChartSource = {
-    line: status?.condition
-      ? `Latest solve · ${solveWords} · ${stamp(fromIso || firstSnap16 || '') || 'start'} → ${
-        stamp(toIso || lastSnap16 || '') || 'end'} · ${selectedPeriod === 'all' ? 'all periods' : `period ${selectedPeriod}`}`
-      : null,
+    line: status?.condition ? `Latest solve · ${solved} · ${windowWords} · ${periodWords}` : null,
     stale: status?.dispatch === 'stale',
   }
   const filterValue = {
@@ -808,7 +807,7 @@ export default function Results() {
             {uiMode === 'guided' && <BackToHubResults />}
             {status && !discussedRun && (
               <span className="font-mono text-[11px] text-muted">
-                {status.condition ?? '—'}
+                {status.condition ? solved : 'not run yet'}
                 {status.solve_time != null ? ` · ${status.solve_time.toFixed(2)} s` : ''}
               </span>
             )}
@@ -822,7 +821,7 @@ export default function Results() {
         <div className="mx-4 text-xs text-muted" data-testid="results-source-context">
           Current project: {currentProject ?? 'unsaved'}
           {selectedEntity && <> · selected {selectedEntity.type}: {selectedEntity.name}</>}
-          {!discussedRun && <> · window {toDisplay(fromIso) || 'start'} → {toDisplay(toIso) || 'end'} · period {selectedPeriod}</>}
+          {!discussedRun && <> · window {windowWords} · {periodWords}</>}
         </div>
       )}
       {discussedRun && (

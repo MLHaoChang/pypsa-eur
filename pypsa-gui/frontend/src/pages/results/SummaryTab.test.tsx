@@ -13,7 +13,7 @@ vi.mock('../../api/flow', async (orig) => ({ ...(await orig<typeof import('../..
 
 const api = vi.hoisted(() => ({
   getCostBreakdown: vi.fn(), getEmissions: vi.fn(), getLostLoad: vi.fn(), getReserveMargin: vi.fn(),
-  getAdequacy: vi.fn(), getStatistics: vi.fn(), getStatus: vi.fn(),
+  getAdequacy: vi.fn(), getStatistics: vi.fn(), getStatus: vi.fn(), getHeadlineKpis: vi.fn(),
 }))
 vi.mock('../../api/simulation', async (orig) => {
   const actual = await orig<typeof import('../../api/simulation')>()
@@ -21,7 +21,7 @@ vi.mock('../../api/simulation', async (orig) => {
     ...actual,
     resultsApi: { ...actual.resultsApi, getCostBreakdown: api.getCostBreakdown, getEmissions: api.getEmissions,
       getLostLoad: api.getLostLoad, getReserveMargin: api.getReserveMargin, getAdequacy: api.getAdequacy,
-      getStatistics: api.getStatistics },
+      getStatistics: api.getStatistics, getHeadlineKpis: api.getHeadlineKpis },
     simulationApi: { ...actual.simulationApi, getStatus: api.getStatus },
   }
 })
@@ -52,6 +52,7 @@ beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
   api.getStatus.mockResolvedValue({ running: false, status: 'ok', condition: 'optimal', objective: 1.2e7, solve_time: 3.4 })
   api.getCostBreakdown.mockResolvedValue(COST)
+  api.getHeadlineKpis.mockResolvedValue(null)
   api.getEmissions.mockResolvedValue(EMISSIONS)
   api.getLostLoad.mockResolvedValue({ total_mwh: 12, total_cost_eur: 36_000, voll_eur_per_mwh: 3000,
     shed_hours: { total: 4, by_period: {} } })
@@ -116,7 +117,7 @@ describe('the Summary tab (M3)', () => {
   it('shows the solve status and the LP objective', async () => {
     renderTab()
     const status = await screen.findByTestId('summary-status')
-    expect(within(status).getByText('optimal')).toBeTruthy()
+    expect(within(status).getByText('solved')).toBeTruthy()
     expect(status.textContent).toContain('€12.00 M')
   })
 
@@ -132,6 +133,44 @@ describe('the Summary tab (M3)', () => {
     for (const f of [api.getCostBreakdown, api.getEmissions, api.getStatistics, api.getLostLoad]) f.mockResolvedValue(null)
     renderTab()
     expect(await screen.findByTestId('summary-empty')).toBeTruthy()
+  })
+})
+
+describe('the Summary under the headline strip (ui-modern 03)', () => {
+  const STRIP = { kind: 'energy_hub', cards: [
+    { id: 'system_cost', value: 1e7, unit: 'currency/yr', state: 'ready', reason: null, formula_id: null, detail: null },
+    { id: 'new_build_capital', value: 3e6, unit: 'currency/yr', state: 'ready', reason: null, formula_id: null, detail: null },
+    { id: 'unserved_energy', value: 12, unit: 'MWh', state: 'ready', reason: null, formula_id: null, detail: null },
+  ] }
+
+  it('a figure the strip shows is not repeated as a card headline below', async () => {
+    api.getHeadlineKpis.mockResolvedValue(STRIP)
+    renderTab()
+    await screen.findByTestId('headline-system_cost')
+    const cost = screen.getByTestId('summary-cost')
+    expect(cost.querySelector('[data-kpi-value]')).toBeNull()
+    expect(cost.textContent).not.toContain('of which new build')
+    // The split the strip does not carry stays, in the charts' words.
+    expect(cost.textContent).toContain('Capital cost per year')
+    expect(cost.textContent).toContain('Operating cost')
+    const adequacy = screen.getByTestId('summary-adequacy')
+    expect(adequacy.querySelector('[data-kpi-value]')).toBeNull()
+    expect(adequacy.textContent).toContain('Cost at VoLL')
+  })
+
+  it('a card narrowed to one period keeps its own headline', async () => {
+    api.getHeadlineKpis.mockResolvedValue(STRIP)
+    api.getCostBreakdown.mockResolvedValue({ ...COST, by_period: [{ period: 2030, capex: 4e6, opex: 5e5, total: 4.5e6 }] })
+    renderTab(vi.fn(), 2030)
+    await screen.findByTestId('headline-system_cost')
+    expect(screen.getByTestId('summary-cost').querySelector('[data-kpi-value]')?.getAttribute('data-kpi-value')).toBe('€4.50 M')
+  })
+
+  it('says "solved" on the status line, never the solver term', async () => {
+    renderTab()
+    const status = await screen.findByTestId('summary-status')
+    expect(status.textContent).toContain('Solve: solved')
+    expect(status.textContent).not.toContain('optimal')
   })
 })
 

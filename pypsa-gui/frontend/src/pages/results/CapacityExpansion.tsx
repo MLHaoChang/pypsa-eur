@@ -983,7 +983,7 @@ export default function CapacityExpansion() {
               user sees. Mode-aware (annualised vs PV). */}
           <KPI
             accent
-            label={costMode === 'lifetime' ? 'Total new investment (PV)' : 'Total new investment (annualised)'}
+            label={costMode === 'lifetime' ? 'Total new investment (PV)' : 'Total new investment per year'}
             // See `displayExpansionCapex` for why the zero-fallback to the
             // frontend-computed per-asset sum survives but a null does not.
             value={fmtCostOrUnavailable(displayExpansionCapex)}
@@ -1174,7 +1174,7 @@ export default function CapacityExpansion() {
               New capacity and incremental investment the optimiser placed in
               each investment period (asset <code>build_year</code>). Capacity
               is a nameplate sum across component classes (MW · MVA · MWh);
-              CAPEX is {costMode === 'lifetime' ? 'present-value upfront investment' : 'annualised'}.
+              CAPEX is {costMode === 'lifetime' ? 'present-value upfront investment' : 'per year'}.
             </p>
             <div ref={perPeriodCapRef}>
               <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
