@@ -207,8 +207,10 @@ def _observe(record, ledger):
                 return data
             objective = manifest.get("metrics", {}).get("objective", {}).get("value")
             unit = manifest.get("metrics", {}).get("objective", {}).get("unit")
+            # The manifest holds the queue's total (LP objective + constant), not the bare objective.
+            from harness.continuation import saved_queue_total
             if (isinstance(objective, bool) or not isinstance(objective, (int, float))
-                    or not math.isfinite(objective) or saved.network.objective != objective
+                    or not math.isfinite(objective) or saved_queue_total(saved) != objective
                     or job.get("objective") != objective or not isinstance(unit, str) or not 1 <= len(unit) <= 24):
                 data.update(status="unavailable", last_error="experiment_result_mismatch")
                 return data

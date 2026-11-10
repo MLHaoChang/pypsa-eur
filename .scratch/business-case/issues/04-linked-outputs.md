@@ -103,3 +103,8 @@ quantity; (2) unserved is only the involuntary slack, converted to the billed
 unit, a quantity, never priced; (3) one load: the billed series uses the build's
 own rule, with an identity test against the BUILT network; (4) no change to any
 template's IC basis, and no BC line in the IC or adequacy facts.
+
+### 2026-11-10: from DC 03 (#1319, merged 394bdae2), via the coordinator
+
+- The IT energy read is `it_energy(spec, snapshots, generators weightings, unserved_facility_mw(n), timezone=_dc_timezone(tid))`. On a single index it uses the week-start phase (GK A F1 on #1319).
+- Unserved IT MWh is a quantity only: 04 needs its own test that no BC line prices it.

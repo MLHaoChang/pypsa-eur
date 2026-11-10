@@ -13,10 +13,11 @@ import { nk } from '../../utils/queryKeys'
 import type { Generator, Load, StorageUnit, Store, Link as LinkT } from '../../api/types'
 import {
   type TSPayload, type WeightCtx, type ResultsViewMode, type Season,
-  generatorGroup, aggregateTS, isRenewableCarrier, durationCurvePoints, useWeightCtx,
+  generatorGroup, aggregateTS, isRenewableCarrier, useWeightCtx,
   weightedSum, weightedSumSplit, effectiveWeightAt, snapshotWeightAt, averageScaling, hasScaling,
   fmtEnergy, fmtCurrency, fmtPower, shortStamp, downloadCSV, downloadSVG, KPI, Seg,
-  ChartCard, ChartActions, WindowCapBanner,
+  ChartFrame, ChartSourceLine, CHART_HEIGHT, chartFigure, carrierColour, seriesDash,
+  WindowCapBanner,
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   SEASONS, SEASON_OF_MONTH, SEASON_ACCENT,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, WEEKDAYS,
@@ -29,10 +30,15 @@ import {
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import DispatchStack from './DispatchStack'
+import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
 import StorageHeatmap from './StorageHeatmap'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { storageCarrierKey, storageCarrierLabel } from './carrierAliases'
 import NotSolved from './NotSolved'
+
+// The load duration curve's two series: total load, then load minus renewables.
+const LOAD_SERIES: DurationSeries = { key: 'load', name: 'Load', colour: carrierColour('load'), csv: 'load_MW' }
+const RESIDUAL_SERIES: DurationSeries = { key: 'residual', name: 'Residual load', colour: 'var(--color-series-2)', csv: 'residual_load_MW' }
 
 // Module-level constant so we don't allocate a fresh Set on every parent
 // render. Passed to <DispatchStack> for non-electrical stacks where the
@@ -552,7 +558,6 @@ export default function Dispatch() {
   const refPeriods = refTs?.periods
   const range = resolveRange(refIndex, filter, refPeriods)
 
-  const durationChartRef = useRef<HTMLDivElement | null>(null)
   // Load- and residual-load-duration curves. Total load and residual load
   // (load − variable-renewable generation) are each sorted descending over the
   // (range-sliced) horizon. The residual curve is the net demand the
@@ -571,15 +576,8 @@ export default function Dispatch() {
       loadArr[i] = l
       resArr[i] = l - (vre ? (vre[i]?.value ?? 0) : 0)
     }
-    const loadPts = durationCurvePoints(loadArr)
-    const resPts = durationCurvePoints(resArr)
     const hasVre = !!vre && vre.some(v => Math.abs(v.value) > 1e-9)
-    return {
-      hasVre,
-      rows: loadPts.map((p, i) => ({
-        pct: p.pct, load: p.value, residual: resPts[i].value,
-      })),
-    }
+    return { hasVre, rows: durationRows({ load: loadArr, residual: resArr }) }
   }, [loadTS, gensTS, loadNames, groupCols.renew, range])
 
   // Weight context — assembled once and shared across every weightedSum call.
@@ -1246,7 +1244,7 @@ export default function Dispatch() {
   // with `overflow-hidden` then clip their charts to a thin sliver.
   return (
     <notRecorded.Provider value={notRecorded.report}>
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
 
       {/* One "—" note for the whole page; the sections below report theirs. */}
       <NotRecordedNote show={notRecorded.show} />
@@ -1565,61 +1563,22 @@ export default function Dispatch() {
 
       {/* ── Load- & residual-load duration curves ─────────────────── */}
       {durationCurves && durationCurves.rows.length > 1 && (
-        <ChartCard
+        <DurationCurve
           title="Load duration curve"
+          figure={chartFigure(fmtPower(durationCurves.rows[0]?.load ?? 0), 'peak')}
           hint={durationCurves.hasVre ? 'total load vs residual (load − renewables), each sorted descending'
                                        : 'total load, sorted descending'}
-          right={
-            <ChartActions
-              chartRef={durationChartRef}
-              onExportCSV={() => {
-                downloadCSV('load_duration_curve.csv',
-                  ['pct_of_hours', 'load_MW', 'residual_load_MW'],
-                  durationCurves.rows.map(r => [r.pct, r.load, r.residual]))
-                toast.success('Exported')
-              }}
-              filename="load_duration_curve" />
-          }
-          bodyClassName="p-3"
-        >
-          <p className="text-[11px] text-muted mb-2">
+          note={<>
             Total system load sorted high-to-low (x = % of hours). {durationCurves.hasVre && (
               <>The <span className="font-medium text-text">residual</span> curve subtracts variable-renewable
-              generation — the net demand the dispatchable + storage fleet must meet (its peak sizes firm
+              generation: the net demand the dispatchable + storage fleet must meet (its peak sizes firm
               capacity; a dip below zero flags renewable-surplus hours).</>
             )}
-          </p>
-          <div ref={durationChartRef}>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={durationCurves.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="ldc-load-grad" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="#6b7280" stopOpacity={0.22} />
-                    <stop offset="100%" stopColor="#6b7280" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="ldc-res-grad" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="#0369a1" stopOpacity={0.28} />
-                    <stop offset="100%" stopColor="#0369a1" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid {...CHART_GRID} />
-                <XAxis dataKey="pct" type="number" domain={[0, 100]}
-                  tickFormatter={(v: number) => `${v.toFixed(0)} %`} {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} width={64} tickFormatter={(v: number) => fmtPower(v, 1)} label={yAxisLabel('MW')} />
-                <RTooltip {...CHART_TOOLTIP}
-                  labelFormatter={(v: number) => `${Number(v).toFixed(1)} % of hours`}
-                  formatter={(v: number, n: string) => [fmtPower(v), n === 'residual' ? 'Residual load' : 'Load']} />
-                {durationCurves.hasVre && <Legend {...CHART_LEGEND} />}
-                <Area type="monotone" dataKey="load" name="Load" stroke="#6b7280"
-                      fill="url(#ldc-load-grad)" strokeWidth={1.4} isAnimationActive={false} />
-                {durationCurves.hasVre && (
-                  <Area type="monotone" dataKey="residual" name="Residual load" stroke="#0369a1"
-                        fill="url(#ldc-res-grad)" strokeWidth={1.6} isAnimationActive={false} />
-                )}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartCard>
+          </>}
+          rows={durationCurves.rows}
+          series={durationCurves.hasVre ? [LOAD_SERIES, RESIDUAL_SERIES] : [LOAD_SERIES]}
+          unit="MW" format={v => fmtPower(v)} tickFormat={v => fmtPower(v, 1)} yWidth={64}
+          filename="load_duration_curve" />
       )}
 
       {effectiveMode !== 'timeframe' && seasonalViewByCarrier ? (
@@ -2092,6 +2051,11 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
           <span className="w-2 h-2 rounded-full shrink-0"
             style={{ background: SEASON_ACCENT[sn] }} />
           <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">{sn}</span>
+          {hasLoadTotal && (
+            <span className="font-mono text-[12px] font-semibold text-text tabular-nums" data-chart-figure="">
+              {chartFigure(fmtPower(rows.reduce((a, r) => Math.max(a, r.LoadTotal ?? 0), 0)), 'peak demand')}
+            </span>
+          )}
           <span className="text-[10px] text-muted">
             averaged {mode === 'weekly' ? 'week' : 'month'} · MW
           </span>
@@ -2102,7 +2066,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
               No dispatch data at {carrierDisplayLabel(carrier)} buses in {sn.toLowerCase()}.
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height={full ? 320 : 190}>
+            <ResponsiveContainer width="100%" height={full ? CHART_HEIGHT.lg : CHART_HEIGHT.md}>
               <ComposedChart data={rows} stackOffset="sign"
                 margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
@@ -2160,7 +2124,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
   return (
     <section>
       <header className="flex items-center gap-2 mb-2">
-        <span className="text-[12px] font-semibold text-text">{carrierDisplayLabel(carrier)} — averaged {mode === 'weekly' ? 'week' : 'month'}</span>
+        <span className="text-[12px] font-semibold text-text">{carrierDisplayLabel(carrier)} · averaged {mode === 'weekly' ? 'week' : 'month'}</span>
         <span className="text-[10px] text-muted">
           renewables → storage → thermal (above zero); charge below; load dashed
         </span>
@@ -2174,6 +2138,7 @@ function CarrierSeasonalSection({ carrier, mode, data, season }: {
           {renderSeason(season, true)}
         </div>
       )}
+      <ChartSourceLine className="pt-2" />
     </section>
   )
 }
@@ -3033,6 +2998,13 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
       return { ...r, value: (r.value / denom) * 100 }
     })
   }, [agg, showPct, capacity.total, capacityByPeriod.total, periodByStamp])
+  // The header's number (chart theme, ui-modern 02): the largest value plotted.
+  const groupPeak = useMemo(() => {
+    const rows = aggView ?? agg
+    if (!rows || rows.length === 0) return null
+    const m = rows.reduce((a, r) => Math.max(a, Math.abs(Number(r.value) || 0)), 0)
+    return Number.isFinite(m) ? m : null
+  }, [aggView, agg])
   const perAssetView = useMemo(() => {
     if (!perAssetData) return null
     if (!showPct) return perAssetData
@@ -3111,6 +3083,11 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <Icon size={14} color={style.color} />
         <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">{titleOverride ?? groupKey}</span>
+        {groupPeak != null && (
+          <span className="font-mono text-[12px] font-semibold text-text tabular-nums" data-chart-figure="">
+            {chartFigure(`${groupPeak} ${yUnit.split(' ')[0]}`, isStorage ? 'max' : 'peak')}
+          </span>
+        )}
         <span className="text-[10px] text-muted">{assets.length} asset{assets.length !== 1 ? 's' : ''}</span>
         <span className="flex-1" />
         {agg != null && (
@@ -3174,7 +3151,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
           ) : (
           <div ref={mainChartRef}>
             {perAsset && perAssetView ? (
-              <ResponsiveContainer width="100%" height={180}>
+              <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
                 <LineChart data={perAssetView.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
@@ -3185,12 +3162,12 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                   <Legend {...CHART_LEGEND} />
                   {perAssetView.cols.map((c, i) => (
                     <Line key={c} type="monotone" dataKey={c} stroke={TRACE_COLORS[i % TRACE_COLORS.length]}
-                          strokeWidth={1.4} dot={false} />
+                          strokeDasharray={seriesDash(i)} strokeWidth={1.4} dot={false} />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <ResponsiveContainer width="100%" height={140}>
+              <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
                 {isStorage ? (
                   <LineChart data={aggView ?? agg} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
@@ -3246,13 +3223,13 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                 <ChartZero>No renewable energy was curtailed in this window.</ChartZero>
               ) : (
               <div ref={curtailChartRef}>
-                <ResponsiveContainer width="100%" height={120}>
+                <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
                   <AreaChart data={curtailmentSeries} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                     <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
                     <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} MW`} />
-                    <Area type="monotone" dataKey="value" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.22} strokeWidth={1.6} />
+                    <Area type="monotone" dataKey="value" stroke="var(--color-warn)" fill="var(--color-warn)" fillOpacity={0.22} strokeWidth={1.6} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -3296,18 +3273,19 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                 </span>
               </div>
               <div ref={lostLoadChartRef}>
-                <ResponsiveContainer width="100%" height={120}>
+                <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
                   <AreaChart data={lostLoadSeries} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
                     <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
                     <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
                     <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} MW`} />
-                    <Area type="monotone" dataKey="value" stroke="#dc2626" fill="#dc2626" fillOpacity={0.22} strokeWidth={1.6} />
+                    <Area type="monotone" dataKey="value" stroke="var(--color-danger)" fill="var(--color-danger)" fillOpacity={0.22} strokeWidth={1.6} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
             </div>
           )}
+          <ChartSourceLine className="px-1 pt-2" />
         </div>
       )}
     </section>
@@ -3657,15 +3635,15 @@ function FullLoadHoursSection(props: {
       </header>
 
       {/* ── Per-category bar chart ───────────────────────────────── */}
-      <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
-        <header className="px-4 py-2.5 border-b border-border bg-bg-2 flex items-center gap-2">
-          <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">By category</span>
-          <span className="text-[10px] text-muted">
-            {selectedPeriod != null
-              ? 'capacity-weighted FLH for the selected period'
-              : 'capacity-weighted FLH (per-asset averages across periods then summed)'}
-          </span>
-          <span className="flex-1" />
+      <ChartFrame
+        title="Full load hours by category"
+        figure={categoryStats.length > 0
+          ? `${Math.max(...categoryStats.map(c => c.flh)).toFixed(0)} h/yr highest` : undefined}
+        hint={selectedPeriod != null
+          ? 'capacity-weighted FLH for the selected period'
+          : 'capacity-weighted FLH (per-asset averages across periods then summed)'}
+        basis={scaled ? `each hour weighted × ${avgScale.toFixed(2)}` : undefined}
+        right={
           <button
             onClick={() => {
               downloadCSV('results_flh_by_category.csv',
@@ -3676,9 +3654,9 @@ function FullLoadHoursSection(props: {
             }}
             className="flex items-center gap-1 text-[11px] text-muted hover:text-accent"
           ><Download size={11} /> CSV</button>
-        </header>
-        <div className="p-3">
-          <ResponsiveContainer width="100%" height={220}>
+        }
+      >
+          <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
             <ComposedChart data={categoryStats} margin={{ top: 18, right: 12, left: 0, bottom: 4 }}>
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="category" {...CHART_AXIS} interval={0}
@@ -3691,11 +3669,10 @@ function FullLoadHoursSection(props: {
                   if (n === 'flh') return [`${v.toFixed(0)} h/year`, 'FLH']
                   return [v.toFixed(0), n]
                 }} />
-              <Area type="monotone" dataKey="flh" fill="#0ea5e9" stroke="#0ea5e9" fillOpacity={0.5} />
+              <Area type="monotone" dataKey="flh" fill="var(--color-series-2)" stroke="var(--color-series-2)" fillOpacity={0.5} />
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
-      </section>
+      </ChartFrame>
 
       {/* ── Per-asset filterable table ────────────────────────────── */}
       <PerAssetFlhTable rows={rows} scopeLabel={scopeLabel} />

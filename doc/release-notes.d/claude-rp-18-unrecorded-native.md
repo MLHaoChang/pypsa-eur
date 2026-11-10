@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A wind/solar series with no provenance record (a project saved before RP-14, or a raw upload) reads as "Source not recorded · kept" instead of a measured file; a default never replaces it, and a card lists every such series so you can confirm they are the network's own (RP-18). Reading changes nothing; confirming writes only the record and one undo reverts it.

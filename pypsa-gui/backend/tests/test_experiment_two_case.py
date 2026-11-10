@@ -493,3 +493,78 @@ def test_tracked_wait_can_settle_after_native_job_finishes_without_refresh(basel
     assert not current['cases'][1]['case_effects_reserved']
     assert current['next_call']['tool'] == 'run_sensitivity_sweep'
     assert len(solve_queue.list_jobs()) == 1
+
+
+def _with_constant(monkeypatch, extra):
+    """Price every queue total with an objective constant, as a network with built assets does."""
+    from routers import simulation
+    real = simulation._compute_run_objective
+    monkeypatch.setattr(simulation, '_compute_run_objective',
+                        lambda n, cfg=None: None if (t := real(n, cfg)) is None else t + extra())
+
+
+def test_a_child_with_a_non_zero_objective_constant_reads_available_not_mismatch(baseline, monkeypatch):
+    """SH-39: the manifest holds LP objective + constant (eh_h2_hub: 506,529,579.17 vs 505,116,197.62)."""
+    _with_constant(monkeypatch, lambda: 1413381.55)
+    eid = prepared_pair()
+    session, state = arm(eid)
+    first = finish(session, state, eid)
+    assert first['cases'][0]['status'] == 'completed' and first['cases'][0]['objective'] == 200 + 1413381.55
+
+
+def test_an_objective_off_by_one_from_the_recomputed_total_stays_a_mismatch(baseline, monkeypatch):
+    """Kills the drop-the-compare mutant: the recompute must still be compared exactly."""
+    _with_constant(monkeypatch, lambda: 1413381.55)
+    eid = prepared_pair()
+    session, state = arm(eid)
+    invoke(session, state['next_call'])
+    job = tool('refresh_experiment', experiment_id=eid)['cases'][0]['job_id']
+    assert chat_tools.wait_for_job(job, 25)['completed']
+    _with_constant(monkeypatch, lambda: 1413382.55)
+    case = tool('refresh_experiment', experiment_id=eid)['cases'][0]
+    assert case['status'] == 'unavailable' and case['last_error'] == 'experiment_result_mismatch'
+
+
+def _completed_child(monkeypatch):
+    """A completed experiment child; returns a refresh that reads it after `damage(saved)` is applied."""
+    from services import workflow_tools as wt
+    eid = prepared_pair()
+    session, state = arm(eid)
+    invoke(session, state['next_call'])
+    job = tool('refresh_experiment', experiment_id=eid)['cases'][0]['job_id']
+    assert chat_tools.wait_for_job(job, 25)['completed']
+    real = wt._load_context
+
+    def refresh(damage):
+        def damaged(project):
+            saved = real(project)
+            damage(saved)
+            return saved
+        monkeypatch.setattr(wt, '_load_context', damaged)
+        return tool('refresh_experiment', experiment_id=eid)['cases'][0]
+    return refresh
+
+
+def _total_with(monkeypatch, *, solver_state, objective):
+    """`saved_queue_total` on a saved network that is fresh and prices to 5.0 whenever it is asked to."""
+    from types import SimpleNamespace
+    from routers import simulation
+    from harness.continuation import saved_queue_total
+    from services import workflow_tools as wt
+    monkeypatch.setattr(wt, 'solve_freshness', lambda saved: {'inputs_changed_since_solve': False})
+    monkeypatch.setattr(simulation, '_compute_run_objective', lambda n, cfg=None: 5.0)
+    return saved_queue_total(SimpleNamespace(solver_state=solver_state, network=SimpleNamespace(objective=objective)))
+
+
+def test_the_queue_total_is_told_for_a_saved_config_and_objective(baseline, monkeypatch):
+    assert _total_with(monkeypatch, solver_state={'solver_config': {}}, objective=1.0) == 5.0
+
+
+def test_a_saved_network_with_no_solver_config_has_no_queue_total(baseline, monkeypatch):
+    """Without the cfg guard `_compute_run_objective` prices with the foreground's config and returns a total."""
+    assert _total_with(monkeypatch, solver_state={}, objective=1.0) is None
+
+
+def test_a_saved_network_with_no_objective_has_no_queue_total(baseline, monkeypatch):
+    """Without the objective guard a network that holds no LP objective is priced all the same."""
+    assert _total_with(monkeypatch, solver_state={'solver_config': {}}, objective=None) is None

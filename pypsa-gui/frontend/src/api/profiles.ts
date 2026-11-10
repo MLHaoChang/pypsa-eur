@@ -119,7 +119,9 @@ export interface ReadinessRow {
   lon: number | null
   lat: number | null
   coord_source: 'bus' | 'missing'
-  profile: 'none' | 'network_native' | 'uploaded' | 'generated'
+  profile: 'none' | 'network_native' | 'uploaded' | 'unrecorded' | 'generated'
+  /** `profile === 'unrecorded'`: the fingerprint the confirm card sends back (RP-18). */
+  digest?: string
   provenance?: { source?: string | null; weather_year?: number | null; provenance?: string | null }
   stale_reason?: 'horizon_changed' | 'bus_moved'
 }
@@ -369,6 +371,12 @@ export const seriesApi = {
   /** Apply the chosen defaults under one undo step; each row reported. */
   applyDefaults: (project: string, jobIds: string[]) =>
     client.post<DefaultsApplyResult>(`${projectPath(project)}/defaults/apply`, { job_ids: jobIds })
+      .then(r => r.data),
+
+  /** RP-18: say series with no provenance record are the network's own. Writes only
+   *  the record, never the values; one undo; a changed series refuses the whole batch. */
+  confirmUnrecorded: (project: string, items: { component: string; digest: string }[]) =>
+    client.post<{ confirmed: string[] }>(`${projectPath(project)}/unrecorded/confirm`, { items })
       .then(r => r.data),
 
   /** Refine by `ops`, or with `undoIndex` re-refine without that recorded op (TSG 05). */

@@ -1,0 +1,4 @@
+{"kinds": {
+  "not_unrecorded": {"surface": "inline", "why": "Confirming a series with no provenance record found a series that has a record now, or none at all: nothing was stamped. Reload the readiness list and confirm again."},
+  "unrecorded_stale": {"surface": "inline", "why": "A series changed since the confirm list showed its fingerprint: the whole batch was refused and nothing was stamped. Reload the list and confirm again."}
+}}
