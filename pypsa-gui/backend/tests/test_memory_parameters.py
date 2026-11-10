@@ -1003,3 +1003,234 @@ def test_the_preview_note_shows_no_internal_id(client, proj):
     chip = _saved_chip(client, proj)
     note = _preview(client, proj, chip).json()["memory_note"]
     assert chip["id"] not in note and "mem_" not in note and "Replaces 10 " in note
+
+
+# ── GK B (43) findings ───────────────────────────────────────────────────────
+
+
+def _other_member(_auth_db):
+    from tests.conftest import _seed_org_and_user
+
+    user_id, _org = _seed_org_and_user(
+        _auth_db[1],
+        email=f"m{uuid.uuid4().hex[:6]}@example.com",
+        org_name=f"Org {uuid.uuid4().hex[:6]}",
+    )
+    return user_id
+
+
+def test_an_admin_never_uses_a_members_nominated_private_value(
+    client, proj, _auth_db, seeded_identity
+):
+    from db.models import User
+    from services import memory_store as M
+
+    chip = _saved_chip(client, proj)
+    _set(_auth_db, chip["id"], user_id=_other_member(_auth_db), nomination="pending")
+    with _db(_auth_db) as db:
+        admin = db.get(User, seeded_identity["user_id"])
+        assert M.is_admin_of(db, admin, proj.org_id)  # may read it, to review it
+        assert M._can_read(db, admin, db.get(M.MemoryItem, M.parse_id(chip["id"])))
+    assert _chips(client, proj) == {}
+    r = _preview(client, proj, chip)
+    assert r.status_code == 404
+    assert _apply(client, proj, chip, "0" * 64).status_code == 404
+    assert proj.net().generators.at["gas", "p_nom"] == 10.0
+
+
+def test_only_a_memory_fact_moving_makes_the_apply_stale(client, proj):
+    chip = _saved_chip(client, proj)
+    card = _preview(client, proj, chip).json()
+    proj.stamp(field="p_nom", source="pack:moved")  # the card's old → new rows stay
+    assert _preview(client, proj, chip).json()["card_digest"] == card["card_digest"]
+    r = _apply(client, proj, chip, card["digest"])
+    assert (
+        r.status_code == 409
+        and r.json()["detail"]["error_kind"] == "edit_preview_stale"
+    )
+    assert proj.net().generators.at["gas", "p_nom"] == 10.0
+
+
+def test_money_is_decided_by_the_field_not_the_stored_unit():
+    from services import memory_parameters as P
+    from services import memory_store as M
+
+    assert P.is_money(
+        M.parameter_spec("Bus", "product_value")
+    )  # stores "", shows EUR/unit
+    assert P.is_money(M.parameter_spec("Generator", "marginal_cost"))
+    assert not P.is_money(M.parameter_spec("Generator", "p_nom"))
+    with pytest.raises(M.MemoryError) as exc:  # t, MW or EUR by the constraint's type
+        M.parameter_spec("GlobalConstraint", "constant")
+    assert exc.value.kind == "memory_field_unknown" and exc.value.status == 422
+
+
+def test_a_product_value_needs_a_money_basis(client, proj):
+    net = proj.net()
+    bus = net.buses.index[0]
+    net.buses["product_value"] = float("nan")
+    net.buses.at[bus, "product_value"] = 30.0
+    r = client.post(
+        SAVE,
+        json={
+            "project_id": proj.id,
+            "component_class": "Bus",
+            "name": bus,
+            "field": "product_value",
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "memory_money_basis_missing"
+
+
+def test_a_field_with_a_time_series_is_neither_saved_nor_applied(client, proj):
+    proj.stamp()
+    chip_item = _save(client, proj).json()
+    _set_value(proj, 70.0)
+    net = proj.net()
+    net.generators_t.marginal_cost["gas"] = 5.0
+    r = _save(client, proj)
+    assert (
+        r.status_code == 422
+        and r.json()["detail"]["error_kind"] == "memory_field_has_series"
+    )
+    chip = _chips(client, proj)["marginal_cost"][0]
+    assert chip["id"] == chip_item["id"]
+    r = _preview(client, proj, chip)
+    assert (
+        r.status_code == 422
+        and r.json()["detail"]["error_kind"] == "memory_field_has_series"
+    )
+    assert "time series" in r.json()["detail"]["message"]
+
+
+def test_a_parameter_items_keys_are_not_edited(client, proj, _auth_db, seeded_identity):
+    from db.models import User
+    from services import memory_store as M
+
+    item = _save(client, proj, field="p_nom").json()
+    r = client.patch(
+        f"/api/memory/items/{item['id']}",
+        json={"concept_keys": ["param:Generator.p_nom"]},
+    )
+    assert r.json()["detail"]["error_kind"] == "memory_kind_unavailable"
+    with _db(_auth_db) as db:
+        user = db.get(User, seeded_identity["user_id"])
+        with pytest.raises(M.MemoryError) as exc:
+            M.edit_item(db, user, item["id"], project_kind="connection")
+        assert exc.value.kind == "memory_kind_unavailable"
+    assert _row(_auth_db, item["id"]).current_version == 1
+
+
+def test_a_parameter_item_is_not_nominated(client, proj, _auth_db, seeded_identity):
+    from db.models import User
+    from services import memory_store as M
+
+    item = _save(client, proj, field="p_nom").json()
+    with _db(_auth_db) as db:
+        user = db.get(User, seeded_identity["user_id"])
+        with pytest.raises(M.MemoryError) as exc:
+            M.nominate(db, user, item["id"])
+        assert exc.value.kind == "memory_kind_unavailable"
+    assert _row(_auth_db, item["id"]).nomination is None
+
+
+def test_apply_refuses_a_no_change_pick_too(client, proj, _auth_db):
+    chip = _saved_chip(client, proj)
+    card = _preview(client, proj, chip).json()
+    _set_value(proj, 200.0, "p_nom")  # the field now holds the saved value
+    r = _apply(client, proj, chip, card["digest"])
+    assert (
+        r.status_code == 422 and r.json()["detail"]["error_kind"] == "memory_no_change"
+    )
+    assert _row(_auth_db, chip["id"]).apply_count == 0
+
+
+def test_an_item_of_another_project_kind_is_not_applied_by_id(client, proj, _auth_db):
+    chip = _saved_chip(client, proj)
+    _set(_auth_db, chip["id"], project_kind="connection")
+    assert _preview(client, proj, chip).status_code == 404
+    assert _apply(client, proj, chip, "0" * 64).status_code == 404
+
+
+def test_an_unknown_class_with_an_asset_named_is_a_422(client, proj):
+    r = client.get(
+        SUGGEST,
+        params={"project_id": proj.id, "component_class": "Gadget", "name": "gas"},
+    )
+    assert (
+        r.status_code == 422
+        and r.json()["detail"]["error_kind"] == "memory_field_unknown"
+    )
+
+
+@pytest.mark.parametrize(
+    ("currency", "year", "kind"),
+    [
+        ("USD", 2024, "currency_mismatch"),
+        ("EUR", 2020, "memory_money_year_mismatch"),
+    ],
+)
+def test_money_mismatch_is_refused_at_apply_too(
+    client, proj, _auth_db, currency, year, kind
+):
+    proj.stamp()
+    _save(client, proj)
+    _set_value(proj, 70.0)
+    proj.stamp(source="typed:x")
+    chip = _chips(client, proj)["marginal_cost"][0]
+    card = _preview(client, proj, chip).json()
+    proj.stamp(currency=currency, year=year, source="typed:x")
+    r = _apply(client, proj, chip, card["digest"])
+    assert r.status_code == 422 and r.json()["detail"]["error_kind"] == kind
+    assert proj.net().generators.at["gas", "marginal_cost"] == 70.0
+    assert _row(_auth_db, chip["id"]).apply_count == 0
+
+
+def test_a_refused_write_leaves_provenance_and_count_untouched(
+    client, proj, _auth_db, monkeypatch
+):
+    from fastapi import HTTPException
+
+    from services import chat_tools
+
+    chip = _saved_chip(client, proj)
+    proj.stamp(field="p_nom", source="pack:x")
+    card = _preview(client, proj, chip).json()
+    before = PV.get(proj.net(), "Generator", "gas").get("p_nom")
+
+    def refuse(*_a, **_k):
+        raise HTTPException(422, {"error_kind": "invalid_value", "message": "no"})
+
+    monkeypatch.setattr(chat_tools, "update_component", refuse)
+    r = _apply(client, proj, chip, card["digest"])
+    assert r.status_code == 422
+    assert PV.get(proj.net(), "Generator", "gas").get("p_nom") == before
+    assert _row(_auth_db, chip["id"]).apply_count == 0
+
+
+@pytest.mark.parametrize(
+    "carrier",
+    [
+        "wind(on)",
+        "a+b",
+        "a/b",
+        "a,b",
+        "a:b",
+        "éolien",
+        "x" * 65,
+        "trailing ",
+    ],
+)
+def test_a_carrier_outside_the_key_pattern_is_a_typed_422(client, proj, carrier):
+    proj.net().generators.at["solar", "carrier"] = carrier
+    r = _save(client, proj, field="p_nom", name="solar")
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "memory_carrier_unsupported"
+
+
+def test_a_double_space_carrier_is_saved_and_suggested_for_its_asset(client, proj):
+    proj.net().generators.at["solar", "carrier"] = "solar  rooftop"
+    assert _save(client, proj, field="p_nom", name="solar").status_code == 201
+    assert _chips(client, proj, "solar")["p_nom"][0]["carrier"] == "solar  rooftop"
+    assert "p_nom" not in _chips(client, proj, "gas")

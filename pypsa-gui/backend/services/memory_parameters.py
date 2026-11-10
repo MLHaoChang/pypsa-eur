@@ -37,8 +37,34 @@ def _refuse(message: str, kind: str, status: int = 422) -> M.MemoryError:
 
 
 def is_money(spec) -> bool:
-    """A cost field: its stored unit is a money unit (`EUR/MW`, `EUR/MW/yr`, ...)."""
-    return spec.unit_storage.split("/", 1)[0] == "EUR"
+    """A cost field: its stored or shown unit is a money unit (`EUR/MW`, `EUR/MW/yr`,
+    ...). `Bus.product_value` stores no unit and shows `EUR/unit` (GK B F3)."""
+    return "EUR" in (
+        spec.unit_storage.split("/", 1)[0],
+        spec.unit_display.split("/", 1)[0],
+    )
+
+
+def _usable(item, user) -> bool:
+    """A value the user may suggest or apply in their own project: their own item or
+    an org item. An admin reads a member's nominated item to review it, not to use
+    it (GK B F1)."""
+    return item.owner_scope == "org" or item.user_id == user.id
+
+
+def _has_series(n, component_class: str, name: str, field: str) -> bool:
+    """The asset has a time series for `field`, which the solve reads instead of the
+    static value (GK B F4)."""
+    dynamic = n.components[component_class].dynamic
+    return field in dynamic and name in dynamic[field].columns
+
+
+def _refuse_series(spec, name: str) -> M.MemoryError:
+    return _refuse(
+        f"{spec.label} of {name} is set by a time series, which the solve reads instead "
+        "of a single value. A saved value is not saved or applied for it.",
+        "memory_field_has_series",
+    )
 
 
 def _network():
@@ -155,8 +181,16 @@ def save(
     spec = M.parameter_spec(component_class, field)
     n = _network()
     value, _source, carrier = _current(n, component_class, name, field)
+    if _has_series(n, component_class, name, field):
+        raise _refuse_series(spec, name)
     if value is None:
         raise _refuse(f"{spec.label} has no value to save.", "memory_value_missing")
+    if carrier and not M.carrier_ok(str(carrier)):
+        raise _refuse(
+            f"The carrier name {carrier} cannot be stored with a saved value: use "
+            "letters, digits, spaces, '.', '_' or '-', at most 64 characters.",
+            "memory_carrier_unsupported",
+        )
     body: dict[str, Any] = {
         "component_class": component_class,
         "field": field,
@@ -235,7 +269,7 @@ def suggestions(
     ).all()
     out: dict[str, list[tuple]] = {}
     for item in rows:
-        if not M._can_read(db, user, item):
+        if not _usable(item, user):
             continue
         v = M._version(db, item)
         body = json.loads(v.body_json) if v.body_json else None
@@ -295,8 +329,10 @@ def _item_for_apply(
     db: DBSession, user: User, project: Project, item_id: str, version: int
 ):
     item = M._get(db, user, item_id)
-    if item.kind != "parameter":
+    if item.kind != "parameter" or not _usable(item, user):
         raise M._not_found()
+    if item.project_kind not in (None, project.project_kind):
+        raise M._not_found()  # never suggested for this project, so never applied
     if item.org_id != project.org_id:  # §9 M1: never across orgs
         raise M._not_found()
     if item.status != "confirmed":
@@ -345,6 +381,8 @@ def plan(
         )
     n = _network()
     current, source, carrier = _current(n, component_class, name, spec.key)
+    if _has_series(n, component_class, name, spec.key):
+        raise _refuse_series(spec, name)
     if body.get("carrier") and body["carrier"] != carrier:
         raise _refuse(
             f"{spec.label}: saved for {body['carrier']}, this asset is {carrier or 'without a carrier'}.",
@@ -371,6 +409,9 @@ def plan(
                 f"in {year} money. Nothing is converted or relabelled.",
                 "memory_money_year_mismatch",
             )
+    if current is not None and current == body["value"]:
+        # Refused in the plan, so preview and apply both refuse it (GK B F5).
+        raise _refuse("This field already has the saved value.", "memory_no_change")
     memory = {
         "item": M.public_id(item.id),
         "version": item.current_version,
@@ -395,7 +436,6 @@ def plan(
             "attrs": {spec.key: body["value"]},
         },
         "memory": memory,
-        "no_change": current is not None and current == body["value"],
     }
 
 
@@ -421,8 +461,6 @@ def preview(
     from harness import edit_card
 
     p = plan(db, user, project, item_id, version, component_class, name)
-    if p["no_change"]:
-        raise _refuse("This field already has the saved value.", "memory_no_change")
     card = edit_card.preview("update_component", p["args"])
     m = p["memory"]
     before = m["target"]["value"]

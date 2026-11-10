@@ -373,7 +373,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
                    'The assistant never applies one.'),
         'page': 'Asset card (Properties)',
         'panel': None,
-        'keywords': frozenset({'reuse', 'suggestion', 'saved'}),
+        'keywords': frozenset({'reusable', 'chip', 'chips'}),
         'routes': frozenset({
             ('GET', '/api/memory/suggestions'),
             ('POST', '/api/memory/parameters'),

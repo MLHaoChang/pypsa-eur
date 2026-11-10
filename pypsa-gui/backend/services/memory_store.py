@@ -190,7 +190,7 @@ def validate_concept_key(key: Any) -> str:
 
             ok = ident.split(".", 1)[0] in _known_classes()
     elif ns == "carrier":
-        ok = bool(_CARRIER.match(ident)) and not ident.endswith(" ")
+        ok = carrier_ok(ident)
     elif ns == "step":
         ok = ident in _step_ids()
     elif ns == "report":
@@ -272,6 +272,20 @@ def _chart_spec(body: Any) -> dict:
         raise MemoryError(str(exc), exc.kind) from None
 
 
+# Fields whose unit depends on another field of the same row (GK B F3): a saved
+# value would not say what it is (a CO₂ cap in t, or a cost limit in EUR).
+CONTEXT_FIELDS = {("GlobalConstraint", "constant"): "constraint type"}
+
+
+def carrier_ok(value: Any) -> bool:
+    """A carrier name a concept key and a parameter body can hold verbatim."""
+    return (
+        isinstance(value, str)
+        and bool(_CARRIER.match(value))
+        and not value.endswith(" ")
+    )
+
+
 def parameter_spec(component_class: Any, field: Any):
     """The asset-schema field a `parameter` item may hold, or MemoryError
     `memory_field_unknown` (§9 M6): a numeric, typed (not derived) field."""
@@ -294,6 +308,13 @@ def parameter_spec(component_class: Any, field: Any):
     if spec is None or spec.derived or spec.kind not in ("number", "int"):
         raise MemoryError(
             f"{component_class}.{field} is not a field that can be saved for reuse",
+            "memory_field_unknown",
+            422,
+        )
+    if (component_class, field) in CONTEXT_FIELDS:
+        raise MemoryError(
+            f"{spec.label} means something different for each "
+            f"{CONTEXT_FIELDS[(component_class, field)]}, so it is not saved for reuse",
             "memory_field_unknown",
             422,
         )
@@ -343,7 +364,16 @@ def _parameter(body: Any) -> dict:
             raise MemoryError("currency_year must be a year")
         out["currency_year"] = year
     if b.get("carrier") is not None:
-        out["carrier"] = _text(b["carrier"], "carrier", 64)
+        # Kept exactly as the asset has it (never whitespace-folded), or it would
+        # never match its own asset again.
+        if not carrier_ok(b["carrier"]):
+            raise MemoryError(
+                "a carrier name for a saved value uses letters, digits, spaces, '.', "
+                "'_' or '-', at most 64 characters",
+                "memory_carrier_unsupported",
+                422,
+            )
+        out["carrier"] = b["carrier"]
     return out
 
 
@@ -838,6 +868,17 @@ def edit_item(
     item = _get(db, user, item_id, write=True)
     if item.status == "dismissed":
         raise MemoryError("a dismissed proposal is not edited", "memory_status", 409)
+    if (
+        item.kind == "parameter"
+        and not parameter_ok
+        and (concept_keys is not None or project_kind is not ...)
+    ):
+        # The keys and project kind are the item's identity for Save for reuse.
+        raise MemoryError(
+            "a saved parameter's field, carrier and project kind change only with "
+            "Save for reuse on its field",
+            "memory_kind_unavailable",
+        )
     cur = _version(db, item)
     keys = json.loads(item.concept_keys) if concept_keys is None else concept_keys
     pk = item.project_kind if project_kind is ... else project_kind
@@ -1070,6 +1111,12 @@ def record_recall(db: DBSession, item_ids: Iterable[uuid.UUID]) -> None:
 
 def nominate(db: DBSession, user: User, item_id: str | uuid.UUID) -> ItemView:
     item = _get(db, user, item_id, write=True)
+    if item.kind == "parameter":
+        # Promote cannot carry a parameter body (WRITABLE_KINDS), so it is not offered.
+        raise MemoryError(
+            "a saved parameter stays yours; it is not suggested to your organisation",
+            "memory_kind_unavailable",
+        )
     if item.owner_scope != "user" or item.status != "confirmed":
         raise MemoryError(
             "only your own confirmed item can be suggested", "memory_status", 409
