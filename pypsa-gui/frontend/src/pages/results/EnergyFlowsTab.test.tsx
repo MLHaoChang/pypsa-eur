@@ -53,7 +53,8 @@ describe('EnergyFlowsTab', () => {
     const spy = vi.spyOn(shared, 'downloadCSV').mockImplementation(() => {})
     mount()
     fireEvent.click(await screen.findByRole('button', { name: 'CSV' }))
-    const [, header, rows] = spy.mock.calls[0]
+    const [file, header, rows] = spy.mock.calls[0]
+    expect(file).toBe('energy_flows_year.csv')
     expect(header).toEqual(['Source', 'Via', 'Destination', 'MWh'])
     expect(rows).toHaveLength(ROWS.length)
     spy.mockRestore()
@@ -142,6 +143,9 @@ describe('cross-link', () => {
     mount()
     fireEvent.click(await screen.findByTestId('ef-to-value-flows'))
     expect(useUIStore.getState().resultsTabRequest).toBe('investment')
+    // One "›" link, and Back names where the user came from.
+    expect(screen.getByTestId('ef-to-value-flows').textContent).toBe('Investment: value flows ›')
+    expect(JSON.stringify(useUIStore.getState().flowReturn)).toContain('Energy flow')
   })
 })
 

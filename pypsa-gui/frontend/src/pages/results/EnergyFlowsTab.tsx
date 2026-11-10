@@ -15,6 +15,7 @@ import toast from 'react-hot-toast'
 import ResultState from '../../components/ResultState'
 import { energyFlowsApi, type EnergyFlowsPayload } from '../../api/energyFlows'
 import { useUIStore } from '../../store/uiStore'
+import { showResultsTab } from '../../layout/flowNavigation'
 import { nk } from '../../utils/queryKeys'
 import { useResultsFilter } from './filterContext'
 import WindowSlider, { useWindowRange } from './WindowSlider'
@@ -165,7 +166,6 @@ function SeriesChart({ title, series, index }: {
 
 export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }) {
   const currentProject = useUIStore(s => s.currentProject)
-  const requestResultsTab = useUIStore(s => s.requestResultsTab)
   const filter = useResultsFilter()
   const shellPeriod = typeof filter.selectedPeriod === 'number' ? filter.selectedPeriod
     : filter.selectedPeriod != null && filter.selectedPeriod !== 'all' && !Number.isNaN(Number(filter.selectedPeriod))
@@ -264,8 +264,8 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
           a storage hands back the mix it was charged with.{' '}
           Money flows:{' '}
           <button type="button" className="underline" data-testid="ef-to-value-flows"
-                  onClick={() => requestResultsTab('investment')}>
-            Investment → Value flows
+                  onClick={() => showResultsTab('investment', { from: 'Energy flow' })}>
+            Investment: value flows ›
           </button>
         </p>
       </ChartFrame>
