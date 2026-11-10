@@ -672,6 +672,14 @@ def test_a_check_not_read_after_the_measures_is_no_evidence(hub, status):
     )
     result = _contingency(hub, step)
     assert result["verdict"] == "not_evaluated"
+    words = {
+        "not_rechecked": "not re-checked",
+        "not_rated": "not rated",
+        None: "no status",
+    }
+    assert result["reason"] == (
+        f"Campus voltage: {words.get(status, status)} after the measures"
+    )
 
 
 def test_a_missing_invested_table_is_no_evidence_and_the_as_is_table_is_never_read(hub):
