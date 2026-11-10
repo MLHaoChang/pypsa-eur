@@ -1,4 +1,4 @@
-# AL-8 harness (adequacy loops 01). Run: cp .scratch/adequacy-loops/al8_harness.py pypsa-gui/backend/tests/test_zz_al8_scratch.py && cd pypsa-gui/backend && AL8_OUT=<file.jsonl> python3 -m pytest -q tests/test_zz_al8_scratch.py  (one JSON row per EH template)
+# AL-8 harness (adequacy loops 01). Run: cp .scratch/adequacy-loops/al8_harness.py pypsa-gui/backend/tests/test_zz_al8_scratch.py && cd pypsa-gui/backend && AL8_OUT=<file.jsonl> python3 -m pytest -q tests/test_zz_al8_scratch.py  (one JSON row per EH template; AL8_WAIT=<seconds> to wait longer than 900 s for a loop)
 import dataclasses, json, os, pathlib, time
 import pytest
 
@@ -34,7 +34,7 @@ def test_al8(client, tmp_path, monkeypatch, tmp_projects_dir, project_row, sessi
         row.update(start=r.status_code, detail=str(r.json().get("detail"))[:160])
     else:
         body = None
-        while time.time() - t0 < 900:
+        while time.time() - t0 < float(os.environ.get("AL8_WAIT", 900)):
             g = client.get("/api/results/coupling_loop")
             body = g.json()
             if body.get("status") != "running":

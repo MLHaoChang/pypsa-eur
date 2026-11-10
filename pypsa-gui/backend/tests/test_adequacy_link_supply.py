@@ -240,6 +240,7 @@ def test_a_fuel_cell_on_an_unlimited_fuel_is_credited_at_its_delivered_cap():
     b = sampled_fleet(n)
     assert _names(b) == ["diesel", "link:grid_import", "link:fuel_cell"]
     assert b.units[-1].capacity_mw == pytest.approx(20.0)  # 40 x 0.5
+    assert b.units[-1].capacity_series is None  # the same in every hour
     assert b.supply_links == ("grid_import", "fuel_cell")
 
 
@@ -447,6 +448,61 @@ def test_a_fuel_cell_without_a_finite_mttr_is_not_credited():
     assert (
         "firm Link fuel_cell: not credited (0 MW) — no finite MTTR in its outage data"
     ) in b.fleet_notes
+
+
+def test_an_import_link_without_capacity_is_kept_only_for_stable_membership():
+    """AL-4: a zero-capacity import Link is a 0 MW unit when the caller keeps
+    membership stable, and "not counted" otherwise; without usable occurrence
+    data it is never a unit."""
+    n = _net(import_mw=0.0)
+    kept = sampled_fleet(n, keep_zero_capacity=True)
+    [unit] = [u for u in kept.units if u.name == "link:grid_import"]
+    assert unit.capacity_mw == 0.0 and unit.q == 0.01 and unit.mttr_hours == 12.0
+    dropped = sampled_fleet(n)
+    assert "link:grid_import" not in _names(dropped)
+    assert (
+        "import Link grid_import: no capacity in any hour; not counted"
+        in dropped.fleet_notes
+    )
+    for data in (None, (0.01, float("inf")), (0.01, 0.0)):
+        m = _net(import_mw=0.0, import_data=data)
+        assert "link:grid_import" not in _names(
+            sampled_fleet(m, keep_zero_capacity=True)
+        ), data
+
+
+def test_a_firm_link_without_capacity_is_kept_only_for_stable_membership():
+    n = _fuel_cell(_net(), p_nom=0.0)
+    assert "link:fuel_cell" not in _names(sampled_fleet(n))
+    kept = sampled_fleet(n, keep_zero_capacity=True)
+    assert kept.units[-1].name == "link:fuel_cell"
+    assert kept.units[-1].capacity_mw == 0.0
+    assert kept.units[-1].capacity_series is None
+
+
+@pytest.mark.parametrize("how", ["name", "carrier"])
+def test_a_slack_link_is_never_a_firm_backup(how):
+    from services.adequacy.slack import SLACK_CARRIERS, SLACK_NAME_PREFIXES
+
+    n = _net()
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Generator", "gas_supply", bus="gas", p_nom=1000.0)
+    name = f"{SLACK_NAME_PREFIXES[0]}fc" if how == "name" else "fc"
+    carrier = sorted(SLACK_CARRIERS)[0] if how == "carrier" else ""
+    n.add("Link", name, bus0="gas", bus1="hub", p_nom=40.0, carrier=carrier)
+    _outage(n.links, name, 0.0, 24.0)
+    b = sampled_fleet(n)
+    assert f"link:{name}" not in _names(b) and name not in b.supply_links
+
+
+def test_the_fuel_generators_availability_series_bounds_the_credit():
+    n = _fuel_cell(_net())
+    n.generators.at["gas_supply", "p_nom"] = 10.0
+    pu = np.where(np.arange(len(n.snapshots)) < 6, 0.2, 1.0)
+    n.generators_t.p_max_pu["gas_supply"] = pu
+    unit = sampled_fleet(n).units[-1]
+    assert unit.capacity_mw == pytest.approx(5.0)
+    np.testing.assert_allclose(unit.capacity_series, pu * 10.0 * 0.5)
 
 
 def test_the_fuel_generators_availability_bounds_the_credit():
