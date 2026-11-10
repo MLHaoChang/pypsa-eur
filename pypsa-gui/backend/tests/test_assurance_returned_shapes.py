@@ -21,7 +21,7 @@ from tests.assurance_acceptance.support import approval
 from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_workflow_tools import baseline  # noqa: F401
 
-BASE = "6e1d5f963"  # master when FILL-11-6 began
+BASE = "714077b58"  # master with checked_tool_inputs: an input widening is judged additive there (LC-14 guided_step)
 
 
 @pytest.fixture

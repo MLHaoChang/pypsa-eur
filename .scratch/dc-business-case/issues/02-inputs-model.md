@@ -3,7 +3,7 @@
 
 # 02 — Business-case inputs model
 
-Status: ready-for-agent after 01 merges (GK B BC7, BC9; DCBC-SCOPE-1)
+Status: wontfix (superseded by ../../business-case/issues/02 (line-item model, on #1320's branch); its DC classes become 07's DC preset; owner BC-ALL-1, 2026-11-10)
 Type: task
 Blocked by: 01
 Gated: yes (GK B)

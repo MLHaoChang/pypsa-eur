@@ -5976,6 +5976,7 @@ def ui_open_panel(
     compare_b: str | None = None,
     compare_tab: str | None = None,
     canvas_view: str | None = None,
+    guided_step: str | None = None,
     loadflow_source: str | None = None,
     window_from: int | None = None,
     window_to: int | None = None,
@@ -6026,6 +6027,16 @@ def ui_open_panel(
             "error_kind": "invalid_navigation", "field": "canvas_view",
             "message": "Choose blank for topology, or satellite, hybrid or site for map.",
         })
+    if guided_step is not None:
+        from harness import workflows
+
+        steps = [step.id for step in workflows.get("hub-design").steps]
+        if panel_id not in {"HubDesign", "hubDesign"} or not isinstance(guided_step, str) or guided_step not in steps:
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": "guided_step",
+                "message": f"Choose a Guided card: {', '.join(steps[:-1])} or {steps[-1]}. "
+                           "Cards exist only in the hub design.",
+            })
     if highlight_projects is not None:
         if (panel_id not in {"Scenarios", "scenarios"} or not isinstance(highlight_projects, list)
                 or not 1 <= len(highlight_projects) <= 4 or not all(isinstance(p, str) for p in highlight_projects)):
@@ -6066,6 +6077,8 @@ def ui_open_panel(
         event["compare_tab"] = compare_tab
     if canvas_view is not None:
         event["canvas_view"] = canvas_view
+    if guided_step is not None:
+        event["guided_step"] = guided_step
     if highlight_projects:
         event["highlight_projects"] = highlight_projects
     return event
@@ -9552,6 +9565,7 @@ from harness.experiment_reconciliation import reconcile_experiment
 from harness.experiment_comparison import compare_experiments, export_experiment_comparison
 from harness.sensitivity_comparison import compare_sensitivities, export_sensitivity_comparison
 from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
+from services import memory_tools as _memory_tools
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
 
@@ -9584,6 +9598,8 @@ DISPATCHERS: dict[str, Any] = {
     "list_experiments": list_experiments,
     "get_experiment": get_experiment,
     "list_tasks": list_tasks,
+    "propose_memory": _memory_tools.propose_memory,
+    "recall_memory": _memory_tools.recall_memory,
     "find_capabilities": find_capabilities,
     "start_task": start_task,
     "get_task": get_task,

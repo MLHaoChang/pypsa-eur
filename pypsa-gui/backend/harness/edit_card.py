@@ -123,6 +123,8 @@ NOT_EDITS = {
     "campus_cancel_island_cuts": "stops a running job after the trial in hand",
     "gridspine_upload_readback": "compares an uploaded export with a bundle; no input changes",
     "campus_upload_grid_code_document": "stores a source document; a draft is the edit",
+    # assistant-memory 02a
+    "propose_memory": "saves a memory item on its own always-shown card; no project input changes",
     # live-voice 08 B3
     "solve_queue_clear_finished": "drops finished jobs from the queue listing",
     "solve_queue_dismiss": "hides a finished job from your own queue listing",

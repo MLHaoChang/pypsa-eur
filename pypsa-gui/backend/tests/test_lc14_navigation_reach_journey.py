@@ -67,3 +67,10 @@ class TestNavigationJourney:
         events = [d for e, d in frames if e == 'ui_event']
         assert [e['canvas_view'] for e in events] == ['hybrid', 'site']
         assert [r['canvas_view'] for r in results] == ['hybrid', 'site']
+
+    def test_chat_opens_a_named_guided_card(self, oj_grid, kind, model, base_url, auth, mode):
+        steps = [lambda r: ('ui_open_panel', {'panel_id': 'hubDesign', 'guided_step': 'goal'}), lambda r: (None, {})]
+        _, results, frames, _ = run_journey(kind, model, base_url, auth, steps, 'Take me to the Goal card.', mode=mode)
+        events = [d for e, d in frames if e == 'ui_event']
+        assert [e['guided_step'] for e in events] == ['goal']
+        assert [r['guided_step'] for r in results] == ['goal']  # the model's acknowledgement

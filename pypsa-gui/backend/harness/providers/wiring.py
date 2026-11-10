@@ -391,6 +391,12 @@ def _tools_payload_for_profile(profile: Any, query: str = "", history=None) -> l
         # A harness run's agent turn (study harness issue 04, §6.3): its stage's
         # allowlist only, in catalogue order; no toolset, no external tools.
         return [t for t in tools if t.get("name") in stage_tools]
+    if getattr(session, "task_id", None) is not None:
+        # Assistant memory §9 M3: a runner's turn works from its frozen grant;
+        # memory would steer it outside its digest, so its tools are not offered.
+        from harness.memory_recall import TOOLS as _MEMORY_TOOLS
+
+        tools = [t for t in tools if t.get("name") not in _MEMORY_TOOLS]
     toolset = getattr(session, "toolset", "all")
     tools = filter_tools(tools, toolset)
     if toolset in (None, "all"):

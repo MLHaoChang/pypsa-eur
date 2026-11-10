@@ -1,6 +1,7 @@
 import { manualNavigation, navigationEpoch, withAssistantNavigation } from '../utils/navigationEpoch'
 import { useUIStore, type CanvasView, type PropertiesEditRequest } from '../store/uiStore'
 import { withReturnFrom } from '../layout/flowNavigation'
+import { HUB_STEPS, useHubDesignStore, type HubStep } from '../pages/hubDesign/hubDesignStore'
 
 /**
  * Map chat tool panel_id → SlidePanel / special navigation targets.
@@ -75,6 +76,8 @@ type NavigationRequest = {
   name?: string
   snapshot_index?: number
   canvas_view?: string
+  /** LC-14: open one Guided card with panel hubDesign. */
+  guided_step?: string
   snapshot_iso?: string
   period?: number | null
   category?: string
@@ -218,6 +221,17 @@ function apply(d: NavigationRequest, modelTurn: number | null = null) {
   ) {
     // LC-17 (UX): Scenarios opened from chat keeps "Back to <origin>".
     if (panel === 'scenarios') withReturnFrom(() => useUIStore.getState().setSlidePanel('scenarios'))
+    else if (panel === 'hubDesign' && HUB_STEPS.includes(d.guided_step as HubStep)) {
+      const step = d.guided_step as HubStep
+      const showing = ui.activeSlidePanel === 'hubDesign' && useHubDesignStore.getState().step === step
+      // The card already showing: nothing to jump from, so no "Back to" pointing at itself.
+      if (!showing) {
+        withReturnFrom(() => {
+          useUIStore.getState().setSlidePanel('hubDesign')
+          useHubDesignStore.getState().setStep(step, { user: true })
+        })
+      }
+    }
     else ui.setSlidePanel(panel as NonNullable<typeof ui.activeSlidePanel>)
   }
 

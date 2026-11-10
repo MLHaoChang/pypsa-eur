@@ -75,6 +75,10 @@ from services.project_context import ProjectContext
 
 logger = logging.getLogger("pypsa_gui.chat")
 
+# propose_memory's precheck failed for a reason that is not a typed refusal:
+# refuse closed (a dict literal, so the error-kind manifest scan sees it).
+_MEMORY_CHECK_UNAVAILABLE = {"error_kind": "memory_check_unavailable"}
+
 from harness.history import (  # noqa: E402, F401 — moved (issue 08); re-exported
     _message_is_tool_results,
     _is_turn_start,
@@ -2082,6 +2086,7 @@ def _run_turn_body(
     # rebinding above: the model cannot lift it mid-turn (budget.task_cap).
     session.turn_task_cap = harness_budget.task_cap(session)
     session.turn_single_edit_applied = False
+    session.turn_memory_proposals = 0
     session.turn_redirects = {}
     from harness import guards as _guards
 
@@ -2107,6 +2112,14 @@ def _run_turn_body(
     _eventlog.context(session, "requirements", requirements_block)
     if requirements_block:
         ui_block = f"{ui_block}\n\n{requirements_block}" if ui_block else requirements_block
+    # Assistant memory (plan §3.1): items about what is on screen, fenced, in
+    # the user turn; the standing block rides the system prompt below.
+    from harness import memory_recall as _memory_recall
+
+    memory_block = _memory_recall.turn_block(session, turn_ctx, ui_context, profile.tools)
+    _eventlog.context(session, "memory", memory_block)
+    if memory_block:
+        ui_block = f"{ui_block}\n\n{memory_block}" if ui_block else memory_block
     if session.assurance_turn is not None:
         assurance_block = session.assurance_turn.request_content()
         _eventlog.context(session, "checked_request", assurance_block)
@@ -2248,6 +2261,7 @@ def _run_turn_body(
         session,
         live_meta=_format_live_network_meta(turn_ctx),
         include_tools=profile.tools,
+        memory=_memory_recall.standing_block(session, turn_ctx, profile.tools),
     )
     if session.assurance_turn is not None:
         system_prompt += "\n" + session.assurance_turn.prompt()
@@ -3403,6 +3417,39 @@ def _dispatch_real_tool_call(
                 }
             )
             return
+    if tool_name == "propose_memory":
+        # Assistant memory §2.2–§2.4: a proposal is validated, capped and
+        # checked against recent dismissals BEFORE its card, so a refused one
+        # never asks the user anything.
+        try:
+            from services import memory_tools
+
+            memory_tools.precheck(session, args or {})
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            kind = (
+                detail.get("error_kind", _MEMORY_CHECK_UNAVAILABLE["error_kind"])
+                if isinstance(detail, dict)
+                else _MEMORY_CHECK_UNAVAILABLE["error_kind"]
+            )
+            yield (
+                "tool_error",
+                {
+                    "tool_use_id": tool_use_id,
+                    "tool_name": tool_name,
+                    "error_kind": kind,
+                    "message": _redact_for_log(detail or exc),
+                },
+            )
+            tool_results_collector.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "is_error": True,
+                    "content": _error_result_content(detail, exc, kind),
+                }
+            )
+            return
     from harness import confirm as confirmation_gate
 
     policy_revision = confirmation_gate.confirmation_revision()
@@ -4307,6 +4354,7 @@ def _dispatch_real_tool_call(
             "period": ui_event_payload.get("period"),
             "snapshot_index": ui_event_payload.get("snapshot_index"),
             "canvas_view": ui_event_payload.get("canvas_view"),
+            "guided_step": ui_event_payload.get("guided_step"),
             # Live-voice 07 — Load flow source, window and highlighted branch.
             "loadflow_source": ui_event_payload.get("loadflow_source"),
             "window_from": ui_event_payload.get("window_from"),
