@@ -97,7 +97,10 @@ it('renders a distinctive curtailed-energy KPI sourced from a single mocked snap
   // The by-carrier table keeps full precision ("424.2 MWh"); the KPI tile
   // rounds to the R1 standard (3 s.f.): "424 MWh".
   expect(await findKpiValue('424 MWh')).toBeTruthy()
-  expect(screen.getAllByText((text) => text.includes('424.2')).length).toBe(1)
+  // The hour-by-day map below (ui-modern 02 slice 3) also writes the hour's
+  // "424.2 MW" in its key and its text alternative; count only the table's
+  // <td>, which is what this test pins (as Prices.test.tsx does).
+  expect(screen.getAllByText((text) => text.includes('424.2')).filter(el => el.tagName === 'TD').length).toBe(1)
 })
 
 // ── Result states (UX overhaul S2) ──────────────────────────────────────────

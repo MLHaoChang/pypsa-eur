@@ -77,28 +77,36 @@ describe('<HourDayHeatmap>', () => {
     expect(Array.from(container.querySelectorAll('[data-hour-tick]')).map(t => t.textContent))
       .toEqual(['00', '06', '12', '18', '23'])
     expect(Array.from(container.querySelectorAll('[data-day-tick]')).map(t => t.textContent))
-      .toEqual(['07-01', '07-02'])
+      .toEqual(['2030-07-01', '07-02'])
   })
 
   it('keys the colour with both ends of the scale as text, and says when the scale is shared', () => {
     const { container } = render(
-      <HourDayHeatmap {...base} scale={{ min: 0, max: 200 }} scaleNote="one scale for all storage carriers" />,
+      <HourDayHeatmap {...base} scale={{ min: 0, max: 200 }} scaleNote="same scale as the other storage carriers" />,
     )
     const key = container.querySelector('[data-heat-key]')!
     expect(key.textContent).toContain('0.0 €/MWh')
     expect(key.textContent).toContain('200.0 €/MWh')
-    expect(key.textContent).toContain('lighter is lower')
-    expect(key.textContent).toContain('one scale for all storage carriers')
+    expect(key.textContent).toContain('stronger colour is higher')
+    expect(key.textContent).toContain('same scale as the other storage carriers')
     // On the shared scale the top value (87 of 200) is no longer full strength.
     const strongest = Math.max(...Array.from(container.querySelectorAll('rect[data-cell="value"]'))
       .map(c => Number(c.getAttribute('fill-opacity'))))
     expect(strongest).toBeLessThan(0.5)
   })
 
+  it('has a text alternative: its title and one sentence on what it covers', () => {
+    const { container } = render(<HourDayHeatmap {...base} />)
+    const svg = container.querySelector('svg[role="img"]')!
+    expect(svg.querySelector('title')!.textContent).toBe('Price by hour and day')
+    expect(svg.querySelector('desc')!.textContent)
+      .toBe('2 days by hour of day, 2030-07-01 to 2030-07-02, from 40.0 €/MWh to 86.0 €/MWh. The CSV export holds every value.')
+  })
+
   it('reads a cell out as text when it is pointed at', () => {
     const { container } = render(<HourDayHeatmap {...base} />)
     const readout = container.querySelector('[data-heat-readout]')!
-    expect(readout.textContent).toBe('Point at a cell to read its hour')
+    expect(readout.textContent).toBe('Hover a cell to read its value')
     const svg = container.querySelector('svg[role="img"]')!
     // jsdom's box is at 0,0: day 1 starts at x 30 + 240, hour 3 at y 18 + 3 rows of (182 / 24).
     fireEvent.mouseMove(svg, { clientX: 30 + 240 + 5, clientY: 18 + 3 * (182 / 24) + 1 })
@@ -106,7 +114,7 @@ describe('<HourDayHeatmap>', () => {
     fireEvent.mouseMove(svg, { clientX: 30 + 240 + 5, clientY: 18 + 1 * (182 / 24) + 1 })
     expect(readout.textContent).toBe('2030-07-02 01:00 · no snapshot')
     fireEvent.mouseLeave(svg)
-    expect(readout.textContent).toBe('Point at a cell to read its hour')
+    expect(readout.textContent).toBe('Hover a cell to read its value')
   })
 
   it('says why there is no map, in the frame, instead of a blank plot', () => {

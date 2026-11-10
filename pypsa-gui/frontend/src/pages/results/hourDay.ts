@@ -41,6 +41,9 @@ export function hourDayGrid(stamps: readonly string[], values: ReadonlyArray<num
   }
 }
 
+/** Why an all-periods view has no hour-by-day map. */
+export const PICK_ONE_PERIOD = 'Pick one period to see hours by day: periods share calendar dates.'
+
 export interface HeatScale { min: number; max: number }
 
 /**

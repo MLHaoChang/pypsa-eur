@@ -3,7 +3,7 @@
 // day, colour strength for the value. A full year is 365 × 24 cells ("8760").
 // Maps shown together pass one scale (hourDay.ts), so a colour means the same
 // value in each. Drawn as SVG, so the SVG export works.
-import { useId, useRef, useState, type MouseEvent } from 'react'
+import { memo, useId, useRef, useState, type MouseEvent } from 'react'
 import { ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 import {
@@ -36,12 +36,12 @@ export interface HourDayHeatmapProps {
   grid: HourDayGrid
   /** The colour scale, from `heatScale`. Maps shown together pass the same one. */
   scale: HeatScale | null
-  /** Said in the key when the scale is shared: "one scale for all storage carriers". */
+  /** Said in the key when the scale is shared: "same scale as the other storage carriers". */
   scaleNote?: string
   /** A theme colour token, e.g. `carrierColour('electricity')`. */
   colour: string
-  /** A value with its unit, for the readout and the key. */
-  format: (v: number) => string
+  /** A value with its unit, for the key and the readout; the readout also passes the cell, for a second figure. */
+  format: (v: number, cell?: { day: number; hour: number }) => string
   /** The value's CSV column, with the unit: `price_EUR_per_MWh`. */
   csv: string
   /** File name for the SVG and CSV exports, without the extension. */
@@ -51,11 +51,12 @@ export interface HourDayHeatmapProps {
   testId?: string
 }
 
-function Cells({
-  width = 0, height = 0, grid, scale, colour, hatchId, onHover,
+// Memoised: a year is 8760 cells, and pointing at one must not redraw them all.
+const Cells = memo(function Cells({
+  width = 0, height = 0, grid, scale, colour, hatchId, onHover, title, summary,
 }: {
   width?: number; height?: number
-  grid: HourDayGrid; scale: HeatScale; colour: string; hatchId: string
+  grid: HourDayGrid; scale: HeatScale; colour: string; hatchId: string; title: string; summary: string
   onHover: (cell: { day: number; hour: number } | null) => void
 }) {
   const w = Math.max(0, width - PAD.left - PAD.right)
@@ -70,7 +71,9 @@ function Cells({
   }
   return (
     <svg width={width} height={height} role="img" onMouseMove={move} onMouseLeave={() => onHover(null)}
-      aria-label={`Heatmap: ${grid.days.length} days by 24 hours`}>
+      aria-label={`${title}. ${summary}`}>
+      <title>{title}</title>
+      <desc>{summary}</desc>
       <defs>
         <pattern id={hatchId} width={4} height={4} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
           <line x1={0} y1={0} x2={0} y2={4} stroke="var(--color-axis)" strokeWidth={1} />
@@ -93,12 +96,12 @@ function Cells({
       {dayTicks(grid.days).map(d => (
         <text key={d} {...CHART_TICK} x={PAD.left + (d + 0.5) * cw} y={height - 6}
           textAnchor={d === 0 ? 'start' : 'middle'} data-day-tick="">
-          {grid.days[d].slice(5)}
+          {d === 0 ? grid.days[d] : grid.days[d].slice(5)}
         </text>
       ))}
     </svg>
   )
-}
+})
 
 export default function HourDayHeatmap({
   title, figure, hint, grid, scale, scaleNote, colour, format, csv, filename, unavailable, testId,
@@ -141,17 +144,19 @@ export default function HourDayHeatmap({
     >
       <div ref={chartRef}>
         <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-          <Cells grid={grid} scale={scale} colour={colour} hatchId={hatchId} onHover={setHover} />
+          <Cells grid={grid} scale={scale} colour={colour} hatchId={hatchId} onHover={setHover} title={title}
+            summary={`${grid.days.length} days by hour of day, ${grid.days[0]} to ${grid.days[grid.days.length - 1]}, from ${
+              format(scale.min)} to ${format(scale.max)}. The CSV export holds every value.`} />
         </ResponsiveContainer>
       </div>
       {/* The key: what the colour strength and the hatch mean, in text. */}
-      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted" data-heat-key="">
+      <div className="mt-1 flex min-h-[18px] flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted" data-heat-key="">
         <span className="flex items-center gap-1.5">
           <span className="font-mono tabular-nums">{format(scale.min)}</span>
           <span aria-hidden className="h-2 w-24 rounded-sm border border-border"
             style={{ background: `linear-gradient(to right, color-mix(in srgb, ${colour} 8%, transparent), ${colour})` }} />
           <span className="font-mono tabular-nums">{format(scale.max)}</span>
-          <span>lighter is lower</span>
+          <span>stronger colour is higher</span>
         </span>
         {scaleNote && <span>{scaleNote}</span>}
         {gaps && (
@@ -163,8 +168,8 @@ export default function HourDayHeatmap({
         )}
         <span className="ml-auto font-mono tabular-nums text-text" data-heat-readout="" role="status">
           {hover
-            ? `${grid.days[hover.day]} ${pad2(hover.hour)}:00 · ${at == null ? 'no snapshot' : format(at)}`
-            : 'Point at a cell to read its hour'}
+            ? `${grid.days[hover.day]} ${pad2(hover.hour)}:00 · ${at == null ? 'no snapshot' : format(at, hover)}`
+            : 'Hover a cell to read its value'}
         </span>
       </div>
     </ChartFrame>

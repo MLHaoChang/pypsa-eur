@@ -31,6 +31,8 @@ import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import DispatchStack from './DispatchStack'
 import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
+import HourDayHeatmap from './HourDayHeatmap'
+import { hourDayGrid, spansPeriods, PICK_ONE_PERIOD, type HeatScale } from './hourDay'
 import StorageHeatmap from './StorageHeatmap'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { storageCarrierKey, storageCarrierLabel } from './carrierAliases'
@@ -38,6 +40,8 @@ import NotSolved from './NotSolved'
 
 // The load duration curve's two series: total load, then load minus renewables.
 const LOAD_SERIES: DurationSeries = { key: 'load', name: 'Load', colour: carrierColour('load'), csv: 'load_MW' }
+// Every state-of-charge map shares this scale: empty to full.
+const SOC_SCALE: HeatScale = { min: 0, max: 100 }
 const RESIDUAL_SERIES: DurationSeries = { key: 'residual', name: 'Residual load', colour: 'var(--color-series-2)', csv: 'residual_load_MW' }
 
 // Module-level constant so we don't allocate a fresh Set on every parent
@@ -675,6 +679,28 @@ export default function Dispatch() {
     aggPower: aggregateTS(storPowerTS as TSPayload | null, g.nameSet, range),
     aggSoC: aggregateTS(storTS as TSPayload | null, g.nameSet, range),
   })), [storageGroups, storPowerTS, storTS, range.from, range.to])
+
+  // State of charge by calendar day and hour of day, one map per storage
+  // carrier, all on one 0–100 % scale so a small battery reads as clearly as a
+  // large store. 100 % is the carrier's energy capacity (Σ p_nom_opt ×
+  // max_hours); a carrier with no capacity on record falls back to the highest
+  // state of charge in the window, and its key says so.
+  const socMaps = useMemo(() => storageSeriesByCarrier.map(g => {
+    const rows = g.aggSoC ?? []
+    const capacity = g.assets.reduce((s, a) => {
+      const cap = (a.p_nom_opt ?? a.p_nom ?? 0) * (a.max_hours ?? 0)
+      return s + (Number.isFinite(cap) ? cap : 0)
+    }, 0)
+    const peak = rows.reduce((m, r) => Math.max(m, r.value), 0)
+    const full = capacity > 0 ? capacity : peak
+    const stamps = rows.map(r => r.snapshot)
+    return {
+      carrier: g.carrier,
+      byCapacity: capacity > 0,
+      pct: hourDayGrid(stamps, rows.map(r => (full > 0 ? (r.value / full) * 100 : null))),
+      mwh: hourDayGrid(stamps, rows.map(r => r.value)),
+    }
+  }), [storageSeriesByCarrier])
 
 
   // Renewable curtailment time-series — same filter range as everything else.
@@ -1896,6 +1922,24 @@ export default function Dispatch() {
             snapshotPeriods={(storTS as TSPayload | null)?.periods}
             rowRange={range}
           />
+          {socMaps.filter(m => m.carrier === group.carrier).map(m => (
+            <HourDayHeatmap
+              key={`soc-map-${m.carrier}`}
+              title={`Storage SoC by hour and day · ${storageCarrierLabel(m.carrier)}`}
+              hint={m.byCapacity ? '% of energy capacity' : '% of highest state of charge in this window'}
+              grid={m.pct} scale={SOC_SCALE}
+              scaleNote={[
+                m.byCapacity ? '% of energy capacity' : '% of highest state of charge in this window',
+                socMaps.length > 1 ? 'same scale as the other storage carriers' : '',
+              ].filter(Boolean).join(' · ')}
+              colour={carrierColour('storage')}
+              format={(v, cell) => {
+                const e = cell ? m.mwh.cells[cell.day]?.[cell.hour] : null
+                return e == null ? `${v.toFixed(0)} %` : `${v.toFixed(0)} % · ${fmtEnergy(e)}`
+              }}
+              csv="state_of_charge_pct" filename={`storage_soc_hour_by_day_${m.carrier}`}
+              unavailable={spansPeriods((storTS as TSPayload | null)?.periods, range.from, range.to) ? PICK_ONE_PERIOD : null} />
+          ))}
         </Fragment>
       ))}
       {/* Stores power flow (signed MW): same convention as Storage. */}

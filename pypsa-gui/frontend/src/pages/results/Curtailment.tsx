@@ -13,8 +13,10 @@ import type { Generator } from '../../api/types'
 import {
   type TSPayload, type WeightCtx, weightedSum, aggregateTS,
   isRenewableCarrier, shortStamp, useWeightCtx, WindowCapBanner,
-  CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
+  CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, chartFigure,
 } from './shared'
+import HourDayHeatmap from './HourDayHeatmap'
+import { heatScale, hourDayGrid, spansPeriods, PICK_ONE_PERIOD } from './hourDay'
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import NotSolved from './NotSolved'
@@ -79,7 +81,17 @@ export default function Curtailment() {
   }, [generators])
   const aggSeries = useMemo(() => aggregateTS(
     curtailTS as TSPayload | null, renewableNames, range,
-  ), [curtailTS, renewableNames, range])
+  // `range` is a new object on every render: depend on its bounds, so the
+  // series (and the 8760-cell map built from it) is not rebuilt each time.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [curtailTS, renewableNames, range.from, range.to])
+  // The same curtailed power by calendar day and hour of day: which hours of
+  // the day, and which days, the renewables were turned down.
+  const curtailMap = useMemo(() => {
+    if (!aggSeries) return null
+    const grid = hourDayGrid(aggSeries.map(r => r.snapshot), aggSeries.map(r => r.value))
+    return { grid, scale: heatScale([grid], true) }
+  }, [aggSeries])
 
   // Totals: curtailment energy + percent vs (curtailed + delivered) using
   // the renewable generators' supply for the denominator. Comes from the
@@ -222,6 +234,19 @@ export default function Curtailment() {
           )}
         </div>
       </section>
+
+      {curtailMap && (
+        <HourDayHeatmap
+          title="Curtailment by hour and day"
+          figure={curtailMap.scale && curtailMap.scale.max > 0
+            ? chartFigure(`${curtailMap.scale.max.toFixed(1)} MW`, 'highest hour') : undefined}
+          hint="curtailed renewable power in each hour"
+          grid={curtailMap.grid} scale={curtailMap.scale}
+          colour="var(--color-warn)"
+          format={v => `${v.toFixed(1)} MW`}
+          csv="curtailment_MW" filename="curtailment_hour_by_day"
+          unavailable={spansPeriods(refPeriods, range.from, range.to) ? PICK_ONE_PERIOD : null} />
+      )}
       </>)}
     </div>
   )
