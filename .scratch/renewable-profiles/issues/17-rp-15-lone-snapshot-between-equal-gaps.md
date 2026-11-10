@@ -3,7 +3,7 @@
 
 # RP-15: a lone snapshot between equal gaps is refused
 
-Status: ready-for-agent
+Status: done (RP-17 PR)
 Type: bug
 Found by: RP-15 (`15-constant-step-per-run.md`); owner list DOCS-1.
 
