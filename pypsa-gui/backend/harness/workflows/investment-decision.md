@@ -38,10 +38,15 @@ report says so. Then `start_decision_study`.
 ## Step: parameters
 
 `start_decision_study` returned the key parameters, each with its default
-and source. For each, ask with `ask_user`, offering the default as the
-recommended option with its source and year; `set_study_parameter` on a
-changed answer, with the row's own unit. Everything else stays the generic
-defaults; say that once.
+and source. Ask once, as one Assumptions card: a single `ask_user` whose
+`detail` lists every parameter with its default, unit, source and year in
+plain words (never raw keys), and whose options are "Keep all defaults"
+(recommended) and "Change some". Never one question per parameter. If the
+user changes some, they say which in free text: `set_study_parameter` for
+each changed one in the same turn, with the row's own unit; the rest stay as
+listed. Everything else stays the generic defaults; say that once.
+Inputs the user must give (bidding zone, connection, load, tariff) are asked
+above and never get a default or a "Keep all defaults".
 
 ## Step: verdict
 
