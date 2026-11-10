@@ -19,6 +19,7 @@
 // `fromStudy` keeps a figure the reliability study produced and marks it "From
 // the study" while the project has no solve of its own (owner decision G5);
 // `study_only` stays for a figure that does not exist without that solve.
+import type { ReactNode } from 'react'
 import { kpiFigure, splitValueUnit } from '../utils/format'
 import { StateAction, StatePill, type ResultAction, type ResultStateKind } from './ResultState'
 
@@ -32,7 +33,7 @@ const TONE: Record<KpiTone, string> = {
 
 export default function Kpi({
   label, value, unit, basis, hint, delta, deltaTone, headline, testId,
-  state = 'ready', reason, action, fromStudy, valueLabel, dimmed,
+  state = 'ready', reason, action, fromStudy, valueLabel, dimmed, trend,
 }: {
   label: string
   value: string
@@ -55,6 +56,8 @@ export default function Kpi({
   valueLabel?: string
   /** Dim the figure without a pill: its group already says "Out of date" once. */
   dimmed?: boolean
+  /** A small trend under the figure (the headline strip's periods); shown with the figure only. */
+  trend?: ReactNode
 }) {
   const raw = unit !== undefined ? { value, unit } : splitValueUnit(value)
   const parts = kpiFigure(raw.value, raw.unit)
@@ -93,6 +96,7 @@ export default function Kpi({
           {delta}
         </div>
       )}
+      {trend && showsFigure && <div className={state === 'stale' || dimmed ? 'opacity-60' : undefined}>{trend}</div>}
       {reason && state !== 'ready' && state !== 'zero' && (
         <div className="text-[11.5px] leading-snug text-muted">{reason}</div>
       )}

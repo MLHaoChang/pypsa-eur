@@ -1296,8 +1296,26 @@ export interface HeadlineCard {
   formula_id: string | null
   /** What the figure belongs to, e.g. the line at the peak loading. */
   detail: string | null
+  /** This case minus its base case, in the card's unit; `pct` is null over a zero base. */
+  delta?: { value: number; pct: number | null; note: string | null } | null
+  /** The figure per investment period, for a run with two or more. */
+  trend?: { period: number | string; value: number }[] | null
 }
-export interface HeadlineKpis { kind: 'energy_hub' | 'microgrid' | 'network'; cards: HeadlineCard[] }
+/** The open project against its base case: the base itself, or a sensitivity case of it. */
+export interface HeadlineComparison {
+  role: 'base' | 'case'
+  /** Null when the base is not open to the user. */
+  base_name: string | null
+  base_project_id: string | null
+  comparable: boolean
+  /** One plain sentence when the case is not compared with its base. */
+  reason: string | null
+}
+export interface HeadlineKpis {
+  kind: 'energy_hub' | 'microgrid' | 'network'
+  cards: HeadlineCard[]
+  comparison?: HeadlineComparison | null
+}
 
 export const resultsApi = {
   // The strip says so itself when this fails (one message, not a toast as well).

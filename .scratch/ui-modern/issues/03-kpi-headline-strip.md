@@ -3,7 +3,7 @@
 
 # KPI headline strip per project type
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 Type: feature (first slice of DASHBOARD-1)
 Model: Sonnet. Reviewer: UX.
@@ -24,3 +24,4 @@ The strip sits at the top of Results › Summary, in Guided and Expert. One PR p
 ## Comments
 
 - GK B (44), PR #1343 @88c90b13, condition C1 for slice 2: the `not_via_chat` entry for the strip must not attach to a goal that puts the figures elsewhere. Slice 2 adds excel, word, csv, pdf, workbook, document, bundle, exported, save, download and compared to `_STRIP_ELSEWHERE`, with GK B's five goals in `test_ordinary_goals_get_no_refusal`. Done in slice 2 (one goal per word as well).
+- S3 (session …4zMm464JdjviPVCe): the delta is the change in the card's own figure. `harness/sensitivity_comparison` decides who the base is and whether the case compares (`_read`, `_reasons`); its metrics are on another basis than the cards (pro-rated CAPEX + OPEX, all annuitised CAPEX, curtailed GWh, no LCOE), so the base's cards are built by `headline_kpis` on the base's saved context and subtracted (`services/results/headline_delta.py`). Only Total system cost has a figure per investment period (`compute_cost_breakdown` `by_period`), so only that tile draws a trend; the checked formulas refuse a multi-period run, and lost load and new-build capital are horizon-wide.

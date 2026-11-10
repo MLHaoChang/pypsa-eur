@@ -27,7 +27,7 @@ import threading as _threading
 if TYPE_CHECKING:
     from services.finance.case import CampusSummary
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict
 from db.models import User
 from deps import require_user
@@ -2768,18 +2768,13 @@ def get_lost_load(
     return Response(status_code=204) if payload is None else payload
 
 
-@results_router.get("/headline_kpis")
-def get_headline_kpis():
-    """
-    The headline figures at the top of Results for the open project's type
-    (ui-modern 03; `services.results.headline_kpis`). 204 when nothing is solved.
-    """
+def _headline_cards() -> dict:
+    """The strip for the request's bound context: the open project's, or the
+    base case's while `get_headline_kpis` binds it."""
     from services.results.headline_kpis import headline_kpis
     from services.results.lost_load import lost_load_payload
 
     n = PyPSAService.get_network()
-    if not _dispatch_ready(n):
-        return _not_solved()
     try:
         cost = compute_cost_breakdown(n, _state['solver_config'])
     except Exception:  # the service logged it; its cards say there is no breakdown
@@ -2787,6 +2782,51 @@ def get_headline_kpis():
     lost_load = lost_load_payload(n, _state.get("last_lost_load"), _solved_settings)
     return headline_kpis(PyPSAService.get_active_context(), template=_workbook_template(),
                          cost=cost, lost_load=lost_load)
+
+
+def _headline_comparison(cards: list[dict], actor_id) -> dict | None:
+    """The strip's base-case block, with each card's delta set when the open
+    case compares with its base (`services.results.headline_delta`). A base
+    that cannot be read costs the deltas, never the strip."""
+    from services import chat_tools
+    from services.results import headline_delta
+
+    previous = chat_tools.acting_user_id()
+    chat_tools.set_acting_user(actor_id)
+    try:
+        comparison, base_read = headline_delta.base_case(PyPSAService.get_active_context())
+        if base_read is None:
+            return comparison
+        binding = PyPSAService.bind_request_context(base_read["ctx"])
+        # A turn cell outranks the request binding; a fresh one holds the base.
+        cell = PyPSAService.bind_turn_cell()
+        try:
+            base_cards = _headline_cards()["cards"]
+        except Exception:  # noqa: BLE001 — the strip still answers, without deltas
+            logger.exception("headline strip: the base case's figures could not be read")
+            return dict(comparison, comparable=False, reason=headline_delta.BASE_UNREADABLE)
+        finally:
+            PyPSAService._turn_cell.reset(cell)
+            PyPSAService.reset_request_context(binding)
+        headline_delta.add_deltas(cards, base_cards)
+        return comparison
+    finally:
+        chat_tools.set_acting_user(previous)
+
+
+@results_router.get("/headline_kpis")
+def get_headline_kpis(request: Request):
+    """
+    The headline figures at the top of Results for the open project's type
+    (ui-modern 03; `services.results.headline_kpis`). 204 when nothing is solved.
+    `comparison` names the base case and whether the open case compares with it.
+    """
+    if not _dispatch_ready(PyPSAService.get_network()):
+        return _not_solved()
+    payload = _headline_cards()
+    payload["comparison"] = _headline_comparison(
+        payload["cards"], getattr(getattr(request.state, "auth_user", None), "id", None))
+    return payload
 
 
 

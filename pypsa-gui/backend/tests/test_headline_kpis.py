@@ -503,3 +503,251 @@ def test_card_sets_are_short_and_reasons_carry_no_engine_identifier():
         "running",
         "unavailable",
     }
+
+
+# --- S3: the delta against the base case, and the trend over periods ---------
+
+from harness import sensitivity_comparison as sc  # noqa: E402
+from services.results import headline_delta as hd  # noqa: E402
+from tests.test_sensitivity_comparison import (  # noqa: E402, F401
+    edit_saved,
+    set_price,
+    sweep,
+    swept,
+)
+from tests.test_sensitivity_comparison import solve as solve_saved  # noqa: E402
+
+
+def strip(client, name=None):
+    """The strip's answer, after opening the saved project `name` if given."""
+    if name is not None:
+        opened = client.get(f"/api/projects/{name}")
+        assert opened.status_code == 200, opened.text
+    response = client.get(URL)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    return body, {c["id"]: c for c in body["cards"]}
+
+
+def no_deltas(by_id):
+    return all(card["delta"] is None for card in by_id.values())
+
+
+def test_a_case_reads_each_cards_change_against_its_base(swept, client):
+    """G1 serves 5 MW for 2 h: 100 at the base's price of 10, 200 at 20."""
+    base_id, _cases = swept
+    body, by_id = strip(client, "Gas 20")
+    assert body["comparison"] == {
+        "role": "case",
+        "base_name": "Tool Baseline",
+        "base_project_id": base_id,
+        "comparable": True,
+        "reason": None,
+    }
+    assert by_id["system_cost"]["value"] == pytest.approx(200)
+    assert by_id["system_cost"]["delta"] == {
+        "value": pytest.approx(100),
+        "pct": pytest.approx(100),
+        "note": None,
+    }
+    # Nothing is built in either: a zero base has a delta and no percentage.
+    assert by_id["new_build_capital"]["delta"] == {
+        "value": 0,
+        "pct": None,
+        "note": "zero base: no percentage",
+    }
+
+
+def test_a_cheaper_case_reads_a_negative_change(swept, client):
+    _body, by_id = strip(client, "Gas 5")
+    assert by_id["system_cost"]["delta"] == {
+        "value": pytest.approx(-50),
+        "pct": pytest.approx(-50),
+        "note": None,
+    }
+
+
+def test_the_base_says_it_is_the_base_and_carries_no_delta(swept, client):
+    base_id, _cases = swept
+    body, by_id = strip(client)
+    assert body["comparison"] == {
+        "role": "base",
+        "base_name": "Tool Baseline",
+        "base_project_id": base_id,
+        "comparable": True,
+        "reason": None,
+    }
+    assert no_deltas(by_id)
+
+
+def test_a_project_with_no_cases_has_no_comparison(baseline, client):
+    _ctx, base_id, _root = baseline
+    solve_saved(base_id)
+    body, by_id = strip(client)
+    assert body["comparison"] is None
+    assert no_deltas(by_id)
+    assert all(card["trend"] is None for card in by_id.values())
+
+
+def test_a_case_whose_base_changed_says_why_and_carries_no_delta(swept, client):
+    base_id, _cases = swept
+    edit_saved(base_id, set_price(11))
+    solve_saved(base_id)
+    body, by_id = strip(client, "Gas 20")
+    assert body["comparison"]["role"] == "case"
+    assert body["comparison"]["base_name"] == "Tool Baseline"
+    assert body["comparison"]["comparable"] is False
+    assert body["comparison"]["reason"] == (
+        "Not compared with the base case: the base's inputs or finance "
+        "settings changed since this case was branched."
+    )
+    assert no_deltas(by_id)
+    assert by_id["system_cost"]["value"] == pytest.approx(200)
+
+
+def test_a_base_out_of_date_is_named_first(swept, client):
+    base_id, _cases = swept
+    edit_saved(base_id, set_price(11))
+    body, by_id = strip(client, "Gas 20")
+    assert body["comparison"]["reason"] == (
+        "Not compared with the base case: the base has no current results to "
+        "compare with; the base's inputs or finance settings changed since "
+        "this case was branched."
+    )
+    assert no_deltas(by_id)
+
+
+def test_a_base_the_user_cannot_open_is_not_named(swept, client, monkeypatch):
+    base_id, _cases = swept
+    resolve = sc._resolve
+
+    def closed(db, user, ref):
+        if ref == base_id:
+            raise HTTPException(404, {"error_kind": "sensitivity_project_not_found"})
+        return resolve(db, user, ref)
+
+    monkeypatch.setattr(sc, "_resolve", closed)
+    body, by_id = strip(client, "Gas 20")
+    assert body["comparison"] == {
+        "role": "case",
+        "base_name": None,
+        "base_project_id": None,
+        "comparable": False,
+        "reason": hd.NO_BASE_ACCESS,
+    }
+    assert no_deltas(by_id)
+
+
+@pytest.mark.parametrize("error", [KeyError("x"), OSError("x"), HTTPException(409)])
+def test_a_base_that_cannot_be_read_costs_the_deltas_only(
+    swept, client, monkeypatch, error
+):
+    def broken(project):
+        raise error
+
+    strip(client, "Gas 20")
+    monkeypatch.setattr(sc, "_read", broken)
+    body, by_id = strip(client)
+    assert body["comparison"]["comparable"] is False
+    assert body["comparison"]["reason"] == hd.BASE_UNREADABLE
+    assert body["comparison"]["base_name"] == "Tool Baseline"
+    assert no_deltas(by_id)
+    assert by_id["system_cost"]["value"] == pytest.approx(200)
+
+
+def test_base_figures_that_fail_cost_the_deltas_only(swept, client, monkeypatch):
+    strip(client, "Gas 20")
+    build, calls = results_router._headline_cards, []
+
+    def second_fails():
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("base")
+        return build()
+
+    monkeypatch.setattr(results_router, "_headline_cards", second_fails)
+    body, by_id = strip(client)
+    assert body["comparison"]["comparable"] is False
+    assert body["comparison"]["reason"] == hd.BASE_UNREADABLE
+    assert no_deltas(by_id)
+    # The base's context is unbound again: the next read is the case's.
+    monkeypatch.setattr(results_router, "_headline_cards", build)
+    assert strip(client)[1]["system_cost"]["value"] == pytest.approx(200)
+
+
+def test_the_comparison_leaves_the_acting_user_as_it_found_it(swept):
+    from services import chat_tools
+
+    before = chat_tools.acting_user_id()
+    assert results_router._headline_comparison([], None) is None
+    assert chat_tools.acting_user_id() == before
+
+
+def test_a_scratch_network_has_no_comparison():
+    assert hd.base_case(SimpleNamespace(project_uuid=None)) == (None, None)
+
+
+def card(card_id, value, unit="currency"):
+    return {"id": card_id, "value": value, "unit": unit, "delta": None}
+
+
+def test_a_delta_needs_both_values_in_one_unit():
+    cards = [
+        card("a", 90.0),
+        card("b", None),
+        card("c", 1.0),
+        card("d", 1.0, "currency/yr"),
+        card("e", 1.0),
+        card("f", -30.0),
+    ]
+    base = [
+        card("a", 120.0),
+        card("b", 1.0),
+        card("c", None),
+        card("d", 1.0, "currency"),
+        card("f", -20.0),
+    ]
+    hd.add_deltas(cards, base)
+    deltas = {c["id"]: c["delta"] for c in cards}
+    assert deltas["a"] == {"value": -30.0, "pct": -25.0, "note": None}
+    # Over the base's size: a more negative figure is a negative change.
+    assert deltas["f"] == {"value": -10.0, "pct": -50.0, "note": None}
+    assert [deltas[k] for k in "bcde"] == [None] * 4
+
+
+def periods(*totals):
+    return {
+        "total": sum(totals),
+        "capex_expansion": 1.0,
+        "by_period": [
+            {"period": 2030 + 10 * i, "total": t} for i, t in enumerate(totals)
+        ],
+    }
+
+
+def cost_cards(cost, investment_periods=(2030, 2040)):
+    ctx = SimpleNamespace(
+        network=SimpleNamespace(investment_periods=investment_periods)
+    )
+    payload = hk.headline_kpis(ctx, template=None, cost=cost, lost_load=None)
+    return {c["id"]: c for c in payload["cards"] if c["id"] in hk.ORDER["network"][:2]}
+
+
+def test_system_cost_carries_its_total_per_investment_period(monkeypatch):
+    monkeypatch.setattr(hk, "_checked", lambda ctx, cid: hk._card(cid))
+    by_id = cost_cards(periods(41.0, 37.5, 33.0))
+    assert by_id["system_cost"]["trend"] == [
+        {"period": 2030, "value": 41.0},
+        {"period": 2040, "value": 37.5},
+        {"period": 2050, "value": 33.0},
+    ]
+    assert by_id["new_build_capital"]["trend"] is None
+
+
+@pytest.mark.parametrize(
+    "cost",
+    [periods(41.0), periods(), periods(41.0, float("nan")), {"total": 1.0}],
+)
+def test_no_trend_without_two_finite_periods(monkeypatch, cost):
+    monkeypatch.setattr(hk, "_checked", lambda ctx, cid: hk._card(cid))
+    assert cost_cards(cost)["system_cost"]["trend"] is None

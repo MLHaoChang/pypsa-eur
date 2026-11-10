@@ -14,7 +14,8 @@ import { ChartSourceLine, ChartSourceProvider, useChartSource } from '../../comp
 import { showResultsTab } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import { HEADLINE_WORDS, headlineFigure } from './headlineWords'
+import { Sparkline } from '../../components/PageKit'
+import { HEADLINE_WORDS, comparisonBasis, headlineDelta, headlineFigure, headlineTrend } from './headlineWords'
 
 export const headlineKpisKey = (project: string | null) => nk(project, 'results', 'headline_kpis')
 
@@ -41,6 +42,20 @@ function rememberTiles(n: number) {
   try { localStorage.setItem(TILES_KEY, String(n)) } catch { /* the count is a nicety */ }
 }
 
+/** The figure over the investment periods: the line, with its first and last period in words (K6). */
+function Trend({ card }: { card: HeadlineCard }) {
+  const trend = headlineTrend(card)
+  if (!trend) return null
+  return (
+    <div role="img" aria-label={trend.label} data-testid={`headline-${card.id}-trend`} className="flex flex-col gap-0.5">
+      <div className="h-5" aria-hidden="true"><Sparkline data={trend.data} color="var(--color-series-1)" /></div>
+      <div className="flex flex-wrap justify-between gap-x-2 text-[10.5px] leading-snug text-muted tabular-nums" aria-hidden="true">
+        <span>{trend.first}</span><span>{trend.last}</span>
+      </div>
+    </div>
+  )
+}
+
 function Tile({ card, dimmed }: { card: HeadlineCard; dimmed: boolean }) {
   const words = HEADLINE_WORDS[card.id]
   if (!words) return null
@@ -52,6 +67,7 @@ function Tile({ card, dimmed }: { card: HeadlineCard; dimmed: boolean }) {
       <Kpi
         headline testId={`headline-${card.id}`} label={words.label} value={value} basis={basis}
         state={state} reason={card.reason ?? undefined} dimmed={dimmed}
+        delta={headlineDelta(card)} trend={<Trend card={card} />}
         action={card.state === 'not_run' || (card.id === 'lcoe' && card.value == null && card.state !== 'running')
           ? { label: `${words.tabLabel} ›`, onClick: () => showResultsTab(words.tab, { from: 'Summary' }) }
           : undefined}
@@ -86,14 +102,20 @@ export default function HeadlineStrip() {
   const cards = data?.cards.filter(c => HEADLINE_WORDS[c.id]) ?? []
   if (!cards.length) return null
   if (cards.length !== loadingTiles) rememberTiles(cards.length)
+  const comparison = data?.comparison
   const stale = source.stale || cards.some(c => c.state === 'stale')
   return (
     <section aria-label="Headline figures" data-testid="headline-strip" className="flex flex-col gap-1.5">
       <div className={ROW}>
         {cards.map(card => <Tile key={card.id} card={card} dimmed={stale} />)}
       </div>
+      {comparison && !comparison.comparable && comparison.reason && (
+        <p role="note" data-testid="headline-not-compared" className="px-0.5 text-[11.5px] leading-snug text-muted">
+          {comparison.reason}
+        </p>
+      )}
       <ChartSourceProvider value={{ ...source, stale }}>
-        <ChartSourceLine className="px-0.5" />
+        <ChartSourceLine className="px-0.5" basis={comparisonBasis(comparison)} />
       </ChartSourceProvider>
     </section>
   )

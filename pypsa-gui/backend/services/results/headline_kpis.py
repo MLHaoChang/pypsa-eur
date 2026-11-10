@@ -136,6 +136,10 @@ def _card(card_id, value=None, unit=None, *, state="ready", reason=None, **extra
         "reason": reason,
         "formula_id": None,
         "detail": None,
+        # S3: `headline_delta.add_deltas` fills the delta; the trend is the
+        # figure per investment period, where the run has one.
+        "delta": None,
+        "trend": None,
         **extra,
     }
 
@@ -258,10 +262,25 @@ def _checked(ctx, card_id):
         return _card(card_id, state=_UNAVAILABLE[0], reason=_UNAVAILABLE[1])
 
 
-def _cost(card_id, cost, field, per_year):
+def _cost(card_id, cost, field, per_year, trend=None):
     if not cost or cost.get(field) is None:
         return _card(card_id, state="unavailable", reason=NO_COST)
-    return _card(card_id, float(cost[field]), "currency/yr" if per_year else "currency")
+    return _card(
+        card_id,
+        float(cost[field]),
+        "currency/yr" if per_year else "currency",
+        trend=trend,
+    )
+
+
+def _period_totals(cost):
+    """The cost breakdown's total per investment period, in the card's unit:
+    the trend of a run with two or more periods, else None."""
+    periods = (cost or {}).get("by_period") or []
+    points = [{"period": p["period"], "value": float(p["total"])} for p in periods]
+    if len(points) < 2 or not all(math.isfinite(p["value"]) for p in points):
+        return None
+    return points
 
 
 def _unserved(lost_load):
@@ -286,7 +305,9 @@ def headline_kpis(
         # Annualised fixed cost plus the opex of the modelled snapshots: a
         # year's cost only when they cover a year, so it carries no "/yr" (the
         # Capacity expansion tab's "Total system cost" has none either).
-        "system_cost": lambda: _cost("system_cost", cost, "total", False),
+        "system_cost": lambda: _cost(
+            "system_cost", cost, "total", False, _period_totals(cost)
+        ),
         # Annualised: a year's in a single-period run, the horizon's otherwise.
         "new_build_capital": lambda: _cost(
             "new_build_capital", cost, "capex_expansion", not multi
