@@ -144,3 +144,29 @@ def test_guided_step_pairs():
 def test_guided_steps_match_the_workflow():
     enum = _tool('ui_open_panel')['input_schema']['properties']['guided_step']['enum']
     assert enum == _hub_steps()
+
+
+def test_panel_section_pairs():
+    for panel, section in [('campusStudy', 'island'), ('campusElectrical', 'grid_codes'),
+                           ('campusResults', 'electrical_design'), ('gridspine', 'readback'),
+                           ('CampusStudy', 'island'), ('GridSpine', 'readback')]:
+        event = chat_tools.ui_open_panel(panel, panel_section=section)
+        assert (event['panel_id'], event['panel_section']) == (panel, section)
+    for panel, section, title in [('campusStudy', 'grid_codes', 'the grid study'),
+                                  ('gridspine', 'nope', 'Planning → dynamics'),
+                                  ('campusResults', 3, 'the grid study results'),
+                                  ('campusElectrical', 'island', 'the grid connection')]:
+        message = _refusal(lambda: chat_tools.ui_open_panel(panel, panel_section=section), 'panel_section')
+        assert title in message and panel not in message and '`' not in message and '—' not in message
+    message = _refusal(lambda: chat_tools.ui_open_panel('campusStudy', panel_section='grid_codes'), 'panel_section')
+    assert message == 'Choose a section of the grid study: study_settings or island.'
+    _refusal(lambda: chat_tools.ui_open_panel('results', panel_section='island'), 'panel_section')
+    assert json.dumps(chat_tools.ui_open_panel('campusStudy')) == json.dumps(
+        {"_ui_event": True, "kind": "navigate", "panel_id": "campusStudy"})
+
+
+def test_panel_section_enum_matches_the_pairs():
+    props = _tool('ui_open_panel')['input_schema']['properties']
+    assert sorted(props['panel_section']['enum']) == sorted(
+        s for _title, ids in chat_tools._PANEL_SECTIONS.values() for s in ids)
+    assert sorted(chat_tools._PANEL_SECTION_ORDER) == sorted(props['panel_section']['enum'])

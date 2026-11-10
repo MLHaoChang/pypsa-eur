@@ -38,6 +38,7 @@ import {
 } from '../api/campusElectrical'
 import { solveQueueApi } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
+import { usePanelSectionScroll } from './usePanelSectionScroll'
 import { openPanel } from './results/openPanel'
 import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
@@ -127,8 +128,12 @@ function NextPart({ part }: { part: CampusPart }) {
   )
 }
 
+const PART_PANEL = { inputs: 'campusElectrical', study: 'campusStudy', results: 'campusResults' } as const
+
 function CampusPanel({ part }: { part: CampusPart }) {
   const currentProject = useUIStore(s => s.currentProject)
+  // No project: no section to show, so a requested section is dropped rather than kept for later.
+  usePanelSectionScroll(PART_PANEL[part], !currentProject)
   if (!currentProject) {
     return (
       <PageBody>
@@ -198,6 +203,9 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
     setLost(null)
   }, [state.data, state.dataUpdatedAt])
 
+  // A campus read that failed has no sections to scroll to; one that loaded has them on screen.
+  usePanelSectionScroll(PART_PANEL[part], !state.isPending)
+
   if (state.isError && isOtherKind(state.error)) {
     return (
       <PageBody>
@@ -261,7 +269,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
           <RunSection name={name} state={state.data} onChange={refresh} lost={lost} outcome={outcome} pending={pending}
                       onRunStart={onRunStart} onRunLost={onRunLost} />
         ) : (
-          <PageSection title="Study settings">
+          <PageSection panelSection="study_settings" title="Study settings">
             <p className="text-[12px] text-muted">
               Draft the campus file in the grid connection first; the study runs on it.
             </p>
@@ -318,6 +326,7 @@ function CampusFileSection({ name, state, onChange }: {
 
   return (
     <PageSection
+      panelSection="campus_file"
       title="Campus file"
       hint={has ? 'Edit, then save; every value carries its source tag' : 'Draft it from the project, or paste your own'}
       right={has ? (
@@ -366,7 +375,7 @@ function GridConnectionSection({ name, state }: { name: string; state: CampusSta
   const codes = useQuery({ queryKey: GRID_CODES_KEY(name), queryFn: () => campusApi.gridCodes(name), retry: false })
   const unconfirmed = new Set((codes.data?.published ?? []).filter(p => p.unconfirmed.length > 0).map(p => p.id))
   return (
-    <PageSection title="Grid code and PCC" hint="Applies to the next run">
+    <PageSection panelSection="grid_connection" title="Grid code and PCC" hint="Applies to the next run">
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Grid code">
           <select aria-label="Grid code" className={`${INPUT} w-[320px]`} value={draft.profile}
@@ -444,7 +453,7 @@ function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart,
   const busy = run.isPending || milp.isStarting || milp.isRunning || pending
 
   return (
-    <PageSection title="Study settings" hint="Applies to the next run">
+    <PageSection panelSection="study_settings" title="Study settings" hint="Applies to the next run">
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Hours per criterion">
           <input aria-label="Hours per criterion" className={`${INPUT} w-[70px]`} inputMode="numeric" value={k} onChange={e => patch({ k: e.target.value })} />
@@ -668,6 +677,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
       {design && <CampusInvestmentSection state={state} />}
 
       {grid && <PageSection
+        panelSection="grid_code_results"
         title="PCC compliance"
         hint={invested ? 'as the campus is, and with the purchased assets, re-solved' : 'as the campus is, and with the recommended measures'}
       >
@@ -741,7 +751,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
       {grid && <CampusDipsRestartSection dips={r.dips_restart} />}
 
       {design && <>
-      <PageSection title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">
+      <PageSection panelSection="electrical_design" title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">
         <TableScroll>
           <table className="w-full text-[12px]">
             <thead>

@@ -122,3 +122,41 @@ describe.each(['expert', 'guided'] as const)('guided_step in %s', mode => {
     expect(useHubDesignStore.getState().step).toBe('site')
   })
 })
+
+describe.each(['expert', 'guided'] as const)('panel_section in %s', mode => {
+  beforeEach(() => useUIStore.setState({
+    uiMode: mode, activeSlidePanel: null, flowReturn: null, panelSectionRequest: null,
+  }))
+
+  it('opens the panel, asks for the section, and keeps Back to the view it left', () => {
+    useUIStore.setState({ activeSlidePanel: 'overview' })
+    applyUiNavigate({ kind: 'navigate', panel_id: 'campusStudy', panel_section: 'island' })
+    const ui = useUIStore.getState()
+    expect(ui.activeSlidePanel).toBe('campusStudy')
+    expect(ui.panelSectionRequest).toEqual({ panel: 'campusStudy', section: 'island' })
+    expect(ui.flowReturn?.panel).toBe('overview')
+    expect(ui.uiMode).toBe(mode)
+  })
+
+  it('reaches each of the four panels', () => {
+    for (const panel of ['campusElectrical', 'campusStudy', 'campusResults', 'gridspine'] as const) {
+      applyUiNavigate({ kind: 'navigate', panel_id: panel, panel_section: 'x' })
+      expect(useUIStore.getState().panelSectionRequest).toEqual({ panel, section: 'x' })
+    }
+  })
+
+  it('opens the panel as before without a section', () => {
+    applyUiNavigate({ kind: 'navigate', panel_id: 'campusStudy' })
+    const ui = useUIStore.getState()
+    expect(ui.activeSlidePanel).toBe('campusStudy')
+    expect(ui.panelSectionRequest).toBeNull()
+    expect(ui.flowReturn).toBeNull()
+  })
+
+  it('scrolls in place with no Back when the panel is already showing', () => {
+    useUIStore.setState({ activeSlidePanel: 'campusStudy' })
+    applyUiNavigate({ kind: 'navigate', panel_id: 'campusStudy', panel_section: 'island' })
+    expect(useUIStore.getState().panelSectionRequest).toEqual({ panel: 'campusStudy', section: 'island' })
+    expect(useUIStore.getState().flowReturn).toBeNull()
+  })
+})

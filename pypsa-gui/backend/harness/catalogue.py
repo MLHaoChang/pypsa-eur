@@ -55,6 +55,14 @@ PROFILE_KIND_ENUM = ["loads", "generators", "links"]
 # The Guided cards. A literal, because the inventory reads this file without the backend
 # on its path; test_guided_steps_match_the_workflow pins it to the hub-design workflow.
 GUIDED_STEP_ENUM = ["start", "site", "goal", "results", "improve"]
+# The sections of the grid connection, grid study, its results and GridSpine panels chat can scroll to.
+# A literal for the same reason; test_panel_section_enum_matches_the_pairs pins it to chat_tools._PANEL_SECTIONS.
+PANEL_SECTION_ENUM = [
+    "campus_file", "grid_connection", "connection_limits", "grid_codes", "library",
+    "study_settings", "island", "grid_code_results", "electrical_design",
+    "dispatch_source", "configuration", "ranked_snapshots", "assumptions_ledger",
+    "readback", "connection_capacity", "connection_assessment",
+]
 TIMESERIES_KIND_ENUM = ["loads", "generators", "links"]
 # Friendly + SlidePanel ids accepted by ui_open_panel (frontend normalises).
 SAFETY_PANEL_ENUM = [
@@ -2426,6 +2434,8 @@ TOOLS: list[dict[str, Any]] = [
         "adequacy and fmea select their Results tabs. Use map with canvas_view hybrid "
         "(satellite with labels) or site (the 3D site view). "
         "With hubDesign, guided_step opens one Guided card (start, site, goal, results or improve). "
+        "With campusElectrical, campusStudy, campusResults or gridspine, panel_section scrolls to one "
+        "section of that panel (for example island, grid_codes, readback). "
         "With results_tab loadflow, pass loadflow_source, window_from/window_to and "
         "highlight_branch from get_loadflow_summary's ui_reference to open the same source and "
         "window and highlight one line or transformer. Only when one of these is given, an "
@@ -2436,6 +2446,7 @@ TOOLS: list[dict[str, Any]] = [
             "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
             "canvas_view": {"type": "string", "enum": ["blank", "satellite", "hybrid", "site"]},
             "guided_step": {"type": "string", "enum": GUIDED_STEP_ENUM},
+            "panel_section": {"type": "string", "enum": PANEL_SECTION_ENUM},
             "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM},
             "bottom_tab": {"type": "string", "enum": BOTTOM_TAB_ENUM},
             "compare_rail": {"type": "boolean"},

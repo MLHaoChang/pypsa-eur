@@ -14,10 +14,17 @@ import type { CapacityRow, CapacityTable, ConnectionRow, Ledger, RankedSnapshot,
 import GridspinePanel from './GridspinePanel'
 import toast from 'react-hot-toast'
 
-const store = vi.hoisted(() => ({ currentProject: 'Study A' as string | null }))
+const store = vi.hoisted(() => ({
+  currentProject: 'Study A' as string | null,
+  request: null as { panel: string; section: string } | null,
+}))
 
 vi.mock('../store/uiStore', () => ({
-  useUIStore: (sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }),
+  useUIStore: (sel: (s: Record<string, unknown>) => unknown) => sel({
+    currentProject: store.currentProject,
+    panelSectionRequest: store.request,
+    clearPanelSectionRequest: () => { store.request = null },
+  }),
 }))
 
 const queue = vi.hoisted(() => ({ activeJob: undefined as { id: string } | undefined }))
@@ -121,6 +128,7 @@ function renderPanel() {
 
 beforeEach(() => {
   store.currentProject = 'Study A'
+  store.request = null
   queue.activeJob = undefined
   vi.clearAllMocks()
   api.config.mockResolvedValue(config)
@@ -685,5 +693,40 @@ describe('connection-point assessment', () => {
     await userEvent.type(within(section).getByLabelText('Load (MW)'), '50')
     await userEvent.click(within(section).getByRole('button', { name: 'Assess' }))
     expect(await within(section).findByText(/unknown bus 'BUS_99'/)).toBeTruthy()
+  })
+})
+
+// LC-14 item 5: chat's panel_section scrolls the panel to a named section once its data is on screen.
+describe('GridspinePanel panel_section', () => {
+  const scrolled: string[] = []
+  beforeEach(() => {
+    scrolled.length = 0
+    Element.prototype.scrollIntoView = function scroll(this: Element) {
+      scrolled.push(this.getAttribute('data-panel-section') ?? '')
+    }
+  })
+
+  it.each(['readback', 'ranked_snapshots', 'assumptions_ledger', 'configuration', 'dispatch_source'])(
+    'scrolls to %s once the study has loaded, and clears the request', async section => {
+      store.request = { panel: 'gridspine', section }
+      renderPanel()
+      await waitFor(() => expect(scrolled).toEqual([section]))
+      expect(store.request).toBeNull()
+    })
+
+  it('clears a request for a section that is not on screen, without scrolling', async () => {
+    api.status.mockResolvedValue({ ...completed, status: 'pending' })  // no snapshots, capacity or connection yet
+    store.request = { panel: 'gridspine', section: 'ranked_snapshots' }
+    renderPanel()
+    await waitFor(() => expect(store.request).toBeNull())
+    expect(scrolled).toEqual([])
+  })
+
+  it('leaves a request for another panel alone', async () => {
+    store.request = { panel: 'campusStudy', section: 'island' }
+    renderPanel()
+    await screen.findByTestId('stage-ingest')
+    expect(store.request).not.toBeNull()
+    expect(scrolled).toEqual([])
   })
 })
