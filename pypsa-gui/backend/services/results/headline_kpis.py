@@ -66,8 +66,10 @@ INPUTS_CHANGED = ("stale", "The inputs changed since this solve.")
 LOAD_FLOW_REPLACED = ("unavailable", "A load flow replaced the results of this solve.")
 NOT_OPTIMAL = ("unavailable", "The solve did not finish with an optimal result.")
 CASE_NOT_RUN = ("not_run", "The investment case has not run on this solve.")
-CASE_RUNNING = ("unavailable", "The investment case is still running.")
-CASE_STALE = ("stale", "The investment case is older than its inputs.")
+# "stale" is kept for the solve itself: the strip marks every figure out of
+# date on it. A case to run or re-run is "not_run", which links to its tab.
+CASE_RUNNING = ("not_run", "The investment case is still running.")
+CASE_STALE = ("not_run", "The investment case is older than its inputs.")
 CASE_UNREAD = ("unavailable", "The investment case could not be read just now.")
 REASONS = {
     "no_variable_generators": (
