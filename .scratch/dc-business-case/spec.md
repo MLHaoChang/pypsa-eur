@@ -3,7 +3,7 @@
 
 # Data-centre business case: a standalone project P&L beside the investment case
 
-Status: ready-for-agent once 01 merges (GK B plan GO with BC1–BC10, GK A with BC3-1..8, owner DCBC-SCOPE-1, all 2026-11-10)
+Status: ready-for-agent once #1316 merges (GK B plan GO with BC1–BC10, GK A with BC3-1..8, owner DCBC-SCOPE-1, all 2026-11-10)
 Owner request: 2026-11-10 (coordinator brief, session `session_01G7qCujw1M4yEuv53K2qCpG`)
 Research: [research.md](research.md)
 Reviewers: GK B (finance engine, lead), GK A (DC load and engine parts), UX (the view, slice 06)

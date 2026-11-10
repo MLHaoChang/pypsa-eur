@@ -3,7 +3,7 @@
 
 # 01 — Design plan: the data-centre business case
 
-Status: ready-for-human (GK B and GK A plan GO and owner DCBC-SCOPE-1, 2026-11-10; merges with this PR)
+Status: done (#1316; GK B and GK A plan GO, owner DCBC-SCOPE-1, 2026-11-10)
 Type: task
 Blocked by: —
 Gated: yes (GK B finance plan GO; GK A for the DC side)
