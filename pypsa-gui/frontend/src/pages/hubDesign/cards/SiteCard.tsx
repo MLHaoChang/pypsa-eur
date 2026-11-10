@@ -6,6 +6,7 @@
 // Off-grid (P24-BE gate N4): the pack islands the import, so a tagged tie is
 // "normally open", not a grid connection with a rating, and its missing
 // outage data is not a gap — the island is studied without it.
+import { SkeletonLines } from '../../../components/Skeleton'
 import { useEffect, useRef } from 'react'
 import { useUIStore } from '../../../store/uiStore'
 import type { EhArchetype, EhReadiness, EhTemplateMeta } from '../../../api/simulation'
@@ -191,10 +192,11 @@ export function SiteCard() {
             {ROW_META.map(m => <SiteRow key={m.k} {...m} row={rows[m.k]} liveStudy={liveStudy} />)}
           </ul>
         ) : (
-          <p className="text-[12px] text-muted">
-            {isError ? 'The site check could not be read — ask the assistant for help.'
-              : 'Checking the site…'}
-          </p>
+          isError ? (
+            <p className="text-[12px] text-muted">
+              The site check could not be read — ask the assistant for help.
+            </p>
+          ) : <SkeletonLines what="the site check" rows={3} testId="hub-site-loading" />
         )}
       </div>
 
