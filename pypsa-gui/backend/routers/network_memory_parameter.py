@@ -7,7 +7,7 @@ See `services/memory_parameters.py`.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session as DBSession
 
@@ -35,6 +35,7 @@ def apply_memory_parameter(
     user: User = Depends(require_user),
 ) -> dict:
     """The user's Apply on the card they saw: the digest must still be current."""
+    from routers.memory import _raise
     from services import memory_parameters as P
     from services import memory_store as M
 
@@ -43,4 +44,4 @@ def apply_memory_parameter(
         return P.apply(db, user, project, body.item_id, body.version, body.component_class,
                        body.name, body.digest)
     except M.MemoryError as exc:
-        raise HTTPException(exc.status, {"error_kind": exc.kind, "message": str(exc)}) from None
+        _raise(exc)

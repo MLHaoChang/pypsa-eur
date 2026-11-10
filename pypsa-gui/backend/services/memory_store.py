@@ -74,6 +74,8 @@ TRANSITIONS: dict[str, tuple[tuple[str, ...], str]] = {
 }
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$")
+# PyPSA carrier names carry spaces ("solar rooftop", "urban central heat").
+_CARRIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_. \-]{0,63}$")
 _PARAM = re.compile(r"^[A-Z][A-Za-z]{0,47}\.[a-z][a-z0-9_]{0,63}$")
 
 
@@ -180,7 +182,7 @@ def validate_concept_key(key: Any) -> str:
 
             ok = ident.split(".", 1)[0] in _known_classes()
     elif ns == "carrier":
-        ok = bool(_ID.match(ident))
+        ok = bool(_CARRIER.match(ident)) and not ident.endswith(" ")
     elif ns == "step":
         ok = ident in _step_ids()
     elif ns == "report":
@@ -1024,7 +1026,7 @@ def node(db: DBSession, user: User, item_id: str | uuid.UUID, version: int) -> d
         "owner_scope": item.owner_scope,
         "summary": v.summary,
         "evidence": evidence_for(db, user, json.loads(v.evidence_json or "[]")),
-        "state": "from memory, user-approved",
+        "state": f"from memory v{v.version}, user-approved",
     }
 
 

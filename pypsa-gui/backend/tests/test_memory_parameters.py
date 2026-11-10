@@ -103,7 +103,7 @@ def test_save_reads_value_unit_carrier_and_money_from_the_project(client, proj):
     assert item["kind"] == "parameter" and item["status"] == "confirmed" and item["origin"] == "button"
     assert item["body"] == {"component_class": "Generator", "field": "marginal_cost", "value": 50.0,
                             "unit": "EUR/MWh", "currency": "EUR", "currency_year": 2024, "carrier": "gas"}
-    assert item["concept_keys"] == ["param:Generator.marginal_cost"]
+    assert item["concept_keys"] == ["carrier:gas", "param:Generator.marginal_cost"]
     assert item["evidence"][0]["id"] == proj.id and item["evidence"][0]["access"] is True
 
 
@@ -238,7 +238,8 @@ def test_an_org_item_of_the_projects_org_is_suggested(client, proj, _auth_db):
 
 def test_another_user_reads_no_suggestions_of_a_project_they_cannot_open(client, proj, other_org_client):
     _save(client, proj, field="p_nom")
-    r = other_org_client.get(SUGGEST, params={"project_id": proj.id, "component_class": "Generator"})
+    r = other_org_client.get(SUGGEST, params={"project_id": proj.id, "component_class": "Generator",
+                                              "name": "gas"})
     assert r.status_code == 404
 
 
@@ -391,6 +392,7 @@ def test_a_vanished_field_is_refused_and_never_applied(client, proj, _auth_db):
         body = json.loads(v.body_json)
         v.body_json = json.dumps({**body, "field": "p_nom_gone"})
         db.commit()
+    assert _chips(client, proj) == {}  # never offered (M6)
     r = _preview(client, proj, chip)
     assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "memory_field_unknown"
 
@@ -404,6 +406,7 @@ def test_a_unit_mismatch_is_refused(client, proj, _auth_db):
         v = db.scalar(select(MemoryItemVersion).where(MemoryItemVersion.item_id == uuid.UUID(chip["id"][4:])))
         v.body_json = json.dumps({**json.loads(v.body_json), "unit": "kW"})
         db.commit()
+    assert _chips(client, proj) == {}  # never offered (M6)
     r = _preview(client, proj, chip)
     assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "memory_unit_mismatch"
 
@@ -455,6 +458,7 @@ def test_node_reads_one_version_for_the_provenance_graph(client, proj, _auth_db,
         user = db.get(User, seeded_identity["user_id"])
         node = M.node(db, user, item["id"], 1)
         assert node["id"] == f"{item['id']}@v1" and node["kind"] == "parameter"
+        assert node["state"] == "from memory v1, user-approved"  # M9
         assert node["evidence"][0]["access"] is True
         with pytest.raises(M.MemoryError) as exc:
             M.node(db, user, item["id"], 2)
@@ -590,10 +594,10 @@ def test_money_stamp_reads_provenance_then_the_case(monkeypatch, entry, fin, bas
 
 # ── Second mutant pass ───────────────────────────────────────────────────────
 
-def test_without_an_asset_name_every_carrier_is_suggested(client, proj):
+def test_suggestions_need_the_asset_so_the_carrier_filter_always_holds(client, proj):
     _save(client, proj, field="p_nom")  # gas
     r = client.get(SUGGEST, params={"project_id": proj.id, "component_class": "Generator"})
-    assert r.status_code == 200 and "p_nom" in r.json()["fields"]
+    assert r.status_code == 422
 
 
 def test_last_used_ranks_before_last_updated(client, proj, _auth_db):
@@ -643,3 +647,34 @@ def test_finance_reads_the_case_only_when_it_states_one(monkeypatch, raw, want):
     monkeypatch.setattr(P, "_finance_config", lambda: type("C", (), {"finance": raw})())
     fin = P._finance()
     assert (None if fin is None else (fin.currency, fin.currency_year)) == want
+
+
+# ── Spec review ──────────────────────────────────────────────────────────────
+
+def test_each_carrier_keeps_its_own_saved_value(client, proj):
+    gas = _save(client, proj, field="p_nom", name="gas").json()
+    solar = _save(client, proj, field="p_nom", name="solar").json()
+    assert gas["id"] != solar["id"] and gas["version"] == solar["version"] == 1
+    assert [c["id"] for c in _chips(client, proj, "gas")["p_nom"]] == [gas["id"]]
+    assert [c["id"] for c in _chips(client, proj, "solar")["p_nom"]] == [solar["id"]]
+
+
+def test_a_carrier_name_with_spaces_saves_and_suggests(client, proj):
+    proj.net().generators.at["solar", "carrier"] = "solar rooftop"
+    r = _save(client, proj, field="p_nom", name="solar")
+    assert r.status_code == 201, r.text
+    assert "carrier:solar rooftop" in r.json()["concept_keys"]
+    assert _chips(client, proj, "solar")["p_nom"][0]["carrier"] == "solar rooftop"
+
+
+def test_a_chip_equal_to_the_fields_value_is_marked_current(client, proj):
+    _save(client, proj, field="p_nom")
+    assert _chips(client, proj)["p_nom"][0]["current"] is True
+    _set_value(proj, 10.0, "p_nom")
+    assert _chips(client, proj)["p_nom"][0]["current"] is False
+
+
+def test_the_preview_note_shows_no_internal_id(client, proj):
+    chip = _saved_chip(client, proj)
+    note = _preview(client, proj, chip).json()["memory_note"]
+    assert chip["id"] not in note and "mem_" not in note and "Replaces 10 " in note

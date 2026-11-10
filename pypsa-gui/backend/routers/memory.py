@@ -328,18 +328,17 @@ class SuggestionPreview(ParameterTarget):
 def list_suggestions(
     project_id: str,
     component_class: str,
-    name: str | None = None,
+    name: str,
     db: DBSession = Depends(get_db),
     user: User = Depends(require_user),
 ) -> dict:
-    """Saved values for each field of `component_class` in this project's org
-    (§9 M1), as chips. A read: nothing is applied (COPILOT-1)."""
+    """Saved values for each field of the asset `name` in the open project, scoped to
+    its org (§9 M1) and carrier (GK B P3), as chips. A read: nothing is applied
+    (COPILOT-1)."""
     from services import memory_parameters as P
 
     try:
-        project = P.readable_project(db, user, project_id)
-        if name is not None:
-            project = P.bound_project(db, user, project_id)
+        project = P.bound_project(db, user, project_id)
         return {"fields": P.suggestions(db, user, project, component_class, name)}
     except M.MemoryError as exc:
         _raise(exc)

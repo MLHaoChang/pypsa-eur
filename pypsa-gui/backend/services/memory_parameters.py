@@ -18,7 +18,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -128,18 +127,6 @@ def bound_project(db: DBSession, user: User, project_id: str) -> Project:
     return project
 
 
-def readable_project(db: DBSession, user: User, project_id: str) -> Project:
-    """A project the caller may read (suggestions need read access only, GK B P6)."""
-    from fastapi import HTTPException
-
-    from services import project_registry
-
-    try:
-        return project_registry.resolve_project(db, user, project_id)
-    except HTTPException:
-        raise M.MemoryError("not found", "not_found", 404) from None
-
-
 # ── Save for reuse ────────────────────────────────────────────────────────────
 
 def save(db: DBSession, user: User, project: Project, component_class: str, name: str,
@@ -163,8 +150,9 @@ def save(db: DBSession, user: User, project: Project, component_class: str, name
         body["currency"], body["currency_year"] = currency, year
     evidence = [{"kind": "project", "id": str(project.id), "label": project.name,
                  "at": datetime.now(UTC).isoformat(timespec="seconds")}]
+    keys = [f"param:{component_class}.{field}"] + ([f"carrier:{body['carrier']}"] if carrier else [])
     return M.create_item(
-        db, user, kind="parameter", body=body, concept_keys=[f"param:{component_class}.{field}"],
+        db, user, kind="parameter", body=body, concept_keys=keys,
         project_kind=project.project_kind, evidence=evidence, status="confirmed", origin="button",
         org_id=project.org_id, parameter_ok=True,
     )
@@ -173,20 +161,21 @@ def save(db: DBSession, user: User, project: Project, component_class: str, name
 # ── Suggestions ───────────────────────────────────────────────────────────────
 
 def suggestions(db: DBSession, user: User, project: Project, component_class: str,
-                name: str | None = None) -> dict[str, list[dict]]:
-    """Confirmed `parameter` items for `component_class`, by field: only items of the
-    project's org (§9 M1, user and org items alike), of its project kind or of any, and
-    with no carrier or the target's carrier (GK B P3). At most 3 per field, ranked by
-    times applied, then last used, then last updated."""
+                name: str) -> dict[str, list[dict]]:
+    """Confirmed `parameter` items for the asset `name` of `component_class`, by field:
+    only items of the project's org (§9 M1, user and org items alike), of its project
+    kind or of any, with no carrier or the asset's carrier (GK B P3), and whose field
+    and stored unit still hold (M6). `current` marks a chip equal to the field's value
+    (UX P2). At most 3 per field, ranked by times applied, then last used, then last
+    updated."""
     from sqlalchemy import or_
 
     from services.asset_schema.fields import known_components
 
     if component_class not in known_components():
         raise _refuse(f"{component_class} is not a component class", "memory_field_unknown")
-    carrier = None
-    if name is not None:
-        _v, _s, carrier = _current(_network(), component_class, name, "carrier")
+    n = _network()
+    _v, _s, carrier = _current(n, component_class, name, "carrier")
     rows = db.scalars(select(MemoryItem).where(
         MemoryItem.kind == "parameter",
         MemoryItem.status == "confirmed",
@@ -201,14 +190,22 @@ def suggestions(db: DBSession, user: User, project: Project, component_class: st
         body = json.loads(v.body_json) if v.body_json else None
         if not body or body.get("component_class") != component_class:
             continue
-        if name is not None and body.get("carrier") and body["carrier"] != carrier:
+        if body.get("carrier") and body["carrier"] != carrier:
             continue
+        try:
+            spec = M.parameter_spec(component_class, body["field"])
+        except M.MemoryError:
+            continue  # the field left the schema: never offered (M6)
+        if spec.unit_storage != body["unit"]:
+            continue
+        current = _current(n, component_class, name, spec.key)[0]
         evidence = M.evidence_for(db, user, json.loads(v.evidence_json or "[]"))
         source = next((e for e in evidence if e.get("kind") == "project"), None)
         chip = {
             "id": M.public_id(item.id), "version": item.current_version, "scope": item.owner_scope,
             "value": body["value"], "unit": body["unit"], "currency": body.get("currency"),
             "currency_year": body.get("currency_year"), "carrier": body.get("carrier"),
+            "current": current is not None and current == body["value"],
             "saved_at": M._aware(item.updated_at).isoformat(timespec="seconds"),
             "source": None if source is None else {"label": source.get("label"),
                                                    "id": source.get("id"),
@@ -247,7 +244,7 @@ def plan(db: DBSession, user: User, project: Project, item_id: str, version: int
     try:
         spec = M.parameter_spec(component_class, body["field"])
     except M.MemoryError as exc:
-        raise _refuse(f"{body['component_class']}.{body['field']} is no longer a field of this "
+        raise _refuse("The saved field is no longer a field of this "
                       "app, so the saved value is not applied.", exc.kind) from None
     if spec.unit_storage != body["unit"]:
         raise _refuse(f"{spec.label}: saved in {body['unit']}, this field is stored in "
@@ -298,10 +295,12 @@ def preview(db: DBSession, user: User, project: Project, item_id: str, version: 
         raise _refuse("This field already has the saved value.", "memory_no_change")
     card = edit_card.preview("update_component", p["args"])
     m = p["memory"]
-    note = (f"From memory {m['item']} v{m['version']}: {m['value']:g} {m['unit']}"
+    before = m["target"]["value"]
+    note = (f"Saved value (version {m['version']}): {m['value']:g} {m['unit']}"
             + (f", {m['currency_year']} {m['currency']}" if m["currency"] else "")
             + (f", {m['carrier']}" if m["carrier"] else "")
-            + f". Replaces {m['target']['value']} (source: {m['target']['source'] or 'typed'}).")
+            + (f". Replaces {before:g}" if before is not None else ". The field has no value yet")
+            + f" (source: {m['target']['source'] or 'typed'}).")
     return {**card, "memory": m, "memory_note": note, "digest": digest(card["digest"], m),
             "card_digest": card["digest"]}
 
@@ -320,11 +319,12 @@ def apply(db: DBSession, user: User, project: Project, item_id: str, version: in
         raise _refuse("The card changed since it was shown. Look at it again before applying.",
                       "edit_preview_stale", 409)
     m = p["memory"]
+    stamp = SOURCE.format(id=m["item"], version=m["version"])
     chat_tools.update_component(component_class, name, p["args"]["attrs"])
     n = _network()
     provenance.record(
         n, component_class, name, m["field"], status="customised",
-        source=SOURCE.format(id=m["item"], version=m["version"]),
+        source=stamp,
         currency=m["currency"], currency_year=m["currency_year"],
         approved_by=getattr(user, "email", None),
         approved_at=datetime.now(UTC).isoformat(timespec="seconds"),
@@ -332,10 +332,10 @@ def apply(db: DBSession, user: User, project: Project, item_id: str, version: in
     )
     counted = True
     try:
-        M.record_apply(db, user, uuid.UUID(m["item"][4:]))
+        M.record_apply(db, user, M.parse_id(m["item"]))
     except Exception:  # noqa: BLE001 - the apply stands; the result says so (GK B P5)
         db.rollback()
         counted = False
     return {"component_class": component_class, "name": name, "written": p["args"]["attrs"],
-            "source": SOURCE.format(id=m["item"], version=m["version"]), "memory": m,
+            "source": stamp, "memory": m,
             "apply_counted": counted, "receipt": edit_card.receipt(card, p["args"])}
