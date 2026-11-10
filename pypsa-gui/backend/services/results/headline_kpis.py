@@ -64,6 +64,10 @@ CHECKED = {
 #: identifier appears in a sentence (docs/agents/review-ux.md). The two refusals
 #: with more than one cause are split in `_why`.
 _UNAVAILABLE = ("unavailable", "This run cannot give this figure.")
+SWITCHED_OFF = (
+    "unavailable",
+    "Checked figures are switched off for this installation.",
+)
 BUSY = ("unavailable", "The project is busy. Try again in a moment.")
 INPUTS_CHANGED = ("stale", "The inputs changed since this solve.")
 LOAD_FLOW_REPLACED = ("unavailable", "A load flow replaced the results of this solve.")
@@ -198,9 +202,12 @@ def _peak_branch(raw, scope, peak):
 
 
 def _shown(profile):
-    """Whether the strip shows this checked profile. The one place for the
-    rollout gate (chat's is `harness.rollout.profile_enabled`)."""
-    return True
+    """Whether the strip shows this checked profile: the switch chat's checked
+    answers use (`PYPSA_GUI_ANSWER_ASSURANCE_PROFILES`; owner decision
+    STRIP-GATE-1). The one place for the gate."""
+    from harness.rollout import profile_enabled
+
+    return profile_enabled(profile)
 
 
 def _checked(ctx, card_id):
@@ -214,7 +221,7 @@ def _checked(ctx, card_id):
 
     profile, metric = CHECKED[card_id]
     if not _shown(profile):
-        return _card(card_id, state=_UNAVAILABLE[0], reason=_UNAVAILABLE[1])
+        return _card(card_id, state=SWITCHED_OFF[0], reason=SWITCHED_OFF[1])
     scope = {
         "project_id": ctx.project_uuid,
         "profile": profile,
