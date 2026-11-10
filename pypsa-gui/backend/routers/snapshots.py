@@ -48,6 +48,7 @@ from services.dispatch_status import (
 )
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.pypsa_service import PyPSAService
+from services.reports import store as report_store
 
 # Reuse the same path-validation pattern as projects.py — snapshots inherit the
 # project-name safety check by going through `_safe_project_dir`.
@@ -56,6 +57,7 @@ from services.atomic_io import (
     atomic_write_with as _atomic_write_with,
 )
 from routers.projects import (
+    _reports_copy_guard,
     _BUNDLE_DIRS,
     _BUNDLE_FILES,
     _enforce_project_lock,
@@ -449,6 +451,23 @@ def _create_snapshot_internal(
     project_dir: pathlib.Path | None = None,
 ) -> SnapshotInfo:
     """
+    `_capture_snapshot` under the project's report locks (study harness 07e),
+    so each report is captured as one consistent set of files. They are taken
+    after the network lock (`_reports_copy_guard`) and before the snapshot
+    directory exists: busy → 409 `report_busy` and no snapshot is left behind.
+    """
+    if project_dir is None:
+        project_dir = _safe_project_dir(name)
+    with PyPSAService.get_lock(), _reports_copy_guard(project_dir):
+        return _capture_snapshot(name, label, message, protect, project_dir)
+
+
+def _capture_snapshot(
+    name: str, label: str, message: str,
+    protect: frozenset[str] | None = None,
+    project_dir: pathlib.Path | None = None,
+) -> SnapshotInfo:
+    """
     Shared snapshot-creation core used by both the public endpoint and the
     restore safety net. Splits out so callers can pass a ``protect`` set for
     the at-cap-restore edge case.
@@ -769,6 +788,8 @@ def restore_snapshot(
             protect=frozenset({snapshot_id}),
         )
     except HTTPException as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("error_kind") == "report_busy":
+            raise  # 07e: retryable, and nothing was written
         # If the pre-restore snapshot fails, refuse the restore — losing work
         # is worse than a confusing error.
         raise HTTPException(
@@ -791,7 +812,9 @@ def restore_snapshot(
     # (e.g. autosave triggering during restore) could lose updates without
     # the lock.
     from services import dirty_state, undo_service
-    with PyPSAService.get_lock():
+    # The report locks too (study harness 07e), before the first file is
+    # overwritten: a restore never interleaves with a report writer.
+    with PyPSAService.get_lock(), _reports_copy_guard(snap_dir, project_dir):
         _refuse_if_changed_since(project, saved_revision)
         # Copy snapshot's files over the project's. Use atomic-write per file
         # so a crash mid-restore leaves either the pre-restore file or the
@@ -842,6 +865,10 @@ def restore_snapshot(
             live = project_dir / dname
             if live.exists() and not (snap_dir / dname).exists():
                 try:
+                    if dname == report_store.REPORTS_DIRNAME:
+                        # Report by report, and never the held lock files.
+                        report_store.clear_reports(project_dir)
+                        continue
                     _force_rmtree(live)
                 except OSError as exc:
                     logger.warning("restore: could not remove %s: %s", live, exc)

@@ -257,6 +257,9 @@ _REPORT_LOCKS: dict[str, threading.RLock] = {}
 _REPORT_LOCKS_GUARD = threading.Lock()
 _HELD = threading.local()
 LOCK_TIMEOUT_S = 30
+# A bundle copy's bound for all its report locks together (07e, GK B L2).
+COPY_LOCK_TIMEOUT_S = 3
+_COPY_LOCK_ROUNDS = 5
 
 
 class ReportBusy(ReportStoreError):
@@ -280,8 +283,8 @@ def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | N
     (`harness.durable.file_lock`, GK B's #1070 ruling), taken once per
     thread; a thread lock in front of it makes it re-entrant, so a holder
     may call `save_version`. `ReportBusy` when another process keeps it past
-    `LOCK_TIMEOUT_S` (or `timeout`, for a caller sharing one deadline over
-    several reports)."""
+    `LOCK_TIMEOUT_S`. With `timeout` (a bundle copy sharing one deadline over
+    several reports) that bound also covers a thread of this process."""
     from harness.durable import file_lock
 
     rid = validate_report_id(report_id)
@@ -289,7 +292,12 @@ def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | N
     key = str((root / rid).resolve())
     with _REPORT_LOCKS_GUARD:
         lock = _REPORT_LOCKS.setdefault(key, threading.RLock())
-    with lock:
+    # A writer waits for another thread of this process as long as it takes
+    # (07c); a caller with a `timeout` is refused when that thread keeps it.
+    started = None if timeout is None else time.monotonic()
+    if not lock.acquire(timeout=-1 if timeout is None else max(0.0, timeout)):
+        raise ReportBusy(f"report {rid} is being written")
+    try:
         held = getattr(_HELD, "keys", None)
         if held is None:
             held = _HELD.keys = set()
@@ -297,9 +305,10 @@ def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | N
             yield
             return
         root.mkdir(parents=True, exist_ok=True)
+        left = (LOCK_TIMEOUT_S if timeout is None
+                else max(0.0, timeout - (time.monotonic() - started)))
         try:
-            with file_lock(str(root / f".{rid}.lock"),
-                           timeout=LOCK_TIMEOUT_S if timeout is None else timeout,
+            with file_lock(str(root / f".{rid}.lock"), timeout=left,
                            busy=f"report {rid} is being written"):
                 held.add(key)
                 try:
@@ -308,6 +317,8 @@ def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | N
                     held.discard(key)
         except TimeoutError as exc:
             raise ReportBusy(f"report {rid} is being written by another process") from exc
+    finally:
+        lock.release()
 
 
 # ── bundle copies (study harness 07e) ───────────────────────────────────────
@@ -336,6 +347,10 @@ def _lockable_ids(project_dir: pathlib.Path | None) -> set[str]:
     return ids
 
 
+def _reports_key(project_dir: pathlib.Path | None) -> str | None:
+    return None if project_dir is None else str(reports_dir(project_dir).resolve())
+
+
 @contextmanager
 def reports_copy_lock(src: pathlib.Path | None = None, dst: pathlib.Path | None = None,
                       *, incoming: tuple[str, ...] | frozenset[str] | set[str] = ()):
@@ -345,28 +360,42 @@ def reports_copy_lock(src: pathlib.Path | None = None, dst: pathlib.Path | None 
 
     `src` is read: its own reports are locked. `dst` is written: its reports,
     `src`'s and the `incoming` ids (an import's archive) are locked there.
-    Yields `{"src": ids, "dst": ids}`, the ids held on each side; a copy
-    touches only those, so a report created after the set was taken is left
-    alone and serialises after the copy.
+    Yields `{"src": ids, "dst": ids}`, the ids held on each side. A copy
+    touches only those: a report created after the set was taken is neither
+    copied nor removed, so it serialises after the copy.
 
-    Locks are taken in sorted `(reports dir, id)` order, so two copies cannot
-    deadlock; a report writer holds one lock and takes nothing inside it. All
-    of them share one `LOCK_TIMEOUT_S` deadline. A report that appears while
-    they are being taken releases the set and starts over, to keep the order.
-    `ReportBusy`, with every lock released, when the deadline passes."""
+    Order: the locks are taken in sorted `(reports dir, id)` order, so two
+    copies cannot deadlock, and after `PyPSAService.get_lock()` when the copy
+    holds that too; a report writer holds one report lock and takes neither
+    inside it. All of them share one `COPY_LOCK_TIMEOUT_S` deadline, short
+    because the network lock may be held meanwhile. A report that appears
+    while they are being taken releases the set and starts over, to keep the
+    order, at most `_COPY_LOCK_ROUNDS` times.
+
+    Nested in the same thread (`copy_reports` under a route's own hold), a
+    side the outer call holds keeps the outer id set and is not listed again.
+
+    `ReportBusy`, with every lock released, when the deadline passes or the
+    reports keep changing."""
     extra = {validate_report_id(rid) for rid in incoming}
-    deadline = time.monotonic() + LOCK_TIMEOUT_S
+    holds = getattr(_HELD, "copies", None)
+    if holds is None:
+        holds = _HELD.copies = {}
+    src_key, dst_key = _reports_key(src), _reports_key(dst)
+    deadline = time.monotonic() + COPY_LOCK_TIMEOUT_S
 
     def wanted() -> tuple[set[str], set[str]]:
-        src_ids = _lockable_ids(src)
-        dst_ids = (_lockable_ids(dst) | src_ids | extra) if dst is not None else set()
-        return src_ids, dst_ids
+        src_ids = set(holds[src_key]) if src_key in holds else _lockable_ids(src)
+        if dst is None:
+            return src_ids, set()
+        dst_ids = set(holds[dst_key]) if dst_key in holds else _lockable_ids(dst)
+        return src_ids, dst_ids | src_ids | extra
 
-    while True:
+    for _ in range(_COPY_LOCK_ROUNDS):
         src_ids, dst_ids = wanted()
         keys = sorted(
-            {(str(reports_dir(src).resolve()), rid, "src") for rid in src_ids}
-            | {(str(reports_dir(dst).resolve()), rid, "dst") for rid in dst_ids}
+            {(src_key, rid, "src") for rid in src_ids}
+            | {(dst_key, rid, "dst") for rid in dst_ids}
         )
         with ExitStack() as stack:
             for _root, rid, side in keys:
@@ -376,8 +405,27 @@ def reports_copy_lock(src: pathlib.Path | None = None, dst: pathlib.Path | None 
                 ))
             if wanted() != (src_ids, dst_ids):
                 continue
-            yield {"src": frozenset(src_ids), "dst": frozenset(dst_ids)}
+            mine = {
+                key: frozenset(ids)
+                for key, ids in ((src_key, src_ids), (dst_key, dst_ids))
+                if key is not None and key not in holds
+            }
+            holds.update(mine)
+            try:
+                yield {"src": frozenset(src_ids), "dst": frozenset(dst_ids)}
+            finally:
+                for key in mine:
+                    holds.pop(key, None)
             return
+    raise ReportBusy("the project's reports kept changing while a copy waited for them")
+
+
+def in_copy(name: str, held: frozenset[str] | set[str]) -> bool:
+    """Whether the entry `reports/<name>` belongs to a copy holding `held`:
+    never a lock file, and a report only when its lock is held."""
+    if _lock_file_id(name):
+        return False
+    return not _REPORT_ID.fullmatch(name) or name in held
 
 
 def _swap_in(build, target: pathlib.Path) -> None:
@@ -404,6 +452,13 @@ def _swap_in(build, target: pathlib.Path) -> None:
                 leftover.unlink(missing_ok=True)
 
 
+def _remove_entry(entry: pathlib.Path) -> None:
+    if entry.is_dir() and not entry.is_symlink():
+        shutil.rmtree(entry)
+    else:
+        entry.unlink()
+
+
 def copy_reports(src: pathlib.Path, dst: pathlib.Path) -> None:
     """Make `dst`'s `reports/` a copy of `src`'s, one report at a time under
     `reports_copy_lock`. No `reports/` in `src` → nothing changes.
@@ -417,28 +472,28 @@ def copy_reports(src: pathlib.Path, dst: pathlib.Path) -> None:
         return
     with reports_copy_lock(src, dst) as held:
         dst_root.mkdir(parents=True, exist_ok=True)
-
-        def ours(entry: pathlib.Path, side: str) -> bool:
-            if _lock_file_id(entry.name):
-                return False
-            return not _REPORT_ID.fullmatch(entry.name) or entry.name in held[side]
-
-        names = {e.name for e in src_root.iterdir() if ours(e, "src")}
+        names = {e.name for e in src_root.iterdir() if in_copy(e.name, held["src"])}
         for entry in list(dst_root.iterdir()):
-            if entry.name in names or not ours(entry, "dst"):
-                continue
-            if entry.is_dir() and not entry.is_symlink():
-                shutil.rmtree(entry)
-            else:
-                entry.unlink()
+            if entry.name not in names and in_copy(entry.name, held["dst"]):
+                _remove_entry(entry)
         for name in sorted(names):
             entry = src_root / name
-            if entry.is_dir():
-                _swap_in(lambda tmp, entry=entry: shutil.copytree(str(entry), str(tmp)),
-                         dst_root / name)
-            else:
-                _swap_in(lambda tmp, entry=entry: shutil.copy2(str(entry), str(tmp)),
-                         dst_root / name)
+            copy = shutil.copytree if entry.is_dir() else shutil.copy2
+            _swap_in(lambda tmp, entry=entry, copy=copy: copy(str(entry), str(tmp)),
+                     dst_root / name)
+
+
+def clear_reports(project_dir: pathlib.Path) -> None:
+    """Remove every report of the project under `reports_copy_lock` (a restore
+    to a state that had none). The lock files, and a report created after the
+    locks were taken, stay. `ReportBusy` before anything is removed."""
+    root = reports_dir(project_dir)
+    if not root.is_dir():
+        return
+    with reports_copy_lock(None, project_dir) as held:
+        for entry in list(root.iterdir()):
+            if in_copy(entry.name, held["dst"]):
+                _remove_entry(entry)
 
 
 def create_report(project_dir: pathlib.Path, doc: ReportDocument) -> ReportMeta:
