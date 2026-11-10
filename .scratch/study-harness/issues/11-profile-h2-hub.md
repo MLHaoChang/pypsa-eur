@@ -3,7 +3,7 @@
 
 # 11 — Harness profile: eh_h2_hub and eh_h2_hub_staged
 
-Status: ready-for-agent
+Status: done (#1318)
 Type: task
 Blocked by: 07
 Gated: yes (GK B; GK A for the IC counterfactual rule's engine dependency)
