@@ -225,7 +225,12 @@ def _with_member(data: bytes, member: str) -> bytes:
 def test_export_refuses_while_a_report_is_being_written(client, project):
     name, pdir = project
     with held_elsewhere(pdir, RID_A):
-        _busy(client.get(f"/api/projects/{name}/bundle"))
+        resp = client.get(f"/api/projects/{name}/bundle")
+    _busy(resp)
+    assert resp.json()["detail"]["message"] == (
+        "A report of this project is being written, so its reports could not "
+        "be copied; nothing was changed. Try again in a moment."
+    )
 
 
 def test_export_carries_the_reports_and_no_lock_file(client, project):
@@ -582,6 +587,62 @@ def test_a_save_as_waits_for_the_network_lock_before_any_report_lock(
         pdir / "reports"
     )
 
+
+
+def test_the_save_as_early_check_waits_for_the_network_lock_before_any_report_lock(
+    client, project, project_storage_dir, monkeypatch
+):
+    """`_refuse_copy_of_busy_reports`, not patched out (GK B N1)."""
+    from routers import projects
+
+    name, pdir = project
+    monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 5)
+    resp = _with_the_sites_network_lock_held_elsewhere(
+        monkeypatch,
+        projects,
+        "_refuse_copy_of_busy_reports",
+        lambda: client.post("/api/projects/lockme_copy", params={"rebind": True}),
+        pdir,
+        lock_of=lambda ctx, *a, **k: ctx.mutation_lock,
+    )
+    assert resp.status_code == 200, resp.text
+    assert _tree(project_storage_dir("lockme_copy") / "reports") == _tree(
+        pdir / "reports"
+    )
+
+
+def test_a_save_as_takes_report_locks_only_under_the_contexts_lock(
+    client, project, monkeypatch
+):
+    """At the early check and at the save: whenever the route asks for the
+    report locks, its thread already holds the context's lock, so another
+    thread cannot take it."""
+    from routers import projects
+
+    contexts, free_for_others = [], []
+    real_check, real_guard = projects._refuse_copy_of_busy_reports, projects._reports_copy_guard
+
+    def check(ctx, *a, **k):
+        contexts.append(ctx)
+        return real_check(ctx, *a, **k)
+
+    def guard(*a, **k):
+        def probe():
+            got = contexts[0].mutation_lock.acquire(blocking=False)
+            if got:
+                contexts[0].mutation_lock.release()
+            free_for_others.append(got)
+
+        other = threading.Thread(target=probe)
+        other.start()
+        other.join(10)
+        return real_guard(*a, **k)
+
+    monkeypatch.setattr(projects, "_refuse_copy_of_busy_reports", check)
+    monkeypatch.setattr(projects, "_reports_copy_guard", guard)
+    resp = client.post("/api/projects/lockme_copy", params={"rebind": True})
+    assert resp.status_code == 200, resp.text
+    assert free_for_others == [False, False]  # the early check, then the save
 
 # ── GK B F4, F5, F6 ─────────────────────────────────────────────────────────
 

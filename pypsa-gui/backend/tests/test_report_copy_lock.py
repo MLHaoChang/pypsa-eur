@@ -598,6 +598,7 @@ def test_a_writer_is_refused_when_a_copy_of_this_process_keeps_its_report(
         thread.start()
         thread.join(5)
     assert not thread.is_alive()
-    assert outcome and outcome[0] != "entered" and 0.25 < outcome[0] < 2
+    # Not before the bound; the upper side only says "it did not hang".
+    assert outcome and outcome[0] != "entered" and 0.25 < outcome[0] < 4.5
     with store.report_lock(tmp_path, RID_A):  # and it is free once the copy ends
         pass

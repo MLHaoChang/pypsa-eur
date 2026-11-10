@@ -821,7 +821,8 @@ def restore_snapshot(
     # the lock.
     from services import dirty_state, undo_service
     # The report locks too (study harness 07e), before the first file is
-    # overwritten: a restore never interleaves with a report writer.
+    # overwritten: a restore never reads or replaces a report while one write
+    # to it is in progress.
     with PyPSAService.get_lock(), _reports_copy_guard(snap_dir, project_dir):
         _refuse_if_changed_since(project, saved_revision)
         # Copy snapshot's files over the project's. Use atomic-write per file
