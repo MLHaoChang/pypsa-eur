@@ -484,3 +484,13 @@ def test_the_parameter_body_itself_checks_field_and_stored_unit(change, kind):
     assert exc.value.kind == kind and exc.value.status == 422
     assert M.validate_body("parameter", {**body, **{"unit": "MW", "field": "p_nom"}},
                            parameter_ok=True)["unit"] == "MW"
+
+
+def test_a_non_parameter_item_is_not_found_by_preview_or_apply(client, proj):
+    pref = client.post("/api/memory/items", json={
+        "kind": "preference", "concept_keys": ["topic:units"],
+        "body": {"key": "units.power", "value": "MW"}})
+    assert pref.status_code == 201, pref.text
+    chip = {"id": pref.json()["id"], "version": 1}
+    assert _preview(client, proj, chip).status_code == 404
+    assert _apply(client, proj, chip, "any").status_code == 404
