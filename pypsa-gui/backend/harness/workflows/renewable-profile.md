@@ -61,6 +61,15 @@ ask which technology the site is for.
 
 ## Step: parameters
 
+Sites and technology are the user's own inputs: ask them, never default them.
+Everything after them has a default (preset, weather, weather year,
+resolution): ask those once, as one Assumptions card, not one question per
+step. A single `ask_user` whose `detail` lists each default in plain words
+with its reason, with the options "Accept all defaults" (recommended) and
+"Change some"; a change comes back as free text. Then run the steps below
+only for what the user changed. The weather and resolution steps describe
+what each choice means, for that card and for a changed answer.
+
 `list_profile_presets` for the chosen technology shows the parameter
 bundles; `get_profile_parameters` shows one preset's resolved knobs —
 turbine model and hub height for wind, panel and orientation for solar.

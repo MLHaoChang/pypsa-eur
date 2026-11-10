@@ -8,6 +8,7 @@ import { SectionNotInScope } from '../../components/flowScope/NotInScopeGroup'
 import { useFieldLabels } from '../../hooks/useFieldLabels'
 import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
+import { AssumptionsCard, isAssumedItem } from './AssumptionsCard'
 import { CommercialCard } from './cards/CommercialCard'
 import { GoalStudyRun } from './shared/GoalStudyRun'
 import { NextSectionButton } from '../../components/NextSectionButton'
@@ -58,7 +59,9 @@ export function SectionView({ id, onNext, children }: {
   const { section, isError } = useProjectFlow()
   const s = section(id)
   const stateless = id === 'readiness' || id === 'results'
-  const items = (s?.items ?? []).filter(isOpenItem)
+  const open = (s?.items ?? []).filter(isOpenItem)
+  const assumed = open.filter(isAssumedItem)
+  const items = open.filter(i => !isAssumedItem(i))
   const infos = (s?.items ?? []).filter(i => !i.acknowledged && i.severity === 'info')
   return (
     <div data-testid={`section-view-${id}`} className="flex flex-col gap-4">
@@ -78,6 +81,7 @@ export function SectionView({ id, onNext, children }: {
           {items.map((it, i) => <ItemRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
         </ul>
       )}
+      <AssumptionsCard items={assumed} />
       {!stateless && <SectionNotInScope section={id} />}
       {infos.length > 0 && (
         <ul data-testid="section-infos" className="flex flex-col gap-0.5 text-[11px] text-muted">
@@ -88,7 +92,7 @@ export function SectionView({ id, onNext, children }: {
       {onNext && (
         <div>
           <NextSectionButton from={id} onNext={onNext} testId={`section-next-${id}`}
-            label={items.length > 0 ? 'Continue anyway' : 'Next'} />
+            label={open.length > 0 ? 'Continue anyway' : 'Next'} />
         </div>
       )}
     </div>

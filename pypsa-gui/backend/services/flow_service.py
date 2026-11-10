@@ -860,6 +860,37 @@ def acknowledge(project_dir: pathlib.Path, items: list[dict], code: str,
     return record
 
 
+def acknowledge_many(project_dir: pathlib.Path, items: list[dict],
+                     pairs: list[tuple[str, str | None]]) -> list[dict]:
+    """Acknowledge several CURRENT warnings in ONE write (the Assumptions card's
+    "Accept all defaults"). Every pair is checked first, as in `acknowledge`:
+    nothing is stored when one is unknown (404) or not a warning (422)."""
+    from services.atomic_io import atomic_write_text
+
+    records: list[dict] = []
+    for code, entity in pairs:
+        ent = entity or ""
+        match = [it for it in items if it["code"] == code and (it["target"]["entity"] or "") == ent]
+        if not match:
+            raise FlowAckError(404, "flow_item_unknown",
+                               f"no flow item {code!r} for {ent or 'the project'!r}")
+        if any(it["severity"] != "warning" for it in match):
+            raise FlowAckError(422, "flow_ack_not_warning",
+                               "only a warning can be acknowledged; fix an error instead")
+        records.append({"section": match[0]["target"]["section"], "code": code, "entity": ent,
+                        "value_hash": _ack_hash(match[0]),
+                        "at": datetime.now(UTC).isoformat(timespec="seconds")})
+    keys = {(r["code"], r["entity"]) for r in records}
+    with _acks_lock:
+        acks = [a for a in read_acks(project_dir)
+                if (a.get("code"), a.get("entity") or "") not in keys]
+        acks.extend(records)
+        atomic_write_text(project_dir / ACKS_FILE,
+                          json.dumps({"version": 1, "acks": acks}, indent=2, sort_keys=True)
+                          + "\n")
+    return records
+
+
 # ── Results freshness ───────────────────────────────────────────────────────
 
 def _freshness(n, *, running: bool) -> str:
@@ -1203,3 +1234,13 @@ def acknowledge_item(project_dir: pathlib.Path, code: str, entity: str | None, *
         raise FlowAckError(409, "flow_deferred",
                            payload["deferred_reason"] or "validation deferred")
     return acknowledge(project_dir, items, code, entity)
+
+
+def acknowledge_items(project_dir: pathlib.Path, pairs: list[tuple[str, str | None]], *,
+                      cache_key: str, db=None, org_id=None) -> list[dict]:
+    """``POST …/flow/ack-many``: acknowledge several standing warnings at once."""
+    payload, items = _collect(project_dir, cache_key=cache_key, db=db, org_id=org_id)
+    if payload["deferred"]:
+        raise FlowAckError(409, "flow_deferred",
+                           payload["deferred_reason"] or "validation deferred")
+    return acknowledge_many(project_dir, items, pairs)

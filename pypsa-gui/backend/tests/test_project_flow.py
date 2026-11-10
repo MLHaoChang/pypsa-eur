@@ -404,6 +404,22 @@ def test_an_error_cannot_be_acknowledged(client, site, edit):
     assert r.json()["detail"]["error_kind"] == "flow_item_unknown"
 
 
+def test_ack_many_stores_all_in_one_write_or_none(client, site, project_storage_dir, edit):
+    name = site()
+    with edit() as n:
+        n.snapshot_weightings.loc[:, ["objective", "generators", "stores"]] = 3.0
+    bad = client.post(f"/api/projects/{name}/flow/ack-many", json={"items": [
+        {"code": "snapshot_weights_nyears_off", "entity": None},
+        {"code": "no_such_code", "entity": None}]})
+    assert bad.status_code == 404
+    assert not (project_storage_dir(name) / "flow_acks.json").exists()    # all or none
+    r = client.post(f"/api/projects/{name}/flow/ack-many", json={"items": [
+        {"code": "snapshot_weights_nyears_off", "entity": None}]})
+    assert r.status_code == 200, r.text
+    assert [a["code"] for a in r.json()["acks"]] == ["snapshot_weights_nyears_off"]
+    assert _states(_flow(client, name))["project"] == "complete"
+
+
 # ── deferred ────────────────────────────────────────────────────────────────
 
 def test_a_deferred_preflight_is_unknown_everywhere(client, site, monkeypatch):
