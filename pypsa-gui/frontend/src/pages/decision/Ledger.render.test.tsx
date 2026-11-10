@@ -106,8 +106,18 @@ describe('the assumptions review', () => {
     const payload: LedgerPayload = { ...ledger, stale_unchecked: [{ option_id: 'bess_pv_2h', option_label: 'Battery (2 hours) with PV' }] }
     render(<LedgerReview payload={payload} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
     expect(screen.getByTestId('ledger-stale-unchecked').textContent).toBe(
-      'Could not check whether the Battery (2 hours) with PV option\'s costs are out of date: its network could not be read. '
-      + 'Open the Battery (2 hours) with PV option in Expert to check.')
+      'Could not check the Battery (2 hours) with PV option for out-of-date costs: its network could not be read. '
+      + 'Open that option in Expert to check.')
+  })
+
+  it('names several unchecked options in one line', () => {
+    const payload: LedgerPayload = { ...ledger, stale_unchecked: [
+      { option_id: 'bess_pv_2h', option_label: 'Battery (2 hours) with PV' },
+      { option_id: 'bess_pv_4h', option_label: 'Battery (4 hours) with PV' }] }
+    render(<LedgerReview payload={payload} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    expect(screen.getAllByTestId('ledger-stale-unchecked').map(n => n.textContent)).toEqual([
+      'Could not check the Battery (2 hours) with PV and Battery (4 hours) with PV options for out-of-date costs: '
+      + 'their networks could not be read. Open those options in Expert to check.'])
   })
 
   it('states what the energy price level means', () => {

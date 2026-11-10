@@ -127,10 +127,17 @@ function Row({ r, intake, attention, stale, onSave, onReset, saving, tested }: {
 
 const NO_NOTES: string[] = []
 
-/** GK B F1 (P1): the costs on this option were not checked, so none of its rows may read as current. */
-export const uncheckedNote = (option: string) =>
-  `Could not check whether the ${option} option's costs are out of date: its network could not be read. `
-  + `Open the ${option} option in Expert to check.`
+/** GK B F1 (P1): the costs on these options were not checked, so none of their rows may read as current.
+ *  One line for all of them; the words are UX's. */
+export function uncheckedNote(options: string[]): string {
+  if (options.length === 1) {
+    return `Could not check the ${options[0]} option for out-of-date costs: its network could not be read. `
+      + 'Open that option in Expert to check.'
+  }
+  const names = `${options.slice(0, -1).join(', ')} and ${options[options.length - 1]}`
+  return `Could not check the ${names} options for out-of-date costs: their networks could not be read. `
+    + 'Open those options in Expert to check.'
+}
 
 function shownRange(r: LedgerRow, low: number, high: number): string {
   const f = (v: number) => (PERCENT(r) ? `${Number((v * 100).toFixed(2))} %` : `${Number(v.toFixed(4))} ${r.unit}`)
@@ -197,11 +204,11 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
         <p key={n} className="text-[11px] text-muted">{helpFor(n).text}</p>
       ))}
       {/* GK B F1: a fork the ledger could not check is named, so its rows never read as current. */}
-      {(payload.stale_unchecked ?? []).map(u => (
-        <p key={u.option_id} data-testid="ledger-stale-unchecked" className="text-[11.5px] text-warn">
-          {uncheckedNote(u.option_label || u.option_id)}
+      {(payload.stale_unchecked ?? []).length > 0 && (
+        <p data-testid="ledger-stale-unchecked" className="text-[11.5px] text-warn">
+          {uncheckedNote((payload.stale_unchecked ?? []).map(u => u.option_label || u.option_id))}
         </p>
-      ))}
+      )}
       {error && <Refusal error={error} />}
       <ul className="flex flex-col gap-2">{keyRows.map(rowOf)}</ul>
       {changed.length > 0 && (
