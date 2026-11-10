@@ -14,6 +14,7 @@ export const FIELD_LABELS: Record<string, string> = {
   p_nom_min: 'Minimum capacity',
   dc_ac_ratio: 'DC/AC ratio',
   max_hours: 'Storage hours',
+  e_nom: 'Energy capacity',
   marginal_cost: 'Running cost',
   eh_process: 'Process unit',
   rated_mva: 'Rated apparent power',
