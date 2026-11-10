@@ -1,6 +1,6 @@
 // Screenshot the decision study's "How robust" screen (the tornado chart) over mocked study routes.
 //
-//   node tornado-shots.mjs <outDir> <variant: base|missing|negative> <theme: dark|light> <mode: expert|guided> [width]
+//   node tornado-shots.mjs <outDir> <variant: base|missing|negative|none> <theme: dark|light> <mode: expert|guided> [width]
 //   -> <outDir>/s5-<variant>-<theme>-<mode>[-w<width>].png
 //
 // Env: BASE_URL (default http://127.0.0.1:5173) to shoot another Vite (e.g. a "before" worktree);
@@ -17,8 +17,8 @@ import { fileURLToPath } from 'url'
 const { chromium } = createRequire(import.meta.url)('playwright')
 
 const [outDir, variant = 'base', theme = 'dark', mode = 'expert', widthArg] = process.argv.slice(2)
-if (!outDir || !['base', 'missing', 'negative'].includes(variant) || !['dark', 'light'].includes(theme) || !['expert', 'guided'].includes(mode)) {
-  console.error('usage: node tornado-shots.mjs <outDir> <base|missing|negative> <dark|light> <expert|guided> [width]')
+if (!outDir || !['base', 'missing', 'negative', 'none'].includes(variant) || !['dark', 'light'].includes(theme) || !['expert', 'guided'].includes(mode)) {
+  console.error('usage: node tornado-shots.mjs <outDir> <base|missing|negative|none> <dark|light> <expert|guided> [width]')
   process.exit(2)
 }
 const BASE = (process.env.BASE_URL || 'http://127.0.0.1:5173').replace(/\/$/, '')
@@ -35,6 +35,9 @@ if (variant === 'missing') {
 } else if (variant === 'negative') {
   rob.npv_centre -= 3_500_000
   for (const r of rob.tornado) { r.npv_low -= 3_500_000; r.npv_high -= 3_500_000 }
+} else if (variant === 'none') {
+  rob.npv_centre = null
+  for (const r of rob.tornado) { r.npv_low = null; r.npv_high = null; r.swing = null }
 }
 tornado.robustness = rob
 

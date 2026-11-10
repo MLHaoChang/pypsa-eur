@@ -103,6 +103,8 @@ export interface TornadoChartProps {
   /** The base case every row departs from; `null` when it is not established. */
   base: number | null
   currency?: string
+  /** The page's word for the base case, as its other screens say it: "Centre". */
+  baseWord?: string
   /** A driver's input value with its unit, as the page writes it elsewhere. */
   formatInput: (value: number, unit: string | null) => string
   /** Fix the value axis, so two options side by side share one scale. */
@@ -126,7 +128,7 @@ const TEXT = { fontSize: 11, fill: 'var(--color-text)' }
 const SMALL = { fontSize: 10.5, fill: 'var(--color-axis)', fontFamily: 'var(--font-family-mono)' }
 
 export default function TornadoChart({
-  title, measure, rows, base, currency = 'EUR', formatInput, domain, note, children, filename, testId,
+  title, measure, rows, base, currency = 'EUR', baseWord = 'Base case', formatInput, domain, note, children, filename, testId,
 }: TornadoChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null)
   const [box, setBox] = useState<HTMLDivElement | null>(null)
@@ -189,7 +191,8 @@ export default function TornadoChart({
     ...laid.map(l => <line key={l.r.key} x1={px} x2={px} y1={l.barY - 2} y2={l.barY + BAR + 2} {...style} />),
     <line key="foot" x1={px} x2={px} y1={axisY - 4} y2={axisY} {...style} />,
   ]
-  const baseLabel = base != null ? `Base case ${signedMoney(base, currency)}` : ''
+  const baseLabel = base != null ? `${baseWord} ${signedMoney(base, currency)}` : ''
+  const baseLower = baseWord.charAt(0).toLowerCase() + baseWord.slice(1)
 
   return (
     <ChartFrame
@@ -277,9 +280,21 @@ export default function TornadoChart({
           })}
         </svg>
       </div>
+      {base != null && (
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted mt-1" data-testid="tornado-key">
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true" className="inline-block w-2.5 h-2.5 rounded-[2px]" style={{ background: 'var(--color-danger)' }} />
+            Red: below the {baseLower}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span aria-hidden="true" className="inline-block w-2.5 h-2.5 rounded-[2px]" style={{ background: 'var(--color-success)' }} />
+            Green: above the {baseLower}
+          </span>
+        </p>
+      )}
       {anyMissing && (
         <p className="text-[11px] text-muted mt-1" data-testid="tornado-missing-note">
-          A driver with a case that is not established has no swing and is listed last; that side draws no bar.
+          A driver with a case that is not established has no swing and is listed last. That side draws no bar.
         </p>
       )}
       {children}

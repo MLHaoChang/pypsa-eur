@@ -62,6 +62,7 @@ export default function Robust({ findings, tornado, error, onStart, onAbort, bus
           measure="Battery NPV"
           rows={rows}
           base={rob.npv_centre}
+          baseWord="Centre"
           formatInput={inputText}
           note={HELP.tornado_method_redispatch_fixed_sizes}
           filename="battery-npv-drivers"

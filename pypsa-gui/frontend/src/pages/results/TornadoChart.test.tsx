@@ -73,6 +73,16 @@ describe('each bar end (T2)', () => {
     show([bar('a', 4e6, 5e6), bar('wide', 1e6, 6e6)], 3e6)
     expect(sides('a')).toEqual(['above'])
   })
+
+  it('says what red and green mean under the plot, in the page’s word for the base case', () => {
+    show([bar('a', 2e6, 5e6)], 3e6)
+    expect(screen.getByTestId('tornado-key').textContent).toBe('Red: below the base caseGreen: above the base case')
+    cleanup()
+    render(<TornadoChart title="t" measure="Battery NPV" rows={[bar('a', 2e6, 5e6)]} base={3e6} baseWord="Centre"
+      formatInput={pct} filename="t" />)
+    expect(screen.getByTestId('tornado-key').textContent).toBe('Red: below the centreGreen: above the centre')
+    expect(screen.getByTestId('tornado-base').textContent).toBe('Centre €\u00a03\u00a0m')
+  })
 })
 
 describe('the base case and zero (T3)', () => {
