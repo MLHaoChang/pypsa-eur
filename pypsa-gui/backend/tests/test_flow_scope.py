@@ -271,6 +271,11 @@ def test_reliability_off_takes_the_study_out_of_the_run(client, tmp_projects_dir
         if row["state"] in ("complete", "not_needed"):
             counted = [i for i in row["items"] if i["in_scope"]]
             assert not any(i["severity"] == "error" for i in counted), row["section"]
+        # A section that is not needed says why, never a count.
+        if row["state"] == "not_needed":
+            assert row["summary"] in ("Off-grid: no grid connection needed",
+                                      "Generation-only: export through the POI in section 3",
+                                      "Not needed by the cards in scope"), row["section"]
 
     # Back on: the stored sub-options come back, and the study with them.
     on = _put(client, name, {**off, "groups": [*off["groups"], "reliability"]})

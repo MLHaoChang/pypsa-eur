@@ -1220,9 +1220,10 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             else:
                 state = "complete"
             row.update(state=state, required=required[s] and state != "not_needed")
-            if state == "not_needed" and s == "connection" and islanded:
-                _unused_connection_defaults(mine, frozenset(facts.connection_links))
-                row["items"] = [_strip(it) for it in mine]
+            if state == "not_needed":
+                if s == "connection" and islanded:
+                    _unused_connection_defaults(mine, frozenset(facts.connection_links))
+                    row["items"] = [_strip(it) for it in mine]
                 row["summary"] = ("Not needed by the cards in scope" if s not in needed
                                   else "Generation-only: export through the POI in section 3"
                                   if s == "loads"

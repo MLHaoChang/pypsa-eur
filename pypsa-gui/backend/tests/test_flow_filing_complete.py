@@ -328,6 +328,19 @@ def test_the_staged_microgrid_keeps_its_feeder_losses_counted(client, tmp_projec
     assert readiness["summary"] == "0 to do, 11 to check"
 
 
+def test_a_section_the_scope_leaves_out_says_so(client, tmp_projects_dir, monkeypatch):
+    """Every not-needed section keeps its reason as the summary, never a count;
+    only the off-grid connection's defaults leave the scope."""
+    real = S.S.needed_sections
+    monkeypatch.setattr(S.S, "needed_sections", lambda scope: set(real(scope)) - {"loads"})
+    flow = _microgrid_flow(client, "mg_scope")
+    by_id = {s["section"]: s for s in flow["sections"]}
+    assert by_id["loads"]["state"] == "not_needed"
+    assert by_id["loads"]["summary"] == "Not needed by the cards in scope"
+    assert by_id["connection"]["summary"] == "Off-grid: no grid connection needed"
+    assert all(i["in_scope"] for i in by_id["loads"]["items"])
+
+
 def _row(code: str, entity: str, severity: str = "warning") -> dict:
     return S._item(code, severity, "m", "template", "connection", entity=entity)
 
