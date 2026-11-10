@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A copied generic defaults-pack tariff now reads with the currency its pack stamp names (EUR), marked `currency_source: "stamp"`, in Library and simulation reads; nothing is written onto the tariff and its hashes are unchanged (gridspine-library-eu 05).

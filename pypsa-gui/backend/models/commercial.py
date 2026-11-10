@@ -456,14 +456,24 @@ class Tariff(BaseModel):
 
 def tariff_payload_resolved(payload: Any) -> Any:
     """A stored tariff payload with the currency it reads as (an API read, GK B C2);
-    anything that is not a valid tariff is returned unchanged."""
+    anything that is not a valid tariff is returned unchanged. A `generic` pack copy
+    that states none shows the currency its `pack_hash` stamp names, with
+    `currency_source: "stamp"` (gridspine-library-eu 05), the one the currency gate
+    reads (`binding.resolved_tariff_currency`). A new dict: nothing is written onto the
+    tariff, so its stored form and hashes stay as they are."""
     if not isinstance(payload, dict):
         return payload
     try:
-        cur = Tariff.model_validate(payload).currency
+        tariff = Tariff.model_validate(payload)
     except ValueError:
         return payload
-    return {**payload, "currency": cur} if cur is not None and "currency" not in payload \
+    if tariff.currency is None:
+        from services.commercial.binding import resolved_tariff_currency
+
+        cur, source = resolved_tariff_currency(tariff)
+        return {**payload, "currency": cur, "currency_source": source} \
+            if source == "stamp" else payload
+    return {**payload, "currency": tariff.currency} if "currency" not in payload \
         else payload
 
 
