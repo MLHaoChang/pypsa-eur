@@ -10,7 +10,7 @@ export interface NavigationAcknowledgement {
   project_name: string
   project_id: string
   input_sha256: string
-  target: { panel_id: string; results_tab?: string; highlight?: { component: string; name: string } }
+  target: { panel_id: string; canvas_view?: 'site'; results_tab?: string; highlight?: { component: string; name: string } }
   source_binding?: ResultsSourceBinding
 }
 
@@ -18,6 +18,9 @@ export function acknowledgeMountedView(
   expected: NavigationAcknowledgement,
   isCurrent: () => boolean,
   onVerified?: () => void,
+  // SC-07 S5b R6: told once when this ACK can no longer complete (the 5 s window
+  // ended, the view stopped being current, or the server did not complete it).
+  onUnverified?: () => void,
 ): () => void {
   let finished = false
   const mounted = () => Array.from(document.querySelectorAll<HTMLElement>('[data-assurance-panel]'))
@@ -25,6 +28,8 @@ export function acknowledgeMountedView(
       if (element.dataset.assurancePanel !== expected.target.panel_id
         || element.dataset.assuranceProject !== expected.project_name
         || element.closest('[hidden], [aria-hidden="true"]')) return false
+      // SC-07 S5b R6: a canvas-view target (Site 3D) counts only on that view's own marker.
+      if ((element.dataset.assuranceCanvas ?? null) !== (expected.target.canvas_view ?? null)) return false
       for (let parent: HTMLElement | null = element; parent; parent = parent.parentElement) {
         const style = getComputedStyle(parent)
         if (style.display === 'none' || style.visibility === 'hidden') return false
@@ -41,9 +46,10 @@ export function acknowledgeMountedView(
         .some(tab => tab.dataset.assuranceTab === expected.target.results_tab)
     })
   const stop = () => { finished = true; observer.disconnect(); clearTimeout(timeout) }
+  const giveUp = () => { if (!finished) { stop(); onUnverified?.() } }
   const check = () => {
     if (finished) return
-    if (!isCurrent()) { stop(); return }
+    if (!isCurrent()) { giveUp(); return }
     if (!mounted()) return
     stop()
     const { version, action_id, turn_id, binding_generation, target } = expected
@@ -51,10 +57,11 @@ export function acknowledgeMountedView(
       ...(version === 2 ? { source_binding: expected.source_binding } : {}) },
       { skipErrorToast: true }).then(response => {
       if (isCurrent() && mounted() && response.data?.outcome === 'completed') onVerified?.()
-    }).catch(() => { /* Failed/expired ACKs retain submitted status. */ })
+      else onUnverified?.()
+    }).catch(() => { onUnverified?.() /* Failed/expired ACKs retain submitted status. */ })
   }
   const observer = new MutationObserver(check)
-  const timeout = setTimeout(stop, 5000)
+  const timeout = setTimeout(giveUp, 5000)
   observer.observe(document.body, { subtree: true, childList: true, attributes: true })
   check()
   return stop

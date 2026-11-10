@@ -3,8 +3,8 @@
 
 # P4: charts, tables, reports and delivery provenance
 
-Status: ready-for-agent
-Progress: PNG integrity and JSON/ZIP export shipped; checked chart, report, import and general-export adapters pending
+Status: done (S1–S5b and Y merged; #1292 is the last PR; the readiness oracle's project_value/limit stays a recorded follow-up)
+Progress: all slices shipped: checked chart (S1), delivery (S2), imports (S3), reports (S4a, S4b), fact identity (S5a), chart identity and fact-free tables/reports/headers (S5b), summary facts (Y)
 Type: task
 Blocked by: 02, 03
 
@@ -384,3 +384,99 @@ card through the coordinator.
   `limit` as given; neither is compared against the builder network.
   Follow-up: an oracle that computes `project_value` (and `limit`) for each
   row from the network.
+
+### 2026-11-08 — S5 Q1 owner pick; S5b plan: GK B (35) GO WITH CHANGES (B1–B7, verbatim)
+
+Owner card 2026-11-08 (~01:50 CET), S5 Q1: "Pin them as fact-free
+(Recommended)", recorded as AA05-A46-SCOPE-1 (lands in owner-decisions.md with
+#1268). S5 tests the field lists on the answer and the checked chart, adds the
+metric identity (metric, formula_id, unit, disposition, warnings) to the chart,
+and pins that table exports, reports and download headers never present a
+value as checked.
+
+GK B (35), as sent at about 01:10Z (resent 01:13Z):
+
+> Q1: (a), metrics and warnings go inside `dataset`, so dataset_sha256 covers them and verify() re-derives them.
+> Q2: not_drawn / "other_project" is right. render() runs under for_answer, which never fails the answer. assurance_context_changed is for the answer path when the active project changes mid-turn, and that path already raises it.
+>
+> B1. Unavailable identity comes from the evidence, never from the current code.
+> - A slot does not store formula_id or unit (calculations.py:277 and :652). With the plan as written, verify() would read unavailable slots from today's `calculations.definition`. A later release that bumps a formula_id or unit would then make every stored chart with an unavailable slot fail verify (409), even though nothing about the evidence changed.
+> - So: an unavailable metric carries {metric, disposition, reason}, with formula_id and unit None. That matches the receipt, which names only "metric: reason" for those.
+> - Answered metrics take formula_id and unit from the record's fact.
+> - verify() re-derives only from the unsealed record. Pin it with a test that monkeypatches `calculations.definition` (or DEFINITIONS) to a new formula_id after render, and shows verify() still returns "current".
+>
+> B2. Legacy branch.
+> - Legacy applies only when BOTH `metrics` and `warnings` are absent from the stored dataset. One key without the other is a mismatch (False).
+> - A new render always writes both, even when empty, with a test.
+> - The legacy compare still checks series, window and the rest of the dataset.
+> - Add a hand mutant "legacy taken when only one key is absent" next to "legacy always taken".
+>
+> B3. Warnings text.
+> - One builder for "<metric>: <reason>" is shared by the receipt limitations and the chart. Do not restate the format.
+> - A test compares chart warnings with the receipt's limitations for the same record.
+> - Answered slots produce no warning.
+>
+> B4. The download-header pin is an exact allow-list per kind, not a word grep.
+> - Charts legitimately send X-Checked-Chart ("evidence re-verified now") and X-Chart-Scope; reports send X-Report-Source (S4b). A grep for "evidence"/"checked" would hit those, and it would miss a neutral header name that carries a value.
+> - Pin the exact header-name set for each kind (table, human report, assistant report_export, chart). Then pin that no header value contains a checked number from the record.
+>
+> B5. Download metadata includes the delivery zip.
+> - P4 also pins that a delivery item for a table or report export carries no facts, metrics or checked value. Only `assurance`, dataset_sha256 and render_spec_sha256 are as today.
+> - The report-export pin needs #1267 merged first.
+>
+> B6. K1.
+> - render() compares record["project_id"] with the same id the manifest writes (str(project.id) from assistant_tools._project()). The check runs before _draw and before any file or sidecar write.
+> - Test: no upload, no sidecar, and REASONS["other_project"] in plain words.
+> - grep the frontend for consumers of chart reason codes (CheckedChart.tsx and its test): a new code must render its title, not a raw code.
+>
+> B7. Citation and survivors.
+> - The PR cites the owner's S5 Q1 pick ("Pin them as fact-free", 2026-11-08) by its owner-decisions.md row. If the row has not landed yet, say so in the body.
+> - mutants.py survivors are fixed or listed with a reason.
+
+### 2026-11-08 — S5b build (branch `claude/aa05-s5b-chart-identity`)
+
+- `checked_charts.dataset` carries `metrics` (one entry per evidence slot:
+  metric, disposition, formula_id and unit from the record's fact, or None
+  and the slot's reason when not answered; B1) and `warnings`
+  (`calculations.slot_warnings`, shared with the receipt's limitations; B3).
+  Both sit inside `dataset`, so `dataset_sha256` covers them.
+- `verify` treats a dataset with neither key as drawn before S5b (B2); one key
+  alone is a mismatch.
+- `render` refuses `other_project` before drawing or writing (K1/B6). The
+  frontend shows the reason's title, never the code.
+- `test_p4_chart_identity.py`: identity against record, answer and receipt for
+  all 21 profiles; drawn end to end for the four profiles with series; B1 on
+  an all-answered chart and on one with unavailable slots; B2; changed
+  identity; K1 (no draw, no upload, no sidecar; a moved manifest does not
+  verify).
+- `test_p4_fact_free_surfaces.py` (B4/B5): exact header names for checked
+  chart, result chart and table downloads; no header value carries a checked
+  number; a delivered table item has exactly today's keys and none that names
+  a fact, metric or evidence. `test_p4_fact_free_reports.py` does the same for
+  the human report and the assistant's sealed report_export (S4b, merged in
+  from #1267's branch): base headers only, `X-Report-Source` only when a
+  source is gone, no number in any header value, and exact delivery item
+  keys (a human export carries no assurance at all).
+- Mutants: `mutants.py` 17/17 killed (checked_charts 16, calculations 1;
+  assurance.py's lines yield none). Hand mutants killed: legacy always taken,
+  metrics dropped from verify, warnings from answered slots, K1 removed,
+  reason dropped, unit dropped. "Legacy taken when only one key is absent" is
+  equivalent: stripping both keys from the re-derived data still mismatches a
+  manifest that holds one.
+
+### 2026-11-09 — completion (AA-05 (10))
+
+Issue 05 is done. Merged: S1 #1224, S2 #1227, S3 #1230, S4a #1234, S5a #1265,
+S4b #1267, Y #1289 (64686f9d), and S5b #1292 (the last).
+
+- S5 froze the field lists per AA05-A46-SCOPE-1: the answer and the checked
+  chart carry a checked fact; table exports, reports and download headers are
+  pinned fact-free (`test_p4_fact_free_surfaces.py`, `…_reports.py`).
+- #1292's CI shards 1/4 and 4/4 failed on six header pins that listed `vary`
+  as always present. The CORS middleware adds it only when an origin is
+  configured, so CI had none. Fixed in b7abf519: the pins compare header names
+  without `vary`; every other header stays pinned.
+- Remaining (recorded, not blocking): the readiness oracle does not compute
+  project_value/limit (S5a, GK B (35) ruling); SH-07c adds `revised_from` to
+  sealed exports, which #1292's exact-key pin keeps green while it is only
+  present when carried.

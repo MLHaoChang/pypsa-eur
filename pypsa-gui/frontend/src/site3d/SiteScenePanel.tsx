@@ -13,6 +13,7 @@ import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useProjectFlow } from '../hooks/useProjectFlow'
+import SiteResume from './siteResume'
 import SiteCompanion, { BlockerAsk, whereWords, buildingLabel, SECTION_WORDS } from './SiteCompanion'
 import { openSectionInExpert, openSectionInGuided, openSiteAnchor, withReturnFromSite3D } from '../layout/flowNavigation'
 import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type GreenfieldInput, type SceneBuilding, type SourceInput } from '../api/siteScene'
@@ -201,7 +202,13 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
           </button>
         ))}
       </div>
-      <SiteCompanion siteName={site.name} part={part} selected={selected} />
+      <SiteCompanion siteName={site.name} part={part} selected={selected}
+        resume={enabled ? <SiteResume siteName={site.name} rows={enabled.my_previews} readAt={scene.dataUpdatedAt}
+          recheck={async () => {
+            const read = await scene.refetch()
+            return read.isError || read.data?.state !== 'enabled' ? null
+              : { rows: read.data.my_previews ?? [], readAt: read.dataUpdatedAt }
+          }} /> : null} />
 
       {/* The part's body scrolls inside itself, so the tabs (and the Site toolbar above the panel) stay in view
           when the Model part grows (a preview, the Place form, the bottom table open); focusable so the

@@ -67,6 +67,7 @@ def test_the_issue_rows_are_declared():
         'dc_operational_gap': ('manual', 'results'),
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
+        'report_comment_revisions': ('unbuilt', None),
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected
