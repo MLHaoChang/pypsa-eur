@@ -479,7 +479,8 @@ component (`frontend/src/components/EditCard.tsx`).
   `member_gate` in place of its own card. A ticked row runs only while its fresh
   preview still writes what the card showed: an old value may differ only on a
   column an earlier verified write of the response created (absent when the
-  card was raised), and only from not set to that column's default. Otherwise
+  card was raised), and only from not set to that column's declared default
+  (`eh_columns`; a column with none opens nothing). Otherwise
   it is `edit_preview_stale`. An unticked row is refused with `change_unticked`, and a
   deny or expiry denies every row. Approvals: one `asked` per member with the
   set's token; `decided(by="change_set:<token6>")` only for ticked rows. The
