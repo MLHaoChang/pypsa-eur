@@ -863,7 +863,7 @@ def acknowledge(project_dir: pathlib.Path, items: list[dict], code: str,
 def acknowledge_many(project_dir: pathlib.Path, items: list[dict],
                      pairs: list[tuple[str, str | None]]) -> list[dict]:
     """Acknowledge several CURRENT warnings in ONE write (the Assumptions card's
-    "Accept all defaults"). Every pair is checked first, as in `acknowledge`:
+    "Keep all defaults"). Every pair is checked first, as in `acknowledge`:
     nothing is stored when one is unknown (404) or not a warning (422)."""
     from services.atomic_io import atomic_write_text
 

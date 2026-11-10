@@ -204,9 +204,9 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
     },
     {
         'id': 'accept_assumed_defaults',
-        'title': 'Accept all assumed defaults',
+        'title': 'Keep all assumed defaults',
         'disposition': 'unbuilt',
-        'reason': 'Confirming every assumed default at once is not available from chat yet. Use Accept all defaults on the Assumptions card of the section in Guided.',
+        'reason': 'Confirming every assumed default at once is not available from chat yet. Use Keep all defaults on the Assumptions card of the section in Guided.',
         'page': 'Guided sections',
         'panel': None,
         'keywords': frozenset({

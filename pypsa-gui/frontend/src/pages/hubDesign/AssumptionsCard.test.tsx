@@ -39,7 +39,7 @@ describe('AssumptionsCard', () => {
     expect(screen.queryByText(/confirm it or set your own/)).toBeNull()
   })
 
-  it('Accept all defaults confirms every row in a single write', async () => {
+  it('Keep all defaults confirms every row in a single write', async () => {
     renderCard(rows(5))
     fireEvent.click(screen.getByTestId('assumptions-accept-all'))
     await waitFor(() => expect(ackMany).toHaveBeenCalledTimes(1))

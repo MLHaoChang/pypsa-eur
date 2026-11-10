@@ -8,7 +8,7 @@ import { useFieldLabels } from '../../hooks/useFieldLabels'
 import { fieldWords } from '../../utils/flowItems'
 
 // One card for every default the project still assumes (LC-46): the value and
-// where it comes from, one "Accept all defaults" and an edit per row. Assumed
+// where it comes from, one "Keep all defaults" and an edit per row. Assumed
 // values stay marked "assumed" until accepted. Inputs only the user can give
 // are never here: they are required fields, not defaults.
 
@@ -42,7 +42,12 @@ export function AssumptionsCard({ items }: { items: FlowItem[] }) {
       items.map(i => ({ code: i.code, entity: i.target.entity }))),
     onSettled: () => { void qc.invalidateQueries({ queryKey: nk(project, 'flow') }) },
   })
-  if (items.length === 0) return null
+  if (items.length === 0) {
+    // After "Keep all defaults" succeeds the flow re-reads and the rows leave: one muted line, until the next visit.
+    return accept.isSuccess
+      ? <p role="status" data-testid="assumptions-kept" className="text-[11px] text-muted">Defaults kept</p>
+      : null
+  }
   return (
     <section data-testid="assumptions-card" aria-label="Assumptions"
       className="flex flex-col gap-2 rounded border border-border bg-panel px-3 py-2">
@@ -54,7 +59,7 @@ export function AssumptionsCard({ items }: { items: FlowItem[] }) {
           disabled={!project || accept.isPending}
           onClick={() => accept.mutate()}
           className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[11px] text-accent hover:border-accent disabled:opacity-50">
-          <CheckCircle2 size={12} /> Accept all defaults
+          <CheckCircle2 size={12} /> Keep all defaults
         </button>
       </div>
       <ul className="flex flex-col gap-1.5">

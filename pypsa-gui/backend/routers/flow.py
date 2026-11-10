@@ -131,7 +131,7 @@ def ack_flow_items(body: FlowAckMany,
                    db: DBSession = Depends(get_db),
                    user: User | None = Depends(optional_user)) -> dict:
     """Acknowledge several standing warnings in one write (all or none): the
-    Assumptions card's "Accept all defaults". Same errors as ``/flow/ack``."""
+    Assumptions card's "Keep all defaults". Same errors as ``/flow/ack``."""
     from routers.projects import _check_project_lock
 
     _require_open(project)
