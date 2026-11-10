@@ -230,19 +230,22 @@ def firm_backup_units(n, *, keep_zero_capacity: bool = False):
 
 def nothing_to_sample(inputs) -> str | None:
     """The shared refusal (AL-7): ``None`` when the fleet samples something,
-    else the message. It names only what the walk established (#1318 F1):
-    no supplying Link at all, or each supplying Link's own reason."""
+    else the message, decided on the fleet the caller samples (GK A (20)).
+    It names only what that fleet's walk established (#1318 F1): each
+    supplying Link's own reason when the Link walk built it, nothing about
+    Links otherwise."""
     if inputs.units:
         return None
     links = tuple(getattr(inputs, "supply_links", ()) or ())
-    if not links:
-        clause = "and no Link supplies an electrical bus"
-    else:
+    clause = ""
+    if links:
+        # Only a fleet the Link walk built names Links; a generator-only
+        # fleet (mc_loop's `snapshot_inputs`) claims nothing about them.
         about = [s for s in (getattr(inputs, "fleet_notes", ()) or ())
                  if any(lk in s for lk in links)]
-        clause = ("and no Link supplying an electrical bus is sampled ("
+        clause = (" — and no Link supplying an electrical bus is sampled ("
                   + ("; ".join(about) if about else ", ".join(links)) + ")")
     return (f"{NOTHING_TO_SAMPLE} (unavailability + MTTR), so the sampled "
-            f"fleet is empty — {clause}. An empty fleet would report the "
-            "entire horizon as loss of load, which is a statement about "
-            "missing input data, not about the system")
+            f"fleet is empty{clause}. An empty fleet would report the entire "
+            "horizon as loss of load, which is a statement about missing "
+            "input data, not about the system")

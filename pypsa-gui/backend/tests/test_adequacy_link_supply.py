@@ -347,8 +347,7 @@ def test_the_refusal_without_any_supplying_link_says_only_that():
     msg = nothing_to_sample(sampled_fleet(n))
     assert msg.startswith(f"{coupling.NOTHING_TO_SAMPLE} (unavailability + MTTR), "
                           "so the sampled fleet is empty")
-    assert "and no Link supplies an electrical bus" in msg
-    assert "not credited" not in msg and "never failing" not in msg
+    assert "Link" not in msg  # nothing about Links was established
 
 
 def test_the_refusal_names_each_supplying_links_own_reason():
@@ -357,7 +356,7 @@ def test_the_refusal_names_each_supplying_links_own_reason():
     msg = nothing_to_sample(sampled_fleet(n))
     assert "grid import taken as never failing: no outage data for grid_import" in msg
     assert "firm Link fuel_cell: not credited (0 MW) — no outage data" in msg
-    assert "no Link supplies" not in msg
+    assert "and no Link supplying an electrical bus is sampled (" in msg
 
 
 def test_freeze_fixed_plan_refuses_with_the_shared_message_and_reads_bad_rates():
@@ -391,3 +390,41 @@ def test_freeze_fixed_plan_samples_the_same_firm_backup():
     snap = freeze_fixed_plan(n, _Cfg(), threading.Lock())
     assert [u.name for u in snap.mc_inputs.units] == _names(sampled_fleet(n))
     assert math.isfinite(snap.mc_inputs.nyears)
+
+
+# ── The routes: each site refuses on the fleet it samples (GK A (20)) ─────
+
+def _h2_hub():
+    from project_templates import eh_templates as T
+
+    return T.BUILDERS["eh_h2_hub"]()
+
+
+def _install(client, install_network, n):
+    from project_templates import eh_templates as T
+
+    install_network(n)
+    body = {k: v for k, v in {**T.SOLVER_CONFIG, **T.SOLVER_CONFIG_EXTRA.get("eh_h2_hub", {})}.items()
+            if k in ("solver_name", "voll", "solve_strategy")}
+    body.setdefault("voll", 3000.0)
+    assert client.put("/api/simulation/solver_config", json=body).status_code == 200
+
+
+def test_the_mc_study_refuses_the_h2_hub_on_its_own_generator_only_fleet(client, install_network):
+    """mc_loop keeps `snapshot_inputs` (follow-up 03): it refuses the H2 hub
+    and its reason claims nothing about Links (#1318 F1)."""
+    _install(client, install_network, _h2_hub())
+    r = client.post("/api/results/mc", json={"draws": 50})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail.startswith(coupling.NOTHING_TO_SAMPLE) and "Link" not in detail
+
+
+@pytest.mark.parametrize("url", ["/api/results/coupling_loop", "/api/results/margin_loop"])
+def test_a_bad_import_rate_is_a_typed_refusal_at_both_loops(client, install_network, url):
+    n = _h2_hub()
+    n.links.at["grid_import", "outage_rate_value"] = 1.5
+    _install(client, install_network, n)
+    r = client.post(url, json={"max_solves": 2, "target_lole_h": 2.0})
+    assert r.status_code == 422, r.text
+    assert "outage rate outside [0, 1) on import Link(s): grid_import" in str(r.json()["detail"])
