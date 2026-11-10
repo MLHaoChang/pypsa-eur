@@ -285,7 +285,7 @@ function MemoryRow({
           </div>
         </td>
         <td className="px-2 py-1.5"><SourceLabel item={item} /></td>
-        <td className="px-2 py-1.5 text-muted">{used}</td>
+        <td className="px-2 py-1.5 text-muted whitespace-nowrap">{used}</td>
         <td className="px-2 py-1.5">
           <div className="flex flex-col gap-0.5 items-start">
             <Tag tone={STATUS_TONE[item.status]}>{STATUS_WORDS[item.status]}</Tag>
