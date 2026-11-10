@@ -31,5 +31,47 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "deny": [
+      "mcp__claude-code-remote__create_environment",
+      "mcp__claude-code-remote__update_environment",
+      "mcp__claude-code-remote__switch_environment",
+      "mcp__claude-code-remote__get_environment",
+      "mcp__claude-code-remote__request_credential",
+      "mcp__claude-code-remote__confirm_repository_trust",
+      "mcp__claude-code-remote__list_computer_folders",
+      "mcp__claude-code-remote__request_computer_folder",
+      "mcp__claude-code-remote__watch_url",
+      "mcp__claude-code-remote__unwatch_url",
+      "mcp__claude-code-remote__report_preview_port",
+      "Workflow",
+      "ScheduleWakeup",
+      "ShowOnboardingRolePicker",
+      "SuggestPluginInstall",
+      "SuggestSkills",
+      "SearchPlugins",
+      "SendUserFile",
+      "ListAgents"
+    ]
+  },
+  "skillOverrides": {
+    "session-start-hook": "user-invocable-only",
+    "keybindings-help": "user-invocable-only",
+    "fewer-permission-prompts": "user-invocable-only",
+    "loop": "user-invocable-only",
+    "workflow-authoring": "user-invocable-only",
+    "plugin-authoring": "user-invocable-only",
+    "init": "user-invocable-only",
+    "dataviz": "user-invocable-only",
+    "anthropic-skills:docs": "user-invocable-only",
+    "anthropic-skills:docx": "user-invocable-only",
+    "anthropic-skills:google-workspace": "user-invocable-only",
+    "anthropic-skills:import-memory": "user-invocable-only",
+    "anthropic-skills:morning": "user-invocable-only",
+    "anthropic-skills:pdf": "user-invocable-only",
+    "anthropic-skills:pptx": "user-invocable-only",
+    "anthropic-skills:skill-creator": "user-invocable-only",
+    "anthropic-skills:xlsx": "user-invocable-only"
   }
 }
