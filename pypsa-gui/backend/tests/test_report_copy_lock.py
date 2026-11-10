@@ -368,6 +368,38 @@ def test_a_thread_of_this_process_is_bounded_too(tmp_path, short_timeout):
         thread.join(5)
 
 
+def test_the_wait_for_a_thread_comes_off_the_file_locks_budget(tmp_path, monkeypatch):
+    """One budget: what the thread lock used is not given to the file lock again."""
+    from harness import durable
+
+    _seed(tmp_path, RID_A)
+    real, budgets = durable.file_lock, []
+
+    def spy(path, *, timeout, **kwargs):
+        budgets.append(timeout)
+        return real(path, timeout=timeout, **kwargs)
+
+    monkeypatch.setattr(durable, "file_lock", spy)
+    entered, leave = threading.Event(), threading.Event()
+
+    def writer():
+        with store.report_lock(tmp_path, RID_A):
+            entered.set()
+            leave.wait(10)
+
+    thread = threading.Thread(target=writer)
+    thread.start()
+    try:
+        assert entered.wait(5)
+        threading.Timer(0.5, leave.set).start()
+        with store.report_lock(tmp_path, RID_A, timeout=5.0):
+            pass
+    finally:
+        leave.set()
+        thread.join(5)
+    assert budgets[-1] <= 4.6
+
+
 # ── lock order against the network lock (GK B L1, L2) ───────────────────────
 
 

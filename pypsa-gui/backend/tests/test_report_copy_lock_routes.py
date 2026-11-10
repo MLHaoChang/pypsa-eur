@@ -336,6 +336,31 @@ def test_restore_itself_takes_the_locks_before_its_first_write(
     assert _leftovers(pdir) == []
 
 
+def test_restore_refuses_a_writer_that_arrived_after_its_early_check(
+    client, project, monkeypatch
+):
+    """The restore's own hold covers the live project's reports, not only the
+    snapshot's: the writer takes its lock where the safety snapshot runs."""
+    import contextlib
+
+    from routers import snapshots
+
+    name, pdir = project
+    snap_id = _snapshot(client, name)
+    (pdir / "layout.json").write_text('{"edited": "after the snapshot"}')
+    seen = {}
+
+    with contextlib.ExitStack() as writer:
+        def arrive(*_a, **_k):
+            seen["before"] = _tree(pdir)
+            writer.enter_context(held_elsewhere(pdir, RID_A))
+
+        monkeypatch.setattr(snapshots, "_create_snapshot_internal", arrive)
+        _busy(client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore"))
+        assert _tree(pdir) == seen["before"]
+    assert _leftovers(pdir) == []
+
+
 def test_an_export_with_a_stray_reports_file_still_imports(
     client, project, project_storage_dir
 ):
