@@ -396,6 +396,11 @@ def test_boundary_shapes_are_accepted():
     )
     B.LineItem(**_share(default_keys={"quantity": "k"}))
     B.LineItem(
+        **_opex(
+            quantity_source="linked:x@1", quantity=None, default_keys={"price": "k"}
+        )
+    )
+    B.LineItem(
         **_capex(
             depreciation="declining_balance", rate=1.0, life_years=1, refresh_years=1
         )
