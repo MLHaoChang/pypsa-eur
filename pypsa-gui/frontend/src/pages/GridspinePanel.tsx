@@ -23,6 +23,7 @@ import {
 import { projectsApi } from '../api/projects'
 import { formatApiDetail } from '../api/client'
 import { useUIStore } from '../store/uiStore'
+import { usePanelSectionScroll } from './usePanelSectionScroll'
 import { useSolveQueue, activeJobForProject, QUEUE_KEY } from '../hooks/useSolveQueue'
 import { PageBody, PageSection, Btn, Tag, Field } from '../components/PageKit'
 
@@ -63,6 +64,8 @@ function errorText(e: unknown): string {
 
 export default function GridspinePanel() {
   const currentProject = useUIStore(s => s.currentProject)
+  // No project: no section to show, so a requested section is dropped rather than kept for later.
+  usePanelSectionScroll('gridspine', !currentProject)
   if (!currentProject) {
     return (
       <PageBody>
@@ -126,6 +129,10 @@ function StudyView({ name }: { name: string }) {
     },
     onError: (e) => toast.error(`Could not start the study: ${errorText(e)}`),
   })
+
+  // The study's own reads (status, then the ones it enables) have settled: its sections are on screen.
+  usePanelSectionScroll('gridspine', status.isError || (status.isSuccess
+    && !ledger.isFetching && !config.isFetching && !snapshots.isFetching))
 
   if (notAStudy) {
     return (
@@ -192,6 +199,7 @@ function StudyView({ name }: { name: string }) {
 
       {done && (
         <PageSection
+          panelSection="ranked_snapshots"
           title="Ranked snapshots"
           count={snapshots.data?.length}
           hint="The union of the k most extreme hours under each criterion"
@@ -221,6 +229,7 @@ function StudyView({ name }: { name: string }) {
 
       {ledger.data && (
         <PageSection
+          panelSection="assumptions_ledger"
           title="Assumptions ledger"
           hint={ledger.data.from_run === false ? 'From the templates this study will use — no run yet' : 'From the latest run'}
         >
@@ -397,7 +406,7 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
   })
 
   return (
-    <PageSection title="Dispatch source" hint={locked ? 'Locked while the study is queued or running' : 'Applies to the next run'}>
+    <PageSection panelSection="dispatch_source" title="Dispatch source" hint={locked ? 'Locked while the study is queued or running' : 'Applies to the next run'}>
       <p className="text-[11px] text-muted mb-2" data-testid="dispatch-source-current">
         Current: {describeSource(config)}
       </p>
@@ -537,6 +546,7 @@ function ConfigEditor({ name, config, locked }: { name: string; config: StudyCon
 
   return (
     <PageSection
+      panelSection="configuration"
       title="Configuration"
       hint={locked ? 'Locked while the study is queued or running' : 'Applies to the next run'}
       right={
@@ -609,6 +619,7 @@ function ReadbackSection({ name, status }: { name: string; status: StageStatus }
   const hours = Object.keys(status.bundles).map(Number).sort((a, b) => a - b)
   return (
     <PageSection
+      panelSection="readback"
       title="PowerFactory read-back"
       hint="Import a bundle's .raw, run the load flow, export the bus CSV (and the branch CSV) per the runbook, upload them here"
     >
@@ -851,6 +862,7 @@ export function CapacitySection({ name, locked, onAssess, readOnly = false }: {
   return (
     <div data-testid="capacity-section">
       <PageSection
+        panelSection="connection_capacity"
         title="Connection capacity"
         hint="MW that can connect at each bus with no new or worsened violation, intact and under N-1"
       >
@@ -1049,6 +1061,7 @@ export function ConnectionSection({ name, locked, assessAt, readOnly = false }: 
   return (
     <div data-testid="connection-section" ref={ref}>
       <PageSection
+        panelSection="connection_assessment"
         title="Connection-point assessment"
         hint="A load plus on-site unit, against EU RfG/DCC (Continental Europe)"
       >

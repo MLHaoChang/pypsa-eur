@@ -63,6 +63,9 @@ function _normalizePanelId(raw: string): string {
   return aliases[key] ?? key
 }
 
+/** The panels whose sections chat can name (backend `_PANEL_SECTIONS`). */
+const SECTION_PANELS: ReadonlySet<string> = new Set(['campusElectrical', 'campusStudy', 'campusResults', 'gridspine'])
+
 type NavigationRequest = {
   kind?: string
   panel_id?: string
@@ -78,6 +81,8 @@ type NavigationRequest = {
   canvas_view?: string
   /** LC-14: open one Guided card with panel hubDesign. */
   guided_step?: string
+  /** LC-14: scroll the grid connection, grid study, grid study results or GridSpine panel to one section. */
+  panel_section?: string
   snapshot_iso?: string
   period?: number | null
   category?: string
@@ -229,6 +234,17 @@ function apply(d: NavigationRequest, modelTurn: number | null = null) {
         withReturnFrom(() => {
           useUIStore.getState().setSlidePanel('hubDesign')
           useHubDesignStore.getState().setStep(step, { user: true })
+        })
+      }
+    }
+    else if (SECTION_PANELS.has(panel) && typeof d.panel_section === 'string') {
+      const target = panel as NonNullable<typeof ui.activeSlidePanel>
+      // Already on this panel: scroll in place, with no "Back to" pointing at the view it would return from.
+      if (ui.activeSlidePanel === target) useUIStore.getState().requestPanelSection(target, d.panel_section)
+      else {
+        withReturnFrom(() => {
+          useUIStore.getState().setSlidePanel(target)
+          useUIStore.getState().requestPanelSection(target, d.panel_section as string)
         })
       }
     }

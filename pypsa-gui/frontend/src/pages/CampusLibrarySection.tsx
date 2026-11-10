@@ -46,6 +46,7 @@ export default function CampusLibrarySection({ name, onChanged }: {
   return (
     <div data-testid="asset-library">
       <PageSection
+        panelSection="library"
         title="Equipment library"
         hint="What the investment step may buy, and what it costs"
         right={data && (
