@@ -48,7 +48,10 @@ export default function Curtailment() {
   // /investmentPeriods) — same recipe as the Dispatch tab so the per-period ×
   // snapshot-weight scaling of the curtailment KPI matches.
   const { weightCtx, refIndex, refPeriods } = useWeightCtx(curtailTS as TSPayload | null)
-  const range = resolveRange(refIndex, filter, refPeriods)
+  const { from, to } = resolveRange(refIndex, filter, refPeriods)
+  // One object per window, not per render: the memos below key on it, and the
+  // app re-renders this tab every few seconds while it polls.
+  const range = useMemo(() => ({ from, to }), [from, to])
 
   // Per-carrier curtailment energy: each renewable generator's curtailment
   // column is summed by carrier so multi-carrier networks (e.g. solar + wind)
@@ -81,10 +84,7 @@ export default function Curtailment() {
   }, [generators])
   const aggSeries = useMemo(() => aggregateTS(
     curtailTS as TSPayload | null, renewableNames, range,
-  // `range` is a new object on every render: depend on its bounds, so the
-  // series (and the 8760-cell map built from it) is not rebuilt each time.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [curtailTS, renewableNames, range.from, range.to])
+  ), [curtailTS, renewableNames, range])
   // The same curtailed power by calendar day and hour of day: which hours of
   // the day, and which days, the renewables were turned down.
   const curtailMap = useMemo(() => {
@@ -92,6 +92,29 @@ export default function Curtailment() {
     const grid = hourDayGrid(aggSeries.map(r => r.snapshot), aggSeries.map(r => r.value))
     return { grid, scale: heatScale([grid], true) }
   }, [aggSeries])
+
+  // The chart element is kept while the series is the same: a full year is
+  // 8760 x-axis ticks, and Recharts measures every one of them on each render.
+  const overTime = useMemo(() => aggSeries && (
+    <ResponsiveContainer width="100%" height={280}>
+      <AreaChart data={aggSeries} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+        <defs>
+          <linearGradient id="curtGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={ACCENT} stopOpacity={0.4} />
+            <stop offset="95%" stopColor={ACCENT} stopOpacity={0.05} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid {...CHART_GRID} />
+        <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
+        <YAxis {...CHART_AXIS} label={yAxisLabel('Curtailment (MW)')} />
+        <Tooltip {...CHART_TOOLTIP}
+          labelFormatter={shortStamp}
+          formatter={(v: number) => [`${v.toFixed(1)} MW`, 'curtailed']} />
+        <Area type="monotone" dataKey="value"
+          stroke={ACCENT} fill="url(#curtGrad)" strokeWidth={1.6} dot={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  ), [aggSeries])
 
   // Totals: curtailment energy + percent vs (curtailed + delivered) using
   // the renewable generators' supply for the denominator. Comes from the
@@ -211,24 +234,7 @@ export default function Curtailment() {
               No curtailment in this range: all available renewable energy was used.
             </p>
           ) : aggSeries && aggSeries.length > 0 ? (
-            <ResponsiveContainer width="100%" height={280}>
-              <AreaChart data={aggSeries} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="curtGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={ACCENT} stopOpacity={0.4} />
-                    <stop offset="95%" stopColor={ACCENT} stopOpacity={0.05} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid {...CHART_GRID} />
-                <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} label={yAxisLabel('Curtailment (MW)')} />
-                <Tooltip {...CHART_TOOLTIP}
-                  labelFormatter={shortStamp}
-                  formatter={(v: number) => [`${v.toFixed(1)} MW`, 'curtailed']} />
-                <Area type="monotone" dataKey="value"
-                  stroke={ACCENT} fill="url(#curtGrad)" strokeWidth={1.6} dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
+            overTime
           ) : (
             <p className="text-[11px] text-muted py-2">No curtailment time series for the selected range.</p>
           )}

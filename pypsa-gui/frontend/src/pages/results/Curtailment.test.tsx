@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { ReactNode } from 'react'
 import { render, screen, cleanup } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
@@ -30,6 +31,18 @@ vi.mock('../../api/network', async (importOriginal) => {
       getSnapshots: vi.fn(),
       getInvestmentPeriods: vi.fn(),
     },
+  }
+})
+
+// Count how often the over-time chart is drawn. The real ResponsiveContainer
+// draws nothing in jsdom (no size), so it passes its child through here.
+const areaChartRenders = vi.hoisted(() => ({ count: 0 }))
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  return {
+    ...actual,
+    ResponsiveContainer: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+    AreaChart: () => { areaChartRenders.count += 1; return <div data-testid="curtailment-over-time" /> },
   }
 })
 
@@ -137,4 +150,23 @@ it('shows the curtailment by cause above the hourly chart', async () => {
   const table = await screen.findByTestId('curtailment-by-cause')
   const chart = screen.getByText('Curtailment over time')
   expect(table.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})
+
+it('does not redraw the over-time chart when the tab re-renders with the same data', async () => {
+  // The app re-renders Results every few seconds while it polls. On a full
+  // year the over-time chart has 8760 x-axis ticks and Recharts measures each
+  // one per draw, so a redraw per poll leaves the tab busy most of the time.
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const page = () => (
+    <QueryClientProvider client={client}>
+      <Curtailment />
+    </QueryClientProvider>
+  )
+  const { rerender } = render(page())
+  await screen.findByTestId('curtailment-over-time')
+  await findKpiValue('424 MWh')
+  const drawn = areaChartRenders.count
+  rerender(page())
+  rerender(page())
+  expect(areaChartRenders.count).toBe(drawn)
 })
