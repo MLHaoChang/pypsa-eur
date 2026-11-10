@@ -3,7 +3,7 @@
 
 # LC-47 — One change-set card: a tick box per row, replacing a card per fix
 
-Status: ready-for-agent
+Status: done (#1331, #1352)
 Type: task
 Model: Opus (design touches the confirmation and read-back path)
 Reviewers: GK B, UX (card UI)
