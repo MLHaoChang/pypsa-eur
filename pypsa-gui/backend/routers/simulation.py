@@ -337,10 +337,10 @@ def get_solver_config():
     if isinstance(commercial, dict) and isinstance(commercial.get("import_tariff"), dict):
         # The stored tariff leaves out a currency its jurisdiction implies; a read states
         # it (GK B C2, gridspine-library-eu 01). The stored config is not touched.
-        from models.commercial import tariff_payload_resolved
+        from services.commercial.binding import tariff_payload_read
 
         out["commercial"] = {**commercial,
-                             "import_tariff": tariff_payload_resolved(commercial["import_tariff"])}
+                             "import_tariff": tariff_payload_read(commercial["import_tariff"])}
     return out
 
 

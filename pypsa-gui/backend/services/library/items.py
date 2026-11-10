@@ -46,6 +46,7 @@ from sqlalchemy.orm import Session as DBSession
 from db.models import LibraryItem
 from models import commercial as M
 from services.commercial import hashing as H
+from services.commercial import stamp_currency as _stamp_currency  # noqa: F401  (registers it)
 from services.library.series_store import LibraryRefNotFound, LibraryRefStale
 from services.storage_paths import library_file
 

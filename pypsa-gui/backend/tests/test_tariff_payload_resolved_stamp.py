@@ -15,7 +15,9 @@ from dataclasses import asdict
 import pytest
 
 from models import commercial as M
+from services.commercial import binding as B
 from services.commercial import hashing as H
+from services.commercial import stamp_currency  # noqa: F401  (the app registers it)
 from tests.fixtures.investment_case.edge_15min import build_edge_15min
 
 GEN = "tou_reference_illustrative"
@@ -44,7 +46,7 @@ def test_a_copied_generic_tariff_reads_eur_from_its_stamp_and_nothing_is_written
     stored = _generic_copy_payload()
     before, hashes = copy.deepcopy(stored), _hashes(stored)
 
-    out = M.tariff_payload_resolved(stored)
+    out = B.tariff_payload_read(stored)
 
     assert out["currency"] == "EUR"
     assert out["currency_source"] == "stamp"
@@ -55,7 +57,7 @@ def test_a_copied_generic_tariff_reads_eur_from_its_stamp_and_nothing_is_written
 
 def test_a_tariff_that_states_a_currency_shows_that_one():
     stored = {**_generic_copy_payload(), "currency": "USD"}
-    out = M.tariff_payload_resolved(stored)
+    out = B.tariff_payload_read(stored)
     assert out["currency"] == "USD"
     assert "currency_source" not in out
 
@@ -63,9 +65,9 @@ def test_a_tariff_that_states_a_currency_shows_that_one():
 def test_an_implied_currency_and_an_unstamped_generic_tariff_are_as_before():
     stored = _generic_copy_payload()
     nl = {**stored, "jurisdiction": "NL", "pack_hash": None}
-    assert M.tariff_payload_resolved(nl) == {**nl, "currency": "EUR"}
+    assert B.tariff_payload_read(nl) == {**nl, "currency": "EUR"}
     bare = {**stored, "pack_hash": None}
-    assert M.tariff_payload_resolved(bare) == bare
+    assert B.tariff_payload_read(bare) == bare
 
 
 def _break_pack(monkeypatch, exc_name):
@@ -90,9 +92,9 @@ def test_a_broken_pack_degrades_the_read_and_anything_else_propagates(
     exc = _break_pack(monkeypatch, exc_name)
     if exc_name == "RuntimeError":
         with pytest.raises(exc):
-            M.tariff_payload_resolved(stored)
+            B.tariff_payload_read(stored)
         return
-    out = M.tariff_payload_resolved(stored)
+    out = B.tariff_payload_read(stored)
     assert out == {**stored, "currency_source": "pack_unreadable"}
     assert "currency" not in out
 
@@ -102,7 +104,7 @@ def test_a_broken_pack_degrades_the_read_and_anything_else_propagates(
 
 def test_a_stamp_read_sent_back_drops_the_echo_and_a_stated_currency_stays():
     stored = _generic_copy_payload()
-    read = M.tariff_payload_resolved(stored)
+    read = B.tariff_payload_read(stored)
     # The echo: same bytes and hashes as the stored tariff.
     assert _hashes(read) == _hashes(stored)
     assert M.Tariff.model_validate(read).currency is None
@@ -123,7 +125,7 @@ def test_a_stamp_read_sent_back_drops_the_echo_and_a_stated_currency_stays():
 def test_a_marked_write_with_a_broken_pack_is_refused_typed(monkeypatch, exc_name):
     from pydantic import ValidationError
 
-    read = M.tariff_payload_resolved(_generic_copy_payload())
+    read = B.tariff_payload_read(_generic_copy_payload())
     exc = _break_pack(monkeypatch, exc_name)
     if exc_name == "RuntimeError":
         with pytest.raises(exc):
@@ -134,6 +136,28 @@ def test_a_marked_write_with_a_broken_pack_is_refused_typed(monkeypatch, exc_nam
     err = info.value.errors()[0]
     assert err["type"] == "tariff_stamp_unreadable"
     assert read["pack_hash"] in err["msg"]
+
+
+def test_the_app_registers_the_stamp_lookup_and_none_refuses(monkeypatch):
+    """Models hold no service imports, so the app registers the lookup; a marked write
+    with none registered is refused, never stored with the currency."""
+    import importlib
+
+    from pydantic import ValidationError
+
+    import main  # noqa: F401
+
+    assert M._STAMP_CURRENCY == (
+        stamp_currency.stamp_currency,
+        importlib.import_module(
+            "services.library.defaults_pack.loader"
+        ).DefaultsPackError,
+    )
+    read = B.tariff_payload_read(_generic_copy_payload())
+    monkeypatch.setattr(M, "_STAMP_CURRENCY", None)
+    with pytest.raises(ValidationError) as info:
+        M.Tariff.model_validate(read)
+    assert info.value.errors()[0]["type"] == "tariff_stamp_unreadable"
 
 
 # ── the routes (GK A G5-1, G5-3) ──────────────────────────────────────────────

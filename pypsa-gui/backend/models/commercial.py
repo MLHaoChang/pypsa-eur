@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 
 from datetime import date
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Callable, Literal, Union
 
 from pydantic import AfterValidator, BaseModel, Field, model_serializer, model_validator
 from pydantic_core import PydanticCustomError
@@ -404,35 +404,48 @@ RESOLVED_CURRENCY_KEY = "resolved_currency"
 RESOLVED_CURRENCY = {RESOLVED_CURRENCY_KEY: True}
 
 
+#: The currency a defaults-pack stamp names for a tariff, `(pack_hash, tariff_id) ->
+#: currency | None`, and the error class it raises for a pack it cannot read
+#: (gridspine-library-eu 05). A model module holds no service imports, so
+#: `services.commercial.stamp_currency` registers both; `_drop_stamp_echo` reads them.
+_STAMP_CURRENCY: tuple[Callable[[str, str], str | None], type[Exception]] | None = None
+
+
+def register_stamp_currency(lookup: Callable[[str, str], str | None],
+                            unreadable: type[Exception]) -> None:
+    global _STAMP_CURRENCY
+    _STAMP_CURRENCY = (lookup, unreadable)
+
+
+def _stamp_unreadable(data: dict, why: str) -> PydanticCustomError:
+    return PydanticCustomError(
+        "tariff_stamp_unreadable",
+        "Tariff \u201c{id}\u201d was read with the currency of its defaults pack "
+        "{stamp}, which cannot be read now ({why}), so it is not saved. Reload the "
+        "tariff, or state its currency.",
+        {"id": str(data.get("id")), "stamp": str(data["pack_hash"]), "why": why},
+    )
+
+
 def _drop_stamp_echo(data: dict) -> dict:
-    """A tariff payload sent back as it was read (`tariff_payload_resolved`), minus
+    """A tariff payload sent back as it was read (`binding.tariff_payload_read`), minus
     what the read added (gridspine-library-eu 05, GK A G5-1): the read-only
     `currency_source` key always, and a currency the read took from the `pack_hash`
     stamp when it still equals the stamp's. A currency that differs is stated content.
     So a read then written back unchanged stores the same bytes and hashes. A pack that
-    cannot be read refuses the write (`tariff_stamp_unreadable`); never stored with it."""
+    cannot be read, or no registered lookup, refuses the write
+    (`tariff_stamp_unreadable`): never stored with the currency."""
     source = data.get("currency_source")
     data = {k: v for k, v in data.items() if k != "currency_source"}
     if source != "stamp" or not data.get("currency") or not data.get("pack_hash"):
         return data
-    from types import SimpleNamespace
-
-    from services.library.defaults_pack.loader import (
-        DefaultsPackError,
-        stamped_tariff_currency,
-    )
-
-    probe = SimpleNamespace(id=data.get("id"), pack_hash=data["pack_hash"])
+    if _STAMP_CURRENCY is None:
+        raise _stamp_unreadable(data, "no defaults-pack lookup is registered")
+    lookup, unreadable = _STAMP_CURRENCY
     try:
-        stamped = (stamped_tariff_currency(probe) or "").strip().upper()
-    except DefaultsPackError as exc:
-        raise PydanticCustomError(
-            "tariff_stamp_unreadable",
-            "Tariff \u201c{id}\u201d was read with the currency of its defaults pack "
-            "{stamp}, which cannot be read now ({why}), so it is not saved. Reload the "
-            "tariff, or state its currency.",
-            {"id": str(data.get("id")), "stamp": str(data["pack_hash"]), "why": str(exc)},
-        ) from exc
+        stamped = (lookup(data["pack_hash"], data.get("id")) or "").strip().upper()
+    except unreadable as exc:
+        raise _stamp_unreadable(data, str(exc)) from exc
     if stamped and data["currency"] == stamped:
         data = {k: v for k, v in data.items() if k != "currency"}
     return data
@@ -493,30 +506,13 @@ class Tariff(BaseModel):
 
 def tariff_payload_resolved(payload: Any) -> Any:
     """A stored tariff payload with the currency it reads as (an API read, GK B C2);
-    anything that is not a valid tariff is returned unchanged. A `generic` pack copy
-    that states none shows the currency its `pack_hash` stamp names, with
-    `currency_source: "stamp"` (gridspine-library-eu 05), the one the currency gate
-    reads (`binding.resolved_tariff_currency`). A new dict: nothing is written onto the
-    tariff, so its stored form and hashes stay as they are; a write drops the echo
-    (`Tariff._drop_stamp_echo`). A pack that cannot be read gives no currency and
-    `currency_source: "pack_unreadable"`."""
+    anything that is not a valid tariff is returned unchanged."""
     if not isinstance(payload, dict):
         return payload
     try:
-        tariff = Tariff.model_validate(payload)
+        cur = Tariff.model_validate(payload).currency
     except ValueError:
         return payload
-    from services.commercial.binding import resolved_tariff_currency
-    from services.library.defaults_pack.loader import DefaultsPackError
-
-    try:
-        cur, source = resolved_tariff_currency(tariff)
-    except DefaultsPackError:
-        # A display read never 500s on a broken pack (GK A G5-2): no currency, said
-        # why. Anything else propagates; a bind or run still refuses (GLE3-1).
-        return {**payload, "currency_source": "pack_unreadable"}
-    if source == "stamp":
-        return {**payload, "currency": cur, "currency_source": source}
     return {**payload, "currency": cur} if cur is not None and "currency" not in payload \
         else payload
 
