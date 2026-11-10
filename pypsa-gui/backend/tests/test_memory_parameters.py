@@ -1234,3 +1234,16 @@ def test_a_double_space_carrier_is_saved_and_suggested_for_its_asset(client, pro
     assert _save(client, proj, field="p_nom", name="solar").status_code == 201
     assert _chips(client, proj, "solar")["p_nom"][0]["carrier"] == "solar  rooftop"
     assert "p_nom" not in _chips(client, proj, "gas")
+
+
+def test_the_applied_stamp_carries_the_items_currency_and_money_year(client, proj):
+    proj.stamp(currency="EUR", year=2024)
+    _save(client, proj)
+    _set_value(proj, 70.0)
+    proj.stamp(currency="EUR", year=2024, source="typed:x")
+    chip = _chips(client, proj)["marginal_cost"][0]
+    card = _preview(client, proj, chip).json()
+    assert _apply(client, proj, chip, card["digest"]).status_code == 200
+    entry = PV.get(proj.net(), "Generator", "gas")["marginal_cost"]
+    assert entry["source"] == f"memory:{chip['id']}@v{chip['version']}"
+    assert entry["currency"] == "EUR" and entry["currency_year"] == 2024  # GK B F8
