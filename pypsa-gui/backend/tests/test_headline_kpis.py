@@ -70,6 +70,10 @@ def test_a_figure_the_run_did_not_produce_is_a_state_with_its_sentence(windy, cl
 
 def test_peak_line_loading_names_its_line(windy, client):
     n = windy.network
+    # A lightly loaded spur listed first: the name is the peak's, not the first branch's.
+    n.add("Bus", "B3", v_nom=110)
+    n.add("Line", "A spur", bus0="B1", bus1="B3", x=0.1, r=0.01, s_nom=10)
+    n.add("Load", "L3", bus="B3", p_set=0.5)
     n.add("Bus", "B2", v_nom=110)
     n.add("Line", "North tie", bus0="B1", bus1="B2", x=0.1, r=0.01, s_nom=10)
     n.add("Load", "L2", bus="B2", p_set=2)
@@ -118,6 +122,44 @@ def test_a_microgrid_leads_with_unserved_energy_and_keeps_a_real_zero(
         "MWh",
         "zero",
     )
+
+
+def test_a_missing_payload_is_a_state_never_a_zero(windy):
+    solve(windy)
+    template = {"id": "eh_microgrid"}
+    by_id = {
+        c["id"]: c
+        for c in hk.headline_kpis(windy, template=template, cost=None, lost_load=None)[
+            "cards"
+        ]
+    }
+    for card_id in ("system_cost", "new_build_capital"):
+        assert (
+            by_id[card_id]["value"],
+            by_id[card_id]["state"],
+            by_id[card_id]["reason"],
+        ) == (
+            None,
+            "unavailable",
+            hk.NO_COST,
+        )
+    assert (by_id["unserved_energy"]["value"], by_id["unserved_energy"]["state"]) == (
+        None,
+        "not_modelled",
+    )
+    # One missing field leaves the other card its figure.
+    partial = {"total": 5.0, "capex_expansion": None}
+    by_id = {
+        c["id"]: c
+        for c in hk.headline_kpis(
+            windy, template=template, cost=partial, lost_load=None
+        )["cards"]
+    }
+    assert (by_id["system_cost"]["value"], by_id["system_cost"]["state"]) == (
+        5.0,
+        "ready",
+    )
+    assert by_id["new_build_capital"]["state"] == "unavailable"
 
 
 @pytest.mark.parametrize(
