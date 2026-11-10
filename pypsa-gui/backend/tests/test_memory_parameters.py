@@ -459,7 +459,9 @@ def test_preview_shows_the_card_and_every_memory_fact(client, proj):
     )
     assert m["unit"] == "MW" and m["carrier"] == "gas" and m["target"]["value"] == 10.0
     assert m["label"] and m["field"] == "p_nom"
-    assert m["target"]["component_class"] == "Generator" and m["target"]["name"] == "gas"
+    assert (
+        m["target"]["component_class"] == "Generator" and m["target"]["name"] == "gas"
+    )
     assert "target" in m and card["digest"] != card["card_digest"]
     assert any(row.get("field") == "p_nom" for row in card["rows"])
     assert proj.net().generators.at["gas", "p_nom"] == 10.0  # the preview wrote nothing
@@ -1255,3 +1257,101 @@ def test_the_applied_stamp_carries_the_items_currency_and_money_year(client, pro
     entry = PV.get(proj.net(), "Generator", "gas")["marginal_cost"]
     assert entry["source"] == f"memory:{chip['id']}@v{chip['version']}"
     assert entry["currency"] == "EUR" and entry["currency_year"] == 2024  # GK B F8
+
+
+_BODY = {"component_class": "Generator", "field": "p_nom", "value": 1.0, "unit": "MW"}
+
+
+@pytest.mark.parametrize(
+    ("change", "kind"),
+    [
+        ({"component_class": 5}, "memory_field_unknown"),
+        ({"field": 5}, "memory_field_unknown"),
+        ({"field": "p nom"}, "memory_field_unknown"),
+        ({"field": "capital_cost"}, "memory_field_unknown"),  # derived
+        ({"value": True}, "memory_invalid"),
+        ({"value": "1"}, "memory_invalid"),
+        ({"value": float("inf")}, "memory_invalid"),
+        ({"currency": "XYZ"}, "memory_invalid"),
+        ({"currency_year": True}, "memory_invalid"),
+        ({"currency_year": 2024.0}, "memory_invalid"),
+        ({"currency_year": 1899}, "memory_invalid"),
+        ({"currency_year": 2201}, "memory_invalid"),
+        ({"carrier": 5}, "memory_carrier_unsupported"),
+    ],
+)
+def test_the_parameter_body_refuses_each_malformed_key(change, kind):
+    """Each guard of the stored body on its own, as the Save route never sends
+    these (a hand-built body or a future writer would)."""
+    from services import memory_store as M
+
+    with pytest.raises(M.MemoryError) as exc:
+        M.validate_body("parameter", _BODY | change, parameter_ok=True)
+    assert exc.value.kind == kind
+
+
+@pytest.mark.parametrize("year", [1900, 2200])
+def test_a_money_year_at_either_bound_is_kept(year):
+    from services import memory_store as M
+
+    body = M.validate_body(
+        "parameter",
+        _BODY | {"currency": "EUR", "currency_year": year},
+        parameter_ok=True,
+    )
+    assert body["currency_year"] == year and body["currency"] == "EUR"
+
+
+def test_a_unit_refusal_names_the_stored_unit():
+    from services import memory_store as M
+
+    with pytest.raises(M.MemoryError) as exc:
+        M.validate_body("parameter", _BODY | {"unit": "GW"}, parameter_ok=True)
+    assert "stored in MW" in str(exc.value)
+    with pytest.raises(M.MemoryError) as exc:
+        M.validate_body(
+            "parameter",
+            _BODY | {"field": "dc_ac_ratio", "unit": "MW"},
+            parameter_ok=True,
+        )
+    assert "stored in no unit" in str(exc.value)
+
+
+def test_the_kind_refusal_points_to_save_for_reuse():
+    from services import memory_store as M
+
+    with pytest.raises(M.MemoryError) as exc:
+        M.validate_body("parameter", _BODY)
+    assert exc.value.kind == "memory_kind_unavailable"
+    assert "Save for reuse" in str(exc.value)
+
+
+def test_a_preferences_keys_still_edit(client):
+    item = client.post(
+        "/api/memory/items",
+        json={
+            "kind": "preference",
+            "body": {"key": "units.power", "value": "GW"},
+            "concept_keys": ["topic:units"],
+        },
+    ).json()
+    r = client.patch(
+        f"/api/memory/items/{item['id']}", json={"concept_keys": ["topic:units"]}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["version"] == 2
+
+
+@pytest.mark.parametrize("version", [0, True, "1", 1.0])
+def test_node_reads_only_a_whole_version_number(
+    client, proj, _auth_db, seeded_identity, version
+):
+    from db.models import User
+    from services import memory_store as M
+
+    item = _save(client, proj, field="p_nom").json()
+    with _db(_auth_db) as db:
+        user = db.get(User, seeded_identity["user_id"])
+        with pytest.raises(M.MemoryError) as exc:
+            M.node(db, user, item["id"], version)
+        assert exc.value.status == 404
