@@ -114,6 +114,19 @@ describe('HeadlineStrip', () => {
     expect((await screen.findByTestId('headline-peak_line_loading')).textContent).toContain('North tie')
   })
 
+  it('holds the row with placeholders while the figures load, and shows no value', async () => {
+    let answer: (v: unknown) => void = () => {}
+    api.getHeadlineKpis.mockReturnValue(new Promise(r => { answer = r }))
+    renderStrip()
+    const loading = screen.getByTestId('headline-strip-loading')
+    expect(loading.getAttribute('aria-busy')).toBe('true')
+    expect(loading.textContent).toBe('Loading the headline figures…')
+    expect(loading.querySelectorAll('[aria-hidden="true"]').length).toBeGreaterThanOrEqual(4)
+    answer(HUB)
+    await screen.findByTestId('headline-strip')
+    expect(screen.queryByTestId('headline-strip-loading')).toBeNull()
+  })
+
   it('says so when the figures cannot be read, and draws nothing when nothing is solved', async () => {
     api.getHeadlineKpis.mockRejectedValue(new Error('500'))
     renderStrip()

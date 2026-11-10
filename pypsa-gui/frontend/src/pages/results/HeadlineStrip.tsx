@@ -9,6 +9,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { resultsApi, type HeadlineCard } from '../../api/simulation'
 import Kpi from '../../components/Kpi'
+import { Skeleton } from '../../components/Skeleton'
 import { ChartSourceLine, ChartSourceProvider, useChartSource } from '../../components/charts/chartTheme'
 import { showResultsTab } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
@@ -26,6 +27,8 @@ export function useHeadlineKpis() {
 const ROW = 'grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]'
 // Every tile is as tall as the tallest state (label, figure, pill, sentence), so the row never jumps.
 const TILE_MIN = 'min-h-[104px]'
+// The shortest card set (`headline_kpis.py` ORDER); a fifth tile joins the same row.
+const LOADING_TILES = 4
 
 function Tile({ card, dimmed }: { card: HeadlineCard; dimmed: boolean }) {
   const words = HEADLINE_WORDS[card.id]
@@ -48,7 +51,20 @@ function Tile({ card, dimmed }: { card: HeadlineCard; dimmed: boolean }) {
 
 export default function HeadlineStrip() {
   const source = useChartSource()
-  const { data, isError } = useHeadlineKpis()
+  const { data, isError, isLoading } = useHeadlineKpis()
+  if (isLoading) {
+    // The row's own grid and tile height, and the source line's, so nothing below moves when the figures arrive.
+    return (
+      <section aria-label="Headline figures" role="status" aria-busy="true" data-testid="headline-strip-loading"
+        className="flex flex-col gap-1.5">
+        <span className="sr-only">Loading the headline figures…</span>
+        <div className={ROW}>
+          {Array.from({ length: LOADING_TILES }, (_, i) => <Skeleton key={i} className={TILE_MIN} />)}
+        </div>
+        <Skeleton className="h-3 w-1/3" />
+      </section>
+    )
+  }
   if (isError) {
     return (
       <p role="status" data-testid="headline-strip-failed" className="text-[11.5px] text-muted">
