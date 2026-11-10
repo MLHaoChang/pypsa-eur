@@ -45,7 +45,8 @@ def test_every_previous_row_is_byte_equal_and_the_new_version_is_the_default():
     )["generic_defaults"]
     assert loader.load_defaults_pack(PREV).hash == pins[PREV]
     assert loader.load_defaults_pack(NEW).hash == pins[NEW]
-    assert NEW == A.ARCH_PACK_VERSION   # pinned; DC BC 02 (2026-11-10) is the unpinned default now
+    # Pinned; DC BC 02 (2026-11-10) is the unpinned default now.
+    assert NEW == A.ARCH_PACK_VERSION
 
 
 def test_pinned_callers_are_unaffected():
