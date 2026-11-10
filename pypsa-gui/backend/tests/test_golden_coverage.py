@@ -277,6 +277,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/studies.py", "get_ledger"):            frozenset(),
     ("routers/studies.py", "put_ledger"):            frozenset(),
     ("routers/studies.py", "get_ledger_csv"):        frozenset(),
+    ("routers/studies.py", "get_ledger_row_why"):    frozenset(),
     ("routers/studies.py", "get_option_case"):       frozenset({"investment_case"}),
     ("routers/studies.py", "get_option_case_xlsx"):  frozenset({"investment_case_xlsx"}),
     # S6: the findings report the battery's value; the tornado routes start,
