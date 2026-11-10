@@ -1355,3 +1355,14 @@ def test_node_reads_only_a_whole_version_number(
         with pytest.raises(M.MemoryError) as exc:
             M.node(db, user, item["id"], version)
         assert exc.value.status == 404
+
+
+@pytest.mark.parametrize(
+    "change", [{"component_class": 5}, {"field": 5}, {"field": "p nom"}]
+)
+def test_a_malformed_class_or_field_is_named_as_such(change):
+    from services import memory_store as M
+
+    with pytest.raises(M.MemoryError) as exc:
+        M.validate_body("parameter", _BODY | change, parameter_ok=True)
+    assert "needs a component class and a field" in str(exc.value)
