@@ -493,3 +493,45 @@ def test_tracked_wait_can_settle_after_native_job_finishes_without_refresh(basel
     assert not current['cases'][1]['case_effects_reserved']
     assert current['next_call']['tool'] == 'run_sensitivity_sweep'
     assert len(solve_queue.list_jobs()) == 1
+
+
+def _with_constant(monkeypatch, extra):
+    """Price every queue total with an objective constant, as a network with built assets does."""
+    from routers import simulation
+    real = simulation._compute_run_objective
+    monkeypatch.setattr(simulation, '_compute_run_objective',
+                        lambda n, cfg=None: None if (t := real(n, cfg)) is None else t + extra())
+
+
+def test_a_child_with_a_non_zero_objective_constant_reads_available_not_mismatch(baseline, monkeypatch):
+    """SH-39: the manifest holds LP objective + constant (eh_h2_hub: 506,529,579.17 vs 505,116,197.62)."""
+    _with_constant(monkeypatch, lambda: 1413381.55)
+    eid = prepared_pair()
+    session, state = arm(eid)
+    first = finish(session, state, eid)
+    assert first['cases'][0]['status'] == 'completed' and first['cases'][0]['objective'] == 200 + 1413381.55
+
+
+def test_an_objective_off_by_one_from_the_recomputed_total_stays_a_mismatch(baseline, monkeypatch):
+    """Kills the drop-the-compare mutant: the recompute must still be compared exactly."""
+    _with_constant(monkeypatch, lambda: 1413381.55)
+    eid = prepared_pair()
+    session, state = arm(eid)
+    invoke(session, state['next_call'])
+    job = tool('refresh_experiment', experiment_id=eid)['cases'][0]['job_id']
+    assert chat_tools.wait_for_job(job, 25)['completed']
+    _with_constant(monkeypatch, lambda: 1413382.55)
+    case = tool('refresh_experiment', experiment_id=eid)['cases'][0]
+    assert case['status'] == 'unavailable' and case['last_error'] == 'experiment_result_mismatch'
+
+
+def test_a_child_without_a_saved_solver_config_or_total_stays_a_mismatch(baseline, monkeypatch):
+    from harness import continuation
+    eid = prepared_pair()
+    session, state = arm(eid)
+    invoke(session, state['next_call'])
+    job = tool('refresh_experiment', experiment_id=eid)['cases'][0]['job_id']
+    assert chat_tools.wait_for_job(job, 25)['completed']
+    monkeypatch.setattr(continuation, 'saved_queue_total', lambda saved: None)
+    case = tool('refresh_experiment', experiment_id=eid)['cases'][0]
+    assert case['status'] == 'unavailable' and case['last_error'] == 'experiment_result_mismatch'
