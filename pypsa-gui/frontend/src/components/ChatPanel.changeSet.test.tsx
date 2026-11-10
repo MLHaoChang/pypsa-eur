@@ -133,6 +133,15 @@ it('Stop with the card open withdraws it and says nothing changed, once', async 
   expect(screen.getAllByTestId('chat-change-set-settled')).toHaveLength(1)
 })
 
+it('a set the server withdrew after Apply still says its line', async () => {
+  await turn('guided')
+  raise()
+  act(() => useChatStore.getState().setPending(null))  // Apply answered the card
+  emit('change_set_receipt', receiptFrame('revoked', [['failed', 'confirmation_denied'], ['failed', 'confirmation_denied']]))
+  expect(screen.getByTestId('chat-change-set-settled').textContent)
+    .toBe('Not applied: the rules for confirming changed while the card was open. Nothing changed.')
+})
+
 it('a malformed receipt frame adds no line', async () => {
   await turn('expert')
   raise()

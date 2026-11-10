@@ -285,6 +285,8 @@ export function ConfirmationCard() {
   const repeat = repeatCardOf(pending?.repeat_card)
   // LC-47: a change set's rows, the ones ticked, and a refused decision's line.
   const changeSet = changeSetOf(pending?.change_set)
+  // A change-set card without well-formed rows is never approvable: an approval with no ticks means every row.
+  const isChangeSet = pending?.change_set !== undefined || pending?.tool_name === 'change_set'
   const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set())
   const [refused, setRefused] = useState(false)
   // LC-04: a chat edit's card that arrived malformed is never approvable.
@@ -292,7 +294,7 @@ export function ConfirmationCard() {
     || (pending?.edit_card !== undefined && !edit)
     || (pending?.sweep_card !== undefined && !sweep)
     || (pending?.repeat_card !== undefined && !repeat)
-    || (pending?.change_set !== undefined && !changeSet)
+    || (isChangeSet && !changeSet)
 
   // Reset the typed-confirmation field whenever the pending card changes.
   useEffect(() => { setTypedConfirmation('') }, [pending?.confirmation_token])
@@ -341,7 +343,7 @@ export function ConfirmationCard() {
         const lapsedGroup = useChatStore.getState().activeRequest?.group
         if (lapsedGroup) useChatStore.getState().dropRequestGroup(lapsedGroup)
         // LC-47 (UX C4): a change set says "Timed out: nothing changed" in the transcript.
-        if (pending.change_set !== undefined) appendMessage(settledChangeSet('expired'))
+        if (isChangeSet) appendMessage(settledChangeSet('expired', pending.confirmation_token))
         else setError({
           error_kind: 'confirmation_expired',
           message: `The confirmation for ${pending.tool_name} expired before it was answered. Ask again to retry.`,
@@ -398,7 +400,7 @@ export function ConfirmationCard() {
       const group = useChatStore.getState().activeRequest?.group
       if (group) useChatStore.getState().dropRequestGroup(group)
       // LC-47 (UX C4): a change set says "Cancelled: nothing changed".
-      if (pending.change_set !== undefined) appendMessage(settledChangeSet('deny'))
+      if (isChangeSet) appendMessage(settledChangeSet('deny', token))
       else appendMessage({
         role: 'tool', content: `denied: ${pending.tool_name}`,
         tool_use_id: pending.tool_use_id, tool_name: pending.tool_name,
@@ -407,7 +409,7 @@ export function ConfirmationCard() {
     } catch (err) {
       toast.error(`confirmation failed: ${(err as Error).message}`)
     }
-  }, [pending, target, clearIfStill, appendMessage])
+  }, [pending, target, clearIfStill, appendMessage, isChangeSet])
 
   if (!pending) return null
 
@@ -503,8 +505,8 @@ export function ConfirmationCard() {
       )}
       {edit && <EditCardTable card={edit} guided={Boolean(guidedWording)} />}
       {changeSet && <ChangeSetRows set={changeSet} ticked={ticked} onToggle={toggleTick} />}
-      {pending.change_set !== undefined && !changeSet && <p role="alert" className="mb-2 text-xs text-warn">
-        The changes of this card are unavailable. Cancel it and ask again.
+      {isChangeSet && !changeSet && <p role="alert" className="mb-2 text-xs text-warn">
+        The changes of this card are unavailable. Cancel all and ask again.
       </p>}
       {changeSet && ticked.size === 0 && (
         <p className="mb-2 text-[11px] text-warn" data-testid="chat-change-set-none">{CHANGE_SET_NONE_TICKED}</p>
@@ -573,7 +575,7 @@ export function ConfirmationCard() {
           onClick={onDeny}
           data-testid="chat-confirm-deny"
         >
-          {pending.change_set !== undefined ? 'Cancel all' : 'Deny'}
+          {isChangeSet ? 'Cancel all' : 'Deny'}
         </button>
         <span className="font-mono text-[10px] text-muted ml-auto">
           {secondsLeft}s

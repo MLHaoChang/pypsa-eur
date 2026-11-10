@@ -143,7 +143,7 @@ const STALE_REASON = 'the project changed after the card was shown'
 function statusWords(row: ChangeSetReceiptRow, reason: string | undefined): string {
   switch (row.status) {
     case 'applied': return 'Applied'
-    case 'unchanged': return 'Applied: the project already had this value'
+    case 'unchanged': return 'No change: the project already had this value'
     case 'uncertain': return 'Applied: not confirmed yet'
     case 'stale': return `Failed: ${STALE_REASON}`
     case 'failed': return `Failed: ${reason || 'the change was refused'}`
@@ -170,11 +170,11 @@ export function changeSetReceiptText(receipt: ChangeSetReceipt): string {
 }
 
 /** The line a set leaves when the browser itself settles it (Cancel all, its own timeout, Stop): no row was
- * applied. The server's receipt for the same decision is then not shown a second time (ChatPanel). */
-export function settledChangeSet(decision: 'deny' | 'expired' | 'aborted') {
+ * applied. The server's receipt for that card (`token`) is then not shown a second time (ChatPanel). */
+export function settledChangeSet(decision: 'deny' | 'expired' | 'aborted', token: string) {
   const receipt: ChangeSetReceipt = { version: 1, decision, rows: [], ticked: 0, landed: 0, failed: 0, all_applied: false }
   return { role: 'tool' as const, content: changeSetReceiptText(receipt),
-    change_set_receipt: { receipt, labels: {}, reasons: {} } }
+    change_set_receipt: { receipt, labels: {}, reasons: {}, token } }
 }
 
 /** The set's one receipt: a count line, then each row's outcome in words, its reason on its row. */

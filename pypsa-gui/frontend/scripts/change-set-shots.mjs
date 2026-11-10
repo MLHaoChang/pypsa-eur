@@ -102,13 +102,13 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     ['site-all-ticked', 'card', [], ['guided', 'expert'], ['dark', 'light']],
     ['site-one-unticked', 'card', [2], ['guided', 'expert'], ['dark', 'light']],
     ['site-none-ticked', 'card', [0, 1, 2, 3], ['guided', 'expert'], ['dark']],
-    ['site-malformed', 'malformed', [], ['guided'], ['dark']],
+    ['site-malformed', 'malformed', [], ['guided', 'expert'], ['dark']],
     ['profiles', 'profiles', [], ['guided', 'expert'], ['dark']],
     ['receipt-partial', 'partial', [], ['guided', 'expert'], ['dark', 'light']],
-    ['receipt-every-status', 'all', [], ['guided'], ['dark']],
+    ['receipt-every-status', 'all', [], ['guided', 'expert'], ['dark']],
     ['settled-cancelled', 'cancelled', [], ['guided', 'expert'], ['dark']],
-    ['settled-timeout', 'timeout', [], ['guided'], ['dark']],
-    ['settled-stopped', 'stopped', [], ['guided'], ['dark']],
+    ['settled-timeout', 'timeout', [], ['guided', 'expert'], ['dark']],
+    ['settled-stopped', 'stopped', [], ['guided', 'expert'], ['dark']],
   ]
   for (const [name, state, clear, modes, themes] of shots) {
     for (const mode of modes) for (const theme of themes) {

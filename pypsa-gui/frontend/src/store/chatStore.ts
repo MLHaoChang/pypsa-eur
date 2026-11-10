@@ -34,7 +34,9 @@ export interface ChatMessage {
   tool_result?: unknown
   /** LC-47: a change set's one receipt, with each row's label and a failed row's reason
    *  (components/ChangeSetCard.tsx). Not persisted: a reloaded transcript keeps `content`. */
-  change_set_receipt?: { receipt: unknown; labels: Record<string, string>; reasons: Record<string, string> }
+  change_set_receipt?: { receipt: unknown; labels: Record<string, string>; reasons: Record<string, string>
+    /** Set on the line the browser wrote itself for the card with this confirmation token. */
+    token?: string }
   // Phase D — file_ids that were attached to this user turn (for replay).
   // Read-only chip strip renders below the message bubble.
   attachment_file_ids?: string[]

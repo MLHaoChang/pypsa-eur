@@ -1503,7 +1503,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
   const [historyGap, setHistoryGap] = useState<number>(0)
   const [interruptedTurn, setInterruptedTurn] = useState<InterruptedTurn | null>(null)
   // LC-47: the open change set's row labels and each failed row's reason, for its receipt.
-  const changeSetRef = useRef<{ labels: Record<string, string>; reasons: Record<string, string> }>({ labels: {}, reasons: {} })
+  const changeSetRef = useRef<{ labels: Record<string, string>; reasons: Record<string, string>; token: string }>({ labels: {}, reasons: {}, token: '' })
 
   // Reset chat state on project switch (mirrors simulationStore pattern).
   useEffect(() => {
@@ -2324,17 +2324,18 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
         if (set) {
           changeSetRef.current = {
             labels: Object.fromEntries(set.items.map(i => [i.tool_use_id, changeSetItemLabel(i)])), reasons: {},
+            token: d.confirmation_token,
           }
         }
         break
       }
       case 'change_set_receipt': {
         const receipt = changeSetReceiptOf(_frame_data<unknown>(frame))
-        const { labels, reasons } = changeSetRef.current
-        changeSetRef.current = { labels: {}, reasons: {} }
+        const { labels, reasons, token } = changeSetRef.current
+        changeSetRef.current = { labels: {}, reasons: {}, token: '' }
         const card = useChatStore.getState().pending
-        // Cancel all, the card's own timeout and Stop each withdrew the card and said their line already.
-        if (!receipt || (receipt.decision !== 'approve' && card?.change_set === undefined)) break
+        // Cancel all, the card's own timeout and Stop each withdrew this card and said their line already.
+        if (!receipt || (token && useChatStore.getState().messages.some(m => m.change_set_receipt?.token === token))) break
         // A set the server settled on its own (timed out, withdrawn) takes its card with it.
         if (card?.change_set !== undefined) setPending(null)
         appendMessage({ role: 'tool', content: changeSetReceiptText(receipt),
@@ -3030,9 +3031,10 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
     // queued is sent after the user stopped.
     useChatStore.setState({ requestQueue: [] })
     // LC-47 (UX C4): Stop with a change-set card open withdraws it; no row was applied.
-    if (useChatStore.getState().pending?.change_set !== undefined) {
+    const openCard = useChatStore.getState().pending
+    if (openCard && (openCard.change_set !== undefined || openCard.tool_name === 'change_set')) {
       setPending(null)
-      appendMessage(settledChangeSet('aborted'))
+      appendMessage(settledChangeSet('aborted', openCard.confirmation_token))
     }
     if (!sessionId) return
     try {

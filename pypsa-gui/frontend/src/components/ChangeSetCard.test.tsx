@@ -134,12 +134,13 @@ it.each([
   ['a repeated id', { ...SET, items: [SET.items[0], SET.items[0]] }],
   ['a malformed edit card', { ...SET, items: [SET.items[0], { ...SET.items[1], edit_card: { rows: [] } }] }],
   ['no requirements line', { ...SET, requirements: {} }],
+  ['no rows at all', undefined],
 ])('never offers Apply for a malformed set: %s', (_name, broken) => {
   expect(changeSetOf(broken)).toBeNull()
   setPending(broken)
   render(<ConfirmationCard />)
   expect(approve().disabled).toBe(true)
-  expect(screen.getByRole('alert').textContent).toBe('The changes of this card are unavailable. Cancel it and ask again.')
+  expect(screen.getByRole('alert').textContent).toBe('The changes of this card are unavailable. Cancel all and ask again.')
   expect(screen.queryByTestId('chat-change-set')).toBeNull()
 })
 
@@ -161,7 +162,7 @@ it('words each row of the receipt and keeps a failed row’s reason on its row',
     'backend cNot applied (unticked)',
     'backend dApplied: not confirmed yet',
     'backend eFailed: the project changed after the card was shown',
-    'backend fApplied: the project already had this value',
+    'backend fNo change: the project already had this value',
   ])
 })
 
