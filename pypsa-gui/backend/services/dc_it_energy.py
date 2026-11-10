@@ -163,7 +163,7 @@ def it_energy(spec: DataCentreLoadSpec, snapshots, weights, unserved=None, *,
     g = hourly.groupby(pd.Index(hourly["period"].to_numpy(), name="period"))
     periods = g[["it_mwh", "unserved_it_mwh", "billable_it_mwh"]].sum()
     hours = g["weight"].sum()
-    periods["contracted_it_kw"] = (g["it_kw_h"].sum() / hours.where(hours > 0)).fillna(0.0)
+    periods["contracted_it_kw"] = (g["it_kw_h"].sum() / hours).fillna(0.0)  # 0/0 → 0
     phases = []
     for k, p in enumerate(spec.phases):
         live = np.flatnonzero(idx >= k)
