@@ -868,8 +868,9 @@ def acknowledge_many(project_dir: pathlib.Path, items: list[dict],
     from services.atomic_io import atomic_write_text
 
     records: list[dict] = []
-    for code, entity in pairs:
-        ent = entity or ""
+    # A pair listed twice is stored once.
+    wanted = {(code, entity or ""): None for code, entity in pairs}
+    for code, ent in wanted:
         match = [it for it in items if it["code"] == code and (it["target"]["entity"] or "") == ent]
         if not match:
             raise FlowAckError(404, "flow_item_unknown",

@@ -20,7 +20,7 @@ import uuid
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import User
@@ -38,7 +38,7 @@ class FlowAck(BaseModel):
 
 
 class FlowAckMany(BaseModel):
-    items: list[FlowAck]
+    items: list[FlowAck] = Field(min_length=1)
 
 
 def _require_open(project: AuthorizedProject) -> None:
