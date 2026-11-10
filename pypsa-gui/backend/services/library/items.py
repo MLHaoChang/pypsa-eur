@@ -156,8 +156,9 @@ def _validate(kind: str, payload: Any) -> BaseModel:
         return model.model_validate(body)
     except ValidationError as exc:
         err = exc.errors()[0]
-        if err.get("type") == TariffStampUnreadable.code:
-            raise TariffStampUnreadable(err["msg"]) from exc
+        cause = (err.get("ctx") or {}).get("error")
+        if isinstance(cause, M.TariffStampUnreadableError):
+            raise TariffStampUnreadable(str(cause)) from exc
         where = ".".join(str(x) for x in err.get("loc", ()))
         raise ValueError(f"invalid {kind}: {where + ': ' if where else ''}{err['msg']}") from exc
 

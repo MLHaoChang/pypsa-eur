@@ -146,9 +146,10 @@ def test_a_marked_write_with_a_broken_pack_is_refused_typed(monkeypatch, exc_nam
         return
     with pytest.raises(ValidationError) as info:
         M.Tariff.model_validate(read)
-    err = info.value.errors()[0]
-    assert err["type"] == "tariff_stamp_unreadable"
-    assert read["pack_hash"] in err["msg"]
+    cause = info.value.errors()[0]["ctx"]["error"]
+    assert isinstance(cause, M.TariffStampUnreadableError)
+    assert cause.code == "tariff_stamp_unreadable"
+    assert read["pack_hash"] in str(cause)
 
 
 def test_the_app_registers_the_stamp_lookup_and_none_refuses_a_marked_write():
@@ -168,7 +169,8 @@ def test_the_app_registers_the_stamp_lookup_and_none_refuses_a_marked_write():
         m.setattr(M, "_STAMP_CURRENCY", None)
         with pytest.raises(ValidationError) as info:
             M.Tariff.model_validate(read)
-        assert info.value.errors()[0]["type"] == "tariff_stamp_unreadable"
+        cause = info.value.errors()[0]["ctx"]["error"]
+        assert isinstance(cause, M.TariffStampUnreadableError)
         # A marker with no currency has nothing to check, so it is not refused.
         bare = {k: v for k, v in read.items() if k != "currency"}
         assert M.Tariff.model_validate(bare).currency is None
@@ -310,7 +312,8 @@ def test_a_marked_solver_config_put_with_a_broken_pack_is_a_typed_422(
     r = client.put("/api/simulation/solver_config", json={"commercial": commercial})
 
     assert r.status_code == 422, r.text
-    assert "tariff_stamp_unreadable" in r.text
+    assert "cannot be read now" in r.text
+    assert commercial["import_tariff"]["pack_hash"] in r.text
     monkeypatch.undo()
     assert _stored(session_ctx, client) == before
 

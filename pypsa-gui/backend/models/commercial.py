@@ -16,7 +16,6 @@ from datetime import date
 from typing import Annotated, Any, Callable, Literal, Union
 
 from pydantic import AfterValidator, BaseModel, Field, model_serializer, model_validator
-from pydantic_core import PydanticCustomError
 
 # ------------------------------------------------------------------ enums
 
@@ -417,13 +416,20 @@ def register_stamp_currency(lookup: Callable[[str, str], str | None],
     _STAMP_CURRENCY = (lookup, unreadable)
 
 
-def _stamp_unreadable(data: dict, why: str) -> PydanticCustomError:
-    return PydanticCustomError(
-        "tariff_stamp_unreadable",
-        "Tariff \u201c{id}\u201d was read with the currency of its defaults pack "
-        "{stamp}, which cannot be read now ({why}), so it is not saved. Reload the "
-        "tariff, or state its currency.",
-        {"id": str(data.get("id")), "stamp": str(data["pack_hash"]), "why": why},
+class TariffStampUnreadableError(ValueError):
+    """A tariff read sent back with its stamp-read currency while its defaults pack
+    cannot be read (gridspine-library-eu 05, GK A G5-1): it is refused, never stored
+    with the currency. A plain `ValueError` subclass, so pydantic reports it as a
+    value error carrying this instance in `ctx["error"]`."""
+
+    code = "tariff_stamp_unreadable"
+
+
+def _stamp_unreadable(data: dict, why: str) -> TariffStampUnreadableError:
+    return TariffStampUnreadableError(
+        f"Tariff \u201c{data.get('id')}\u201d was read with the currency of its "
+        f"defaults pack {data['pack_hash']}, which cannot be read now ({why}), so it "
+        "is not saved. Reload the tariff, or state its currency."
     )
 
 
