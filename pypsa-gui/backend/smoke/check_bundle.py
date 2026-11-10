@@ -218,6 +218,8 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-11-06/manifest.json",
     # DC-05: the power-architecture chain and capex rows.
     "services/library/defaults_pack/versions/2026-11-07/manifest.json",
+    # DC business case 02: the non-energy cost defaults.
+    "services/library/defaults_pack/versions/2026-11-10/manifest.json",
     # The shipped common Library items (GS-EU P2d): `common.COMMON_DIR` = the module's
     # sibling `common_items/`; one probe per shipped kind.
     "services/library/common_items/tariff/nl-tennet-2026-hs.json",
