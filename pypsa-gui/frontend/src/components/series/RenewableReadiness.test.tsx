@@ -3,7 +3,8 @@ import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useUIStore } from '../../store/uiStore'
 import type { ReadinessRow } from '../../api/profiles'
-import { MissingCoordinatesBanner, readinessBadge } from './RenewableReadiness'
+import { readyRows, notReadyReason } from './renewableGeneration'
+import { MissingCoordinatesBanner, UnrecordedSourceBanner, readinessBadge } from './RenewableReadiness'
 
 const row = (o: Partial<ReadinessRow>): ReadinessRow => ({
   generator: 'g_wind', technology: 'wind', bus: 'b1', lon: 8, lat: 50,
@@ -68,5 +69,47 @@ describe('MissingCoordinatesBanner', () => {
   it('renders nothing when every generator has a location', () => {
     render(<MissingCoordinatesBanner rows={[row({})]} />)
     expect(screen.queryByTestId('missing-coordinates-banner')).toBeNull()
+  })
+})
+
+describe('unrecorded series (RP-18)', () => {
+  const un = (g: string, digest?: string) => row({ generator: g, profile: 'unrecorded', digest })
+
+  it('is badged as kept, never as the network’s own, even with no location', () => {
+    expect(readinessBadge(un('a', 'd1')).text).toBe('Source not recorded · kept')
+    expect(readinessBadge({ ...un('a', 'd1'), coord_source: 'missing', lon: null, lat: null }).text)
+      .toBe('Source not recorded · kept')
+  })
+
+  it('is never ready to generate over, and the reason counts it', () => {
+    expect(readyRows([un('a', 'd1')], true)).toEqual([])
+    expect(notReadyReason([un('a', 'd1')])).toContain('no recorded source')
+  })
+
+  it('lists every series with its fingerprint and sends exactly those back', async () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+    const rows = Array.from({ length: 12 }, (_, i) => un(`g${i}`, `d${i}`))
+    render(<UnrecordedSourceBanner rows={rows} onConfirm={onConfirm} />)
+    const text = screen.getByTestId('unrecorded-source-banner').textContent ?? ''
+    for (let i = 0; i < 12; i++) expect(text).toContain(`g${i}`)
+    await userEvent.click(screen.getByTestId('confirm-unrecorded'))
+    expect(onConfirm).toHaveBeenCalledWith(rows.map(r => ({ component: r.generator, digest: r.digest })))
+  })
+
+  it('refuses to stamp when a series cannot be shown with its fingerprint', () => {
+    render(<UnrecordedSourceBanner rows={[un('a', 'd1'), un('b')]} onConfirm={vi.fn()} />)
+    expect((screen.getByTestId('confirm-unrecorded') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('shows the refusal and stays when the series changed', async () => {
+    const onConfirm = vi.fn().mockRejectedValue({ response: { data: { detail: { message: 'changed since the list was shown' } } } })
+    render(<UnrecordedSourceBanner rows={[un('a', 'd1')]} onConfirm={onConfirm} />)
+    await userEvent.click(screen.getByTestId('confirm-unrecorded'))
+    expect((await screen.findByTestId('confirm-unrecorded-error')).textContent).toContain('changed since')
+  })
+
+  it('renders nothing without unrecorded rows', () => {
+    const { container } = render(<UnrecordedSourceBanner rows={[row({})]} onConfirm={vi.fn()} />)
+    expect(container.firstChild).toBeNull()
   })
 })

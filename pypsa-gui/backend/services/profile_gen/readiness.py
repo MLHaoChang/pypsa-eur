@@ -42,7 +42,7 @@ def _stamps(series: pd.Series) -> pd.DatetimeIndex:
 
 
 def profile_kind(ctx, name: str) -> str:
-    """uploaded / generated / network_native / none, without the staleness
+    """uploaded / unrecorded / generated / network_native / none, without the staleness
     work. `ctx.user_ts` first: opening a project seeds it from the network's
     own series, so the column test alone would call a generated one native."""
     key = (*KEY, name)
@@ -51,6 +51,11 @@ def profile_kind(ctx, name: str) -> str:
     meta = ctx.user_ts_meta.get(key) or {}
     if is_network_native(meta):
         return "network_native"   # seeded from the network's own column (RP-14)
+    if not meta:
+        # No record at all: a project saved before RP-14 stamped its native
+        # series, or a raw upload. Read as measured (never replaced), never as
+        # native; the user confirms which it is (RP-18).
+        return "unrecorded"
     if is_measured(meta):
         return "uploaded"
     return "generated"
@@ -59,7 +64,7 @@ def profile_kind(ctx, name: str) -> str:
 def supplied_profiles(ctx, names) -> set[str]:
     """The generators among `names` whose profile the user already has
     (uploaded or the network's own): they need no weather point."""
-    return {nm for nm in names if profile_kind(ctx, nm) in ("uploaded", "network_native")}
+    return {nm for nm in names if profile_kind(ctx, nm) in ("uploaded", "network_native", "unrecorded")}
 
 
 def _profile_state(ctx, name: str) -> tuple[str, dict | None, str | None]:
@@ -126,6 +131,11 @@ def readiness_rows(ctx) -> list[dict[str, Any]]:
             "coord_source": "bus" if coord else "missing",
             "profile": profile,
         }
+        if profile == "unrecorded":
+            # What the confirm card froze (#1257): the route refuses a series
+            # whose values changed since.
+            from services.profile_gen.apply import current_digest
+            row["digest"] = current_digest(ctx.user_ts[(*KEY, name)])
         if provenance is not None:
             row["provenance"] = provenance
             if _bus_moved(ctx.user_ts_meta.get((*KEY, name)) or {}, name, coord):

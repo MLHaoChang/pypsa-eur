@@ -15,11 +15,12 @@ const STALE_WORDS: Record<NonNullable<ReadinessRow['stale_reason']>, string> = {
 }
 
 export function readinessBadge(row: ReadinessRow): { text: string; tone: 'ok' | 'warn' | 'muted' } {
-  if (row.coord_source === 'missing' && row.profile !== 'uploaded' && row.profile !== 'network_native') {
+  if (row.coord_source === 'missing' && row.profile !== 'uploaded' && row.profile !== 'unrecorded' && row.profile !== 'network_native') {
     return { text: 'No location', tone: 'warn' }
   }
   switch (row.profile) {
     case 'uploaded': return { text: 'Measured file', tone: 'ok' }
+    case 'unrecorded': return { text: 'Source not recorded · kept', tone: 'muted' }
     case 'network_native': return { text: 'From the network', tone: 'ok' }
     case 'generated': {
       const year = row.provenance?.weather_year
@@ -81,6 +82,51 @@ function InlineCoordinates({ bus, onSave, onDone }: {
       )}
       {err && <span className="text-warn" data-testid={`coord-error-${bus}`}>{err}</span>}
     </span>
+  )
+}
+
+/** RP-18: series with no record of where they came from (a project saved before the
+ *  import stamped them, or a raw upload). A default never replaces them. This lists
+ *  every one, with no cut-off, and one button says they are the network's own; the
+ *  write sends the fingerprint shown here, so a series changed since is refused. */
+export function UnrecordedSourceBanner({ rows, onConfirm }: {
+  rows: ReadinessRow[]; onConfirm: (items: { component: string; digest: string }[]) => Promise<void>
+}) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const shown = rows.filter(r => r.profile === 'unrecorded')
+  if (shown.length === 0) return null
+  // Never stamp a series the list cannot show in full (#1079): no digest, no button.
+  const items = shown.flatMap(r => (r.digest ? [{ component: r.generator, digest: r.digest }] : []))
+  const complete = items.length === shown.length
+  const go = async () => {
+    setErr(null); setBusy(true)
+    try { await onConfirm(items) } catch (e) { setErr(errorText(e)) } finally { setBusy(false) }
+  }
+  return (
+    <div data-testid="unrecorded-source-banner"
+      className="px-3 py-2 border-b border-border/40 bg-amber-500/10 text-[11px]">
+      <p className="font-medium text-text">
+        {shown.length === 1 ? 'One series has' : `${shown.length} series have`} no record of where {shown.length === 1 ? 'it' : 'they'} came from.
+        They are kept as they are: a default never replaces them.
+      </p>
+      <ul className="mt-1 space-y-0.5">
+        {shown.map(r => (
+          <li key={r.generator} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-mono text-text">{r.generator}</span>
+            <span className="text-muted">wind/solar availability · fingerprint {r.digest ?? 'unavailable'}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-muted">
+        If they came with the network (not a file you uploaded), say so and a default can replace them. This changes only the record, one undo reverts it.
+      </p>
+      <button type="button" className="mt-1 text-accent hover:underline disabled:opacity-40"
+        disabled={!complete || busy} data-testid="confirm-unrecorded" onClick={() => { void go() }}>
+        {busy ? 'Saving…' : shown.length === 1 ? 'This one is the network’s own' : `These ${shown.length} are the network’s own`}
+      </button>
+      {err && <span className="ml-2 text-warn" data-testid="confirm-unrecorded-error">{err}</span>}
+    </div>
   )
 }
 
