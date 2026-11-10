@@ -17,7 +17,7 @@ vi.mock('../../hooks/useFieldLabels', () => ({ useFieldLabels: () => ({}) }))
 const item = (n: number, over: Partial<FlowItem> = {}): FlowItem => ({
   code: `assumed_row${n}`, severity: 'warning', source: 'template', blocking: false,
   acknowledged: false, card: null, in_scope: true,
-  message: `Row ${n}: ${n} MW (assumed) — confirm it or set your own.`,
+  message: `Row ${n}: ${n} MW (assumed): confirm it or set your own.`,
   target: { section: 'connection', panel: null, component: null, entity: `e${n}`, field: null },
   ...over,
 })

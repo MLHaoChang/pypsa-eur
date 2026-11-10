@@ -572,7 +572,13 @@ def _n_1(n, lost_load, periods) -> dict:
         cells = [r["by_period"].get(k) or {} for r in rows]
         # One fold over every product of every row, in row order: never the sum of the row sums (float order).
         by_period[k] = _cell(*_fold(p for c in cells for p in c.get("products", [])))
-        flags += [LOWER_BOUND for c in cells if c.get("bound") == "lower"]
+        # The screen bounds a cell only when the outage is longer than the period: the line names that reason.
+        flags += [
+            f
+            for c in cells
+            if c.get("bound") == "lower"
+            for f in (PL.OUTAGE_LONGER_THAN_PERIOD, LOWER_BOUND)
+        ]
     return _line(
         "n_1",
         source_files=src,

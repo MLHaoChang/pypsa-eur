@@ -60,6 +60,10 @@ FRAME_PAYLOADS: dict[str, tuple[str, ...]] = {
     # and when the loop pauses or blocks the goal (before an `error` frame,
     # since the panel closes the stream on it).
     "goal_state": ("goal",),
+    # LC-47: after a change-set card's rows were dispatched, one receipt:
+    # each row's status (applied, unchanged, uncertain, failed, stale,
+    # unticked) and how many landed (`harness/change_set.py`).
+    "change_set_receipt": ("version", "decision", "rows", "ticked", "landed", "failed", "all_applied"),
 }
 
 FRAMES: frozenset[str] = frozenset(FRAME_PAYLOADS)

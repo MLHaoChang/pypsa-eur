@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Energy flow diagram in Results > Operation has the same header as the other charts: its title, the total energy delivered or lost, the SVG and CSV exports and the source line. A window with no energy says so in the chart.

@@ -158,7 +158,7 @@ function LineTile({ line, period, eurTarget, mode }: {
           {line.status === 'partial' && (
             <span className="inline-flex flex-wrap items-baseline gap-1.5">
               <Tag tone="warn">lower bound</Tag>
-              <span className="text-[11px] text-muted">some units are not known</span>
+              <span className="text-[11px] text-muted">{boundReason(line.flags)}</span>
             </span>
           )}
         </>
@@ -220,11 +220,16 @@ function stampWords(stamp: Record<string, string>): string {
   return parts.join(', ')
 }
 
-/** A sub-row's flags, once each. A bound from an outage longer than the period is not one from unknown units, so
+/** A line's or sub-row's flags, once each. A bound from an outage longer than the period is not one from unknown units, so
  *  the generic lower-bound words are left out beside it (the data keeps both). */
 export function subRowFlags(flags: string[]): string[] {
   const out = [...new Set(flags)]
   return out.includes('outage_longer_than_period') ? out.filter(f => f !== 'lower_bound') : out
+}
+
+/** Why a line is a lower bound, in the report's words (`chapters._bound_reason`). */
+export function boundReason(flags: string[]): string {
+  return flags.includes('outage_longer_than_period') ? 'the outage is longer than the period' : 'some units are not known'
 }
 
 function ExpertTable({ lines, period }: { lines: GridRiskLine[]; period: string }) {
@@ -232,7 +237,7 @@ function ExpertTable({ lines, period }: { lines: GridRiskLine[]; period: string 
   const td = 'px-2 py-1 align-top text-[11px] text-text'
   const rows: Array<{ key: string; line: GridRiskLine; label: string; cell: Partial<GridRiskCell> | undefined; flags: string[]; sub: boolean }> = []
   for (const line of lines) {
-    rows.push({ key: line.key, line, label: line.label, cell: line.by_period[period], flags: line.flags, sub: false })
+    rows.push({ key: line.key, line, label: line.label, cell: line.by_period[period], flags: subRowFlags(line.flags), sub: false })
     // The island's two rows, and one row per N-1 site transformer, in the backend's order; never under a missing line.
     if ((line.key === 'island' || line.key === 'n_1') && line.status !== 'missing') {
       for (const r of line.rows) {

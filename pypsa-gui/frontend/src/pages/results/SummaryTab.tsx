@@ -304,7 +304,8 @@ const ROW_OPEN: Partial<Record<CardGroupId, SummaryLink>> = {
 }
 const ROW_HINT: Partial<Record<CardGroupId, string>> = {
   grid: 'Line loading and voltages are on the Load Flow tab.',
-  control: 'No control results yet.',
+  reliability: 'No reliability result yet: set a reliability goal, then run the adequacy study on the Adequacy tab.',
+  control: 'No control results yet: run the island study on the Island & ride-through tab.',
   commercial: 'NPV and IRR are on the Investment case tab.',
   handoff: 'Reports and exports.',
 }

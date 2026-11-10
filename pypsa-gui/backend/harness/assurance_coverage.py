@@ -172,6 +172,8 @@ FRAME_PROJECTIONS = {
     "turn_done": "software_state",
     "thinking": "dropped",
     "workflow_state": "dropped",
+    # LC-47: a checked turn never offers a change set (`change_set.exclusion`).
+    "change_set_receipt": "dropped",
 }
 
 NO_ASSISTANT_TEXT = "no_assistant_text"

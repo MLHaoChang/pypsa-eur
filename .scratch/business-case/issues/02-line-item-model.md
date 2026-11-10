@@ -3,7 +3,7 @@
 
 # 02 — Line-item model and validation
 
-Status: ready-for-agent after 01 merges (GK B G-C1..G-C3, #1320 F1/F2; TDD plan to GK B first)
+Status: done (#1320)
 Type: task
 Blocked by: 01
 Gated: yes (GK B)

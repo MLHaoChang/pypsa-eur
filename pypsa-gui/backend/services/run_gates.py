@@ -169,7 +169,18 @@ def _ic_counterfactual(env):
     fact = ic.read(env.ctx, lambda fn: _on(env.ctx, fn))
     if fact["state"] == ic.ESTABLISHED:
         return fact["state"]
-    return NoEvidence(fact["state"], f"{fact['state']}: {', '.join(fact['reasons'])}")
+    return NoEvidence(fact["state"], ic.reason_words(fact))
+
+
+def _ic_returns(env):
+    """SH-10b: the investment case's project post-tax NPV at the WACC and IRR,
+    from the stored case when it is current and its counterfactual
+    established; else no evidence with the state and reasons."""
+    from services import ic_counterfactual as ic
+    fact = ic.read_returns(env.ctx, lambda fn: _on(env.ctx, fn))
+    if fact["returns"] is not None:
+        return fact["returns"]
+    return NoEvidence(fact["state"], ic.reason_words(fact))
 
 
 def _ic_baseline_keeps(env):
@@ -721,6 +732,24 @@ def _dc_campus_study(env):
     return "done" if step["status"] == "completed" else ((step.get("job") or {}).get("outcome") or "failed")
 
 
+def _dc_campus_contingency(env):
+    """SH-10b (GK A CT-1..CT-6): the checks of the run's own campus study
+    that fail in the intact case or a transformer N-1 after the taps and
+    the compensation it bought (DC13-SCOPE; no redispatch), each with its
+    case, period, value and limit; [] when none fails. No evidence unless
+    the study is the run's own, held to its frozen profile, on the network
+    it read, with every check re-solved and read on a stated band (D3)."""
+    from services import dirty_state, run_actions
+    if env.project is None:
+        return NoEvidence("not_run", "the run has no project")
+    if not hasattr(env.ctx, "network_revision"):
+        return NoEvidence("edited", "the network's edit counter cannot be read")
+    out = run_actions.contingency(env.project, env.task, dirty_state.revision(env.ctx))
+    if "failing" in out:
+        return Measured(out["failing"], out["measures"])
+    return NoEvidence(out["state"], out["reason"])
+
+
 FACTS: dict[str, Fact] = {
     # Harness facts: the run block itself, written only by harness code.
     "brief.valid": Fact("task.brief", "brief", None, lambda env: bool(env.task.get("brief"))),
@@ -742,6 +771,7 @@ FACTS: dict[str, Fact] = {
     "solve.status": Fact("routers.solve_queue._visible_job_or_404", "condition", None, _solve_status),
     "fresh": Fact("services.workflow_tools.solve_freshness", "results_current", None, _fresh),
     "ic.counterfactual": Fact("services.ic_counterfactual.read", "state", None, _ic_counterfactual),
+    "ic.returns": Fact("services.ic_counterfactual.read_returns", "returns", None, _ic_returns),
     "ic.baseline_keeps": Fact("services.ic_counterfactual.read_baseline_keeps", "kept", None,
                               _ic_baseline_keeps),
     LOOP_FACT: Fact("task.steps[engine].result.loop", "status", None, _loop_converged, per_rule=True),
@@ -764,6 +794,7 @@ FACTS: dict[str, Fact] = {
     "h2.electrolyser.utilisation": Fact("services.run_gates._electrolyser_utilisation", "utilisation", "p.u.",
                                         _electrolyser_utilisation, per_rule=True),
     # Study harness 10a: the data-centre run (GK B (36) D1, Q1, Q2).
+    "dc.campus.contingency": Fact("services.run_actions.contingency", "failing", None, _dc_campus_contingency),
     "dc.gridcode.published": Fact("services.run_actions.choose", "id", None, _dc_gridcode_published),
     "dc.gridcode.frequency_match": Fact("services.solver.island.campus_f_hz", "f_hz", None,
                                         _dc_gridcode_frequency),
@@ -781,6 +812,19 @@ FAMILIES = ("energization_peak:", "dynamic:", "ride_through:", "motor_start:")
 SCREENING_PASS = "within the screening limit"
 # D8: requirements only the operator's own study can show; the screening never passes them.
 NEVER_PASS = ("ride_through:", "dynamic:")
+
+
+@dataclass(frozen=True)
+class Measured:
+    """A reading that passes only with the campus study's measures (GK A
+    CT-5d, the #1172 rule): the value the rule compares, and each measure,
+    carried into the gate record and named in the pass's words."""
+
+    value: Any
+    measures: list
+
+
+MEASURED_PASS = "passes with the campus study's measures: "
 
 
 @dataclass(frozen=True)
@@ -834,6 +878,10 @@ def _scorecard_reader(name):
             rows = [r for r in card.get("rows") or [] if str(r["id"]).startswith(target)]
             if not rows:
                 return NoEvidence("no_rows", f"no scorecard row in family {target!r}")
+            if target == PERIOD_FAMILY:
+                gap = _period_gap(env, rows)
+                if gap is not None:
+                    return gap
             verdict = "pass" if all(r["verdict"] == "pass" for r in rows) else "fail"
         else:
             verdict = grid_readiness.readiness_fact(card, target)
@@ -843,6 +891,25 @@ def _scorecard_reader(name):
         return Scored(verdict, [{"id": r["id"], "verdict": r["verdict"], "assumed": bool(r.get("assumed"))}
                                 for r in rows])
     return read
+
+
+PERIOD_FAMILY = "energization_peak:"
+
+
+def _period_gap(env, rows):
+    """SH-10b (GK A ST-1): on a multi-period network the energization family
+    has exactly one row per investment period of the network at gate time
+    (never the template's planning); a period without a row, or a row for a
+    period the network does not have, is no evidence, never ignored."""
+    periods = getattr(getattr(env.ctx, "network", None), "investment_periods", None)
+    if periods is None or not len(periods):
+        return None
+    have = {str(r["id"])[len(PERIOD_FAMILY):] for r in rows}
+    want = {str(int(p)) for p in periods}
+    if have != want:
+        return NoEvidence("periods_changed",
+                          f"the energization rows cover {sorted(have)}, the network's periods are {sorted(want)}")
+    return None
 
 
 def _check_scorecard(name):
@@ -939,7 +1006,9 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
                 except Exception as exc:  # noqa: BLE001 — an unreadable fact is no evidence (fail closed)
                     values[key] = (None, f"the reader failed: {type(exc).__name__}")
         value, problem = values[key]
-        shown, scored, looped = None, None, None
+        shown, scored, looped, measured = None, None, None, None
+        if isinstance(value, Measured):
+            measured, value = value, value.value
         if isinstance(value, Scored):
             scored, value = value, value.value
         if isinstance(value, Looped):
@@ -962,6 +1031,12 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
                 problem = f"the fact cannot be compared: {exc}"
         if problem is None and scored is not None:
             problem = _scored_problem(rule, result, scored)
+        if measured is not None:
+            result["facts"][0]["measures"] = measured.measures
+            if problem is None and result["verdict"] == "pass" and measured.measures:
+                from services.run_actions import CHECK_WORDS
+                result["note"] = MEASURED_PASS + "; ".join(m["detail"] or CHECK_WORDS.get(m["check"], m["check"])
+                                                           for m in measured.measures)
         if problem is not None:
             result.update(verdict="not_evaluated", reason=problem)
         out.append(result)
