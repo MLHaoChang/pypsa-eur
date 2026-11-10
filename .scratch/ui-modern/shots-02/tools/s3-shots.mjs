@@ -2,7 +2,7 @@ import { createRequire } from 'module'
 const { chromium } = createRequire(import.meta.url)('playwright')
 const [project, outDir, state, ...steps] = process.argv.slice(2)
 const b = await chromium.launch()
-const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, storageState: state })
+const ctx = await b.newContext({ viewport: { width: 1440, height: Number(process.env.VH || 900) }, storageState: state })
 const p = await ctx.newPage()
 p.setDefaultTimeout(20000)
 const log = (...a) => console.log(...a)
