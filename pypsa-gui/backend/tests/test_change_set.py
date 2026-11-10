@@ -1127,8 +1127,12 @@ def test_rules_changed_while_the_card_is_open_revoke_the_whole_set(world, monkey
         return decision
 
     session.wait_for_decision = waiting
-    events = _run(session, [B1_POC, B2_CRIT, VOLL], EXPERT, [("approve", ["tu-0", "tu-1"])])
-    assert _errors(events) == dict.fromkeys(["tu-0", "tu-1", "tu-2"], "confirmation_revoked")
+    events = _run(
+        session, [B1_POC, B2_CRIT, VOLL], EXPERT, [("approve", ["tu-0", "tu-1"])]
+    )
+    assert _errors(events) == dict.fromkeys(
+        ["tu-0", "tu-1", "tu-2"], "confirmation_revoked"
+    )
     statuses, receipt = _receipt(events)
     assert receipt["decision"] == "revoked" and receipt["landed"] == 0
     assert set(statuses.values()) == {"failed"}

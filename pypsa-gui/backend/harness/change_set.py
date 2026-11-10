@@ -682,9 +682,7 @@ def _unreached(state: dict, row: dict) -> str:
     """K7: a member the dispatch never brought to its gate (the turn ended
     first, as at the tool-call cap). Nothing was written, so a
     ticked, approved row reads `not_run`, never `uncertain`."""
-    return (
-        "not_run" if row["ticked"] and state["decision"] == "approve" else "failed"
-    )
+    return "not_run" if row["ticked"] and state["decision"] == "approve" else "failed"
 
 
 def observe(session, frames: Generator) -> Generator[tuple[str, dict], None, Any]:
