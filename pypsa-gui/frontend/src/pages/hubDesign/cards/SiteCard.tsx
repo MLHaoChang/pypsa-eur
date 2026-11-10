@@ -194,7 +194,7 @@ export function SiteCard() {
         ) : (
           isError ? (
             <p className="text-[12px] text-muted">
-              The site check could not be read — ask the assistant for help.
+              The site check could not be read: ask the assistant for help.
             </p>
           ) : <SkeletonLines what="the site check" rows={3} testId="hub-site-loading" />
         )}
