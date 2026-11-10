@@ -199,7 +199,7 @@ def test_reading_without_repair_never_writes():
     assert path.read_bytes() == before
 
 
-def test_a_corrupt_line_in_the_middle_is_not_a_history():
+def test_a_corrupt_line_in_the_middle_is_not_a_history(isolated_chat_events):
     """A torn write is only the last line. A broken line earlier means the log
     cannot be read: it is not folded up to the break, and nothing is rewritten.
     `resume` leaves the session alone so the caller can fall back to chat.jsonl."""

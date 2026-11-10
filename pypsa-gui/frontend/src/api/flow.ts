@@ -181,6 +181,12 @@ export function ackFlowItem(project: string, code: string, entity: string | null
     .then(r => r.data.ack)
 }
 
+/** Acknowledge several standing warnings in one write (all or none). */
+export function ackFlowItems(project: string, items: { code: string, entity: string | null }[]): Promise<FlowAck[]> {
+  return client.post<{ acks: FlowAck[] }>(`${flowPath(project)}/ack-many`, { items })
+    .then(r => r.data.acks)
+}
+
 // ── The scope (W4a): six work cards, each with at most three sub-options ──────
 
 export const SCOPE_CARDS = [

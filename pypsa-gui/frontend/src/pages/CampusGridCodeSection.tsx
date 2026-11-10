@@ -189,7 +189,7 @@ export default function CampusGridCodeSection({ name, onProfilesChanged }: {
   const confirmThen = (what: string, run: () => void) => { if (window.confirm(what)) run() }
 
   return (
-    <div data-testid="grid-codes">
+    <div data-testid="grid-codes" data-panel-section="grid_codes">
       <PageSection title="Grid codes" hint="Upload a grid code, review its limits, publish it for the study">
         <p className="text-[12px] text-muted mb-3">
           The document stays in this project and is never added to the repository. The copilot drafts the

@@ -1,6 +1,6 @@
 # LC-44 — Edit card names in curly quotes
 
-Status: ready-for-agent
+Status: done (#1325)
 Type: task
 Raised by: UX (14) on #1295 (UX OK @e3d39420cb95c42432a5a59917cc1a66c8cf10cf), not blocking there
 

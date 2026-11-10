@@ -74,3 +74,18 @@ class TestNavigationJourney:
         events = [d for e, d in frames if e == 'ui_event']
         assert [e['guided_step'] for e in events] == ['goal']
         assert [r['guided_step'] for r in results] == ['goal']  # the model's acknowledgement
+
+    def test_chat_opens_a_panel_section(self, oj_grid, kind, model, base_url, auth, mode):
+        steps = [lambda r: ('ui_open_panel', {'panel_id': 'campusStudy', 'panel_section': 'island'}), lambda r: (None, {})]
+        _, results, frames, _ = run_journey(kind, model, base_url, auth, steps, 'Show me the island study.', mode=mode)
+        events = [d for e, d in frames if e == 'ui_event']
+        assert [(e['panel_id'], e['panel_section']) for e in events] == [('campusStudy', 'island')]
+        assert [r['panel_section'] for r in results] == ['island']  # the model's acknowledgement
+        assert not [e for e, _ in frames if e in ('tool_error', 'tool_pending_confirmation')]
+
+    def test_chat_refuses_a_section_of_another_panel(self, oj_grid, kind, model, base_url, auth, mode):
+        steps = [lambda r: ('ui_open_panel', {'panel_id': 'campusStudy', 'panel_section': 'grid_codes'}), lambda r: (None, {})]
+        _, _, frames, _ = run_journey(kind, model, base_url, auth, steps, 'Open the grid codes in the study.', mode=mode)
+        errors = [d for e, d in frames if e == 'tool_error']
+        assert [d.get('error_kind') for d in errors] == ['invalid_navigation']
+        assert not [e for e, _ in frames if e == 'ui_event']

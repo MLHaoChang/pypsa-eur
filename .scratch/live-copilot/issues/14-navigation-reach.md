@@ -3,7 +3,7 @@
 
 # LC-14 — navigation reach: the pages a human can open that chat cannot
 
-Status: ready-for-agent; small, independent PRs
+Status: done 2026-11-10 (items 1, 2, 3, 6: #700; item 4: #1308; item 5: #1328; follow-up: #952)
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
 Dependencies: none (each item is its own PR); inside LC-03 scope, feeds LC-11
@@ -40,3 +40,27 @@ Follow-up (GK condition 8, 2026-10-23): plain `ui_select_component` (without
 not in the network emits a `select_component` event that shows nothing. Task I
 adds the check only for `open_editor=true`; a later small PR gives plain
 selection the same `component_not_found` refusal.
+
+## Comments
+
+- 2026-11-10: item 4 merged as #1308 (`guided_step`). Item 5 is PR #1328 (`panel_section`), built by the
+  LC-14 session under owner decision LC14-R-1; the Codex task R was withdrawn.
+- 2026-11-10, GK B (41), plan GO for item 5, no trims (all 16 ids), conditions:
+  - G1: `PANEL_SECTION_ENUM` may be a literal in `catalogue.py`; pinned both ways to the union of
+    `_PANEL_SECTIONS`, and no id belongs to two panels (a test for each).
+  - G2: a static test that every enum id has exactly one `data-panel-section` marker in its own file and that
+    no marker exists outside the enum.
+  - G3: each dispatcher guard (panel membership, non-string, unknown id, spelling normalisation, no event
+    before refusal) is mutated, and a test kills it.
+  - G4: the refusal names the panel by its on-screen title; one message per panel is pinned, ids joined with
+    "or", no backticks; kind stays `invalid_navigation`; the error-kind manifest tests run at the trial merge.
+  - G5: hook cases: absent section (cleared, no later scroll), data that never arrives (cleared when the
+    panel goes away), a second request replaces the first.
+  - G6: `loop.py` adds only the two keys; the acknowledgement carries the request as sent and never claims the
+    section was shown; `navigation.py` unchanged (ACK option a).
+- 2026-11-10, outcome: every item is merged. Item 4 #1308 (`guided_step`), item 5 #1328 (`panel_section`), items
+  1, 2, 3, 6 #700. The `ui_select_component` follow-up (GK condition 8) was already done: plain selection
+  refuses a component not in the network with `component_not_found` (landed in #952, LC-35; tested in
+  tests/test_lc06_d24_ui_events.py), so no PR was needed.
+- Known and not part of this issue: in Guided, a jump can show both "Back to Results" (header) and "Back to the
+  cards" (floating); UX logged it as its own follow-up.

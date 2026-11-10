@@ -5967,6 +5967,25 @@ def ui_select_component(component_class: str, name: str, open_editor: bool | Non
             "component_class": component_class, "name": name}
 
 
+# LC-14 item 5: the sections of each panel chat can scroll to, and the title the user sees for it.
+# Keyed by the lower-camel panel id; the catalogue's PANEL_SECTION_ENUM is the union (a test pins it).
+_PANEL_SECTIONS: dict[str, tuple[str, frozenset[str]]] = {
+    "campusElectrical": ("the grid connection", frozenset({
+        "campus_file", "grid_connection", "connection_limits", "grid_codes", "library"})),
+    "campusStudy": ("the grid study", frozenset({"study_settings", "island"})),
+    "campusResults": ("the grid study results", frozenset({"grid_code_results", "electrical_design"})),
+    "gridspine": ("Planning → dynamics", frozenset({
+        "dispatch_source", "configuration", "ranked_snapshots", "assumptions_ledger", "readback",
+        "connection_capacity", "connection_assessment"})),
+}
+_PANEL_SECTION_ORDER = [
+    "campus_file", "grid_connection", "connection_limits", "grid_codes", "library",
+    "study_settings", "island", "grid_code_results", "electrical_design",
+    "dispatch_source", "configuration", "ranked_snapshots", "assumptions_ledger",
+    "readback", "connection_capacity", "connection_assessment",
+]
+
+
 def ui_open_panel(
     panel_id: str,
     results_tab: str | None = None,
@@ -5977,6 +5996,7 @@ def ui_open_panel(
     compare_tab: str | None = None,
     canvas_view: str | None = None,
     guided_step: str | None = None,
+    panel_section: str | None = None,
     loadflow_source: str | None = None,
     window_from: int | None = None,
     window_to: int | None = None,
@@ -6037,6 +6057,22 @@ def ui_open_panel(
                 "message": f"Choose a Guided card: {', '.join(steps[:-1])} or {steps[-1]}. "
                            "Cards exist only in the hub design.",
             })
+    if panel_section is not None:
+        by_name = {k.lower(): v for k, v in _PANEL_SECTIONS.items()}  # CampusStudy, GridSpine: either spelling
+        title, valid = by_name.get(panel_id.lower(), (None, frozenset()))
+        if title is None:
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": "panel_section",
+                "message": "Sections exist only in the grid connection, the grid study, the grid study "
+                           "results and Planning → dynamics.",
+            })
+        if not isinstance(panel_section, str) or panel_section not in valid:
+            ids = [s for s in _PANEL_SECTION_ORDER if s in valid]
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": "panel_section",
+                "message": f"Choose a section of {title}: {', '.join(ids[:-1])} or {ids[-1]}."
+                           if len(ids) > 1 else f"Choose a section of {title}: {ids[0]}.",
+            })
     if highlight_projects is not None:
         if (panel_id not in {"Scenarios", "scenarios"} or not isinstance(highlight_projects, list)
                 or not 1 <= len(highlight_projects) <= 4 or not all(isinstance(p, str) for p in highlight_projects)):
@@ -6079,6 +6115,8 @@ def ui_open_panel(
         event["canvas_view"] = canvas_view
     if guided_step is not None:
         event["guided_step"] = guided_step
+    if panel_section is not None:
+        event["panel_section"] = panel_section
     if highlight_projects:
         event["highlight_projects"] = highlight_projects
     return event

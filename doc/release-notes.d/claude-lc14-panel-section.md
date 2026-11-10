@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can scroll the grid connection, grid study, grid study results and Planning → dynamics panels to a named section (`ui_open_panel` with `panel_section`, for example island, grid_codes or readback); an unknown or mismatched section is refused and nothing changes on screen (LC-14 item 5).

@@ -553,6 +553,10 @@ interface UIStore {
   // anchor has to live outside it — a set(SlidePanel) parameter cannot
   // survive that remount. Consumed then cleared by the section itself.
   settingsSectionRequest: string | null
+  /** LC-14: scroll a panel to one named section (chat's ui_open_panel panel_section); the panel clears it. */
+  panelSectionRequest: { panel: SlidePanel; section: string } | null
+  requestPanelSection: (panel: SlidePanel, section: string) => void
+  clearPanelSectionRequest: () => void
   // WP7b: "generation pre-armed" — the Adequacy tab's Reports button opens
   // the Reports panel WITH the Generate dialog. Same shape as the settings
   // deep link: the panel subtree remounts on every switch, so the flag lives
@@ -820,6 +824,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   libraryFocus: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
+  panelSectionRequest: null,
   reportGenerateRequest: false,
   propertiesEditRequest: null,
   ehReportRequest: false,
@@ -1105,6 +1110,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
+  requestPanelSection: (panel, section) => set({ panelSectionRequest: { panel, section } }),
+  clearPanelSectionRequest: () => set({ panelSectionRequest: null }),
   requestReportGenerate: () => set({ reportGenerateRequest: true }),
   clearReportGenerateRequest: () => set({ reportGenerateRequest: false }),
   requestPropertiesEdit: (c) => set({ propertiesEditRequest: c }),

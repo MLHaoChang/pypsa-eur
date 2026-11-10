@@ -316,8 +316,8 @@ def tariff_energy_rate(
 ) -> dict | None:
     """The tariff's energy component in currency/MWh on each snapshot, or None
     when no tariff can be read. Energy items only (``kind`` energy, per kWh, on
-    import, a cost, untiered). A stated tariff currency other than the finance
-    currency is refused (GS-01 gate)."""
+    import, a cost, untiered). A tariff currency (stated, else its defaults-pack
+    stamp) other than the finance currency is refused (GS-01 gate)."""
     import pandas as pd
 
     from models.commercial import CommercialConfig
@@ -332,14 +332,15 @@ def tariff_energy_rate(
     tariff = cfg.import_tariff
     if tariff is None:
         return None
-    cur = getattr(tariff, "currency", None)
-    if cur and cur != finance_currency:
-        raise _err(
-            f"Energy price: the tariff is in {cur}, the finance case in "
-            f"{finance_currency}; a case in two currencies is refused",
-            "currency_mismatch",
-            "energy_price_per_mwh",
-        )
+    from services.commercial.binding import (
+        resolved_tariff_currency,
+        tariff_currency_mismatch,
+    )
+
+    _, cur_source = resolved_tariff_currency(tariff)
+    why = tariff_currency_mismatch(tariff, finance_currency)
+    if why:
+        raise _err(f"Energy price: {why}", "currency_mismatch", "energy_price_per_mwh")
     items = [i for i in tariff.items if i.kind == "energy"]
     if not items or any(
         i.unit != "per_kwh"
@@ -369,10 +370,14 @@ def tariff_energy_rate(
         "covered": covered,
         "source": f"tariff {tariff.id}: energy items "
         f"{', '.join(i.id for i in items)} (per kWh × 1000)",
-        "currency": cur or finance_currency,
-        "currency_note": None
-        if cur
-        else "the tariff states no currency: read as the finance currency (assumed)",
+        "currency": finance_currency,  # the gate passed: resolved == finance
+        "currency_note": {
+            "stated": None,
+            "stamp": "the tariff states no currency: read from its defaults-pack stamp",
+        }.get(
+            cur_source,
+            "the tariff states no currency: read as the finance currency (assumed)",
+        ),
     }
 
 
