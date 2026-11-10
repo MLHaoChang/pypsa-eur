@@ -880,7 +880,70 @@ def test_the_campus_step_records_the_revision_and_settles_on_its_run(hub, monkey
     assert settled["result"]["run_files"] == run_actions.run_files(run)
 
 
-# ── L2 and DC13-SCOPE (L2-1, L2-2) ───────────────────────────────────────────
+@pytest.mark.parametrize("ref", REFS)
+def test_the_dc_coupling_loop_restores_the_base(ref):
+    """CT-3 (c) holds across the run's own LOLE loop only because that loop
+    restores the base: a restore="final" hold bumps the revision (below)."""
+    engines = [
+        r["engine"]
+        for stage in run_profiles.resolve(ref)["stages"].values()
+        for r in stage.get("rules") or ()
+        if r.get("engine")
+    ]
+    assert [e["tool"] for e in engines] == ["run_coupling_loop"]
+    assert engines[0]["restore"] == "base"
+
+
+@pytest.mark.parametrize("restore, readable", [("base", True), ("final", False)])
+def test_the_runs_own_restore_base_coupling_loop_keeps_the_contingency_readable(
+    hub, client, install_network, monkeypatch, restore, readable
+):
+    """CT-3 (c): the campus step records the revision before the result gate's
+    coupling loop runs. A restore="base" loop does not move it, so the gate
+    still reads the run's campus study; a restore="final" hold does, and the
+    same read is "edited"."""
+    from services import dirty_state
+    from tests.test_adequacy_coupling_endpoint import (
+        DRAWS,
+        LOOP_URL,
+        SEED,
+        _install_stubs,
+        _poll,
+        _setup,
+        _Stubs,
+    )
+
+    seen = []
+    capture = dirty_state.capture
+    monkeypatch.setattr(
+        dirty_state,
+        "capture",
+        lambda rec, ctx=None, **kw: (
+            seen.append((ctx, capture(rec, ctx, **kw))) or seen[-1][1]
+        ),
+    )
+    _install_stubs(monkeypatch, _Stubs(lole_seq=[0.5]))
+    _setup(client, install_network)
+    r = client.post(
+        LOOP_URL,
+        json={"target_lole_h": 1.0, "draws": DRAWS, "seed": SEED, "restore": restore},
+    )
+    assert r.status_code == 200, r.text
+    assert _poll(client)["status"] == "met"
+    ctx, at_start = seen[0]
+    _, step = _campus(hub, revision=at_start)
+    env = run_gates.Env(
+        task={"steps": [step]}, ctx=ctx, project=hub, project_dir=None
+    )
+    result = run_gates.evaluate([_rules(REFS[0])["dc.campus.contingency"]], env)[0]
+    if readable:
+        assert result["verdict"] == "pass", result
+    else:
+        assert result["verdict"] == "not_evaluated", result
+        assert "edited since the run's campus study" in result["reason"]
+
+
+# ── L2 and DC13-SCOPE (L2-1, L2-2)───────────────────────────────────────────
 
 
 @pytest.mark.parametrize("ref", REFS)
