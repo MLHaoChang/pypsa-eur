@@ -562,7 +562,8 @@ def _readiness_items(r: dict | Exception, *, voll_noted: bool) -> list[dict]:
         names = ", ".join(m.get("name", "") for m in missing[:5])
         more = f" and {len(missing) - 5} more" if len(missing) > 5 else ""
         out.append(_item("eh_outage_data_missing", "warning",
-                         f"{len(missing)} unit(s) have no outage data ({names}{more}).",
+                         f"{_count(len(missing), 'unit')} {'has' if len(missing) == 1 else 'have'} "
+                         f"no outage data ({names}{more}).",
                          "eh_readiness", "assets", fld="outage_rate_value"))
     for w in r.get("warnings") or []:
         text = str(w)
@@ -664,6 +665,37 @@ def _humanise(item: str) -> str:
     return text[:1].upper() + text[1:]
 
 
+#: Ledger rows whose record names engineering keys, said in plain words for the
+#: flow message: ``item -> (label or None, ((key text, plain words), …))``. The
+#: ledger itself (the report's appendix, the acknowledgement) keeps the record.
+_LEDGER_PLAIN: dict[str, tuple[str | None, tuple[tuple[str, str], ...]]] = {
+    "point of connection": (None, ((" (p_max_pu 0)", ""),)),
+    "battery inverter replacement": (None, ((" (inv_power_lifetime)", ""),)),
+    "island sidecar": ("Island control set-up", ()),
+    "island unit data": ("Island unit settings", (
+        ("tau_f", "frequency filter time"), ("i_max", "current limit"),
+        ("k_gfm_min", "grid-forming current at least"), (", H ", ", inertia constant "),
+        (" pu", " p.u."), ("pf ", "power factor "))),
+    # The island panel's own word for RoCoF ("Rate of change (Hz/s)"); a test pins the two.
+    "transition RoCoF limit": ("Rate-of-change limit during the transition", ()),
+    "island rows": ("Island limits in the optimisation", ((" (island_constraints false)", ""),)),
+}
+
+
+def _plain_words(item: str, shown: str) -> tuple[str | None, str]:
+    """``(label, value)`` of a ledger row for the flow message: the row's plain
+    label when it has one, and its value with the engineering keys in words."""
+    label, swaps = _LEDGER_PLAIN.get(item, (None, ()))
+    for key, words in swaps:
+        shown = shown.replace(key, words)
+    return label, shown
+
+
+def _count(n: int, noun: str) -> str:
+    """``1 asset`` / ``9 assets``: a count with its noun in the right number."""
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 def _shown(value) -> str:
     """A ledger value as the message shows it: a number at full precision and
     never in exponent form for an integral MW figure (``1500000``, ``0.85``)."""
@@ -674,7 +706,9 @@ def _shown(value) -> str:
 
 def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
     """The template's `assumed` ledger rows and energization: a default the user
-    has not confirmed is a warning (design §3.2). A row may name its own
+    has not confirmed is a warning (design §3.2). The
+    message says the row in plain words (``_plain_words``); the ledger's
+    ``value`` keeps the engineering record and binds the acknowledgement. A row may name its own
     ``section`` (and ``component`` / ``entity`` / ``field`` / ``panel``); one
     that does not is filed by ``ledger_section(item)``. A row on a reliability
     goal field the project stores (``cfg``, W3b-R) is not raised: the stored
@@ -693,10 +727,11 @@ def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
         value = row.get("value")
         unit = row.get("unit")
         shown = f"{_shown(value)} {unit}" if unit else _shown(value)
-        # "<label>: <value> <unit> (assumed) — <hint>"; without a label the
+        plain_label, shown = _plain_words(item, shown)
+        # "<label>: <value> <unit> (assumed): <hint>"; without a label the
         # item, humanised (checklist §6.9: no raw ids in the UI).
-        label = str(row.get("label") or _humanise(item))
-        message = f"{label}: {shown} (assumed) — confirm it or set your own."
+        label = str(row.get("label") or plain_label or _humanise(item))
+        message = f"{label}: {shown} (assumed): confirm it or set your own."
         section = row.get("section")
         card = row.get("card") if row.get("card") in S.CARD_BY_ID else None
         if section in F.INPUT_SECTIONS:
@@ -721,10 +756,29 @@ def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
                           if isinstance(e.get("available_import_mw"), (int, float))
                           else str(e.get("year")) for e in energ)
         out.append(_item("assumed_default", "warning",
-                         f"Energization schedule: {steps} (assumed) — confirm it with the "
+                         f"Energization schedule: {steps} (assumed): confirm it with the "
                          "network operator's offer.", "template",
                          "connection", entity="energization schedule", value=value))
     return out
+
+
+def _is_assumed(it: dict) -> bool:
+    """An unconfirmed template default (the Assumptions card's rows)."""
+    return it["severity"] == "warning" and it["code"].startswith("assumed_")
+
+
+#: The ledger item that describes the point of connection itself.
+_POC_ITEM = "point of connection"
+
+
+def _unused_connection_defaults(items: list[dict], links: frozenset[str]) -> None:
+    """Off-grid, section 3 is "not needed": the open point of connection's own
+    defaults (its description, and the assumed rows on a connection link) carry
+    no flow, so they stay listed but out of scope and count nowhere. Any other
+    row there (a feeder's losses, a warning that is not a default) is untouched."""
+    for it in items:
+        if _is_assumed(it) and it["target"]["entity"] in links | {_POC_ITEM}:
+            it["in_scope"] = False
 
 
 def _money_year_items(facts: _Facts) -> list[dict]:
@@ -998,9 +1052,9 @@ def _summary(section: str, facts: _Facts) -> str | None:
         mw = f", {facts.import_p_nom_mw:g} MW" if facts.import_p_nom_mw is not None else ""
         return ", ".join(facts.connection_links[:3]) + mw
     if section == "loads":
-        return f"{facts.loads} load(s)"
+        return _count(facts.loads, "load")
     if section == "assets":
-        return f"{facts.asset_count} asset(s)"
+        return _count(facts.asset_count, "asset")
     return None
 
 
@@ -1167,6 +1221,9 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                 state = "complete"
             row.update(state=state, required=required[s] and state != "not_needed")
             if state == "not_needed":
+                if s == "connection" and islanded:
+                    _unused_connection_defaults(mine, frozenset(facts.connection_links))
+                    row["items"] = [_strip(it) for it in mine]
                 row["summary"] = ("Not needed by the cards in scope" if s not in needed
                                   else "Generation-only: export through the POI in section 3"
                                   if s == "loads"

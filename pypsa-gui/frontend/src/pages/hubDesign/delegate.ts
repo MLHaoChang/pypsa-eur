@@ -27,9 +27,9 @@ export function delegate(text: string, opts?: { label?: string; group?: string }
  *  change shows a confirmation card; in Expert runs and deletions do and
  *  edits apply directly. */
 export const ASK_TITLE =
-  'Opens the assistant with a question prefilled — nothing is sent until you press Send.'
+  'Opens the assistant with a question prefilled: nothing is sent until you press Send.'
 const DELEGATE_LEAD =
-  'Sends this request to the assistant — your attached files are not included. '
+  'Sends this request to the assistant: your attached files are not included. '
 export function delegateTitle(mode: UiMode): string {
   return DELEGATE_LEAD + (mode === 'guided'
     ? 'Nothing changes until you confirm it.'

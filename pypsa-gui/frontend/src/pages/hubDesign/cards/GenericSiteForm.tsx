@@ -172,7 +172,7 @@ function SiteFormBody({ form, create, disabledReason, onCancel, seed }: {
         <details className="text-[12px]">
           <summary className="cursor-pointer text-muted">More</summary>
           <div className="mt-2">
-            <NumField {...field('fault_level_mva')} label="Grid strength — fault level (MVA)"
+            <NumField {...field('fault_level_mva')} label="Grid strength: fault level (MVA)"
               hint="20 × the connection unless you know the utility's figure."
               value={v.fault_level_mva} onChange={x => update(setField(draft, 'fault_level_mva', x))} />
           </div>

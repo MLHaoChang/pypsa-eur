@@ -65,7 +65,7 @@ describe('ask / delegate', () => {
   // P25 gate B1: true in each mode. Guided confirms every change; Expert
   // confirms runs and deletions, and applies edits directly.
   it('the button title says it sends, without attachments, and what confirms — per mode', () => {
-    const lead = /^Sends this request to the assistant — your attached files are not included\. /
+    const lead = /^Sends this request to the assistant: your attached files are not included\. /
     expect(delegateTitle('guided')).toMatch(lead)
     expect(delegateTitle('guided')).toMatch(/Nothing changes until you confirm it\.$/)
     expect(delegateTitle('expert')).toMatch(lead)
