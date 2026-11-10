@@ -696,3 +696,158 @@ def test_a_call_the_dispatcher_would_refuse_never_shows_as_a_row(world, monkeypa
         "tu-0",
         "tu-1",
     ]
+
+
+# ── K1a–d: the combined requirements check ──────────────────────────────────
+
+
+def _bound(field="v_nom", name="B2", hi=50):
+    return {
+        "id": "r1",
+        "predicate": {
+            "kind": "scalar_bound",
+            "component_class": "Bus",
+            "name": name,
+            "field": field,
+            "op": "within",
+            "lo": 0,
+            "hi": hi,
+        },
+    }
+
+
+@pytest.mark.parametrize("kind", ["preserve_horizon", "sum_bound", "some_future_kind"])
+def test_only_allow_listed_predicate_kinds_permit_a_set(world, monkeypatch, kind):
+    """K1a: scalar_bound only; any other active kind means no set."""
+    from harness import requirements
+
+    s = chat_service.ChatSession()
+    monkeypatch.setattr(
+        requirements, "annotate", lambda session, tool, args, card: card
+    )
+    monkeypatch.setattr(requirements, "active_for", lambda session: ("t", [_bound()]))
+    assert len(_members(s, [B1_POC, B2_CRIT])) == 2
+    other = {"id": "r2", "predicate": {"kind": kind}}
+    monkeypatch.setattr(
+        requirements, "active_for", lambda session: ("t", [_bound(), other])
+    )
+    assert _members(s, [B1_POC, B2_CRIT]) == []
+
+
+def test_a_union_that_trips_a_bound_is_not_offered(world, monkeypatch):
+    """K1c: `violations` over the union trips; per-member checks are bypassed
+    so only the union check stands between the rows and the card."""
+    from harness import requirements
+
+    s = chat_service.ChatSession()
+    monkeypatch.setattr(
+        requirements, "annotate", lambda session, tool, args, card: card
+    )
+    monkeypatch.setattr(requirements, "active_for", lambda session: ("t", [_bound()]))
+    real = requirements.violations
+    monkeypatch.setattr(
+        requirements,
+        "violations",
+        lambda tool, *a: real(tool, *a) if tool == change_set.TOOL else [],
+    )
+    high = (
+        "update_component",
+        {"component_class": "Bus", "name": "B2", "attrs": {"v_nom": 110.0}},
+    )
+    assert _members(s, [B1_POC, high]) == []
+
+
+def test_two_rows_on_one_component_that_would_trip_a_bound_together_are_split(
+    world, monkeypatch
+):
+    """K1c: the only way two rows meet on one bounded field is one component;
+    K2 keeps the later one out, so it gets its own card and its own check."""
+    from harness import requirements
+
+    s = chat_service.ChatSession()
+    monkeypatch.setattr(
+        requirements, "active_for", lambda session: ("t", [_bound(hi=50)])
+    )
+    first = (
+        "update_component",
+        {"component_class": "Bus", "name": "B2", "attrs": {"v_nom": 40.0}},
+    )
+    second = (
+        "update_component",
+        {"component_class": "Bus", "name": "B2", "attrs": {"v_nom": 45.0}},
+    )
+    assert [i["tool_use_id"] for i in _members(s, [first, second, B1_POC])] == [
+        "tu-0",
+        "tu-2",
+    ]
+
+
+def test_a_derived_row_overlap_splits_the_set(
+    tmp_projects_dir, install_network, monkeypatch
+):
+    """K1b: with no AC carrier, each bus edit's own preview also creates
+    Carrier AC (a derived row), so two such edits never share a set."""
+    monkeypatch.setattr(change_set, "ENABLED", True)
+    n = pypsa.Network()
+    for bus in ("B1", "B2", "B3"):
+        n.add("Bus", bus)
+    install_network(n, name=None)
+    s = chat_service.ChatSession()
+    assert ("Carrier", "AC") in change_set._targets(edit_card.preview(*B1_POC))
+    third = ("update_solver_config", {"partial": {"voll": 4321.0}})
+    assert [i["tool_use_id"] for i in _members(s, [B1_POC, B2_CRIT, third])] == [
+        "tu-0",
+        "tu-2",
+    ]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"complete": False},
+        {"rows": []},
+        {"more": True},
+    ],
+)
+def test_an_incomplete_preview_keeps_its_own_card(world, monkeypatch, change):
+    """K1b: no complete row list, or a "more" note, is not a member."""
+    real = edit_card.preview
+
+    def preview(tool, args, **k):
+        card = real(tool, args, **k)
+        if tool == "update_solver_config":
+            if change.get("more"):
+                card["rows"] = card["rows"] + [
+                    {
+                        "role": "note",
+                        "field": "more",
+                        "component_class": None,
+                        "name": None,
+                    }
+                ]
+            else:
+                card.update(change)
+        return card
+
+    monkeypatch.setattr(edit_card, "preview", preview)
+    s = chat_service.ChatSession()
+    assert [i["tool_use_id"] for i in _members(s, [B1_POC, B2_CRIT, VOLL])] == [
+        "tu-0",
+        "tu-1",
+    ]
+
+
+def test_the_card_says_the_rows_were_checked_together(world, monkeypatch):
+    """K1d."""
+    from harness import requirements
+
+    s = chat_service.ChatSession()
+    monkeypatch.setattr(
+        requirements, "active_for", lambda session: ("t", [_bound(), _bound(name="B3")])
+    )
+    payload = change_set.card_payload(_members(s, [B1_POC, B2_CRIT]))
+    assert payload["requirements"]["checked"] == 2
+    assert "checked together" in payload["requirements"]["says"]
+    monkeypatch.setattr(requirements, "active_for", lambda session: ("t", []))
+    payload = change_set.card_payload(_members(s, [B1_POC, B2_CRIT]))
+    assert payload["requirements"]["checked"] == 0

@@ -466,8 +466,10 @@ component (`frontend/src/components/EditCard.tsx`).
   run's own session, calls routed to the preview, and calls the guards, the
   validator, a restriction or the preview would refuse. Two members never touch
   the same component (derived rows included); the later one keeps its own card.
-  Confirmed requirements are checked on the union of the members' native rows,
-  and an unknown predicate kind means no set. The card is one
+  Confirmed requirements are checked on the union of the members' native rows.
+  Only `scalar_bound` is allow-listed: any other active kind, including
+  `preserve_horizon` and any kind added later, means no set. The card says in
+  `requirements.says` that the rows were checked together. The card is one
   `tool_pending_confirmation` frame carrying `change_set: {version, items,
   digest}` under one token. Each item's `source` comes only from an adapter's
   row field, otherwise "proposed by the assistant". `POST /chat/{id}/confirm`

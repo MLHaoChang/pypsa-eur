@@ -45,9 +45,10 @@ SOURCE_ASSISTANT = "proposed by the assistant"
 _UNTICKED = {"error_kind": "change_unticked"}
 _STALE = {"error_kind": "edit_preview_stale"}
 _INVALID_TICKS = {"error_kind": "invalid_decision"}
-# The predicate kinds a union of the members' rows checks exactly (GK B K1,
-# option A): both are read per row or per tool, never across components.
-_ROW_CHECKED_KINDS = frozenset({"scalar_bound", "preserve_horizon"})
+# K1a: the predicate kinds a union of the members' rows checks exactly (GK B
+# K1, option A). An allow-list: any other active kind, `preserve_horizon` and
+# every kind added later included, means no set.
+_ROW_CHECKED_KINDS = frozenset({"scalar_bound"})
 
 
 def _digest(value: Any) -> str:
@@ -139,35 +140,37 @@ def _shows_everything(card: dict) -> bool:
     )
 
 
-def _combined_ok(session, items: list[dict]) -> bool:
+def _combined_ok(session, items: list[dict]) -> int | None:
     """K1 (option A): the confirmed requirements checked on the union of the
     members' native rows. With no two members on one component (K2), the union
     IS the combined state for every row-checked predicate; any other kind fails
-    closed (no set)."""
+    closed (no set). Returns how many requirements were checked, or None."""
     from harness import requirements
     from services.pypsa_service import PyPSAService
 
     try:
         _, active = requirements.active_for(session)
         if not active:
-            return True
+            return 0
         if any(r["predicate"].get("kind") not in _ROW_CHECKED_KINDS for r in active):
-            return False
+            return None
         union = {
             "complete": True,
             "rows": [row for item in items for row in item["edit_card"]["rows"]],
         }
         network = PyPSAService.get_network()
         if requirements.violations(TOOL, {}, union, active, network):
-            return False
-        return not any(
+            return None
+        if any(
             requirements.violations(
                 item["tool"], item["args"], item["edit_card"], active, network
             )
             for item in items
-        )
+        ):
+            return None
+        return len(active)
     except Exception:  # noqa: BLE001 — requirements that cannot be checked: no set
-        return False
+        return None
 
 
 def members(
@@ -219,8 +222,13 @@ def members(
                 "digest": item_digest(name, args, card),
             }
         )
-    if len(items) < 2 or not _combined_ok(session, items):
+    if len(items) < 2:
         return []
+    checked = _combined_ok(session, items)
+    if checked is None:
+        return []
+    for item in items:
+        item["requirements_checked"] = checked
     return items
 
 
@@ -241,10 +249,21 @@ def card_payload(items: list[dict]) -> dict:
         }
         for i in items
     ]
+    checked = items[0].get("requirements_checked", 0) if items else 0
     return {
         "version": VERSION,
         "items": shown,
         "digest": _digest([i["digest"] for i in items]),
+        # K1d: said plainly on the card, in Guided and Expert alike.
+        "requirements": {
+            "checked": checked,
+            "says": (
+                f"These changes were checked together against the project's "
+                f"{checked} confirmed requirement{'s' if checked != 1 else ''}."
+                if checked
+                else "The project has no confirmed requirements to check these changes against."
+            ),
+        },
     }
 
 

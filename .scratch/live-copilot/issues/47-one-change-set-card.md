@@ -55,3 +55,10 @@ C4 true settled lines: "Cancelled: nothing changed", and timeout, stop and reloa
 C5 the same field labels in both modes.
 C6 a failed row's reason stays on its row.
 C7 shots: dc Site 4 rows with one unticked, before and after, dark and light, partial failure, 0 ticked, Cancel all, Expert, renewable-profile with several generators.
+
+**K1 ruling, GK B (2026-11-10): option A**, a union check over the members' native rows.
+K1a: allow-list `scalar_bound` only; any other kind means no set.
+K1b: K2 targets come from each preview's own rows, derived rows included; an incomplete preview (or a "more" note) is not a member.
+K1c: the K2 split is tested, and a union that trips a bound means no set.
+K1d: the card says the rows were checked together; the allow-list, overlap and union checks are hand-mutated.
+GK B rotated to (42) session_01G7qCujySwKRbkMQGwxXfz2.
