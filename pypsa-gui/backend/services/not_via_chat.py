@@ -294,8 +294,10 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'reason': "The Results headline strip's own card list is not read from chat. Chat reads the same figures one by one (cost breakdown, lost load, the checked answers). Open Results › Summary to see the strip.",
         'page': 'Results › Summary',
         'panel': 'results',
+        # 'headline' alone is in six tool descriptions (compare-runs headline
+        # KPIs, …) and 'strip' alone in the chat file strip's: `matches` needs both.
         'keywords': frozenset({
-            'headline',
+            'strip',
         }),
         'routes': frozenset({
             ('GET', '/api/results/headline_kpis'),
@@ -410,6 +412,8 @@ def matches(words: set[str], limit: int = 2) -> list[dict]:
     for index, entry in enumerate(NOT_VIA_CHAT):
         if (entry['id'] == 'solve_queue_instance_controls' and words & {'goal', 'task', 'plan'}
                 and 'queue' not in words):
+            continue
+        if entry['id'] == 'results_headline_strip' and not words & {'headline', 'kpi', 'kpis'}:
             continue
         hits = len(words & entry['keywords'])
         if hits:

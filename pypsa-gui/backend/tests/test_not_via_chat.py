@@ -86,6 +86,7 @@ def test_the_issue_rows_are_declared():
     ('Set my Anthropic API key', 'assistant_keys_and_profiles'), ('Pause the solve queue', 'solve_queue_instance_controls'),
     ('Unpause the solve queue', 'solve_queue_instance_controls'),
     ('Resume the paused solve queue', 'solve_queue_instance_controls'), ('Replace the site thumbnail', 'map_layout_and_sites'),
+    ('Read me the headline strip', 'results_headline_strip'), ('What is in the KPI strip', 'results_headline_strip'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -102,6 +103,8 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Set the load profile from the uploaded file', 'Resume my task', 'Resume the plan',
     'Switch to my OpenAI profile', 'Switch to my Anthropic profile', 'Pause my goal', 'Pause the plan',
     'Extract the grid code from this PDF', 'Geocode the site address',
+    # ui-modern 03 (GK B F3): 'headline' and 'strip' each belong to real tools.
+    'Headline KPIs for run A vs run B', 'Show the investment case headlines', 'List the files in the chat file strip',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)
