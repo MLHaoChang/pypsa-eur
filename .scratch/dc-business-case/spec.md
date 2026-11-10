@@ -3,7 +3,7 @@
 
 # Data-centre business case: a standalone project P&L beside the investment case
 
-Status: needs-triage (design; owner scope answers pending, §9)
+Status: needs-triage (design; GK A plan GO 2026-11-10 with BC3-1..8; GK B plan and owner scope answers pending, §9)
 Owner request: 2026-11-10 (coordinator brief, session `session_01G7qCujw1M4yEuv53K2qCpG`)
 Research: [research.md](research.md)
 Reviewers: GK B (finance engine, lead), GK A (DC load and engine parts), UX (the view, slice 06)
@@ -111,9 +111,12 @@ no default** (§9 Q4), because prices are the case.
 | **R4 Other services** | contracted kW or rack count (`it_mw` ÷ `rack_kw`) | per kW-month or per rack-month (cross-connects, remote hands) | none | research §1e |
 
 - **IT energy series.** IT MWh(t) = Σ phases in service IT MW × u(t) ×
-  weight(t) − unserved IT share, per period, from `dc_load_profile` (GK A owns the
+  weight(t) − the unserved IT share, per period, from `dc_load_profile` (GK A owns the
   read). It is the same series the facility load was built from, so the energy
-  bill and the revenue see one load.
+  bill and the revenue see one load. Unserved IT(t) = involuntary unserved facility
+  MWh(t) ÷ PUE(T(t)), capped at the billable IT (GK A rule, issue 03 BC3-4).
+  Holding revenue whole under DC 07 curtailment is the model's claim that the
+  curtailable share is non-IT load; the revenue line says so.
 - **Lease-up.** A per-phase ramp (share of contracted kW billed in years 1..k,
   default 100 % from COD unless stated). Under R1, utilisation is already in u(t);
   a separate "sold share" says how much of the utilised capacity is sold.
