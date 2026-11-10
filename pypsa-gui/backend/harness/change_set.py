@@ -386,7 +386,69 @@ def _state(
             for i in items
         },
         "order": [i["tool_use_id"] for i in items],
+        # K3: every column the network had when the card was raised (None when
+        # they could not be read: no column then counts as created).
+        "columns": _columns(),
+        # (class, field) -> the default a verified member write gave a column it created.
+        "created": {},
     }
+
+
+def _plain(value: Any) -> Any:
+    """A cell as the edit card shows it: not set (None, NaN) is None."""
+    value = value.item() if hasattr(value, "item") else value
+    return None if value is None or value != value else value
+
+
+def _static(component_class: str):
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_network().static(component_class)
+
+
+def _columns() -> set[tuple] | None:
+    from services.pypsa_service import PyPSAService
+
+    try:
+        network = PyPSAService.get_network()
+        return {
+            (cls, column)
+            for cls in network.all_components
+            for column in network.static(cls).columns
+        }
+    except Exception:  # noqa: BLE001 — unreadable columns: nothing counts as created
+        return None
+
+
+def _note_created(state: dict, receipt: dict) -> None:
+    """K3: the columns a verified write of this response created on the
+    classes it wrote, each with the one value it left on every component it
+    did not write that field of (the column's default). The write is a member
+    or a call on its own card: either way the user approved it and it was
+    read back."""
+    before = state.get("columns")
+    if before is None or receipt.get("outcome") != "verified":
+        return
+    rows = [r for r in receipt.get("rows") or [] if r.get("role") == "typed"]
+    for cls in {r.get("component_class") for r in rows if r.get("component_class")}:
+        try:
+            frame = _static(cls)
+            for column in frame.columns:
+                key = (cls, column)
+                if key in before or key in state["created"]:
+                    continue
+                named = {
+                    r.get("name")
+                    for r in rows
+                    if r.get("component_class") == cls and r.get("field") == column
+                }
+                rest = {
+                    _plain(v) for name, v in frame[column].items() if name not in named
+                }
+                if len(rest) == 1:
+                    state["created"][key] = rest.pop()
+        except Exception:  # noqa: BLE001 — an unreadable class opens nothing
+            continue
 
 
 def _row_key(row: dict) -> tuple:
@@ -403,10 +465,11 @@ def _still_shown(
     state: dict, held_row: dict, tool: str, args: dict, fresh: dict | None
 ) -> bool:
     """K3: the fresh preview still writes what the card showed. Fields, new
-    values, arguments and binding must match exactly; an old value may differ
-    only where an earlier write of this response wrote the same (class, field),
-    e.g. a first write that created the column turns "not set" into its
-    default, and a side (non-typed) row on such a field may come or go."""
+    values, arguments and binding must match exactly. An old value may differ
+    only on a column an earlier verified write of this response created,
+    and only from not set to that column's default; a side (non-typed) row on
+    such a column may come or go. Every other moved old value is stale: the
+    grant freezes what the card showed (#1257)."""
     if fresh is None:
         return False
     if item_digest(tool, args, fresh) == held_row["digest"]:
@@ -416,16 +479,14 @@ def _still_shown(
         "complete"
     ) != shown.get("complete"):
         return False
-    written = state.setdefault("written", set())
+    created = state.get("created") or {}
 
-    def kept(
-        rows,
-    ):  # a side row on a field an earlier write already filled may come or go
+    def key(row):
+        return (row.get("component_class"), row.get("field"))
+
+    def kept(rows):  # a side row on a column an earlier row created may come or go
         return [
-            r
-            for r in rows or []
-            if r.get("role") == "typed"
-            or (r.get("component_class"), r.get("field")) not in written
+            r for r in rows or [] if r.get("role") == "typed" or key(r) not in created
         ]
 
     old_rows, new_rows = kept(shown.get("rows")), kept(fresh.get("rows"))
@@ -433,7 +494,11 @@ def _still_shown(
         return False
     return all(
         a.get("old") == b.get("old")
-        or (a.get("component_class"), a.get("field")) in written
+        or (
+            key(a) in created
+            and _plain(a.get("old")) is None
+            and _plain(b.get("old")) == created[key(a)]
+        )
         for a, b in zip(old_rows, new_rows)
     )
 
@@ -570,16 +635,12 @@ def member_gate(
 
 def note_receipt(session, tool_use_id: str, receipt: dict) -> None:
     """K7: a row lands only when read back verified AND this call changed it.
-    Any write of the response (a member, or a call on its own card) also notes
-    the fields it wrote, for `_still_shown`."""
+    Any verified write of the response also notes the columns it created, for
+    `_still_shown`."""
     state = getattr(session, "change_set", None)
     if not state:
         return
-    state.setdefault("written", set()).update(
-        (r.get("component_class"), r.get("field"))
-        for r in receipt.get("rows") or []
-        if r.get("role") not in ("note", "at_solve")
-    )
+    _note_created(state, receipt)
     row = held(session, tool_use_id)
     if row is None:
         return
