@@ -159,7 +159,7 @@ def _closed(
 def validate_concept_key(key: Any) -> str:
     """One `<namespace>:<id>` key (plan §1.2), checked against its registry."""
     if not isinstance(key, str) or ":" not in key:
-        raise MemoryError(f"concept key {key!r} is not <namespace>:<id>")
+        raise MemoryError(f"concept key {key} is not <namespace>:<id>")
     ns, ident = key.split(":", 1)
     ok = False
     if ns == "view":
@@ -185,7 +185,7 @@ def validate_concept_key(key: Any) -> str:
     elif ns == "topic":
         ok = ident in TOPICS
     if not ok:
-        raise MemoryError(f"concept key {key!r} is not a known {ns or 'namespace'} id")
+        raise MemoryError(f"concept key {key} is not a known {ns or 'namespace'} id")
     return key
 
 
@@ -203,13 +203,13 @@ def _preference(body: Any) -> dict:
     key, value = b["key"], b["value"]
     rule = PREFERENCE_KEYS.get(key)
     if rule is None:
-        raise MemoryError(f"preference key {key!r} is not in the registry")
+        raise MemoryError(f"preference key {key} is not in the registry")
     if isinstance(rule, tuple):
         if value not in rule:
             raise MemoryError(f"{key} must be one of {', '.join(rule)}")
     elif rule == "currency":
         if value not in _currencies():
-            raise MemoryError(f"currency {value!r} is not a supported ISO 4217 code")
+            raise MemoryError(f"currency {value} is not a supported ISO 4217 code")
     elif rule == "report_sections":
         known = _report_sections()
         if (

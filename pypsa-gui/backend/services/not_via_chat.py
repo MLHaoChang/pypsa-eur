@@ -336,10 +336,9 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'id': 'memory_page_edits',
         'title': 'Editing, retiring or sharing saved memory',
         'disposition': 'out of chat',
-        'reason': ('The assistant can only propose an item (the user decides on its card) and read '
-                   'confirmed items. Editing, retiring, restoring, dismissing, suggesting an item to '
-                   'the organisation and promoting it are the user\'s own actions on the Memory page '
-                   '(assistant-memory plan §4).'),
+        'reason': ('The assistant only proposes memory (on a card you decide) and reads it. Editing, '
+                   'retiring, restoring and sharing items with your organisation are done on the '
+                   'Memory page.'),
         'page': 'Memory page (account menu)',
         'panel': None,
         'keywords': frozenset({'forget', 'unremember', 'memories'}),

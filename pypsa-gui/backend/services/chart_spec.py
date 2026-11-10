@@ -83,7 +83,7 @@ def validate(spec: Any) -> dict:
         {"schema", "series", "chart"},
     )
     if s["schema"] != SCHEMA:
-        raise ChartSpecError(f"schema must be {SCHEMA!r}")
+        raise ChartSpecError(f"schema must be {SCHEMA}")
     out: dict[str, Any] = {"schema": SCHEMA}
     if "view_id" in s:
         if s["view_id"] not in _view_ids():
