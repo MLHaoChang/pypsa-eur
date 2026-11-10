@@ -210,7 +210,9 @@ def _energy_cap_on(n, carrier: str) -> list[str]:
 def _input_ports(n, lk: str) -> list[tuple[str, str, np.ndarray]]:
     """``(port, bus, draw)`` for every bus the Link draws from: bus0 at 1 per
     MW sent, and each busN (N >= 2) whose ``efficiencyN`` is negative in some
-    hour, at ``-efficiencyN`` per MW sent."""
+    hour, at ``-efficiencyN`` per MW sent. Ports on one bus are one entry
+    (named for the first) whose draw is their sum, so that bus's fuel is
+    divided once."""
     from services.adequacy.eh_stages import _series
 
     ldf = n.links
@@ -222,8 +224,13 @@ def _input_ports(n, lk: str) -> list[tuple[str, str, np.ndarray]]:
         if not isinstance(bus, str) or not bus:
             continue
         draw = np.clip(-_series(n, lk, "efficiency" + col[3:], 1.0), 0.0, None)
-        if draw.max(initial=0.0) > 0.0:
+        if draw.max(initial=0.0) <= 0.0:
+            continue
+        same = next((i for i, x in enumerate(ports) if x[1] == bus), None)
+        if same is None:
             ports.append((col, bus, draw))
+        else:
+            ports[same] = (ports[same][0], bus, ports[same][2] + draw)
     return ports
 
 

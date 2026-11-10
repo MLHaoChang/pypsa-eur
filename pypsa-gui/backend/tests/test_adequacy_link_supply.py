@@ -983,3 +983,40 @@ def test_the_firm_block_comparison_says_why_its_import_never_fails():
         "grid import taken as never failing: no finite MTTR in its outage "
         "data for grid_import"
     )
+
+
+def test_two_input_ports_on_one_bus_share_that_buses_fuel():
+    """GK A (21) D1: bus0 = bus2 = gas with 30 MW of fuel. The Link takes
+    1 + 1 per MW sent, so 15 MW is sent and 7.5 MW delivered, not 15."""
+    n = _fuel_cell(_net(), bus2="gas", efficiency2=-1.0)
+    n.generators.at["gas_supply", "p_nom"] = 30.0
+    b = sampled_fleet(n)
+    assert b.units[-1].name == "link:fuel_cell"
+    assert b.units[-1].capacity_mw == pytest.approx(7.5)
+    assert not b.fleet_notes
+
+
+def test_two_further_ports_on_one_bus_share_that_buses_fuel():
+    """D1: bus2 = bus3 = h2 at 1 and 2 per MW sent, 30 MW of h2: 10 MW is
+    sent and 5 MW delivered (bus0's 1000 MW of gas does not bind)."""
+    n = _net()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Generator", "h2_supply", bus="h2", p_nom=30.0)
+    n = _fuel_cell(n, bus2="h2", efficiency2=-1.0, bus3="h2", efficiency3=-2.0)
+    b = sampled_fleet(n)
+    assert b.units[-1].name == "link:fuel_cell"
+    assert b.units[-1].capacity_mw == pytest.approx(5.0)
+    assert not b.fleet_notes
+
+
+def test_a_store_on_a_bus_two_ports_draw_from_is_named_once():
+    n = _net()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Generator", "h2_supply", bus="h2", p_nom=30.0)
+    n.add("Store", "tank", bus="h2", e_nom=1.0)
+    n = _fuel_cell(n, bus2="h2", efficiency2=-1.0, bus3="h2", efficiency3=-2.0)
+    [note] = sampled_fleet(n).fleet_notes
+    assert note == (
+        "firm Link fuel_cell: not credited (0 MW) — "
+        "bus2 h2 carries a Store (energy-limited): tank"
+    )
