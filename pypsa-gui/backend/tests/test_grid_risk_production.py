@@ -949,9 +949,7 @@ def test_one_long_outage_period_flags_the_line_once_and_moves_no_figure(monkeypa
     p = [_prod(1.0, 10.0)]
 
     def run(bound):
-        _fake_loss(
-            monkeypatch, {"site_trafo": {"2030": (p, bound), "2040": (p, None)}}
-        )
+        _fake_loss(monkeypatch, {"site_trafo": {"2030": (p, bound), "2040": (p, None)}})
         return _n1(_network(periods=[2030, 2040]))
 
     n1, plain = run("lower"), run(None)
@@ -960,7 +958,9 @@ def test_one_long_outage_period_flags_the_line_once_and_moves_no_figure(monkeypa
     assert G.PL.OUTAGE_LONGER_THAN_PERIOD not in plain["flags"]
     assert G.LOWER_BOUND not in plain["flags"] and plain["status"] == "ok"
     assert n1["by_period"] == plain["by_period"]  # no figure moves with the flag
-    assert {k: (c["t_per_year"], c["eur_per_year"]) for k, c in n1["by_period"].items()} == {
+    assert {
+        k: (c["t_per_year"], c["eur_per_year"]) for k, c in n1["by_period"].items()
+    } == {
         "2030": (1.0, 10.0),
         "2040": (1.0, 10.0),
     }

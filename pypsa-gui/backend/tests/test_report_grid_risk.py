@@ -417,7 +417,13 @@ def test_the_disclosures_join_with_a_colon_never_an_em_dash(net, tmp_path):
         if d.startswith("Grid risk to production")
     ]
     flat = " ".join(lines)
-    for kind in ("each grid risk", "incomplete", "out of date", "EUR is unavailable", "one row set per period"):
+    for kind in (
+        "each grid risk",
+        "incomplete",
+        "out of date",
+        "EUR is unavailable",
+        "one row set per period",
+    ):
         assert kind in flat, kind
     assert all(d.startswith("Grid risk to production: ") for d in lines)
     assert not [d for d in lines if "—" in d]
