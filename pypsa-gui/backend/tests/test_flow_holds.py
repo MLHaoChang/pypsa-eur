@@ -78,10 +78,11 @@ def _hand_built() -> pypsa.Network:
     n.add("Generator", "broken", bus="site")
     n.add("StorageUnit", "bess", bus="site", p_nom=3.0)
     n.add("Store", "tank", bus="h2", e_nom=40.0)
+    n.add("Store", "grid_import", bus="h2", e_nom=1.0)             # a store, whatever its name
     n.add("Link", "grid_import", bus0="grid", bus1="site", p_nom=10.0)   # the import link
     n.add("Link", "export_tie", bus0="site", bus1="grid", p_nom=4.0)     # in `connection`
     n.add("Link", "electrolyser", bus0="site", bus1="h2", p_nom=1.5)
-    n.add("Load", "fixed", bus="site", p_set=2.0)
+    n.add("Load", "fixed", bus="site", p_set=2.0, carrier="AC")
     n.add("Load", "shaped", bus="site", p_set=[1.0, 7.5, 3.0, 2.0])
     n.generators.at["broken", "p_nom"] = np.nan
     return n
@@ -91,11 +92,13 @@ def test_the_list_and_the_count_share_one_set():
     n = _hand_built()
     assets = S._site_assets(n, ["grid_import"], {"grid_import", "export_tie"})
     assert assets == [("Generator", "pv"), ("Generator", "candidate"), ("Generator", "broken"),
-                      ("StorageUnit", "bess"), ("Store", "tank"), ("Link", "electrolyser")]
+                      ("StorageUnit", "bess"), ("Store", "tank"), ("Store", "grid_import"),
+                      ("Link", "electrolyser")]
     holds = S._holds(n, ["solar"], assets)
     assert [(h["component"], h["entity"]) for h in holds["assets"]] == assets
     by = {h["entity"]: h for h in holds["assets"]}
-    assert by["tank"] | {"carrier": None} == {
+    # No carrier is null, not an empty string.
+    assert by["tank"] == {
         "component": "Store", "entity": "tank", "carrier": None, "field": "e_nom",
         "value": 40.0, "unit": "MWh", "extendable": False}
     assert by["pv"]["carrier"] == "solar" and by["pv"]["value"] == 5.0
@@ -103,8 +106,8 @@ def test_the_list_and_the_count_share_one_set():
     assert by["candidate"]["value"] == 2.0 and by["candidate"]["extendable"] is True
     # A missing size is null, never 0.
     assert by["broken"]["value"] is None
-    loads = {h["entity"]: h["value"] for h in holds["loads"]}
-    assert loads == {"fixed": 2.0, "shaped": 7.5}
+    loads = {h["entity"]: (h["value"], h["carrier"]) for h in holds["loads"]}
+    assert loads == {"fixed": (2.0, "AC"), "shaped": (7.5, None)}
     assert [(h["component"], h["entity"], h["field"]) for h in holds["profiles"]] == [
         ("Load", "shaped", "p_set"), ("Generator", "pv", "p_max_pu")]
     assert holds["carriers"] == [{"component": "Carrier", "entity": "solar", "carrier": None,
