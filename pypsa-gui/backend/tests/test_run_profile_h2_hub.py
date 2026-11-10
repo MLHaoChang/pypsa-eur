@@ -1014,6 +1014,51 @@ def test_a_zero_weight_snapshot_is_read_and_counts_nothing(tmp_path, monkeypatch
         for r in _gate(env, "h2.electrolyser.utilisation")["facts"][0]["rows"]
     }
     assert rows[2040]["utilisation"] == pytest.approx(3.0 / 30.0)
+    shed = run_gates.FACTS["h2.offtake.shed_hours"].read(env)
+    assert [(r["period"], r["shed_hours"]) for r in shed.rows] == [
+        (2030, 2.0),
+        (2040, 0.0),
+    ]
+
+
+def test_an_infinite_weight_reads_no_utilisation(tmp_path, monkeypatch):
+    env = _h2_env(tmp_path, monkeypatch)
+    sw = env.ctx.network.snapshot_weightings
+    sw.iloc[2, sw.columns.get_loc("generators")] = float("inf")
+    result = _gate(env, "h2.electrolyser.utilisation")
+    assert result["verdict"] == "not_evaluated" and result["facts"][0]["value"] is None
+
+
+@pytest.mark.parametrize("flow, band_edge", [(4.0, 0.40), (9.5, 0.95)])
+def test_utilisation_on_the_bands_edge_passes(tmp_path, monkeypatch, flow, band_edge):
+    """The band [0.40, 0.95] is closed at both ends."""
+    env = _h2_env(tmp_path, monkeypatch, dispatch=((flow, flow), (flow, flow)))
+    rows = _gate(env, "h2.electrolyser.utilisation")["facts"][0]["rows"]
+    assert all(
+        r["utilisation"] == pytest.approx(band_edge) and r["verdict"] == "pass"
+        for r in rows
+    )
+
+
+def test_a_failed_loop_job_keeps_its_own_outcome(tmp_path):
+    """A loop step whose job settled without a record reads the job's own
+    outcome, not the step's status."""
+    from tests.test_harness_run_eh import ctx_for, env_for
+
+    step = {
+        "id": "result_gate.1",
+        "tool": "run_coupling_loop",
+        "engine": "eh.adequacy.lole",
+        "status": "failed",
+        "job": {"outcome": "cancelled"},
+        "error": "the user cancelled the loop",
+    }
+    env = env_for(tmp_path, ctx=ctx_for(tmp_path), steps=[step])
+    [result] = run_gates.evaluate([_rules(REFS["eh_h2_hub"])["eh.adequacy.lole"]], env)
+    assert (
+        result["facts"][0]["value"] == "cancelled"
+        and result["verdict"] == "not_evaluated"
+    )
 
 
 def test_dispatch_within_a_relative_tolerance_of_a_large_capacity_is_read(
