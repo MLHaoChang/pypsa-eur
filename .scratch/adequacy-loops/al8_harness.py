@@ -1,4 +1,7 @@
 # AL-8 harness (adequacy loops 01). Run: cp .scratch/adequacy-loops/al8_harness.py pypsa-gui/backend/tests/test_zz_al8_scratch.py && cd pypsa-gui/backend && AL8_OUT=<file.jsonl> python3 -m pytest -q tests/test_zz_al8_scratch.py  (one JSON row per EH template; AL8_WAIT=<seconds> to wait longer than 900 s for a loop)
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+#
+# SPDX-License-Identifier: MIT
 import dataclasses
 import json
 import os
