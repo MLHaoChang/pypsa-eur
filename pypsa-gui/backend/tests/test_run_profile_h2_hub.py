@@ -470,7 +470,9 @@ def _read_on(monkeypatch, n, reader, *args, capture=None, current=True):
     ctx = type(
         "Ctx", (), {"network": n, "solver_state": {"last_lost_load": capture or {}}}
     )()
-    monkeypatch.setattr(run_gates, "_own_solve", lambda env, read, typed=False: read(ctx))
+    monkeypatch.setattr(
+        run_gates, "_own_solve", lambda env, read, typed=False: read(ctx)
+    )
     monkeypatch.setattr(calculations, "solve_matches_inputs", lambda c: current)
     return reader(None, *args)
 
