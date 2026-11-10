@@ -30,8 +30,10 @@
   record marks the estimate as not confident. ``eh_h2_hub_staged`` stays blocked: the import's outages alone
   miss the goal and no lever moves them.
 
-  ``eh_concentrator_staged`` now starts the loop, but its first solve did not finish within 26 minutes on the
-  test machine, so it has no before/after verdict here.
+  ``eh_concentrator_staged`` now starts the loop, but it has no before/after verdict here: the loop's first
+  solve did not finish within 40 minutes on the test machine. The time is the template's own optimisation (about
+  1.5 million constraints over 26,280 snapshots), which a plain solve of the template also did not finish in 20
+  minutes there; the loop adds nothing to it.
 
   Known limits: the Monte Carlo study, ELCC and the portfolio still sample generators only, so on these
   templates the study still refuses or counts the grid as must-take. The run gate does not yet show
