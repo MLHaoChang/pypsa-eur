@@ -350,6 +350,13 @@ def test_returns_are_read_only_from_the_report_the_case_judged_current(
     assert fact["returns"] is None and fact["reasons"] == ["report_changed"]
 
 
+def test_a_case_whose_status_names_no_report_hash_has_no_returns(monkeypatch):
+    """GK B F3: with no hash on the status, no report can be bound to it."""
+    body = {**DONE, "report": {"present": True, "stale": False}}
+    fact = _returns(monkeypatch, body, _report())
+    assert fact["returns"] is None and fact["reasons"] == ["report_changed"]
+
+
 def test_a_real_network_edit_after_the_case_has_no_returns(
     monkeypatch, install_network
 ):
@@ -827,6 +834,28 @@ def test_a_re_check_that_did_not_converge_is_no_evidence(hub):
     result = _contingency(hub, step)
     assert result["verdict"] == "not_evaluated"
     assert "re-check with the measures did not converge" in result["reason"]
+
+
+def test_a_re_check_record_rewritten_after_the_settle_is_not_the_runs(hub):
+    """GK B F2, CT-3 (b): the invest history is one of the run's bound files."""
+    run, step = _campus(hub)
+    _history(
+        run,
+        [
+            {
+                "iteration": 1,
+                "need": "tap",
+                "from": "0",
+                "to": "1",
+                "check": "campus_voltage",
+                "detail": "",
+            }
+        ],
+    )
+    result = _contingency(hub, step)
+    assert (
+        result["verdict"] == "not_evaluated" and "not the run's own" in result["reason"]
+    )
 
 
 def test_convergence_is_the_re_checks_not_the_as_is_cases(hub):
