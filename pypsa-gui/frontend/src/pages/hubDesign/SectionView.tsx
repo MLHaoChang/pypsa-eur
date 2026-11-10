@@ -81,7 +81,7 @@ export function SectionView({ id, onNext, children }: {
           {items.map((it, i) => <ItemRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
         </ul>
       )}
-      <AssumptionsCard items={assumed} />
+      <AssumptionsCard key={id} items={assumed} />
       {!stateless && <SectionNotInScope section={id} />}
       {infos.length > 0 && (
         <ul data-testid="section-infos" className="flex flex-col gap-0.5 text-[11px] text-muted">

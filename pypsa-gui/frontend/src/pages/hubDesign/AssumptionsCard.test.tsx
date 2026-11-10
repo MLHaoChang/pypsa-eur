@@ -62,9 +62,12 @@ describe('AssumptionsCard', () => {
   })
 
   it('shows a plain error when the write fails', async () => {
-    ackMany.mockRejectedValue(new Error('x'))
+    ackMany.mockRejectedValue({ response: { data: { detail: { message: 'Another user is editing this project.' } } } })
     renderCard(rows(1))
     fireEvent.click(screen.getByTestId('assumptions-accept-all'))
-    expect((await screen.findByTestId('assumptions-error')).textContent).toMatch(/could not be saved/)
+    const err = await screen.findByTestId('assumptions-error')
+    expect(err.textContent).toBe('The defaults could not be saved: Another user is editing this project. Try again.')
+    expect(err.getAttribute('role')).toBe('status')
+    expect(screen.getAllByTestId('assumption-row')).toHaveLength(1)    // the rows stay
   })
 })

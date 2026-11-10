@@ -46,7 +46,7 @@ user changes some, they say which in free text: `set_study_parameter` for
 each changed one in the same turn, with the row's own unit; the rest stay as
 listed. Everything else stays the generic defaults; say that once.
 Inputs the user must give (bidding zone, connection, load, tariff) are asked
-above and never get a default or an "Keep all defaults".
+above and never get a default or a "Keep all defaults".
 
 ## Step: verdict
 
