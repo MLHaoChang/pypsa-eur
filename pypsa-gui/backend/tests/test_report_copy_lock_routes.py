@@ -356,6 +356,7 @@ def test_restore_refuses_a_writer_that_arrived_after_its_early_check(
     seen = {}
 
     with contextlib.ExitStack() as writer:
+
         def arrive(*_a, **_k):
             seen["before"] = _tree(pdir)
             writer.enter_context(held_elsewhere(pdir, RID_A))
@@ -588,7 +589,6 @@ def test_a_save_as_waits_for_the_network_lock_before_any_report_lock(
     )
 
 
-
 def test_the_save_as_early_check_waits_for_the_network_lock_before_any_report_lock(
     client, project, project_storage_dir, monkeypatch
 ):
@@ -620,7 +620,10 @@ def test_a_save_as_takes_report_locks_only_under_the_contexts_lock(
     from routers import projects
 
     contexts, free_for_others = [], []
-    real_check, real_guard = projects._refuse_copy_of_busy_reports, projects._reports_copy_guard
+    real_check, real_guard = (
+        projects._refuse_copy_of_busy_reports,
+        projects._reports_copy_guard,
+    )
 
     def check(ctx, *a, **k):
         contexts.append(ctx)
@@ -643,6 +646,7 @@ def test_a_save_as_takes_report_locks_only_under_the_contexts_lock(
     resp = client.post("/api/projects/lockme_copy", params={"rebind": True})
     assert resp.status_code == 200, resp.text
     assert free_for_others == [False, False]  # the early check, then the save
+
 
 # ── GK B F4, F5, F6 ─────────────────────────────────────────────────────────
 
