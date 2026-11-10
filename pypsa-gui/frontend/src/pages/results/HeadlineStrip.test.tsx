@@ -29,7 +29,7 @@ const HUB = {
   kind: 'energy_hub',
   cards: [
     card('lcoe', { state: 'not_run', reason: 'The investment case has not run on this solve.' }),
-    card('system_cost', { value: 34_700_000, unit: 'currency/yr' }),
+    card('system_cost', { value: 34_700_000, unit: 'currency' }),
     card('new_build_capital', { value: 2_210_000, unit: 'currency/yr' }),
     card('curtailed_share', { value: 12.34, unit: '%', formula_id: 'curtailment-share-of-available/1' }),
     card('unserved_energy', { value: 0, unit: 'MWh', state: 'zero' }),
@@ -59,7 +59,10 @@ describe('HeadlineStrip', () => {
     expect([...strip.querySelectorAll('[data-headline]')].map(t => t.getAttribute('data-testid'))).toEqual(
       HUB.cards.map(c => `headline-${c.id}`))
     expect(figure('system_cost')?.getAttribute('data-kpi-value')).toBe('€34.7 M')
-    expect(screen.getByTestId('headline-system_cost').textContent).toContain('per year')
+    // The system cost covers the solved snapshots; only the annualised new build reads per year.
+    expect(screen.getByTestId('headline-system_cost').textContent).toContain('in this solve')
+    expect(screen.getByTestId('headline-system_cost').textContent).not.toContain('per year')
+    expect(screen.getByTestId('headline-new_build_capital').textContent).toContain('per year')
     expect(figure('curtailed_share')?.getAttribute('data-kpi-value')).toBe('12.3 %')
     // A computed zero stays a 0, never a state.
     expect(figure('unserved_energy')?.getAttribute('data-kpi-value')).toBe('0 MWh')
@@ -102,14 +105,13 @@ describe('HeadlineStrip', () => {
     expect(screen.getByTestId('headline-curtailed_share').textContent).toContain('The inputs changed since this solve.')
   })
 
-  it('names the line at the peak loading, and the horizon for a multi-period cost', async () => {
+  it('names the line at the peak loading', async () => {
     api.getHeadlineKpis.mockResolvedValue({ kind: 'network', cards: [
       card('system_cost', { value: 5e8, unit: 'currency' }),
       card('peak_line_loading', { value: 87.25, unit: '%', detail: 'North tie' }),
     ] })
     renderStrip()
     expect((await screen.findByTestId('headline-peak_line_loading')).textContent).toContain('North tie')
-    expect(screen.getByTestId('headline-system_cost').textContent).toContain('whole horizon')
   })
 
   it('says so when the figures cannot be read, and draws nothing when nothing is solved', async () => {
@@ -139,5 +141,10 @@ describe('headline words', () => {
   it('formats a price with its currency', () => {
     expect(headlineFigure(card('lcoe', { value: 55.5, unit: 'EUR/MWh' }))).toEqual({ value: '55.50 €/MWh', basis: 'investment case' })
     expect(headlineFigure(card('lcoe', { value: 55.5, unit: 'USD/MWh' })).value).toBe('55.50 USD/MWh')
+  })
+
+  it('writes a zero rate as 0 %, not 0.0 %', () => {
+    expect(headlineFigure(card('curtailed_share', { value: 0, unit: '%', state: 'zero' })).value).toBe('0 %')
+    expect(headlineFigure(card('curtailed_share', { value: 0.04, unit: '%' })).value).toBe('0.0 %')
   })
 })

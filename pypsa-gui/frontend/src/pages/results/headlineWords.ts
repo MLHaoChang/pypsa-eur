@@ -41,9 +41,11 @@ export function headlineFigure(card: HeadlineCard): { value: string; basis?: str
   if (v == null) return { value: '' }
   switch (card.unit) {
     case 'currency/yr': return { value: fmtCurrency(v), basis: 'per year' }
-    case 'currency': return { value: fmtCurrency(v), basis: 'whole horizon' }
+    // Annualised fixed cost plus the opex of the solved snapshots, or a sum over
+    // the periods: what the solve covered, which is a year only by coincidence.
+    case 'currency': return { value: fmtCurrency(v), basis: 'in this solve' }
     case 'MWh': return { value: fmtEnergy(v), basis: 'in this solve' }
-    case '%': return { value: `${v.toFixed(1)} %`, basis: card.detail ?? undefined }
+    case '%': return { value: v === 0 ? '0 %' : `${v.toFixed(1)} %`, basis: card.detail ?? undefined }
     default: {
       const unit = card.unit === 'EUR/MWh' ? '€/MWh' : card.unit ?? ''
       return { value: `${v.toFixed(2)} ${unit}`.trim(), basis: card.id === 'lcoe' ? 'investment case' : undefined }
