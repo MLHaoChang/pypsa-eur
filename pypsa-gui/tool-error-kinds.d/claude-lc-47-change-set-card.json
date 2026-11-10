@@ -1,0 +1,3 @@
+{"kinds": {
+  "change_unticked": {"surface": "inline", "why": "The user left this row unticked on a change-set card (harness/change_set.py) and applied the others. Nothing was written for this call; the result reads denied. The assistant does not propose it again unless the user asks."}
+}}
