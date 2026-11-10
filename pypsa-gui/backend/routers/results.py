@@ -2768,6 +2768,27 @@ def get_lost_load(
     return Response(status_code=204) if payload is None else payload
 
 
+@results_router.get("/headline_kpis")
+def get_headline_kpis():
+    """
+    The headline figures at the top of Results for the open project's type
+    (ui-modern 03; `services.results.headline_kpis`). 204 when nothing is solved.
+    """
+    from services.results.headline_kpis import headline_kpis
+    from services.results.lost_load import lost_load_payload
+
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        return _not_solved()
+    try:
+        cost = compute_cost_breakdown(n, _state['solver_config'])
+    except Exception:  # the service logged it; its cards say there is no breakdown
+        cost = None
+    lost_load = lost_load_payload(n, _state.get("last_lost_load"), _solved_settings)
+    return headline_kpis(PyPSAService.get_active_context(), template=_workbook_template(),
+                         cost=cost, lost_load=lost_load)
+
+
 
 def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = True):
     """
