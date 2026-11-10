@@ -16,6 +16,7 @@ from datetime import date
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import AfterValidator, BaseModel, Field, model_serializer, model_validator
+from pydantic_core import PydanticCustomError
 
 # ------------------------------------------------------------------ enums
 
@@ -403,6 +404,40 @@ RESOLVED_CURRENCY_KEY = "resolved_currency"
 RESOLVED_CURRENCY = {RESOLVED_CURRENCY_KEY: True}
 
 
+def _drop_stamp_echo(data: dict) -> dict:
+    """A tariff payload sent back as it was read (`tariff_payload_resolved`), minus
+    what the read added (gridspine-library-eu 05, GK A G5-1): the read-only
+    `currency_source` key always, and a currency the read took from the `pack_hash`
+    stamp when it still equals the stamp's. A currency that differs is stated content.
+    So a read then written back unchanged stores the same bytes and hashes. A pack that
+    cannot be read refuses the write (`tariff_stamp_unreadable`); never stored with it."""
+    source = data.get("currency_source")
+    data = {k: v for k, v in data.items() if k != "currency_source"}
+    if source != "stamp" or not data.get("currency") or not data.get("pack_hash"):
+        return data
+    from types import SimpleNamespace
+
+    from services.library.defaults_pack.loader import (
+        DefaultsPackError,
+        stamped_tariff_currency,
+    )
+
+    probe = SimpleNamespace(id=data.get("id"), pack_hash=data["pack_hash"])
+    try:
+        stamped = (stamped_tariff_currency(probe) or "").strip().upper()
+    except DefaultsPackError as exc:
+        raise PydanticCustomError(
+            "tariff_stamp_unreadable",
+            "Tariff \u201c{id}\u201d was read with the currency of its defaults pack "
+            "{stamp}, which cannot be read now ({why}), so it is not saved. Reload the "
+            "tariff, or state its currency.",
+            {"id": str(data.get("id")), "stamp": str(data["pack_hash"]), "why": str(exc)},
+        ) from exc
+    if stamped and data["currency"] == stamped:
+        data = {k: v for k, v in data.items() if k != "currency"}
+    return data
+
+
 class Tariff(BaseModel):
     id: str = Field(min_length=1)
     name: str
@@ -429,6 +464,8 @@ class Tariff(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _currency_from_jurisdiction(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "currency_source" in data:
+            data = _drop_stamp_echo(data)
         if isinstance(data, dict) and data.get("currency") is None:
             implied = jurisdiction_currency(data.get("jurisdiction"), data.get("valid_from"))
             if implied is not None:
@@ -460,7 +497,9 @@ def tariff_payload_resolved(payload: Any) -> Any:
     that states none shows the currency its `pack_hash` stamp names, with
     `currency_source: "stamp"` (gridspine-library-eu 05), the one the currency gate
     reads (`binding.resolved_tariff_currency`). A new dict: nothing is written onto the
-    tariff, so its stored form and hashes stay as they are."""
+    tariff, so its stored form and hashes stay as they are; a write drops the echo
+    (`Tariff._drop_stamp_echo`). A pack that cannot be read gives no currency and
+    `currency_source: "pack_unreadable"`."""
     if not isinstance(payload, dict):
         return payload
     try:
@@ -468,8 +507,14 @@ def tariff_payload_resolved(payload: Any) -> Any:
     except ValueError:
         return payload
     from services.commercial.binding import resolved_tariff_currency
+    from services.library.defaults_pack.loader import DefaultsPackError
 
-    cur, source = resolved_tariff_currency(tariff)
+    try:
+        cur, source = resolved_tariff_currency(tariff)
+    except DefaultsPackError:
+        # A display read never 500s on a broken pack (GK A G5-2): no currency, said
+        # why. Anything else propagates; a bind or run still refuses (GLE3-1).
+        return {**payload, "currency_source": "pack_unreadable"}
     if source == "stamp":
         return {**payload, "currency": cur, "currency_source": source}
     return {**payload, "currency": cur} if cur is not None and "currency" not in payload \

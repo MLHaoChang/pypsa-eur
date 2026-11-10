@@ -124,6 +124,10 @@ def validate_payload(kind: str, payload: Any) -> BaseModel:
         raw = {k: v for k, v in payload.items() if k != "library_ref"}
     elif kind == "contract":
         raw = {k: v for k, v in payload.items() if k not in ("type", "library_ref")}
+    elif kind == "tariff":
+        # The read-only key a tariff read adds (gridspine-library-eu 05); the model
+        # drops it, with a stamp-read currency that still equals the stamp's.
+        raw = {k: v for k, v in payload.items() if k != "currency_source"}
     unknown = _unknown_keys(model, raw)
     if unknown:
         raise ValueError(f"unknown {kind} field(s): {', '.join(sorted(unknown))}")
