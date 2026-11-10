@@ -269,7 +269,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
           <RunSection name={name} state={state.data} onChange={refresh} lost={lost} outcome={outcome} pending={pending}
                       onRunStart={onRunStart} onRunLost={onRunLost} />
         ) : (
-          <PageSection panelSection="study_settings" title="Study settings">
+          <PageSection title="Study settings">
             <p className="text-[12px] text-muted">
               Draft the campus file in the grid connection first; the study runs on it.
             </p>
