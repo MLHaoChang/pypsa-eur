@@ -110,6 +110,7 @@ from routers import (
     uploads,
     vintage,
 )
+from services.commercial import stamp_currency
 from services.pypsa_service import PyPSAService
 from services.site_scene.contract import SceneError
 from services.study.body_limit import StudyBodyLimitMiddleware
@@ -696,6 +697,10 @@ app = FastAPI(
     # per-user instead of through a process global (Step 0b).
     dependencies=[Depends(bind_active_project)],
 )
+
+# The Tariff model's defaults-pack stamp lookup (gridspine-library-eu 05, GK A G5-1):
+# a model module holds no service imports, so the app registers it, in any import order.
+stamp_currency.register()
 
 
 def _json_safe(obj):

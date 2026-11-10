@@ -138,26 +138,28 @@ def test_a_marked_write_with_a_broken_pack_is_refused_typed(monkeypatch, exc_nam
     assert read["pack_hash"] in err["msg"]
 
 
-def test_the_app_registers_the_stamp_lookup_and_none_refuses(monkeypatch):
-    """Models hold no service imports, so the app registers the lookup; a marked write
-    with none registered is refused, never stored with the currency."""
-    import importlib
-
+def test_the_app_registers_the_stamp_lookup_and_none_refuses_a_marked_write():
+    """Models hold no service imports, so the app entry point registers the lookup. With
+    none registered a marked write is refused, never stored with the currency; an
+    unmarked write is unaffected. The slot is swapped only in this test's own context."""
     from pydantic import ValidationError
 
     import main  # noqa: F401
+    from services.library.defaults_pack.loader import DefaultsPackError
 
-    assert M._STAMP_CURRENCY == (
-        stamp_currency.stamp_currency,
-        importlib.import_module(
-            "services.library.defaults_pack.loader"
-        ).DefaultsPackError,
-    )
-    read = B.tariff_payload_read(_generic_copy_payload())
-    monkeypatch.setattr(M, "_STAMP_CURRENCY", None)
-    with pytest.raises(ValidationError) as info:
-        M.Tariff.model_validate(read)
-    assert info.value.errors()[0]["type"] == "tariff_stamp_unreadable"
+    registered = (stamp_currency.stamp_currency, DefaultsPackError)
+    assert M._STAMP_CURRENCY == registered
+    stored = _generic_copy_payload()
+    read = B.tariff_payload_read(stored)
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(M, "_STAMP_CURRENCY", None)
+        with pytest.raises(ValidationError) as info:
+            M.Tariff.model_validate(read)
+        assert info.value.errors()[0]["type"] == "tariff_stamp_unreadable"
+        # Unmarked: the stored copy, and a deliberately stated currency.
+        assert M.Tariff.model_validate(stored).currency is None
+        assert M.Tariff.model_validate({**stored, "currency": "EUR"}).currency == "EUR"
+    assert M._STAMP_CURRENCY == registered
 
 
 # ── the routes (GK A G5-1, G5-3) ──────────────────────────────────────────────
@@ -295,3 +297,19 @@ def test_a_marked_solver_config_put_with_a_broken_pack_is_a_typed_422(
     assert "tariff_stamp_unreadable" in r.text
     monkeypatch.undo()
     assert _stored(session_ctx, client) == before
+
+
+def test_a_marked_library_put_with_a_broken_pack_is_a_typed_422(client, monkeypatch):
+    stored = _generic_copy_payload()
+    with pytest.MonkeyPatch.context() as m:
+        m.setattr(M, "jurisdiction_currency", lambda *a, **k: "EUR")
+        ref = client.put("/api/library/items/tariff/legacy2", json={"payload": stored})
+        assert ref.status_code == 200, ref.text
+    item = client.get("/api/library/items/tariff/legacy2").json()["payload"]
+    _break_pack(monkeypatch, "DefaultsPackError")
+
+    r = client.put("/api/library/items/tariff/legacy2", json={"payload": item})
+
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["code"] == "tariff_stamp_unreadable"
+    assert item["pack_hash"] in r.json()["detail"]["message"]

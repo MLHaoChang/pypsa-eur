@@ -1,7 +1,7 @@
 """Registers the defaults-pack stamp lookup the `Tariff` model reads when a tariff
 read is sent back (gridspine-library-eu 05, GK A G5-1). Models never import services,
 so this module hands `models.commercial` the lookup; `services.library.items` imports
-it, so it is registered whenever the app is.
+it, and `main` calls `register` at startup, so the app has it in any import order.
 """
 
 from __future__ import annotations
@@ -21,4 +21,9 @@ def stamp_currency(pack_hash: str, tariff_id: str) -> str | None:
     return stamped_tariff_currency(SimpleNamespace(id=tariff_id, pack_hash=pack_hash))
 
 
-M.register_stamp_currency(stamp_currency, DefaultsPackError)
+def register() -> None:
+    """Hand `models.commercial` the lookup; idempotent. `main` calls it at startup."""
+    M.register_stamp_currency(stamp_currency, DefaultsPackError)
+
+
+register()

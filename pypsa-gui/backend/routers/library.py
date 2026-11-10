@@ -319,6 +319,8 @@ def put_item(kind: ItemKind, name: str, body: ItemIn, org_id: UUID | None = None
         raise HTTPException(409, {"code": "library_item_common_readonly", "message": str(exc)}) from exc
     except I.TariffCurrencyRequired as exc:
         raise HTTPException(422, _currency_required(exc)) from exc
+    except I.TariffStampUnreadable as exc:
+        raise HTTPException(422, {"code": exc.code, "message": str(exc)}) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

@@ -156,6 +156,8 @@ def _validate(kind: str, payload: Any) -> BaseModel:
         return model.model_validate(body)
     except ValidationError as exc:
         err = exc.errors()[0]
+        if err.get("type") == TariffStampUnreadable.code:
+            raise TariffStampUnreadable(err["msg"]) from exc
         where = ".".join(str(x) for x in err.get("loc", ()))
         raise ValueError(f"invalid {kind}: {where + ': ' if where else ''}{err['msg']}") from exc
 
@@ -204,6 +206,14 @@ def _write(target: Path, data: bytes, digest: str) -> None:
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
+
+
+class TariffStampUnreadable(ValueError):
+    """A tariff read sent back with its stamp-read currency while its defaults pack
+    cannot be read (gridspine-library-eu 05, GK A G5-1): nothing is stored. The route
+    answers 422 `tariff_stamp_unreadable`."""
+
+    code = "tariff_stamp_unreadable"
 
 
 class TariffCurrencyRequired(ValueError):

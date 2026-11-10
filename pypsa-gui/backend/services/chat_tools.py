@@ -1844,7 +1844,7 @@ _LIBRARY_ERROR_KINDS = (
     {"error_kind": "library_reference_unknown"},
     {"error_kind": "reference_target_unsupported"}, {"error_kind": "currency_mismatch"},
     {"error_kind": "reference_confirmation_needed"},
-    {"error_kind": "tariff_currency_required"},
+    {"error_kind": "tariff_currency_required"}, {"error_kind": "tariff_stamp_unreadable"},
 )
 _LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
 
