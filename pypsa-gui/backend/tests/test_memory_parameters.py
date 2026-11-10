@@ -354,7 +354,8 @@ def test_the_change_log_entry_belongs_to_the_projects_org(client, proj):
     card = _preview(client, proj, chip).json()
     assert _apply(client, proj, chip, card["digest"]).status_code == 200
     entries = change_log_service.get_all(org_id=str(proj.org_id))
-    assert entries and entries[-1]["org_id"] == str(proj.org_id)
+    newest = entries[0]  # get_all is newest first
+    assert newest["component_type"] == "Generator" and newest["org_id"] == str(proj.org_id)
 
 
 def test_a_stale_digest_refuses_and_writes_nothing(client, proj):
@@ -585,3 +586,60 @@ def test_money_stamp_reads_provenance_then_the_case(monkeypatch, entry, fin, bas
     monkeypatch.setattr(P, "_finance_config", lambda: object())
     monkeypatch.setattr(reference_apply, "case_base_year", lambda *_a: base)
     assert P.money_stamp(None, "Generator", "gas", "marginal_cost") == want
+
+
+# ── Second mutant pass ───────────────────────────────────────────────────────
+
+def test_without_an_asset_name_every_carrier_is_suggested(client, proj):
+    _save(client, proj, field="p_nom")  # gas
+    r = client.get(SUGGEST, params={"project_id": proj.id, "component_class": "Generator"})
+    assert r.status_code == 200 and "p_nom" in r.json()["fields"]
+
+
+def test_last_used_ranks_before_last_updated(client, proj, _auth_db):
+    from datetime import UTC, datetime
+
+    used = _save(client, proj, field="p_nom").json()
+    _set(_auth_db, used["id"], project_kind="connection")
+    fresh = _save(client, proj, field="p_nom").json()  # updated later, never used
+    _set(_auth_db, used["id"], project_kind=None, last_used_at=datetime(2026, 1, 1, tzinfo=UTC))
+    assert [c["id"] for c in _chips(client, proj)["p_nom"]] == [used["id"], fresh["id"]]
+
+
+@pytest.mark.parametrize(("currency", "year"), [(None, 2024), ("EUR", None)])
+def test_a_cost_target_missing_currency_or_money_year_is_refused(client, proj, monkeypatch, currency, year):
+    from services import memory_parameters as P
+
+    proj.stamp()
+    _save(client, proj)
+    _set_value(proj, 70.0)
+    monkeypatch.setattr(P, "money_stamp", lambda *_a: (currency, year))
+    chip = _chips(client, proj)["marginal_cost"][0]
+    r = _preview(client, proj, chip)
+    assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "memory_money_basis_missing"
+
+
+def test_the_preview_note_names_the_replaced_values_source(client, proj):
+    chip = _saved_chip(client, proj)
+    assert "(source: typed)" in _preview(client, proj, chip).json()["memory_note"]
+    proj.stamp(field="p_nom", source="pack:x")
+    assert "(source: pack:x)" in _preview(client, proj, chip).json()["memory_note"]
+
+
+def test_a_carrier_refusal_names_an_asset_without_a_carrier(client, proj):
+    chip = _saved_chip(client, proj)
+    proj.net().generators.at["solar", "carrier"] = ""
+    r = _preview(client, proj, chip, name="solar")
+    assert r.status_code == 422 and "without a carrier" in r.json()["detail"]["message"]
+
+
+@pytest.mark.parametrize(("raw", "want"), [
+    (None, None),
+    ({"currency": "USD", "currency_year": 2020, "financial_close": "2025-01-01"}, ("USD", 2020)),
+])
+def test_finance_reads_the_case_only_when_it_states_one(monkeypatch, raw, want):
+    from services import memory_parameters as P
+
+    monkeypatch.setattr(P, "_finance_config", lambda: type("C", (), {"finance": raw})())
+    fin = P._finance()
+    assert (None if fin is None else (fin.currency, fin.currency_year)) == want
