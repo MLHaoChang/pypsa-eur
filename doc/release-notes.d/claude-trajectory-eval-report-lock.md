@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The trajectory evaluation no longer counts a report's lock file as an unauthorized effect, and its driver reads only the event logs a case wrote, so another test's damaged log cannot fail it.
