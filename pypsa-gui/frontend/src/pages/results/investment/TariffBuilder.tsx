@@ -380,7 +380,7 @@ export default function TariffBuilder({ initial, onSaved }: {
       ))}
       {/* One add control for every charge type (ui-modern 05; one entry point per feature). */}
       <div className="flex flex-wrap gap-2 items-center" data-testid="tb-add-item">
-        <label>Add an item <select aria-label="Charge type of the item to add" className={input} value={addKind}
+        <label>Add an item <select aria-label="Add an item: charge type" className={input} value={addKind}
                                    onChange={e => setAddKind(e.target.value as Item['kind'])}>
           {KINDS.map(k => <option key={k} value={k}>{optionWords(k)}</option>)}</select></label>
         <button type="button" className={action}

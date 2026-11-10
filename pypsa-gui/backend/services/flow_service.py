@@ -676,7 +676,8 @@ _LEDGER_PLAIN: dict[str, tuple[str | None, tuple[tuple[str, str], ...]]] = {
         ("tau_f", "frequency filter time"), ("i_max", "current limit"),
         ("k_gfm_min", "grid-forming current at least"), (", H ", ", inertia constant "),
         (" pu", " p.u."), ("pf ", "power factor "))),
-    "transition RoCoF limit": ("Frequency change limit during the transition", ()),
+    # The island panel's own word for RoCoF ("Rate of change (Hz/s)"); a test pins the two.
+    "transition RoCoF limit": ("Rate-of-change limit during the transition", ()),
     "island rows": ("Island limits in the optimisation", ((" (island_constraints false)", ""),)),
 }
 
@@ -703,12 +704,9 @@ def _shown(value) -> str:
     return str(int(value)) if float(value).is_integer() else repr(float(value))
 
 
-def _assumed_items(template: dict, cfg: dict | None = None, *,
-                   skip_sections: frozenset[str] = frozenset()) -> list[dict]:
+def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
     """The template's `assumed` ledger rows and energization: a default the user
-    has not confirmed is a warning (design §3.2). A row filed to a section in
-    ``skip_sections`` (one the project does not need, such as the connection of
-    an off-grid site) is not raised: there is nothing there to confirm. The
+    has not confirmed is a warning (design §3.2). The
     message says the row in plain words (``_plain_words``); the ledger's
     ``value`` keeps the engineering record and binds the acknowledgement. A row may name its own
     ``section`` (and ``component`` / ``entity`` / ``field`` / ``panel``); one
@@ -736,9 +734,6 @@ def _assumed_items(template: dict, cfg: dict | None = None, *,
         message = f"{label}: {shown} (assumed): confirm it or set your own."
         section = row.get("section")
         card = row.get("card") if row.get("card") in S.CARD_BY_ID else None
-        if (section if section in F.INPUT_SECTIONS
-                else ledger_section(item) or "project") in skip_sections:
-            continue
         if section in F.INPUT_SECTIONS:
             # A row that names its own target (DC-02's rows): filed there, and
             # coded per item so two rows on one entity keep separate acks.
@@ -755,7 +750,7 @@ def _assumed_items(template: dict, cfg: dict | None = None, *,
         out[-1]["card"] = card
     energ = [e for e in template.get("energization") or []
              if isinstance(e, dict) and e.get("source") == "assumed"]
-    if energ and "connection" not in skip_sections:
+    if energ:
         value = json.dumps([[e.get("year"), e.get("available_import_mw")] for e in energ])
         steps = ", ".join(f"{e.get('year')}: {_shown(e.get('available_import_mw'))} MW"
                           if isinstance(e.get("available_import_mw"), (int, float))
@@ -765,6 +760,11 @@ def _assumed_items(template: dict, cfg: dict | None = None, *,
                          "network operator's offer.", "template",
                          "connection", entity="energization schedule", value=value))
     return out
+
+
+def _is_assumed(it: dict) -> bool:
+    """An unconfirmed template default (the Assumptions card's rows)."""
+    return it["severity"] == "warning" and it["code"].startswith("assumed_")
 
 
 def _money_year_items(facts: _Facts) -> list[dict]:
@@ -1169,9 +1169,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             r = _readiness(facts, template, cache_key)
             items += _readiness_items(r, voll_noted=any(
                 i["code"] == "presence_voll" for i in presence))
-        # Off-grid: section 3 is "not needed", so its defaults are not asked for.
-        items += _assumed_items(template, facts.cfg_dict,
-                                skip_sections=frozenset({"connection"} if islanded else ()))
+        items += _assumed_items(template, facts.cfg_dict)
     items += _bind_items(facts, db, org_id, project_dir, n)
     # Load flow and N-1 security are on exactly when their solver settings are.
     scope = S.apply_settings(scope, facts.cfg_dict)
@@ -1209,6 +1207,12 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                 state = "complete"
             row.update(state=state, required=required[s] and state != "not_needed")
             if state == "not_needed":
+                # A section the project does not need asks for no defaults: its
+                # assumed rows stay listed, out of scope, and count nowhere.
+                for it in mine:
+                    if _is_assumed(it):
+                        it["in_scope"] = False
+                row["items"] = [_strip(it) for it in mine]
                 row["summary"] = ("Not needed by the cards in scope" if s not in needed
                                   else "Generation-only: export through the POI in section 3"
                                   if s == "loads"

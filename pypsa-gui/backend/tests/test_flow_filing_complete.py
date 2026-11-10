@@ -263,7 +263,7 @@ def test_a_ledger_row_is_said_in_plain_words_and_keeps_its_record():
     items = S._assumed_items({"ledger": rows})
     assert [i["message"] for i in items] == [
         "Island limits in the optimisation: off (assumed): confirm it or set your own.",
-        "Frequency change limit during the transition: 2 Hz/s over 500 ms (assumed): "
+        "Rate-of-change limit during the transition: 2 Hz/s over 500 ms (assumed): "
         "confirm it or set your own.",
         "Island unit settings: diesel droop 4 %, inertia constant 1.5 s; batteries frequency "
         "filter time 0.1 s, current limit 1.2 p.u., grid-forming current at least 1.0, "
@@ -272,25 +272,57 @@ def test_a_ledger_row_is_said_in_plain_words_and_keeps_its_record():
     assert items[0]["_value"] == "off (island_constraints false)"
 
 
-def test_a_section_that_is_not_needed_asks_for_no_defaults():
-    rows = DC02_ROWS + [{"item": "point of connection", "value": "tie, normally open",
-                         "source": "assumed"},
-                        {"item": "discount rate", "value": 0.07, "source": "assumed"}]
-    template = {"ledger": rows, "energization": [
-        {"year": 2030, "available_import_mw": 40, "source": "assumed"}]}
-    sections = lambda items: {i["target"]["section"] for i in items}       # noqa: E731
-    assert "connection" in sections(S._assumed_items(template))
-    kept = S._assumed_items(template, skip_sections=frozenset({"connection"}))
-    assert kept and "connection" not in sections(kept)
+def test_the_rate_of_change_word_is_the_island_panels():
+    panel = (pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages"
+             / "CampusIslandSection.tsx").read_text()
+    assert "'Rate of change (Hz/s)'" in panel
+    label, _ = S._LEDGER_PLAIN["transition RoCoF limit"]
+    assert label.replace("-", " ").lower().startswith("rate of change")
 
 
-def test_an_off_grid_project_lists_no_connection_defaults(client, tmp_projects_dir):
-    r = client.post("/api/projects/from_template/eh_microgrid", params={"name": "mg_words"})
+CONFIG_URL = "/api/simulation/solver_config"
+
+
+def _microgrid_flow(client, name: str) -> dict:
+    r = client.post("/api/projects/from_template/eh_microgrid", params={"name": name})
     assert r.status_code == 200, r.text
-    flow = client.get("/api/projects/mg_words/flow").json()
+    return client.get(f"/api/projects/{name}/flow").json()
+
+
+def _connection_defaults(flow: dict) -> tuple[dict, list[dict]]:
     conn = next(s for s in flow["sections"] if s["section"] == "connection")
+    return conn, [i for i in conn["items"] if i["code"].startswith("assumed_")]
+
+
+def test_an_off_grid_section_keeps_its_defaults_out_of_scope(client, tmp_projects_dir):
+    """Section 3 is "not needed" off-grid: its four assumed rows stay listed (the
+    audit trail) but are out of scope and counted nowhere; nothing else moves."""
+    flow = _microgrid_flow(client, "mg_words")
+    conn, defaults = _connection_defaults(flow)
     assert conn["state"] == "not_needed"
-    assert [i for i in conn["items"] if i["code"].startswith("assumed_")] == []
+    assert sorted(i["code"] for i in defaults) == [
+        "assumed_connection_ramp", "assumed_default", "assumed_import_efficiency",
+        "assumed_oscillation"]
+    assert [i["in_scope"] for i in defaults] == [False] * 4
+    assert not any(i["blocking"] for i in defaults)
+    by_id = {s["section"]: s for s in flow["sections"]}
+    assert by_id["readiness"]["summary"] == "0 to do, 14 to check"
+    # The assumed rows of the sections the project does need are still asked for.
+    assert all(i["in_scope"] for s in ("assets", "commercial", "scenarios")
+               for i in by_id[s]["items"] if i["code"].startswith("assumed_"))
+    assert flow["run_ready"] is True and flow["run_blocker"] is None
+    assert flow["verdicts"]["optimisation"] == {"ready": True, "blocker": None}
+
+
+def test_a_grid_connection_brings_the_connection_defaults_back(client, tmp_projects_dir):
+    """Keyed on the live section state, not the template: a user who says the
+    site has a grid connection is asked to confirm its defaults again."""
+    _microgrid_flow(client, "mg_grid")
+    r = client.put(CONFIG_URL, json={"site_archetype": "weak_flexible"})
+    assert r.status_code == 200, r.text
+    conn, defaults = _connection_defaults(client.get("/api/projects/mg_grid/flow").json())
+    assert conn["state"] != "not_needed"
+    assert len(defaults) == 4 and all(i["in_scope"] for i in defaults)
 
 
 @pytest.mark.parametrize("n, words", [(0, "0 assets"), (1, "1 asset"), (9, "9 assets")])

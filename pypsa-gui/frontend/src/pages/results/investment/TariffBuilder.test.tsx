@@ -153,7 +153,7 @@ describe('TariffBuilder — review round 1', () => {
     fireEvent.focus(months)
     fireEvent.change(months, { target: { value: '6, x' } })
     fireEvent.blur(months)
-    fireEvent.change(screen.getByLabelText('Item e id'), { target: { value: 'e2' } })
+    fireEvent.change(screen.getByLabelText('Item e ID'), { target: { value: 'e2' } })
     expect(screen.getByTestId('tb-blocked').textContent).toContain('Item e2 period 1 months')
     expect(screen.getByRole('button', { name: 'Save as the project tariff' }).hasAttribute('disabled'))
       .toBe(true)
@@ -251,10 +251,10 @@ describe('TariffBuilder — review round 1', () => {
     expect(screen.queryByRole('button', { name: /^Add \w+( \w+)? item$/ })).toBeNull()
     const add = screen.getByTestId('tb-add-item')
     expect(within(add).getAllByRole('button')).toHaveLength(1)
-    const kind = within(add).getByLabelText('Charge type of the item to add') as HTMLSelectElement
+    const kind = within(add).getByLabelText('Add an item: charge type') as HTMLSelectElement
     expect([...kind.options].map(o => o.value)).toEqual(KINDS)
     fireEvent.change(kind, { target: { value: 'tax_levy' } })
     fireEvent.click(within(add).getByRole('button', { name: 'Add item' }))
-    expect((screen.getByLabelText('Item tax_levy_2 kind') as HTMLSelectElement).value).toBe('tax_levy')
+    expect((screen.getByLabelText('Item tax_levy_2 charge type') as HTMLSelectElement).value).toBe('tax_levy')
   })
 })

@@ -23,8 +23,8 @@ Guided reads as one product: a section shows plain words, one way in per row, an
   - The section is headed "complete" and its text agrees: an import tariff is optional, so the sentence says so instead of "build one". The backend state is unchanged.
 - **Sections 3 and 5, assumed rows (finding 4).**
   - The Assumptions card (LC-46) is the quieter mark: no warning icon, one "Edit ›" per row, one "Keep all defaults".
-  - No engineering keys in the row text: `flow_service._LEDGER_PLAIN` says the ledger rows in plain words (`p_max_pu 0`, `tau_f`, `i_max`, `k_gfm_min`, `RoCoF`, `island_constraints`, `inv_power_lifetime`, "sidecar" are gone from the message). The ledger's own `value` is unchanged, so the acknowledgement and the report's ledger appendix keep the record.
-  - A section that is "not needed" lists no defaults. **Backend change:** for an off-grid template, the `assumed_*` rows filed to Connection & grid are no longer raised (the microgrid's "to check" count goes from 18 to 14). Errors and blockers are unchanged.
+  - No engineering keys in the row text: `flow_service._LEDGER_PLAIN` says the ledger rows in plain words (`p_max_pu 0`, `tau_f`, `i_max`, `k_gfm_min`, `RoCoF`, `island_constraints`, `inv_power_lifetime`, "sidecar" are gone from the message; RoCoF takes the island panel's word, "Rate of change"). The ledger's own `value` is unchanged, so the acknowledgement and the report's ledger appendix keep the record.
+  - A section that is "not needed" asks for no defaults. **Backend change:** when section 3 is "not needed" (an off-grid site), its `assumed_*` rows stay in the flow but are out of scope: Guided shows one muted line, Expert lists them under "Not in scope", and they count nowhere (the microgrid's "to check" goes from 18 to 14). A grid connection brings them back. Errors, blockers and run verdicts are unchanged.
 - **Wording rules in Guided (finding 11).**
   - The section heading separates the state from its summary with "·": "complete · 9 assets".
   - Real plurals: "1 load", "9 assets", "1 unit has no outage data".

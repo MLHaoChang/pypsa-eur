@@ -268,7 +268,7 @@ describe('ContractsEditor', () => {
     const conn = await screen.findByTestId('ce-connection')
     expect((within(conn).getByLabelText('Import cap (MW)') as HTMLInputElement).value).toBe('')
     fireEvent.click(within(conn).getByRole('button', { name: 'Add a capacity fee' }))
-    const kind = within(conn).getByLabelText('Item capacity_fee kind') as HTMLSelectElement
+    const kind = within(conn).getByLabelText('Item capacity_fee charge type') as HTMLSelectElement
     const unit = within(conn).getByLabelText('Item capacity_fee unit') as HTMLSelectElement
     // Only what the connection's fee supports (a per_kwh unit failed at the solve; round 2).
     expect([...kind.options].map(o => o.value)).toEqual(['capacity'])

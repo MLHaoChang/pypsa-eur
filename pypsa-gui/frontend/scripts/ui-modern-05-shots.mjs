@@ -88,6 +88,23 @@ try {
         await view.screenshot({ path: path.join(OUT, `${TAG}-${short}-${theme}-${n}.jpg`), type: 'jpeg', quality: 80 })
         await page.setViewportSize({ width: 1280, height: 900 })
       }
+      // Expert, once (ui-modern 05, UX U7): the same tariff builder in Economics, and the Issues list,
+      // where an assumed row shows its whole sentence.
+      if (TAG === 'after' && theme === 'dark') {
+        for (const [n, panel, wait] of [['expert-economics', 'economics', 'tariff-builder'], ['expert-issues', 'issues', null]]) {
+          if (panel === 'economics' && short !== 'dc') continue
+          await page.evaluate(async (panel) => {
+            const { useUIStore } = await import('/src/store/uiStore.ts')
+            useUIStore.getState().setUiMode('expert', { explicit: true })
+            useUIStore.getState().setSlidePanel(panel)
+          }, panel)
+          if (panel === 'economics') await page.getByRole('tablist', { name: 'Economics' }).getByRole('tab', { name: 'Tariffs & contracts' }).click()
+          if (wait) await page.getByTestId(wait).first().waitFor()
+          await page.waitForLoadState('networkidle')
+          await page.waitForTimeout(1200)
+          await page.screenshot({ path: path.join(OUT, `${TAG}-${short}-${theme}-${n}.jpg`), type: 'jpeg', quality: 80 })
+        }
+      }
       await ctx.close()
     }
   }

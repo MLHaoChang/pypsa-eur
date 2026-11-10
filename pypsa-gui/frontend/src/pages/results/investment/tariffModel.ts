@@ -113,14 +113,14 @@ export const FIELD_WORDS = {
 } as const
 
 /** An item's field words: `text` is the visible label, `aria` the suffix of the
- *  accessible name ("Item energy kind"). */
+ *  accessible name, which holds the visible words ("Item energy charge type"). */
 export const ITEM_WORDS = {
-  id: { text: 'Item ID', aria: 'id' },
-  kind: { text: 'Charge type', aria: 'kind' },
+  id: { text: 'ID', aria: 'ID' },
+  kind: { text: 'Charge type', aria: 'charge type' },
   unit: { text: 'Unit', aria: 'unit' },
   measured_on: { text: 'Measured on', aria: 'measured on' },
   direction: { text: 'Direction', aria: 'direction' },
-  settlement: { text: 'Settlement interval', aria: 'settlement' },
+  settlement: { text: 'Settlement interval', aria: 'settlement interval' },
 } as const
 
 /** The words shown for a stored option value (a kind, unit, measure or settlement). */
