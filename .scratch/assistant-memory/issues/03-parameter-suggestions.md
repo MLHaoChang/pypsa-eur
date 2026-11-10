@@ -26,3 +26,14 @@ Two slices (PR-SIZE-1, two reviewer areas): **03a** backend (store `parameter` k
 - P5 Memory dialog param words "<Field label> (<Class in user words>)" via `componentLabel`/`FIELD_LABELS`, with a parity test.
 - P6 The PR says whether the Guided field drawer gets chips; if not, a named follow-up. Expert may show more than Guided, not the reverse.
 - Shots: chip row, card popover, a refusal, Save toast, a chip marked current (or hidden case), Save button on focus, the Memory dialog row.
+
+### GK B GO with changes (GK B 42, 2026-11-10), binding on 03a (and 03b where it applies)
+
+- P1 Chat path: `parameter` items are written only by the Save route; the chat proposal tool refuses `parameter` (`memory_kind_unavailable`). A test through the real tool, and a killed mutant that drops the refusal.
+- P2 Money basis: Save on a cost field with neither a provenance currency nor a project money basis refuses by name (no unstamped item). Preview/apply refuse a differing currency (`currency_mismatch`) and a differing currency_year (`memory_money_year_mismatch`); never converted or relabelled.
+- P3 Carrier: chosen same-carrier only. An item with a carrier is suggested only for a component with the same carrier; preview/apply refuse a mismatch (`memory_carrier_mismatch`).
+- P4 Card and digest: the digest binds item id, version, value, unit, currency, currency_year, carrier and the target's current value and source; the card shows each. At apply a retired or dismissed item, or a newer version, gives 409.
+- P5 Apply: through `update_component`'s validators, under the same mutation lock and revision bump as `library_reference/apply`. Undo restores the provenance entry exactly (byte-equal `replaces`), tested. `record_apply` runs after the network write, outside the project lock (mutation → solver_state → store); if it fails the apply stands and the result says the count was not recorded, tested. The change-log entry is bound to the project's org.
+- P6 Access: suggestions need project read access, Save needs write access; an unknown class or field is 422, never 500. Tests: a cross-org org item (M1), a retired item never suggested.
+- P7 Mutants: hand-mutate every guard (M1 org, field-in-schema, unit, currency, money year, carrier, version, digest, active-project 409, P1 chat refusal) and name the killing test; run `scripts/coord/mutants.py` on memory_store and the new routes and list survivors.
+- P8 Trial merge: route-policy trio, smoke `--check`s (inventory, route_parity, control_matrix), the error-kind manifest test, the memory and library_reference/apply suites.
