@@ -387,8 +387,7 @@ def _parameter(body: Any) -> dict:
             and b["bus_unit"] != "MW"
         ):
             raise MemoryError(
-                f"{b['component_class']}.{b['field']} cannot be saved in "
-                f"{b['bus_unit']!r}",
+                f"{b['component_class']}.{b['field']} cannot be saved in that bus unit",
                 "memory_unit_mismatch",
                 422,
             )
