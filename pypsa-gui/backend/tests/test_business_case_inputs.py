@@ -448,7 +448,12 @@ def test_a_complete_case_has_no_refusal():
         ),
         ([_share(base="opex")], "share_cycle", "lines[0].quantity_source"),
         (
-            [_capex(), _share("a"), _share("b", base="opex/maintenance")],
+            # b (sga) reads a (maintenance), a share: not itself, still a cycle
+            [
+                _capex(),
+                _share("a"),
+                _share("b", base="opex/maintenance", category="sga"),
+            ],
             "share_cycle",
             "lines[2].quantity_source",
         ),
@@ -551,6 +556,10 @@ def test_each_refusal_names_its_kind_and_field(lines, kind, field):
         ],
         [_rev(start_year=2030, end_year=2030)],
         [_rev(start_year=H[0], end_year=H[1])],
+        [_rev(start_year=H[1])],
+        [_rev(end_year=H[0])],
+        [_capex(), _share(quantity_by_year={2030: 0.0, 2031: 1.0})],
+        [_rev(quantity_by_year={2030: 5.0})],
         [_rev(money_year=BASE + 5)],
         [_rev(money_year=1990)],
         [_rev(price_by_year={H[0]: 1.0, H[1]: 2.0})],
@@ -869,6 +878,44 @@ def _patched(update: dict) -> Any:
             return bad if key == bad.key else real.value(key)
 
     return _Pack()
+
+
+def test_only_a_price_default_moves_the_money_year():
+    """G-C1: a life row with a money year leaves the line's money year alone; a price row
+    without one fills a line whose money year is stated."""
+    real = loader.load_defaults_pack(NEW)
+    life = real.value(DC_KEYS["facility_life"]).model_copy(
+        update={"currency_year": 2020}
+    )
+    capex = real.value(DC_KEYS["facility_capex"]).model_copy(
+        update={"currency_year": None}
+    )
+
+    class _Pack:
+        stamp = real.stamp
+
+        def value(self, key):
+            return {life.key: life, capex.key: capex}.get(key) or real.value(key)
+
+    line = _capex(
+        price=None,
+        life_years=None,
+        money_year=BASE,
+        default_keys={
+            "price": DC_KEYS["facility_capex"],
+            "life_years": DC_KEYS["facility_life"],
+        },
+    )
+    filled = _case(line).with_cost_defaults(_Pack(), currency="EUR").lines[0]
+    assert filled.price == capex.value and filled.life_years == 20
+    assert filled.money_year == BASE
+    line2 = _capex(
+        life_years=None, default_keys={"life_years": DC_KEYS["facility_life"]}
+    )
+    assert (
+        _case(line2).with_cost_defaults(_Pack(), currency="EUR").lines[0].money_year
+        is None
+    )
 
 
 def test_a_pack_row_without_a_value_is_cost_not_established():

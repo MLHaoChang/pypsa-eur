@@ -412,11 +412,12 @@ class BusinessCaseInputs(BaseModel):
         if base_cat and base_cat not in CATEGORIES[base_kind]:
             return [CategoryNotInKind(at)]
         base = [
-            (j, b)
-            for j, b in enumerate(self.lines)
+            b
+            for b in self.lines
             if b.kind == base_kind and (not base_cat or b.category == base_cat)
         ]
-        if any(j == i or b.source == "share_of" for j, b in base):
+        # The line is a share itself, so a base that holds it is caught here too.
+        if any(b.source == "share_of" for b in base):
             return [ShareCycle(at)]
         if not base:
             return [ShareBaseEmpty(at)]
