@@ -1,6 +1,6 @@
 # 04. The DC energy-price check trusts only a stated tariff currency
 
-Status: needs-triage
+Status: done (#1290)
 Type: task
 Raised by: GLE-03 session (issue 03, PR #1279), GK A follow-up, 2026-11-08.
 Gated: yes (money semantics).
@@ -20,3 +20,11 @@ Issue 03 made the currency gate (`services/commercial/binding.tariff_currency_mi
 - `pypsa-gui/backend/services/library/defaults_pack/loader.py` (`stamped_tariff_currency`).
 
 ## Comments
+
+### GK A conditions (GLE-04 plan GO, 2026-11-08)
+
+- G4-1: one resolver, `binding.resolved_tariff_currency(tariff) -> (currency | None, "stated" | "stamp" | None)`, used by the gate and `tariff_energy_rate`; gate wording unchanged.
+- G4-2: result "currency" is the resolved currency (equal to the finance currency once the gate passes); "currency_note" has stated / stamp / assumed cases, each tested.
+- G4-3: `git grep` for the old dc wording ("a case in two currencies", "the finance case in") hits only dc_architecture.py; kind name unchanged.
+- G4-4: nothing is caught (a broken pack raises); JSON unchanged after the call. Both tested.
+- G4-5: mutants (stated-wins, stamp fallback, note branches) killed. `"currency": cur or finance_currency` → `finance_currency` was equivalent (gate already forces equality), so the code uses `finance_currency`.

@@ -29,6 +29,7 @@ from typing import Any
 
 import numpy as np
 
+from services.adequacy.coupling import NOTHING_TO_SAMPLE
 from services.adequacy.energization import capped_mw
 
 from models.energy_hub import (
@@ -1147,8 +1148,7 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
         return snap
     if not inputs.units:
         snap.mc_error = (
-            "nothing to sample: no electrical generator carries resolvable "
-            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            f"{NOTHING_TO_SAMPLE} (unavailability + MTTR), so the sampled fleet is "
             "empty — a statement about missing input data, not about the system")
         snap.copt_error = snap.mc_error
         return snap

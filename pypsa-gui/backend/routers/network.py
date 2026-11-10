@@ -24,9 +24,8 @@ from models.schemas import (
 from db.models import Session as SessionRow
 from db.session import get_db
 from deps import current_session
-from services import active_project, attribute_catalog
+from services import active_project, attribute_catalog, provenance_graph
 from services.asset_schema import fields as asset_fields
-from services.asset_schema import provenance as asset_provenance
 from services.asset_schema.schema import CLASS_ATTR
 from services.transient_rows import filter_transient_names
 # Phase 12f's write-path guards live in `services/user_timeseries.py` beside
@@ -799,15 +798,15 @@ def get_asset_costs() -> dict:
     rate = _global_discount_rate()
     rows = asset_cost_rows(n, discount_rate=rate, keep=filter_transient_names)
     for row in rows:
-        row["provenance"] = asset_provenance.staleness(
-            n, row["component"], row["name"], asset_provenance.get(n, row["component"], row["name"]))
+        # The provenance graph's verdict on each money field (provenance-graph 02), not a comparison of our own.
+        row["provenance"] = provenance_graph.stale_entries(n, row["component"], row["name"])
     return {"discount_rate": rate, "assets": rows}
 
 
 @router.get("/asset_schema/{component}/provenance/{name}")
 def get_asset_provenance(component: str, name: str) -> dict:
     """Per-field provenance of one asset (`n.meta["asset_params"]`); fields never recorded are absent. A cost
-    priced through a scale input that has since changed carries `stale` (TCU-05, `provenance.staleness`)."""
+    priced through a scale input that has since changed carries `stale` (TCU-05; the provenance graph's verdict)."""
     attr = CLASS_ATTR.get(component)
     if attr is None:
         raise HTTPException(400, f"No asset schema for '{component}'.")
@@ -815,7 +814,7 @@ def get_asset_provenance(component: str, name: str) -> dict:
     if name not in getattr(n, attr).index:
         raise HTTPException(404, f"{component} '{name}' not found")
     return {"component": component, "name": name,
-            "fields": asset_provenance.staleness(n, component, name, asset_provenance.get(n, component, name))}
+            "fields": provenance_graph.stale_entries(n, component, name)}
 
 
 # ── Time Series ───────────────────────────────────────────────────────────────

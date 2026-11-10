@@ -20,7 +20,7 @@ an annualised literal.
     (`output_electric_dc`, PV) is scaled by the Generator's declared `dc_ac_ratio` (TC-02); an
     undeclared or invalid ratio refuses, never assumed 1. A scale read from a column is recorded on
     the overnight and FOM costs' provenance (`scaled_by`: column, value, technology, capacity basis),
-    so `asset_schema.provenance.staleness` flags the cost when that column or its value changes
+    so the provenance graph (`provenance_graph.money`) flags the cost when that column or its value changes
     (TCU-05). A pair
     that cannot be converted unambiguously raises `CapacityBasisMismatch` before anything is written,
     never a guess;
@@ -177,8 +177,9 @@ def _scale_input(n, component: str, name: str, technology: str | None,
 
 def current_scale_input(n, component_class: str, name: str, technology: str | None,
                         capacity_basis: str) -> tuple[str | None, float]:
-    """`_scale_input` by component class (`Generator`, `Link`), for `provenance.staleness`: the one
-    reader of the current scale input, so the check cannot drift from what pricing would do."""
+    """`_scale_input` by component class (`Generator`, `Link`), for the provenance graph
+    (`provenance_graph.money.compare_priced_through`): the one reader of the current scale input,
+    so the check cannot drift from what pricing would do."""
     component = next(c for c, cls in _CLASS.items() if cls == component_class)
     return _scale_input(n, component, name, technology, capacity_basis)
 

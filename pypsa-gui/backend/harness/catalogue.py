@@ -52,6 +52,9 @@ COMPONENT_CLASS_ENUM = [
 # via its dedicated CRUD).
 CRUD_CLASS_ENUM = COMPONENT_CLASS_ENUM[:]
 PROFILE_KIND_ENUM = ["loads", "generators", "links"]
+# The Guided cards. A literal, because the inventory reads this file without the backend
+# on its path; test_guided_steps_match_the_workflow pins it to the hub-design workflow.
+GUIDED_STEP_ENUM = ["start", "site", "goal", "results", "improve"]
 TIMESERIES_KIND_ENUM = ["loads", "generators", "links"]
 # Friendly + SlidePanel ids accepted by ui_open_panel (frontend normalises).
 SAFETY_PANEL_ENUM = [
@@ -2422,6 +2425,7 @@ TOOLS: list[dict[str, Any]] = [
         "price basis and every asset's investment costs; "
         "adequacy and fmea select their Results tabs. Use map with canvas_view hybrid "
         "(satellite with labels) or site (the 3D site view). "
+        "With hubDesign, guided_step opens one Guided card (start, site, goal, results or improve). "
         "With results_tab loadflow, pass loadflow_source, window_from/window_to and "
         "highlight_branch from get_loadflow_summary's ui_reference to open the same source and "
         "window and highlight one line or transformer. Only when one of these is given, an "
@@ -2431,6 +2435,7 @@ TOOLS: list[dict[str, Any]] = [
         {
             "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
             "canvas_view": {"type": "string", "enum": ["blank", "satellite", "hybrid", "site"]},
+            "guided_step": {"type": "string", "enum": GUIDED_STEP_ENUM},
             "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM},
             "bottom_tab": {"type": "string", "enum": BOTTOM_TAB_ENUM},
             "compare_rail": {"type": "boolean"},

@@ -599,7 +599,8 @@ def test_a_new_checked_tool_input_is_additive(frozen):
     assert breaking_changes(frozen, added) == []
 
 
-# The v1 hashes as master froze them before G2P-21 added `checked_tool_inputs`.
+# The v1 hashes as master froze them before G2P-21 added `checked_tool_inputs`,
+# moved only by an additive input widening (each noted on its line).
 V1_HASHES = {
     "compare_project_runs": "5ff81e9828bdd6ccb997ace8ad45a83d40efafd2ac4860887ca0f17247238a5f",
     "get_aggregate_load": "49cd7d3066d8405553280d53afeea4b809936b2157ae9e0670f4bba89eeb66a2",
@@ -607,7 +608,7 @@ V1_HASHES = {
     "get_run_evidence": "4abaac2419832365fa560a3c15252f7900510c90f2b42c052298b438a97032cb",
     "get_timeseries": "379ddbdecfeb262575eee58c147e81cb6ffa59905d2c8738d12519f3303a5c88",
     "list_components": "6e4521eb8f8ac1bc72ab54928c82adbab7b47bf4bb8f627ff00b10ceb2dfa353",
-    "ui_open_panel": "93e4ba6a83996226176f7ca0cf7798c8bb96bcd0c67da8819140f4b565f61cba",
+    "ui_open_panel": "7a75404f3b1babb4923ed4e7fa1dce221ce82eb30201c9f4339fe959d66132f6",  # LC-14: guided_step widened the input (additive)
     "update_component": "620554ac6bc2ecc1d9abf2620676d5e050b7c0f5ad50d0c0d00c1de13f908734",
 }
 
