@@ -26,11 +26,11 @@ export function readyRows(rows: ReadinessRow[], replace = false): ReadinessRow[]
 export function notReadyReason(rows: ReadinessRow[]): string {
   if (rows.length === 0) return 'There is no wind or solar generator in this model.'
   const missing = rows.filter(r => r.coord_source === 'missing').length
-  const kept = rows.filter(r => r.profile === 'uploaded' || r.profile === 'network_native').length
+  const kept = rows.filter(r => r.profile === 'uploaded' || r.profile === 'unrecorded' || r.profile === 'network_native').length
   const generated = rows.filter(r => r.profile === 'generated').length
   const parts: string[] = []
   if (missing) parts.push(`${missing} without a location (set the bus coordinates)`)
-  if (kept) parts.push(`${kept} with a measured file or the network’s own series, which a default never replaces`)
+  if (kept) parts.push(`${kept} with a measured file, the network’s own series or a series with no recorded source, which a default never replaces`)
   if (generated) parts.push(`${generated} already generated (use the row’s Generate to redo one)`)
   return `No wind or solar generator is ready: ${parts.join(', ')}.`
 }

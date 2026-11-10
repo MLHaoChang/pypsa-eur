@@ -315,6 +315,20 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'unrecorded_series_confirm',
+        'title': 'Confirming where a series with no provenance record came from',
+        'disposition': 'manual',
+        'reason': 'Only you can say a series with no record is the network\'s own. Review the list in Time Series, Renewables, and confirm it there; chat only reads it.',
+        'page': 'Time Series, Renewables tab',
+        'panel': None,
+        'keywords': frozenset({
+            'unrecorded',
+        }),
+        'routes': frozenset({
+            ('POST', '/api/projects/{name}/profiles/unrecorded/confirm'),
+        }),
+    },
+    {
         'id': 'power_trace_spectrum',
         'title': 'Power-trace spectrum and smoothing-tier split',
         'disposition': 'unbuilt',
