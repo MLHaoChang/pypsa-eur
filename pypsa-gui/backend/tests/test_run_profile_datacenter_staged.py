@@ -721,6 +721,13 @@ def test_a_boolean_revision_is_never_a_match(hub):
     assert _contingency(hub, step, revision=1)["verdict"] == "not_evaluated"
 
 
+@pytest.mark.parametrize("recorded", [7.0, "7"])
+def test_a_revision_that_is_not_an_int_is_never_a_match(hub, recorded):
+    """E2: the recorded revision is the counter's int, never a number-like stand-in."""
+    _, step = _campus(hub, revision=recorded)
+    assert _contingency(hub, step, revision=7)["verdict"] == "not_evaluated"
+
+
 def test_a_row_with_no_detail_is_read(hub):
     _, step = _campus(
         hub, {**ROWS, "pcc_voltage": ("pass", "pass", "code", "intact", None)}
