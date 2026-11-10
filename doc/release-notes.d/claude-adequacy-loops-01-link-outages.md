@@ -3,10 +3,13 @@
   two-state unit on the hub side, per investment period, and the grid behind it drops out of the fleet instead
   of being counted as must-take supply. An import Link without outage data is taken as never failing, and the
   loop record says so. A firm backup Link (a fuel cell or engine feeding an electrical bus) is credited only on
-  an unlimited fuel: its fuel bus carries no Store, StorageUnit or Load, is fed by no other Link, is shared with
-  no other Link, and has a fuel Generator without an energy cap. Its credit is bounded by that Generator's
-  capacity and availability. A Link that is not credited is named with the reason in the loop record's
-  ``fleet_notes``.
+  an unlimited fuel. That holds for every bus the Link draws from (``bus0``, and any further port with a
+  negative efficiency): the bus carries no Store, StorageUnit or Load, is fed by no other Link, is shared with
+  no other Link, and has a fuel Generator without an energy cap. A GlobalConstraint that caps the fuel's
+  carrier, or outage data set on the fuel Generator itself, also withholds the credit. The credit is bounded by
+  the fuel Generator's capacity and availability and is never negative. A Link that is not credited is named
+  with the reason in the loop record's ``fleet_notes``. The energy-hub study's fixed-plan check builds its
+  fleet with the same code as the loops, so both sample the same units in the same order.
 
   What changes on the shipped energy-hub templates (coupling loop, goal 2 h/yr, 500 draws, before → after):
 

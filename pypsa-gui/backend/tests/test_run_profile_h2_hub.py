@@ -382,6 +382,12 @@ def test_a_run_on_each_template_reaches_a_loop_verdict_on_the_sampled_grid_impor
     )
     assert run_gates.passed([lole]) is met
     assert verdicts["h2.offtake.met"]["verdict"] == "pass"
+    # The typed state is the fact's value (the reason's wording is SH-10b's).
+    investment = verdicts["h2.ic.counterfactual"]
+    assert investment["verdict"] == "not_evaluated"
+    assert investment["facts"][0]["value"] == "not_run"
+    use = verdicts["h2.electrolyser.utilisation"]
+    assert use["verdict"] in ("pass", "fail") and 0.0 < use["facts"][0]["value"] <= 1.0
     envelope = envelope_of(path)
     [row] = [
         a
