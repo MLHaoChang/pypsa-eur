@@ -906,7 +906,23 @@ def test_a_campus_step_not_completed_is_no_evidence(hub):
     assert _contingency(hub, step)["verdict"] == "not_evaluated"
 
 
-def test_the_campus_step_records_the_revision_and_settles_on_its_run(hub, monkeypatch):
+_LATER = {
+    "id": "u2",
+    "kind": "campus",
+    "project_key": "p",
+    "enqueued_at": 2.0,
+    "status": "completed",
+}
+
+
+@pytest.mark.parametrize(
+    "later",
+    [[], [_LATER], [{**_LATER, "project_key": "other"}], [{**_LATER, "kind": "solve"}]],
+    ids=["alone", "user_run_after", "other_project", "other_kind"],
+)
+def test_the_campus_step_records_the_revision_and_settles_on_its_run(
+    hub, monkeypatch, later
+):
     """CT-3 (b, c) at dispatch and settle: the job record keeps the revision the
     job will read; the settled result keeps it and the published tables' digests."""
     from services import solve_queue as sq
@@ -939,15 +955,31 @@ def test_the_campus_step_records_the_revision_and_settles_on_its_run(hub, monkey
     )
     waiting = json.loads(path.read_text())["steps"][0]
     assert waiting["status"] == "waiting" and waiting["job"]["network_revision"] == 11
-    monkeypatch.setattr(
-        sq.solve_queue, "get_job", lambda job_id: {"status": "completed"}
-    )
+    ours = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "kind": sq.KIND_CAMPUS,
+        "project_key": "p",
+        "enqueued_at": 1.0,
+        "status": "completed",
+    }
+    queue = [ours, *later]
+    monkeypatch.setattr(sq.solve_queue, "get_job", lambda job_id: ours)
+    monkeypatch.setattr(sq.solve_queue, "list_jobs", lambda: queue)
     monkeypatch.setattr(run_actions, "release", lambda *a, **k: None)
     monkeypatch.setattr(run_actions, "_interrupted", lambda path, task: False)
     assert run_actions.settle(path) == "done"
     settled = json.loads(path.read_text())["steps"][0]
     assert settled["result"]["network_revision"] == 11
-    assert settled["result"]["run_files"] == run_actions.run_files(run)
+    if later != [_LATER]:  # alone, or another project's or kind's job
+        assert settled["result"]["run_files"] == run_actions.run_files(run)
+        return
+    # GK A F1: a user's campus run enqueued after the job published over it
+    # before the settle tick: the settle records no run, and the gate reads it.
+    assert settled["result"]["run_files"] is None
+    result = _contingency(hub, settled, revision=11)
+    assert (
+        result["verdict"] == "not_evaluated" and "not the run's own" in result["reason"]
+    )
 
 
 @pytest.mark.parametrize("ref", REFS)

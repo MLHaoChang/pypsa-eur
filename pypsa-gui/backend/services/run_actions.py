@@ -693,6 +693,25 @@ def outcome(job, used, code) -> tuple[str, str | None]:
     return "done", None
 
 
+def _latest_campus(job, job_id) -> bool:
+    """GK A F1: the published campus run is this job's only while no later
+    campus job of the same project was enqueued (a user's run published after
+    this job ended overwrites it). Fails closed: a job with no project key,
+    or not in the queue, is never the latest."""
+    from services import solve_queue as sq
+
+    key = job.get("project_key") if isinstance(job, dict) else None
+    if not key:
+        return False
+    jobs = [
+        j
+        for j in sq.solve_queue.list_jobs()
+        if j.get("kind") == sq.KIND_CAMPUS and j.get("project_key") == key
+    ]
+    latest = max(jobs, key=lambda j: j.get("enqueued_at") or 0.0, default=None)
+    return latest is not None and str(latest.get("id")) == str(job_id)
+
+
 def _interrupted(path, task) -> bool:
     """A step left `running` by a dispatch this process is not running (a
     restart mid-dispatch) is uncertain: the run waits for the user, any
@@ -768,7 +787,9 @@ def settle(path, ctx=None) -> str | None:
     # CT-3: the published run this job made, by its compliance tables' digests,
     # so a later campus run (a user's) is never read as this one.
     files = (
-        run_files(path.parent.parent / ce.SUBDIR / "run") if result == "done" else None
+        run_files(path.parent.parent / ce.SUBDIR / "run")
+        if result == "done" and _latest_campus(job, step["job"]["job_id"])
+        else None
     )
     release(path, step["job"]["call_id"])
 
