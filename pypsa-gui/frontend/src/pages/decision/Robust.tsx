@@ -32,7 +32,8 @@ export default function Robust({ findings, tornado, error, onStart, onAbort, bus
     ?? key.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())
   const running = tornado?.status === 'running'
   return (
-    <div className="flex flex-col gap-4">
+    // results-scroll-clear: room below the chart for the floating "Chat here" launcher.
+    <div className="flex flex-col gap-4 results-scroll-clear">
       <Card title="Run the robustness check" right={running
         ? <Button kind="danger" onClick={onAbort}>Stop</Button>
         : <Button kind="primary" onClick={onStart} disabled={busy}>{rob.tornado.length ? 'Run it again' : 'Run it'}</Button>}>

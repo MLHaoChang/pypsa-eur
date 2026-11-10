@@ -8,7 +8,7 @@
 //
 // A case with no result is "not established" in words and draws no bar on
 // that side; it is never a bar at 0 (ADR-0001).
-import { useRef, useState, type ReactNode } from 'react'
+import { useRef, useState, type ReactNode, type SVGProps } from 'react'
 import toast from 'react-hot-toast'
 import { useElementWidth } from '../../hooks/useElementWidth'
 import { money, SYMBOL } from '../../utils/money'
@@ -65,6 +65,7 @@ export function niceTicks(lo: number, hi: number, count: number): { ticks: numbe
 export function tickText(v: number, step: number, span: number): string {
   const [scale, suffix] = span >= 1e6 ? [1e6, `${NBSP}m`] : span >= 1e3 ? [1e3, `${NBSP}k`] : [1, '']
   const digits = Math.min(3, Math.max(0, Math.ceil(-Math.log10(step / scale) - 1e-9)))
+  if (v === 0) return '0'
   const body = (Math.abs(v) / scale).toFixed(digits)
   return `${v < 0 && Number(body) !== 0 ? MINUS : ''}${body}${suffix}`
 }
@@ -115,13 +116,14 @@ export interface TornadoChartProps {
   testId?: string
 }
 
-const PAD = { left: 8, right: 8, top: 30, bottom: 30 }
+const PAD = { left: 8, right: 8, top: 24, bottom: 30 }
 const LINE = 13      // a line of label or end text
 const BAR = 12
 const GAP = 12
 const FALLBACK_WIDTH = 720   // jsdom, and the first paint before the width is measured
 const TEXT = { fontSize: 11, fill: 'var(--color-text)' }
-const SMALL = { fontSize: 10.5, fill: 'var(--color-muted)', fontFamily: 'var(--font-family-mono)' }
+// --color-axis is the chart text colour held to 4.5 : 1 on every chart surface.
+const SMALL = { fontSize: 10.5, fill: 'var(--color-axis)', fontFamily: 'var(--font-family-mono)' }
 
 export default function TornadoChart({
   title, measure, rows, base, currency = 'EUR', formatInput, domain, note, children, filename, testId,
@@ -180,6 +182,13 @@ export default function TornadoChart({
       + (base != null ? ` (${deltaMoney(e.npv, base, currency)})` : ''))
   // Keep a line's label inside the plot.
   const clampX = (px: number, half: number) => Math.min(width - PAD.right - half, Math.max(PAD.left + half, px))
+  // A vertical line at `px`, drawn across the bars only (a stub from `from` down to
+  // the first row, then one piece per bar), so it never runs through a row's text.
+  const across = (px: number, from: number, style: SVGProps<SVGLineElement>) => [
+    <line key="stub" x1={px} x2={px} y1={from} y2={Math.max(from, PAD.top - 1)} {...style} />,
+    ...laid.map(l => <line key={l.r.key} x1={px} x2={px} y1={l.barY - 3} y2={l.barY + BAR + 3} {...style} />),
+    <line key="foot" x1={px} x2={px} y1={axisY - 4} y2={axisY} {...style} />,
+  ]
   const baseLabel = base != null ? `Base case ${signedMoney(base, currency)}` : ''
 
   return (
@@ -206,9 +215,9 @@ export default function TornadoChart({
         <svg width={width} height={height} role="list" aria-label={title} data-testid="tornado-plot">
           {/* The value axis: grid, ticks, and the unit once. */}
           <g aria-hidden="true">
-            {ticks.map(t => (
+            {ticks.filter(t => t !== 0).map(t => (
               <g key={t}>
-                <line x1={x(t)} x2={x(t)} y1={PAD.top} y2={axisY} stroke="var(--color-border)" strokeWidth={1} />
+                {across(x(t), axisY - 4, { stroke: 'var(--color-border)', strokeWidth: 1 })}
                 <text x={clampX(x(t), 22)} y={axisY + 12} textAnchor="middle" {...CHART_TICK}>{tickText(t, step, span)}</text>
               </g>
             ))}
@@ -217,16 +226,17 @@ export default function TornadoChart({
               {`${measure}, ${SYMBOL[currency] ?? currency}`}
             </text>
           </g>
-          {/* Zero and the base case sit on separate lines of text, so they never collide. */}
+          {/* Zero is named by its tick on the axis, at the bottom; the base case at the top: they never collide. */}
           {zeroIn && (
             <g data-testid="tornado-zero">
-              <line x1={x(0)} x2={x(0)} y1={PAD.top - 4} y2={axisY} stroke="var(--color-axis)" strokeWidth={1} strokeDasharray="3 3" />
-              <text x={clampX(x(0), 34)} y={PAD.top - 7} textAnchor="middle" {...SMALL}>{`Zero ${measure}`}</text>
+              {across(x(0), PAD.top - 4, { stroke: 'var(--color-axis)', strokeWidth: 1, strokeDasharray: '3 3' })}
+              <text x={clampX(x(0), 8)} y={axisY + 12} textAnchor="middle" {...CHART_TICK} fontWeight={700}
+                fill="var(--color-text)">0</text>
             </g>
           )}
           {base != null && (
             <g data-testid="tornado-base">
-              <line x1={x(base)} x2={x(base)} y1={PAD.top - 16} y2={axisY} stroke="var(--color-text)" strokeWidth={1.2} />
+              {across(x(base), 14, { stroke: 'var(--color-text)', strokeWidth: 1.2 })}
               <text x={clampX(x(base), baseLabel.length * 3.3)} y={10} textAnchor="middle" fontSize={10.5}
                 fontWeight={600} fill="var(--color-text)" fontFamily="var(--font-family-mono)">{baseLabel}</text>
             </g>

@@ -34,7 +34,7 @@ describe('the tornado’s numbers (T1)', () => {
     expect(new Set(labels).size).toBe(labels.length)
     expect(labels.join(' ')).not.toMatch(/€|EUR/)
     expect(tickText(-200_000, 100_000, 400_000)).toBe('−200 k')
-    expect(tickText(0, 100_000, 400_000)).toBe('0 k')
+    expect(tickText(0, 100_000, 400_000)).toBe('0')
   })
 
   it('heads the frame with the largest swing and its driver, and names the unit once on the axis', () => {
@@ -82,13 +82,14 @@ describe('the base case and zero (T3)', () => {
     expect(screen.getByTestId('tornado-base').textContent).toBe('Base case € 3 m')
   })
 
-  it('puts the zero and base-case labels on separate lines, so they cannot collide near zero', () => {
+  it('names zero on the axis below and the base case above, so they cannot collide near zero', () => {
     show([bar('a', -40_000, 60_000)], 5_000)
     const zero = screen.getByTestId('tornado-zero').querySelector('text')!
     const base = screen.getByTestId('tornado-base').querySelector('text')!
-    expect(zero.textContent).toBe('Zero Battery NPV')
+    expect(zero.textContent).toBe('0')
+    expect(screen.getByTestId('tornado-zero').querySelector('line')!.getAttribute('stroke-dasharray')).toBeTruthy()
     expect(base.textContent).toBe('Base case € 5 k')
-    expect(Math.abs(Number(zero.getAttribute('y')) - Number(base.getAttribute('y')))).toBeGreaterThanOrEqual(11)
+    expect(Math.abs(Number(zero.getAttribute('y')) - Number(base.getAttribute('y')))).toBeGreaterThanOrEqual(60)
     expect(values('a')[0]).toBe('Low 4.9 %: −€ 40 k (−€ 45 k)')
   })
 })
