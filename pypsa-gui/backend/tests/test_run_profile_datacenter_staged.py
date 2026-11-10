@@ -437,6 +437,59 @@ def test_the_cases_must_cover_intact_and_transformer_n_minus_1(hub, cases, why):
     assert result["verdict"] == "not_evaluated" and why in result["reason"]
 
 
+def test_a_missing_status_says_so(hub):
+    _, step = _campus(hub, {**ROWS, "campus_voltage": ("pass", None, "code", "intact", "")})
+    assert _contingency(hub, step)["reason"] == "campus_voltage: no status after the measures"
+
+
+def test_a_header_only_case_table_is_no_evidence(hub):
+    run, step = _campus(hub)
+    (run / ce.cs.LF_PCC_CSV).write_text("period,hour,case,converged,p_mw,q_mvar,losses_mw\n")
+    _settle(run, step)
+    result = _contingency(hub, step)
+    assert result["verdict"] == "not_evaluated" and "did not converge" in result["reason"]
+
+
+def test_no_campus_step_is_no_evidence(hub):
+    rule = _rules(REFS[0])["dc.campus.contingency"]
+    env = run_gates.Env(task={"steps": []}, ctx=SimpleNamespace(network_revision=7), project=hub, project_dir=None)
+    [result] = run_gates.evaluate([rule], env)
+    assert result["verdict"] == "not_evaluated" and "has not finished" in result["reason"]
+
+
+def test_a_boolean_revision_is_never_a_match(hub):
+    _, step = _campus(hub, revision=True)
+    assert _contingency(hub, step, revision=1)["verdict"] == "not_evaluated"
+
+
+def test_a_row_with_no_detail_is_read(hub):
+    _, step = _campus(hub, {**ROWS, "pcc_voltage": ("pass", "pass", "code", "intact", None)})
+    result = _contingency(hub, step)
+    assert result["verdict"] == "pass" and result["facts"][0]["measures"] == []
+
+
+def test_an_extracted_transformer_limit_never_counts(hub):
+    _, step = _campus(hub, {**ROWS, "transformer_loading": ("pass", "pass", "extracted", "N-1:T1", "")})
+    result = _contingency(hub, step)
+    assert result["verdict"] == "not_evaluated" and "own rating" in result["reason"]
+
+
+def test_the_no_transformer_note_may_sit_on_the_pcc_row_and_excuses_only_the_transformer(hub):
+    """CT-4: the engine puts the note on the PCC row when there is no other bus;
+    it never excuses a missing voltage row."""
+    from gridspine.static.campus_compliance import NO_TRANSFORMER
+
+    rows = {k: v for k, v in ROWS.items() if k != "transformer_loading"}
+    rows["pcc_voltage"] = ("pass", "pass", "code", "intact", NO_TRANSFORMER.format(kv="20"))
+    _, step = _campus(hub, rows, cases=[("intact", True)])
+    assert _contingency(hub, step)["verdict"] == "pass"
+    rows = {k: v for k, v in ROWS.items() if k not in ("transformer_loading", "pcc_voltage")}
+    rows["campus_voltage"] = ("pass", "pass", "code", "intact", NO_TRANSFORMER.format(kv="20"))
+    _, step = _campus(hub, rows, cases=[("intact", True)])
+    result = _contingency(hub, step)
+    assert result["verdict"] == "not_evaluated" and "pcc_voltage" in result["reason"]
+
+
 def test_a_campus_with_no_transformer_needs_only_its_intact_case(hub):
     from gridspine.static.campus_compliance import NO_TRANSFORMER
 

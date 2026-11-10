@@ -821,7 +821,6 @@ CONTINGENCY_CHECKS = ("transformer_loading", "pcc_voltage", "campus_voltage")
 EQUIPMENT_LIMIT = frozenset({"transformer_loading"})
 EQUIPMENT_CLAUSE = "equipment rating"
 _BAND = {"pcc_voltage": "the PCC voltage band", "campus_voltage": "the campus voltage band"}
-_NOT_READ = ("not_rechecked", "unknown", "not_rated")
 _NO_TRANSFORMER = "no transformer between the PCC and the site buses"
 
 
@@ -899,13 +898,15 @@ def contingency(project, task, revision: int) -> dict:
     for check in CONTINGENCY_CHECKS:
         row = rows.get(check)
         if row is None:
-            voltage = rows.get("campus_voltage") or rows.get("pcc_voltage") or {}
-            if check == "transformer_loading" and _NO_TRANSFORMER in str(voltage.get("detail") or ""):
+            # The engine notes "no transformer" on the campus row, or on the PCC row without other buses.
+            noted = any(_NO_TRANSFORMER in str((rows.get(v) or {}).get("detail"))
+                        for v in ("campus_voltage", "pcc_voltage"))
+            if check == "transformer_loading" and noted:
                 continue  # not applicable: the voltage row says the campus has no transformer
             return {"state": "no_row", "reason": f"the campus run has no {check} row"}
         status = row.get("status_with_measures")
         status = status if isinstance(status, str) else None
-        if status is None or status in _NOT_READ or status not in ("pass", "fail"):
+        if status not in ("pass", "fail"):  # not_rechecked, unknown, not_rated, none: never read as a pass
             return {"state": "not_evaluated", "reason": f"{check}: {status or 'no status'} after the measures"}
         if status == "fail":
             failing.append({"check": check, "worst_case": _text(row.get("worst_case")),
