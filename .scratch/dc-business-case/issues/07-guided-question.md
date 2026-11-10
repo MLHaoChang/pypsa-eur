@@ -3,7 +3,7 @@
 
 # 07 — Guided question: is this data centre worth building?
 
-Status: needs-triage (blocked by 05 and study-harness 10)
+Status: wontfix (superseded by ../../business-case/issues/14 (guided question); owner BC-ALL-1, 2026-11-10)
 Type: task
 Blocked by: 05; .scratch/study-harness/issues/10-profile-datacenter.md
 Gated: yes (GK B)

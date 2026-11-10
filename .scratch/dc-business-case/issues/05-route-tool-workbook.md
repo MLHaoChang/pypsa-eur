@@ -3,7 +3,7 @@
 
 # 05 — Route, chat tool and workbook sheet
 
-Status: needs-triage (blocked by 04)
+Status: wontfix (superseded by ../../business-case/issues/08 (route, tools, workbook); owner BC-ALL-1, 2026-11-10)
 Type: task
 Blocked by: 04
 Gated: yes (GK B)
