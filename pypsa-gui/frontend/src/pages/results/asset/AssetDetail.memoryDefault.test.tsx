@@ -1,5 +1,5 @@
-// Assistant memory 02b (plan §2.1): "Save as default" on the Asset detail chart
-// saves a chart_spec@1 for the carrier; Asset detail then opens that way. A chat
+// Assistant memory 02b (plan §2.1): "Save as default" on the Asset Detail chart
+// saves a chart_spec@1 for the carrier; Asset Detail then opens that way. A chat
 // or link request that names settings wins over the saved default.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
@@ -47,7 +47,7 @@ function saved(over: Partial<MemoryItem> = {}, spec: Record<string, unknown> = {
   return {
     id: 'mem_d', kind: 'chart_spec', scope: 'user', applies_to: 'connection',
     concept_keys: ['view:asset', 'carrier:gas'], status: 'confirmed', origin: 'button', version: 1,
-    summary: 'Asset detail · gas', evidence: [], nomination: null, promoted_from: null,
+    summary: 'Asset Detail · gas', evidence: [], nomination: null, promoted_from: null,
     recall_count: 0, apply_count: 0, last_used_at: null, created_at: '', updated_at: '',
     body: { spec: { schema: 'chart_spec@1', view_id: 'asset',
       series: [{ component_class: 'Generator', metric: 'p_max_pu', unit: '1' }],
@@ -98,7 +98,7 @@ describe('Save as default', () => {
     expect(sent.body.spec.series.map((s: { metric: string }) => s.metric)).toEqual(['p', 'p_max_pu'])
     expect(sent.body.spec.series[1].unit).toBe('1')
     expect((await screen.findByTestId('asset-default-toast')).textContent)
-      .toContain('Saved as your default for Asset detail · gas, all connection projects')
+      .toContain('Saved as your default for Asset Detail · gas, all connection projects')
   })
 })
 

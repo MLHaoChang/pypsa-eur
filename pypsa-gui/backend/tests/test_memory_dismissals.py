@@ -81,9 +81,9 @@ def test_a_dismissal_is_validated_like_a_new_item(client):
 def test_another_user_never_sees_a_dismissal(client, other_org_client):
     text = f"Use EUR {uuid.uuid4().hex[:8]}"
     item = client.post("/api/memory/dismissals", json=_proposal(text)).json()
-    theirs = other_org_client.get(
-        "/api/memory/items", params={"status": "all"}
-    ).json()["items"]
+    theirs = other_org_client.get("/api/memory/items", params={"status": "all"}).json()[
+        "items"
+    ]
     assert item["id"] not in [i["id"] for i in theirs]
     r = other_org_client.get(f"/api/memory/items/{item['id']}/versions")
     assert r.status_code == 404

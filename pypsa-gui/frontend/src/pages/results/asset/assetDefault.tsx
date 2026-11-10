@@ -8,9 +8,9 @@ import { useUIStore } from '../../../store/uiStore'
 import { useMemoryStore } from '../../../store/memoryStore'
 import type { AssetRef, MetricRow, ViewMode } from './types'
 
-// "Save as default" on Asset detail (assistant-memory plan §2.1, §7.2): the
+// "Save as default" on Asset Detail (assistant-memory plan §2.1, §7.2): the
 // chart's metrics and view mode, saved as a `chart_spec@1` memory item for the
-// asset's carrier, so Asset detail opens that way in every project of this kind.
+// asset's carrier, so Asset Detail opens that way in every project of this kind.
 
 export const ASSET_VIEW_KEY = 'view:asset'
 export const SERIES_MAX = 12
@@ -59,7 +59,7 @@ export function conceptKeys(asset: AssetRef): string[] {
   return asset.carrier ? [ASSET_VIEW_KEY, `carrier:${asset.carrier}`] : [ASSET_VIEW_KEY]
 }
 
-/** The saved settings of a chart_spec item, when it is an Asset detail
+/** The saved settings of a chart_spec item, when it is an Asset Detail
  * default for this asset's class; null otherwise. */
 export function settingsOf(item: MemoryItem, asset: AssetRef): AssetChartSettings | null {
   const spec = (item.body as { spec?: Record<string, unknown> } | null)?.spec
@@ -118,7 +118,7 @@ export function useChartDefaults() {
 export function useSaveAssetDefault() {
   const qc = useQueryClient()
   return async (asset: AssetRef, series: MetricRow[], mode: ViewMode, kind: ProjectKind) => {
-    const what = asset.carrier ? `Asset detail · ${asset.carrier}` : 'Asset detail'
+    const what = asset.carrier ? `Asset Detail · ${asset.carrier}` : 'Asset Detail'
     const scope = `all ${PROJECT_KIND_WORDS[kind]} projects`
     let saved: MemoryItem
     try {
@@ -137,11 +137,11 @@ export function useSaveAssetDefault() {
     toast.success(t => (
       <span className="flex items-center gap-2" data-testid="asset-default-toast">
         <span>Saved as your default for {what}, {scope}</span>
-        <button type="button" className="underline font-medium"
+        <button type="button" className="underline font-medium whitespace-nowrap"
           onClick={() => { toast.dismiss(t.id); useMemoryStore.getState().openMemory({ editId: saved.id }) }}>
           Edit ›
         </button>
-        <button type="button" className="underline font-medium"
+        <button type="button" className="underline font-medium whitespace-nowrap"
           onClick={async () => {
             toast.dismiss(t.id)
             try {

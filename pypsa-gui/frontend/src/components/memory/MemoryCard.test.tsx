@@ -50,7 +50,7 @@ it.each(['expert', 'guided'] as const)('shows the proposal in plain words in %s'
   expect(screen.getByTestId('memory-card-summary').textContent).toBe('Show power in GW')
   expect(screen.getByTestId('memory-card-scope').textContent)
     .toBe('Just me · Capacity expansion projects')
-  expect(screen.getByText('Asset detail')).toBeTruthy()
+  expect(screen.getByText('Asset Detail')).toBeTruthy()
   // The generic Approve/Deny pair is replaced, not duplicated.
   expect(screen.queryByTestId('chat-confirm-approve')).toBeNull()
   expect(screen.queryByText('Approve')).toBeNull()

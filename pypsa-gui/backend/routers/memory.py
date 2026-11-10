@@ -144,7 +144,7 @@ def dismiss_proposal(
     db: DBSession = Depends(get_db),
     user: User = Depends(require_user),
 ) -> dict:
-    """"Not now" on a memory card (§2.2): the card's deny writes nothing, so the
+    """Record "Not now" on a memory card (§2.2): the card's deny writes nothing, so the
     UI records the declined proposal here. It is stored dismissed (its body is
     dropped after 30 days by `sweep_dismissed`; its hash stays), so
     `propose_memory` does not offer the same proposal again for 30 days. The

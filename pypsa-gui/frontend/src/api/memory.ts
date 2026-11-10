@@ -111,8 +111,8 @@ export function appliesToWords(kind: ProjectKind | null | undefined): string {
   return `${w.charAt(0).toUpperCase()}${w.slice(1)} projects`
 }
 
-/** A concept key as plain words: `view:asset` → "Asset detail". */
-const VIEW_WORDS: Record<string, string> = { asset: 'Asset detail' }
+/** A concept key as plain words: `view:asset` → "Asset Detail". */
+const VIEW_WORDS: Record<string, string> = { asset: 'Asset Detail' }
 export function conceptWords(key: string): string {
   const [ns, id = ''] = key.split(':', 2)
   if (ns === 'view') return VIEW_WORDS[id] ?? id.replace(/_/g, ' ')

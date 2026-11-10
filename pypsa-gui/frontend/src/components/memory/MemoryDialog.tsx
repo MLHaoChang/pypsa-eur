@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { X } from 'lucide-react'
 import { Dialog } from '../Dialog'
-import { Btn, Seg, Tag } from '../PageKit'
+import { Seg, Tag } from '../PageKit'
 import { authApi } from '../../api/auth'
 import {
   memoryApi, errorWords, KIND_WORDS, appliesToWords, conceptWords,
@@ -99,7 +99,10 @@ function MemoryPanel() {
     retry: false,
   })
   const shared = (membersQ.data?.length ?? 0) > 1
-  const canPromote = !!itemsQ.data?.can_promote && shared
+  // An admin of the workspace may change its items (server-checked, M2); the
+  // queue of members' suggestions only exists in a shared workspace.
+  const isAdmin = !!itemsQ.data?.can_promote
+  const canPromote = isAdmin && shared
   const suggestedQ = useQuery({
     queryKey: ['memory', 'suggested'],
     queryFn: () => memoryApi.list({ status: 'all', nominated: true }),
@@ -208,7 +211,12 @@ function MemoryPanel() {
                 : 'No suggestions from workspace members.'}
           </p>
         ) : (
-          <table className="w-full text-[11px]" data-testid={`memory-table-${tab}`}>
+          <table className="w-full table-fixed text-[11px]" data-testid={`memory-table-${tab}`}>
+            <colgroup>
+              {['9%', '21%', '12%', '8%', '11%', '11%', '8%', '8%', '12%'].map((w, i) => (
+                <col key={i} style={{ width: w }} />
+              ))}
+            </colgroup>
             <thead className="sticky top-0 bg-panel text-[9.5px] uppercase tracking-wide text-muted">
               <tr className="text-left">
                 <th className="px-3 py-1.5 font-semibold">Kind</th>
@@ -225,7 +233,7 @@ function MemoryPanel() {
             <tbody>
               {rows.map(item => (
                 <MemoryRow key={item.id} item={item} tab={tab} shared={shared}
-                  canPromote={canPromote} busy={act.isPending}
+                  isAdmin={isAdmin} busy={act.isPending}
                   historyOpen={historyOf === item.id}
                   userId={user?.id ?? null}
                   onEdit={() => { setEditing(item.id); setHistoryOf(null) }}
@@ -241,12 +249,12 @@ function MemoryPanel() {
 }
 
 function MemoryRow({
-  item, tab, shared, canPromote, busy, historyOpen, userId, onEdit, onHistory, onAct,
+  item, tab, shared, isAdmin, busy, historyOpen, userId, onEdit, onHistory, onAct,
 }: {
   item: MemoryItem
   tab: MemoryTab
   shared: boolean
-  canPromote: boolean
+  isAdmin: boolean
   busy: boolean
   historyOpen: boolean
   userId: string | null
@@ -262,8 +270,8 @@ function MemoryRow({
     <>
       <tr className="border-t border-border align-top" data-testid="memory-row" data-item-id={item.id}>
         <td className="px-3 py-1.5"><Tag tone="accent">{KIND_WORDS[item.kind]}</Tag></td>
-        <td className="px-2 py-1.5 text-text max-w-[260px]">{item.summary}</td>
-        <td className="px-2 py-1.5 text-muted whitespace-nowrap">{appliesToWords(item.applies_to)}</td>
+        <td className="px-2 py-1.5 text-text">{item.summary}</td>
+        <td className="px-2 py-1.5 text-muted">{appliesToWords(item.applies_to)}</td>
         <td className="px-2 py-1.5 text-muted">{own ? 'Me' : 'Workspace'}</td>
         <td className="px-2 py-1.5">
           <div className="flex flex-wrap gap-1">
@@ -276,7 +284,7 @@ function MemoryRow({
           </div>
         </td>
         <td className="px-2 py-1.5"><SourceLabel item={item} /></td>
-        <td className="px-2 py-1.5 text-muted whitespace-nowrap">{used}</td>
+        <td className="px-2 py-1.5 text-muted">{used}</td>
         <td className="px-2 py-1.5">
           <div className="flex flex-col gap-0.5 items-start">
             <Tag tone={STATUS_TONE[item.status]}>{STATUS_WORDS[item.status]}</Tag>
@@ -289,35 +297,35 @@ function MemoryRow({
           </div>
         </td>
         <td className="px-3 py-1.5">
-          <div className="flex flex-wrap justify-end gap-1">
+          <div className="flex flex-wrap justify-end gap-x-2.5 gap-y-0.5">
             {tab === 'proposals' ? (
               <>
-                <Btn variant="primary" disabled={busy} onClick={() => onAct('confirm')}>Confirm</Btn>
-                <Btn disabled={busy} onClick={onEdit}>Edit and confirm</Btn>
-                <Btn disabled={busy} onClick={() => onAct('dismiss')}>Dismiss</Btn>
+                <Act strong disabled={busy} onClick={() => onAct('confirm')}>Confirm</Act>
+                <Act disabled={busy} onClick={onEdit}>Edit and confirm</Act>
+                <Act disabled={busy} onClick={() => onAct('dismiss')}>Dismiss</Act>
               </>
             ) : tab === 'suggested' ? (
               <>
-                <Btn variant="primary" disabled={busy} onClick={() => onAct('promote')}>Promote</Btn>
-                <Btn disabled={busy} onClick={() => onAct('decline')}>Decline</Btn>
-                <Btn disabled={busy} onClick={onHistory}>History</Btn>
+                <Act strong disabled={busy} onClick={() => onAct('promote')}>Promote</Act>
+                <Act disabled={busy} onClick={() => onAct('decline')}>Decline</Act>
+                <Act disabled={busy} onClick={onHistory}>History</Act>
               </>
             ) : (
               <>
-                {item.status === 'confirmed' && (own || canPromote) && (
-                  <Btn disabled={busy} onClick={onEdit}>Edit</Btn>
+                {item.status === 'confirmed' && (own || isAdmin) && (
+                  <Act disabled={busy} onClick={onEdit}>Edit</Act>
                 )}
-                {item.status === 'confirmed' && (own || canPromote) && (
-                  <Btn disabled={busy} onClick={() => onAct('retire')}>Retire</Btn>
+                {item.status === 'confirmed' && (own || isAdmin) && (
+                  <Act disabled={busy} onClick={() => onAct('retire')}>Retire</Act>
                 )}
-                {item.status === 'retired' && (own || canPromote) && (
-                  <Btn disabled={busy} onClick={() => onAct('restore')}>Restore</Btn>
+                {item.status === 'retired' && (own || isAdmin) && (
+                  <Act disabled={busy} onClick={() => onAct('restore')}>Restore</Act>
                 )}
                 {item.status !== 'dismissed' && (
-                  <Btn disabled={busy} onClick={onHistory}>History</Btn>
+                  <Act disabled={busy} onClick={onHistory}>History</Act>
                 )}
                 {own && shared && item.status === 'confirmed' && !item.nomination && (
-                  <Btn disabled={busy} onClick={() => onAct('nominate')}>Suggest to workspace</Btn>
+                  <Act disabled={busy} onClick={() => onAct('nominate')}>Suggest to workspace</Act>
                 )}
               </>
             )}
@@ -332,5 +340,16 @@ function MemoryRow({
         </tr>
       )}
     </>
+  )
+}
+
+/** A row action: a text button, so a row stays one line (DENSITY-1). */
+function Act({ strong, children, ...props }: { strong?: boolean } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button type="button" {...props}
+      className={`text-[10.5px] whitespace-nowrap hover:underline disabled:opacity-40 disabled:cursor-not-allowed ${
+        strong ? 'font-semibold text-accent' : 'text-ink-700 hover:text-text'}`}>
+      {children}
+    </button>
   )
 }
