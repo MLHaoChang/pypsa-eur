@@ -31,9 +31,9 @@ it.each([['expert', 's_nom'], ['guided', 'Rating']] as const)('shows old → new
   useUIStore.setState({ uiMode })
   render(<ConfirmationCard />)
   const rows = within(screen.getByRole('table', { name: 'Changes to apply' })).getAllByRole('row')
-  expect(within(rows[1]).getAllByRole('cell').map(c => c.textContent)).toEqual(["Line 'L2'", field, '300', '400', 'MVA'])
+  expect(within(rows[1]).getAllByRole('cell').map(c => c.textContent)).toEqual(["Line “L2”", field, '300', '400', 'MVA'])
   expect(rows[2].textContent).toContain('Follows from the change, read-only')
-  expect(screen.getByTestId('chat-edit-header').textContent).toBe("Line 'L2'")
+  expect(screen.getByTestId('chat-edit-header').textContent).toBe("Line “L2”")
   await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
   expect(postChatConfirm).toHaveBeenCalledWith('session-1', { token: 'token-1', decision: 'approve' })
 })
@@ -136,7 +136,7 @@ it('names the flow section and shows the field in Properties without leaving the
     section: { id: 'connection', label: 'Connection & grid' }, rows: [{ ...typed, target }] } } })
   useUIStore.setState({ selectedComponent: null, activeSlidePanel: null, assistantDockOpen: true })
   render(<ConfirmationCard />)
-  expect(screen.getByTestId('chat-edit-header').textContent).toBe("Connection & grid \u203a Line 'L2'")
+  expect(screen.getByTestId('chat-edit-header').textContent).toBe("Connection & grid \u203a Line “L2”")
   await userEvent.click(screen.getByTestId('chat-edit-show'))
   expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Line', name: 'L2' })
   expect(useUIStore.getState().activeSlidePanel).toBeNull()
@@ -292,7 +292,7 @@ it('the inactive member is marked in the table', () => {
   useUIStore.setState({ uiMode: 'guided' })
   showSetCard(setCard)
   const assets = screen.getAllByTestId('chat-edit-row-typed').map(r => r.querySelector('td')!.textContent)
-  expect(assets).toEqual(["Generator 'Solar'", "Generator 'Solar roof'", "Generator 'Solar old' (inactive)"])
+  expect(assets).toEqual(["Generator “Solar”", "Generator “Solar roof”", "Generator “Solar old” (inactive)"])
 })
 
 it.each([
@@ -319,7 +319,7 @@ it('a names-form scale lists its members in the set line', () => {
   useUIStore.setState({ uiMode: 'guided' })
   showSetCard({ ...setCard, rows: [solar('Solar', 80)], sets: [{ ...solarSet, selector: null, names: ['Solar'],
     size: 1, inactive: 0 }] })
-  expect(screen.getByTestId('chat-edit-set').textContent).toBe("Generator 'Solar' · 1 asset · Capacity × 1.2 (+20 %)")
+  expect(screen.getByTestId('chat-edit-set').textContent).toBe("Generator “Solar” · 1 asset · Capacity × 1.2 (+20 %)")
 })
 
 it('a malformed set line cannot be approved', () => {

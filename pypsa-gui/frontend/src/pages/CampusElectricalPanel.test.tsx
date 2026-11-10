@@ -15,11 +15,14 @@ import OnePart, { CampusResultsPanel as ResultsOnly, CampusStudyPanel as StudyOn
 import { useCampusRunNotice, useCampusSettingsDraft } from '../store/campusSettingsDraft'
 
 const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null, requestRunSolve: (() => {}) as () => void,
-  activeSlidePanel: null as string | null }))
+  activeSlidePanel: null as string | null,
+  panelSectionRequest: null as { panel: string; section: string } | null }))
 vi.mock('../store/uiStore', () => ({
-  useUIStore: (sel: (s: { currentProject: string | null; requestRunSolve: () => void; setSlidePanel: (p: string | null) => void }) => unknown) =>
+  useUIStore: (sel: (s: Record<string, unknown>) => unknown) =>
     sel({ currentProject: store.currentProject, requestRunSolve: () => store.requestRunSolve(),
-          setSlidePanel: (p: string | null) => { store.activeSlidePanel = p } } as never),
+          setSlidePanel: (p: string | null) => { store.activeSlidePanel = p },
+          panelSectionRequest: store.panelSectionRequest,
+          clearPanelSectionRequest: () => { store.panelSectionRequest = null } }),
 }))
 
 const api = vi.hoisted(() => ({
@@ -99,6 +102,7 @@ function renderPanel(Panel: typeof CampusElectricalPanel = CampusElectricalPanel
 
 beforeEach(() => {
   store.currentProject = 'Hub A'
+  store.panelSectionRequest = null
   useCampusSettingsDraft.setState({ drafts: {} })
   useCampusRunNotice.setState({ notices: {} })
   vi.clearAllMocks()
@@ -858,4 +862,44 @@ it('words the bought transformer id and retains its raw identity in the tooltip'
   const verdict = await screen.findByTestId('trafo-verdict-GRID_IMPORT')
   const asset = within(verdict).getByTitle('campus:TR_110_20_63')
   expect(asset.textContent).toBe('TR 110 20 63')
+})
+
+// LC-14 item 5: chat's panel_section scrolls a campus panel to a named section once its data is on screen.
+describe('campus panel_section', () => {
+  const scrolled: string[] = []
+  beforeEach(() => {
+    scrolled.length = 0
+    Element.prototype.scrollIntoView = function scroll(this: Element) {
+      scrolled.push(this.getAttribute('data-panel-section') ?? '')
+    }
+    api.state.mockResolvedValue({ ...empty, campus_yaml: YAML })
+  })
+
+  it.each([
+    ['campusElectrical', 'grid_codes', OnePart], ['campusElectrical', 'connection_limits', OnePart],
+    ['campusElectrical', 'campus_file', OnePart], ['campusElectrical', 'grid_connection', OnePart],
+    ['campusElectrical', 'library', OnePart],
+    ['campusStudy', 'island', StudyOnly], ['campusStudy', 'study_settings', StudyOnly],
+  ] as const)('%s scrolls to %s and clears the request', async (panel, section, Panel) => {
+    store.panelSectionRequest = { panel, section }
+    renderPanel(Panel)
+    await waitFor(() => expect(scrolled).toEqual([section]))
+    expect(store.panelSectionRequest).toBeNull()
+  })
+
+  it('clears a request for a section that is not rendered, without scrolling', async () => {
+    api.state.mockResolvedValue(empty)  // no results yet
+    store.panelSectionRequest = { panel: 'campusResults', section: 'grid_code_results' }
+    renderPanel(ResultsOnly)
+    await waitFor(() => expect(store.panelSectionRequest).toBeNull())
+    expect(scrolled).toEqual([])
+  })
+
+  it('leaves a request for another panel alone', async () => {
+    store.panelSectionRequest = { panel: 'gridspine', section: 'readback' }
+    renderPanel(StudyOnly)
+    await screen.findByText('Island')
+    expect(store.panelSectionRequest).not.toBeNull()
+    expect(scrolled).toEqual([])
+  })
 })

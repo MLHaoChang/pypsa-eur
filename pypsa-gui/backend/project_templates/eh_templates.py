@@ -26,6 +26,7 @@ hourly dispatch move 52 hours of stored energy.
 from __future__ import annotations
 
 import math
+from datetime import date
 from typing import NamedTuple
 
 import numpy as np
@@ -530,10 +531,14 @@ def _staged_datacenter(n: pypsa.Network, plan: _DcPlan, load_spec=None) -> pypsa
             for load in ("it_load", "cooling"):
                 p_set.loc[y, load] = (p_set.loc[y, load] * scale).to_numpy()
     else:
-        it_by_year = {p.cod.year: p.it_mw for p in load_spec.phases}
+        from services.dc_it_energy import phase_in_service
+
         tz = _dc_timezone("eh_datacenter_staged")
         for y in years:
-            _apply_dc_profile(n, load_spec, SNAPSHOTS, it_by_year[y], timezone=tz, period=y)
+            # One phase per period by COD year (dc_load_spec checks it); the
+            # business case's IT energy reads the same rule (DC business case 03).
+            it_mw = phase_in_service(load_spec, date(y, 12, 31)).it_mw
+            _apply_dc_profile(n, load_spec, SNAPSHOTS, it_mw, timezone=tz, period=y)
     # The energization schedule in MW (`services.adequacy.energization`): a
     # solve turns it into p_max_pu = min(own, E / p_nom), so a lever or an
     # overlay that rewrites p_nom composes as min(E, cap) instead of
@@ -612,9 +617,9 @@ def dc_load_preset(template_id: str, planning: Planning | None = None) -> dict:
 
 
 def _single_year_phase(spec, planning: Planning | None = None):
-    week = _week(planning)[0].date()
-    live = [p for p in spec.phases if p.cod <= week]
-    return live[-1] if live else None
+    from services.dc_it_energy import phase_in_service
+
+    return phase_in_service(spec, _week(planning)[0].date())
 
 
 def _apply_dc_profile(n, spec, snapshots, it_mw: float, *, timezone, period=None) -> None:

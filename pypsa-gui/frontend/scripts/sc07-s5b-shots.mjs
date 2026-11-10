@@ -62,7 +62,7 @@ const A = 'greenfield:hall'
 const CHANGE = 'it p_set 3 → 2 MW'  // the mocked edit step's receipt words (its `says`)
 // The mocked receipt row, its label the real field catalogue's (`edit_card._fields('Load')`).
 const EDIT_ROW = { component_class: 'Load', name: 'it', field: 'p_set', label: 'Demand', role: 'typed', unit: 'MW', old: 3, new: 2 }
-const DONE = "Load 'it', Demand 3 → 2 MW"  // Guided's words for that row, in both modes
+const DONE = "Load “it”, Demand 3 → 2 MW"  // Guided's words for that row, in both modes
 const REASONS = { proposal_expired: 'the prepared mapping expired', revision_conflict: 'the site changed after it was prepared' }
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 

@@ -18,6 +18,7 @@ from pydantic import BaseModel as _BaseModel
 
 from models.schemas import Finite as _Finite
 from services.adequacy.campaign import unsupported_scope as _unsupported_scope
+from services.adequacy.coupling import NOTHING_TO_SAMPLE
 from services.adequacy.coupling import snapshot_hash as _snapshot_hash
 from services.pypsa_service import PyPSAService
 
@@ -220,8 +221,7 @@ def start_margin_loop(
     if not inputs.units:
         raise HTTPException(
             422,
-            "nothing to sample: no electrical generator carries resolvable "
-            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            f"{NOTHING_TO_SAMPLE} (unavailability + MTTR), so the sampled fleet is "
             "empty — an empty fleet would report the entire horizon as loss of "
             "load, which is a statement about missing input data, not about "
             "the system")

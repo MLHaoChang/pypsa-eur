@@ -205,7 +205,7 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
   const link = rows.find(r => kindOf(r) === 'ramp_rate')?.target as FlowTarget | undefined
   const kinds = Object.keys(SHOWN).filter(k => rows.some(r => kindOf(r) === k))
   return (
-    <PageSection title="Connection limits" hint="Set the ones you know">
+    <PageSection panelSection="connection_limits" title="Connection limits" hint="Set the ones you know">
       {q.isPending ? <p className="text-[12px] text-muted">Loading the connection limits…</p>
         : q.isError ? <p className="text-[12px] text-warn" data-testid="connection-limits-error">
             The connection limits could not be read.</p>

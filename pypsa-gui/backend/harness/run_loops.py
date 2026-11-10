@@ -784,6 +784,30 @@ def _engine_stop(path, step_id, reason, detail=None, status="failed"):
     runner._update(path, change)
 
 
+def _gate_on_refusal(path, ctx):
+    """A refused loop stops the run at the result gate with the gate read as it
+    stands, so the engine rule shows the refusal's typed reason beside the
+    other rules (GK A (19) SH11-L1: `eh.adequacy.lole` reads
+    `loop_nothing_to_sample`, never passed or not_started). The stop
+    is `_engine_stop`'s alone: the read changes no status, reason or attempt
+    count (SH11-L9), and a read that fails leaves the stop as it is and says
+    so on the stage (SH11-L8)."""
+    from harness import runner
+    from services import assistant_tasks, run_profiles
+    try:
+        task = json.loads(path.read_text())
+        profile = run_profiles.resolve(task["run"]["profile"])
+        # Every rule, the engine ones included: the refused step is settled (`failed`).
+        record = {"gate": assistant_tasks._gate_now(task, profile["stages"][RESULT_STAGE]["rules"], ctx)}
+    except Exception as exc:  # noqa: BLE001 - the stop stands; the stage names the failed read
+        logger.warning("result gate read after an engine refusal failed: %s", type(exc).__name__)
+        record = {"gate_error": f"the gate read after the refusal failed: {type(exc).__name__}"}
+
+    def change(t):
+        t["run"]["stages"][RESULT_STAGE].update(record)
+    runner._update(path, change)
+
+
 def _overhead(tool):
     """The solves a loop spends outside its `max_solves`: the margin loop's
     probe, and the closing re-solve every loop runs (GK A (12) Q1)."""
@@ -847,6 +871,7 @@ def start_engine(path, ctx, step, *, instance):
             runner._update(path, lambda t: run_envelope.settle_carded(
                 t, next(s for s in t["steps"] if s["id"] == step["id"]), 0))
         _engine_stop(path, step["id"], "engine_refused", str(exc.detail))
+        _gate_on_refusal(path, ctx)
         return "engine_refused"
     except BaseException:
         _engine_stop(path, step["id"], "engine_error", "the engine start raised", status="uncertain")

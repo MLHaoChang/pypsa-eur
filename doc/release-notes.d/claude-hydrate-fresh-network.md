@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): After a run's queued solve, the open project shows the solve's optimised capacities (`p_nom_opt`, `e_nom_opt`, `s_nom_opt`) instead of keeping its pre-solve ones next to the new dispatch.

@@ -1048,6 +1048,162 @@ def test_a_busy_context_refuses_the_start_and_never_waits(
     assert len([s for s in record["steps"] if s.get("engine")]) == 1
 
 
+# ── SH-11 (GK A (19) SH11-L1, L7-L9): the gate read on a refused start ──────
+
+
+def _refused(granted, loops, monkeypatch, exc, *, gate_read=True):
+    """A run whose engine start the route refuses with `exc`; with
+    `gate_read=False`, the refusal path as it was before SH-11."""
+    from harness import run_loops
+
+    with_rules(monkeypatch, engine_rule())
+    loops.raise_on_start = exc
+    if not gate_read:
+        monkeypatch.setattr(run_loops, "_gate_on_refusal", lambda path, ctx: None)
+    returned = []
+    real = run_loops.start_engine
+
+    def start(*a, **k):
+        returned.append(real(*a, **k))
+        return returned[-1]
+
+    monkeypatch.setattr(run_loops, "start_engine", start)
+    task, path, _ = granted()
+    record = go(harness_runner.Runner("a", agent_provider=Never()), path, task)
+    return record, path, returned
+
+
+def _engine_row(record):
+    rows = (stage_of(record).get("gate") or {}).get("rules") or []
+    return next(r for r in rows if r["rule"] == "res.adequacy.margin")
+
+
+NOTHING = f"{coupling.NOTHING_TO_SAMPLE} (unavailability + MTTR), so the sampled fleet is empty"
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        HTTPException(409, "another study is running"),
+        HTTPException(422, "target_lole_h is required and must be > 0"),
+    ],
+    ids=["busy_409", "other_422"],
+)
+def test_another_refusal_keeps_its_own_reason_in_the_gate(
+    granted, ok, loops, monkeypatch, exc
+):
+    """SH11-L7: only the runner's nothing-to-sample refusal reads as
+    `loop_nothing_to_sample`; any other refusal keeps its own
+    outcome and reason, and never passes."""
+    record, _, returned = _refused(granted, loops, monkeypatch, exc)
+    row = _engine_row(record)
+    assert returned == ["engine_refused"]
+    assert row["verdict"] == "not_evaluated" and row["severity"] == "block"
+    assert row["facts"][0]["value"] == "failed" != run_gates.LOOP_NOTHING_TO_SAMPLE
+    assert str(exc.detail) in row["reason"]
+    assert not run_gates.passed([row])
+
+
+def test_the_nothing_to_sample_refusal_reads_as_its_typed_reason(
+    granted, ok, loops, monkeypatch
+):
+    """SH11-L1/L6, on the runner's own message from the one shared constant."""
+    record, _, returned = _refused(
+        granted, loops, monkeypatch, HTTPException(422, NOTHING)
+    )
+    row = _engine_row(record)
+    assert returned == ["engine_refused"]
+    assert (
+        row["verdict"] == "not_evaluated"
+        and row["facts"][0]["value"] == run_gates.LOOP_NOTHING_TO_SAMPLE
+    )
+    # GK A (19) F1: on a network with generators and no Link outages (eh_site's
+    # shapes), the reading never claims the outages sit on Links: it names the
+    # generators' missing outage data first, as on the H2 hubs.
+    assert row["reason"] == run_gates.NOTHING_TO_SAMPLE_DETAIL
+    assert row["reason"].startswith(
+        "the loop found no outage to sample: no electrical generator has outage data"
+    )
+
+
+def test_a_gate_read_that_raises_leaves_the_refusal_stop_as_it_is(
+    granted, ok, loops, monkeypatch
+):
+    """SH11-L8: a fact reader raising during the read after a refusal does
+    not turn the refusal into a raise: the start still returns
+    `engine_refused`, the stage is failed with that reason, and the stage
+    names the failed read."""
+    from services import assistant_tasks
+
+    real = assistant_tasks._gate_now
+
+    def gate_now(task, rules, ctx):
+        if any(s.get("engine") and s["status"] == "failed" for s in task["steps"]):
+            raise RuntimeError("a reader raised")
+        return real(task, rules, ctx)
+
+    monkeypatch.setattr(assistant_tasks, "_gate_now", gate_now)
+    record, _, returned = _refused(
+        granted, loops, monkeypatch, HTTPException(422, NOTHING)
+    )
+    stage = stage_of(record)
+    assert returned == ["engine_refused"]
+    assert record["run"]["status"] == "needs_user"
+    assert stage["status"] == "failed" and stage["reason"] == "engine_refused"
+    assert "RuntimeError" in stage["gate_error"]
+
+
+@pytest.mark.parametrize(
+    "gate_read", [False, True], ids=["as_before", "with_gate_read"]
+)
+@pytest.mark.parametrize(
+    "exc",
+    [HTTPException(409, "another study is running"), HTTPException(422, NOTHING)],
+    ids=["busy_409", "nothing_to_sample"],
+)
+def test_the_gate_read_changes_nothing_but_the_stored_gate_rows(
+    granted, ok, loops, monkeypatch, exc, gate_read
+):
+    """SH11-L9 (c), on a non-H2 engine profile (eh_site@1's shapes): with
+    the read and without it (the refusal path before SH-11) the run and task
+    status, the stage's status, reason and attempts, the steps and the
+    envelope's ledger are the same."""
+    record, path, returned = _refused(
+        granted, loops, monkeypatch, exc, gate_read=gate_read
+    )
+    stage = stage_of(record)
+    envelope = envelope_of(path)
+    [engine] = [s for s in record["steps"] if s.get("engine")]
+    [row] = [
+        a
+        for a in envelope["audit"]
+        if a.get("tool") == "run_margin_loop" and "reserved" in a
+    ]
+    assert returned == ["engine_refused"]
+    assert (record["status"], record["run"]["status"], record["run"]["stage"]) == (
+        "needs_review",
+        "needs_user",
+        "result_gate",
+    )
+    assert (stage["status"], stage["reason"], stage["attempts"]) == (
+        "failed",
+        "engine_refused",
+        1,
+    )
+    assert (
+        engine["status"] == "failed"
+        and engine["error"] == f"engine_refused: {exc.detail}"[: len(engine["error"])]
+    )
+    assert [s["status"] for s in record["steps"] if not s.get("engine")] == [
+        "completed"
+    ] * (len(record["steps"]) - 1)
+    assert row["solves"] == 0 and run_envelope.solves_used(envelope) == 1
+    assert (
+        "gate" in stage
+        and "res.adequacy.margin" in [r["rule"] for r in stage["gate"]["rules"]]
+    ) is gate_read
+
+
 # ── Acceptance: the LOLE basis ──────────────────────────────────────────────
 
 

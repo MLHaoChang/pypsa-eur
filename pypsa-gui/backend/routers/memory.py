@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session as DBSession
 
@@ -135,6 +135,106 @@ def create_item(
         )
     except M.MemoryError as exc:
         _raise(exc)
+    return _out(db, user, v)
+
+
+class Dismissal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    chat_id: str = Field(min_length=1, max_length=128)
+    tool_use_id: str = Field(min_length=1, max_length=128)
+
+
+def _result_kind(block: dict) -> str | None:
+    """The error kind of an `is_error` tool_result: the first line of its
+    content (`harness.results._error_result_content`); None for a result."""
+    if not block.get("is_error"):
+        return None
+    content = block.get("content")
+    if isinstance(content, list):
+        content = next(
+            (
+                b.get("text")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ),
+            None,
+        )
+    return content.split("\n", 1)[0].strip() if isinstance(content, str) else None
+
+
+def _denied_proposal(chat_id: str, tool_use_id: str, user: User) -> dict:
+    """The `propose_memory` input of `tool_use_id` in the caller's own live
+    chat. The client names the card; the server reads what it proposed, so
+    the client never supplies the content. Anything else is a 404."""
+    from harness.session import get_session, session_owner_allows
+
+    session = get_session(chat_id)
+    if session is None or not session_owner_allows(session, getattr(user, "id", None)):
+        _raise(M.MemoryError("memory proposal not found", "memory_not_found", 404))
+    blocks = [
+        (message.get("role"), block)
+        for message in list(session.messages)
+        if isinstance(message, dict) and isinstance(message.get("content"), list)
+        for block in message["content"]
+        if isinstance(block, dict)
+    ]
+    # Only a card still waiting (no result yet) or one the user declined
+    # (`confirmation_denied`) is dismissed. A card that ran, expired, or was
+    # refused before it showed (capped, already dismissed, invalid) is not.
+    for _role, block in blocks:
+        if (
+            block.get("type") == "tool_result"
+            and block.get("tool_use_id") == tool_use_id
+            and _result_kind(block) != "confirmation_denied"
+        ):
+            _raise(
+                M.MemoryError("this memory card was not declined", "memory_status", 409)
+            )
+    for role, block in blocks:
+        if (
+            role == "assistant"
+            and block.get("type") == "tool_use"
+            and block.get("id") == tool_use_id
+            and block.get("name") == "propose_memory"
+            and isinstance(block.get("input"), dict)
+        ):
+            return block["input"]
+    _raise(M.MemoryError("memory proposal not found", "memory_not_found", 404))
+
+
+@router.post("/dismissals", status_code=201)
+def dismiss_proposal(
+    payload: Dismissal,
+    response: Response,
+    db: DBSession = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict:
+    """Record "Not now" on a memory card (§2.2): the card's deny writes nothing,
+    so the UI names the denied card here and the server reads its proposal from
+    the caller's chat. It is stored dismissed in one commit (its body is dropped
+    after 30 days by `sweep_dismissed`; its hash stays), so `propose_memory`
+    does not offer the same proposal again for 30 days. A repeat is a 200 on
+    the same row."""
+    from services import memory_tools
+
+    args = _denied_proposal(payload.chat_id, payload.tool_use_id, user)
+    kind, body, keys, summary, pk = memory_tools._checked(args)
+    evidence = [{"kind": "chat", "id": payload.chat_id, "label": "from this chat"}]
+    try:
+        v, created = M.dismiss_proposal(
+            db,
+            user,
+            kind=kind,
+            body=body,
+            concept_keys=keys,
+            project_kind=pk,
+            summary=summary,
+            evidence=evidence,
+        )
+    except M.MemoryError as exc:
+        _raise(exc)
+    if not created:
+        response.status_code = 200
     return _out(db, user, v)
 
 

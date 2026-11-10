@@ -127,7 +127,7 @@ export function PageBody({ children, className }: { children: ReactNode; classNa
 // A 10px-radius card. Optional header bar (title + mono count + hint + a
 // right-aligned slot for controls) sits on the subtle bg-2 surface.
 export function PageSection({
-  title, hint, count, right, children, className, bodyClassName,
+  title, hint, count, right, children, className, bodyClassName, panelSection,
 }: {
   title?: ReactNode
   hint?: ReactNode
@@ -136,9 +136,12 @@ export function PageSection({
   children: ReactNode
   className?: string
   bodyClassName?: string
+  /** LC-14: the id chat's ui_open_panel panel_section scrolls to (a data attribute, nothing visible). */
+  panelSection?: string
 }) {
   return (
     <section
+      data-panel-section={panelSection}
       className={`rounded-[10px] border border-border bg-bg overflow-hidden
         shadow-[0_1px_0_rgba(10,14,20,0.04)] ${className ?? ''}`}
     >

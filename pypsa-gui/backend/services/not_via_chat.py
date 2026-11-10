@@ -203,6 +203,21 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'accept_assumed_defaults',
+        'title': 'Keep all assumed defaults',
+        'disposition': 'unbuilt',
+        'reason': 'Confirming every assumed default at once is not available from chat yet. Use Keep all defaults on the Assumptions card of the section in Guided.',
+        'page': 'Guided sections',
+        'panel': None,
+        'keywords': frozenset({
+            'assumptions',
+            'defaults',
+        }),
+        'routes': frozenset({
+            ('POST', '/api/projects/{name}/flow/ack-many'),
+        }),
+    },
+    {
         'id': 'intent_comparison',
         'title': 'Design intent comparison',
         'disposition': 'unbuilt',
@@ -343,6 +358,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'panel': None,
         'keywords': frozenset({'forget', 'unremember', 'memories'}),
         'routes': frozenset({
+            ('POST', '/api/memory/dismissals'),
             ('PATCH', '/api/memory/items/{item_id}'),
             ('POST', '/api/memory/items/{item_id}/{action}'),
             ('GET', '/api/memory/items/{item_id}/versions'),

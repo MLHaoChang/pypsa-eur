@@ -20,7 +20,7 @@ import uuid
 from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import User
@@ -35,6 +35,10 @@ router = APIRouter()
 class FlowAck(BaseModel):
     code: str
     entity: str | None = None
+
+
+class FlowAckMany(BaseModel):
+    items: list[FlowAck] = Field(min_length=1)
 
 
 def _require_open(project: AuthorizedProject) -> None:
@@ -119,6 +123,32 @@ def ack_flow_item(body: FlowAck,
         raise HTTPException(exc.status, {"error_kind": exc.error_kind,
                                           "message": exc.message}) from exc
     return {"ack": ack}
+
+
+@router.post("/{name}/flow/ack-many")
+def ack_flow_items(body: FlowAckMany,
+                   project: AuthorizedProject = ProjectAccessDep,
+                   db: DBSession = Depends(get_db),
+                   user: User | None = Depends(optional_user)) -> dict:
+    """Acknowledge several standing warnings in one write (all or none): the
+    Assumptions card's "Keep all defaults". Same errors as ``/flow/ack``."""
+    from routers.projects import _check_project_lock
+
+    _require_open(project)
+    try:
+        lock_target = SimpleNamespace(id=uuid.UUID(project.uuid), name=project.name)
+    except (TypeError, ValueError):
+        lock_target = None
+    if lock_target is not None:
+        _check_project_lock(db, lock_target, user)
+    try:
+        acks = flow_service.acknowledge_items(
+            project.directory, [(i.code, i.entity) for i in body.items],
+            cache_key=project.registry_key, db=db, org_id=_org(project))
+    except flow_service.FlowAckError as exc:
+        raise HTTPException(exc.status, {"error_kind": exc.error_kind,
+                                          "message": exc.message}) from exc
+    return {"acks": acks}
 
 
 def _solver_settings(project: AuthorizedProject) -> dict | None:

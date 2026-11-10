@@ -1,6 +1,7 @@
 import { manualNavigation, navigationEpoch, withAssistantNavigation } from '../utils/navigationEpoch'
 import { useUIStore, type CanvasView, type PropertiesEditRequest } from '../store/uiStore'
 import { withReturnFrom } from '../layout/flowNavigation'
+import { HUB_STEPS, useHubDesignStore, type HubStep } from '../pages/hubDesign/hubDesignStore'
 
 /**
  * Map chat tool panel_id → SlidePanel / special navigation targets.
@@ -62,6 +63,9 @@ function _normalizePanelId(raw: string): string {
   return aliases[key] ?? key
 }
 
+/** The panels whose sections chat can name (backend `_PANEL_SECTIONS`). */
+const SECTION_PANELS: ReadonlySet<string> = new Set(['campusElectrical', 'campusStudy', 'campusResults', 'gridspine'])
+
 type NavigationRequest = {
   kind?: string
   panel_id?: string
@@ -75,6 +79,10 @@ type NavigationRequest = {
   name?: string
   snapshot_index?: number
   canvas_view?: string
+  /** LC-14: open one Guided card with panel hubDesign. */
+  guided_step?: string
+  /** LC-14: scroll the grid connection, grid study, grid study results or GridSpine panel to one section. */
+  panel_section?: string
   snapshot_iso?: string
   period?: number | null
   category?: string
@@ -218,6 +226,28 @@ function apply(d: NavigationRequest, modelTurn: number | null = null) {
   ) {
     // LC-17 (UX): Scenarios opened from chat keeps "Back to <origin>".
     if (panel === 'scenarios') withReturnFrom(() => useUIStore.getState().setSlidePanel('scenarios'))
+    else if (panel === 'hubDesign' && HUB_STEPS.includes(d.guided_step as HubStep)) {
+      const step = d.guided_step as HubStep
+      const showing = ui.activeSlidePanel === 'hubDesign' && useHubDesignStore.getState().step === step
+      // The card already showing: nothing to jump from, so no "Back to" pointing at itself.
+      if (!showing) {
+        withReturnFrom(() => {
+          useUIStore.getState().setSlidePanel('hubDesign')
+          useHubDesignStore.getState().setStep(step, { user: true })
+        })
+      }
+    }
+    else if (SECTION_PANELS.has(panel) && typeof d.panel_section === 'string') {
+      const target = panel as NonNullable<typeof ui.activeSlidePanel>
+      // Already on this panel: scroll in place, with no "Back to" pointing at the view it would return from.
+      if (ui.activeSlidePanel === target) useUIStore.getState().requestPanelSection(target, d.panel_section)
+      else {
+        withReturnFrom(() => {
+          useUIStore.getState().setSlidePanel(target)
+          useUIStore.getState().requestPanelSection(target, d.panel_section as string)
+        })
+      }
+    }
     else ui.setSlidePanel(panel as NonNullable<typeof ui.activeSlidePanel>)
   }
 

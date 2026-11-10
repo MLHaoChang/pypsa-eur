@@ -3,7 +3,7 @@
 
 # LC-46 — One Assumptions card: every parameter with its default, accept all or edit inline
 
-Status: ready-for-agent
+Status: done (#1313)
 Type: task
 Model: Sonnet
 Reviewers: GK B, UX (card UI)

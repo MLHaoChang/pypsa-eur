@@ -3,7 +3,7 @@
 
 # Screenshot audit of the main screens
 
-Status: ready-for-agent
+Status: done (#1304; findings in .scratch/ui-modern/audit.md)
 Type: audit
 Model: Sonnet. Run it inside the REVIEW-VERIFY-1 walkthrough session, so one session does both.
 

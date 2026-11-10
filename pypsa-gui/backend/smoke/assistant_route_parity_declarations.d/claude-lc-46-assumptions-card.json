@@ -1,0 +1,1 @@
+{"limitations": [{"method": "POST", "path": "/api/projects/{name}/flow/ack-many", "reason": "ui-local-state"}]}

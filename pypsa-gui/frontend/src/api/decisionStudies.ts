@@ -16,6 +16,7 @@
 // flag).
 import axios from 'axios'
 import client from './client'
+import type { StaleVerdict } from './assetSchema'
 
 // ── enums and small shapes ────────────────────────────────────────────────
 
@@ -209,11 +210,27 @@ export interface DecisionStudy {
   base_project_name?: string
 }
 
+/** A ledger row's asset field that reads out of date on an option fork (provenance-graph 02, TCU-07): the
+ *  verdict the fork's asset card shows, so `staleNote` words it the same. */
+export interface LedgerStale {
+  option_id: string
+  /** The option's name: the fork the person opens to re-price this cost. */
+  option_label: string
+  component: string
+  name: string
+  field: string
+  stale: StaleVerdict
+}
+
 export interface LedgerPayload {
   study_id: string
   stored: boolean
   ledger: AssumptionsLedger
   maturity: StudyMaturity
+  /** By row key; absent or empty when no row's asset field is out of date. */
+  stale?: Record<string, LedgerStale[]>
+  /** The option forks whose costs could not be checked (unreadable): never read as fresh (GK B F1). */
+  stale_unchecked?: { option_id: string; option_label: string }[]
 }
 
 // ── run and tornado records (`services/study/runner.py`, `tornado_runner.py`) ──
