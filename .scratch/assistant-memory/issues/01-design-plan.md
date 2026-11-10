@@ -3,7 +3,7 @@
 
 # Design plan
 
-Status: ready-for-agent
+Status: done (#1305)
 Type: design
 Model: Opus. Reviewer: GK B (harness and app backend). The plan goes to GK B before any code.
 
