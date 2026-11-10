@@ -578,6 +578,50 @@ def test_the_other_side_of_each_boundary_runs(lines):
     assert _refusals(_case(*lines)) == []
 
 
+@pytest.mark.parametrize(
+    "lines, expected",
+    [
+        # A linked line takes its quantity from 04, never quantity_missing.
+        ([_rev(quantity_source="linked:x@1", quantity=None)], []),
+        # The rule's owner and any non-pass-through revenue line run.
+        (
+            [
+                _rev(preset_rule={"price_includes_energy": True}),
+                _rev("lease", category="lease"),
+            ],
+            [],
+        ),
+        # An excluded capex category names only capex lines.
+        (
+            [
+                _rev(preset_rule={"excludes": ["other"]}),
+                _rev("misc", category="other"),
+                _opex("misc2", category="other"),
+            ],
+            [],
+        ),
+        # `cost_recovery` on an opex line is a category fault, not a pass-through.
+        (
+            [
+                _rev(preset_rule={"price_includes_energy": True}),
+                _opex(category="cost_recovery"),
+            ],
+            [("category_not_in_kind", "lines[1].category")],
+        ),
+        # An empty span is end_before_start and still not established: never a covered grid.
+        (
+            [_rev(start_year=2030, end_year=2029, price=None)],
+            [
+                ("end_before_start", "lines[0].end_year"),
+                ("price_not_established", "lines[0].price"),
+            ],
+        ),
+    ],
+)
+def test_refusal_scope(lines, expected):
+    assert _refusals(_case(*lines)) == expected
+
+
 def test_share_base_with_one_line_runs_and_empty_refuses():
     """GK B Q5: an SG&A share with no revenue line is named, never a 0."""
     sga = _share("sga", base="revenue", category="sga")
