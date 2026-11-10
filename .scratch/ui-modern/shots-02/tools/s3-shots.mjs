@@ -15,6 +15,13 @@ if (process.env.GAP || process.env.ROWS) {
     await route.fulfill({ response: r, json: j })
   })
 }
+// EMPTY_FLOWS=1 empties the energy-flow rows (the "No energy moved" state).
+if (process.env.EMPTY_FLOWS) {
+  await p.route('**/api/results/energy_flows**', async route => {
+    const r = await route.fetch(); const j = await r.json(); j.rows = []
+    await route.fulfill({ response: r, json: j })
+  })
+}
 await p.goto('http://127.0.0.1:5173/'); await p.waitForTimeout(2500)
 await p.locator('article').filter({ hasText: new RegExp(`${project}(?!\\w)`) }).first().click({ timeout: 8000 }); await p.waitForTimeout(4500)
 await p.getByRole('button', { name: 'Expert', exact: true }).first().click(); await p.waitForTimeout(1200)

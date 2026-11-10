@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { energyFlowsApi, type EnergyFlowsPayload } from '../../api/energyFlows'
 import EnergyFlowsTab, { FlowSankeyChart } from './EnergyFlowsTab'
-import { sankeyData } from './energyFlows'
+import { fmtMwh, sankeyData } from './energyFlows'
 import { ROWS } from './energyFlows.test'
 import { expectAllButtonsNamed } from '../../test-utils/accessibleName'
 import * as shared from './shared'
@@ -52,7 +52,7 @@ describe('EnergyFlowsTab', () => {
   it('exports exactly the rows it draws', async () => {
     const spy = vi.spyOn(shared, 'downloadCSV').mockImplementation(() => {})
     mount()
-    fireEvent.click(await screen.findByRole('button', { name: 'Export CSV' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'CSV' }))
     const [, header, rows] = spy.mock.calls[0]
     expect(header).toEqual(['Source', 'Via', 'Destination', 'MWh'])
     expect(rows).toHaveLength(ROWS.length)
@@ -109,6 +109,31 @@ describe('undelivered product', () => {
     mount()
     await screen.findByTestId('ef-sankey')
     expect(document.querySelector('[data-testid^="ef-undelivered"]')).toBeNull()
+  })
+})
+
+describe('the Sankey frame', () => {
+  it('heads the diagram with the shared chart frame: the total, the unit and both exports', async () => {
+    mount()
+    const frame = await screen.findByTestId('ef-flow')
+    expect(frame.hasAttribute('data-chart-frame')).toBe(true)
+    expect(within(frame).getByRole('heading', { name: /Energy flow · / })).toBeTruthy()
+    const total = ROWS.reduce((s, r) => s + r.mwh, 0)
+    expect(frame.textContent).toContain(`${fmtMwh(total)} delivered or lost`)
+    expect(within(frame).getByRole('button', { name: 'SVG' })).toBeTruthy()
+    expect(within(frame).getByRole('button', { name: 'CSV' })).toBeTruthy()
+    // The total is said once: the strip above keeps only the losses share.
+    expect(screen.getByTestId('ef-view').textContent!.split('delivered or lost')).toHaveLength(2)
+  })
+
+  it('says an empty window in the frame, with no diagram and no SVG export', async () => {
+    vi.mocked(energyFlowsApi.get).mockResolvedValue({ ...OK, rows: [] })
+    mount()
+    const frame = await screen.findByTestId('ef-flow')
+    expect(within(frame).getByTestId('ef-empty').textContent).toBe('No energy moved in this window.')
+    expect(within(frame).getByTestId('chart-zero')).toBeTruthy()
+    expect(screen.queryByTestId('ef-sankey')).toBeNull()
+    expect(within(frame).queryByRole('button', { name: 'SVG' })).toBeNull()
   })
 })
 
