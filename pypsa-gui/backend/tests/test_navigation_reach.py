@@ -156,12 +156,14 @@ def test_panel_section_pairs():
                                   ('gridspine', 'nope', 'Planning → dynamics'),
                                   ('campusResults', 3, 'the grid study results'),
                                   ('campusStudy', ['island'], 'the grid study'),  # unhashable: must refuse, not raise
+                                  ('campusStudy', {'island': 1}, 'the grid study'),  # unhashable: must refuse, not raise
                                   ('campusElectrical', 'island', 'the grid connection')]:
         message = _refusal(lambda: chat_tools.ui_open_panel(panel, panel_section=section), 'panel_section')
         assert title in message and panel not in message and '`' not in message and '—' not in message
     message = _refusal(lambda: chat_tools.ui_open_panel('campusStudy', panel_section='grid_codes'), 'panel_section')
     assert message == 'Choose a section of the grid study: study_settings or island.'
-    _refusal(lambda: chat_tools.ui_open_panel('results', panel_section='island'), 'panel_section')
+    assert _refusal(lambda: chat_tools.ui_open_panel('results', panel_section='island'), 'panel_section') == (
+        'Sections exist only in the grid connection, the grid study, the grid study results and Planning → dynamics.')
     assert json.dumps(chat_tools.ui_open_panel('campusStudy')) == json.dumps(
         {"_ui_event": True, "kind": "navigate", "panel_id": "campusStudy"})
 
