@@ -1,1 +1,1 @@
-{"limitations": [{"method": "POST", "path": "/api/projects/{name}/profiles/unrecorded/confirm", "reason": "held-by-spec", "issue": ".scratch/renewable-profiles/issues/18-rp-14-old-projects-native-series-unrecorded.md"}]}
+{"limitations": [{"method": "POST", "path": "/api/projects/{name}/profiles/unrecorded/confirm", "reason": "held-by-spec", "issue": ".scratch/renewable-profiles/issues/20-rp-18-chat-confirm-unrecorded.md"}]}
