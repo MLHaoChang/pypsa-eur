@@ -8,7 +8,7 @@ const N = Number(secs)
 const b = await chromium.launch()
 const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, storageState: state })
 const p = await ctx.newPage()
-p.setDefaultTimeout(15000)
+p.setDefaultTimeout(Number(process.env.STEP_TIMEOUT || 15000))
 await p.addInitScript(() => {
   window.__lt = []
   new PerformanceObserver(l => { for (const e of l.getEntries()) window.__lt.push([e.startTime, e.duration]) }).observe({ entryTypes: ['longtask'] })

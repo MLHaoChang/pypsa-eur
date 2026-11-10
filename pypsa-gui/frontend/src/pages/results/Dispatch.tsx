@@ -700,7 +700,9 @@ export default function Dispatch() {
       pct: hourDayGrid(stamps, rows.map(r => (full > 0 ? (r.value / full) * 100 : null))),
       mwh: hourDayGrid(stamps, rows.map(r => r.value)),
     }
-  }), [storageSeriesByCarrier])
+  // A carrier with no state-of-charge series (nothing built) gets no map; the
+  // section above it already says so.
+  }).filter(m => m.pct.days.length > 0), [storageSeriesByCarrier])
 
 
   // Renewable curtailment time-series — same filter range as everything else.
