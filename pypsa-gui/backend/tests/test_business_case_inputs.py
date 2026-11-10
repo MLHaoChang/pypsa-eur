@@ -1,402 +1,866 @@
-"""DC business case slice 02: the inputs model and its pack defaults.
+"""Business case slice 02: the line-item model, its validation and its pack defaults.
 
-Spec .scratch/dc-business-case/spec.md §4, §5, §9 (DCBC-SCOPE-1); GK B BC7 (typed refusals,
-real units) and BC9 (defaults pack: previous rows byte-equal, defaults sourced and assumed).
+Spec .scratch/business-case/spec.md §3 (G1, G5–G9, G-C1, G-C2) and §4 (BC-ALL-1,
+BCA-SCOPE-1); GK B plan GO for slice 02 (Q1–Q5, P1–P5), #1320 F1/F2, and BC9 (defaults
+pack: previous rows byte-equal, defaults sourced and assumed).
 """
 
 from __future__ import annotations
 
 import json
+import math
+import re
 from pathlib import Path
+from typing import Any, get_args
 
 import pytest
 from pydantic import ValidationError
 
 from models import business_case as B
+from models.finance import ESCALATION_CLASSES
 from services.library.defaults_pack import loader
 
 PREV, NEW = "2026-11-07", "2026-11-10"
 VERSIONS = Path(loader.__file__).parent / "versions"
+H = (2027, 2046)  # the analysis horizon: COD .. analysis end
+BASE = 2026  # the case's base year
+
+#: The 2026-11-10 pack rows (no consumer until the DC preset, slice 07).
+DC_KEYS = {
+    "facility_capex": "dc-business-case.facility.overnight",
+    "facility_life": "dc-business-case.facility.lifetime",
+    "it_life": "dc-business-case.it_hardware.lifetime",
+    "maintenance": "dc-business-case.facility.maintenance_share",
+    "insurance": "dc-business-case.insurance_share",
+    "property_tax": "dc-business-case.property_tax_share",
+    "sga": "dc-business-case.sga_share",
+}
+
+
+def _rev(name: str = "compute", **kw: Any) -> dict:
+    return {
+        "name": name,
+        "kind": "revenue",
+        "category": "service_fee",
+        "unit": "GPU_h",
+        "quantity": 1.0e6,
+        "price": 2.5,
+        "escalation": "contract",
+        "indexation": -0.05,
+        **kw,
+    }
+
+
+def _opex(name: str = "staff", **kw: Any) -> dict:
+    return {
+        "name": name,
+        "kind": "opex",
+        "category": "staff",
+        "unit": "unit",
+        "quantity": 10.0,
+        "price": 40_000.0,
+        "escalation": "opex",
+        **kw,
+    }
+
+
+def _capex(name: str = "facility", **kw: Any) -> dict:
+    return {
+        "name": name,
+        "kind": "capex",
+        "category": "facility",
+        "unit": "lump",
+        "quantity": 1.0,
+        "price": 9.0e7,
+        "escalation": "capex",
+        "life_years": 20,
+        **kw,
+    }
+
+
+def _share(name: str = "maintenance", base: str = "capex/facility", **kw: Any) -> dict:
+    return {
+        "name": name,
+        "kind": "opex",
+        "category": "maintenance",
+        "unit": "share",
+        "quantity_source": f"share_of:{base}",
+        "quantity": 0.015,
+        "escalation": "opex",
+        **kw,
+    }
+
+
+def _case(*lines: dict, **kw: Any) -> B.BusinessCaseInputs:
+    return B.BusinessCaseInputs(lines=list(lines), **kw)
+
+
+def _refusals(case: B.BusinessCaseInputs) -> list[tuple[str, str]]:
+    return [(r.kind, r.field) for r in case.refusals(horizon=H, base_year=BASE)]
 
 
 def _full() -> B.BusinessCaseInputs:
-    return B.BusinessCaseInputs(
-        revenue_model="gpu_hour",
-        gpu_hour=B.GpuHourRevenue(
-            price_per_gpu_hour=2.5,
-            reserved_share=0.6,
-            reserved_price_per_gpu_hour=2.0,
-            kw_per_gpu=1.28,
-            sold_share=0.9,
-            indexation=-0.05,
+    """A case that fills every column of every model at least once."""
+    default = B.CostDefault(
+        key=DC_KEYS["facility_life"],
+        value=20.0,
+        unit="years",
+        source="assumed: test",
+        source_year=2026,
+        currency=None,
+        money_year=None,
+        pack="generic@2026-11-10#abc",
+    )
+    return _case(
+        _rev(
+            quantity_by_year={2027: 5.0e5},
+            price_by_year={2027: 3.0},
+            money_year=2025,
+            start_year=2027,
+            end_year=2046,
+            note="term sheet",
+            preset_rule={
+                "requires": ["facility"],
+                "excludes": ["it_hardware"],
+                "price_includes_energy": True,
+            },
         ),
-        colocation=B.ColocationRevenue(
-            price_per_kw_month=150.0,
-            indexation=0.02,
-            lease_up_by_phase=[[0.5, 0.8, 1.0], [1.0]],
+        _capex(
+            depreciation="declining_balance",
+            rate=0.1,
+            refresh_years=10,
+            life_years=20.0,
+            assumed={"life_years": default},
+            default_keys={"life_years": DC_KEYS["facility_life"]},
         ),
-        pass_through=B.PowerPassThrough(enabled=False, share=1.0, margin=0.05),
-        facility=B.Facility(capex_per_mw_it=9.0e6, life_years=20),
-        it_hardware=B.ItHardware(
-            capex_basis="per_gpu", capex=30_000.0, life_years=5, refresh_years=5
+        _share(),
+        _rev(
+            "h2",
+            quantity_source="linked:h2.served@2026-11-10",
+            quantity=None,
+            unit="kg",
+            price=4.0,
         ),
-        opex=B.NonEnergyOpex(
-            staff_per_mw_year=40_000.0,
-            maintenance_share=0.015,
-            insurance_share=0.005,
-            property_tax_share=0.01,
-            network_per_mw_year=10_000.0,
-            sga_share=0.15,
-        ),
+        preset="eh_datacenter@1",
         receivable_days=45,
     )
 
 
-# ---------------------------------------------------------------- round trip
+# ---------------------------------------------------------------- round trip, closed lists
 
 
-def test_round_trip_json():
+def test_round_trip_every_column_json():
+    """GK B P2: JSON turns the grids' int keys into strings; they come back as ints."""
     full = _full()
-    again = B.BusinessCaseInputs.model_validate_json(full.model_dump_json())
-    assert again == full
-    assert (
-        B.BusinessCaseInputs.model_validate(json.loads(full.model_dump_json())) == full
+    js = full.model_dump_json()
+    back = B.BusinessCaseInputs.model_validate_json(js)
+    assert back == full
+    assert back.lines[0].price_by_year == {2027: 3.0}
+    assert back.model_dump_json() == js
+    # Every LineItem column is set to a non-default somewhere in _full().
+    set_cols = {k for ln in full.lines for k in ln.model_fields_set}
+    assert set_cols == set(B.LineItem.model_fields)
+    assert set(B.PresetRule.model_fields) <= set(
+        full.lines[0].preset_rule.model_fields_set
     )
 
 
-def test_round_trip_with_assumed_defaults():
-    filled = B.BusinessCaseInputs().with_cost_defaults(
-        loader.load_defaults_pack(NEW), currency="EUR"
-    )
-    assert filled.assumed
-    assert B.BusinessCaseInputs.model_validate_json(filled.model_dump_json()) == filled
-
-
-def test_empty_inputs_are_valid_and_not_established():
-    """A partial case is saved: every price and cost is None, never 0."""
-    empty = B.BusinessCaseInputs()
-    assert empty.revenue_model is None
-    assert empty.gpu_hour.price_per_gpu_hour is None
-    assert empty.colocation.price_per_kw_month is None
-    assert empty.facility.capex_per_mw_it is None
-    assert empty.it_hardware.capex is None
-    assert all(v is None for v in empty.opex.model_dump().values())
-    assert empty.receivable_days is None
-
-
-# ---------------------------------------------------------------- validation names its field
+@pytest.mark.parametrize("key", ["2030.5", "x", "", "1e3"])
+def test_a_non_integer_grid_year_is_refused(key):
+    js = json.dumps({"lines": [_rev(price_by_year={key: 1.0})]})
+    with pytest.raises(ValidationError) as e:
+        B.BusinessCaseInputs.model_validate_json(js)
+    assert e.value.errors()[0]["loc"][:3] == ("lines", 0, "price_by_year")
 
 
 @pytest.mark.parametrize(
-    "payload, field",
+    "model, payload",
     [
-        ({"gpu_hour": {"reserved_share": 1.2}}, "reserved_share"),
-        ({"gpu_hour": {"sold_share": -0.1}}, "sold_share"),
-        ({"gpu_hour": {"price_per_gpu_hour": -1}}, "price_per_gpu_hour"),
-        ({"gpu_hour": {"kw_per_gpu": 0}}, "kw_per_gpu"),
-        ({"gpu_hour": {"indexation": -1.0}}, "indexation"),
-        ({"colocation": {"price_per_kw_month": -5}}, "price_per_kw_month"),
-        ({"colocation": {"lease_up_by_phase": [[0.5, 1.5]]}}, "lease_up_by_phase[0]"),
-        ({"colocation": {"lease_up_by_phase": [[]]}}, "lease_up_by_phase[0]"),
-        ({"pass_through": {"enabled": True}}, "share"),
-        ({"pass_through": {"share": 1.1}}, "share"),
-        ({"pass_through": {"margin": -0.1}}, "margin"),
-        ({"facility": {"life_years": 0.5}}, "life_years"),
-        ({"facility": {"capex_per_mw_it": -1}}, "capex_per_mw_it"),
-        ({"it_hardware": {"life_years": 0}}, "life_years"),
-        ({"it_hardware": {"refresh_years": 0}}, "refresh_years"),
-        ({"it_hardware": {"capex_basis": "per_rack"}}, "capex_basis"),
-        ({"opex": {"maintenance_share": 1.5}}, "maintenance_share"),
-        ({"opex": {"insurance_share": -0.1}}, "insurance_share"),
-        ({"opex": {"property_tax_share": 2}}, "property_tax_share"),
-        ({"opex": {"sga_share": 1.01}}, "sga_share"),
-        ({"opex": {"staff_per_mw_year": -1}}, "staff_per_mw_year"),
-        ({"opex": {"network_per_mw_year": -1}}, "network_per_mw_year"),
-        ({"receivable_days": -1}, "receivable_days"),
-        ({"receivable_days": 400}, "receivable_days"),
-        ({"revenue_model": "services"}, "revenue_model"),
+        (B.BusinessCaseInputs, {"revenue_model": "gpu_hour"}),
+        (B.LineItem, {**_rev(), "tax": "exempt"}),  # G-C2: no tax column
+        (B.PresetRule, {"requires": [], "owns": []}),
         (
-            {"gpu_hour": {"price_per_gpu_hours": 2}},
-            "price_per_gpu_hours",
-        ),  # a typo is refused
-    ],
-)
-def test_every_invalid_field_is_named(payload, field):
-    with pytest.raises(ValidationError) as exc:
-        B.BusinessCaseInputs.model_validate(payload)
-    err = exc.value.errors()[0]
-    assert field in ".".join(str(p) for p in err["loc"]) + " " + err["msg"]
-
-
-def test_assumed_must_match_its_field():
-    filled = B.BusinessCaseInputs().with_cost_defaults(
-        loader.load_defaults_pack(NEW), currency="EUR"
-    )
-    data = filled.model_dump()
-    data["facility"]["life_years"] = 25  # edited, entry kept: refused
-    with pytest.raises(ValidationError, match="facility.life_years"):
-        B.BusinessCaseInputs.model_validate(data)
-    del data["assumed"][
-        "facility.life_years"
-    ]  # edited, entry dropped: the user's figure
-    assert B.BusinessCaseInputs.model_validate(data).facility.life_years == 25
-
-
-def test_assumed_names_only_cost_fields():
-    with pytest.raises(
-        ValidationError,
-        match=r"\['gpu_hour.price_per_gpu_hour'\], which are not defaultable",
-    ):
-        B.BusinessCaseInputs.model_validate(
+            B.CostDefault,
             {
-                "assumed": {
-                    "gpu_hour.price_per_gpu_hour": {
-                        "key": "k",
-                        "value": 1,
-                        "unit": "u",
-                        "source": "s",
-                        "source_year": 2026,
-                        "pack": "p",
-                    }
-                }
-            }
-        )
-
-
-# ---------------------------------------------------------------- typed refusals (BC7)
-
-
-def _runnable_colocation() -> B.BusinessCaseInputs:
-    return B.BusinessCaseInputs(
-        revenue_model="colocation",
-        colocation=B.ColocationRevenue(price_per_kw_month=150.0),
-        pass_through=B.PowerPassThrough(enabled=True, share=1.0, margin=0.05),
-        facility=B.Facility(capex_per_mw_it=9.0e6, life_years=20),
-    )
-
-
-def _drop(inputs: B.BusinessCaseInputs, path: str) -> B.BusinessCaseInputs:
-    data = inputs.model_dump()
-    group, name = path.split(".")
-    data[group][name] = None
-    return B.BusinessCaseInputs.model_validate(data)
-
-
-def test_runnable_cases_pass():
-    _full().require_runnable()
-    _runnable_colocation().require_runnable()
-
-
-@pytest.mark.parametrize(
-    "inputs, cls, field",
-    [
-        (B.BusinessCaseInputs(), B.RevenueModelMissing, "revenue_model"),
-        (
-            _drop(_full(), "gpu_hour.price_per_gpu_hour"),
-            B.PriceNotEstablished,
-            "gpu_hour.price_per_gpu_hour",
-        ),
-        (
-            _drop(_full(), "gpu_hour.reserved_price_per_gpu_hour"),
-            B.PriceNotEstablished,
-            "gpu_hour.reserved_price_per_gpu_hour",
-        ),
-        (
-            _drop(_full(), "gpu_hour.kw_per_gpu"),
-            B.PriceNotEstablished,
-            "gpu_hour.kw_per_gpu",
-        ),
-        (_drop(_full(), "it_hardware.capex"), B.ItCapexMissing, "it_hardware.capex"),
-        (
-            _drop(_full(), "it_hardware.life_years"),
-            B.LifeMissing,
-            "it_hardware.life_years",
-        ),
-        (
-            _drop(_full(), "facility.capex_per_mw_it"),
-            B.FacilityCapexMissing,
-            "facility.capex_per_mw_it",
-        ),
-        (_drop(_full(), "facility.life_years"), B.LifeMissing, "facility.life_years"),
-        (
-            _drop(_runnable_colocation(), "colocation.price_per_kw_month"),
-            B.PriceNotEstablished,
-            "colocation.price_per_kw_month",
-        ),
-        (
-            _drop(_runnable_colocation(), "facility.capex_per_mw_it"),
-            B.FacilityCapexMissing,
-            "facility.capex_per_mw_it",
+                "key": "k",
+                "value": 1,
+                "unit": "u",
+                "source": "s",
+                "source_year": 2026,
+                "pack": "p",
+                "extra": 1,
+            },
         ),
     ],
 )
-def test_each_refusal_is_typed_and_names_its_field(inputs, cls, field):
-    """Fail-closed: the exact subclass (a base-class mutant fails), the field and the code."""
-    with pytest.raises(B.BusinessCaseRefused) as exc:
-        inputs.require_runnable()
-    assert type(exc.value) is cls
-    assert exc.value.field == field
-    assert exc.value.code == f"business_case_refused:{cls.kind}"
-    assert field in str(exc.value)
+def test_extra_columns_are_refused(model, payload):
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        model.model_validate(payload)
 
 
-def test_kinds_are_distinct():
-    kinds = [
-        c.kind
-        for c in (
-            B.RevenueModelMissing,
-            B.PriceNotEstablished,
-            B.ItCapexMissing,
-            B.FacilityCapexMissing,
-            B.LifeMissing,
-            B.ItCapexNotOwned,
-            B.PassThroughNotColocation,
+def test_closed_lists_match_the_spec():
+    assert get_args(B.Escalation) == (*ESCALATION_CLASSES, "contract")
+    assert get_args(B.Unit) == (
+        "MWh",
+        "MWh_H2",
+        "kg",
+        "t",
+        "GPU_h",
+        "kW_month",
+        "kW_year",
+        "MW_year",
+        "unit",
+        "unit_month",
+        "lump",
+        "share",
+    )
+    assert get_args(B.Depreciation) == ("straight_line", "declining_balance")
+    assert "land" not in B.CATEGORIES["capex"]
+    for bad in (
+        {"kind": "asset"},
+        {"unit": "MW"},
+        {"escalation": "cpi"},
+        {"category": "compute_revenue"},
+    ):
+        with pytest.raises(ValidationError):
+            B.LineItem.model_validate({**_rev(), **bad})
+
+
+def test_category_stream_is_spec_table_and_complete():
+    """GK B P5: pinned literally to spec §3's table, and complete both ways."""
+    assert B.CATEGORY_STREAM == {
+        ("revenue", "product_sale"): ("product_revenue", "contract"),
+        ("revenue", "by_product"): ("byproduct_revenue", "contract"),
+        ("revenue", "service_fee"): ("service_revenue", "contract"),
+        ("revenue", "lease"): ("lease_revenue", "contract"),
+        ("revenue", "capacity_payment"): ("capacity_revenue", "contract"),
+        ("revenue", "tariff"): ("tariff_revenue", "contract"),
+        ("revenue", "cost_recovery"): ("power_passthrough", "contract"),
+        ("revenue", "incentive"): ("premium_revenue", "contract"),
+        ("revenue", "other"): ("other_revenue", "contract"),
+        ("opex", "staff"): ("bc_staff", "opex"),
+        ("opex", "maintenance"): ("bc_maintenance", "opex"),
+        ("opex", "insurance"): ("bc_insurance", "opex"),
+        ("opex", "property_tax"): ("bc_property_tax", "opex"),
+        ("opex", "feedstock"): ("bc_feedstock", "opex"),
+        ("opex", "consumables"): ("bc_consumables", "opex"),
+        ("opex", "network"): ("bc_network", "opex"),
+        ("opex", "land"): ("bc_land", "opex"),
+        ("opex", "sga"): ("bc_sga", "opex"),
+        ("opex", "other"): ("bc_other", "opex"),
+        ("capex", "facility"): (None, "capex"),
+        ("capex", "equipment"): (None, "capex"),
+        ("capex", "it_hardware"): (None, "capex"),
+        ("capex", "other"): (None, "capex"),
+    }
+    pairs = {(k, c) for k in get_args(B.Kind) for c in B.CATEGORIES[k]}
+    assert set(B.CATEGORY_STREAM) == pairs
+    assert set(get_args(B.Category)) == {c for _, c in pairs}
+
+
+def test_capex_depreciation_defaults_to_straight_line():
+    assert B.LineItem(**_capex()).depreciation == "straight_line"
+    assert B.LineItem(**_opex()).depreciation is None
+
+
+def test_provenance_reads_assumed():
+    assert B.LineItem(**_opex()).provenance == "stated"
+    assert _full().lines[1].provenance == "assumed"
+
+
+# ---------------------------------------------------------------- F1: Finite on every float
+
+#: (payload builder, column) for every float column; grid cells as `<grid>[]`.
+FLOAT_COLUMNS = [
+    (_rev, "quantity"),
+    (_rev, "quantity_by_year[]"),
+    (_rev, "price"),
+    (_rev, "price_by_year[]"),
+    (_rev, "indexation"),
+    (_capex, "life_years"),
+    (lambda: _capex(depreciation="declining_balance"), "rate"),
+    (_capex, "refresh_years"),
+]
+
+
+def _float_fields(model) -> set[str]:
+    return {
+        n
+        for n, f in model.model_fields.items()
+        if "float" in str(f.annotation) or "Finite" in str(f.annotation)
+    }
+
+
+def test_float_column_list_is_complete():
+    assert {c.removesuffix("[]") for _, c in FLOAT_COLUMNS} == _float_fields(B.LineItem)
+    assert _float_fields(B.BusinessCaseInputs) == {"receivable_days"}
+    assert _float_fields(B.CostDefault) == {"value"}
+
+
+@pytest.mark.parametrize("bad", [math.inf, -math.inf, math.nan])
+@pytest.mark.parametrize("build, column", FLOAT_COLUMNS)
+def test_every_float_column_refuses_non_finite(build, column, bad):
+    payload = build()
+    if column.endswith("[]"):
+        payload[column[:-2]] = {2030: bad}
+    else:
+        payload[column] = bad
+    with pytest.raises(ValidationError) as e:
+        B.LineItem.model_validate(payload)
+    assert e.value.errors()[0]["loc"][0] == column.removesuffix("[]")
+
+
+@pytest.mark.parametrize("bad", ["Infinity", "NaN", "-Infinity"])
+def test_a_json_infinity_is_refused_in_a_grid_cell(bad):
+    js = (
+        '{"lines": ['
+        + json.dumps(_rev())[:-1]
+        + ', "price_by_year": {"2030": '
+        + bad
+        + "}}]}"
+    )
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs.model_validate_json(js)
+
+
+@pytest.mark.parametrize("bad", [math.inf, math.nan])
+def test_receivable_days_and_a_cost_default_refuse_non_finite(bad):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(receivable_days=bad)
+    with pytest.raises(ValidationError):
+        B.CostDefault(
+            key="k", value=bad, unit="u", source="s", source_year=2026, pack="p"
         )
+
+
+# ---------------------------------------------------------------- shape faults (GK B Q3)
+
+
+@pytest.mark.parametrize(
+    "payload, loc",
+    [
+        (_rev(life_years=10), "life_years"),
+        (_opex(depreciation="straight_line"), "depreciation"),
+        (_opex(refresh_years=5), "refresh_years"),
+        (_capex(rate=0.2), "rate"),  # straight_line takes no rate
+        (_opex(indexation=0.02), "indexation"),
+        (_rev(quantity_source="linked:h2.served@1"), "quantity"),
+        (
+            _rev(
+                quantity_source="linked:h2.served@1",
+                quantity=None,
+                quantity_by_year={2030: 1.0},
+            ),
+            "quantity_by_year",
+        ),
+        (_share(price=1.0), "price"),
+        (_share(price_by_year={2030: 1.0}), "price_by_year"),
+        (_opex(preset_rule={}), "preset_rule"),
+        (_rev(default_keys={"price": "k"}), "default_keys"),
+        (_capex(rate=0.0, depreciation="declining_balance"), "rate"),
+        (_capex(rate=1.01, depreciation="declining_balance"), "rate"),
+        (_capex(life_years=0.5), "life_years"),
+        (_capex(refresh_years=0.5), "refresh_years"),
+        (_rev(name=""), "name"),
+        (_rev(name="x" * 81), "name"),
+        (_rev(quantity_source="linked:h2"), "quantity_source"),  # no catalogue version
+        (_rev(quantity_source="share_of:assets"), "quantity_source"),
+        (_rev(quantity_source="typed "), "quantity_source"),
+    ],
+)
+def test_each_shape_fault_names_its_column(payload, loc):
+    with pytest.raises(ValidationError) as e:
+        B.BusinessCaseInputs(lines=[payload])
+    assert e.value.errors()[0]["loc"][:3] == ("lines", 0, loc)
+
+
+def test_boundary_shapes_are_accepted():
+    B.LineItem(
+        **_capex(
+            depreciation="declining_balance", rate=1.0, life_years=1, refresh_years=1
+        )
+    )
+    B.LineItem(**_rev(name="x" * 80))
+    B.LineItem(**_rev(quantity_source="linked:a@b", quantity=None))
+    B.LineItem(**_share(quantity_source="share_of:revenue"))
+
+
+def test_assumed_must_hold_its_column():
+    d = B.CostDefault(
+        key="k", value=20.0, unit="years", source="s", source_year=2026, pack="p"
+    )
+    with pytest.raises(ValidationError, match=r"assumed\[life_years\] holds 20.0"):
+        B.LineItem(**_capex(life_years=25, assumed={"life_years": d}))
+
+
+def test_a_preset_cannot_require_and_exclude_one_category():
+    with pytest.raises(ValidationError, match="both required and excluded"):
+        B.PresetRule(requires=["facility"], excludes=["facility"])
+
+
+@pytest.mark.parametrize("bad", ["eh_datacenter", "@1", "a@b@c", "a b@1"])
+def test_preset_is_id_at_version(bad):
+    with pytest.raises(ValidationError):
+        B.BusinessCaseInputs(preset=bad)
+    assert B.BusinessCaseInputs(preset="eh_datacenter@2026-11-10").preset
+
+
+# ---------------------------------------------------------------- refusals (G9)
+
+
+def test_a_complete_case_has_no_refusal():
+    case = _case(_rev(), _opex(), _capex(), _share())
+    assert _refusals(case) == []
+    case.require_runnable(horizon=H, base_year=BASE)
+
+
+@pytest.mark.parametrize(
+    "lines, kind, field",
+    [
+        ([_rev(), _rev()], "name_duplicate", "lines[1].name"),
+        ([_rev(category="staff")], "category_not_in_kind", "lines[0].category"),
+        ([_capex(category="land")], "category_not_in_kind", "lines[0].category"),
+        ([_rev(unit="share")], "unit_not_allowed", "lines[0].unit"),
+        ([_rev(unit="lump")], "unit_not_allowed", "lines[0].unit"),
+        ([_opex(unit="lump")], "unit_not_allowed", "lines[0].unit"),
+        (
+            [_rev(quantity_source="linked:x@1", quantity=None, unit="share")],
+            "unit_not_allowed",
+            "lines[0].unit",
+        ),
+        ([_capex(), _share(unit="unit")], "unit_not_allowed", "lines[1].unit"),
+        ([_rev(quantity=None)], "quantity_missing", "lines[0].quantity"),
+        ([_capex(), _share(quantity=None)], "quantity_missing", "lines[1].quantity"),
+        (
+            [_capex(), _share(quantity=1.0001)],
+            "share_out_of_range",
+            "lines[1].quantity",
+        ),
+        (
+            [_capex(), _share(quantity=-0.0001)],
+            "share_out_of_range",
+            "lines[1].quantity",
+        ),
+        (
+            [_capex(), _share(quantity_by_year={2030: 1.5})],
+            "share_out_of_range",
+            "lines[1].quantity_by_year[2030]",
+        ),
+        ([_share(base="opex")], "share_cycle", "lines[0].quantity_source"),
+        (
+            [_capex(), _share("a"), _share("b", base="opex/maintenance")],
+            "share_cycle",
+            "lines[2].quantity_source",
+        ),
+        ([_share(base="opex/staff")], "share_base_empty", "lines[0].quantity_source"),
+        (
+            [_rev(), _share(base="capex")],
+            "share_base_empty",
+            "lines[1].quantity_source",
+        ),
+        (
+            [_share(base="capex/staff")],
+            "category_not_in_kind",
+            "lines[0].quantity_source",
+        ),
+        (
+            [_rev(start_year=2030, end_year=2029)],
+            "end_before_start",
+            "lines[0].end_year",
+        ),
+        ([_rev(start_year=2026)], "outside_horizon", "lines[0].start_year"),
+        ([_rev(end_year=2047)], "outside_horizon", "lines[0].end_year"),
+        (
+            [_rev(price_by_year={2026: 1.0})],
+            "year_out_of_range",
+            "lines[0].price_by_year[2026]",
+        ),
+        (
+            [_rev(end_year=2030, quantity_by_year={2031: 1.0})],
+            "year_out_of_range",
+            "lines[0].quantity_by_year[2031]",
+        ),
+        ([_rev(money_year=BASE + 6)], "year_out_of_range", "lines[0].money_year"),
+        ([_rev(money_year=1989)], "year_out_of_range", "lines[0].money_year"),
+        ([_rev(indexation=None)], "indexation_missing", "lines[0].indexation"),
+        ([_capex(life_years=None)], "life_missing", "lines[0].life_years"),
+        ([_capex(depreciation="declining_balance")], "rate_missing", "lines[0].rate"),
+        ([_rev(price=None)], "price_not_established", "lines[0].price"),
+        (
+            [_rev(price=None, quantity_source="linked:x@1", quantity=None)],
+            "price_not_established",
+            "lines[0].price",
+        ),
+        ([_opex(price=None)], "cost_not_established", "lines[0].price"),
+        ([_capex(price=None)], "cost_not_established", "lines[0].price"),
+        # G7
+        (
+            [_rev(preset_rule={"requires": ["it_hardware"]})],
+            "it_capex_missing",
+            "lines[0].preset_rule.requires[it_hardware]",
+        ),
+        (
+            [_rev(preset_rule={"requires": ["facility"]})],
+            "facility_capex_missing",
+            "lines[0].preset_rule.requires[facility]",
+        ),
+        (
+            [_rev(preset_rule={"requires": ["equipment"]})],
+            "capex_missing",
+            "lines[0].preset_rule.requires[equipment]",
+        ),
+        # #1320 F2: an excluded capex, the category in the field path
+        (
+            [
+                _rev(preset_rule={"excludes": ["it_hardware"]}),
+                _capex("gpus", category="it_hardware"),
+            ],
+            "capex_not_owned",
+            "lines[1].category",
+        ),
+        (
+            [
+                _rev(preset_rule={"price_includes_energy": True}),
+                _rev("power", category="cost_recovery", unit="MWh"),
+            ],
+            "pass_through_price_includes_energy",
+            "lines[1].category",
+        ),
+    ],
+)
+def test_each_refusal_names_its_kind_and_field(lines, kind, field):
+    case = _case(*lines)
+    assert (kind, field) in _refusals(case)
+    found = {r.kind for r in case.refusals(horizon=H, base_year=BASE)}
+    assert found <= set(B.REFUSAL_KINDS)
+    with pytest.raises(B.BusinessCaseRefused) as e:
+        case.require_runnable(horizon=H, base_year=BASE)
+    assert e.value.code.startswith("business_case_refused:")
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        [_capex(), _share(quantity=0.0)],
+        [_capex(), _share(quantity=1.0)],
+        [
+            _capex(),
+            _share(
+                quantity=None, quantity_by_year={y: 0.5 for y in range(H[0], H[1] + 1)}
+            ),
+        ],
+        [_rev(start_year=2030, end_year=2030)],
+        [_rev(start_year=H[0], end_year=H[1])],
+        [_rev(money_year=BASE + 5)],
+        [_rev(money_year=1990)],
+        [_rev(price_by_year={H[0]: 1.0, H[1]: 2.0})],
+        [_rev(price=None, end_year=2028, price_by_year={2027: 1.0, 2028: 1.1})],
+        [_opex(price=None, price_by_year={y: 1.0 for y in range(H[0], H[1] + 1)})],
+        [_rev(quantity=None, quantity_by_year={y: 1.0 for y in range(H[0], H[1] + 1)})],
+        [_capex(depreciation="declining_balance", rate=0.2)],
+        [_rev(escalation="tariff", indexation=None)],
+        [
+            _rev(preset_rule={"requires": ["it_hardware", "facility", "equipment"]}),
+            _capex(),
+            _capex("gpus", category="it_hardware"),
+            _capex("racks", category="equipment"),
+        ],
+        [_rev(preset_rule={"excludes": ["it_hardware"]}), _capex()],
+        [
+            _rev(preset_rule={"price_includes_energy": False}),
+            _rev("power", category="cost_recovery", unit="MWh"),
+        ],
+        [_rev(), _share("sga", base="revenue", category="sga")],
+        [_capex(), _capex("lump2", unit="lump")],
+    ],
+)
+def test_the_other_side_of_each_boundary_runs(lines):
+    assert _refusals(_case(*lines)) == []
+
+
+def test_share_base_with_one_line_runs_and_empty_refuses():
+    """GK B Q5: an SG&A share with no revenue line is named, never a 0."""
+    sga = _share("sga", base="revenue", category="sga")
+    assert _refusals(_case(sga)) == [("share_base_empty", "lines[0].quantity_source")]
+    assert _refusals(_case(_rev(), sga)) == []
+
+
+def test_a_partial_price_grid_is_not_established():
+    case = _case(_rev(price=None, price_by_year={2027: 1.0}))
+    assert _refusals(case) == [("price_not_established", "lines[0].price")]
+
+
+def test_order_is_line_then_column_and_not_established_last():
+    """GK B P4."""
+    case = _case(
+        _rev("a", price=None, money_year=1900, unit="lump"),
+        _rev("a", indexation=None),
+    )
+    got = _refusals(case)
+    assert got == [
+        ("unit_not_allowed", "lines[0].unit"),
+        ("year_out_of_range", "lines[0].money_year"),
+        ("price_not_established", "lines[0].price"),
+        ("name_duplicate", "lines[1].name"),
+        ("indexation_missing", "lines[1].indexation"),
     ]
-    assert len(set(kinds)) == len(kinds) and B.BusinessCaseRefused.kind not in kinds
+    with pytest.raises(B.UnitNotAllowed) as e:
+        case.require_runnable(horizon=H, base_year=BASE)
+    assert (e.value.kind, e.value.field) == got[0]
+    assert _refusals(case) == got  # deterministic
 
 
-def test_reserved_price_needed_only_with_a_reserved_share():
-    data = _full().model_dump()
-    data["gpu_hour"].update(reserved_share=0.0, reserved_price_per_gpu_hour=None)
-    B.BusinessCaseInputs.model_validate(data).require_runnable()
+def test_kinds_are_distinct_subclasses_and_the_documented_list():
+    """GK B P3: a kind cannot be added silently."""
+    subs = B.BusinessCaseRefused.__subclasses__()
+    kinds = [c.kind for c in subs]
+    assert len(kinds) == len(set(kinds))
+    assert set(kinds) == set(B.REFUSAL_KINDS)
+    assert len(B.REFUSAL_KINDS) == len(set(B.REFUSAL_KINDS))
+    err = B.CapexNotOwned("lines[3].category")
+    assert err.code == "business_case_refused:capex_not_owned"
+    assert err.field == "lines[3].category" and isinstance(err, ValueError)
 
 
-def test_colocation_never_needs_it_hardware():
-    """R2: the tenant owns the IT; no IT capex, no refusal."""
-    inputs = _runnable_colocation()
-    assert inputs.it_hardware.capex is None
-    inputs.require_runnable()
+def test_no_retired_dc_kind_survives():
+    """GK B ruling 2026-11-10: one kind per refusal, no aliases."""
+    src = Path(B.__file__).read_text()
+    for retired in (
+        "it_capex_not_owned",
+        "pass_through_not_colocation",
+        "revenue_model_missing",
+    ):
+        assert retired not in src
 
 
-def test_defaults_never_make_a_case_runnable_without_a_price():
-    """Cost defaults fill costs only (DCBC-SCOPE-1 Q4): the price is still refused."""
-    filled = B.BusinessCaseInputs(revenue_model="colocation").with_cost_defaults(
-        loader.load_defaults_pack(NEW), currency="EUR"
-    )
-    with pytest.raises(B.PriceNotEstablished):
-        filled.require_runnable()
+# ---------------------------------------------------------------- per-year override
 
 
-# ---------------------------------------------------------------- real units (BC7)
-
-
-def test_kw_month_is_twelve_times_a_year():
-    """USD 181 per kW-month ≈ USD 2.2 M per MW-year (research §3, derived)."""
-    rent = B.ColocationRevenue(price_per_kw_month=181.0).rent_per_kw_year()
-    assert rent == pytest.approx(2172.0)
-    assert rent * 1000 == pytest.approx(2.172e6)
-
-
-def test_gpu_count_and_gpu_hours_in_kw_per_gpu():
-    """1 MW of IT at 1.28 kW per GPU (H100 DGX all-in, research §5) is 781.25 GPUs; one MWh of
-    served IT energy is 781.25 GPU-hours, times the sold share (never a second u(t))."""
-    gpu = B.GpuHourRevenue(kw_per_gpu=1.28, sold_share=0.8)
-    assert gpu.gpu_count(1.0) == pytest.approx(781.25)
-    assert gpu.gpu_hours(1.0) == pytest.approx(781.25 * 0.8)
-    assert gpu.gpu_hours(8760.0) == pytest.approx(
-        gpu.gpu_count(1.0) * B.HOURS_PER_YEAR * 0.8
-    )
-
-
-def test_it_capex_per_gpu_and_per_mw():
-    gpu = B.GpuHourRevenue(kw_per_gpu=1.25)
-    per_gpu = B.ItHardware(capex_basis="per_gpu", capex=40_000.0)
-    per_mw = B.ItHardware(capex_basis="per_mw_it", capex=32.0e6)
-    assert per_gpu.capex_total(2.0, gpu) == pytest.approx(1600 * 40_000.0)
-    assert per_mw.capex_total(2.0) == pytest.approx(64.0e6)
-    with pytest.raises(B.PriceNotEstablished):
-        per_gpu.capex_total(2.0)  # per GPU without kW per GPU
-    with pytest.raises(B.ItCapexMissing):
-        B.ItHardware().capex_total(2.0)
-
-
-def test_unit_helpers_refuse_without_their_input():
-    with pytest.raises(B.PriceNotEstablished):
-        B.ColocationRevenue().rent_per_kw_year()
-    for call in (lambda g: g.gpu_hours(1.0), lambda g: g.gpu_count(1.0)):
-        with pytest.raises(B.PriceNotEstablished) as exc:
-            call(B.GpuHourRevenue())
-        assert exc.value.field == "gpu_hour.kw_per_gpu"
-    with pytest.raises(B.PriceNotEstablished) as exc:  # per GPU, kW per GPU unset
-        B.ItHardware(capex_basis="per_gpu", capex=1.0).capex_total(
-            1.0, B.GpuHourRevenue()
+def test_a_grid_cell_is_that_years_value_unescalated_in_money_year():
+    """GK B 2026-11-10: the cell is that year's value in the line's money_year money, the
+    row's escalation does not apply to that year, and every cell is Finite."""
+    ln = B.LineItem(
+        **_rev(
+            price=2.5,
+            money_year=2025,
+            price_by_year={2030: 3.0},
+            quantity_by_year={2031: 7.0},
         )
-    assert exc.value.field == "gpu_hour.kw_per_gpu"
+    )
+    assert ln.cell("price", 2030) == B.Cell(3.0, 2025, False)
+    assert ln.cell("price", 2031) == B.Cell(2.5, 2025, True)
+    assert ln.cell("quantity", 2031) == B.Cell(7.0, 2025, False)
+    assert ln.cell("quantity", 2030) == B.Cell(1.0e6, 2025, True)
+    assert B.LineItem(**_rev(price=None)).cell("price", 2030) == B.Cell(
+        None, None, True
+    )
+    with pytest.raises(ValidationError):
+        B.LineItem(**_rev(price_by_year={2030: math.inf}))
 
 
-# ---------------------------------------------------------------- pack defaults (BC9)
+# ---------------------------------------------------------------- defaults (BC9, G-C1, P1)
+
+
+def _dc_lines() -> list[dict]:
+    """The DC defaults as cost lines with their pack keys (07 will ship these rows)."""
+    return [
+        _rev(preset_rule={"requires": ["facility"]}),
+        _capex(
+            price=None,
+            life_years=None,
+            default_keys={
+                "price": DC_KEYS["facility_capex"],
+                "life_years": DC_KEYS["facility_life"],
+            },
+        ),
+        _capex(
+            "gpus",
+            category="it_hardware",
+            unit="unit",
+            quantity=1000,
+            price=30_000.0,
+            life_years=None,
+            default_keys={"life_years": DC_KEYS["it_life"]},
+        ),
+        _share(
+            "maint", quantity=None, default_keys={"quantity": DC_KEYS["maintenance"]}
+        ),
+        _share(
+            "ins",
+            base="capex",
+            category="insurance",
+            quantity=None,
+            default_keys={"quantity": DC_KEYS["insurance"]},
+        ),
+        _share(
+            "ptax",
+            base="capex",
+            category="property_tax",
+            quantity=None,
+            default_keys={"quantity": DC_KEYS["property_tax"]},
+        ),
+        _share(
+            "sga",
+            base="revenue",
+            category="sga",
+            quantity=None,
+            default_keys={"quantity": DC_KEYS["sga"]},
+        ),
+    ]
 
 
 def test_defaults_carry_source_year_and_assumed():
     pack = loader.load_defaults_pack(NEW)
-    filled = B.BusinessCaseInputs().with_cost_defaults(pack, currency="EUR")
-    assert set(filled.assumed) == set(B.COST_DEFAULT_KEYS)
-    for path, d in filled.assumed.items():
-        row = pack.value(B.COST_DEFAULT_KEYS[path])
+    filled = _case(*_dc_lines()).with_cost_defaults(pack, currency="EUR")
+    got = {(ln.name, col): d for ln in filled.lines for col, d in ln.assumed.items()}
+    assert {d.key for d in got.values()} == set(DC_KEYS.values())
+    for (name, col), d in got.items():
+        row = pack.value(d.key)
+        ln = next(x for x in filled.lines if x.name == name)
         assert d.status == "assumed" and row.illustrative is True
         assert d.source == row.source and d.source.startswith("assumed")
         assert d.source_year == 2026 and d.pack == pack.stamp
         assert row.range is not None and row.range.low <= d.value <= row.range.high
-        assert B._get(filled, path) == d.value
-    assert filled.assumed["facility.capex_per_mw_it"].currency == "EUR"
-    assert filled.assumed["facility.capex_per_mw_it"].money_year == 2025
-    assert filled.it_hardware.life_years == 5
-    life = pack.value("dc-business-case.it_hardware.lifetime").range
+        assert getattr(ln, col) == d.value and ln.provenance == "assumed"
+    fac = filled.lines[1]
+    assert got[("facility", "price")].currency == "EUR"
+    assert fac.life_years == 20 and filled.lines[2].life_years == 5
+    life = pack.value(DC_KEYS["it_life"]).range
     assert (life.low, life.high) == (4, 6)
     # Percent rows arrive as fractions (the loader's %/year -> share/year, % -> per unit).
-    assert filled.opex.maintenance_share == pytest.approx(0.015)
-    assert filled.opex.insurance_share == pytest.approx(0.005)
-    assert filled.opex.property_tax_share == pytest.approx(0.01)
-    assert filled.opex.sga_share == pytest.approx(0.15)
-    assert filled.facility.life_years == 20
+    assert [ln.quantity for ln in filled.lines[3:]] == pytest.approx(
+        [0.015, 0.005, 0.01, 0.15]
+    )
+    assert _refusals(filled) == []
 
 
-def test_defaults_never_fill_a_revenue_price_or_an_unsourced_line():
-    filled = B.BusinessCaseInputs().with_cost_defaults(
+def test_a_preset_defaults_money_year_survives_into_the_line():
+    """G-C1: the facility default is 2025 money, not the base year."""
+    filled = _case(*_dc_lines()).with_cost_defaults(
         loader.load_defaults_pack(NEW), currency="EUR"
     )
-    assert filled.gpu_hour.price_per_gpu_hour is None
-    assert filled.gpu_hour.kw_per_gpu is None
-    assert filled.colocation.price_per_kw_month is None
-    assert filled.it_hardware.capex is None  # no primary price list
-    assert filled.opex.staff_per_mw_year is None  # no primary per-MW source
-    assert filled.opex.network_per_mw_year is None
-    assert filled.receivable_days is None
+    fac = filled.lines[1]
+    assert fac.money_year == 2025 != BASE
+    assert fac.assumed["price"].money_year == 2025
+    assert fac.cell("price", 2030).money_year == 2025
+    back = B.BusinessCaseInputs.model_validate_json(filled.model_dump_json())
+    assert back.lines[1].money_year == 2025
+    # A life default carries no money year onto a line that has none.
+    assert filled.lines[2].money_year is None
 
 
-def test_defaults_never_overwrite_a_stated_value():
-    stated = B.BusinessCaseInputs(
-        facility=B.Facility(capex_per_mw_it=1.0, life_years=30),
-        opex=B.NonEnergyOpex(sga_share=0.0),
+def test_defaults_never_fill_a_revenue_line_or_overwrite_a_stated_value():
+    lines = _dc_lines()
+    lines[0]["price"] = None
+    lines[1] |= {"price": 1.0, "life_years": 30}
+    lines[6]["quantity"] = 0.0  # a stated 0 is the user's, kept
+    case = _case(*lines)
+    filled = case.with_cost_defaults(loader.load_defaults_pack(NEW), currency="EUR")
+    assert filled.lines[0].price is None and filled.lines[0].assumed == {}
+    assert filled.lines[1].price == 1.0 and filled.lines[1].life_years == 30
+    assert filled.lines[1].assumed == {} and filled.lines[1].money_year is None
+    assert filled.lines[6].quantity == 0.0 and filled.lines[6].assumed == {}
+    assert case.lines[1].assumed == {}  # input untouched
+    assert ("price_not_established", "lines[0].price") in _refusals(filled)
+
+
+# P1: each skip path ends in cost_not_established, never a 0.
+
+
+def _facility_after(pack, *, currency="EUR", **kw) -> list[tuple[str, str]]:
+    case = _case(
+        _rev(),
+        _capex(price=None, default_keys={"price": DC_KEYS["facility_capex"]}, **kw),
     )
-    filled = stated.with_cost_defaults(loader.load_defaults_pack(NEW), currency="EUR")
-    assert filled.facility.capex_per_mw_it == 1.0 and filled.facility.life_years == 30
-    assert filled.opex.sga_share == 0.0  # a stated 0 is the user's, kept
-    assert not {
-        "facility.capex_per_mw_it",
-        "facility.life_years",
-        "opex.sga_share",
-    } & set(filled.assumed)
+    filled = case.with_cost_defaults(pack, currency=currency)
+    assert filled.lines[1].price is None and "price" not in filled.lines[1].assumed
+    return _refusals(filled)
+
+
+NOT_ESTABLISHED = [("cost_not_established", "lines[1].price")]
+
+
+def test_no_default_key_is_cost_not_established():
+    case = _case(_rev(), _capex(price=None))
+    filled = case.with_cost_defaults(loader.load_defaults_pack(NEW), currency="EUR")
+    assert _refusals(filled) == NOT_ESTABLISHED
+
+
+def test_an_older_pack_is_cost_not_established():
+    assert _facility_after(loader.load_defaults_pack(PREV)) == NOT_ESTABLISHED
+
+
+def test_another_currency_is_skipped_not_converted():
     assert (
-        stated.assumed == {} and stated.facility.capex_per_mw_it == 1.0
-    )  # input untouched
-
-
-def test_a_money_default_in_another_currency_is_skipped_not_converted():
-    filled = B.BusinessCaseInputs().with_cost_defaults(
-        loader.load_defaults_pack(NEW), currency="USD"
+        _facility_after(loader.load_defaults_pack(NEW), currency="USD")
+        == NOT_ESTABLISHED
     )
-    assert filled.facility.capex_per_mw_it is None
-    assert "facility.capex_per_mw_it" not in filled.assumed
-    assert filled.facility.life_years == 20  # a life has no currency
 
 
-def test_an_older_pack_gives_no_defaults():
-    filled = B.BusinessCaseInputs().with_cost_defaults(
-        loader.load_defaults_pack(PREV), currency="EUR"
+def test_a_stated_different_money_year_is_skipped_not_converted():
+    """GK B Q4."""
+    assert (
+        _facility_after(loader.load_defaults_pack(NEW), money_year=BASE)
+        == NOT_ESTABLISHED
     )
-    assert filled.assumed == {} and filled == B.BusinessCaseInputs()
+    case = _case(
+        _capex(
+            price=None,
+            money_year=2025,
+            default_keys={"price": DC_KEYS["facility_capex"]},
+        )
+    )
+    filled = case.with_cost_defaults(loader.load_defaults_pack(NEW), currency="EUR")
+    assert filled.lines[0].price == pytest.approx(10.7e6 / 1.13, rel=1e-4)
+
+
+def _patched(update: dict) -> Any:
+    real = loader.load_defaults_pack(NEW)
+    bad = real.value(DC_KEYS["facility_capex"]).model_copy(update=update)
+
+    class _Pack:
+        stamp = real.stamp
+
+        def value(self, key):
+            return bad if key == bad.key else real.value(key)
+
+    return _Pack()
+
+
+def test_a_pack_row_without_a_value_is_cost_not_established():
+    pack = _patched({"value": None, "original_value": None, "status": "not_available"})
+    assert _facility_after(pack) == NOT_ESTABLISHED
+
+
+def test_a_pack_error_that_is_not_a_missing_row_propagates():
+    """Only a missing row (a LookupError) means "no default"; any other pack error is raised."""
+    real = loader.load_defaults_pack(NEW)
+
+    class _Broken:
+        stamp = real.stamp
+
+        def value(self, key):
+            raise loader.DefaultsPackError("corrupt pack")
+
+    with pytest.raises(loader.DefaultsPackError, match="corrupt pack"):
+        _case(*_dc_lines()).with_cost_defaults(_Broken(), currency="EUR")
+
+
+def test_a_pack_value_outside_its_column_range_is_refused():
+    real = loader.load_defaults_pack(NEW)
+    bad = real.value(DC_KEYS["facility_life"]).model_copy(update={"value": 0.5})
+
+    class _Pack:
+        stamp = real.stamp
+
+        def value(self, key):
+            return bad if key == bad.key else real.value(key)
+
+    with pytest.raises(ValidationError, match="life_years"):
+        _case(*_dc_lines()).with_cost_defaults(_Pack(), currency="EUR")
+
+
+# ---------------------------------------------------------------- the pack (BC9)
 
 
 def test_new_pack_keeps_every_previous_row_byte_equal():
@@ -431,10 +895,10 @@ def test_new_rows_price_no_part_and_no_revenue():
     no revenue price row (DCBC-SCOPE-1 Q4)."""
     pack = loader.load_defaults_pack(NEW)
     rows = [v for v in pack.cost_values if v.technology == "dc-business-case"]
-    assert {v.key for v in rows} == set(B.COST_DEFAULT_KEYS.values())
+    assert {v.key for v in rows} == set(DC_KEYS.values())
     assert all(v.part is None for v in rows)
     assert pack.cost_parts("dc-business-case") == []
-    assert not any("price" in v.key or "revenue" in v.key for v in rows)
+    assert not any(re.search(r"price|revenue", v.key) for v in rows)
     prev = loader.load_defaults_pack(PREV)
     assert [
         v for v in pack.cost_values if v.technology != "dc-business-case"
@@ -444,171 +908,7 @@ def test_new_rows_price_no_part_and_no_revenue():
 
 def test_facility_capex_default_is_the_converted_jll_figure():
     """USD 10.7 M/MW (JLL, 2025) at 1.13 USD/EUR (ECB 2025 average) ≈ EUR 9.47 M/MW."""
-    row = loader.load_defaults_pack(NEW).value("dc-business-case.facility.overnight")
+    row = loader.load_defaults_pack(NEW).value(DC_KEYS["facility_capex"])
     assert row.unit == "EUR/MW" and row.value == pytest.approx(10.7e6 / 1.13, rel=1e-4)
     assert row.range.low == pytest.approx(8.9e6 / 1.13, rel=1e-4)
     assert row.range.high == pytest.approx(23.3e6 / 1.13, rel=1e-4)
-
-
-def test_a_pack_row_without_a_value_is_skipped():
-    """A `not_available` row (value None) fills nothing, never a None default."""
-    real = loader.load_defaults_pack(NEW)
-    blank = real.value("dc-business-case.sga_share").model_copy(
-        update={"value": None, "original_value": None, "status": "not_available"}
-    )
-
-    class _Pack:
-        stamp = real.stamp
-
-        def value(self, key):
-            return blank if key == blank.key else real.value(key)
-
-    filled = B.BusinessCaseInputs().with_cost_defaults(_Pack(), currency="EUR")
-    assert filled.opex.sga_share is None and "opex.sga_share" not in filled.assumed
-    assert "opex.insurance_share" in filled.assumed
-
-
-def test_lease_up_bounds_are_inclusive():
-    ramp = B.ColocationRevenue(lease_up_by_phase=[[0.0, 0.5, 1.0]])
-    assert ramp.lease_up_by_phase == [[0.0, 0.5, 1.0]]
-
-
-def test_a_pack_error_that_is_not_a_missing_row_propagates():
-    """Only a missing row (a LookupError) means "no default"; any other pack error is raised."""
-    real = loader.load_defaults_pack(NEW)
-
-    class _Broken:
-        stamp = real.stamp
-
-        def value(self, key):
-            raise loader.DefaultsPackError("corrupt pack")
-
-    with pytest.raises(loader.DefaultsPackError, match="corrupt pack"):
-        B.BusinessCaseInputs().with_cost_defaults(_Broken(), currency="EUR")
-
-
-def test_a_pack_value_outside_its_field_range_is_refused():
-    real = loader.load_defaults_pack(NEW)
-    bad = real.value("dc-business-case.sga_share").model_copy(update={"value": 1.5})
-
-    class _Pack:
-        stamp = real.stamp
-
-        def value(self, key):
-            return bad if key == bad.key else real.value(key)
-
-    with pytest.raises(ValidationError, match="sga_share"):
-        B.BusinessCaseInputs().with_cost_defaults(_Pack(), currency="EUR")
-
-
-# ---------------------------------------------------------------- GK B #1320 F1, F2, ruling (2)
-
-#: Every float field of the inputs (dotted path in a payload), unbounded or not.
-FLOAT_FIELDS = [
-    ("gpu_hour", "price_per_gpu_hour"),
-    ("gpu_hour", "reserved_share"),
-    ("gpu_hour", "reserved_price_per_gpu_hour"),
-    ("gpu_hour", "kw_per_gpu"),
-    ("gpu_hour", "sold_share"),
-    ("gpu_hour", "indexation"),
-    ("colocation", "price_per_kw_month"),
-    ("colocation", "indexation"),
-    ("pass_through", "share"),
-    ("pass_through", "margin"),
-    ("facility", "capex_per_mw_it"),
-    ("facility", "life_years"),
-    ("it_hardware", "capex"),
-    ("it_hardware", "life_years"),
-    ("opex", "staff_per_mw_year"),
-    ("opex", "maintenance_share"),
-    ("opex", "insurance_share"),
-    ("opex", "property_tax_share"),
-    ("opex", "network_per_mw_year"),
-    ("opex", "sga_share"),
-]
-
-
-def test_float_field_list_is_complete():
-    """A new float field must join FLOAT_FIELDS (the lease-up list is tested on its own)."""
-    found = {
-        (g, n)
-        for g, sub in B.BusinessCaseInputs.model_fields.items()
-        if hasattr(sub.annotation, "model_fields")
-        for n, f in sub.annotation.model_fields.items()
-        if "float" in str(f.annotation) and "list" not in str(f.annotation)
-    }
-    assert found == set(FLOAT_FIELDS)
-
-
-@pytest.mark.parametrize("group, name", FLOAT_FIELDS)
-@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan")])
-def test_every_float_field_refuses_non_finite(group, name, bad):
-    with pytest.raises(ValidationError) as exc:
-        B.BusinessCaseInputs.model_validate({group: {name: bad}})
-    assert exc.value.errors()[0]["loc"] == (group, name)
-
-
-@pytest.mark.parametrize("bad", [float("inf"), float("nan")])
-def test_receivable_days_and_lease_up_refuse_non_finite(bad):
-    with pytest.raises(ValidationError, match="receivable_days"):
-        B.BusinessCaseInputs.model_validate({"receivable_days": bad})
-    with pytest.raises(ValidationError, match="lease_up_by_phase"):
-        B.BusinessCaseInputs.model_validate(
-            {"colocation": {"lease_up_by_phase": [[bad]]}}
-        )
-
-
-def test_a_json_infinity_is_refused():
-    with pytest.raises(ValidationError, match="price_per_kw_month"):
-        B.BusinessCaseInputs.model_validate_json(
-            '{"colocation": {"price_per_kw_month": Infinity}}'
-        )
-
-
-def test_a_cost_default_refuses_non_finite():
-    with pytest.raises(ValidationError, match="value"):
-        B.CostDefault(
-            key="k",
-            value=float("inf"),
-            unit="u",
-            source="s",
-            source_year=2026,
-            pack="p",
-        )
-
-
-def test_colocation_with_owned_it_capex_is_refused():
-    """F2 (B5): the tenant owns the IT under colocation; stated IT capex is a typed refusal."""
-    data = _runnable_colocation().model_dump()
-    data["it_hardware"]["capex"] = 30.0e6
-    with pytest.raises(B.BusinessCaseRefused) as exc:
-        B.BusinessCaseInputs.model_validate(data).require_runnable()
-    assert type(exc.value) is B.ItCapexNotOwned
-    assert exc.value.field == "it_hardware.capex"
-    assert exc.value.code == "business_case_refused:it_capex_not_owned"
-
-
-def test_colocation_keeps_an_it_life_without_capex():
-    """Only stated capex is refused: a defaulted IT life alone prices nothing."""
-    filled = _runnable_colocation().with_cost_defaults(
-        loader.load_defaults_pack(NEW), currency="EUR"
-    )
-    assert filled.it_hardware.life_years == 5 and filled.it_hardware.capex is None
-    filled.require_runnable()
-
-
-def test_pass_through_under_gpu_hour_is_refused():
-    """Ruling (2): R3 is a colocation recovery; under GPU-hour it is a typed refusal."""
-    data = _full().model_dump()
-    data["pass_through"]["enabled"] = True
-    with pytest.raises(B.BusinessCaseRefused) as exc:
-        B.BusinessCaseInputs.model_validate(data).require_runnable()
-    assert type(exc.value) is B.PassThroughNotColocation
-    assert exc.value.field == "pass_through.enabled"
-    assert exc.value.code == "business_case_refused:pass_through_not_colocation"
-
-
-def test_pass_through_under_colocation_runs():
-    inputs = _runnable_colocation()
-    assert inputs.pass_through.enabled
-    inputs.require_runnable()

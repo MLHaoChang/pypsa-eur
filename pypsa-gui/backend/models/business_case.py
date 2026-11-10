@@ -1,189 +1,141 @@
 """
-Data-centre business case: the inputs (DC business case slice 02).
+Business case on every template: the line-item model and its validation (BC-ALL slice 02).
 
-Spec: .scratch/dc-business-case/spec.md §4, §5, §9 (owner decision DCBC-SCOPE-1);
-GK B conditions BC7 and BC9 (.scratch/dc-business-case/issues/01-design-plan.md).
+Spec: .scratch/business-case/spec.md §3 (G1, G5–G9, G-C1, G-C2) and §4 (owner decisions
+BC-ALL-1, BCA-SCOPE-1); GK B plan GO for slice 02 (P1–P5, 2026-11-10).
 
-`BusinessCaseInputs` sits beside `FinanceInputs`: the finance inputs say how the project
-is financed and taxed, these say what the data centre sells and what it costs beyond
-the energy the network prices. No arithmetic on cash here; the engine is slice 04.
+A case is a table of `LineItem`s (revenue, opex, capex) beside `FinanceInputs`. No
+arithmetic on cash here: the engine is slice 05, linked outputs and unit conversions are
+slice 04, presets as data are slice 07.
 
-Units are real and named in each field: money is in the finance case's currency and
-base-year money (`FinanceInputs.currency`); a GPU-hour price is per GPU per hour, a
-colocation price per kW of contracted IT per **month**, capex per MW of IT or per GPU,
-shares are fractions in [0, 1], lives are years.
+Units (G5): `unit` is the quantity's unit; `price` is currency per `unit`, in the line's
+`money_year` money (None = the case's base year). No conversion happens here.
 
-Rules (ADR-0001, DCBC-SCOPE-1 Q4):
-- a revenue price has no default: `None` is not established, never 0;
-- a cost line with no stated value is `None`; `with_cost_defaults` fills it from the
-  defaults pack's `dc-business-case.*` rows (assumed, with source and year) and records
-  which fields it filled, so a default is never mistaken for a user's figure;
-- `require_runnable` refuses an incomplete case with a typed `BusinessCaseRefused`
-  that names the field (BC7): a missing price, GPU-hour revenue without IT hardware
-  capex, a revenue model without facility capex. Never a 0 or a guessed value.
+Rules:
+- Parse time (pydantic): types, closed enums, `Finite` on every float, `extra=forbid`, and
+  the shape faults (a column the line's kind, source or escalation does not take).
+- Run time: `refusals()` returns every typed refusal (G9), `BusinessCaseRefused` with
+  `.field = "lines[<i>].<column>"`, in line order and, within a line, a fixed column order
+  with "not established" last. `require_runnable()` raises the first. A case with a
+  refusal still saves; the route slice owns the save policy (GK B Q1).
+- A revenue price has no default: `None` is `price_not_established`, never 0. A cost
+  price still `None` after `with_cost_defaults` is `cost_not_established` (GK B P1).
 
 Nothing here imports ``services``: the pack is passed in.
 """
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, NamedTuple, Protocol, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
-RevenueModel = Literal["gpu_hour", "colocation"]
-"""R1 GPU-hour rental (the project owns the IT) and R2 colocation / wholesale lease per
-kW-month (the tenant owns the IT). R4 services and SLA credits are later (DCBC-SCOPE-1 Q2).
-One model per case: both at once would sell the same IT capacity twice."""
+from models.schemas import Finite
 
-ItCapexBasis = Literal["per_gpu", "per_mw_it"]
+# ------------------------------------------------------------------ closed lists
 
-HOURS_PER_YEAR = 8760.0
-MONTHS_PER_YEAR = 12
-KW_PER_MW = 1000.0
+Kind = Literal["revenue", "opex", "capex"]
+RevenueCategory = Literal[
+    "product_sale",
+    "by_product",
+    "service_fee",
+    "lease",
+    "capacity_payment",
+    "tariff",
+    "cost_recovery",
+    "incentive",
+    "other",
+]
+OpexCategory = Literal[
+    "staff",
+    "maintenance",
+    "insurance",
+    "property_tax",
+    "feedstock",
+    "consumables",
+    "network",
+    "land",
+    "sga",
+    "other",
+]
+# No `land`: it does not depreciate (spec §11).
+CapexCategory = Literal["facility", "equipment", "it_hardware", "other"]
+Category = Literal[RevenueCategory, OpexCategory, CapexCategory]
 
-_Share = Field(default=None, ge=0.0, le=1.0)
-# A typo is refused, never dropped (as FinanceInputs); inf and NaN are refused in every float
-# field, so an unbounded field (a price, a capex, a margin) can never carry a non-finite value.
+CATEGORIES: dict[str, tuple[str, ...]] = {
+    "revenue": get_args(RevenueCategory),
+    "opex": get_args(OpexCategory),
+    "capex": get_args(CapexCategory),
+}
+
+Unit = Literal[
+    "MWh",
+    "MWh_H2",
+    "kg",
+    "t",
+    "GPU_h",
+    "kW_month",
+    "kW_year",
+    "MW_year",
+    "unit",
+    "unit_month",
+    "lump",
+    "share",
+]
+
+#: `models.finance.ESCALATION_CLASSES` plus `contract` (a test pins the two equal).
+Escalation = Literal["opex", "fuel", "tariff", "ppa", "export", "capex", "contract"]
+Depreciation = Literal["straight_line", "declining_balance"]
+#: The columns a pack default may fill (`default_keys`, `assumed`).
+DefaultColumn = Literal["price", "quantity", "life_years", "rate"]
+
+#: (kind, category) -> (ledger stream, stream class), spec §3 (G-C1, GK B (a)). A capex
+#: line is an asset, not a stream. Slice 05 adds the `STREAM_CLASS` rows.
+CATEGORY_STREAM: dict[tuple[str, str], tuple[str | None, str]] = {
+    ("revenue", "product_sale"): ("product_revenue", "contract"),
+    ("revenue", "by_product"): ("byproduct_revenue", "contract"),
+    ("revenue", "service_fee"): ("service_revenue", "contract"),
+    ("revenue", "lease"): ("lease_revenue", "contract"),
+    ("revenue", "capacity_payment"): ("capacity_revenue", "contract"),
+    ("revenue", "tariff"): ("tariff_revenue", "contract"),
+    ("revenue", "cost_recovery"): ("power_passthrough", "contract"),
+    ("revenue", "incentive"): ("premium_revenue", "contract"),
+    ("revenue", "other"): ("other_revenue", "contract"),
+    **{("opex", c): (f"bc_{c}", "opex") for c in get_args(OpexCategory)},
+    **{("capex", c): (None, "capex") for c in get_args(CapexCategory)},
+}
+
+_ID = r"[A-Za-z0-9_.\-]+"
+#: `typed`, `linked:<output id>@<catalogue version>` (syntax only; 04 resolves it), or
+#: `share_of:<kind>[/<category>]`.
+QUANTITY_SOURCE_PATTERN = (
+    rf"^(typed|linked:{_ID}@{_ID}|share_of:(revenue|opex|capex)(/[a-z_]+)?)$"
+)
+PRESET_PATTERN = rf"^{_ID}@{_ID}$"
+MONEY_YEAR_MIN = 1990
+MONEY_YEAR_AFTER_BASE = 5
+
+# A typo is refused, never dropped; inf and NaN are refused in every float (#1320 F1).
 _FORBID = ConfigDict(extra="forbid", allow_inf_nan=False)
 
-
-class GpuHourRevenue(BaseModel):
-    """R1: billable GPU-hours = served IT MWh × 1000 ÷ `kw_per_gpu` × `sold_share`
-    (spec §4). u(t) is already in the IT MWh, so `sold_share` is the sold share of the
-    utilised capacity, never a second utilisation. A `reserved_share` of the sold hours is
-    billed at the contract price, the rest at the on-demand price."""
-
-    model_config = _FORBID
-
-    # Case currency per GPU-hour. No default (DCBC-SCOPE-1 Q4).
-    price_per_gpu_hour: float | None = Field(default=None, ge=0.0)
-    reserved_share: float = Field(default=0.0, ge=0.0, le=1.0)
-    reserved_price_per_gpu_hour: float | None = Field(default=None, ge=0.0)
-    # All-in server kW per GPU (racks, CPUs and networking inside); no default: it
-    # depends on the system (research §5 gives 1.28 kW for an H100 DGX, 1.79 kW for B200).
-    kw_per_gpu: float | None = Field(default=None, gt=0.0)
-    sold_share: float = Field(default=1.0, ge=0.0, le=1.0)
-    # Real annual indexation of the prices (contract class); negative = price decay.
-    indexation: float = Field(default=0.0, gt=-1.0, lt=1.0)
-
-    def gpu_count(self, it_mw: float) -> float:
-        """GPUs installed in `it_mw` of IT. Refuses without `kw_per_gpu`."""
-        if self.kw_per_gpu is None:
-            raise PriceNotEstablished("gpu_hour.kw_per_gpu")
-        return it_mw * KW_PER_MW / self.kw_per_gpu
-
-    def gpu_hours(self, served_it_mwh: float) -> float:
-        """Billable GPU-hours from served IT energy (MWh): MWh ÷ 1 h = MW, so GPUs × hours."""
-        return self.gpu_count(served_it_mwh) * self.sold_share
-
-
-class ColocationRevenue(BaseModel):
-    """R2: contracted IT kW per phase × lease-up × price per kW-month × 12; take-or-pay,
-    independent of u(t) (spec §4)."""
-
-    model_config = _FORBID
-
-    # Case currency per kW of contracted IT per month. No default (DCBC-SCOPE-1 Q4).
-    price_per_kw_month: float | None = Field(default=None, ge=0.0)
-    indexation: float = Field(default=0.0, gt=-1.0, lt=1.0)
-    # Per COD phase (the load spec's phase order): the share of contracted kW billed in
-    # operating years 1..k, the last entry holding. An absent phase bills 100 % from COD.
-    lease_up_by_phase: list[list[float]] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _lease_up_shares(self) -> ColocationRevenue:
-        for i, ramp in enumerate(self.lease_up_by_phase):
-            if not ramp:
-                raise ValueError(
-                    f"lease_up_by_phase[{i}] is empty; omit the phase for 100 % from COD"
-                )
-            bad = [s for s in ramp if not 0.0 <= s <= 1.0]
-            if bad:
-                raise ValueError(
-                    f"lease_up_by_phase[{i}] shares must be in [0, 1], got {bad}"
-                )
-        return self
-
-    def rent_per_kw_year(self) -> float:
-        """The price per kW-year (12 × the kW-month price). Refuses without a price."""
-        if self.price_per_kw_month is None:
-            raise PriceNotEstablished("colocation.price_per_kw_month")
-        return self.price_per_kw_month * MONTHS_PER_YEAR
-
-
-class PowerPassThrough(BaseModel):
-    """R3: the tenant pays `share` of the energy bill × (1 + `margin`), presented gross
-    (GK B plan answer 2): the bill stays a cost, the recovery is revenue."""
-
-    model_config = _FORBID
-
-    enabled: bool = False
-    share: float | None = _Share
-    margin: float = Field(default=0.0, ge=0.0)
-
-    @model_validator(mode="after")
-    def _share_when_enabled(self) -> PowerPassThrough:
-        if self.enabled and self.share is None:
-            raise ValueError("share is required when the power pass-through is enabled")
-        return self
-
-
-class ItHardware(BaseModel):
-    """IT hardware (R1 only): a lump per GPU or per MW of IT (DCBC-SCOPE-1 Q1), straight-line
-    over `life_years` (pack default 5, sensitivity 4–6), re-bought every `refresh_years`
-    (None: at the end of its life)."""
-
-    model_config = _FORBID
-
-    capex_basis: ItCapexBasis = "per_mw_it"
-    # Case currency per GPU or per MW of IT; no default (no primary price list, research §2b).
-    capex: float | None = Field(default=None, ge=0.0)
-    life_years: float | None = Field(default=None, ge=1.0)
-    refresh_years: int | None = Field(default=None, ge=1)
-
-    def capex_total(self, it_mw: float, gpu: GpuHourRevenue | None = None) -> float:
-        """The capex for `it_mw` of IT. Per GPU needs `kw_per_gpu` to count the GPUs."""
-        if self.capex is None:
-            raise ItCapexMissing("it_hardware.capex")
-        if self.capex_basis == "per_mw_it":
-            return self.capex * it_mw
-        if gpu is None:
-            raise PriceNotEstablished("gpu_hour.kw_per_gpu")
-        return self.capex * gpu.gpu_count(it_mw)
-
-
-class Facility(BaseModel):
-    """Building, shell and M&E fit-out per MW of IT (spec §5), straight-line."""
-
-    model_config = _FORBID
-
-    capex_per_mw_it: float | None = Field(default=None, ge=0.0)
-    life_years: float | None = Field(default=None, ge=1.0)
-
-
-class NonEnergyOpex(BaseModel):
-    """The operating costs the energy model does not see (spec §5). Money per MW of IT per
-    year; shares as fractions of their base."""
-
-    model_config = _FORBID
-
-    staff_per_mw_year: float | None = Field(default=None, ge=0.0)
-    maintenance_share: float | None = _Share  # of facility capex, per year
-    insurance_share: float | None = _Share  # of capex, per year
-    property_tax_share: float | None = _Share  # of asset value, per year
-    network_per_mw_year: float | None = Field(default=None, ge=0.0)
-    sga_share: float | None = _Share  # of revenue
+# ------------------------------------------------------------------ models
 
 
 class CostDefault(BaseModel):
-    """Where a defaulted cost field came from: the pack row, its source and year. Always
+    """Where a defaulted column came from: the pack row, its source and year. Always
     `assumed` (GK B BC9)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
 
     key: str
-    value: float
+    value: Finite
     unit: str
     source: str = Field(min_length=1)
     source_year: int
@@ -193,122 +145,334 @@ class CostDefault(BaseModel):
     status: Literal["assumed"] = "assumed"
 
 
-class BusinessCaseInputs(BaseModel):
-    """The business case's inputs (spec §4–§5). Saved partial: a missing price or cost is
-    `None` (not established) until stated; `require_runnable` says what is missing."""
+class PresetRule(BaseModel):
+    """What a preset's revenue row owns (G7, G-C3, G-C4). Written by the preset, read-only."""
 
     model_config = _FORBID
 
-    revenue_model: RevenueModel | None = None
-    gpu_hour: GpuHourRevenue = Field(default_factory=GpuHourRevenue)
-    colocation: ColocationRevenue = Field(default_factory=ColocationRevenue)
-    pass_through: PowerPassThrough = Field(default_factory=PowerPassThrough)
-    facility: Facility = Field(default_factory=Facility)
-    it_hardware: ItHardware = Field(default_factory=ItHardware)
-    opex: NonEnergyOpex = Field(default_factory=NonEnergyOpex)
-    # Days of revenue outstanding (cash bridge only, never EBITDA: GK B BC3). None = not stated.
-    receivable_days: float | None = Field(default=None, ge=0.0, le=365.0)
-    # Field path ("facility.capex_per_mw_it") -> the pack default it holds. A field listed
-    # here is assumed, not the user's figure; a field whose value differs from its entry is
-    # refused, so an edit must drop the entry (the user's figure is then no longer assumed).
-    assumed: dict[str, CostDefault] = Field(default_factory=dict)
+    requires: list[CapexCategory] = Field(default_factory=list)
+    excludes: list[CapexCategory] = Field(default_factory=list)
+    price_includes_energy: bool = False
 
     @model_validator(mode="after")
-    def _assumed_names_cost_fields(self) -> BusinessCaseInputs:
-        unknown = sorted(set(self.assumed) - set(COST_DEFAULT_KEYS))
-        if unknown:
-            raise ValueError(
-                f"assumed names {unknown}, which are not defaultable cost fields "
-                f"{sorted(COST_DEFAULT_KEYS)}"
-            )
-        for path, d in self.assumed.items():
-            if _get(self, path) != d.value:
-                raise ValueError(
-                    f"assumed[{path}] holds {d.value} but the field is {_get(self, path)}"
-                )
+    def _requires_and_excludes_disjoint(self) -> PresetRule:
+        both = sorted(set(self.requires) & set(self.excludes))
+        if both:
+            raise ValueError(f"{both} both required and excluded")
         return self
 
-    def require_runnable(self) -> None:
-        """Refuse a case the engine cannot run, naming the field (BC7). Never fills a gap."""
-        if self.revenue_model is None:
-            raise RevenueModelMissing("revenue_model")
-        if self.revenue_model == "gpu_hour":
-            # R3 is a colocation recovery; a GPU-hour price is all-in (GK B ruling on #1320).
-            if self.pass_through.enabled:
-                raise PassThroughNotColocation("pass_through.enabled")
-            if self.gpu_hour.price_per_gpu_hour is None:
-                raise PriceNotEstablished("gpu_hour.price_per_gpu_hour")
-            if (
-                self.gpu_hour.reserved_share > 0
-                and self.gpu_hour.reserved_price_per_gpu_hour is None
-            ):
-                raise PriceNotEstablished("gpu_hour.reserved_price_per_gpu_hour")
-            if self.gpu_hour.kw_per_gpu is None:
-                raise PriceNotEstablished("gpu_hour.kw_per_gpu")
-            if self.it_hardware.capex is None:
-                raise ItCapexMissing("it_hardware.capex")
-            if self.it_hardware.life_years is None:
-                raise LifeMissing("it_hardware.life_years")
-        else:
-            if self.colocation.price_per_kw_month is None:
-                raise PriceNotEstablished("colocation.price_per_kw_month")
-            # The tenant owns the IT under colocation: owned IT capex would be priced with no
-            # revenue that needs it (B5: capex priced exactly once).
-            if self.it_hardware.capex is not None:
-                raise ItCapexNotOwned("it_hardware.capex")
-        if self.facility.capex_per_mw_it is None:
-            raise FacilityCapexMissing("facility.capex_per_mw_it")
-        if self.facility.life_years is None:
-            raise LifeMissing("facility.life_years")
+
+class Cell(NamedTuple):
+    """One year's value of a line's column: the value (None = not established), the money
+    year it is in (None = the case's base year), and whether the row's escalation applies."""
+
+    value: float | None
+    money_year: int | None
+    escalates: bool
+
+
+class LineItem(BaseModel):
+    """One row of the business-case table (spec §4). No tax column (G-C2)."""
+
+    model_config = _FORBID
+
+    name: str = Field(min_length=1, max_length=80)
+    kind: Kind
+    category: Category
+    unit: Unit
+    quantity_source: str = Field(default="typed", pattern=QUANTITY_SOURCE_PATTERN)
+    quantity: Finite | None = None
+    quantity_by_year: dict[int, Finite] = Field(default_factory=dict)
+    price: Finite | None = None
+    price_by_year: dict[int, Finite] = Field(default_factory=dict)
+    money_year: int | None = None
+    escalation: Escalation
+    indexation: Finite | None = None  # fraction per year, `contract` only
+    start_year: int | None = None
+    end_year: int | None = None
+    depreciation: Depreciation | None = None  # capex: None reads straight_line
+    life_years: Finite | None = Field(default=None, ge=1.0)
+    rate: Finite | None = Field(default=None, gt=0.0, le=1.0)
+    refresh_years: Finite | None = Field(default=None, ge=1.0)
+    note: str = ""
+    # Column -> the pack default it holds. Empty = every column is the user's (`stated`). A
+    # column listed here must hold the default's value: an edit drops the entry.
+    assumed: dict[DefaultColumn, CostDefault] = Field(default_factory=dict)
+    # Column -> its defaults-pack key, written by the preset (07).
+    default_keys: dict[DefaultColumn, str] = Field(default_factory=dict)
+    preset_rule: PresetRule | None = None
+
+    # -- shape faults (GK B Q3): a column the line does not take is a parse error
+
+    @field_validator("depreciation", "life_years", "rate", "refresh_years")
+    @classmethod
+    def _capex_only(cls, v: Any, info: ValidationInfo) -> Any:
+        if v is None:
+            return v
+        if info.data.get("kind") != "capex":
+            raise ValueError(f"{info.field_name} applies to capex lines only")
+        if (
+            info.field_name == "rate"
+            and info.data.get("depreciation") != "declining_balance"
+        ):
+            raise ValueError("rate applies to declining_balance only")
+        return v
+
+    @field_validator("indexation")
+    @classmethod
+    def _contract_only(cls, v: Any, info: ValidationInfo) -> Any:
+        if v is not None and info.data.get("escalation") != "contract":
+            raise ValueError("indexation applies to escalation `contract` only")
+        return v
+
+    @field_validator("quantity", "quantity_by_year")
+    @classmethod
+    def _not_on_linked(cls, v: Any, info: ValidationInfo) -> Any:
+        if v not in (None, {}) and str(info.data.get("quantity_source")).startswith(
+            "linked:"
+        ):
+            raise ValueError(f"a linked line takes no {info.field_name}")
+        return v
+
+    @field_validator("price", "price_by_year")
+    @classmethod
+    def _not_on_share(cls, v: Any, info: ValidationInfo) -> Any:
+        if v not in (None, {}) and str(info.data.get("quantity_source")).startswith(
+            "share_of:"
+        ):
+            raise ValueError(f"a share_of line takes no {info.field_name}")
+        return v
+
+    @field_validator("assumed", "default_keys")
+    @classmethod
+    def _costs_only(cls, v: Any, info: ValidationInfo) -> Any:
+        if v and info.data.get("kind") == "revenue":
+            raise ValueError(
+                f"a revenue line takes no {info.field_name}: never a default"
+            )
+        return v
+
+    @field_validator("preset_rule")
+    @classmethod
+    def _revenue_only(cls, v: Any, info: ValidationInfo) -> Any:
+        if v is not None and info.data.get("kind") != "revenue":
+            raise ValueError("preset_rule applies to revenue lines only")
+        return v
+
+    @model_validator(mode="after")
+    def _assumed_matches_and_method(self) -> LineItem:
+        for col, d in self.assumed.items():
+            if getattr(self, col) != d.value:
+                raise ValueError(
+                    f"assumed[{col}] holds {d.value} but the column is {getattr(self, col)}"
+                )
+        if self.kind == "capex" and self.depreciation is None:
+            self.depreciation = "straight_line"
+        return self
+
+    # -- reads
+
+    @property
+    def provenance(self) -> Literal["stated", "assumed"]:
+        return "assumed" if self.assumed else "stated"
+
+    @property
+    def source(self) -> Literal["typed", "linked", "share_of"]:
+        return self.quantity_source.split(":", 1)[0]  # type: ignore[return-value]
+
+    def cell(self, column: Literal["price", "quantity"], year: int) -> Cell:
+        """`year`'s value of `column`. A grid cell is that year's value in the line's
+        `money_year` money and the row's escalation does not apply to it (GK B 2026-11-10);
+        any other year reads the column, escalated."""
+        grid = self.price_by_year if column == "price" else self.quantity_by_year
+        if year in grid:
+            return Cell(grid[year], self.money_year, False)
+        return Cell(getattr(self, column), self.money_year, True)
+
+
+class BusinessCaseInputs(BaseModel):
+    """The business case's inputs (spec §4 case-level fields). Saved partial: a refusal is
+    reported by `refusals()` and blocks the run, not the save."""
+
+    model_config = _FORBID
+
+    preset: str | None = Field(
+        default=None, pattern=PRESET_PATTERN
+    )  # preset_id@version
+    # Days of revenue outstanding (cash bridge only, never EBITDA: GK B BC3). None = not stated.
+    receivable_days: Finite | None = Field(default=None, ge=0.0, le=365.0)
+    lines: list[LineItem] = Field(default_factory=list)
+
+    def refusals(
+        self, *, horizon: tuple[int, int], base_year: int
+    ) -> list[BusinessCaseRefused]:
+        """Every refusal (G9), deterministic: line order, then the column order of
+        `_line_refusals`, "not established" last on each line (GK B P4). `horizon` is the
+        analysis's first and last year (a line's default span); `base_year` bounds money
+        years."""
+        excluded = {
+            c for ln in self.lines if ln.preset_rule for c in ln.preset_rule.excludes
+        }
+        energy_in_price = any(
+            ln.preset_rule and ln.preset_rule.price_includes_energy for ln in self.lines
+        )
+        capex = {ln.category for ln in self.lines if ln.kind == "capex"}
+        out: list[BusinessCaseRefused] = []
+        seen: set[str] = set()
+        for i, ln in enumerate(self.lines):
+            out += self._line_refusals(
+                i, ln, seen, horizon, base_year, excluded, energy_in_price, capex
+            )
+            seen.add(ln.name)
+        return out
+
+    def require_runnable(self, *, horizon: tuple[int, int], base_year: int) -> None:
+        """Refuse a case the engine cannot run, naming the line and column (G9, BC7)."""
+        found = self.refusals(horizon=horizon, base_year=base_year)
+        if found:
+            raise found[0]
+
+    def _line_refusals(
+        self,
+        i: int,
+        ln: LineItem,
+        seen: set[str],
+        horizon: tuple[int, int],
+        base_year: int,
+        excluded: set[str],
+        energy_in_price: bool,
+        capex: set[str],
+    ) -> list[BusinessCaseRefused]:
+        at = f"lines[{i}]"
+        out: list[BusinessCaseRefused] = []
+        if ln.name in seen:
+            out.append(NameDuplicate(f"{at}.name"))
+        if ln.category not in CATEGORIES[ln.kind]:
+            out.append(CategoryNotInKind(f"{at}.category"))
+        if ln.kind == "capex" and ln.category in excluded:
+            out.append(CapexNotOwned(f"{at}.category"))
+        if energy_in_price and ln.kind == "revenue" and ln.category == "cost_recovery":
+            out.append(PassThroughPriceIncludesEnergy(f"{at}.category"))
+        share = ln.source == "share_of"
+        if (ln.unit == "share") != share or (ln.unit == "lump" and ln.kind != "capex"):
+            out.append(UnitNotAllowed(f"{at}.unit"))
+        if share:
+            out += self._share_refusals(i, ln)
+        first, last = ln.start_year or horizon[0], ln.end_year or horizon[1]
+        years = range(first, last + 1)
+        if (
+            ln.source != "linked"
+            and ln.quantity is None
+            and not _covers(ln.quantity_by_year, years)
+        ):
+            out.append(QuantityMissing(f"{at}.quantity"))
+        if share and ln.quantity is not None and not 0.0 <= ln.quantity <= 1.0:
+            out.append(ShareOutOfRange(f"{at}.quantity"))
+        for y, v in sorted(ln.quantity_by_year.items()):
+            if y not in years:
+                out.append(YearOutOfRange(f"{at}.quantity_by_year[{y}]"))
+            elif share and not 0.0 <= v <= 1.0:
+                out.append(ShareOutOfRange(f"{at}.quantity_by_year[{y}]"))
+        for y in sorted(ln.price_by_year):
+            if y not in years:
+                out.append(YearOutOfRange(f"{at}.price_by_year[{y}]"))
+        if ln.money_year is not None and not (
+            MONEY_YEAR_MIN <= ln.money_year <= base_year + MONEY_YEAR_AFTER_BASE
+        ):
+            out.append(YearOutOfRange(f"{at}.money_year"))
+        if ln.escalation == "contract" and ln.indexation is None:
+            out.append(IndexationMissing(f"{at}.indexation"))
+        if ln.start_year is not None and not horizon[0] <= ln.start_year <= horizon[1]:
+            out.append(OutsideHorizon(f"{at}.start_year"))
+        if ln.end_year is not None and not horizon[0] <= ln.end_year <= horizon[1]:
+            out.append(OutsideHorizon(f"{at}.end_year"))
+        if last < first:
+            out.append(EndBeforeStart(f"{at}.end_year"))
+        if ln.kind == "capex" and ln.life_years is None:
+            out.append(LifeMissing(f"{at}.life_years"))
+        if ln.depreciation == "declining_balance" and ln.rate is None:
+            out.append(RateMissing(f"{at}.rate"))
+        if ln.preset_rule:
+            for c in ln.preset_rule.requires:
+                if c not in capex:
+                    out.append(
+                        _CAPEX_MISSING.get(c, CapexMissing)(
+                            f"{at}.preset_rule.requires[{c}]"
+                        )
+                    )
+        if not share and ln.price is None and not _covers(ln.price_by_year, years):
+            cls = PriceNotEstablished if ln.kind == "revenue" else CostNotEstablished
+            out.append(cls(f"{at}.price"))
+        return out
+
+    def _share_refusals(self, i: int, ln: LineItem) -> list[BusinessCaseRefused]:
+        """G6: a share reads only non-share lines, one level; an empty base is refused."""
+        at = f"lines[{i}].quantity_source"
+        base_kind, _, base_cat = ln.quantity_source.split(":", 1)[1].partition("/")
+        if base_cat and base_cat not in CATEGORIES[base_kind]:
+            return [CategoryNotInKind(at)]
+        base = [
+            (j, b)
+            for j, b in enumerate(self.lines)
+            if b.kind == base_kind and (not base_cat or b.category == base_cat)
+        ]
+        if any(j == i or b.source == "share_of" for j, b in base):
+            return [ShareCycle(at)]
+        if not base:
+            return [ShareBaseEmpty(at)]
+        return []
 
     def with_cost_defaults(self, pack: _Pack, *, currency: str) -> BusinessCaseInputs:
-        """A copy with each unset cost field filled from `pack`'s `dc-business-case.*` row and
-        listed in `assumed`. A stated field is never overwritten; a revenue price is never
-        filled. A money row in another currency than the case's is skipped, never converted."""
-        out = self.model_copy(deep=True)
-        assumed = dict(out.assumed)
-        for path, key in COST_DEFAULT_KEYS.items():
-            if _get(out, path) is not None:
-                continue
-            row = _pack_row(pack, key)
-            if row is None or row.value is None:
-                continue
-            if row.currency is not None and row.currency != currency:
-                continue
-            _set(out, path, row.value)
-            assumed[path] = CostDefault(
-                key=key,
-                value=row.value,
-                unit=row.unit,
-                source=row.source,
-                source_year=row.source_year,
-                currency=row.currency,
-                money_year=row.money_year,
-                pack=pack.stamp,
-            )
-        # Re-validate: a pack value outside a field's range is refused, never stored.
-        return type(self).model_validate({**out.model_dump(), "assumed": assumed})
+        """A copy with each unset column a cost line lists in `default_keys` filled from
+        `pack` and recorded in `assumed`. A stated value is never overwritten; a revenue line
+        has no defaults. A money row in another currency is skipped, never converted. A price
+        default carries its row's money year into the line (G-C1); a line whose stated
+        money year differs is skipped, never converted (GK B Q4). A skipped price stays None
+        and the run refuses it `cost_not_established` (GK B P1)."""
+        lines = []
+        for ln in self.lines:
+            data = ln.model_dump()
+            assumed = dict(ln.assumed)
+            for col, key in ln.default_keys.items():
+                if data[col] is not None:
+                    continue
+                row = _pack_row(pack, key)
+                if row is None or row.value is None:
+                    continue
+                if row.currency is not None and row.currency != currency:
+                    continue
+                if col == "price" and row.money_year is not None:
+                    if data["money_year"] is None:
+                        data["money_year"] = row.money_year
+                    elif data["money_year"] != row.money_year:
+                        continue
+                data[col] = row.value
+                assumed[col] = CostDefault(
+                    key=key,
+                    value=row.value,
+                    unit=row.unit,
+                    source=row.source,
+                    source_year=row.source_year,
+                    currency=row.currency,
+                    money_year=row.money_year,
+                    pack=pack.stamp,
+                )
+            lines.append({**data, "assumed": assumed})
+        # Re-validate: a pack value outside a column's range is refused, never stored.
+        return type(self).model_validate({**self.model_dump(), "lines": lines})
 
 
-#: Defaultable cost field -> its defaults-pack key (pack 2026-11-10 on). Staff, network
-#: and IT hardware capex have no row: no primary source (research §2b, §2c).
-COST_DEFAULT_KEYS: dict[str, str] = {
-    "facility.capex_per_mw_it": "dc-business-case.facility.overnight",
-    "facility.life_years": "dc-business-case.facility.lifetime",
-    "it_hardware.life_years": "dc-business-case.it_hardware.lifetime",
-    "opex.maintenance_share": "dc-business-case.facility.maintenance_share",
-    "opex.insurance_share": "dc-business-case.insurance_share",
-    "opex.property_tax_share": "dc-business-case.property_tax_share",
-    "opex.sga_share": "dc-business-case.sga_share",
-}
+def _covers(grid: dict[int, float], years: range) -> bool:
+    """True when the per-year grid gives a value for every year of the line's span."""
+    return len(years) > 0 and all(y in grid for y in years)
 
 
 # ------------------------------------------------------------------ refusals
 
 
 class BusinessCaseRefused(ValueError):
-    """The business case cannot run; `field` names the input (dotted path) and `kind` the
-    reason, as `business_case_refused:<kind>`."""
+    """The business case cannot run; `field` names the line and column
+    (`lines[<i>].<column>`) and `kind` the reason, as `business_case_refused:<kind>`."""
 
     kind = "refused"
 
@@ -321,12 +485,68 @@ class BusinessCaseRefused(ValueError):
         return f"business_case_refused:{self.kind}"
 
 
-class RevenueModelMissing(BusinessCaseRefused):
-    kind = "revenue_model_missing"
+class NameDuplicate(BusinessCaseRefused):
+    kind = "name_duplicate"
+
+
+class CategoryNotInKind(BusinessCaseRefused):
+    kind = "category_not_in_kind"
+
+
+class UnitNotAllowed(BusinessCaseRefused):
+    kind = "unit_not_allowed"
+
+
+class QuantityMissing(BusinessCaseRefused):
+    kind = "quantity_missing"
+
+
+class ShareOutOfRange(BusinessCaseRefused):
+    kind = "share_out_of_range"
+
+
+class ShareCycle(BusinessCaseRefused):
+    kind = "share_cycle"
+
+
+class ShareBaseEmpty(BusinessCaseRefused):
+    kind = "share_base_empty"
+
+
+class EndBeforeStart(BusinessCaseRefused):
+    kind = "end_before_start"
+
+
+class OutsideHorizon(BusinessCaseRefused):
+    kind = "outside_horizon"
+
+
+class YearOutOfRange(BusinessCaseRefused):
+    kind = "year_out_of_range"
+
+
+class IndexationMissing(BusinessCaseRefused):
+    kind = "indexation_missing"
+
+
+class LifeMissing(BusinessCaseRefused):
+    kind = "life_missing"
+
+
+class RateMissing(BusinessCaseRefused):
+    kind = "rate_missing"
 
 
 class PriceNotEstablished(BusinessCaseRefused):
     kind = "price_not_established"
+
+
+class CostNotEstablished(BusinessCaseRefused):
+    kind = "cost_not_established"
+
+
+class CapexMissing(BusinessCaseRefused):
+    kind = "capex_missing"
 
 
 class ItCapexMissing(BusinessCaseRefused):
@@ -337,17 +557,43 @@ class FacilityCapexMissing(BusinessCaseRefused):
     kind = "facility_capex_missing"
 
 
-class LifeMissing(BusinessCaseRefused):
-    kind = "life_missing"
+class CapexNotOwned(BusinessCaseRefused):
+    kind = "capex_not_owned"
 
 
-class ItCapexNotOwned(BusinessCaseRefused):
-    kind = "it_capex_not_owned"
+class PassThroughPriceIncludesEnergy(BusinessCaseRefused):
+    kind = "pass_through_price_includes_energy"
 
 
-class PassThroughNotColocation(BusinessCaseRefused):
-    kind = "pass_through_not_colocation"
+# The DC spec names these two; every other required category is `capex_missing` (GK B Q2).
+_CAPEX_MISSING: dict[str, type[BusinessCaseRefused]] = {
+    "it_hardware": ItCapexMissing,
+    "facility": FacilityCapexMissing,
+}
 
+#: Every refusal kind this module raises (GK B P3: a test pins it to the subclasses).
+REFUSAL_KINDS: tuple[str, ...] = (
+    "name_duplicate",
+    "category_not_in_kind",
+    "unit_not_allowed",
+    "quantity_missing",
+    "share_out_of_range",
+    "share_cycle",
+    "share_base_empty",
+    "end_before_start",
+    "outside_horizon",
+    "year_out_of_range",
+    "indexation_missing",
+    "life_missing",
+    "rate_missing",
+    "price_not_established",
+    "cost_not_established",
+    "capex_missing",
+    "it_capex_missing",
+    "facility_capex_missing",
+    "capex_not_owned",
+    "pass_through_price_includes_energy",
+)
 
 # ------------------------------------------------------------------ helpers
 
@@ -369,18 +615,8 @@ class _Pack(Protocol):
 
 
 def _pack_row(pack: _Pack, key: str) -> _PackRow | None:
-    """The pack's row `key`, or None in a pack version before 2026-11-10."""
+    """The pack's row `key`, or None in a pack version without it."""
     try:
         return pack.value(key)
     except LookupError:  # UnknownPackValue; a regional pack without the row
         return None
-
-
-def _get(model: BaseModel, path: str) -> Any:
-    group, name = path.split(".")
-    return getattr(getattr(model, group), name)
-
-
-def _set(model: BaseModel, path: str, value: float) -> None:
-    group, name = path.split(".")
-    setattr(getattr(model, group), name, value)
