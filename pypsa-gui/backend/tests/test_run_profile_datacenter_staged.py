@@ -612,7 +612,10 @@ def test_a_missing_row_is_no_evidence(hub, check):
     """CT-4."""
     _, step = _campus(hub, {k: v for k, v in ROWS.items() if k != check})
     result = _contingency(hub, step)
-    assert result["verdict"] == "not_evaluated" and check in result["reason"]
+    assert (
+        result["verdict"] == "not_evaluated"
+        and run_actions.CHECK_WORDS[check] in result["reason"]
+    )
 
 
 def test_no_transformer_row_is_not_applicable_only_when_the_voltage_row_says_so(hub):
@@ -650,7 +653,10 @@ def test_a_voltage_pass_on_an_assumed_or_unconfirmed_band_never_passes(
     status, _, _, case, detail = ROWS[check]
     _, step = _campus(hub, {**ROWS, check: (status, "pass", source, case, detail)})
     result = _contingency(hub, step)
-    assert result["verdict"] == "not_evaluated" and check in result["reason"]
+    assert (
+        result["verdict"] == "not_evaluated"
+        and run_actions.CHECK_WORDS[check] in result["reason"]
+    )
 
 
 def test_the_transformer_ratings_own_limit_counts_only_with_its_clause(hub):
@@ -715,7 +721,7 @@ def test_a_missing_status_says_so(hub):
     )
     assert (
         _contingency(hub, step)["reason"]
-        == "campus_voltage: no status after the measures"
+        == "Campus voltage: no status after the measures"
     )
 
 
@@ -787,7 +793,7 @@ def test_a_measure_with_no_detail_is_named_by_its_check(hub):
     )
     result = _contingency(hub, step)
     assert result["verdict"] == "pass"
-    assert result["note"] == run_gates.MEASURED_PASS + "pcc_voltage"
+    assert result["note"] == run_gates.MEASURED_PASS + "PCC voltage"
 
 
 @pytest.mark.parametrize("source", ["extracted", "code", None])
@@ -831,7 +837,7 @@ def test_the_no_transformer_note_may_sit_on_the_pcc_row_and_excuses_only_the_tra
     )
     _, step = _campus(hub, rows, cases=[("intact", True)])
     result = _contingency(hub, step)
-    assert result["verdict"] == "not_evaluated" and "pcc_voltage" in result["reason"]
+    assert result["verdict"] == "not_evaluated" and "PCC voltage" in result["reason"]
 
 
 def test_a_campus_with_no_transformer_needs_only_its_intact_case(hub):
@@ -1003,6 +1009,76 @@ def test_the_runs_own_restore_base_coupling_loop_keeps_the_contingency_readable(
     else:
         assert result["verdict"] == "not_evaluated", result
         assert "edited since the run's campus study" in result["reason"]
+
+
+_SNAKE = re.compile(r"\b[a-z0-9]+(?:_[a-z0-9]+)+\b")
+
+
+def test_no_gate_reason_or_note_shows_an_internal_key(hub, monkeypatch):
+    """UX: every reason and note the DC result gate shows for the contingency
+    and the investment case is in words, never a snake_case key."""
+    texts = []
+    for status in ("not_rechecked", "not_rated", "unknown", None):
+        _, step = _campus(
+            hub, {**ROWS, "pcc_voltage": ("pass", status, "code", "intact", "")}
+        )
+        texts.append(_contingency(hub, step)["reason"])
+    for check in run_actions.CONTINGENCY_CHECKS:
+        tags = (
+            ("extracted", "code", None)
+            if check == "transformer_loading"
+            else ("assumed", "extracted", None)
+        )
+        for source in tags:
+            _, step = _campus(
+                hub, {**ROWS, check: ("pass", "pass", source, "intact", "")}
+            )
+            texts.append(_contingency(hub, step)["reason"])
+        rows = dict(ROWS)
+        rows.pop(check)
+        _, step = _campus(hub, rows)
+        texts.append(_contingency(hub, step)["reason"])
+        source = "code" if "voltage" in check else "assumed"
+        _, step = _campus(
+            hub, {**ROWS, check: ("fail", "pass", source, "intact", None)}
+        )
+        texts.append(_contingency(hub, step)["note"])
+    for body, current in (
+        (None, True),
+        ({"status": "running"}, True),
+        ({"status": "failed"}, True),
+        ({"status": "done", "report": {"present": False}}, True),
+        (
+            {
+                "status": "done",
+                "report": {
+                    "present": True,
+                    "stale": True,
+                    "changed": ["dispatch", "solver_config"],
+                },
+            },
+            True,
+        ),
+        (DONE, False),
+        (
+            {
+                "status": "refused",
+                "error_code": "no_owner_assets",
+                "report": {"present": True, "stale": False},
+            },
+            True,
+        ),
+        (
+            {**DONE, "flags": ["counterfactual_not_established:owner_conversion_load"]},
+            True,
+        ),
+    ):
+        texts.append(ic.reason_words(_returns(monkeypatch, body, _report(), current)))
+    texts.append(
+        ic.reason_words(_returns(monkeypatch, DONE, _report(npv=None, irr=None)))
+    )
+    for text in texts:
+        assert text and not _SNAKE.search(text), text
 
 
 # ── L2 and DC13-SCOPE (L2-1, L2-2)───────────────────────────────────────────

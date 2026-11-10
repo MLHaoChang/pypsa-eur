@@ -823,6 +823,13 @@ CONTINGENCY_CHECKS = ("transformer_loading", "pcc_voltage", "campus_voltage")
 EQUIPMENT_LIMIT = frozenset({"transformer_loading"})
 EQUIPMENT_CLAUSE = "equipment rating"
 EQUIPMENT_SOURCE = "assumed"  # the engine's only tag on a unit-rating limit
+# The checks in words for the gate's reasons and note (UX: no internal keys in user-facing copy).
+CHECK_WORDS = {
+    "transformer_loading": "Transformer loading",
+    "pcc_voltage": "PCC voltage",
+    "campus_voltage": "Campus voltage",
+}
+_STATUS_WORDS = {"not_rechecked": "not re-checked", "not_rated": "not rated"}
 _BAND = {
     "pcc_voltage": "the PCC voltage band",
     "campus_voltage": "the campus voltage band",
@@ -943,7 +950,10 @@ def contingency(project, task, revision: int) -> dict:
             )
             if check == "transformer_loading" and noted:
                 continue  # not applicable: the voltage row says the campus has no transformer
-            return {"state": "no_row", "reason": f"the campus run has no {check} row"}
+            return {
+                "state": "no_row",
+                "reason": f"the campus run has no row for {CHECK_WORDS[check]}",
+            }
         status = row.get("status_with_measures")
         status = status if isinstance(status, str) else None
         if status not in (
@@ -952,7 +962,7 @@ def contingency(project, task, revision: int) -> dict:
         ):  # not_rechecked, unknown, not_rated, none: never read as a pass
             return {
                 "state": "not_evaluated",
-                "reason": f"{check}: {status or 'no status'} after the measures",
+                "reason": f"{CHECK_WORDS[check]}: {_STATUS_WORDS.get(status) or (status or 'no status').replace('_', ' ')} after the measures",
             }
         if status == "fail":
             failing.append(
@@ -972,20 +982,22 @@ def contingency(project, task, revision: int) -> dict:
                 not str(row.get("clause") or "").startswith(EQUIPMENT_CLAUSE)
                 or source != EQUIPMENT_SOURCE
             ):
-                waiting.append(f"{check} is not read against the unit's own rating")
+                waiting.append(
+                    f"{CHECK_WORDS[check]} is not read against the unit's own rating"
+                )
         elif source == "assumed":
             # D3 (#1079): a pass on an assumed design band never passes a block row (CT-5b).
             waiting.append(
-                f"{check} passes only on an assumed band: state {_BAND[check]} in the grid-code profile"
+                f"{CHECK_WORDS[check]} passes only on an assumed band: state {_BAND[check]} in the grid-code profile"
             )
         elif source == "extracted":
             waiting.append(
-                f"{check} passes only on an unconfirmed band: confirm {_BAND[check]} in the grid-code profile"
+                f"{CHECK_WORDS[check]} passes only on an unconfirmed band: confirm {_BAND[check]} in the grid-code profile"
             )
         elif source != "code":
             # A missing or unknown tag fails closed: only a band the code states passes (CT-5b).
             waiting.append(
-                f"{check} names no source for its band: state {_BAND[check]} in the grid-code profile"
+                f"{CHECK_WORDS[check]} names no source for its band: state {_BAND[check]} in the grid-code profile"
             )
         detail = _text(row.get("detail")) or ""
         if row.get("status_as_is") != "pass" or "recommended" in detail:

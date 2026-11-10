@@ -23,6 +23,7 @@ the case's baseline keeps (`BaselinePlan.kept`), `not_run` as above, and
 export's caveats and the baseline wording); the harness report never
 restates a price.
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -40,20 +41,37 @@ def classify(body: dict | None, results_current: bool = True) -> dict:
         return {"state": NOT_RUN, "basis": None, "reasons": ["no_case"]}
     status = body.get("status")
     if status not in ("done", "refused", "failed"):
-        return {"state": NOT_RUN, "basis": None, "reasons": [f"case_{status or 'idle'}"]}
+        return {
+            "state": NOT_RUN,
+            "basis": None,
+            "reasons": [f"case_{status or 'idle'}"],
+        }
     if status == "failed":
         return {"state": NOT_RUN, "basis": None, "reasons": ["case_failed"]}
     report = body.get("report") or {}
     if not report.get("present"):
         return {"state": NOT_RUN, "basis": None, "reasons": ["no_report"]}
     if report.get("stale") is not False:
-        return {"state": NOT_RUN, "basis": None,
-                "reasons": ["case_stale", *(f"changed:{c}" for c in report.get("changed") or [])]}
+        return {
+            "state": NOT_RUN,
+            "basis": None,
+            "reasons": [
+                "case_stale",
+                *(f"changed:{c}" for c in report.get("changed") or []),
+            ],
+        }
     if not results_current:
-        return {"state": NOT_RUN, "basis": None, "reasons": ["case_stale", "results_not_current"]}
+        return {
+            "state": NOT_RUN,
+            "basis": None,
+            "reasons": ["case_stale", "results_not_current"],
+        }
     if status == "refused":
-        return {"state": NOT_ESTABLISHED, "basis": None,
-                "reasons": [str(body.get("error_code") or "refused")]}
+        return {
+            "state": NOT_ESTABLISHED,
+            "basis": None,
+            "reasons": [str(body.get("error_code") or "refused")],
+        }
     flags = [str(f) for f in body.get("flags") or []]
     blockers = [f for f in flags if f.startswith(_BLOCKER)]
     basis = "site_today" if _SITE_TODAY in flags else "analytic"
@@ -71,14 +89,58 @@ def _case(ctx, on) -> tuple[dict | None, bool]:
     from services import workflow_tools
 
     body = on(get_investment_case)
-    return (None if isinstance(body, Response) else body,
-            workflow_tools.solve_freshness(ctx)["results_current"])
+    return (
+        None if isinstance(body, Response) else body,
+        workflow_tools.solve_freshness(ctx)["results_current"],
+    )
 
 
 def read(ctx, on) -> dict:
     """The fact for the run's project ``ctx``: ``on(fn)`` calls ``fn`` with
     that context bound (`services.run_gates._on`)."""
     return classify(*_case(ctx, on))
+
+
+_REASON_WORDS = {
+    "no_case": "no investment case has been run",
+    "case_failed": "the investment case failed",
+    "no_report": "the investment case has no report",
+    "case_stale": "the investment case is out of date",
+    "results_not_current": "the solve's results no longer describe the network",
+    "refused": "the investment case was refused",
+    "npv_not_established": "the case could not establish the project NPV",
+    "irr_not_established": "the case could not establish the project IRR",
+}
+
+
+def _plain(key: str) -> str:
+    return key.replace("_", " ").replace(":", " ").strip()
+
+
+def reason_words(fact: dict) -> str:
+    """The fact's reasons as one plain sentence for the gate (UX: no internal
+    keys in user-facing copy): known keys by their words, a `case_<status>`
+    as not finished, a changed input or a counterfactual blocker with its
+    subject in words, anything else with its underscores spelled out."""
+    out = []
+    for r in fact.get("reasons") or []:
+        r = str(r)
+        if r in _REASON_WORDS:
+            out.append(_REASON_WORDS[r])
+        elif r.startswith("changed:"):
+            out.append(f"{_plain(r[len('changed:') :])} changed since the case")
+        elif r.startswith(_BLOCKER):
+            out.append(
+                f"the counterfactual is not established ({_plain(r[len(_BLOCKER) :])})"
+            )
+        elif r.startswith("case_"):
+            out.append(
+                f"the investment case has not finished ({_plain(r[len('case_') :])})"
+            )
+        else:
+            out.append(f"the investment case was refused ({_plain(r)})")
+    text = "; ".join(out) or "the investment case is not evaluated"
+    return text[0].upper() + text[1:]
 
 
 # ── `ic.returns` (study harness 10b, GK A ST-3) ─────────────────────────────
@@ -104,18 +166,30 @@ def read_returns(ctx, on) -> dict:
         return {**fact, "returns": None}
     report = on(partial(get_investment_case_report, detail="full"))
     if isinstance(report, Response) or not isinstance(report, dict):
-        return {"state": NOT_RUN, "basis": fact["basis"], "reasons": ["no_report"], "returns": None}
+        return {
+            "state": NOT_RUN,
+            "basis": fact["basis"],
+            "reasons": ["no_report"],
+            "returns": None,
+        }
     heads = _ic_headlines(report)
     npv, irr = heads["project_post_tax_npv_at_wacc"], heads["project_post_tax_irr"]
-    missing = [name for name, v in (("npv", npv), ("irr", irr)) if v == _NE or v is None]
+    missing = [
+        name for name, v in (("npv", npv), ("irr", irr)) if v == _NE or v is None
+    ]
     if missing:
-        return {"state": NOT_ESTABLISHED, "basis": fact["basis"],
-                "reasons": [f"{m}_not_established" for m in missing], "returns": None}
+        return {
+            "state": NOT_ESTABLISHED,
+            "basis": fact["basis"],
+            "reasons": [f"{m}_not_established" for m in missing],
+            "returns": None,
+        }
     currency = (_section(report, "project").get("payload") or {}).get("currency")
     return {**fact, "returns": {"npv_at_wacc": npv, "irr": irr, "currency": currency}}
 
 
 # ── `ic.baseline_keeps` (study harness issue 20) ─────────────────────────────
+
 
 def existing_assets(template_id: str | None) -> tuple[str, ...] | None:
     """The owned existing assets a template declares its baseline keeps (the
@@ -123,14 +197,18 @@ def existing_assets(template_id: str | None) -> tuple[str, ...] | None:
     none, and then the fact lists what is kept with no guard."""
     if template_id == "eh_microgrid":
         from project_templates.eh_templates import MG_EXISTING
+
         return MG_EXISTING
     if template_id == "eh_microgrid_staged":
         from project_templates.eh_staged_hubs import MG_EXISTING
+
         return MG_EXISTING
     return None
 
 
-def baseline_keeps(n, cfg, existing: tuple[str, ...] | None, owner: str | None = None) -> dict:
+def baseline_keeps(
+    n, cfg, existing: tuple[str, ...] | None, owner: str | None = None
+) -> dict:
     """``{"state", "kept", "reasons"}``: the owned existing rows the case's
     baseline keeps, and `not_established` with ``baseline_drops:<name>`` for
     each asset of ``existing`` missing from them (a priced or renamed unit).
@@ -144,8 +222,11 @@ def baseline_keeps(n, cfg, existing: tuple[str, ...] | None, owner: str | None =
     kept_set = set(kept)
     missing = [a for a in existing or () if a not in kept_set]
     if missing:
-        return {"state": NOT_ESTABLISHED, "kept": kept,
-                "reasons": [f"baseline_drops:{a}" for a in missing]}
+        return {
+            "state": NOT_ESTABLISHED,
+            "kept": kept,
+            "reasons": [f"baseline_drops:{a}" for a in missing],
+        }
     return {"state": ESTABLISHED, "kept": kept, "reasons": []}
 
 
@@ -166,8 +247,13 @@ def read_baseline_keeps(ctx, on, template_id: str | None) -> dict:
         # `baseline_plan(n, cfg, owner)` under the network lock, with the
         # owner the run was started for.
         with PyPSAService.get_lock():
-            return baseline_keeps(PyPSAService.get_network(), _state["solver_config"],
-                                  existing_assets(template_id), body.get("owner"))
+            return baseline_keeps(
+                PyPSAService.get_network(),
+                _state["solver_config"],
+                existing_assets(template_id),
+                body.get("owner"),
+            )
+
     return on(plan)
 
 
@@ -179,6 +265,9 @@ def counterfactual_text(flags: Iterable[str]) -> list[str]:
     from services.finance.export_xlsx import BASELINE_CAVEATS
 
     flags = [str(f) for f in flags]
-    caveats = [text for key, text in BASELINE_CAVEATS
-               if any(f == key or f.startswith(key + ":") for f in flags)]
+    caveats = [
+        text
+        for key, text in BASELINE_CAVEATS
+        if any(f == key or f.startswith(key + ":") for f in flags)
+    ]
     return [*caveats, *(t for t in (flag_text(f) for f in flags) if t)]

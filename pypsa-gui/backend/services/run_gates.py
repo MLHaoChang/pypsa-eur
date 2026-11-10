@@ -169,7 +169,7 @@ def _ic_counterfactual(env):
     fact = ic.read(env.ctx, lambda fn: _on(env.ctx, fn))
     if fact["state"] == ic.ESTABLISHED:
         return fact["state"]
-    return NoEvidence(fact["state"], f"{fact['state']}: {', '.join(fact['reasons'])}")
+    return NoEvidence(fact["state"], ic.reason_words(fact))
 
 
 def _ic_returns(env):
@@ -180,7 +180,7 @@ def _ic_returns(env):
     fact = ic.read_returns(env.ctx, lambda fn: _on(env.ctx, fn))
     if fact["returns"] is not None:
         return fact["returns"]
-    return NoEvidence(fact["state"], f"{fact['state']}: {', '.join(fact['reasons'])}")
+    return NoEvidence(fact["state"], ic.reason_words(fact))
 
 
 def _ic_baseline_keeps(env):
@@ -1034,7 +1034,9 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
         if measured is not None:
             result["facts"][0]["measures"] = measured.measures
             if problem is None and result["verdict"] == "pass" and measured.measures:
-                result["note"] = MEASURED_PASS + "; ".join(m["detail"] or m["check"] for m in measured.measures)
+                from services.run_actions import CHECK_WORDS
+                result["note"] = MEASURED_PASS + "; ".join(m["detail"] or CHECK_WORDS.get(m["check"], m["check"])
+                                                           for m in measured.measures)
         if problem is not None:
             result.update(verdict="not_evaluated", reason=problem)
         out.append(result)
