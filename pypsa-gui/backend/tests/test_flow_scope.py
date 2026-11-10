@@ -271,6 +271,11 @@ def test_reliability_off_takes_the_study_out_of_the_run(client, tmp_projects_dir
         if row["state"] in ("complete", "not_needed"):
             counted = [i for i in row["items"] if i["in_scope"]]
             assert not any(i["severity"] == "error" for i in counted), row["section"]
+        # A section that is not needed says why, never a count.
+        if row["state"] == "not_needed":
+            assert row["summary"] in ("Off-grid: no grid connection needed",
+                                      "Generation-only: export through the POI in section 3",
+                                      "Not needed by the cards in scope"), row["section"]
 
     # Back on: the stored sub-options come back, and the study with them.
     on = _put(client, name, {**off, "groups": [*off["groups"], "reliability"]})
@@ -386,7 +391,13 @@ def test_no_scope_file_reads_exactly_as_before(client, tmp_projects_dir, project
     assert preset["run_request"] == {"optimisation": True, "study": not generation_only,
                                     "loadflow": False}
     items = [i for s in preset["sections"] for i in s["items"]]
-    assert all(i["in_scope"] for i in items)
+    # Every item is in scope, except an off-grid site's unused connection
+    # defaults: the open point of connection's own assumed rows (ui-modern 05).
+    out = [i for i in items if not i["in_scope"]]
+    off_grid = template.get("recommended_archetype") == "off_grid"
+    assert bool(out) == off_grid
+    assert all(i["target"]["section"] == "connection" and i["code"].startswith("assumed_")
+               and i["target"]["entity"] in ("subsea_tie", "point of connection") for i in out)
     (project_storage_dir(name) / S.SCOPE_FILE).write_text(json.dumps(_all_on(template)))
     everything = _flow(client, name)
     assert _strip_scope(preset) == _strip_scope(everything)

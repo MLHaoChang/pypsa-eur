@@ -167,7 +167,7 @@ export function ImproveCard() {
         </div>
         {following && (
           <p data-testid="hub-improve-fmea-started" className="text-muted">
-            Started — the check runs in the background; the risk table fills in as it goes.
+            Started: the check runs in the background; the risk table fills in as it goes.
             {sweepRunning && ` Running for ${sweepElapsed}.`}
           </p>
         )}

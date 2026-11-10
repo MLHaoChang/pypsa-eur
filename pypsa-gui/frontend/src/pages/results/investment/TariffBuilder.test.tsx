@@ -8,7 +8,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { commercialApi, libraryApi } from '../../../api/commercial'
 import TariffBuilder from './TariffBuilder'
 import { H3 } from './tariffModel.test'
-import { blankTariff, fieldLabel, FIELD_WORDS } from './tariffModel'
+import { blankTariff, fieldLabel, FIELD_WORDS, ITEM_WORDS, KINDS, MEASURED, OPTION_WORDS, SETTLEMENTS, UNITS } from './tariffModel'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 
 vi.mock('../../../api/commercial', async (importOriginal) => {
@@ -153,7 +153,7 @@ describe('TariffBuilder — review round 1', () => {
     fireEvent.focus(months)
     fireEvent.change(months, { target: { value: '6, x' } })
     fireEvent.blur(months)
-    fireEvent.change(screen.getByLabelText('Item e id'), { target: { value: 'e2' } })
+    fireEvent.change(screen.getByLabelText('Item e ID'), { target: { value: 'e2' } })
     expect(screen.getByTestId('tb-blocked').textContent).toContain('Item e2 period 1 months')
     expect(screen.getByRole('button', { name: 'Save as the project tariff' }).hasAttribute('disabled'))
       .toBe(true)
@@ -217,5 +217,44 @@ describe('TariffBuilder — review round 1', () => {
       expect(fieldLabel(key)).toBe(w.aria)
     }
     expect(container).toBeTruthy()
+  })
+
+  // ui-modern 05: human labels, never a bare lowercase field key.
+  it('every field label is a capitalised word, from the word maps', () => {
+    renderBuilder(blankTariff())
+    for (const w of [...Object.values(FIELD_WORDS), ...Object.values(ITEM_WORDS)]) expect(w.text).toMatch(/^[A-Z]/)
+    const item = screen.getByTestId('tb-item-0')
+    for (const [key, w] of Object.entries(ITEM_WORDS)) {
+      if (key === 'settlement') continue   // shown only for a demand, capacity or peak-import item
+      const control = within(item).getByLabelText(`Item energy ${w.aria}`)
+      expect(control.closest('label')!.textContent!.startsWith(w.text)).toBe(true)
+    }
+    const labels = [...document.querySelectorAll('label')].map(l => l.firstChild?.textContent?.trim())
+    for (const bare of ['id', 'name', 'kind', 'unit', 'measured on']) expect(labels).not.toContain(bare)
+    expect([...item.querySelectorAll('th')].map(th => th.textContent).filter(Boolean))
+      .toEqual(['Name', 'Rate', 'Months', 'Weekdays', 'Start hour', 'End hour', 'Remove'])
+  })
+
+  it('every stored option value has words without an underscore', () => {
+    for (const v of [...KINDS, ...UNITS, ...MEASURED, ...SETTLEMENTS]) {
+      expect(OPTION_WORDS[v], v).toBeTruthy()
+      expect(OPTION_WORDS[v]).not.toContain('_')
+    }
+    renderBuilder(blankTariff())
+    const unit = screen.getByLabelText('Item energy unit') as HTMLSelectElement
+    expect([...unit.options].map(o => o.textContent)).toContain('per kWh')
+    expect(unit.value).toBe('per_kwh')   // the stored value is unchanged
+  })
+
+  it('one add control replaces the six Add … item links', () => {
+    renderBuilder(blankTariff())
+    expect(screen.queryByRole('button', { name: /^Add \w+( \w+)? item$/ })).toBeNull()
+    const add = screen.getByTestId('tb-add-item')
+    expect(within(add).getAllByRole('button')).toHaveLength(1)
+    const kind = within(add).getByLabelText('Add an item: charge type') as HTMLSelectElement
+    expect([...kind.options].map(o => o.value)).toEqual(KINDS)
+    fireEvent.change(kind, { target: { value: 'tax_levy' } })
+    fireEvent.click(within(add).getByRole('button', { name: 'Add item' }))
+    expect((screen.getByLabelText('Item tax_levy_2 charge type') as HTMLSelectElement).value).toBe('tax_levy')
   })
 })

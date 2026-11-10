@@ -1,0 +1,52 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# Full-year time-series charts block the Results tab
+
+Status: needs-triage
+Type: bug
+Model: Sonnet. Reviewer: UX.
+
+Found while building ui-modern 02 slice 3. Measured on master `e4766504` with the
+`eh_ipp_hybrid` template (8760 snapshots), Expert > Results > Capacity expansion,
+Vite dev build, headless Chromium. The scripts are
+`.scratch/ui-modern/shots-02/tools/settle.mjs` (DOM mutations and long-task time
+per second after a tab opens) and `profile.mjs` (CPU profile, top self time).
+
+## What happens
+
+| Tab | Opens in | While idle |
+| --- | --- | --- |
+| Operation > Dispatch > Full timeframe | 12.9 s | a 10 s blocking redraw (92,799 DOM mutations) every 10 s: the tab never responds |
+| Curtailment | 1.1 s | a 0.8–1.7 s redraw (15,464 mutations) every 5 s |
+| Costs & prices | 1.7 s | a 0.4 s redraw (72 mutations) every 5 s |
+
+## Causes
+
+1. **Recharts measures every x-axis tick.** A category `XAxis` over 8760 snapshots
+   measures each label with `getBoundingClientRect` to decide which ticks fit. In
+   the Curtailment profile that call was 77 % of the time. Recharts caches 2,000
+   string sizes, fewer than a year of hourly stamps, so every draw measures again.
+2. **The whole Results tree re-renders every 5 s** with unchanged data. Suspected
+   source, not confirmed: `useProjectMismatchDetection` polls `/api/network/meta`
+   every 5 s and reads `isFetching`, so its host re-renders twice per poll. Tabs
+   whose memos key on a fresh object each render (`resolveRange(...)` returns a new
+   `{ from, to }`) then rebuild their series and redraw their charts.
+
+## What is already fixed
+
+Slice 3 (the hour-by-day map) fixed Curtailment only: the window object is kept
+per window and the over-time chart element is kept while its series is the same.
+Full year, idle: 0.1 s and 46 mutations per 5 s. `Curtailment.test.tsx` guards it.
+
+## What to build
+
+- Give full-year time-series charts explicit x-axis ticks (or a numeric `interval`),
+  so Recharts does not measure 8760 labels. One shared helper next to `CHART_AXIS`.
+- Stop the 5 s re-render reaching the Results tabs: confirm the source with the
+  React profiler, then narrow the subscription or memoise the tab body.
+- Dispatch > Full timeframe: keep each group's chart element while its series is
+  the same, as Curtailment does.
+
+Done when `settle.mjs` on `eh_ipp_hybrid` reports the three tabs idle (no long task
+over 200 ms after the first 5 s) and Dispatch > Full timeframe opens in under 3 s.

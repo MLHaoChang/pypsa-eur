@@ -129,13 +129,13 @@ def test_the_gate_leaves_a_not_established_case_unevaluated_with_its_flags(ic, c
     run(UNSERVED)
     result = _gate(client, session_ctx)
     assert result["verdict"] == "not_evaluated"
-    assert result["reason"] == "not_established: counterfactual_not_established:owner_conversion_load"
+    assert result["reason"] == "The counterfactual is not established (owner conversion load)"
     assert result["facts"][0]["value"] == "not_established"
 
 
 def test_the_gate_leaves_no_case_unevaluated(ic, client, session_ctx):
     result = _gate(client, session_ctx)
-    assert (result["verdict"], result["reason"]) == ("not_evaluated", "not_run: no_case")
+    assert (result["verdict"], result["reason"]) == ("not_evaluated", "No investment case has been run")
     assert result["facts"][0]["value"] == "not_run"
 
 

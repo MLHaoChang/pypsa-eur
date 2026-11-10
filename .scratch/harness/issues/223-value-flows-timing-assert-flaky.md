@@ -3,7 +3,7 @@
 
 # Flaky 2 s timing assert in `test_v1_value_flows_payload[multi]`
 
-Status: needs-triage
+Status: done (#1337)
 Type: bug (test)
 Found by: coordinator, CI on #1257 (GUI backend shard 3/4, 2026-11-07), a PR that does not touch the file.
 

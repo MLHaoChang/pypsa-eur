@@ -1354,6 +1354,9 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // Default to roughly central Europe so first render isn't a featureless
   // ocean. FitToNetwork takes over as soon as bus data arrives.
   const initialCenter: [number, number] = [50.0, 10.0]
+  // The "No bus has a location yet" card (UnplacedBusesPanel) is showing.
+  const noBusPlaced = placementUiAllowed && !draw.drawing && !placing
+    && unplaced.length > 0 && unplaced.length === (buses as Bus[]).length
 
   return (
     // isolate: local stacking context so z-40 companion isn't buried under Leaflet panes (see placement-strip z-index note below).
@@ -1752,12 +1755,17 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
 
       {/* Legend + minimap (plan M5), bottom-left above Leaflet's attribution;
           the minimap steps aside on a narrow canvas like the schematic's. */}
+      {/* Nothing is placed: the "No bus has a location yet" card is up and
+          there is no network to key or to map, so both step aside rather
+          than overlap it. */}
+      {!noBusPlaced && (
       <div className="absolute z-[400] flex flex-col items-start gap-2" style={{ left: 10, bottom: 28 }}>
         {mapHandle && (canvasWidth == null || canvasWidth >= MINIMAP_MIN_CANVAS_PX) && (
           <MapMiniMap map={mapHandle} tileUrl={ESRI_IMAGERY_URL} />
         )}
         <MapLegend linkCarriers={linkCarriers} assetRows={legendAssetRows} />
       </div>
+      )}
 
       {/* Map toolbar (recalculate line lengths). Sits over the map at the
           top-left, below the zoom buttons that Leaflet renders on its own. */}

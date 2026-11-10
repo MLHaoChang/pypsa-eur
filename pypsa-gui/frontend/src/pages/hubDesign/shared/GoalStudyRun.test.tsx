@@ -227,7 +227,7 @@ describe('GoalStudyRun when the template read failed', () => {
     expect((screen.getByTestId('hub-run-start') as HTMLButtonElement).disabled).toBe(true)
     // P30 (B8): the disabled Run says why.
     expect(screen.getByTestId('hub-run-start').getAttribute('title'))
-      .toBe('The template could not be read — retry below.')
+      .toBe('The template could not be read: retry below.')
     await user.click(screen.getByTestId('hub-run-start'))
     expect(resultsApi.startEhStudy).not.toHaveBeenCalled()
 

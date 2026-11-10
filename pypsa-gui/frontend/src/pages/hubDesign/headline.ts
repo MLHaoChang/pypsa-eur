@@ -50,12 +50,12 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
   const target = num(s.target_lole_h)
 
   if (verdict === 'fail' && lole != null && target != null) {
-    return `Not certified: about ${lole.toFixed(1)} h/yr of shortfall vs a ${g(target)} h/yr goal — driven by ${topRisk(report)}`
+    return `Not certified: about ${lole.toFixed(1)} h/yr of shortfall vs a ${g(target)} h/yr goal, driven by ${topRisk(report)}`
   }
   if (verdict === 'inconclusive' && target != null) {
     const ci = interval(review, report)
     if (ci) {
-      return `Not decided: the shortfall estimate (${ci[0].toFixed(1)}–${ci[1].toFixed(1)} h/yr) straddles the ${g(target)} h/yr goal — more simulation runs would settle it.`
+      return `Not decided: the shortfall estimate (${ci[0].toFixed(1)}–${ci[1].toFixed(1)} h/yr) straddles the ${g(target)} h/yr goal: more simulation runs would settle it.`
     }
   }
   if (verdict === 'pass' && lole != null && target != null) {
@@ -64,13 +64,13 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
       : `Certified: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
   }
   if (lole != null && target == null) {
-    return lole < 0.05 ? 'No reliability goal was set — the study expects no shortfall. Set a goal to certify.'
-      : `No reliability goal was set — the study reports ${lole.toFixed(1)} h/yr of shortfall. Set a goal to certify.`
+    return lole < 0.05 ? 'No reliability goal was set: the study expects no shortfall. Set a goal to certify.'
+      : `No reliability goal was set: the study reports ${lole.toFixed(1)} h/yr of shortfall. Set a goal to certify.`
   }
   // No goal and no shortfall number (decided at P24-FE, spec §5.5): the
   // engine's note ("no LOLE target …") would be jargon; ask for a goal.
   if (lole == null && target == null) {
-    return 'No reliability goal is set for this site, so the study did not certify it — set an allowed shortfall in step 3 (Goal) to get a verdict.'
+    return 'No reliability goal is set for this site, so the study did not certify it: set an allowed shortfall in step 3 (Goal) to get a verdict.'
   }
   const note = report?.sections?.certification?.note
   return `The study could not certify reliability: ${

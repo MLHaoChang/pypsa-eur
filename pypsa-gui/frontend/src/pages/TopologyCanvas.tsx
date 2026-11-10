@@ -5,7 +5,7 @@ import {
   ReactFlow, Background, Controls, MiniMap, useNodesState, useEdgesState,
   Handle, Position, type NodeProps, type EdgeProps, type Connection,
   BackgroundVariant, Panel, useReactFlow, EdgeLabelRenderer,
-  type Node, type Edge, type NodeChange,
+  type Node, type Edge, type NodeChange, type FitViewOptions,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
@@ -1910,10 +1910,12 @@ function ResultsPill() {
 // window (canvas ~710 px) it sat against the assistant launcher and the nodes.
 export const MINIMAP_MIN_CANVAS_PX = 760
 const LEGEND_KEY = 'pypsa.canvasLegendOpen'
-// Below this canvas width (a side panel open on a ~1250 px window) the open
+// Below this canvas width (a side panel open on a ~1000 px window) the open
 // legend card covers the network and crowds the left toolbar, so it starts
 // folded; the user's own choice, once made, wins.
-const LEGEND_OPEN_MIN_CANVAS_PX = 760
+const LEGEND_OPEN_MIN_CANVAS_PX = 520
+const prefersReducedMotion = (): boolean =>
+  typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
 function readLegendOpen(): boolean | null {
   try {
     const v = localStorage.getItem(LEGEND_KEY)
@@ -2008,13 +2010,26 @@ export default function TopologyCanvas() {
   const legendOpen = legendChoice ?? (canvasWidth == null || canvasWidth >= LEGEND_OPEN_MIN_CANVAS_PX)
   const setLegendOpen = (open: boolean) => { setLegendChoice(open); writeLegendOpen(open) }
   const rfInstance = useRef<{
-    fitView: (opts?: { padding?: number; duration?: number; maxZoom?: number; minZoom?: number }) => void
+    fitView: (opts?: { padding?: FitViewOptions['padding']; duration?: number; maxZoom?: number; minZoom?: number }) => void
     flowToScreenPosition: (pos: { x: number; y: number }) => { x: number; y: number }
     setCenter: (x: number, y: number, opts?: { duration?: number; zoom?: number }) => void
     getViewport: () => { x: number; y: number; zoom: number }
     zoomIn: () => void; zoomOut: () => void
   } | null>(null)
   const hasFitted = useRef(false)
+  // Fit the network into the part of the canvas the left toolbar and the open
+  // legend leave free, not under them.
+  const legendOpenRef = useRef(legendOpen)
+  legendOpenRef.current = legendOpen
+  const fitOpts = (duration: number): FitViewOptions => ({
+    padding: { top: '40px', right: '40px', bottom: '40px', left: legendOpenRef.current ? '250px' : '70px' },
+    duration: prefersReducedMotion() ? 0 : duration, maxZoom: 0.85,
+  })
+  // The canvas opens fitted to the network and stays fitted while the layout
+  // settles (saved positions arriving, the sidebar and properties panel
+  // changing the canvas width) until the user first pans or zooms.
+  // React Flow reports a null event for its own (programmatic) moves.
+  const userMoved = useRef(false)
   // The layoutEpoch this canvas last APPLIED `savedStateRef` for. A plain
   // boolean "layoutComputed" latch can't tell "laid out project A" from
   // "laid out project B" — on a same-canvas project switch it stayed `true`
@@ -2530,6 +2545,13 @@ export default function TopologyCanvas() {
   // Includes a structural-equality guard so unchanged data does NOT trigger
   // setNodes on every refetch — that previously fed a setState→render→setState
   // loop on empty/idle networks ("Maximum update depth exceeded").
+  useEffect(() => {
+    if (!hasFitted.current || userMoved.current) return
+    const t = setTimeout(() => {
+      if (!userMoved.current) rfInstance.current?.fitView(fitOpts(0))
+    }, 120)
+    return () => clearTimeout(t)
+  }, [canvasWidth, layoutEpoch])
   const prevNodeSig = useRef('')
   const prevDataSig = useRef('')
   const prevLayoutEpoch = useRef(layoutEpoch)
@@ -2558,7 +2580,7 @@ export default function TopologyCanvas() {
       // Fit view once when real nodes first appear (100ms lets RF measure node dimensions)
       if (sig !== '' && !hasFitted.current) {
         hasFitted.current = true
-        setTimeout(() => rfInstance.current?.fitView({ padding: 0.25, duration: 400, maxZoom: 0.85 }), 100)
+        setTimeout(() => rfInstance.current?.fitView(fitOpts(400)), 100)
       }
     } else {
       // Data-only update: skip when the relevant data hasn't changed. Without
@@ -2797,7 +2819,7 @@ export default function TopologyCanvas() {
     })))
     toast.success('Layout reset — waypoints cleared')
     scheduleSave()
-    setTimeout(() => rfInstance.current?.fitView({ padding: 0.25, duration: 400, maxZoom: 0.85 }), 50)
+    setTimeout(() => rfInstance.current?.fitView(fitOpts(400)), 50)
   }, [buses, allSatellites, setNodes, setEdges, scheduleSave])
 
   const handleResetDiagram = useCallback(() => {
@@ -2823,7 +2845,7 @@ export default function TopologyCanvas() {
     // layout.json), localStorage for the unsaved network.
     scheduleSave()
     toast.success('Diagram reset — positions and waypoints cleared')
-    setTimeout(() => rfInstance.current?.fitView({ padding: 0.25, duration: 400, maxZoom: 0.85 }), 50)
+    setTimeout(() => rfInstance.current?.fitView(fitOpts(400)), 50)
   }, [buses, allSatellites, setNodes, setEdges, scheduleSave, layoutEpoch, currentProject])
 
   const onNodeDoubleClick = useCallback((e: React.MouseEvent, node: Node) => {
@@ -3088,7 +3110,8 @@ export default function TopologyCanvas() {
         nodes={nodes} edges={edges}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
         onConnect={onConnect}
-        onNodeClick={onNodeClick} onEdgeClick={onEdgeClick}
+        onNodeClick={(e, n) => { userMoved.current = true; onNodeClick(e, n) }}
+        onEdgeClick={(e, ed) => { userMoved.current = true; onEdgeClick(e, ed) }}
         onNodeDoubleClick={onNodeDoubleClick}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
@@ -3101,6 +3124,7 @@ export default function TopologyCanvas() {
         // so the gradient stays anchored to the viewport while the dot grid
         // and nodes pan/zoom above it.
         style={{ backgroundColor: 'var(--color-canvas)', backgroundImage: 'var(--ambient)' }}
+        onMoveStart={(event) => { if (event) userMoved.current = true }}
         onInit={(instance) => {
           rfInstance.current = instance
           ;(window as unknown as { rfInstance: unknown }).rfInstance = instance
@@ -3180,7 +3204,7 @@ export default function TopologyCanvas() {
                   <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><circle cx="3.5" cy="3.5" r="1.6"/><circle cx="12.5" cy="12.5" r="1.6"/><path d="M3.5 5v3a2 2 0 0 0 2 2h5a2 2 0 0 1 2 2v-0.5"/></svg>
                 </button>
                 <button aria-label="Fit view — centre the network in the canvas"
-                  onClick={() => rfInstance.current?.fitView({ padding: 0.25, duration: 400, maxZoom: 0.85 })}
+                  onClick={() => rfInstance.current?.fitView(fitOpts(400))}
                   title="Fit view — centre the network in the canvas"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-accent transition-colors"
                 >
