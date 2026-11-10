@@ -18,7 +18,7 @@ You are a session for {{REPO}}, commissioned by the owner through the coordinato
 
 **Review.** <Who reviews it: the gatekeeper for engine code, else "none required".>
 
-**Context budget.** Hand off at 300k context (owner decision USE-2). Keep tool output short: `| tail -8`, `grep -n` then `sed -n` of at most 60 lines, never whole files or whole diffs; background runs under 580 s.
+**Context budget.** Hand off at 300k context (owner decision USE-2). Keep tool output short: `| tail -8`, `grep -n` then `sed -n` of at most 60 lines, never whole files or whole diffs; background runs under 580 s. Before reading a big file, have an Explore subagent return a file:line map, then read only those line ranges, several per call; aim for under 120 turns to your first PR. Never load a full-size screenshot: run `scripts/coord/shots.sh` on the image and Read the `.small` file it prints. Builders and reviewers alike run reviews, mutant runs and long log reads in a subagent that returns a short summary.
 
 **Process.** Follow `.claude/skills/steward/SKILL.md`: one PR on its own `claude/*` branch, a release-note fragment if the repo's guard requires one for the path, drive its CI, report `premerge ok <full head SHA>` and the `scripts/coord/premerge.sh` output to the coordinator `@COORDINATOR@` once green, and send questions to the coordinator as 2–4 options. A clean master merge carries a reviewer's OK, so do not ask for a re-OK (owner decision RETRO-QUIET-1).
 ```
