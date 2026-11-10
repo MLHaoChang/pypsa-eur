@@ -3,7 +3,7 @@
 
 # 02 — Line-item model and validation
 
-Status: in progress (#1320, re-scoped; TDD plan sent to GK B 2026-11-10)
+Status: done (#1320)
 Type: task
 Blocked by: 01
 Gated: yes (GK B)

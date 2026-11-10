@@ -3,7 +3,7 @@
 
 # 10 — Harness profile: eh_datacenter and eh_datacenter_staged
 
-Status: ready-for-agent (10a done: PR #1283 and its test follow-up merged; 10b in progress, session_01G7qCukvjkKproA4DUNhn6F)
+Status: done (10a: #1283 and its test follow-up; 10b: #1333)
 Type: task
 Blocked by: 07
 Gated: yes (GK A for the engine gates and the grid-readiness actions; GK B for the harness parts)
