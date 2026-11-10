@@ -135,10 +135,13 @@ def _facts(facts) -> dict:
 def survival(n, island, *, solve=None) -> dict:
     """The outcome for the solved network ``n`` and its validated island
     sidecar ``island`` (``island_config.load_island_config`` / ``validate``,
-    never the raw file): ``{state, reason, shortfalls, binding, fixed, sustained_h,
+    never the raw file): ``{state, reason, shortfalls, binding, fixed, solves, solver, sustained_h,
     scenarios, periods, critical_loads, seamless_bridge, fuel, missing}``.
     ``shortfalls`` are ``{row, sentence}``; ``reason`` is words, None when
-    the island survives. ``solve(n, extra_functionality, **kw)`` returns
+    the island survives. ``solves`` is 1 once the check's solve was attempted
+    (0 when there was no plan to fix) and ``solver`` its ``{status,
+    condition}``, for the caller that charges a solve budget; the function
+    opens no solver context and writes neither ``n`` nor ``n.meta``. ``solve(n, extra_functionality, **kw)`` returns
     ``(status, condition)``; HiGHS by default."""
     from services.adequacy.energization import apply_energization
     from services.solver import island as rows
@@ -150,6 +153,8 @@ def survival(n, island, *, solve=None) -> dict:
         "shortfalls": [],
         "binding": [],
         "fixed": [],
+        "solves": 0,
+        "solver": None,
         "sustained_h": float(req["values"]["sustained_h"]),
         "scenarios": list(req["scenarios"]),
         **_facts(None),
@@ -170,6 +175,7 @@ def survival(n, island, *, solve=None) -> dict:
     setattr(c, rows.FIXED_DESIGN_ATTR, True)
     setattr(c, rows.AS_SIZED_ATTR, frozenset(rows.uc_gensets(n, island)[1]))
     apply_energization(c)
+    out["solves"] = 1  # from here the solve is attempted, whatever its ending
     try:
         with rows.linearised_uc(c, island) as kw:
             status, condition = (solve or _solve)(
@@ -197,7 +203,9 @@ def survival(n, island, *, solve=None) -> dict:
             "reason": f"the island check's solve stopped with an error ({type(exc).__name__})",
         }
     facts = getattr(c, "_island_facts", None)
-    out.update(_facts(facts))
+    out.update(
+        _facts(facts), solver={"status": str(status), "condition": str(condition)}
+    )
     short = [
         {"row": sh["row"], "sentence": rows.shortfall_sentence(sh)}
         for sh in rows.island_shortfalls(facts)

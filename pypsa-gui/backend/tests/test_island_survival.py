@@ -71,13 +71,18 @@ def _sizes(n):
 @pytest.mark.parametrize("tid", TEMPLATES)
 def test_the_shipped_plan_survives_with_the_facts_of_its_own_rows(solved, tid):
     n = solved[tid]
-    before, objective = _sizes(n), float(n.objective)
+    before, objective, meta = _sizes(n), float(n.objective), dict(n.meta)
     left = S.extendable(n)
     out = S.survival(n, _island(tid))
     assert (
         out["state"] == S.SURVIVES and out["reason"] is None and out["shortfalls"] == []
     )
     assert out["sustained_h"] == 24.0 and out["scenarios"] == ["seamless"]
+    assert out["solves"] == 1 and out["solver"] == {
+        "status": "ok",
+        "condition": "optimal",
+    }
+    assert dict(n.meta) == meta
     assert (
         out["critical_loads"] == ["hospital_load"] and out["seamless_bridge"] == "held"
     )
@@ -173,6 +178,7 @@ def test_an_unsolved_network_is_not_solved_never_a_verdict():
         out["state"] == S.NOT_SOLVED
         and out["reason"] == "the network has no solved plan"
     )
+    assert out["solves"] == 0 and out["solver"] is None
 
 
 def test_a_solved_network_missing_a_solved_size_is_not_solved(solved, monkeypatch):
@@ -315,6 +321,7 @@ def test_a_solver_error_is_not_evaluated_and_a_refused_row_fails(solved):
         S.NOT_EVALUATED,
         "the island check's solve stopped with an error (RuntimeError)",
     )
+    assert out["solves"] == 1 and out["solver"] is None  # an attempted solve counts
 
     def refuse(c, fn, **kw):
         raise I.IslandRefusal(
