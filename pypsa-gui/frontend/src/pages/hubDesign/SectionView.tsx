@@ -10,6 +10,7 @@ import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
 import { AssumptionsCard, isAssumedItem } from './AssumptionsCard'
 import { CommercialCard } from './cards/CommercialCard'
+import { SectionHoldings } from './SectionHoldings'
 import { GoalStudyRun } from './shared/GoalStudyRun'
 import { NextSectionButton } from '../../components/NextSectionButton'
 import { sectionMeta } from '../../layout/flowSections'
@@ -103,7 +104,7 @@ export function SectionView({ id, onNext, children }: {
  *  and the one way there. Never a silent gap (design §3.5). */
 export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   const meta = sectionMeta(id)
-  const { flow, section } = useProjectFlow()
+  const { flow, section, isError, isPending } = useProjectFlow()
   const setActiveSection = useUIStore(s => s.setActiveSection)
   const gate = useRunGate('all')
   if (id === 'readiness') {
@@ -164,10 +165,7 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   if (id === 'commercial') return <CommercialCard />
   return (
     <div data-testid={`hub-card-${id}`} className="flex flex-col gap-3 rounded border border-border bg-panel p-4">
-      <p className="text-[12px] text-muted">
-        {s?.summary ? `${s.summary}. ` : ''}Anything this section still needs is listed above, and each item opens here.
-        The full {meta.label.toLowerCase()} editor is in Expert.
-      </p>
+      <SectionHoldings id={id} holds={s?.holds} pending={isPending} failed={isError} />
       <div>
         <button type="button" data-testid={`section-open-expert-${id}`} onClick={() => openSectionInExpert(id)}
           className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">

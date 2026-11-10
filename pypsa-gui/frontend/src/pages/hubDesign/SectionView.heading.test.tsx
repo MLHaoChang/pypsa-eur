@@ -1,9 +1,9 @@
 // ui-modern 05: a section's heading separates the state from its summary with "·" (data), never an em dash.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { FlowSection } from '../../api/flow'
-import { SectionView } from './SectionView'
+import { GenericSectionCard, SectionView } from './SectionView'
 
 const rows: Record<string, Partial<FlowSection>> = {
   assets: { state: 'complete', summary: '9 assets', items: [] },
@@ -28,4 +28,13 @@ describe('Guided section heading', () => {
     expect(heading('connection')).toBe('not needed · Off-grid: no grid connection needed')
   })
   it('no summary: the state alone', () => { expect(heading('commercial')).toBe('complete') })
+  it('the card lists what the section holds: as many rows as the heading counts', () => {
+    rows.assets.holds = Array.from({ length: 9 }, (_, i) => ({ component: 'Generator', entity: `g${i}`,
+      carrier: null, field: 'p_nom', value: 1, unit: 'MW', extendable: false }))
+    expect(heading('assets')).toBe('complete · 9 assets')
+    render(<GenericSectionCard id="assets" />)
+    fireEvent.click(screen.getByTestId('section-held-show-all'))
+    expect(screen.getAllByTestId('section-held')).toHaveLength(9)
+    expect(screen.getByTestId('section-open-expert-assets').textContent).toBe('Open assets & sizing in Expert ›')
+  })
 })
