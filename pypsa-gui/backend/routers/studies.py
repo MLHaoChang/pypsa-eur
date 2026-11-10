@@ -1145,8 +1145,8 @@ def get_ledger_row_why(study_id: str, key: str, option_id: str,
     _refuse_unless_enabled()
     study = _load(project, study_id)
 
-    def unknown(message: str) -> HTTPException:
-        return HTTPException(404, detail={"error_kind": "why_target_unknown", "message": message})
+    def unknown(message: str, status: int = 404) -> HTTPException:
+        return HTTPException(status, detail={"error_kind": "why_target_unknown", "message": message})
 
     try:
         ledger_fields(key)
@@ -1160,7 +1160,7 @@ def get_ledger_row_why(study_id: str, key: str, option_id: str,
     try:
         out = explain_ledger_row(network, key)
     except TargetUnknown as exc:
-        raise unknown(str(exc)) from exc
+        raise unknown(str(exc), exc.status) from exc
     return {**out, "target": {**out["target"], "study_id": study_id, "option_id": option_id}}
 
 

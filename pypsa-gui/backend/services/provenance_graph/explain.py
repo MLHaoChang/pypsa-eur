@@ -23,7 +23,7 @@ from typing import Any
 from services.asset_schema import fields as asset_fields
 from services.asset_schema.schema import CLASS_ATTR
 from services.provenance_graph import money
-from services.provenance_graph.queries import Builder, _check, staleness, why
+from services.provenance_graph.queries import _check, money_graph, staleness, why
 from services.provenance_graph.types import Edge, Graph, Step, Unrecorded
 
 #: The most steps one answer carries; a longer walk is cut and marked `truncated`, never read as complete (X5).
@@ -131,9 +131,10 @@ def _stamp(stamp: dict | None) -> dict | None:
 
 
 def _stamp_missing(stamp: dict | None, unit: str | None) -> list[str]:
-    """The stamp keys this step's stamp lacks; a money unit with no recorded currency names `currency`."""
+    """The stamp keys this step's stamp lacks; a money unit with no recorded currency names `currency`. A step
+    with no stamp at all names `stamp`: its unit is then the schema's, not a recorded one."""
     if not stamp:
-        return []
+        return ["stamp"]
     missing = [k for k in STAMP_REQUIRED if stamp.get(k) is None]
     if unit and unit.startswith(_SCHEMA_CURRENCY) and not stamp.get("currency"):
         missing.append("currency")
@@ -179,13 +180,16 @@ def _pack_price(
     if value is None:
         return _not_established("the priced value is missing or not a finite number")
     column = scaled.get("column")
+    basis = scaled.get("capacity_basis")
     return {
         "status": "established",
         "value": value / scale,
+        # Per unit of the pack row's capacity basis (DC for a DC-priced PV), as pricing recorded it.
         "unit": unit,
+        "capacity_basis": basis if isinstance(basis, str) else None,
         "source": (step.stamp or {}).get("source"),
         "basis": ARITHMETIC,
-        "worked_back": f"{value} ÷ {column} {scale}",
+        "worked_back": f"{value} ÷ {column if isinstance(column, str) else 'the recorded scale'} {scale}",
     }
 
 
@@ -222,12 +226,6 @@ def _step(g: Graph, step: Step) -> dict:
     return out
 
 
-def _graph(n, component: str, name: str) -> Graph:
-    b = Builder(n)
-    money.add_asset(b, component, name)
-    return b.build()
-
-
 def _start(g: Graph, component: str, name: str, field: str) -> str:
     """The node a field is shown as: its derived node when pricing scaled it (or it is the annualised cost), else
     its input node. Refused when the graph holds neither: the field has no provenance to walk (X4)."""
@@ -252,7 +250,7 @@ def check_target(n, component: str, name: str) -> None:
 def explain(n, component: str, name: str, field: str) -> dict:
     """Why one asset field has its value: the walk from the field to what priced it, outcome first."""
     check_target(n, component, name)
-    g = _graph(n, component, name)
+    g = money_graph(n, [(component, name)])
     start = _start(g, component, name, field)
     steps = why(g, start).steps
     verdict = staleness(g, start)
@@ -314,8 +312,10 @@ def explain_ledger_row(n, key: str) -> dict:
     return {
         "outcome": {
             "state": state,
+            "uncompared": [u for f in fields for u in f["outcome"]["uncompared"]],
             "complete": all(f["outcome"]["complete"] for f in fields),
             "truncated": any(f["outcome"]["truncated"] for f in fields),
+            "steps_total": sum(f["outcome"]["steps_total"] for f in fields),
         },
         "target": {"ledger_key": key},
         "fields": fields,

@@ -81,9 +81,11 @@ def test_why_a_pv_cost_walks_to_the_pack_price_and_the_ratio_with_their_stamps(
     assert pack["value"] == pytest.approx(cost["value"] / 1.2)
     assert pack["source"] == stamp["source"] and pack["basis"] == E.ARITHMETIC
     assert ratio["node"] == RATIO and ratio["value"] == pytest.approx(1.2)
-    assert (
-        ratio["unit"] is None
-    )  # a ratio: the schema names no unit, and none is made up
+    # A ratio: the schema names no unit, and none is made up.
+    assert ratio["unit"] is None
+    assert ratio["stamp"] is None and ratio["stamp_missing"] == ["stamp"]
+    # Per DC MW, as the pack row was priced.
+    assert pack["capacity_basis"] == "output_electric_dc"
     assert ratio["via"]["edge"] == "priced_through"
     assert ratio["via"]["recorded"]["column"] == "dc_ac_ratio"
     assert ratio["via"]["recorded"]["value"] == pytest.approx(1.2)
@@ -130,6 +132,9 @@ def test_the_economics_annualised_cost_walks_both_money_fields_to_the_ratio(
     annual = out["steps"][0]
     assert annual["value"] == float(n.generators.at["g", "capital_cost"])  # X4
     assert annual["unit"] == "EUR/MW/yr" and annual["stamp"] is None
+    assert annual["stamp_missing"] == [
+        "stamp"
+    ]  # the unit is the schema's: named, not recorded
     assert "pack_price" not in annual  # nothing scaled the annualised cost itself
 
 
@@ -325,7 +330,13 @@ def test_a_ledger_row_walks_the_field_it_compiles_to(tmp_path, monkeypatch):
     n.generators.at["pv", "dc_ac_ratio"] = 1.3
     out = explain_ledger_row(n, "pv_utility_eur_per_kw")
     assert next(iter(out)) == "outcome"
-    assert out["outcome"] == {"state": "stale", "complete": True, "truncated": False}
+    assert out["outcome"] == {
+        "state": "stale",
+        "uncompared": [],
+        "complete": True,
+        "truncated": False,
+        "steps_total": 2,
+    }
     (field,) = out["fields"]
     assert field == explain(n, "Generator", "pv", "overnight_cost")
     assert field["steps"][1]["node"] == "input:Generator/pv/dc_ac_ratio"
@@ -519,6 +530,7 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
     with PyPSAService.get_netcdf_io_lock():
         PyPSAService.export_network_to_netcdf(n, path)
 
+    _no_writes(monkeypatch)
     fork_bytes = path.read_bytes()
     study_file = project_storage_dir(name) / "studies" / f"{sid}.json"
     study_bytes = study_file.read_bytes()
@@ -670,8 +682,64 @@ def test_a_two_field_row_reads_stale_over_uncompared_over_fresh(
     it = iter(states)
 
     def fake(_n, component, name, field):
-        return {"outcome": {"state": next(it), "complete": True, "truncated": False}}
+        return {
+            "outcome": {
+                "state": next(it),
+                "uncompared": [],
+                "complete": True,
+                "truncated": False,
+                "steps_total": 1,
+            }
+        }
 
     monkeypatch.setattr(E, "explain", fake)
     out = explain_ledger_row(pypsa.Network(), "battery_round_trip_efficiency")
     assert len(out["fields"]) == 2 and out["outcome"]["state"] == want
+
+
+def test_worked_back_names_a_missing_column_plainly(tmp_path, monkeypatch):
+    n = _pv(tmp_path, monkeypatch)
+    for field in ("overnight_cost", "fom_cost"):
+        P._root(n)["Generator"]["g"][field]["scaled_by"].pop("column")
+    pack = explain(n, "Generator", "g", "overnight_cost")["steps"][0]["pack_price"]
+    assert (
+        "None" not in pack["worked_back"]
+        and "the recorded scale" in pack["worked_back"]
+    )
+
+
+def test_the_tool_through_the_harness_dispatch_path(
+    tmp_path, monkeypatch, install_network
+):
+    """X6: the call the turn loop makes (`harness.loop.dispatch_tool_call`): allowlist, validators, the
+    handler; a read is never carded, and the result is the route's answer."""
+    from harness.loop import dispatch_tool_call
+    from harness.session import ChatSession
+    from services import chat_service, dirty_state
+
+    chat_service._reset_sessions_for_tests()
+    monkeypatch.setattr(dirty_state, "mark_dirty", lambda: None)
+    n = install_network(_pv(tmp_path, monkeypatch))
+    n.generators.at["g", "dc_ac_ratio"] = 1.3
+    session = ChatSession(model="m", owner_user_id="u1")
+    collector: list[dict] = []
+    tu = {
+        "id": "tu_1",
+        "name": "why_this_number",
+        "input": {"component": "Generator", "name": "g", "field": "overnight_cost"},
+    }
+    frames = list(
+        dispatch_tool_call(
+            session, tu, collector, offered_tool_names={"why_this_number"}
+        )
+    )
+    assert "tool_pending_confirmation" not in [e for e, _ in frames]
+    (result,) = collector
+    assert result.get("is_error") is not True, result
+    text = (
+        result["content"]
+        if isinstance(result["content"], str)
+        else json.dumps(result["content"])
+    )
+    assert '"outcome"' in text and '"stale"' in text and "dc_ac_ratio" in text
+    chat_service._reset_sessions_for_tests()

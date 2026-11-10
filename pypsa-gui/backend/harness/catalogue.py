@@ -4895,8 +4895,9 @@ TOOLS: list[dict[str, Any]] = [
         "`broken` lists what was compared (recorded vs current: say the input changed since "
         "pricing) and what was not. A scaled price carries `pack_price`: arithmetic (value ÷ "
         "the recorded scale), or not_established. uncompared means nothing was compared, never "
-        "that it is current; a truncated answer is not complete. Values are in storage units "
-        "(EUR/MW). Changes nothing. Safety: read.",
+        "that it is current; a truncated answer is not complete. Values are per MW of the "
+        "stored capacity, in the stamp's currency (EUR when it names none, listed in "
+        "stamp_missing). Changes nothing. Safety: read.",
         {"component": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
          "name": {"type": "string", "minLength": 1},
          "field": {"type": "string", "minLength": 1},
@@ -5386,8 +5387,6 @@ TOOL_ROUTES: dict[str, list] = {
     "cluster_network": [("POST", "/api/network/cluster")],
     "recalculate_line_lengths": [("POST", "/api/network/lines/recalculate_lengths")],
     # network topology and sites (8) — LV08 B1, in process through `_route`.
-    "why_this_number": [("GET", "/api/network/asset_schema/{component}/provenance/{name}/why/{field}"),
-                        ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why")],
     "get_asset_reference": [("GET", "/api/network/asset_costs"),
                             ("GET", "/api/network/asset_schema/{component}"),
                             ("GET", "/api/network/catalog/{component}")],
@@ -5710,6 +5709,9 @@ TOOL_ROUTES: dict[str, list] = {
     "abort_investment_case": [("POST", "/api/results/investment_case/abort")],
     "list_stress_profile_packs": [("GET", "/api/projects/{name}/stress_profile_packs")],
     # end LV08 B2a
+    # Provenance graph (1), issue 03: "why this number", an asset field or a Guided ledger row.
+    "why_this_number": [("GET", "/api/network/asset_schema/{component}/provenance/{name}/why/{field}"),
+                        ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why")],
     # Library references (3): two reads (the asset's pack from its provenance) and the apply.
     "list_library_references": [("GET", "/api/library/references")],
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
