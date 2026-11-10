@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
 // SPDX-License-Identifier: MIT
 
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { useUIStore, type SlidePanel } from '../store/uiStore'
 
 /** Panels currently mounted, by id. StrictMode unmounts and remounts in one commit; this tells that from a real leave. */
@@ -20,8 +20,6 @@ const mounted = new Map<SlidePanel, number>()
 export function usePanelSectionScroll(panel: SlidePanel, ready: boolean): void {
   const request = useUIStore(s => s.panelSectionRequest)
   const clear = useUIStore(s => s.clearPanelSectionRequest)
-  const latest = useRef({ request, clear })
-  latest.current = { request, clear }
   useEffect(() => {
     if (!request || request.panel !== panel || !ready) return
     document.querySelector(`[data-panel-section="${request.section}"]`)?.scrollIntoView?.({ block: 'start' })
@@ -33,7 +31,10 @@ export function usePanelSectionScroll(panel: SlidePanel, ready: boolean): void {
       mounted.set(panel, (mounted.get(panel) ?? 1) - 1)
       queueMicrotask(() => {
         if ((mounted.get(panel) ?? 0) > 0) return
-        if (latest.current.request?.panel === panel) latest.current.clear()
+        // The live store, not this render's request: a jump to another panel's section may have replaced it.
+        // (Panel tests mock the store without getState; there is nothing to clear in them.)
+        const s = useUIStore.getState?.()
+        if (s?.panelSectionRequest?.panel === panel) s.clearPanelSectionRequest()
       })
     }
   }, [panel])

@@ -72,4 +72,12 @@ describe('usePanelSectionScroll', () => {
     expect(scrolled).toEqual([])
     expect(useUIStore.getState().panelSectionRequest).toEqual({ panel: 'gridspine', section: 'readback' })
   })
+
+  it('leaving a waiting panel for another panel\'s section keeps the new request', async () => {
+    ask('campusStudy', 'island')
+    const { unmount } = render(<Panel ready={false} />)
+    act(() => { useUIStore.getState().requestPanelSection('gridspine', 'readback'); unmount() })
+    await act(async () => { await Promise.resolve() })
+    expect(useUIStore.getState().panelSectionRequest).toEqual({ panel: 'gridspine', section: 'readback' })
+  })
 })
