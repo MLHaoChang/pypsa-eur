@@ -25,8 +25,8 @@ export function useHeadlineKpis() {
 }
 
 const ROW = 'grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(170px,1fr))]'
-// Every tile is as tall as the tallest state (label, figure, pill, sentence), so the row never jumps.
-const TILE_MIN = 'min-h-[104px]'
+// Every tile is as tall as the tallest state (label, pill, sentence and the tab link: 128px measured), so the row never jumps.
+const TILE_MIN = 'min-h-[128px]'
 // The shortest card set (`headline_kpis.py` ORDER); a fifth tile joins the same row.
 const LOADING_TILES = 4
 

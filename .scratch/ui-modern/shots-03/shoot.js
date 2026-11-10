@@ -9,15 +9,15 @@ const has = f => flags.includes(f)
   if (has('slow')) await page.route('**/api/results/headline_kpis', async r => { await new Promise(x => setTimeout(x, 6000)); r.continue() })
   if (has('stale')) await page.route('**/api/simulation/status', async r => { const res = await r.fetch(); const j = await res.json(); j.dispatch = 'stale'; r.fulfill({ response: res, json: j }) })
   if (has('fail')) await page.route('**/api/results/headline_kpis', r => r.fulfill({ status: 500, body: '{}' }))
-  await page.goto('http://127.0.0.1:5173/')
+  await page.goto('http://127.0.0.1:' + (process.env.PORT || 5173) + '/')
   const card = page.locator(`text=${project}`).first()
   await card.waitFor({ timeout: 20000 })
   await page.locator('a,button,[role=button]').filter({ hasText: project }).first().click()
   await page.waitForTimeout(2500)
   if (has('run')) {
     const csrf = (await ctx.cookies()).find(c => c.name === 'pypsa_gui_csrf')?.value
-    await page.request.post('http://127.0.0.1:5173/api/simulation/run', { headers: { 'X-CSRF-Token': csrf }, data: {} })
-    for (let i = 0; i < 60; i++) { await page.waitForTimeout(2000); const s = await (await page.request.get('http://127.0.0.1:5173/api/simulation/status')).json(); if (!s.running) break }
+    await page.request.post('http://127.0.0.1:' + (process.env.PORT || 5173) + '/api/simulation/run', { headers: { 'X-CSRF-Token': csrf }, data: {} })
+    for (let i = 0; i < 60; i++) { await page.waitForTimeout(2000); const s = await (await page.request.get('http://127.0.0.1:' + (process.env.PORT || 5173) + '/api/simulation/status')).json(); if (!s.running) break }
     await page.reload(); await page.waitForTimeout(2500)
   }
   const mode = has('guided') ? 'Guided' : 'Expert'
