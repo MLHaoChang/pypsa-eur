@@ -58,10 +58,18 @@ CHECKED = {
 }
 
 #: A checked formula's refusal -> (ResultState, one plain sentence). No engine
-#: identifier appears in a sentence (docs/agents/review-ux.md).
+#: identifier appears in a sentence (docs/agents/review-ux.md). The two refusals
+#: with more than one cause are split in `_why`.
 _UNAVAILABLE = ("unavailable", "This run cannot give this figure.")
+BUSY = ("unavailable", "The project is busy. Try again in a moment.")
+INPUTS_CHANGED = ("stale", "The inputs changed since this solve.")
+LOAD_FLOW_REPLACED = ("unavailable", "A load flow replaced the results of this solve.")
+NOT_OPTIMAL = ("unavailable", "The solve did not finish with an optimal result.")
+CASE_NOT_RUN = ("not_run", "The investment case has not run on this solve.")
+CASE_RUNNING = ("unavailable", "The investment case is still running.")
+CASE_STALE = ("stale", "The investment case is older than its inputs.")
+CASE_UNREAD = ("unavailable", "The investment case could not be read just now.")
 REASONS = {
-    "unverified_solve": ("stale", "The inputs changed since this solve."),
     "no_variable_generators": (
         "not_applicable",
         "The project has no generator with a varying availability.",
@@ -69,10 +77,6 @@ REASONS = {
     "no_available_energy": (
         "not_applicable",
         "No varying generator had energy available in this run.",
-    ),
-    "investment_case_not_current": (
-        "not_run",
-        "The investment case has not run on this solve.",
     ),
     "unsupported_snapshot_scope": (
         "unavailable",
@@ -118,8 +122,42 @@ def _card(card_id, value=None, unit=None, *, state="ready", reason=None, **extra
     }
 
 
-def _refused(card_id, code):
-    state, reason = REASONS.get(code, _UNAVAILABLE)
+def _unverified(ctx):
+    """Why `calculations.solve_matches_inputs` said no, in its own order."""
+    state = ctx.solver_state
+    if state.get("ac_pf_results") is not None or state.get("lopf_results") is not None:
+        return LOAD_FLOW_REPLACED
+    if state.get("status") != "completed" or state.get("condition") != "optimal":
+        return NOT_OPTIMAL
+    return INPUTS_CHANGED
+
+
+def _case_not_current(ctx):
+    """Which of `investment.is_current`'s conditions failed."""
+    from fastapi import HTTPException
+
+    try:
+        state = calculations.investment.current(ctx)
+    except (ValueError, KeyError, TypeError, HTTPException):
+        return CASE_UNREAD
+    if not state or not state["present"]:
+        return CASE_NOT_RUN
+    if state["status"] == "running":
+        return CASE_RUNNING
+    if state["stale"] or state["assumptions_hash"] != state["current_hash"]:
+        return CASE_STALE
+    # Current now: it changed during the read, or it holds no years.
+    return CASE_UNREAD
+
+
+_WHY = {
+    "unverified_solve": _unverified,
+    "investment_case_not_current": _case_not_current,
+}
+
+
+def _refused(ctx, card_id, code):
+    state, reason = _WHY[code](ctx) if code in _WHY else REASONS.get(code, _UNAVAILABLE)
     return _card(card_id, state=state, reason=reason)
 
 
@@ -134,12 +172,24 @@ def _peak_branch(raw, scope, peak):
     return None
 
 
+def _shown(profile):
+    """Whether the strip shows this checked profile. The one place for the
+    rollout gate (chat's is `harness.rollout.profile_enabled`)."""
+    return True
+
+
 def _checked(ctx, card_id):
-    """One checked fact, read and calculated as a checked answer reads it."""
+    """One checked fact, read and calculated as a checked answer reads it. A
+    failure costs this card only: the same set a checked answer catches
+    (`harness.assurance`)."""
+    from fastapi import HTTPException
+
     from harness.durable import network_guard
-    from services.assurance_records import _scoped_read
+    from services.assurance_records import scoped_read
 
     profile, metric = CHECKED[card_id]
+    if not _shown(profile):
+        return _card(card_id, state=_UNAVAILABLE[0], reason=_UNAVAILABLE[1])
     scope = {
         "project_id": ctx.project_uuid,
         "profile": profile,
@@ -147,37 +197,40 @@ def _checked(ctx, card_id):
         "metrics": [metric],
     }
     try:
-        raw = _scoped_read(ctx, scope, None)
+        raw = scoped_read(ctx, scope, None)
         with network_guard():
             facts, slots = calculations.scoped_calculate(raw, scope)
-    except ValueError as exc:
-        return _refused(card_id, str(exc))
-    fact = next((f for f in facts if f["metric"] == metric), None)
-    if fact is None:
-        return _refused(
-            card_id,
-            next((s.get("reason") for s in slots if s["metric"] == metric), None),
+        fact = next((f for f in facts if f["metric"] == metric), None)
+        if fact is None:
+            return _refused(
+                ctx,
+                card_id,
+                next((s.get("reason") for s in slots if s["metric"] == metric), None),
+            )
+        detail = (
+            _peak_branch(raw, scope, fact["value"])
+            if card_id == "peak_line_loading"
+            else None
         )
-    detail = (
-        _peak_branch(raw, scope, fact["value"])
-        if card_id == "peak_line_loading"
-        else None
-    )
-    return _card(
-        card_id,
-        fact["value"],
-        fact["unit"],
-        formula_id=fact["formula_id"],
-        detail=detail,
-    )
+        return _card(
+            card_id,
+            fact["value"],
+            fact["unit"],
+            formula_id=fact["formula_id"],
+            detail=detail,
+        )
+    except ValueError as exc:
+        return _refused(ctx, card_id, str(exc))
+    except HTTPException:
+        return _card(card_id, state=BUSY[0], reason=BUSY[1])
+    except (KeyError, TypeError):
+        return _card(card_id, state=_UNAVAILABLE[0], reason=_UNAVAILABLE[1])
 
 
-def _cost(card_id, cost, field, multi_period):
+def _cost(card_id, cost, field, per_year):
     if not cost or cost.get(field) is None:
         return _card(card_id, state="unavailable", reason=NO_COST)
-    # A multi-period total spans the horizon; a single-period one is a year's.
-    unit = "currency" if multi_period else "currency/yr"
-    return _card(card_id, float(cost[field]), unit)
+    return _card(card_id, float(cost[field]), "currency/yr" if per_year else "currency")
 
 
 def _unserved(lost_load):
@@ -199,9 +252,13 @@ def headline_kpis(
     kind = project_kind(template)
     multi = len(ctx.network.investment_periods) > 0
     build = {
-        "system_cost": lambda: _cost("system_cost", cost, "total", multi),
+        # Annualised fixed cost plus the opex of the modelled snapshots: a
+        # year's cost only when they cover a year, so it carries no "/yr" (the
+        # Capacity expansion tab's "Total system cost" has none either).
+        "system_cost": lambda: _cost("system_cost", cost, "total", False),
+        # Annualised: a year's in a single-period run, the horizon's otherwise.
         "new_build_capital": lambda: _cost(
-            "new_build_capital", cost, "capex_expansion", multi
+            "new_build_capital", cost, "capex_expansion", not multi
         ),
         "unserved_energy": lambda: _unserved(lost_load),
     }

@@ -1,11 +1,15 @@
 """The headline figures at the top of Results (ui-modern 03 S1)."""
 # ruff: noqa: F811 -- imported shared fixtures.
 
+from types import SimpleNamespace
+
 import pandas as pd
 import pytest
+from fastapi import HTTPException
 
 from routers import results as results_router
 from services.results import headline_kpis as hk
+from tests.test_investment_assurance import lcoe_hand, project, store  # noqa: F401
 from tests.test_result_profiles_assurance import solve, windy  # noqa: F401
 from tests.test_workflow_tools import baseline  # noqa: F401
 
@@ -40,7 +44,10 @@ def test_a_plain_network_reads_cost_and_the_checked_curtailed_share(windy, clien
     cost = client.get("/api/results/cost_breakdown").json()
     # The strip and the Capacity expansion tab read one payload.
     assert by_id["system_cost"]["value"] == pytest.approx(cost["total"])
-    assert by_id["system_cost"]["unit"] == "currency/yr"
+    # Opex is over the modelled snapshots (two hours here), so no "/yr"; the
+    # annualised new-build cost of a single-period run is a year's.
+    assert by_id["system_cost"]["unit"] == "currency"
+    assert by_id["new_build_capital"]["unit"] == "currency/yr"
     assert by_id["new_build_capital"]["value"] == pytest.approx(cost["capex_expansion"])
     # 33 of 50 MWh available curtailed (the `windy` fixture).
     share = by_id["curtailed_share"]
@@ -93,6 +100,186 @@ def test_inputs_changed_since_the_solve_reads_out_of_date(windy, client):
     share = by_id["curtailed_share"]
     assert (share["value"], share["state"]) == (None, "stale")
     assert share["reason"] == "The inputs changed since this solve."
+
+
+@pytest.mark.parametrize(
+    "change, expected",
+    [
+        ({"ac_pf_results": {"converged": True}}, hk.LOAD_FLOW_REPLACED),
+        ({"lopf_results": {"kept": True}}, hk.LOAD_FLOW_REPLACED),
+        ({"condition": "suboptimal"}, hk.NOT_OPTIMAL),
+        ({"status": "failed"}, hk.NOT_OPTIMAL),
+    ],
+)
+def test_an_unverified_solve_says_which_check_failed(
+    windy, client, monkeypatch, change, expected
+):
+    solve(windy)
+    for key, value in change.items():
+        monkeypatch.setitem(windy.solver_state, key, value)
+    # The inputs did not change, so the card must not say they did.
+    assert (
+        hk._refused(windy, "curtailed_share", "unverified_solve")["reason"]
+        == (expected[1])
+    )
+    assert (
+        hk._refused(windy, "curtailed_share", "unverified_solve")["state"]
+        == (expected[0])
+    )
+
+
+def test_a_load_flow_over_the_solve_is_not_called_changed_inputs(
+    windy, client, monkeypatch
+):
+    solve(windy)
+    monkeypatch.setitem(windy.solver_state, "ac_pf_results", {"converged": True})
+    share = hk._checked(windy, "curtailed_share")
+    assert (share["value"], share["state"], share["reason"]) == (
+        None,
+        *hk.LOAD_FLOW_REPLACED,
+    )
+
+
+CASE = {
+    "status": "completed",
+    "present": True,
+    "stale": False,
+    "assumptions_hash": "a",
+    "current_hash": "a",
+}
+
+
+@pytest.mark.parametrize(
+    "state, expected",
+    [
+        (None, hk.CASE_NOT_RUN),
+        ({**CASE, "present": False}, hk.CASE_NOT_RUN),
+        ({**CASE, "status": "running"}, hk.CASE_RUNNING),
+        ({**CASE, "stale": True}, hk.CASE_STALE),
+        ({**CASE, "current_hash": "b"}, hk.CASE_STALE),
+        # Current, but the stored report is not this one.
+        (CASE, hk.CASE_UNREAD),
+    ],
+)
+def test_an_lcoe_card_says_why_the_case_is_not_current(
+    windy, monkeypatch, state, expected
+):
+    solve(windy)
+    monkeypatch.setattr(hk.calculations.investment, "current", lambda ctx: state)
+    lcoe = hk._checked(windy, "lcoe")
+    assert (lcoe["value"], lcoe["state"], lcoe["reason"]) == (None, *expected)
+
+
+def test_a_case_that_cannot_be_read_says_so(windy, monkeypatch):
+    def busy(ctx):
+        raise HTTPException(409, "busy")
+
+    monkeypatch.setattr(hk.calculations.investment, "current", busy)
+    assert hk._case_not_current(windy) == hk.CASE_UNREAD
+
+
+def test_a_ready_lcoe_card_carries_the_checked_figure(project, client, monkeypatch):
+    store(project, lcoe_hand)
+    as_template(monkeypatch, "eh_datacenter")
+    _, by_id, order = cards(client)
+    lcoe = by_id["lcoe"]
+    assert order[0] == "lcoe" and lcoe["state"] == "ready" and lcoe["reason"] is None
+    # tests/test_investment_assurance.py::test_the_lcoe_from_the_retained_series.
+    assert lcoe["value"] == pytest.approx(
+        169.42148760330576 / (10 / 1.0784313725490196 + 10 / 1.0784313725490196**2)
+    )
+    assert lcoe["unit"] == "USD/MWh"
+    assert lcoe["formula_id"] == "investment-lcoe-real/1"
+
+
+def test_a_busy_network_costs_one_card_not_the_strip(windy, client, monkeypatch):
+    from contextlib import contextmanager
+
+    import harness.durable
+
+    solve(windy)
+
+    @contextmanager
+    def busy():
+        raise HTTPException(409, {"error_kind": "assurance_context_changed"})
+        yield
+
+    monkeypatch.setattr(harness.durable, "network_guard", busy)
+    _, by_id, _ = cards(client)
+    share = by_id["curtailed_share"]
+    assert (share["value"], share["state"], share["reason"]) == (None, *hk.BUSY)
+    assert by_id["system_cost"]["state"] == "ready"
+
+
+@pytest.mark.parametrize("error", [KeyError("p"), TypeError("odd frame")])
+def test_an_odd_source_costs_one_card_not_the_strip(windy, client, monkeypatch, error):
+    solve(windy)
+
+    def odd(raw, scope):
+        raise error
+
+    monkeypatch.setattr(hk.calculations, "scoped_calculate", odd)
+    _, by_id, _ = cards(client)
+    share = by_id["curtailed_share"]
+    assert (share["value"], share["state"], share["reason"]) == (
+        None,
+        *hk._UNAVAILABLE,
+    )
+    assert by_id["system_cost"]["state"] == "ready"
+
+
+def test_a_failing_cost_breakdown_leaves_the_checked_cards(windy, client, monkeypatch):
+    solve(windy)
+
+    def broken(n, config):
+        raise RuntimeError("statistics failed")
+
+    monkeypatch.setattr(results_router, "compute_cost_breakdown", broken)
+    _, by_id, _ = cards(client)
+    for card_id in ("system_cost", "new_build_capital"):
+        assert (by_id[card_id]["value"], by_id[card_id]["reason"]) == (None, hk.NO_COST)
+    assert by_id["curtailed_share"]["state"] == "ready"
+
+
+def test_the_strip_gate_is_one_switch(windy, client, monkeypatch):
+    solve(windy)
+    asked = []
+    monkeypatch.setattr(hk, "_shown", lambda profile: asked.append(profile))
+    _, by_id, _ = cards(client)
+    share = by_id["curtailed_share"]
+    assert (share["value"], share["state"], share["formula_id"]) == (
+        None,
+        "unavailable",
+        None,
+    )
+    assert asked == [hk.CHECKED[c][0] for c in ("curtailed_share", "peak_line_loading")]
+    assert by_id["system_cost"]["state"] == "ready"
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_figure_is_never_shown(value):
+    card = hk._card("system_cost", value, "currency")
+    assert (card["value"], card["state"], card["reason"]) == (None, *hk._UNAVAILABLE)
+
+
+@pytest.mark.parametrize(
+    "periods, new_build_unit", [([], "currency/yr"), ([2030, 2040], "currency")]
+)
+def test_cost_units_follow_the_horizon(monkeypatch, periods, new_build_unit):
+    monkeypatch.setattr(hk, "_checked", lambda ctx, card_id: hk._card(card_id))
+    ctx = SimpleNamespace(network=SimpleNamespace(investment_periods=periods))
+    by_id = {
+        c["id"]: c
+        for c in hk.headline_kpis(
+            ctx,
+            template={"id": "eh_microgrid"},
+            cost={"total": 9.0, "capex_expansion": 4.0},
+            lost_load=None,
+        )["cards"]
+    }
+    # The system cost never reads per year; see `headline_kpis`.
+    assert by_id["system_cost"]["unit"] == "currency"
+    assert by_id["new_build_capital"]["unit"] == new_build_unit
 
 
 def test_an_energy_hub_leads_with_lcoe_and_says_when_the_case_has_not_run(
@@ -177,14 +364,24 @@ def test_project_kind(template, kind):
 
 def test_card_sets_are_short_and_reasons_carry_no_engine_identifier():
     assert all(len(ids) <= 5 and len(set(ids)) == len(ids) for ids in hk.ORDER.values())
-    sentences = [r for _, r in hk.REASONS.values()] + [
-        hk._UNAVAILABLE[1],
+    split = [
+        hk._UNAVAILABLE,
+        hk.BUSY,
+        hk.INPUTS_CHANGED,
+        hk.LOAD_FLOW_REPLACED,
+        hk.NOT_OPTIMAL,
+        hk.CASE_NOT_RUN,
+        hk.CASE_RUNNING,
+        hk.CASE_STALE,
+        hk.CASE_UNREAD,
+    ]
+    sentences = [r for _, r in [*hk.REASONS.values(), *split]] + [
         hk.NOT_MODELLED_LOST_LOAD,
         hk.NO_COST,
     ]
     for sentence in sentences:
         assert "_" not in sentence and "/" not in sentence and sentence.endswith(".")
-    assert {s for s, _ in hk.REASONS.values()} <= {
+    assert {s for s, _ in [*hk.REASONS.values(), *split]} <= {
         "stale",
         "not_applicable",
         "not_run",
