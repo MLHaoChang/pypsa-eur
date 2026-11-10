@@ -285,6 +285,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("DELETE", "/api/chat/settings/mcp/servers/{server_id}/keys/{key_name}"): (NOT_PROJECT_DATA, _R_MCP_SETTINGS),
     ("PUT", "/api/local-settings/anthropic-key"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/memory/items"): (NOT_PROJECT_DATA, _R_MEMORY),
+    ("POST", "/api/memory/dismissals"): (NOT_PROJECT_DATA, _R_MEMORY),
     ("PATCH", "/api/memory/items/{item_id}"): (NOT_PROJECT_DATA, _R_MEMORY),
     ("POST", "/api/memory/items/{item_id}/{action}"): (NOT_PROJECT_DATA, _R_MEMORY),
     ("POST", "/api/local-settings/reveal-log"): (NOT_PROJECT_DATA, _R_LOCAL),

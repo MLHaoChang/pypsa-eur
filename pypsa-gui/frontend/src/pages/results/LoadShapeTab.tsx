@@ -8,7 +8,7 @@ import { useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   ResponsiveContainer, ComposedChart, AreaChart, Area, Bar, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, ReferenceLine,
+  Tooltip, ReferenceLine, Legend,
 } from 'recharts'
 import ResultState from '../../components/ResultState'
 import { loadShapeApi, type HeatmapState, type LoadShapePayload } from '../../api/loadShape'
@@ -16,7 +16,10 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { useResultsFilter } from './filterContext'
 import WindowSlider, { useWindowRange } from './WindowSlider'
-import { CHART_AXIS, CHART_GRID, CHART_TOOLTIP, shortStamp, yAxisLabel } from './shared'
+import {
+  CHART_AXIS, CHART_GRID, CHART_TOOLTIP, shortStamp, yAxisLabel,
+  ChartFrame, CHART_HEIGHT, chartFigure, CHART_LEGEND, carrierColour, seriesDash,
+} from './shared'
 import {
   GROUP_COLOR, GROUP_LABEL, MONTH_STACK, WEEKDAYS, annualStack, cellTitle, fmtMw, fmtMwh, heatBackground,
   heatMax, missingGroups, monthRows, periodLabel, socRows, weekRows,
@@ -139,10 +142,9 @@ export default function LoadShapeTab() {
         </div>
       </section>
 
-      <section className="space-y-2" data-testid="ls-week">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-[12px] font-semibold">Profile snapshot</h3>
-          {weekView?.status === 'ok' && (
+      <ChartFrame testId="ls-week" title="Profile snapshot"
+        figure={wk ? chartFigure(fmtMw(wk.rows.reduce((a, r) => Math.max(a, ...wk.keys.map(k => Math.abs(Number(r[k]) || 0))), 0)), 'peak') : undefined}
+        right={weekView?.status === 'ok' && (
             <span className="flex items-center gap-1 text-[11px]">
               <button type="button" aria-label="Previous week" disabled={weekView.selected <= 0}
                       onClick={() => setWeek(weekView.selected - 1)}>‹</button>
@@ -153,20 +155,20 @@ export default function LoadShapeTab() {
               <button type="button" aria-label="Next week" disabled={weekView.selected >= weekView.weeks.length - 1}
                       onClick={() => setWeek(weekView.selected + 1)}>›</button>
             </span>
-          )}
-        </div>
+          )}>
         {weekView?.status === 'ok' && wk ? (
           <>
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
               <ComposedChart data={wk.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} />
                 <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
                 <Tooltip {...CHART_TOOLTIP} />
-                <Bar dataKey="flag" name="Flagged interval" fill="#dc2626" fillOpacity={0.12} barSize={6} isAnimationActive={false} />
-                {wk.keys.map(k => (
+                <Legend {...CHART_LEGEND} />
+                <Bar dataKey="flag" name="Flagged interval" fill="var(--color-danger)" fillOpacity={0.12} barSize={6} isAnimationActive={false} />
+                {wk.keys.map((k, i) => (
                   <Line key={k} type="monotone" dataKey={k} name={GROUP_LABEL[k]} dot={false} stroke={GROUP_COLOR[k]}
-                        strokeWidth={1.5} isAnimationActive={false} />
+                        strokeDasharray={seriesDash(i)} strokeWidth={1.5} isAnimationActive={false} />
                 ))}
               </ComposedChart>
             </ResponsiveContainer>
@@ -176,13 +178,13 @@ export default function LoadShapeTab() {
                 : 'No flag can be established for this run (no connection capacity and no lost-load record).'}
             </p>
             {soc ? (
-              <ResponsiveContainer width="100%" height={110}>
+              <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
                 <AreaChart data={soc} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} />
                   <YAxis {...CHART_AXIS} label={yAxisLabel('Battery SoC, MWh')} />
                   <Tooltip {...CHART_TOOLTIP} />
-                  <Area type="monotone" dataKey="soc" name={GROUP_LABEL.battery_soc} stroke="#16a34a" fill="#16a34a"
+                  <Area type="monotone" dataKey="soc" name={GROUP_LABEL.battery_soc} stroke={carrierColour('storage')} fill={carrierColour('storage')}
                         fillOpacity={0.25} isAnimationActive={false} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -191,27 +193,29 @@ export default function LoadShapeTab() {
         ) : (
           <ResultState state="unavailable" reason={weekView?.status === 'unavailable' ? weekView.reason : 'No week to show.'} />
         )}
-      </section>
+      </ChartFrame>
 
       {data.monthly?.status === 'ok' ? (
-        <section className="space-y-2" data-testid="ls-monthly">
-          <h3 className="text-[12px] font-semibold">Monthly site energy</h3>
+        <ChartFrame testId="ls-monthly" title="Monthly site energy"
+          figure={data.monthly.average_daily_generation_mwh != null
+            ? `${fmtMwh(data.monthly.average_daily_generation_mwh)} per day on average` : undefined}>
           <>
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
               <ComposedChart data={monthRows(data.monthly.months)} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="month" {...CHART_AXIS} />
                 <YAxis yAxisId="e" {...CHART_AXIS} label={yAxisLabel('MWh per month')} />
                 <YAxis yAxisId="d" orientation="right" {...CHART_AXIS} label={yAxisLabel('MWh per day')} />
                 <Tooltip {...CHART_TOOLTIP} />
+                <Legend {...CHART_LEGEND} />
                 {MONTH_STACK.map(k => (
                   <Bar key={k} yAxisId="e" stackId="m" dataKey={k} name={GROUP_LABEL[k]} fill={GROUP_COLOR[k]}
                        isAnimationActive={false} />
                 ))}
-                <Line yAxisId="d" type="monotone" dataKey="daily" name="Daily generation" stroke="#111827"
+                <Line yAxisId="d" type="monotone" dataKey="daily" name="Daily generation" stroke="var(--color-text)"
                       dot={false} strokeWidth={1.5} isAnimationActive={false} />
                 {data.monthly.average_daily_generation_mwh != null && (
-                  <ReferenceLine yAxisId="d" y={data.monthly.average_daily_generation_mwh} stroke="#111827"
+                  <ReferenceLine yAxisId="d" y={data.monthly.average_daily_generation_mwh} stroke="var(--color-text)"
                                  strokeDasharray="4 3" />
                 )}
               </ComposedChart>
@@ -220,7 +224,7 @@ export default function LoadShapeTab() {
               Average daily generation {fmtMwh(data.monthly.average_daily_generation_mwh)} per day.
             </p>
           </>
-        </section>
+        </ChartFrame>
       ) : (
         // One line, not an empty chart frame: on a representative-week run this is always the answer.
         <p className="text-[11px] text-muted" data-testid="ls-monthly">

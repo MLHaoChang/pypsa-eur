@@ -3,7 +3,7 @@
 `GET /api/projects/{name}/profiles/readiness` (read-only) and the chat tool
 `get_profile_readiness` return one row per wind/solar generator:
 coordinate state (the bus's, with PyPSA's 0/0 default as `missing`), the
-profile it carries now (none / uploaded / generated / network_native) and
+profile it carries now (none / uploaded / unrecorded / generated / network_native) and
 whether a generated one is stale (the bus moved, or the horizon changed).
 """
 from __future__ import annotations
@@ -69,7 +69,7 @@ def test_rows_match_the_fixture_exactly(client, project, ctx_of):
     }
     assert rows["g_up"]["technology"] == "solar"
     assert rows["g_up"]["coord_source"] == "bus"
-    assert rows["g_up"]["profile"] == "uploaded"
+    assert rows["g_up"]["profile"] == "unrecorded"  # no record: RP-18
     assert "stale_reason" not in rows["g_up"]
 
 

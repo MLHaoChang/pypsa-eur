@@ -9,7 +9,9 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - Read a PR with `git diff --stat` first, then one hunk or file at a time, each capped with `| head -c 6000`. Whole-file or cross-file reads go to an Explore subagent that returns file:line findings only.
 - Fetch `refs/pull/N/head:refs/gk/N`, `git worktree add --detach` under the scratchpad, and remove the worktree afterwards.
 - Backend tests: `PYTHONPATH=<wt>:<wt>/pypsa-gui/backend /root/.venv-pypsa-gui/bin/python -m pytest -p no:warnings -q -rfE <files>`, no xdist. Check the exit code. Keep each run under 590 s and split files (`test_pilot_evaluation` and broad finance sweeps time out).
+- pytest `-k` filters every path collected in the same invocation, so explicit node ids from another file are silently deselected. Run node ids in their own invocation.
 - Frontend: symlink `node_modules` from `/home/user/pypsa-eur/pypsa-gui/frontend`, put `/home/user/pypsa-eur/.pixi/envs/default/bin` on `PATH`, then `npx vitest run <paths>` and `npx tsc --noEmit -p .`.
+- In a shallow clone, `git log -S/-G` names the history edge, not the introducing PR. Attribute a change with `gh api search/issues` (`is:pr is:merged`) plus that PR's diff (#1329).
 
 ## Delta reviews
 
@@ -33,6 +35,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 
 - Byte-identity against master's tests: copy master's test file into the PR worktree and run it there (a recording pytest plugin can capture rows). Running it from the master worktree imports master's code even with PYTHONPATH on the PR, because the rootdir wins.
 - A merge commit M has no hand resolution when `git merge-tree --write-tree M^1 M^2` equals `M^{tree}`.
+- A delta that only adds a test can still collide in CI order. Run the colliding files in CI's order without randomisation: red with the old file, then green at the head (#1311).
 
 ## Known container-only failures
 
@@ -84,10 +87,14 @@ A broken-dependency test builds its inputs before injecting the fault; otherwise
 
 A "never swallowed" test injects the module's own error class (e.g. `DefaultsPackError`) as well as a foreign one: a narrow `except` survives a RuntimeError-only test (#1290 F2, GK A (19)).
 
+Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded float for `Finite` (#1320 F1).
+- A cleanup that reads a render-time ref after unmount acts on stale state; read the store at cleanup (#1328 F5).
+
 ## Rulings
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
 - A project-scoped result-view read carries `project_id` = the active project, and 404/409 count as `no_data`.
+- A source tag is read for what it means, keyed narrowly. gridspine's transformer_loading row is tagged `assumed` but its limit is the unit's own rating, so it counts under D3 only when check and clause ('equipment rating') both match; anything else fails closed. A pass that rests on recommended measures shows them and says whether the IC costs them (#1172).
 - A run profile whose approval envelope lists `run_sensitivity_sweep` or `run_eh_study` needs its own GK review. A sweep's cases[].changes create child projects with arbitrary edits that no edit bound limits; admit such a run only with per-case bounds or a card per case. An envelope admission must also refuse any `*project*` argument that is not the run's own project (#875).
 - Builders record a GK plan GO's conditions in the issue file's `## Comments`, so a rotation does not drop them.
 - A plan GO for work over one reviewer area or about 1,500 changed lines (excluding generated files, shots and fixtures) names the slices, one PR each (PR-SIZE-1).
@@ -179,3 +186,18 @@ A "never swallowed" test injects the module's own error class (e.g. `DefaultsPac
 - A queued job's change-log entry is bound to the job's own org. A key with no org logs nothing, never the foreground's (#1286, GK B (37)).
 - A run's native write action shows every frozen setting its digest binds on its own card. A deny stops the step; it is not re-carded at once (#1283, GK B (37)).
 - A model draft from a human route is never charged to a run's budget and never takes the runner's lease (SH-07c Q1, owner decision SH07C-DRAFT-1).
+- A "same run" binding of published files is recorded only while the job is still the latest of its kind for the project. Digesting a shared publish dir on a later tick can capture another run (#1333 F1).
+- A gate reading a re-solved study reads the re-check's own columns and convergence (`*_with_measures`, the invest history's load_flow row), never the as-is table's (#1333, GK B F1/F2).
+- A read that adds a derived field a client can echo back needs a write-side strip keyed on a marker AND value equality, with a GET→PUT round-trip test through the real routes (GLE-05 G5-1).
+- An energy-limited unit (a store-fed converter) never gets full two-state credit in a block LOLE. Model it as storage or give it no credit (AL-1).
+- A stale-check relaxation for a field written earlier in a batch is keyed on columns the batch created, never on any (class, field) it wrote (#1331).
+- A plan-card or gate sentence claims only the cases the gate reads (#1333 "any one out").
+- A test named for a guard must run that guard, not monkeypatch the function that holds it (#1334).
+- Run each mutant on its single targeted test with `-x` and a timeout: a mutant can hang a whole-file run and leave an empty result (#1333, #1334).
+- An out-of-scope or "not needed" tag is keyed on what the row is (the unused element's own rows), never on every row filed to the section; pin each template that reaches it (#1340).
+- A default used to excuse a changed value comes from the declared default, never inferred from neighbouring cells (#1331).
+- A `not_via_chat` keyword is a word only that feature owns; one hit attaches "do not look for another tool" (#1343 `headline`, #1347 `saved`).
+- A read-only route that reuses chat-path readers catches the chat path's exception set per item, so one busy lock degrades one card (#1343).
+- A PR that makes a lock's hold longer re-checks every waiter's bound on that lock (#1345).
+- A reviewer rule for visibility ("admin sees a nominated item") is not reused as a rule for use (#1347).
+- Review through a subagent: it reads the diff, runs the trial merge, tests and mutants, and returns file:line findings; the gatekeeper reads only the hunks those point at (GK B (42) and (43) each reached 300k in about 80 minutes).

@@ -54,18 +54,18 @@ const verdictText = async () => (await screen.findByTestId('hub-results-verdict'
 describe('ResultsCard headline (§5.5)', () => {
   const cases: [string, ReturnType<typeof review>, EhReferenceDesignReport, string][] = [
     ['fail', review(), REPORT,
-      'Not certified: about 12.4 h/yr of shortfall vs a 3 h/yr goal — driven by Grid import'],
+      'Not certified: about 12.4 h/yr of shortfall vs a 3 h/yr goal, driven by Grid import'],
     ['inconclusive', review({ summary: { verdict: 'inconclusive', mc_lole_h_per_year: 3.2, target_lole_h: 3 } }),
       { ...REPORT, sections: { certification: { status: 'ok', payload: {
         verdict: 'inconclusive', lole_h_per_year: 3.2, lole_ci: [2.4, 4.1], horizon_years: 1, target_lole_h: 3 } } } },
-      'Not decided: the shortfall estimate (2.4–4.1 h/yr) straddles the 3 h/yr goal — more simulation runs would settle it.'],
+      'Not decided: the shortfall estimate (2.4–4.1 h/yr) straddles the 3 h/yr goal: more simulation runs would settle it.'],
     ['pass', review({ summary: { verdict: 'pass', mc_lole_h_per_year: 0.44, target_lole_h: 3 } }), REPORT,
       'Certified: about 0.4 h/yr of shortfall, under the 3 h/yr goal.'],
     ['no target', review({ summary: { verdict: null, mc_lole_h_per_year: 1.25, target_lole_h: null } }), REPORT,
-      'No reliability goal was set — the study reports 1.3 h/yr of shortfall. Set a goal to certify.'],
+      'No reliability goal was set: the study reports 1.3 h/yr of shortfall. Set a goal to certify.'],
     ['no goal, no shortfall number', review({ summary: { verdict: null, mc_lole_h_per_year: null, target_lole_h: null } }),
       { ...REPORT, mc_lole_h: null, sections: { certification: { status: 'skipped', note: 'no LOLE target — certification not requested' } } },
-      'No reliability goal is set for this site, so the study did not certify it — set an allowed shortfall in step 3 (Goal) to get a verdict.'],
+      'No reliability goal is set for this site, so the study did not certify it: set an allowed shortfall in step 3 (Goal) to get a verdict.'],
     ['not established', review({ summary: { verdict: null, mc_lole_h_per_year: null, target_lole_h: 3 } }),
       { ...REPORT, sections: { certification: { status: 'not_established', note: 'no hub-side buses' } } },
       'The study could not certify reliability: no hub-side buses'],
@@ -162,7 +162,7 @@ describe('ResultsCard body', () => {
     // said once under the list, never ranked in it.
     expect(screen.queryByTestId('hub-results-risks-2')).toBeNull()
     expect(screen.getByTestId('hub-results-no-shortfall').textContent)
-      .toBe('Also checked: Genset 1 — no shortfall, the site copes without it.')
+      .toBe('Also checked: Genset 1: no shortfall, the site copes without it.')
   })
 
   it('every unit copes: no ranked list, the units still named', async () => {
@@ -172,7 +172,7 @@ describe('ResultsCard body', () => {
       ] } } } }))
     mount()
     expect((await screen.findByTestId('hub-results-no-shortfall')).textContent)
-      .toBe('Also checked: PV — no shortfall, the site copes without it.')
+      .toBe('Also checked: PV: no shortfall, the site copes without it.')
     expect(screen.queryByTestId('hub-results-risks')).toBeNull()
   })
 
@@ -187,10 +187,10 @@ describe('ResultsCard body', () => {
       ] } } } }))
     mount()
     await screen.findByTestId('hub-results-risks-2')
-    expect(screen.getAllByTestId(/^hub-results-risks-\d$/).map(e => e.textContent?.split(' —')[0]))
+    expect(screen.getAllByTestId(/^hub-results-risks-\d$/).map(e => e.textContent?.split(' ·')[0]))
       .toEqual(['Grid import', 'Genset 1', 'Genset 2'])
     expect(screen.getByTestId('hub-results-no-shortfall').textContent)
-      .toBe('Also checked: PV, UPS battery — no shortfall, the site copes without them.')
+      .toBe('Also checked: PV, UPS battery: no shortfall, the site copes without them.')
   })
 
   it('stale banner from the boolean (not the source text)', async () => {

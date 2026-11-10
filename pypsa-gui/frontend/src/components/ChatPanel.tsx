@@ -93,6 +93,7 @@ import ExternalAgentStrip from './ExternalAgentStrip'
 import {
   type CurrentToolOutcome, type ToolOutcomeMark, currentToolOutcome, outcomeClock, refusalDetail, toolOutcomeLine, toolOutcomeOf, toolOutcomeWords,
 } from './toolOutcome'
+import MemorySettledLine, { isMemoryRow, memorySettledAt } from './memory/MemorySettledLine'
 export { guidedCardSummary } from './ConfirmationCard'
 
 // Phase D — extensions accepted by the file picker / drag-drop overlay.
@@ -3644,6 +3645,17 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           />
         )}
         {messages.map((m, index) => {
+          // Assistant memory (UX M4): a memory card's call is one settled line.
+          if (isMemoryRow(m)) {
+            const settled = memorySettledAt(messages, index, { streaming, pending: pendingCard != null })
+            if (!settled) return null
+            return (
+              <div key={m.id} className="px-3 py-1.5 text-muted text-[11px] leading-snug"
+                data-role={m.role} data-testid="chat-message">
+                <MemorySettledLine settled={settled} toolUseId={m.tool_use_id!} />
+              </div>
+            )
+          }
           // Issue 04 (S1b): a job tool's mark follows its `_outcome`.
           const outcomeNow = m.role === 'tool' ? currentToolOutcome(messages, index) : null
           // P26 item 6: Guided renders a declined card as one plain line.

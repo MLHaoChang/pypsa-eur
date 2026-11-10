@@ -180,6 +180,23 @@ def _queue_job_error(job) -> str | None:
     return str(error)[:200] if error else None
 
 
+def saved_queue_total(saved) -> float | None:
+    """The queue's own total (`_compute_run_objective`: the LP's objective plus
+    its constant, which carries existing-capacity CAPEX) recomputed on a saved
+    network with the project's saved solver config; None when it cannot be told.
+
+    No saved config (the function would price with the foreground's), inputs
+    edited since the solve, or no LP objective is no total (GK B 38, A1). Shared
+    by the plan-step settle and the experiment refresh (SH-39)."""
+    from routers.simulation import _compute_run_objective
+    from services import workflow_tools as wt
+    cfg = saved.solver_state.get("solver_config")
+    if (cfg is None or wt.solve_freshness(saved)["inputs_changed_since_solve"] is not False
+            or getattr(saved.network, "objective", None) is None):
+        return None
+    return _compute_run_objective(saved.network, cfg)
+
+
 def _queue_run(job) -> dict | None:
     """A completed job's evidence, or None when any native record disagrees.
 
@@ -210,19 +227,12 @@ def _queue_run(job) -> dict | None:
         return None
     except Exception:  # noqa: BLE001 — unreadable evidence is no evidence
         return None
-    # The manifest stores the job's objective unrounded: the queue's own total
-    # (`_compute_run_objective`: the LP's objective plus its constant, which
-    # carries existing-capacity CAPEX), recomputed here on the saved network
-    # with the project's saved config and compared exactly. No saved config
-    # (the function would price with the foreground's) or no total is no
-    # evidence (GK B 38, A1).
-    from routers.simulation import _compute_run_objective
-    cfg = saved.solver_state.get("solver_config")
-    if (isinstance(objective, bool) or not isinstance(objective, (int, float)) or cfg is None
-            or wt.solve_freshness(saved)["inputs_changed_since_solve"] is not False
-            or getattr(saved.network, "objective", None) is None):
+    # The manifest stores the job's objective unrounded: the queue's own total,
+    # recomputed on the saved network and compared exactly (`saved_queue_total`).
+    # No total is no evidence (GK B 38, A1).
+    if isinstance(objective, bool) or not isinstance(objective, (int, float)):
         return None
-    total = _compute_run_objective(saved.network, cfg)
+    total = saved_queue_total(saved)
     if total is None or total != objective:
         return None
     return {"job_id": job["job_id"], "run_id": run_id, "project_id": job["project_id"], "objective": objective}

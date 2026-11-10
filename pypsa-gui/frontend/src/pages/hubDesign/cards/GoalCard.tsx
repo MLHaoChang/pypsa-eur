@@ -118,7 +118,7 @@ export function GoalCard() {
         {voll == null ? <span className="text-muted">…</span>
           : vollMissing ? (
             <>
-              <span className="text-warn">not set — the study needs a price above zero</span>
+              <span className="text-warn">not set: the study needs a price above zero</span>
               <DelegateButton testId="hub-goal-voll-fix" text={VOLL_TEXT}
                 label="Let the assistant set it"
                 disabled={liveStudy} disabledTitle={LIVE_STUDY_EDIT} />

@@ -692,6 +692,10 @@ def test_no_window_is_current_during_the_reference_solve(monkeypatch):
     _direct(n, horizon=8, overlap=4)
     (ref_len, ref_win), wins = seen[0], seen[1:]
     assert ref_len == HOURS and ref_win is None
+    # 24 h cut every horizon - overlap = 4 h: six windows, the last clipped to
+    # 4 h. Without the count, a run that solved no window passes the two
+    # checks below on an empty list (issue 26).
+    assert [length for length, _ in wins] == [8] * 5 + [4]
     assert [w["index"] for _, w in wins] == list(range(len(wins)))
     assert all(w is not None and w["network"] is n for _, w in wins)
     assert OP.current_window(n) is None  # and none after the run

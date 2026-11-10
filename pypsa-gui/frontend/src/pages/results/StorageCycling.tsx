@@ -11,6 +11,7 @@ import type { StorageUnit } from '../../api/types'
 import {
   type TSPayload, WindowCapBanner, useWeightCtx, snapshotWeightAt,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
+  ChartFrame, CHART_HEIGHT, carrierColour,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
@@ -311,7 +312,7 @@ export default function StorageCycling() {
   return (
     // [&>*]:shrink-0: the cards keep their height and the column scrolls (DC 06
     // adds a tall reserve card; a shrinking card would clip its content).
-    <div className="flex flex-col h-full overflow-auto p-4 gap-4 [&>*]:shrink-0">
+    <div className="flex flex-col h-full overflow-auto p-4 gap-4 results-scroll-clear [&>*]:shrink-0">
       {/* Truncated-window banner — see FIX 1 secondary in the
           results-tabs-window final review: a narrow-but-wide window can
           still hit the server's MAX_RESPONSE_VALUES cap. */}
@@ -329,13 +330,10 @@ export default function StorageCycling() {
       </header>
 
       {/* Carrier-level cycle counts as a bar chart */}
-      <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
-        <header className="px-4 py-2.5 border-b border-border bg-bg-2">
-          <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">By carrier</span>
-          <span className="ml-2 text-[10px] text-muted">capacity-weighted</span>
-        </header>
-        <div className="p-3">
-          <ResponsiveContainer width="100%" height={220}>
+      <ChartFrame title="Equivalent full cycles by carrier" hint="capacity-weighted"
+        figure={carrierStats.length > 0
+          ? `${Math.max(...carrierStats.map(c => c.cycles)).toFixed(1)} cycles highest` : undefined}>
+          <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
             <BarChart
               data={carrierStats.map(c => ({ ...c, label: storageCarrierLabel(c.carrier) }))}
               margin={{ top: 18, right: 12, left: 0, bottom: 4 }}
@@ -345,11 +343,10 @@ export default function StorageCycling() {
               <YAxis {...CHART_AXIS} label={yAxisLabel('Cycles')} />
               <Tooltip {...CHART_TOOLTIP}
                 formatter={(v: number) => [`${v.toFixed(2)} cycles`, 'cycles']} />
-              <Bar dataKey="cycles" fill="#7c3aed" />
+              <Bar dataKey="cycles" fill={carrierColour('storage')} maxBarSize={72} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
-      </section>
+      </ChartFrame>
 
       <PerUnitCyclingSection units={units} />
 

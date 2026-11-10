@@ -783,6 +783,78 @@ def transition(
     return _view(db, item)
 
 
+def dismiss_proposal(
+    db: DBSession,
+    user: User,
+    *,
+    kind: str,
+    body: Any,
+    concept_keys: Any,
+    project_kind: str | None = None,
+    summary: str | None = None,
+    evidence: Any = None,
+) -> tuple[ItemView, bool]:
+    """Record "Not now" on a memory card (§2.2, §2.4) in one commit: the item
+    is written already `dismissed` with its `dismissed_hash`, so a failure
+    leaves no stray `proposed` row. The same proposal dismissed again by the
+    same user refreshes that row's 30-day window instead of adding a second
+    one. Returns the item and whether it was new."""
+    home_org = org_of(db, user)
+    if home_org is None:
+        raise MemoryError(
+            "memory needs an organisation membership", "memory_no_org", 403
+        )
+    body, keys, summary, evidence = _checked(
+        kind, body, concept_keys, summary, evidence, project_kind
+    )
+    h = proposal_hash(kind, sorted(keys), body)
+    now = _now()
+    existing = db.scalar(
+        select(MemoryItem).where(
+            MemoryItem.user_id == user.id,
+            MemoryItem.status == "dismissed",
+            MemoryItem.dismissed_hash == h,
+        )
+    )
+    if existing is not None:
+        existing.updated_at = now
+        db.commit()
+        return _view(db, existing), False
+    item = MemoryItem(
+        id=uuid.uuid4(),
+        kind=kind,
+        owner_scope="user",
+        user_id=user.id,
+        org_id=home_org,
+        project_kind=project_kind,
+        concept_keys=json.dumps(keys),
+        status="dismissed",
+        dismissed_hash=h,
+        current_version=1,
+        origin="chat",
+        recall_count=0,
+        apply_count=0,
+        created_by=user.id,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(item)
+    db.flush()
+    _write_version(
+        db,
+        item,
+        version=1,
+        body=body,
+        summary=summary,
+        evidence=evidence,
+        actor=user,
+        now=now,
+    )
+    _bump(db, _scope_key(item))
+    db.commit()
+    return _view(db, item), True
+
+
 def recently_dismissed(
     db: DBSession,
     user: User,
