@@ -486,8 +486,9 @@ component (`frontend/src/components/EditCard.tsx`).
   read-back, `_edit_receipt`). One `change_set_receipt` frame follows the batch.
   Each row is applied (verified and changed), unchanged, uncertain, failed,
   stale or unticked, with `landed`; `all_applied` holds only when every ticked
-  row landed. A failed row does not stop the later rows. Off (`ENABLED`) until
-  the browser card ships (S2).
+  row landed. A failed row does not stop the later rows. The browser shows the
+  card and the receipt in `frontend/src/components/ChangeSetCard.tsx`; `/confirm`
+  carries the ticked ids as `ticked`. `ENABLED` switches membership off.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path

@@ -2,10 +2,11 @@ import { shortMcpToolName } from '../api/mcpSettings'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
-import { postChatConfirm } from '../api/chat'
+import { InvalidDecisionError, postChatConfirm } from '../api/chat'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { mismatchSentence } from '../utils/projectMismatch'
+import { CHANGE_SET_NONE_TICKED, ChangeSetRows, changeSetApplyLabel, changeSetOf } from './ChangeSetCard'
 import { EditCardTable, editCardOf, editCardWords } from './EditCard'
 import { SweepCardTable, sweepCardOf } from './SweepCard'
 
@@ -58,6 +59,10 @@ for (const t of ['load_project', 'activate_project']) {
   GUIDED_WRITE_PURPOSE[t] = { header: 'Confirm: open a project',
     note: 'Switches the workbench to another project. Save first if you have unsaved edits.' }
 }
+
+// LC-47: one card for a step's several changes, a tick box each.
+GUIDED_WRITE_PURPOSE.change_set = { header: 'Confirm these changes',
+  note: 'Each ticked change is made and then read back. An unticked change is not made.' }
 
 function guidedConfirmWording(tool: string, tier: string): { header: string; note: string | null } {
   if (tier !== 'write') return { header: 'Confirm', note: null }
@@ -278,14 +283,32 @@ export function ConfirmationCard() {
   const edit = editCardOf(pending?.edit_card)
   const sweep = sweepCardOf(pending?.sweep_card)
   const repeat = repeatCardOf(pending?.repeat_card)
+  // LC-47: a change set's rows, the ones ticked, and a refused decision's line.
+  const changeSet = changeSetOf(pending?.change_set)
+  const [ticked, setTicked] = useState<ReadonlySet<string>>(new Set())
+  const [refused, setRefused] = useState(false)
   // LC-04: a chat edit's card that arrived malformed is never approvable.
   const reviewUnavailable = (pending?.tool_name === 'apply_project_changes' && !review)
     || (pending?.edit_card !== undefined && !edit)
     || (pending?.sweep_card !== undefined && !sweep)
     || (pending?.repeat_card !== undefined && !repeat)
+    || (pending?.change_set !== undefined && !changeSet)
 
   // Reset the typed-confirmation field whenever the pending card changes.
   useEffect(() => { setTypedConfirmation('') }, [pending?.confirmation_token])
+  // Every row of a new change set starts ticked.
+  useEffect(() => {
+    setTicked(new Set(changeSetOf(useChatStore.getState().pending?.change_set)?.items.map(i => i.tool_use_id)))
+    setRefused(false)
+  }, [pending?.confirmation_token])
+  const toggleTick = useCallback((id: string) => {
+    setRefused(false)
+    setTicked(prev => {
+      const next = new Set(prev)
+      if (!next.delete(id)) next.add(id)
+      return next
+    })
+  }, [])
 
   // Countdown timer. Tracked via ref so a re-render or unmount never leaks.
   useEffect(() => {
@@ -317,7 +340,8 @@ export function ConfirmationCard() {
         // Deny — the rest of that click's queued actions are dropped.
         const lapsedGroup = useChatStore.getState().activeRequest?.group
         if (lapsedGroup) useChatStore.getState().dropRequestGroup(lapsedGroup)
-        setError({
+        // LC-47 (UX C4): a change set's own receipt says "Timed out: nothing changed".
+        if (pending.change_set === undefined) setError({
           error_kind: 'confirmation_expired',
           message: `The confirmation for ${pending.tool_name} expired before it was answered. Ask again to retry.`,
         })
@@ -346,15 +370,20 @@ export function ConfirmationCard() {
     if (reviewUnavailable) return
     if (useUIStore.getState().projectMismatch) return
     const token = pending.confirmation_token
+    // LC-47: the ticked rows, in card order. Approving none is not offered.
+    const rows = changeSet?.items.map(i => i.tool_use_id).filter(id => ticked.has(id))
+    if (rows && rows.length === 0) return
     try {
       await postChatConfirm(target, {
-        token, decision: 'approve',
+        token, decision: 'approve', ...(rows ? { ticked: rows } : {}),
       })
       clearIfStill(token)
     } catch (err) {
-      toast.error(`confirmation failed: ${(err as Error).message}`)
+      // LC-47 K5: the server kept the card; say so on it, in words.
+      if (err instanceof InvalidDecisionError) setRefused(true)
+      else toast.error(`confirmation failed: ${(err as Error).message}`)
     }
-  }, [pending, target, clearIfStill, reviewUnavailable])
+  }, [pending, target, clearIfStill, reviewUnavailable, changeSet, ticked])
 
   const onDeny = useCallback(async () => {
     if (!pending || !target) return
@@ -367,7 +396,8 @@ export function ConfirmationCard() {
       // queued actions (Improve: one message per action) are dropped.
       const group = useChatStore.getState().activeRequest?.group
       if (group) useChatStore.getState().dropRequestGroup(group)
-      appendMessage({
+      // LC-47 (UX C4): a change set's own receipt says "Cancelled: nothing changed".
+      if (pending.change_set === undefined) appendMessage({
         role: 'tool', content: `denied: ${pending.tool_name}`,
         tool_use_id: pending.tool_use_id, tool_name: pending.tool_name,
       })
@@ -439,7 +469,8 @@ export function ConfirmationCard() {
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
             data-testid="chat-confirmation-summary">
-            {(edit && (editCardWords(edit) || edit.says)) || sweep?.says || (pending.external
+            {(changeSet && `${changeSet.items.length} changes proposed for this step`)
+              || (edit && (editCardWords(edit) || edit.says)) || sweep?.says || (pending.external
               ? shortMcpToolName(pending.tool_name)
               : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
@@ -457,7 +488,8 @@ export function ConfirmationCard() {
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
             {/* Study harness 10a (UX (14)): a runner-issued native card says what it runs, not "The assistant wants". */}
-            {(edit?.kind === 'native' && edit.says) || (pending.external
+            {(changeSet && `${changeSet.items.length} changes proposed for this step`)
+              || (edit?.kind === 'native' && edit.says) || (pending.external
               ? shortMcpToolName(pending.tool_name) : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
           {Object.keys(pending.args ?? {}).length > 0 && (
@@ -468,6 +500,16 @@ export function ConfirmationCard() {
         </>
       )}
       {edit && <EditCardTable card={edit} guided={Boolean(guidedWording)} />}
+      {changeSet && <ChangeSetRows set={changeSet} ticked={ticked} onToggle={toggleTick} />}
+      {pending.change_set !== undefined && !changeSet && <p role="alert" className="mb-2 text-xs text-warn">
+        The changes of this card are unavailable. Cancel it and ask again.
+      </p>}
+      {changeSet && ticked.size === 0 && (
+        <p className="mb-2 text-[11px] text-warn" data-testid="chat-change-set-none">{CHANGE_SET_NONE_TICKED}</p>
+      )}
+      {refused && <p role="alert" className="mb-2 text-xs text-warn" data-testid="chat-change-set-refused">
+        These ticks no longer match the card, so nothing was applied. Cancel all and ask again.
+      </p>}
       {sweep && <SweepCardTable card={sweep} guided={Boolean(guidedWording)} />}
       {pending.sweep_card !== undefined && !sweep && <p role="alert" className="mb-2 text-xs text-warn">
         The cases of this sweep are unavailable. Deny it and ask again.
@@ -518,18 +560,18 @@ export function ConfirmationCard() {
         <button
           className="px-2 py-1 text-xs rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
           onClick={onApprove}
-          disabled={!typedSatisfied || !!mismatchLine || reviewUnavailable}
+          disabled={!typedSatisfied || !!mismatchLine || reviewUnavailable || (!!changeSet && ticked.size === 0)}
           title={mismatchLine ?? undefined}
           data-testid="chat-confirm-approve"
         >
-          Approve
+          {changeSet ? changeSetApplyLabel(ticked.size) : 'Approve'}
         </button>
         <button
           className="px-2 py-1 text-xs rounded bg-bg-2 hover:bg-bg-3 border border-border"
           onClick={onDeny}
           data-testid="chat-confirm-deny"
         >
-          Deny
+          {pending.change_set !== undefined ? 'Cancel all' : 'Deny'}
         </button>
         <span className="font-mono text-[10px] text-muted ml-auto">
           {secondsLeft}s

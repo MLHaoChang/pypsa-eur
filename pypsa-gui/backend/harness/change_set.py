@@ -26,8 +26,8 @@ The seam has four parts, all keyed by the response's `tool_use_id`s:
   `landed` count. `all_applied` is true only when every ticked row landed.
 
 Destructive rows (deletes, imports), `CARD_ONLY_TOOLS`, memory proposals and
-requirements never join. Membership is off (`ENABLED`) until the card renders
-(LC-47 S2), so master never emits a frame the browser cannot show.
+requirements never join. `ENABLED` is the one switch: off, every call keeps
+its own card. The browser shows the card in `ChangeSetCard.tsx`.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ import json
 from typing import Any
 from collections.abc import Callable, Generator, Iterable
 
-ENABLED = False
+ENABLED = True
 VERSION = 1
 TOOL = "change_set"
 SOURCE_ASSISTANT = "proposed by the assistant"

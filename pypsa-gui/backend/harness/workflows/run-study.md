@@ -20,9 +20,13 @@ steps:
 ## Step: readiness
 
 Call `suggest_eh_setup`; if it reports gaps (grid import link, critical
-loads, grid strength, outage data), explain each in one sentence and fix the
-ones the user confirms with `update_component`. Then `review_eh_study` for
-anything still blocking.
+loads, grid strength, outage data), explain each in one sentence. Propose
+all of the step's fixes in one response, one `update_component` call per
+component: the user gets one card with a tick box per fix and applies the
+ticked ones together. Do not ask about each fix in turn. Report from the
+card's receipt which fixes were applied, and do not propose an unticked fix
+again unless the user asks. Then `review_eh_study` for anything still
+blocking.
 
 ## Step: run
 
