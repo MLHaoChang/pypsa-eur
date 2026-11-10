@@ -168,10 +168,11 @@ it('words each row of the receipt and keeps a failed row’s reason on its row',
     'backend dApplied: not confirmed yet',
     'backend eFailed: the project changed after the card was shown',
     'backend fNo change: the project already had this value',
-    // GK B (44) F1: the turn ended first; nothing was written, so it is not a failure.
+    // GK B (44) F1: the turn ended first. Not counted as failed, but warn-coloured (UX (16)).
     'backend gNot applied: the turn ended before this change ran',
   ])
-  expect(screen.getAllByTestId('chat-change-set-receipt-row')[6].querySelector('.text-warn')).toBeNull()
+  const warn = screen.getAllByTestId('chat-change-set-receipt-row').map(li => li.querySelector('.text-warn') !== null)
+  expect(warn).toEqual([false, true, false, true, true, false, true])
 })
 
 it('counts what landed out of what was ticked', () => {

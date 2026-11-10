@@ -205,8 +205,9 @@ export function ChangeSetReceiptCard({ receipt, reasons, labels }: {
           <li key={row.tool_use_id} className="flex flex-wrap gap-x-2 border-t border-border py-0.5"
             data-testid="chat-change-set-receipt-row" data-status={row.status}>
             <span className="text-text">{labels?.[row.tool_use_id] || row.label || 'Change'}</span>
+            {/* UX (16): a ticked change that did not happen stands out; an unticked one was the user's choice. */}
             <span className={row.status === 'failed' || row.status === 'stale' || row.status === 'uncertain'
-              ? 'text-warn' : 'text-muted'}>
+              || row.status === 'not_run' ? 'text-warn' : 'text-muted'}>
               {statusWords(row, reasons?.[row.tool_use_id])}
             </span>
           </li>
