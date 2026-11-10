@@ -194,3 +194,10 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A plan-card or gate sentence claims only the cases the gate reads (#1333 "any one out").
 - A test named for a guard must run that guard, not monkeypatch the function that holds it (#1334).
 - Run each mutant on its single targeted test with `-x` and a timeout: a mutant can hang a whole-file run and leave an empty result (#1333, #1334).
+- An out-of-scope or "not needed" tag is keyed on what the row is (the unused element's own rows), never on every row filed to the section; pin each template that reaches it (#1340).
+- A default used to excuse a changed value comes from the declared default, never inferred from neighbouring cells (#1331).
+- A `not_via_chat` keyword is a word only that feature owns; one hit attaches "do not look for another tool" (#1343 `headline`, #1347 `saved`).
+- A read-only route that reuses chat-path readers catches the chat path's exception set per item, so one busy lock degrades one card (#1343).
+- A PR that makes a lock's hold longer re-checks every waiter's bound on that lock (#1345).
+- A reviewer rule for visibility ("admin sees a nominated item") is not reused as a rule for use (#1347).
+- Review through a subagent: it reads the diff, runs the trial merge, tests and mutants, and returns file:line findings; the gatekeeper reads only the hunks those point at (GK B (42) and (43) each reached 300k in about 80 minutes).
