@@ -266,7 +266,11 @@ describe('recommendations', () => {
   it('prints each tornado bar’s low and high NPV as text', () => {
     render(<Robust findings={findings} tornado={null} error={null} onStart={vi.fn()} onAbort={vi.fn()} busy={false} />)
     const bar = screen.getAllByTestId('tornado-bar').find(b => b.getAttribute('data-key') === 'discount_rate')!
-    expect(within(bar).getByTestId('tornado-values').textContent).toBe('NPV at the low value: EUR 4.34 M · at the high value: EUR 2.93 M')
+    // The lower NPV sits on the left: here the high discount rate gives it.
+    expect([...within(bar).getByTestId('tornado-values').querySelectorAll('text')].map(t => t.textContent)).toEqual([
+      'High 9.1 %: €\u00a02.9\u00a0m (\u2212€\u00a0597\u00a0k)',
+      'Low 4.9 %: €\u00a04.3\u00a0m (+€\u00a0808\u00a0k)',
+    ])
   })
 
   it('counts the options the NEXT run solves, not the last run’s', () => {

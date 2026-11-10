@@ -8,7 +8,7 @@ Blocked by: 01
 Type: feature
 Model: Opus for the shared theme API, Sonnet for each chart. Reviewer: UX.
 
-The issue is cut into slices (PR-SIZE-1). Slices 1 to 4 are done in their PRs; the
+The issue is cut into slices (PR-SIZE-1). Slices 1 to 5 are done in their PRs; the
 rest are ready for an agent and build on their API.
 
 ## Slice 1: shared chart theme (this PR)
@@ -43,9 +43,13 @@ Full-year runs: see `06-full-year-charts-block-the-tab.md`.
 
 For slice 6 (UX, #1354): on a multi-period run with "Aggregated" selected the diagram shows the first period (title "Energy flow · 2027") while the source line says "all periods". Left as on master in slice 4.
 
-## Later slices
+## Slice 5: tornado (this PR)
 
-5. **Tornado / delta for sensitivities**, with shared axes, scales, colours and order across base and sensitivity cases (VISUALS-1).
+`pypsa-gui/frontend/src/pages/results/TornadoChart.tsx`: `<TornadoChart>` on `ChartFrame`, one row per driver on one value axis. A bar runs between the results at the driver's low and high input and is split at the labelled "Base case" line: the danger token below it, the success token above. Each end is written out ("Low 4.9 %: € 4.3 m (+€ 808 k)"), the lower result on the left; the header carries the largest swing and its driver; the axis names the unit once. A zero line is drawn and labelled only when zero is in range, on its own line of text above the plot. A case with no result reads "High case: not established", draws no bar on that side and never a bar at 0. `domain` fixes the axis so two options side by side share one scale (no second chart is wired yet). SVG and CSV (driver, input low and high, unit, NPV low and high, swing). It is in `THEMED` in `chartStandard.test.tsx`.
+
+Used by Decision hub > Robustness check (`pages/decision/Robust.tsx`), which keeps the row order of `sortTornado` (largest swing first, an unknown swing last), the pending and skipped lists, the status and the per-driver notes. The chart has no source line there: the method sentence above the plot is the study's basis.
+
+## Later slices
 6. **The rest of Results on the theme**: Prices, Economics, AC power flow, Investment, Aggregated overview (they already get the tokens and ticks through the shared constants, not `ChartFrame`).
 7. **Reports reuse the exact chart specs** the user saw.
 
