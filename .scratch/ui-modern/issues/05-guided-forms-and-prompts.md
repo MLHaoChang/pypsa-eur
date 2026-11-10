@@ -32,13 +32,21 @@ Guided reads as one product: a section shows plain words, one way in per row, an
 
 Shots: `.scratch/ui-modern/shots-05/`, `before-` and `after-`, dark and light, `dc-` and `mg-`, sections 3, 5 and 7. Script: `pypsa-gui/frontend/scripts/ui-modern-05-shots.mjs`.
 
-### Slice 2 (open)
+### Slice 2 (built)
 
-- **Sections that are a sentence and a link (finding 7).** Carriers, Loads, Assets and Time series each show "N assets. Anything this section still needs is listed above…" and an Expert link. Give each a card with something to do in Guided, or a list of what it holds.
-- **`SiteCard.tsx` em dashes.** Five strings ("None — the site runs as an island", "… — normally open; …", "… — everything on this bus keeps power", "data missing — …", "N units — M without outage data") and the Grid connection option labels. Left out of slice 1 because PR #1335 was editing the file.
-- **The microgrid's section 7.** Contracts and Finance inputs show 21 selects on one screen with unstyled underlined actions ("Add contract", "Reload the contracts", "State the finance inputs"). Group them, and give the actions the card style.
-- **Assumed rows that are still engineer's prose.** "Q(U)", "the staged microgrid's blocks on the plain unit names", unit names such as `diesel_1` in the "Existing island" row.
-- **Em dashes the backend builds** and Guided shows (refusals such as "A study is still running — wait for it…", the site check's notes).
+- **Sections that were a sentence and a link (finding 7).** Carriers, Loads, Assets and Time series list what they hold: one row per carrier, load, asset or time series, with its kind and one figure ("Capacity: 10 MW", "Peak load: 40 MW", "Availability time series"; an extendable asset reads "sized by the study"). Each row has one "Edit ›": an asset or load opens its own editor in the drawer over the card, a time series opens the Time Series drawer on that row, a carrier (no Guided editor) opens Expert with "Back to Carriers & processes". A group longer than 8 folds to "(N more) Show all". The list is the flow's `holds`, built server-side from the same set as the heading's count; it decides no state, and the assistant's copy of the flow leaves it out.
+- **The microgrid's section 7.** The Contracts and Finance inputs actions ("Add contract", "Reload the contracts", "State the finance inputs", "Remove", …) use the card's bordered small-action style, one constant shared with the tariff builder (`actionStyle.ts`). The finance inputs were already grouped in titled field sets, so no select moved.
+- **Assumed rows.** "Q(U)" reads "voltage-dependent reactive power", "blocks on the plain unit names" reads "settings for each unit", and `process_uc`, `discount_rate` and `eu_de` no longer show. Unit names such as `diesel_1` stay: they are the names the section lists and the editors show.
+- **Refusals.** "A study is still running: wait for it…" and "A risk check is running: wait for it…" use a colon.
+- **Slice 1's surviving mutants.** Tests now cover the tag's two-part condition and the "has / have" verb.
+
+Shots: `.scratch/ui-modern/shots-05b/`. Script: `pypsa-gui/frontend/scripts/ui-modern-05b-shots.mjs`.
+
+### Left for a follow-up
+
+- **`SiteCard.tsx` em dashes** (five strings and the Grid connection option labels): PR #1335 is still editing the file.
+- **"synthetic illustrative data — representative week…"** in section 1: template data (`project_templates/`), which the report prints too.
+- **Em dashes in backend refusals** outside the flow (`routers/results.py`, `routers/reports.py`, `services/study/runner.py`, `services/adequacy/eh_review.py`): other tests and the frontend match some of these by text.
 
 ## Done when
 
