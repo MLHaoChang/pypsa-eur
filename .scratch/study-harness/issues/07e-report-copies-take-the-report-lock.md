@@ -3,7 +3,7 @@
 
 # 07e — Bundle copies of `reports/` take the per-report lock
 
-Status: needs-triage
+Status: done (#1345)
 Type: task
 Gated: yes (GK B)
 Split from: [07c](07c-report-comment-revisions.md), GK B (38)'s non-blocking finding on #1300
