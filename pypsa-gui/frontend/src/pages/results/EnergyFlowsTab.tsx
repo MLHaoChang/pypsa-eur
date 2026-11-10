@@ -245,7 +245,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
       <ChartFrame testId="ef-flow"
         title={`Energy flow · ${periodLabel(data.period)}`}
         figure={graph.links.length ? chartFigure(fmtMwh(total), 'delivered or lost') : undefined}
-        hint="MWh · source → via → destination"
+        hint="source → via → destination"
         right={
           <ChartActions chartRef={graph.links.length ? chartRef : undefined} filename={exportName}
             onExportCSV={() => {

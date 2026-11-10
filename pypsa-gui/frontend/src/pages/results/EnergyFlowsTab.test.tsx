@@ -121,6 +121,8 @@ describe('the Sankey frame', () => {
     expect(within(frame).getByRole('heading', { name: /Energy flow · / })).toBeTruthy()
     const total = ROWS.reduce((s, r) => s + r.mwh, 0)
     expect(frame.textContent).toContain(`${fmtMwh(total)} delivered or lost`)
+    // One unit in the header: the figure carries it, the hint does not repeat another.
+    expect(frame.textContent).not.toContain('MWh ·')
     expect(within(frame).getByRole('button', { name: 'SVG' })).toBeTruthy()
     expect(within(frame).getByRole('button', { name: 'CSV' })).toBeTruthy()
     // The total is said once: the strip above keeps only the losses share.
