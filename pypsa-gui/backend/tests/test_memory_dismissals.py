@@ -300,20 +300,73 @@ def test_a_dismissal_needs_an_organisation(seeded_identity, _auth_db, monkeypatc
     assert (e.value.kind, e.value.status) == ("memory_no_org", 403)
 
 
-def test_a_card_that_was_remembered_cannot_be_dismissed(client, seeded_identity):
+@pytest.mark.parametrize(
+    "result, status",
+    [
+        ({"content": "{}"}, 409),  # Remember ran
+        ({"is_error": True, "content": "confirmation_expired"}, 409),
+        ({"is_error": True, "content": "memory_proposal_capped\nfenced"}, 409),
+        ({"is_error": True, "content": "memory_proposal_dismissed\nfenced"}, 409),
+        ({"is_error": True, "content": "memory_invalid\nfenced"}, 409),
+        ({"is_error": True, "content": [{"type": "text", "text": "x"}]}, 409),
+        ({"is_error": True, "content": "confirmation_denied\nfenced"}, 201),
+        (
+            {
+                "is_error": True,
+                "content": [{"type": "text", "text": "confirmation_denied"}],
+            },
+            201,
+        ),
+        (None, 201),  # no result yet: the deny is still on its way
+    ],
+)
+def test_only_a_declined_or_waiting_card_is_dismissed(
+    client, seeded_identity, result, status
+):
     from harness import session as harness_session
 
-    text = f"Remembered {uuid.uuid4().hex[:8]}"
+    text = f"Card {uuid.uuid4().hex[:8]}"
     card = _chat_with_card(seeded_identity["user_id"], _proposal(text))
-    session = harness_session.get_session(card["chat_id"])
-    result = {
-        "type": "tool_result",
-        "tool_use_id": card["tool_use_id"],
-        "content": "{}",
-    }
-    session.messages.append({"role": "user", "content": [result]})
+    if result is not None:
+        block = {"type": "tool_result", "tool_use_id": card["tool_use_id"], **result}
+        harness_session.get_session(card["chat_id"]).messages.append(
+            {"role": "user", "content": [block]}
+        )
     r = _dismiss(client, card)
-    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "memory_status"
-    # A denied card's error result does not block the dismissal.
-    session.messages[-1] = {"role": "user", "content": [{**result, "is_error": True}]}
-    assert _dismiss(client, card).status_code == 201
+    assert r.status_code == status, r.text
+    if status == 409:
+        assert r.json()["detail"]["error_kind"] == "memory_status"
+
+
+def test_dismissing_again_restarts_the_30_day_window(
+    client, seeded_identity, _auth_db, monkeypatch
+):
+    from sqlalchemy import select
+
+    from db.models import MemoryItemVersion, User
+    from services import memory_store as M
+
+    _engine, session_local = _auth_db
+    text = f"Again later {uuid.uuid4().hex[:8]}"
+    first = _dismiss(
+        client, _chat_with_card(seeded_identity["user_id"], _proposal(text))
+    ).json()
+    start = M._now()
+    monkeypatch.setattr(M, "_now", lambda: start + timedelta(days=29))
+    again = _dismiss(
+        client, _chat_with_card(seeded_identity["user_id"], _proposal(text))
+    )
+    assert (again.status_code, again.json()["id"]) == (200, first["id"])
+    later = start + timedelta(days=40)  # 40 days after the first, 11 after the repeat
+    with session_local() as db:
+        user = db.get(User, seeded_identity["user_id"])
+        assert M.recently_dismissed(
+            db, user, "lesson", ["topic:units"], {"text": text}, now=later
+        )
+        M.sweep_dismissed(db, now=later)
+        body = db.scalar(
+            select(MemoryItemVersion.body_json).where(
+                MemoryItemVersion.item_id == M.parse_id(first["id"])
+            )
+        )
+    assert body is not None

@@ -144,6 +144,24 @@ class Dismissal(BaseModel):
     tool_use_id: str = Field(min_length=1, max_length=128)
 
 
+def _result_kind(block: dict) -> str | None:
+    """The error kind of an `is_error` tool_result: the first line of its
+    content (`harness.results._error_result_content`); None for a result."""
+    if not block.get("is_error"):
+        return None
+    content = block.get("content")
+    if isinstance(content, list):
+        content = next(
+            (
+                b.get("text")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ),
+            None,
+        )
+    return content.split("\n", 1)[0].strip() if isinstance(content, str) else None
+
+
 def _denied_proposal(chat_id: str, tool_use_id: str, user: User) -> dict:
     """The `propose_memory` input of `tool_use_id` in the caller's own live
     chat. The client names the card; the server reads what it proposed, so
@@ -154,7 +172,25 @@ def _denied_proposal(chat_id: str, tool_use_id: str, user: User) -> dict:
     if session is None or not session_owner_allows(session, getattr(user, "id", None)):
         _raise(M.MemoryError("memory proposal not found", "memory_not_found", 404))
     messages = list(session.messages)
-    # A card that ran (Remember) has a successful tool_result: it was not denied.
+    # Only a card still waiting (no result yet) or one the user declined
+    # (`confirmation_denied`) is dismissed. A card that ran, expired, or was
+    # refused before it showed (capped, already dismissed, invalid) is not.
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if message.get("role") != "user" or not isinstance(content, list):
+            continue
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool_result"
+                and block.get("tool_use_id") == tool_use_id
+                and _result_kind(block) != "confirmation_denied"
+            ):
+                _raise(
+                    M.MemoryError(
+                        "this memory card was not declined", "memory_status", 409
+                    )
+                )
     for message in messages:
         content = message.get("content") if isinstance(message, dict) else None
         if message.get("role") == "user" and isinstance(content, list):
