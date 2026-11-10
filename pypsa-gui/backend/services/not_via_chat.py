@@ -364,6 +364,23 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('GET', '/api/memory/items/{item_id}/versions'),
         }),
     },
+    {
+        'id': 'memory_parameter_suggestions',
+        'title': 'Saving a field value for reuse, or applying a saved one',
+        'disposition': 'out of chat',
+        'reason': ('A value is saved for reuse with the Save for reuse button beside its field, and a '
+                   'saved value is applied only when you pick its chip next to the same field and '
+                   'approve the card there. The assistant never applies one.'),
+        'page': 'Asset card (Properties)',
+        'panel': None,
+        'keywords': frozenset({'reuse', 'suggestion', 'saved value'}),
+        'routes': frozenset({
+            ('GET', '/api/memory/suggestions'),
+            ('POST', '/api/memory/parameters'),
+            ('POST', '/api/memory/suggestions/{item_id}/preview'),
+            ('POST', '/api/network/memory_parameter/apply'),
+        }),
+    },
 )
 
 NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the reason and the page; "
