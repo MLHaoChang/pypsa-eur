@@ -171,6 +171,12 @@ class ChatSession:
     job_wait_progress: dict[str, Any] | None = None
     # Issue 04 S5: holds on job calls whose outcome is unknown (harness/job_holds.py).
     job_holds: dict[Any, Any] = field(default_factory=dict)
+    # Assistant memory (harness/memory_recall.py): the standing block's cache,
+    # the per-session ranking snapshot and the items already counted as
+    # recalled; and the memory cards raised this session and this turn (§2.3).
+    memory_state: dict[str, Any] | None = None
+    memory_proposals: int = 0
+    turn_memory_proposals: int = 0
     # Private turn-local checked-answer state; cleared on every exit.
     assurance_turn: Any | None = None
     shadow_turn: Any | None = None

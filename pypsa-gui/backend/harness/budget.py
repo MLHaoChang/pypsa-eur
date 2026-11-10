@@ -43,6 +43,15 @@ NO_PROGRESS_PER_RUN: int = 5
 
 MAX_OUTPUT_TOKENS_PER_SESSION: int = 200_000
 
+# Assistant memory (assistant-memory plan §3.2, §2.3): the prompt blocks'
+# caps, and how many memory cards one turn and one session may raise.
+MEMORY_STANDING_ITEMS: int = 8
+MEMORY_STANDING_CHARS: int = 1500
+MEMORY_TURN_ITEMS: int = 4
+MEMORY_TURN_CHARS: int = 800
+MEMORY_PROPOSALS_PER_TURN: int = 1
+MEMORY_PROPOSALS_PER_SESSION: int = 3
+
 
 # Transient-SDK-error retry (chat reliability). A rate-limit (429) or an
 # Anthropic overload (5xx) that fails the stream BEFORE any token is emitted is

@@ -9552,6 +9552,7 @@ from harness.experiment_reconciliation import reconcile_experiment
 from harness.experiment_comparison import compare_experiments, export_experiment_comparison
 from harness.sensitivity_comparison import compare_sensitivities, export_sensitivity_comparison
 from services.assistant_tasks import list_tasks, start_task, get_task, resume_task, cancel_task, resolve_task_step
+from services import memory_tools as _memory_tools
 from services.assistant_tools import (find_capabilities, get_file_delivery, inspect_import, import_uploaded_network,
                                       preview_project_changes, apply_project_changes, create_chart, build_delivery)
 
@@ -9584,6 +9585,8 @@ DISPATCHERS: dict[str, Any] = {
     "list_experiments": list_experiments,
     "get_experiment": get_experiment,
     "list_tasks": list_tasks,
+    "propose_memory": _memory_tools.propose_memory,
+    "recall_memory": _memory_tools.recall_memory,
     "find_capabilities": find_capabilities,
     "start_task": start_task,
     "get_task": get_task,

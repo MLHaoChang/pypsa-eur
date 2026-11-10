@@ -460,8 +460,11 @@ def _reset_tenant_tables(_auth_db):
         # must not leak a version number from one test into the next.
         # `assurance_record_seq`: a record's replay mark must not outlive the
         # test whose record store it belongs to.
+        # `memory_*` (assistant memory 02a): items are per user/org rows, and a
+        # revision counter must not carry from one test into the next.
         for table in ("project_locks", "project_memberships", "projects", "solve_jobs",
-                      "library_items", "assurance_record_seq"):
+                      "library_items", "assurance_record_seq", "memory_item_versions",
+                      "memory_items", "memory_revisions"):
             conn.execute(text(f"DELETE FROM {table}"))
 
 @pytest.fixture(autouse=True)

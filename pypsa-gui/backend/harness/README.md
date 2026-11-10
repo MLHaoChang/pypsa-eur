@@ -48,6 +48,7 @@ harness/
   attention.py    bounded owned question/confirmation observations and versioned read-only inspection; no restored approval or answer authority
   owned_snapshots.py private atomic bounded snapshot storage shared by job and decision observations; schemas remain separate
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
+  memory_recall.py assistant memory in the prompt: the standing block (system prompt, after the skill catalogue; byte-stable until memory changes) and the turn block (next to the ui-context block); none in a headless run's turn
   budget.py       the per-turn / per-session / daily caps, the task caps that lower them for a bounded task (the card explanation), the retry schedule, the per-tool timeout, the budget gate
   stub.py         the scripted stub loop behind StreamRequest.script
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
@@ -885,6 +886,29 @@ never breaks the package skills. The listing shows each skill's provenance
 | `events` | the tripwire test; `choice_request` is what `ask_user` emits, `workflow_state` what the workflow tools emit | — |
 | `workflows` | `GET /api/chat/workflows` (the start menu the panel renders), the `start_workflow` / `advance_workflow` / `end_workflow` tools, `chat_service._workflow_addendum` (the per-turn step), `_guided_mode_addendum` (the `hub-design` preamble) | — |
 | `skills` | `chat_service._skills_block` (the catalogue in the tools-on prompt), the `use_skill` tool | — |
+| `memory_recall` | `_build_system_prompt(memory=...)` and the per-turn user content in `run_turn`; the `propose_memory` / `recall_memory` tools (`services/memory_tools.py`) | `services/memory_store.py`, `confirm.ALWAYS_CARD_TOOLS` |
+
+### Assistant memory (assistant-memory plan, slice 02a)
+
+- **Standing block**: `memory_recall.standing_block(session, turn_ctx, include_tools)`, passed as
+  `_build_system_prompt(memory=...)` and placed right after the skill catalogue in both modes. It is
+  cached on the session under (owner, org, bound project's org, project kind, user revision, org
+  revision, include_tools) and ranked on a per-session snapshot of the counters, so it changes only
+  when memory does (plan §9 M5). An empty block adds nothing, so the default prompt bytes are
+  unchanged.
+- **Turn block**: `memory_recall.turn_block(...)`, appended to the ui-context slot and logged as the
+  `memory` context event: items whose concept keys meet `memory_store.concepts_for(ui_context)` and
+  that the standing block does not carry. It builds the (cached) standing block first, so a chat's
+  first turn never lists an item twice. Each block's text, tools hint included, stays within its cap.
+- Item text is always inside one `fence.fenced(...)`; the one hint naming the two tools is added only
+  when tools are offered. A runner or agent-stage turn (`session.task_id` or `session.stage_tools`)
+  gets neither block and neither tool (M3).
+- `propose_memory` is in `confirm.ALWAYS_CARD_TOOLS`: no auto-approve tier, saved rule, task or run
+  envelope admits it (M4). `memory_tools.precheck` runs before its card (validation, one card per
+  turn and three per chat, a dismissal younger than 30 days); a precheck that cannot run refuses
+  closed with `memory_check_unavailable`. A `lesson` saved from a bound project takes that project's
+  org, so a lesson saved in another org's shared project recalls only there and cannot be suggested
+  to the user's own org; `preference` and `chart_spec` items keep the user's own org (M1).
 
 ## Durable assistant tasks and file delivery
 

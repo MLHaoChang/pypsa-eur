@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Assistant memory backend: confirmed preferences, chart specs (`chart_spec@1`) and lessons are stored per user and organisation, recalled into the chat prompt under a fixed budget, proposed only through an always-carded `propose_memory` card, read with `recall_memory`, and served to the coming Memory page by `/api/memory/*`.

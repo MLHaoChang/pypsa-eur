@@ -443,6 +443,7 @@ def _build_system_prompt(
     session: ChatSession,
     live_meta: str | None = None,
     include_tools: bool = True,
+    memory: str | None = None,
 ) -> str:
     """
     Build the system prompt for one turn. Kept small — the agent learns the
@@ -506,6 +507,11 @@ def _build_system_prompt(
         # bodies arrive through use_skill). TOOLS-ON ONLY: it names a tool.
         # A NEW part, the sanctioned way past the pinned constants.
         *( [_skills_block()] if include_tools else [] ),
+        # Assistant memory (plan §3.1) — the standing block, built by
+        # `harness.memory_recall.standing_block`: FACTS in a fence, in both
+        # modes; its one tool hint is there only when tools are offered.
+        # Byte-stable until memory changes. "" or None adds nothing.
+        memory or "",
         _DOMAIN_GUIDE if include_tools else _DOMAIN_GUIDE_FACTS,
         _SOLVER_ERROR_DECODER if include_tools else _SOLVER_ERROR_DECODER_FACTS,
         _PRICE_CONGESTION_GUIDE if include_tools else _PRICE_CONGESTION_GUIDE_FACTS,
