@@ -643,7 +643,7 @@ def grid_risk_disclosures(payload: dict) -> list[str]:
         out.append(f"{head}: lower bound for {' · '.join(partial)}.")
     stale = [ln["label"] for ln in lines if ln["stale"]]
     if stale:
-        out.append(f"{head}: out of date for {', '.join(stale)} (the inputs changed since the run).")
+        out.append(f"{head}: out of date for {' · '.join(stale)} (the inputs changed since the run).")
     if any(c["t_per_year"] is not None and c["eur_per_year"] is None
            for ln in lines for c in ln["by_period"].values()):
         out.append(f"{head}: EUR is unavailable where no lost-production value is set; the tonnes stand.")
