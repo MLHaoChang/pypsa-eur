@@ -9,7 +9,9 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - Read a PR with `git diff --stat` first, then one hunk or file at a time, each capped with `| head -c 6000`. Whole-file or cross-file reads go to an Explore subagent that returns file:line findings only.
 - Fetch `refs/pull/N/head:refs/gk/N`, `git worktree add --detach` under the scratchpad, and remove the worktree afterwards.
 - Backend tests: `PYTHONPATH=<wt>:<wt>/pypsa-gui/backend /root/.venv-pypsa-gui/bin/python -m pytest -p no:warnings -q -rfE <files>`, no xdist. Check the exit code. Keep each run under 590 s and split files (`test_pilot_evaluation` and broad finance sweeps time out).
+- pytest `-k` filters every path collected in the same invocation, so explicit node ids from another file are silently deselected. Run node ids in their own invocation.
 - Frontend: symlink `node_modules` from `/home/user/pypsa-eur/pypsa-gui/frontend`, put `/home/user/pypsa-eur/.pixi/envs/default/bin` on `PATH`, then `npx vitest run <paths>` and `npx tsc --noEmit -p .`.
+- In a shallow clone, `git log -S/-G` names the history edge, not the introducing PR. Attribute a change with `gh api search/issues` (`is:pr is:merged`) plus that PR's diff (#1329).
 
 ## Delta reviews
 
@@ -33,6 +35,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 
 - Byte-identity against master's tests: copy master's test file into the PR worktree and run it there (a recording pytest plugin can capture rows). Running it from the master worktree imports master's code even with PYTHONPATH on the PR, because the rootdir wins.
 - A merge commit M has no hand resolution when `git merge-tree --write-tree M^1 M^2` equals `M^{tree}`.
+- A delta that only adds a test can still collide in CI order. Run the colliding files in CI's order without randomisation: red with the old file, then green at the head (#1311).
 
 ## Known container-only failures
 
@@ -83,6 +86,9 @@ A batch of mutants that runs whole suites can exceed the background limit: run e
 A broken-dependency test builds its inputs before injecting the fault; otherwise the fixture raises and the code under test never runs (#1290 F1, GK A (19)).
 
 A "never swallowed" test injects the module's own error class (e.g. `DefaultsPackError`) as well as a foreign one: a narrow `except` survives a RuntimeError-only test (#1290 F2, GK A (19)).
+
+Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded float for `Finite` (#1320 F1).
+- A cleanup that reads a render-time ref after unmount acts on stale state; read the store at cleanup (#1328 F5).
 
 ## Rulings
 
