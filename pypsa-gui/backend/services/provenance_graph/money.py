@@ -14,6 +14,7 @@ Per asset, from `n.meta["asset_params"]` (`provenance.get`, the only writer stay
 "What is the scale input now?" is answered by `pricing.current_scale_input` only, so the check cannot drift from
 what pricing would do.
 """
+
 from __future__ import annotations
 
 import math
@@ -60,21 +61,31 @@ def _recorded_input(entry: dict) -> dict | None:
         return entry["scaled_by"]
     if entry.get("dc_ac_ratio") is not None:
         # TC-02 wrote the key on a DC-priced (`output_electric_dc`) overnight cost only.
-        return {"column": "dc_ac_ratio", "value": entry["dc_ac_ratio"], "technology": None,
-                "capacity_basis": "output_electric_dc"}
+        return {
+            "column": "dc_ac_ratio",
+            "value": entry["dc_ac_ratio"],
+            "technology": None,
+            "capacity_basis": "output_electric_dc",
+        }
     return None
 
 
 def _well_formed(scaled) -> bool:
     """The shape pricing writes: a str column and capacity basis, a finite number value."""
-    return (isinstance(scaled, dict) and isinstance(scaled.get("column"), str)
-            and isinstance(scaled.get("capacity_basis"), str)
-            and isinstance(scaled.get("value"), (int, float)) and not isinstance(scaled["value"], bool)
-            and math.isfinite(scaled["value"]))
+    return (
+        isinstance(scaled, dict)
+        and isinstance(scaled.get("column"), str)
+        and isinstance(scaled.get("capacity_basis"), str)
+        and isinstance(scaled.get("value"), (int, float))
+        and not isinstance(scaled["value"], bool)
+        and math.isfinite(scaled["value"])
+    )
 
 
 #: An applied Library reference's source (`reference_apply.source_id`).
-_REFERENCE_SOURCE = re.compile(r"^(?P<id>[^#/]+)#(?P<hash>[0-9a-f]{16})/(?P<technology>.+)@(?P<year>\d{4})$")
+_REFERENCE_SOURCE = re.compile(
+    r"^(?P<id>[^#/]+)#(?P<hash>[0-9a-f]{16})/(?P<technology>.+)@(?P<year>\d{4})$"
+)
 
 
 def _dc_reference_unrecorded(component_class: str, entry: dict) -> str | None:
@@ -82,9 +93,13 @@ def _dc_reference_unrecorded(component_class: str, entry: dict) -> str | None:
     a DC-priced reference (every other class refuses `output_electric_dc`), so its source is
     looked up: a DC reference, or one this build cannot read back, is not recorded (a reason);
     an AC or other basis reads fresh (None)."""
-    if component_class != "Generator" or entry.get("status") != "customised" or not entry.get("approved_by"):
+    if (
+        component_class != "Generator"
+        or entry.get("status") != "customised"
+        or not entry.get("approved_by")
+    ):
         return None
-    m = _REFERENCE_SOURCE.match(str(entry.get("source")))   # None: "None", no match
+    m = _REFERENCE_SOURCE.match(str(entry.get("source")))  # None: "None", no match
     if m is None:
         return None
     from services.library import europe_reference as R
@@ -103,8 +118,10 @@ def _priced_by_scaling_rule(component_class: str, entry: dict) -> bool:
     from services.library.defaults_pack.pricing import _CLASS, SCALED_RULES, scale_rule
 
     component = next((c for c, cls in _CLASS.items() if cls == component_class), None)
-    return entry.get("status") == "default" and \
-        scale_rule(component, entry.get("capacity_basis")) in SCALED_RULES   # unknown: "refuse"
+    return (
+        entry.get("status") == "default"
+        and scale_rule(component, entry.get("capacity_basis")) in SCALED_RULES
+    )  # unknown: "refuse"
 
 
 def _priced_with(component_class: str, field: str, entries: dict[str, dict]):
@@ -116,8 +133,12 @@ def _priced_with(component_class: str, field: str, entries: dict[str, dict]):
     basis = entry
     # fom_cost carries no annotation of its own before TCU-05: it shares the overnight
     # cost's when both are the same pack price.
-    if scaled is None and field == "fom_cost" and entry.get("status") == over.get("status") \
-            and entry.get("source") == over.get("source"):
+    if (
+        scaled is None
+        and field == "fom_cost"
+        and entry.get("status") == over.get("status")
+        and entry.get("source") == over.get("source")
+    ):
         scaled, basis = _recorded_input(over), over
     if scaled is not None:
         return scaled
@@ -127,13 +148,22 @@ def _priced_with(component_class: str, field: str, entries: dict[str, dict]):
     return None if why is None else Unrecorded(why)
 
 
-def add_asset(b, component_class: str, name: str, entries: dict[str, dict] | None = None) -> dict[str, dict]:
+def add_asset(
+    b, component_class: str, name: str, entries: dict[str, dict] | None = None
+) -> dict[str, dict]:
     """Add one asset's money path to the builder `b`; returns the recorded entries it read (`provenance.get`)."""
     entries = provenance.get(b.n, component_class, name) if entries is None else entries
     for field, entry in entries.items():
         nid = input_id(component_class, name, field)
         b.node(Node("input", nid))
-        b.edge(Edge("stamped_with", nid, f"source:{entry.get('source')}", recorded=dict(entry)))
+        b.edge(
+            Edge(
+                "stamped_with",
+                nid,
+                f"source:{entry.get('source')}",
+                recorded=dict(entry),
+            )
+        )
     money = []
     for field in SCALED_FIELDS:
         if field not in entries:
@@ -143,11 +173,26 @@ def add_asset(b, component_class: str, name: str, entries: dict[str, dict] | Non
             node = input_id(component_class, name, field)
         else:
             node = derived_id(component_class, name, field)
-            column = priced.get("column") if isinstance(priced, dict) and _well_formed(priced) else "scale_input"
+            column = (
+                priced.get("column")
+                if isinstance(priced, dict) and _well_formed(priced)
+                else "scale_input"
+            )
             b.node(Node("derived", node))
             b.node(Node("input", input_id(component_class, name, column)))
-            recorded = priced if isinstance(priced, Unrecorded) else ScaleRecord(component_class, name, priced)
-            b.edge(Edge("priced_through", node, input_id(component_class, name, column), recorded=recorded))
+            recorded = (
+                priced
+                if isinstance(priced, Unrecorded)
+                else ScaleRecord(component_class, name, priced)
+            )
+            b.edge(
+                Edge(
+                    "priced_through",
+                    node,
+                    input_id(component_class, name, column),
+                    recorded=recorded,
+                )
+            )
         money.append(node)
         for surface in ASSET_SURFACES:
             sid = surface_id(surface, component_class, name, field)
@@ -170,20 +215,45 @@ def compare_priced_through(g, edge: Edge) -> Broken | None:
     from services.library.defaults_pack.pricing import current_scale_input
 
     def broken(field, recorded, current_field, current, reason) -> Broken:
-        return Broken("priced_through", edge.src, edge.dst, field, recorded, current_field, current, reason)
+        return Broken(
+            "priced_through",
+            edge.src,
+            edge.dst,
+            field,
+            recorded,
+            current_field,
+            current,
+            reason,
+        )
 
     if isinstance(edge.recorded, Unrecorded):
         return broken(None, None, None, None, edge.recorded.reason)
     scaled = edge.recorded.scaled
-    if not _well_formed(scaled):          # read as stale, never a KeyError 500 (#1255)
+    if not _well_formed(scaled):  # read as stale, never a KeyError 500 (#1255)
         return broken(None, None, None, None, "scale input record malformed")
     try:
-        column, value = current_scale_input(g.ctx, edge.recorded.component_class, edge.recorded.name, scaled.get("technology"), scaled["capacity_basis"])
+        column, value = current_scale_input(
+            g.ctx,
+            edge.recorded.component_class,
+            edge.recorded.name,
+            scaled.get("technology"),
+            scaled["capacity_basis"],
+        )
     except (ValueError, KeyError, TypeError, StopIteration) as exc:
-        return broken(scaled["column"], scaled["value"], None, None, f"cannot be priced now: {exc}")
-    if column == scaled["column"] and math.isclose(float(value), float(scaled["value"]), rel_tol=1e-9):
+        return broken(
+            scaled["column"],
+            scaled["value"],
+            None,
+            None,
+            f"cannot be priced now: {exc}",
+        )
+    if column == scaled["column"] and math.isclose(
+        float(value), float(scaled["value"]), rel_tol=1e-9
+    ):
         return None
-    return broken(scaled["column"], scaled["value"], column, value, "scale input changed")
+    return broken(
+        scaled["column"], scaled["value"], column, value, "scale input changed"
+    )
 
 
 def ledger_row_id(key: str) -> str:

@@ -6,6 +6,7 @@ A small typed graph held in process and rebuilt per query from records the app a
 nothing; `asset_schema.provenance` stays the only writer of `asset_params`. Slice 02 fills the money path
 (`money.py`); later slices add their producers next to the code that records them.
 """
+
 from services.provenance_graph.queries import (
     COMPARATORS,
     Builder,
@@ -28,5 +29,22 @@ from services.provenance_graph.types import (
     Walk,
 )
 
-__all__ = ["COMPARATORS", "EDGE_KINDS", "NODE_KINDS", "Broken", "Builder", "Edge", "Graph", "Node", "Step",
-           "Unrecorded", "Verdict", "Walk", "money_graph", "stale_entries", "staleness", "surface_verdicts", "why"]
+__all__ = [
+    "COMPARATORS",
+    "EDGE_KINDS",
+    "NODE_KINDS",
+    "Broken",
+    "Builder",
+    "Edge",
+    "Graph",
+    "Node",
+    "Step",
+    "Unrecorded",
+    "Verdict",
+    "Walk",
+    "money_graph",
+    "stale_entries",
+    "staleness",
+    "surface_verdicts",
+    "why",
+]

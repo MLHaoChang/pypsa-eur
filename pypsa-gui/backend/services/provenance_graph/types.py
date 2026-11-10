@@ -5,6 +5,7 @@ Frozen records only: a `Node`, an `Edge`, the `Graph` that holds them and the ne
 the two answers, `Verdict` (is this value still current?) and `Walk` (why does it have this value?). An unknown
 node or edge kind is refused, so a producer cannot invent one silently.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -13,7 +14,14 @@ from typing import Any, Literal
 #: `memory` is reserved (MEMORY-1): the kind exists so adding it is not a schema change; nothing builds one yet.
 NODE_KINDS = ("input", "derived", "run", "surface", "memory")
 #: `computed_in` is built by the runs slice (04); `recalled_from` is reserved (MEMORY-1).
-EDGE_KINDS = ("derived_from", "priced_through", "stamped_with", "computed_in", "shown_in", "recalled_from")
+EDGE_KINDS = (
+    "derived_from",
+    "priced_through",
+    "stamped_with",
+    "computed_in",
+    "shown_in",
+    "recalled_from",
+)
 RESERVED_NODE_KINDS = ("run", "memory")
 RESERVED_EDGE_KINDS = ("computed_in", "recalled_from")
 #: The edges `staleness` and `why` walk, from a value towards what it was made from.
@@ -31,7 +39,9 @@ class Node:
 
     def __post_init__(self) -> None:
         if self.kind not in NODE_KINDS:
-            raise ValueError(f"unknown node kind {self.kind!r}; expected one of {NODE_KINDS}")
+            raise ValueError(
+                f"unknown node kind {self.kind}; expected one of {NODE_KINDS}"
+            )
 
 
 @dataclass(frozen=True)
@@ -54,7 +64,9 @@ class Edge:
 
     def __post_init__(self) -> None:
         if self.kind not in EDGE_KINDS:
-            raise ValueError(f"unknown edge kind {self.kind!r}; expected one of {EDGE_KINDS}")
+            raise ValueError(
+                f"unknown edge kind {self.kind}; expected one of {EDGE_KINDS}"
+            )
 
 
 @dataclass(frozen=True)
@@ -69,7 +81,9 @@ class Graph:
         return [e for e in self.edges if e.src == node_id and e.kind in kinds]
 
     def shown_at(self, surface_id: str) -> list[str]:
-        return [e.src for e in self.edges if e.kind == "shown_in" and e.dst == surface_id]
+        return [
+            e.src for e in self.edges if e.kind == "shown_in" and e.dst == surface_id
+        ]
 
 
 @dataclass(frozen=True)
@@ -87,8 +101,13 @@ class Broken:
     reason: str
 
     def wire(self) -> dict:
-        return {"field": self.field, "recorded": self.recorded, "current_field": self.current_field,
-                "current": self.current, "reason": self.reason}
+        return {
+            "field": self.field,
+            "recorded": self.recorded,
+            "current_field": self.current_field,
+            "current": self.current,
+            "reason": self.reason,
+        }
 
 
 @dataclass(frozen=True)
@@ -105,8 +124,8 @@ class Verdict:
 @dataclass(frozen=True)
 class Step:
     node: Node
-    via: Edge | None                 # the edge from the previous step; None on the first
-    stamp: dict | None               # the node's provenance stamp (`stamped_with`), if any
+    via: Edge | None  # the edge from the previous step; None on the first
+    stamp: dict | None  # the node's provenance stamp (`stamped_with`), if any
     state: State
 
 

@@ -5,12 +5,23 @@ A comparator per edge kind answers "does the recorded value still match the curr
 owns it (`money.compare_priced_through`). An edge kind with no comparator, or an edge that recorded nothing,
 compared nothing: the walk reads `uncompared` there, never `fresh` (P1). Rebuilt per query, never cached (P5).
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
 
 from services.provenance_graph import money
-from services.provenance_graph.types import WALKED, Broken, Edge, Graph, Node, State, Step, Verdict, Walk
+from services.provenance_graph.types import (
+    WALKED,
+    Broken,
+    Edge,
+    Graph,
+    Node,
+    State,
+    Step,
+    Verdict,
+    Walk,
+)
 
 #: The one comparison per edge kind. `computed_in` joins with the runs slice (04).
 COMPARATORS: dict[str, Callable[[Graph, Edge], Broken | None]] = {
@@ -29,7 +40,7 @@ class Builder:
     def node(self, node: Node) -> None:
         had = self._nodes.setdefault(node.id, node)
         if had.kind != node.kind:
-            raise ValueError(f"node {node.id!r} added as {had.kind!r} and as {node.kind!r}")
+            raise ValueError(f"node {node.id} added as {had.kind} and as {node.kind}")
 
     def has(self, node_id: str) -> bool:
         return node_id in self._nodes
@@ -78,7 +89,8 @@ def staleness(g: Graph, node_id: str) -> Verdict:
                 broken.append(broke)
             elif state == "uncompared" and e.kind != "derived_from":
                 uncompared.append(e.dst)
-            if e.kind == "derived_from":      # a compared edge's input is the comparison itself
+            # A compared edge's input is the comparison itself; only derived_from walks on.
+            if e.kind == "derived_from":
                 visit(e.dst)
 
     visit(node_id)
@@ -113,7 +125,13 @@ def why(g: Graph, node_id: str) -> Walk:
         node = g.nodes.get(nid) or Node("input", nid)
         steps.append(Step(node, via, _stamp(g, nid), state))
         for e in g.out(nid, WALKED):
-            visit(e.dst, e, staleness(g, e.dst).state if e.kind == "derived_from" else _check(g, e)[0])
+            visit(
+                e.dst,
+                e,
+                staleness(g, e.dst).state
+                if e.kind == "derived_from"
+                else _check(g, e)[0],
+            )
 
     visit(node_id, None, staleness(g, node_id).state)
     return Walk(node_id, tuple(steps))
