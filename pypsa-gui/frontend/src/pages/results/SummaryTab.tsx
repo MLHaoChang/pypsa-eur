@@ -173,7 +173,11 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
         status={status} onOpenTab={onOpenTab} onOpenGroup={onOpenGroup}
         isIn={card => !scopeRead || inScope(flowScope, card)}
         headline={{
-          capacity: c ? `${fmtCurrency(c.total)} a year${ll?.total_mwh != null && ll.total_mwh > 0 ? ` · ${fmtEnergy(ll.total_mwh)} unserved` : ''}` : null,
+          // The strip above already carries the total cost and the unserved energy.
+          capacity: !c ? null
+            : [inStrip('system_cost') ? 'What was built, and the cost by asset' : `${fmtCurrency(c.total)} a year`,
+              ll?.total_mwh != null && ll.total_mwh > 0 && !inStrip('unserved_energy') ? `${fmtEnergy(ll.total_mwh)} unserved` : null,
+            ].filter(Boolean).join(' · '),
           reliability: target
             ? `${fmtEnergy(target.target.system.achieved_ens_mwh)} unserved of ${fmtEnergy(target.target.system.cap_mwh)} allowed`
             : rm ? `Reserve margin ${rm.text}` : null,

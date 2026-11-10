@@ -156,6 +156,8 @@ describe('the Summary under the headline strip (ui-modern 03)', () => {
     const adequacy = screen.getByTestId('summary-adequacy')
     expect(adequacy.querySelector('[data-kpi-value]')).toBeNull()
     expect(adequacy.textContent).toContain('Cost at VoLL')
+    expect(screen.getByTestId('summary-row-capacity').textContent).toContain('What was built, and the cost by asset')
+    expect(screen.getByTestId('summary-row-capacity').textContent).not.toContain('a year')
   })
 
   it('a card narrowed to one period keeps its own headline', async () => {
