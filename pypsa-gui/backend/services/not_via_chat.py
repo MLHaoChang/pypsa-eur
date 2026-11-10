@@ -358,6 +358,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'panel': None,
         'keywords': frozenset({'forget', 'unremember', 'memories'}),
         'routes': frozenset({
+            ('POST', '/api/memory/dismissals'),
             ('PATCH', '/api/memory/items/{item_id}'),
             ('POST', '/api/memory/items/{item_id}/{action}'),
             ('GET', '/api/memory/items/{item_id}/versions'),

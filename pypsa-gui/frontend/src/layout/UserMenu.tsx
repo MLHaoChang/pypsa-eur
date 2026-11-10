@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, LogOut, User as UserIcon } from 'lucide-react'
+import { Brain, ChevronDown, LogOut, User as UserIcon } from 'lucide-react'
 import { useAuth } from '../auth/AuthProvider'
 import { redirectAfterLogout } from '../auth/logoutRedirect'
 import { useUIStore } from '../store/uiStore'
+import { useMemoryStore } from '../store/memoryStore'
+import MemoryDialog from '../components/memory/MemoryDialog'
 import { releaseProjectLock } from '../utils/projectActions'
 
 // Workbench user menu (Task 14). Header dropdown carrying the signed-in
@@ -16,6 +18,15 @@ export default function UserMenu() {
 
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  // UX M1: closing Memory (Esc or Close, however it was opened) returns focus
+  // to this menu button. Runs after the dialog's own restore, so it wins.
+  const memoryOpen = useMemoryStore(s => s.open)
+  const wasMemoryOpen = useRef(false)
+  useEffect(() => {
+    if (wasMemoryOpen.current && !memoryOpen) buttonRef.current?.focus()
+    wasMemoryOpen.current = memoryOpen
+  }, [memoryOpen])
 
   useEffect(() => {
     if (!open) return
@@ -40,8 +51,11 @@ export default function UserMenu() {
   return (
     <div ref={rootRef} className="relative max-xl:ml-auto" data-no-panel-close>
       <button
+        ref={buttonRef}
         onClick={() => setOpen(o => !o)}
         title={email}
+        aria-label="Account menu"
+        data-testid="user-menu-button"
         className="flex items-center gap-1.5 pl-1 pr-1.5 py-1 rounded text-[11px] font-medium border border-border text-text hover:bg-border/30 transition-colors shrink-0"
       >
         <span className="flex items-center justify-center w-5 h-5 rounded-full bg-accent/15 text-accent text-[10px] font-bold shrink-0">
@@ -68,6 +82,14 @@ export default function UserMenu() {
 
           <div className="my-1 border-t border-border" />
           <button
+            onClick={() => { setOpen(false); buttonRef.current?.focus(); useMemoryStore.getState().openMemory() }}
+            data-testid="user-menu-memory"
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] text-text hover:bg-bg-2 transition-colors"
+          >
+            <Brain size={13} className="shrink-0" /> Memory
+          </button>
+          <div className="my-1 border-t border-border" />
+          <button
             onClick={handleLogout}
             className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-[12px] text-danger hover:bg-danger/10 transition-colors"
           >
@@ -75,6 +97,7 @@ export default function UserMenu() {
           </button>
         </div>
       )}
+      <MemoryDialog />
     </div>
   )
 }
