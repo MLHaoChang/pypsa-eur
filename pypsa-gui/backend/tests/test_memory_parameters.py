@@ -458,6 +458,8 @@ def test_preview_shows_the_card_and_every_memory_fact(client, proj):
         and m["value"] == 200.0
     )
     assert m["unit"] == "MW" and m["carrier"] == "gas" and m["target"]["value"] == 10.0
+    assert m["label"] and m["field"] == "p_nom"
+    assert m["target"]["component_class"] == "Generator" and m["target"]["name"] == "gas"
     assert "target" in m and card["digest"] != card["card_digest"]
     assert any(row.get("field") == "p_nom" for row in card["rows"])
     assert proj.net().generators.at["gas", "p_nom"] == 10.0  # the preview wrote nothing
@@ -631,6 +633,7 @@ def test_a_carrier_mismatch_is_refused(client, proj):
         r.status_code == 422
         and r.json()["detail"]["error_kind"] == "memory_carrier_mismatch"
     )
+    assert "this asset is solar" in r.json()["detail"]["message"]
 
 
 @pytest.mark.parametrize(
