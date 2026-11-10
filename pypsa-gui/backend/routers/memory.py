@@ -153,7 +153,24 @@ def _denied_proposal(chat_id: str, tool_use_id: str, user: User) -> dict:
     session = get_session(chat_id)
     if session is None or not session_owner_allows(session, getattr(user, "id", None)):
         _raise(M.MemoryError("memory proposal not found", "memory_not_found", 404))
-    for message in list(session.messages):
+    messages = list(session.messages)
+    # A card that ran (Remember) has a successful tool_result: it was not denied.
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if message.get("role") == "user" and isinstance(content, list):
+            for block in content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_result"
+                    and block.get("tool_use_id") == tool_use_id
+                    and not block.get("is_error")
+                ):
+                    _raise(
+                        M.MemoryError(
+                            "this memory card was not declined", "memory_status", 409
+                        )
+                    )
+    for message in messages:
         content = message.get("content") if isinstance(message, dict) else None
         if message.get("role") != "assistant" or not isinstance(content, list):
             continue

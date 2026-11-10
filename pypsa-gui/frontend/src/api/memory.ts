@@ -133,7 +133,8 @@ export function conceptWords(key: string): string {
   const [ns, id = ''] = key.split(':', 2)
   if (ns === 'view') return VIEW_WORDS[id] ?? id.replace(/_/g, ' ')
   if (ns === 'topic') return TOPIC_WORDS[id] ?? id.replace(/_/g, ' ')
-  if (ns === 'param') return id
+  // A parameter key is a class path (Generator.p_nom); show the class only (UI-2).
+  if (ns === 'param') return `${id.split('.', 1)[0]} setting`
   return id.replace(/_/g, ' ')
 }
 

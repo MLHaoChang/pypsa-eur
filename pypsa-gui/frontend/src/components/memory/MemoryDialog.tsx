@@ -206,7 +206,7 @@ function MemoryPanel() {
           </p>
         ) : rows.length === 0 ? (
           <p className="px-4 py-3 text-[11px] text-muted" data-testid="memory-empty">
-            {tab === 'items' ? MEMORY_EMPTY
+            {tab === 'items' ? (status === 'confirmed' || status === 'all' ? MEMORY_EMPTY : 'Nothing with this status.')
               : tab === 'proposals' ? 'No proposals waiting.'
                 : 'No suggestions from workspace members.'}
           </p>

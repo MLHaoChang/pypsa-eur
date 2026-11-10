@@ -298,3 +298,22 @@ def test_a_dismissal_needs_an_organisation(seeded_identity, _auth_db, monkeypatc
                 concept_keys=["topic:units"],
             )
     assert (e.value.kind, e.value.status) == ("memory_no_org", 403)
+
+
+def test_a_card_that_was_remembered_cannot_be_dismissed(client, seeded_identity):
+    from harness import session as harness_session
+
+    text = f"Remembered {uuid.uuid4().hex[:8]}"
+    card = _chat_with_card(seeded_identity["user_id"], _proposal(text))
+    session = harness_session.get_session(card["chat_id"])
+    result = {
+        "type": "tool_result",
+        "tool_use_id": card["tool_use_id"],
+        "content": "{}",
+    }
+    session.messages.append({"role": "user", "content": [result]})
+    r = _dismiss(client, card)
+    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "memory_status"
+    # A denied card's error result does not block the dismissal.
+    session.messages[-1] = {"role": "user", "content": [{**result, "is_error": True}]}
+    assert _dismiss(client, card).status_code == 201
