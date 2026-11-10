@@ -3,12 +3,12 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { FlowHeld } from '../../api/flow'
-import { PEAK_LOAD, SERIES_WORDS, heldFigure, heldGroups, heldHome, heldKind } from './holdWords'
+import { PEAK_LOAD, SERIES_WORDS, groupTitle, heldFigure, heldGroups, heldHome, heldKind, heldRest } from './holdWords'
 
 const src = (rel: string) => readFileSync(resolve(__dirname, rel), 'utf8')
 const held = (over: Partial<FlowHeld>): FlowHeld => ({
   component: 'Generator', entity: 'pv', carrier: null, field: 'p_nom', value: 5, unit: 'MW',
-  extendable: false, ...over,
+  extendable: false, series: false, ...over,
 })
 
 describe('the list words match the panels that own them', () => {
@@ -40,8 +40,25 @@ describe('a row in words', () => {
   })
   it('a missing figure says why', () => {
     expect(heldFigure('assets', held({ value: null }))).toBe('Capacity: not set')
-    expect(heldFigure('loads', held({ component: 'Load', field: 'p_set', value: null })))
+    expect(heldFigure('loads', held({ component: 'Load', field: 'p_set', value: null, series: true })))
       .toBe('Peak load: its profile has no values yet')
+    // A fixed load with no value has no profile to blame.
+    expect(heldFigure('loads', held({ component: 'Load', field: 'p_set', value: null })))
+      .toBe('Peak load: not set')
+  })
+  it('a figure shows the unit the server sent, or none', () => {
+    expect(heldFigure('assets', held({ value: 1200, unit: 't/h' }))).toBe('Capacity: 1,200 t/h')
+    expect(heldFigure('assets', held({ value: 3, unit: null }))).toBe('Capacity: 3')
+  })
+  it('a group is titled as the Expert tables name it', () => {
+    expect(['Generator', 'StorageUnit', 'Store', 'Load', 'Link', 'Carrier'].map(groupTitle))
+      .toEqual(['Generators', 'Storage', 'Stores', 'Loads', 'Links', 'Carriers'])
+    expect(groupTitle('Bus')).toBe('Bus')
+  })
+  it('a list the server cut short says how many it shows', () => {
+    expect(heldRest(200, 4000)).toBe('Showing the first 200 of 4,000. The rest are in Expert.')
+    expect(heldRest(12, 12)).toBeNull()
+    expect(heldRest(12, undefined)).toBeNull()
   })
   it('a time series names its slot; a carrier has no figure', () => {
     expect(heldFigure('profiles', held({ field: 'p_max_pu', value: null, unit: null })))

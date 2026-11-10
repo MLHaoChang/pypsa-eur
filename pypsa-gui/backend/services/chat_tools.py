@@ -4058,6 +4058,7 @@ def get_project_flow(name: str) -> dict:
         for row in out.get("sections") or []:
             if isinstance(row, dict):
                 row.pop("holds", None)
+                row.pop("holds_total", None)
     return out
 
 

@@ -13,7 +13,7 @@ vi.mock('../../layout/flowNavigation', async orig => ({
 
 const held = (over: Partial<FlowHeld>): FlowHeld => ({
   component: 'Generator', entity: 'pv', carrier: null, field: 'p_nom', value: 5, unit: 'MW',
-  extendable: false, ...over,
+  extendable: false, series: false, ...over,
 })
 const gens = (n: number) => Array.from({ length: n }, (_, i) => held({ entity: `g${i + 1}` }))
 
@@ -34,7 +34,7 @@ describe('SectionHoldings', () => {
     for (const r of rows) expect(r.querySelectorAll('button')).toHaveLength(1)
     // Two classes: each group is titled with its count.
     expect(screen.getAllByTestId('section-held-group').map(g => g.querySelector('p')?.textContent))
-      .toEqual(['Generator (1)', 'Store (1)'])
+      .toEqual(['Generators (1)', 'Stores (1)'])
   })
 
   it('a group longer than 8 folds, and "Show all" lists every row', () => {
@@ -91,6 +91,14 @@ describe('SectionHoldings', () => {
     expect(loading.children).toHaveLength(0)
     act(() => { vi.advanceTimersByTime(200) })
     expect(loading.children).toHaveLength(3)
+  })
+
+  it('a list the server cut short says so under the rows', () => {
+    const { rerender } = render(<SectionHoldings id="assets" pending={false} failed={false}
+      holds={gens(3)} total={40} />)
+    expect(screen.getByTestId('section-held-rest').textContent).toBe('Showing the first 3 of 40. The rest are in Expert.')
+    rerender(<SectionHoldings id="assets" pending={false} failed={false} holds={gens(3)} total={3} />)
+    expect(screen.queryByTestId('section-held-rest')).toBeNull()
   })
 
   it('a deferred flow says the list comes back, and a failed refetch keeps the list', () => {

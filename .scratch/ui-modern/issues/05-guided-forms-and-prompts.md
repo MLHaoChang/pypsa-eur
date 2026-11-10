@@ -48,6 +48,9 @@ Shots: `.scratch/ui-modern/shots-05b/`. Script: `pypsa-gui/frontend/scripts/ui-m
 - **"synthetic illustrative data — representative week…"** in section 1: template data (`project_templates/`), which the report prints too.
 - **Em dashes in backend refusals** outside the flow (`routers/results.py`, `routers/reports.py`, `services/study/runner.py`, `services/adequacy/eh_review.py`): other tests and the frontend match some of these by text.
 
+- **Helper generators in section 5** (`__lost_*`, `__buy_*`): they are counted and listed as assets with "Edit ›" (counted before slice 2 too; the 3D scene hides them). GK B (44) F8.
+- **Custom series outside section 6's list** (`eh_energization_mw`, `ic_export_price`, `ic_import_price` on Links, `ic_ref_price` on Buses): they are inputs of the energisation and commercial editors, and the Time Series drawer has no slot for them (it cannot open a Bus series at all), so section 6's list and count leave them out.
+
 ## Done when
 
 - Each slice-1 point has before and after shots in dark and light on the data centre and microgrid templates.
@@ -76,3 +79,17 @@ GK B (43): GO with H1–H6.
 - H5. The assistant's copy of the flow leaves `holds` out.
 - H6. Plain words only from `_LEDGER_PLAIN`; `git grep` the old text before rewording a refusal; hand mutants of the shared set and the null rule.
 - H7. The tests that kill slice 1's four surviving mutants (`flow_service.py:1224`, the tag's two-part condition, three shapes; `:565`, the has/have verb) land in slice 2's first commit, each shown red under its mutant in the PR body. GK B's OK on #1340 stands without them. GK B (44) took over from (43) on 10 Nov.
+
+### Slice 2 review, PR #1353 (10 Nov 2026)
+
+UX (16): OK on cd68f795, S5 accepted as built. Two follow-ups, done in the next push: group titles as the Expert tables name them ("Generators (14)"), and the loading bars stop pulsing under reduced motion.
+
+GK B (44): NOT OK on cd68f795, F1–F8, answered in one push.
+- F1. The assistant-tool test compares against the endpoint's payload minus the lists.
+- F2. A size's unit comes from its bus (`process_products.bus_unit`): MW / MWh, t/h / t on a tonne bus, null where it is not known.
+- F3. The inert-read test reads the session's own context and adds the investment-case digest; it is red under a list that writes.
+- F4. A list stops at 200 rows (`HOLDS_CAP`) and the section carries `holds_total`; the card then says "Showing the first 200 of N. The rest are in Expert."
+- F5. The template list is every `TEMPLATE_META` id plus `eh_site`.
+- F6. A row says whether its value is a series' peak (`series`); a peak is the value furthest from zero, sign kept.
+- F7. A text flag ("True", "1", "yes") counts as extendable; a carrier named "nan" is null, tested.
+- F8. The four custom series stay out (see "Left for a follow-up").

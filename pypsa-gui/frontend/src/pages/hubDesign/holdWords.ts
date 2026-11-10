@@ -36,7 +36,7 @@ export function heldFigure(section: FlowSectionId, h: FlowHeld): string | null {
   }
   const label = section === 'loads' ? PEAK_LOAD : (h.field && FIELD_LABELS[h.field]) || 'Size'
   if (h.extendable) return `${label}: sized by the study`
-  if (h.value === null) return `${label}: ${section === 'loads' ? 'its profile has no values yet' : 'not set'}`
+  if (h.value === null) return `${label}: ${h.series ? 'its profile has no values yet' : 'not set'}`
   return `${label}: ${number(h.value)}${h.unit ? ` ${h.unit}` : ''}`
 }
 
@@ -60,8 +60,20 @@ export function heldHome(section: FlowSectionId, h: FlowHeld): HeldHome {
     target: { section, panel: null, component: h.component, entity: h.entity, field: null } }
 }
 
-/** Rows in the order the server sent them, grouped by class; a group's title
- *  is the class in the plural the tables use. */
+/** A group's title: the class as the Expert tables name their tabs. */
+export const GROUP_TITLES: Record<string, string> = {
+  Generator: 'Generators', StorageUnit: 'Storage', Store: 'Stores', Load: 'Loads', Link: 'Links',
+  Carrier: 'Carriers',
+}
+export const groupTitle = (component: string): string => GROUP_TITLES[component] ?? componentLabel(component)
+
+/** How many rows the list leaves out, in words; null when it is whole. */
+export function heldRest(shown: number, total: number | undefined): string | null {
+  if (total === undefined || total <= shown) return null
+  return `Showing the first ${number(shown)} of ${number(total)}. The rest are in Expert.`
+}
+
+/** Rows in the order the server sent them, grouped by class. */
 export function heldGroups(holds: FlowHeld[]): { component: string; rows: FlowHeld[] }[] {
   const groups: { component: string; rows: FlowHeld[] }[] = []
   for (const h of holds) {

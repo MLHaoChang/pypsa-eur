@@ -14,13 +14,17 @@ from __future__ import annotations
 
 import json
 import pathlib
+import sys
 
 import pytest
 
 from services import flow_service as S
 
-TEMPLATES = ["eh_datacenter", "eh_datacenter_staged", "eh_h2_hub", "eh_h2_hub_staged",
-             "eh_microgrid", "eh_microgrid_staged", "eh_site", "eh_ammonia_staged"]
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
+import eh_templates as T  # noqa: E402
+
+# Every shipped template, and the site wizard's.
+TEMPLATES = [*T.TEMPLATE_META, "eh_site"]
 
 
 def _create(client, tid, name="filing"):

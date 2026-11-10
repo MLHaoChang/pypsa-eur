@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FlowHeld, FlowSectionId } from '../../api/flow'
-import { componentLabel } from '../../utils/componentLabels'
 import { openFlowTargetInPlace, openSectionInExpert, openTimeSeriesFor, withReturnFrom } from '../../layout/flowNavigation'
-import { FOLD_AFTER, heldFigure, heldGroups, heldHome, heldKind } from './holdWords'
+import { FOLD_AFTER, groupTitle, heldFigure, heldGroups, heldHome, heldKind, heldRest } from './holdWords'
 
 // What a Guided section holds (ui-modern 05, finding 7): one row per carrier,
 // load, asset or time series, with one "Edit ›" that opens the row's editor
@@ -64,13 +63,14 @@ function Loading() {
   return (
     <div data-testid="section-held-loading" role="status" aria-busy="true" aria-label="Loading what this section holds"
       className="flex min-h-[4.5rem] flex-col gap-2">
-      {show && [0, 1, 2].map(i => <div key={i} className="h-4 animate-pulse rounded bg-border" />)}
+      {show && [0, 1, 2].map(i => <div key={i} className="h-4 animate-pulse rounded bg-border motion-reduce:animate-none" />)}
     </div>
   )
 }
 
-export function SectionHoldings({ id, holds, pending, failed, deferred = false }: {
-  id: FlowSectionId; holds: FlowHeld[] | undefined; pending: boolean; failed: boolean; deferred?: boolean
+export function SectionHoldings({ id, holds, total, pending, failed, deferred = false }: {
+  id: FlowSectionId; holds: FlowHeld[] | undefined; total?: number; pending: boolean; failed: boolean
+  deferred?: boolean
 }) {
   // A failed refetch keeps the last good list on screen.
   if (failed && !holds) {
@@ -89,12 +89,14 @@ export function SectionHoldings({ id, holds, pending, failed, deferred = false }
     return <p data-testid="section-held-empty" className="text-[12px] text-muted">Nothing here yet.</p>
   }
   const groups = heldGroups(holds)
+  const rest = heldRest(holds.length, total)
   return (
     <div data-testid="section-held-list" className="flex flex-col gap-3">
       {groups.map(g => (
         <Group key={g.component} section={id} rows={g.rows}
-          title={groups.length > 1 ? componentLabel(g.component) : null} />
+          title={groups.length > 1 ? groupTitle(g.component) : null} />
       ))}
+      {rest && <p data-testid="section-held-rest" className="text-[11px] text-muted">{rest}</p>}
     </div>
   )
 }

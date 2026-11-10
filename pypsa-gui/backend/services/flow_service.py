@@ -193,6 +193,7 @@ class _Facts:
     asset_count: int
     # What sections 2, 4, 5 and 6 hold, for display only (`_holds`).
     holds: dict[str, list[dict]]
+    holds_total: dict[str, int]
     buses: int
     buses_placed: int
     voll: float
@@ -371,10 +372,13 @@ def section_for_component(n, config, project_dir: pathlib.Path | None,
 
 
 # The table of each asset class, and the size field a section list shows for it.
-_ASSET_TABLES = (("Generator", "generators", "p_nom", "MW"),
-                 ("StorageUnit", "storage_units", "p_nom", "MW"),
-                 ("Store", "stores", "e_nom", "MWh"),
-                 ("Link", "links", "p_nom", "MW"))
+# The last column says whether the size is a stock (a Store) or a rate.
+_ASSET_TABLES = (("Generator", "generators", "p_nom", False),
+                 ("StorageUnit", "storage_units", "p_nom", False),
+                 ("Store", "stores", "e_nom", True),
+                 ("Link", "links", "p_nom", False))
+# The most rows one section's list carries; the true total rides beside it.
+HOLDS_CAP = 200
 # Input series a component can carry, in the order section 6 lists them.
 _PROFILE_FIELDS = ("p_set", "q_set", "p_max_pu", "p_min_pu", "e_max_pu", "e_min_pu",
                    "inflow", "marginal_cost", "efficiency")
@@ -387,7 +391,7 @@ def _site_assets(n, imports, connection) -> list[tuple[str, str]]:
     connection's own Links are the connection's, not assets of the site."""
     grid_side = {str(n.links.at[i, "bus0"]) for i in imports if i in n.links.index}
     out: list[tuple[str, str]] = []
-    for klass, table, _field, _unit in _ASSET_TABLES:
+    for klass, table, _field, _stock in _ASSET_TABLES:
         df = getattr(n, table)
         for name in df.index:
             if klass == "Generator" and str(df.at[name, "bus"]) in grid_side:
@@ -407,47 +411,85 @@ def _number(value) -> float | None:
     return x if math.isfinite(x) else None
 
 
+def _size_unit(n, bus, *, stock: bool) -> str | None:
+    """The unit of a size on ``bus``: MW (MWh for a stock) on an energy bus,
+    t/h (t) on a tonne bus, None where the bus's unit is not known."""
+    from services.process_products import bus_unit
+
+    try:
+        unit = bus_unit(n, str(bus))
+    except Exception:  # noqa: BLE001 — an unreadable bus has no known unit
+        return None
+    if unit in ("", "MWh"):
+        return "MWh" if stock else "MW"
+    if unit == "t":
+        return "t" if stock else "t/h"
+    return None
+
+
 def _held(component: str, entity: str, *, carrier=None, field_name: str | None = None,
-          value=None, unit: str | None = None, extendable: bool = False) -> dict:
+          value=None, unit: str | None = None, extendable=False, series: bool = False) -> dict:
+    from services.adequacy.eh_stages import _truthy
+
     carrier = str(carrier) if carrier is not None and str(carrier) not in ("", "nan") else None
     return {"component": component, "entity": entity, "carrier": carrier, "field": field_name,
             "value": _number(value), "unit": unit,
-            # A blank (NaN) flag is not extendable.
-            "extendable": bool(_number(extendable))}
+            # A flag stored as text ("True", "1", "yes") counts; a blank (NaN) one does not.
+            "extendable": _truthy(extendable),
+            # Whether the value is read from a time series (a load's peak).
+            "series": bool(series)}
 
 
-def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]) -> dict[str, list[dict]]:
-    """What sections 2, 4, 5 and 6 hold, one entry per row a Guided list shows:
-    raw values only, the words are the frontend's. Display only: no state,
+def _peak(column) -> float | None:
+    """The value of a series furthest from zero, sign kept: the peak of
+    [-5, -1, -2] is -5. None for a series with no finite value."""
+    values = [x for x in (_number(v) for v in column) if x is not None]
+    return max(values, key=abs) if values else None
+
+
+def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]
+           ) -> tuple[dict[str, list[dict]], dict[str, int]]:
+    """What sections 2, 4, 5 and 6 hold, one entry per row a Guided list shows,
+    and how many each holds in all: a list stops at ``HOLDS_CAP`` rows, the
+    total never does. Raw values only, the words are the frontend's. Display only: no state,
     count, blocker, verdict, acknowledgement or fingerprint reads it. An
     extendable asset carries the size as entered, never a solved one."""
-    tables = {klass: (table, fld, unit) for klass, table, fld, unit in _ASSET_TABLES}
+    tables = {klass: (table, fld, stock) for klass, table, fld, stock in _ASSET_TABLES}
     assets = []
-    for klass, name in site_assets:
-        table, fld, unit = tables[klass]
+    for klass, name in site_assets[:HOLDS_CAP]:
+        table, fld, stock = tables[klass]
         df = getattr(n, table)
+        bus = df.at[name, "bus0" if klass == "Link" else "bus"]
         assets.append(_held(klass, name, carrier=df.at[name, "carrier"] if "carrier" in df else None,
-                            field_name=fld, value=df.at[name, fld], unit=unit,
+                            field_name=fld, value=df.at[name, fld],
+                            unit=_size_unit(n, bus, stock=stock),
                             extendable=df.at[name, f"{fld}_extendable"]))
     series = n.loads_t.p_set
     loads = []
-    for name in n.loads.index:
+    for name in n.loads.index[:HOLDS_CAP]:
         # The peak of the load's series where it has one, else its fixed value.
-        # A series with no rows has no peak: null, not the unused fixed value.
-        value = series[name].max() if name in series.columns else n.loads.at[name, "p_set"]
-        loads.append(_held("Load", str(name), field_name="p_set", value=value, unit="MW",
+        # A series with no values has no peak: null, not the unused fixed value.
+        has_series = name in series.columns
+        value = _peak(series[name]) if has_series else n.loads.at[name, "p_set"]
+        loads.append(_held("Load", str(name), field_name="p_set", value=value, series=has_series,
+                           unit=_size_unit(n, n.loads.at[name, "bus"], stock=False),
                            carrier=n.loads.at[name, "carrier"] if "carrier" in n.loads else None))
-    profiles = []
+    profiles, profile_total = [], 0
     for klass, table in (("Load", "loads"), *((k, t) for k, t, _f, _u in _ASSET_TABLES)):
         frames = getattr(n, f"{table}_t")
         for fld in _PROFILE_FIELDS:
             frame = frames.get(fld) if hasattr(frames, "get") else None
             if frame is None:
                 continue
+            profile_total += len(frame.columns)
             # The attribute's name only, never the series' values.
-            profiles += [_held(klass, str(name), field_name=fld) for name in frame.columns]
-    return {"carriers": [_held("Carrier", c) for c in carriers], "loads": loads,
+            profiles += [_held(klass, str(name), field_name=fld)
+                         for name in frame.columns[:max(0, HOLDS_CAP - len(profiles))]]
+    rows = {"carriers": [_held("Carrier", c) for c in carriers[:HOLDS_CAP]], "loads": loads,
             "assets": assets, "profiles": profiles}
+    totals = {"carriers": len(carriers), "loads": len(n.loads.index),
+              "assets": len(site_assets), "profiles": profile_total}
+    return rows, totals
 
 
 def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
@@ -491,11 +533,12 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
             copy = _private_copy(n)
     carriers = [str(c) for c in n.carriers.index] if len(n.carriers) else \
         sorted({str(b) for b in n.buses.get("carrier", []) if str(b)})
+    holds, holds_total = _holds(n, carriers, site_assets)
     return _Facts(
         revision=revision, snapshots=len(n.snapshots), loads=len(n.loads),
         carriers=carriers,
         connection_links=sorted(connection), import_p_nom_mw=p_nom,
-        asset_count=assets, holds=_holds(n, carriers, site_assets),
+        asset_count=assets, holds=holds, holds_total=holds_total,
         buses=len(n.buses), buses_placed=placed,
         renewables_unplaced=unplaced_renewables(n, supplied), voll=voll,
         ens_cap=getattr(config, "ens_cap_permyriad", None),
@@ -1290,6 +1333,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                                "summary": _summary(s, facts)}
         if s in facts.holds:
             row["holds"] = facts.holds[s]
+            row["holds_total"] = facts.holds_total[s]
         if s in F.INPUT_SECTIONS:
             # Only what the scope holds counts (W4a, §5.2).
             counted = [it for it in mine if it["in_scope"]]

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import math
 
+import threading
+
 import numpy as np
 import pandas as pd
 import pypsa
@@ -41,10 +43,15 @@ def test_a_section_lists_exactly_what_its_heading_counts(client, tmp_projects_di
         # A "not needed" section says why instead of a count; its list is still whole.
         if row["state"] != "not_needed":
             assert row["summary"] == S._count(len(row["holds"]), noun)
+        # No shipped template reaches the cap: the list is whole.
+        assert row["holds_total"] == len(row["holds"])
         names = [(h["component"], h["entity"]) for h in row["holds"]]
         assert len(names) == len(set(names))
     for h in _section(flow, "assets")["holds"]:
-        assert h["field"] in ("p_nom", "e_nom") and h["unit"] in ("MW", "MWh")
+        assert h["field"] in ("p_nom", "e_nom")
+        assert (
+            h["unit"] in ({"p_nom": ("MW", "t/h"), "e_nom": ("MWh", "t")}[h["field"]])
+        )
         assert h["value"] is None or math.isfinite(h["value"])
     for h in _section(flow, "profiles")["holds"]:
         # The attribute's name only: no series value rides along.
@@ -59,12 +66,13 @@ def test_the_list_decides_nothing(client, tmp_projects_dir, monkeypatch, tid):
     name = _create(client, tid, "inert")
     url = f"/api/projects/{name}/flow"
     with_list = client.get(url).json()
-    monkeypatch.setattr(S, "_holds", lambda *a, **k: {})
+    monkeypatch.setattr(S, "_holds", lambda *a, **k: ({}, {}))
     S._readiness_cache.clear()
     without = client.get(url).json()
     assert not any("holds" in s for s in without["sections"])
     for s in with_list["sections"]:
         s.pop("holds", None)
+        s.pop("holds_total", None)
     assert with_list == without
 
 
@@ -110,7 +118,8 @@ def test_the_list_and_the_count_share_one_set():
         ("Store", "grid_import"),
         ("Link", "electrolyser"),
     ]
-    holds = S._holds(n, ["solar"], assets)
+    holds, totals = S._holds(n, ["solar"], assets)
+    assert totals == {"carriers": 1, "loads": 2, "assets": len(assets), "profiles": 2}
     assert [(h["component"], h["entity"]) for h in holds["assets"]] == assets
     by = {h["entity"]: h for h in holds["assets"]}
     # No carrier is null, not an empty string.
@@ -122,14 +131,21 @@ def test_the_list_and_the_count_share_one_set():
         "value": 40.0,
         "unit": "MWh",
         "extendable": False,
+        "series": False,
     }
     assert by["pv"]["carrier"] == "solar" and by["pv"]["value"] == 5.0
     # The size as entered, flagged; never a solved one.
     assert by["candidate"]["value"] == 2.0 and by["candidate"]["extendable"] is True
     # A missing size is null, never 0.
     assert by["broken"]["value"] is None
-    loads = {h["entity"]: (h["value"], h["carrier"]) for h in holds["loads"]}
-    assert loads == {"fixed": (2.0, "AC"), "shaped": (7.5, None)}
+    loads = {
+        h["entity"]: (h["value"], h["carrier"], h["series"], h["unit"])
+        for h in holds["loads"]
+    }
+    assert loads == {
+        "fixed": (2.0, "AC", False, "MW"),
+        "shaped": (7.5, None, True, "MW"),
+    }
     assert [(h["component"], h["entity"], h["field"]) for h in holds["profiles"]] == [
         ("Load", "shaped", "p_set"),
         ("Generator", "pv", "p_max_pu"),
@@ -143,6 +159,7 @@ def test_the_list_and_the_count_share_one_set():
             "value": None,
             "unit": None,
             "extendable": False,
+            "series": False,
         }
     ]
 
@@ -168,12 +185,21 @@ def test_a_multi_period_axis_and_an_empty_frame_list_names_only(
     profiles = _section(flow, "profiles")["holds"]
     assert profiles and all(
         set(h)
-        == {"component", "entity", "carrier", "field", "value", "unit", "extendable"}
+        == {
+            "component",
+            "entity",
+            "carrier",
+            "field",
+            "value",
+            "unit",
+            "extendable",
+            "series",
+        }
         for h in profiles
     )
     n = _hand_built()
     n.loads_t.p_set = n.loads_t.p_set.iloc[0:0]  # an empty frame
-    assert {h["entity"]: h["value"] for h in S._holds(n, [], [])["loads"]} == {
+    assert {h["entity"]: h["value"] for h in S._holds(n, [], [])[0]["loads"]} == {
         "fixed": 2.0,
         "shaped": None,
     }
@@ -206,16 +232,148 @@ def test_the_assistants_copy_of_the_flow_leaves_the_lists_out(monkeypatch):
     }
 
 
-def test_reading_the_flow_leaves_the_input_fingerprint_alone(client, tmp_projects_dir):
-    from services import workflow_tools
-    from services.pypsa_service import PyPSAService
+def _input_state(client, session_ctx, bound_ctx) -> tuple:
+    """What a run and the investment case key on, read from the session's own
+    context (the test thread's foreground context is another, empty one)."""
+    from routers import results
+    from services import dirty_state, workflow_tools
 
+    ctx = session_ctx(client)
+    n = ctx.network
+    with bound_ctx(client):
+        case = results._ic_assumptions(
+            ctx.solver_state["solver_config"], n, lock=threading.RLock()
+        )[0]
+    sizes = [
+        tuple(getattr(n, t)[c].astype(str))
+        for _k, t, c, _s in S._ASSET_TABLES
+        if len(getattr(n, t))
+    ]
+    return (
+        workflow_tools._network_input_fingerprint(ctx),
+        dirty_state.revision(ctx),
+        case,
+        sizes,
+    )
+
+
+def test_reading_the_flow_leaves_the_inputs_alone(
+    client, tmp_projects_dir, session_ctx, bound_ctx, monkeypatch
+):
     name = _create(client, "eh_microgrid", "fingerprint")
-    before = workflow_tools._network_input_fingerprint(
-        PyPSAService.get_active_context()
-    )
+    assert len(
+        session_ctx(client).network.generators
+    )  # the real network, not an empty one
+    before = _input_state(client, session_ctx, bound_ctx)
     assert client.get(f"/api/projects/{name}/flow").status_code == 200
-    assert (
-        workflow_tools._network_input_fingerprint(PyPSAService.get_active_context())
-        == before
-    )
+    assert _input_state(client, session_ctx, bound_ctx) == before
+
+    # The check sees a list that writes: the same read is then not inert.
+    real = S._holds
+
+    def writing(n, *a, **k):
+        n.generators["p_nom"] = n.generators["p_nom"] + 1.0
+        return real(n, *a, **k)
+
+    monkeypatch.setattr(S, "_holds", writing)
+    S._readiness_cache.clear()
+    assert client.get(f"/api/projects/{name}/flow").status_code == 200
+    assert _input_state(client, session_ctx, bound_ctx) != before
+
+
+def test_a_size_on_a_tonne_bus_is_in_tonnes(client, tmp_projects_dir, session_ctx):
+    flow = _flow(client, "eh_concentrator_staged", "tonnes")
+    n = session_ctx(client).network
+    tonne = {str(b) for b in n.buses.index[n.buses["unit"] == "t"]}
+    assert tonne
+    seen = 0
+    for h in _section(flow, "assets")["holds"]:
+        table = {k: t for k, t, _f, _s in S._ASSET_TABLES}[h["component"]]
+        bus = getattr(n, table).at[
+            h["entity"], "bus0" if h["component"] == "Link" else "bus"
+        ]
+        if str(bus) in tonne:
+            seen += 1
+            assert h["unit"] == ("t" if h["component"] == "Store" else "t/h"), h
+        else:
+            assert h["unit"] in ("MW", "MWh"), h
+    assert seen
+    by = {h["entity"]: h["unit"] for h in _section(flow, "assets")["holds"]}
+    assert by["mine"] == "t/h" and by["coarse_ore_stockpile"] == "t"
+    loads = {h["entity"]: h["unit"] for h in _section(flow, "loads")["holds"]}
+    assert loads["shipments"] == "t/h"
+
+
+def test_a_bus_of_unknown_unit_gives_no_unit(monkeypatch):
+    from services import process_products
+
+    n = _hand_built()
+    assert S._size_unit(n, "site", stock=False) == "MW"
+    assert S._size_unit(n, "site", stock=True) == "MWh"
+    monkeypatch.setattr(process_products, "bus_unit", lambda n, bus: "kg")
+    assert S._size_unit(n, "site", stock=False) is None
+
+
+def test_a_long_list_stops_at_the_cap_and_carries_the_true_total(monkeypatch):
+    monkeypatch.setattr(S, "HOLDS_CAP", 3)
+    n = _hand_built()
+    n.loads_t.p_set["fixed"] = 1.0  # a second load series
+    assets = S._site_assets(n, ["grid_import"], {"grid_import", "export_tie"})
+    carriers = ["a", "b", "c", "d"]
+    holds, totals = S._holds(n, carriers, assets)
+    assert totals == {"carriers": 4, "loads": 2, "assets": 7, "profiles": 3}
+    assert {k: len(v) for k, v in holds.items()} == {
+        "carriers": 3,
+        "loads": 2,
+        "assets": 3,
+        "profiles": 3,
+    }
+    # The first rows, in the order the uncapped list has them.
+    assert [(h["component"], h["entity"]) for h in holds["assets"]] == assets[:3]
+    monkeypatch.setattr(S, "HOLDS_CAP", 2)
+    assert len(S._holds(n, carriers, assets)[0]["profiles"]) == 2
+    assert S.HOLDS_CAP == 2 and S._holds(n, carriers, assets)[1]["profiles"] == 3
+
+
+def test_the_cap_as_shipped():
+    assert S.HOLDS_CAP == 200
+
+
+def test_a_peak_is_the_value_furthest_from_zero():
+    assert S._peak([-5.0, -1.0, -2.0]) == -5.0
+    assert S._peak([1.0, 7.5, float("nan")]) == 7.5
+    assert S._peak([float("nan"), float("inf")]) is None and S._peak([]) is None
+
+
+def test_an_unset_fixed_load_is_told_apart_from_an_empty_series():
+    n = _hand_built()
+    n.loads.at["fixed", "p_set"] = np.nan
+    n.loads_t.p_set["shaped"] = np.nan
+    loads = {
+        h["entity"]: (h["value"], h["series"]) for h in S._holds(n, [], [])[0]["loads"]
+    }
+    assert loads == {"fixed": (None, False), "shaped": (None, True)}
+
+
+@pytest.mark.parametrize(
+    "flag, expected",
+    [
+        ("True", True),
+        ("true", True),
+        ("1", True),
+        ("yes", True),
+        (np.True_, True),
+        ("False", False),
+        ("", False),
+        ("0", False),
+        (np.False_, False),
+    ],
+)
+def test_an_extendable_flag_stored_as_text_counts(flag, expected):
+    assert S._held("Generator", "g", extendable=flag)["extendable"] is expected
+
+
+@pytest.mark.parametrize("blank", ["nan", "", None, float("nan")])
+def test_a_blank_carrier_is_null(blank):
+    assert S._held("Generator", "g", carrier=blank)["carrier"] is None
+    assert S._held("Generator", "g", carrier="gas")["carrier"] == "gas"

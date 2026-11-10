@@ -30,7 +30,7 @@ describe('Guided section heading', () => {
   it('no summary: the state alone', () => { expect(heading('commercial')).toBe('complete') })
   it('the card lists what the section holds: as many rows as the heading counts', () => {
     rows.assets.holds = Array.from({ length: 9 }, (_, i) => ({ component: 'Generator', entity: `g${i}`,
-      carrier: null, field: 'p_nom', value: 1, unit: 'MW', extendable: false }))
+      carrier: null, field: 'p_nom', value: 1, unit: 'MW', extendable: false, series: false }))
     expect(heading('assets')).toBe('complete · 9 assets')
     render(<GenericSectionCard id="assets" />)
     fireEvent.click(screen.getByTestId('section-held-show-all'))
