@@ -181,3 +181,48 @@ def test_every_step_passing_exits_zero(repo):
     commit(repo, {"pypsa-gui/frontend/src/components/Kpi.tsx": "export {}\n"})
     r = prepush(repo, env={"PREPUSH_PYTHON": str(repo / "fakepython")})
     assert "PREPUSH: PASS" in r.stdout and r.returncode == 0, r.stdout
+
+
+def _slow_python(repo, output=""):
+    """A backend python that hangs on the mapped tests only and passes the rest."""
+    path = repo / "fakepython"
+    path.write_text(
+        f'#!/bin/sh\ncase "$*" in *test_costs*) echo "{output}"; sleep 30;; esac\nexit 0\n'
+    )
+    path.chmod(0o755)
+    return {"PREPUSH_PYTHON": str(path), "PREPUSH_MAPPED_CAP": "1"}
+
+
+def test_mapped_tests_hitting_the_cap_are_cut_off_without_failing_the_push(repo):
+    for tool in ("tsc", "vitest"):
+        _fake_tool(repo / "pypsa-gui/frontend/node_modules/.bin" / tool, 0)
+    commit(repo, {"pypsa-gui/backend/services/costs.py": "x = 1\n"})
+    r = prepush(repo, env=_slow_python(repo, "..s.  [ 40%]"))
+    assert "CUT  mapped backend tests (cut off at 1s" in r.stdout, r.stdout
+    assert "CI covers them" in r.stdout
+    assert "FAIL" not in r.stdout
+    assert "PREPUSH: PASS (0 skipped, 1 mapped step(s) cut off at 1s" in r.stdout
+    assert r.returncode == 0
+
+
+def test_a_test_failure_before_the_cap_still_fails(repo):
+    for tool in ("tsc", "vitest"):
+        _fake_tool(repo / "pypsa-gui/frontend/node_modules/.bin" / tool, 0)
+    commit(repo, {"pypsa-gui/backend/services/costs.py": "x = 1\n"})
+    r = prepush(repo, env=_slow_python(repo, "..F.  [ 40%]"))
+    assert "FAIL mapped backend tests" in r.stdout, r.stdout
+    assert "CUT" not in r.stdout
+    assert r.returncode == 1
+
+
+def test_contract_checks_run_before_the_mapped_tests(repo):
+    commit(repo, {"pypsa-gui/backend/services/costs.py": "x = 1\n"})
+    out = prepush(repo, "--plan").stdout
+    assert out.index("plan contract pytest") < out.index("plan mapped backend tests")
+    assert out.index("plan contract vitest") < out.index("plan mapped backend tests")
+
+
+def test_a_cap_that_is_not_a_number_is_refused(repo):
+    commit(repo, {"docs/note.md": "hi\n"})
+    r = prepush(repo, "--plan", env={"PREPUSH_MAPPED_CAP": "10m"})
+    assert r.returncode == 2 and "PREPUSH_MAPPED_CAP" in r.stderr

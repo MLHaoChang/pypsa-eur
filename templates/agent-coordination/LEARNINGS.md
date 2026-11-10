@@ -299,3 +299,26 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Big PRs multiplied re-OK rounds** (+5352 lines: 4 NOT OK, 16 OK comments; +4397 lines, 25 commits).
   - Fix (owner decision PR-SIZE-1): one reviewer area and about 1,500 changed lines per PR, excluding generated files, shots and fixtures; a plan GO names the slices.
   - Lives in: steward "Gatekeeper checkpoints", `docs/agents/review-gk.md`, `docs/agents/session-brief.md`.
+
+## 10 Nov 2026: token-use retro (owner decision RETRO-1110)
+
+Eight sessions reached 300k context in 75–120 minutes. The causes were full-size screenshots, Playwright against slow pages, mutant logs, long single-file reads and a pre-push check that took 11–30 minutes.
+
+- **Sessions read big files whole, one slice at a time, and ran reviews and mutant runs in their own context.**
+  - Fix: the brief's Context budget says to get a file:line map from an Explore subagent, read line ranges several per call, aim for under 120 turns to the first PR, and run reviews, mutant runs and long log reads in a subagent that returns a short summary. "Hand off at 300k" is unchanged.
+  - Lives in: `docs/agents/session-brief.md`.
+- **The pre-push check took 11–30 minutes and hung once after lint passed.** The tests mapped from the changed files had no time limit, and the fast contract checks ran after them.
+  - Fix: the fixed contract set runs first, and each mapped step is stopped at a wall-clock cap (`PREPUSH_MAPPED_CAP`, default 600 s). A cut-off step prints `CUT` and does not fail the push, because CI runs those tests; a test failure already in its output still fails.
+  - Lives in: `scripts/coord/prepush.sh` (this repo's example), steward step 3; test `test/test_coord_prepush.py`.
+- **Sessions addressed a reviewer or coordinator id that had rotated**, or re-read `coordinator.md` by hand to find it.
+  - Fix: `whois.py [role]` fetches the base branch and prints each role's current session id.
+  - Lives in: `scripts/coord/whois.py`, steward (opening paragraph), coordinator "Tool hygiene"; test `test/test_coord_whois.py`.
+- **Each full-size screenshot cost several thousand tokens every time it was loaded.**
+  - Fix: `shots.sh <image>...` writes `<name>.small.<ext>` with the longest side at 800 px, and sessions read only that file.
+  - Lives in: `scripts/coord/shots.sh`, `docs/agents/session-brief.md`, coordinator "Tool hygiene".
+- **A hand-off note pasted into a brief passed through the coordinator's output a second time.**
+  - Fix: `handoff.py <start> <end> <out>` copies the note from the session's transcript into a file.
+  - Lives in: `scripts/coord/handoff.py`, coordinator "Opening a session"; test `test/test_coord_handoff.py`.
+- **An owner question card closed when a notification arrived or the worker restarted.**
+  - Fix: after a dropped card the coordinator asks in the reply text only, recommended option first, and takes the owner's typed answer.
+  - Lives in: coordinator "Deciding or asking".
