@@ -1704,7 +1704,8 @@ TOOLS: list[dict[str, Any]] = [
         "get_profile_readiness",
         "One row per wind/solar generator: its coordinates (the bus's; "
         "`missing` when the bus is unplaced), the profile it carries now "
-        "(none, uploaded, generated with its provenance, network_native) "
+        "(none, uploaded, unrecorded (no provenance record), generated with "
+        "its provenance, network_native) "
         "and a stale_reason (bus_moved, horizon_changed) when a generated "
         "profile no longer fits. Read it before generating. `project_id` is "
         "the project NAME. Safety: read.",

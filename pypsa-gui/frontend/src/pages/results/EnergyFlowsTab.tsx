@@ -9,6 +9,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   ResponsiveContainer, Sankey, Tooltip, Layer, Rectangle,
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
+  Legend,
 } from 'recharts'
 import ResultState from '../../components/ResultState'
 import { energyFlowsApi, type EnergyFlowsPayload } from '../../api/energyFlows'
@@ -18,13 +19,13 @@ import { useResultsFilter } from './filterContext'
 import WindowSlider, { useWindowRange } from './WindowSlider'
 import {
   CHART_AXIS, CHART_GRID, CHART_TOOLTIP, downloadCSV, downloadSVG, shortStamp, yAxisLabel,
+  ChartFrame, ChartSourceLine, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
 } from './shared'
 import {
   CSV_HEADER, csvRows, fmtMwh, periodLabel, sankeyData, share,
   type FlowNode, type FlowSankey,
 } from './energyFlows'
 
-const STACK_COLORS = ['#f59e0b', '#0ea5e9', '#6b7280', '#16a34a', '#9333ea', '#db2777', '#0d9488', '#a16207']
 
 function FlowNodeShape(props: {
   x: number; y: number; width: number; height: number; payload: FlowNode
@@ -131,22 +132,33 @@ function SeriesChart({ title, series, index }: {
   const keys = Object.keys(series)
   if (!keys.length || !index.length) return null
   const data = index.map((t, i) => ({ t: shortStamp(t), ...Object.fromEntries(keys.map(k => [k, series[k][i]])) }))
+  const peak = data.reduce((a, r) => Math.max(a, keys.reduce((b, k) => b + Math.max(Number(r[k as keyof typeof r]) || 0, 0), 0)), 0)
+  // A band is named on itself (not hue alone); the legend alone when names could collide.
+  const labelAt = bandLabelIndices(data, keys, peak)
+  const bandLabel = (k: string) => {
+    const i = labelAt.get(k)
+    return i == null ? undefined : directLabel(legendName(k), i)
+  }
   return (
-    <div className="space-y-1" data-testid={`ef-series-${title.toLowerCase()}`}>
-      <h3 className="text-[11px] font-semibold">{title}</h3>
-      <ResponsiveContainer width="100%" height={150}>
+    <ChartFrame testId={`ef-series-${title.toLowerCase()}`}
+      title={`${title} by carrier`} figure={chartFigure(fmtPower(peak), 'peak')} hint="hourly average">
+      <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
         <AreaChart data={data} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid {...CHART_GRID} />
           <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} />
           <YAxis {...CHART_AXIS} label={yAxisLabel('MW (average)')} />
           <Tooltip {...CHART_TOOLTIP} />
+          <Legend {...CHART_LEGEND} />
           {keys.map((k, i) => (
-            <Area key={k} type="monotone" dataKey={k} stackId="s" stroke={STACK_COLORS[i % STACK_COLORS.length]}
-                  fill={STACK_COLORS[i % STACK_COLORS.length]} fillOpacity={0.6} isAnimationActive={false} />
+            <Area key={k} type="monotone" dataKey={k} stackId="s" stroke={carrierColour(k, i)}
+                  fill={carrierColour(k, i)} fillOpacity={0.6} isAnimationActive={false} />
+          ))}
+          {keys.map(k => (
+            <Area key={`label:${k}`} type="monotone" dataKey={k} stackId="labels" {...LABEL_PASS} label={bandLabel(k)} />
           ))}
         </AreaChart>
       </ResponsiveContainer>
-    </div>
+    </ChartFrame>
   )
 }
 
@@ -248,6 +260,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
           <p className="text-[11px] text-muted py-2" data-testid="ef-empty">
             No energy moved in this window.</p>
         )}
+        <ChartSourceLine className="py-1" />
         <p className="text-[11px] text-muted">
           Source → Via → Destination. “Via” is Direct, or the storage the energy was last held in;
           a storage hands back the mix it was charged with.{' '}

@@ -4,7 +4,8 @@
 import { useMemo, useState, type RefObject, type ReactNode, type CSSProperties } from 'react'
 import {
   ResponsiveContainer, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, DefaultLegendContent,
+  type DefaultLegendContentProps,
 } from 'recharts'
 import { Download } from 'lucide-react'
 import Kpi from '../../components/Kpi'
@@ -17,6 +18,11 @@ import { useUIStore } from '../../store/uiStore'
 import { displayName } from '../../utils/displayName'
 import { nk } from '../../utils/queryKeys'
 import { networkApi } from '../../api/network'
+import { CHART_TICK, carrierColour } from '../../components/charts/chartTheme'
+export {
+  CHART_HEIGHT, CHART_TICK, LABEL_PASS, bandLabelIndices, chartFigure, ChartFrame, ChartSourceLine, ChartSourceProvider, carrierColour, directLabel, seriesDash,
+  thickestIndex, useChartSource,
+} from '../../components/charts/chartTheme'
 
 // ── Asset-group categorisation (mirrors TopologyCanvas / MapCanvas) ──────────
 export type Group = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -836,6 +842,7 @@ export function downloadSVG(container: HTMLElement | null, filename: string): bo
     bg.setAttribute('data-bg', 'true')
     clone.insertBefore(bg, clone.firstChild)
   }
+  resolveCssVars(clone)
   const serializer = new XMLSerializer()
   const source = '<?xml version="1.0" standalone="no"?>\r\n' + serializer.serializeToString(clone)
   const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' })
@@ -844,6 +851,19 @@ export function downloadSVG(container: HTMLElement | null, filename: string): bo
   a.href = url; a.download = filename; a.click()
   URL.revokeObjectURL(url)
   return true
+}
+
+// A saved SVG opens outside the app, where `var(--color-…)` means nothing:
+// swap each theme token in a fill / stroke / style for its current value.
+export function resolveCssVars(root: Element): void {
+  const css = getComputedStyle(document.documentElement)
+  const swap = (v: string) => v.replace(/var\((--[\w-]+)\)/g, (m, name: string) => css.getPropertyValue(name).trim() || m)
+  for (const el of [root, ...Array.from(root.querySelectorAll('*'))]) {
+    for (const attr of ['fill', 'stroke', 'style', 'stop-color', 'color']) {
+      const v = el.getAttribute(attr)
+      if (v && v.includes('var(')) el.setAttribute(attr, swap(v))
+    }
+  }
 }
 
 // ── Chart action buttons ───────────────────────────────────────────────────
@@ -1021,7 +1041,8 @@ export const CHART_GRID = {
 
 export const CHART_AXIS = {
   // `tick` here is a set of SVG <text> presentation props (not CSSProperties).
-  tick: { fontSize: 10, fill: 'var(--color-axis)' },
+  // Mono with tabular figures (chart theme, ui-modern 02).
+  tick: CHART_TICK,
   stroke: 'var(--color-grid)',
   tickLine: false,
 }
@@ -1033,12 +1054,21 @@ export const legendName = (v: unknown): string =>
 
 // Chart standard: the legend sits top-left, with display names.
 export const CHART_LEGEND = {
-  wrapperStyle: { fontSize: 10.5, color: 'var(--color-legend)' } as CSSProperties,
+  // paddingBottom leaves the axis-unit caption (yAxisLabel, drawn just above
+  // the plot) its own line under the legend instead of under the legend text.
+  wrapperStyle: { fontSize: 10.5, color: 'var(--color-legend)', paddingBottom: 14 } as CSSProperties,
   iconType: 'circle' as const,
   iconSize: 8,
   verticalAlign: 'top' as const,
   align: 'left' as const,
   formatter: legendName,
+  // `iconType` above would otherwise give a series that asked for
+  // legendType="none" (the chart theme's LABEL_PASS, ReserveCommitments'
+  // helper bands) a legend entry anyway.
+  content: ({ ref: _ref, ...props }: DefaultLegendContentProps & { ref?: unknown }) => (
+    <DefaultLegendContent {...props}
+      payload={props.payload?.filter(e => (e.payload as { legendType?: string } | undefined)?.legendType !== 'none')} />
+  ),
 }
 
 // `cursor` is intentionally left at Recharts' per-chart-type default — a line
@@ -1156,46 +1186,13 @@ export function ChartZero({ children }: { children: ReactNode }) {
 // divergent copy). Anchored on the design system's category hues —
 // thermal=red, renewables=green, storage=purple, load=amber, carriers=h2/gas —
 // with finer per-fuel variation inside each family.
-const CARRIER_PALETTE: Record<string, string> = {
-  coal:        '#57534e',
-  lignite:     '#78716c',
-  oil:         '#1f2937',
-  gas:         '#0369a1',  // design --carrier-gas
-  ocgt:        '#0369a1',
-  ccgt:        '#0ea5e9',
-  nuclear:     '#b91c1c',
-  biomass:     '#65a30d',
-  geothermal:  '#0d9488',
-  hydro:       '#2563eb',
-  ror:         '#38bdf8',
-  wind:        '#16a34a',  // design --cat-renew
-  onwind:      '#16a34a',
-  offwind:     '#15803d',
-  solar:       '#f59e0b',
-  pv:          '#f59e0b',
-  rooftop:     '#fbbf24',
-  load:        '#d97706',  // design --cat-load
-  battery:     '#7c3aed',  // design --cat-storage
-  storage:     '#7c3aed',
-  electricity: '#2563eb',
-  heat:        '#ea580c',  // design --carrier-heat
-  h2:          '#7c3aed',  // design --carrier-h2
-  hydrogen:    '#7c3aed',
-}
-const FALLBACK_PALETTE = [
-  '#6a7384', '#97a0ae', '#0369a1', '#16a34a',
-  '#f59e0b', '#7c3aed', '#dc2626', '#0d9488',
-]
-// Resolve a carrier name to a stable colour. Exact match wins; then a substring
-// match (so "offwind-ac" still reads as wind); finally a hashed fallback so any
-// custom carrier still gets a deterministic colour.
+// The colours now live as CSS tokens (`--color-carrier-*` in index.css) behind
+// the chart theme's carrierColour(), so they follow light / dark. Exact match
+// wins; then a substring match (so "offwind-ac" still reads as wind); finally
+// a series token picked by `hashSeed`, so any custom carrier still gets a
+// deterministic colour.
 export function colourForCarrier(carrier: string, hashSeed = 0): string {
-  const k = (carrier ?? '').toLowerCase()
-  if (CARRIER_PALETTE[k]) return CARRIER_PALETTE[k]
-  for (const [match, hex] of Object.entries(CARRIER_PALETTE)) {
-    if (k.includes(match)) return hex
-  }
-  return FALLBACK_PALETTE[Math.abs(hashSeed) % FALLBACK_PALETTE.length]
+  return carrierColour(carrier, hashSeed)
 }
 
 // ── Seasonal view mode ────────────────────────────────────────────────────────

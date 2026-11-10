@@ -9,6 +9,8 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { readableWindow } from '../utils/readableTime'
 import { ResultsFilterProvider, defaultWindow } from './results/filterContext'
+import { ChartSourceProvider, type ChartSource } from '../components/charts/chartTheme'
+import { REFERENCE_CONDITION_WORDS } from './results/OperationalGap'
 import { type TSPayload, type WeightCtx } from './results/shared'
 import CompareView, { type Tab as CompareTab } from './CompareView'
 import { ErrorBoundary } from '../components/ErrorBoundary'
@@ -647,6 +649,19 @@ export default function Results() {
   // through `controls` rather than keeping a second copy — one filter for the
   // whole panel, so the strip above and the in-tab control can never diverge.
   // Values are pre-translated into the display year; see toDisplay/toStore.
+  // What every run chart reads, for its source line and "Out of date" mark
+  // (chart theme, ui-modern 02; VISUALS-1).
+  // Plain words, no solver terms (#1194): "solved", "all periods".
+  const stamp = (iso: string) => toDisplay(iso).replace('T', ' ')
+  const solveWords = status?.condition === 'optimal' ? 'solved'
+    : (status?.condition && REFERENCE_CONDITION_WORDS[status.condition]) || 'did not solve'
+  const chartSource: ChartSource = {
+    line: status?.condition
+      ? `Latest solve · ${solveWords} · ${stamp(fromIso || firstSnap16 || '') || 'start'} → ${
+        stamp(toIso || lastSnap16 || '') || 'end'} · ${selectedPeriod === 'all' ? 'all periods' : `period ${selectedPeriod}`}`
+      : null,
+    stale: status?.dispatch === 'stale',
+  }
   const filterValue = {
     fromIso: normIso(fromIso),
     toIso: normIso(toIso),
@@ -1035,6 +1050,7 @@ export default function Results() {
           whichever tab the user clicked. */}
       <div ref={splitWrapRef} className="flex flex-1 min-h-0 overflow-hidden">
         <ResultsFilterProvider value={filterValue}>
+          <ChartSourceProvider value={chartSource}>
           <div className="flex-1 min-w-0 overflow-hidden">
             {(() => {
               // Overview is multi-period-only; if it's somehow the active tab on
@@ -1081,6 +1097,7 @@ export default function Results() {
               return renderBody(t)
             })()}
           </div>
+          </ChartSourceProvider>
         </ResultsFilterProvider>
         {effectiveTab === 'asset' && (
           <aside data-testid="asset-drawer" aria-label="Asset detail"
