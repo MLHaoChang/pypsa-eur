@@ -319,6 +319,18 @@ def test_a_dismissal_needs_an_organisation(seeded_identity, _auth_db, monkeypatc
             201,
         ),
         (None, 201),  # no result yet: the deny is still on its way
+        (
+            {
+                "is_error": True,
+                "content": [
+                    "x",
+                    {"type": "image"},
+                    {"type": "text", "text": "confirmation_denied"},
+                ],
+            },
+            201,
+        ),
+        ({"tool_use_id": "toolu_other", "content": "{}"}, 201),  # another tool's result
     ],
 )
 def test_only_a_declined_or_waiting_card_is_dismissed(
