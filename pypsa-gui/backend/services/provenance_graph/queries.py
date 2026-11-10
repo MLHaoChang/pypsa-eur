@@ -71,12 +71,15 @@ def _check(g: Graph, edge: Edge) -> tuple[State, Broken | None]:
 def staleness(g: Graph, node_id: str) -> Verdict:
     """Walk `derived_from`, `priced_through` and `computed_in` from `node_id`. Stale when an edge broke (its
     recorded value no longer matches, or the current one cannot be read); uncompared when something on the walk
-    compared nothing (named in `uncompared`); fresh only when every edge on the walk compared and matched."""
+    compared nothing (named in `uncompared`); fresh only when every edge on the walk compared and matched, and at
+    least one did (a walk that compared nothing, such as a `derived_from` cycle, names its start: P1)."""
     broken: list[Broken] = []
+    compared = 0
     uncompared: list[str] = []
     seen: set[str] = set()
 
     def visit(nid: str) -> None:
+        nonlocal compared
         if nid in seen:
             return
         seen.add(nid)
@@ -85,6 +88,7 @@ def staleness(g: Graph, node_id: str) -> Verdict:
             uncompared.append(nid)
         for e in edges:
             state, broke = _check(g, e)
+            compared += state != "uncompared"
             if broke is not None:
                 broken.append(broke)
             elif state == "uncompared" and e.kind != "derived_from":
@@ -94,6 +98,8 @@ def staleness(g: Graph, node_id: str) -> Verdict:
                 visit(e.dst)
 
     visit(node_id)
+    if not compared and not uncompared:
+        uncompared.append(node_id)
     state: State = "stale" if broken else "uncompared" if uncompared else "fresh"
     return Verdict(node_id, state, tuple(broken), tuple(uncompared))
 
@@ -145,9 +151,9 @@ def stale_entries(n, component_class: str, name: str) -> dict[str, dict]:
     entries = money.add_asset(b, component_class, name)
     g = b.build()
     out = dict(entries)
-    for field in money.SCALED_FIELDS:
-        if field not in entries:
-            continue
+    for field in (
+        money.SCALED_FIELDS
+    ):  # a field never recorded has no node: it reads uncompared, never stale
         verdict = staleness(g, money.derived_id(component_class, name, field))
         if verdict.state == "stale":
             out[field] = {**entries[field], "stale": verdict.broken[0].wire()}
