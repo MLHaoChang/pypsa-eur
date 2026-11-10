@@ -103,7 +103,7 @@ describe('Save as default', () => {
     expect(sent.body.spec.series.map((s: { metric: string }) => s.metric)).toEqual(['p', 'p_max_pu'])
     expect(sent.body.spec.series[1].unit).toBe('1')
     const toastEl = await screen.findByTestId('asset-default-toast')
-    expect(toastEl.textContent).toBe('Saved as your default for Asset detail · gas ·Edit ›·Undo')
+    expect(toastEl.textContent).toBe('Saved as your default for Asset Detail · gas · Edit › · Undo')
     expect(toastEl.closest('[role="status"]')).toBeTruthy()
   })
 

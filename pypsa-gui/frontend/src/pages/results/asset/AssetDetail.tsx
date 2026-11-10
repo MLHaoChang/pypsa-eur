@@ -295,7 +295,7 @@ export default function AssetDetail() {
 
           <div className="flex-1 min-w-0 flex flex-col">
             {/* Controls + exports */}
-            <div className="shrink-0 flex items-center gap-2 px-2 py-1.5
+            <div className="shrink-0 flex flex-wrap items-center gap-x-2 gap-y-1 px-2 py-1.5
               border-b border-border">
               {/* Table/Chart and the view mode only mean anything where
                   there is a series to shape. Summary is scalars-only, so
@@ -363,7 +363,7 @@ export default function AssetDetail() {
                     download
                     aria-disabled={isPlaceholderData || undefined}
                     title={isPlaceholderData ? 'Refreshing — the workbook would not match the view' : undefined}
-                    className={`flex items-center gap-1 text-[11px] ${isPlaceholderData
+                    className={`flex items-center gap-1 whitespace-nowrap text-[11px] ${isPlaceholderData
                       ? 'text-muted/40 pointer-events-none' : 'text-muted hover:text-accent'}`}
                   >
                     <Download size={11} /> Export configured view
@@ -373,7 +373,7 @@ export default function AssetDetail() {
                     download
                     aria-disabled={isPlaceholderData || undefined}
                     title={isPlaceholderData ? 'Refreshing — the workbook would not match the view' : undefined}
-                    className={`flex items-center gap-1 text-[11px] ${isPlaceholderData
+                    className={`flex items-center gap-1 whitespace-nowrap text-[11px] ${isPlaceholderData
                       ? 'text-muted/40 pointer-events-none' : 'text-muted hover:text-accent'}`}
                   >
                     <Download size={11} /> Full asset report

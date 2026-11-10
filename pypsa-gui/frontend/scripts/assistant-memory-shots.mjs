@@ -75,6 +75,21 @@ const ASSET = {
     curtailment: Array.from({ length: N }, (_, i) => Math.max(0, 15 * Math.sin((i % 24 - 9) / 6 * Math.PI))) },
 }
 
+/** The asset response for the metrics and mode the view asked for, as the
+ * backend answers: only those columns, and a duration curve sorted high to low. */
+function assetFor(metrics, mode) {
+  const ids = metrics ? metrics.split(',').filter(Boolean) : ['p']
+  const columns = ASSET.columns.filter(c => ids.includes(c.metric_id))
+  const series = Object.fromEntries(columns.map(c => {
+    const v = ASSET.series[c.id]
+    return [c.id, mode === 'duration' ? [...v].sort((a, b) => b - a) : v]
+  }))
+  const duration = mode === 'duration'
+  return { ...ASSET, mode: mode || 'chronological', columns, series,
+    index: duration ? ASSET.index.map((_, i) => String(i + 1)) : ASSET.index,
+    pct_of_hours: duration ? ASSET.index.map((_, i) => (i + 1) / ASSET.index.length) : null }
+}
+
 function api(url, scene) {
   const p = url.pathname.replace(/^\/api/, '')
   const s = url.searchParams
@@ -91,7 +106,7 @@ function api(url, scene) {
   if (p.startsWith('/memory/items/') && p.endsWith('/versions')) return VERSIONS
   if (p === '/memory/items' || p.startsWith('/memory/')) return item({ id: 'mem_new' })
   if (p.includes('/results/asset/assets') || p.endsWith('/assets')) return { assets: [{ class: 'Generator', name: 'Solar 1', carrier: 'solar', bus: 'B1' }] }
-  if (p.includes('/asset')) return ASSET
+  if (p.includes('/asset')) return assetFor(s.get('metrics'), s.get('mode'))
   return {}
 }
 

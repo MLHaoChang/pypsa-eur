@@ -71,7 +71,7 @@ describe('Memory dialog', () => {
     expect((await screen.findByTestId('memory-empty')).textContent).toBe(MEMORY_EMPTY)
   })
 
-  it('lists items with plain words and the source label as the server gives it', async () => {
+  it('lists items with plain words and the source label from the server, capitalised', async () => {
     listing({ confirmed: [
       item(),
       item({ id: 'mem_2', kind: 'lesson', scope: 'org', summary: 'Check curtailment first',
@@ -83,13 +83,13 @@ describe('Memory dialog', () => {
     expect(rows).toHaveLength(2)
     expect(within(rows[0]).getByText('Preference')).toBeTruthy()
     expect(within(rows[0]).getByText('Any project')).toBeTruthy()
-    expect(within(rows[0]).getByText('Me')).toBeTruthy()
+    expect(within(rows[0]).getByText('Just me')).toBeTruthy()
     expect(within(rows[0]).getByText(/^2× ·/)).toBeTruthy()
     expect(within(rows[1]).getByText('Capacity expansion projects')).toBeTruthy()
     expect(within(rows[1]).getByText('Workspace')).toBeTruthy()
     // M1: a project the viewer lost access to shows no name, only the server's label.
     const src = within(rows[1]).getByTestId('memory-source')
-    expect(src.textContent).toBe('source project (no access)')
+    expect(src.textContent).toBe('Source project (no access)')
     expect(src.className).toContain('italic')
     // A workspace item is not the member's to edit or retire.
     expect(within(rows[1]).queryByText('Retire')).toBeNull()

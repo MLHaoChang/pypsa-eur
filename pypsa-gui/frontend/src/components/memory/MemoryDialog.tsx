@@ -19,7 +19,7 @@ import MemoryHistory from './MemoryHistory'
 // leaves their project or chat to reach it.
 
 export const MEMORY_EMPTY =
-  'Nothing saved yet. Use Save as default on an Asset detail chart in Results, or say “remember this” in chat.'
+  'Nothing saved yet. Use Save as default on an Asset Detail chart in Results, or say “remember this” in chat.'
 
 const STATUS_WORDS: Record<MemoryStatus, string> = {
   proposed: 'Proposed', confirmed: 'Saved', retired: 'Retired', dismissed: 'Dismissed',
@@ -31,7 +31,8 @@ const STATUS_TONE: Record<MemoryStatus, 'ok' | 'neutral' | 'warn'> = {
 function dateWords(iso: string | null | undefined): string {
   if (!iso) return ''
   const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString()
+  // ISO date, as elsewhere in the app (UX).
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10)
 }
 
 /** The Source cell: the first evidence link, as the server labels it for this
@@ -42,7 +43,7 @@ export function SourceLabel({ item }: { item: MemoryItem }) {
   return (
     <span className={first.access === false ? 'text-muted italic' : ''}
       data-testid="memory-source">
-      {first.label}
+      {first.label.charAt(0).toUpperCase() + first.label.slice(1)}
     </span>
   )
 }
@@ -272,7 +273,7 @@ function MemoryRow({
         <td className="px-3 py-1.5"><Tag tone="accent">{KIND_WORDS[item.kind]}</Tag></td>
         <td className="px-2 py-1.5 text-text">{item.summary}</td>
         <td className="px-2 py-1.5 text-muted">{appliesToWords(item.applies_to)}</td>
-        <td className="px-2 py-1.5 text-muted">{own ? 'Me' : 'Workspace'}</td>
+        <td className="px-2 py-1.5 text-muted">{own ? 'Just me' : 'Workspace'}</td>
         <td className="px-2 py-1.5">
           <div className="flex flex-wrap gap-1">
             {item.concept_keys.map(k => (

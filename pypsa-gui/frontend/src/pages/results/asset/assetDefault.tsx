@@ -145,7 +145,7 @@ async function undoSave(saved: MemoryItem): Promise<void> {
 export function useSaveAssetDefault() {
   const qc = useQueryClient()
   return async (asset: AssetRef, series: MetricRow[], mode: ViewMode, kind: ProjectKind) => {
-    const what = asset.carrier ? `Asset detail · ${asset.carrier}` : 'Asset detail'
+    const what = asset.carrier ? `Asset Detail · ${asset.carrier}` : 'Asset Detail'
     let saved: MemoryItem
     try {
       saved = await memoryApi.create({
@@ -163,12 +163,13 @@ export function useSaveAssetDefault() {
     // UX M6: one status line that clears on its own; "›" separators.
     toast.success(t => (
       <span className="flex items-center gap-1.5" data-testid="asset-default-toast">
-        <span>Saved as your default for {what} ·</span>
+        <span>Saved as your default for {what}</span>
+        <span aria-hidden="true">{' · '}</span>
         <button type="button" className="underline font-medium whitespace-nowrap"
           onClick={() => { toast.dismiss(t.id); useMemoryStore.getState().openMemory({ editId: saved.id }) }}>
           Edit ›
         </button>
-        <span aria-hidden="true">·</span>
+        <span aria-hidden="true">{' · '}</span>
         <button type="button" className="underline font-medium whitespace-nowrap"
           data-testid="asset-default-undo"
           onClick={async () => {
