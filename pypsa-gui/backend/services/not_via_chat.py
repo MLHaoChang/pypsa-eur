@@ -413,7 +413,9 @@ def matches(words: set[str], limit: int = 2) -> list[dict]:
         if (entry['id'] == 'solve_queue_instance_controls' and words & {'goal', 'task', 'plan'}
                 and 'queue' not in words):
             continue
-        if entry['id'] == 'results_headline_strip' and not words & {'headline', 'kpi', 'kpis'}:
+        # The chat file strip is a tool's (exports land there): never refuse a goal that names it.
+        if entry['id'] == 'results_headline_strip' and (
+                'file' in words or not words & {'headline', 'kpi', 'kpis'}):
             continue
         hits = len(words & entry['keywords'])
         if hits:
