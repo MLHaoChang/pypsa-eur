@@ -1,6 +1,6 @@
 # 05. `tariff_payload_resolved` does not show a stamped tariff's currency
 
-Status: ready-for-agent
+Status: done (#1350)
 Type: task
 Raised by: GLE-03 session (issue 03), repeated by GLE-04 (issue 04, PR #1290).
 Gated: yes (money semantics).
