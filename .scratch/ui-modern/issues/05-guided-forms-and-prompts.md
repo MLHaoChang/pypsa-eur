@@ -75,3 +75,4 @@ GK B (43): GO with H1–H6.
 - H4. Profiles list attribute names only, and handle a multi-period axis and an empty frame.
 - H5. The assistant's copy of the flow leaves `holds` out.
 - H6. Plain words only from `_LEDGER_PLAIN`; `git grep` the old text before rewording a refusal; hand mutants of the shared set and the null rule.
+- H7. The tests that kill slice 1's four surviving mutants (`flow_service.py:1224`, the tag's two-part condition, three shapes; `:565`, the has/have verb) land in slice 2's first commit, each shown red under its mutant in the PR body. GK B's OK on #1340 stands without them. GK B (44) took over from (43) on 10 Nov.
