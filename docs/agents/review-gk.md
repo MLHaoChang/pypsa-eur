@@ -186,3 +186,18 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A queued job's change-log entry is bound to the job's own org. A key with no org logs nothing, never the foreground's (#1286, GK B (37)).
 - A run's native write action shows every frozen setting its digest binds on its own card. A deny stops the step; it is not re-carded at once (#1283, GK B (37)).
 - A model draft from a human route is never charged to a run's budget and never takes the runner's lease (SH-07c Q1, owner decision SH07C-DRAFT-1).
+- A "same run" binding of published files is recorded only while the job is still the latest of its kind for the project. Digesting a shared publish dir on a later tick can capture another run (#1333 F1).
+- A gate reading a re-solved study reads the re-check's own columns and convergence (`*_with_measures`, the invest history's load_flow row), never the as-is table's (#1333, GK B F1/F2).
+- A read that adds a derived field a client can echo back needs a write-side strip keyed on a marker AND value equality, with a GET→PUT round-trip test through the real routes (GLE-05 G5-1).
+- An energy-limited unit (a store-fed converter) never gets full two-state credit in a block LOLE. Model it as storage or give it no credit (AL-1).
+- A stale-check relaxation for a field written earlier in a batch is keyed on columns the batch created, never on any (class, field) it wrote (#1331).
+- A plan-card or gate sentence claims only the cases the gate reads (#1333 "any one out").
+- A test named for a guard must run that guard, not monkeypatch the function that holds it (#1334).
+- Run each mutant on its single targeted test with `-x` and a timeout: a mutant can hang a whole-file run and leave an empty result (#1333, #1334).
+- An out-of-scope or "not needed" tag is keyed on what the row is (the unused element's own rows), never on every row filed to the section; pin each template that reaches it (#1340).
+- A default used to excuse a changed value comes from the declared default, never inferred from neighbouring cells (#1331).
+- A `not_via_chat` keyword is a word only that feature owns; one hit attaches "do not look for another tool" (#1343 `headline`, #1347 `saved`).
+- A read-only route that reuses chat-path readers catches the chat path's exception set per item, so one busy lock degrades one card (#1343).
+- A PR that makes a lock's hold longer re-checks every waiter's bound on that lock (#1345).
+- A reviewer rule for visibility ("admin sees a nominated item") is not reused as a rule for use (#1347).
+- Review through a subagent: it reads the diff, runs the trial merge, tests and mutants, and returns file:line findings; the gatekeeper reads only the hunks those point at (GK B (42) and (43) each reached 300k in about 80 minutes).
