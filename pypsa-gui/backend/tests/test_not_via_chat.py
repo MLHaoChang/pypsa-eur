@@ -116,6 +116,15 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Compare the headline strip of two runs', 'Compare the KPI strip of run A and run B',
     'Strip the headline from the report', 'Strip KPI names of units in the export', 'Save the KPI strip to my files',
     'Add the KPI strip to the export', 'What is in the chat file strip',
+    # GK B C1: destinations and actions that put the figures elsewhere.
+    'Add the headline strip to the Excel workbook', 'Add the KPI strip to the Word document',
+    'Add the headline strip to the exported bundle', 'Read the headline strip and save it as CSV',
+    'What is the KPI strip showing for system cost compared with the last run?',
+    # One word each, so no word of the set is carried by another.
+    'Add the KPI strip to Excel', 'Add the KPI strip to the workbook', 'Add the headline strip to Word',
+    'Add the KPI strip to the document', 'Add the KPI strip to the bundle', 'Which KPIs in the strip were exported',
+    'Add the KPI strip as CSV', 'Which strip KPIs can I save', 'Add the KPI strip to the PDF',
+    'Which strip KPIs can I download', 'Add the KPI strip to the report',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)
