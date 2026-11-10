@@ -124,6 +124,9 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
       await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/${entry}.html?mode=${mode}&state=${state}&theme=${theme}`)
       await page.getByText('Fix the gaps on the Site card.').waitFor()
       for (const n of clear) await page.getByTestId('chat-change-set-tick').nth(n).click()
+      // Nothing ticked: show the disabled Apply and its reason at the card's foot.
+      if (clear.length && await page.getByTestId('chat-change-set-none').count())
+        await page.getByTestId('chat-confirm-deny').scrollIntoViewIfNeeded()
       await page.waitForTimeout(400)
       const file = path.join(out, `lc47-${name}-${mode}-${theme}.png`)
       await page.screenshot({ path: file, fullPage: true })

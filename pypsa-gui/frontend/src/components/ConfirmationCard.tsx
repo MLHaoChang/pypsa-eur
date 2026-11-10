@@ -494,15 +494,16 @@ export function ConfirmationCard() {
               ? shortMcpToolName(pending.tool_name)
               : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
-          {/* P26 gate B2: a destructive card shows its raw call by default. */}
-          <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details"
+          {/* P26 gate B2: a destructive card shows its raw call by default.
+              LC-47 (UX (16)): a change set's rows are its detail. */}
+          {!isChangeSet && <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details"
             open={pending.safety_tier === 'destructive'}>
             <summary className="cursor-pointer select-none">Details</summary>
             <div className="font-mono mt-1">{pending.tool_name}</div>
             <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mt-1 whitespace-pre-wrap break-all">
               {JSON.stringify(pending.args, null, 2)}
             </pre>
-          </details>
+          </details>}
         </>
       ) : (
         <>
@@ -512,7 +513,7 @@ export function ConfirmationCard() {
               || (edit?.kind === 'native' && edit.says) || (pending.external
               ? shortMcpToolName(pending.tool_name) : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
-          {Object.keys(pending.args ?? {}).length > 0 && (
+          {!isChangeSet && Object.keys(pending.args ?? {}).length > 0 && (
             <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
               {JSON.stringify(pending.args, null, 2)}
             </pre>

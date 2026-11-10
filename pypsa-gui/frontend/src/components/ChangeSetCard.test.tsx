@@ -68,6 +68,10 @@ it.each(['guided', 'expert'] as const)('lists every change with a tick box and t
   expect(screen.getByTestId('chat-change-set-count').textContent).toBe('3 of 3 ticked')
   expect(approve().textContent).toBe('Apply 3 changes')
   expect(screen.getByTestId('chat-confirm-deny').textContent).toBe('Cancel all')
+  // UX (16): the rows are the detail; no arguments block, no Details, no tool-use ids.
+  expect(screen.queryByTestId('chat-confirmation-details')).toBeNull()
+  expect(screen.getByTestId('chat-confirmation-card').querySelector('pre')).toBeNull()
+  expect(screen.getByTestId('chat-confirmation-card').textContent).not.toContain('tu-0')
 })
 
 it('applies exactly the ticked rows, in card order', async () => {
