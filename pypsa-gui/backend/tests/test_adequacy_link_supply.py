@@ -873,8 +873,7 @@ def _freeze(n, **kw):
         _Cfg(),
         threading.Lock(),
         overlay=ImportOverlaySpec(import_carriers=[]),
-        import_model="sampled_unit",
-        **kw,
+        **{"import_model": "sampled_unit", **kw},
     )
 
 
@@ -962,4 +961,20 @@ def test_a_bad_firm_rate_is_a_typed_refusal_at_both_loops(
     assert r.status_code == 422, r.text
     assert "outage rate outside [0, 1) on firm Link(s): backup (rate 1.5)" in str(
         r.json()["detail"]
+    )
+
+
+def test_the_firm_block_comparison_says_why_its_import_never_fails():
+    """F4: with Link sampling switched off, the note names that, not a
+    missing MTTR the Link does not lack."""
+    frozen = _freeze(_net(), import_model="firm_block").mc_inputs
+    assert _names(frozen) == ["diesel"]
+    assert frozen.fleet_notes == (
+        "grid import taken as never failing: Link sampling disabled "
+        "(firm-block comparison) for grid_import",
+    )
+    [note] = sampled_fleet(_net(import_data=(0.01, float("inf")))).fleet_notes
+    assert note == (
+        "grid import taken as never failing: no finite MTTR in its outage "
+        "data for grid_import"
     )
