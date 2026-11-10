@@ -322,19 +322,20 @@ def _wrap_with_island(network, user_fn, cfg, island=_UNSET, log_queue=None,
 
 
 def island_extra_functionality(island, *, user_fn=None, delta_p_plus=None, emit=None,
-                               event_rows=True):
+                               event_rows=True, check=False):
     """The ``extra_functionality`` callback that adds the island rows.
 
     ``delta_p_plus`` overrides the ``seamless`` step ΔP⁺ in MW (a number, a
     Series on the snapshots, or ``callable(n, sns)`` returning either); None,
     the default, builds it from the PCC Links and the late UPSs (I2b).
     ``event_rows`` is a test seam: False keeps the islanding step (E1) rows
-    alone; production never passes it."""
+    alone; production never passes it. ``check`` adds the rows to a solve
+    that sizes nothing (``add_island_rows``)."""
     def fn(n, snapshots):
         if user_fn is not None:
             user_fn(n, snapshots)
         add_island_rows(n, snapshots, island, delta_p_plus=delta_p_plus, emit=emit,
-                        event_rows=event_rows)
+                        event_rows=event_rows, check=check)
     return fn
 
 
@@ -641,16 +642,21 @@ def island_study(n, island, *, scenarios=None, solve=None, tol=1e-6) -> dict:
 
 
 def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None,
-                    event_rows=True) -> dict:
+                    event_rows=True, check=False) -> dict:
     """Add (a), (b) and (c) to ``n.model`` and record what was built on
     ``n._island_facts``. ``event_rows`` is a test seam: False keeps the
-    islanding step (E1) rows alone; production never passes it."""
+    islanding step (E1) rows alone; production never passes it.
+
+    ``check`` (study harness 12, ``island_survival``): the rows are added to
+    a dispatch-only solve too, where they size nothing and test the plan as
+    built; a row the fixed sizes cannot hold is then an ``IslandRefusal`` or
+    an infeasible LP, never a skipped row. Every other caller leaves it off."""
     # gridspine through the guarded seam (a build without it then says so).
     from services.adequacy.activity import active_mask
     from services.adequacy.island_config import GFM_CONTROLS
 
     emit = emit or (lambda msg: None)
-    skipped = dispatch_only(n, island)
+    skipped = None if check else dispatch_only(n, island)
     if skipped:
         n._island_facts = {"skipped": skipped}
         emit(f"island rows skipped ({skipped}); they size the site, and this solve cannot")
