@@ -35,8 +35,19 @@ The gap predates 07c, which didn't widen it.
 - **L1, lock order.** Copies take `PyPSAService.get_lock()` first and the report locks second. No report writer takes the network lock, a project context or a solver lock inside a report lock: the holders are the five store writers, `revisions.add_comment` / `withdraw` / `address` and the job's generation meta, and inside it they only read and write files under `reports/<id>/` (the job also takes its own `job.lock`, which no copy takes). `test_a_writer_finishes_while_a_copy_holds_the_network_lock` times each writer against a copy holding the network lock.
 - **L2, bound.** All of a copy's report locks share one `COPY_LOCK_TIMEOUT_S` = 3 s deadline, because the network lock may be held meanwhile. The bound covers a thread of the same process too (a 07c writer still waits for a thread without one).
 - **L3, archive ids.** Bundle import validates every `reports/<x>/…` member with `validate_report_id` before the project row exists; anything else refuses 400 `invalid_report_id`. A bundled `.<id>.lock` is skipped.
-- **L4, one rule.** A copy touches only the reports whose locks it holds. A report created after the lock set was taken is neither copied nor removed: it serialises after the copy. The set is re-read once the locks are held; a change releases them and starts over, at most 5 times, then `report_busy`.
-- **L5, re-entrancy.** `_copy_bundle_dirs` takes the locks itself as a backstop. Nested in the same thread it keeps the outer call's id set, and its release leaves the outer hold in place.
-- **L6, cleanup.** `reports/` is no longer removed and copied whole (that deleted the held lock files). Each report is built in a temp sibling and swapped in; a failure leaves that report as it was and no temp directory. A busy refusal happens before the first write.
+- **L4, one rule.** A copy touches only the reports whose locks it holds. A report created after the lock set was taken is neither copied nor removed: it serialises after the copy. Lock files and stray files in `reports/` are never copied, removed or exported. The set is re-read once the locks are held; a change releases them and starts over, at most 5 times, then `report_busy`.
+- **L5, re-entrancy.** `_copy_bundle_dirs` takes the locks itself as a backstop. Nested in the same thread it keeps the outer call's id set, and its release leaves the outer hold in place. A `ReportBusy` from it is re-raised by the snapshot, restore and save callers, which swallow every other copy error.
+- **L6, cleanup.** `reports/` is no longer removed and copied whole (that deleted the held lock files). Each report is built in a temp sibling and swapped in; a failure leaves that report as it was and no temp directory. So a copy that fails part-way leaves each report either old or new, never mixed, but not the whole folder as it was. A busy refusal happens before the copy's first write.
 
-Not covered: bundle import always writes into a new project directory, so its refusal can only be forced in a test, and the project row made just before it stays. The study option forks (`services/study/forks.py`) walk the bundle themselves and are not changed here.
+What a refusal can still leave behind:
+
+- Restore checks the locks first, before it saves unsaved live edits and makes the "before-restore" snapshot, then takes them again around its own writes. A writer that arrives between the two gets the restore refused with that save and that snapshot already made; no project file is replaced.
+- Save-As and Save a Copy refuse before the network is written, but the route has already made the new project's row and empty directory, as it has for the save's other refusals. Bundle import likewise: it writes into a new project directory, so its refusal can only be forced in a test, and the row made just before it stays.
+
+Side effects to know about:
+
+- A save to another name now holds the context's mutation lock for the whole save, and snapshot create holds it across the prune and the capture.
+- Export can now answer 409 `report_busy`, the chat export tool included.
+- Locking a snapshot's or an export source's reports leaves `.<id>.lock` files there.
+
+Not covered: the study option forks (`services/study/forks.py`) walk the bundle themselves; `services/legacy_import.py` and `import_unclaimed_project` move a whole directory in from outside the registry, where no report writer can reach it yet.

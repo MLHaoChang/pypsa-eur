@@ -1259,7 +1259,7 @@ def _bundle_report_ids(members: set[str]) -> frozenset[str]:
         parts = pathlib.PurePosixPath(member).parts
         if len(parts) < 2 or parts[0] != report_store.REPORTS_DIRNAME:
             continue
-        if len(parts) == 2 and not report_store.in_copy(parts[1], ()):
+        if len(parts) == 2 and report_store.is_lock_file(parts[1]):
             continue  # `reports/.<id>.lock`, skipped on extraction
         try:
             ids.add(report_store.validate_report_id(parts[1]))
@@ -1306,7 +1306,7 @@ def _extract_bundle(zf: zipfile.ZipFile, members: set[str], dest: pathlib.Path,
                 continue  # zip-slip attempt — silently drop the member
             parts = pathlib.PurePosixPath(member).parts
             if dname == report_store.REPORTS_DIRNAME and (
-                len(parts) < 2 or not report_store.in_copy(parts[1], incoming_reports)
+                len(parts) < 2 or parts[1] not in incoming_reports
             ):
                 continue  # an exported lock file is not part of the bundle
             target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -2448,6 +2448,8 @@ def _carry_sidecars_on_move(
             # where the source project is.
             _copy_bundle_dirs(src_dir, dest)
             _copy_history_dirs(src_dir, dest)
+        except report_store.ReportBusy:
+            raise  # never a silent skip (07e); `_save_context` holds the locks
         except Exception:  # noqa: BLE001 — best-effort, never abort save
             logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
 
@@ -5134,10 +5136,11 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
                     if scene_store.is_scene_path(full.relative_to(src)):
                         continue
                     rel = full.relative_to(src)
-                    if dname == report_store.REPORTS_DIRNAME and not report_store.in_copy(
-                        rel.parts[1], reports_held["src"]
-                    ):
-                        continue  # a lock file, or a report created meanwhile
+                    if (dname == report_store.REPORTS_DIRNAME
+                            and rel.parts[1] not in reports_held["src"]):
+                        # A lock file, a report created meanwhile, or a stray
+                        # file an import would refuse.
+                        continue
                     arc = rel.as_posix()
                     zf.write(full, arcname=arc)
         for rel, data in scene_blobs:

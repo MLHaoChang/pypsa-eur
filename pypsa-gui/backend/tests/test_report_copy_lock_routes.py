@@ -335,3 +335,79 @@ def test_restore_itself_takes_the_locks_before_its_first_write(
         _busy(client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore"))
         assert _tree(pdir) == before
     assert _leftovers(pdir) == []
+
+
+def test_an_export_with_a_stray_reports_file_still_imports(
+    client, project, project_storage_dir
+):
+    name, pdir = project
+    (pdir / "reports" / ".DS_Store").write_text("stray")
+    data = _bundle(client, name)
+    assert "reports/.DS_Store" not in zipfile.ZipFile(io.BytesIO(data)).namelist()
+    assert _import(client, data).status_code in (200, 201)
+
+
+def _raise_busy(*_a, **_k):
+    raise store.ReportBusy("a report the route's hold did not cover")
+
+
+def test_a_busy_backstop_is_never_a_silent_skip_in_a_snapshot(
+    client, project, monkeypatch
+):
+    from routers import projects
+
+    name, _pdir = project
+    monkeypatch.setattr(projects, "_copy_bundle_dirs", _raise_busy)
+    _busy(client.post(f"/api/projects/{name}/snapshots", json={"label": "v1"}))
+
+
+def test_a_busy_backstop_is_never_a_silent_skip_in_a_restore(
+    client, project, monkeypatch
+):
+    from routers import projects, snapshots
+
+    name, _pdir = project
+    snap_id = _snapshot(client, name)
+    monkeypatch.setattr(snapshots, "_create_snapshot_internal", lambda *a, **k: None)
+    monkeypatch.setattr(projects, "_copy_bundle_dirs", _raise_busy)
+    _busy(client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore"))
+
+
+def test_a_busy_backstop_is_never_a_silent_skip_in_a_save_as(
+    client, project, monkeypatch
+):
+    from routers import projects
+
+    monkeypatch.setattr(projects, "_copy_bundle_dirs", _raise_busy)
+    _busy(client.post("/api/projects/lockme_copy", params={"rebind": True}))
+
+
+def test_a_busy_safety_snapshot_refuses_the_restore_as_report_busy(
+    client, project, monkeypatch
+):
+    """A writer that arrives after the restore's early check: still 409, not
+    the 500 other safety-snapshot failures become."""
+    from routers import reports, snapshots
+
+    name, _pdir = project
+    snap_id = _snapshot(client, name)
+
+    def busy(*_a, **_k):
+        raise reports._http(store.ReportBusy("busy"))
+
+    monkeypatch.setattr(snapshots, "_create_snapshot_internal", busy)
+    _busy(client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore"))
+
+
+def test_restore_refuses_before_it_saves_unsaved_edits(client, project, monkeypatch):
+    from routers import snapshots
+
+    name, pdir = project
+    snap_id = _snapshot(client, name)
+    saved = []
+    monkeypatch.setattr(
+        snapshots, "_save_unsaved_live_state", lambda *a, **k: saved.append(1)
+    )
+    with held_elsewhere(pdir, RID_A):
+        _busy(client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore"))
+    assert saved == []

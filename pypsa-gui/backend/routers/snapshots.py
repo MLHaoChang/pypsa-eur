@@ -540,6 +540,8 @@ def _capture_snapshot(
         try:
             from routers.projects import _copy_bundle_dirs
             _copy_bundle_dirs(project_dir, snap_dir)
+        except report_store.ReportBusy:
+            raise  # never a silent skip (07e); the caller holds the locks
         except Exception:  # noqa: BLE001 — best-effort
             pass
 
@@ -769,6 +771,12 @@ def restore_snapshot(
     absent = _absent_at_capture(snap_dir)
     absent_files, absent_dirs = absent if absent is not None else (set(), set())
 
+    # The early `report_busy` refusal (study harness 07e), before the save and
+    # the safety snapshot below write anything. The restore takes the locks
+    # again, and holds them, around its own writes.
+    with PyPSAService.get_lock(), _reports_copy_guard(snap_dir, project_dir):
+        pass
+
     # Outside the `get_lock()` block below: the save takes that lock itself.
     saved_revision = _save_unsaved_live_state(project, db, user)
 
@@ -859,6 +867,8 @@ def restore_snapshot(
         try:
             from routers.projects import _copy_bundle_dirs
             _copy_bundle_dirs(snap_dir, project_dir)
+        except report_store.ReportBusy:
+            raise  # never a silent skip (07e); this block holds the locks
         except Exception:  # noqa: BLE001 — best-effort
             pass
         for dname in sorted(absent_dirs):

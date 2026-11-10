@@ -482,3 +482,25 @@ def test_a_failed_swap_puts_the_old_report_back(tmp_path, monkeypatch):
         f".{RID_A}.lock",
         RID_A,
     ]
+
+
+def test_only_reports_are_copied_or_removed(tmp_path):
+    """A stray file in `reports/` is no report: it stays where it is."""
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    _seed(src, RID_A)
+    _seed(dst, RID_B)
+    (src / "reports" / "notes.txt").write_text("source stray")
+    (dst / "reports" / ".DS_Store").write_text("destination stray")
+    store.copy_reports(src, dst)
+    assert {p.name for p in (dst / "reports").iterdir()} == {
+        ".DS_Store",
+        f".{RID_A}.lock",
+        f".{RID_B}.lock",
+        RID_A,
+    }
+    store.clear_reports(dst)
+    assert {p.name for p in (dst / "reports").iterdir()} == {
+        ".DS_Store",
+        f".{RID_A}.lock",
+        f".{RID_B}.lock",
+    }

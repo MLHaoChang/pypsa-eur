@@ -420,12 +420,9 @@ def reports_copy_lock(src: pathlib.Path | None = None, dst: pathlib.Path | None 
     raise ReportBusy("the project's reports kept changing while a copy waited for them")
 
 
-def in_copy(name: str, held: frozenset[str] | set[str]) -> bool:
-    """Whether the entry `reports/<name>` belongs to a copy holding `held`:
-    never a lock file, and a report only when its lock is held."""
-    if _lock_file_id(name):
-        return False
-    return not _REPORT_ID.fullmatch(name) or name in held
+def is_lock_file(name: str) -> bool:
+    """Whether `reports/<name>` is a report's lock file."""
+    return _lock_file_id(name) is not None
 
 
 def _swap_in(build, target: pathlib.Path) -> None:
@@ -464,17 +461,19 @@ def copy_reports(src: pathlib.Path, dst: pathlib.Path) -> None:
     `reports_copy_lock`. No `reports/` in `src` → nothing changes.
 
     Each report directory is built beside its destination and swapped in, and
-    a destination report `src` lacks is removed. Lock files are neither
-    copied nor removed: deleting a held `.<id>.lock` would let a second
-    process lock a fresh file. `ReportBusy` before anything is written."""
+    a destination report `src` lacks is removed. Only the reports whose locks
+    are held are touched: lock files and anything else in `reports/` are
+    neither copied nor removed (deleting a held `.<id>.lock` would let a
+    second process lock a fresh file). `ReportBusy` before anything is
+    written."""
     src_root, dst_root = reports_dir(src), reports_dir(dst)
     if not src_root.is_dir():
         return
     with reports_copy_lock(src, dst) as held:
         dst_root.mkdir(parents=True, exist_ok=True)
-        names = {e.name for e in src_root.iterdir() if in_copy(e.name, held["src"])}
+        names = {e.name for e in src_root.iterdir() if e.name in held["src"]}
         for entry in list(dst_root.iterdir()):
-            if entry.name not in names and in_copy(entry.name, held["dst"]):
+            if entry.name not in names and entry.name in held["dst"]:
                 _remove_entry(entry)
         for name in sorted(names):
             entry = src_root / name
@@ -492,7 +491,7 @@ def clear_reports(project_dir: pathlib.Path) -> None:
         return
     with reports_copy_lock(None, project_dir) as held:
         for entry in list(root.iterdir()):
-            if in_copy(entry.name, held["dst"]):
+            if entry.name in held["dst"]:
                 _remove_entry(entry)
 
 
