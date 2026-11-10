@@ -505,6 +505,13 @@ def test_the_fuel_generators_availability_series_bounds_the_credit():
     np.testing.assert_allclose(unit.capacity_series, pu * 10.0 * 0.5)
 
 
+def test_a_fuel_generator_with_a_blank_energy_cap_is_unlimited():
+    n = _fuel_cell(_net())
+    n.generators["e_sum_max"] = float("inf")
+    n.generators.at["gas_supply", "e_sum_max"] = float("nan")
+    assert sampled_fleet(n).units[-1].name == "link:fuel_cell"
+
+
 def test_the_fuel_generators_availability_bounds_the_credit():
     n = _fuel_cell(_net())
     n.generators.at["gas_supply", "p_nom"] = 10.0
