@@ -18,3 +18,14 @@ Gated: yes (money semantics).
 
 - `pypsa-gui/backend/models/commercial.py` (`tariff_payload_resolved`).
 - `pypsa-gui/backend/services/commercial/binding.py` (`resolved_tariff_currency`).
+
+## Comments
+
+GK A plan GO with conditions (2026-11-10):
+
+- **G5-1 Round trip writes nothing** (option 1, replacing the marker-only strip). A read adds `currency_source: "stamp"`. A write drops that key, and drops `currency` only while it still equals the stamp's. A differing currency is stated content, and so is an explicit currency with no marker. GET then PUT `/simulation/solver_config` (the frontend's `saveCommercial`), and a Library item edit, keep the stored bytes, the library digest and hash v1/v2 unchanged. Shown red before the fix. A marked write whose pack cannot be read is a typed refusal (`tariff_stamp_unreadable`, a 422 naming the pack), never a 500 and never stored with the currency. A RuntimeError propagates.
+- **G5-2 Broken pack on the read.** A GET never 500s on the pack's own error class (`DefaultsPackError`). It returns the payload with no currency and `currency_source: "pack_unreadable"`. Anything else propagates. Binding keeps raising (GLE3-1), so a run still refuses.
+- **G5-3 Every reader.** Both route readers (`routers/library.py` item GET, `routers/simulation.py` GET `/solver_config`) and the function are tested for stamp, stated, implied and generic-no-stamp.
+- **G5-4 No-write proof.** The input dict stays deep-equal, and the canonical hash and recipes 1/2 stay equal, plus G5-1's route round trip.
+
+Note: a Library tariff write refuses unknown keys, so `items.validate_payload` lets the read-only `currency_source` through for a tariff. A legacy stamped Library item (stored before rule 01) that is read and put back is refused with `tariff_currency_required`, and no version is stored.
