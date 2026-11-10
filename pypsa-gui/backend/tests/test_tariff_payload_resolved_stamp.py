@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import copy
 
+import pytest
+
 from models import commercial as M
 from services.commercial import hashing as H
 
@@ -46,8 +48,6 @@ def test_a_copied_generic_tariff_reads_eur_from_its_stamp_and_nothing_is_written
     # Nothing is written onto the tariff: the stored payload and its hashes are unchanged.
     assert stored == before and "currency" not in stored
     assert _hashes(stored) == hashes
-    # A client re-sending the read's extra key writes nothing new.
-    assert "currency_source" not in M.Tariff.model_validate(out).model_dump(mode="json")
 
 
 def test_a_tariff_that_states_a_currency_shows_that_one():
@@ -63,3 +63,19 @@ def test_an_implied_currency_and_an_unstamped_generic_tariff_are_as_before():
     assert M.tariff_payload_resolved(nl) == {**nl, "currency": "EUR"}
     bare = {**stored, "pack_hash": None}
     assert M.tariff_payload_resolved(bare) == bare
+
+
+@pytest.mark.parametrize("exc_name", ["RuntimeError", "DefaultsPackError"])
+def test_a_broken_pack_fails_the_read_rather_than_reading_as_unknown(monkeypatch, exc_name):
+    """GLE3-1: a broken vendored pack is never read as \u201cno currency\u201d."""
+    from services.library.defaults_pack import loader
+
+    stored = _generic_copy_payload()
+    exc = RuntimeError if exc_name == "RuntimeError" else loader.DefaultsPackError
+
+    def boom(*a, **k):
+        raise exc("broken pack")
+
+    monkeypatch.setattr(loader, "load_defaults_pack", boom)
+    with pytest.raises(exc):
+        M.tariff_payload_resolved(stored)

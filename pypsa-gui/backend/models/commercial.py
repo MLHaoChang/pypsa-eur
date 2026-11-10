@@ -467,13 +467,12 @@ def tariff_payload_resolved(payload: Any) -> Any:
         tariff = Tariff.model_validate(payload)
     except ValueError:
         return payload
-    if tariff.currency is None:
-        from services.commercial.binding import resolved_tariff_currency
+    from services.commercial.binding import resolved_tariff_currency
 
-        cur, source = resolved_tariff_currency(tariff)
-        return {**payload, "currency": cur, "currency_source": source} \
-            if source == "stamp" else payload
-    return {**payload, "currency": tariff.currency} if "currency" not in payload \
+    cur, source = resolved_tariff_currency(tariff)
+    if source == "stamp":
+        return {**payload, "currency": cur, "currency_source": source}
+    return {**payload, "currency": cur} if cur is not None and "currency" not in payload \
         else payload
 
 
