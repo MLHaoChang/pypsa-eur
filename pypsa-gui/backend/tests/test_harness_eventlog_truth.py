@@ -128,7 +128,8 @@ def test_nothing_but_the_log_changes_a_sessions_history():
 
 # ── a session not in memory is rebuilt from its log ────────────────────────
 
-def test_a_damaged_log_falls_back_to_the_transcript(client, seeded_identity, project, tools):
+def test_a_damaged_log_falls_back_to_the_transcript(
+        isolated_chat_events, client, seeded_identity, project, tools):
     """Issue 13b: the log is the source of truth only while it can be read.
     A broken line that is not a torn tail must not become a shorter history.
     The session is rebuilt from chat.jsonl, which still has both turns."""

@@ -167,6 +167,25 @@ def reset_backend():
     _reset_backend_state()
 
 
+@pytest.fixture
+def isolated_chat_events(tmp_path, monkeypatch):
+    """Point the app-data dir at a tmp dir, for tests that damage chat-event logs.
+
+    `harness.eventlog._root()` is `app_data_dir() / "chat-events"`, and the
+    app-data dir is shared by the whole pytest session. A test that writes a
+    deliberately broken log there leaves it for every test that reads all the
+    logs. On teardown this also checks the shared dir holds no damaged log.
+    """
+    import app_paths
+    shared = app_paths.app_data_dir() / "chat-events"
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    yield tmp_path / "chat-events"
+    monkeypatch.undo()
+    damaged = [p for p in shared.rglob("*") if p.is_file()
+               and "{not-json" in p.read_text(encoding="utf-8", errors="replace")]
+    assert not damaged, f"damaged chat-event logs in the shared app-data dir: {damaged}"
+
+
 @pytest.fixture(autouse=True)
 def _clean_llm_profiles():
     """
