@@ -20,6 +20,13 @@ Study-harness issue 11 (`.scratch/study-harness/issues/11-profile-h2-hub.md`): h
 - **Queued-solve settle** (`harness/continuation.py`, A1–A3): the manifest objective is compared with `_compute_run_objective` on the saved network and the saved config, so a hub with existing-capacity costs settles `completed`. No saved config, no total, or inputs changed since the solve leaves it unverified. Ticket 39 (A4) holds the experiment-path finding.
 - Issue 11 `## Comments` record GK B (38)'s plan verdicts, GK A (19)'s L1–L9 and GK B (39)'s Q3-A1/A2 verbatim.
 
+- **Review findings (mp-code-review)** addressed:
+  - H1: the H2 readers type every solve they cannot read. No run solve is `not_solved`; a solve that did not complete is `solve_<status>` (an infeasible LP: `solve_failed`); results older than the inputs are `stale_solve`. `_own_solve` takes `typed=True` only for them: `kpi.unserved_mwh` still reads None.
+  - The FACTS sources of `h2.offtake.shed_hours` and `h2.electrolyser.utilisation` name their real readers (`run_gates._offtake_shed_hours`, `run_gates._electrolyser_utilisation`).
+  - `_loop_converged`'s detail no longer names an internal path (CODING_STANDARDS UI rule 2), and imports `NOTHING_TO_SAMPLE` lazily like its neighbours.
+  - A2 (c): `test_harness_run_eh_site_v2.py::test_pilot_envelope_mode_reaches_the_hand_off` settles a real eh_site queue solve through the unpatched `_queue_run` and asserts `completed`.
+  - Harness README "Who writes the run block" names only `assistant_tasks._advance_run`. `run_loops._engine_stop` already writes the run block on an engine stop; `_gate_on_refusal` extends that same exception, writing the stage's gate through `runner._update` right after `_engine_stop`. The README is left as it is (it does not list `_engine_stop` either).
+
 ### SH11-L9 (GK A)
 - (a) The read after a refusal does **not** bump `stage["attempts"]`. It writes only `stage["gate"]`, or `stage["gate_error"]` when the read fails. So no attempts reader changes: not caps, not the needs_user wording, not continuation.
 - (b) The readers it calls are exactly those the result gate's first pass already called through `assistant_tasks._gate_now` on the same Env, plus the loop-record reader:

@@ -33,7 +33,6 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Callable
 
-from services.adequacy.coupling import NOTHING_TO_SAMPLE
 
 FACTS_VERSION = 1
 OPS = ("eq", "ne", "lt", "le", "gt", "ge", "in", "not_in", "empty", "nonempty", "within")
@@ -233,6 +232,7 @@ def engine_step(task, rule_id):
 
 
 def _loop_converged(env, rule):
+    from services.adequacy.coupling import NOTHING_TO_SAMPLE
     step = engine_step(env.task, rule["id"])
     if step is None:
         return NoEvidence("not_started", "the engine loop for this rule has not run")
@@ -245,7 +245,7 @@ def _loop_converged(env, rule):
             # GK A (19) SH11-L1: the runner's own refusal, typed by its cause.
             return NoEvidence(LOOP_CANNOT_SAMPLE, "the loop cannot sample this network's outages: they are "
                                                   "carried on Links (firm backup, grid import), not on "
-                                                  "electrical generators (.scratch/adequacy-loops/issues/01)")
+                                                  "electrical generators")
         return NoEvidence((step.get("job") or {}).get("outcome") or step["status"], str(reason)[:240])
     if loop.get("applied") is False:  # a user edit landed while the loop ran (H3): not this project's
         return NoEvidence("inputs_changed", "the inputs changed while the engine loop ran")
@@ -425,16 +425,21 @@ def _kpi_unserved_mwh(env):
     return facts[0]["value"] if facts else None
 
 
-def _own_solve(env, read):
+def _own_solve(env, read, typed=False):
     """F6: `read(ctx)` under the network guard, on the run's ctx, only when
     the run's own solve job finished, its capture is applied and the live
-    results carry its exact input identity; else None or no evidence."""
+    results carry its exact input identity; else None or no evidence. With
+    `typed` (the H2 readers, SH-11 H1), a missing or unfinished solve is
+    typed no evidence rather than None (`kpi.unserved_mwh` keeps None)."""
     from harness.durable import network_guard
     if env.ctx is None or env.case is not None:
         return None
     job = _solve_job(env)
-    if job is None or job["status"] != "completed":
-        return None
+    if job is None:
+        return NoEvidence("not_solved", "the run has no solve of its own") if typed else None
+    if job["status"] != "completed":
+        return (NoEvidence(f"solve_{job['status']}", f"the run's solve is {job['status']}, not completed")
+                if typed else None)
     refused = _not_applied(job)
     if refused is not None:
         return refused
@@ -537,6 +542,10 @@ def _period_rows(n, values):
     return rows
 
 
+# SH-11 H1: the H2 readers type a solve whose results predate the inputs.
+STALE_SOLVE = NoEvidence("stale_solve", "the inputs changed since the solve: its results are not this network's")
+
+
 def _offtake_shed_hours(env):
     """Hours (generator weights) in which the offtake's VoLL slack shed more
     than `SHED_THRESHOLD_MW`. Multi-period: one row per investment period,
@@ -556,6 +565,8 @@ def _offtake_shed_hours(env):
                 raw = lost_load.source(ctx, load)
             except ValueError as exc:
                 return NoEvidence(str(exc), f"{exc}: the offtake's shed cannot be read")
+            if not raw["valid_solve"]:
+                return STALE_SOLVE
             facts, _ = lost_load.calculate(raw, {"profile": lost_load.PROFILE, "entity_id": load,
                                                  "metrics": ["shed_hours"]})
             return facts[0]["value"] if facts else None
@@ -563,7 +574,7 @@ def _offtake_shed_hours(env):
         if not isinstance(frame, pd.DataFrame) or not frame.index.equals(n.snapshots) or load not in frame.columns:
             return NoEvidence("no_lost_load_capture", "no_lost_load_capture: the offtake's shed cannot be read")
         if not solve_matches_inputs(ctx):
-            return None
+            return STALE_SOLVE
 
         def hours(mask, w, _period):
             shed = [float(v) for v in frame.loc[mask, load]]
@@ -576,7 +587,7 @@ def _offtake_shed_hours(env):
         if not rows or isinstance(rows, NoEvidence):
             return rows or None
         return _worst(rows, "shed_hours")
-    return _own_solve(env, read)
+    return _own_solve(env, read, typed=True)
 
 
 def _electrolysers(n):
@@ -629,7 +640,7 @@ def _electrolyser_utilisation(env, rule):
         if not fleet:
             return NoEvidence("no_electrolyser", "the network has no electrolyser")
         if not solve_matches_inputs(ctx):
-            return None  # a capacity edited since the solve is not the dispatch's
+            return STALE_SOLVE  # a capacity edited since the solve is not the dispatch's
         if not len(n.investment_periods):
             return _utilisation(n, fleet, None, n.snapshot_weightings["generators"].reindex(n.snapshots))
 
@@ -644,7 +655,7 @@ def _electrolyser_utilisation(env, rule):
             return rows or None
         return _worst(rows, "utilisation", key=lambda r: (max(lo - r["utilisation"], r["utilisation"] - hi, 0.0),
                                                           -r["utilisation"]))
-    return _own_solve(env, read)
+    return _own_solve(env, read, typed=True)
 
 
 def _handoff_kpis_read(env):
@@ -745,9 +756,9 @@ FACTS: dict[str, Fact] = {
     "kpi.unserved_mwh": Fact("harness.lost_load_calculations.calculate", "lost_load_energy", "MWh",
                              _kpi_unserved_mwh),
     # Study harness 11: the H2 hub's offtake and electrolyser.
-    "h2.offtake.shed_hours": Fact("harness.lost_load_calculations.calculate", "shed_hours", "h",
+    "h2.offtake.shed_hours": Fact("services.run_gates._offtake_shed_hours", "shed_hours", "h",
                                   _offtake_shed_hours),
-    "h2.electrolyser.utilisation": Fact("services.run_gates._utilisation", "utilisation", "p.u.",
+    "h2.electrolyser.utilisation": Fact("services.run_gates._electrolyser_utilisation", "utilisation", "p.u.",
                                         _electrolyser_utilisation, per_rule=True),
     # Study harness 10a: the data-centre run (GK B (36) D1, Q1, Q2).
     "dc.gridcode.published": Fact("services.run_actions.choose", "id", None, _dc_gridcode_published),

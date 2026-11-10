@@ -469,7 +469,7 @@ def _read_on(monkeypatch, n, reader, *args, capture=None, current=True):
     ctx = type(
         "Ctx", (), {"network": n, "solver_state": {"last_lost_load": capture or {}}}
     )()
-    monkeypatch.setattr(run_gates, "_own_solve", lambda env, read: read(ctx))
+    monkeypatch.setattr(run_gates, "_own_solve", lambda env, read, typed=False: read(ctx))
     monkeypatch.setattr(calculations, "solve_matches_inputs", lambda c: current)
     return reader(None, *args)
 
@@ -638,7 +638,7 @@ def test_staged_offtake_counts_shed_hours_per_period_and_reads_the_worst(monkeyp
     [
         (None, True, "no_lost_load_capture"),  # no capture: never 0
         ("other_load", True, "no_lost_load_capture"),  # a capture without the offtake
-        ("ok", False, None),  # a stale solve has no value
+        ("ok", False, "stale_solve"),  # a stale solve has no value
     ],
 )
 def test_staged_offtake_without_its_own_capture_is_no_evidence(
@@ -661,10 +661,7 @@ def test_staged_offtake_without_its_own_capture_is_no_evidence(
     read = _read_on(
         monkeypatch, n, run_gates._offtake_shed_hours, capture=frame, current=current
     )
-    if expected is None:
-        assert read is None
-    else:
-        assert isinstance(read, run_gates.NoEvidence) and read.value == expected
+    assert isinstance(read, run_gates.NoEvidence) and read.value == expected
 
 
 # ── the investment rule (issue 19's fact) ───────────────────────────────────
@@ -1318,13 +1315,14 @@ def test_a_renamed_offtake_is_found_by_its_h2_bus(tmp_path, monkeypatch):
     [
         (
             "infeasible",
-            None,
+            "solve_failed",
         ),  # the run's solve did not complete (an infeasible LP fails the job)
         ("not_applied", "inputs_changed"),
         ("no_identity", "no_capture"),
         ("other_solve", "other_solve"),
         ("no_capture", "no_lost_load_capture"),
-        ("stale", None),
+        ("stale", "stale_solve"),
+        ("no_solve", "not_solved"),
     ],
 )
 @pytest.mark.parametrize("rid", ["h2.offtake.met", "h2.electrolyser.utilisation"])
@@ -1350,12 +1348,13 @@ def test_without_the_runs_own_solve_neither_reader_has_evidence(
         env.ctx.solver_state.pop("last_lost_load")
     if change == "stale":
         monkeypatch.setattr(calculations, "solve_matches_inputs", lambda c: False)
+    if change == "no_solve":
+        monkeypatch.setattr(run_gates, "_solve_job", lambda env: None)
     result = _gate(env, rid)
     if rid == "h2.electrolyser.utilisation" and change == "no_capture":
         return  # utilisation reads the dispatch, never the shed capture
     assert result["verdict"] == "not_evaluated", result
-    if reason is not None:
-        assert result["facts"][0]["value"] == reason
+    assert result["facts"][0]["value"] == reason  # H1: typed, never a bare none
     if rid == "h2.offtake.met":
         assert not run_gates.passed([result])
 
