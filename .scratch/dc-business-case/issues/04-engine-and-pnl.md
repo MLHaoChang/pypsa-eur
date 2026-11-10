@@ -16,7 +16,7 @@ Read [the spec](../spec.md) §3 (B1–B7), §5 and §6, and GK B conditions BC1�
 
 1. `services/finance/business_case.py`: `build_business_case(ic_case, inputs,
    it_energy)` → a `FinanceCase` with `counterfactual=()`, the IC's templates and
-   assets, the revenue templates (R1–R4 per §9 Q2), the facility and IT-hardware
+   assets, the revenue templates (R1, R2 and the R3 flag, per DCBC-SCOPE-1), the facility and IT-hardware
    `AssetFinance` with their depreciation classes, and the non-energy opex lines.
    Refusals B5 (`it_capex_missing`, `facility_capex_missing`).
 2. New streams in `cashflow.STREAM_CLASS` (spec §5).

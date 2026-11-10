@@ -3,7 +3,7 @@
 
 # Data-centre business case: a standalone project P&L beside the investment case
 
-Status: needs-triage (design; GK B plan GO with BC1–BC10 and GK A with BC3-1..8, 2026-11-10; owner scope answers pending, §9)
+Status: ready-for-agent once 01 merges (GK B plan GO with BC1–BC10, GK A with BC3-1..8, owner DCBC-SCOPE-1, all 2026-11-10)
 Owner request: 2026-11-10 (coordinator brief, session `session_01G7qCujw1M4yEuv53K2qCpG`)
 Research: [research.md](research.md)
 Reviewers: GK B (finance engine, lead), GK A (DC load and engine parts), UX (the view, slice 06)
@@ -108,7 +108,7 @@ no default** (§9 Q4), because prices are the case.
 | **R1 GPU / compute-hour** | billable GPU-hours = IT MWh(t) × u_sold ÷ kW per GPU (all-in server kW per GPU, so racks, CPUs and networking are inside) | GPU-hours × price per GPU-hour; reserved share at the contract price, the rest at on-demand × sold utilisation | IT hardware (owned) + facility | research §1a |
 | **R2 Colocation / wholesale lease** | contracted IT kW per phase (the spec's `it_mw`) × lease-up curve | kW × price per kW-month × 12, escalator, take-or-pay (independent of u(t)) | facility only (tenant owns IT) | research §1b–c |
 | **R3 Power pass-through** | the energy-bill streams | share × bill × (1 + margin), or metered IT kWh × PUE × rate | none beyond R2 | research §1d |
-| **R4 Other services** | contracted kW or rack count (`it_mw` ÷ `rack_kw`) | per kW-month or per rack-month (cross-connects, remote hands) | none | research §1e |
+| **R4 Other services** (later, DCBC-SCOPE-1) | contracted kW or rack count (`it_mw` ÷ `rack_kw`) | per kW-month or per rack-month (cross-connects, remote hands) | none | research §1e |
 
 - **IT energy series.** IT MWh(t) = Σ phases in service IT MW × u(t) ×
   weight(t) − the unserved IT share, per period, from `dc_load_profile` (GK A owns the
@@ -120,7 +120,7 @@ no default** (§9 Q4), because prices are the case.
 - **Lease-up.** A per-phase ramp (share of contracted kW billed in years 1..k,
   default 100 % from COD unless stated). Under R1, utilisation is already in u(t);
   a separate "sold share" says how much of the utilised capacity is sold.
-- **SLA credits.** A stated share of revenue (default 0, user-entered), a negative
+- **SLA credits** (later, DCBC-SCOPE-1). A stated share of revenue (default 0, user-entered), a negative
   revenue line, so availability risk is visible; it is not derived from the
   adequacy result in v1 (that would price lost load).
 
@@ -187,12 +187,19 @@ none.
 
 ## 9. Owner scope choices
 
-Pending; sent to the coordinator 2026-11-10. Answers are recorded here.
+Owner decision **DCBC-SCOPE-1** (2026-11-10 01:12Z, via the coordinator): the
+recommended answer on all four.
 
-- **Q1 IT hardware capex**: pending.
-- **Q2 Revenue models first**: pending.
-- **Q3 Where the P&L lives**: pending.
-- **Q4 Price defaults**: pending.
+- **Q1 IT hardware capex: A.** A user-entered lump per GPU or per MW IT, with its own
+  life (default 5 years, 4–6 as the sensitivity) and refresh. No GPU/server catalogue.
+- **Q2 Revenue models first: A.** R1 GPU-hour and R2 kW-month lease, with R3 power
+  pass-through as a flag. R4 (cross-connects and services) and SLA credits are later.
+- **Q3 Where the P&L lives: A.** A separate "Business case" view beside the
+  investment case on the Investment tab, with its own run and result. The IC's
+  numbers and hash do not change.
+- **Q4 Price defaults: A.** Revenue prices are user-entered with no default
+  (`not_established` until given). Cost lines get researched defaults with source
+  and year, marked assumed.
 
 ## 10. Slices (one PR each, PR-SIZE-1)
 
