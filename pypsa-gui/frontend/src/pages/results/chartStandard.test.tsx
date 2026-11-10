@@ -139,7 +139,7 @@ describe('time ticks (S4b)', () => {
 
 // ui-modern 02 slice 1: the Operation and Build charts are on the chart theme.
 describe('the chart theme on Operation and Build (ui-modern 02)', () => {
-  const THEMED = ['CapacityExpansion', 'Dispatch', 'DispatchStack', 'EnergyFlowsTab', 'LoadShapeTab',
+  const THEMED = ['CapacityExpansion', 'Dispatch', 'DispatchStack', 'DurationCurve', 'EnergyFlowsTab', 'LoadShapeTab',
     'StorageCycling', 'LostLoadTab']
   it('sizes every chart with CHART_HEIGHT, never a one-off pixel height', () => {
     const offenders = THEMED.flatMap(f => [...readFileSync(resolve(here, `${f}.tsx`), 'utf8')
