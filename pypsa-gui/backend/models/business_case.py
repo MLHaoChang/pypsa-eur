@@ -250,6 +250,18 @@ class LineItem(BaseModel):
             raise ValueError(
                 f"a revenue line takes no {info.field_name}: never a default"
             )
+        source = str(info.data.get("quantity_source"))
+        for col in v or ():
+            if (
+                (col in ("life_years", "rate") and info.data.get("kind") != "capex")
+                or (
+                    col == "rate"
+                    and info.data.get("depreciation") != "declining_balance"
+                )
+                or (col == "quantity" and source.startswith("linked:"))
+                or (col == "price" and source.startswith("share_of:"))
+            ):
+                raise ValueError(f"{info.field_name}[{col}]: the line takes no {col}")
         return v
 
     @field_validator("preset_rule")

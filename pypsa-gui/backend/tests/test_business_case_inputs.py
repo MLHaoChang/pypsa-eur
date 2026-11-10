@@ -357,6 +357,17 @@ def test_receivable_days_and_a_cost_default_refuse_non_finite(bad):
         (_share(price_by_year={2030: 1.0}), "price_by_year"),
         (_opex(preset_rule={}), "preset_rule"),
         (_rev(default_keys={"price": "k"}), "default_keys"),
+        (_opex(default_keys={"life_years": "k"}), "default_keys"),
+        (_capex(default_keys={"rate": "k"}), "default_keys"),
+        (_share(default_keys={"price": "k"}), "default_keys"),
+        (
+            _opex(
+                quantity_source="linked:x@1",
+                quantity=None,
+                default_keys={"quantity": "k"},
+            ),
+            "default_keys",
+        ),
         (_capex(rate=0.0, depreciation="declining_balance"), "rate"),
         (_capex(rate=1.01, depreciation="declining_balance"), "rate"),
         (_capex(life_years=0.5), "life_years"),
@@ -375,6 +386,15 @@ def test_each_shape_fault_names_its_column(payload, loc):
 
 
 def test_boundary_shapes_are_accepted():
+    B.LineItem(**_opex(default_keys={"price": "k", "quantity": "k"}))
+    B.LineItem(
+        **_capex(
+            depreciation="declining_balance",
+            rate=0.1,
+            default_keys={"rate": "k", "life_years": "k"},
+        )
+    )
+    B.LineItem(**_share(default_keys={"quantity": "k"}))
     B.LineItem(
         **_capex(
             depreciation="declining_balance", rate=1.0, life_years=1, refresh_years=1
