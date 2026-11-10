@@ -8,8 +8,8 @@ Blocked by: 01
 Type: feature
 Model: Opus for the shared theme API, Sonnet for each chart. Reviewer: UX.
 
-The issue is cut into slices (PR-SIZE-1). Slice 1 is done in its PR; the
-rest are ready for an agent and build on its API.
+The issue is cut into slices (PR-SIZE-1). Slices 1 and 2 are done in their PRs; the
+rest are ready for an agent and build on their API.
 
 ## Slice 1: shared chart theme (this PR)
 
@@ -25,9 +25,12 @@ chat-button part of 8). One Recharts theme every chart uses,
 
 Done when the existing Results charts above use the theme, `chartTheme.test.tsx` covers the API, dark and light shots show before and after, and the PR merges with the UX reviewer's OK.
 
+## Slice 2: duration curve (done in its PR)
+
+`pypsa-gui/frontend/src/pages/results/DurationCurve.tsx`: `<DurationCurve>` on `ChartFrame`, and `durationRows()`, which sorts each series on its own over % of hours. A series is `{ key, name, colour, csv }`; the first is solid, later ones dashed and named on the line; `mean` draws the labelled reference line. Used by Dispatch (load and residual load) and Prices (system mean price). The file sits in `pages/results/` so `chartStandard.test.tsx` guards it (it is in `THEMED`). The two-run price duration curve in Compare (`CompareView.tsx`) keeps its own chart.
+
 ## Later slices
 
-2. **Duration curve** as its own chart type (load, residual, price), on `ChartFrame`.
 3. **8760 hour-by-day heatmap** (price, state of charge, curtailment) with a shared scale.
 4. **Energy-flow Sankey** on the theme (the Energy flow tab's Sankey moves into `ChartFrame`).
 5. **Tornado / delta for sensitivities**, with shared axes, scales, colours and order across base and sensitivity cases (VISUALS-1).
