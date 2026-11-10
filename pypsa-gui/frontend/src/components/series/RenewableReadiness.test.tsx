@@ -86,26 +86,60 @@ describe('unrecorded series (RP-18)', () => {
     expect(notReadyReason([un('a', 'd1')])).toContain('no recorded source')
   })
 
-  it('lists every series with its fingerprint and sends exactly those back', async () => {
+  it('names each series with its technology, never a hash', () => {
+    render(<UnrecordedSourceBanner rows={[un('a', 'd1'), { ...un('b', 'd2'), technology: 'solar' }]} onConfirm={vi.fn()} />)
+    const text = screen.getByTestId('unrecorded-source-banner').textContent ?? ''
+    expect(text).toContain('a· wind availability')
+    expect(text).toContain('b· solar availability')
+    expect(text).not.toContain('d1')
+  })
+
+  it('marks them with a verb, singular and plural, sending the digests', async () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+    const { unmount } = render(<UnrecordedSourceBanner rows={[un('a', 'd1')]} onConfirm={onConfirm} />)
+    const one = screen.getByTestId('confirm-unrecorded')
+    expect(one.textContent).toBe('Mark this one as the network’s own')
+    await userEvent.click(one)
+    expect(onConfirm).toHaveBeenCalledWith([{ component: 'a', digest: 'd1' }])
+    unmount()
+    render(<UnrecordedSourceBanner rows={[un('a', 'd1'), un('b', 'd2'), un('c', 'd3')]} onConfirm={onConfirm} />)
+    expect(screen.getByTestId('confirm-unrecorded').textContent).toBe('Mark these 3 as the network’s own')
+  })
+
+  it('folds past five rows and keeps the button off until every row is shown', async () => {
     const onConfirm = vi.fn().mockResolvedValue(undefined)
     const rows = Array.from({ length: 12 }, (_, i) => un(`g${i}`, `d${i}`))
     render(<UnrecordedSourceBanner rows={rows} onConfirm={onConfirm} />)
-    const text = screen.getByTestId('unrecorded-source-banner').textContent ?? ''
-    for (let i = 0; i < 12; i++) expect(text).toContain(`g${i}`)
-    await userEvent.click(screen.getByTestId('confirm-unrecorded'))
+    const text = () => screen.getByTestId('unrecorded-source-banner').textContent ?? ''
+    expect(text()).toContain('g4')
+    expect(text()).not.toContain('g5·')
+    expect(text()).toContain('(7 more) Show all')
+    const btn = screen.getByTestId('confirm-unrecorded') as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+    expect(screen.getByTestId('confirm-unrecorded-why').textContent).toBe('Show all 12 first, then mark them.')
+    await userEvent.click(screen.getByTestId('unrecorded-toggle'))
+    for (let i = 0; i < 12; i++) expect(text()).toContain(`g${i}·`)
+    expect(btn.disabled).toBe(false)
+    await userEvent.click(btn)
     expect(onConfirm).toHaveBeenCalledWith(rows.map(r => ({ component: r.generator, digest: r.digest })))
   })
 
-  it('refuses to stamp when a series cannot be shown with its fingerprint', () => {
+  it('says why the button is off when a series has not been read', () => {
     render(<UnrecordedSourceBanner rows={[un('a', 'd1'), un('b')]} onConfirm={vi.fn()} />)
     expect((screen.getByTestId('confirm-unrecorded') as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByTestId('confirm-unrecorded-why').textContent)
+      .toBe('Can’t mark them yet: some series have not been read.')
   })
 
-  it('shows the refusal and stays when the series changed', async () => {
-    const onConfirm = vi.fn().mockRejectedValue({ response: { data: { detail: { message: 'changed since the list was shown' } } } })
-    render(<UnrecordedSourceBanner rows={[un('a', 'd1')]} onConfirm={onConfirm} />)
+  it('puts a stale refusal on the button line as a status, and clears it when the list re-reads', async () => {
+    const stale = { response: { data: { detail: { error_kind: 'unrecorded_stale', message: 'x' } } } }
+    const { rerender } = render(<UnrecordedSourceBanner rows={[un('a', 'd1')]} onConfirm={vi.fn().mockRejectedValue(stale)} />)
     await userEvent.click(screen.getByTestId('confirm-unrecorded'))
-    expect((await screen.findByTestId('confirm-unrecorded-error')).textContent).toContain('changed since')
+    const note = await screen.findByTestId('confirm-unrecorded-error')
+    expect(note.getAttribute('role')).toBe('status')
+    expect(note.textContent).toBe('The series changed since this list was shown: reload to see them.')
+    rerender(<UnrecordedSourceBanner rows={[un('a', 'd9')]} onConfirm={vi.fn()} />)
+    expect(screen.getByTestId('confirm-unrecorded-error').textContent).toBe('')
   })
 
   it('renders nothing without unrecorded rows', () => {
