@@ -509,8 +509,8 @@ def _grid_risk_row_cell(c: Any) -> dict:
 
 
 def _sub_row_flags(flags: list[str]) -> list[str]:
-    """A sub-row's flags to word, once each. A bound from an outage longer than the period is not one from unknown
-    units, so the generic lower-bound words are left out beside it (the tab's `subRowFlags`)."""
+    """A line's or sub-row's flags to word, once each. A bound from an outage longer than the period is not one from
+    unknown units, so the generic lower-bound words are left out beside it (the tab's `subRowFlags`)."""
     out = list(dict.fromkeys(flags))
     return [f for f in out if f != "lower_bound"] if "outage_longer_than_period" in out else out
 
@@ -600,9 +600,10 @@ def grid_risk_table(payload: dict, source_path: str):
                 else None
             t, eur = _grid_risk_values(cell, missing)
             source = ", ".join(ln["source_files"])
-            if ln["stamp"]:
-                source = f"{source} ({_stamp_words(ln['stamp'])})"
-            notes = "; ".join(grid_risk_flag_words(f) for f in ln["flags"] if f != "stale")
+            stamp = _stamp_words(ln["stamp"])
+            if stamp:
+                source = f"{source} ({stamp})"
+            notes = "; ".join(grid_risk_flag_words(f) for f in _sub_row_flags(ln["flags"]) if f != "stale")
             rows.append([*lead, F.fmt_text(ln["label"]), t, eur, _grid_risk_status(ln), notes, source])
             if ln["key"] in GRID_RISK_SUB_ROW_LINES and missing is None:
                 for r in ln["rows"]:
@@ -620,27 +621,33 @@ def grid_risk_table(payload: dict, source_path: str):
                          source_path=f"{source_path}/lines")
 
 
+def _bound_reason(flags: list[str]) -> str:
+    """Why a line is a lower bound, in the tile's words (the tab's `boundReason`)."""
+    return ("the outage is longer than the period" if "outage_longer_than_period" in flags
+            else "some units are not known")
+
+
 def grid_risk_disclosures(payload: dict) -> list[str]:
     head = "Grid risk to production"
     lines = payload["lines"]
-    out = [f"{head} — each grid risk as lost tonnes, then EUR, per year: expected values, not a forecast. "
+    out = [f"{head}: each grid risk as lost tonnes, then EUR, per year, as expected values, not a forecast. "
            "The total is an upper bound: the lines may overlap (the same event can sit in two lines)."]
     missing = [ln for ln in lines if ln["status"] == "missing"]
     if missing:
         n = len(missing)
-        out.append(f"{head} — incomplete: {n} {'line is' if n == 1 else 'lines are'} missing ("
+        out.append(f"{head}: incomplete, {n} {'line is' if n == 1 else 'lines are'} missing ("
                    + "; ".join(f"{ln['label']}: Missing: {', '.join(ln['missing_words'] or ['input'])}"
                                for ln in missing) + "). A missing line is not 0.")
-    partial = [ln["label"] for ln in lines if ln["status"] == "partial"]
+    partial = [f"{ln['label']} ({_bound_reason(ln['flags'])})" for ln in lines if ln["status"] == "partial"]
     if partial:
-        out.append(f"{head} — lower bound: {', '.join(partial)} (some units are not known).")
+        out.append(f"{head}: lower bound for {'; '.join(partial)}.")
     stale = [ln["label"] for ln in lines if ln["stale"]]
     if stale:
-        out.append(f"{head} — out of date: {', '.join(stale)} (the inputs changed since the run).")
+        out.append(f"{head}: out of date for {', '.join(stale)} (the inputs changed since the run).")
     if any(c["t_per_year"] is not None and c["eur_per_year"] is None
            for ln in lines for c in ln["by_period"].values()):
-        out.append(f"{head} — EUR is unavailable where no lost-production value is set; the tonnes stand.")
+        out.append(f"{head}: EUR is unavailable where no lost-production value is set; the tonnes stand.")
     if len(payload["periods"]) > 1:
-        out.append(f"{head} — one row set per period; a period's figures are per year of that period, "
+        out.append(f"{head}: one row set per period; a period's figures are per year of that period, "
                    "never a horizon total.")
     return out

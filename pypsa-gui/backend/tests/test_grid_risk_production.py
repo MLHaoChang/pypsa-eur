@@ -918,6 +918,32 @@ def test_a_rows_lower_bound_sits_in_that_periods_row_cell_only(monkeypatch):
     }
 
 
+def test_the_n_1_line_names_why_it_is_a_lower_bound(monkeypatch):
+    """G2P-13: the line's bound comes from an outage longer than the period, so its flags say that."""
+    p = [_prod(1.0, 10.0)]
+    _fake_loss(
+        monkeypatch,
+        {"site_trafo": {"_": (p, "lower")}, "site_trafo_b": {"_": (p, "lower")}},
+    )
+    n1 = _n1(_two_trafos())
+    assert n1["flags"] == [
+        "no_inventory_credit",
+        G.PL.OUTAGE_LONGER_THAN_PERIOD,
+        G.LOWER_BOUND,
+    ]  # the reason once, before the bound it explains
+    assert n1["status"] == "partial"
+    _fake_loss(
+        monkeypatch,
+        {"site_trafo": {"_": (p, None)}, "site_trafo_b": {"_": (p, None)}},
+    )
+    n1 = _n1(_two_trafos())
+    assert n1["flags"] == ["no_inventory_credit"] and n1["status"] == "ok"
+    assert _SCREEN_FLAGS == {
+        "line": ["no_inventory_credit"],
+        "period": ["feedstock_inventory_not_credited"],
+    }
+
+
 def test_a_skipped_transformer_gets_no_row_and_the_basis_says_so(monkeypatch):
     n = _two_trafos()
     n.links.at["site_trafo_b", "mttr_hours"] = float("nan")
