@@ -142,9 +142,4 @@ describe('headline words', () => {
     expect(headlineFigure(card('lcoe', { value: 55.5, unit: 'EUR/MWh' }))).toEqual({ value: '55.50 €/MWh', basis: 'investment case' })
     expect(headlineFigure(card('lcoe', { value: 55.5, unit: 'USD/MWh' })).value).toBe('55.50 USD/MWh')
   })
-
-  it('writes a zero rate as 0 %, not 0.0 %', () => {
-    expect(headlineFigure(card('curtailed_share', { value: 0, unit: '%', state: 'zero' })).value).toBe('0 %')
-    expect(headlineFigure(card('curtailed_share', { value: 0.04, unit: '%' })).value).toBe('0.0 %')
-  })
 })
