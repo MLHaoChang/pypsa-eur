@@ -1,4 +1,5 @@
 """LC-46: the Assumptions card's bulk-button words are the chat's words (UX A8)."""
+
 import pathlib
 import re
 
@@ -16,7 +17,9 @@ def test_keep_all_defaults_wording_matches_everywhere():
     from services.not_via_chat import NOT_VIA_CHAT
 
     words = _card_words()
-    reason = next(e for e in NOT_VIA_CHAT if e["id"] == "accept_assumed_defaults")["reason"]
+    reason = next(e for e in NOT_VIA_CHAT if e["id"] == "accept_assumed_defaults")[
+        "reason"
+    ]
     assert words in reason
     for name in ("investment-decision.md", "renewable-profile.md"):
         text = (ROOT / "backend/harness/workflows" / name).read_text()
