@@ -308,13 +308,15 @@ def _reports_copy_guard(src: pathlib.Path | None = None, dst: pathlib.Path | Non
     Take it AFTER `PyPSAService.get_lock()` when the copy holds both: no
     report writer takes the network lock inside a report lock.
     """
-    from routers.reports import _http as _report_http
-
     try:
         with report_store.reports_copy_lock(src, dst, incoming=incoming) as held:
             yield held
     except report_store.ReportBusy as exc:
-        raise _report_http(exc) from exc
+        raise HTTPException(409, {
+            "error_kind": "report_busy",
+            "message": "A report of this project is being written, so its reports "
+                       "could not be copied; nothing was changed. Try again in a moment.",
+        }) from exc
 
 
 def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
@@ -2266,8 +2268,13 @@ def save_project(
     # Likewise a Save-As / Save-a-Copy whose source has a report being written
     # (study harness 07e). `_save_context` takes the locks again, and holds
     # them, around its writes.
-    _refuse_copy_of_busy_reports(PyPSAService.get_active_context(), name, db, user)
     project = project_registry.find_project(db, user, name)
+    # By the project's own name, as `_save_context` compares it: `name` may
+    # be the bound project's id.
+    _refuse_copy_of_busy_reports(
+        PyPSAService.get_active_context(),
+        project.name if project is not None else name, db, user,
+    )
     if project is None:
         # First save of a new project — register a root row in the DB.
         project = project_registry.create_root(
@@ -5119,8 +5126,8 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
         raise HTTPException(404, f"Project '{name}' not found")
 
     buf = io.BytesIO()
-    # The report locks (study harness 07e): each report goes in as one
-    # consistent set of files; busy → 409 `report_busy`.
+    # The report locks (study harness 07e): no report is read while one
+    # write to it is in progress; busy → 409 `report_busy`.
     with _reports_copy_guard(src) as reports_held, \
             zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for fname in _BUNDLE_FILES:

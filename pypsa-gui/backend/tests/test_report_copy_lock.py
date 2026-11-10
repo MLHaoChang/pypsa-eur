@@ -113,7 +113,9 @@ def test_the_locks_share_one_deadline(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 30)
     clock = iter([100.0, 110.0, 125.0])
     monkeypatch.setattr(
-        store, "time", SimpleNamespace(monotonic=lambda: next(clock), time_ns=lambda: 0)
+        store,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(clock, 125.0), time_ns=lambda: 0),
     )
     timeouts = []
     real = store.report_lock
@@ -539,3 +541,31 @@ def test_a_report_that_is_a_file_or_a_link_is_removed_as_one(tmp_path):
         "00000000000000cc"
     ]
     assert (kept / "meta.json").exists()  # the link went, not what it pointed at
+
+
+def test_a_writer_is_refused_when_a_copy_of_this_process_keeps_its_report(
+    tmp_path, monkeypatch
+):
+    """A copy can hold a report for a whole save or restore: a writer in
+    another thread gets `report_busy` after its bound, it does not hang
+    (GK B F2)."""
+    monkeypatch.setattr(store, "LOCK_TIMEOUT_S", 0.3)
+    _seed(tmp_path, RID_A)
+    outcome = []
+
+    def writer():
+        started = time.monotonic()
+        try:
+            with store.report_lock(tmp_path, RID_A):
+                outcome.append("entered")
+        except store.ReportBusy:
+            outcome.append(time.monotonic() - started)
+
+    with store.reports_copy_lock(tmp_path):
+        thread = threading.Thread(target=writer)
+        thread.start()
+        thread.join(5)
+    assert not thread.is_alive()
+    assert outcome and outcome[0] != "entered" and 0.25 < outcome[0] < 2
+    with store.report_lock(tmp_path, RID_A):  # and it is free once the copy ends
+        pass

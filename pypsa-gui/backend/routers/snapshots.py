@@ -452,7 +452,7 @@ def _create_snapshot_internal(
 ) -> SnapshotInfo:
     """
     `_capture_snapshot` under the project's report locks (study harness 07e),
-    so each report is captured as one consistent set of files. They are taken
+    so no report is captured while one write to it is in progress. They are taken
     after the network lock (`_reports_copy_guard`) and before the snapshot
     directory exists: busy → 409 `report_busy` and no snapshot is left behind.
     """

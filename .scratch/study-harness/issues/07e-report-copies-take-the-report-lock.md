@@ -51,4 +51,12 @@ Side effects to know about:
 - Export can now answer 409 `report_busy`, the chat export tool included.
 - Locking a snapshot's or an export source's reports leaves `.<id>.lock` files there.
 
-Not covered: the study option forks (`services/study/forks.py`) walk the bundle themselves; `services/legacy_import.py` and `import_unclaimed_project` move a whole directory in from outside the registry, where no report writer can reach it yet.
+Not covered, filed as [07f](07f-report-lock-remaining-directory-operations.md): project delete and rename, snapshot delete and prune, the study option forks (`services/study/forks.py`, which also copy the lock files), `services/legacy_import.py` and `import_unclaimed_project`.
+
+10 Nov, GK B (43) review of #1345, asks F1–F6:
+
+- **F1.** The order is pinned at each site that holds the network lock: a second thread holds the request's own network lock while snapshot create, restore (early check and its writes) and Save-As wait, and a report writer still gets its lock. Red when the two locks are swapped, or when `_save_context` drops its hold of the context's lock.
+- **F2.** A report writer waiting for a thread of this process is now refused `report_busy` after `LOCK_TIMEOUT_S` (30 s), as it already was for another process. Before, it waited without a bound, which a copy holding the report for a whole save or restore would have turned into a hang.
+- **F4.** The chat export tool returns the typed `report_busy`; the manifest text and the 409 message say what is true for copies.
+- **F5.** "One consistent set of files" was too strong: a copy never reads or replaces a report while one write to it is in progress, but a writer that saves in several locked steps can have a copy land between them. Locking a snapshot's reports leaves `.<id>.lock` files in the snapshot; nothing else in it changes.
+- **F6.** The Save-As early check compares the project's own name, as the save does, so a save addressed by the bound project's id copies nothing and takes no report lock.

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import io
 import os
+import threading
+import time
 import zipfile
 
 import pytest
@@ -422,3 +424,179 @@ def test_restore_refuses_before_it_saves_unsaved_edits(client, project, monkeypa
     with held_elsewhere(pdir, RID_A):
         _busy(client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore"))
     assert saved == []
+
+
+# ── lock order at the sites that hold the network lock (GK B F1) ────────────
+
+
+def _with_the_sites_network_lock_held_elsewhere(
+    monkeypatch, module, site, call, pdir, lock_of=None
+):
+    """Run `call`; when it reaches `module.site`, another thread takes the
+    network lock that request uses and keeps it. A report writer must then
+    still get its lock at once: the site waits for the network lock FIRST,
+    holding no report lock. Returns what `call` returned once the lock is
+    freed."""
+    from services.pypsa_service import PyPSAService
+
+    lock_of = lock_of or (lambda *a, **k: PyPSAService.get_lock())
+    locks, result = [], []
+    reached, holding, release = threading.Event(), threading.Event(), threading.Event()
+    real = getattr(module, site)
+
+    def at_site(*a, **k):
+        if not reached.is_set():
+            locks.append(lock_of(*a, **k))
+            reached.set()
+            assert holding.wait(10)
+        return real(*a, **k)
+
+    def hold():
+        assert reached.wait(10)
+        with locks[0]:
+            holding.set()
+            release.wait(20)
+
+    monkeypatch.setattr(module, site, at_site)
+    holder = threading.Thread(target=hold)
+    caller = threading.Thread(target=lambda: result.append(call()))
+    holder.start()
+    caller.start()
+    try:
+        assert holding.wait(10)
+        time.sleep(0.5)  # long enough for an inverted site to take the report locks
+        with store.report_lock(pdir, RID_A, timeout=1):
+            pass
+    finally:
+        release.set()
+        holder.join(10)
+        caller.join(30)
+    return result[0]
+
+
+def test_snapshot_create_waits_for_the_network_lock_before_any_report_lock(
+    client, project, monkeypatch
+):
+    from routers import snapshots
+
+    name, pdir = project
+    monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 5)
+    resp = _with_the_sites_network_lock_held_elsewhere(
+        monkeypatch,
+        snapshots,
+        "_create_snapshot_internal",
+        lambda: client.post(f"/api/projects/{name}/snapshots", json={"label": "v1"}),
+        pdir,
+    )
+    assert resp.status_code in (200, 201), resp.text
+
+
+@pytest.mark.parametrize("site", ["_absent_at_capture", "_refuse_if_changed_since"])
+def test_restore_waits_for_the_network_lock_before_any_report_lock(
+    client, project, monkeypatch, site
+):
+    """At its early check and again at its own writes."""
+    from routers import snapshots
+
+    name, pdir = project
+    snap_id = _snapshot(client, name)
+    monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 5)
+    if site == "_refuse_if_changed_since":
+        # Reached with the lock held by the request itself, so stop one step
+        # earlier: the last call before the restore's `with` statement.
+        site = "_save_unsaved_live_state"
+        monkeypatch.setattr(
+            snapshots, "_create_snapshot_internal", lambda *a, **k: None
+        )
+    resp = _with_the_sites_network_lock_held_elsewhere(
+        monkeypatch,
+        snapshots,
+        site,
+        lambda: client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore"),
+        pdir,
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_a_save_as_waits_for_the_network_lock_before_any_report_lock(
+    client, project, project_storage_dir, monkeypatch
+):
+    """`_save_context` keeps the context's lock for the whole save: without
+    it, the save would wait for that lock inside `_write_context` with the
+    report locks already held."""
+    from routers import projects
+
+    name, pdir = project
+    monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 5)
+    monkeypatch.setattr(projects, "_refuse_copy_of_busy_reports", lambda *a, **k: None)
+    resp = _with_the_sites_network_lock_held_elsewhere(
+        monkeypatch,
+        projects,
+        "_save_context",
+        lambda: client.post("/api/projects/lockme_copy", params={"rebind": True}),
+        pdir,
+        lock_of=lambda ctx, *a, **k: ctx.mutation_lock,
+    )
+    assert resp.status_code == 200, resp.text
+    assert _tree(project_storage_dir("lockme_copy") / "reports") == _tree(
+        pdir / "reports"
+    )
+
+
+# ── GK B F4, F5, F6 ─────────────────────────────────────────────────────────
+
+
+def test_the_chat_export_tool_refuses_typed_report_busy(client, session_ctx, project):
+    from fastapi import HTTPException
+
+    from services import chat_tools
+
+    name, pdir = project
+    with held_elsewhere(pdir, RID_A), pytest.raises(HTTPException) as exc:
+        chat_tools.download_project_bundle(name)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error_kind"] == "report_busy"
+
+
+def test_the_manifest_text_for_report_busy_covers_copies():
+    import json
+    import pathlib
+
+    fragment = (
+        pathlib.Path(__file__).parents[2]
+        / "tool-error-kinds.d"
+        / "claude-sh07c-report-comment-revisions.json"
+    )
+    why = json.loads(fragment.read_text())["kinds"]["report_busy"]["why"]
+    assert "3 s" in why and "30 s" in why and "another request of this server" in why
+
+
+def test_a_restore_leaves_only_lock_files_behind_in_the_snapshot(client, project):
+    """Locking the snapshot's reports writes `.<id>.lock` beside them. Nothing
+    else in the snapshot changes, and it restores and deletes as before."""
+    name, pdir = project
+    snap_id = _snapshot(client, name)
+    snap = pdir / "snapshots" / snap_id
+    before = _tree(snap)
+    for _ in range(2):
+        resp = client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore")
+        assert resp.status_code == 200, resp.text
+    assert _tree(snap) == before  # `_tree` leaves the lock files out
+    locks = sorted(p.name for p in (snap / "reports").iterdir() if p.is_file())
+    assert locks == [f".{RID_A}.lock", f".{RID_B}.lock"]
+    assert _tree(pdir / "reports") == _tree(snap / "reports")
+    resp = client.delete(f"/api/projects/{name}/snapshots/{snap_id}")
+    assert resp.status_code in (200, 204), resp.text
+    assert not snap.exists()
+
+
+def test_a_save_of_the_bound_project_by_its_id_copies_no_reports(
+    client, project, project_row
+):
+    """The early check compares the project's own name, as the save does: a
+    save addressed by id is still a save to the bound project (GK B F6)."""
+    name, pdir = project
+    row = project_row(name)
+    with held_elsewhere(pdir, RID_A):
+        resp = client.post(f"/api/projects/{row.id}", params={"force": True})
+    assert resp.status_code == 200, resp.text

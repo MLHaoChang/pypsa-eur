@@ -282,9 +282,9 @@ def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | N
     Cross-process: the file lock `reports/.<report_id>.lock`
     (`harness.durable.file_lock`, GK B's #1070 ruling), taken once per
     thread; a thread lock in front of it makes it re-entrant, so a holder
-    may call `save_version`. `ReportBusy` when another process keeps it past
-    `LOCK_TIMEOUT_S`. With `timeout` (a bundle copy sharing one deadline over
-    several reports) that bound also covers a thread of this process."""
+    may call `save_version`. `ReportBusy` when another holder, a process or
+    a thread of this one, keeps it past `LOCK_TIMEOUT_S`, or past `timeout`
+    (a bundle copy sharing one deadline over several reports)."""
     from harness.durable import file_lock
 
     rid = validate_report_id(report_id)
@@ -292,10 +292,12 @@ def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | N
     key = str((root / rid).resolve())
     with _REPORT_LOCKS_GUARD:
         lock = _REPORT_LOCKS.setdefault(key, threading.RLock())
-    # A writer waits for another thread of this process as long as it takes
-    # (07c); a caller with a `timeout` is refused when that thread keeps it.
-    started = None if timeout is None else time.monotonic()
-    if not lock.acquire(timeout=-1 if timeout is None else max(0.0, timeout)):
+    # One budget for the thread lock and the file lock: a bundle copy of this
+    # process can hold a report for a whole save or restore (07e), so a writer
+    # is refused after `LOCK_TIMEOUT_S` here too, not left waiting.
+    budget = LOCK_TIMEOUT_S if timeout is None else max(0.0, timeout)
+    started = time.monotonic()
+    if not lock.acquire(timeout=budget):
         raise ReportBusy(f"report {rid} is being written")
     try:
         held = getattr(_HELD, "keys", None)
@@ -305,8 +307,7 @@ def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | N
             yield
             return
         root.mkdir(parents=True, exist_ok=True)
-        left = (LOCK_TIMEOUT_S if timeout is None
-                else max(0.0, timeout - (time.monotonic() - started)))
+        left = max(0.0, budget - (time.monotonic() - started))
         try:
             with file_lock(str(root / f".{rid}.lock"), timeout=left,
                            busy=f"report {rid} is being written"):
@@ -355,8 +356,9 @@ def _reports_key(project_dir: pathlib.Path | None) -> str | None:
 def reports_copy_lock(src: pathlib.Path | None = None, dst: pathlib.Path | None = None,
                       *, incoming: tuple[str, ...] | frozenset[str] | set[str] = ()):
     """`report_lock` on every report a bundle copy reads or replaces (study
-    harness 07e), so a snapshot, restore, import or save-as never interleaves
-    with a report writer.
+    harness 07e), so a snapshot, restore, import or save-as never reads or
+    replaces a report while one write to it is in progress. (A writer that
+    saves in several locked steps can still have a copy land between them.)
 
     `src` is read: its own reports are locked. `dst` is written: its reports,
     `src`'s and the `incoming` ids (an import's archive) are locked there.
