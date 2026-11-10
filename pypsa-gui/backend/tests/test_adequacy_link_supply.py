@@ -458,6 +458,12 @@ def test_an_import_link_without_capacity_is_kept_only_for_stable_membership():
     kept = sampled_fleet(n, keep_zero_capacity=True)
     [unit] = [u for u in kept.units if u.name == "link:grid_import"]
     assert unit.capacity_mw == 0.0 and unit.q == 0.01 and unit.mttr_hours == 12.0
+    [live] = [
+        u
+        for u in sampled_fleet(_net(), keep_zero_capacity=True).units
+        if u.name == "link:grid_import"
+    ]
+    assert live.capacity_mw == pytest.approx(40.0)  # a live Link keeps its capacity
     dropped = sampled_fleet(n)
     assert "link:grid_import" not in _names(dropped)
     assert (
