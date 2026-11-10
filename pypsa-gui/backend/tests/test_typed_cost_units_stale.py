@@ -3,7 +3,8 @@ TCU-05 (`.scratch/typed-cost-units/issues/05-...`): a cost priced through a scal
 Generator's `dc_ac_ratio`, a Link's output-bus efficiency) reads stale when that input changes.
 
 One mechanism for both: pricing records the input it scaled by (`scaled_by` on the provenance
-entry), and `provenance.staleness` recomputes the current input through pricing's own
+entry), and the provenance graph (`provenance_graph.money`, moved from `provenance.staleness`,
+provenance-graph 02) recomputes the current input through pricing's own
 `_scale_input` and compares column and value (math.isclose rel 1e-9). GK A conditions T5-1..T5-7.
 """
 
@@ -15,6 +16,7 @@ import pandas as pd
 import pypsa
 import pytest
 
+from services import provenance_graph as G
 from services.asset_schema import provenance as P
 from tests.test_library_defaults_pack_typed_units import (
     TYPED,
@@ -55,10 +57,7 @@ def _fc():
 
 
 def _stale(n, cls, name):
-    return {
-        f: e.get("stale")
-        for f, e in P.staleness(n, cls, name, P.get(n, cls, name)).items()
-    }
+    return {f: e.get("stale") for f, e in G.stale_entries(n, cls, name).items()}
 
 
 # ── recording ───────────────────────────────────────────────────────────────
@@ -324,7 +323,7 @@ def test_staleness_never_changes_what_get_reads(tmp_path, monkeypatch):
     n = _pv(tmp_path, monkeypatch)
     n.generators.at["g", "dc_ac_ratio"] = 1.3
     before = copy.deepcopy(P._root(n))
-    P.staleness(n, "Generator", "g", P.get(n, "Generator", "g"))
+    G.stale_entries(n, "Generator", "g")
     assert P._root(n) == before
 
 
@@ -334,7 +333,7 @@ def test_an_asset_with_no_scale_records_reads_through_staleness_unchanged():
     n.add("Generator", "gas", bus="b")
     P.record(n, "Generator", "gas", "marginal_cost", status="customised")
     got = P.get(n, "Generator", "gas")
-    assert P.staleness(n, "Generator", "gas", got) == got
+    assert G.stale_entries(n, "Generator", "gas") == got
 
 
 # ── routes and reference apply ──────────────────────────────────────────────

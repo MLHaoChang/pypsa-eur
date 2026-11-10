@@ -1603,6 +1603,42 @@ def test_an_identity_check_is_listed_but_another_read_on_its_thread_counts(
     assert scored["wrong_project_results"] == 0 and scored["identity_reads"] == [decoy]
 
 
+def test_a_log_another_test_left_broken_before_the_case_is_not_read(
+    tmp_path, monkeypatch
+):
+    """CI: another test (`test_harness_eventlog*.py`) leaves a session log with a
+    broken line mid-file in the shared event-log root. The case did not write it,
+    so the ledgers, which count what the case added, never read it. A log the
+    case wrote or appended to is still read."""
+    monkeypatch.setattr(eventlog, "_root", lambda: tmp_path)
+    broken = tmp_path / "other" / "s.jsonl"
+    broken.parent.mkdir()
+    broken.write_text('{"format": 1}\n{not-json\n{"seq": 2}\n')
+    before = {"event_logs": _logs(tmp_path), "approvals": set(), "dirs": {}}
+    header = {"format": eventlog.FORMAT, "session_id": "chat-1"}
+    start = {"seq": 1, "type": "turn/start", "project": P}
+    attempt = {
+        "seq": 2,
+        "type": "assistant/attempt",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "id": "tu-1", "name": "x", "input": {}}],
+        },
+    }
+    log = tmp_path / "case" / "s.jsonl"
+    log.parent.mkdir()
+    log.write_text("\n".join(json.dumps(r) for r in (header, start, attempt)) + "\n")
+    after = {"event_logs": _logs(tmp_path), "approvals": set(), "dirs": {}}
+    calls = native_ledgers(before, after)["calls"]
+    assert calls == {"tu-1": {"name": "x", "input": {}, "project_id": P}}
+    # The broken log changing during the case would make it the case's: read, and it raises.
+    broken.write_text(broken.read_text() + '{"seq": 3}\n')
+    with pytest.raises(json.JSONDecodeError):
+        native_ledgers(
+            before, {"event_logs": _logs(tmp_path), "approvals": set(), "dirs": {}}
+        )
+
+
 def test_a_torn_event_log_beside_the_case_is_read_as_the_harness_reads_it(
     tmp_path, monkeypatch
 ):

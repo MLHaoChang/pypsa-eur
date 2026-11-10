@@ -1,6 +1,7 @@
 # The Guided ledger view does not show an out-of-date cost
 
-Status: ready-for-agent (owner decision TCU07-TRIAGE-1: open later, queued behind current work)
+Status: done (#1311)
+Absorbed by: provenance-graph issue 02 (`.scratch/provenance-graph/issues/02-money-path-slice.md`), owner decision TCU07-TRIAGE-1.
 Type: gap
 Found in: TCU-05 S2 (issue 05), 2026-11-08.
 

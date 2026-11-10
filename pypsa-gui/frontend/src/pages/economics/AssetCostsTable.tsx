@@ -16,7 +16,7 @@ const DISPLAY: Record<AssetCostRow['basis'], { unit: string; scale: number }> = 
   'EUR/MWh': { unit: '€/kWh', scale: 1e-3 },
   'EUR/MVA': { unit: '€/MVA', scale: 1 },
 }
-/** The money fields a scale input can price (backend `_SCALED_FIELDS`). */
+/** The money fields a scale input can price (backend `provenance_graph.money.SCALED_FIELDS`). */
 const SCALED = ['overnight_cost', 'fom_cost']
 const OVERNIGHT_FIELDS = ['overnight_cost', 'inv_power_overnight', 'inv_energy_overnight', 'inv_per_km_overnight']
 

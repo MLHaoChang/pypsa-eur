@@ -10,6 +10,7 @@ import LedgerReview from './LedgerReview'
 import TariffStep from './TariffStep'
 import { ledger, library, previewUpload, study } from './__fixtures__/payloads'
 import type { LedgerPayload } from '../../api/decisionStudies'
+import { staleBody } from '../../components/ProvenanceChip'
 import { CHANGED_IN_EXPERT_LABEL, KEY_PARAMETER_LABELS, ROW_MEANING, helpFor } from '../../utils/decisionVocabulary'
 
 afterEach(() => cleanup())
@@ -66,6 +67,57 @@ describe('the assumptions review', () => {
     const r = row('pv_rooftop_eur_per_kw')
     expect(within(r).getByTestId('ledger-unused').textContent).toContain('PV is off')
     expect(within(r).queryByRole('spinbutton')).toBeNull()
+  })
+
+  it('shows the asset card’s out-of-date note on the row its cost compiles from, once (TCU-07)', () => {
+    const verdict = { field: 'dc_ac_ratio', recorded: 1.2, current_field: 'dc_ac_ratio', current: 1.3, reason: 'scale input changed' }
+    const hit = (option_id: string, option_label: string) =>
+      ({ option_id, option_label, component: 'Generator', name: 'pv', field: 'overnight_cost', stale: verdict })
+    const payload: LedgerPayload = { ...ledger, stale: { pv_rooftop_eur_per_kw: [
+      hit('bess_pv_2h', 'Battery (2 hours) with PV'), hit('bess_pv_4h', 'Battery (4 hours) with PV')] } }
+    render(<LedgerReview payload={payload} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    const notes = within(row('pv_rooftop_eur_per_kw')).getAllByTestId('ledger-stale')
+    const options = ['Battery (2 hours) with PV', 'Battery (4 hours) with PV']
+    expect(notes.map(n => n.textContent)).toEqual([
+      `Generator · pv is out of date: ${staleBody({ stale: verdict }, 'ledger', { asset: 'pv', options })}`])
+    // The cost lives on each option fork, so the hint names the options to open first (UX, provenance-graph 02).
+    expect(notes[0].textContent).toBe('Generator · pv is out of date: DC/AC ratio changed. Priced with DC/AC ratio 1.2, '
+      + 'now 1.3. Open each of the Battery (2 hours) with PV and Battery (4 hours) with PV options in Expert, '
+      + 'then pv, and compare with references to re-price.')
+  })
+
+  it('names the one option whose fork carries the out-of-date cost', () => {
+    const verdict = { field: 'dc_ac_ratio', recorded: 1.2, current_field: 'dc_ac_ratio', current: 1.3, reason: 'scale input changed' }
+    const payload: LedgerPayload = { ...ledger, stale: { pv_rooftop_eur_per_kw: [{ option_id: 'bess_pv_2h',
+      option_label: 'Battery (2 hours) with PV', component: 'Generator', name: 'pv', field: 'overnight_cost', stale: verdict }] } }
+    render(<LedgerReview payload={payload} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    expect(within(row('pv_rooftop_eur_per_kw')).getByTestId('ledger-stale').textContent).toContain(
+      'Open the Battery (2 hours) with PV option in Expert, then pv, and compare with references to re-price.')
+    expect(within(row('battery_storage_eur_per_kwh')).queryByTestId('ledger-stale')).toBeNull()
+  })
+
+  it('shows no out-of-date note when the payload carries none', () => {
+    render(<LedgerReview payload={ledger} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    expect(screen.queryByTestId('ledger-stale')).toBeNull()
+    expect(screen.queryByTestId('ledger-stale-unchecked')).toBeNull()
+  })
+
+  it('names an option whose costs could not be checked (GK B F1)', () => {
+    const payload: LedgerPayload = { ...ledger, stale_unchecked: [{ option_id: 'bess_pv_2h', option_label: 'Battery (2 hours) with PV' }] }
+    render(<LedgerReview payload={payload} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    expect(screen.getByTestId('ledger-stale-unchecked').textContent).toBe(
+      'Could not check the Battery (2 hours) with PV option for out-of-date costs: its network could not be read. '
+      + 'Open that option in Expert to check.')
+  })
+
+  it('names several unchecked options in one line', () => {
+    const payload: LedgerPayload = { ...ledger, stale_unchecked: [
+      { option_id: 'bess_pv_2h', option_label: 'Battery (2 hours) with PV' },
+      { option_id: 'bess_pv_4h', option_label: 'Battery (4 hours) with PV' }] }
+    render(<LedgerReview payload={payload} intake={study.intake} saving={false} error={null} csvUrl="/x.csv" onSave={vi.fn()} onReset={vi.fn()} />)
+    expect(screen.getAllByTestId('ledger-stale-unchecked').map(n => n.textContent)).toEqual([
+      'Could not check the Battery (2 hours) with PV and Battery (4 hours) with PV options for out-of-date costs: '
+      + 'their networks could not be read. Open those options in Expert to check.'])
   })
 
   it('states what the energy price level means', () => {

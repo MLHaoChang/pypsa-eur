@@ -20,6 +20,7 @@ import {
 } from '../../utils/decisionVocabulary'
 import { isMoneyUnit, isPvRowUnused, ledgerCurrencyYearLabel, parseNeedsAttention } from './decisionModel'
 import { Button, Card, Chip, Refusal } from './DecisionUi'
+import { staleBody } from '../../components/ProvenanceChip'
 
 export interface LedgerEditOut { key: string; value: number; unit: string; currency_year?: number }
 
@@ -32,10 +33,12 @@ function shown(r: LedgerRow): string {
 
 const RECENTRED = 'range_recentred_on_user_value'
 
-function Row({ r, intake, attention, onSave, onReset, saving, tested }: {
+function Row({ r, intake, attention, stale, onSave, onReset, saving, tested }: {
   r: LedgerRow
   intake: StudyIntake
   attention: string | null
+  /** The out-of-date lines of the asset field this row compiles to, one per distinct line (TCU-07). */
+  stale: string[]
   tested: TornadoRow | null
   onSave: (e: LedgerEditOut[]) => void
   onReset: (keys: string[]) => void
@@ -73,6 +76,10 @@ function Row({ r, intake, attention, onSave, onReset, saving, tested }: {
           </span>
         )}
       </div>
+      {/* provenance-graph 02 (TCU-07): the note the option's asset card shows for this row's cost. */}
+      {stale.map(note => (
+        <p key={note} data-testid="ledger-stale" className="text-[11.5px] text-warn">{note}</p>
+      ))}
       {r.technical_name && <span className="font-mono text-[10px] text-muted">{r.technical_name}</span>}
       {meaning && <p className="text-[11.5px] text-muted">{meaning}</p>}
       {unused ? (
@@ -118,6 +125,20 @@ function Row({ r, intake, attention, onSave, onReset, saving, tested }: {
   )
 }
 
+const NO_NOTES: string[] = []
+
+/** GK B F1 (P1): the costs on these options were not checked, so none of their rows may read as current.
+ *  One line for all of them; the words are UX's. */
+export function uncheckedNote(options: string[]): string {
+  if (options.length === 1) {
+    return `Could not check the ${options[0]} option for out-of-date costs: its network could not be read. `
+      + 'Open that option in Expert to check.'
+  }
+  const names = `${options.slice(0, -1).join(', ')} and ${options[options.length - 1]}`
+  return `Could not check the ${names} options for out-of-date costs: their networks could not be read. `
+    + 'Open those options in Expert to check.'
+}
+
 function shownRange(r: LedgerRow, low: number, high: number): string {
   const f = (v: number) => (PERCENT(r) ? `${Number((v * 100).toFixed(2))} %` : `${Number(v.toFixed(4))} ${r.unit}`)
   return `${f(low)} to ${f(high)}`
@@ -141,6 +162,26 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
     for (const r of rows) if (r.status === 'needs_attention' && !m.has(r.key)) m.set(r.key, 'needs_attention')
     return m
   }, [payload, rows])
+  const staleNotes = useMemo(() => {
+    const m = new Map<string, string[]>()
+    for (const [key, hits] of Object.entries(payload.stale ?? {})) {
+      // One line per distinct verdict (UX P4), naming every option fork that carries it: the cost lives on
+      // the fork, so the hint says which option to open (UX, provenance-graph 02).
+      const groups = new Map<string, { hit: (typeof hits)[number]; options: string[] }>()
+      for (const h of hits) {
+        if (staleBody(h, 'ledger') === null) continue
+        const g = `${h.component}\u0000${h.name}\u0000${JSON.stringify(h.stale)}`
+        const at = groups.get(g) ?? groups.set(g, { hit: h, options: [] }).get(g)!
+        const option = h.option_label || h.option_id
+        if (!at.options.includes(option)) at.options.push(option)
+      }
+      // The table's form, which names the asset: the row is not the asset (UX P1).
+      const notes = [...groups.values()].map(({ hit: h, options }) =>
+        `${h.component} · ${h.name} is out of date: ${staleBody(h, 'ledger', { asset: h.name, options })}`)
+      if (notes.length) m.set(key, [...new Set(notes)])
+    }
+    return m
+  }, [payload])
   const keyRows = rows.filter(r => r.sensitivity_flag)
   const others = rows.filter(r => !r.sensitivity_flag)
   const changed = others.filter(r => r.status !== 'default' || attention.has(r.key))
@@ -148,6 +189,7 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
   const keyCount = keyRows.length
   const rowOf = (r: LedgerRow) => (
     <Row key={r.key} r={r} intake={intake} attention={attention.get(r.key) ?? null}
+      stale={staleNotes.get(r.key) ?? NO_NOTES}
       onSave={onSave} onReset={onReset} saving={saving}
       tested={tested.find(t => t.key === r.key) ?? null} />
   )
@@ -161,6 +203,12 @@ export default function LedgerReview({ payload, intake, onSave, onReset, saving,
       {payload.ledger.honesty_notes.filter(n => !n.startsWith('needs_attention:')).map(n => (
         <p key={n} className="text-[11px] text-muted">{helpFor(n).text}</p>
       ))}
+      {/* GK B F1: a fork the ledger could not check is named, so its rows never read as current. */}
+      {(payload.stale_unchecked ?? []).length > 0 && (
+        <p data-testid="ledger-stale-unchecked" className="text-[11.5px] text-warn">
+          {uncheckedNote((payload.stale_unchecked ?? []).map(u => u.option_label || u.option_id))}
+        </p>
+      )}
       {error && <Refusal error={error} />}
       <ul className="flex flex-col gap-2">{keyRows.map(rowOf)}</ul>
       {changed.length > 0 && (
