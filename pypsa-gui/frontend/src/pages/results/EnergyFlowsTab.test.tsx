@@ -140,6 +140,35 @@ describe('the Sankey frame', () => {
   })
 })
 
+describe('the source line on a multi-period run', () => {
+  const line = 'Latest solve · solved · 2027-01-01 00:00 → 2030-12-31 23:00 · all periods'
+  const mountIn = () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    return render(
+      <QueryClientProvider client={client}>
+        <shared.ChartSourceProvider value={{ line, stale: false }}><EnergyFlowsTab sankeyWidth={700} /></shared.ChartSourceProvider>
+      </QueryClientProvider>)
+  }
+
+  it('names the one period the diagram draws, not "all periods"', async () => {
+    vi.mocked(energyFlowsApi.get).mockResolvedValue({ ...OK, period: 2027, periods: [2027, 2030] })
+    mountIn()
+    const frame = await screen.findByTestId('ef-flow')
+    expect(within(frame).getByRole('heading', { name: 'Energy flow · 2027' })).toBeTruthy()
+    const source = frame.querySelector('[data-chart-source]')!.textContent!
+    expect(source).toContain('period 2027')
+    expect(source).not.toContain('all periods')
+    // The supply and demand charts below read the same period.
+    expect(screen.getByTestId('ef-series-supply').querySelector('[data-chart-source]')!.textContent).toContain('period 2027')
+  })
+
+  it('leaves the line alone on a single-period run', async () => {
+    mountIn()
+    const frame = await screen.findByTestId('ef-flow')
+    expect(frame.querySelector('[data-chart-source]')!.textContent).toBe(line)
+  })
+})
+
 describe('cross-link', () => {
   it('points at the money view and asks for that tab', async () => {
     mount()

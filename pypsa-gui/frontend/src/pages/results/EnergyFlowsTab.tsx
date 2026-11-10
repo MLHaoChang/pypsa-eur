@@ -21,7 +21,7 @@ import { useResultsFilter } from './filterContext'
 import WindowSlider, { useWindowRange } from './WindowSlider'
 import {
   CHART_AXIS, CHART_GRID, CHART_TOOLTIP, downloadCSV, shortStamp, yAxisLabel,
-  ChartFrame, ChartActions, ChartZero, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
+  ChartFrame, ChartSourceProvider, useChartSource, type ChartSource, ChartActions, ChartZero, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
 } from './shared'
 import {
   CSV_HEADER, csvRows, fmtMwh, periodLabel, sankeyData, share,
@@ -182,6 +182,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
     placeholderData: keepPreviousData,
   })
   const chartRef = useRef<HTMLDivElement>(null)
+  const source = useChartSource()
 
   if (!data) {
     if (!isFetched) return null
@@ -210,6 +211,11 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   const win = data.window!
   const graph = sankeyData(data.rows)
   const total = data.rows.reduce((s, r) => s + r.mwh, 0)
+  // With "all periods" chosen above, this tab still draws ONE period (its own
+  // picker, the first by default): its charts' source line names that period.
+  const frameSource: ChartSource = shellPeriod == null && data.period != null && source.line
+    ? { ...source, line: source.line.replace(/all periods$/, `period ${data.period}`) }
+    : source
   const lossShare = share(data.rows.filter(r => r.destination === 'Losses').reduce((s, r) => s + r.mwh, 0), total)
   const periods = data.periods.filter((p): p is number => p != null)
   const exportName = `energy_flows_${data.period ?? 'year'}`
@@ -242,6 +248,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
       <WindowSlider testId="ef-window" snapshots={win.snapshots} from={win.from} to={win.to}
                     start={win.start} end={win.end} drag={drag} setDrag={setDrag} whole={whole} />
 
+      <ChartSourceProvider value={frameSource}>
       <ChartFrame testId="ef-flow"
         title={`Energy flow · ${periodLabel(data.period)}`}
         figure={graph.links.length ? chartFigure(fmtMwh(total), 'delivered or lost') : undefined}
@@ -276,6 +283,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
           <SeriesChart title="Demand" series={data.series.demand} index={data.series.index} />
         </div>
       )}
+      </ChartSourceProvider>
     </div>
   )
 }

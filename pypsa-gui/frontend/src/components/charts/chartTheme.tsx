@@ -71,6 +71,8 @@ const CARRIER_TOKEN: ReadonlyArray<readonly [string, string]> = [
 const EXACT = new Map(CARRIER_TOKEN)
 /** How many `--color-series-*` tokens exist for carriers with no token. */
 export const SERIES_TOKENS = 8
+/** The series colours in order, for lines with no carrier (buses, branches). Past the last, reuse them dashed (`seriesDash`). */
+export const SERIES_COLOURS: readonly string[] = Array.from({ length: SERIES_TOKENS }, (_, i) => `var(--color-series-${i + 1})`)
 
 /**
  * A carrier's chart colour as a CSS custom property, so it follows the light

@@ -21,8 +21,9 @@ import { networkApi } from '../../api/network'
 import { CHART_TICK, carrierColour } from '../../components/charts/chartTheme'
 export {
   CHART_HEIGHT, CHART_TICK, LABEL_PASS, bandLabelIndices, chartFigure, ChartFrame, ChartSourceLine, ChartSourceProvider, carrierColour, directLabel, seriesDash,
-  thickestIndex, useChartSource,
+  thickestIndex, useChartSource, SERIES_TOKENS, SERIES_COLOURS,
 } from '../../components/charts/chartTheme'
+export type { ChartSource } from '../../components/charts/chartTheme'
 
 // ── Asset-group categorisation (mirrors TopologyCanvas / MapCanvas) ──────────
 export type Group = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
