@@ -2,6 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 """Study harness 07e: bundle copies of `reports/` take the per-report lock."""
+
 from __future__ import annotations
 
 import fcntl
@@ -59,6 +60,7 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="flock-based holder")
 
 
 # ── the lock set ────────────────────────────────────────────────────────────
+
 
 def test_the_copy_lock_holds_every_report_on_both_sides(tmp_path):
     src, dst = tmp_path / "src", tmp_path / "dst"
@@ -152,6 +154,7 @@ def test_a_create_in_progress_is_waited_for(tmp_path, short_timeout):
 
 # ── the per-report copy ─────────────────────────────────────────────────────
 
+
 def test_copy_reports_replaces_each_report_and_drops_the_extra(tmp_path):
     src, dst = tmp_path / "src", tmp_path / "dst"
     _seed(src, RID_A, "new")
@@ -160,8 +163,11 @@ def test_copy_reports_replaces_each_report_and_drops_the_extra(tmp_path):
     _seed(dst, RID_B, "old")
     store.copy_reports(src, dst)
     assert _tree(dst / "reports") == _tree(src / "reports")
-    assert [m.name for m in (dst / "reports").iterdir() if ".tmp-" in m.name
-            or ".old-" in m.name] == []
+    assert [
+        m.name
+        for m in (dst / "reports").iterdir()
+        if ".tmp-" in m.name or ".old-" in m.name
+    ] == []
 
 
 def test_copy_reports_keeps_held_lock_files_and_copies_none(tmp_path):
@@ -176,7 +182,10 @@ def test_copy_reports_keeps_held_lock_files_and_copies_none(tmp_path):
     (src / "reports" / f".{RID_B}.lock").write_bytes(b"")  # a stale source lock
     store.copy_reports(src, dst)
     assert sorted(p.name for p in (dst / "reports").iterdir()) == [
-        f".{RID_A}.lock", f".{RID_B}.lock", RID_A]
+        f".{RID_A}.lock",
+        f".{RID_B}.lock",
+        RID_A,
+    ]
 
 
 def test_copy_reports_without_source_reports_changes_nothing(tmp_path):
