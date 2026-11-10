@@ -389,6 +389,77 @@ def test_a_column_that_already_existed_is_not_a_created_column(world):
     assert not _flag("B2", "eh_critical")
 
 
+def test_an_outside_write_to_a_created_column_is_not_taken_as_its_default(
+    world, monkeypatch
+):
+    """K3 (GK B (43) F1): the default of a created column is the declared one,
+    never read from other cells. An outside edit sets `eh_critical` on every
+    bus before row 1 runs; row 2 (B2 → False) is stale and B2 keeps True."""
+    real = chat_tools.DISPATCHERS["update_component"]
+    seen = []
+
+    def outside_first(*a, **k):
+        if not seen:
+            PyPSAService.get_network().buses["eh_critical"] = True
+        seen.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "update_component", outside_first)
+    calls = [
+        (
+            "update_component",
+            {"component_class": "Bus", "name": "B1", "attrs": {"eh_critical": True}},
+        ),
+        (
+            "update_component",
+            {"component_class": "Bus", "name": "B2", "attrs": {"eh_critical": False}},
+        ),
+    ]
+    events = _run(chat_service.ChatSession(), calls, EXPERT, [("approve", None)])
+    assert _errors(events) == {"tu-1": "edit_preview_stale"}
+    assert _flag("B2", "eh_critical")
+
+
+def test_a_side_row_that_moved_on_an_existing_column_is_stale(world):
+    """K3 (GK B (43) F2a): a side row may come or go only on a created column.
+    `eh_poc` exists before the card, set on B1 only, so row 2's card shows B2's
+    `eh_poc` following to False; row 1's write fills that cell, the side row
+    is gone from the fresh preview, and row 2 is refused."""
+    PyPSAService.get_network().buses.loc["B1", "eh_poc"] = True
+    events = _run(
+        chat_service.ChatSession(), [B1_POC, B2_CRIT], EXPERT, [("approve", None)]
+    )
+    assert _errors(events) == {"tu-1": "edit_preview_stale"}
+    assert not _flag("B2", "eh_critical")
+
+
+def test_a_created_column_without_a_declared_default_opens_nothing(monkeypatch):
+    """K3 (GK B (43) F1): no declared default, no loosening."""
+    monkeypatch.setattr(
+        change_set, "_static", lambda cls: type("F", (), {"columns": ["made_up"]})()
+    )
+    state = {"columns": set(), "created": {}}
+    change_set._note_created(
+        state,
+        {
+            "outcome": "verified",
+            "rows": [{"role": "typed", "component_class": "Bus", "field": "made_up"}],
+        },
+    )
+    assert state["created"] == {}
+    monkeypatch.setattr(
+        change_set, "_static", lambda cls: type("F", (), {"columns": ["eh_critical"]})()
+    )
+    change_set._note_created(
+        state,
+        {
+            "outcome": "verified",
+            "rows": [{"role": "typed", "component_class": "Bus", "field": "eh_poc"}],
+        },
+    )
+    assert state["created"] == {("Bus", "eh_critical"): False}
+
+
 def test_an_uncertain_earlier_write_does_not_excuse_a_moved_old_value(
     world, monkeypatch
 ):

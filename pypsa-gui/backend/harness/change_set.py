@@ -420,33 +420,36 @@ def _columns() -> set[tuple] | None:
         return None
 
 
+def _declared_default(component_class: str, column: str) -> tuple[bool, Any]:
+    """(declared, default) of a column the app itself creates. The default is
+    the declared one (`eh_columns`), never read from other cells: an outside
+    edit can have written those."""
+    from services.adequacy import eh_columns
+
+    kind = eh_columns.eh_columns_for(component_class).get(column)
+    if kind is None:
+        return False, None
+    return True, _plain(eh_columns._default(kind))
+
+
 def _note_created(state: dict, receipt: dict) -> None:
     """K3: the columns a verified write of this response created on the
-    classes it wrote, each with the one value it left on every component it
-    did not write that field of (the column's default). The write is a member
-    or a call on its own card: either way the user approved it and it was
-    read back."""
+    classes it wrote, each with its declared default. A column with no
+    declared default opens nothing. The write is a member or a call on its
+    own card: either way the user approved it and it was read back."""
     before = state.get("columns")
     if before is None or receipt.get("outcome") != "verified":
         return
     rows = [r for r in receipt.get("rows") or [] if r.get("role") == "typed"]
     for cls in {r.get("component_class") for r in rows if r.get("component_class")}:
         try:
-            frame = _static(cls)
-            for column in frame.columns:
+            for column in _static(cls).columns:
                 key = (cls, column)
                 if key in before or key in state["created"]:
                     continue
-                named = {
-                    r.get("name")
-                    for r in rows
-                    if r.get("component_class") == cls and r.get("field") == column
-                }
-                rest = {
-                    _plain(v) for name, v in frame[column].items() if name not in named
-                }
-                if len(rest) == 1:
-                    state["created"][key] = rest.pop()
+                declared, default = _declared_default(cls, column)
+                if declared:
+                    state["created"][key] = default
         except Exception:  # noqa: BLE001 — an unreadable class opens nothing
             continue
 
