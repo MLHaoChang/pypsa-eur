@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can open a named Guided card (`ui_open_panel` with `guided_step`: start, site, goal, results or improve); an unknown card is refused and nothing changes on screen (LC-14 item 4).
