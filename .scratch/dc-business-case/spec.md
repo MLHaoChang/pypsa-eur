@@ -96,6 +96,12 @@ none in `services/`).
   `equity_post_tax` series year by year (the report's existing reconciliation,
   WP4.6b B2); the P&L is a presentation of the engine's numbers, never a second
   calculation.
+- **B8. The P&L reads the per-stream ledger, never op_inc (GK B BC4).** In standalone
+  mode `inc_net = net_total`, and `engine.py:183-185` clips op_inc to the net
+  (`revenue = clip(inc_net, 0)`, `costs = clip(-inc_net, 0)`), so op_inc loses the
+  gross revenue/cost split. The P&L builds its lines from the operating ledger `op`
+  by `STREAM_CLASS` stream; EBITDA ties to `net_total` per year (a test, with a year
+  where net > 0 and gross revenue ≠ net).
 
 ## 4. Revenue: how the load profile drives it
 
@@ -105,9 +111,9 @@ no default** (§9 Q4), because prices are the case.
 
 | Model | Quantity from the load | Line | Needs capex | Research |
 |---|---|---|---|---|
-| **R1 GPU / compute-hour** | billable GPU-hours = IT MWh(t) × u_sold ÷ kW per GPU (all-in server kW per GPU, so racks, CPUs and networking are inside) | GPU-hours × price per GPU-hour; reserved share at the contract price, the rest at on-demand × sold utilisation | IT hardware (owned) + facility | research §1a |
+| **R1 GPU / compute-hour** | billable GPU-hours = served IT MWh(t) × 1000 ÷ kW per GPU × u_sold (all-in server kW per GPU, so racks, CPUs and networking are inside; u(t) is already in the IT MWh, so u_sold is the sold share of the utilised capacity, never a second u(t); GK A note, units pin test) | GPU-hours × price per GPU-hour; reserved share at the contract price, the rest at on-demand × sold utilisation | IT hardware (owned) + facility | research §1a |
 | **R2 Colocation / wholesale lease** | contracted IT kW per phase (the spec's `it_mw`) × lease-up curve | kW × price per kW-month × 12, escalator, take-or-pay (independent of u(t)) | facility only (tenant owns IT) | research §1b–c |
-| **R3 Power pass-through** | the energy-bill streams | share × bill × (1 + margin), or metered IT kWh × PUE × rate | none beyond R2 | research §1d |
+| **R3 Power pass-through** | the energy-bill streams | share × bill × (1 + margin), or metered served IT kWh × PUE(T(t)) per snapshot × rate (never `pue_at_design` or an annual mean; GK A note) | none beyond R2 | research §1d |
 | **R4 Other services** (later, DCBC-SCOPE-1) | contracted kW or rack count (`it_mw` ÷ `rack_kw`) | per kW-month or per rack-month (cross-connects, remote hands) | none | research §1e |
 
 - **IT energy series.** IT MWh(t) = Σ phases in service IT MW × u(t) ×
@@ -138,8 +144,9 @@ no default** (§9 Q4), because prices are the case.
 | SG&A | `other` | share of revenue | — |
 | Working capital | cash bridge only, below EBITDA, never a stream (GK B BC3) | receivable days on revenue; released at end of life | — |
 
-New streams (`compute_revenue`, `colocation_revenue`, `power_passthrough`,
-`services_revenue`, `sla_credit`, `property_tax`) are rows in
+New v1 streams (`compute_revenue`, `colocation_revenue`, `power_passthrough`,
+`property_tax`; `services_revenue` and `sla_credit` are later, not v1, per
+DCBC-SCOPE-1 Q2) are rows in
 `STREAM_CLASS`; revenue streams are contract or `export` class, cost streams
 `opex`. Each new non-energy cost has a researched default with its source and
 year, marked assumed (as G2's region-tagged defaults); prices of revenue have
@@ -147,7 +154,7 @@ none.
 
 ## 6. Outputs
 
-- **P&L by year**: revenue by model; energy cost (the bill and the energy assets'
+- **P&L by year** (built per B8 from `op` by stream, never op_inc): revenue by model; energy cost (the bill and the energy assets'
   O&M); non-energy opex by line; **EBITDA**; depreciation by class (energy assets,
   facility, IT hardware); **EBIT**; interest; tax; **net income**; then the cash
   bridge (+ D&A − capex − Δ working capital + debt flows) to the engine's cash

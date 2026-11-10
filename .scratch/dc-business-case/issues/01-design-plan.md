@@ -18,7 +18,7 @@ The spec, the research note and the slice files 02–07. No code.
 
 ## Done when
 
-- GK B has given a plan GO on spec §3–§6 (bases B1–B7, the new streams, the P&L
+- GK B has given a plan GO on spec §3–§6 (bases B1–B8, the new streams, the P&L
   reconciliation) and GK A on §2 facts 1–2 and §4's IT energy series.
 - The owner's answers to spec §9 Q1–Q4 are recorded in the spec and the slices
   are adjusted to them.
