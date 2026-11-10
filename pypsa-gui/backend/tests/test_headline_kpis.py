@@ -177,14 +177,14 @@ CASE = {
         # No key to compare against: its age is unknown, so it is not called old.
         (
             {**CASE, "stale": True, "current_hash": None},
-            ("unavailable", "The investment case could not be read just now."),
+            ("unavailable", "The investment case cannot be compared with its inputs."),
         ),
         (
             {**CASE, "stale": True, "assumptions_hash": None},
-            ("unavailable", "The investment case could not be read just now."),
+            ("unavailable", "The investment case cannot be compared with its inputs."),
         ),
         # Current, but the stored report is not this one.
-        (CASE, ("unavailable", "The investment case could not be read just now.")),
+        (CASE, ("unavailable", "The investment case could not be read.")),
     ],
 )
 def test_an_lcoe_card_says_why_the_case_is_not_current(
@@ -207,7 +207,7 @@ def test_a_case_that_cannot_be_read_says_so(windy, monkeypatch, error):
     monkeypatch.setattr(hk.calculations.investment, "current", failing)
     assert hk._case_not_current(windy) == (
         "unavailable",
-        "The investment case could not be read just now.",
+        "The investment case could not be read.",
     )
 
 
@@ -223,6 +223,41 @@ def test_a_solve_that_recorded_no_inputs_is_not_called_changed(windy, client):
         "unavailable",
         "This solve did not record its inputs, so this figure is not checked.",
     )
+
+
+@pytest.mark.parametrize(
+    "change, expected",
+    [
+        ({"status": "failed"}, ("unavailable", NOT_OPTIMAL)),
+        ({"ac_pf_results": {"converged": True}}, ("unavailable", LOAD_FLOW)),
+    ],
+)
+def test_no_fingerprints_does_not_hide_a_failed_or_replaced_solve(
+    windy, monkeypatch, change, expected
+):
+    solve(windy)
+    for key in hk.SOLVE_FINGERPRINTS:
+        del windy.network.meta[key]
+    for key, value in change.items():
+        monkeypatch.setitem(windy.solver_state, key, value)
+    assert hk._unverified(windy) == expected
+
+
+def test_a_branch_without_a_loading_is_passed_over_for_the_peak_name(monkeypatch):
+    raw = {
+        "branches": {"a": {"name": "No flows"}, "b": {"name": "North tie"}},
+        "energy_weight": [1.0],
+    }
+    branch = hk.calculations.branch
+    monkeypatch.setattr(branch, "_window", lambda raw, scope: (0, 0))
+    monkeypatch.setattr(
+        branch,
+        "_loading",
+        lambda item, weights, a, b: (
+            None if item["name"] == "No flows" else {"peak_branch_utilisation": 20.0}
+        ),
+    )
+    assert hk._peak_branch(raw, {}, 20.0) == "North tie"
 
 
 @pytest.mark.parametrize("missing", hk.SOLVE_FINGERPRINTS)
@@ -453,6 +488,7 @@ def test_card_sets_are_short_and_reasons_carry_no_engine_identifier():
         hk.CASE_RUNNING,
         hk.CASE_STALE,
         hk.CASE_UNREAD,
+        hk.CASE_NO_KEY,
     ]
     sentences = [r for _, r in [*hk.REASONS.values(), *split]] + [
         hk.NOT_MODELLED_LOST_LOAD,

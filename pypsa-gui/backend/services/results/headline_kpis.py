@@ -77,7 +77,11 @@ CASE_NOT_RUN = ("not_run", "The investment case has not run on this solve.")
 # date on it. A case to run or re-run is "not_run", which links to its tab.
 CASE_RUNNING = ("not_run", "The investment case is still running.")
 CASE_STALE = ("not_run", "The investment case is older than its inputs.")
-CASE_UNREAD = ("unavailable", "The investment case could not be read just now.")
+CASE_NO_KEY = (
+    "unavailable",
+    "The investment case cannot be compared with its inputs.",
+)
+CASE_UNREAD = ("unavailable", "The investment case could not be read.")
 REASONS = {
     "no_variable_generators": (
         "not_applicable",
@@ -164,7 +168,7 @@ def _case_not_current(ctx):
         return CASE_RUNNING
     # No key to compare against: the case's age is not known.
     if not state["assumptions_hash"] or not state["current_hash"]:
-        return CASE_UNREAD
+        return CASE_NO_KEY
     if state["stale"] or state["assumptions_hash"] != state["current_hash"]:
         return CASE_STALE
     # Current now: it changed during the read, or it holds no years.
