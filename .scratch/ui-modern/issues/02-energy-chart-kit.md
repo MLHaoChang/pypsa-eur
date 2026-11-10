@@ -3,20 +3,35 @@
 
 # Energy chart kit
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: 01
 Type: feature
 Model: Opus for the shared theme API, Sonnet for each chart. Reviewer: UX.
 
-## What to build
+The issue is cut into slices (PR-SIZE-1). Slice 1 is done in its PR; the
+rest are ready for an agent and build on its API.
 
-One Recharts theme used by every chart: carrier colour tokens (`--color-carrier-*`), unit-labelled axes, tabular mono numbers, shared axes and order across base and sensitivity cases, a source run/window line and an out-of-date mark (VISUALS-1). Then the chart types energy studies expect:
-- stacked dispatch;
-- duration curve;
-- 8760 hour-by-day heatmap (price, state of charge, curtailment);
-- energy-flow Sankey;
-- tornado/delta for sensitivities.
+## Slice 1: shared chart theme (this PR)
 
-## Done when
+From the screenshot audit (`.scratch/ui-modern/audit.md`, findings 5 and the
+chat-button part of 8). One Recharts theme every chart uses,
+`pypsa-gui/frontend/src/components/charts/chartTheme.tsx`:
 
-The existing Results charts use the theme, each new type has a unit test and shots in both modes, and reports reuse the same chart specs.
+- `carrierColour(carrier, i)`: carrier colour tokens (`--color-carrier-*`, light + dark in `index.css`); unknown carriers get `--color-series-1..8`. `colourForCarrier` in `results/shared.tsx` delegates to it; a saved SVG resolves the tokens.
+- `CHART_HEIGHT.sm|md|lg`, `CHART_TICK` (mono, tabular figures; DENSITY-1 sizes kept); unit-labelled axes stay `yAxisLabel`.
+- `seriesDash(i)`, `directLabel(name, i)`, `thickestIndex(rows, key)`: series that differ by more than hue.
+- `<ChartFrame>`: one header (title, the chart's number in mono, hint, actions), then the chart, then the source line (solve, window, period, plus a chart's own basis such as "weighted × 52.14") and an "Out of date" mark when the dispatch is stale. Source and freshness come from `<ChartSourceProvider>`, set once in `Results.tsx`. `<ChartSourceLine>` is the footer alone, for cards that keep their own header.
+- Applied to Results > Capacity expansion > Build and > Operation (Dispatch, Energy flow, Load shape, Storage cycling, Lost load). Those scroll views leave room below the last chart for the "Chat here" launcher.
+
+Done when the existing Results charts above use the theme, `chartTheme.test.tsx` covers the API, dark and light shots show before and after, and the PR merges with the UX reviewer's OK.
+
+## Later slices
+
+2. **Duration curve** as its own chart type (load, residual, price), on `ChartFrame`.
+3. **8760 hour-by-day heatmap** (price, state of charge, curtailment) with a shared scale.
+4. **Energy-flow Sankey** on the theme (the Energy flow tab's Sankey moves into `ChartFrame`).
+5. **Tornado / delta for sensitivities**, with shared axes, scales, colours and order across base and sensitivity cases (VISUALS-1).
+6. **The rest of Results on the theme**: Prices, Economics, AC power flow, Investment, Aggregated overview (they already get the tokens and ticks through the shared constants, not `ChartFrame`).
+7. **Reports reuse the exact chart specs** the user saw.
+
+Each new type has a unit test and shots in both modes.

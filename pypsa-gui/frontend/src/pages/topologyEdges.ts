@@ -21,8 +21,10 @@ import type { WP } from './topologyLayoutStore'
 export const CARRIER_LINK_COLORS: Record<string, string> = {
   H2: '#7c3aed', electrolysis: '#7c3aed', 'H2 electrolysis': '#7c3aed',
   heat: '#ea580c', heat_pump: '#f97316',
-  gas: '#0369a1', CCGT: '#0369a1', OCGT: '#0891b2',
-  battery: '#16a34a', BEV: '#16a34a',
+  // Keys a chart also colours match its light-theme token (--color-carrier-*
+  // in index.css; pinned by components/charts/chartTheme.test.tsx).
+  gas: '#0369a1', CCGT: '#0284c7', OCGT: '#0369a1',
+  battery: '#5b21b6', BEV: '#16a34a',
   DC: '#d97706', HVDC: '#d97706',
   AC: '#e60012',
 }

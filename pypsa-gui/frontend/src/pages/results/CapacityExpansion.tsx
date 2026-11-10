@@ -12,8 +12,8 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import type { Generator, Line as LineT, Link as LinkT, StorageUnit, Store, Transformer } from '../../api/types'
 import { fmtCurrency, fmtPower, fmtEnergy, downloadCSV, KPI, isRenewableCarrier, ChartActions,
-  ChartCard, Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
-  COST_UNAVAILABLE } from './shared'
+  Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
+  COST_UNAVAILABLE, ChartFrame, CHART_HEIGHT, carrierColour, chartFigure } from './shared'
 import { useResultsFilter } from './filterContext'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
@@ -33,13 +33,14 @@ import NotSolved from './NotSolved'
 // Each subsection auto-hides when its asset list is empty so a single-carrier
 // network doesn't show 5 "No expansion" cards.
 
+// Theme series tokens (chart theme, ui-modern 02), so the bars follow light / dark.
 const COMPONENT_COLOR: Record<string, string> = {
-  Generator:    '#16a34a',
-  StorageUnit:  '#7c3aed',
-  Store:        '#a855f7',
-  Link:         '#0ea5e9',
-  Line:         '#dc2626',
-  Transformer:  '#d97706',
+  Generator:    'var(--color-carrier-wind)',
+  StorageUnit:  'var(--color-carrier-storage)',
+  Store:        'var(--color-series-5)',
+  Link:         'var(--color-carrier-ccgt)',
+  Line:         'var(--color-series-7)',
+  Transformer:  'var(--color-carrier-load)',
 }
 
 // PyPSA stores most extendability attrs (build_year, p_nom_opt, …) on the
@@ -778,15 +779,15 @@ export default function CapacityExpansion() {
     const opex = cost.opex ?? 0
     const total = cost.total ?? (capex + opex)
     const steps = [
-      { name: 'Existing CAPEX', value: existing, color: '#0369a1' },
-      { name: 'New-build CAPEX', value: expansion, color: '#16a34a' },
-      { name: 'OPEX', value: opex, color: '#d97706' },
+      { name: 'Existing CAPEX', value: existing, color: carrierColour('gas') },
+      { name: 'New-build CAPEX', value: expansion, color: carrierColour('wind') },
+      { name: 'OPEX', value: opex, color: carrierColour('load') },
     ]
     let cum = 0
     const rows: Row[] = steps
       .filter(s => Math.abs(s.value) > 1e-6)
       .map(s => { const base = cum; cum += s.value; return { name: s.name, base, value: s.value, abs: s.value, color: s.color } })
-    rows.push({ name: 'Total', base: 0, value: total, abs: total, color: '#334155' })
+    rows.push({ name: 'Total', base: 0, value: total, abs: total, color: 'var(--color-muted)' })
     return rows
   }, [cost])
 
@@ -923,7 +924,7 @@ export default function CapacityExpansion() {
   })()
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full results-scroll-clear [&>*]:shrink-0">
 
       {/* ── Upfront (PV) CAPEX unavailable ─────────────────────── */}
       {/* Gated on lifetime mode on purpose: in Annualised mode not one figure
@@ -1037,9 +1038,10 @@ export default function CapacityExpansion() {
 
       {/* ── System-cost waterfall ──────────────────────────────── */}
       {costWaterfall.length > 1 && (
-        <ChartCard
-          title="System-cost waterfall"
-          hint="annualised, horizon (all periods) — how the Total system cost builds up. Ignores the period selector."
+        <ChartFrame
+          title="System cost build-up"
+          figure={`${fmtCurrency(costWaterfall[costWaterfall.length - 1]?.abs ?? 0)} per year`}
+          hint="per year, horizon (all periods): how the Total system cost builds up. Ignores the period selector."
           right={
             <ChartActions
               chartRef={waterfallChartRef}
@@ -1060,12 +1062,12 @@ export default function CapacityExpansion() {
             )}
           </p>
           <div ref={waterfallChartRef}>
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
               <BarChart data={costWaterfall} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} />
                 <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
-                  label={yAxisLabel('EUR (annualised)')} />
+                  label={yAxisLabel('€ per year')} />
                 <RTooltip
                   cursor={{ fill: 'rgba(0,0,0,0.04)' }}
                   content={(props: { active?: boolean; payload?: Array<{ payload?: { name: string; abs: number } }> }) => {
@@ -1087,13 +1089,14 @@ export default function CapacityExpansion() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartFrame>
       )}
 
       {/* ── Expansion CAPEX by component class ─────────────────── */}
-      <ChartCard
-        title="Expansion CAPEX by component class"
-        hint={costMode === 'lifetime' ? 'PV of upfront investment' : 'annualised'}
+      <ChartFrame
+        title="New-build CAPEX by component class"
+        figure={capexByClass.length > 0 ? `${fmtCurrency(totalExpansionCapex)}${costMode === 'lifetime' ? ' present value' : ' per year'}` : undefined}
+        hint={costMode === 'lifetime' ? 'present value of upfront investment' : 'per year'}
         right={capexByClass.length > 0 && (
           <ChartActions
             chartRef={capexChartRef}
@@ -1124,23 +1127,24 @@ export default function CapacityExpansion() {
           </div>
         ) : (
           <div ref={capexChartRef}>
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={capexByClass} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
+              {/* maxBarSize: one asset class is a bar, not a full-width slab (audit finding 5). */}
+              <BarChart data={capexByClass} margin={{ top: 18, right: 16, left: 8, bottom: 0 }} maxBarSize={72}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} />
                 <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
-                  label={yAxisLabel(costMode === 'lifetime' ? 'EUR (PV)' : 'EUR (annualised)')} />
+                  label={yAxisLabel(costMode === 'lifetime' ? '€ (present value)' : '€ per year')} />
                 <RTooltip {...CHART_TOOLTIP} formatter={(v: number) => fmtCurrency(v)} />
                 <Bar dataKey="capex" radius={[4, 4, 0, 0]}>
                   {capexByClass.map((d, i) => (
-                    <Cell key={i} fill={COMPONENT_COLOR[d.name] ?? '#6b7280'} />
+                    <Cell key={i} fill={COMPONENT_COLOR[d.name] ?? 'var(--color-series-1)'} />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
         )}
-      </ChartCard>
+      </ChartFrame>
 
       {/* ── Capacity expansion by period (multi-period runs only) ── */}
       {/* Auto-hides on single-period runs — perPeriod is empty when no asset
@@ -1148,8 +1152,9 @@ export default function CapacityExpansion() {
           period, then the same CAPEX broken down by component class. */}
       {perPeriod.length > 0 && (
         <>
-          <ChartCard
-            title="Capacity expansion by period"
+          <ChartFrame
+            title="Capacity added per build year"
+            figure={chartFigure(fmtPower(perPeriod.reduce((a, p) => a + p.capacityAdded, 0)), 'added')}
             hint="grouped by build year"
             right={
               <ChartActions
@@ -1172,7 +1177,7 @@ export default function CapacityExpansion() {
               CAPEX is {costMode === 'lifetime' ? 'present-value upfront investment' : 'annualised'}.
             </p>
             <div ref={perPeriodCapRef}>
-              <ResponsiveContainer width="100%" height={240}>
+              <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
                 <BarChart data={perPeriod} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="period" {...CHART_AXIS} />
@@ -1186,17 +1191,18 @@ export default function CapacityExpansion() {
                       name === 'Total CAPEX' ? fmtCurrency(v) : fmtPower(v)} />
                   <Legend {...CHART_LEGEND} />
                   <Bar yAxisId="cap" dataKey="capacityAdded" name="Capacity added"
-                    fill="#16a34a" radius={[4, 4, 0, 0]} />
+                    fill={carrierColour('wind')} radius={[4, 4, 0, 0]} />
                   <Bar yAxisId="capex" dataKey="capex" name="Total CAPEX"
-                    fill="#dc2626" radius={[4, 4, 0, 0]} />
+                    fill="var(--color-series-7)" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </ChartCard>
+          </ChartFrame>
 
-          <ChartCard
+          <ChartFrame
             title="Investment by asset class, per period"
-            hint={costMode === 'lifetime' ? 'PV of upfront investment' : 'annualised'}
+            figure={`${fmtCurrency(perPeriod.reduce((a, p) => a + p.capex, 0))}${costMode === 'lifetime' ? ' present value' : ' per year'}`}
+            hint={costMode === 'lifetime' ? 'present value of upfront investment' : 'per year'}
             right={
               <ChartActions
                 chartRef={perPeriodClassRef}
@@ -1220,22 +1226,22 @@ export default function CapacityExpansion() {
               shows which technologies the optimiser invested in, and when.
             </p>
             <div ref={perPeriodClassRef}>
-              <ResponsiveContainer width="100%" height={240}>
+              <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
                 <BarChart data={perPeriod} margin={{ top: 18, right: 16, left: 8, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="period" {...CHART_AXIS} />
                   <YAxis {...CHART_AXIS} width={72} tickFormatter={(v: number) => fmtCurrency(v, 1)}
-                    label={yAxisLabel(costMode === 'lifetime' ? 'EUR (PV)' : 'EUR (annualised)')} />
+                    label={yAxisLabel(costMode === 'lifetime' ? '€ (present value)' : '€ per year')} />
                   <RTooltip {...CHART_TOOLTIP} formatter={(v: number) => fmtCurrency(v)} />
                   <Legend {...CHART_LEGEND} />
                   {perPeriodClasses.map(c => (
                     <Bar key={c} dataKey={c} name={c} stackId="capex"
-                      fill={COMPONENT_COLOR[c] ?? '#6b7280'} />
+                      fill={COMPONENT_COLOR[c] ?? 'var(--color-series-1)'} />
                   ))}
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          </ChartCard>
+          </ChartFrame>
         </>
       )}
 
