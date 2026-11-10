@@ -944,6 +944,35 @@ def test_the_n_1_line_names_why_it_is_a_lower_bound(monkeypatch):
     }
 
 
+def test_one_long_outage_period_flags_the_line_once_and_moves_no_figure(monkeypatch):
+    """GK A N28-2: one transformer, one of two periods bounded; the figures are those of the unbounded line."""
+    p = [_prod(1.0, 10.0)]
+
+    def run(bound):
+        _fake_loss(
+            monkeypatch, {"site_trafo": {"2030": (p, bound), "2040": (p, None)}}
+        )
+        return _n1(_network(periods=[2030, 2040]))
+
+    n1, plain = run("lower"), run(None)
+    assert n1["flags"].count(G.PL.OUTAGE_LONGER_THAN_PERIOD) == 1
+    assert n1["flags"].count(G.LOWER_BOUND) == 1 and n1["status"] == "partial"
+    assert G.PL.OUTAGE_LONGER_THAN_PERIOD not in plain["flags"]
+    assert G.LOWER_BOUND not in plain["flags"] and plain["status"] == "ok"
+    assert n1["by_period"] == plain["by_period"]  # no figure moves with the flag
+    assert {k: (c["t_per_year"], c["eur_per_year"]) for k, c in n1["by_period"].items()} == {
+        "2030": (1.0, 10.0),
+        "2040": (1.0, 10.0),
+    }
+    cell = n1["rows"][0]["by_period"]
+    assert cell["2030"]["flags"] == ["feedstock_inventory_not_credited", G.LOWER_BOUND]
+    assert cell["2040"]["flags"] == ["feedstock_inventory_not_credited"]
+    assert _SCREEN_FLAGS == {
+        "line": ["no_inventory_credit"],
+        "period": ["feedstock_inventory_not_credited"],
+    }  # the screen's own lists are never changed
+
+
 def test_a_skipped_transformer_gets_no_row_and_the_basis_says_so(monkeypatch):
     n = _two_trafos()
     n.links.at["site_trafo_b", "mttr_hours"] = float("nan")

@@ -640,7 +640,7 @@ def grid_risk_disclosures(payload: dict) -> list[str]:
                                for ln in missing) + "). A missing line is not 0.")
     partial = [f"{ln['label']} ({_bound_reason(ln['flags'])})" for ln in lines if ln["status"] == "partial"]
     if partial:
-        out.append(f"{head}: lower bound for {'; '.join(partial)}.")
+        out.append(f"{head}: lower bound for {' · '.join(partial)}.")
     stale = [ln["label"] for ln in lines if ln["stale"]]
     if stale:
         out.append(f"{head}: out of date for {', '.join(stale)} (the inputs changed since the run).")

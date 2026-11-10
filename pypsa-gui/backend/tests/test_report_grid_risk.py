@@ -367,8 +367,21 @@ def test_a_lower_bound_from_unknown_units_still_says_so():
     }
     out = C.grid_risk_disclosures({"lines": [line, n_1], "periods": ["_"]})
     assert out[1] == (
-        "Grid risk to production: lower bound for Ride-through (some units are not known); "
+        "Grid risk to production: lower bound for Ride-through (some units are not known) · "
         "N-1 (the outage is longer than the period)."
+    )
+
+
+def test_a_lower_bound_line_without_that_reason_keeps_the_generic_words(net, tmp_path):
+    """GK A N28-4: only an outage longer than the period on the same line drops the generic words."""
+    sec = _section(net, _write_campus(tmp_path / "run"))
+    ride = next(ln for ln in sec["lines"] if ln["key"] == "ride_through")
+    ride["flags"], ride["status"] = ["lower_bound"], "partial"
+    ev = _collect(grid_risk=sec)
+    row = _rows(ev)[1][G.LABELS["ride_through"]]
+    assert row[4] == "some units are not known, so this is a lower bound"
+    assert f"{G.LABELS['ride_through']} (some units are not known)" in " ".join(
+        ev.required_disclosures
     )
 
 
