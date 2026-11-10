@@ -81,6 +81,7 @@ def test_why_a_pv_cost_walks_to_the_pack_price_and_the_ratio_with_their_stamps(
     assert pack["value"] == pytest.approx(cost["value"] / 1.2)
     assert pack["source"] == stamp["source"] and pack["basis"] == E.ARITHMETIC
     assert ratio["node"] == RATIO and ratio["value"] == pytest.approx(1.2)
+    assert ratio["unit"] is None  # a ratio: the schema names no unit, and none is made up
     assert ratio["via"]["edge"] == "priced_through"
     assert ratio["via"]["recorded"]["column"] == "dc_ac_ratio"
     assert ratio["via"]["recorded"]["value"] == pytest.approx(1.2)
@@ -517,5 +518,55 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
 def test_only_input_and_derived_ids_name_an_asset_field():
     assert E._parse("input:Generator/g/dc_ac_ratio") == ("Generator", "g", "dc_ac_ratio")
     assert E._parse("derived:Link/a/b/overnight_cost") == ("Link", "a/b", "overnight_cost")
-    for nid in ("asset_card:Generator/g/overnight_cost", "ledger_row:pv_x", "input:nowhere", "source:s"):
+    for nid in ("asset_card:Generator/g/overnight_cost", "ledger_row:pv_x", "input:nowhere", "source:s",
+                "input:/g/f", "input:Generator//f", "input:Generator/g/"):
         assert E._parse(nid) is None, nid
+
+
+# ── mutant-killing edges (X7) ───────────────────────────────────────────────
+
+
+def test_unit_and_value_reads_never_raise_on_an_absent_target(tmp_path, monkeypatch):
+    n = _pv(tmp_path, monkeypatch)
+    assert E._value(n, "Nope", "g", "p_nom") is None
+    assert E._value(n, "Generator", "missing", "p_nom") is None
+    assert E._value(n, "Generator", "g", "no_such_field") is None
+    assert E._unit("Nope", "overnight_cost", {"currency": "GBP"}) is None
+    # Only a money unit takes the stamp's currency.
+    assert E._unit("Generator", "lifetime", {"currency": "GBP"}) == E._schema_unit("Generator", "lifetime")
+    assert E._stamp_missing({"source": "s", "source_year": 1, "currency_year": 1}, None) == []
+
+
+def test_currency_is_missing_only_on_a_money_unit_whose_stamp_names_none(tmp_path, monkeypatch):
+    n = _pv(tmp_path, monkeypatch)
+    lifetime = explain(n, "Generator", "g", "lifetime")["steps"][0]
+    assert "currency" not in lifetime["stamp_missing"]
+    P._root(n)["Generator"]["g"]["overnight_cost"]["currency"] = "EUR"
+    cost = explain(n, "Generator", "g", "overnight_cost")["steps"][0]
+    assert cost["stamp_missing"] == [] and cost["unit"] == "EUR/MW"
+
+
+def test_an_absent_asset_is_refused_by_name_before_the_graph(tmp_path, monkeypatch):
+    n = _pv(tmp_path, monkeypatch)
+    with pytest.raises(TargetUnknown, match=r"^Generator 'missing' not found$"):
+        explain(n, "Generator", "missing", "overnight_cost")
+
+
+def test_a_walk_exactly_at_the_cap_is_complete(tmp_path, monkeypatch):
+    n = _pv(tmp_path, monkeypatch)
+    monkeypatch.setattr(E, "MAX_STEPS", 4)
+    out = explain(n, "Generator", "g", "capital_cost")
+    assert out["outcome"]["truncated"] is False and out["outcome"]["complete"] is True
+    assert len(out["steps"]) == 4
+
+
+def test_the_pv_kind_filter_keeps_every_non_pv_row():
+    assert E.ledger_fields("battery_storage_eur_per_kwh", pv_kind="utility")
+    assert E.ledger_fields("discount_rate", pv_kind="rooftop")
+
+
+def test_a_ledger_row_on_a_network_with_no_study_pack_meta(tmp_path, monkeypatch):
+    n = _ledger_pv(tmp_path, monkeypatch)
+    del n.meta["decision_study_pack"]
+    out = explain_ledger_row(n, "pv_utility_eur_per_kw")
+    assert out["outcome"]["state"] == "fresh"
