@@ -743,13 +743,16 @@ def test_a_queued_h2_hub_solve_is_verified_on_the_runs_total_with_its_constant(
         assert float(saved.network.objective) != total
 
 
-@pytest.mark.parametrize("change", ["objective_off_by_one", "no_config", "no_total"])
+@pytest.mark.parametrize(
+    "change", ["objective_off_by_one", "no_config", "no_total", "inputs_changed"]
+)
 def test_a_queued_solve_whose_total_cannot_be_matched_stays_unverified(
     queued_job, monkeypatch, change
 ):
     """A1, A2 (b): a manifest objective off by 1.0, a saved project with no
     solver config (the total would be priced with the foreground's) or no
-    total at all is no evidence."""
+    total at all is no evidence; so is a saved network whose inputs changed
+    since its solve."""
     from harness import continuation
     from routers import simulation
     from services import run_evidence, workflow_tools as wt
@@ -772,6 +775,13 @@ def test_a_queued_solve_whose_total_cannot_be_matched_stays_unverified(
             return saved
 
         monkeypatch.setattr(wt, "_load_context", bare)
+    elif change == "inputs_changed":
+        fresh = wt.solve_freshness
+
+        def changed(ctx):
+            return {**fresh(ctx), "inputs_changed_since_solve": True}
+
+        monkeypatch.setattr(wt, "solve_freshness", changed)
     else:
         monkeypatch.setattr(
             simulation, "_compute_run_objective", lambda n, cfg=None: None
@@ -939,6 +949,83 @@ def test_a_staged_electrolyser_cap_above_its_bound_is_refused(
         == "out_of_bounds"
     )
     assert float(_ctx().network.links.at["electrolyser_new_2035", "p_nom_max"]) == 40.0
+
+
+# ── H9: the readers' guards on unreadable numbers (mutant survivors) ─────────
+
+
+@pytest.mark.parametrize("where", ["shed", "weight"])
+def test_an_unreadable_shed_or_weight_in_one_period_reads_no_shed_hours(
+    tmp_path, monkeypatch, where
+):
+    """A NaN shed or a NaN or negative weight in 2040 makes the whole reading
+    unavailable, never a number from the other period."""
+    env = _h2_env(
+        tmp_path,
+        monkeypatch,
+        shed=((1.0, 0.0), (float("nan"), 1.0))
+        if where == "shed"
+        else ((1.0, 0.0), (0.0, 1.0)),
+    )
+    if where == "weight":
+        env.ctx.network.snapshot_weightings.iloc[
+            2, env.ctx.network.snapshot_weightings.columns.get_loc("generators")
+        ] = float("nan")
+    assert run_gates.FACTS["h2.offtake.shed_hours"].read(env) is None
+
+
+def test_a_negative_weight_reads_no_shed_hours_and_no_utilisation(
+    tmp_path, monkeypatch
+):
+    env = _h2_env(tmp_path, monkeypatch)
+    sw = env.ctx.network.snapshot_weightings
+    sw.iloc[3, sw.columns.get_loc("generators")] = -1.0
+    assert run_gates.FACTS["h2.offtake.shed_hours"].read(env) is None
+    result = _gate(env, "h2.electrolyser.utilisation")
+    assert result["verdict"] == "not_evaluated" and result["facts"][0]["value"] is None
+
+
+@pytest.mark.parametrize("where", ["flow", "weight"])
+def test_an_unreadable_flow_or_weight_reads_no_utilisation(
+    tmp_path, monkeypatch, where
+):
+    env = _h2_env(
+        tmp_path,
+        monkeypatch,
+        dispatch=((6.0, 6.0), (float("nan"), 10.0))
+        if where == "flow"
+        else ((6.0, 6.0), (1.0, 10.0)),
+    )
+    if where == "weight":
+        sw = env.ctx.network.snapshot_weightings
+        sw.iloc[2, sw.columns.get_loc("generators")] = float("nan")
+    result = _gate(env, "h2.electrolyser.utilisation")
+    assert result["verdict"] == "not_evaluated" and result["facts"][0]["value"] is None
+
+
+def test_a_capture_on_other_snapshots_is_no_evidence_of_shed(tmp_path, monkeypatch):
+    """The capture's frame must be on the network's own snapshots."""
+    env = _h2_env(tmp_path, monkeypatch)
+    capture = env.ctx.solver_state["last_lost_load"]
+    capture["lost_load_t"] = capture["lost_load_t"].iloc[::-1]
+    value = run_gates.FACTS["h2.offtake.shed_hours"].read(env)
+    assert (
+        isinstance(value, run_gates.NoEvidence)
+        and value.value == "no_lost_load_capture"
+    )
+
+
+def test_an_electrolyser_named_by_its_role_is_read_whatever_its_carrier(
+    tmp_path, monkeypatch
+):
+    """The fleet is the Links whose `eh_role` says electrolyser first; the
+    carrier is the fallback only."""
+    env = _h2_env(tmp_path, monkeypatch)
+    links = env.ctx.network.links
+    links.loc["electrolyser", "carrier"] = "H2 conversion"
+    links["eh_role"] = "electrolyser"
+    result = _gate(env, "h2.electrolyser.utilisation")
+    assert result["facts"][0]["value"] == pytest.approx(0.325)
 
 
 # ── Q3-A1, Q3-A2 (GK B (39)): the staged envelope, lever by lever ────────────
