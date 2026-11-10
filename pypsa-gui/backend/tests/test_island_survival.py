@@ -108,12 +108,13 @@ def test_every_component_class_is_fixed_at_its_solved_size(table):
     nom = dict(S._CAPACITY_ATTRS)[table]
     for t, a in S._CAPACITY_ATTRS:
         getattr(n, t)[f"{a}_opt"] = 7.5
+        getattr(n, f"{t}_t")[S._DISPATCH[t]] = pd.DataFrame(0.0, index=n.snapshots, columns=getattr(n, t).index)
     assert len(S.fix_design(n)) == 6 and S.extendable(n) == []
     assert float(getattr(n, table)[nom].iloc[0]) == 7.5
     # B5: a missing solved size is never fixed at 0.
     getattr(n, table)[f"{nom}_extendable"] = True
     getattr(n, table)[f"{nom}_opt"] = float("nan")
-    with pytest.raises(S.NotSolved, match=f"{table}/"):
+    with pytest.raises(S.NotSolved, match="is extendable and has no solved size"):
         S.fix_design(n)
 
 
@@ -131,7 +132,39 @@ def test_a_solved_network_missing_a_solved_size_is_not_solved(solved, monkeypatc
     n.storage_units.at["bess_new", "p_nom_opt"] = float("nan")
     out = S.survival(n, _island("eh_microgrid"))
     assert out["state"] == S.NOT_SOLVED
-    assert out["reason"] == "storage_units/bess_new is extendable and has no solved size"
+    assert out["reason"] == "bess_new is extendable and has no solved size"
+
+
+def test_an_asset_added_since_the_solve_is_not_fixed_at_zero(solved):
+    """B5: PyPSA holds ``p_nom_opt`` 0 for an asset the solve never saw; that is no solved size."""
+    from services.study.findings import copy_network
+
+    n = copy_network(solved["eh_microgrid"])
+    n.add("Generator", "new_pv", bus="island", carrier="solar", p_nom_extendable=True)
+    assert float(n.generators.at["new_pv", "p_nom_opt"]) == 0.0
+    with pytest.raises(S.NotSolved, match="new_pv is extendable and has no solved size"):
+        S.fix_design(n)
+
+
+def test_the_check_commits_only_the_gensets_the_own_solve_committed(solved):
+    """I2: with linearised unit commitment on, a genset the own solve sized is not committed by the check."""
+    raw = {**T.ISLAND_CONFIG["eh_microgrid"]}
+    raw["requirements"] = {**raw["requirements"], "linearised_uc": True}
+    island = IC.validate(raw)
+    n = solved["eh_microgrid"]
+    own_committed, own_skipped = I.uc_gensets(n, island)
+    assert "diesel_new" in own_skipped and own_committed
+    seen = {}
+
+    def solve(c, extra_functionality, **kw):
+        seen["committed"], seen["skipped"] = I.uc_gensets(c, island)
+        seen["kw"] = kw
+        return S._solve(c, extra_functionality, **kw)
+
+    out = S.survival(n, island, solve=solve)
+    assert seen["committed"] == own_committed and set(seen["skipped"]) == set(own_skipped)
+    assert seen["kw"] == {"linearized_unit_commitment": True}
+    assert out["state"] in (S.SURVIVES, S.FAILS) and "diesel_new" not in str(out["reason"])
 
 
 def _undersized():
@@ -148,8 +181,8 @@ def test_a_seeded_undersized_battery_fails_survival_with_the_row_named():
     # The 0.2 MW battery cannot form the island at the instant the tie is lost: a fixed check, named.
     assert out["reason"].startswith(
         "seamless islanding needs grid-forming MVA online at the instant (GFM storage and spinning gensets) "
-        "of (1 + gfm_margin) × the critical load: short by ")
-    assert out["reason"].endswith(" with nothing this solve can size") and out["binding"] == []
+        "of (1 + gfm_margin) × the critical load: the plan as built is short by ")
+    assert float(out["reason"].rsplit(" ", 1)[1]) > 0 and out["binding"] == []
 
 
 @pytest.mark.parametrize("ending", [("warning", "infeasible"), ("ok", "optimal")])
@@ -190,11 +223,13 @@ def test_a_solver_error_is_not_evaluated_and_a_refused_row_fails(solved):
         S.NOT_EVALUATED, "the island check's solve stopped with an error (RuntimeError)")
 
     def refuse(c, fn, **kw):
-        raise I.IslandRefusal("Island-power: short by 1.2 with nothing this solve can size")
+        raise I.IslandRefusal("sustained_h (48 h) is longer than the period (24 h) the ride-through is checked over")
 
+    # A refusal that is not a short row is a bad input: no verdict on the plan.
     out = S.survival(solved["eh_microgrid"], _island("eh_microgrid"), solve=refuse)
     assert (out["state"], out["reason"]) == (
-        S.FAILS, "Island-power: short by 1.2 with nothing this solve can size")
+        S.NOT_EVALUATED, "the island rows could not be built: sustained_h (48 h) is longer than the period "
+                         "(24 h) the ride-through is checked over")
 
 
 def test_an_ok_solve_without_the_rows_is_not_a_pass(solved):
@@ -219,7 +254,7 @@ def test_the_rows_are_skipped_on_a_dispatch_only_solve_unless_checked(solved):
 @pytest.mark.parametrize("tid", TEMPLATES)
 def test_the_shipped_tie_is_open_and_the_critical_load_agrees(tid):
     n = T.BUILDERS[tid]()
-    assert S.tie_state(n) == {"state": "open", "ties": ["subsea_tie"], "open": []}
+    assert S.tie_state(n) == {"state": "open", "ties": ["subsea_tie"], "carrying": []}
     assert S.critical_state(n, _island(tid)) == {
         "state": "tagged", "loads": ["hospital_load"], "network_only": [], "sidecar_only": []}
 
@@ -234,10 +269,10 @@ def test_a_tie_that_can_carry_power_in_any_hour_or_direction_is_closed():
         return lambda n: n.links.loc[["subsea_tie"], attr].pipe(
             lambda _old: n.links.__setitem__(attr, n.links[attr].where(n.links.index != "subsea_tie", value)))
 
-    assert state(set_tie("p_max_pu", 1.0))["open"] == ["subsea_tie"]
+    assert state(set_tie("p_max_pu", 1.0))["carrying"] == ["subsea_tie"]
     # Export only: nothing flows in, but the island is not alone.
     out = state(set_tie("p_min_pu", -1.0))
-    assert out["state"] == "closed" and out["open"] == ["subsea_tie"]
+    assert out["state"] == "closed" and out["carrying"] == ["subsea_tie"]
 
     def one_hour(n):
         series = pd.Series(0.0, index=n.snapshots)
@@ -247,23 +282,43 @@ def test_a_tie_that_can_carry_power_in_any_hour_or_direction_is_closed():
     assert state(one_hour)["state"] == "closed"
     # A second tie left open, untagged: a Link and a Line on the PoC bus.
     out = state(lambda n: n.add("Link", "tie_2", bus0="mainland", bus1="island", p_nom=5.0))
-    assert out == {"state": "closed", "ties": ["subsea_tie", "tie_2"], "open": ["tie_2"]}
+    assert out == {"state": "closed", "ties": ["subsea_tie", "tie_2"], "carrying": ["tie_2"]}
     out = state(lambda n: n.add("Line", "cable", bus0="island", bus1="mainland", x=0.1, s_nom=5.0))
-    assert out["state"] == "closed" and out["open"] == ["cable"]
+    assert out["state"] == "closed" and out["carrying"] == ["cable"]
+    out = state(lambda n: n.add("Transformer", "tx", bus0="mainland", bus1="island", x=0.1, s_nom=5.0))
+    assert out["state"] == "closed" and out["carrying"] == ["tx"]
+    # A Link whose third port is the mainland bus.
+    out = state(lambda n: n.add("Link", "three", bus0="island", bus1="hospital", bus2="mainland", p_nom=5.0))
+    assert out["state"] == "closed" and out["carrying"] == ["three"]
+
+    def series(table, attr, name, value):
+        def change(n):
+            n.add(table[0], name, bus0="island", bus1="mainland", **table[1])
+            s = pd.Series(0.0, index=n.snapshots)
+            s.iloc[7] = value
+            getattr(n, table[2])[attr][name] = s
+        return change
+
+    line = ("Line", {"x": 0.1, "s_nom": 5.0, "s_max_pu": 0.0}, "lines_t")
+    assert state(series(line, "s_max_pu", "cable", 0.4))["carrying"] == ["cable"]
+    link = ("Link", {"p_nom": 5.0, "p_max_pu": 0.0}, "links_t")
+    assert state(series(link, "p_min_pu", "tie_2", -0.4))["carrying"] == ["tie_2"]
     # At zero size, or at zero in every hour, a second tie is still open.
     assert state(lambda n: n.add("Link", "tie_2", bus0="mainland", bus1="island", p_nom=0.0))["state"] == "open"
     assert state(lambda n: n.add("Line", "cable", bus0="island", bus1="mainland", x=0.1, s_nom=5.0,
                                  s_max_pu=0.0))["state"] == "open"
-    # An extendable tie at 0 MW can still be built.
+    # An extendable tie at 0 MW can still be built, unless its largest size is 0.
     assert state(lambda n: n.add("Link", "tie_2", bus0="mainland", bus1="island", p_nom=0.0,
                                  p_nom_extendable=True))["state"] == "closed"
+    assert state(lambda n: n.add("Link", "tie_2", bus0="mainland", bus1="island", p_nom=0.0,
+                                 p_nom_extendable=True, p_nom_max=0.0))["state"] == "open"
 
 
 def test_no_poc_bus_and_no_tagged_link_is_no_tie():
     n = T.BUILDERS["eh_microgrid"]()
     n.buses["eh_poc"] = False
     n.links["eh_role"] = ""
-    assert S.tie_state(n) == {"state": "no_tie", "ties": [], "open": []}
+    assert S.tie_state(n) == {"state": "no_tie", "ties": [], "carrying": []}
 
 
 def test_the_critical_tag_and_the_sidecar_must_name_the_same_load():

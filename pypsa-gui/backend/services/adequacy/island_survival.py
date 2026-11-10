@@ -10,12 +10,16 @@ plan the project has: it holds the sidecar's N+k ride-through over
 Four outcomes, never folded into one another:
 
 * ``survives``: the LP with the rows is optimal and no event row is short;
-* ``fails``: a row the fixed sizes cannot hold (an ``IslandRefusal``, an
-  infeasible LP, or an event row short of its step), each named;
-* ``not_evaluated``: the solver ended any other way (an error, a time limit);
+* ``fails``: a row the fixed sizes cannot hold (a fixed check that is short,
+  an infeasible LP, or an event row short of its step), each named;
+* ``not_evaluated``: the rows could not be built from the sidecar and the
+  network (any other ``IslandRefusal``), or the solver ended any other way
+  (an error, a time limit);
 * ``not_solved``: the network has no solved sizes to fix.
 
 The caller's network is never written: the copy is the only thing solved.
+The solve is plain HiGHS, as the island study's variants are, not the
+project's own solver settings.
 """
 
 from __future__ import annotations
@@ -31,6 +35,11 @@ SURVIVES, FAILS, NOT_EVALUATED, NOT_SOLVED = "survives", "fails", "not_evaluated
 _INFEASIBLE = ("infeasible", "infeasible_or_unbounded")
 
 
+#: The solved dispatch table an asset of each class is in after a solve.
+_DISPATCH = {"generators": "p", "storage_units": "p", "stores": "e", "links": "p0",
+             "lines": "p0", "transformers": "p0"}
+
+
 class NotSolved(ValueError):
     """An extendable asset has no solved size, so there is no plan to fix."""
 
@@ -40,7 +49,13 @@ def fix_design(n) -> list[str]:
     ``*_nom = *_nom_opt`` and ``*_nom_extendable = False`` for generators,
     storage units, stores, links, lines and transformers. Returns the
     ``"<table>/<name>"`` of each asset fixed. ``NotSolved`` when a solved
-    size is missing or not a number (never fixed at 0 instead)."""
+    size is missing or not a number, or the asset is not in the solved
+    dispatch (added since the solve: PyPSA holds ``*_nom_opt`` 0 for it), so
+    it is never fixed at 0 instead.
+
+    Not ``sweep.freeze_capacities`` (it keeps extendability on and lets the
+    LP build a micro-MW) nor ``process_uc._fix_capacities`` (it fixes a
+    missing size at 0): the check needs every size off the LP and no guess."""
     fixed = []
     for table, nom in _CAPACITY_ATTRS:
         df = getattr(n, table)
@@ -49,8 +64,9 @@ def fix_design(n) -> list[str]:
             continue
         for name in df.index[df[ext].astype(bool)]:
             opt = df.at[name, f"{nom}_opt"] if f"{nom}_opt" in df.columns else None
-            if opt is None or pd.isna(opt) or not math.isfinite(float(opt)):
-                raise NotSolved(f"{table}/{name} is extendable and has no solved size")
+            if opt is None or pd.isna(opt) or not math.isfinite(float(opt)) \
+                    or name not in getattr(n, f"{table}_t")[_DISPATCH[table]].columns:
+                raise NotSolved(f"{name} is extendable and has no solved size")
             df.at[name, nom] = float(opt)
             df.at[name, ext] = False
             fixed.append(f"{table}/{name}")
@@ -94,8 +110,9 @@ def _facts(facts) -> dict:
 
 
 def survival(n, island, *, solve=None) -> dict:
-    """The outcome for the solved network ``n`` and its loaded island sidecar
-    ``island``: ``{state, reason, shortfalls, binding, fixed, sustained_h,
+    """The outcome for the solved network ``n`` and its validated island
+    sidecar ``island`` (``island_config.load_island_config`` / ``validate``,
+    never the raw file): ``{state, reason, shortfalls, binding, fixed, sustained_h,
     scenarios, periods, critical_loads, seamless_bridge, fuel, missing}``.
     ``shortfalls`` are ``{row, sentence}``; ``reason`` is words, None when
     the island survives. ``solve(n, extra_functionality, **kw)`` returns
@@ -118,15 +135,20 @@ def survival(n, island, *, solve=None) -> dict:
         out["fixed"] = fix_design(c)
     except NotSolved as exc:
         return {**out, "reason": str(exc)}
-    # A fixed-size run: the linearised unit commitment still commits (#448 §3.1).
+    # A fixed-size run: the linearised unit commitment still commits (#448 §3.1),
+    # but only the gensets the own solve committed (it never commits one it sizes).
     setattr(c, rows.FIXED_DESIGN_ATTR, True)
+    setattr(c, rows.AS_SIZED_ATTR, frozenset(rows.uc_gensets(n, island)[1]))
     apply_energization(c)
     try:
         with rows.linearised_uc(c, island) as kw:
             status, condition = (solve or _solve)(
                 c, rows.island_extra_functionality(island, check=True), **kw)
     except rows.IslandRefusal as exc:
-        return {**out, "state": FAILS, "reason": str(exc)}
+        short = getattr(exc, "short", None)
+        if short is None:   # the rows could not be built: a bad input is not a failed plan
+            return {**out, "state": NOT_EVALUATED, "reason": f"the island rows could not be built: {exc}"}
+        return {**out, "state": FAILS, "reason": f"{exc.row}: the plan as built is short by {short:.4g}"}
     except Exception as exc:  # noqa: BLE001 — a solver that broke is no verdict, in words
         return {**out, "state": NOT_EVALUATED,
                 "reason": f"the island check's solve stopped with an error ({type(exc).__name__})"}
@@ -151,8 +173,9 @@ def survival(n, island, *, solve=None) -> dict:
 
 def _ties(n) -> list[tuple[str, str]]:
     """(component, name) of every branch between the mainland and the island:
-    a Link, Line or Transformer with exactly one end on a PoC bus (``eh_poc``),
-    and every Link tagged as the grid import or export."""
+    a Link (any of its ports), Line or Transformer touching both a PoC bus
+    (``eh_poc``, the mainland side of the tie) and another bus, and every
+    Link tagged as the grid import or export."""
     from services.adequacy.archetypes import _poc_buses
     from services.solver.island import _pcc_links
 
@@ -161,8 +184,9 @@ def _ties(n) -> list[tuple[str, str]]:
     for comp, table in (("Link", "links"), ("Line", "lines"), ("Transformer", "transformers")):
         df = getattr(n, table)
         for name in df.index:
-            ends = {str(df.at[name, "bus0"]), str(df.at[name, "bus1"])}
-            if len(ends & poc) == 1 and len(ends) == 2:
+            ends = {str(df.at[name, col]) for col in df.columns
+                    if col.startswith("bus") and col[3:].isdigit()} - {"", "nan"}
+            if ends & poc and ends - poc:
                 out.append((comp, str(name)))
     pcc = _pcc_links(n)
     out += [("Link", x) for x in (*pcc["import"], *pcc["export"]) if ("Link", x) not in out]
@@ -174,7 +198,8 @@ def _carries(n, comp, name) -> bool:
     table, nom = {"Link": ("links", "p_nom"), "Line": ("lines", "s_nom"),
                   "Transformer": ("transformers", "s_nom")}[comp]
     df = getattr(n, table)
-    if not bool(df.at[name, f"{nom}_extendable"]) and float(df.at[name, nom]) == 0.0:
+    size = f"{nom}_max" if bool(df.at[name, f"{nom}_extendable"]) else nom
+    if float(df.at[name, size]) == 0.0:
         return False
     limits = ("p_max_pu", "p_min_pu") if comp == "Link" else ("s_max_pu",)
     for attr in limits:
@@ -185,16 +210,16 @@ def _carries(n, comp, name) -> bool:
 
 
 def tie_state(n) -> dict:
-    """``{state, ties, open}``: ``open`` when every branch between the
+    """``{state, ties, carrying}``: ``open`` when every branch between the
     mainland and the island is at 0 in both directions in every hour (the
     island runs alone), ``closed`` naming each branch that can carry power,
     ``no_tie`` when the network marks no PoC bus and tags no grid Link."""
     ties = _ties(n)
     if not ties:
-        return {"state": "no_tie", "ties": [], "open": []}
+        return {"state": "no_tie", "ties": [], "carrying": []}
     carrying = [name for comp, name in ties if _carries(n, comp, name)]
     return {"state": "closed" if carrying else "open", "ties": [name for _c, name in ties],
-            "open": carrying}
+            "carrying": carrying}
 
 
 def critical_state(n, island) -> dict:

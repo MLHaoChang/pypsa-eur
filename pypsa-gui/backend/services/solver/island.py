@@ -430,6 +430,10 @@ OPERATIONAL_ATTR = "_ic_operational"
 # A fixed-size run (F1; = sweep.FIXED_DESIGN_ATTR): nothing is sized, but the
 # linearised UC still runs (it is a real dispatch).
 FIXED_DESIGN_ATTR = "_fixed_design"
+# The gensets the project's own solve sized, on the island survival check's
+# fixed copy (``services.adequacy.island_survival``): never committed there
+# either, so the check has the own solve's rows.
+AS_SIZED_ATTR = "_island_as_sized"
 
 
 def _sizable(n, island) -> list[tuple[str, str]]:
@@ -477,9 +481,14 @@ def uc_gensets(n, island, gensets=None) -> tuple[list[str], dict[str, str]]:
         gensets = [u for u, s in island["units"].items() if s["kind"] == "genset"
                    and (u in n.generators.index or u in n.links.index)]
     committed, skipped = [], {}
+    as_sized = getattr(n, AS_SIZED_ATTR, None) or ()
     for g in gensets:
         frame = n.generators if g in n.generators.index else n.links
-        if bool(frame.at[g, "p_nom_extendable"]):
+        if g in as_sized:
+            # The island survival check's copy: the own solve sized this
+            # genset, so it never committed it; the check keeps its rows.
+            skipped[g] = "not committed: extendable in the project's own solve"
+        elif bool(frame.at[g, "p_nom_extendable"]):
             # Owner, 2026-10-13 (option A): never committed, not refused; it
             # keeps I2b's spinning rule.
             skipped[g] = "not committed: extendable (big-M bilinear)"
@@ -919,8 +928,10 @@ def _row(m, lhs: _Lin, rhs: _Lin, name, coord, refuse=None, facts=None) -> bool:
     if not terms:
         short = float(np.max(np.asarray(const, dtype=float))) if np.size(const) else 0.0
         if short > 1e-6:
-            raise IslandRefusal(f"{refuse or name}: short by {short:.4g} with nothing this "
+            exc = IslandRefusal(f"{refuse or name}: short by {short:.4g} with nothing this "
                                 "solve can size")
+            exc.row, exc.short = refuse or name, short   # a fixed check that failed, not a bad input
+            raise exc
         return False
     expr = terms[0]
     for t in terms[1:]:
