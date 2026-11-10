@@ -591,3 +591,32 @@ def test_a_precheck_that_cannot_run_refuses_the_proposal(db, alice, monkeypatch)
     ]
     assert not any(e == "tool_pending_confirmation" for e, _ in frames)
     assert ran == [] and M.list_items(db, alice) == []
+
+
+def test_a_denied_card_writes_nothing(db, alice, monkeypatch, project):
+    """Decision 1 for GK B: the handler runs only on approval; a denied card
+    leaves no item, proposed or dismissed."""
+    from services import chat_service, chat_tools
+    from services.pypsa_service import PyPSAService
+
+    monkeypatch.setattr(chat_tools, "acting_user_id", lambda: str(alice.id))
+    monkeypatch.setattr(
+        PyPSAService, "get_active_context", staticmethod(lambda: _ctx(project))
+    )
+    session = _session(alice)
+    chat_tools.set_chat_session(session)
+    cards = []
+    try:
+        for event, data in chat_service._dispatch_real_tool_call(
+            session,
+            {"id": "tu-1", "name": "propose_memory", "input": _args()},
+            [],
+        ):
+            if event == "tool_pending_confirmation":
+                cards.append(data)
+                session.record_decision(data["confirmation_token"], "deny")
+    finally:
+        chat_tools.set_chat_session(None)
+    assert len(cards) == 1
+    assert M.list_items(db, alice) == []
+    assert M.list_items(db, alice, status=None) == []

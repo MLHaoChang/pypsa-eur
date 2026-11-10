@@ -348,6 +348,22 @@ def test_a_user_in_another_orgs_project_gets_only_preferences_and_chart_specs(wo
     assert in_a == {pref.id, lesson.id, org_pref.id}
 
 
+def test_a_user_without_an_org_membership_cannot_save(world):
+    db = world["db"]
+    loner = User(
+        id=uuid.uuid4(),
+        email="loner@x.test",
+        status="active",
+        is_super_admin=False,
+        created_at=datetime.now(UTC),
+    )
+    db.add(loner)
+    db.commit()
+    with pytest.raises(M.MemoryError) as e:
+        _lesson(db, loner, org_id=world["A"].id)
+    assert (e.value.kind, e.value.status) == ("memory_no_org", 403)
+
+
 def test_a_lesson_saved_in_another_orgs_project_recalls_only_there(world):
     """M1: Alice (org A) saves a lesson while in an org-B project. It recalls in
     org-B projects, never in her own org-A projects, and cannot be suggested to
@@ -365,6 +381,7 @@ def test_a_lesson_saved_in_another_orgs_project_recalls_only_there(world):
     }
     assert lesson.id in in_b and lesson.id not in in_a
     assert pref.id in in_a and pref.id in in_b
+    assert (lesson.org_id, pref.org_id) == (world["B"].id, world["A"].id)
     # A home-org button save on the same keys is a new item, not a version of it.
     home = _lesson(db, alice)
     assert home.id != lesson.id
