@@ -202,17 +202,23 @@ def _peak_branch(raw, scope, peak):
 
 
 def _shown(profile):
-    """Whether the strip shows this checked profile: where a user can get the
-    same checked answer in chat (owner decision STRIP-GATE-1). That takes the
-    mode that admits one (`harness.assurance.admission`: pilot or strict,
-    `PYPSA_GUI_ANSWER_ASSURANCE_MODE`) and the profile on the list
+    """Whether the strip shows this checked profile: exactly where a user can
+    get the same checked answer in chat (owner decision STRIP-GATE-1). Chat's
+    own two questions decide: `harness.assurance.admission` admits a checked
+    answer (`PYPSA_GUI_ANSWER_ASSURANCE_MODE`), and
+    `harness.rollout.profile_enabled` lists the profile
     (`PYPSA_GUI_ANSWER_ASSURANCE_PROFILES`). The one place for the gate."""
-    import os
+    from fastapi import HTTPException
 
+    from harness import assurance
     from harness.rollout import profile_enabled
 
-    mode = os.environ.get("PYPSA_GUI_ANSWER_ASSURANCE_MODE", "disabled")
-    return mode in {"pilot", "strict"} and profile_enabled(profile)
+    try:
+        # What a "Check answers" turn sends; refused where none can be given.
+        assurance.admission({"version": 1, "mode": "strict"})
+    except HTTPException:
+        return False
+    return profile_enabled(profile)
 
 
 def _checked(ctx, card_id):

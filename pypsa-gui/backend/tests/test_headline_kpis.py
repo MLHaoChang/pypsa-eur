@@ -398,6 +398,7 @@ def test_one_listed_profile_shows_only_its_card(windy, client, monkeypatch):
         (None, False),
         ("disabled", False),
         ("shadow", False),
+        ("no-such-mode", False),
         ("pilot", True),
         ("strict", True),
     ],
