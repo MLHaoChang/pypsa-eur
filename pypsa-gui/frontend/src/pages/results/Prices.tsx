@@ -16,6 +16,8 @@ import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
   useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine, chartFigure, carrierColour } from './shared'
 import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
+import HourDayHeatmap from './HourDayHeatmap'
+import { heatScale, hourDayGrid, spansPeriods, PICK_ONE_PERIOD } from './hourDay'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import NotSolved from './NotSolved'
@@ -166,6 +168,14 @@ export default function Prices() {
   // Price duration curve — sorted descending, x-axis = % of hours, y-axis = €/MWh.
   // Single trace (system mean). Reads "what % of hours did the price exceed X?"
   // off the chart at a glance.
+  // The same system mean price by calendar day and hour of day: when in the
+  // day and the season prices run high. The scale runs from the lowest to the
+  // highest price, since prices can be negative.
+  const priceMap = useMemo(() => {
+    if (!priceChart) return null
+    const grid = hourDayGrid(priceChart.avgRows.map(r => r.snapshot), priceChart.avgRows.map(r => r.avg))
+    return { grid, scale: heatScale([grid]) }
+  }, [priceChart])
   const durationCurve = useMemo(() => {
     if (!priceChart) return null
     const arr = priceChart.avgRows.map(r => r.avg).filter(v => Number.isFinite(v))
@@ -414,6 +424,19 @@ export default function Prices() {
             )}
           </div>
         </ChartCard>
+      )}
+
+      {/* ── Price by hour and day ────────────────────────────── */}
+      {priceMap && (
+        <HourDayHeatmap
+          title="Price by hour and day"
+          figure={priceChart?.mean != null ? chartFigure(`${priceChart.mean.toFixed(2)} €/MWh`, 'mean') : undefined}
+          hint="system mean price in each hour"
+          grid={priceMap.grid} scale={priceMap.scale}
+          colour={PRICE_SERIES.colour}
+          format={v => `${v.toFixed(1)} €/MWh`}
+          csv="price_EUR_per_MWh" filename="prices_hour_by_day"
+          unavailable={spansPeriods(tsP?.periods, range.from, range.to) ? PICK_ONE_PERIOD : null} />
       )}
 
       {/* ── Price duration curve ─────────────────────────────── */}
