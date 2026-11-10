@@ -167,8 +167,8 @@ export default function TornadoChart({
   const laid = rows.map(r => {
     const lines = wrapLabel(r.label, labelChars)
     const at = y
-    const barY = at + lines.length * LINE + 3
-    const endsY = barY + BAR + LINE
+    const barY = at + lines.length * LINE + 5
+    const endsY = barY + BAR + LINE + 2
     y = endsY + (narrow ? LINE : 0) + GAP
     return { r, lines, at, barY, endsY }
   })
@@ -186,7 +186,7 @@ export default function TornadoChart({
   // the first row, then one piece per bar), so it never runs through a row's text.
   const across = (px: number, from: number, style: SVGProps<SVGLineElement>) => [
     <line key="stub" x1={px} x2={px} y1={from} y2={Math.max(from, PAD.top - 1)} {...style} />,
-    ...laid.map(l => <line key={l.r.key} x1={px} x2={px} y1={l.barY - 3} y2={l.barY + BAR + 3} {...style} />),
+    ...laid.map(l => <line key={l.r.key} x1={px} x2={px} y1={l.barY - 2} y2={l.barY + BAR + 2} {...style} />),
     <line key="foot" x1={px} x2={px} y1={axisY - 4} y2={axisY} {...style} />,
   ]
   const baseLabel = base != null ? `Base case ${signedMoney(base, currency)}` : ''
