@@ -511,6 +511,22 @@ def test_the_fuel_generators_availability_series_bounds_the_credit():
     np.testing.assert_allclose(unit.capacity_series, pu * 10.0 * 0.5)
 
 
+def test_a_fuel_cell_with_a_zero_mttr_is_not_credited():
+    n = _fuel_cell(_net(), data=(0.05, 0.0))
+    b = sampled_fleet(n)
+    assert "link:fuel_cell" not in _names(b)
+    assert (
+        "firm Link fuel_cell: not credited (0 MW) — no finite MTTR in its outage data"
+    ) in b.fleet_notes
+
+
+def test_the_firm_links_own_availability_bounds_the_credit():
+    n = _fuel_cell(_net(), p_max_pu=0.5)
+    assert sampled_fleet(n).units[-1].capacity_mw == pytest.approx(
+        10.0
+    )  # 40 x 0.5 x 0.5
+
+
 def test_a_fuel_generator_with_a_blank_energy_cap_is_unlimited():
     n = _fuel_cell(_net())
     n.generators["e_sum_max"] = float("inf")
