@@ -150,11 +150,11 @@ function showDisplay(value: number | null | undefined): string {
   return value.toLocaleString(undefined, { maximumFractionDigits: Math.abs(value) >= 100 ? 2 : 4 })
 }
 
-/** "Generator 'pv'": the class in the user's words and the component's name. */
+/** "Generator “pv”": the class in the user's words and the component's name. */
 function assetWords(componentClass: string, name: string): string {
   // "Settings" is a bucket, not a thing: the unit or item is named as it is ("BESS_NEW")
   if (componentClass === 'Settings') return name
-  return componentClass ? `${componentLabel(componentClass)} '${name}'` : name
+  return componentClass ? `${componentLabel(componentClass)} \u201c${name}\u201d` : name
 }
 
 /** The rows a set line stands for, by class, name and field. */
@@ -195,8 +195,8 @@ function cardSetLine(card: EditCard, g: EditCardSet, guided: boolean): string {
   return setLine(g, guided, row?.label, value)
 }
 
-/** "Connection & grid › Line 'L2'" (the edit's flow section), or "Line 'L2'" when the
- * project has no flow; a bulk edit lists its names: "Connection & grid › Line 'L1', Line 'L2'";
+/** "Connection & grid › Line “L2”" (the edit's flow section), or "Line “L2”" when the
+ * project has no flow; a bulk edit lists its names: "Connection & grid › Line “L1”, Line “L2”";
  * a set shows its phrase ("Every Generator with carrier Solar"), never its members' names. */
 export function editCardHeader(card: EditCard): string {
   const byKey = new Map<string, string[]>()
@@ -228,7 +228,7 @@ function rowValues(r: EditCardRow, guided: boolean, value = cellValue): [string,
 }
 
 /** The Guided headline: each typed change in the table's words and display unit
- * ("Line 'L1', Capacity 300 → 500 MVA"), never the raw field or the stored unit. */
+ * ("Line “L1”, Capacity 300 → 500 MVA"), never the raw field or the stored unit. */
 export const HEADLINE_CAP = 4
 
 /** Each typed change in Guided's words, one line per set or row (the headline's parts). */
