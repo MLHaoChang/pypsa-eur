@@ -124,6 +124,16 @@ def test_a_stamp_read_sent_back_drops_the_echo_and_a_stated_currency_stays():
     assert M.Tariff.model_validate(other).currency == "EUR"
 
 
+def test_a_stamp_marker_the_pack_cannot_back_keeps_the_currency_stated():
+    """A "stamp" marker whose pack names no currency for the tariff, or that comes with
+    no pack_hash, has no echo to drop: the currency stays stated, nothing is raised."""
+    read = B.tariff_payload_read(_generic_copy_payload())
+    unknown = {**read, "id": "not_in_the_pack"}
+    assert M.Tariff.model_validate(unknown).currency == "EUR"
+    unpinned = {k: v for k, v in read.items() if k != "pack_hash"}
+    assert M.Tariff.model_validate(unpinned).currency == "EUR"
+
+
 @pytest.mark.parametrize("exc_name", ["RuntimeError", "DefaultsPackError"])
 def test_a_marked_write_with_a_broken_pack_is_refused_typed(monkeypatch, exc_name):
     from pydantic import ValidationError
