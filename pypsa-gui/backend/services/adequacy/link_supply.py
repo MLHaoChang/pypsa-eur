@@ -215,7 +215,9 @@ def _input_ports(n, lk: str) -> list[tuple[str, str, np.ndarray]]:
 
     ldf = n.links
     ports = [("bus0", str(ldf.at[lk, "bus0"]), np.ones(len(n.snapshots)))]
-    for col in sorted(c for c in ldf.columns if re.fullmatch(r"bus([2-9]|[1-9]\d+)", c)):
+    for col in sorted(
+        c for c in ldf.columns if re.fullmatch(r"bus([2-9]|[1-9]\d+)", c)
+    ):
         bus = ldf.at[lk, col]
         if not isinstance(bus, str) or not bus:
             continue

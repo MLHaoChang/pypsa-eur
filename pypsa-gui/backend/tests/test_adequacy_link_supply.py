@@ -679,7 +679,10 @@ def test_a_fuel_cell_drawing_on_a_store_through_a_second_port_is_not_credited():
         ("load", "bus2 h2 carries a Load: h2_use"),
         ("feeder", "bus2 h2 is fed by another Link: ely"),
         ("sharer", "bus2 h2 is shared with another Link: burner"),
-        ("capped_fuel", "bus2 h2 has no fuel Generator without an energy cap (e_sum_max)"),
+        (
+            "capped_fuel",
+            "bus2 h2 has no fuel Generator without an energy cap (e_sum_max)",
+        ),
     ],
 )
 def test_each_exclusion_applies_to_a_second_input_port(exclusion, words):
@@ -904,13 +907,17 @@ def test_freeze_and_the_loops_sample_one_fleet():
     snap = _freeze(n)
     assert snap.mc_error is None
     frozen = snap.mc_inputs
-    assert _names(frozen) == _names(loops) == [
-        "diesel",
-        "link:a_imp",
-        "link:z_imp",
-        "link:a_cell",
-        "link:z_cell",
-    ]
+    assert (
+        _names(frozen)
+        == _names(loops)
+        == [
+            "diesel",
+            "link:a_imp",
+            "link:z_imp",
+            "link:a_cell",
+            "link:z_cell",
+        ]
+    )
     _same_units(frozen.units, loops.units)
     np.testing.assert_array_equal(frozen.residual, loops.residual)
     assert frozen.fleet_notes == loops.fleet_notes
@@ -944,9 +951,7 @@ def test_freeze_refuses_an_import_rate_outside_the_unit_interval():
 @pytest.mark.parametrize(
     "url", ["/api/results/coupling_loop", "/api/results/margin_loop"]
 )
-def test_a_bad_firm_rate_is_a_typed_refusal_at_both_loops(
-    client, install_network, url
-):
+def test_a_bad_firm_rate_is_a_typed_refusal_at_both_loops(client, install_network, url):
     """F6 (AL-6): the firm-backup role refuses like the import role."""
     n = _h2_hub()
     n.add("Bus", "backup_gas", carrier="gas")
