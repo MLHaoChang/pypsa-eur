@@ -70,10 +70,8 @@ class GpuHourRevenue(BaseModel):
         return it_mw * KW_PER_MW / self.kw_per_gpu
 
     def gpu_hours(self, served_it_mwh: float) -> float:
-        """Billable GPU-hours from served IT energy (MWh)."""
-        if self.kw_per_gpu is None:
-            raise PriceNotEstablished("gpu_hour.kw_per_gpu")
-        return served_it_mwh * KW_PER_MW / self.kw_per_gpu * self.sold_share
+        """Billable GPU-hours from served IT energy (MWh): MWh ÷ 1 h = MW, so GPUs × hours."""
+        return self.gpu_count(served_it_mwh) * self.sold_share
 
 
 class ColocationRevenue(BaseModel):
@@ -252,8 +250,9 @@ class BusinessCaseInputs(BaseModel):
             assumed[path] = CostDefault(
                 key=key, value=row.value, unit=row.unit, source=row.source,
                 source_year=row.source_year, currency=row.currency,
-                money_year=getattr(row, "money_year", None), pack=pack.stamp)
-        return out.model_copy(update={"assumed": assumed})
+                money_year=row.money_year, pack=pack.stamp)
+        # Re-validate: a pack value outside a field's range is refused, never stored.
+        return type(self).model_validate({**out.model_dump(), "assumed": assumed})
 
 
 #: Defaultable cost field -> its defaults-pack key (pack 2026-11-10 on). Staff, network
@@ -315,6 +314,7 @@ class _PackRow(Protocol):
     source: str
     source_year: int
     currency: str | None
+    money_year: int | None
 
 
 class _Pack(Protocol):

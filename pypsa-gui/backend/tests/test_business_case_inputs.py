@@ -253,7 +253,14 @@ def test_defaults_carry_source_year_and_assumed():
     assert filled.assumed["facility.capex_per_mw_it"].currency == "EUR"
     assert filled.assumed["facility.capex_per_mw_it"].money_year == 2025
     assert filled.it_hardware.life_years == 5
-    assert 4 <= pack.value("dc-business-case.it_hardware.lifetime").range.low <= 4
+    life = pack.value("dc-business-case.it_hardware.lifetime").range
+    assert (life.low, life.high) == (4, 6)
+    # Percent rows arrive as fractions (the loader's %/year -> share/year, % -> per unit).
+    assert filled.opex.maintenance_share == pytest.approx(0.015)
+    assert filled.opex.insurance_share == pytest.approx(0.005)
+    assert filled.opex.property_tax_share == pytest.approx(0.01)
+    assert filled.opex.sga_share == pytest.approx(0.15)
+    assert filled.facility.life_years == 20
 
 
 def test_defaults_never_fill_a_revenue_price_or_an_unsourced_line():
@@ -353,3 +360,31 @@ def test_a_pack_row_without_a_value_is_skipped():
 def test_lease_up_bounds_are_inclusive():
     ramp = B.ColocationRevenue(lease_up_by_phase=[[0.0, 0.5, 1.0]])
     assert ramp.lease_up_by_phase == [[0.0, 0.5, 1.0]]
+
+
+def test_a_pack_error_that_is_not_a_missing_row_propagates():
+    """Only a missing row (a LookupError) means "no default"; any other pack error is raised."""
+    real = loader.load_defaults_pack(NEW)
+
+    class _Broken:
+        stamp = real.stamp
+
+        def value(self, key):
+            raise loader.DefaultsPackError("corrupt pack")
+
+    with pytest.raises(loader.DefaultsPackError, match="corrupt pack"):
+        B.BusinessCaseInputs().with_cost_defaults(_Broken(), currency="EUR")
+
+
+def test_a_pack_value_outside_its_field_range_is_refused():
+    real = loader.load_defaults_pack(NEW)
+    bad = real.value("dc-business-case.sga_share").model_copy(update={"value": 1.5})
+
+    class _Pack:
+        stamp = real.stamp
+
+        def value(self, key):
+            return bad if key == bad.key else real.value(key)
+
+    with pytest.raises(ValidationError, match="sga_share"):
+        B.BusinessCaseInputs().with_cost_defaults(_Pack(), currency="EUR")
