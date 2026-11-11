@@ -57,3 +57,10 @@ def test_stage_steps_name_their_gate_rule_ids(source):
             continue
         for rule in profile["stages"][stage]["rules"]:
             assert rule["id"] in step.done_when
+
+
+def test_a_source_without_front_matter_is_refused(tmp_path):
+    bad = tmp_path / "x.md"
+    bad.write_text("no front matter\n")
+    with pytest.raises(ValueError, match="missing front matter"):
+        gen.generate(bad)
