@@ -389,8 +389,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'panel': None,
         # 'saved' and 'reuse' alone are in project, scenario and snapshot asks:
         # `matches` also needs `_asks_for_a_saved_value` (GK B N4).
-        'keywords': frozenset({'reusable', 'chip', 'chips', 'saved', 'save', 'reuse', 'keep', 'store',
-                               'remember'}),
+        'keywords': frozenset({'reusable', 'chip', 'chips', 'saved', 'save', 'reuse', 'remember'}),
         'routes': frozenset({
             ('GET', '/api/memory/suggestions'),
             ('POST', '/api/memory/parameters'),
@@ -408,12 +407,14 @@ NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the 
 # - a chip, or a value made "reusable";
 # - using one ("saved"/"reuse" with a value or a field), unless the saved thing is a
 #   scenario, run, snapshot, tariff or project;
-# - keeping one: a keep verb ("save", "keep", "store", "remember") with a value or a
-#   field AND words that say the value is kept for reuse: "later", "future",
-#   "elsewhere", "reuse", "use ... again", or "next/another/other" with "project" or
-#   "time". A bare "again", "next", "other" or "another" is ordinary workflow ("solve
-#   again", "the next one", "another carrier"), and an ask that also names a table,
-#   network, report or results stores that, not a value (GK B N2).
+# - keeping one: "save" or "remember" with a value or a field AND words that say the
+#   value is kept for reuse: "later", "elsewhere", "reuse", or "next/another/other"
+#   with "project" or "time". A bare "again", "next", "other" or "another" is
+#   ordinary workflow ("solve again", "the next one", "another carrier"), and an ask
+#   that also names a table, network, report or results stores that, not a value
+#   (GK B N2). "Store" is a component, "keep" a constraint ("keep the capacity under
+#   50 MW"), and "future" and "use ... again" describe model time, so none of them
+#   counts (GK B N2 of 46).
 _SAVED_VALUE_NAMES = frozenset({'reusable', 'chip', 'chips'})
 _USE_WORDS = frozenset({'saved', 'reuse'})
 _VALUE_WORDS = frozenset({
@@ -424,8 +425,8 @@ _SAVED_ELSEWHERE = frozenset({
     'scenario', 'scenarios', 'run', 'runs', 'snapshot', 'snapshots', 'tariff',
     'tariffs', 'project', 'projects',
 })
-_KEEP_VERBS = frozenset({'save', 'keep', 'store', 'remember'})
-_KEPT_FOR_REUSE = frozenset({'later', 'future', 'elsewhere', 'reuse'})
+_KEEP_VERBS = frozenset({'save', 'remember'})
+_KEPT_FOR_REUSE = frozenset({'later', 'elsewhere', 'reuse'})
 _KEPT_FOR_PLACES = frozenset({'next', 'another', 'other'})
 _REUSE_PLACES = frozenset({'project', 'projects', 'time'})
 _KEPT_ELSEWHERE = (_SAVED_ELSEWHERE - {'project', 'projects'}) | {
@@ -437,7 +438,6 @@ _KEPT_ELSEWHERE = (_SAVED_ELSEWHERE - {'project', 'projects'}) | {
 def _kept_for_reuse(words: set[str]) -> bool:
     return bool(
         words & _KEPT_FOR_REUSE
-        or {'use', 'again'} <= words
         or (words & _KEPT_FOR_PLACES and words & _REUSE_PLACES)
     )
 

@@ -94,11 +94,10 @@ def test_the_issue_rows_are_declared():
     ('Apply my saved lifetime', 'memory_parameter_suggestions'),
     ('Save this value for later', 'memory_parameter_suggestions'),
     ('Save the lifetime of this battery for my next project', 'memory_parameter_suggestions'),
-    ('Save this capex so I can use it again', 'memory_parameter_suggestions'),
+    ('Save this capex so I can reuse it', 'memory_parameter_suggestions'),
     ('Save the efficiency for another project', 'memory_parameter_suggestions'),
     ('Remember this capex for later', 'memory_parameter_suggestions'),
-    ('Keep this value for next time', 'memory_parameter_suggestions'),
-    ('Store this capex for future projects', 'memory_parameter_suggestions'),
+    ('Remember this value for next time', 'memory_parameter_suggestions'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -126,6 +125,11 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Set capacity to 50 and save, then do the next one', 'Save the capacity, then try another carrier',
     'Save the network and costs for later', 'Save the cost table for later', 'Save the other values',
     'Keep the capacity at 50 MW', 'Keep the cost for the next run',
+    'Add a store and set its capacity for future years', 'Increase the store capacity next time step',
+    'Store the hydrogen at a lower cost later in the year',
+    'Store the excess energy for later use and lower the cost',
+    'Keep the capacity under 50 MW for future years', 'Keep the price fixed and use it again',
+    'Remember to use the price again in the next solve', 'Save the capacity for future years',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)
