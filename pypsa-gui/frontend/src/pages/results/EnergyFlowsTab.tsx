@@ -11,15 +11,17 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Legend,
 } from 'recharts'
+import toast from 'react-hot-toast'
 import ResultState from '../../components/ResultState'
 import { energyFlowsApi, type EnergyFlowsPayload } from '../../api/energyFlows'
 import { useUIStore } from '../../store/uiStore'
+import { showResultsTab } from '../../layout/flowNavigation'
 import { nk } from '../../utils/queryKeys'
 import { useResultsFilter } from './filterContext'
 import WindowSlider, { useWindowRange } from './WindowSlider'
 import {
-  CHART_AXIS, CHART_GRID, CHART_TOOLTIP, downloadCSV, downloadSVG, shortStamp, yAxisLabel,
-  ChartFrame, ChartSourceLine, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
+  CHART_AXIS, CHART_GRID, CHART_TOOLTIP, downloadCSV, shortStamp, yAxisLabel,
+  ChartFrame, ChartSourceProvider, useChartSource, type ChartSource, ChartActions, ChartZero, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
 } from './shared'
 import {
   CSV_HEADER, csvRows, fmtMwh, periodLabel, sankeyData, share,
@@ -40,7 +42,7 @@ function FlowNodeShape(props: {
             dy={payload.column === 'via' ? 0 : '0.35em'}
             textAnchor={payload.column === 'via' ? 'middle' : anchor}
             fontSize={10} fill="currentColor">
-        {payload.name}
+        {legendName(payload.name)}
       </text>
     </Layer>
   )
@@ -103,7 +105,7 @@ export function FlowSankeyChart({ data, width }: {
   const height = Math.max(240, 30 * Math.max(perColumn('source'), perColumn('via'), perColumn('destination')))
   const chart = (w?: number) => (
     <Sankey width={w} height={height} data={data} nodePadding={16} nodeWidth={10}
-            margin={{ left: 110, right: 130, top: 16, bottom: 8 }}
+            margin={{ left: 160, right: 130, top: 16, bottom: 8 }}
             node={FlowNodeShape as never} link={FlowLinkShape as never}>
       <Tooltip content={<FlowTip />} />
     </Sankey>
@@ -126,6 +128,12 @@ function ConservationChip({ c }: { c: NonNullable<EnergyFlowsPayload['conservati
   )
 }
 
+/** A series key in plain words: "ups_battery discharge" reads "UPS battery discharge". */
+export function seriesName(key: string): string {
+  const m = /^(.*) (discharge|charge)$/.exec(key)
+  return m ? `${legendName(m[1])} ${m[2]}` : legendName(key)
+}
+
 function SeriesChart({ title, series, index }: {
   title: string; series: Record<string, number[]>; index: string[]
 }) {
@@ -137,20 +145,20 @@ function SeriesChart({ title, series, index }: {
   const labelAt = bandLabelIndices(data, keys, peak)
   const bandLabel = (k: string) => {
     const i = labelAt.get(k)
-    return i == null ? undefined : directLabel(legendName(k), i)
+    return i == null ? undefined : directLabel(seriesName(k), i)
   }
   return (
     <ChartFrame testId={`ef-series-${title.toLowerCase()}`}
       title={`${title} by carrier`} figure={chartFigure(fmtPower(peak), 'peak')} hint="hourly average">
       <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-        <AreaChart data={data} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+        <AreaChart data={data} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
           <CartesianGrid {...CHART_GRID} />
           <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} />
           <YAxis {...CHART_AXIS} label={yAxisLabel('MW (average)')} />
           <Tooltip {...CHART_TOOLTIP} />
           <Legend {...CHART_LEGEND} />
           {keys.map((k, i) => (
-            <Area key={k} type="monotone" dataKey={k} stackId="s" stroke={carrierColour(k, i)}
+            <Area key={k} type="monotone" dataKey={k} name={seriesName(k)} stackId="s" stroke={carrierColour(k, i)}
                   fill={carrierColour(k, i)} fillOpacity={0.6} isAnimationActive={false} />
           ))}
           {keys.map(k => (
@@ -164,7 +172,6 @@ function SeriesChart({ title, series, index }: {
 
 export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }) {
   const currentProject = useUIStore(s => s.currentProject)
-  const requestResultsTab = useUIStore(s => s.requestResultsTab)
   const filter = useResultsFilter()
   const shellPeriod = typeof filter.selectedPeriod === 'number' ? filter.selectedPeriod
     : filter.selectedPeriod != null && filter.selectedPeriod !== 'all' && !Number.isNaN(Number(filter.selectedPeriod))
@@ -181,6 +188,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
     placeholderData: keepPreviousData,
   })
   const chartRef = useRef<HTMLDivElement>(null)
+  const source = useChartSource()
 
   if (!data) {
     if (!isFetched) return null
@@ -209,8 +217,15 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   const win = data.window!
   const graph = sankeyData(data.rows)
   const total = data.rows.reduce((s, r) => s + r.mwh, 0)
+  // With "all periods" chosen above, this tab still draws ONE period (its own
+  // picker, the first by default): its charts' source line names that period
+  // and drops the dates, which are the whole horizon's and not that period's.
+  const frameSource: ChartSource = shellPeriod == null && data.period != null && source.line
+    ? { ...source, line: source.line.replace(/(?: · [^·]*→[^·]*)? · all periods$/, ` · period ${data.period}`) }
+    : source
   const lossShare = share(data.rows.filter(r => r.destination === 'Losses').reduce((s, r) => s + r.mwh, 0), total)
   const periods = data.periods.filter((p): p is number => p != null)
+  const exportName = `energy_flows_${data.period ?? 'year'}`
 
   return (
     <div className="space-y-3 p-3" data-testid="ef-view">
@@ -225,7 +240,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
           </label>
         )}
         <span className="text-muted">
-          {fmtMwh(total)} delivered or lost{lossShare != null ? ` · ${(lossShare * 100).toFixed(1)} % losses` : ''}
+          {lossShare != null ? `${(lossShare * 100).toFixed(1)} % losses` : ''}
         </span>
         {Object.entries(data.unserved_product_mwh ?? {}).filter(([, v]) => v > 0).map(([load, v]) => (
           <span key={load} className="text-danger" data-testid={`ef-undelivered-${load}`}>
@@ -240,37 +255,39 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
       <WindowSlider testId="ef-window" snapshots={win.snapshots} from={win.from} to={win.to}
                     start={win.start} end={win.end} drag={drag} setDrag={setDrag} whole={whole} />
 
-      <div className="space-y-1">
-        <div className="flex justify-between">
-          <h3 className="text-[11px] font-semibold">Energy flow, {periodLabel(data.period)} (MWh)</h3>
-          <span className="flex gap-3 text-[11px]">
-            <button type="button" className="underline"
-                    onClick={() => downloadCSV(`energy_flows_${data.period ?? 'year'}.csv`, CSV_HEADER, csvRows(data.rows))}>
-              Export CSV
-            </button>
-            <button type="button" className="underline"
-                    onClick={() => downloadSVG(chartRef.current, `energy_flows_${data.period ?? 'year'}.svg`)}>
-              Export SVG
-            </button>
-          </span>
-        </div>
+      <ChartSourceProvider value={frameSource}>
+      <ChartFrame testId="ef-flow"
+        title={`Energy flow · ${periodLabel(data.period)}`}
+        figure={graph.links.length ? chartFigure(fmtMwh(total), 'delivered or lost') : undefined}
+        hint="source → via → destination"
+        right={
+          <ChartActions chartRef={graph.links.length ? chartRef : undefined} filename={exportName}
+            onExportCSV={() => {
+              downloadCSV(`${exportName}.csv`, CSV_HEADER, csvRows(data.rows))
+              toast.success('Exported')
+            }} />
+        }
+        bodyClassName="p-3">
+        {frameSource !== source && (
+          <p className="mb-2 text-[11px] text-muted" data-testid="ef-one-period">
+            All periods are selected above. The diagram draws one period: {periodLabel(data.period)}.
+          </p>
+        )}
         {graph.links.length ? (
           <div ref={chartRef} data-testid="ef-sankey"><FlowSankeyChart data={graph} width={sankeyWidth} /></div>
         ) : (
-          <p className="text-[11px] text-muted py-2" data-testid="ef-empty">
-            No energy moved in this window.</p>
+          <div data-testid="ef-empty"><ChartZero>No energy moved in this window.</ChartZero></div>
         )}
-        <ChartSourceLine className="py-1" />
-        <p className="text-[11px] text-muted">
-          Source → Via → Destination. “Via” is Direct, or the storage the energy was last held in;
+        <p className="mt-1 text-[11px] text-muted">
+          “Via” is Direct, or the storage the energy was last held in;
           a storage hands back the mix it was charged with.{' '}
           Money flows:{' '}
           <button type="button" className="underline" data-testid="ef-to-value-flows"
-                  onClick={() => requestResultsTab('investment')}>
-            Investment → Value flows
+                  onClick={() => showResultsTab('investment', { from: 'Energy flow' })}>
+            Investment: value flows ›
           </button>
         </p>
-      </div>
+      </ChartFrame>
 
       {data.series && (
         <div className="grid gap-3 md:grid-cols-2">
@@ -278,6 +295,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
           <SeriesChart title="Demand" series={data.series.demand} index={data.series.index} />
         </div>
       )}
+      </ChartSourceProvider>
     </div>
   )
 }

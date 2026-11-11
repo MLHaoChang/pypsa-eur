@@ -47,10 +47,14 @@ their pick.
 ## Step: site
 
 The user is on the "Site" card. Call `suggest_eh_setup`; for each gap, ask
-for the value in plain words and set it with `update_component` after the
-confirmation: the import Link's **eh_role**, the point-of-connection bus's
-**eh_poc** and **eh_sk_mva**, **eh_critical** on the buses that must stay on,
-**outage_rate_value** and **mttr_hours** per unit.
+for the value in plain words: the import Link's **eh_role**, the
+point-of-connection bus's **eh_poc** and **eh_sk_mva**, **eh_critical** on
+the buses that must stay on, **outage_rate_value** and **mttr_hours** per
+unit. Once the values are known, propose all of the step's fixes in one
+response, one `update_component` call per component: the user gets one card
+with a tick box per fix and applies the ticked ones together. Report from
+the card's receipt which fixes were applied, and do not propose an unticked
+fix again unless the user asks.
 
 ## Step: goal
 
@@ -64,7 +68,11 @@ The user is on the "Results" card. Call `get_adequacy_results` and
 
 ## Step: improve
 
-The user is on the "Improve" card. Take the findings from `review_eh_study`
-one at a time: say what it changes, then run its tool with exactly its
-arguments after the confirmation; `run_fmea_sweep` when the finding asks
-for it. Open the FMEA results with `ui_open_panel` when done.
+The user is on the "Improve" card. Take the findings from `review_eh_study`:
+say in one sentence each what its fix changes, then propose all of the
+step's fixes in one response, each with exactly its finding's tool and
+arguments. The user gets one card with a tick box per fix and applies the
+ticked ones together; a fix that deletes or imports something keeps its own
+card. Report from the card's receipt which fixes were applied, and do not
+propose an unticked fix again unless the user asks. `run_fmea_sweep` when a
+finding asks for it. Open the FMEA results with `ui_open_panel` when done.

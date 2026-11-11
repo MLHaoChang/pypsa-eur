@@ -1713,6 +1713,17 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "get_profile_tuning_schema",
+        "The settings the Tune dialog offers for one technology (wind or "
+        "solar) and preset: each field's key, label, unit, type, bounds or "
+        "options, which weather sources use it, its preset value and "
+        "provenance. Read it before putting tuning keys (for example tilt, "
+        "losses) into the params of a profile generation. Safety: read.",
+        {"technology": {"type": "string", "enum": ["wind", "solar"]},
+         "preset": {"type": "string"}},
+        ["technology"],
+    ),
+    _t(
         "compare_profiles",
         "Compare current:<generator>, pending:<job>[:<point>] or "
         "shaped:<job>[:<point>] profiles on the project's snapshot clock. "
@@ -4883,6 +4894,32 @@ TOOLS: list[dict[str, Any]] = [
         ["view"],
     ),
     _t(
+        "why_this_number",
+        "Explain why one number has its value, step by step, from the provenance graph. "
+        "Target either an asset field (component, name, field; field='capital_cost' is the "
+        "Economics row's annualised cost) or a Guided ledger row (project, study_id, ledger_key, "
+        "option_id: the row on that option's network). The result starts with `outcome` "
+        "(state fresh|stale|uncompared, complete, truncated), then each step: what the value "
+        "was derived from or priced through (a pack price scaled by dc_ac_ratio or a Link's "
+        "efficiency), its value and unit as stored now, its provenance stamp (status, source, "
+        "source_year, currency_year, approver) and `stamp_missing` (name those, never assume "
+        "them), the edge to it with what that edge recorded, and its state. A stale step's "
+        "`broken` lists what was compared (recorded vs current: say the input changed since "
+        "pricing) and what was not. A scaled price carries `pack_price`: arithmetic (value ÷ "
+        "the recorded scale), or not_established. uncompared means nothing was compared, never "
+        "that it is current; a truncated answer is not complete. Values are per MW of the "
+        "stored capacity, in the stamp's currency (EUR when it names none, listed in "
+        "stamp_missing). Changes nothing. Safety: read.",
+        {"component": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+         "name": {"type": "string", "minLength": 1},
+         "field": {"type": "string", "minLength": 1},
+         "project": {"type": "string", "minLength": 1},
+         "study_id": {"type": "string", "minLength": 1},
+         "ledger_key": {"type": "string", "minLength": 1},
+         "option_id": {"type": "string", "minLength": 1}},
+        [],
+    ),
+    _t(
         "geocode_place",
         "Look up a place name or address with the configured geocoder (Nominatim-compatible) "
         "and return its candidate matches with coordinates, to place a site or bus on the "
@@ -5472,6 +5509,7 @@ TOOL_ROUTES: dict[str, list] = {
     "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
     "get_profile_readiness": [("GET", "/api/projects/{name}/profiles/readiness")],
     "compare_profiles": [("GET", "/api/projects/{name}/profiles/compare")],
+    "get_profile_tuning_schema": [("GET", "/api/profiles/schema")],
     "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
     "apply_generated_profiles": [("POST", "/api/projects/{name}/profiles/apply-batch")],
@@ -5684,6 +5722,9 @@ TOOL_ROUTES: dict[str, list] = {
     "abort_investment_case": [("POST", "/api/results/investment_case/abort")],
     "list_stress_profile_packs": [("GET", "/api/projects/{name}/stress_profile_packs")],
     # end LV08 B2a
+    # Provenance graph (1), issue 03: "why this number", an asset field or a Guided ledger row.
+    "why_this_number": [("GET", "/api/network/asset_schema/{component}/provenance/{name}/why/{field}"),
+                        ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why")],
     # Library references (3): two reads (the asset's pack from its provenance) and the apply.
     "list_library_references": [("GET", "/api/library/references")],
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),

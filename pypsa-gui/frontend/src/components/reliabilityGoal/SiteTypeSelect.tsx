@@ -6,6 +6,7 @@ import type { EhArchetype } from '../../api/simulation'
 import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { useGuide } from '../GuidedTour'
 import { InfoTip } from '../../layout/properties/cardKit'
+import { Skeleton } from '../Skeleton'
 
 export const SITE_TYPES: { id: EhArchetype; label: string }[] = [
   { id: 'strong_grid', label: 'Strong — import whenever needed' },
@@ -22,7 +23,7 @@ export function SiteTypeSelect({ mode, label, disabled = false, testId }: {
   disabled?: boolean
   testId: string
 }) {
-  const { goal, archetype, save } = useReliabilityGoal()
+  const { goal, archetype, save, isPending } = useReliabilityGoal()
   const source = goal?.site_archetype.source
   const guided = mode === 'guided'
   const { data: guide } = useGuide()
@@ -34,6 +35,14 @@ export function SiteTypeSelect({ mode, label, disabled = false, testId }: {
             the catalogue's (P21), as the EH panel's archetype had it. */}
         {guided ? label : <InfoTip text={fieldTip('archetype')}>{label}</InfoTip>}
       </span>
+      {isPending ? (
+        // The stored site type is not read yet: showing the default would
+        // flash "Strong" on an island site.
+        <span role="status" aria-busy="true" data-testid={`${testId}-loading`} className="max-w-sm">
+          <span className="sr-only">Loading the grid connection…</span>
+          <Skeleton className={'h-[26px] w-full'} />
+        </span>
+      ) : (
       <select data-testid={testId} value={archetype}
         disabled={disabled || !goal || save.isPending}
         onChange={e => save.mutate({ site_archetype: e.target.value as EhArchetype })}
@@ -42,6 +51,7 @@ export function SiteTypeSelect({ mode, label, disabled = false, testId }: {
           : 'max-w-sm px-2 py-1 border border-border rounded text-xs bg-bg focus:outline-none focus:border-accent'}>
         {SITE_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
       </select>
+      )}
       {source && source !== 'stored' && (
         <span data-testid={`${testId}-source`} className="text-[10px] text-muted">
           {source === 'template' ? "The project template's choice" : 'The default'}; choosing one saves it.

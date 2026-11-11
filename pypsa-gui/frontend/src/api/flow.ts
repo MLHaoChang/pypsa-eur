@@ -64,6 +64,22 @@ export interface FlowItem {
   in_scope: boolean
 }
 
+/** One thing a section holds (carriers, loads, assets, time series): raw
+ *  values for Guided's list, never a state. `value` is null when it is missing;
+ *  an extendable asset carries the size as entered. A time-series entry names
+ *  the attribute in `field` and has no value. `unit` is null where the bus's
+ *  unit is not known; `series` says a load's value is the peak of its series. */
+export interface FlowHeld {
+  component: string
+  entity: string
+  carrier: string | null
+  field: string | null
+  value: number | null
+  unit: string | null
+  extendable: boolean
+  series: boolean
+}
+
 export interface FlowSection {
   section: FlowSectionId
   label: string
@@ -73,6 +89,10 @@ export interface FlowSection {
   items: FlowItem[]
   /** One line for the rail ("grid_import, 40 MW"); `readiness`: "n to do, m to check". */
   summary: string | null
+  /** Sections 2, 4, 5 and 6: what the section holds, for display only. */
+  holds?: FlowHeld[]
+  /** How many the section holds in all; `holds` stops at the server's cap. */
+  holds_total?: number
   /** `results` only. */
   freshness?: FlowFreshness
   /** `results` only: one freshness per run kind (W4b); `study` is null for a

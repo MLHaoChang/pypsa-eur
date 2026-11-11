@@ -12,7 +12,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import type { Bus } from '../../api/types'
 import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
-  ChartCard, Seg, CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
+  ChartFrame, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, Seg, CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine, chartFigure, carrierColour } from './shared'
 import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
@@ -215,7 +215,7 @@ export default function Prices() {
   }
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
 
       {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
           final review) — a narrow-but-wide window can still hit the
@@ -306,7 +306,7 @@ export default function Prices() {
 
       {/* ── Hourly marginal price chart ───────────────────────── */}
       {priceChart && (
-        <ChartCard
+        <ChartFrame
           title="Hourly marginal price"
           hint={priceView === 'per_bus' && priceChart.busTotal > priceChart.cols.length
             ? `top ${priceChart.cols.length} of ${priceChart.busTotal} buses by mean`
@@ -380,20 +380,17 @@ export default function Prices() {
                 mode={effectiveMode}
                 rows={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
                 cols={priceView === 'avg' ? ['avg'] : priceChart.cols}
-                colors={priceView === 'avg' ? ['#0369a1'] : [
-                  '#dc2626', '#0369a1', '#16a34a', '#d97706', '#7c3aed',
-                  '#db2777', '#0891b2', '#65a30d', '#c2410c', '#6d28d9',
-                  '#e11d48', '#1d4ed8',
-                ]}
+                colors={priceView === 'avg' ? [PRICE_SERIES.colour] : SERIES_COLOURS}
                 unit="€/MWh"
                 valueFormatter={(v: number) => `${v.toFixed(2)} €/MWh`}
+                dashed={priceView !== 'avg'}
                 height={170}
               />
             ) : (
-              <ResponsiveContainer width="100%" height={200}>
+              <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
                 <LineChart
                   data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
-                  margin={{ top: 18, right: 8, left: 0, bottom: 0 }}
+                  margin={{ top: 18, right: 40, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
@@ -407,15 +404,12 @@ export default function Prices() {
                   )}
                   {priceView === 'avg' ? (
                     <Line type="monotone" dataKey="avg" name="Average"
-                          stroke="#0369a1" strokeWidth={1.8} dot={false} />
+                          stroke={PRICE_SERIES.colour} strokeWidth={1.8} dot={false} />
                   ) : (
                     priceChart.cols.map((c, i) => (
                       <Line key={c} type="monotone" dataKey={c} name={c}
-                            stroke={[
-                              '#dc2626', '#0369a1', '#16a34a', '#d97706', '#7c3aed',
-                              '#db2777', '#0891b2', '#65a30d', '#c2410c', '#6d28d9',
-                              '#e11d48', '#1d4ed8',
-                            ][i % 12]}
+                            stroke={SERIES_COLOURS[i % SERIES_TOKENS]}
+                            strokeDasharray={seriesDash(i + Math.floor(i / SERIES_TOKENS))}
                             strokeWidth={1.2} dot={false} />
                     ))
                   )}
@@ -423,7 +417,7 @@ export default function Prices() {
               </ResponsiveContainer>
             )}
           </div>
-        </ChartCard>
+        </ChartFrame>
       )}
 
       {/* ── Price by hour and day ────────────────────────────── */}

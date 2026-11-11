@@ -29,8 +29,8 @@ from typing import Any
 
 import numpy as np
 
-from services.adequacy.coupling import NOTHING_TO_SAMPLE
 from services.adequacy.energization import capped_mw
+from services.adequacy.link_supply import nothing_to_sample
 
 from models.energy_hub import (
     DEFAULT_EH_FMEA_TOP_N,
@@ -338,7 +338,8 @@ def _series(n, name: str, attr: str, default: float) -> np.ndarray:
 
 
 def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
-                    boundary: dict | None = None) -> FleetScope:
+                    boundary: dict | None = None,
+                    keep_zero_capacity: bool = False) -> FleetScope:
     """
     Split the network at the identified import Link(s) → ``FleetScope``.
 
@@ -360,6 +361,15 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
       capacity; otherwise it is a firm block at the cap. A rate outside
       ``[0, 1)`` raises ``OutageRateError`` exactly as a generator's does.
 
+    The Link's MW is ``ActivityContext``'s per-period rule (p_nom_opt for an
+    extendable, PyPSA's activity mask and vintages per period; adequacy
+    loops 01, GK A (20) AL-3), equal to ``solved_capacity`` on a network
+    whose Links are active throughout.
+
+    ``keep_zero_capacity`` (the loops' superset fleet, AL-4): a Link with
+    chainable data whose cap is 0 in every hour stays a sampled unit at
+    0 MW, so membership never changes between iterates. Default ``False``.
+
     ``boundary`` (the EH study, merge 2026-09-28): the ``info`` of
     ``archetypes.hub_boundary_copy`` — the gated P11 hub boundary (spec §4
     amendment). Its sides are authoritative (``removed_buses`` is the grid
@@ -370,7 +380,6 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
     all — instead of a firm block.
     """
     from services.adequacy.archetypes import select_import_links
-    from services.adequacy.copt import solved_capacity
 
     links = select_import_links(n, overlay)
     if boundary is not None:
@@ -460,9 +469,12 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
     bad: list[str] = []
     bad_cm: list[str] = []
     common_mode: list[dict] = []
+    from services.adequacy.activity import ActivityContext, period_blocks
+    actx = ActivityContext(n, "links", period_blocks(n.snapshots))
     for lk in links:
         g, h = orient[lk]
-        cap = solved_capacity(ldf.loc[lk])
+        cap_max_mw, cap_series = actx.capacity_series(lk, ldf.loc[lk])
+        cap = cap_max_mw if cap_series is None else cap_series
         if h == str(ldf.at[lk, "bus1"]):
             eff = _series(n, lk, "efficiency", 1.0)
             # A connection energized in steps caps the sending MW hour by hour
@@ -485,6 +497,20 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True,
                 bad_cm.append(f"{lk} ({why})")
             else:
                 common_mode.append(cm)
+        mttr0 = float(occ["mttr_hours"]) if src != "missing" else float("nan")
+        if (cap_max <= 0.0 and keep_zero_capacity and sample_links
+                and src != "missing" and rate_is_usable(occ["rate"])
+                and math.isfinite(mttr0) and mttr0 > 0
+                and str(lk) not in boundary_excluded):
+            import_units.append(CoptUnit(
+                name=f"link:{lk}", capacity_mw=0.0, q=float(occ["rate"]),
+                basis=str(occ["basis"] or "FOR"), mttr_hours=mttr0,
+                source=src))
+            models.append(ImportLinkModel(
+                name=str(lk), model="sampled_unit", cap_mw_max=0.0,
+                q=float(occ["rate"]), mttr_hours=mttr0,
+                basis=str(occ["basis"] or "FOR"), source=src))
+            continue
         if cap_max <= 0.0:
             models.append(ImportLinkModel(name=str(lk), model="islanded",
                                           cap_mw_max=0.0, source=src))
@@ -1094,7 +1120,7 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
 
     ``boundary``: the EH study's gated hub boundary (``hub_fleet_scope``).
     """
-    from services.adequacy.mc import snapshot_inputs
+    from services.adequacy.link_supply import assemble_fleet
 
     if import_model not in ("auto", "sampled_unit", "firm_block"):
         raise ValueError(f"unknown import_model {import_model!r}")
@@ -1107,14 +1133,11 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
                      if overlay is not None
                      else FleetScope(mode="whole_network",
                                      note="no import overlay given"))
+            # Adequacy loops 01 (Q1 = a): the loops' own assembly of units,
+            # residual and notes, on this route's scope (pack overlay and
+            # carrier fallback).
+            inputs = assemble_fleet(network, scope, cfg=cfg)
             if scope.mode == "hub_side":
-                inputs = snapshot_inputs(
-                    _hub_side_copy(network, scope.excluded_buses), cfg=cfg)
-                firm = np.asarray(scope.import_firm_mw, dtype=np.float64)
-                inputs = dataclasses.replace(
-                    inputs,
-                    units=tuple(inputs.units) + tuple(scope.import_units),
-                    residual=np.ascontiguousarray(inputs.residual - firm))
                 why = None
                 if import_model == "auto":
                     snap.zonal_inputs, why = _grid_areas(network, cfg, scope,
@@ -1129,8 +1152,6 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
                 # AFTER the loop: the note states import_firmness, which
                 # reads the `applied` flags the loop may just have cleared.
                 scope.note = _scope_note(scope, why)
-            else:
-                inputs = snapshot_inputs(network, cfg=cfg)
         except Exception as exc:  # noqa: BLE001 — the reason is the payload
             snap.mc_error = f"MC snapshot refused: {exc}"
             snap.copt_error = snap.mc_error
@@ -1146,10 +1167,9 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
         snap.scope["copt_import_model"] = None
         snap.scope["copt_import_note"] = None
         return snap
-    if not inputs.units:
-        snap.mc_error = (
-            f"{NOTHING_TO_SAMPLE} (unavailability + MTTR), so the sampled fleet is "
-            "empty — a statement about missing input data, not about the system")
+    refusal = nothing_to_sample(inputs)  # AL-7: the loops' one refusal
+    if refusal is not None:
+        snap.mc_error = refusal
         snap.copt_error = snap.mc_error
         return snap
     snap.mc_inputs = inputs

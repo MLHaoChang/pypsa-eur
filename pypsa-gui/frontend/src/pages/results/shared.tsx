@@ -18,11 +18,12 @@ import { useUIStore } from '../../store/uiStore'
 import { displayName } from '../../utils/displayName'
 import { nk } from '../../utils/queryKeys'
 import { networkApi } from '../../api/network'
-import { CHART_TICK, carrierColour } from '../../components/charts/chartTheme'
+import { CHART_TICK, carrierColour, seriesDash } from '../../components/charts/chartTheme'
 export {
   CHART_HEIGHT, CHART_TICK, LABEL_PASS, bandLabelIndices, chartFigure, ChartFrame, ChartSourceLine, ChartSourceProvider, carrierColour, directLabel, seriesDash,
-  thickestIndex, useChartSource,
+  thickestIndex, useChartSource, SERIES_TOKENS, SERIES_COLOURS,
 } from '../../components/charts/chartTheme'
+export type { ChartSource } from '../../components/charts/chartTheme'
 
 // ── Asset-group categorisation (mirrors TopologyCanvas / MapCanvas) ──────────
 export type Group = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -1377,7 +1378,7 @@ export function seasonalLabelFmt(mode: 'weekly' | 'monthly') {
 // profile" view of a multi-line time series.
 export function SeasonalLineCardGrid({
   mode, rows, cols, colors, unit, valueFormatter, headerNote, height = 190,
-  showLegendThreshold = 8,
+  showLegendThreshold = 8, dashed = false,
 }: {
   mode: 'weekly' | 'monthly'
   rows: ReadonlyArray<Record<string, unknown>>
@@ -1388,6 +1389,8 @@ export function SeasonalLineCardGrid({
   headerNote?: string         // appears in muted text next to "averaged week/month"
   height?: number
   showLegendThreshold?: number  // hide legend when cols.length > threshold
+  /** Lines with no carrier (buses): tell them apart by dash as well as colour. */
+  dashed?: boolean
 }) {
   const data = useMemo(
     () => aggregateSeasonalRows(rows, cols, mode),
@@ -1433,6 +1436,7 @@ export function SeasonalLineCardGrid({
                     {present.map((c, i) => (
                       <Line key={c} type="monotone" dataKey={c} name={c}
                         stroke={colors[i % colors.length]}
+                        strokeDasharray={dashed ? seriesDash(i + Math.floor(i / colors.length)) : undefined}
                         strokeWidth={1.4} dot={false} connectNulls />
                     ))}
                   </LineChart>

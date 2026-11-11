@@ -97,13 +97,13 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         diagnose_network cluster_network derive_lengths_from_geometry recalculate_line_lengths
         rescale_line_impedances reset_network reconstruct_network_from_image get_asset_reference
         resolve_reference apply_project_changes preview_project_changes apply_equipment_mapping
-        preview_equipment_mapping apply_document_values preview_document_values""",
+        preview_equipment_mapping apply_document_values preview_document_values why_this_number""",
     'timeseries-horizon': """
         apply_default_series preview_default_series apply_demand_from_excel apply_generated_profile
         apply_generated_profiles compare_profiles delete_timeseries generate_availability_profile
         generate_exemplary_timeseries generate_load_profile generate_renewable_profile
         generate_series_profile get_aggregate_load get_current_series get_profile_parameters
-        get_profile_readiness get_timeseries get_weather_choice list_all_timeseries list_investment_periods
+        get_profile_readiness get_profile_tuning_schema get_timeseries get_weather_choice list_all_timeseries list_investment_periods
         list_load_profile_archetypes list_pending_profiles list_profile_presets list_snapshots
         list_timeseries_profiles pending_profile_from_current preview_renewable_profile
         refine_generated_profile sample_representative_weeks set_investment_period_weightings
