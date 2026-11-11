@@ -263,7 +263,55 @@ def _loop_converged(env, rule):
         return NoEvidence((step.get("job") or {}).get("outcome") or step["status"], str(reason)[:240])
     if loop.get("applied") is False:  # a user edit landed while the loop ran (H3): not this project's
         return NoEvidence("inputs_changed", "the inputs changed while the engine loop ran")
+    problem = _goal_problem(env, loop)
+    if problem:
+        return NoEvidence(*problem)
     return Looped(converged(loop), {k: loop[k] for k in LOOP_FIELDS if k in loop})
+
+
+def _granted_goal(env):
+    """The goal the grant froze (`{"value", "unit", "source"}`), or None when
+    the run has no granted envelope or its envelope froze no goal."""
+    from services import run_envelope
+    task_id = env.task.get("task_id")
+    if env.project_dir is None or not isinstance(task_id, str):
+        return None
+    envelope = run_envelope._load(Path(env.project_dir) / "assistant_tasks" / f"{task_id}.json")
+    if envelope is None or envelope.get("state") != "granted":
+        return None
+    goal = envelope.get("goal")
+    return goal if isinstance(goal, dict) else None
+
+
+GOAL_REL_TOL, GOAL_ABS_TOL = 1e-9, 1e-9  # the loop target vs the frozen goal on the horizon basis
+
+
+def _number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _goal_problem(env, loop):
+    """`(reason, detail)` when the loop did not judge the goal the grant froze,
+    else None (also when the grant froze no goal). GK B (46): nothing defaults;
+    an unreadable input is `goal_unreadable`, never a match. The loop's
+    `horizon_years` is `metrics.horizon_years(n)` (both runners), and its target
+    is the goal's h/yr value put on that horizon by `reliability_goal.loop_goal`."""
+    goal = _granted_goal(env)
+    if goal is None:
+        return None
+    from services.reliability_goal import loop_goal
+    value, years, target = goal.get("value"), loop.get("horizon_years"), loop.get("target_lole_h")
+    if (goal.get("unit") != "h/yr" or not _number(value) or value < 0 or not _number(years) or years <= 0
+            or not _number(target)):
+        return ("goal_unreadable", "the frozen goal or the engine loop's target or horizon could not be read")
+    expected, _, _ = loop_goal(None, {"target_lole_h": {"value": value, "source": goal.get("source")},
+                                      "mc_draws": {"value": 1, "source": ""}}, float(years))
+    if not math.isclose(target, expected, rel_tol=GOAL_REL_TOL, abs_tol=GOAL_ABS_TOL):
+        return ("goal_mismatch", "the engine loop ran against a different LOLE target than the goal the grant froze")
+    sources = loop.get("goal_sources")
+    if not isinstance(sources, dict) or sources.get("target_lole_h") != goal.get("source"):
+        return ("goal_mismatch", "the engine loop's LOLE target came from a different source than the grant's goal")
+    return None
 
 
 def check_engine(rule):
