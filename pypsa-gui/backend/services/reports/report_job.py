@@ -551,7 +551,7 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
     return doc, aborted
 
 
-def _write_generation_meta(job: ReportJob, *, aborted: bool, version: int) -> None:
+def _write_generation_meta(job: ReportJob, *, aborted: bool) -> None:
     """
     `meta.json` gains a `generation` object (repairs, prose failures, the
     sections written). `ReportMeta` ignores unknown keys, so WP1's readers
@@ -564,12 +564,16 @@ def _write_generation_meta(job: ReportJob, *, aborted: bool, version: int) -> No
     with store.report_lock(job.project_dir, job.report_id):
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            logger.warning("reports: meta.json unreadable after save (%s)", path)
-            return
-        mark = raw.get("settings_unrecorded")
-        if isinstance(mark, dict) and mark.get("version") == version:
-            raw.pop("settings_unrecorded")  # this job's receipt is its last write
+        except (OSError, ValueError) as exc:
+            # Never `done` without the receipt (07f-b): the job fails, naming the version.
+            raise store.ReportStoreError(
+                f"meta.json of report {job.report_id} unreadable after save") from exc
+        # The receipt lands: it leaves the unrecorded mark (07f-b).
+        mark = store.without_unrecorded(raw.get("settings_unrecorded"), ("generation",))
+        if mark is None:
+            raw.pop("settings_unrecorded", None)
+        else:
+            raw["settings_unrecorded"] = mark
         with job.lock:
             raw["generation"] = {
                 "repairs": job.record["repairs"],
@@ -685,7 +689,7 @@ def run_report_job(job: ReportJob) -> ReportDocument:
         saved = store.load_report(job.project_dir, job.report_id, version)
         # Terminal status lets clients consume the generation receipt or
         # start another job, so publish it only after that receipt is saved.
-        _write_generation_meta(job, aborted=aborted, version=version)
+        _write_generation_meta(job, aborted=aborted)
         _set(job, status="aborted" if aborted else "done", version=version,
              error=None, finished_at=time.time())
         return saved
@@ -698,8 +702,11 @@ def run_report_job(job: ReportJob) -> ReportDocument:
         error = str(exc)
         if version is not None:
             fields["version"] = version
-            error = (f"version {version} was saved, but its figures, settings or "
-                     f"generation receipt were not: {exc}")
+            unwritten = [*(["figures"] if job.new_report else []), "generation receipt",
+                         *([f"settings ({', '.join(sorted(job.meta_updates))})"]
+                           if job.meta_updates else [])]
+            error = (f"version {version} was saved, but not all of its "
+                     f"{', '.join(unwritten)} were written: {exc}")
         _set(job, status="failed", error=error, finished_at=time.time(), **fields)
         raise
     finally:

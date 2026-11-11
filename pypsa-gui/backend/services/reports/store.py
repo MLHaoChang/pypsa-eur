@@ -151,13 +151,27 @@ _CARRIED_META_FIELDS = ("generation", "template_mode", "template_language", "map
 _PENDING_FIELDS = frozenset(_CARRIED_META_FIELDS) - {"settings_unrecorded"}
 
 
-def _pending_mark(pending: tuple[str, ...], version: int) -> dict:
-    """The `settings_unrecorded` mark for fields a caller writes after its
-    save of `version` (07f-b, GK B E1). `TypeError` for any other field."""
+def _check_pending(pending: tuple[str, ...]) -> None:
     unknown = sorted(set(pending) - _PENDING_FIELDS)
     if unknown:
         raise TypeError(f"not a pending meta field: {', '.join(unknown)}")
-    return {"settings_unrecorded": {"version": version, "fields": sorted(set(pending))}}
+
+
+def _moved_mark(mark: dict | None, pending: tuple[str, ...], version: int) -> dict | None:
+    """The `settings_unrecorded` mark after a save of `version` (07f-b, GK B
+    E1). Its fields are the carried fields left null by a write that never
+    landed: the ones still unrecorded, which stay null in the new version
+    too, plus this save's `pending`. None when there are none."""
+    fields = sorted({*((mark or {}).get("fields") or ()), *pending})
+    return {"version": version, "fields": fields} if fields else None
+
+
+def without_unrecorded(mark: dict | None, written) -> dict | None:
+    """The mark once `written` fields have landed; None when none is left."""
+    if not isinstance(mark, dict):
+        return None
+    fields = sorted(set(mark.get("fields") or ()) - set(written))
+    return {**mark, "fields": fields} if fields else None
 
 
 def _meta_from_doc(doc: ReportDocument, *, latest_version: int,
@@ -208,13 +222,17 @@ def update_meta(project_dir: pathlib.Path, report_id: str, **fields: object) -> 
     is a `TypeError`: the document-derived fields are rewritten from the
     document, never patched here.
     """
-    unknown = sorted(set(fields) - set(_CARRIED_META_FIELDS))
+    unknown = sorted(set(fields) - _PENDING_FIELDS)
     if unknown:
         raise TypeError(f"update_meta: not a carried meta field: {', '.join(unknown)}")
     rdir = _existing_report_dir(project_dir, report_id)
     with report_lock(project_dir, report_id):
         meta = load_meta(project_dir, report_id)
-        updated = meta.model_copy(update={**fields, "updated_at": _now_iso()})
+        # A field written here is recorded again (07f-b): it leaves the mark.
+        updated = meta.model_copy(update={
+            **fields, "updated_at": _now_iso(),
+            "settings_unrecorded": without_unrecorded(meta.settings_unrecorded, fields),
+        })
         _write_meta(rdir, updated)
     return updated
 
@@ -626,6 +644,7 @@ def clear_closing(project_dir: pathlib.Path) -> None:
 def create_report(project_dir: pathlib.Path, doc: ReportDocument, *,
                   pending: tuple[str, ...] = ()) -> ReportMeta:
     """Create `reports/<id>/` with `v1.json` and `meta.json`. The id must be new."""
+    _check_pending(pending)  # a wrong field name refuses before any write
     rdir = report_dir(project_dir, doc.report_id)
     with report_lock(project_dir, doc.report_id):
         if rdir.exists():
@@ -636,7 +655,7 @@ def create_report(project_dir: pathlib.Path, doc: ReportDocument, *,
         _write_version(rdir, first)
         meta = _meta_from_doc(first, latest_version=1)
         if pending:  # see `save_version`
-            meta = meta.model_copy(update=_pending_mark(pending, 1))
+            meta = meta.model_copy(update={"settings_unrecorded": _moved_mark(None, pending, 1)})
         _write_meta(rdir, meta)
     return meta
 
@@ -661,10 +680,10 @@ def save_version(project_dir: pathlib.Path, doc: ReportDocument, *,
     save writes them as null and marks them `settings_unrecorded`, so if
     that later write is refused the meta shows version n without them,
     never with version n-1's (07f-b, GK B Q2, E1). Every other carried field
-    still carries (E4).
+    still carries (E4). Fields a mark already lists stay null in the new
+    version, so the mark moves to it with them (any caller's save).
     """
-    if pending:
-        _pending_mark(pending, 0)  # a wrong field name refuses before any write
+    _check_pending(pending)  # a wrong field name refuses before any write
     rdir = _existing_report_dir(project_dir, doc.report_id)
     with report_lock(project_dir, doc.report_id):
         meta = load_meta(project_dir, doc.report_id)
@@ -685,8 +704,10 @@ def save_version(project_dir: pathlib.Path, doc: ReportDocument, *,
         _write_meta(rdir, _meta_from_doc(
             bumped, latest_version=next_version, created_at=meta.created_at,
             carried=meta.model_copy(update={
-                **dict.fromkeys(pending), **_pending_mark(pending, next_version),
-            }) if pending else meta,
+                **dict.fromkeys(pending),
+                "settings_unrecorded": _moved_mark(meta.settings_unrecorded, pending,
+                                                   next_version),
+            }),
         ))
     return next_version
 
