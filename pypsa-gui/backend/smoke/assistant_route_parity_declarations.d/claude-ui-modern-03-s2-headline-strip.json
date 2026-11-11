@@ -1,0 +1,10 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/results/headline_kpis",
+   "reason": "ui-pointer",
+   "decision": "DASHBOARD-1"
+  }
+ ]
+}

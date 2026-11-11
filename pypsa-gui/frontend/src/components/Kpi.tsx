@@ -32,7 +32,7 @@ const TONE: Record<KpiTone, string> = {
 
 export default function Kpi({
   label, value, unit, basis, hint, delta, deltaTone, headline, testId,
-  state = 'ready', reason, action, fromStudy, valueLabel,
+  state = 'ready', reason, action, fromStudy, valueLabel, dimmed,
 }: {
   label: string
   value: string
@@ -53,6 +53,8 @@ export default function Kpi({
   fromStudy?: boolean
   /** Hover text and accessible name for the figure itself, e.g. what a "—" means. */
   valueLabel?: string
+  /** Dim the figure without a pill: its group already says "Out of date" once. */
+  dimmed?: boolean
 }) {
   const raw = unit !== undefined ? { value, unit } : splitValueUnit(value)
   const parts = kpiFigure(raw.value, raw.unit)
@@ -73,7 +75,7 @@ export default function Kpi({
           role={valueLabel ? 'img' : undefined}
           title={valueLabel}
           aria-label={valueLabel}
-          className={`flex items-baseline gap-1 whitespace-nowrap ${state === 'stale' ? 'opacity-60' : ''}`}
+          className={`flex items-baseline gap-1 whitespace-nowrap ${state === 'stale' || dimmed ? 'opacity-60' : ''}`}
         >
           <span
             className={`font-semibold leading-none tabular-nums text-text
