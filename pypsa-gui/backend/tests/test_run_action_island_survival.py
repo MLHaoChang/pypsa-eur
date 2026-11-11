@@ -108,7 +108,11 @@ def _ctx(hub, network=None, revision=7):
     )
 
 
-def _start(path, ctx):
+def _start(path, ctx, *, grant=True):
+    """Dispatch the step; with `grant`, on a granted budget of 3 solves
+    unless the test wrote an envelope of its own."""
+    if grant and run_envelope._load(path) is None:
+        _granted(path, 3)
     return run_actions.start(path, ctx, {"id": "solve.3"}, instance="a")
 
 
@@ -489,6 +493,37 @@ def test_no_solve_left_stops_before_any_solve(hub, monkeypatch):
     ]
 
 
+@pytest.mark.parametrize("envelope", ["none", "proposed"])
+def test_no_granted_budget_stops_before_any_solve(hub, monkeypatch, envelope):
+    """B1: the check's one solve comes only from a granted budget. With no
+    envelope, or one not granted, it stops by name before it reads the
+    network or solves, and the ledger keeps no row."""
+    _sidecar(hub)
+    path = _task_file(hub, run_actions.mg_freeze(hub))
+    if envelope == "proposed":
+        run_envelope._save(
+            path,
+            run_envelope.propose(path, _read(path), run_profiles.resolve("eh_site@1")),
+        )
+        assert run_envelope._load(path)["state"] != "granted"
+    monkeypatch.setattr(S, "survival", lambda *a, **k: pytest.fail("never run"))
+    monkeypatch.setattr(S, "_solve", lambda *a, **k: pytest.fail("never solved"))
+    monkeypatch.setattr(
+        "services.study.findings.copy_network",
+        lambda n: pytest.fail("never read"),
+    )
+    assert _start(path, _ctx(hub), grant=False) == "mg_no_grant"
+    step = _read(path)["steps"][0]
+    assert step["status"] == "failed" and step["error"].startswith("mg_no_grant")
+    assert "result" not in step
+    after = run_envelope._load(path)
+    if envelope == "none":
+        assert after is None
+    else:
+        assert after["state"] != "granted"
+        assert not [a for a in after["audit"] if a["event"] == run_actions.MG_EVENT]
+
+
 def test_a_second_solve_raises_and_the_reservation_settles_what_was_spent(
     hub, monkeypatch
 ):
@@ -564,10 +599,68 @@ def test_an_edit_during_the_check_makes_its_result_no_evidence(hub, monkeypatch,
         assert (w in result["reason"]) == (edit in (key, "both"))
 
 
+class _EditOnRelease:
+    """A context's mutation lock whose first release is followed at once by
+    a network edit (the counter bumped, a bus added), as an edit waiting on
+    the lock would land."""
+
+    def __init__(self, edit):
+        self._lock = threading.RLock()
+        self._edit = edit
+        self.fired = False
+
+    def acquire(self, *args, **kwargs):
+        return self._lock.acquire(*args, **kwargs)
+
+    def release(self):
+        self._lock.release()
+        if not self.fired:
+            self.fired = True
+            with self._lock:
+                self._edit()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+
+
+def test_the_solved_copy_is_the_network_at_the_recorded_revision(hub, monkeypatch):
+    """C2: the copy the check solves is taken under the lock with the
+    revision it records. An edit landing the moment the lock is released is
+    not in the solved network, and the result reads not current."""
+    _sidecar(hub)
+    path = _task_file(hub, run_actions.mg_freeze(hub))
+    n = pypsa.Network()
+    n.add("Bus", "a")
+    ctx = _ctx(hub, n)
+
+    def edit():
+        ctx.network_revision += 1
+        ctx.network.add("Bus", "edited")
+
+    ctx.mutation_lock = _EditOnRelease(edit)
+    seen = _stub(monkeypatch)
+    assert _start(path, ctx) == MG
+    assert ctx.mutation_lock.fired and "edited" in ctx.network.buses.index
+    assert list(seen[0].buses.index) == ["a"]  # the network at revision 7
+    result = _read(path)["steps"][0]["result"]
+    assert result["network_revision"] == 7
+    assert result["state"] == run_actions.INPUTS_CHANGED
+    assert "the network was edited" in result["reason"]
+    live = run_actions.mg_outcome(
+        _read(path), ctx.network_revision, result["settings_digest"]
+    )
+    assert live["no_evidence"] == run_actions.INPUTS_CHANGED
+
+
 @pytest.mark.parametrize("loss", ["lease", "attempt", "status"])
 def test_a_run_taken_over_during_the_check_keeps_nothing(hub, monkeypatch, loss):
-    """C3 (#1123): with the activity bindings cleared, so only the publish
-    guard stands between the result and the step."""
+    """C3 (#1123): the check is synchronous and registers no job (no
+    activity binding), so only the publish guard (`_held`) stands between
+    the result and the step."""
     from harness import runner
 
     _sidecar(hub)
@@ -586,9 +679,12 @@ def test_a_run_taken_over_during_the_check_keeps_nothing(hub, monkeypatch, loss)
 
         runner._update(path, change)
 
-    monkeypatch.setattr(assistant_tasks, "_ACTIVITY", {}, raising=False)
+    from harness import job_adapters
+
+    bindings = dict(job_adapters._ACTIVITY_BINDINGS)
     _stub(monkeypatch, during=during)
     assert _start(path, _ctx(hub)) == "taken_over"
+    assert dict(job_adapters._ACTIVITY_BINDINGS) == bindings
     step = _read(path)["steps"][0]
     assert "result" not in step and step["status"] != "completed"
     assert _row(path)["solves"] == 1
@@ -755,6 +851,7 @@ def _done(hub, result_over=None, drop=None, revision=7):
         "version": run_actions.MG_VERSION,
         "settings_digest": frozen["settings_digest"],
         "network_revision": revision,
+        "skipped": [],
         **(result_over or {}),
     }
     if drop:
@@ -1240,6 +1337,69 @@ def test_a_lock_busy_after_the_solve_makes_the_result_no_evidence(hub, monkeypat
     assert "the island settings changed" in result["reason"]
 
 
+def _solver_config(hub, cfg):
+    (_project_dir(hub) / "solver_config.json").write_text(json.dumps(cfg))
+
+
+_CODE = "def extra_functionality(n, snapshots):\n    pass\n"
+
+
+@pytest.mark.parametrize(
+    "cfg, skipped",
+    [
+        (None, []),
+        ({}, []),
+        ({"extra_functionality_code": "  \n", "solver_options": {}}, []),
+        (
+            {"extra_functionality_code": _CODE, "solver_options": {"threads": 2}},
+            ["user_code", "solver_options"],
+        ),
+        ({"island_constraints": True, "mode": "pf"}, []),
+        (
+            {
+                "island_constraints": True,
+                "commercial": {"poc": {}},
+                "extra_functionality_code": _CODE,
+                "solver_options": {"threads": 2},
+            },
+            ["island_apply", "poc_writer", "user_code", "solver_options"],
+        ),
+    ],
+)
+def test_the_result_names_each_solve_step_the_check_skipped(
+    hub, monkeypatch, cfg, skipped
+):
+    """C1: the steps of the project's own solve the check does not take,
+    named only when this project has them on, and shown in the gate record."""
+    _sidecar(hub)
+    if cfg is not None:
+        _solver_config(hub, cfg)
+    path = _task_file(hub, run_actions.mg_freeze(hub))
+    _stub(monkeypatch)
+    assert _start(path, _ctx(hub)) == MG
+    result = _read(path)["steps"][0]["result"]
+    assert run_actions.mg_shape_ok(result) and result["skipped"] == skipped
+    task = _read(path)
+    fact = _gate(hub, "mg.island.survival", value="survives", task=task)["facts"][0]
+    assert fact["value"] == "survives"
+    if skipped:
+        for key in skipped:
+            assert run_actions.MG_SKIPPED[key] in fact["basis"]
+        for key in set(run_actions.MG_SKIPPED) - set(skipped):
+            assert run_actions.MG_SKIPPED[key] not in fact["basis"]
+    else:
+        assert "basis" not in fact
+
+
+def test_unreadable_solver_settings_are_named_as_skipped(hub, monkeypatch):
+    _sidecar(hub)
+    (_project_dir(hub) / "solver_config.json").write_text("{not json")
+    path = _task_file(hub, run_actions.mg_freeze(hub))
+    _stub(monkeypatch)
+    assert _start(path, _ctx(hub)) == MG
+    assert _read(path)["steps"][0]["result"]["skipped"] == ["solver_config"]
+
+
 def _done_result():
     out = {k: v for k, v in _out().items() if k in run_actions.MG_RESULT}
     return {
@@ -1248,6 +1408,7 @@ def _done_result():
         "version": run_actions.MG_VERSION,
         "settings_digest": "0" * 64,
         "network_revision": 7,
+        "skipped": [],
     }
 
 

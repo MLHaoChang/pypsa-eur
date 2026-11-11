@@ -780,7 +780,8 @@ def _mg_settings(env):
 def _mg_survival(env):
     """The run's own island check (12b): `survives` or `fails` (each
     shortfall named) while it is current on the live network and island
-    settings (B4); no evidence otherwise (B5, B7, M10)."""
+    settings (B4); no evidence otherwise (B5, B7, M10). The basis names each
+    step of the project's own solve the check did not take (C1)."""
     from services import dirty_state, run_actions
     island = _mg_settings(env)
     if isinstance(island, NoEvidence):
@@ -790,7 +791,9 @@ def _mg_survival(env):
     out = run_actions.mg_outcome(env.task, dirty_state.revision(env.ctx), run_actions.settings_digest(island))
     if "no_evidence" in out:
         return NoEvidence(out["no_evidence"], out["reason"])
-    return Detailed(out["state"], [f"{s['row']}: {s['sentence']}" for s in out["result"]["shortfalls"]])
+    skipped = [run_actions.MG_SKIPPED.get(k, str(k)) for k in out["result"]["skipped"]]
+    basis = ("The island check solved without " + "; ".join(skipped) + ".") if skipped else None
+    return Detailed(out["state"], [f"{s['row']}: {s['sentence']}" for s in out["result"]["shortfalls"]], basis)
 
 
 def _mg_fuel(env):

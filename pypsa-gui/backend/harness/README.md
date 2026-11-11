@@ -1582,7 +1582,8 @@ kind refuses (GK B (46) M2). The data-centre record is unchanged (M1).
 - **Run (GK B (46): M4-M8, C1-C3).** Synchronous, in the
   runner step, with no card: it writes nothing, and its one solve comes from
   the granted budget (`mg_island` ledger row, settled once on every exit
-  with the solver calls it made). The project is resolved in a database
+  with the solver calls it made). With no granted envelope it stops before
+  it reads the network (`mg_no_grant`), and reserves nothing. The project is resolved in a database
   session that closes before the solve. Under the context's mutation lock it reads
   the edit counter, the sidecar and a copy of the live network together;
   a sidecar that changed since the freeze stops the step
@@ -1591,7 +1592,14 @@ kind refuses (GK B (46) M2). The data-centre record is unchanged (M1).
   `time_limit = MG_TIME_LIMIT_S` (60 s, inside the 90 s lease), the island
   rows of the project's own solve as a check, every size fixed. It does not
   go through `build_lp_chain`: no island apply, PoC writer, user code or the
-  project's solver options (`_solver_config_from_dict`). A second solver
+  project's solver options. The result's `skipped` lists those of them the
+  project's saved solver settings (`solver_config.json`, read with the other
+  inputs) have on, each by the test its own solve step makes
+  (`run_actions.mg_skipped`: `island_constraints` on an LOPF, a
+  `commercial` config, user code that is not blank, `solver_options` not
+  empty; `solver_config` when the settings cannot be read), and the
+  `mg.island.survival` gate record names them in words in its `basis`
+  (`run_actions.MG_SKIPPED`); a plain project lists none. A second solver
   call raises. While it solves it holds the runner's one worker thread, and
   neither the mutation lock nor the task lock. Both inputs are read again
   after the solve; a change makes the result `inputs_changed`. The result is
