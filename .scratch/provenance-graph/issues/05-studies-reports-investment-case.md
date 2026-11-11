@@ -22,3 +22,10 @@ stops parsing reason text with a regex (`ReportStep.tsx:26`): the verdict says w
 - One PR within PR-SIZE-1, or the slices the plan GO names.
 
 ## Comments
+
+### From issue 08 (GK B (45), 2026-11-11)
+
+A cost node built here that reads a tariff or PPA cell gets a `derived_from` edge to that cell's node,
+`input:commercial/<target>:<entity>/<path>` (`provenance_graph.commercial.cell_id`), so the cost reads the cell's
+verdict. Until then a cost whose commercial input has no such edge lists it as `uncompared`, never fresh (ruling (b)
+in issue 01).

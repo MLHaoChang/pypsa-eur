@@ -594,12 +594,41 @@ def provenance(p: dict, *, approved_by: str | None) -> dict:
     return out
 
 
-def _slot_of(commercial: dict, key: str):
-    """The value stored at a provenance key, or raises (KeyError, StopIteration, ...) when its
-    item, period, tier or contract no longer exists."""
+#: What reading a provenance key raises when its item, period, tier or contract no longer exists.
+CELL_GONE = (KeyError, StopIteration, IndexError, TypeError, AttributeError)
+
+
+def cell_value(commercial: dict, key: str):
+    """The value stored at a provenance key, or raises (`CELL_GONE`) when its item, period, tier or
+    contract no longer exists."""
     target, _, rest = key.partition(":")
     entity, _, path = rest.partition("/")
     return read(commercial, target, entity, _where({"target_kind": target, "field": path}))
+
+
+def cell_now(commercial: dict, key: str) -> dict:
+    """What the config holds for a provenance key now: its `value` and `unit`, the `currency` a tariff
+    states or its jurisdiction implies, and a PPA price's `currency_year` (the contract's `base_year`).
+    A field the config does not state is left out. Raises (`CELL_GONE`) like `cell_value`."""
+    from models.commercial import jurisdiction_currency
+
+    target, _, rest = key.partition(":")
+    entity, _, path = rest.partition("/")
+    now = {"value": cell_value(commercial, key)}
+    owner = _owner(commercial, target, entity)
+    if target == "tariff":
+        tariff = commercial["import_tariff"]
+        now["unit"] = UNIT_LABELS[owner["unit"]]
+        currency = tariff.get("currency") or jurisdiction_currency(tariff.get("jurisdiction"),
+                                                                    tariff.get("valid_from"))
+        if currency:
+            now["currency"] = currency
+    else:
+        money = PPA_FIELDS[path][2]
+        now["unit"] = "/MWh" if money else PPA_UNIT_LABELS[path]
+        if money and owner.get("base_year") is not None:
+            now["currency_year"] = owner["base_year"]
+    return now
 
 
 def _live(commercial: dict, entries: dict) -> dict:
@@ -607,24 +636,23 @@ def _live(commercial: dict, entries: dict) -> dict:
     out = {}
     for key, entry in (entries or {}).items():
         try:
-            _slot_of(commercial, key)
-        except (KeyError, StopIteration, IndexError, TypeError, AttributeError):
+            cell_value(commercial, key)
+        except CELL_GONE:
             continue
         out[key] = entry
     return out
 
 
 def document_source(commercial: dict | None, key: str) -> dict | None:
-    """The provenance entry for `key` while the stored value still equals the one the
-    document gave; None after a later edit, or for an entry whose item is gone."""
+    """The provenance entry for `key` while the provenance graph reads its cell fresh (the stored value,
+    unit, currency and money year still are the ones the document gave); None after a later edit, or for
+    an entry whose item is gone."""
+    from services.provenance_graph import queries
+
     entry = ((commercial or {}).get("provenance") or {}).get(key)
     if not isinstance(entry, dict):
         return None
-    try:
-        now = _slot_of(commercial, key)
-    except (KeyError, StopIteration, IndexError, TypeError, AttributeError):
-        return None
-    return entry if _same(now, entry.get("value")) else None
+    return entry if queries.cell_verdict(commercial, key).state == "fresh" else None
 
 
 def apply(p: dict, card: dict, *, approved_by: str | None) -> dict:
