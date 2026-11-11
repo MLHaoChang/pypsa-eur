@@ -91,7 +91,10 @@ _REASON_WORDS = {
     "refused": "the investment case was refused",
     "npv_not_established": "the case could not establish the project NPV",
     "irr_not_established": "the case could not establish the project IRR",
+    # Study harness 12c (B12, G5): `ic.baseline_keeps`'s own reasons.
+    "no_baseline_plan": "the case's baseline has no plan to read",
 }
+_DROPS = "baseline_drops:"
 
 
 def _plain(key: str) -> str:
@@ -108,6 +111,8 @@ def reason_words(fact: dict) -> str:
         r = str(r)
         if r in _REASON_WORDS:
             out.append(_REASON_WORDS[r])
+        elif r.startswith(_DROPS):
+            out.append(f"the case's baseline drops the owned asset {r[len(_DROPS):]}")
         elif r.startswith("changed:"):
             out.append(f"{_plain(r[len('changed:'):])} changed since the case")
         elif r.startswith(_BLOCKER):

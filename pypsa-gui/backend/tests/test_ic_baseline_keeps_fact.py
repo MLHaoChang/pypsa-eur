@@ -160,7 +160,7 @@ def test_a_dropped_existing_asset_leaves_the_rule_unevaluated_with_its_name(ic, 
     _cf, keeps = gate()
     assert keeps["verdict"] == "not_evaluated"
     assert keeps["facts"][0]["value"] == F.NOT_ESTABLISHED
-    assert keeps["reason"] == "not_established: baseline_drops:diesel_1"
+    assert keeps["reason"] == "The case's baseline drops the owned asset diesel_1"
 
 
 def test_no_case_is_not_run(ic):
@@ -168,7 +168,7 @@ def test_no_case_is_not_run(ic):
     setup("eh_microgrid")
     _cf, keeps = gate()
     assert keeps["verdict"] == "not_evaluated" and keeps["facts"][0]["value"] == F.NOT_RUN
-    assert keeps["reason"] == "not_run: no_case"
+    assert keeps["reason"] == "No investment case has been run"
 
 
 def test_a_case_whose_network_was_edited_is_not_run(ic, client, session_ctx):
@@ -178,7 +178,9 @@ def test_a_case_whose_network_was_edited_is_not_run(ic, client, session_ctx):
     session_ctx(client).network.generators.loc["diesel_1", "marginal_cost"] += 5.0
     _cf, keeps = gate()
     assert keeps["facts"][0]["value"] == F.NOT_RUN
-    assert keeps["reason"] == "not_run: case_stale, results_not_current"
+    assert keeps["reason"] == (
+        "The investment case is out of date; the solve's results no longer describe the network"
+    )
 
 
 # ── one live solve through the real route ───────────────────────────────────
