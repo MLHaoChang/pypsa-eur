@@ -1,12 +1,12 @@
 Hand mutation of services/site_scene/layout.py, each run from pypsa-gui/backend: timeout 500 python -m pytest tests/test_site_scene_layout.py -q -p no:cacheprovider -W ignore -x -rf
 # | result | first failing test
-1 | not applied (text `dy = -(p[1] - py0) * s` absent; line 297 is `dx, dy = (p[0] - px0) * s, -(p[1] - py0) * s`) | -
+1 | killed (re-run with the edit on the combined `dx, dy = ...` line) | test_raster_north_up_yields_the_drawn_rectangle
 2 | killed | test_raster_rotation_anchor_and_local_anchor_place_every_vertex
 3 | killed | test_raster_north_up_yields_the_drawn_rectangle
 4 | killed | test_raster_north_up_yields_the_drawn_rectangle
 5 | killed | test_raster_rotation_anchor_and_local_anchor_place_every_vertex
 6 | killed | test_a_projected_crs_is_named[EPSG:25832-crs0]
-7 | survived | -
+7 | killed after adding a link-CRS case with no href (it survived before: `_no_remote` caught the href first) | test_remote_references_are_refused[member2]
 8 | killed | test_remote_references_are_refused[member1]
 9 | killed | test_a_layout_far_from_the_site_is_named
 10 | killed | test_polygon_holes_are_refused_by_name
