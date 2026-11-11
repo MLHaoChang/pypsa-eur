@@ -56,7 +56,10 @@ export const DEFAULT_WORDS: Record<string, string> = {
   horizon_end: 'Study horizon end',
 }
 const DEFAULT_UNITS: Record<string, string> = { connection_mw: 'MW', fault_level_mva: 'MVA' }
+/** A source's quoted words in curly quotes (`you wrote 'x'` -> `you wrote “x”`); the backend text keeps straight ones. */
+export const curly = (text: string) => text.replace(/^(.*?(?:: |wrote ))'(.*)'$/s, '$1“$2”')
 const showValue = (v: unknown, unit: string | null) => {
+  if (unit === 'fraction' && typeof v === 'number') return `${+(v * 100).toFixed(1)} %`
   if (typeof v === 'boolean') return v ? 'Yes' : 'No'
   if (Array.isArray(v)) return `${v.length} entries`
   if (typeof v === 'object' && v !== null) return 'several values'
@@ -109,9 +112,9 @@ function IntakeRows({ intake }: { intake: RunIntake }) {
           <span className={struck ? 'text-muted line-through' : undefined}>{r.label}: {showValue(r.value, r.unit)}</span>
           {struck && <>{' '}<span className="text-muted" data-testid="envelope-intake-struck">· Struck</span></>}
           {r.status === 'conflict' && <>{' '}<span className="text-warn" data-testid="envelope-intake-conflict">
-            · Not used: {other ? `conflicts with ${other.source}` : 'two sources disagree'}</span></>}
+            · Not used: {other ? `conflicts with the other value (${curly(other.source)})` : 'two sources disagree'}</span></>}
           {r.from_document && <>{' '}<span className="text-muted" data-testid="envelope-intake-document">· read from a document</span></>}
-          <div className="text-[11px] text-muted" data-testid="envelope-intake-source">{r.source}</div>
+          <div className="text-[11px] text-muted" data-testid="envelope-intake-source">{curly(r.source)}</div>
         </li>
       })}
     </ul>

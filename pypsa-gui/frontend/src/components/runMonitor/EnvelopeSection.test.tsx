@@ -10,7 +10,7 @@ import { useUIStore } from '../../store/uiStore'
 import * as api from '../../api/runMonitor'
 import { RELIABILITY_GOAL_LABEL } from '../../hooks/useReliabilityGoal'
 import realIntake from './intakeCard.fixture.json'
-import { DEFAULT_WORDS, PATH_WORDS, setupWords } from './EnvelopeSection'
+import { curly, DEFAULT_WORDS, PATH_WORDS, setupWords } from './EnvelopeSection'
 import { ENVELOPE, STATES, TASK_ID } from './runFixtures'
 
 vi.mock('../../api/runMonitor', () => ({
@@ -296,7 +296,7 @@ describe('EnvelopeSection reliability goal', () => {
     expect(rows[0].textContent).toContain('read from a document')
     expect(rows[0].textContent).toContain('sheet.pdf, page 2')
     expect(rows[1].textContent).toContain('Struck')
-    expect(rows[2].textContent).toContain("Not used: conflicts with b.xlsx S!A1")
+    expect(rows[2].textContent).toContain('Not used: conflicts with the other value (b.xlsx S!A1)')
     expect(screen.getByTestId('envelope-intake-default').textContent).toBe('Critical load share: 40 % · preset default')
   })
 
@@ -424,5 +424,20 @@ describe('EnvelopeSection reliability goal', () => {
 
   it('a refused intake digest has a plain-words title, never its kind key', () => {
     expect(KIND_COPY.intake_stale.title).toBe('The inputs changed: review them again')
+  })
+
+  it('quotes in source lines are curly, a fraction shows as a percentage, a conflict names the other value in words', async () => {
+    expect(curly("you wrote 'critical load is 40 %'")).toBe('you wrote “critical load is 40 %”')
+    expect(curly("grid.pdf, page 1: 'Grid connection: 12 MW'")).toBe('grid.pdf, page 1: “Grid connection: 12 MW”')
+    expect(curly('b.xlsx S!A1')).toBe('b.xlsx S!A1')
+    openIntake([row(0, { param: 'critical_share', label: 'Critical load share', value: 0.4, unit: 'fraction', source: "you wrote 'critical load is 40 %'" }),
+      row(1, { param: 'c', status: 'conflict', source: 'a.pdf, page 1' }), row(2, { param: 'c', status: 'conflict', source: "you wrote 'x'" })])
+    await screen.findByTestId('envelope-intake')
+    const rows = screen.getAllByTestId('envelope-intake-row')
+    expect(rows[0].textContent).toContain('Critical load share: 40 %')
+    expect(rows[0].textContent).not.toContain('fraction')
+    expect(rows[0].textContent).toContain('you wrote “critical load is 40 %”')
+    expect(rows[1].textContent).toContain('Not used: conflicts with the other value (you wrote “x”)')
+    expect(screen.getByTestId('envelope-intake').textContent).not.toContain("'")
   })
 })
