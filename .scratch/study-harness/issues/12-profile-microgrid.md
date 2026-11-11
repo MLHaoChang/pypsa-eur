@@ -106,6 +106,19 @@ Conditions:
 
 B14 holds. If the change adds error kinds, also run `tests/test_tool_error_kind_manifest.py` at the trial merge, with each kind in its own `tool-error-kinds.d` fragment.
 
+12c build answers, from GK B (47), 2026-11-11:
+
+- **Split.** A1 (about 1,430 lines) opens first: the profiles, K, the envelope, G1–G4, G7 and B13. A2 (about 290 lines) follows A1: G5 words and G8 counts. PR B (instruction files, G6, the live runs) comes later.
+- **Envelope cap.** The 20-solve cap stays; raising it is a design change for the owner. Conditions:
+  - **Q1-i.** A pass that the remaining solves cannot finish never starts. A whole pass (the EH stages, the K DTC solves and the island solve) is reserved before it begins; if fewer solves remain, the run ends `eh_budget`, nothing runs half way, and no partial DTC result is recorded.
+  - **Q1-ii.** If one full pass is over the cap, the card refuses at proposal with a typed kind and the arithmetic.
+  - **Q1-iii.** Whenever the cap applies, the card shows both the arithmetic and the capped figure.
+- **"Not evaluated" is never "met", on every profile.** A2 pins `partly` and the not-evaluated count:
+  - for eh_datacenter@1 and its staged variant, on a scorecard warn row;
+  - for eh_h2_hub@1 and its staged variant, on utilisation and the counterfactual.
+  - An eh_site test shows its output unchanged.
+  - A2 goes to UX too, if UX reads the "Stated targets" wording as theirs.
+
 ### Slices
 
 - 12a (GK A): the off-grid exclusion on the scorecard, the island survival check and the tie and critical-load predicates. Engine only.
