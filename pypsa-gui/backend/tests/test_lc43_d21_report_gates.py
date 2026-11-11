@@ -14,9 +14,11 @@ each at the version it had, and the headline table still reads MC LOLE 3.21 h/yr
   report ``aborted`` with each unwritten section carrying an ``aborted`` note and no
   model prose; a generate after the abort runs to ``done`` as its own report, and
   the earlier reports are unchanged;
-- an edited Word copy that changes the headline MC LOLE to 1.00 and the summary to
-  "1.0 h/yr" becomes version 2: the summary is the user's edit (``source``
-  ``user_edit``) and the edited table is stored as ``headline_edited_v2``; the
+- a deleted report is 404 report_not_found to get, regenerate and export;
+- an edited Word copy (bound as the template or not) that changes the headline MC LOLE
+  to 1.00 and the summary to "The plan is robust." becomes version 2: the summary is the
+  user's edit (``source`` ``user_edit``), the edited table is stored as
+  ``headline_edited_v2``, and the diff of versions 1 and 2 names only the summary; the
   ``headline`` table still reads 3.21 h/yr, and version 1 still reads "The plan meets
   3.2 h/yr." with 3.21 h/yr in its headline. (That version 2's delivered headline then
   reads 1.00 h/yr unflagged is the pending row ``LC-D21.edited_admitted_number``.)
@@ -31,7 +33,6 @@ import threading
 
 import pytest
 from docx import Document
-from fastapi import HTTPException
 
 from services import chat_tools as T, upload_service
 from services.llm_fake import FakeProvider
@@ -46,6 +47,7 @@ from tests.test_chat_report_tools import (
     project,  # noqa: F401
 )
 from tests.test_lc06_d21_reports import HEADLINE, SECTIONS, _docx, _generated
+from tests.lc43_gates import refused
 from tests.test_workflow_tools import helpers_state  # noqa: F401
 
 
@@ -54,13 +56,6 @@ def _stored() -> dict[str, int]:
         r["report_id"]: T.get_report(r["report_id"])["version"]
         for r in T.list_reports()
     }
-
-
-def _refused(call, status: int, kind: str) -> None:
-    with pytest.raises(HTTPException) as failure:
-        call()
-    assert failure.value.status_code == status, failure.value.detail
-    assert failure.value.detail["error_kind"] == kind, failure.value.detail
 
 
 def _upload(project_dir, doc) -> str:
@@ -81,24 +76,38 @@ def test_an_unknown_section_table_or_version_is_refused_and_changes_nothing(
 ):
     report_id = _generated(monkeypatch)
     before = _stored()
-    _refused(
+    refused(
         lambda: T.generate_report(sections=["no_such_section"]),
         404,
         "report_section_not_found",
     )
-    _refused(
+    refused(
         lambda: T.regenerate_report_section(report_id, "no_such_section"),
         404,
         "report_section_not_found",
     )
-    _refused(
+    refused(
         lambda: T.get_report_table(report_id, "no_such_table"),
         404,
         "report_table_not_found",
     )
-    _refused(lambda: T.get_report(report_id, version=7), 404, "report_not_found")
+    refused(lambda: T.get_report(report_id, version=7), 404, "report_not_found")
     assert _stored() == before == {report_id: 1}
     assert T.get_report_table(report_id, "headline")["items"] == HEADLINE
+
+
+def test_a_deleted_report_is_gone_from_every_report_tool(project, monkeypatch):
+    report_id = _generated(monkeypatch)
+    assert T.delete_report(report_id) == {"deleted": True, "report_id": report_id}
+    assert _stored() == {}
+    refused(lambda: T.get_report(report_id), 404, "report_not_found")
+    refused(
+        lambda: T.regenerate_report_section(report_id, "executive_summary"),
+        404,
+        "report_not_found",
+    )
+    refused(lambda: T.export_report_docx(report_id), 404, "report_not_found")
+    assert _stored() == {}
 
 
 def test_a_second_run_is_refused_an_abort_writes_no_prose_and_a_restart_is_its_own_report(
@@ -109,7 +118,7 @@ def test_a_second_run_is_refused_an_abort_writes_no_prose_and_a_restart_is_its_o
     _install_provider(monkeypatch, _Holding(_script(), hold))
     try:
         second = T.generate_report(sections=SECTIONS)["report_id"]
-        _refused(
+        refused(
             lambda: T.generate_report(sections=SECTIONS), 409, "report_job_in_flight"
         )
         assert T.abort_report_generation() == {"status": "running", "aborting": True}
@@ -143,8 +152,9 @@ def test_a_second_run_is_refused_an_abort_writes_no_prose_and_a_restart_is_its_o
     }
 
 
+@pytest.mark.parametrize("bind_as_template", [False, True])
 def test_an_edited_copy_is_a_new_user_version_and_leaves_the_admitted_table_and_version_one(
-    project, client, monkeypatch
+    project, client, monkeypatch, bind_as_template
 ):
     report_id = _generated(monkeypatch)
     doc = _docx(client, report_id)
@@ -153,10 +163,10 @@ def test_an_edited_copy_is_a_new_user_version_and_leaves_the_admitted_table_and_
             row.cells[1].text = "1.00 h/yr"
     for paragraph in doc.paragraphs:
         if paragraph.text == "The plan meets 3.2 h/yr.":
-            paragraph.text = "The plan meets 1.0 h/yr."
+            paragraph.text = "The plan is robust."
 
     out = T.import_edited_report(
-        report_id, _upload(project, doc), bind_as_template=False
+        report_id, _upload(project, doc), bind_as_template=bind_as_template
     )
 
     assert out["version"] == 2 and out["changed"] == ["executive_summary"]
@@ -164,7 +174,7 @@ def test_an_edited_copy_is_a_new_user_version_and_leaves_the_admitted_table_and_
     assert summary["source"] == "user_edit"
     assert summary["blocks"][0] == {
         "type": "paragraph",
-        "md": "The plan meets 1.0 h/yr.",
+        "md": "The plan is robust.",
     }
     tables = [b["table_id"] for b in summary["blocks"] if "table_id" in b]
     assert "headline" not in tables and "headline_edited_v2" in tables
@@ -178,6 +188,15 @@ def test_an_edited_copy_is_a_new_user_version_and_leaves_the_admitted_table_and_
         for row in _docx(client, report_id, 1).tables[0].rows
     ]
     assert headline == [["Item", "Value"]] + HEADLINE
+    diff = T.diff_report_versions(report_id, 1, 2)
+    assert (
+        diff["changed"] == ["executive_summary"]
+        and diff["added"] == []
+        and diff["removed"] == []
+    )
+    refused(
+        lambda: T.diff_report_versions(report_id, 1, 3), 404, "report_version_not_found"
+    )
 
 
 def test_a_word_file_that_is_not_the_report_merges_nothing(project, monkeypatch):
@@ -186,7 +205,7 @@ def test_a_word_file_that_is_not_the_report_merges_nothing(project, monkeypatch)
     other = Document()
     other.add_heading("Quarterly note", 1)
     other.add_paragraph("The plan meets 1.0 h/yr.")
-    _refused(
+    refused(
         lambda: T.import_edited_report(report_id, _upload(project, other)),
         400,
         "roundtrip_not_a_report",
@@ -203,14 +222,14 @@ def test_no_mapping_without_a_template_and_no_pdf_without_a_converter(
 ):
     report_id = _generated(monkeypatch)
     before = _stored()
-    _refused(
+    refused(
         lambda: T.set_report_mapping(report_id, {"sections": {}}), 400, "no_template"
     )
     monkeypatch.setattr(pdf.shutil, "which", lambda cmd: None)
     uploads = sorted(
         m.file_id for m in upload_service.list_uploads(PROJECT, project_dir=project)
     )
-    _refused(lambda: T.export_report_pdf(report_id), 501, "pdf_not_available")
+    refused(lambda: T.export_report_pdf(report_id), 501, "pdf_not_available")
     assert (
         sorted(
             m.file_id for m in upload_service.list_uploads(PROJECT, project_dir=project)

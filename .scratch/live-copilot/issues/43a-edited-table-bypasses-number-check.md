@@ -28,9 +28,13 @@ The roundtrip's edited-table path (`services/reports/roundtrip.py`, a table beco
 `services/reports/revisions.py::_number_reason`. That is the check that stops a
 regenerated or comment-anchored edit from changing an evidence-bound number.
 
+The same holds for a number edited in a section's prose: "The plan meets 3.2 h/yr." edited
+to "The plan meets 1.0 h/yr." is stored as `user_edit` with no audit entry. The LC-43 fixture
+therefore edits the prose to a sentence without a number.
+
 ## Done when
 
-An imported table edit that changes an evidence-bound number either is refused or
+An imported table or prose edit that changes an evidence-bound number either is refused or
 is listed in "Numbers to check" (unverified, withheld from the headline), under both
 `bind_as_template` values. A test pins that, and `LC-D21.edited_admitted_number` in
 `pypsa-gui/backend/smoke/family_manifest.py` turns covered.

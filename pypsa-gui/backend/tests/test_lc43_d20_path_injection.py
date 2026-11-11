@@ -9,7 +9,8 @@ uses. Three name sinks are read independently:
   separator, ``..``, quote or control character, and the bytes land inside the
   project's own ``uploads`` directory;
 - the ``Content-Disposition`` header of the download: one line, its quoted
-  ``filename`` is the stored name, and a ``filename*`` (when present) decodes to it;
+  ``filename`` is the stored name, and it carries no ``filename*`` (the stored name
+  has nothing the quoted form cannot hold);
 - the zip member a bundle names (``build_delivery``): ``<file_id>_<name>`` with every
   character outside ``[A-Za-z0-9_.-]`` replaced by ``_`` and at most 100 characters
   after the prefix.
@@ -80,7 +81,9 @@ def test_a_hostile_delivery_name_is_stored_as_one_plain_name_inside_the_project(
     assert response.status_code == 200, response.text
     quoted, star = _header_name(response.headers["content-disposition"])
     assert quoted == delivery["filename"]
-    assert star in (None, delivery["filename"])
+    # The stored name is already plain ASCII, so the header needs no ``filename*``: one
+    # appears only when the stored name keeps a character the quoted fallback cannot carry.
+    assert star is None
     _assert_plain_name(quoted)
 
 

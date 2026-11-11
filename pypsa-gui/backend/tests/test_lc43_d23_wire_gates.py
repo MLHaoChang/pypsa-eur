@@ -15,10 +15,11 @@ Hand oracle on the baseline project (G1 20 MW):
 - changed arguments: a write whose arguments change after its approval is refused
   confirmation_args_changed (outcome denied) and G1 stays 20 MW;
 - lost approval: an approval that never comes is confirmation_expired and G1 stays
-  20 MW; after a restart (a fresh session) the old token is 404
-  unknown_confirmation_token;
-- timeout: an approved write that outlives its budget is reported tool_timeout to the
-  model as an error, and its outcome is ``uncertain``, never success;
+  20 MW; a fresh session (pending approvals are server state and are not hydrated after
+  a restart) answers the old token 404 unknown_confirmation_token;
+- timeout: an approved write that outlives its budget reaches the model as an error
+  naming tool_timeout, and the panel's frame reads outcome ``uncertain`` and "may have
+  changed the project" (the model-facing text is LC-43b);
 - profile switch: a turn on a session bound to another wire, or naming a deleted
   profile, sends no request and ends with profile_switch_requires_new_chat or
   unknown_profile_id, the session unchanged.
@@ -31,12 +32,12 @@ from importlib import import_module
 
 import anthropic as sdk
 import pytest
-from fastapi import HTTPException
 
 from harness import budget as harness_budget, loop, spill
 from harness.providers.anthropic import AnthropicProvider
 from services import chat_service, chat_tools, llm_config, upload_service
 from services.pypsa_service import PyPSAService
+from tests.lc43_gates import refused
 from tests.test_workflow_provider_parity import _anthropic_stream
 from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
 
@@ -213,10 +214,11 @@ def test_an_approval_that_never_comes_expires_and_does_not_survive_a_restart(
     assert p_nom() == 20.0
 
     restarted = _session()
-    with pytest.raises(HTTPException) as failure:
-        restarted.record_decision(card["confirmation_token"], "approve")
-    assert failure.value.status_code == 404
-    assert failure.value.detail["error_kind"] == "unknown_confirmation_token"
+    refused(
+        lambda: restarted.record_decision(card["confirmation_token"], "approve"),
+        404,
+        "unknown_confirmation_token",
+    )
     assert p_nom() == 20.0
 
 
@@ -241,8 +243,9 @@ def test_a_write_that_outlives_its_budget_is_never_reported_done(baseline, monke
         d for e, d in frames if e == "tool_result" and d.get("tool_use_id") == "call_0"
     ]
     result = _result(bodies, 0)
-    assert result["is_error"] is True and result["content"].startswith("tool_timeout")
-    assert "success" not in result["content"] and "completed" not in result["content"]
+    # The model is told it failed, never that it succeeded. That the text also says the
+    # outcome is unknown is LC-43b (pending row LC-D23.timeout_outcome_text).
+    assert result["is_error"] is True and "tool_timeout" in result["content"]
 
 
 @pytest.mark.parametrize(

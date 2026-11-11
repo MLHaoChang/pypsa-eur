@@ -13,11 +13,15 @@ uploads and G1's 20 MW are exactly as before:
 - another organisation's client fetching a delivery's download URL gets 404;
 - an upload whose blob was never finished (``blob_ready`` false) is 404 upload_not_found
   to the delivery tool and to the download;
-- an export over the per-file cap is 413 file_too_large; a delivery whose contents
+- an export over the per-file cap is 413 file_too_large, for each of the network, CSV,
+  Excel and MATPOWER exports; a delivery whose contents
   exceed the cap less 100 kB is 413 delivery_too_large (the cap is lowered so a
   two-snapshot network crosses it);
 - an import with an unnamed format is 422 invalid_import_format; an upload whose bytes
   no longer match their hash is 409 import_file_changed;
+- a malformed CSV bundle or workbook is refused (the dispatcher's tool_error) with the
+  open project and its unsaved G1 edit (33 MW) kept; a malformed netCDF or MATPOWER file
+  is LC-43c and pending;
 - a chart of an unknown component, no names, a repeated name or nine names is 422
   invalid_chart;
 - ``export_run_evidence`` with no run named and none discussed is 409
@@ -28,10 +32,11 @@ uploads and G1's 20 MW are exactly as before:
 import json
 
 import pytest
-from fastapi import HTTPException
 
 from services import chat_tools, upload_service
 from services.pypsa_service import PyPSAService
+from tests.lc43_gates import refused
+from tests.test_assistant_capabilities import dispatch, session  # noqa: F401
 from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
 
 
@@ -42,13 +47,6 @@ def _state(project_dir) -> tuple[list[str], float]:
     )
     g1 = float(PyPSAService.get_active_context().network.generators.at["G1", "p_nom"])
     return uploads, g1
-
-
-def _refused(call, status: int, kind: str) -> None:
-    with pytest.raises(HTTPException) as failure:
-        call()
-    assert failure.value.status_code == status, failure.value.detail
-    assert failure.value.detail["error_kind"] == kind, failure.value.detail
 
 
 def test_an_id_from_another_project_or_a_malformed_id_reaches_no_file(
@@ -65,10 +63,10 @@ def test_an_id_from_another_project_or_a_malformed_id_reaches_no_file(
     )
     before = _state(project_dir)
     for file_id in (foreign.file_id, "..", "0" * 15, foreign.file_id.upper()):
-        _refused(
+        refused(
             lambda f=file_id: chat_tools.build_delivery([f]), 404, "upload_not_found"
         )
-        _refused(
+        refused(
             lambda f=file_id: chat_tools.get_file_delivery(f), 404, "upload_not_found"
         )
     assert _state(project_dir) == before
@@ -95,12 +93,12 @@ def test_an_unfinished_upload_is_never_delivered(baseline, client):
     )
     meta = json.loads(meta_path.read_text())
     meta_path.write_text(json.dumps({**meta, "blob_ready": False}))
-    _refused(
+    refused(
         lambda: chat_tools.get_file_delivery(delivery["file_id"]),
         404,
         "upload_not_found",
     )
-    _refused(
+    refused(
         lambda: chat_tools.build_delivery([delivery["file_id"]]),
         404,
         "upload_not_found",
@@ -110,11 +108,17 @@ def test_an_unfinished_upload_is_never_delivered(baseline, client):
     assert response.json()["detail"]["error_kind"] == "upload_not_found"
 
 
-def test_an_export_over_the_cap_is_refused_and_saves_nothing(baseline, monkeypatch):
+@pytest.mark.parametrize(
+    "export",
+    ["export_network_nc", "export_csv_bundle", "export_excel", "export_matpower"],
+)
+def test_an_export_over_the_cap_is_refused_and_saves_nothing(
+    baseline, monkeypatch, export
+):
     _ctx, _project_id, project_dir = baseline
     before = _state(project_dir)
     monkeypatch.setattr(upload_service, "MAX_FILE_BYTES", 64)
-    _refused(chat_tools.export_network_nc, 413, "file_too_large")
+    refused(getattr(chat_tools, export), 413, "file_too_large")
     assert _state(project_dir) == before
 
 
@@ -123,7 +127,7 @@ def test_a_delivery_over_the_cap_is_refused_and_saves_nothing(baseline, monkeypa
     source = chat_tools.export_csv_bundle()
     before = _state(project_dir)
     monkeypatch.setattr(upload_service, "MAX_FILE_BYTES", 100_000 + source["size"] - 1)
-    _refused(
+    refused(
         lambda: chat_tools.build_delivery([source["file_id"]]),
         413,
         "delivery_too_large",
@@ -138,7 +142,7 @@ def test_an_import_needs_a_named_format_and_unchanged_bytes(baseline):
     source = chat_tools.export_network_nc()
     before = _state(project_dir)
     for fmt in ("pdf", "", "NETCDF"):
-        _refused(
+        refused(
             lambda f=fmt: chat_tools.import_uploaded_network(source["file_id"], f),
             422,
             "invalid_import_format",
@@ -147,7 +151,7 @@ def test_an_import_needs_a_named_format_and_unchanged_bytes(baseline):
         "Tool Baseline", source["file_id"], project_dir=project_dir
     )
     path.write_bytes(path.read_bytes() + b"\0")
-    _refused(
+    refused(
         lambda: chat_tools.import_uploaded_network(source["file_id"], "netcdf"),
         409,
         "import_file_changed",
@@ -170,7 +174,7 @@ def test_a_chart_outside_its_shape_is_refused_and_draws_nothing(
 ):
     _ctx, _project_id, project_dir = baseline
     before = _state(project_dir)
-    _refused(
+    refused(
         lambda: chat_tools.create_chart(component, "p_nom", names), 422, "invalid_chart"
     )
     assert _state(project_dir) == before
@@ -183,5 +187,27 @@ def test_a_chart_outside_its_shape_is_refused_and_draws_nothing(
 def test_run_evidence_is_never_exported_for_a_run_nobody_named(baseline):
     _ctx, _project_id, project_dir = baseline
     before = _state(project_dir)
-    _refused(chat_tools.export_run_evidence, 409, "discussed_run_required")
+    refused(chat_tools.export_run_evidence, 409, "discussed_run_required")
     assert _state(project_dir) == before
+
+
+@pytest.mark.parametrize(
+    "name, data, fmt",
+    [("bad.zip", b"PK\x03\x04junk", "csv_bundle"), ("bad.xlsx", b"junk", "excel")],
+)
+def test_a_malformed_bundle_or_workbook_is_refused_and_keeps_the_open_network(
+    baseline, session, name, data, fmt
+):
+    _ctx, project_id, project_dir = baseline
+    PyPSAService.get_network().generators.at["G1", "p_nom"] = 33.0  # an unsaved edit
+    upload = upload_service.add_upload(
+        "Tool Baseline", data, name, "application/octet-stream", project_dir=project_dir
+    )
+    before = _state(project_dir)
+    frames = dispatch(
+        session, "import_uploaded_network", {"file_id": upload.file_id, "format": fmt}
+    )
+    assert [d["error_kind"] for e, d in frames if e == "tool_error"] == ["tool_error"]
+    assert not [d for e, d in frames if e == "tool_result"]
+    assert str(PyPSAService.get_active_context().project_uuid) == project_id
+    assert _state(project_dir) == before == (before[0], 33.0)

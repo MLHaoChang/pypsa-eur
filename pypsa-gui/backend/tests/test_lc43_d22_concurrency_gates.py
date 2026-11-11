@@ -28,8 +28,6 @@ import shutil
 import time
 import uuid
 
-import pytest
-from fastapi import HTTPException
 
 from services import chat_service, chat_tools, dirty_state, undo_service
 from services.pypsa_service import PyPSAService
@@ -39,21 +37,12 @@ from tests.test_assistant_capabilities import (
     solve_to_completion,
 )
 from tests.test_lc06_d22_undo_checkpoints import fingerprint
+from tests.lc43_gates import refused
 from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
 
 
 def g1(attr: str) -> float:
     return float(PyPSAService.get_network().generators.at["G1", attr])
-
-
-def _refused(call, status: int, kind) -> None:
-    with pytest.raises(HTTPException) as failure:
-        call()
-    assert failure.value.status_code == status, failure.value.detail
-    detail = failure.value.detail
-    assert (detail.get("error_kind") if isinstance(detail, dict) else detail) == kind, (
-        detail
-    )
 
 
 def _completed_run(timeout: float = 10.0) -> str:
@@ -115,7 +104,7 @@ def test_an_edit_during_a_restore_refuses_the_restore(baseline, session, monkeyp
         return info
 
     monkeypatch.setattr(snapshots, "_create_snapshot_internal", save_then_edit)
-    _refused(
+    refused(
         lambda: chat_tools.restore_project_snapshot("Tool Baseline", checkpoint.id),
         409,
         "changed_during_restore",
@@ -146,12 +135,12 @@ def test_another_users_lock_refuses_checkpoint_restore_and_edit(
             is not None
         )
 
-    _refused(
+    refused(
         lambda: chat_tools.create_project_snapshot("Tool Baseline", "S1"),
         409,
         "project_locked",
     )
-    _refused(
+    refused(
         lambda: chat_tools.restore_project_snapshot("Tool Baseline", checkpoint.id),
         409,
         "project_locked",
@@ -188,7 +177,7 @@ def test_undo_reverts_the_newest_step_even_when_it_is_the_persons(
     assert chat_tools.undo_last() == {"undone": True, "remaining": 0}
     assert (g1("marginal_cost"), g1("p_nom")) == (10.0, 20.0)
     assert fingerprint() == original
-    _refused(chat_tools.undo_last, 409, "Nothing to undo")
+    refused(chat_tools.undo_last, 409, "Nothing to undo")
     assert fingerprint() == original
 
 
@@ -208,7 +197,7 @@ def test_a_missing_checkpoint_restores_nothing_and_the_run_evidence_stays(
     before = fingerprint()
 
     shutil.rmtree(root / "snapshots" / checkpoint.id)
-    _refused(
+    refused(
         lambda: chat_tools.restore_project_snapshot("Tool Baseline", checkpoint.id),
         404,
         f"Snapshot '{checkpoint.id}' not found (or incomplete)",
