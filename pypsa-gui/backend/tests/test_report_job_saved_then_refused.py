@@ -151,6 +151,8 @@ def test_a_new_reports_settings_refused_are_marked_unrecorded(
     _settings_refused(monkeypatch, tmp_path, job.report_id)
     with pytest.raises(store.ReportBusy):
         run_report_job(job)
+    assert job.record["status"] == "failed" and job.record["version"] == 1
+    assert job.record["error_kind"] == "report_busy"
     meta = store.load_meta(tmp_path, job.report_id)
     assert meta.template_mode is None and meta.generation is None
     assert meta.settings_unrecorded == {
@@ -184,6 +186,7 @@ def test_a_field_that_is_not_carried_cannot_be_pending(tmp_path, evidence):
         with pytest.raises(TypeError):
             store.save_version(tmp_path, v1, pending=bad)
     assert store.load_meta(tmp_path, v1.report_id).latest_version == 1
+    assert not (store.report_dir(tmp_path, v1.report_id) / "v2.json").exists()
 
 
 # ── E3 (d): the strict check reads version n's document, never the meta ────
