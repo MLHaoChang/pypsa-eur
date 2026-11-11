@@ -1,0 +1,7 @@
+{"kinds": {
+  "dream_job_live": {"surface": "inline", "why": "POST /api/memory/dream while the user's previous review of recent work is still queued or running (harness/dream.py; one live job per user, a partial unique index). Nothing new was queued; the Memory page shows the running job."},
+  "dream_budget_exhausted": {"surface": "inline", "why": "A dream job reached its token cap (PYPSA_GUI_DREAM_JOB_TOKENS, or the user's remaining daily dream budget) before its next model call (harness/dream.py). The job ends capped; the lessons proposed so far are kept and the next job continues from its cursor."},
+  "dream_restarts": {"surface": "inline", "why": "A dream job's worker stopped three times within an hour without finishing (harness/dream.py, the runner's crash-loop rule). The job is failed; proposals written before stay, and a new review can be started."},
+  "dream_provider_error": {"surface": "inline", "why": "The provider of the active profile failed a dream job's model call (harness/dream.py). The job is failed; candidates gathered so far are proposed and the next job re-reads the source that failed."},
+  "dream_user_inactive": {"surface": "inline", "why": "A dream job's user no longer exists or is deactivated (harness/dream.py). The job is failed without reading anything."}
+}}
