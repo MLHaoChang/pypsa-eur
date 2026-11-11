@@ -1163,9 +1163,15 @@ def test_item3_an_overflowing_line_is_not_established_never_inf():
     assert next(a for a in bc.case.assets if a.name == "plant").overnight_cost is None
 
 
+def _brentq_at(x, converged=True):
+    from types import SimpleNamespace
+
+    return lambda f, lo, hi, **kw: (x, SimpleNamespace(converged=converged))
+
+
 def test_item6_a_rerun_outside_the_tolerance_is_not_converged(monkeypatch):
     monkeypatch.setattr(bcm, "_npv_at", lambda *a: a[-1] - 1.2)
-    monkeypatch.setattr(bcm, "brentq", lambda f, lo, hi, **kw: 1.3)
+    monkeypatch.setattr(bcm, "brentq", _brentq_at(1.3))
     be = break_even(_ic(), _inputs(_line()), {}, "product", PACK)
     assert be["status"] == "break_even_not_converged" and be["price"] is None
 
@@ -1180,15 +1186,77 @@ def test_item6_a_none_inside_the_bracket_is_not_established_never_a_500(monkeypa
     assert be["status"] == "break_even_not_established"
 
 
-def test_item6_brentq_maxiter_is_not_converged_never_a_500(monkeypatch):
+def test_item6_brentq_not_converging_is_not_converged_never_a_500(monkeypatch):
     monkeypatch.setattr(bcm, "_npv_at", lambda *a: a[-1] - 1.2)
-
-    def stuck(*a, **kw):
-        raise RuntimeError("Failed to converge after 200 iterations")
-
-    monkeypatch.setattr(bcm, "brentq", stuck)
+    monkeypatch.setattr(bcm, "brentq", _brentq_at(1.2, converged=False))
     be = break_even(_ic(), _inputs(_line()), {}, "product", PACK)
     assert be["status"] == "break_even_not_converged"
+
+
+def test_item6_real_brentq_non_convergence_is_a_flag_not_an_exception(monkeypatch):
+    """`disp=False`: SciPy's own maxiter stop is read from the flag."""
+    from scipy.optimize import brentq as real
+
+    def short(f, lo, hi, **kw):
+        return real(f, lo, hi, **{**kw, "maxiter": 1})
+
+    monkeypatch.setattr(bcm, "_npv_at", lambda *a: a[-1] ** 3 - 1.7)
+    monkeypatch.setattr(bcm, "brentq", short)
+    be = break_even(_ic(), _inputs(_line()), {}, "product", PACK)
+    assert be["status"] == "break_even_not_converged"
+
+
+def test_b_an_engine_runtime_error_inside_the_bracket_propagates(monkeypatch):
+    """Only brentq's non-convergence is not_converged (GK B #1404 B)."""
+
+    class EngineBug(RuntimeError):
+        pass
+
+    def f(*a):
+        if a[-1] not in (0.0, 1.0, 1.5):
+            raise EngineBug("boom")
+        return a[-1] - 1.2
+
+    monkeypatch.setattr(bcm, "_npv_at", f)
+    with pytest.raises(EngineBug):
+        break_even(_ic(), _inputs(_line()), {}, "product", PACK)
+
+
+def test_a_a_refused_rerun_is_not_established(monkeypatch):
+    monkeypatch.setattr(bcm, "_npv_at", lambda *a: a[-1] - 1.2)
+
+    def refused(*a):
+        raise FinanceRefused("staged_incentive_not_supported:plant", "x")
+
+    monkeypatch.setattr(bcm, "_result_at", refused)
+    be = break_even(_ic(), _inputs(_line()), {}, "product", PACK)
+    assert be["status"] == "break_even_not_established"
+
+
+@pytest.mark.parametrize(
+    "lines",
+    [
+        (
+            dict(name="a", unit="unit", quantity=1.0, price=1.5e308),
+            dict(name="b", unit="unit", quantity=1.0, price=1.5e308),
+        ),
+        (dict(name="a", unit="unit", quantity=1.0, price=1.7e308),),
+    ],
+)
+def test_c_an_engine_overflow_never_reaches_a_pnl_row(lines):
+    """Two lines summing past float range, or one escalated past it (GK B #1404 C)."""
+    _, r = _run(_inputs(*(_line(**kw) for kw in lines)))
+    p = pnl(r, receivable_days=30.0)
+    assert "revenue" in p.not_finite
+    for row in list(p.rows.values()) + list(p.streams.values()):
+        if isinstance(row, np.ndarray):
+            assert np.isfinite(row).all()
+        elif isinstance(row, list):
+            assert all(v is None or math.isfinite(v) for v in row)
+    k = kpis(r, p, capacity={"pv": 1.0})
+    assert k["ebitda_margin_gross"].reason == "not_finite"
+    for v in k.values():
+        _strict(v)
 
 
 def test_item7_a_zero_export_line_that_is_no_difference_line_prices_nothing():

@@ -401,8 +401,21 @@ class PnL:
     years: list[int]
     #: Per ledger stream, per year: the IC's energy-model streams (locked, G2) and the
     #: business-case lines' streams, from `result.op` (BC4).
-    streams: dict[str, np.ndarray]
+    streams: dict[str, np.ndarray | None]
     rows: dict[str, np.ndarray | list | None] = field(default_factory=dict)
+    #: The streams and rows that overflowed in the engine (a sum or an escalation past
+    #: float range): each reads None, never inf (GK B #1404 C).
+    not_finite: tuple[str, ...] = ()
+
+
+def _drop_non_finite(d: dict, prefix: str = "") -> list[str]:
+    """Set each array in `d` holding a non-finite value to None; return their names."""
+    hit = []
+    for k, v in d.items():
+        if isinstance(v, np.ndarray) and not np.isfinite(v).all():
+            d[k] = None
+            hit.append(prefix + k)
+    return hit
 
 
 def _first(d: dict | None):
@@ -521,7 +534,13 @@ def pnl(result, *, receivable_days: float | None = None) -> PnL:
         rows[f"{k}_after_working_capital"] = (
             None if wc is None or post is None else post + wc
         )
-    return PnL(years=[int(y) for y in tl.years], streams=streams, rows=rows)
+    bad = _drop_non_finite(streams, "stream:") + _drop_non_finite(rows)
+    return PnL(
+        years=[int(y) for y in tl.years],
+        streams=streams,
+        rows=rows,
+        not_finite=tuple(bad),
+    )
 
 
 # ── KPIs (BC2, BC8, C5) ──────────────────────────────────────────────────────
@@ -585,7 +604,11 @@ def kpis(
     ops = [result.tl.index(y) for y in result.tl.operating_years]
     rev, ebitda = p.rows["revenue"], p.rows["ebitda"]
     if rev is None or ebitda is None:
-        why = _missing(result, ("operating",))
+        why = (
+            "not_finite"
+            if {"revenue", "ebitda"} & set(p.not_finite)
+            else _missing(result, ("operating",))
+        )
         for k in (
             "ebitda_margin_gross",
             "ebitda_margin_net",
@@ -753,7 +776,9 @@ def break_even(
             break
         if prev_f is not None and (prev_f < 0.0) != (f < 0.0):
             try:
-                root = brentq(
+                # `disp=False`: non-convergence is the result's flag, never an exception,
+                # so any RuntimeError the engine raises still propagates (GK B #1404 B).
+                root, info = brentq(
                     lambda x: _npv_or_raise(
                         ic_case, inputs, outputs, i, pack, layers, x
                     ),
@@ -762,11 +787,13 @@ def break_even(
                     xtol=BREAK_EVEN_XTOL,
                     rtol=BREAK_EVEN_XTOL,
                     maxiter=200,
+                    full_output=True,
+                    disp=False,
                 )
             except _NotEstablished:
                 out["status"] = "break_even_not_established"
                 return out
-            except RuntimeError:  # brentq's maxiter
+            if not info.converged:
                 out["status"] = "break_even_not_converged"
                 return out
             break
