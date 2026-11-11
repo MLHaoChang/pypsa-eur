@@ -398,7 +398,18 @@ describe('EnvelopeSection reliability goal', () => {
     const walk = (path: string, v: unknown) => { if (v && typeof v === 'object') Object.entries(v).forEach(([k, x]) => walk(`${path}.${k}`, x)); else leaves.push([path, v]) }
     for (const d of realIntake.card.defaults) if (d.param === 'existing' || d.param === 'candidates') walk(d.param, d.value)
     expect(leaves.length).toBeGreaterThan(10)
-    for (const [path] of leaves) { expect(PATH_WORDS[path], path).toBeTruthy(); expect(text).toContain(PATH_WORDS[path][0]) }
+    // F2a: every leaf shows its label, its value and its unit.
+    for (const [path, v] of leaves) {
+      const [label, unit] = PATH_WORDS[path]
+      const shown = typeof v === 'boolean' ? (v ? 'Yes' : 'No') : unit ? `${v} ${unit}` : String(v)
+      expect(text, path).toContain(`${label}: ${shown}`)
+    }
+    // F2b: every year-entry of both lists shows its year and its value.
+    for (const [param, key, tail] of [['stages', 'peak_mw', 'MW peak'], ['energization', 'mw', 'MW energized']] as const) {
+      const entries = realIntake.card.defaults.find(d => d.param === param)!.value as Record<string, number>[]
+      expect(entries.length).toBeGreaterThan(0)
+      for (const e of entries) expect(text, param).toContain(`${e.year}: ${e[key]} ${tail}`)
+    }
     expect(text).not.toMatch(/\d+ (entries|values)/)
   })
 
