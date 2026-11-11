@@ -81,8 +81,8 @@ What 07f-a still leaves: the closing set is per process. A report writer in anot
 
 11 Nov, 07f-a built (`claude/sh-07f-report-lock-dirs`):
 
-- **What was built.** `store.reports_closed(dir)`: the report locks (3 s), then `reports/.closing` written while they are held, then the locks released. Every `report_lock` refuses `ReportBusy` while the marker is fresh; a marker older than 60 s (a crash) is ignored. Delete, snapshot delete and fork delete move the directory to a hidden `.pypsa-deleting-<hex>` sibling under the locks and remove it after them. Rename moves it to its new name and clears the marker there. `report_lock` makes `reports/` only, never the project directory, so a writer whose project is gone gets `ReportProjectGone` (404 `report_not_found` at the report routes). A bundle copy still makes its own destination.
-- **Deviation from the plan, legacy import.** It copies without taking the report locks, skipping `reports/.<id>.lock` and `.closing` in both the copy and its verification. A legacy tree is outside the registry, so no report writer of the app reaches it, and taking a lock would write lock files into the user's original tree, which that module guarantees never to change. The claim (`shutil.move` into the registry) does take `reports_closed`.
+- **What was built.** `store.reports_closed(dir)`: the report locks (3 s), then `reports/.closing` written while they are held, then the locks released. Every `report_lock` refuses `ReportBusy` while the marker is fresh; a marker older than 600 s (a crash) is ignored; the bound leaves room for a cascade delete closing many busy scenarios in turn. Delete, snapshot delete and fork delete move the directory to a hidden `.pypsa-deleting-<hex>` sibling under the locks and remove it after them. Rename moves it to its new name and clears the marker there. `report_lock` makes `reports/` only, never the project directory, so a writer whose project is gone gets `ReportProjectGone` (404 `report_not_found` at the report routes). A bundle copy still makes its own destination.
+- **Deviation from the plan, legacy import.** It copies without taking the report locks, skipping `reports/.<id>.lock` and `.closing` in both the copy and its verification. A legacy tree is outside the registry, so no report writer of the app reaches it, and taking a lock would write lock files into the user's original tree, which that module guarantees never to change. The claim (`shutil.move` into the registry) does take `reports_closed`. `rebase_row` (the CLI that copies a registry row's directory) does too, from the copy to the commit, since a running app can write that directory.
 - **Fork delete** (`forks.delete_fork`) is a project delete too, and gets the same closing, job refusal and move-aside. A fork's own empty lock files come from `copy_reports` locking the destination, as a snapshot's do (07e). None of the base's lock files is copied.
 
 **C3, lock order.** In order, outermost first:
@@ -118,3 +118,14 @@ The timed waiters on the same lock, any of which can now time out during one of 
 `routers/simulation.py:1162`, `:1275` and `:1430` are non-blocking and only defer or report. The worst new hold is about 3 s × targets on a busy cascade delete; with no report busy, it is the moves alone.
 
 No caller passes `report_lock` a timeout. Writers keep `LOCK_TIMEOUT_S` = 30 s, and they meet these holds only through the closing marker, which refuses at once rather than making them wait. The three 5 s branches are tested in 07f-b.
+
+Code review (mp-code-review, 11 Nov), fixed:
+- `rebase_row` now closes its source.
+- The moved trees of a delete are removed in a `finally`.
+- The stale bound is 600 s.
+- One `report_busy_http`.
+- `store.is_lock_artifact` replaces the private `_lock_file_id` in legacy import.
+
+Left as follow-ups:
+- No sweeper removes a `.pypsa-deleting-*` directory left by a crash or a failed removal. It is hidden, logged and outside every listing.
+- A partly failed cross-device `shutil.move` in the claim can leave `.closing` in the partial copy; it goes stale.

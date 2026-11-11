@@ -1292,11 +1292,7 @@ def import_unclaimed_project(
     except (PermissionDenied, ConflictError, ValidationError) as exc:
         _raise_tenancy_http_error(exc)
     except report_store.ReportBusy as exc:
-        raise HTTPException(409, {
-            "error_kind": "report_busy",
-            "message": "A report of this project is being written, so it could not be "
-                       "imported; nothing was changed. Try again in a moment.",
-        }) from exc
+        raise project_registry.report_busy_http("imported") from exc
 
     return {
         "root": _serialize_registry_project(result.root),
@@ -4275,31 +4271,34 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
     # removed (busy → 409, nothing deleted), and a running report job refuses
     # the delete (GK B Q1), asked once no new job can start (C2). The network
     # lock first, then the report locks (07e, L1).
-    with PyPSAService.get_lock(), contextlib.ExitStack() as closed:
-        for target_dir in target_dirs.values():
-            closed.enter_context(project_registry.reports_closed_or_409(target_dir, "deleted"))
-        project_registry.refuse_running_report(target_dirs, "delete it")
-        for target in targets:
-            target_dir = target_dirs[target.name]
-            try:
-                if target_dir.exists():
-                    retired.append(_retire_closed_dir(target_dir))
-            except OSError as exc:  # noqa: BLE001
-                failed.append(target.name)
-                change_log_service.log(
-                    "warn", "Project", target.name,
-                    f"Could not fully delete '{target.name}': {exc}.",
-                )
-                continue
-            # Capture the registry key BEFORE the row is deleted — it is derived
-            # from `(org_id, id)`, which a deleted/expired row can no longer supply.
-            dropped.append((target.name, project_registry.registry_key(target)))
-            project_registry.delete_project_row(db, target)
-            deleted.append(target.name)
-    # Outside the network lock: removing a moved tree can take long (GK B C4),
-    # and evicting a context takes its own locks.
-    for path in retired:
-        _remove_retired(path)
+    try:
+        with PyPSAService.get_lock(), contextlib.ExitStack() as closed:
+            for target_dir in target_dirs.values():
+                closed.enter_context(project_registry.reports_closed_or_409(target_dir, "deleted"))
+            project_registry.refuse_running_report(target_dirs, "delete it")
+            for target in targets:
+                target_dir = target_dirs[target.name]
+                try:
+                    if target_dir.exists():
+                        retired.append(_retire_closed_dir(target_dir))
+                except OSError as exc:  # noqa: BLE001
+                    failed.append(target.name)
+                    change_log_service.log(
+                        "warn", "Project", target.name,
+                        f"Could not fully delete '{target.name}': {exc}.",
+                    )
+                    continue
+                # Capture the registry key BEFORE the row is deleted — it is derived
+                # from `(org_id, id)`, which a deleted/expired row can no longer supply.
+                dropped.append((target.name, project_registry.registry_key(target)))
+                project_registry.delete_project_row(db, target)
+                deleted.append(target.name)
+    finally:
+        # Outside the network lock: removing a moved tree can take long (GK B
+        # C4). In a `finally`, so a failure after a move leaves no hidden tree.
+        for path in retired:
+            _remove_retired(path)
+    # Evicting a context takes its own locks.
     for target_name, target_key in dropped:
         try:
             PyPSAService.drop(target_key)

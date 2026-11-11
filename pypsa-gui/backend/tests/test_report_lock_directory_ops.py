@@ -497,3 +497,45 @@ def test_a_legacy_claim_moves_the_reports_and_leaves_no_marker(
     assert not (legacy_root_dir / "Root").exists()
     assert (store.reports_dir(moved) / RID_A / "v1.json").exists()
     assert not (store.reports_dir(moved) / store.CLOSING_MARKER).exists()
+
+
+def _outside_row(db_session, tmp_path):
+    import uuid
+
+    from db.models import Project
+    from tests.test_legacy_import import _ORG, _USER, _now
+
+    outside = tmp_path / "checkout" / "e8645aba"
+    outside.mkdir(parents=True)
+    (outside / "network.nc").write_text("irreplaceable", encoding="utf-8")
+    _seed(outside, RID_A)
+    row = Project(id=uuid.uuid4(), org_id=_ORG, name="3_nodes_system", created_by=_USER,
+                  storage_path=str(outside), created_at=_now(), updated_at=_now())
+    db_session.add(row)
+    db_session.commit()
+    return row, outside
+
+
+def test_a_rebase_refuses_while_a_report_of_the_row_is_being_written(
+    db_session, identity, tmp_path, dest_root
+):
+    """`rebase_row` copies a registry project, which a running app can write."""
+    from services.legacy_import import rebase_row
+
+    row, outside = _outside_row(db_session, tmp_path)
+    with held_elsewhere(outside, RID_A):
+        with pytest.raises(store.ReportBusy):
+            rebase_row(db_session, row)
+    assert not (dest_root / "3_nodes_system").exists()
+    assert row.storage_path == str(outside)
+    assert not (store.reports_dir(outside) / store.CLOSING_MARKER).exists()
+
+
+def test_a_rebase_copies_the_reports_and_no_lock_file(db_session, identity, tmp_path, dest_root):
+    from services.legacy_import import rebase_row
+
+    row, outside = _outside_row(db_session, tmp_path)
+    destination = rebase_row(db_session, row)
+    assert (store.reports_dir(destination) / RID_A / "v1.json").exists()
+    assert _lock_files(destination) == []
+    assert not (store.reports_dir(outside) / store.CLOSING_MARKER).exists()

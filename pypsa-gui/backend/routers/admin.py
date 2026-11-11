@@ -293,11 +293,9 @@ def claim_legacy_project_endpoint(
     except (PermissionDenied, ConflictError, ValidationError) as exc:
         _raise_http_error(exc)
     except _report_store.ReportBusy as exc:
-        raise HTTPException(409, {
-            "error_kind": "report_busy",
-            "message": "A report of this project is being written, so it could not be "
-                       "imported; nothing was changed. Try again in a moment.",
-        }) from exc
+        from services import project_registry
+
+        raise project_registry.report_busy_http("imported") from exc
 
     return {
         "root": _serialize_project(result.root),

@@ -316,23 +316,25 @@ def inventory(root) -> list[LegacyProject]:
 
 # ── Copy + verify ────────────────────────────────────────────────────────────
 
-def _is_report_lock_name(name: str) -> bool:
-    """A `reports/.<id>.lock` or `reports/.closing` name (study harness 07f)."""
-    return name == report_store.CLOSING_MARKER or report_store._lock_file_id(name) is not None
+def _is_report_lock(relative: Path) -> bool:
+    """`reports/.<id>.lock` or `reports/.closing`, relative to a project."""
+    return (len(relative.parts) == 2 and relative.parts[0] == report_store.REPORTS_DIRNAME
+            and report_store.is_lock_artifact(relative.name))
 
 
 def _skip_report_locks(root: Path):
     """A `copytree` ignore callback: a project's report lock files and closing
     marker are never copied (study harness 07f). They name a lock, not data,
-    and a copied one is a second lock file for the same report. No lock is
-    taken: a legacy tree is outside the registry, so no report writer of this
-    app reaches it, and locking it would write into the user's original."""
+    and a copied one is a second lock file for the same report. The import
+    takes no lock: a legacy tree is outside the registry, so no report writer
+    of this app reaches it, and locking it would write into the user's
+    original. `rebase_row` copies a registry project, and closes it first."""
     reports = os.path.normcase(os.path.abspath(root / report_store.REPORTS_DIRNAME))
 
     def ignore(directory: str, names: list[str]) -> set[str]:
         if os.path.normcase(os.path.abspath(directory)) != reports:
             return set()
-        return {n for n in names if _is_report_lock_name(n)}
+        return {n for n in names if report_store.is_lock_artifact(n)}
 
     return ignore
 
@@ -340,10 +342,7 @@ def _skip_report_locks(root: Path):
 def _relative_files(root: Path) -> list[Path]:
     return sorted(
         path.relative_to(root) for path in root.rglob("*")
-        if path.is_file() and not (
-            len(path.relative_to(root).parts) == 2
-            and path.relative_to(root).parts[0] == report_store.REPORTS_DIRNAME
-            and _is_report_lock_name(path.name))
+        if path.is_file() and not _is_report_lock(path.relative_to(root))
     )
 
 
@@ -861,28 +860,32 @@ def rebase_row(db: DBSession, row: Project) -> Path:
     if staged.exists():
         shutil.rmtree(staged, ignore_errors=True)
 
-    try:
-        shutil.copytree(source, staged, symlinks=False, ignore_dangling_symlinks=True,
-                        ignore=_skip_report_locks(source))
-        _normalise_modes(staged)
-        problem = _verify_copy(source, staged)
-        if problem is not None:
-            raise OSError(f"{row.name}: copy verification failed — {problem}")
-        os.rename(staged, destination)
-    except Exception:
-        shutil.rmtree(staged, ignore_errors=True)
-        raise
+    # Study harness 07f: the source is a registry project a report writer can
+    # reach (another process: the app may be running), so it is closed from
+    # the copy to the commit; busy → `ReportBusy`, and nothing is copied.
+    with report_store.reports_closed(source):
+        try:
+            shutil.copytree(source, staged, symlinks=False, ignore_dangling_symlinks=True,
+                            ignore=_skip_report_locks(source))
+            _normalise_modes(staged)
+            problem = _verify_copy(source, staged)
+            if problem is not None:
+                raise OSError(f"{row.name}: copy verification failed — {problem}")
+            os.rename(staged, destination)
+        except Exception:
+            shutil.rmtree(staged, ignore_errors=True)
+            raise
 
-    previous = row.storage_path
-    row.storage_path = storage_value(relative)
-    row.updated_at = datetime.now(tz=timezone.utc)
-    try:
-        db.commit()
-    except Exception:
-        row.storage_path = previous
-        db.rollback()
-        shutil.rmtree(destination, ignore_errors=True)
-        raise
+        previous = row.storage_path
+        row.storage_path = storage_value(relative)
+        row.updated_at = datetime.now(tz=timezone.utc)
+        try:
+            db.commit()
+        except Exception:
+            row.storage_path = previous
+            db.rollback()
+            shutil.rmtree(destination, ignore_errors=True)
+            raise
     return destination
 
 

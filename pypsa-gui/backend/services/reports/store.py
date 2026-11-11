@@ -517,9 +517,17 @@ def clear_reports(project_dir: pathlib.Path) -> None:
 # ── closing a directory (study harness 07f) ─────────────────────────────────
 
 CLOSING_MARKER = ".closing"
-# A marker older than this is left from a crash: every operation that writes
-# one moves its directory away within moments, so nothing refuses for ever.
-CLOSING_STALE_S = 60
+# A marker older than this is left from a crash, so nothing refuses for ever.
+# Every operation that writes one moves its directory away within seconds; a
+# cascade delete closes each target in turn (up to `COPY_LOCK_TIMEOUT_S`
+# each), so the bound leaves room for a large tree of busy scenarios.
+CLOSING_STALE_S = 600
+
+
+def is_lock_artifact(name: str) -> bool:
+    """Whether a name in `reports/` is a report lock file or the closing
+    marker: never data, never copied (study harness 07e, 07f)."""
+    return name == CLOSING_MARKER or _lock_file_id(name) is not None
 
 
 def _closing_active(root: pathlib.Path) -> bool:

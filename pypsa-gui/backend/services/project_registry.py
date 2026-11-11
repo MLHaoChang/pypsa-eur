@@ -484,6 +484,16 @@ def _may_move_directory(project: Project, old_dir: Path) -> bool:
     return old_dir.is_relative_to(Path(get_settings().projects_root))
 
 
+def report_busy_http(action: str) -> HTTPException:
+    """409 `report_busy` for a whole-directory operation that could not close
+    the project's reports (study harness 07f)."""
+    return HTTPException(status_code=409, detail={
+        "error_kind": "report_busy",
+        "message": f"A report of this project is being written, so it could not be "
+                   f"{action}; nothing was changed. Try again in a moment.",
+    })
+
+
 @contextlib.contextmanager
 def reports_closed_or_409(directory: Path, action: str):
     """`store.reports_closed` for an operation that moves or removes a whole
@@ -499,11 +509,7 @@ def reports_closed_or_409(directory: Path, action: str):
     try:
         stack.enter_context(report_store.reports_closed(directory))
     except report_store.ReportBusy as exc:
-        raise HTTPException(status_code=409, detail={
-            "error_kind": "report_busy",
-            "message": f"A report of this project is being written, so it could not be "
-                       f"{action}; nothing was changed. Try again in a moment.",
-        }) from exc
+        raise report_busy_http(action) from exc
     with stack:
         yield
 
