@@ -588,3 +588,21 @@ def test_a_rebase_copies_the_reports_and_no_lock_file(
     assert (store.reports_dir(destination) / RID_A / "v1.json").exists()
     assert _lock_files(destination) == []
     assert not (store.reports_dir(outside) / store.CLOSING_MARKER).exists()
+
+
+def test_rename_never_moves_a_project_outside_the_projects_root(movable, monkeypatch):
+    """The move's own containment check, behind the name sanitiser."""
+    from pathlib import Path
+
+    db, row, old_dir, _new_dir = movable
+    monkeypatch.setattr(
+        project_registry,
+        "allocate_storage_path",
+        lambda *a, **k: Path("..") / "escaped",
+    )
+    with pytest.raises(OSError):
+        project_registry.rename_project(db, row, "New Name")
+    db.refresh(row)
+    assert (row.name, row.storage_path) == ("Old Name", "Old Name")
+    assert old_dir.exists()
+    assert not (old_dir.parent.parent / "escaped").exists()

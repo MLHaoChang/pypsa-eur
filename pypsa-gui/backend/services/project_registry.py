@@ -416,8 +416,18 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
         # and re-raises — so this is a portability question, not a data one.
         if old_dir.exists() and old_dir != new_dir:
             try:
-                new_dir.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(old_dir, new_dir)
+                # The destination must lie under the projects root. Only the
+                # parent is resolved: a case-only rename keeps the new name's
+                # spelling (realpath of an existing directory returns its
+                # on-disk case on Windows). normpath plus a prefix check is
+                # the form CodeQL reads as a py/path-injection barrier.
+                root = os.path.realpath(get_settings().projects_root)
+                target = os.path.normpath(
+                    os.path.join(os.path.realpath(new_dir.parent), new_dir.name))
+                if not target.startswith(root + os.sep):
+                    raise OSError(f"refusing to move a project outside the projects root: {new_dir}")
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                os.replace(old_dir, target)
             except OSError:
                 # The row is already committed — there is no transaction spanning
                 # the database and the filesystem — so put BOTH columns back or the
