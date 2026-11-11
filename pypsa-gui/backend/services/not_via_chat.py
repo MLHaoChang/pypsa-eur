@@ -491,8 +491,11 @@ def _asks_for_a_saved_value(words: set[str]) -> bool:
 # or comparing the same figures is a chat tool's job and must not be refused.
 _STRIP_NAMES = frozenset({'headline', 'kpi', 'kpis'})
 _STRIP_ASKS = frozenset({'why', 'what', 'which', 'read', 'add', 'hide'})
-# "Add the strip to the report/export" puts it elsewhere: a tool does that.
-_STRIP_ELSEWHERE = frozenset({'report', 'export'})
+# A destination or an action that puts the figures elsewhere: a tool does that.
+_STRIP_ELSEWHERE = frozenset({
+    'report', 'export', 'exported', 'excel', 'word', 'csv', 'pdf', 'workbook', 'document', 'bundle',
+    'save', 'download', 'compared',
+})
 
 
 def _asks_about_the_strip(words: set[str]) -> bool:

@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { CURTAILMENT_RATE } from './headlineWords'
 import { useQuery } from '@tanstack/react-query'
 import Kpi from '../../components/Kpi'
 import ResultState from '../../components/ResultState'
@@ -177,7 +178,7 @@ export default function Curtailment() {
              {...tileState} />
         <Kpi label="Delivered renewable" value={fmtEnergy(totals.delivered)}
              hint="Σ renewable dispatch over the same range, for context." />
-        <Kpi label="Curtailment rate" value={`${totals.pct.toFixed(2)} %`}
+        <Kpi label={CURTAILMENT_RATE} value={`${totals.pct.toFixed(2)} %`}
              hint="curtailed ÷ (curtailed + delivered)."
              {...tileState} />
       </div>

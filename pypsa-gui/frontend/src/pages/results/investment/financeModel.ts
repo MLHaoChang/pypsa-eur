@@ -168,7 +168,7 @@ function hasStorage(payload: Obj): boolean {
   return !!b && isObj(b.assets) && Object.keys(b.assets).length > 0
 }
 
-const HEADLINES: HeadlineSpec[] = [
+export const HEADLINES: HeadlineSpec[] = [
   { id: 'project_irr_pre_tax', label: 'Unlevered project IRR, pre-tax', kind: 'pct',
     top: 'project_irr_pre_tax', section: 'project', keys: ['project_pre_tax_irr'] },
   { id: 'project_irr_post_tax', label: 'Unlevered project IRR, post-tax', kind: 'pct',

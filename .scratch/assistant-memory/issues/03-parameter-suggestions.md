@@ -37,3 +37,25 @@ Two slices (PR-SIZE-1, two reviewer areas): **03a** backend (store `parameter` k
 - P6 Access: suggestions need project read access, Save needs write access; an unknown class or field is 422, never 500. Tests: a cross-org org item (M1), a retired item never suggested.
 - P7 Mutants: hand-mutate every guard (M1 org, field-in-schema, unit, currency, money year, carrier, version, digest, active-project 409, P1 chat refusal) and name the killing test; run `scripts/coord/mutants.py` on memory_store and the new routes and list survivors.
 - P8 Trial merge: route-policy trio, smoke `--check`s (inventory, route_parity, control_matrix), the error-kind manifest test, the memory and library_reference/apply suites.
+
+### GK B GO with changes (GK B 47, 2026-11-11), binding on 03b
+
+With GK B 42's P2–P5 above. The `saveable` field goes in this UI PR under A1.
+
+- A1 `saveable` is Save's own predicate: computed by calling the function the Save route uses to accept or refuse, never rebuilt from its inputs (#1343). Backend test: for every numeric field on fixtures with a plain MW bus, a non-MW bus, a money field and a derived field, `field in saveable` equals "Save succeeds", both directions; a mutated Save rule turns it red.
+- A2 Save's Undo retires by the id the save returned, and only when the response says it created the item. A re-save is a new version with no Undo. Tests: a re-save leaves both versions; Undo after a first save retires exactly that id.
+- A3 "current" comes from the server flag or the preview's no-op refusal, never a client compare. Test: a value equal only after rounding is not marked current.
+- A4 The pick card shows every value its digest binds (value, unit, currency, price year, carrier, memory version, source project, target field); the client posts the digest untouched. Tests: changing any one in the preview changes the card text; the posted body equals the preview's digest fields.
+- A5 No silent conversion: chip and card show money-year and currency as saved; a refusal opens with the field label. Test: one of each 03a mismatch kind.
+- A6 Fail closed on stale data: suggestions refetch after apply, save, and a bus or carrier edit; a 409 (`edit_preview_stale`, `memory_stale`) applies nothing and offers only "Preview again". Test: a 409 on apply leaves the network revision unchanged.
+- A7 Trial merge: `assistant_route_parity`, `assistant_control_matrix`, `assistant_inventory` `--check`; `test_route_chat_disposition`, `test_project_route_acl_policy`, `test_write_surface_lock_policy`, `test_golden_coverage`; `ChatPanel.manifest.test.tsx` if kinds are added.
+
+### UX GO on the 03b plan (UX 18, 2026-11-11)
+
+- Re-save toast "Saved value updated (version n)" with no Undo is acceptable (the store has no drop-latest action); it says the earlier value stays in the Memory dialog as a version, with no dead Undo button.
+- 1 Memory line: "From memory v2 · saved in Project A · 2026-11-03 · 2024 EUR · carrier solar". A refusal is a sentence opening with the field label, no keys, no repr quotes.
+- 2 A row refusal shown in place clears when its condition ends or after a timeout (#1183), in a `role="status"` region.
+- 3 Chips: "current" marker; cost chips use `money()` with the price-year stamp; one entry point (no second Apply link); the 3-chip cap shows "(N more)" only if the user can reach them.
+- 4 Save on hover and `:focus-within` is a real button in the Tab order with a visible focus ring; the row does not shift when it appears.
+- 5 Expert-only: the PR names the flag that hides chips and Save in Guided, with a test that the Guided FieldDrawer renders neither; ticket 06 as planned.
+- 6 Shots as listed, dark and light, plus one narrow width (no clipping or overflow). Harness shots with route mocks are fine.
