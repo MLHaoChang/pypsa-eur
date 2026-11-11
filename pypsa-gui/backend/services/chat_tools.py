@@ -4526,6 +4526,11 @@ def compare_profiles(project_id: str, a: str, b: str, component: str | None = No
                           proj=_authorized_project(project_id))
 
 
+def get_profile_tuning_schema(technology: str, preset: str = "default") -> dict:
+    from routers.profiles import profile_tuning_schema as _h
+    return _profile_route(_h, technology=technology, preset=preset)
+
+
 # ── Time series and weather (live-voice 08 B3) (6) ──────────────────────────
 
 
@@ -9848,6 +9853,7 @@ DISPATCHERS: dict[str, Any] = {
     "list_pending_profiles": list_pending_profiles,
     "get_profile_readiness": get_profile_readiness,
     "compare_profiles": compare_profiles,
+    "get_profile_tuning_schema": get_profile_tuning_schema,
     "generate_renewable_profile": generate_renewable_profile,
     "apply_generated_profile": apply_generated_profile,
     "apply_generated_profiles": apply_generated_profiles,
