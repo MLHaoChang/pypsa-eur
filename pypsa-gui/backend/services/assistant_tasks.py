@@ -618,6 +618,8 @@ def _start_run(session, title, request_id, run, profile, brief, *, origin=None, 
             _refuse("invalid_intake", str(exc), 422)
     task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{project}:{owner}:{request_id}"))
     path = root / "assistant_tasks" / (task_id + ".json")
+    from services import run_envelope
+    held = run_envelope.counted_live(project, profile)  # study harness 12c (G1): K, before the lock (#1345)
     with _LOCK:
         if path.exists():
             _, task = _read(task_id)
@@ -641,8 +643,7 @@ def _start_run(session, title, request_id, run, profile, brief, *, origin=None, 
             if record:
                 task["requirements"] = record  # issue 23: a run inherits the confirmed requirements
             _save(path, task)
-            from services import run_envelope
-            run_envelope.propose(path, task, profile)  # issue 03: the plan-review card's envelope
+            run_envelope.propose(path, task, profile, held)  # issue 03: the plan-review card's envelope
             if intake_request is not None:
                 run_envelope.set_setup(path, profile["templates"][0], intake["project_name"], intake["digest"])
             if grant is not None:

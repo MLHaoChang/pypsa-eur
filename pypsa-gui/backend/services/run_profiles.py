@@ -785,6 +785,10 @@ def _mg_levers(template: str):
 
 
 
+# The coupling loop's own solve budget on the microgrid profiles' LOLE rule.
+MG_LOOP_SOLVES = 3
+
+
 def mg_pass_solves(k: int) -> int:
     """G2: what one pass of the solve stage spends: the queued solve, the EH
     study (2 + K) and the island check's one solve."""
@@ -798,7 +802,17 @@ def mg_budget(k: int) -> int:
     (1 + (2 + K) + 1) x (1 + 2) + 3 + 1, so 19 with K = 1, 22 with K = 2.
     The envelope takes it from the K counted on the project
     (`run_envelope.counted`), held to the envelope's hard cap."""
-    return mg_pass_solves(k) * (1 + L2_ROUNDS) + 3 + 1
+    return mg_pass_solves(k) * (1 + L2_ROUNDS) + MG_LOOP_SOLVES + 1
+
+
+def mg_pass_words(k: int) -> str:
+    """`mg_pass_solves` as the card writes it, from the same counts."""
+    return f"1 + (2 + {MG_CONTINGENCY_SOLVES * k}) + {run_actions.SOLVES}"
+
+
+def mg_budget_words(k: int) -> str:
+    """`mg_budget` as the card writes it, from the same counts (Q1-iii)."""
+    return f"({mg_pass_words(k)}) x {1 + L2_ROUNDS} + {MG_LOOP_SOLVES + 1}"
 
 
 MG_PASS_SOLVES = mg_pass_solves(MG_CONTINGENCIES)
@@ -811,7 +825,7 @@ MG_FUEL_BASIS = ("The gensets' fuel lasts the island's fuel autonomy (h). The ge
 def _eh_microgrid(staged: bool) -> dict:
     template = "eh_microgrid_staged" if staged else "eh_microgrid"
     lole = copy.deepcopy(next(r for r in EH_RESULT_RULES if r.get("engine")))
-    lole["engine"] = {"tool": "run_coupling_loop", "max_solves": 3, "restore": "base"}
+    lole["engine"] = {"tool": "run_coupling_loop", "max_solves": MG_LOOP_SOLVES, "restore": "base"}
     edits = _mg_levers(template)
     tunable = [(e["target"]["component"], e["target"]["attr"]) for e in edits]
     eh_study = copy.deepcopy(EH_SITE["eh_study"])

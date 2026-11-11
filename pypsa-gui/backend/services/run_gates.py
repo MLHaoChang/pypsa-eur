@@ -223,7 +223,7 @@ NOTHING_TO_SAMPLE_DETAIL = ("the loop found no outage to sample: no electrical g
 # Study harness 12c (GK B (47) Q4): a loop the envelope's cap cut short. It is
 # the engine's own refusal kind (`run_envelope.reserve_engine`), read as not
 # evaluated with words: never met, and its last unconverged value is no result.
-LOOP_CAPPED = "budget_spent"
+LOOP_BUDGET_SPENT = "budget_spent"
 LOOP_REFUSED_WORDS = ("no solve was left in the envelope for the engine loop, so the rule is not evaluated; "
                       "it never counts as met")
 
@@ -275,8 +275,8 @@ def _loop_converged(env, rule):
         if NOTHING_TO_SAMPLE in str(reason):
             # GK A (19) SH11-L1: the runner's own refusal, typed (F1: cause-neutral).
             return NoEvidence(LOOP_NOTHING_TO_SAMPLE, NOTHING_TO_SAMPLE_DETAIL)
-        if reason == LOOP_CAPPED:  # the reservation found no solve left: the loop never started
-            return NoEvidence(LOOP_CAPPED, LOOP_REFUSED_WORDS)
+        if reason == LOOP_BUDGET_SPENT:  # the reservation found no solve left: the loop never started
+            return NoEvidence(LOOP_BUDGET_SPENT, LOOP_REFUSED_WORDS)
         return NoEvidence((step.get("job") or {}).get("outcome") or step["status"], str(reason)[:240])
     if loop.get("applied") is False:  # a user edit landed while the loop ran (H3): not this project's
         return NoEvidence("inputs_changed", "the inputs changed while the engine loop ran")
@@ -286,7 +286,7 @@ def _loop_converged(env, rule):
         from services.adequacy.coupling import MAX_LOOP_SOLVES
         wanted = min(wanted, MAX_LOOP_SOLVES)
         if granted < wanted:  # GK B (47) Q4: the cap, not the loop's own budget, ended it
-            return NoEvidence(LOOP_CAPPED, _capped_words(granted, wanted))
+            return NoEvidence(LOOP_BUDGET_SPENT, _capped_words(granted, wanted))
     return Looped(converged(loop), {k: loop[k] for k in LOOP_FIELDS if k in loop})
 
 
