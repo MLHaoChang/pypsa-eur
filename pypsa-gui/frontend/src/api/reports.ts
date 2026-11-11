@@ -888,7 +888,7 @@ export function reportChartPngUrl(projectName: string, chartId: string): string 
 
 /** The words the limit gives, in the UI's own voice (no code, no key). */
 export const REPORT_CHART_LIMIT_TEXT = (limit: number) =>
-  `The report holds ${limit} charts: remove one in Reports > Generate`
+  `The report holds ${limit} charts: remove one on the Reports page`
 
 /** The toast copy for a refused add / remove of a saved chart. */
 export function reportChartErrorMessage(e: unknown, limit = 12): string {

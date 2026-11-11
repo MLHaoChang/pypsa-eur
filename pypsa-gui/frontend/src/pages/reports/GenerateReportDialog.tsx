@@ -256,7 +256,7 @@ export function GenerateReportDialog({
                 No charts added yet. Use "Add to report" on a chart in Results.
               </p>
             ) : (
-              <ul className="flex flex-col gap-1 max-h-[140px] overflow-y-auto pr-1">
+              <ul className="flex flex-col gap-1 max-h-[200px] overflow-y-auto pr-1">
                 {saved.charts.map(c => (
                   <li key={c.id} className="flex items-start justify-between gap-2 text-[11.5px]">
                     <span className="min-w-0">

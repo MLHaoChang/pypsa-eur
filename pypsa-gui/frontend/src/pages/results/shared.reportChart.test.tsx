@@ -103,7 +103,7 @@ describe('ChartActions · Add to report', () => {
     const add = await screen.findByRole('button', { name: 'Add to report' })
     await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(true))
     expect(screen.getByTestId('report-chart-cap').textContent)
-      .toBe('The report holds 12 charts: remove one in Reports > Generate')
+      .toBe('The report holds 12 charts: remove one on the Reports page')
   })
 
   it('a 409 chart_limit_reached toasts plain words and keeps the button state', async () => {
@@ -112,7 +112,7 @@ describe('ChartActions · Add to report', () => {
     mount()
     await user.click(await screen.findByRole('button', { name: 'Add to report' }))
     await waitFor(() => expect(toast.error).toHaveBeenCalled())
-    expect(toast.error).toHaveBeenCalledWith('The report holds 12 charts: remove one in Reports > Generate')
+    expect(toast.error).toHaveBeenCalledWith('The report holds 12 charts: remove one on the Reports page')
     expect(screen.getByRole('button', { name: 'Add to report' }).getAttribute('aria-pressed')).toBe('false')
   })
 })

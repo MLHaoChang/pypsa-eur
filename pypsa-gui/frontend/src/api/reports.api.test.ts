@@ -611,7 +611,7 @@ describe('reports api — saved charts', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ detail: { error_kind: 'chart_limit_reached', message: 'x', total: 12 } }, 409))
     const err = await addReportChart('p', spec, new Blob(['x'])).catch(e => e)
     expect(isReportError(err, 'chart_limit_reached')).toBe(true)
-    expect(reportChartErrorMessage(err)).toBe('The report holds 12 charts: remove one in Reports > Generate')
+    expect(reportChartErrorMessage(err)).toBe('The report holds 12 charts: remove one on the Reports page')
     expect(reportChartErrorMessage(new ReportsError({ error_kind: 'chart_snapshot_invalid', message: 'Bad chart' }, 422))).toBe('Bad chart')
   })
 })
