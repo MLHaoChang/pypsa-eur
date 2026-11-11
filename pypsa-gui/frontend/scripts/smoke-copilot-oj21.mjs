@@ -163,7 +163,7 @@ try {
   await undo.waitFor({ timeout: 60000 })
   shots.undo = 'oj21-undo-expert.png'
   await undo.screenshot({ path: path.join(artifacts, shots.undo) })
-  assert.match(await undo.innerText(), /Battery[\s\S]*inv_power_overnight/, 'the undo card names the battery')
+  assert.match(await undo.innerText(), /Battery[\s\S]*Power part: overnight cost/, 'the undo card names the battery')
   await page.getByTestId('chat-confirm-approve').last().click()
   for (let i = 0; JSON.stringify(await read()) !== JSON.stringify(BEFORE); i += 1) {
     assert(i < 60, `undo did not restore all three: ${JSON.stringify(await read())}`)
