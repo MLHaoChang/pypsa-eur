@@ -800,7 +800,13 @@ def test_the_assistant_tool_returns_the_endpoints_payload(client, site, bound_ct
     assert safety_tier_for("get_project_flow") == "read"
     with bound_ctx(client):
         out = chat_tools.DISPATCHERS["get_project_flow"](name=name)
-    assert out == _flow(client, name)
+    # The assistant's copy is the endpoint's payload minus the Guided lists.
+    expected = _flow(client, name)
+    assert any("holds" in row for row in expected["sections"])
+    for row in expected["sections"]:
+        row.pop("holds", None)
+        row.pop("holds_total", None)
+    assert out == expected
 
 
 def test_a_missing_location_is_a_note_beside_an_enabled_run(client, site, edit):

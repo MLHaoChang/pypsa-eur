@@ -106,7 +106,7 @@ Title and tag every session per owner decision NAMING: pass `title` as "<Team> Â
 | Probes, key checks, link checks, summaries of logs or lists | `claude-haiku-5-5` |
 | Frontend-only fixes, template data, CI and infra scripts, docs, walkthrough audits, landing stale PRs | `claude-sonnet-5-5` |
 | Gridspine, investment/finance, adequacy and IC engine code; security; design-first features; gatekeeper review | `claude-opus-5-5` |
-| Only when the owner asks for it | `claude-fable-5-1` |
+| Only when the owner asks for it in so many words; never on the coordinator's own initiative (owner decision FABLE-NONE-1) | `claude-fable-5-1` |
 
 After `create_session`, re-enable the sweep routine if [Wakes](#wakes) disabled it.
 

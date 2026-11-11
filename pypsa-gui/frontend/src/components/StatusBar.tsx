@@ -4,6 +4,7 @@ import toast from 'react-hot-toast'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import { useSimulationStore } from '../store/simulationStore'
+import { solveStageLabel } from '../utils/solveStage'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { formatRelativeTime } from '../utils/projectActions'
@@ -21,7 +22,7 @@ function fmtElapsed(ms: number): string {
 }
 
 export default function StatusBar() {
-  const { status, objective, solveTime, runStartedAt } = useSimulationStore()
+  const { status, objective, solveTime, runStartedAt, logLines } = useSimulationStore()
   const clearResults = useSimulationStore(s => s.clearResults)
   const projectName = useUIStore(s => s.projectName)
   const currentProject = useUIStore(s => s.currentProject)
@@ -144,8 +145,9 @@ export default function StatusBar() {
       />
       {/* Solver status */}
       <span className={`flex items-center gap-1 ${color}`}>
-        <span className={`inline-block w-1.5 h-1.5 rounded-full bg-current ${status === 'running' ? 'animate-pulse' : ''}`} />
+        <span className={`inline-block w-1.5 h-1.5 rounded-full bg-current ${status === 'running' ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
         {status.charAt(0).toUpperCase() + status.slice(1)}
+        {status === 'running' && <span role="status" data-testid="solve-stage">· {solveStageLabel(logLines)}</span>}
         {elapsedStr && <span className="tabular-nums" title="Elapsed solve time">· {elapsedStr}</span>}
       </span>
       <span className="text-border">|</span>

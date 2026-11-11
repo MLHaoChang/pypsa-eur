@@ -37,7 +37,6 @@ SERVED_BY_TOOL: dict[tuple[str, str], str] = {
     ('GET', '/api/memory/items'): 'recall_memory',
     ('POST', '/api/memory/items'): 'propose_memory',
     ('GET', '/api/results/run-evidence.json'): 'export_run_evidence',  # one run_evidence.export_bytes
-    ('GET', '/api/profiles/schema'): 'get_profile_parameters',
     ('GET', '/api/campus-electrical/{name}'): 'campus_get_study',
     ('GET', '/api/campus-electrical/{name}/grid-codes'): 'campus_list_grid_codes',
     ('GET', '/api/campus-electrical/{name}/grid-readiness'): 'campus_grid_readiness',

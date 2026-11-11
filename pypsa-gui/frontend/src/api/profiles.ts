@@ -134,6 +134,27 @@ export interface WeatherChoice {
   year_source: 'saved' | 'snapshots' | 'default'
   /** What the snapshots are read as; set in the site connection, never here. */
   time_basis: { value: string; assumed: boolean }
+  /** null: one full calendar year; a sampled window; or why the snapshots cannot take an hourly profile. */
+  window?: { first: string; last: string; hours: number; runs: number } | { unsupported: string } | null
+}
+
+export interface TuningField {
+  key: string; label: string; unit: string | null; type: 'number' | 'string'
+  min?: number; max?: number; options?: string[]; sources: ProfileSource[]
+  preset_value: string | number | null; provenance: string
+}
+export interface TuningSchema { technology: ProfileTechnology; preset: string; fields: TuningField[] }
+
+export type CompareSide = `current:${string}` | `pending:${string}` | `shaped:${string}`
+export interface ProfileStats {
+  cf: number; flh: number; peak: number; peak_hour: number | null
+  p10: number; p50: number; p90: number; monthly: Record<string, number>; duration: number[]
+}
+/** `a` is null when the generator carries no series now: the new profile stands alone. */
+export interface ProfileCompare {
+  a: ProfileStats | null; b: ProfileStats
+  delta: Omit<ProfileStats, 'duration' | 'monthly'> & { monthly: Record<string, number> } | null
+  week: { snapshots: string[]; a: number[] | null; b: number[]; period?: number | string }
 }
 
 export interface BatchApplyResult {
@@ -165,6 +186,15 @@ export const profilesApi = {
     client.get<{ presets: ProfilePreset[] }>('/profiles/presets', {
       params: technology ? { technology } : {},
     }).then(r => r.data.presets),
+
+  schema: (technology: ProfileTechnology, preset: string) =>
+    client.get<TuningSchema>('/profiles/schema', { params: { technology, preset } }).then(r => r.data),
+
+  /** The route takes two sides; with no current series the new profile is read against itself and shown alone. */
+  compare: (project: string, a: CompareSide | undefined, b: CompareSide, component?: string) =>
+    client.get<ProfileCompare>(`/projects/${encodeURIComponent(project)}/profiles/compare`,
+      { params: { a: a ?? b, b, component } }).then(r => a ? r.data
+      : { ...r.data, a: null, delta: null, week: { ...r.data.week, a: null } }),
 
   estimate: (spec: GenerateSpec) =>
     client.post<ProfileEstimate>('/profiles/estimate', spec).then(r => r.data),

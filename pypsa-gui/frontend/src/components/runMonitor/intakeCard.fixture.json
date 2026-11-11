@@ -1,0 +1,137 @@
+{
+ "card": {
+  "rows": [
+   {
+    "index": 0,
+    "param": "connection_mw",
+    "label": "Grid connection",
+    "value": 12,
+    "unit": "MW",
+    "status": "proposed",
+    "source": "grid.pdf, page 1: 'Grid connection: 12 MW'",
+    "from_document": true,
+    "mapped": false
+   },
+   {
+    "index": 1,
+    "param": "critical_share",
+    "label": "Critical load share",
+    "value": 0.4,
+    "unit": "fraction",
+    "status": "proposed",
+    "source": "you wrote 'critical load is 40 %'",
+    "from_document": false,
+    "mapped": false
+   },
+   {
+    "index": 2,
+    "param": "site_type",
+    "label": "Site type",
+    "value": "hospital",
+    "unit": null,
+    "status": "proposed",
+    "source": "mapped by the assistant from: 'It is a hospital'",
+    "from_document": false,
+    "mapped": true
+   }
+  ],
+  "defaults": [
+   {
+    "param": "stages",
+    "value": [
+     {
+      "year": 2027,
+      "peak_mw": 4.0
+     },
+     {
+      "year": 2030,
+      "peak_mw": 5.0
+     },
+     {
+      "year": 2035,
+      "peak_mw": 6.0
+     }
+    ],
+    "preset_default": true
+   },
+   {
+    "param": "energization",
+    "value": [
+     {
+      "year": 2027,
+      "mw": 12.0
+     },
+     {
+      "year": 2030,
+      "mw": 12.0
+     },
+     {
+      "year": 2035,
+      "mw": 12.0
+     }
+    ],
+    "preset_default": true
+   },
+   {
+    "param": "load_profile",
+    "value": "hospital",
+    "preset_default": true
+   },
+   {
+    "param": "existing",
+    "value": {
+     "gensets": {
+      "count": 3,
+      "unit_mw": 2.0,
+      "fuel": "diesel"
+     },
+     "pv_mw": 0.3,
+     "battery": {
+      "mw": 0.0,
+      "mwh": 0.0
+     },
+     "ups": {
+      "mw": 2.64,
+      "minutes": 15.0
+     }
+    },
+    "preset_default": true
+   },
+   {
+    "param": "candidates",
+    "value": {
+     "genset": {
+      "enabled": true,
+      "max_mw": 6.0
+     },
+     "bess": {
+      "enabled": true,
+      "max_mw": 4.0
+     },
+     "pv": {
+      "enabled": true,
+      "max_mw": 1.0
+     }
+    },
+    "preset_default": true
+   },
+   {
+    "param": "ride_through",
+    "value": false,
+    "preset_default": true
+   },
+   {
+    "param": "fault_level_mva",
+    "value": 240.0,
+    "preset_default": true
+   },
+   {
+    "param": "horizon_end",
+    "value": 2045,
+    "preset_default": true
+   }
+  ]
+ },
+ "digest": "9b0d19075690034c33ad600291c7af1cb9717d11e0e7bf9c3e75b23234ae4073",
+ "missing": []
+}

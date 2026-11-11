@@ -21,6 +21,7 @@ import {
   errorsFor, financeErrors, NOT_STATED, numOrNull, numText, parseNumberList, parseRateOrList,
   rateOrListText, triText, triValue, withKey, type FinanceDraft,
 } from './financeModel'
+import { ACTION } from './actionStyle'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
 const ESCALATION: EscalationClass[] = ['opex', 'fuel', 'tariff', 'ppa', 'export', 'capex']
@@ -185,7 +186,7 @@ function AssetMap({ title, noun, path, map, kind, onChange, errors, report, asse
           <Row label={`${title}, ${asset}`} errors={errorsFor(errors, `${path}.${asset}`)}>
             {a => valueControl(asset, v, a)}
           </Row>
-          <button type="button" className="underline" aria-label={`Remove ${title}, ${asset}`}
+          <button type="button" className={ACTION} aria-label={`Remove ${title}, ${asset}`}
                   onClick={() => put(asset, undefined)}>Remove</button>
         </div>
       ))}
@@ -193,7 +194,7 @@ function AssetMap({ title, noun, path, map, kind, onChange, errors, report, asse
       <div className="flex items-center gap-2">
         <input aria-label={`${title}: new asset`} className={`${input} w-40`} list={assets}
                placeholder="asset name" value={name} onChange={e => setName(e.target.value)} />
-        <button type="button" className="underline" disabled={!name.trim() || taken}
+        <button type="button" className={ACTION} disabled={!name.trim() || taken}
                 onClick={() => {
                   // A new entry is not stated until a value is typed; a date
                   // starts blank (the server refuses a blank one at its field).
@@ -300,7 +301,7 @@ function TrancheEditor({ t, i, set, remove, errors, report }: {
       <NumField label={`${name} grace (years)`} int value={t.grace_years} errors={e('grace_years')}
                 onChange={v => f('grace_years', v)} />
       <FieldErrors id={`${p}-errors`} list={errorsFor(errors, p, TRANCHE_FIELDS.map(x => `${p}.${x}`))} />
-      <button type="button" className="underline" aria-label={`Remove ${name}`} onClick={remove}>Remove</button>
+      <button type="button" className={ACTION} aria-label={`Remove ${name}`} onClick={remove}>Remove</button>
     </fieldset>
   )
 }
@@ -346,7 +347,7 @@ function IncentiveEditor({ inc, i, set, remove, errors, report }: {
       <TriField label={`${name} FEOC material assistance`} value={inc.feoc_flag} errors={e('feoc_flag')}
                 onChange={v => f('feoc_flag', v)} />
       <FieldErrors id={`${p}-errors`} list={errorsFor(errors, p, INCENTIVE_FIELDS.map(x => `${p}.${x}`))} />
-      <button type="button" className="underline" aria-label={`Remove ${name}`} onClick={remove}>Remove</button>
+      <button type="button" className={ACTION} aria-label={`Remove ${name}`} onClick={remove}>Remove</button>
     </fieldset>
   )
 }
@@ -442,7 +443,7 @@ function Form({ d, set, errors, report, assets }: {
                          remove={() => set('debt', debt.filter((_, j) => j !== i))} />
         ))}
         <FieldErrors id="debt-errors" list={errorsFor(errors, 'debt', debt.map((_, i) => `debt.${i}`))} />
-        <button type="button" className="underline" onClick={() => set('debt', [...debt, {
+        <button type="button" className={ACTION} onClick={() => set('debt', [...debt, {
           kind: 'term_loan', amount: null, rate: null as unknown as number, tenor_years: null as unknown as number,
           upfront_fee: null, commitment_fee: null, dsra_months: null, grace_years: null,
         }])}>Add a debt tranche</button>
@@ -481,7 +482,7 @@ function Form({ d, set, errors, report, assets }: {
         ))}
         <FieldErrors id="incentives-errors"
                      list={errorsFor(errors, 'incentives', incentives.map((_, i) => `incentives.${i}`))} />
-        <button type="button" className="underline"
+        <button type="button" className={ACTION}
                 onClick={() => set('incentives', [...incentives, { kind: 'itc' }])}>Add an incentive</button>
       </fieldset>
       <fieldset className="border border-border rounded p-2 space-y-1">
@@ -647,7 +648,7 @@ export default function FinanceInputsEditor() {
       {stale && (
         <div role="alert" className="text-warn" data-testid="fi-stale">
           The finance inputs changed elsewhere since you opened them; your edits were not saved.{' '}
-          <button type="button" className="underline" onClick={() => { void reload() }}>
+          <button type="button" className={ACTION} onClick={() => { void reload() }}>
             Reload the finance inputs</button>
         </div>
       )}
@@ -662,7 +663,7 @@ export default function FinanceInputsEditor() {
       {draft === null ? (
         <div className="space-y-1" data-testid="fi-none">
           <p className="text-muted">No finance inputs are stated for this project.</p>
-          <button type="button" className="underline" onClick={() => setDraft({})}>
+          <button type="button" className={ACTION} onClick={() => setDraft({})}>
             State the finance inputs</button>
         </div>
       ) : (
@@ -675,10 +676,10 @@ export default function FinanceInputsEditor() {
             <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"
                     disabled={blocked || saving} onClick={() => { void save(draft) }}>
               Save the finance inputs</button>
-            <button type="button" className="underline" onClick={() => { void reload() }}>
+            <button type="button" className={ACTION} onClick={() => { void reload() }}>
               Discard changes</button>
             {state.data?.finance != null && (
-              <button type="button" className="underline" disabled={saving}
+              <button type="button" className={ACTION} disabled={saving}
                       onClick={() => { void save(null) }}>Remove the finance inputs</button>
             )}
           </div>

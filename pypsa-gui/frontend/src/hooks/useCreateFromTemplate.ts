@@ -22,7 +22,7 @@ import { nameClashFrom, showNameClashToast } from '../utils/nameClashToast'
 /** A project switch refused because a study runs on the current network
  *  (P24-FE gate decision): plain words instead of the status-code line. */
 export const STUDY_RUNNING_SWITCH =
-  'A study is still running — wait for it to finish or abort it before switching project.'
+  'A study is still running: wait for it to finish or abort it before switching project.'
 
 function createErrorMessage(e: unknown): string {
   const status = (e as { response?: { status?: number } })?.response?.status
