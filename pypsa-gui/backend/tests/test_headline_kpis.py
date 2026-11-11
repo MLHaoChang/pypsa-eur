@@ -759,7 +759,7 @@ def test_base_figures_that_fail_cost_the_deltas_only(swept, client, monkeypatch)
     assert strip(client)[1]["system_cost"]["value"] == pytest.approx(200)
 
 
-@pytest.mark.parametrize("broken", [None, "read", "cards"])
+@pytest.mark.parametrize("broken", [None, "relation", "read", "cards"])
 def test_the_comparison_leaves_the_user_and_the_open_project_as_it_found_them(
     swept, monkeypatch, broken
 ):
@@ -767,7 +767,9 @@ def test_the_comparison_leaves_the_user_and_the_open_project_as_it_found_them(
     project are the ones the request came with."""
     _base_id, cases = swept
     actor = chat_tools.acting_user_id()
-    if broken == "read":
+    if broken == "relation":
+        monkeypatch.setattr(hd, "_relation", lambda ctx: 1 / 0)
+    if broken == "read":  # any failure of the base read, not a listed few
         monkeypatch.setattr(sc, "_read", lambda project: 1 / 0)
     with open_saved(cases["Gas 20"]) as ctx:
         cards = results_router._headline_cards()["cards"]
@@ -775,12 +777,14 @@ def test_the_comparison_leaves_the_user_and_the_open_project_as_it_found_them(
             monkeypatch.setattr(results_router, "_headline_cards", lambda: 1 / 0)
         chat_tools.set_acting_user("someone-else")
         try:
-            if broken == "read":
+            if broken == "relation":
                 with pytest.raises(ZeroDivisionError):
                     results_router._headline_comparison(cards, actor)
             else:
                 block = results_router._headline_comparison(cards, actor)
                 assert block["comparable"] is (broken is None)
+                if broken:
+                    assert block["reason"] == hd.BASE_UNREADABLE
             assert chat_tools.acting_user_id() == "someone-else"
             assert PyPSAService.get_active_context() is ctx
         finally:

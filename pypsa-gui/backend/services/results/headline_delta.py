@@ -119,7 +119,7 @@ def base_case(ctx):
         reasons = sc._reasons(base_read, read, spec, base_read["fingerprint"])
         if not (base_read["summary"].get("has_solve") and base_read["fresh"]):
             reasons.insert(0, "baseline_unavailable")
-    except (HTTPException, OSError, KeyError, TypeError, ValueError):
+    except Exception:  # noqa: BLE001 — an unread base costs the deltas, with the reason shown
         logger.exception("headline strip: the base case could not be read")
         return _block("case", base, False, BASE_UNREADABLE), None
     if reasons:

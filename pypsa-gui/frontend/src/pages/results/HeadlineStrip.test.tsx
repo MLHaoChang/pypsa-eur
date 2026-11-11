@@ -18,7 +18,7 @@ vi.mock('../../layout/flowNavigation', async (orig) => ({
   ...(await orig<typeof import('../../layout/flowNavigation')>()), showResultsTab: nav.showResultsTab,
 }))
 
-import HeadlineStrip from './HeadlineStrip'
+import HeadlineStrip, { headlineKpisKey } from './HeadlineStrip'
 import { COST_WORDS, CURTAILMENT_RATE, HEADLINE_WORDS, comparisonBasis, headlineDelta, headlineFigure, headlineTrend } from './headlineWords'
 import { HEADLINES } from './investment/financeModel'
 
@@ -43,6 +43,7 @@ function renderStrip(source = { line: 'Latest solve · solved · 2030-01-01 00:0
       <ChartSourceProvider value={source}><HeadlineStrip /></ChartSourceProvider>
     </QueryClientProvider>,
   )
+  return qc
 }
 const figure = (id: string) => screen.getByTestId(`headline-${id}`).querySelector('[data-kpi-value]')
 
@@ -231,6 +232,40 @@ describe('HeadlineStrip against the base case', () => {
     expect(figure('system_cost')?.getAttribute('data-kpi-value')).toBe('€33.2 M')
     expect(screen.getByTestId('headline-strip').textContent).not.toContain('Base case')
     expect(screen.queryByTestId('headline-strip-failed')).toBeNull()
+  })
+
+  it('after a new solve shows the new figures at once, and the changes only when the base case is read again', async () => {
+    const one = (value: number, d?: ReturnType<typeof delta>) =>
+      ({ kind: 'network', comparison: d ? CASE : null, cards: [card('system_cost', { value, unit: 'currency', delta: d ?? null })] })
+    api.getHeadlineKpis.mockResolvedValue(one(33_240_000))
+    compared(one(33_240_000, delta(-1_460_000, -4.21)))
+    const qc = renderStrip()
+    await waitFor(() => expect(screen.getByTestId('headline-strip').textContent).toContain('−4.2 % vs Base case'))
+    // A new solve: the plain fetch answers first, the comparison is still on its way.
+    let answer: (v: unknown) => void = () => {}
+    let fail: (e: unknown) => void = () => {}
+    api.getHeadlineKpis.mockResolvedValue(one(40_000_000))
+    api.getHeadlineComparison.mockReturnValue(new Promise((resolve, reject) => { answer = resolve; fail = reject }))
+    void qc.invalidateQueries({ queryKey: headlineKpisKey('Demo') })
+    await waitFor(() => expect(figure('system_cost')?.getAttribute('data-kpi-value')).toBe('€40.0 M'))
+    expect(screen.getByTestId('headline-strip').textContent).not.toContain('vs Base case')
+    answer(one(40_000_000, delta(5_300_000, 15.27)))
+    await waitFor(() => expect(screen.getByTestId('headline-strip').textContent).toContain('+15.3 % vs Base case'))
+    // The next one fails: the old changes do not stay beside the new figure.
+    api.getHeadlineKpis.mockResolvedValue(one(41_000_000))
+    api.getHeadlineComparison.mockReturnValue(new Promise((_, reject) => { fail = reject }))
+    void qc.invalidateQueries({ queryKey: headlineKpisKey('Demo') })
+    await waitFor(() => expect(figure('system_cost')?.getAttribute('data-kpi-value')).toBe('€41.0 M'))
+    fail(new Error('500'))
+    await waitFor(() => expect(api.getHeadlineComparison).toHaveBeenCalledTimes(3))
+    expect(figure('system_cost')?.getAttribute('data-kpi-value')).toBe('€41.0 M')
+    expect(screen.getByTestId('headline-strip').textContent).not.toContain('vs Base case')
+  })
+
+  it('a change that rounds to nothing reads "No change", with no sign', () => {
+    expect(headlineDelta(card('system_cost', { value: 1e7, unit: 'currency', delta: delta(1e-6, 1e-11) }))).toBe('No change vs Base case')
+    expect(headlineDelta(card('curtailed_share', { value: 12.3, unit: '%', delta: delta(-0.04, -0.3) }))).toBe('No change vs Base case')
+    expect(headlineDelta(card('system_cost', { value: 1e7, unit: 'currency', delta: delta(-6000, -0.06) }))).toBe('−0.1 % vs Base case')
   })
 
   it('does not ask for the base case when nothing is solved', async () => {

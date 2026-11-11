@@ -92,7 +92,10 @@ export default function HeadlineStrip() {
     queryKey: [...headlineKpisKey(project), 'compare'], queryFn: resultsApi.getHeadlineComparison,
     retry: false, enabled: !!plain.data,
   })
-  const data = compared.data ?? plain.data
+  // After a new solve both are asked again: figures the plain fetch has since replaced are not shown
+  // while the comparison is still on its way, nor after it failed.
+  const current = !compared.isError && (!compared.isFetching || compared.dataUpdatedAt >= plain.dataUpdatedAt)
+  const data = (current ? compared.data : undefined) ?? plain.data
   if (isLoading) {
     // The row's own grid and tile height, and the source line's, so nothing below moves when the figures arrive.
     return (

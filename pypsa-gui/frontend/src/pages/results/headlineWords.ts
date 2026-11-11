@@ -69,10 +69,12 @@ export function headlineDelta(card: HeadlineCard): string | undefined {
   const d = card.delta
   if (!d || card.value == null) return undefined
   if (d.value == null) return d.note ?? undefined
-  if (d.value === 0) return `No change vs ${BASE_CASE}`
   const sign = d.value > 0 ? '+' : '−'
-  if (card.unit === '%') return `${sign}${Math.abs(d.value).toFixed(1)} percentage points vs ${BASE_CASE}`
-  if (d.pct != null) return `${sign}${Math.abs(d.pct).toFixed(1)} % vs ${BASE_CASE}`
+  // A change that rounds to nothing (solver noise) has no sign to show.
+  const shown = card.unit === '%' ? Math.abs(d.value).toFixed(1) : d.pct != null ? Math.abs(d.pct).toFixed(1) : null
+  if (d.value === 0 || shown === '0.0') return `No change vs ${BASE_CASE}`
+  if (card.unit === '%') return `${sign}${shown} percentage points vs ${BASE_CASE}`
+  if (shown != null) return `${sign}${shown} % vs ${BASE_CASE}`
   return `${sign}${inTileWords(card, Math.abs(d.value))} vs ${BASE_CASE}`
 }
 
