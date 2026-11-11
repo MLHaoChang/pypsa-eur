@@ -307,11 +307,11 @@ def _grant(path, ref="eh_microgrid@1", audit=(), **extra):
     return record
 
 
-def _second_tie(n):
+def _second_tie(n, name="second_tie"):
     """A second mainland tie the off_grid pack islands: one more contingency."""
     n.add(
         "Link",
-        "second_tie",
+        name,
         bus0="mainland",
         bus1="island",
         p_nom=10.0,
@@ -319,7 +319,7 @@ def _second_tie(n):
         efficiency=0.97,
         carrier="AC",
     )
-    n.links.at["second_tie", "eh_role"] = "grid_import"
+    n.links.at[name, "eh_role"] = "grid_import"
 
 
 @pytest.mark.parametrize("template, ref", REFS.items())
@@ -697,7 +697,13 @@ def test_the_staged_microgrid_keeps_its_staged_planning():
 
 
 @pytest.fixture
-def baseline(client, session_ctx, install_network, tmp_path):
+def ties(request):
+    """The extra mainland ties on the run's network (K = 1 + ties)."""
+    return getattr(request, "param", 0)
+
+
+@pytest.fixture
+def baseline(client, session_ctx, install_network, tmp_path, ties):
     """The shipped eh_microgrid network as the run's project, its battery
     candidate capped at 5 MW (the seeded undersized battery), with the
     template's card and island settings (as `test_run_profile_h2_hub`)."""
@@ -707,6 +713,8 @@ def baseline(client, session_ctx, install_network, tmp_path):
 
     n = T.build_eh_microgrid()
     n.storage_units.at["bess_new", "p_nom_max"] = 5.0
+    for i in range(ties):
+        _second_tie(n, f"tie_{i + 2}")
     n.export_to_netcdf(tmp_path / "template.nc")
     install_network(pypsa.Network(tmp_path / "template.nc"))
     name = "Island Microgrid run"
@@ -885,3 +893,114 @@ def test_a_resize_just_over_the_bound_is_refused_and_ends_needs_user(
     assert [t for t, _ in refused(path)] == ["update_component"]
     assert record["run"]["ledger"] == []
     assert float(_live().network.storage_units.at["bess_new", "p_nom_max"]) == 5.0
+
+
+# ── G1: the envelope's budget follows the project's K ────────────────────────
+
+
+@pytest.mark.parametrize("ties", [1, 2], indirect=True)
+def test_the_card_names_k_and_the_grant_holds_the_budget_it_sets(
+    session, site, detached, ties
+):
+    from services import chat_tools
+    from tests.test_harness_envelope import envelope_of
+    from tests.test_harness_run_skeleton import start
+    from tests.test_harness_runner import task_path
+
+    k = 1 + ties
+    task = start(run={"profile": "eh_microgrid@1", "mode": "stepwise"})
+    assert (
+        f"K = {k} islanding contingencies" in task["envelope"]["detail"]
+    )  # the card, before the grant
+    message = run_envelope.decide(
+        session, task["task_id"], "unattended", goal=task["envelope"]["goal"]
+    )
+    chat_tools.set_chat_session(None)
+    chat_tools.set_acting_user(None)
+    path = task_path(site[1], task)
+    envelope = envelope_of(path)
+    needed = run_profiles.mg_budget(k)
+    assert needed == (1 + (2 + k) + 1) * (1 + run_profiles.L2_ROUNDS) + 3 + 1
+    assert (
+        envelope["contingencies"]["count"] == k
+        and envelope["contingencies"]["needed"] == needed
+    )
+    assert envelope["budget"]["solves"] == min(needed, run_envelope.CAPS["solves"])
+    assert f"K = {k} islanding contingencies on this project" in message
+    assert f"= {needed} solves" in message
+    if needed > run_envelope.CAPS["solves"]:
+        assert "held to the hard cap of 20" in message
+    frozen = envelope["eh_study"]
+    assert (
+        frozen["contingencies"]["count"] == k
+        and frozen["args"]["budget_solves"] == 2 + k
+    )
+    # A full pass and one L2 round fit, with the loop after them, and never stop on eh_budget.
+    ctx = _live()
+    for n_pass in (1, 2):
+        record = run_envelope._load(path)
+        run_envelope._audit(
+            record, "used", tool="solve_queue_enqueue", call_id=f"q{n_pass}"
+        )
+        run_envelope._save(path, record)
+        step = {
+            "id": f"solve.{n_pass}",
+            "tool": "run_eh_study",
+            "args": dict(frozen["args"]),
+            "frozen": frozen,
+            "status": "pending",
+            "attempt_id": f"eh{n_pass}",
+        }
+        run_task = json.loads(path.read_text())
+        assert run_eh.admit(path, run_task, step, step["args"], ctx) is None
+        assert run_eh.release(path, f"eh{n_pass}", 2 + k, run_task)
+        assert run_actions._reserve(
+            path,
+            f"mg{n_pass}",
+            tool=run_actions.MG_SURVIVAL,
+            event=run_actions.MG_EVENT,
+        )
+        assert run_actions.release(path, f"mg{n_pass}", 1, event=run_actions.MG_EVENT)
+    left = envelope["budget"]["solves"] - run_envelope.solves_used(
+        run_envelope._load(path)
+    )
+    assert left >= 3 + 1  # the coupling loop and its closing re-solve
+    # K changed after the grant: refused by its kind before any solve.
+    _second_tie(ctx.network, "late_tie")
+    step = {
+        "id": "solve.3",
+        "tool": "run_eh_study",
+        "args": dict(frozen["args"]),
+        "frozen": frozen,
+        "status": "pending",
+        "attempt_id": "eh3",
+    }
+    before = run_envelope.solves_used(run_envelope._load(path))
+    assert (
+        run_eh.admit(path, json.loads(path.read_text()), step, step["args"], ctx)[0]
+        == "eh_contingencies"
+    )
+    assert run_envelope.solves_used(run_envelope._load(path)) == before
+
+
+@pytest.mark.parametrize("ties", [1], indirect=True)
+def test_a_k_changed_after_the_card_refuses_the_grant(session, site, detached, ties):
+    from fastapi import HTTPException
+
+    from tests.test_harness_run_skeleton import start
+    from tests.test_harness_runner import task_path
+
+    task = start(run={"profile": "eh_microgrid@1", "mode": "stepwise"})
+    path = task_path(site[1], task)
+    card = run_envelope.read_for_card(path, json.loads(path.read_text()))
+    assert (
+        card["contingencies"]["count"] == 2
+        and "K = 2 islanding contingencies" in card["detail"]
+    )
+    _second_tie(_live().network, "late_tie")
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(
+            session, task["task_id"], "unattended", goal=task["envelope"]["goal"]
+        )
+    assert exc.value.detail["error_kind"] == "eh_contingencies"
+    assert run_envelope._load(path)["state"] == "proposed"

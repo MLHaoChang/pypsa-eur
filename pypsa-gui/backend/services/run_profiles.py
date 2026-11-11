@@ -783,13 +783,27 @@ def _mg_levers(template: str):
     ]
 
 
-# G2: what one pass of the solve stage spends: the queued solve, the EH study
-# (2 + K) and the island check's one solve.
-MG_PASS_SOLVES = 1 + (2 + MG_CONTINGENCY_SOLVES * MG_CONTINGENCIES) + run_actions.SOLVES
-# The worst case, every reservation at its cap: the first pass and each L2
-# round's (L2_ROUNDS = 2), then the coupling loop's 3 and its closing
-# re-solve: (1 + (2 + K) + 1) x (1 + 2) + 3 + 1 = 5 x 3 + 4 = 19 with K = 1.
-MG_BUDGET_SOLVES = MG_PASS_SOLVES * (1 + L2_ROUNDS) + 3 + 1
+
+
+def mg_pass_solves(k: int) -> int:
+    """G2: what one pass of the solve stage spends: the queued solve, the EH
+    study (2 + K) and the island check's one solve."""
+    return 1 + (2 + MG_CONTINGENCY_SOLVES * k) + run_actions.SOLVES
+
+
+def mg_budget(k: int) -> int:
+    """G1, G2: the worst case for a project with K islanding contingencies,
+    every reservation at its cap: the first pass and each L2 round's
+    (L2_ROUNDS = 2), then the coupling loop's 3 and its closing re-solve:
+    (1 + (2 + K) + 1) x (1 + 2) + 3 + 1, so 19 with K = 1, 22 with K = 2.
+    The envelope takes it from the K counted on the project
+    (`run_envelope.counted`), held to the envelope's hard cap."""
+    return mg_pass_solves(k) * (1 + L2_ROUNDS) + 3 + 1
+
+
+MG_PASS_SOLVES = mg_pass_solves(MG_CONTINGENCIES)
+# The profile's own budget, for the shipped templates' K = 1: 5 x 3 + 4 = 19.
+MG_BUDGET_SOLVES = mg_budget(MG_CONTINGENCIES)
 MG_FUEL_BASIS = ("The gensets' fuel lasts the island's fuel autonomy (h). The gensets draw no modelled "
                  "fuel, so it is not evaluated and never counts toward a pass.")
 

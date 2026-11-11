@@ -573,8 +573,49 @@ def propose(task_path, task, profile):
                 # template with the confirmed intake inputs), set by `set_setup`.
                 "setup": None,
                 "state": "proposed", "audit": []}
+    _count_on_card(envelope, task, profile)
     _save(task_path, envelope)
     return envelope
+
+
+def counted(profile, ctx):
+    """Study harness 12c (G1): for a profile whose EH study counts its
+    islanding contingencies, K counted on `ctx`'s network as the freeze
+    counts them (`run_eh.islanding`) and the solve budget that follows
+    (`run_profiles.mg_budget`), held to the hard cap: `{count, links, needed,
+    solves}`, `count` None when they cannot be counted. None for any other
+    profile."""
+    if (profile.get("eh_study") or {}).get("contingency_solves") is None:
+        return None
+    from harness import run_eh
+    from services import flow_service, run_profiles
+    try:
+        card = flow_service._request_for(run_eh._template(ctx), ctx.solver_state.get("solver_config"))
+        links, _ = run_eh.islanding(ctx.network, {"archetype": card["archetype"],
+                                                  "pack_overrides": card.get("pack_overrides"),
+                                                  "dtc_attribution": card.get("dtc_attribution")})
+    except Exception:  # noqa: BLE001 — not counted is never a K
+        return {"count": None, "links": [], "needed": None, "solves": None}
+    needed = run_profiles.mg_budget(len(links))
+    return {"count": len(links), "links": links, "needed": needed, "solves": min(needed, CAPS["solves"])}
+
+
+def _count_on_card(envelope, task, profile, ctx=None):
+    """G1: a proposed plain run's card carries K, counted on the run's own
+    open project, and the solve budget it sets. True when it changed."""
+    from services.pypsa_service import PyPSAService
+    if envelope.get("setup") or envelope["state"] != "proposed":
+        return False
+    ctx = ctx or PyPSAService.get_active_context()
+    if str(getattr(ctx, "project_uuid", None)) != task.get("project_id"):
+        return False
+    held = counted(profile, ctx)
+    if held is None or held == envelope.get("contingencies"):
+        return False
+    envelope["contingencies"] = held
+    if held["solves"] is not None:
+        envelope["budget"] = {**envelope["budget"], "solves": held["solves"]}
+    return True
 
 
 SETUP_TOOL = "create_project_from_template"
@@ -610,6 +651,17 @@ def _rows(envelope):
         unit = f" {e['unit']}" if e.get("unit") else ""
         source = f"; source: {e['source']}" if e.get("source") else ""
         lines.append(f"- Edit {t['component']} `{t['name']}` {t['attr']} ({allowed}{unit}{source}) with {e['tool']}")
+    shown = envelope.get("contingencies")
+    if isinstance(shown, dict):  # study harness 12c (G1): K and the budget it sets
+        k = shown.get("count")
+        if k is None:
+            lines.append("- The islanding contingencies cannot be counted now, so the run cannot be granted")
+        else:
+            lines.append(f"- K = {k} islanding contingenc{'y' if k == 1 else 'ies'} on this project "
+                         f"({', '.join(map(str, shown.get('links') or []))}): (1 + (2 + {k}) + 1) x 3 + 4 = "
+                         f"{shown['needed']} solves" + (f", held to the hard cap of {CAPS['solves']}: the last "
+                                                       "L2 round may stop for you" if shown["needed"] > shown["solves"]
+                                                       else ""))
     held = (envelope.get("eh_study") or {}).get("contingencies")
     if isinstance(held, dict):  # study harness 12c (G1): K, frozen at the grant
         k = held.get("count")
@@ -711,6 +763,7 @@ def describe(envelope, goal=None):
                      for g in envelope.get("gaps", [])],
             "runs": envelope["runs"], "budget": envelope["budget"], "research": envelope["research"],
             "notify": envelope["notify"], "setup": envelope.get("setup"),
+            **({"contingencies": envelope["contingencies"]} if envelope.get("contingencies") else {}),
             "used": sum(1 for a in audit if a["event"] == "used"),
             "refused": sum(1 for a in audit if a["event"] == "refused"),
             "detail": _rows(envelope) + ("\n" + _goal_row(goal) if goal is not None else ""),
@@ -731,6 +784,12 @@ def read_for_card(task_path, task):
     ctx = PyPSAService.get_active_context()
     if str(getattr(ctx, "project_uuid", None)) != task.get("project_id"):
         return describe(envelope)
+    from services import assistant_tasks, run_profiles
+    with assistant_tasks._LOCK:  # G1: the card shows the K the grant then holds it to
+        envelope = _load(task_path)
+        if envelope is not None and envelope["state"] == "proposed" and _count_on_card(
+                envelope, task, run_profiles.resolve(task["run"]["profile"]), ctx):
+            _save(task_path, envelope)
     return describe(envelope, goal=card_goal(task, ctx))
 
 
@@ -910,6 +969,16 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
             if block is None:  # study harness 10a (GK B (36) F3): a stepwise-only profile has none to grant
                 _refuse("envelope_not_grantable", "This run's profile runs step by step only: it has no envelope.")
             block = check_block(block)
+            if not current.get("setup"):
+                live = PyPSAService.get_active_context()
+                held = (counted(run_profiles.resolve(task["run"]["profile"]), live)
+                        if str(getattr(live, "project_uuid", None)) == task["project_id"] else None)
+                if held is not None:
+                    # Study harness 12c (G1): the K the card showed, and the budget it set.
+                    if held["count"] is None or held != current.get("contingencies"):
+                        _refuse("eh_contingencies", "The project's islanding contingencies changed since the "
+                                "card was shown, or cannot be counted; review the card again.")
+                    block = {**block, "budget": {**block["budget"], "solves": held["solves"]}}
             chosen = narrow(block, envelope if envelope is not None else block)
             if current.get("setup"):
                 setup = (path, task, current, chosen)
