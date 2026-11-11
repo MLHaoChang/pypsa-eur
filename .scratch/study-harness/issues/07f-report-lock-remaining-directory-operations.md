@@ -137,3 +137,13 @@ Left as follow-ups:
 - **Tests.** One forces the interleaving: a writer locks a new id just before the marker is written, and the close does not yield until it is done. One shows that such a writer held past the deadline refuses the close. One shows `write_figure` never rebuilds a removed report. Each is red with the fix removed (mutants M25–M28).
 - **Minor: the waiter table** now includes `eh_study_runner.py:302`.
 - **Minor: known limit.** A `rebase_row` copy that runs past `CLOSING_STALE_S` (600 s), a tree of many GB, lets writers back in before the copy ends. The CLI then commits a copy that may miss their last write; the source stays, so `--forget-legacy` should wait for a check.
+
+11 Nov, 07f-b (successor session_01G7qCuj3zWPNptek5GKaSVq). The code holds no per-version settings or receipt: `meta.json` has one copy of `generation`, `template_mode`, `template_language` and `mapping_plan`, and `save_version` carries them all. So a refused write after a save left version n showing version n-1's. GK B (46) gave the plan GO under E1–E5:
+
+- **E1.** The missing state is explicit. The job's save writes `settings_unrecorded: {version: n, fields}` and clears those fields, in the same locked meta write; the job's last write (its receipt) removes the mark. A user-created report, also `generation: null`, has no mark.
+- **E2.** Export of the version a mark names, with `mapping_plan` among its fields, refuses 409 `report_settings_unrecorded` (option (i)). No job writes `mapping_plan` today, so this guards a future job.
+- **E3.** The regenerate base and the strict check read version n's document, never the meta, and the mark does not block them. One test each.
+- **E4.** `pending` holds exactly `generation` plus this job's `meta_updates` keys. Every other carried field, and every field on a user edit, still carries. Tested.
+- **E5.** An older version k < latest still exports with the latest meta's `mapping_plan`: ticketed as [43](43-export-older-version-borrows-latest-mapping.md).
+
+M26 (07f-a survivor): the close's drain now has a timing test with an upper bound well under 30 s.

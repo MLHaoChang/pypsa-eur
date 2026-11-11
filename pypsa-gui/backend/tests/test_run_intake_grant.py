@@ -773,3 +773,44 @@ def test_the_answer_diff_is_read_from_the_network():
     assert ("network", "", "inputs") in run_envelope._changed(
         base, run_envelope._inputs(ctx)
     )
+
+
+@pytest.mark.parametrize("lock", ["mutation_lock", "solver_state_lock"])
+def test_a_card_write_whose_lock_is_held_past_the_bound_is_an_ordinary_write(
+    waiting, monkeypatch, lock
+):
+    """07f-b (C4): `answering` waits `LOCK_TIMEOUT_SECONDS` for each of the
+    project's locks. Past it, the write still runs, as an ordinary write:
+    nothing is settled as the run's answer and nothing resumes."""
+    import threading
+
+    from harness import runner
+
+    path, record, _ = waiting
+    chat, resumed = _chat_answering(waiting, monkeypatch)
+    monkeypatch.setattr(runner, "LOCK_TIMEOUT_SECONDS", 0.05)
+    ctx = PyPSAService.get_active_context()
+    held, release = threading.Event(), threading.Event()
+
+    def holder():
+        with getattr(ctx, lock):
+            held.set()
+            release.wait(10)
+
+    other = threading.Thread(target=holder)
+    other.start()
+    assert held.wait(5)
+    ran = []
+    card = {"rows": [_typed("p_nom"), _typed("marginal_cost")]}
+    try:
+        with run_envelope.answering(chat, "call-card", card):
+            ctx.network.generators.loc["G1", ["p_nom", "marginal_cost"]] = [25.0, 12.0]
+            ran.append(True)
+    finally:
+        release.set()
+        other.join(timeout=10)
+    assert ran == [True]
+    assert ctx.network.generators.loc["G1", "p_nom"] == 25.0
+    task = json.loads(path.read_text())
+    assert not task["run"].get("answers") and task["run"]["waiting"] is not None
+    assert resumed == []
