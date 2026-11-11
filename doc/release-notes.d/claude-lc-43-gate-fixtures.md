@@ -1,0 +1,1 @@
+* Test(pypsa-gui): behavioural fixtures for the assistant's delivery, report, undo/checkpoint and Claude-wire gates (LC-43); two defects found are filed as LC-43a and LC-43b, and each gate not yet built stays a pending manifest row.
