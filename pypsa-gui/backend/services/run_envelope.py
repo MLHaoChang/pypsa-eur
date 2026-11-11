@@ -557,8 +557,9 @@ def _audit(envelope, event, **fields):
     envelope["audit"].append({"at": _iso(_now()), "event": event, **{k: v for k, v in fields.items() if v is not None}})
 
 
-def propose(task_path, task, profile):
-    """The profile's envelope block as a `proposed` envelope (intake)."""
+def propose(task_path, task, profile, held=None):
+    """The profile's envelope block as a `proposed` envelope (intake), with
+    `held`, the K its caller counted before the lock (`counted_live`)."""
     block = profile.get("envelope")
     if block is None:
         return None
@@ -573,7 +574,7 @@ def propose(task_path, task, profile):
                 # template with the confirmed intake inputs), set by `set_setup`.
                 "setup": None,
                 "state": "proposed", "audit": []}
-    _count_on_card(envelope, task, profile)
+    _count_on_card(envelope, held)
     _save(task_path, envelope)
     return envelope
 
@@ -610,22 +611,30 @@ PASS_OVER_CAP = "eh_pass_over_cap"
 
 
 def _over_cap_words(shown):
+    from services.run_profiles import mg_pass_words
     k = shown["count"]
-    return (f"- K = {k} islanding contingencies on this project: one solve pass needs 1 + (2 + {k}) + 1 = "
+    return (f"- K = {k} islanding contingencies on this project: one solve pass needs {mg_pass_words(k)} = "
             f"{shown['one_pass']} solves, above the hard cap of {CAPS['solves']}, so this run cannot be "
             "granted; run it step by step")
 
 
-def _count_on_card(envelope, task, profile, ctx=None):
-    """G1: a proposed plain run's card carries K, counted on the run's own
-    open project, and the solve budget it sets. True when it changed."""
+def counted_live(project_id, profile):
+    """G1: `counted` on the open project when it is the run's own, else None.
+    It copies the network and derives the DTC config, so callers take it
+    before `assistant_tasks._LOCK`, never under it (#1345)."""
     from services.pypsa_service import PyPSAService
+    ctx = PyPSAService.get_active_context()
+    if str(getattr(ctx, "project_uuid", None)) != str(project_id):
+        return None
+    return counted(profile, ctx)
+
+
+def _count_on_card(envelope, held):
+    """G1: a proposed plain run's card carries `held` (K, counted on the run's
+    own open project by `counted_live`) and the solve budget it sets. True
+    when it changed."""
     if envelope.get("setup") or envelope["state"] != "proposed":
         return False
-    ctx = ctx or PyPSAService.get_active_context()
-    if str(getattr(ctx, "project_uuid", None)) != task.get("project_id"):
-        return False
-    held = counted(profile, ctx)
     if held is None or held == envelope.get("contingencies"):
         return False
     envelope["contingencies"] = held
@@ -677,9 +686,10 @@ def _rows(envelope):
             lines.append(_over_cap_words(shown))
         else:
             # Q1-iii: the arithmetic, and the capped figure whenever the cap applies.
+            from services import run_profiles
             lines.append(f"- K = {k} islanding contingenc{'y' if k == 1 else 'ies'} on this project ({links}): "
-                         f"(1 + (2 + {k}) + 1) x 3 + 4 = {shown['needed']} solves"
-                         + (f"; the budget is the hard cap of {CAPS['solves']} solves, so the last L2 round "
+                         f"{run_profiles.mg_budget_words(k)} = {shown['needed']} solves"
+                         + (f"; the budget is the hard cap of {CAPS['solves']} solves, so the last round "
                             "may stop for you" if shown["needed"] > shown["solves"] else ""))
     held = (envelope.get("eh_study") or {}).get("contingencies")
     if isinstance(held, dict):  # study harness 12c (G1): K, frozen at the grant
@@ -804,10 +814,10 @@ def read_for_card(task_path, task):
     if str(getattr(ctx, "project_uuid", None)) != task.get("project_id"):
         return describe(envelope)
     from services import assistant_tasks, run_profiles
+    held = counted(run_profiles.resolve(task["run"]["profile"]), ctx)  # before the lock (#1345)
     with assistant_tasks._LOCK:  # G1: the card shows the K the grant then holds it to
         envelope = _load(task_path)
-        if envelope is not None and envelope["state"] == "proposed" and _count_on_card(
-                envelope, task, run_profiles.resolve(task["run"]["profile"]), ctx):
+        if envelope is not None and envelope["state"] == "proposed" and _count_on_card(envelope, held):
             _save(task_path, envelope)
     return describe(envelope, goal=card_goal(task, ctx))
 
@@ -959,6 +969,11 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
     if verdict not in ("unattended", "stepwise", "revoke"):
         _invalid("Choose unattended, stepwise or revoke.")
     setup = None
+    live_k = None
+    if verdict == "unattended":  # G1: K counted before the lock (#1345); the run's project and profile never change
+        _, early = assistant_tasks._read(task_id)
+        if early.get("run"):
+            live_k = counted_live(early.get("project_id"), run_profiles.resolve(early["run"]["profile"]))
     with assistant_tasks._LOCK:
         path, task = assistant_tasks._read(task_id)
         current = _load(path)
@@ -989,9 +1004,7 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
                 _refuse("envelope_not_grantable", "This run's profile runs step by step only: it has no envelope.")
             block = check_block(block)
             if not current.get("setup"):
-                live = PyPSAService.get_active_context()
-                held = (counted(run_profiles.resolve(task["run"]["profile"]), live)
-                        if str(getattr(live, "project_uuid", None)) == task["project_id"] else None)
+                held = live_k
                 if held is not None:
                     # Study harness 12c (G1): the K the card showed, and the budget it set.
                     if held["count"] is None or held != current.get("contingencies"):

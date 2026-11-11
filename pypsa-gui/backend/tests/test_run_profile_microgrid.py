@@ -895,6 +895,43 @@ def test_a_resize_just_over_the_bound_is_refused_and_ends_needs_user(
     assert float(_live().network.storage_units.at["bess_new", "p_nom_max"]) == 5.0
 
 
+def test_a_resize_with_no_bound_on_the_card_is_refused_and_ends_needs_user(
+    granted, rated, monkeypatch
+):
+    """G4: the card shows no bound for the battery's p_nom_min, so a write to it
+    is refused and the run ends needs_user, the network unchanged."""
+    from tests.test_harness_run_loops import Script, call, go, refused, say
+    from tests.test_harness_run_skeleton import RUN
+
+    _l2_only(monkeypatch)
+    _check_by_cap(monkeypatch)
+    task, path, _ = granted(run={**RUN, "profile": "eh_microgrid@1"})
+    shown = {
+        e["target"]["attr"]
+        for e in run_profiles.resolve("eh_microgrid@1")["envelope"]["edits"]
+    }
+    assert "p_nom_min" not in shown
+    before = float(_live().network.storage_units.at["bess_new", "p_nom_min"])
+    script = Script(
+        call(
+            "update_component",
+            {
+                "component_class": "StorageUnit",
+                "name": "bess_new",
+                "attrs": {"p_nom_min": 50.0},
+            },
+            0,
+        ),
+        say("Tried a size the card shows no bound for."),
+        say("Nothing more within the bounds."),
+    )
+    record = go(harness_runner.Runner("a", agent_provider=script), path, task)
+    assert record["run"]["status"] == "needs_user", record["run"]
+    assert [t for t, _ in refused(path)] == ["update_component"]
+    assert record["run"]["ledger"] == []
+    assert float(_live().network.storage_units.at["bess_new", "p_nom_min"]) == before
+
+
 # ── G1: the envelope's budget follows the project's K ────────────────────────
 
 
@@ -1257,7 +1294,7 @@ def test_a_lole_loop_the_cap_cut_short_is_not_evaluated_and_ends_on_the_cap(tmp_
     task["steps"].append(_looped(lole, granted))
     [result] = run_gates.evaluate([lole], run_gates.Env(task, None, None, None))
     assert result["verdict"] == "not_evaluated"
-    assert result["facts"][0]["value"] == run_gates.LOOP_CAPPED == "budget_spent"
+    assert result["facts"][0]["value"] == run_gates.LOOP_BUDGET_SPENT == "budget_spent"
     assert (
         "1 of its 3 solves" in result["reason"]
         and "never counts as met" in result["reason"]

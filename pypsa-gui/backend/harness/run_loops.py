@@ -299,9 +299,9 @@ def after_failed_result(path, task, gate, profile):
         engines = {rule["id"] for rule in engine_rules(profile)}
         moved = any(r["rule"] in engines and r["facts"][0].get("value") == "inputs_changed" for r in gate["rules"])
         # Study harness 12c (GK B (47) Q4): a loop the cap cut short ends on the cap, not as unconverged.
-        capped = any(r["rule"] in engines and r["facts"][0].get("value") == run_gates.LOOP_CAPPED
+        capped = any(r["rule"] in engines and r["facts"][0].get("value") == run_gates.LOOP_BUDGET_SPENT
                      for r in gate["rules"])
-        return stop("inputs_changed" if moved else run_gates.LOOP_CAPPED if capped
+        return stop("inputs_changed" if moved else run_gates.LOOP_BUDGET_SPENT if capped
                     else "not_converged" if engines & set(failing) else "result_failed")
     capture = _not_applied(gate)
     if capture is not None:
