@@ -114,6 +114,7 @@ function LayoutReadBack({ summary }: { summary: LayoutSummary }) {
       {summary.kind === 'raster' ? `Drawing at ${n(summary.metres_per_pixel ?? 0)} m per pixel` : 'GeoJSON in WGS84'}
       {` · spans ${n(summary.extent_m[0])} × ${n(summary.extent_m[1])} m (east × north)`}
       {skipped > 0 && ` · ${skipped} non-building ${skipped === 1 ? 'feature' : 'features'} skipped`}
+      {summary.kept_layout_ids.length > 0 && ` · ${summary.kept_layout_ids.length} earlier layout ${summary.kept_layout_ids.length === 1 ? 'building stays' : 'buildings stay'}`}
     </span>
   )
 }
@@ -124,7 +125,7 @@ function CornerTable({ ring, disabled, onChange }: { ring: [number, number][]; d
   return (
     <table className="text-[11px]" data-testid="scene-corner-table">
       <caption className="text-left text-muted">Corners, metres from the site origin</caption>
-      <thead><tr><th className="text-left font-normal text-muted">#</th><th className="font-normal text-muted">East</th><th className="font-normal text-muted">North</th></tr></thead>
+      <thead><tr><th className="text-left font-normal text-muted">#</th><th className="text-left font-normal text-muted">East (m)</th><th className="text-left font-normal text-muted">North (m)</th></tr></thead>
       <tbody>
         {ring.map((p, i) => (
           <tr key={i}>
@@ -221,7 +222,8 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       setProposal(await propose(qc, project, site.id, 'import_layout', inputs))
     } catch (e) {
       const copy = e instanceof SitesNotSaved ? e.message : sceneErrorCopy(e)
-      setError({ copy, reload: sceneErrorWantsReload(e), snapshots: false })
+      // The import shows the refusal on its own line; the panel adds it only when Reload is the fix.
+      if (sceneErrorWantsReload(e)) setError({ copy, reload: true, snapshots: false })
       throw new Error(copy)
     } finally { setBusy(false) }
   }

@@ -186,6 +186,8 @@ export interface LayoutInputs { layout: LayoutInput }
 export interface LayoutSummary {
   kind: 'geojson' | 'raster'; metres_per_pixel: number | null; crs: string | null
   extent_m: [number, number]; footprints: number; skipped: Record<string, number>
+  /** Earlier layout buildings a re-import keeps (merge by id). */
+  kept_layout_ids: string[]
 }
 
 export type ProposalInputs = BuildingInputs | LayoutInputs | BindInputs | RebindInputs | PlaceInputs | DetachInputs | UndoDetachInputs

@@ -19,7 +19,8 @@ import { propose } from './sceneActions'
 import { useUIStore } from '../store/uiStore'
 import { useSceneProposal } from './useSiteScene'
 import SiteScenePanel from './SiteScenePanel'
-import { layoutReady } from './LayoutImport'
+import { layoutReady, nameError, previewReason } from './LayoutImport'
+import { buildingLabel } from './SiteCompanion'
 import type { Site } from './types'
 
 const site: Site = { id: 'campus', name: 'Campus', buses: [], origin: { lng: 11, lat: 48 }, placements: {},
@@ -31,7 +32,7 @@ const enabled = (buildings: SceneBuilding[]): SiteScene => ({ state: 'enabled', 
 const available = (name: string) => ({ action: name, available: true, blocker: null, required_inputs: [], computes: '' })
 const preview: Proposal = { id: 'p-1', site_id: 'campus', action: 'import_layout', base_revision: 2, input_hash: 'h', status: 'ready',
   preview: { buildings: [hall], stats: { buildings: 1, triangles: 12, bytes: 300 },
-    layout: { kind: 'raster', metres_per_pixel: 0.1, crs: null, extent_m: [20, 10], footprints: 1, skipped: {} } } }
+    layout: { kind: 'raster', metres_per_pixel: 0.1, crs: null, extent_m: [20, 10], footprints: 1, skipped: {}, kept_layout_ids: [] } } }
 const view = () => render(<QueryClientProvider client={new QueryClient()}><SiteScenePanel site={site} contextBuildings={[]} /></QueryClientProvider>)
 
 const enc = (s: string) => Array.from(s, c => c.charCodeAt(0))
@@ -122,6 +123,49 @@ describe('layout import (SC-06-layout)', () => {
     const src = (inputs as { sources: { namespace: string; source_id: string; ring: [number, number][] }[] }).sources[0]
     expect([src.namespace, src.source_id, src.ring.length]).toEqual(['layout', 'hall', 4])
     expect(src.ring[1][0]).toBeGreaterThan(src.ring[0][0])
+  })
+
+  it('says why Preview is off, guards discarding a trace, and shows a refusal once (UX 19)', async () => {
+    vi.mocked(propose).mockRejectedValue(Object.assign(new Error('x'), { isAxiosError: true,
+      response: { status: 422, data: { detail: { error_kind: 'invalid_input', code: 'far_from_site', field: 'layout',
+        message: 'Layout building building 1 is more than 10 km from this site: check the layout is for this site and where it is placed' } } } }))
+    view()
+    await choose(png(1000, 800))
+    const canvas = await screen.findByTestId('layout-trace-canvas')
+    expect(screen.getByTestId('layout-trace-reason').textContent).toBe('Mark the two ends of a known distance with the Scale tool')
+    const key = (k: string, n = 1) => { for (let i = 0; i < n; i++) fireEvent.keyDown(canvas, { key: k, shiftKey: true }) }
+    key('Enter'); key('ArrowRight', 5); key('Enter')
+    fireEvent.click(screen.getByTestId('layout-tool-anchor')); key('Enter')
+    fireEvent.click(screen.getByTestId('layout-tool-trace')); key('Enter'); key('ArrowDown', 3); key('Enter'); key('ArrowLeft', 3); key('Enter')
+    expect(screen.getByTestId('layout-trace-reason').textContent).toBe('Finish or undo the outline you are tracing')
+    fireEvent.click(screen.getByTestId('layout-trace-finish'))
+    expect(screen.queryByTestId('layout-trace-reason')).toBeNull()
+    expect(screen.getByText('Distance (m)')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('layout-trace-preview'))
+    const alerts = await screen.findAllByText(/more than 10 km from this site/)
+    expect(alerts).toHaveLength(1)                                   // in the dialog, not again in the panel
+    fireEvent.click(screen.getByText('Cancel'))
+    expect((await screen.findAllByText('Discard the traced buildings?')).length).toBeGreaterThan(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
+    await waitFor(() => expect(screen.queryByTestId('layout-trace')).toBeNull())
+  })
+
+  it('keeps traced names non-empty and unique', () => {
+    const fps = [{ id: 'hall', ring_px: [] as [number, number][] }, { id: 'hall ', ring_px: [] }, { id: ' ', ring_px: [] }]
+    expect(nameError(fps, 1)).toBe('Name: another building already has this name')
+    expect(nameError(fps, 2)).toBe('Name: enter a name')
+    expect(previewReason([[0, 0], [1, 0]], 1, [0, 0], fps, false)).toBe('Give every building its own name')
+  })
+
+  it('names a layout building by its traced name', () => {
+    expect(buildingLabel({ ...hall, source: { namespace: 'layout', source_id: 'Hall A' } })).toBe('Layout building Hall A')
+  })
+
+  it('says which earlier layout buildings a re-import keeps', async () => {
+    useSceneProposal.setState({ proposal: { ...preview, preview: { ...preview.preview,
+      layout: { ...preview.preview.layout!, kept_layout_ids: ['layout:old'] } } } })
+    view()
+    expect((await screen.findByTestId('scene-layout-readback')).textContent).toContain('· 1 earlier layout building stays')
   })
 
   it('needs a scale, an anchor and a finished outline', () => {
