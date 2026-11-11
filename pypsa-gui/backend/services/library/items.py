@@ -46,6 +46,7 @@ from sqlalchemy.orm import Session as DBSession
 from db.models import LibraryItem
 from models import commercial as M
 from services.commercial import hashing as H
+from services.commercial import stamp_currency as _stamp_currency  # noqa: F401  (registers it)
 from services.library.series_store import LibraryRefNotFound, LibraryRefStale
 from services.storage_paths import library_file
 
@@ -124,6 +125,10 @@ def validate_payload(kind: str, payload: Any) -> BaseModel:
         raw = {k: v for k, v in payload.items() if k != "library_ref"}
     elif kind == "contract":
         raw = {k: v for k, v in payload.items() if k not in ("type", "library_ref")}
+    elif kind == "tariff":
+        # The read-only key a tariff read adds (gridspine-library-eu 05); the model
+        # drops it, with a stamp-read currency that still equals the stamp's.
+        raw = {k: v for k, v in payload.items() if k != "currency_source"}
     unknown = _unknown_keys(model, raw)
     if unknown:
         raise ValueError(f"unknown {kind} field(s): {', '.join(sorted(unknown))}")
@@ -151,6 +156,9 @@ def _validate(kind: str, payload: Any) -> BaseModel:
         return model.model_validate(body)
     except ValidationError as exc:
         err = exc.errors()[0]
+        cause = (err.get("ctx") or {}).get("error")
+        if isinstance(cause, M.TariffStampUnreadableError):
+            raise TariffStampUnreadable(str(cause)) from exc
         where = ".".join(str(x) for x in err.get("loc", ()))
         raise ValueError(f"invalid {kind}: {where + ': ' if where else ''}{err['msg']}") from exc
 
@@ -199,6 +207,14 @@ def _write(target: Path, data: bytes, digest: str) -> None:
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
+
+
+class TariffStampUnreadable(ValueError):
+    """A tariff read sent back with its stamp-read currency while its defaults pack
+    cannot be read (gridspine-library-eu 05, GK A G5-1): nothing is stored. The route
+    answers 422 `tariff_stamp_unreadable`."""
+
+    code = "tariff_stamp_unreadable"
 
 
 class TariffCurrencyRequired(ValueError):

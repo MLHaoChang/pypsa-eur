@@ -286,6 +286,25 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        # ui-modern 03: the strip is a screen layout over figures chat already
+        # reads (get_results cost_breakdown and lost_load, the checked answers).
+        'id': 'results_headline_strip',
+        'title': 'Results headline strip',
+        'disposition': 'manual',
+        'reason': "The Results headline strip's own card list is not read from chat. Chat reads the same figures one by one (cost breakdown, lost load, the checked answers). Open Results › Summary to see the strip.",
+        'page': 'Results › Summary',
+        'panel': 'results',
+        # 'headline' alone is in six tool descriptions (compare-runs headline
+        # KPIs, …) and 'strip' alone in the chat file strip's: `matches` also
+        # needs `_asks_about_the_strip`.
+        'keywords': frozenset({
+            'strip',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/results/headline_kpis'),
+        }),
+    },
+    {
         'id': 'site_scene',
         'title': 'Site 3D: legacy Site adoption and results overlay',
         'disposition': 'unbuilt',
@@ -396,10 +415,91 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('GET', '/api/memory/items/{item_id}/versions'),
         }),
     },
+    {
+        'id': 'memory_parameter_suggestions',
+        'title': 'Saving a field value for reuse, or applying a saved one',
+        'disposition': 'out of chat',
+        'reason': ('Save a value with the Save for reuse button beside its field. A saved value is '
+                   'applied only when you pick its chip beside the same field and approve the card. '
+                   'The assistant never applies one.'),
+        'page': 'Asset card (Properties)',
+        'panel': None,
+        # 'saved' and 'reuse' alone are in project, scenario and snapshot asks:
+        # `matches` also needs `_asks_for_a_saved_value` (GK B N4).
+        'keywords': frozenset({'reusable', 'chip', 'chips', 'saved', 'save', 'reuse', 'remember'}),
+        'routes': frozenset({
+            ('GET', '/api/memory/suggestions'),
+            ('POST', '/api/memory/parameters'),
+            ('POST', '/api/memory/suggestions/{item_id}/preview'),
+            ('POST', '/api/network/memory_parameter/apply'),
+        }),
+    },
 )
 
 NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the reason and the page; "
         "if panel is set you may open it with ui_open_panel. Do not look for another tool or an API for them.")
+
+
+# A saved field value. Three asks reach it:
+# - a chip, or a value made "reusable";
+# - using one ("saved"/"reuse" with a value or a field), unless the saved thing is a
+#   scenario, run, snapshot, tariff or project;
+# - keeping one: "save" or "remember" with a value or a field AND words that say the
+#   value is kept for reuse: "later", "elsewhere", "reuse", or "next/another/other"
+#   with "project" or "time". A bare "again", "next", "other" or "another" is
+#   ordinary workflow ("solve again", "the next one", "another carrier"), and an ask
+#   that also names a table, network, report or results stores that, not a value
+#   (GK B N2). "Store" is a component, "keep" a constraint ("keep the capacity under
+#   50 MW"), and "future" and "use ... again" describe model time, so none of them
+#   counts (GK B N2 of 46).
+_SAVED_VALUE_NAMES = frozenset({'reusable', 'chip', 'chips'})
+_USE_WORDS = frozenset({'saved', 'reuse'})
+_VALUE_WORDS = frozenset({
+    'value', 'values', 'parameter', 'parameters', 'efficiency', 'capex', 'opex',
+    'cost', 'costs', 'price', 'prices', 'capacity', 'lifetime',
+})
+_SAVED_ELSEWHERE = frozenset({
+    'scenario', 'scenarios', 'run', 'runs', 'snapshot', 'snapshots', 'tariff',
+    'tariffs', 'project', 'projects',
+})
+_KEEP_VERBS = frozenset({'save', 'remember'})
+_KEPT_FOR_REUSE = frozenset({'later', 'elsewhere', 'reuse'})
+_KEPT_FOR_PLACES = frozenset({'next', 'another', 'other'})
+_REUSE_PLACES = frozenset({'project', 'projects', 'time'})
+_KEPT_ELSEWHERE = (_SAVED_ELSEWHERE - {'project', 'projects'}) | {
+    'table', 'tables', 'network', 'networks', 'report', 'reports', 'result', 'results',
+    'csv', 'chart', 'charts', 'series', 'file', 'files',
+}
+
+
+def _kept_for_reuse(words: set[str]) -> bool:
+    return bool(
+        words & _KEPT_FOR_REUSE
+        or (words & _KEPT_FOR_PLACES and words & _REUSE_PLACES)
+    )
+
+
+def _asks_for_a_saved_value(words: set[str]) -> bool:
+    if words & _SAVED_VALUE_NAMES:
+        return True
+    if not words & _VALUE_WORDS:
+        return False
+    if words & _USE_WORDS and not words & _SAVED_ELSEWHERE:
+        return True
+    return bool(words & _KEEP_VERBS and _kept_for_reuse(words) and not words & _KEPT_ELSEWHERE)
+
+
+# The headline strip entry answers only what the strip itself owns: what it
+# shows, why a card is missing, adding or hiding a card. Exporting, reporting
+# or comparing the same figures is a chat tool's job and must not be refused.
+_STRIP_NAMES = frozenset({'headline', 'kpi', 'kpis'})
+_STRIP_ASKS = frozenset({'why', 'what', 'which', 'read', 'add', 'hide'})
+# "Add the strip to the report/export" puts it elsewhere: a tool does that.
+_STRIP_ELSEWHERE = frozenset({'report', 'export'})
+
+
+def _asks_about_the_strip(words: set[str]) -> bool:
+    return bool(words & _STRIP_NAMES and words & _STRIP_ASKS and not words & _STRIP_ELSEWHERE)
 
 
 def matches(words: set[str], limit: int = 2) -> list[dict]:
@@ -415,6 +515,10 @@ def matches(words: set[str], limit: int = 2) -> list[dict]:
             continue
         if entry['id'] == 'report_chart_snapshots' and not words & {'chart', 'charts', 'graph', 'plot'}:
             continue  # bare `pin` also means "pin a bus or a capacity"
+        if entry['id'] == 'memory_parameter_suggestions' and not _asks_for_a_saved_value(words):
+            continue
+        if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):
+            continue
         hits = len(words & entry['keywords'])
         if hits:
             ranked.append((-hits, index, entry))

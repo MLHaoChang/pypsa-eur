@@ -1713,6 +1713,17 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "get_profile_tuning_schema",
+        "The settings the Tune dialog offers for one technology (wind or "
+        "solar) and preset: each field's key, label, unit, type, bounds or "
+        "options, which weather sources use it, its preset value and "
+        "provenance. Read it before putting tuning keys (for example tilt, "
+        "losses) into the params of a profile generation. Safety: read.",
+        {"technology": {"type": "string", "enum": ["wind", "solar"]},
+         "preset": {"type": "string"}},
+        ["technology"],
+    ),
+    _t(
         "compare_profiles",
         "Compare current:<generator>, pending:<job>[:<point>] or "
         "shaped:<job>[:<point>] profiles on the project's snapshot clock. "
@@ -5498,6 +5509,7 @@ TOOL_ROUTES: dict[str, list] = {
     "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
     "get_profile_readiness": [("GET", "/api/projects/{name}/profiles/readiness")],
     "compare_profiles": [("GET", "/api/projects/{name}/profiles/compare")],
+    "get_profile_tuning_schema": [("GET", "/api/profiles/schema")],
     "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
     "apply_generated_profiles": [("POST", "/api/projects/{name}/profiles/apply-batch")],

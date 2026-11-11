@@ -63,6 +63,9 @@ from routers.projects import (
     _enforce_project_lock,
     _force_rmtree,
     _read_meta,
+    _remove_closed_dir,
+    _remove_retired,
+    _retire_closed_dir,
     _restore_results_state,
     _safe_project_dir,
     _solver_config_from_dict,
@@ -363,7 +366,9 @@ def _list_snapshot_dirs(project_dir: pathlib.Path) -> list[pathlib.Path]:
     root = snaps.resolve()
     kept = []
     for d in snaps.iterdir():
-        if not d.is_dir():
+        # A dot name is never a snapshot: `_remove_closed_dir` parks one there
+        # while it removes it (study harness 07f).
+        if not d.is_dir() or d.name.startswith("."):
             continue
         try:
             resolved = d.resolve()
@@ -436,11 +441,17 @@ def _prune_oldest(
     if to_delete <= 0 or not oldest_first:
         return 0
     pruned = 0
-    for d in oldest_first[:to_delete]:
+    # Study harness 07f: a snapshot a restore is reading (its report locks
+    # held) is skipped, as one that cannot be removed is, and the next oldest
+    # goes instead, so a busy snapshot never lets the count grow (GK B C5).
+    for d in oldest_first:
+        if pruned >= to_delete:
+            break
         try:
-            _force_rmtree(d)
+            with report_store.reports_closed(d):
+                _remove_closed_dir(d)
             pruned += 1
-        except OSError:
+        except (OSError, report_store.ReportBusy):
             pass
     return pruned
 
@@ -1025,14 +1036,20 @@ def delete_snapshot(
     label = _read_snapshot_meta(snap_dir).get("label", snapshot_id)
     # `_force_rmtree` clears read-only attributes and retries with a backoff —
     # a plain `shutil.rmtree` raises WinError 5 on OneDrive-synced paths.
+    # Study harness 07f: not while a restore reads it. A restore holds the
+    # network lock and the snapshot's report locks; take them in that order,
+    # busy → 409 `report_busy` and the snapshot stays.
     try:
-        _force_rmtree(snap_dir)
+        with PyPSAService.get_lock(), \
+                project_registry.reports_closed_or_409(snap_dir, "deleted"):
+            retired = _retire_closed_dir(snap_dir)
     except OSError as exc:
         raise HTTPException(
             500,
             f"Could not delete snapshot '{label}': {exc}. The folder is "
             f"locked (OneDrive sync / AV scan?) — retry, or remove it manually.",
         ) from exc
+    _remove_retired(retired)  # outside the network lock (GK B C4)
     change_log_service.log(
         "delete_snapshot", "Project", name,
         f"Deleted snapshot '{label}' of '{name}'",

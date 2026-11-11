@@ -3,7 +3,7 @@
 
 # Live states and flow canvas
 
-Status: in-progress (slice 1 in its PR; slices 2 and 3 not started)
+Status: in-progress (slice 1 merged, #1335; slice 2 in its PR; slice 3 not started)
 Blocked by: 01
 Type: feature
 Model: Sonnet. Reviewer: UX.
@@ -17,11 +17,13 @@ Re-scoped from the screenshot audit (`audit.md` findings 2, 8, 9, 10) into three
 - Loading: skeleton placeholders instead of blank panels; no wrong value while loading (the Grid connection select no longer reads "Strong" before "None"). Test: `SiteTypeSelect.test.tsx`.
 - Empty states say what to do next, with a "›" link only where a GUI field really sets it: Results Summary Reliability row and Control row. The Site 3D empty state already names its one next step and links to the field that sets it.
 - Home and the New project dialog follow the workspace theme.
-- Not in this slice: finding 8 (the floating "Chat here" button and the repeating Guided banner), and the loud triple "Out of date" marks of finding 10.
+- Not in this slice: finding 8 (the floating "Chat here" button and the repeating Guided banner), now issue 08, and the loud triple "Out of date" marks of finding 10, now issue 09.
 
 ## Slice 2: flow on the canvas and map
 
 - Animated flow direction and line-loading colours during playback, switched off under `prefers-reduced-motion`.
+- The schematic already had both (`utils/flowMotion.ts`). This slice brings the map level: lines, links and transformers carry the same moving dash, and the flow label gains a direction arrow that stays when motion is off.
+- Both legends show a "Loading (% of rating)" key while the results overlay is on, since the overlay replaces the voltage and carrier colours.
 
 ## Slice 3: solver progress
 

@@ -223,7 +223,7 @@ NOTHING_TO_SAMPLE_DETAIL = ("the loop found no outage to sample: no electrical g
 # gate shows: the verdict, what it cost, how the network was left, and the
 # goal it was judged against with where each part came from.
 LOOP_FIELDS = ("status", "solves_used", "probe_solves", "restore", "base_restored", "base_restore_status",
-               "target_lole_h", "draws", "basis", "goal_sources", "lever_star", "eps_star", "confident",
+               "target_lole_h", "horizon_years", "draws", "basis", "goal_sources", "lever_star", "eps_star", "confident",
                "started_at", "finished_at", "error", "network_revision")
 
 
@@ -263,7 +263,66 @@ def _loop_converged(env, rule):
         return NoEvidence((step.get("job") or {}).get("outcome") or step["status"], str(reason)[:240])
     if loop.get("applied") is False:  # a user edit landed while the loop ran (H3): not this project's
         return NoEvidence("inputs_changed", "the inputs changed while the engine loop ran")
+    problem = _goal_problem(env, loop)
+    if problem:
+        return NoEvidence(*problem)
     return Looped(converged(loop), {k: loop[k] for k in LOOP_FIELDS if k in loop})
+
+
+_UNREADABLE = object()
+
+
+def _granted_goal(env):
+    """The goal the envelope froze (`{"value", "unit", "source"}`); None when
+    the run has no envelope file, or its envelope is only proposed or froze no
+    goal; `_UNREADABLE` when the file is there but is not a whole envelope or
+    its goal is malformed (GK B (46) G1/G2). Any state past `proposed` counts:
+    a spent (`exhausted`), `expired` or `revoked` grant still froze its goal."""
+    from services import run_envelope
+    task_id = env.task.get("task_id")
+    if env.project_dir is None or not isinstance(task_id, str):
+        return None
+    task_path = Path(env.project_dir) / "assistant_tasks" / f"{task_id}.json"
+    envelope = run_envelope._load(task_path)
+    if envelope is None:
+        return _UNREADABLE if run_envelope.path_for(task_path).exists() else None
+    if envelope.get("state") == "proposed" or "goal" not in envelope:
+        return None
+    goal = envelope["goal"]
+    return goal if isinstance(goal, dict) else _UNREADABLE
+
+
+GOAL_REL_TOL, GOAL_ABS_TOL = 1e-9, 1e-9  # the loop target vs the frozen goal on the horizon basis
+
+
+def _number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _goal_problem(env, loop):
+    """`(reason, detail)` when the loop did not judge the goal the grant froze,
+    else None (also when the grant froze no goal). GK B (46): nothing defaults;
+    an unreadable input is `goal_unreadable`, never a match. The loop's
+    `horizon_years` is `metrics.horizon_years(n)` (both runners), and its target
+    is the goal's h/yr value put on that horizon by `reliability_goal.loop_goal`."""
+    goal = _granted_goal(env)
+    if goal is None:
+        return None
+    if goal is _UNREADABLE:
+        return ("goal_unreadable", "the granted envelope or its frozen goal could not be read")
+    from services.reliability_goal import loop_goal
+    value, years, target = goal.get("value"), loop.get("horizon_years"), loop.get("target_lole_h")
+    if (goal.get("unit") != "h/yr" or not _number(value) or value < 0 or not _number(years) or years <= 0
+            or not _number(target)):
+        return ("goal_unreadable", "the frozen goal or the engine loop's target or horizon could not be read")
+    expected, _, _ = loop_goal(None, {"target_lole_h": {"value": value, "source": goal.get("source")},
+                                      "mc_draws": {"value": 1, "source": ""}}, float(years))
+    if not math.isclose(target, expected, rel_tol=GOAL_REL_TOL, abs_tol=GOAL_ABS_TOL):
+        return ("goal_mismatch", "the engine loop ran against a different LOLE target than the goal the grant froze")
+    sources = loop.get("goal_sources")
+    if not isinstance(sources, dict) or sources.get("target_lole_h") != goal.get("source"):
+        return ("goal_mismatch", "the engine loop's LOLE target came from a different source than the grant's goal")
+    return None
 
 
 def check_engine(rule):

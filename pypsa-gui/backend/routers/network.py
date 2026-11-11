@@ -204,6 +204,11 @@ from routers.network_library_reference import router as _library_reference_route
 
 router.include_router(_library_reference_router)
 
+# Apply a saved parameter from assistant memory (slice 03): an edit-card write.
+from routers.network_memory_parameter import router as _memory_parameter_router  # noqa: E402
+
+router.include_router(_memory_parameter_router)
+
 # Apply a mapped equipment table to several assets (data-to-model slice 1): an edit-card write.
 from routers.network_equipment_table import apply_equipment_mapping  # noqa: E402,F401
 from routers.network_equipment_table import router as _equipment_table_router

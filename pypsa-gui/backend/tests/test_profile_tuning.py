@@ -299,3 +299,20 @@ def test_tuning_receipts_come_from_flat_settings_not_caller_metadata():
     )
     assert got.meta["tuning"] == {"losses": 0.1}
     assert "tuning_not_applied" not in got.meta
+
+
+def test_the_chat_tool_returns_the_schema_route_payload(client, bound_ctx):
+    from harness.catalogue import TOOL_ROUTES, TOOLS, safety_tier_for
+    from services import chat_tools
+
+    assert "get_profile_tuning_schema" in [t["name"] for t in TOOLS]
+    assert safety_tier_for("get_profile_tuning_schema") == "read"
+    assert TOOL_ROUTES["get_profile_tuning_schema"] == [("GET", "/api/profiles/schema")]
+    with bound_ctx(client):
+        out = chat_tools.DISPATCHERS["get_profile_tuning_schema"](
+            technology="solar", preset="default"
+        )
+    res = client.get(
+        "/api/profiles/schema", params={"technology": "solar", "preset": "default"}
+    )
+    assert json.loads(json.dumps(out)) == res.json()

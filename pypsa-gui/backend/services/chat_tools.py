@@ -1867,7 +1867,7 @@ _LIBRARY_ERROR_KINDS = (
     {"error_kind": "library_reference_unknown"},
     {"error_kind": "reference_target_unsupported"}, {"error_kind": "currency_mismatch"},
     {"error_kind": "reference_confirmation_needed"},
-    {"error_kind": "tariff_currency_required"},
+    {"error_kind": "tariff_currency_required"}, {"error_kind": "tariff_stamp_unreadable"},
 )
 _LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
 
@@ -4074,7 +4074,15 @@ def get_project_flow(name: str) -> dict:
     notes, through the same handler as ``GET /api/projects/{name}/flow``."""
     from routers.flow import get_project_flow as _h
 
-    return _route(_h, project=_authorized_project(name))
+    out = _route(_h, project=_authorized_project(name))
+    # The per-section component lists are for Guided's cards. They grow with the
+    # network, so the model's copy leaves them out (list_components has them).
+    if isinstance(out, dict):
+        for row in out.get("sections") or []:
+            if isinstance(row, dict):
+                row.pop("holds", None)
+                row.pop("holds_total", None)
+    return out
 
 
 def get_reliability_goal(name: str) -> dict:
@@ -4516,6 +4524,11 @@ def compare_profiles(project_id: str, a: str, b: str, component: str | None = No
     from routers.profiles import compare_profiles as _h
     return _profile_route(_h, a=a, b=b, component=component,
                           proj=_authorized_project(project_id))
+
+
+def get_profile_tuning_schema(technology: str, preset: str = "default") -> dict:
+    from routers.profiles import profile_tuning_schema as _h
+    return _profile_route(_h, technology=technology, preset=preset)
 
 
 # ── Time series and weather (live-voice 08 B3) (6) ──────────────────────────
@@ -9841,6 +9854,7 @@ DISPATCHERS: dict[str, Any] = {
     "list_pending_profiles": list_pending_profiles,
     "get_profile_readiness": get_profile_readiness,
     "compare_profiles": compare_profiles,
+    "get_profile_tuning_schema": get_profile_tuning_schema,
     "generate_renewable_profile": generate_renewable_profile,
     "apply_generated_profile": apply_generated_profile,
     "apply_generated_profiles": apply_generated_profiles,

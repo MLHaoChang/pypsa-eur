@@ -31,9 +31,20 @@ from sqlalchemy.orm import Session as DBSession
 from db.models import MemoryItem, MemoryItemVersion, MemoryRevision, OrgMembership, User
 
 KINDS = ("preference", "chart_spec", "parameter", "lesson")
-# Kinds this slice writes; `parameter` arrives with slice 03 (its unit check
-# on apply belongs there, §9 M6).
+# Kinds a client or the model may write. `parameter` (slice 03) is written
+# only by the Save-for-reuse route, which reads the value, unit and money stamp
+# from the project itself (`services/memory_parameters.py`; GK B P1): a body a
+# client or the model chose is refused, and only its summary may be edited.
 WRITABLE_KINDS = ("preference", "chart_spec", "lesson")
+PARAMETER_KEYS = (
+    "component_class",
+    "field",
+    "value",
+    "unit",
+    "currency",
+    "currency_year",
+    "carrier",
+)
 # Kinds that hold no project data and so may be recalled in another org's
 # project (§9 M1). Everything else needs the bound project's org.
 CROSS_ORG_KINDS = frozenset({"preference", "chart_spec"})
@@ -71,6 +82,8 @@ TRANSITIONS: dict[str, tuple[tuple[str, ...], str]] = {
 }
 
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$")
+# PyPSA carrier names carry spaces ("solar rooftop", "urban central heat").
+_CARRIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_. \-]{0,63}$")
 _PARAM = re.compile(r"^[A-Z][A-Za-z]{0,47}\.[a-z][a-z0-9_]{0,63}$")
 
 
@@ -177,7 +190,7 @@ def validate_concept_key(key: Any) -> str:
 
             ok = ident.split(".", 1)[0] in _known_classes()
     elif ns == "carrier":
-        ok = bool(_ID.match(ident))
+        ok = carrier_ok(ident)
     elif ns == "step":
         ok = ident in _step_ids()
     elif ns == "report":
@@ -259,6 +272,111 @@ def _chart_spec(body: Any) -> dict:
         raise MemoryError(str(exc), exc.kind) from None
 
 
+# Fields whose unit depends on another field of the same row (GK B F3): a saved
+# value would not say what it is (a CO₂ cap in t, or a cost limit in EUR).
+CONTEXT_FIELDS = {("GlobalConstraint", "constant"): "constraint type"}
+
+
+def carrier_ok(value: Any) -> bool:
+    """A carrier name a concept key and a parameter body can hold verbatim."""
+    return (
+        isinstance(value, str)
+        and bool(_CARRIER.fullmatch(value))
+        and not value.endswith(" ")
+    )
+
+
+def parameter_spec(component_class: Any, field: Any):
+    """The asset-schema field a `parameter` item may hold, or MemoryError
+    `memory_field_unknown` (§9 M6): a numeric, typed (not derived) field."""
+    from services.asset_schema.fields import fields_for
+
+    if (
+        not isinstance(component_class, str)
+        or not isinstance(field, str)
+        or not _PARAM.match(f"{component_class}.{field}")
+    ):
+        raise MemoryError(
+            "a parameter needs a component class and a field",
+            "memory_field_unknown",
+            422,
+        )
+    try:
+        spec = next((f for f in fields_for(component_class) if f.key == field), None)
+    except KeyError:
+        spec = None
+    if spec is None or spec.derived or spec.kind not in ("number", "int"):
+        raise MemoryError(
+            f"{component_class}.{field} is not a field that can be saved for reuse",
+            "memory_field_unknown",
+            422,
+        )
+    if (component_class, field) in CONTEXT_FIELDS:
+        raise MemoryError(
+            f"{spec.label} means something different for each "
+            f"{CONTEXT_FIELDS[(component_class, field)]}, so it is not saved for reuse",
+            "memory_field_unknown",
+            422,
+        )
+    return spec
+
+
+def _parameter(body: Any) -> dict:
+    """`{component_class, field, value, unit, currency?, currency_year?, carrier?}`
+    (plan §1.1). The field must exist in the asset schema and `unit` must be its
+    stored unit (§9 M6); the apply checks both again."""
+    import math
+
+    b = _closed(
+        body, "parameter", PARAMETER_KEYS, ("component_class", "field", "value", "unit")
+    )
+    spec = parameter_spec(b["component_class"], b["field"])
+    value = b["value"]
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
+        raise MemoryError("a parameter value must be a finite number")
+    if b["unit"] != spec.unit_storage:
+        raise MemoryError(
+            f"{b['component_class']}.{b['field']} is stored in {spec.unit_storage or 'no unit'}",
+            "memory_unit_mismatch",
+            422,
+        )
+    out: dict[str, Any] = {
+        "component_class": b["component_class"],
+        "field": b["field"],
+        "value": float(value),
+        "unit": spec.unit_storage,
+    }
+    cur, year = b.get("currency"), b.get("currency_year")
+    if cur is not None:
+        if cur not in _currencies():
+            raise MemoryError("currency must be an ISO 4217 code")
+        out["currency"] = cur
+    if year is not None:
+        if (
+            isinstance(year, bool)
+            or not isinstance(year, int)
+            or not 1900 <= year <= 2200
+        ):
+            raise MemoryError("currency_year must be a year")
+        out["currency_year"] = year
+    if b.get("carrier") is not None:
+        # Kept exactly as the asset has it (never whitespace-folded), or it would
+        # never match its own asset again.
+        if not carrier_ok(b["carrier"]):
+            raise MemoryError(
+                "a carrier name for a saved value uses letters, digits, spaces, '.', "
+                "'_' or '-', at most 64 characters",
+                "memory_carrier_unsupported",
+                422,
+            )
+        out["carrier"] = b["carrier"]
+    return out
+
+
 def _lesson(body: Any) -> dict:
     b = _closed(body, "lesson", {"text", "situation"}, {"text"})
     out: dict[str, Any] = {"text": _text(b["text"], "lesson text")}
@@ -273,16 +391,27 @@ def _lesson(body: Any) -> dict:
     return out
 
 
-_BODIES = {"preference": _preference, "chart_spec": _chart_spec, "lesson": _lesson}
+_BODIES = {
+    "preference": _preference,
+    "chart_spec": _chart_spec,
+    "parameter": _parameter,
+    "lesson": _lesson,
+}
 
 
-def validate_body(kind: str, body: Any) -> dict:
-    """The normalised body for `kind`, or MemoryError. ≤ 4 KB serialised."""
+def validate_body(kind: str, body: Any, *, parameter_ok: bool = False) -> dict:
+    """The normalised body for `kind`, or MemoryError. ≤ 4 KB serialised.
+    `parameter_ok` is passed only by the Save-for-reuse path (GK B P1)."""
     if kind not in KINDS:
         raise MemoryError(f"kind must be one of {', '.join(KINDS)}")
-    if kind not in WRITABLE_KINDS:
+    if kind not in WRITABLE_KINDS and not (kind == "parameter" and parameter_ok):
         raise MemoryError(
-            f"{kind} items arrive in a later slice", "memory_kind_unavailable"
+            (
+                "a saved parameter is written only with Save for reuse on its field"
+                if kind == "parameter"
+                else f"{kind} items arrive in a later slice"
+            ),
+            "memory_kind_unavailable",
         )
     out = _BODIES[kind](body)
     if len(json.dumps(out, sort_keys=True).encode()) > MAX_BODY_BYTES:
@@ -310,6 +439,8 @@ def default_summary(kind: str, body: dict) -> str:
         from services import chart_spec
 
         line = chart_spec.summary(body["spec"])
+    elif kind == "parameter":
+        line = f"{body['component_class']}.{body['field']} = {body['value']:g} {body['unit']}"
     else:
         line = body["text"]
     return line if len(line) <= MAX_SUMMARY else line[: MAX_SUMMARY - 1] + "…"
@@ -607,8 +738,10 @@ def _write_version(db, item, *, version, body, summary, evidence, actor, now) ->
     )
 
 
-def _checked(kind, body, concept_keys, summary, evidence, project_kind):
-    body = validate_body(kind, body)
+def _checked(
+    kind, body, concept_keys, summary, evidence, project_kind, parameter_ok=False
+):
+    body = validate_body(kind, body, parameter_ok=parameter_ok)
     keys = validate_concept_keys(concept_keys)
     summary = (
         _text(summary, "summary", MAX_SUMMARY)
@@ -635,6 +768,7 @@ def create_item(
     status: str = "confirmed",
     origin: str = "button",
     org_id: uuid.UUID | None = None,
+    parameter_ok: bool = False,
 ) -> ItemView:
     """Write a user's own item. A confirmed `button` save on the same
     (owner, org, kind, concept keys, project kind) is a new version of the
@@ -655,7 +789,7 @@ def create_item(
     if org_id is None or kind in CROSS_ORG_KINDS:
         org_id = home_org
     body, keys, summary, evidence = _checked(
-        kind, body, concept_keys, summary, evidence, project_kind
+        kind, body, concept_keys, summary, evidence, project_kind, parameter_ok
     )
     if origin == "button" and status == "confirmed":
         existing = db.scalar(
@@ -673,7 +807,13 @@ def create_item(
         )
         if existing is not None:
             return edit_item(
-                db, user, existing.id, body=body, summary=summary, evidence=evidence
+                db,
+                user,
+                existing.id,
+                body=body,
+                summary=summary,
+                evidence=evidence,
+                parameter_ok=parameter_ok,
             )
     now = _now()
     item = MemoryItem(
@@ -720,12 +860,25 @@ def edit_item(
     evidence: Any = None,
     concept_keys: Any = None,
     project_kind: Any = ...,
+    parameter_ok: bool = False,
 ) -> ItemView:
     """Write version n+1 and move `current_version`; old versions stay (§1).
-    A dismissed item is not edited."""
+    A dismissed item is not edited. A `parameter` item's body changes only
+    through Save for reuse; its summary and scope may be edited (GK B P1)."""
     item = _get(db, user, item_id, write=True)
     if item.status == "dismissed":
         raise MemoryError("a dismissed proposal is not edited", "memory_status", 409)
+    if (
+        item.kind == "parameter"
+        and not parameter_ok
+        and (concept_keys is not None or project_kind is not ...)
+    ):
+        # The keys and project kind are the item's identity for Save for reuse.
+        raise MemoryError(
+            "a saved parameter's field, carrier and project kind change only with "
+            "Save for reuse on its field",
+            "memory_kind_unavailable",
+        )
     cur = _version(db, item)
     keys = json.loads(item.concept_keys) if concept_keys is None else concept_keys
     pk = item.project_kind if project_kind is ... else project_kind
@@ -735,7 +888,13 @@ def edit_item(
     )
     new_evidence = json.loads(cur.evidence_json) if evidence is None else evidence
     new_body, keys, new_summary, new_evidence = _checked(
-        item.kind, new_body, keys, new_summary, new_evidence, pk
+        item.kind,
+        new_body,
+        keys,
+        new_summary,
+        new_evidence,
+        pk,
+        parameter_ok or (item.kind == "parameter" and body is None),
     )
     now = _now()
     item.current_version += 1
@@ -914,6 +1073,28 @@ def record_apply(db: DBSession, user: User, item_id: str | uuid.UUID) -> None:
     db.commit()
 
 
+def node(db: DBSession, user: User, item_id: str | uuid.UUID, version: int) -> dict:
+    """The provenance graph's read of `mem_<id>@v<n>` (plan §7.1, §9 M9): one
+    immutable version's summary, kind, owner scope and evidence as `user` may
+    see them. 404 when the user may not read the item or the version is unknown."""
+    item = _get(db, user, item_id)
+    v = (
+        _version(db, item, version)
+        if isinstance(version, int) and not isinstance(version, bool) and version >= 1
+        else None
+    )
+    if v is None:
+        raise _not_found()
+    return {
+        "id": f"{public_id(item.id)}@v{v.version}",
+        "kind": item.kind,
+        "owner_scope": item.owner_scope,
+        "summary": v.summary,
+        "evidence": evidence_for(db, user, json.loads(v.evidence_json or "[]")),
+        "state": f"from memory v{v.version}, user-approved",
+    }
+
+
 def record_recall(db: DBSession, item_ids: Iterable[uuid.UUID]) -> None:
     """Bump `recall_count` (the caller sends each item once per session, §3.3).
     Counters only, no revision bump (M5)."""
@@ -930,6 +1111,12 @@ def record_recall(db: DBSession, item_ids: Iterable[uuid.UUID]) -> None:
 
 def nominate(db: DBSession, user: User, item_id: str | uuid.UUID) -> ItemView:
     item = _get(db, user, item_id, write=True)
+    if item.kind == "parameter":
+        # Promote cannot carry a parameter body (WRITABLE_KINDS), so it is not offered.
+        raise MemoryError(
+            "a saved parameter stays yours; it is not suggested to your organisation",
+            "memory_kind_unavailable",
+        )
     if item.owner_scope != "user" or item.status != "confirmed":
         raise MemoryError(
             "only your own confirmed item can be suggested", "memory_status", 409

@@ -249,14 +249,28 @@ export function createChatProgressStream(
 export interface ConfirmRequest {
   token: string
   decision: 'approve' | 'deny'
+  /** LC-47: the ticked rows of a change-set card, in card order. Omitted: every row. */
+  ticked?: string[]
 }
+
+/** LC-47 K5: the server refused the decision (400 `invalid_decision`) and kept the card's token alive. */
+export class InvalidDecisionError extends Error {}
 
 export async function postChatConfirm(
   sessionId: string,
   req: ConfirmRequest,
 ): Promise<{ ok: boolean; tool_name?: string; decision?: string }> {
-  const r = await client.post(`/chat/${sessionId}/confirm`, req)
-  return r.data
+  try {
+    const r = await client.post(`/chat/${sessionId}/confirm`, req)
+    return r.data
+  } catch (e) {
+    const response = (e as { response?: { status?: number; data?: { detail?: unknown } } } | null)?.response
+    const detail = response?.data?.detail as { error_kind?: unknown; message?: unknown } | null | undefined
+    if (response?.status === 400 && detail && typeof detail === 'object' && detail.error_kind === 'invalid_decision') {
+      throw new InvalidDecisionError(typeof detail.message === 'string' ? detail.message : 'invalid decision')
+    }
+    throw e
+  }
 }
 
 /** A confirmation card an external MCP agent's call waits on (chat harness

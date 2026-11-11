@@ -3,7 +3,7 @@
 
 # 10 — P&L and KPI view
 
-Status: needs-triage (blocked by 08; UI plan to UX first)
+Status: ready-for-agent (blocked by 08; Opus; UX plan first, GK B for figures)
 Type: task
 Blocked by: 08
 Gated: yes (UX; GK B for the figures)
@@ -20,3 +20,9 @@ energy cost, other opex, EBITDA, D&A, EBIT, interest, tax, net income, cash
 bridge), the KPI row (gross and net of pass-through), break-even on a chosen
 revenue line, `not_established` reasons. Both cases labelled by basis and never
 shown as one total.
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.

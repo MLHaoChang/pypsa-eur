@@ -16,7 +16,7 @@ from pydantic import BaseModel as _BaseModel
 
 from models.schemas import Finite as _Finite
 from services.pypsa_service import PyPSAService
-from services.adequacy.coupling import NOTHING_TO_SAMPLE
+from services.adequacy.link_supply import nothing_to_sample
 
 logger = logging.getLogger("pypsa_gui.results")
 
@@ -181,13 +181,10 @@ def start_mc(
             snapshot_fp = network_fingerprint(n)
             margin_payload = _copy.deepcopy(solver_state.get("last_reserve_margin"))
 
-    if not inputs.units:
-        raise HTTPException(
-            422,
-            f"{NOTHING_TO_SAMPLE} (unavailability + MTTR), so the sampled fleet is "
-            "empty — an empty fleet would report the entire horizon as loss of "
-            "load, which is a statement about missing input data, not about "
-            "the system")
+    # Adequacy loops 01 (AL-7): the one refusal every loop site shares.
+    _refusal = nothing_to_sample(inputs)
+    if _refusal is not None:
+        raise HTTPException(422, _refusal)
 
     # §2.2's inconsistent-pair rejection, pulled forward: it is a property of
     # the (q, MTTR) pair alone, so there is no reason to discover it a batch

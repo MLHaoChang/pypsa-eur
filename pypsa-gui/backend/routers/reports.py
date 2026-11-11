@@ -129,6 +129,12 @@ def _http(exc: store.ReportStoreError) -> HTTPException:
             "error_kind": "report_busy",
             "message": "This report is being written; try again in a moment.",
         })
+    if isinstance(exc, store.ReportProjectGone):
+        return HTTPException(404, {
+            "error_kind": "report_not_found",
+            "message": "This project was deleted or renamed while its report was "
+                       "being written; nothing was saved here.",
+        })
     if isinstance(exc, store.ReportVersionConflict):
         return HTTPException(409, {
             "error_kind": "report_version_conflict",

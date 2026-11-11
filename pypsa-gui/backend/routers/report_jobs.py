@@ -200,6 +200,8 @@ def _start(project: AuthorizedProject, **kwargs: Any) -> str:
             lock=PyPSAService.get_solver_state_lock(), state=_state(), **kwargs)
     except ReportJobInFlight as exc:
         raise _in_flight(exc) from exc
+    except store.ReportBusy as exc:
+        raise _http(exc) from exc
     except SummarySectionUnknown as exc:
         raise HTTPException(400, {
             "error_kind": "summary_section_unknown",
@@ -303,6 +305,8 @@ def propose_template_plan(report_id: str, body: ProposeMappingBody,
             language=language, lock=PyPSAService.get_solver_state_lock(), state=_state())
     except ReportJobInFlight as exc:
         raise _in_flight(exc) from exc
+    except store.ReportBusy as exc:
+        raise _http(exc) from exc
     return {"status": "running", "report_id": report_id}
 
 

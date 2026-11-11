@@ -814,6 +814,8 @@ def run_mapping_job(job: MappingJob) -> dict[str, Any] | None:
 
 _SLOT_LOCK = threading.Lock()
 _ACTIVE: dict[str, Any] | None = None
+# The running job's project directory, kept off the wire record (07f).
+_ACTIVE_DIR: pathlib.Path | None = None
 
 
 def record_is_running(record: dict[str, Any] | None) -> bool:
@@ -823,6 +825,25 @@ def record_is_running(record: dict[str, Any] | None) -> bool:
     if t is None:
         return True  # published, not yet started
     return t.ident is None or t.is_alive()
+
+
+def running_for(project_dir: pathlib.Path) -> bool:
+    """True while this process runs a report job (generate, regenerate or
+    mapping) for `project_dir`. A project delete or rename asks this after it
+    closed the directory (`store.reports_closed`), and `_launch` refuses a job
+    for a closing directory under the same `_SLOT_LOCK` hold as its claim, so
+    no job slips in between (study harness 07f, GK B C2)."""
+    with _SLOT_LOCK:
+        if not record_is_running(_ACTIVE) or _ACTIVE_DIR is None:
+            return False
+        return _same_dir(_ACTIVE_DIR, project_dir)
+
+
+def _same_dir(a: pathlib.Path, b: pathlib.Path) -> bool:
+    try:
+        return pathlib.Path(a).resolve() == pathlib.Path(b).resolve()
+    except OSError:
+        return False
 
 
 def slot_is_busy(state: dict[str, Any]) -> bool:
@@ -845,12 +866,14 @@ def _launch(*, prepare, run, lock: threading.Lock, state: dict[str, Any]) -> str
     `ReportJobInFlight`. `prepare()`'s own exceptions (a `KeyError` for an
     unknown section) propagate before anything is claimed.
     """
-    global _ACTIVE
+    global _ACTIVE, _ACTIVE_DIR
     with lock:
         with _SLOT_LOCK:
             if record_is_running(state.get("report_job")) or record_is_running(_ACTIVE):
                 raise ReportJobInFlight("a report is already being generated")
             job = prepare()
+            if store.reports_closing(job.project_dir):
+                raise store.ReportBusy("the project is being deleted or moved")
 
             def worker() -> None:
                 try:
@@ -864,12 +887,14 @@ def _launch(*, prepare, run, lock: threading.Lock, state: dict[str, Any]) -> str
             job.record["thread"] = thread
             state["report_job"] = job.record
             _ACTIVE = job.record
+            _ACTIVE_DIR = job.project_dir
             _publish_report_evidence(job.record)
             try:
                 thread.start()
             except BaseException:
                 state["report_job"] = None
                 _ACTIVE = None
+                _ACTIVE_DIR = None
                 raise
     return job.report_id
 
