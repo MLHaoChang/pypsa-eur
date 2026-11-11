@@ -21,11 +21,11 @@ import {
   ChartFrame, CHART_HEIGHT, chartFigure, CHART_LEGEND, carrierColour, seriesDash,
 } from './shared'
 import {
-  GROUP_COLOR, GROUP_LABEL, MONTH_STACK, WEEKDAYS, annualStack, cellTitle, fmtMw, fmtMwh, heatBackground,
+  DAILY_COLOR, GROUP_COLOR, GROUP_LABEL, MONTH_STACK, WEEKDAYS, annualStack, cellTitle, fmtMw, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH,
   heatMax, missingGroups, monthRows, periodLabel, socRows, weekRows,
 } from './loadShape'
 
-function Heatmap({ title, testId, heat, rgb }: { title: string; testId: string; heat: HeatmapState; rgb: string }) {
+function Heatmap({ title, testId, heat, colour }: { title: string; testId: string; heat: HeatmapState; colour: string }) {
   if (heat.status !== 'ok') {
     return (
       <div data-testid={testId} className="space-y-1">
@@ -49,12 +49,25 @@ function Heatmap({ title, testId, heat, rgb }: { title: string; testId: string; 
             {heat.mean_mw[di].map((v, h) => (
               <span key={h} className="h-4 border border-border/40" data-cell={`${di}-${h}`}
                     data-value={v ?? ''} title={cellTitle(di, h, v, heat.snapshots[di][h])}
-                    style={{ background: heatBackground(v, max, rgb) }} />
+                    style={{ background: heatBackground(v, max, colour) }} />
             ))}
           </div>
         ))}
       </div>
-      <p className="text-[10px] text-muted">Mean MW per weekday and hour; a hatched cell has no snapshot. Peak cell {fmtMw(max)}.</p>
+      {/* The key: both ends of the scale and the hatch, in text (as the hour-by-day maps). */}
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted" data-heat-key="">
+        <span className="flex items-center gap-1.5">
+          <span className="font-mono tabular-nums">{fmtMw(0)}</span>
+          <span aria-hidden className="h-2 w-24 rounded-sm border border-border"
+            style={{ background: `linear-gradient(to right, ${heatColor(0, max, colour)}, ${heatColor(max, max, colour)})` }} />
+          <span className="font-mono tabular-nums">{fmtMw(max)}</span>
+          <span>mean MW per weekday and hour · stronger colour is higher</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden className="h-2 w-4 rounded-sm border border-border" style={{ background: NO_SNAPSHOT_HATCH }} />
+          no snapshot
+        </span>
+      </p>
     </div>
   )
 }
@@ -132,15 +145,15 @@ export default function LoadShapeTab() {
       </div>
       <Missing status={data.series_status} />
 
-      <section className="space-y-2" data-testid="ls-heatmaps">
-        <h3 className="text-[12px] font-semibold">Import and export by weekday and hour</h3>
+      <ChartFrame testId="ls-heatmaps" title="Import and export by weekday and hour" bodyClassName="p-3 space-y-2">
         <WindowSlider testId="ls-window" snapshots={win.snapshots} from={win.from} to={win.to}
                       start={win.start} end={win.end} drag={drag} setDrag={setDrag} whole={whole} />
         <div className="grid gap-4 md:grid-cols-2">
-          <Heatmap title="Grid import" testId="ls-heat-import" heat={data.heatmaps!.import} rgb="59, 130, 246" />
-          <Heatmap title="Export" testId="ls-heat-export" heat={data.heatmaps!.export} rgb="8, 145, 178" />
+          {/* The export token is written out: Tailwind only emits a theme variable it finds as a literal in the source. */}
+          <Heatmap title="Grid import" testId="ls-heat-import" heat={data.heatmaps!.import} colour={carrierColour('grid')} />
+          <Heatmap title="Export" testId="ls-heat-export" heat={data.heatmaps!.export} colour="var(--color-carrier-link-out)" />
         </div>
-      </section>
+      </ChartFrame>
 
       <ChartFrame testId="ls-week" title="Profile snapshot"
         figure={wk ? chartFigure(fmtMw(wk.rows.reduce((a, r) => Math.max(a, ...wk.keys.map(k => Math.abs(Number(r[k]) || 0))), 0)), 'peak') : undefined}
@@ -159,16 +172,17 @@ export default function LoadShapeTab() {
         {weekView?.status === 'ok' && wk ? (
           <>
             <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-              <ComposedChart data={wk.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+              <ComposedChart data={wk.rows} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} />
                 <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
                 <Tooltip {...CHART_TOOLTIP} />
-                <Legend {...CHART_LEGEND} />
-                <Bar dataKey="flag" name="Flagged interval" fill="var(--color-danger)" fillOpacity={0.12} barSize={6} isAnimationActive={false} />
+                {/* A line swatch, so the key shows each series' dash as well as its colour. */}
+                <Legend {...CHART_LEGEND} iconType={undefined} iconSize={16} />
+                <Bar dataKey="flag" name="Flagged interval" legendType="square" fill="var(--color-danger)" fillOpacity={0.12} barSize={6} isAnimationActive={false} />
                 {wk.keys.map((k, i) => (
                   <Line key={k} type="monotone" dataKey={k} name={GROUP_LABEL[k]} dot={false} stroke={GROUP_COLOR[k]}
-                        strokeDasharray={seriesDash(i)} strokeWidth={1.5} isAnimationActive={false} />
+                        legendType="plainline" strokeDasharray={seriesDash(i)} strokeWidth={1.5} isAnimationActive={false} />
                 ))}
               </ComposedChart>
             </ResponsiveContainer>
@@ -179,7 +193,7 @@ export default function LoadShapeTab() {
             </p>
             {soc ? (
               <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
-                <AreaChart data={soc} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+                <AreaChart data={soc} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} />
                   <YAxis {...CHART_AXIS} label={yAxisLabel('Battery SoC, MWh')} />
@@ -196,9 +210,7 @@ export default function LoadShapeTab() {
       </ChartFrame>
 
       {data.monthly?.status === 'ok' ? (
-        <ChartFrame testId="ls-monthly" title="Monthly site energy"
-          figure={data.monthly.average_daily_generation_mwh != null
-            ? `${fmtMwh(data.monthly.average_daily_generation_mwh)} per day on average` : undefined}>
+        <ChartFrame testId="ls-monthly" title="Monthly site energy">
           <>
             <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
               <ComposedChart data={monthRows(data.monthly.months)} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
@@ -207,15 +219,16 @@ export default function LoadShapeTab() {
                 <YAxis yAxisId="e" {...CHART_AXIS} label={yAxisLabel('MWh per month')} />
                 <YAxis yAxisId="d" orientation="right" {...CHART_AXIS} label={yAxisLabel('MWh per day')} />
                 <Tooltip {...CHART_TOOLTIP} />
-                <Legend {...CHART_LEGEND} />
+                {/* Each series' own swatch: a square for a bar, a line for the daily line. */}
+                <Legend {...CHART_LEGEND} iconType={undefined} iconSize={12} />
                 {MONTH_STACK.map(k => (
-                  <Bar key={k} yAxisId="e" stackId="m" dataKey={k} name={GROUP_LABEL[k]} fill={GROUP_COLOR[k]}
+                  <Bar key={k} yAxisId="e" stackId="m" dataKey={k} name={GROUP_LABEL[k]} fill={GROUP_COLOR[k]} legendType="square"
                        isAnimationActive={false} />
                 ))}
-                <Line yAxisId="d" type="monotone" dataKey="daily" name="Daily generation" stroke="var(--color-text)"
-                      dot={false} strokeWidth={1.5} isAnimationActive={false} />
+                <Line yAxisId="d" type="monotone" dataKey="daily" name="Daily generation" stroke={DAILY_COLOR}
+                      legendType="plainline" dot={false} strokeWidth={1.5} isAnimationActive={false} />
                 {data.monthly.average_daily_generation_mwh != null && (
-                  <ReferenceLine yAxisId="d" y={data.monthly.average_daily_generation_mwh} stroke="var(--color-text)"
+                  <ReferenceLine yAxisId="d" y={data.monthly.average_daily_generation_mwh} stroke={DAILY_COLOR}
                                  strokeDasharray="4 3" />
                 )}
               </ComposedChart>
@@ -257,7 +270,12 @@ export default function LoadShapeTab() {
                 ))}
               </div>
               <ul className="flex flex-wrap gap-x-4 text-[11px]">
-                {st.segments.map(s => <li key={s.key} data-testid={`ls-annual-${s.key}`}>{s.label}: {fmtMwh(s.mwh)}</li>)}
+                {st.segments.map(s => (
+                  <li key={s.key} data-testid={`ls-annual-${s.key}`} className="flex items-center gap-1">
+                    <span aria-hidden className="h-2 w-2 rounded-sm" style={{ background: s.color }} />
+                    {s.label}: {fmtMwh(s.mwh)}
+                  </li>
+                ))}
                 <li data-testid="ls-annual-export">Export: {st.export == null ? 'not modelled' : fmtMwh(st.export)}</li>
                 <li data-testid="ls-annual-excess">Excess: {st.excess == null ? 'not modelled' : fmtMwh(st.excess)}</li>
                 <li data-testid="ls-annual-load">Load served: {fmtMwh(st.load)}</li>

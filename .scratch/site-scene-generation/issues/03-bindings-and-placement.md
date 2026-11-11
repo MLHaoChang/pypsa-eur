@@ -3,7 +3,7 @@
 
 # SC-02 — multi-energy buildings, process complexes and equipment
 
-Status: in-progress — SC-02a backend merged (#844, c86f572f); SC-02b UI merged (#859, 2d8779ca); SC-02d detach and group editing merged (#1029, [../sc-02d/record.md](../sc-02d/record.md)); remaining follow-ups in [../sc-02/record.md](../sc-02/record.md)
+Status: done (#844, #859, #1029; follow-ups SC-02c and site3d-followups landed)
 Type: task
 Dependencies: SC-01; SC-00 target-lifecycle contract
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -57,3 +57,7 @@ Plan: detach (`detach`, `undo_detach` proposal actions) and group editing (sever
 7. Mutants, each killed by a named test: drop the `already_placed` check; undo restores the parent generation wholesale; detach drops the binding.
 
 **UX (6) GO** with conditions: display names everywhere (never `Class:name`) and each refusal as a plain sentence naming the item; move fields reuse the single-item axis words and units; "Edit N items" heading, with one item back to the absolute fields and no values carried between modes; Esc clears the selection only when the canvas or list has focus; the detach preview lists what goes by name and says when a group is left empty (kept); the receipt carries an Undo button, the undo card is titled "Undo detach: restore N items", and Undo stays visible but disabled with its reason when the detach can no longer be undone; one selection outline, distinct from hover and gizmo, in light and dark; screenshots in Guided and Expert, light and dark.
+
+### 2026-11-11: triage
+
+Checked: SC-02a #844, SC-02b #859 and SC-02d #1029 are merged. The follow-ups in `sc-02/record.md` are on master (`store._chain`, `App.hubDesignAutoOpen.test.tsx`, `test_site_scene_detach.py`) or marked not changed by design. Verdict: done. Not re-checked: V93-V98, which stay with SC-07-bindings.

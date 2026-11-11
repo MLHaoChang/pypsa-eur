@@ -1,6 +1,6 @@
 # "Why this number": the assistant's read tool over the graph
 
-Status: in progress
+Status: done (#1339; PG-03b metric target is a follow-up)
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 

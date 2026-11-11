@@ -3,7 +3,7 @@
 
 # 11 — H2 hub and ammonia presets
 
-Status: needs-triage (blocked by 06, 07)
+Status: ready-for-agent (blocked by 06, 07; Sonnet; GK B, GK A for linked outputs)
 Type: task
 Blocked by: 06, 07
 Gated: yes (GK B; GK A for the linked outputs)
@@ -25,3 +25,9 @@ record its tag; only [V]/[S] figures become defaults or hints.
 Each preset runs on its built template; a shortfall lowers revenue once (G3); the
 reference purchase is absent (G4); the identity test of served vs the built
 network (GK A point 3).
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.

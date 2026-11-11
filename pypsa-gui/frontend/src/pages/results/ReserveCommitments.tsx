@@ -14,7 +14,7 @@ import ResultState from '../../components/ResultState'
 import { Tag } from '../../components/PageKit'
 import { money } from '../DcBackupSection'
 import {
-  ChartCard, Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, shortStamp, colourForCarrier,
+  ChartFrame, CHART_HEIGHT, Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, shortStamp, colourForCarrier,
 } from './shared'
 
 // ── Reserve products on the backup storage (DC grid readiness 06) ───────────
@@ -169,7 +169,7 @@ export function ReserveSection({ payload }: { payload: ReservesPayload }) {
     : ''
 
   return (
-    <ChartCard title="Reserve products" hint="committed on the backup storage" count={payload.products.length}
+    <ChartFrame title="Reserve products" hint="committed on the backup storage" count={payload.products.length}
       right={payload.storages.length > 1 && storage ? (
         <Seg value={storage.name} onChange={setPicked} title="Storage"
           options={payload.storages.map(s => ({ value: s.name, label: s.name }))} />
@@ -192,7 +192,7 @@ export function ReserveSection({ payload }: { payload: ReservesPayload }) {
           )}
         </div>
       </div>
-    </ChartCard>
+    </ChartFrame>
   )
 }
 
@@ -275,8 +275,8 @@ function StorageCharts({ storage, snapshots, series }: {
           )}
         </div>
         {storage.soc_mwh ? (
-          <ResponsiveContainer width="100%" height={170}>
-            <ComposedChart data={energyRows} margin={{ top: 18, right: 12, left: 0, bottom: 4 }}>
+          <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
+            <ComposedChart data={energyRows} margin={{ top: 18, right: 40, left: 0, bottom: 4 }}>
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="t" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} />
               <YAxis {...CHART_AXIS} label={yAxisLabel('MWh')}
@@ -328,8 +328,8 @@ function StorageCharts({ storage, snapshots, series }: {
               </span>
             ))}
           </div>
-          <ResponsiveContainer width="100%" height={170}>
-            <AreaChart data={powerRows} stackOffset="sign" margin={{ top: 18, right: 12, left: 0, bottom: 4 }}>
+          <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
+            <AreaChart data={powerRows} stackOffset="sign" margin={{ top: 18, right: 40, left: 0, bottom: 4 }}>
               {hatches(base, shown)}
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="t" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} />

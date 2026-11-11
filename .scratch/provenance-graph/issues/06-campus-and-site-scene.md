@@ -1,6 +1,6 @@
 # Campus and site-scene checks on the graph
 
-Status: needs-triage
+Status: ready-for-agent (Sonnet; GK B, UX for UI parts)
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 
@@ -22,3 +22,12 @@ the checks the spec marks "leave alone".
 - One PR within PR-SIZE-1.
 
 ## Comments
+
+### 2026-11-11: triage
+
+Checked on master: #1295 is merged (the P7 condition) and 02 is done; the checks named still read their own staleness. Verdict: ready-for-agent.
+
+- Blocked by: none.
+- Likely files: `campus_electrical_service.py`, `site_bindings.py`, `site_scene/associations.py`, `assistant_tasks.py`; client `CampusDipsRestartSection`, `DcArchitectureSection`. Reviewers: GK B plan first, UX for the client part.
+
+The acceptance in the body stands. Add: [ ] a test per moved check asserts the same wording before and after.

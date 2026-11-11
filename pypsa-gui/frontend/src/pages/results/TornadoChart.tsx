@@ -141,7 +141,7 @@ export default function TornadoChart({
       <ChartFrame testId={testId} title={title} bodyClassName="p-3">
         {note && <p className="text-[11px] text-muted mb-2">{note}</p>}
         {rows.length > 0 && (
-          <ul className="flex flex-col gap-1 mb-2">
+          <ul className="flex flex-col gap-1 mb-2 text-[11px]">
             {rows.map(r => (
               <li key={r.key} data-testid="tornado-bar" data-key={r.key}>
                 {r.label}: <span data-testid="tornado-values">Low case: not established · High case: not established</span>

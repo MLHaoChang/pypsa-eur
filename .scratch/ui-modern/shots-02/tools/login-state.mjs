@@ -6,7 +6,7 @@ const name = process.argv[2]
 const b = await chromium.launch()
 const ctx = await b.newContext({ viewport: { width: 1440, height: 900 } })
 const p = await ctx.newPage()
-await p.goto('http://127.0.0.1:5173/')
+await p.goto((process.env.BASE_URL || 'http://127.0.0.1:5173') + '/')
 const r = await p.evaluate(async ({ pw, name }) => {
   const j = async (u, o) => { const r = await fetch(u, { credentials: 'include', ...o }); return [r.status, (await r.text()).slice(0, 200)] }
   const out = []

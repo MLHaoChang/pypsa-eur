@@ -144,6 +144,11 @@ class MCInputs:
     # missing a Link, unequal charge and dispatch power, an untagged
     # Store + Links), one sentence each; `mc_adequacy` reports them.
     storage_notes: tuple = ()
+    # Adequacy loops 01 (`link_supply.sampled_fleet`): what the supplying-
+    # Link walk decided (a Link not credited, a grid import taken as never
+    # failing), and the Links it considered. Empty on `snapshot_inputs`.
+    fleet_notes: tuple = ()
+    supply_links: tuple = ()
 
 
 def _storage_capacity(row) -> float:
@@ -1004,4 +1009,5 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
         "resolution_floor_h": floor,
         "warning": MC_WARNING_V1,
         **({"storage_notes": list(inputs.storage_notes)} if inputs.storage_notes else {}),
+        **({"fleet_notes": list(inputs.fleet_notes)} if inputs.fleet_notes else {}),
     }

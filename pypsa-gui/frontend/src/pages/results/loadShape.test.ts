@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AnnualRow, HeatmapState, MonthRow, WeekView } from '../../api/loadShape'
 import {
-  annualStack, cellTitle, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH, heatMax, missingGroups, monthRows, socRows, weekRows,
+  annualStack, DAILY_COLOR, GROUP_COLOR, MONTH_STACK, WEEK_LINES, cellTitle, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH, heatMax, missingGroups, monthRows, socRows, weekRows,
 } from './loadShape'
 
 const HEAT: HeatmapState = {
@@ -30,8 +30,8 @@ describe('heatmap colours', () => {
     const peak = heatColor(10, 10), zero = heatColor(0, 10), none = heatColor(null, 10)
     expect(none).toBe('transparent')
     expect(zero).not.toBe(none)                       // a zero is data, a gap is not
-    expect(peak).toContain('0.900')
-    expect(zero).toContain('0.050')
+    expect(peak).toContain(' 90.0%')
+    expect(zero).toContain(' 5.0%')
   })
   it('hatches a cell with no snapshot, so it never reads as the lightest shade', () => {
     expect(heatBackground(null, 10)).toBe(NO_SNAPSHOT_HATCH)
@@ -45,6 +45,17 @@ describe('heatmap colours', () => {
   })
   it('has no peak for a heatmap the server did not draw', () => {
     expect(heatMax({ status: 'not_modelled', reason: 'x' })).toBe(0)
+  })
+})
+
+describe('series colours', () => {
+  it('gives every series drawn together its own colour', () => {
+    for (const keys of [WEEK_LINES, MONTH_STACK]) {
+      const colours = keys.map(k => GROUP_COLOR[k])
+      expect(new Set(colours).size).toBe(keys.length)
+    }
+    // The monthly chart also draws the daily-generation line over its bars.
+    expect(MONTH_STACK.map(k => GROUP_COLOR[k])).not.toContain(DAILY_COLOR)
   })
 })
 

@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Download } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { type TSPayload, downloadCSV } from './shared'
+import { type TSPayload, downloadCSV, ChartFrame, ChartActions } from './shared'
 
 // ── Storage charge/discharge daily heatmap ─────────────────────────────────
 // Each cell = aggregate storage power at (day d, hour h):
@@ -36,19 +35,23 @@ interface StorageHeatmapProps {
 
 const MAX_DAYS = 31  // hard cap so a year of hourly data doesn't render 365 rows
 
+// Theme tokens, so the map follows light and dark (ui-modern 02 slice 6).
+const BLUE = 'var(--color-info)'
+const RED = 'var(--color-danger)'
+const shade = (colour: string, share: number) => `color-mix(in srgb, ${colour} ${(share * 100).toFixed(1)}%, transparent)`
+
 function colourForValue(
   v: number,
   maxAbs: number,
   mode: 'diverging' | 'unsigned-blue' | 'unsigned-red',
 ): string {
-  if (!Number.isFinite(v) || maxAbs <= 0) return '#f9fafb'  // off-white blank
+  if (!Number.isFinite(v) || maxAbs <= 0) return 'var(--color-bg-2)'  // blank
   const intensity = Math.min(1, Math.abs(v) / maxAbs)
-  const alpha = (0.05 + 0.75 * intensity).toFixed(3)
-  if (mode === 'unsigned-blue') return `rgba(59, 130, 246, ${alpha})`
-  if (mode === 'unsigned-red')  return `rgba(220, 38, 38, ${alpha})`
+  const share = 0.05 + 0.75 * intensity
+  if (mode === 'unsigned-blue') return shade(BLUE, share)
+  if (mode === 'unsigned-red')  return shade(RED, share)
   // Diverging (storage default).
-  if (v < 0) return `rgba(59, 130, 246, ${alpha})`  // charge → blue
-  return `rgba(220, 38, 38, ${alpha})`                // discharge → red
+  return shade(v < 0 ? BLUE : RED, share)  // charge → blue, discharge → red
 }
 
 export default function StorageHeatmap({
@@ -142,32 +145,25 @@ export default function StorageHeatmap({
     toast.success('Exported')
   }
 
-  const headerTitle = title ?? 'Power heatmap — daily charge / discharge pattern'
+  const headerTitle = title ?? 'Power heatmap · daily charge and discharge pattern'
   const headerSubtitle = subtitle ?? '1 row per day, 24 cells per row · red = discharge, blue = charge'
   const negLabel = legendLabels?.negative ?? (effMode === 'unsigned-blue' ? 'Idle' : 'Charge')
   const posLabel = legendLabels?.positive ?? (effMode === 'unsigned-blue' ? 'Consume' : effMode === 'unsigned-red' ? 'Produce' : 'Discharge')
 
   return (
-    <section className="border border-border rounded">
-      <header className="flex items-center gap-2 px-3 py-2 border-b border-border bg-panel flex-wrap">
-        <span className="text-xs font-semibold text-text">{headerTitle}</span>
-        <span className="text-[10px] text-muted">{headerSubtitle}</span>
-        {grid.truncated && (
-          <span className="text-[10px] text-warn font-mono">
-            Showing first {MAX_DAYS} of {grid.totalDays} days — pick a shorter period to see the rest
-          </span>
-        )}
-        <span className="ml-auto text-[10px] font-mono text-muted">
-          max | {grid.maxAbs.toFixed(1)} MW |
-        </span>
-        {/* HTML-rendered heatmap — SVG export doesn't apply (no <svg> element).
-            CSV-only. */}
-        <button onClick={exportCSV}
-          className="flex items-center gap-1 text-[11px] text-muted hover:text-accent"
-          title="Export the (day × hour) grid as a long CSV (date, hour, power_MW, direction)">
-          <Download size={11} /> CSV
-        </button>
-      </header>
+    <ChartFrame
+      title={headerTitle}
+      figure={`${grid.maxAbs.toFixed(1)} MW highest`}
+      hint={headerSubtitle}
+      // An HTML grid, not an <svg>: CSV only.
+      right={<ChartActions onExportCSV={exportCSV} filename={(csvName ?? 'storage_heatmap.csv').replace(/\.csv$/, '')} />}
+      bodyClassName="p-0"
+    >
+      {grid.truncated && (
+        <p className="px-3 pt-2 text-[10.5px] text-warn font-mono">
+          Showing the first {MAX_DAYS} of {grid.totalDays} days. Pick a shorter period to see the rest.
+        </p>
+      )}
       <div className="px-3 py-3 overflow-auto" style={{ position: 'relative' }}>
         {/* Hour-axis header */}
         <div className="flex items-center text-[9px] text-muted font-mono mb-1"
@@ -193,7 +189,7 @@ export default function StorageHeatmap({
                     background: colourForValue(mw, grid.maxAbs, effMode),
                     border: '1px solid rgba(0,0,0,0.04)',
                   }}
-                  title={`${grid.dayDates[d]} ${String(h).padStart(2, '0')}:00 — ${
+                  title={`${grid.dayDates[d]} ${String(h).padStart(2, '0')}:00 · ${
                     Number.isFinite(mw)
                       ? (mw > 0 ? `${posLabel}: ${mw.toFixed(1)} MW` : mw < 0 ? `${negLabel}: ${(-mw).toFixed(1)} MW` : '0 MW')
                       : 'no data'
@@ -206,17 +202,17 @@ export default function StorageHeatmap({
         {/* Colour legend — switches between diverging (blue ↔ red) and
             single-hue gradients depending on the heatmap mode. */}
         <div className="flex items-center gap-2 mt-3 text-[10px] text-muted">
-          <span>{negLabel}</span>
+          <span>{negLabel}{effMode === 'diverging' ? ` \u2212${grid.maxAbs.toFixed(1)} MW` : ' 0 MW'}</span>
           {effMode === 'diverging' && (
             <>
               <div className="flex">
                 {[1, 0.75, 0.5, 0.25, 0].map((a, i) => (
-                  <div key={`b${i}`} style={{ width: 18, height: 8, background: `rgba(59, 130, 246, ${a})` }} />
+                  <div key={`b${i}`} style={{ width: 18, height: 8, background: shade(BLUE, a) }} />
                 ))}
               </div>
               <div className="flex">
                 {[0, 0.25, 0.5, 0.75, 1].map((a, i) => (
-                  <div key={`r${i}`} style={{ width: 18, height: 8, background: `rgba(220, 38, 38, ${a})` }} />
+                  <div key={`r${i}`} style={{ width: 18, height: 8, background: shade(RED, a) }} />
                 ))}
               </div>
             </>
@@ -224,21 +220,21 @@ export default function StorageHeatmap({
           {effMode === 'unsigned-blue' && (
             <div className="flex">
               {[0.05, 0.25, 0.5, 0.75, 1].map((a, i) => (
-                <div key={`u${i}`} style={{ width: 18, height: 8, background: `rgba(59, 130, 246, ${a})` }} />
+                <div key={`u${i}`} style={{ width: 18, height: 8, background: shade(BLUE, a) }} />
               ))}
             </div>
           )}
           {effMode === 'unsigned-red' && (
             <div className="flex">
               {[0.05, 0.25, 0.5, 0.75, 1].map((a, i) => (
-                <div key={`u${i}`} style={{ width: 18, height: 8, background: `rgba(220, 38, 38, ${a})` }} />
+                <div key={`u${i}`} style={{ width: 18, height: 8, background: shade(RED, a) }} />
               ))}
             </div>
           )}
-          <span>{posLabel}</span>
+          <span>{posLabel} {grid.maxAbs.toFixed(1)} MW · stronger colour is higher</span>
           {hover && (
             <span className="ml-auto font-mono text-text">
-              D{hover.day} {String(hover.hour).padStart(2, '0')}:00 — {
+              D{hover.day} {String(hover.hour).padStart(2, '0')}:00 · {
                 Number.isFinite(hover.mw)
                   ? (hover.mw > 0 ? `${posLabel}: ${hover.mw.toFixed(1)} MW` : hover.mw < 0 ? `${negLabel}: ${(-hover.mw).toFixed(1)} MW` : '0 MW')
                   : 'no data'
@@ -247,6 +243,6 @@ export default function StorageHeatmap({
           )}
         </div>
       </div>
-    </section>
+    </ChartFrame>
   )
 }

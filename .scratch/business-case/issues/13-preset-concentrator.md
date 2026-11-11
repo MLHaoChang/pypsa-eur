@@ -3,7 +3,7 @@
 
 # 13 — Mining concentrator preset
 
-Status: needs-triage (blocked by 06, 07; BCA-SCOPE-1 Q3: one net €/t line)
+Status: ready-for-agent (blocked by 06, 07; Sonnet; GK B, GK A for linked outputs)
 Type: task
 Blocked by: 06, 07
 Gated: yes (GK B; GK A for the linked outputs)
@@ -22,3 +22,9 @@ t milled (typed), freight, staff, maintenance, insurance.
 
 Revenue reads shipped t, not mill output (LO-2); a shortfall lowers revenue once
 (G3).
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.

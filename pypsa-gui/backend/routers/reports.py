@@ -127,7 +127,7 @@ def _http(exc: store.ReportStoreError) -> HTTPException:
     if isinstance(exc, store.ReportBusy):
         return HTTPException(409, {
             "error_kind": "report_busy",
-            "message": "Another process is writing this report; try again in a moment.",
+            "message": "This report is being written; try again in a moment.",
         })
     if isinstance(exc, store.ReportVersionConflict):
         return HTTPException(409, {
