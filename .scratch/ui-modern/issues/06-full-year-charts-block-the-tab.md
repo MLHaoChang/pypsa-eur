@@ -3,7 +3,7 @@
 
 # Full-year time-series charts block the Results tab
 
-Status: in-review (PR on claude/ui-modern-06-full-year-charts; reviewer UX)
+Status: done (#1395)
 Type: bug
 Model: Sonnet. Reviewer: UX.
 
