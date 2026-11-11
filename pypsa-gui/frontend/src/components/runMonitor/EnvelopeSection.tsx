@@ -43,7 +43,6 @@ const heldOutcome = (n: number) => n === 1
 
 // Issue 37 (UX): the template in words, never its engine id (#1194).
 const TEMPLATE_WORDS: Record<string, string> = { eh_site: 'site' }
-const FOLD_AT = 5
 const unitWords = (u: string | null) => (u === 'EUR' ? '€' : u ?? '')
 const showValue = (v: unknown, unit: string | null) => {
   const text = Array.isArray(v) ? `${v.length} values` : typeof v === 'object' && v !== null ? 'a series' : String(v)
@@ -52,15 +51,13 @@ const showValue = (v: unknown, unit: string | null) => {
 
 /** Issue 21 "Inputs from the chat": each row with its value, unit and source; read-only here. */
 function IntakeRows({ intake }: { intake: RunIntake }) {
-  const [all, setAll] = useState(false)
   const rows = intake.card.rows
-  const shown = all ? rows : rows.slice(0, FOLD_AT)
   const rival = (r: IntakeRow) => rows.find(o => o.index !== r.index && o.param === r.param && o.status === 'conflict')
   const defaults = intake.card.defaults
   return <div data-testid="envelope-intake" className="my-1">
     <div className="text-[10px] uppercase tracking-wide text-accent">Inputs from the chat</div>
     <ul aria-label="Inputs from the chat" className="space-y-0.5">
-      {shown.map(r => {
+      {rows.map(r => {
         const struck = r.status === 'struck'
         const other = r.status === 'conflict' ? rival(r) : undefined
         return <li key={r.index} data-testid="envelope-intake-row" data-status={r.status}>
@@ -73,8 +70,7 @@ function IntakeRows({ intake }: { intake: RunIntake }) {
         </li>
       })}
     </ul>
-    {rows.length > FOLD_AT && !all && <button type="button" data-testid="envelope-intake-more" onClick={() => setAll(true)}
-      className="text-accent hover:underline">({rows.length - FOLD_AT} more) Show all</button>}
+    {intake.missing.length > 0 && <div data-testid="envelope-intake-missing">Still missing: {intake.request ?? `${intake.missing.length} inputs`}</div>}
     {defaults.length > 0 && <>
       <div className="text-muted">Not given, so the preset default is used:</div>
       <ul aria-label="Preset defaults" className="space-y-0.5">
@@ -129,9 +125,11 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
   const digest = setup && intake ? { intake_digest: intake.digest } : {}
   const unattended = view?.monitor.unattended
   const block = !view ? 'Checking whether this server can run it unattended…'
+    : setup && intake && intake.missing.length > 0 ? 'Inputs are still missing: see the list above.'
     : setup && !intake ? 'The inputs this plan creates the project from are not shown yet.'
     : unattended && !unattended.available ? UNATTENDED_BLOCK_WORDS[unattended.reason ?? ''] ?? 'Not available here'
       : envelope.goal?.value === null ? GOAL_BLOCK : null
+  const stepwiseBlock = setup && intake && intake.missing.length > 0 ? 'Inputs are still missing: see the list above.' : null
   const emailOk = view?.monitor.email.available === true
   const costCap = view?.monitor.budgets.cost_eur.limit
 
@@ -216,12 +214,13 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
         <span className="font-medium text-text">Approve and run unattended</span>
       </button>
       {block && <div className="text-[11px] text-muted" data-testid="envelope-unattended-reason">{block}</div>}
-      <button type="button" data-testid="envelope-verdict" data-verdict="stepwise" disabled={disabled || (setup !== undefined && setup !== null && !intake)}
+      <button type="button" data-testid="envelope-verdict" data-verdict="stepwise" disabled={disabled || (setup != null && !intake) || stepwiseBlock !== null}
         onClick={() => onVerdict({ verdict: 'stepwise', ...digest })}
         className={`${VERDICT} border-border bg-bg-2/60 hover:bg-bg-3/50`}>
         <span className="font-medium text-text">Approve, step by step</span>
         <div className="text-[11px] text-muted mt-0.5">{setup ? `Creates project ${setup.name} now; every other change and run asks you first.` : 'Every change and run asks you first.'}</div>
       </button>
+      {stepwiseBlock && <div className="text-[11px] text-muted" data-testid="envelope-stepwise-reason">{stepwiseBlock}</div>}
       <button type="button" data-testid="envelope-verdict" data-verdict="change" disabled={disabled}
         onClick={() => onVerdict({ verdict: 'change' })}
         className={`${VERDICT} border-border bg-bg-2/60 hover:bg-bg-3/50`}>

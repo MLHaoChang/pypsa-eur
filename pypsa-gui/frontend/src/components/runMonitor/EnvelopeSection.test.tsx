@@ -9,6 +9,7 @@ import { useChatStore } from '../../store/chatStore'
 import { useUIStore } from '../../store/uiStore'
 import * as api from '../../api/runMonitor'
 import { RELIABILITY_GOAL_LABEL } from '../../hooks/useReliabilityGoal'
+import realIntake from './intakeCard.fixture.json'
 import { ENVELOPE, STATES, TASK_ID } from './runFixtures'
 
 vi.mock('../../api/runMonitor', () => ({
@@ -298,12 +299,25 @@ describe('EnvelopeSection reliability goal', () => {
     expect(screen.getByTestId('envelope-intake-default').textContent).toBe('critical share: 0.4 · preset default')
   })
 
-  it('folds after five rows', async () => {
-    openIntake([0, 1, 2, 3, 4, 5, 6].map(i => row(i)))
+  it('shows every row and default, none folded', async () => {
+    openIntake([0, 1, 2, 3, 4, 5, 6].map(i => row(i)), [{ param: 'a_b', value: 1, preset_default: true }])
     await screen.findByTestId('envelope-intake')
-    expect(screen.getAllByTestId('envelope-intake-row')).toHaveLength(5)
-    fireEvent.click(screen.getByText('(2 more) Show all'))
     expect(screen.getAllByTestId('envelope-intake-row')).toHaveLength(7)
+    expect(screen.getAllByTestId('envelope-intake-default')).toHaveLength(1)
+    expect(screen.queryByText(/Show all/)).toBeNull()
+  })
+
+  it('missing inputs are listed and no approve can be sent', async () => {
+    const view = { ...STATES.proposal, envelope: { ...ENVELOPE, setup: SETUP },
+      run: { ...STATES.proposal.run, intake: { card: { rows: [row(0)], defaults: [] }, digest: DIGEST,
+        missing: [{ param: 'connection_mw' }], request: 'Connection capacity (MW)' } } }
+    vi.mocked(api.getRun).mockResolvedValue(view as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope: { ...ENVELOPE, setup: SETUP } } }] })
+    render(<ChoiceCard />)
+    expect((await screen.findByTestId('envelope-intake-missing')).textContent).toContain('Connection capacity (MW)')
+    const [unattended, stepwise] = screen.getAllByTestId('envelope-verdict') as HTMLButtonElement[]
+    expect(unattended.disabled).toBe(true); expect(stepwise.disabled).toBe(true)
+    expect(screen.getByTestId('envelope-stepwise-reason').textContent).toContain('missing')
   })
 
   it('both approvals send the digest from the intake; step by step says it creates the project', async () => {
@@ -327,5 +341,24 @@ describe('EnvelopeSection reliability goal', () => {
     expect(screen.queryByTestId('envelope-intake')).toBeNull()
     fireEvent.click((await screen.findAllByTestId('envelope-verdict'))[0])
     expect(useChatStore.getState().requestQueue[0].harness!.envelope_decision).not.toHaveProperty('intake_digest')
+  })
+
+  // GK B (46) F4: the return of `run_intake.card_view` + digest, dumped from the backend's own
+  // test data (test_run_intake `_given`), not written by hand.
+  it('renders the backend-shaped intake: every row and default, and echoes its digest', async () => {
+    const view = { ...STATES.proposal, envelope: { ...ENVELOPE, setup: SETUP },
+      run: { ...STATES.proposal.run, intake: realIntake } }
+    vi.mocked(api.getRun).mockResolvedValue(view as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope: { ...ENVELOPE, setup: SETUP } } }] })
+    render(<ChoiceCard />)
+    await screen.findByTestId('envelope-intake')
+    expect(screen.getAllByTestId('envelope-intake-row')).toHaveLength(realIntake.card.rows.length)
+    expect(screen.getAllByTestId('envelope-intake-default')).toHaveLength(realIntake.card.defaults.length)
+    expect(screen.getAllByTestId('envelope-intake-row')[0].textContent).toContain("Grid connection: 12 MW")
+    expect(screen.getAllByTestId('envelope-intake-row')[0].textContent).toContain("grid.pdf, page 1")
+    const stepwise = (await screen.findAllByTestId('envelope-verdict'))[1]
+    await waitFor(() => expect((stepwise as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(stepwise)
+    expect(useChatStore.getState().requestQueue[0].harness!.envelope_decision!.intake_digest).toBe(realIntake.digest)
   })
 })

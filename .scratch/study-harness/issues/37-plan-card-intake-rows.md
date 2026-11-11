@@ -39,3 +39,10 @@ Acceptance:
 - [ ] "Approve and run unattended" and "Approve, step by step" send `envelope_decision.intake_digest` from `run.intake.digest`; a Vitest asserts the request body for both.
 - [ ] The step-by-step verdict's words state the creation.
 - [ ] A card without an intake keeps today's rows and sends no digest.
+
+### 2026-11-11: reviewer plan verdicts
+
+UX GO: no digest in any visible row (#1332); source lines in plain words; struck rows muted with "Struck"; a conflict row says "Not used: conflicts with <source>"; shots in Guided and Expert (struck, conflict, document-sourced, preset defaults, no-intake card).
+GK B (46) GO under F1-F5: F1 the digest echoed is the one of the rendered view; F2 every bound row and default is on the card, nothing folded (#1283); F3 missing inputs listed and approve blocked with the reason; F4 fixture from the backend's own `card_view` shape (#1060), no digest on a deny verdict or a card without setup/intake; F5 a refused digest shows its reason.
+Conflict: UX asked to fold after 5 rows, GK B F2 forbids folding; sent to the coordinator as options, built unfolded meanwhile.
+
