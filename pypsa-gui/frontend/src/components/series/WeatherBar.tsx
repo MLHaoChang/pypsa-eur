@@ -17,17 +17,15 @@ const YEAR_WORDS = {
 
 export const weatherKey = (project: string | null) => nk(project, 'profile_weather')
 
-const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+const isoDay = (s: string) => new Date(s).toISOString().slice(0, 10)
 
 /** One line when the snapshots are a sampled window rather than one calendar year. */
 function windowLine(w: WeatherChoice): string | null {
   const win = w.window
   if (!win || 'unsupported' in win) return null
   if (win.runs > 1) return `Your model has ${win.runs} sampled periods (${win.hours} h): a generated profile takes these dates from ${w.year}.`
-  const [a, b] = [DAY.format(new Date(win.first)), DAY.format(new Date(win.last))]
-  const [da, db] = [a.split(' '), b.split(' ')]
-  const span = a === b ? a : da[1] === db[1] ? `${da[0]}–${b}` : `${a} – ${b}`
-  return `Your model covers ${span} (${win.hours} h): a generated profile takes these dates from ${w.year}.`
+  const [a, b] = [isoDay(win.first), isoDay(win.last)]
+  return `Your model covers ${a === b ? a : `${a} to ${b}`} (${win.hours} h): a generated profile takes these dates from ${w.year}.`
 }
 
 export function WeatherBar({ project }: { project: string }) {

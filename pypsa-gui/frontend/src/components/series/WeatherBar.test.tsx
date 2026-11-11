@@ -71,7 +71,7 @@ describe('WeatherBar', () => {
     prof.weather.mockResolvedValue(answer({ year: 2025, window: { first: '2025-07-01T00:00:00', last: '2025-07-07T23:00:00', hours: 168, runs: 1 } }))
     renderIt()
     const line = (await screen.findByTestId('weather-window')).textContent!
-    expect(line).toContain('1–7 Jul')
+    expect(line).toContain('2025-07-01 to 2025-07-07')
     expect(line).toContain('168 h')
     expect(line).toContain('2025')
   })

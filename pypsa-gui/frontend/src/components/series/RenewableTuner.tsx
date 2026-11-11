@@ -11,7 +11,7 @@ function Refusal({ label, error, retry, disabled = false }: { label: string; err
   const raw = errorText(error)
   const plain = profileText(raw)
   return <div role="alert" className="text-warn space-y-1"><p>{label}: {plain}</p>
-    <button type="button" onClick={retry} disabled={disabled} className="text-accent hover:underline disabled:opacity-50">› Retry</button>
+    <button type="button" onClick={retry} disabled={disabled} className="border border-border rounded px-1.5 py-0.5 hover:bg-accent/10 disabled:opacity-50">Retry</button>
     <details><summary>Details</summary><pre className="whitespace-pre-wrap">{raw}</pre></details>
   </div>
 }
@@ -90,6 +90,8 @@ export default function RenewableTuner({ project, row, onApplied }: {
       value={preset} onChange={e => { setChoice(e.target.value); setEdits({}); setAdvanced('') }}>
       {available.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
     </select></label>
+    <button type="button" data-testid="tune-reset" disabled={blocked || apply.isPending || (!changed.length && !advanced)} className="text-accent hover:underline disabled:opacity-50"
+      onClick={() => { setEdits({}); setAdvanced(''); setFormError('') }}>Reset to preset</button>
     {!available.length && <p>No preset is available for this weather source.</p>}
     {fields.map(f => <div key={f.key} className="border-b border-border/40 pb-1">
       <label htmlFor={`${id}-${f.key}`}>{f.label}{f.unit ? ` (${f.unit})` : ''}</label>{' '}
@@ -104,8 +106,6 @@ export default function RenewableTuner({ project, row, onApplied }: {
       {!f.sources.includes(source!) && <p>ERA5 only: switch the weather source to use it</p>}
     </div>)}
     <p>These settings apply to this run only.</p>
-    <button type="button" disabled={blocked || apply.isPending} className="text-accent hover:underline disabled:opacity-50"
-      onClick={() => { setEdits({}); setAdvanced(''); setFormError('') }}>Reset to preset</button>
     <details><summary>Advanced</summary><label className="block">Advanced settings
       <textarea aria-label="Advanced settings" value={advanced} disabled={blocked || apply.isPending} onChange={e => setAdvanced(e.target.value)} className="w-full bg-bg border border-border rounded font-mono" />
     </label><p>Changed fields override Advanced settings{changed.length ? `: ${changed.map(f => f.label).join(', ')}` : ''}.</p></details>
