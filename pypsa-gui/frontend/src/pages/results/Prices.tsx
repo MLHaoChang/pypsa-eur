@@ -12,7 +12,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import type { Bus } from '../../api/types'
 import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
-  ChartFrame, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, Seg, CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
+  ChartFrame, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, Seg, CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, thinNoteText, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine, chartFigure, carrierColour } from './shared'
 import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
@@ -360,7 +360,20 @@ export default function Prices() {
                   }
                   toast.success('Exported')
                 }}
-                filename={`prices_hourly_${priceView}_${priceSource}`} />
+                filename={`prices_hourly_${priceView}_${priceSource}`}
+                report={effectiveMode !== 'timeframe' ? undefined : (() => {
+                  const all = priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows
+                  const cols = priceView === 'avg' ? ['avg'] : priceChart.cols
+                  const busNote = priceView === 'per_bus' && priceChart.busTotal > priceChart.cols.length
+                    ? `top ${priceChart.cols.length} of ${priceChart.busTotal} buses by mean` : undefined
+                  return {
+                    view: 'prices', figure: `hourly_${priceView}_${priceSource}`, unit: 'EUR/MWh',
+                    columns: ['snapshot', ...cols],
+                    rows: thinRows(all).map(r => [r.snapshot, ...cols.map(c => (r as Record<string, unknown>)[c] ?? null)]),
+                    rowsTotal: all.length,
+                    note: [busNote, thinNoteText(all)].filter(Boolean).join(' · ') || undefined,
+                  }
+                })()} />
             </>
           }
           bodyClassName="p-3"

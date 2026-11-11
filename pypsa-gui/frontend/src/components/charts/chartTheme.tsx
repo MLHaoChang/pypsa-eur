@@ -213,6 +213,12 @@ export function ChartSourceProvider({ value, children }: { value: ChartSource; c
   return <SourceCtx.Provider value={value}>{children}</SourceCtx.Provider>
 }
 
+// ── The frame's own words, for the actions in its header ─────────────────────
+/** The chart's title (when it is plain text) and the basis its source line adds. */
+export interface ChartFrameInfo { title: string | null; basis?: string }
+const FrameCtx = createContext<ChartFrameInfo>({ title: null })
+export const useChartFrame = () => useContext(FrameCtx)
+
 // ── The header's number ──────────────────────────────────────────────────────
 /**
  * A chart's number for its header, rounded exactly as the KPI tile rounds it
@@ -248,7 +254,9 @@ export function ChartFrame({
   testId?: string
 }) {
   const { stale } = useChartSource()
+  const info: ChartFrameInfo = { title: typeof title === 'string' ? title : null, basis }
   return (
+    <FrameCtx.Provider value={info}>
     <section
       data-testid={testId}
       data-chart-frame=""
@@ -266,11 +274,12 @@ export function ChartFrame({
           {count != null && <span className="font-mono text-[11px] text-muted shrink-0">{count}</span>}
           {hint && <span className="text-[11px] text-muted [overflow-wrap:anywhere]">{hint}</span>}
         </div>
-        {right && <div className="flex items-center gap-2 shrink-0">{right}</div>}
+        {right && <div className="flex max-w-[calc(100%-9.75rem)] shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">{right}</div>}
       </header>
       <div className={`${bodyClassName ?? 'p-3'} ${stale ? 'opacity-60' : ''}`}>{children}</div>
       <ChartSourceLine basis={basis} />
     </section>
+    </FrameCtx.Provider>
   )
 }
 

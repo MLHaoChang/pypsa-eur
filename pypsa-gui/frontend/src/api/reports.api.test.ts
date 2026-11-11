@@ -11,6 +11,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CSRF_HEADER } from './csrf'
 import {
   abortGenerate,
+  addReportChart,
+  listReportCharts,
+  removeReportChart,
+  reportChartErrorMessage,
   createEvidenceOnlyReport,
   deleteReport,
   exportReport,
@@ -575,5 +579,39 @@ describe('reports api — round trip (WP14)', () => {
       expect(roundTripErrorMessage(err)).toMatch(copy)
     }
     expect(roundTripErrorMessage(new Error('network down'))).toBe('network down')
+  })
+})
+
+describe('reports api — saved charts', () => {
+  const spec = {
+    view: 'v', title: 't', figure: 'f', unit: null, source_line: 's', period: null,
+    out_of_date_when_added: false, columns: ['a'], rows: [[1]], rows_total: 1,
+  }
+  it('lists, adds (multipart + CSRF) and removes', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ charts: [], limit: 12 }))
+    expect(await listReportCharts('My Project')).toEqual({ charts: [], limit: 12 })
+    expect(lastCall().url).toBe('/api/projects/My%20Project/report-charts')
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: 'chart-0123456789abcdef' }))
+    await addReportChart('p', spec, new Blob(['x'], { type: 'image/png' }))
+    const { url, init } = lastCall()
+    expect(url).toBe('/api/projects/p/report-charts')
+    expect(init?.method).toBe('POST')
+    expect((init?.headers as Record<string, string>)[CSRF_HEADER]).toBe('tok')
+    const form = init?.body as FormData
+    expect(JSON.parse(form.get('spec') as string)).toEqual(spec)
+    expect(form.get('png')).toBeInstanceOf(Blob)
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+    await removeReportChart('p', 'chart-0123456789abcdef')
+    expect(lastCall().url).toBe('/api/projects/p/report-charts/chart-0123456789abcdef')
+    expect(lastCall().init?.method).toBe('DELETE')
+  })
+  it('maps the 409 limit to plain words and other errors to the backend message', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: { error_kind: 'chart_limit_reached', message: 'x', total: 12 } }, 409))
+    const err = await addReportChart('p', spec, new Blob(['x'])).catch(e => e)
+    expect(isReportError(err, 'chart_limit_reached')).toBe(true)
+    expect(reportChartErrorMessage(err)).toBe('The report holds 12 charts: remove one in Reports > Generate')
+    expect(reportChartErrorMessage(new ReportsError({ error_kind: 'chart_snapshot_invalid', message: 'Bad chart' }, 422))).toBe('Bad chart')
   })
 })

@@ -7,7 +7,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, DefaultLegendContent,
   type DefaultLegendContentProps,
 } from 'recharts'
-import { Download } from 'lucide-react'
+import { Check, Download, FilePlus } from 'lucide-react'
 import Kpi from '../../components/Kpi'
 import { kpiFigure } from '../../utils/format'
 import type { ResultAction, ResultStateKind } from '../../components/ResultState'
@@ -18,7 +18,12 @@ import { useUIStore } from '../../store/uiStore'
 import { displayName } from '../../utils/displayName'
 import { nk } from '../../utils/queryKeys'
 import { networkApi } from '../../api/network'
-import { CHART_TICK, carrierColour, seriesDash } from '../../components/charts/chartTheme'
+import { CHART_TICK, carrierColour, seriesDash, useChartFrame, useChartSource } from '../../components/charts/chartTheme'
+import { REPORT_CHART_LIMIT_TEXT, reportChartErrorMessage } from '../../api/reports'
+import { svgToPngBlob } from '../../utils/chartPng'
+import {
+  MAX_CELL_CHARS, addChart, findSnapshot, removeChart, sanitizeRows, useReportCharts,
+} from './reportCharts'
 export {
   CHART_HEIGHT, CHART_TICK, LABEL_PASS, bandLabelIndices, chartFigure, ChartFrame, ChartSourceLine, ChartSourceProvider, carrierColour, directLabel, seriesDash,
   thickestIndex, useChartSource, SERIES_TOKENS, SERIES_COLOURS,
@@ -817,10 +822,11 @@ export function downloadJSON(filename: string, data: unknown): void {
 // renders correctly outside the React DOM. Falls back to a toast-style
 // console warning if no svg is found (e.g. user clicked before the chart
 // mounted, or the container is an HTML heatmap).
-export function downloadSVG(container: HTMLElement | null, filename: string): boolean {
-  if (!container) return false
+export interface SerializedSVG { source: string; width: number; height: number }
+export function serializeSVG(container: HTMLElement | null, background = '#ffffff'): SerializedSVG | null {
+  if (!container) return null
   const svg = container.querySelector('svg')
-  if (!svg) return false
+  if (!svg) return null
   const clone = svg.cloneNode(true) as SVGSVGElement
   // Recharts omits the namespace on the inner SVG when the parent <div> is
   // mounted — re-add so the file opens standalone in browsers / Illustrator.
@@ -839,20 +845,28 @@ export function downloadSVG(container: HTMLElement | null, filename: string): bo
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
     bg.setAttribute('width', '100%')
     bg.setAttribute('height', '100%')
-    bg.setAttribute('fill', '#ffffff')
+    bg.setAttribute('fill', background)
     bg.setAttribute('data-bg', 'true')
     clone.insertBefore(bg, clone.firstChild)
   }
   resolveCssVars(clone)
   const serializer = new XMLSerializer()
   const source = '<?xml version="1.0" standalone="no"?>\r\n' + serializer.serializeToString(clone)
-  const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' })
+  const w = Number(clone.getAttribute('width')) || 0
+  const h = Number(clone.getAttribute('height')) || 0
+  return { source, width: w, height: h }
+}
+export function downloadSVG(container: HTMLElement | null, filename: string): boolean {
+  const out = serializeSVG(container)
+  if (!out) return false
+  const blob = new Blob([out.source], { type: 'image/svg+xml;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = filename; a.click()
   URL.revokeObjectURL(url)
   return true
 }
+
 
 // A saved SVG opens outside the app, where `var(--color-…)` means nothing:
 // swap each theme token in a fill / stroke / style for its current value.
@@ -878,15 +892,78 @@ export function resolveCssVars(root: Element): void {
 //     with the chart's data. Caller owns the data shape so each chart can
 //     emit a sensibly-named header row.
 // Filename is shared between both formats (different extensions).
+/** What a chart tells the report: the spec minus what the frame and server know. */
+export interface ChartReportSpec {
+  /** Stable short slug of the chart, e.g. "dispatch-stack". */
+  view: string
+  /** Which of the view's charts, e.g. "profit"; the carrier / bus for a per-bus chart. */
+  figure: string
+  unit?: string | null
+  period?: string | null
+  columns: string[]
+  rows: readonly (readonly unknown[])[]
+  /** Rows the chart's data holds when `rows` is a cut of it. */
+  rowsTotal?: number
+  /** A thinning or demo-data note: kept in the saved source line. */
+  note?: string
+}
 export interface ChartActionsProps {
   chartRef?: RefObject<HTMLDivElement | null>
   onExportCSV?: () => void
   filename: string  // base without extension; .svg / .csv appended by the helper
   className?: string
+  /** Offers "Add to report" next to SVG / CSV (needs `chartRef` with an svg). */
+  report?: ChartReportSpec
 }
-export function ChartActions({ chartRef, onExportCSV, filename, className }: ChartActionsProps) {
+export function ChartActions({ chartRef, onExportCSV, filename, className, report }: ChartActionsProps) {
+  const project = useUIStore(s => s.currentProject)
+  const frame = useChartFrame()
+  const source = useChartSource()
+  const offered = !!(report && chartRef && frame.title && project)
+  const { charts, limit } = useReportCharts(project, offered)
+  const [busy, setBusy] = useState(false)
+  const saved = offered && report
+    ? findSnapshot(charts, report.view, report.figure, frame.title as string) : undefined
+  const full = !saved && charts.length >= limit
+
+  const toggleReport = async () => {
+    if (!offered || !report || !project || busy) return
+    setBusy(true)
+    try {
+      if (saved) {
+        await removeChart(project, saved.id)
+        toast.success('Removed from report')
+        return
+      }
+      // The picture keeps the theme's own background: a dark chart's pale text and
+      // dark gridlines are unreadable on the white the standalone SVG export adds.
+      const out = serializeSVG(chartRef!.current, getComputedStyle(document.documentElement).getPropertyValue('--color-bg').trim() || undefined)
+      if (!out) { toast.error('Chart not ready — try again after it renders'); return }
+      const png = await svgToPngBlob(out.source, out.width || 600, out.height || 300)
+      const columns = report.columns.map(c => String(c).slice(0, MAX_CELL_CHARS))
+      const rows = sanitizeRows(columns, report.rows)
+      await addChart(project, {
+        view: report.view,
+        title: frame.title as string,
+        figure: report.figure,
+        unit: report.unit ?? null,
+        source_line: [source.line, frame.basis, report.note].filter(Boolean).join(' · ').slice(0, MAX_CELL_CHARS),
+        period: report.period ?? null,
+        out_of_date_when_added: source.stale,
+        columns,
+        rows,
+        rows_total: Math.max(report.rowsTotal ?? report.rows.length, rows.length),
+      }, png)
+      toast.success('Added to report')
+    } catch (e) {
+      toast.error(reportChartErrorMessage(e, limit))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <span className={`flex items-center gap-2 text-[11px] text-muted ${className ?? ''}`}>
+    <span className={`flex flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-[11px] text-muted ${className ?? ''}`}>
       {chartRef && (
         <button
           onClick={(e) => {
@@ -909,6 +986,24 @@ export function ChartActions({ chartRef, onExportCSV, filename, className }: Cha
         >
           <Download size={11} /> CSV
         </button>
+      )}
+      {offered && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); void toggleReport() }}
+          aria-pressed={!!saved}
+          aria-label={saved ? 'Remove from report' : 'Add to report'}
+          title={saved ? 'Remove from report' : 'Add this chart, as shown, to the study report'}
+          disabled={busy || full}
+          className={`flex items-center gap-1 whitespace-nowrap hover:text-accent disabled:opacity-60 disabled:hover:text-muted ${saved ? 'text-accent font-medium' : ''}`}
+        >
+          {saved ? <Check size={11} /> : <FilePlus size={11} />} {saved ? 'In report' : 'Add to report'}
+        </button>
+      )}
+      {offered && full && (
+        <span className="ml-auto max-w-[15rem] basis-full text-right text-[10.5px]" data-testid="report-chart-cap">
+          {REPORT_CHART_LIMIT_TEXT(limit)}
+        </span>
       )}
     </span>
   )
@@ -1100,6 +1195,14 @@ export function stepWord(rows: readonly object[]): 'hour' | 'time step' {
   }
   const d = stamp(rows[1]) - stamp(rows[0])
   return d === 3_600_000 ? 'hour' : 'time step'
+}
+
+/** ThinNote's sentence as plain text for a saved chart's source line; undefined when nothing was thinned. */
+export function thinNoteText(rows: readonly object[]): string | undefined {
+  if (rows.length <= MAX_CHART_POINTS) return undefined
+  const drawn = thinRows(rows).length
+  const w = stepWord(rows)
+  return `Drawn: ${drawn.toLocaleString('en-US')} of ${rows.length.toLocaleString('en-US')} ${w}s, the largest ${w} of each stretch kept`
 }
 
 /** The muted line under a chart whose rows were thinned by `thinRows`; renders

@@ -5,7 +5,7 @@ import {
 } from 'recharts'
 import type { Generator, Load, StorageUnit, Link as LinkT } from '../../api/types'
 import { type TSPayload, shortStamp, stampWithPeriod, fmtPower, isRenewableCarrier,
-  ChartActions, downloadCSV, colourForCarrier,
+  ChartActions, thinNoteText, downloadCSV, colourForCarrier,
   CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   ChartFrame, CHART_HEIGHT, chartFigure, LABEL_PASS, directLabel, bandLabelIndices, legendName } from './shared'
 
@@ -344,6 +344,10 @@ export default function DispatchStack({
     downloadCSV('dispatch_stack.csv', header, csvRows)
   }
 
+  // What the chart draws (thinned, as the user sees it) for "Add to report".
+  const reportCols = ['snapshot', ...stackOrder, 'storage_charge', 'load_total']
+  const reportRows = drawn.map(r => reportCols.map(c => r[c] ?? null))
+
   const peakLoad = rows.reduce((a, r) => Math.max(a, Number(r['load_total'] ?? 0)), 0)
   // Name a band on the band itself (not hue alone, audit finding 5); the
   // legend alone when names could collide or the stack is dense.
@@ -360,7 +364,11 @@ export default function DispatchStack({
       hint={`${carrierLabel}-bus balance · carrier-stacked hourly generation · dashed line = total consumption (load + storage charge + link outflows)${
         hasStorage ? ` · storage discharge above zero, charge below` : ''}${
         hasLinkContribs ? ` · cross-carrier link inflows in emerald, outflows in red below zero` : ''}`}
-      right={<ChartActions chartRef={chartRef} onExportCSV={exportCSV} filename={`dispatch_stack_${carrierLabel}`} />}
+      right={<ChartActions chartRef={chartRef} onExportCSV={exportCSV} filename={`dispatch_stack_${carrierLabel}`}
+        report={{
+          view: 'dispatch-stack', figure: carrierLabel, unit: 'MW',
+          columns: reportCols, rows: reportRows, rowsTotal: rows.length, note: thinNoteText(rows),
+        }} />}
       bodyClassName="p-3"
     >
       <div ref={chartRef}>

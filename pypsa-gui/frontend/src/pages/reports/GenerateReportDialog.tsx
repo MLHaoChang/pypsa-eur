@@ -24,12 +24,13 @@
 // language field from it when a template is picked; the field stays
 // editable, and switching back to the default keeps what is typed.
 import { useEffect, useId, useState, type FormEvent } from 'react'
-import { Sparkles } from 'lucide-react'
+import { Sparkles, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { reportJobErrorMessage, type GenerateReportOptions } from '../../api/reports'
+import { reportChartErrorMessage, reportJobErrorMessage, type GenerateReportOptions } from '../../api/reports'
 import { listUploads, type UploadMeta } from '../../api/uploads'
 import { Dialog } from '../../components/Dialog'
 import { Btn } from '../../components/PageKit'
+import { removeChart, useReportCharts } from '../results/reportCharts'
 
 export interface SectionChoice { id: string; title: string }
 
@@ -80,6 +81,7 @@ export function GenerateReportDialog({
   const [templates, setTemplates] = useState<UploadMeta[]>([])
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const saved = useReportCharts(project ?? null, open)
 
   // Reset the form on every open so a second report starts clean.
   useEffect(() => {
@@ -245,6 +247,49 @@ export function GenerateReportDialog({
             disabled={pending}
           />
         </div>
+
+        {project && (
+          <section className="flex flex-col gap-1" aria-labelledby={`${ids}-charts`} data-testid="report-charts-list">
+            <h3 id={`${ids}-charts`} className="text-[10.5px] font-medium text-muted">Charts added from results</h3>
+            {!saved.loaded ? null : saved.charts.length === 0 ? (
+              <p className="text-[11.5px] text-muted">
+                No charts added yet. Use "Add to report" on a chart in Results.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1 max-h-[140px] overflow-y-auto pr-1">
+                {saved.charts.map(c => (
+                  <li key={c.id} className="flex items-start justify-between gap-2 text-[11.5px]">
+                    <span className="min-w-0">
+                      <span className="block text-text [overflow-wrap:anywhere]">{c.title}</span>
+                      <span className="block text-[10.5px] text-muted font-mono [overflow-wrap:anywhere]">{c.source_line}</span>
+                      {(c.out_of_date_when_added || c.earlier_solve) && (
+                        <span className="block text-[10.5px] text-muted">
+                          {[c.out_of_date_when_added && 'Out of date when added', c.earlier_solve && 'From an earlier solve']
+                            .filter(Boolean).join(' · ')}
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      className="shrink-0 inline-flex items-center gap-1 text-muted hover:text-danger"
+                      aria-label={`Remove ${c.title} from report`}
+                      onClick={async () => {
+                        try {
+                          await removeChart(project, c.id)
+                          toast.success('Removed from report')
+                        } catch (err) {
+                          toast.error(reportChartErrorMessage(err, saved.limit))
+                        }
+                      }}
+                    >
+                      <Trash2 size={11} aria-hidden="true" /> Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
 
         {error && (
           <p className="text-[11.5px] text-danger" data-testid="generate-error" role="alert">{error}</p>
