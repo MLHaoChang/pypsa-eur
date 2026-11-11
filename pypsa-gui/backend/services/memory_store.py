@@ -769,6 +769,7 @@ def create_item(
     origin: str = "button",
     org_id: uuid.UUID | None = None,
     parameter_ok: bool = False,
+    commit: bool = True,
 ) -> ItemView:
     """Write a user's own item. A confirmed `button` save on the same
     (owner, org, kind, concept keys, project kind) is a new version of the
@@ -776,7 +777,10 @@ def create_item(
 
     `org_id` is the org the item recalls in (§9 M1); it defaults to the user's
     membership org. A caller saving from a bound project passes that project's
-    org for kinds outside `CROSS_ORG_KINDS`."""
+    org for kinds outside `CROSS_ORG_KINDS`.
+
+    `commit=False` leaves the write in the caller's transaction (the dream
+    job commits its proposals with its own lease-guarded update)."""
     if status not in ("proposed", "confirmed"):
         raise MemoryError("a new item is proposed or confirmed")
     if origin not in ORIGINS or origin == "promoted":
@@ -846,7 +850,10 @@ def create_item(
         now=now,
     )
     _bump(db, _scope_key(item))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return _view(db, item)
 
 

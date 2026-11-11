@@ -1,0 +1,20 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# Full-year chart thinning on the remaining Results tabs
+
+Status: in-review (PR on claude/ui-modern-06b-thinning; reviewer UX)
+Type: bug
+Model: Sonnet. Reviewer: UX.
+
+Finishes ui-modern 06 (#1395). Parent: `06-full-year-charts-block-the-tab.md`.
+
+## What to build
+
+1. LoadFlow (voltage line chart and price chart), LostLoadTab, BranchLoading, ReserveCommitments (2 charts), EnergyFlowsTab and LoadShapeTab: x-axes use `timeAxis(rows.length)`, chart `data` uses `thinRows`, and a `<ThinNote>` sits under each chart (`pages/results/shared.tsx`).
+2. `ThinNote` says "time steps" instead of "hours" when the rows are not an hour apart (UX ask).
+3. Costs & prices (`Prices.tsx`) has `timeAxis` but draws every row: thin it too.
+
+Done when each listed tab opens and idles on `eh_ipp_hybrid` per `.scratch/ui-modern/shots-02/tools/settle.mjs` (no long task over 200 ms after the first 5 s), tests guard the thinning, the note's words follow the step length, shots from `.scratch/ui-modern/shots-06/shots.mjs`, and UX OKs the PR head.
+
+Not changed: the small-multiples voltage view in LoadFlow (`SmallMultiples`), which draws its own series.

@@ -1133,3 +1133,23 @@ def test_b1a_explore_stays_as_the_run_started_it(stored):
     run["stages"]["explore"] = dict(stored)
     assert tasks._sync_stages(run, profile) is False
     assert run["stages"]["explore"] == stored
+
+
+def test_a_run_report_carries_no_saved_charts(detached, site, fake_report, monkeypatch):
+    """ui-modern 02 slice 7a (V1): the harness's stage-7 launch never reads the saved Results charts."""
+    from routers import report_jobs
+
+    mail(monkeypatch)
+    seen = []
+    real = report_jobs._render_figures
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("charts"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(report_jobs, "_render_figures", spy)
+    path, record = completed_run(detached, site)
+    assert record["run"]["status"] == "completed", record["run"]
+    assert seen and set(seen) == {False}
+    doc = run_report.saved(record, path.parent.parent)
+    assert "charts_from_results" not in {s.section_id for s in doc.sections}

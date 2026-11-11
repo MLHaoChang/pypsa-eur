@@ -18,7 +18,7 @@ import {
   fmtEnergy, fmtCurrency, fmtPower, shortStamp, downloadCSV, downloadSVG, KPI, Seg,
   ChartFrame, ChartSourceLine, CHART_HEIGHT, chartFigure, carrierColour, seriesDash,
   WindowCapBanner,
-  CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
+  CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   SEASONS, SEASON_OF_MONTH, SEASON_ACCENT,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, WEEKDAYS,
   parseSeasonStamp, useSeasonalViewMode, colourForCarrier, isAllZero, ChartZero,
@@ -560,7 +560,10 @@ export default function Dispatch() {
               ?? (storTS as TSPayload | null)
   const refIndex = refTs?.index ?? []
   const refPeriods = refTs?.periods
-  const range = resolveRange(refIndex, filter, refPeriods)
+  const { from: rangeFrom, to: rangeTo } = resolveRange(refIndex, filter, refPeriods)
+  // One object per window, not per render: the memos below key on it, and the
+  // app re-renders this tab every few seconds while it polls (ui-modern 06).
+  const range = useMemo(() => ({ from: rangeFrom, to: rangeTo }), [rangeFrom, rangeTo])
 
   // Load- and residual-load-duration curves. Total load and residual load
   // (load − variable-renewable generation) are each sorted descending over the
@@ -3072,6 +3075,52 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
     }
   }, [perAssetData, showPct, capacity.byName, capacityByPeriod.byNameByPeriod, periodByStamp])
 
+  const isStorage = groupKey === 'Storage' || groupKey === 'Storage SoC'
+                  || groupKey === 'Stores' || groupKey === 'Stores Energy'
+  // The main chart element is kept while its series is the same: a full year
+  // is 8760 points, and Recharts redraws them on every render (ui-modern 06).
+  const mainChart = useMemo(() => (
+      perAsset && perAssetView ? (
+        <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
+          <LineChart data={thinRows(perAssetView.rows)} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
+            <CartesianGrid {...CHART_GRID} />
+            <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis(thinRows(perAssetView.rows).length)} />
+            <YAxis {...CHART_AXIS}
+              domain={showPct ? [0, 100] : undefined}
+              label={yAxisLabel(yUnit)} />
+            <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} ${yUnit}`} />
+            <Legend {...CHART_LEGEND} />
+            {perAssetView.cols.map((c, i) => (
+              <Line key={c} type="monotone" dataKey={c} stroke={TRACE_COLORS[i % TRACE_COLORS.length]}
+                    strokeDasharray={seriesDash(i)} strokeWidth={1.4} dot={false}  isAnimationActive={false} />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
+          {isStorage ? (
+            <LineChart data={thinRows(aggView ?? agg ?? [])} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
+              <CartesianGrid {...CHART_GRID} />
+              <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis(thinRows(aggView ?? agg ?? []).length)} />
+              <YAxis {...CHART_AXIS}
+                domain={showPct ? [0, 100] : undefined}
+                label={yAxisLabel(yUnit)} />
+              <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} ${yUnit}`} />
+              <Line type="monotone" dataKey="value" stroke={style.color} strokeWidth={1.6} dot={false}  isAnimationActive={false} />
+            </LineChart>
+          ) : (
+            <AreaChart data={thinRows(aggView ?? agg ?? [])} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
+              <CartesianGrid {...CHART_GRID} />
+              <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis(thinRows(aggView ?? agg ?? []).length)} />
+              <YAxis {...CHART_AXIS} label={yAxisLabel(yUnit)} />
+              <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} ${yUnit}`} />
+              <Area type="monotone" dataKey="value" stroke={style.color} fill={style.color} fillOpacity={0.18} strokeWidth={1.6}  isAnimationActive={false} />
+            </AreaChart>
+          )}
+        </ResponsiveContainer>
+      )
+  ), [perAsset, perAssetView, isStorage, aggView, agg, style.color, yUnit, showPct])
+
   const exportCSV = () => {
     if (perAsset && perAssetData) {
       downloadCSV(`results_${groupKey.toLowerCase()}_per_asset.csv`,
@@ -3097,8 +3146,6 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
   // values (charging) which AreaChart can't shade well, and SoC/Energy values
   // are best shown as a continuous line. AreaChart stays for generation/load
   // groups where the value is always non-negative.
-  const isStorage = groupKey === 'Storage' || groupKey === 'Storage SoC'
-                  || groupKey === 'Stores' || groupKey === 'Stores Energy'
 
   // Refs for SVG export. Three potential charts per section: main, curtailment
   // overlay (Renewables), lost-load overlay (Load). Each is in its own div so
@@ -3196,45 +3243,8 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
             </div>
           ) : (
           <div ref={mainChartRef}>
-            {perAsset && perAssetView ? (
-              <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-                <LineChart data={perAssetView.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
-                  <CartesianGrid {...CHART_GRID} />
-                  <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
-                  <YAxis {...CHART_AXIS}
-                    domain={showPct ? [0, 100] : undefined}
-                    label={yAxisLabel(yUnit)} />
-                  <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} ${yUnit}`} />
-                  <Legend {...CHART_LEGEND} />
-                  {perAssetView.cols.map((c, i) => (
-                    <Line key={c} type="monotone" dataKey={c} stroke={TRACE_COLORS[i % TRACE_COLORS.length]}
-                          strokeDasharray={seriesDash(i)} strokeWidth={1.4} dot={false} />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
-                {isStorage ? (
-                  <LineChart data={aggView ?? agg} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
-                    <CartesianGrid {...CHART_GRID} />
-                    <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
-                    <YAxis {...CHART_AXIS}
-                      domain={showPct ? [0, 100] : undefined}
-                      label={yAxisLabel(yUnit)} />
-                    <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} ${yUnit}`} />
-                    <Line type="monotone" dataKey="value" stroke={style.color} strokeWidth={1.6} dot={false} />
-                  </LineChart>
-                ) : (
-                  <AreaChart data={aggView ?? agg} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
-                    <CartesianGrid {...CHART_GRID} />
-                    <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
-                    <YAxis {...CHART_AXIS} label={yAxisLabel(yUnit)} />
-                    <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} ${yUnit}`} />
-                    <Area type="monotone" dataKey="value" stroke={style.color} fill={style.color} fillOpacity={0.18} strokeWidth={1.6} />
-                  </AreaChart>
-                )}
-              </ResponsiveContainer>
-            )}
+            {mainChart}
+            <ThinNote rows={perAsset && perAssetView ? perAssetView.rows : (aggView ?? agg ?? [])} />
           </div>
           )}
 
@@ -3270,14 +3280,15 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
               ) : (
               <div ref={curtailChartRef}>
                 <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
-                  <AreaChart data={curtailmentSeries} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
+                  <AreaChart data={thinRows(curtailmentSeries)} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
-                    <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
+                    <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis(thinRows(curtailmentSeries).length)} />
                     <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
                     <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} MW`} />
-                    <Area type="monotone" dataKey="value" stroke="var(--color-warn)" fill="var(--color-warn)" fillOpacity={0.22} strokeWidth={1.6} />
+                    <Area type="monotone" dataKey="value" stroke="var(--color-warn)" fill="var(--color-warn)" fillOpacity={0.22} strokeWidth={1.6}  isAnimationActive={false} />
                   </AreaChart>
                 </ResponsiveContainer>
+                <ThinNote rows={curtailmentSeries} />
               </div>
               )}
             </div>
@@ -3320,14 +3331,15 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
               </div>
               <div ref={lostLoadChartRef}>
                 <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
-                  <AreaChart data={lostLoadSeries} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
+                  <AreaChart data={thinRows(lostLoadSeries)} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid {...CHART_GRID} />
-                    <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
+                    <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis(thinRows(lostLoadSeries).length)} />
                     <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
                     <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} MW`} />
-                    <Area type="monotone" dataKey="value" stroke="var(--color-danger)" fill="var(--color-danger)" fillOpacity={0.22} strokeWidth={1.6} />
+                    <Area type="monotone" dataKey="value" stroke="var(--color-danger)" fill="var(--color-danger)" fillOpacity={0.22} strokeWidth={1.6}  isAnimationActive={false} />
                   </AreaChart>
                 </ResponsiveContainer>
+                <ThinNote rows={lostLoadSeries} />
               </div>
             </div>
           )}

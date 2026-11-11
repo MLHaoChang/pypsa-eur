@@ -177,7 +177,8 @@ def _evidence_for(project: AuthorizedProject, *, harness_run: dict | None = None
                        "in this session. Solve the network, run a study (run_eh_study or "
                        "an adequacy study), or create an evidence-only report.",
         })
-    return evidence, _render_figures(eh_report, project.directory)
+    return evidence, _render_figures(eh_report, project.directory,
+                                     charts=harness_run is None and not assistant_strict_active())
 
 
 def _in_flight(exc: Exception) -> HTTPException:

@@ -2,31 +2,34 @@
 id: hub-design
 title: Hub design, step by step
 intent: The site's reliability design in five steps, from template to improvements, with the assistant doing each step on request.
-when: [guided, expert]
-preamble_when: [guided]
+when:
+- guided
+- expert
+preamble_when:
+- guided
 order: 5
 opening_request: Open the Hub design panel and walk me through it, starting with the Start card.
 steps:
-  - id: start
-    title: Start
-    done_when: A template or the user's own network is open and the user is on the Site card.
-    flow_section: project
-  - id: site
-    title: Site
-    done_when: The grid connection, critical loads, grid strength and outage data are set or accepted as gaps.
-    flow_section: connection
-  - id: goal
-    title: Goal
-    done_when: The study target (VOLL, archetype) is set and the study has been started.
-    flow_section: scenarios
-  - id: results
-    title: Results
-    done_when: The user has heard the verdict in plain language.
-    flow_section: results
-  - id: improve
-    title: Improve
-    done_when: The user has applied or declined each recommendation.
-    flow_section: results
+- id: start
+  title: Start
+  done_when: 'A template or the user''s own network is open and the user is on the Site card. Gate rules (eh_site setup): set.project.exists, set.project.template.'
+  flow_section: project
+- id: site
+  title: Site
+  done_when: 'The grid connection, critical loads, grid strength and outage data are set or accepted as gaps. Gate rules (eh_site input_gate): in.validate.errors, in.readiness.ready, in.diagnose.unserved_islands, eh.readiness.ready, eh.energization.min_mw.'
+  flow_section: connection
+- id: goal
+  title: Goal
+  done_when: 'The study target (VOLL, archetype) is set and the study has been started. Gate rules (eh_site solve): sv.solve.state, eh.study.status.'
+  flow_section: scenarios
+- id: results
+  title: Results
+  done_when: 'The user has heard the verdict in plain language. Gate rules (eh_site result_gate): res.solve.status, res.fresh, eh.review.blockers, kpi.unserved_mwh, eh.adequacy.lole.'
+  flow_section: results
+- id: improve
+  title: Improve
+  done_when: 'The user has applied or declined each recommendation. Gate rules (eh_site explore): ex.cases.settled.'
+  flow_section: results
 ---
 
 Guided mode is on. Rules for this turn: answer in plain language a
@@ -56,10 +59,14 @@ with a tick box per fix and applies the ticked ones together. Report from
 the card's receipt which fixes were applied, and do not propose an unticked
 fix again unless the user asks.
 
+Harness tools for this stage (profile eh_site, input_gate): `validate_network`, `project_readiness`, `diagnose_network`.
+
 ## Step: goal
 
 The user is on the "Goal" card. Set VOLL with `update_solver_config` if it
 is missing (recommend 5000 €/MWh), then `run_eh_study`.
+
+Harness tools for this stage (profile eh_site, solve): `solve_queue_enqueue`, `run_eh_study`.
 
 ## Step: results
 

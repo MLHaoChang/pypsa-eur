@@ -2,28 +2,28 @@
 // order, each named with its tab's own word, one "Out of date" mark, and a
 // state with its sentence where the run has no figure.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { ChartSourceProvider } from '../../components/charts/chartTheme'
 import type { HeadlineCard } from '../../api/simulation'
 
-const api = vi.hoisted(() => ({ getHeadlineKpis: vi.fn() }))
+const api = vi.hoisted(() => ({ getHeadlineKpis: vi.fn(), getHeadlineComparison: vi.fn() }))
 vi.mock('../../api/simulation', async (orig) => {
   const actual = await orig<typeof import('../../api/simulation')>()
-  return { ...actual, resultsApi: { ...actual.resultsApi, getHeadlineKpis: api.getHeadlineKpis } }
+  return { ...actual, resultsApi: { ...actual.resultsApi, getHeadlineKpis: api.getHeadlineKpis, getHeadlineComparison: api.getHeadlineComparison } }
 })
 const nav = vi.hoisted(() => ({ showResultsTab: vi.fn() }))
 vi.mock('../../layout/flowNavigation', async (orig) => ({
   ...(await orig<typeof import('../../layout/flowNavigation')>()), showResultsTab: nav.showResultsTab,
 }))
 
-import HeadlineStrip from './HeadlineStrip'
-import { COST_WORDS, CURTAILMENT_RATE, HEADLINE_WORDS, headlineFigure } from './headlineWords'
+import HeadlineStrip, { headlineKpisKey } from './HeadlineStrip'
+import { COST_WORDS, CURTAILMENT_RATE, HEADLINE_WORDS, comparisonBasis, headlineDelta, headlineFigure, headlineTrend } from './headlineWords'
 import { HEADLINES } from './investment/financeModel'
 
 const card = (id: string, over: Partial<HeadlineCard> = {}): HeadlineCard => ({
-  id, value: null, unit: null, state: 'ready', reason: null, formula_id: null, detail: null, ...over,
+  id, value: null, unit: null, state: 'ready', reason: null, formula_id: null, detail: null, delta: null, trend: null, ...over,
 })
 const HUB = {
   kind: 'energy_hub',
@@ -43,12 +43,16 @@ function renderStrip(source = { line: 'Latest solve · solved · 2030-01-01 00:0
       <ChartSourceProvider value={source}><HeadlineStrip /></ChartSourceProvider>
     </QueryClientProvider>,
   )
+  return qc
 }
 const figure = (id: string) => screen.getByTestId(`headline-${id}`).querySelector('[data-kpi-value]')
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
   api.getHeadlineKpis.mockResolvedValue(HUB)
+  // The compared fetch answers like the plain one unless a test gives it a base case.
+  api.getHeadlineComparison.mockImplementation(() => api.getHeadlineKpis())
+  localStorage.clear()
 })
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -176,5 +180,207 @@ describe('headline words', () => {
   it('formats a price with its currency', () => {
     expect(headlineFigure(card('lcoe', { value: 55.5, unit: 'EUR/MWh' }))).toEqual({ value: '55.50 €/MWh', basis: 'investment case' })
     expect(headlineFigure(card('lcoe', { value: 55.5, unit: 'USD/MWh' })).value).toBe('55.50 USD/MWh')
+  })
+})
+
+// ui-modern 03 S3: the change against the base case (K3) and the trend over
+// the investment periods (K6). The backend subtracts; this only words it.
+describe('HeadlineStrip against the base case', () => {
+  const CASE = { role: 'case' as const, base_name: 'Campus', base_project_id: 'p1', comparable: true, reason: null, basis: 'Each change is this case\'s figure minus the base case\'s.' }
+  const delta = (value: number | null, pct: number | null, note: string | null = pct == null ? 'zero base: no percentage' : null) => ({ value, pct, note })
+  type Body = { kind: string; cards: HeadlineCard[]; comparison?: unknown }
+  /** The plain fetch answers without the base case; the compared one, asked after it, with it. */
+  const compared = (body: Body) => {
+    api.getHeadlineKpis.mockResolvedValue({ ...body, comparison: null, cards: body.cards.map(c => ({ ...c, delta: null })) })
+    api.getHeadlineComparison.mockResolvedValue(body)
+  }
+  const text = (id: string) => screen.getByTestId(`headline-${id}`).textContent
+
+  it('a case says each change with its sign in words, and the source line names the base project', async () => {
+    compared({ kind: 'network', comparison: CASE, cards: [
+      card('system_cost', { value: 33_240_000, unit: 'currency', delta: delta(-1_460_000, -4.21) }),
+      card('new_build_capital', { value: 2_210_000, unit: 'currency/yr', delta: delta(2_210_000, null) }),
+      card('curtailed_share', { value: 12.3, unit: '%', delta: delta(1.25, 11.3) }),
+      card('peak_line_loading', { value: 80, unit: '%', delta: delta(0, 0) }),
+    ] })
+    renderStrip()
+    const strip = await screen.findByTestId('headline-strip')
+    // U+2212 for the minus, and the tile's own "%" spacing (D1).
+    await waitFor(() => expect(text('system_cost')).toContain('−4.2 % vs Base case'))
+    // The tile's own basis words stay beside the change.
+    expect(text('system_cost')).toContain('in this solve')
+    // No percentage over a zero base: the change in the tile's unit and rounding.
+    expect(text('new_build_capital')).toContain('+€2.21 M vs Base case')
+    // A share changes in percentage points, never a percent of a percent.
+    expect(text('curtailed_share')).toContain('+1.3 percentage points vs Base case')
+    expect(text('peak_line_loading')).toContain('No change vs Base case')
+    expect(strip.querySelector('[data-chart-source]')?.textContent).toContain('Base case: Campus')
+    expect(screen.queryByTestId('headline-not-compared')).toBeNull()
+    expect(text('system_cost')).not.toContain('-')
+  })
+
+  it('paints the figures before the base case is read, and keeps them if that read fails', async () => {
+    let answer: (v: unknown) => void = () => {}
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'network', comparison: null, cards: [card('system_cost', { value: 33_240_000, unit: 'currency' })] })
+    api.getHeadlineComparison.mockReturnValue(new Promise((_, reject) => { answer = reject }))
+    renderStrip()
+    await screen.findByTestId('headline-strip')
+    expect(figure('system_cost')?.getAttribute('data-kpi-value')).toBe('€33.2 M')
+    expect(api.getHeadlineComparison).toHaveBeenCalledTimes(1)
+    answer(new Error('500'))
+    await waitFor(() => expect(api.getHeadlineComparison).toHaveBeenCalled())
+    expect(figure('system_cost')?.getAttribute('data-kpi-value')).toBe('€33.2 M')
+    expect(screen.getByTestId('headline-strip').textContent).not.toContain('Base case')
+    expect(screen.queryByTestId('headline-strip-failed')).toBeNull()
+  })
+
+  it('after a new solve shows the new figures at once, and the changes only when the base case is read again', async () => {
+    const one = (value: number, d?: ReturnType<typeof delta>) =>
+      ({ kind: 'network', comparison: d ? CASE : null, cards: [card('system_cost', { value, unit: 'currency', delta: d ?? null })] })
+    api.getHeadlineKpis.mockResolvedValue(one(33_240_000))
+    compared(one(33_240_000, delta(-1_460_000, -4.21)))
+    const qc = renderStrip()
+    await waitFor(() => expect(screen.getByTestId('headline-strip').textContent).toContain('−4.2 % vs Base case'))
+    // A new solve: the plain fetch answers first, the comparison is still on its way.
+    let answer: (v: unknown) => void = () => {}
+    let fail: (e: unknown) => void = () => {}
+    api.getHeadlineKpis.mockResolvedValue(one(40_000_000))
+    api.getHeadlineComparison.mockReturnValue(new Promise((resolve, reject) => { answer = resolve; fail = reject }))
+    void qc.invalidateQueries({ queryKey: headlineKpisKey('Demo') })
+    await waitFor(() => expect(figure('system_cost')?.getAttribute('data-kpi-value')).toBe('€40.0 M'))
+    expect(screen.getByTestId('headline-strip').textContent).not.toContain('vs Base case')
+    answer(one(40_000_000, delta(5_300_000, 15.27)))
+    await waitFor(() => expect(screen.getByTestId('headline-strip').textContent).toContain('+15.3 % vs Base case'))
+    // The next one fails: the old changes do not stay beside the new figure.
+    api.getHeadlineKpis.mockResolvedValue(one(41_000_000))
+    api.getHeadlineComparison.mockReturnValue(new Promise((_, reject) => { fail = reject }))
+    void qc.invalidateQueries({ queryKey: headlineKpisKey('Demo') })
+    await waitFor(() => expect(figure('system_cost')?.getAttribute('data-kpi-value')).toBe('€41.0 M'))
+    fail(new Error('500'))
+    await waitFor(() => expect(api.getHeadlineComparison).toHaveBeenCalledTimes(3))
+    expect(figure('system_cost')?.getAttribute('data-kpi-value')).toBe('€41.0 M')
+    expect(screen.getByTestId('headline-strip').textContent).not.toContain('vs Base case')
+  })
+
+  it('a change that rounds to nothing reads "No change", with no sign', () => {
+    expect(headlineDelta(card('system_cost', { value: 1e7, unit: 'currency', delta: delta(1e-6, 1e-11) }))).toBe('No change vs Base case')
+    expect(headlineDelta(card('curtailed_share', { value: 12.3, unit: '%', delta: delta(-0.04, -0.3) }))).toBe('No change vs Base case')
+    expect(headlineDelta(card('system_cost', { value: 1e7, unit: 'currency', delta: delta(-6000, -0.06) }))).toBe('−0.1 % vs Base case')
+  })
+
+  it('does not ask for the base case when nothing is solved', async () => {
+    api.getHeadlineKpis.mockResolvedValue(null)
+    renderStrip()
+    await waitFor(() => expect(api.getHeadlineKpis).toHaveBeenCalled())
+    expect(api.getHeadlineComparison).not.toHaveBeenCalled()
+  })
+
+  it('the base says it is the base case and shows no change', async () => {
+    compared({ ...HUB, comparison: { ...CASE, role: 'base', basis: null } })
+    renderStrip()
+    const strip = await screen.findByTestId('headline-strip')
+    await waitFor(() => expect(strip.querySelector('[data-chart-source]')?.textContent).toMatch(/· Base case$/))
+    expect(strip.textContent).not.toContain('vs Base case')
+  })
+
+  it('a case that is not compared says why in visible text and shows no change', async () => {
+    const reason = 'Not compared with the base case: the base\'s inputs or finance settings changed since this case was branched.'
+    compared({ ...HUB, comparison: { ...CASE, comparable: false, reason, basis: null } })
+    renderStrip()
+    await screen.findByTestId('headline-strip')
+    expect((await screen.findByTestId('headline-not-compared')).textContent).toBe(reason)
+    expect(screen.getByTestId('headline-strip').textContent).not.toContain('vs Base case')
+    expect(screen.getByTestId('headline-strip').querySelector('[data-chart-source]')?.textContent).toContain('Base case: Campus')
+  })
+
+  it('a card whose base has no figure says so in place of a change', async () => {
+    const note = 'The base case has no figure here to compare with.'
+    compared({ kind: 'network', comparison: CASE, cards: [
+      card('system_cost', { value: 33_240_000, unit: 'currency', delta: delta(-1_460_000, -4.21) }),
+      card('curtailed_share', { value: 12.3, unit: '%', delta: delta(null, null, note) }),
+    ] })
+    renderStrip()
+    await screen.findByTestId('headline-strip')
+    await waitFor(() => expect(text('curtailed_share')).toContain(note))
+    expect(text('curtailed_share')).not.toContain('vs Base case')
+    expect(text('system_cost')).toContain('−4.2 % vs Base case')
+  })
+
+  it('an out-of-date strip dims the change with its figure, under the one mark', async () => {
+    compared({ kind: 'network', comparison: CASE, cards: [
+      card('system_cost', { value: 33_240_000, unit: 'currency', delta: delta(-1_460_000, -4.21) }),
+    ] })
+    renderStrip({ line: 'Latest solve · solved', stale: true })
+    const strip = await screen.findByTestId('headline-strip')
+    const change = await screen.findByText('−4.2 % vs Base case')
+    expect(change.className).toContain('opacity-60')
+    expect(strip.textContent?.match(/Out of date/g)).toHaveLength(1)
+  })
+
+  it('a project with no base case says nothing about one', async () => {
+    renderStrip()
+    const strip = await screen.findByTestId('headline-strip')
+    await waitFor(() => expect(api.getHeadlineComparison).toHaveBeenCalled())
+    expect(strip.textContent).not.toContain('Base case')
+    expect(comparisonBasis(null)).toBeUndefined()
+  })
+
+  it('a card without a figure never shows a change', () => {
+    expect(headlineDelta(card('lcoe', { delta: delta(1, 1) }))).toBeUndefined()
+    expect(headlineDelta(card('lcoe', { value: 1, unit: 'EUR/MWh' }))).toBeUndefined()
+    expect(headlineDelta(card('lcoe', { value: 52, unit: 'EUR/MWh', delta: delta(2, 4) }))).toBe('+4.0 % vs Base case')
+    expect(headlineDelta(card('unserved_energy', { value: 1500, unit: 'MWh', delta: delta(-500, null) }))).toBe('−500 MWh vs Base case')
+  })
+})
+
+describe('HeadlineStrip trend over the investment periods', () => {
+  const BASIS = 'Each investment period\'s cost over its years, undiscounted.'
+  const POINTS = [{ period: 2030, value: 41_000_000 }, { period: 2040, value: 37_500_000 }, { period: 2050, value: 33_000_000 }]
+  const TREND = { basis: BASIS, points: POINTS }
+  const MULTI = { kind: 'network', comparison: null, cards: [
+    card('system_cost', { value: 111_500_000, unit: 'currency', trend: TREND }),
+    card('new_build_capital', { value: 2_210_000, unit: 'currency' }),
+  ] }
+
+  it('draws the line with a text alternative and its first and last period in words', async () => {
+    api.getHeadlineKpis.mockResolvedValue(MULTI)
+    renderStrip()
+    const trend = await screen.findByTestId('headline-system_cost-trend')
+    expect(trend.getAttribute('role')).toBe('img')
+    // First and last only, however many periods; the same two figures as the visible text (D5).
+    expect(trend.getAttribute('aria-label')).toBe('2030 to 2050: €41.0 M to €33.0 M')
+    expect(trend.textContent).toBe('2030 · €41.0 M2050 · €33.0 M')
+    expect(trend.getAttribute('title')).toBe(BASIS)
+    expect(trend.querySelector('polyline')?.getAttribute('stroke')).toBe('var(--color-series-1)')
+    expect(screen.queryByTestId('headline-new_build_capital-trend')).toBeNull()
+  })
+
+  it('a single-period run has no trend, so its tiles are as they were', async () => {
+    renderStrip()
+    const strip = await screen.findByTestId('headline-strip')
+    expect(document.querySelector('[data-testid$="-trend"]')).toBeNull()
+    expect(strip.querySelector('.min-h-\\[149px\\]')).toBeNull()
+    expect(headlineTrend(card('system_cost', { value: 1, unit: 'currency', trend: { basis: BASIS, points: POINTS.slice(0, 1) } }))).toBeNull()
+    expect(headlineTrend(card('system_cost', { trend: TREND }))).toBeNull()
+  })
+
+  it('a multi-period row is taller, and so is its placeholder the next time it loads (D4)', async () => {
+    api.getHeadlineKpis.mockResolvedValue(MULTI)
+    renderStrip()
+    const strip = await screen.findByTestId('headline-strip')
+    expect(strip.querySelectorAll('.min-h-\\[149px\\]')).toHaveLength(2)
+    cleanup()
+    api.getHeadlineKpis.mockReturnValue(new Promise(() => {}))
+    renderStrip()
+    const placeholder = await screen.findByTestId('headline-strip-loading')
+    expect(placeholder.querySelectorAll('.min-h-\\[149px\\]')).toHaveLength(2)
+    expect(placeholder.querySelector('.min-h-\\[128px\\]')).toBeNull()
+  })
+
+  it('dims the trend with the figure when the solve is out of date', async () => {
+    api.getHeadlineKpis.mockResolvedValue(MULTI)
+    renderStrip({ line: 'Latest solve · solved', stale: true })
+    const trend = await screen.findByTestId('headline-system_cost-trend')
+    expect(trend.parentElement?.className).toContain('opacity-60')
   })
 })

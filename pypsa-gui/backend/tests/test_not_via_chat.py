@@ -56,7 +56,7 @@ def test_the_issue_rows_are_declared():
     entries = {e['id']: e for e in NOT_VIA_CHAT}
     expected = {
         'admin_users_and_orgs': ('out of chat', None), 'legacy_project_import': ('out of chat', None),
-        'memory_page_edits': ('out of chat', None),
+        'memory_page_edits': ('out of chat', None), 'memory_dream_review': ('out of chat', None),
         'memory_parameter_suggestions': ('out of chat', None),
         'sign_in_and_password': ('out of chat', None),
         'project_members': ('unbuilt; owner to decide later', 'workspace'),
@@ -71,6 +71,7 @@ def test_the_issue_rows_are_declared():
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
         'report_comment_revisions': ('unbuilt', None),
+        'report_chart_snapshots': ('manual', 'results'),
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected
@@ -79,6 +80,8 @@ def test_the_issue_rows_are_declared():
         ('POST', '/api/simulation/queue/pause'), ('POST', '/api/simulation/queue/resume'),
     })
     assert 'series_file_upload' not in entries
+    # ui-modern 03 S3 (GK B S8): the strip's changes are not chat's comparison.
+    assert 'compares a case with its base on other measures' in entries['results_headline_strip']['reason']
 
 
 @pytest.mark.parametrize('goal,entry_id', [
@@ -117,6 +120,7 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Set the load profile from the uploaded file', 'Resume my task', 'Resume the plan',
     'Switch to my OpenAI profile', 'Switch to my Anthropic profile', 'Pause my goal', 'Pause the plan',
     'Extract the grid code from this PDF', 'Geocode the site address',
+    'Pin the slack bus to bus 3', 'Pin the battery capacity at 50 MW', 'Which pinned settings does the scenario use',
     'List my saved snapshots', 'Reuse the last run settings', 'Any suggestion for the battery size', 'Save the project', 'Saved project list', 'Show saved scenarios',
     'Reuse my saved scenario parameters', 'Show saved scenario costs', 'What did the last saved run cost',
     'Compare capacity with the saved snapshot', 'Reuse the price from the saved tariff',
@@ -195,3 +199,19 @@ def test_matching_is_bounded_ranked_and_returns_detached_public_records():
     assert len(out) <= 2 and matches({'account'}, limit=0) == []
     out[0]['reason'] = 'changed by a caller'
     assert matches({'account'})[0]['reason'] != 'changed by a caller'
+
+
+def test_saved_report_charts_are_human_only_and_found_by_their_goal(discovery):
+    from services.not_via_chat import NOT_VIA_CHAT
+
+    entry = next(e for e in NOT_VIA_CHAT if e['id'] == 'report_chart_snapshots')
+    assert entry['disposition'] == 'manual'
+    assert {('POST', '/api/projects/{name}/report-charts'),
+            ('DELETE', '/api/projects/{name}/report-charts/{chart_id}')} <= entry['routes']
+    out = chat_tools.find_capabilities('Pin this chart for the report.')
+    assert [e['title'] for e in out.get('not_via_chat', [])][:1] == [entry['title']]
+
+
+def test_a_real_chart_pin_phrase_is_still_refused(discovery):
+    out = chat_tools.find_capabilities('Which charts are pinned to the report?')
+    assert out['not_via_chat'][0]['title'] == 'Saving a chart for the report'

@@ -291,7 +291,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'id': 'results_headline_strip',
         'title': 'Results headline strip',
         'disposition': 'manual',
-        'reason': "The Results headline strip's own card list is not read from chat. Chat reads the same figures one by one (cost breakdown, lost load, the checked answers). Open Results › Summary to see the strip.",
+        'reason': "The Results headline strip's own card list is not read from chat. Chat reads its figures one by one and compares a case with its base on other measures. Open Results › Summary to see the strip.",
         'page': 'Results › Summary',
         'panel': 'results',
         # 'headline' alone is in six tool descriptions (compare-runs headline
@@ -331,6 +331,24 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
         'routes': frozenset({
             ('POST', '/api/library/series'),
+        }),
+    },
+    {
+        'id': 'report_chart_snapshots',
+        'title': 'Saving a chart for the report',
+        'disposition': 'manual',
+        'reason': 'Only you can pin a chart you are looking at in Results for the report, list the pinned ones or remove one. Use "Add to report" on the chart; chat reports never carry saved charts.',
+        'page': 'Results (chart "Add to report")',
+        'panel': 'results',
+        'keywords': frozenset({
+            'pin',
+            'pinned',
+        }),
+        'routes': frozenset({
+            ('DELETE', '/api/projects/{name}/report-charts/{chart_id}'),
+            ('GET', '/api/projects/{name}/report-charts'),
+            ('GET', '/api/projects/{name}/report-charts/{chart_id}.png'),
+            ('POST', '/api/projects/{name}/report-charts'),
         }),
     },
     {
@@ -381,6 +399,21 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('PATCH', '/api/memory/items/{item_id}'),
             ('POST', '/api/memory/items/{item_id}/{action}'),
             ('GET', '/api/memory/items/{item_id}/versions'),
+        }),
+    },
+    {
+        'id': 'memory_dream_review',
+        'title': 'Reviewing your recent work for lessons',
+        'disposition': 'out of chat',
+        'reason': ('A review of your past chats and runs proposes lessons for you to confirm. It is '
+                   'started, and its proposals confirmed one by one, on the Memory page, so it never '
+                   'runs from inside a chat turn.'),
+        'page': 'Memory page (account menu)',
+        'panel': None,
+        'keywords': frozenset({'dream', 'lessons', 'consolidate'}),
+        'routes': frozenset({
+            ('GET', '/api/memory/dream'),
+            ('POST', '/api/memory/dream'),
         }),
     },
     {
@@ -484,6 +517,8 @@ def matches(words: set[str], limit: int = 2) -> list[dict]:
         if (entry['id'] == 'solve_queue_instance_controls' and words & {'goal', 'task', 'plan'}
                 and 'queue' not in words):
             continue
+        if entry['id'] == 'report_chart_snapshots' and not words & {'chart', 'charts', 'graph', 'plot'}:
+            continue  # bare `pin` also means "pin a bus or a capacity"
         if entry['id'] == 'memory_parameter_suggestions' and not _asks_for_a_saved_value(words):
             continue
         if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import text, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -372,3 +372,49 @@ class MemoryRevision(Base):
 
     scope_key: Mapped[str] = mapped_column(String(48), primary_key=True)
     revision: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# The one-live-job-per-user guarantee (GK B D4): a partial unique index, so two
+# concurrent starts cannot both insert a queued/running row.
+_DREAM_LIVE = text("status IN ('queued', 'running')")
+
+
+class MemoryDreamJob(Base):
+    """One dream job (assistant-memory plan §6, issue 04; `harness/dream.py`).
+
+    Reviews the user's past chats and runs and writes `proposed` memory items
+    only. `lease_owner`/`lease_until` (wall time) guard every write after a
+    take-over (§9 M7, GK B D1). `cursor_json` is where the next job starts;
+    `candidates_json` holds the analyzer output awaiting the organizer.
+    """
+
+    __tablename__ = "memory_dream_jobs"
+    __table_args__ = (
+        Index(
+            "ux_memory_dream_jobs_live_user",
+            "user_id",
+            unique=True,
+            sqlite_where=_DREAM_LIVE,
+            postgresql_where=_DREAM_LIVE,
+        ),
+        Index("ix_memory_dream_jobs_user_created", "user_id", "created_at"),
+        Index("ix_memory_dream_jobs_status", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    trigger: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16))
+    cursor_json: Mapped[str] = mapped_column(Text)
+    candidates_json: Mapped[str] = mapped_column(Text)
+    budget_json: Mapped[str] = mapped_column(Text)
+    spent_json: Mapped[str] = mapped_column(Text)
+    counts_json: Mapped[str] = mapped_column(Text)
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+    restarts: Mapped[int] = mapped_column(Integer, default=0)
+    restart_times_json: Mapped[str] = mapped_column(Text)
+    error_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

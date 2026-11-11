@@ -2,19 +2,21 @@
 id: run-study
 title: Run a reliability study
 intent: Check the site is ready, run the Energy Hub study, and read the adequacy results.
-when: [expert, guided]
+when:
+- expert
+- guided
 order: 40
 opening_request: Run a reliability study on this network. Check the setup first and tell me what is missing before anything runs.
 steps:
-  - id: readiness
-    title: Check the setup
-    done_when: review_eh_study or suggest_eh_setup reports nothing blocking, or the user has accepted the gaps.
-  - id: run
-    title: Run the study
-    done_when: run_eh_study was started after the confirmation card and finished.
-  - id: read
-    title: Read the results
-    done_when: The user has heard the adequacy metrics in plain language and knows the next workflow.
+- id: readiness
+  title: Check the setup
+  done_when: 'review_eh_study or suggest_eh_setup reports nothing blocking, or the user has accepted the gaps. Gate rules (eh_site input_gate): in.validate.errors, in.readiness.ready, in.diagnose.unserved_islands, eh.readiness.ready, eh.energization.min_mw.'
+- id: run
+  title: Run the study
+  done_when: 'run_eh_study was started after the confirmation card and finished. Gate rules (eh_site solve): sv.solve.state, eh.study.status.'
+- id: read
+  title: Read the results
+  done_when: 'The user has heard the adequacy metrics in plain language and knows the next workflow. Gate rules (eh_site result_gate): res.solve.status, res.fresh, eh.review.blockers, kpi.unserved_mwh, eh.adequacy.lole.'
 ---
 
 ## Step: readiness
@@ -28,11 +30,15 @@ card's receipt which fixes were applied, and do not propose an unticked fix
 again unless the user asks. Then `review_eh_study` for anything still
 blocking.
 
+Harness tools for this stage (profile eh_site, input_gate): `validate_network`, `project_readiness`, `diagnose_network`.
+
 ## Step: run
 
 Say what the study will do and that a confirmation card follows, then call
 `run_eh_study`. Report progress from the status frames; do not call another
 write while it runs.
+
+Harness tools for this stage (profile eh_site, solve): `solve_queue_enqueue`, `run_eh_study`.
 
 ## Step: read
 

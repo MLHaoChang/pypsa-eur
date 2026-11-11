@@ -151,6 +151,18 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A card shows every value its approval digest binds; a list or series is never summarised as a count (#1379 F2, GK B (46)).
 - An apply-then-read with nothing moved reads fresh; stale compares against what was recorded at approval (#1375 D1, GK B (46)).
 - A linked quantity clashes with a ledger stream only when that stream prices the same quantity. A served load meets the bill (grid import) but not an EaaS fee (the same delivery). The bill must stay import-only, pinned by a test (BC-04 F1, GK B (47)).
+- A test's expected value is never built from the table under test. Expected units and labels come from the backend source of truth, or the mutant survives (#1379 PATH_WORDS units, GK B (47)).
+- A lease guard has a killing test for each of its parts: owner, an unexpired lease (a stalled holder writes nothing before settlement), and the claim's queued status (#1389 G1, G2, GK B (47)).
+- An access check that runs before a read is repeated at write time for every link the write records (#1389 G3, GK B (47)).
+- A persisted mark or record that readers branch on is normalised by one reader. A malformed shape reads as the fail-closed state, never a 500, a character split or a silent default (#1390 F2, GK B (47)).
+- An "is current" or no-op flag is an exact compare, with a server test at a value equal only after rounding. A mocked client flag pins nothing (#1386 A3, GK B (47)).
+- A solve-like check's revision and its network copy are read under one lock, with a test where an edit lands right after the lock is released (#1384 N1, GK B (47)).
+- A reader of saved settings it cannot parse (non-dict JSON, wrong-typed fields, [] or null) names them as unreadable, never as empty or "nothing on" (#1384 N2b, GK B (47)).
+- A check that must run under a lock (no check-then-act window) has a test that sets the condition at lock entry (wrap the lock). The test is shown red with the check moved above the lock: a test that sets the condition beforehand passes either way (#1378 K1b, GK B (48)).
+- A difference or ratio of two finite figures is checked for a finite RESULT too (a tiny divisor, opposite extremes), not only for finite inputs. Under allow_nan=False an inf is a 500 (#1392 T2, GK B (48)).
+- A survivor called "equivalent" because two quantities "never equal" is checked against what the guard actually compares (e.g. a clamped min(), not the raw value). A card sentence behind such a guard is pinned both absent and present (#1398 A1, GK B (48)).
+- A scheduled trigger that checks "not yet fired" and then creates a job carries a unique fire key, or takes the check and create under one cross-process lock. A one-live-job index does not stop a second job once the first settles. Test the race (#1401 T1, GK B (48)).
+- A PR that adds or renames run-profile levers runs `test_harness_run_monitor` at the trial merge. Its envelope-words test catches a lever name with no NAME_WORDS entry (#1398, GK B (48)).
 
 ## Engineering rules
 

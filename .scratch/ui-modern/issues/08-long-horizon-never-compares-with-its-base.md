@@ -1,0 +1,42 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# A case with a long horizon never compares with its base
+
+Status: needs-triage
+Type: bug (found while timing the 03 S3 comparison)
+Reviewer: GK B.
+
+## What is wrong
+
+`harness.experiment_comparison.basis_digests` hashes the snapshot index with
+`services.experiments._digest`, which refuses any JSON over 64 KiB
+(`MAX_RECORD_BYTES // 2`). That limit is meant for an experiment plan. A
+snapshot index passes it only while it is short: 168 hourly snapshots are
+13,935 bytes, the three-period `eh_datacenter_staged` template (504 snapshots)
+is 77,790 bytes, and a full hourly year would be several hundred kilobytes.
+
+Past the limit `sensitivity_comparison._read` raises a 422 ("The plan must
+contain bounded finite JSON values"), so:
+
+- the headline strip's `?compare=1` answers "The base case could not be read,
+  so this case is not compared with it." and logs a traceback on every call;
+- chat's `compare_sensitivities` and the results workbook's scenario sheet
+  (`services/results_workbook/scenarios.py`, `routers/results.py`
+  `basis_digests(ctx)`) go through the same digest, so they are expected to
+  refuse the same projects. Not confirmed by a run.
+
+## Seen
+
+In-process `TestClient`, branch `claude/ui-modern-03-s3-headline-delta`:
+`eh_datacenter_staged`, solved twice through the queue, one
+`run_sensitivity_sweep` case solved, the case open. `compare=1` returns 200
+with `comparable: false` and every delta null. The same steps on
+`eh_datacenter` (168 snapshots) compare.
+
+## To decide
+
+Whether the basis digests need the plan's size limit at all: a digest of the
+snapshots and weightings is a hash of the run's own data, not user input. A
+digest without the limit gives the same value for every index that passes
+today, so saved records stay valid.

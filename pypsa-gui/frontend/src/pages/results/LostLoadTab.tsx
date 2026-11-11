@@ -13,7 +13,7 @@ import { nk } from '../../utils/queryKeys'
 import {
   type TSPayload, type WeightCtx, weightedSumSplit, aggregateTS,
   shortStamp, useWeightCtx, WindowCapBanner,
-  CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, extremeDot, extremeOf,
+  CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_TOOLTIP, yAxisLabel, extremeDot, extremeOf,
   ChartFrame, CHART_HEIGHT, fmtPower, chartFigure,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
@@ -310,8 +310,9 @@ export default function LostLoadTab() {
       <ChartFrame title="Lost load over time" hint={`aggregated MW · ${periodLabel}`}
         figure={worst ? chartFigure(fmtPower(worst.value), 'worst hour') : undefined}>
           {agg && agg.length > 0 ? (
+            <>
             <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-              <AreaChart data={agg} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+              <AreaChart data={thinRows(agg)} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id="llGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={ACCENT} stopOpacity={0.4} />
@@ -319,7 +320,7 @@ export default function LostLoadTab() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid {...CHART_GRID} />
-                <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
+                <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis(thinRows(agg).length)} />
                 <YAxis {...CHART_AXIS} label={yAxisLabel('Lost load (MW)')} />
                 <Tooltip {...CHART_TOOLTIP}
                   labelFormatter={shortStamp}
@@ -331,6 +332,8 @@ export default function LostLoadTab() {
                 )}
               </AreaChart>
             </ResponsiveContainer>
+            <ThinNote rows={agg} />
+            </>
           ) : <p className="text-[11px] text-muted">No time series for the selected range.</p>}
       </ChartFrame>
     </div>

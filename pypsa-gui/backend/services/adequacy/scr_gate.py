@@ -29,6 +29,10 @@ import math
 from typing import Any
 
 from models.energy_hub import GatesBlock, SectionStatus
+try:
+    from gridspine.drivers.process_chain import truthy as _truthy
+except ImportError:  # a build without gridspine: the one pinned fallback, not a new copy
+    from services.solver.process_uc import _fallback_truthy as _truthy
 
 # gridspine is repo-root (not in gui-requirements pip freeze). Guard like
 # ``gridspine_service`` so the frozen desktop build 503s/fail-closes instead of
@@ -70,16 +74,12 @@ def classify_scr(scr: float) -> GatesBlock:
     return GatesBlock(scr="warn", emt_recommended=True)
 
 
-def _truthy_poc(val: Any) -> bool:
-    return val is True or str(val).lower() in ("true", "1", "yes")
-
-
 def _poc_buses(n) -> list[str]:
     if n.buses is None or n.buses.empty or "eh_poc" not in n.buses.columns:
         return []
     return [
         str(b) for b in n.buses.index
-        if _truthy_poc(n.buses.at[b, "eh_poc"])
+        if _truthy(n.buses.at[b, "eh_poc"])
     ]
 
 
