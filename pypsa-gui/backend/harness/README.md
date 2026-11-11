@@ -1645,6 +1645,12 @@ archetype `off_grid` the template card's.
   the plan card is proposed or read; the card shows K and the budget, held to
   the hard cap of 20 (K >= 2 then covers the first pass and one L2 round).
   The grant counts again and refuses `eh_contingencies` when K moved.
+- **K and the task lock (#1345).** The card paths count K before
+  `assistant_tasks._LOCK` (`run_envelope.counted_live` at propose,
+  `read_for_card` and the grant in `decide`). `run_eh.islanding` still runs
+  under the lock at three sites: `run_eh.admit` from `begin_step`, the
+  `_eh_frozen` freeze in `decide`, and the `stage_frozen` freeze in
+  `_advance_run`; each costs about 5 to 12 ms (GK B (48) A2).
 - **The cap (GK B (47) Q1).** The card shows the arithmetic and, when the
   cap applies, the capped budget (Q1-iii). A K whose one pass, `1 + (2 + K)
   + 1`, is above the cap is refused on the card and at the grant,

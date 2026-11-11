@@ -1652,3 +1652,58 @@ def test_a_changed_k_refusal_names_the_links_the_project_has_now(tmp_path):
     assert kind == run_eh.CONTINGENCY_KIND
     assert "showed 1 islanding contingencies (subsea_tie)" in message
     assert "the project now has 2 (subsea_tie, second_tie)" in message
+
+
+@pytest.mark.parametrize(
+    "k, needed, solves, capped", [(1, 19, 19, False), (2, 22, 20, True)]
+)
+def test_the_hard_cap_sentence_shows_only_when_the_cap_clamps(
+    k, needed, solves, capped
+):
+    """GK B (48) A1: at K = 1 the budget (19) is not capped, so the card has
+    no "hard cap" sentence; at K = 2 (22 > 20) it has (Q1-iii)."""
+    card = run_envelope.describe(
+        {
+            "id": "e",
+            "state": "proposed",
+            "expires_at": None,
+            "audit": [],
+            "notify": {},
+            "edits": [],
+            "gaps": [],
+            "runs": [],
+            "contingencies": {
+                "count": k,
+                "links": [f"tie_{i}" for i in range(k)],
+                "needed": needed,
+                "solves": solves,
+            },
+            "budget": {"solves": solves, "rounds": 6, "wall_time_h": 8.0},
+            "research": {"allowed": False, "cost_cap_eur": 2.0},
+        }
+    )
+    assert f"= {needed} solves" in card["detail"]
+    assert ("the budget is the hard cap of 20 solves" in card["detail"]) is capped
+
+
+def test_a_capped_loop_that_ran_against_another_goal_reads_the_goal_reason(
+    tmp_path, monkeypatch
+):
+    """GK B (48) A3: the goal check runs before the cap check. A loop cut short
+    by the cap that also judged a target other than the granted goal reads
+    `goal_mismatch`, not `budget_spent`."""
+    path, lole, granted = _capped_lole(tmp_path)
+    task = json.loads(path.read_text())
+    step = _looped(lole, granted)
+    step["result"]["loop"].update(
+        horizon_years=1.0, goal_sources={"target_lole_h": "user"}
+    )
+    task["steps"].append(step)
+    monkeypatch.setattr(
+        run_gates,
+        "_granted_goal",
+        lambda env: {"value": 5.0, "unit": "h/yr", "source": "user"},
+    )
+    [result] = run_gates.evaluate([lole], run_gates.Env(task, None, None, None))
+    assert result["verdict"] == "not_evaluated"
+    assert result["facts"][0]["value"] == "goal_mismatch"

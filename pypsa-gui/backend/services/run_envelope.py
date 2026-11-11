@@ -620,8 +620,9 @@ def _over_cap_words(shown):
 
 def counted_live(project_id, profile):
     """G1: `counted` on the open project when it is the run's own, else None.
-    It copies the network and derives the DTC config, so callers take it
-    before `assistant_tasks._LOCK`, never under it (#1345)."""
+    It copies the network and derives the DTC config, so the card paths take
+    it before `assistant_tasks._LOCK` (#1345); the freeze and admit sites
+    still derive K under the lock (README, "K and the task lock")."""
     from services.pypsa_service import PyPSAService
     ctx = PyPSAService.get_active_context()
     if str(getattr(ctx, "project_uuid", None)) != str(project_id):
