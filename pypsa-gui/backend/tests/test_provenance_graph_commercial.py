@@ -223,7 +223,38 @@ def test_an_error_outside_cell_gone_is_never_read_as_fresh_it_propagates(monkeyp
         Q.cell_verdict(_config(), PEAK_KEY)
 
 
+def test_an_error_outside_cell_gone_while_reading_the_value_propagates(monkeypatch):
+    """C3, the first catch site: `cell_value` raising anything but `CELL_GONE` is never read as gone."""
+
+    def boom(config, key):
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(DC, "cell_value", boom)
+    with pytest.raises(RuntimeError):
+        Q.cell_verdict(_config(), PEAK_KEY)
+
+
 # ── What the stamp compares (C2) ───────────────────────────────────────────
+
+
+def test_a_tariff_currency_that_appeared_or_vanished_is_stale():
+    """None is a value: a currency the tariff no longer implies, or one the stamp did not record, differs."""
+    config = _config()
+    config["import_tariff"]["jurisdiction"] = "generic"
+    broke = _broke(config, PEAK_KEY)
+    assert (broke.field, broke.recorded, broke.current) == ("currency", "EUR", None)
+    config = _config()
+    config["provenance"][PEAK_KEY]["currency"] = None
+    config["import_tariff"]["currency"] = "USD"
+    broke = _broke(config, PEAK_KEY)
+    assert (broke.field, broke.recorded, broke.current) == ("currency", None, "USD")
+
+
+def test_a_price_stamped_with_no_money_year_is_stale_once_the_contract_states_one():
+    config = _config()
+    config["provenance"][PPA_KEY]["currency_year"] = None
+    broke = _broke(config, PPA_KEY)
+    assert (broke.field, broke.recorded, broke.current) == ("currency_year", None, 2030)
 
 
 def test_an_equal_value_whose_unit_moved_is_stale():
@@ -290,13 +321,13 @@ def test_the_wire_names_the_fields_compared_and_the_ones_not():
         "currency" in Q.cell_wire(config, PPA_KEY)["uncompared"]
     )  # a contract states no currency
     config["import_tariff"]["jurisdiction"] = (
-        "generic"  # implies none: nothing to compare the stamp's with
+        "generic"  # implies none: the stamp's EUR is no longer what the tariff is in
     )
     wire = Q.cell_wire(config, PEAK_KEY)
-    assert (
-        wire["state"] == "fresh"
-        and "currency" in wire["uncompared"]
-        and "currency" not in wire["compared"]
+    assert (wire["state"], wire["compared"], wire["stale"]["current"]) == (
+        "stale",
+        ["value", "unit", "currency"],
+        None,
     )
     _item(config, "energy")["periods"][0]["rate"] = 0.5
     assert Q.cell_wire(config, PEAK_KEY)["stale"]["current"] == 0.5
@@ -479,7 +510,7 @@ def test_an_entry_with_no_or_an_unknown_source_keeps_its_own_edge_and_compares(s
     assert len(stamps) == 5
     if source != "pdf:never-seen":
         assert stamps[C.cell_id(PEAK_KEY)] != stamps[C.cell_id(PPA_KEY)]
-        assert stamps[C.cell_id(PEAK_KEY)] == f"source:unrecorded/{PEAK_KEY}"
+        assert stamps[C.cell_id(PEAK_KEY)] == f"source-unrecorded:{PEAK_KEY}"
     assert _state(config, PEAK_KEY) == "fresh"
     _item(config, "energy")["periods"][0]["rate"] = 0.09
     assert _state(config, PEAK_KEY) == "stale" and _state(config, PPA_KEY) == "fresh"
@@ -614,3 +645,12 @@ def test_a_verdict_writes_nothing_and_reads_the_store_once(site, monkeypatch):  
     assert reads == [] and stored == passed  # the caller's one read is the only one
     monkeypatch.undo()
     assert _digest() == before
+
+
+def test_live_still_prunes_a_gone_cell_and_keeps_the_rest():
+    """C9: `_live`, which apply prunes with, is unchanged by the graph."""
+    config = _config()
+    _no_item(config)
+    live = DC._live(config, config["provenance"])
+    assert PEAK_KEY not in live
+    assert set(live) == set(config["provenance"]) - {PEAK_KEY}

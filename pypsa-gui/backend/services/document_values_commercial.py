@@ -608,8 +608,8 @@ def cell_value(commercial: dict, key: str):
 
 def cell_now(commercial: dict, key: str) -> dict:
     """What the config holds for a provenance key now: its `value` and `unit`, the `currency` a tariff
-    states or its jurisdiction implies, and a PPA price's `currency_year` (the contract's `base_year`, None
-    when it states none). A currency the tariff neither states nor implies is left out. Raises (`CELL_GONE`) like `cell_value`."""
+    states or its jurisdiction implies (None when it neither states nor implies one), and a PPA price's
+    `currency_year` (the contract's `base_year`, None when it states none). Raises (`CELL_GONE`) like `cell_value`."""
     from models.commercial import jurisdiction_currency
 
     target, _, rest = key.partition(":")
@@ -621,8 +621,7 @@ def cell_now(commercial: dict, key: str) -> dict:
         now["unit"] = UNIT_LABELS[owner["unit"]]
         currency = tariff.get("currency") or jurisdiction_currency(tariff.get("jurisdiction"),
                                                                     tariff.get("valid_from"))
-        if currency:
-            now["currency"] = currency
+        now["currency"] = currency or None
     else:
         money = PPA_FIELDS[path][2]
         now["unit"] = "/MWh" if money else PPA_UNIT_LABELS[path]

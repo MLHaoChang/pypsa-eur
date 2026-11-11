@@ -35,7 +35,7 @@ def _source_id(key: str, entry) -> str:
     return (
         f"source:{source}"
         if isinstance(source, str) and source
-        else f"source:unrecorded/{key}"
+        else f"source-unrecorded:{key}"
     )
 
 
@@ -63,12 +63,14 @@ def fields(config, key: str, entry: dict) -> tuple[list[str], list[str]]:
         now = DC.cell_now(config, key)
     except DC.CELL_GONE:
         now = {"value": None}
-    compared = [
-        f
-        for f in COMPARED
-        if f in entry and f in now and (f == "value" or entry[f] is not None)
-    ]
+    compared = _compared(now, entry)
     return compared, [f for f in entry if f not in compared]
+
+
+def _compared(now: dict, entry: dict) -> list[str]:
+    """The stamp fields compared: each one the entry records and the config supplies now. A field that moved
+    to or from None differs, so a currency or money year that appeared or vanished is never fresh."""
+    return [f for f in COMPARED if f in entry and f in now]
 
 
 def compare_stamp(g, edge: Edge) -> Broken | None:
@@ -106,13 +108,11 @@ def compare_stamp(g, edge: Edge) -> Broken | None:
         now = DC.cell_now(g.ctx, stamp.key)
     except DC.CELL_GONE:  # the value is there, but not its unit or currency (an item with an unknown unit)
         return broken("value", entry["value"], None, UNREADABLE)
-    for field in COMPARED:
-        if field not in now or (field != "value" and entry.get(field) is None):
-            continue
-        if not DC._same(now[field], entry.get(field)):
+    for field in _compared(now, entry):
+        if not DC._same(now[field], entry[field]):
             return broken(
                 field,
-                entry.get(field),
+                entry[field],
                 now[field],
                 "cell edited since approval"
                 if field == "value"
