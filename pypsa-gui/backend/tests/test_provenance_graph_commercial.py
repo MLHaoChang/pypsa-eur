@@ -234,7 +234,7 @@ def test_an_equal_value_whose_unit_moved_is_stale():
         "unit",
         "/kWh",
         "/kW/month",
-        "unit changed since approval",
+        "unit differs from the approved one",
     )
 
 
@@ -252,6 +252,24 @@ def test_an_equal_price_whose_contract_money_year_moved_is_stale():
     broke = _broke(config, PPA_KEY)
     assert (broke.field, broke.recorded, broke.current) == ("currency_year", 2030, 2031)
     assert _state(config, TENOR_KEY) == "fresh"  # not a price: no money year to compare
+    del config["contracts"][0][
+        "base_year"
+    ]  # the year the stamp names is no longer stated: not fresh
+    broke = _broke(config, PPA_KEY)
+    assert (broke.field, broke.recorded, broke.current) == ("currency_year", 2030, None)
+    assert Q.cell_wire(config, PPA_KEY)["compared"] == [
+        "value",
+        "unit",
+        "currency_year",
+    ]
+
+
+@pytest.mark.parametrize("unit", ["per_parsec", None, ["per_kwh"]])
+def test_a_cell_whose_item_unit_cannot_be_read_is_stale_and_says_so(unit):
+    config = _config()
+    _item(config, "energy")["unit"] = unit
+    assert DC.cell_value(config, PEAK_KEY) == 0.2
+    assert _broke(config, PEAK_KEY).reason == C.UNREADABLE
 
 
 def test_the_wire_names_the_fields_compared_and_the_ones_not():

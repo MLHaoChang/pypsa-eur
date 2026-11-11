@@ -4,7 +4,7 @@ The `commercial.provenance` cells on the graph (provenance-graph issue 08).
 Each stored entry (`document_values_commercial.provenance`: key `<target>:<entity>/<path>`) is an `input` node with
 a `stamped_with` edge to its source, recording the entry as a `CellStamp`. `compare_stamp` asks whether the cell
 still holds what the stamp approved: of the entry's fields it compares the ones the commercial config can supply
-now (`COMPARED`, read by `document_values_commercial.cell_now`) and names the rest (`uncompared_fields`). A cell
+now (`COMPARED`, read by `document_values_commercial.cell_now`); `fields` names the rest. A cell
 whose item, period, tier or contract is gone cannot be read, so it is stale, never fresh (P1).
 
 `Graph.ctx` is the commercial config the caller read once; nothing here reads the store or writes (P5).
@@ -20,6 +20,7 @@ from services.provenance_graph.types import Broken, CellStamp, Edge, Node
 COMPARED = ("value", "unit", "currency", "currency_year")
 MALFORMED = "stamp record malformed"
 GONE = "cell no longer exists"
+UNREADABLE = "cell cannot be read now"
 _KEY = re.compile(r"^(tariff|ppa):[^/]+/.+$", re.S)
 
 
@@ -98,9 +99,13 @@ def compare_stamp(g, edge: Edge) -> Broken | None:
     ):
         return broken(None, None, None, MALFORMED)
     try:
-        now = DC.cell_now(g.ctx, stamp.key)
+        DC.cell_value(g.ctx, stamp.key)
     except DC.CELL_GONE:
         return broken("value", entry["value"], None, GONE)
+    try:
+        now = DC.cell_now(g.ctx, stamp.key)
+    except DC.CELL_GONE:  # the value is there, but not its unit or currency (an item with an unknown unit)
+        return broken("value", entry["value"], None, UNREADABLE)
     for field in COMPARED:
         if field not in now or (field != "value" and entry.get(field) is None):
             continue
@@ -111,6 +116,6 @@ def compare_stamp(g, edge: Edge) -> Broken | None:
                 now[field],
                 "cell edited since approval"
                 if field == "value"
-                else f"{field} changed since approval",
+                else f"{field} differs from the approved one",
             )
     return None
