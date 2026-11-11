@@ -14,6 +14,15 @@ from tests.test_result_profiles_assurance import solve, windy  # noqa: F401
 from tests.test_workflow_tools import baseline  # noqa: F401
 
 URL = "/api/results/headline_kpis"
+GATE = "PYPSA_GUI_ANSWER_ASSURANCE_PROFILES"
+MODE = "PYPSA_GUI_ANSWER_ASSURANCE_MODE"
+
+
+@pytest.fixture(autouse=True)
+def checked_profiles_on(monkeypatch):
+    """The three checked profiles are opt-in; the tests below turn them on."""
+    monkeypatch.setenv(MODE, "strict")
+    monkeypatch.setenv(GATE, ",".join(profile for profile, _ in hk.CHECKED.values()))
 
 
 def cards(client):
@@ -354,6 +363,87 @@ def test_a_failing_cost_breakdown_leaves_the_checked_cards(windy, client, monkey
     assert by_id["curtailed_share"]["state"] == "ready"
 
 
+@pytest.mark.parametrize("value", [None, "", "some-other-profile"])
+def test_checked_cards_follow_the_answer_assurance_switch(
+    windy, client, monkeypatch, value
+):
+    solve(windy)
+    if value is None:
+        monkeypatch.delenv(GATE)
+    else:
+        monkeypatch.setenv(GATE, value)
+    _, by_id, _ = cards(client)
+    for card_id in ("curtailed_share", "peak_line_loading"):
+        card = by_id[card_id]
+        assert (card["value"], card["state"], card["reason"], card["formula_id"]) == (
+            None,
+            "unavailable",
+            "Checked figures are switched off for this installation.",
+            None,
+        )
+    assert by_id["system_cost"]["state"] == "ready"
+
+
+def test_one_listed_profile_shows_only_its_card(windy, client, monkeypatch):
+    solve(windy)
+    monkeypatch.setenv(GATE, hk.CHECKED["curtailed_share"][0])
+    _, by_id, _ = cards(client)
+    assert by_id["curtailed_share"]["state"] == "ready"
+    assert by_id["peak_line_loading"]["reason"] == hk.SWITCHED_OFF[1]
+
+
+@pytest.mark.parametrize(
+    "mode, shown",
+    [
+        (None, False),
+        ("disabled", False),
+        ("shadow", False),
+        ("no-such-mode", False),
+        ("pilot", True),
+        ("strict", True),
+    ],
+)
+def test_a_listed_profile_also_needs_a_mode_that_admits_checked_answers(
+    windy, client, monkeypatch, mode, shown
+):
+    """GK B G2: listed profiles alone do not switch checked answers on."""
+    solve(windy)
+    if mode is None:
+        monkeypatch.delenv(MODE)
+    else:
+        monkeypatch.setenv(MODE, mode)
+    _, by_id, _ = cards(client)
+    for card_id in ("curtailed_share", "peak_line_loading"):
+        card = by_id[card_id]
+        if shown:
+            assert card["reason"] != hk.SWITCHED_OFF[1]
+            assert card["formula_id"] is not None or card["state"] != "ready"
+        else:
+            assert (card["value"], card["state"], card["reason"]) == (
+                None,
+                *hk.SWITCHED_OFF,
+            )
+    assert (by_id["curtailed_share"]["state"] == "ready") is shown
+    assert by_id["system_cost"]["state"] == "ready"
+
+
+def test_an_lcoe_profile_that_is_not_listed_switches_its_card_off(
+    project, client, monkeypatch
+):
+    """GK B G1: the LCOE card passes the same gate as the other checked cards."""
+    store(project, lcoe_hand)
+    as_template(monkeypatch, "eh_datacenter")
+    monkeypatch.setenv(GATE, hk.CHECKED["curtailed_share"][0])
+    _, by_id, order = cards(client)
+    lcoe = by_id["lcoe"]
+    assert order[0] == "lcoe"
+    assert (lcoe["value"], lcoe["state"], lcoe["reason"], lcoe["formula_id"]) == (
+        None,
+        *hk.SWITCHED_OFF,
+        None,
+    )
+
+
 def test_the_strip_gate_is_one_switch(windy, client, monkeypatch):
     solve(windy)
     asked = []
@@ -479,6 +569,7 @@ def test_card_sets_are_short_and_reasons_carry_no_engine_identifier():
     assert all(len(ids) <= 5 and len(set(ids)) == len(ids) for ids in hk.ORDER.values())
     split = [
         hk._UNAVAILABLE,
+        hk.SWITCHED_OFF,
         hk.BUSY,
         hk.INPUTS_CHANGED,
         hk.LOAD_FLOW_REPLACED,

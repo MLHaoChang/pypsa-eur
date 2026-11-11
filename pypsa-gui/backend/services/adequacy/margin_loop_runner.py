@@ -18,7 +18,7 @@ from pydantic import BaseModel as _BaseModel
 
 from models.schemas import Finite as _Finite
 from services.adequacy.campaign import unsupported_scope as _unsupported_scope
-from services.adequacy.coupling import NOTHING_TO_SAMPLE
+from services.adequacy.link_supply import nothing_to_sample, sampled_fleet
 from services.adequacy.coupling import snapshot_hash as _snapshot_hash
 from services.pypsa_service import PyPSAService
 
@@ -119,7 +119,6 @@ def start_margin_loop(
         MAX_DRAWS,
         MC_WARNING_V1,
         mc_adequacy,
-        snapshot_inputs,
     )
     from services.adequacy.metrics import horizon_years, resolve_time_basis
     from services.adequacy.sweep import _solve_once, preserve_bus_topology
@@ -213,18 +212,15 @@ def start_margin_loop(
         try:
             # Phase 12c-0: the LP's demand basis — the plan the loop
             # certifies was built on it (the fifteenth finding).
-            inputs = snapshot_inputs(n, keep_zero_capacity=True, cfg=cfg)
+            inputs = sampled_fleet(n, keep_zero_capacity=True, cfg=cfg)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         nyears = float(horizon_years(n))
 
-    if not inputs.units:
-        raise HTTPException(
-            422,
-            f"{NOTHING_TO_SAMPLE} (unavailability + MTTR), so the sampled fleet is "
-            "empty — an empty fleet would report the entire horizon as loss of "
-            "load, which is a statement about missing input data, not about "
-            "the system")
+    # Adequacy loops 01 (AL-7): the one refusal every loop site shares.
+    _refusal = nothing_to_sample(inputs)
+    if _refusal is not None:
+        raise HTTPException(422, _refusal)
 
     # The up-front resolution floor. One shortfall hour in one draw
     # contributes that hour's WEIGHT to the mean, so the smallest non-zero
@@ -334,7 +330,7 @@ def start_margin_loop(
         # `base_cfg` is captured in the request — the worker never reads
         # `solver_state` — and the scalers do not change across iterates.
         with lock:
-            return snapshot_inputs(n, keep_zero_capacity=True, cfg=base_cfg)
+            return sampled_fleet(n, keep_zero_capacity=True, cfg=base_cfg)
 
     def _hash(mc_inputs) -> str:
         """sha256 over exactly what the MC reads — the sorted
@@ -667,6 +663,8 @@ def start_margin_loop(
     record: dict = {
         "study": "margin_loop",
         "goal_sources": goal_sources,
+        # Adequacy loops 01 (AL-2): what the supplying-Link walk decided.
+        **({"fleet_notes": list(inputs.fleet_notes)} if inputs.fleet_notes else {}),
         # The frontend discriminator (spec §3): the column header, the badge
         # suffix and `restoreSentence`'s CONFIG FIELD NAME all come off these,
         # so a margin run can never tell the user to set the cap's field.

@@ -133,7 +133,10 @@ def _run(session, client, ui_context, decisions, *, observe=None):
         assert token, "no confirmation card appeared"
         if observe:
             seen_while_pending.append(observe())
-        session.record_decision(token, decision)
+        if isinstance(decision, tuple):  # LC-47: a change-set card's decision and its ticked rows
+            session.record_decision(token, decision[0], decision[1])
+        else:
+            session.record_decision(token, decision)
     assert done.wait(10.0), "turn did not finish"
     t.join()
     return streamed, seen_while_pending
@@ -207,7 +210,12 @@ def test_guided_read_tools_are_not_carded(world):
     assert "tool_result" in _names(events)
 
 
-def test_several_guided_writes_in_one_response_each_get_a_card_in_turn(world):
+def test_several_guided_writes_in_one_response_share_one_change_set_card(world):
+    """LC-47: the writes of one response raise ONE card with a tick box each
+    (they were carded one after the other before). An unticked row is not
+    written and a ticked one is. The second bus edit would create Carrier AC
+    as the first does, so it keeps its own card (K2) and is still never run
+    silently."""
     calls = [
         ("update_component", {"component_class": "Bus", "name": "B1",
                               "attrs": {"eh_poc": True}}),
@@ -217,21 +225,28 @@ def test_several_guided_writes_in_one_response_each_get_a_card_in_turn(world):
     ]
     voll0 = _voll()
     session = chat_service.ChatSession()
-    events, _ = _run(session, _client(calls), GUIDED, ["approve", "deny", "approve"])
+    events, _ = _run(session, _client(calls), GUIDED, [("approve", ["tu-2"]), "deny"])
     names = _names(events)
     # never refused as a parallel batch, never run silently
     assert not any(p.get("error_kind") == "parallel_destructive_not_allowed"
                    for e, p in events if e == "tool_error")
-    cards = [p["tool_use_id"] for e, p in events if e == "tool_pending_confirmation"]
-    assert cards == ["tu-0", "tu-1", "tu-2"]
-    # one card at a time: each tool's outcome precedes the next card
+    cards = [p for e, p in events if e == "tool_pending_confirmation"]
+    assert [c["tool_name"] for c in cards] == ["change_set", "update_component"]
+    assert [i["tool_use_id"] for i in cards[0]["change_set"]["items"]] == ["tu-0", "tu-2"]
+    # the set's card comes first; each call then has its own outcome, and one receipt closes the set
     order = [(e, p.get("tool_use_id")) for e, p in events
-             if e in ("tool_pending_confirmation", "tool_result", "tool_error")]
-    assert order == [("tool_pending_confirmation", "tu-0"), ("tool_result", "tu-0"),
+             if e in ("tool_pending_confirmation", "tool_result", "tool_error", "change_set_receipt")]
+    assert order == [("tool_pending_confirmation", "tu-0"), ("tool_error", "tu-0"),
                      ("tool_pending_confirmation", "tu-1"), ("tool_error", "tu-1"),
-                     ("tool_pending_confirmation", "tu-2"), ("tool_result", "tu-2")]
+                     ("tool_result", "tu-2"), ("change_set_receipt", None)]
+    assert [p["error_kind"] for e, p in events if e == "tool_error"] == [
+        "change_unticked", "confirmation_denied"]
+    receipt = next(p for e, p in events if e == "change_set_receipt")
+    assert [(r["tool_use_id"], r["status"]) for r in receipt["rows"]] == [
+        ("tu-0", "unticked"), ("tu-2", "applied")]
+    assert (receipt["ticked"], receipt["landed"], receipt["failed"]) == (1, 1, 0)
     buses = PyPSAService.get_network().buses
-    assert bool(buses.at["B1", "eh_poc"]) is True
+    assert "eh_poc" not in buses.columns or bool(buses.at["B1", "eh_poc"]) is False
     assert "eh_critical" not in buses.columns or bool(buses.at["B2", "eh_critical"]) is False
     assert _voll() == 4321.0 != voll0
     assert "tool_running" in names

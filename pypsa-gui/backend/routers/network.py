@@ -817,6 +817,20 @@ def get_asset_provenance(component: str, name: str) -> dict:
             "fields": provenance_graph.stale_entries(n, component, name)}
 
 
+@router.get("/asset_schema/{component}/provenance/{name}/why/{field}")
+def get_asset_provenance_why(component: str, name: str, field: str) -> dict:
+    """Why one asset field has its value (provenance-graph 03): the provenance graph's walk from the field to
+    what priced it, outcome first, then each step's value, unit, stamp, the edge that reached it and whether it is
+    current. `field` = `capital_cost` is the Economics row's annualised cost. Reads only (COPILOT-1). A target
+    the graph cannot answer for is `why_target_unknown` (422 an unknown class, else 404)."""
+    from services.provenance_graph.explain import TargetUnknown, explain
+
+    try:
+        return explain(PyPSAService.get_network(), component, name, field)
+    except TargetUnknown as exc:
+        raise HTTPException(exc.status, {"error_kind": "why_target_unknown", "message": str(exc)}) from exc
+
+
 # ── Time Series ───────────────────────────────────────────────────────────────
 
 

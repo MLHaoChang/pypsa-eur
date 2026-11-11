@@ -3,7 +3,7 @@
 
 # 07 — Preset mechanism, generic offered rows and the DC presets
 
-Status: needs-triage (blocked by 05; TDD plan to GK B first)
+Status: ready-for-agent (blocked by 05; Opus; GK B TDD plan first)
 Type: task
 Blocked by: 05
 Gated: yes (GK B)
@@ -36,3 +36,9 @@ first. Send the TDD plan to GK B before building.
   `assumed`; no revenue row has a price.
 - BC9: pack rows appended, previous version byte-equal; unpinned callers of
   `load_defaults_pack()` listed.
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.

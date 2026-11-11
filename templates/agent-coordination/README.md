@@ -27,7 +27,7 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `.claude/skills/coordinator/SKILL.md` | Bootstrap, task intake, sweep, merge, dashboard, retro |
 | `.claude/skills/steward/SKILL.md` | How a work session drives its PR to green and reports it |
 | `.claude/skills/gatekeeper/SKILL.md` | Plan checks, repeated-failure help and head-exact reviews |
-| `.claude/settings.json`, `.claude/hooks/session-start.sh` | SessionStart hook skeleton for cloud sessions |
+| `.claude/settings.json`, `.claude/hooks/session-start.sh` | SessionStart hook skeleton for cloud sessions. `permissions.deny` and `skillOverrides` drop the tools and skills no procedure calls from every session's starting context (see LEARNINGS, 10 Nov 2026) |
 | `.claude/hooks/context-guard.sh`, `test-context-guard.sh` | PostToolUse hook: tells the agent to write its hand-off note once context passes 200k (300k when `~/.claude-coordinator` exists), then every +20k |
 | `.claude/hooks/block-dangerous-git.sh`, `test-block-dangerous-git.sh` | PreToolUse hook on Bash: allows a normal `git push`, blocks force-push, a coordinator push that creates a remote branch other than its own (`~/.claude-coordinator`), `reset --hard`, `rebase`, `commit --amend`, `filter-branch`/`filter-repo`, `clean -f`, `branch -D`; with its matcher tests |
 | `docs/agents/roles.md` | The one place for the gatekeeper's session id, the dashboard link, the routine id and the template home |

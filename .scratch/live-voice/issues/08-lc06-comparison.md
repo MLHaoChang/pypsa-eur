@@ -3,6 +3,8 @@
 
 # LV 08 against LC-06 (owner decision LV08-HOLD-1)
 
+Status: done (write-up; acted on by LV08-SHRINK-1, which shrank LV 08 to R1-R4, R3 moved to LC-32)
+
 Read-and-write-up only; LV 08's Status line is unchanged (the owner decides).
 Master `c2bd3b7e9`. Numbers come from running `smoke/family_manifest.py --write` and
 `smoke/assistant_control_matrix.py --write` to a scratch path on that commit (nothing
@@ -97,3 +99,9 @@ Counts are LC-06 variants (covered / pending / unavailable) of the suites that
 
 Building slice C as written would duplicate LC-06 for solver, reliability, gridspine and
 experiments (the four families where LC-06 has a hand oracle) and miss the six it left out.
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `08-application-coverage.md` is `done` and carries R1-R4 as the owner's LV08-SHRINK-1 asked; R3 is in LC-32. The write-up is consumed. Verdict: done. (The first line below still says LV 08's Status is unchanged; that was true when it was written.)

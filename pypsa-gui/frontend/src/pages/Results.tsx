@@ -10,7 +10,7 @@ import { nk } from '../utils/queryKeys'
 import { readableWindow } from '../utils/readableTime'
 import { ResultsFilterProvider, defaultWindow } from './results/filterContext'
 import { ChartSourceProvider, type ChartSource } from '../components/charts/chartTheme'
-import { solveWords } from './results/OperationalGap'
+import { solveWords } from './results/solveWords'
 import { type TSPayload, type WeightCtx } from './results/shared'
 import CompareView, { type Tab as CompareTab } from './CompareView'
 import { ErrorBoundary } from '../components/ErrorBoundary'
@@ -172,6 +172,7 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   island: 'overview',
   grid_forming: 'overview',
 }
+
 
 export default function Results() {
   const [tab, setTabState] = useState<ResultsTab>(loadInitialTab)

@@ -354,7 +354,7 @@ def test_a_concurrent_save_and_patch_lose_neither_edit(client, api_project, proj
         meta = real_read(path)
         # Only the save's own read, the one inside its `with ctx.mutation_lock`
         # (the endpoint runs on a worker thread, so the caller is the marker).
-        if not paused["done"] and sys._getframe(1).f_code.co_name == "_save_context":
+        if not paused["done"] and sys._getframe(1).f_code.co_name == "_write_context":
             paused["done"] = True
             save_reading.set()
             go.wait(10)

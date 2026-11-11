@@ -3,7 +3,7 @@
 
 # 14 — Guided question: is this plant worth building?
 
-Status: needs-triage (blocked by 08 and the presets)
+Status: ready-for-agent (blocked by 08, 11, 12, 13; ../../study-harness/issues/10-profile-datacenter.md for the DC profile; Opus; GK B)
 Type: task
 Blocked by: 08, 11, 12, 13; ../../study-harness/issues/10-profile-datacenter.md for the DC profile
 Gated: yes (GK B)
@@ -21,3 +21,9 @@ assumed cost defaults with source and year, run the IC then the business case, a
 give the verdict with EBITDA margin, NPV/IRR and the break-even price. The report
 lists every default it relies on. A template with no preset yet uses the generic
 offered rows.
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.

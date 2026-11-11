@@ -379,6 +379,9 @@ describe('StorageCycling: says why there is nothing to cycle', () => {
     })
     renderPage()
     expect(await screen.findByText('not built')).toBeTruthy()
+    // No cycle anywhere: the carrier chart says so, with no "0.0 cycles highest" over empty axes.
+    expect(screen.getAllByTestId('chart-zero').length).toBeGreaterThan(0)
+    expect(screen.queryByText(/cycles highest/)).toBeNull()
     expect(screen.queryByText('0.00')).toBeNull()
   })
 })

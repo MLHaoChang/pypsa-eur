@@ -14,7 +14,7 @@ import type { Generator } from '../../api/types'
 import {
   type TSPayload, type WeightCtx, weightedSum, aggregateTS,
   isRenewableCarrier, shortStamp, useWeightCtx, WindowCapBanner,
-  CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, chartFigure,
+  CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, chartFigure, ChartFrame, ChartZero, CHART_HEIGHT,
 } from './shared'
 import HourDayHeatmap from './HourDayHeatmap'
 import { heatScale, hourDayGrid, spansPeriods, PICK_ONE_PERIOD } from './hourDay'
@@ -30,7 +30,7 @@ import CurtailmentByCause from './CurtailmentByCause'
 // time series the Dispatch tab uses as an overlay, but here we surface it
 // as a dedicated panel with per-carrier breakdown + time-series chart.
 
-const ACCENT = '#d97706'    // amber — matches the curtailment toggle in Dispatch
+const ACCENT = 'var(--color-warn)'    // amber — matches the curtailment toggle in Dispatch
 
 export default function Curtailment() {
   const currentProject = useUIStore(s => s.currentProject)
@@ -97,8 +97,8 @@ export default function Curtailment() {
   // The chart element is kept while the series is the same: a full year is
   // 8760 x-axis ticks, and Recharts measures every one of them on each render.
   const overTime = useMemo(() => aggSeries && (
-    <ResponsiveContainer width="100%" height={280}>
-      <AreaChart data={aggSeries} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+    <ResponsiveContainer width="100%" height={CHART_HEIGHT.lg}>
+      <AreaChart data={aggSeries} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="curtGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor={ACCENT} stopOpacity={0.4} />
@@ -222,25 +222,15 @@ export default function Curtailment() {
       <CurtailmentByCause />
 
       {/* Time series — aggregated curtailment over renewables */}
-      <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
-        <header className="px-4 py-2.5 border-b border-border bg-bg-2">
-          <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
-            Curtailment over time
-          </span>
-          <span className="ml-2 text-[10px] text-muted">aggregated MW · {periodLabel}</span>
-        </header>
-        <div className="p-3">
-          {nothingCurtailed ? (
-            <p className="text-[12px] text-muted py-2">
-              No curtailment in this range: all available renewable energy was used.
-            </p>
-          ) : aggSeries && aggSeries.length > 0 ? (
-            overTime
-          ) : (
-            <p className="text-[11px] text-muted py-2">No curtailment time series for the selected range.</p>
-          )}
-        </div>
-      </section>
+      <ChartFrame testId="curtailment-over-time-frame" title="Curtailment over time" hint={`aggregated MW · ${periodLabel}`}>
+        {nothingCurtailed ? (
+          <ChartZero>No curtailment in this range: all available renewable energy was used.</ChartZero>
+        ) : aggSeries && aggSeries.length > 0 ? (
+          overTime
+        ) : (
+          <ChartZero>No curtailment time series for the selected range.</ChartZero>
+        )}
+      </ChartFrame>
 
       {curtailMap && (
         <HourDayHeatmap

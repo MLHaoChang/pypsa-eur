@@ -22,7 +22,7 @@ if (process.env.EMPTY_FLOWS) {
     await route.fulfill({ response: r, json: j })
   })
 }
-await p.goto('http://127.0.0.1:5173/'); await p.waitForTimeout(2500)
+await p.goto((process.env.BASE_URL || 'http://127.0.0.1:5173') + '/'); await p.waitForTimeout(2500)
 await p.locator('article').filter({ hasText: new RegExp(`${project}(?!\\w)`) }).first().click({ timeout: 8000 }); await p.waitForTimeout(4500)
 // GUIDED=1 stays in (or switches to) Guided.
 await p.getByRole('button', { name: process.env.GUIDED ? 'Guided' : 'Expert', exact: true }).first().click(); await p.waitForTimeout(1200)

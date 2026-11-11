@@ -3,7 +3,7 @@
 
 # LC-21 — "create a report" for a network study
 
-Status: folded into the study harness (owner decision SH-FOLD-1, 2026-10-28): built as the report stage in `.scratch/study-harness/issues/07-report-handoff-and-pilot.md`; option A below stays its spec.
+Status: done (built as the report stage, study-harness 07, #1257, SH-FOLD-1)
 Previous status: ready-for-agent. Owner decision Q6 = A (2026-10-19): add
 network-study chapters to the existing report pipeline, built in LC-06 after
 LC-05 (after LC-20, whose findings feed the plausibility chapter). This is new
@@ -57,3 +57,9 @@ Chat can already: `generate_report`, `get_report_status`,
 
 OJ-35 passes in Tier A on `oj-grid` with every number in the document
 traced by the existing number audit; OJ-36 (Energy Hub) keeps passing.
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: study-harness 07 is `done (#1257)`. Verdict: done.

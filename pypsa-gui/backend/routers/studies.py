@@ -1131,6 +1131,39 @@ def get_ledger(study_id: str,
                        maturity, *_ledger_stale(study, ledger, project, db, user))
 
 
+@router.get("/{study_id}/ledger/{key}/why")
+def get_ledger_row_why(study_id: str, key: str, option_id: str,
+                       project: AuthorizedProject = ProjectAccessDep,
+                       db: DBSession = Depends(get_db),
+                       user: User | None = Depends(optional_user)) -> dict:
+    """Why a Guided ledger row's value is what option `option_id`'s fork holds (provenance-graph 03): the
+    provenance graph's walk for each asset field the row compiles to, read from the fork's file as saved (the
+    network the ledger's out-of-date note reads). Reads only (COPILOT-1). `why_target_unknown` (404) for a
+    row the ledger does not hold, an option with no fork this study owns, or a row with no recorded field."""
+    from services.provenance_graph.explain import TargetUnknown, explain_ledger_row, ledger_fields
+
+    _refuse_unless_enabled()
+    study = _load(project, study_id)
+
+    def unknown(message: str, status: int = 404) -> HTTPException:
+        return HTTPException(status, detail={"error_kind": "why_target_unknown", "message": message})
+
+    try:
+        ledger_fields(key)
+    except TargetUnknown as exc:
+        raise unknown(str(exc)) from exc
+    fork = next((r for r in _owned_fork_rows(study, project, db, user)
+                 if r.name.rsplit(study_forks.FORK_SEPARATOR, 1)[-1] == option_id), None)
+    if fork is None:
+        raise unknown(f"option {option_id} has no fork this study owns")
+    network, _hash = study_runner.fork_network_from_disk(fork)
+    try:
+        out = explain_ledger_row(network, key)
+    except TargetUnknown as exc:
+        raise unknown(str(exc), exc.status) from exc
+    return {**out, "target": {**out["target"], "study_id": study_id, "option_id": option_id}}
+
+
 def _ledger_after(study: DecisionStudy, ledger, body: "LedgerPut", changed_by: str | None, now):
     """
     The ledger a ``PUT .../ledger`` would store, from the stored (or seeded) ``ledger``;

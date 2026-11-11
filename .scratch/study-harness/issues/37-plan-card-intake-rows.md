@@ -3,7 +3,7 @@
 
 # 37 — Plan card renders the intake and sends its digest
 
-Status: needs-triage
+Status: ready-for-agent (Sonnet; GK B plan, UX review)
 Type: task
 Gated: yes (GK B plan, UX review)
 Model tier: sonnet
@@ -22,3 +22,20 @@ intake rows with their sources (issue 21); send `run.intake.digest` as
 `envelope_decision.intake_digest` for "Approve and run unattended" and
 "Approve, step by step". The stepwise verdict's words state the creation.
 Frontend only; UX review against `.scratch/project-workflow/design.md`.
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `frontend/src` has no `intake_digest` and `EnvelopeSection.tsx`, `ChatPanel.tsx`, `chatStore` render no setup or intake rows. Verdict: ready-for-agent.
+
+- Blocked by: none.
+- Likely files: `pypsa-gui/frontend/src/components/runMonitor/EnvelopeSection.tsx` (+ test), `components/ChatPanel.tsx`, `store/chatStore.ts` (+ tests). Frontend only.
+- Reviewers: GK B (plan), UX (against `.scratch/project-workflow/design.md`). Send the UI plan to UX before code.
+
+Acceptance:
+- [ ] The card's first row reads "Creates project <name> from the <template> template"; the short digest shows in Expert only.
+- [ ] The intake rows appear with their sources (issue 21).
+- [ ] "Approve and run unattended" and "Approve, step by step" send `envelope_decision.intake_digest` from `run.intake.digest`; a Vitest asserts the request body for both.
+- [ ] The step-by-step verdict's words state the creation.
+- [ ] A card without an intake keeps today's rows and sends no digest.

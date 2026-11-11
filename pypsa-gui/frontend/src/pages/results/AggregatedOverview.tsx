@@ -16,7 +16,7 @@ import {
   perPeriodWeightedSum, perPeriodWeightedSumSplit, perPeriodPerColumnWeightedSum,
   weightedSum, weightedSumSplit, averageScaling, hasScaling, generatorGroup,
   isRenewableCarrier, fmtEnergy, fmtCurrency, downloadCSV, KPI, ChartActions,
-  ChartCard, colourForCarrier, CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP,
+  ChartFrame, CHART_HEIGHT, colourForCarrier, carrierColour, CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP,
 } from './shared'
 import { storageCarrierKey, loadCarrierKey } from './carrierAliases'
 import NotSolved from './NotSolved'
@@ -503,7 +503,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   }
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
 
       <div className="text-[11px] text-muted -mt-2">
         Aggregated view spans every investment period. KPIs use snapshot
@@ -540,7 +540,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                value={kpis.curtailEnergy != null
                  ? `${fmtEnergy(kpis.curtailEnergy)}${kpis.curtailPct != null ? ` · ${kpis.curtailPct.toFixed(1)} %` : ''}`
                  : '—'}
-               hint={'Σ max(p_max_pu × p_nom − p, 0) over renewable generators' + scaleHint} />
+               hint={'available renewable energy not used' + scaleHint} />
           <KPI label="Lost load" sub="this dispatch solve, no outages"
                {...(lostLoadTotals && lostLoadTotals.mwh == null ? NOT_RECORDED_KPI
                  : { value: lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—' })}
@@ -612,8 +612,8 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
           test networks where no cost data is configured. */}
       {economicsBars && economicsBars.length > 0
         && economicsBars.some(r => r.CAPEX > 0 || r.OPEX > 0 || r.VOLL == null || r.VOLL > 0) && (
-        <ChartCard
-          title="Economics — system cost per period"
+        <ChartFrame
+          title="Economics · system cost per period"
           hint={vollNotRecorded ? 'CAPEX · OPEX' : 'CAPEX · OPEX · VOLL'}
           right={
             <ChartActions
@@ -629,17 +629,17 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
           bodyClassName="p-3"
         >
           <div ref={economicsRef}>
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
               <BarChart data={economicsBars} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="period" {...CHART_AXIS} />
                 <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtCurrency(v, 0)} />
                 <RTooltip {...CHART_TOOLTIP} formatter={(v: number, name: string) => [fmtCurrency(v), name]} />
                 <Legend {...CHART_LEGEND} />
-                <Bar dataKey="CAPEX" stackId="cost" fill="#0369a1" />
-                <Bar dataKey="OPEX"  stackId="cost" fill="#d97706" />
+                <Bar dataKey="CAPEX" stackId="cost" fill="var(--color-series-6)" />
+                <Bar dataKey="OPEX"  stackId="cost" fill="var(--color-warn)" />
                 {!vollNotRecorded && (
-                  <Bar dataKey="VOLL"  stackId="cost" fill="#dc2626" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="VOLL"  stackId="cost" fill="var(--color-danger)" radius={[3, 3, 0, 0]} />
                 )}
               </BarChart>
             </ResponsiveContainer>
@@ -656,13 +656,13 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
               matches the "Total OPEX" KPI shown when you drill into that period.
             </p>
           </div>
-        </ChartCard>
+        </ChartFrame>
       )}
 
       {/* ── Generation: energy mix per period ────────────────── */}
       {generationMix && generationRows && (
-        <ChartCard
-          title="Generation — energy mix per period"
+        <ChartFrame
+          title="Generation · energy mix per period"
           right={
             <>
               <div className="inline-flex items-center rounded-[7px] bg-panel border border-border p-0.5 text-[10px]">
@@ -691,7 +691,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
           bodyClassName="p-3"
         >
           <div ref={generationRef}>
-            <ResponsiveContainer width="100%" height={260}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.lg}>
               <BarChart data={generationRows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="period" {...CHART_AXIS} />
@@ -708,13 +708,13 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartFrame>
       )}
 
       {/* ── Storage: charged / discharged per period (by carrier) ── */}
       {storageBars && storageBars.rows.length > 0 && (
-        <ChartCard
-          title="Storage — energy charged & discharged per period"
+        <ChartFrame
+          title="Storage · energy charged & discharged per period"
           hint={storageBars.carriers.length > 1
             ? `by carrier · ${storageBars.carriers.join(' · ')}`
             : 'discharge vs. charge'}
@@ -734,7 +734,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
           bodyClassName="p-3"
         >
           <div ref={storageRef}>
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
               <BarChart data={storageBars.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="period" {...CHART_AXIS} />
@@ -744,7 +744,8 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                 {/* Two stacks per period: discharge (positive direction)
                     stacks together, charge (gross positive bars in a
                     separate stack) stacks alongside. Each carrier gets a
-                    stable colour from the shared palette. The naming
+                    stable colour from the shared palette, and its charge
+                    a series colour of its own. The naming
                     convention ` discharged` / ` charged` reads cleanly
                     in the legend even with multiple carriers. */}
                 {storageBars.carriers.map((c, i) => (
@@ -755,28 +756,28 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                 {storageBars.carriers.map((c, i) => (
                   <Bar key={`${c}_c`} dataKey={`${c}_c`} name={`${c} charged`}
                     stackId="charged"
-                    fill={colourForCarrier(c, i)} fillOpacity={0.55}
+                    fill={carrierColour(null, storageBars.carriers.length + i)}
                     radius={[3, 3, 0, 0]} />
                 ))}
               </BarChart>
             </ResponsiveContainer>
             <p className="text-[10px] text-muted mt-2">
               Bars are independent (not net) so the user sees gross energy moved in each direction.
-              Discharge and charge are shown as separate stacked bars side-by-side per period;
-              charge bars are rendered slightly transparent.
+              Discharge and charge are shown as separate stacked bars side-by-side per period,
+              each in its own colour (see the key).
             </p>
           </div>
-        </ChartCard>
+        </ChartFrame>
       )}
 
       {/* ── Renewables: curtailment per period (by carrier) ───── */}
       {curtailmentBars && curtailmentBars.rows.length > 0
         && curtailmentBars.rows.some(r => curtailmentBars.carriers.some(c => Number(r[c] ?? 0) > 0)) && (
-        <ChartCard
-          title="Renewables — curtailment per period"
+        <ChartFrame
+          title="Renewables · curtailment per period"
           hint={curtailmentBars.carriers.length > 1
             ? `by carrier · ${curtailmentBars.carriers.join(' · ')}`
-            : 'Σ max(p_max_pu × p_nom − p, 0)'}
+            : 'available renewable energy not used'}
           right={
             <ChartActions
               chartRef={curtailmentRef}
@@ -792,7 +793,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
           bodyClassName="p-3"
         >
           <div ref={curtailmentRef}>
-            <ResponsiveContainer width="100%" height={200}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
               <BarChart data={curtailmentBars.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="period" {...CHART_AXIS} />
@@ -806,13 +807,13 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartFrame>
       )}
 
       {/* ── Load: by carrier per period ──────────────────────── */}
       {loadByCarrier && loadByCarrier.rows.length > 0 && (
-        <ChartCard
-          title="Load — energy demand per period by carrier"
+        <ChartFrame
+          title="Load · energy demand per period by carrier"
           hint="electricity · heat · H₂"
           right={
             <ChartActions
@@ -828,7 +829,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
           bodyClassName="p-3"
         >
           <div ref={loadRef}>
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
               <BarChart data={loadByCarrier.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="period" {...CHART_AXIS} />
@@ -841,7 +842,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartFrame>
       )}
     </div>
   )

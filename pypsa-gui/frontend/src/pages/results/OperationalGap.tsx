@@ -72,10 +72,6 @@ export const REFERENCE_CONDITION_WORDS: Record<string, string> = {
   suboptimal: 'did not converge',
   numeric: 'did not converge',
 }
-
-/** A solve's termination condition in the words every source line uses: "solved", never a solver term. */
-export const solveWords = (condition: string | null | undefined): string =>
-  condition === 'optimal' ? 'solved' : (condition && REFERENCE_CONDITION_WORDS[condition]) || 'did not solve'
 const REFERENCE_DEFAULT_WORDS = 'did not solve'
 
 export const SIGN_WORDS = 'Gap: operation minus full horizon. Positive means operation costs more.'

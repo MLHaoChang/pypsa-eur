@@ -5,6 +5,7 @@ import { getCarrierBadge } from '../utils/carrierBadges'
 import { getLinkColor } from '../pages/topologyEdges'
 import { assetIcon } from '../utils/assetTypeIcon'
 import type { LegendEntry } from '../utils/assetTypes'
+import LoadingKey, { VoltageKeyTitle } from './LoadingKey'
 
 // The map's legend (plan M5): the voltage tiers the lines and bus rings
 // use, the link carriers present, and one row per asset type present —
@@ -51,7 +52,7 @@ export default function MapLegend({ linkCarriers, assetRows }: Props) {
         className="flex items-center gap-1 mb-2 -ml-0.5 text-left text-muted hover:text-text"
       >
         <ChevronDown size={10} className="shrink-0" />
-        <span className="text-[9px] font-bold uppercase tracking-[0.14em]">Buses &amp; Lines · voltage</span>
+        <span className="text-[9px] font-bold uppercase tracking-[0.14em]"><VoltageKeyTitle /></span>
       </button>
       {VOLTAGE_TIERS.map(t => (
         <div key={t.label} className="flex items-center gap-2 mb-1" data-testid="legend-voltage">
@@ -84,6 +85,7 @@ export default function MapLegend({ linkCarriers, assetRows }: Props) {
         </div>
       ))}
       {assetRows.length === 0 && <p className="text-[9.5px] text-muted">No assets</p>}
+      <LoadingKey />
     </div>
   )
 }
