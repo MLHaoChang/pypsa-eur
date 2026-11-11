@@ -1638,10 +1638,13 @@ archetype `off_grid` the template card's.
   `card` and the granted envelope's text show K and the links. `admit`
   derives them again before any reservation; a different set stops the run
   with `eh_contingencies`.
-- **Budget (G2).** `MG_BUDGET_SOLVES`: one pass is the solve, the study and
-  the island check, `1 + (2 + K) + 1`, for the first pass and each L2 round,
-  plus the coupling loop's 3 and its closing re-solve: 19 with the shipped
-  K = 1. A project with a larger K may run out and stop for the user.
+- **Budget (G1, G2).** `run_profiles.mg_budget(K)`: one pass is the solve,
+  the study and the island check, `1 + (2 + K) + 1`, for the first pass and
+  each L2 round, plus the coupling loop's 3 and its closing re-solve: 19 with
+  the shipped K = 1. `run_envelope.counted` counts K on the open project when
+  the plan card is proposed or read; the card shows K and the budget, held to
+  the hard cap of 20 (K >= 2 then covers the first pass and one L2 round).
+  The grant counts again and refuses `eh_contingencies` when K moved.
 - **Result gate.** `mg.island.survival` (block; its levers are the
   `StorageUnit` `p_nom_max` and `max_hours` of the battery candidate),
   `mg.tie.open`, `mg.critical.tagged`, `mg.island.critical_served` (MWh),
