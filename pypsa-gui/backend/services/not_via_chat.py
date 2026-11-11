@@ -291,7 +291,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'id': 'results_headline_strip',
         'title': 'Results headline strip',
         'disposition': 'manual',
-        'reason': "The Results headline strip's own card list is not read from chat. Chat reads the same figures one by one (cost breakdown, lost load, the checked answers). Open Results › Summary to see the strip.",
+        'reason': "The Results headline strip's own card list is not read from chat. Chat reads its figures one by one and compares a case with its base on other measures. Open Results › Summary to see the strip.",
         'page': 'Results › Summary',
         'panel': 'results',
         # 'headline' alone is in six tool descriptions (compare-runs headline
