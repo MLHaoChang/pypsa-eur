@@ -55,6 +55,30 @@ export const FLOW_CYCLE_VAR = '--flow-cycle'
 export const flowCycleValue = (direction: 1 | -1): string => `${-direction * FLOW_CYCLE_PX}px`
 export const flowDirection = (p: number): 1 | -1 => (p < 0 ? -1 : 1)
 
+/**
+ * The class form of a reverse flow, for a layer that cannot set a CSS variable
+ * per path (the Leaflet map): it sets FLOW_CYCLE_VAR to the reverse offset.
+ */
+export const FLOW_REVERSE_CLASS = 'canvas-flow-rev'
+export const flowClassDirected = (bucket: FlowBucket, direction: 1 | -1): string =>
+  (bucket > 0 && direction < 0 ? `${flowClass(bucket)} ${FLOW_REVERSE_CLASS}` : flowClass(bucket))
+
+/**
+ * Screen angle (degrees, clockwise from +x, as SVG rotates) of the flow at the
+ * middle of a route, by length: the segment that holds the half-way point,
+ * turned round for a reverse flow. `points` are screen-oriented (y down).
+ */
+export function flowArrowAngle(points: readonly (readonly [number, number])[], p: number): number {
+  const lens = points.slice(1).map((b, i) => Math.hypot(b[0] - points[i][0], b[1] - points[i][1]))
+  const half = lens.reduce((a, b) => a + b, 0) / 2
+  let i = 0
+  for (let run = 0; i < lens.length - 1 && run + lens[i] < half; i++) run += lens[i]
+  if (lens.length === 0 || lens[i] === 0) return 0
+  const d = flowDirection(p)
+  // `|| 0` turns -0 into 0, so a due-west flow reads 180 and not -180.
+  return Math.atan2(d * (points[i + 1][1] - points[i][1]) || 0, d * (points[i + 1][0] - points[i][0])) * 180 / Math.PI
+}
+
 /** Stroke width when width-by-flow is on: 1.5 px idle to 7.5 px at rating. */
 export const flowWidth = (share: number): number => 1.5 + 6 * Math.min(1, Math.max(0, share))
 
@@ -71,6 +95,7 @@ export function flowAnimationCss(): string {
       @keyframes canvasFlow { from { stroke-dashoffset: 0; } to { stroke-dashoffset: var(${FLOW_CYCLE_VAR}, -${FLOW_CYCLE_PX}px); } }
       .${FLOW_CLASS} { animation-name: canvasFlow; animation-timing-function: linear; animation-iteration-count: infinite; }
       ${classes}
+      .${FLOW_REVERSE_CLASS} { ${FLOW_CYCLE_VAR}: ${FLOW_CYCLE_PX}px; }
       @media (prefers-reduced-motion: reduce) { .${FLOW_CLASS} { animation: none; } }
     `
 }

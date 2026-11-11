@@ -339,7 +339,7 @@ describe('AggregatedOverview economics chart with an unknown VOLL', () => {
   it('says nothing about VOLL when it is recorded', async () => {
     mockCostAndShed(4000)
     const { container } = renderOverview()
-    await screen.findByText('Economics — system cost per period')
+    await screen.findByText('Economics · system cost per period')
     expect(screen.queryByTestId('economics-voll-not-recorded')).toBeNull()
     expect(screen.getByText('CAPEX · OPEX · VOLL')).toBeTruthy()
     expect(container.querySelector('.recharts-legend-wrapper')?.textContent).toMatch(/VOLL/)

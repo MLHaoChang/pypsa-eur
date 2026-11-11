@@ -1,5 +1,5 @@
 {"kinds": {
   "invalid_comment": {"surface": "inline", "why": "The report comments route refuses an empty comment or one over 2,000 characters; the user shortens or fills in the comment."},
-  "report_busy": {"surface": "inline", "why": "Another process held the report's write lock past 30 s (study harness 07c); nothing was written, and the call can be retried in a moment."},
+  "report_busy": {"surface": "inline", "why": "A report's write lock stayed held past its bound: 30 s for a write to the report (study harness 07c), 3 s for a snapshot, restore, Save As, scenario copy or bundle export or import that copies the project's reports (07e). The holder can be another request of this server or another process. Nothing was written, and the call can be retried in a moment."},
   "report_version_conflict": {"surface": "inline", "why": "Binding a template or merging an edited Word copy found a newer report version than the one it read (another writer saved in between); nothing was written, and the call can be retried on the latest version."}
 }}

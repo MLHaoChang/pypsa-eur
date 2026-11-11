@@ -3,7 +3,7 @@
 
 # 39 — The experiment refresh compares the queue's total, not the bare LP objective
 
-Status: needs-triage
+Status: done (#1334)
 Type: bug
 Gated: yes (GK B)
 Model tier: sonnet

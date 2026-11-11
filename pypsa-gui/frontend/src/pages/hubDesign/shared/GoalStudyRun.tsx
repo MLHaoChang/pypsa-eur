@@ -51,7 +51,7 @@ export function GoalStudyRun() {
           onClick={() => run.mutate()}
           disabled={running || run.isPending || built.body === null || vollMissing || !project
             || templateUnknown || gate.blocked || !reliabilityOn}
-          title={templateUnknown ? 'The template could not be read — retry below.'
+          title={templateUnknown ? 'The template could not be read: retry below.'
             : !reliabilityOn ? outOfScopeTitle : undefined}
           className="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
@@ -90,7 +90,7 @@ export function GoalStudyRun() {
       )}
       {!running && status === 'aborted' && (
         <p data-testid="hub-run-error" className="text-[12px] text-warn">
-          Stopped before the end — the results cover only the parts that finished.
+          Stopped before the end: the results cover only the parts that finished.
         </p>
       )}
     </div>

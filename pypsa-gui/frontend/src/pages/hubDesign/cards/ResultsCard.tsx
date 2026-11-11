@@ -161,7 +161,7 @@ export function ResultsCard() {
                 {riskName(r.name || r.mode_id)}
                 {r.criticality_eur_per_year != null && (
                   <span className="text-muted">
-                    {' — '}{r.criticality_eur_per_year > 0
+                    {' · '}{r.criticality_eur_per_year > 0
                       ? `about ${kpiMoney(r.criticality_eur_per_year)} per year`
                       // P29 (B3): the same reason text as the FMEA tab.
                       : (zeroReasonText(r.zero_reason) ?? 'no measurable cost')}
@@ -172,7 +172,7 @@ export function ResultsCard() {
           </ol>}
           {coped.length > 0 && (
             <span className="text-muted" data-testid="hub-results-no-shortfall">
-              Also checked: {coped.join(', ')} — no shortfall, the site copes without {coped.length > 1 ? 'them' : 'it'}.
+              Also checked: {coped.join(', ')}: no shortfall, the site copes without {coped.length > 1 ? 'them' : 'it'}.
             </span>
           )}
         </div>
@@ -187,7 +187,7 @@ export function ResultsCard() {
             {gaps.map(g => (
               <li key={g.name}>
                 <span className="text-text">{SECTION_LABEL[g.name] ?? 'Another part of the study'}</span>
-                <span className="text-muted"> — {g.note}</span>
+                <span className="text-muted">: {g.note}</span>
               </li>
             ))}
           </ul>

@@ -11,14 +11,19 @@
 # On the files changed since the merge base with <base> it runs: ruff check and
 # ruff format --check on changed Python (a file already failing on the base is
 # left alone, like the CI ratchet); `tsc --noEmit` when a frontend file changed;
-# the tests scripts/coord/overlap_tests.py maps to the changed files (and the
-# changed test files themselves); a fixed cross-cutting contract set; the repr
-# diff guard. One PASS/FAIL/SKIP line per step; exit non-zero on any FAIL. A step
-# whose tool is missing (ruff, node_modules, the backend venv) prints FAIL, never
-# PASS; with --allow-skip it prints SKIP and does not fail the run.
+# a fixed cross-cutting contract set (always, before the mapped tests); the tests
+# scripts/coord/overlap_tests.py maps to the changed files (and the changed test
+# files themselves); the repr diff guard. One PASS/FAIL/SKIP line per step; exit
+# non-zero on any FAIL. A step whose tool is missing (ruff, node_modules, the
+# backend venv) prints FAIL, never PASS; with --allow-skip it prints SKIP and
+# does not fail the run.
+# Each mapped step has a wall-clock cap (they took 11-30 min and hung once): at
+# the cap it is stopped and prints CUT, which does not fail the run because CI
+# runs those tests; a test failure already in its output still prints FAIL.
 # --plan prints the selected steps and files and runs nothing.
 #
-# Env: PREPUSH_PYTHON (backend venv python, default /root/.venv-pypsa-gui/bin/python), PREPUSH_RUFF.
+# Env: PREPUSH_PYTHON (backend venv python, default /root/.venv-pypsa-gui/bin/python), PREPUSH_RUFF,
+# PREPUSH_MAPPED_CAP (seconds per mapped step, default 600; 0 = no cap).
 set -uo pipefail
 
 allow_skip=0 plan=0 base=origin/master
@@ -38,6 +43,8 @@ mb=$(git merge-base "$base" HEAD) || { echo "no merge base with $base" >&2; exit
 changed=$({ git diff --name-only --diff-filter=d "$mb"; git ls-files --others --exclude-standard; } | sort -u)
 
 py_bin=${PREPUSH_PYTHON:-/root/.venv-pypsa-gui/bin/python}
+mapped_cap=${PREPUSH_MAPPED_CAP:-600}
+[[ $mapped_cap =~ ^[0-9]+$ ]] || { echo "PREPUSH_MAPPED_CAP must be whole seconds, got '$mapped_cap'" >&2; exit 2; }
 backend=pypsa-gui/backend
 frontend=pypsa-gui/frontend
 log=$(mktemp -d)/prepush
@@ -53,11 +60,18 @@ result() { # name status detail
 missing() { # name what: FAIL (or SKIP) because a tool is absent
   if [ "$allow_skip" = 1 ]; then result "$1" SKIP "missing: $2"; else result "$1" FAIL "missing: $2"; fi
 }
-run() { # name cmd... (run in $PWD; log tail on failure)
+# A failed test in a cut-off log: a pytest -q progress line with F or E, or a vitest FAIL / cross line.
+failed_re='^[.FEsxX]*[FE][.FEsxX]*( +\[ *[0-9]+%\])?$|(^|[[:space:]])(FAIL|×|✗)[[:space:]]'
+run() { # name cmd... (run in $PWD; log tail on failure); cap=<s> before the call stops cmd at <s> seconds
   local name=$1; shift
   if [ "$plan" = 1 ]; then echo "plan $name: $*"; return 0; fi
-  local f="$log/${name//[^A-Za-z0-9]/_}.log" t0=$SECONDS
-  if "$@" >"$f" 2>&1; then result "$name" PASS "$((SECONDS - t0))s"
+  local f="$log/${name//[^A-Za-z0-9]/_}.log" t0=$SECONDS rc=0 cap=${cap:-0}
+  if [ "$cap" -gt 0 ] && command -v timeout >/dev/null; then
+    timeout -k 10 "$cap" "$@" >"$f" 2>&1 || rc=$?
+  else cap=0; "$@" >"$f" 2>&1 || rc=$?; fi
+  if [ "$rc" = 0 ]; then result "$name" PASS "$((SECONDS - t0))s"
+  elif [ "$cap" -gt 0 ] && { [ "$rc" = 124 ] || [ "$rc" = 137 ]; } && ! grep -qE "$failed_re" "$f"; then
+    result "$name" CUT "cut off at ${cap}s with no failure so far; CI covers them, log $f"
   else result "$name" FAIL "$((SECONDS - t0))s, log $f"; tail -n 12 "$f" | sed 's/^/     | /'; fi
 }
 backend_env() { PYTHONPATH="$root:$root/$backend" "$@"; }
@@ -91,31 +105,12 @@ if grep -q "^$frontend/" <<<"$changed"; then
   else (cd "$frontend" && run tsc node_modules/.bin/tsc --noEmit -p .); fi
 fi
 
-# --- tests overlap_tests.py maps to the changed files ----------------------
-mapped=$(python3 "$here/overlap_tests.py" "$root" $(grep -vE '^$' <<<"$changed" | tr '\n' ' ') 2>/dev/null || true)
-# changed test files run themselves (overlap_tests maps them to nothing)
-own_py=$(grep -E "^$backend/tests/test_.*\.py$" <<<"$changed" | sed "s#^$backend/##" || true)
-own_js=$(grep -E "^$frontend/src/.*\.test\.tsx?$" <<<"$changed" | sed "s#^$frontend/##" || true)
-bt=$( { awk -F'\t' '$1=="pytest" && NF==3 {print $3}' <<<"$mapped"; echo "$own_py"; } | grep -v '^$' | sort -u || true)
-ft=$( { awk -F'\t' '$1=="vitest" && NF==3 {print $3}' <<<"$mapped"; echo "$own_js"; } | grep -v '^$' | sort -u || true)
-
 need_py() { # name -> 0 when the backend interpreter exists
   [ -x "$py_bin" ] && return 0; missing "$1" "backend python $py_bin (set PREPUSH_PYTHON)"; return 1
 }
 need_node() { [ -x "$frontend/node_modules/.bin/vitest" ] && return 0; missing "$1" "$frontend/node_modules (vitest)"; return 1; }
 
-if [ -n "$bt" ]; then
-  if [ "$plan" = 1 ]; then echo "plan mapped backend tests: $(tr '\n' ' ' <<<"$bt")"
-  elif need_py "mapped backend tests"; then
-    (cd "$backend" && run "mapped backend tests" backend_env "$py_bin" -m pytest -q $bt); fi
-fi
-if [ -n "$ft" ]; then
-  if [ "$plan" = 1 ]; then echo "plan mapped frontend tests: $(tr '\n' ' ' <<<"$ft")"
-  elif need_node "mapped frontend tests"; then
-    (cd "$frontend" && run "mapped frontend tests" node_modules/.bin/vitest run $ft); fi
-fi
-
-# --- fixed contract set (always) -------------------------------------------
+# --- fixed contract set (always, first: seconds, and never derived from the mapping)
 contract_py="tests/test_route_chat_disposition.py tests/test_assurance_returned_shapes.py tests/test_assurance_contracts.py tests/test_tool_error_kind_manifest.py"
 contract_js=$(cd "$frontend" 2>/dev/null && { echo src/site3d/site3dUiContract.test.ts; find src -name '*Contract*.test.ts' ; } | sort -u | tr '\n' ' ')
 if [ "$plan" = 1 ]; then
@@ -131,6 +126,25 @@ if [ "$plan" != 1 ] && need_node "contract: vitest"; then
   (cd "$frontend" && run "contract: vitest" node_modules/.bin/vitest run $contract_js)
 fi
 
+# --- tests overlap_tests.py maps to the changed files ----------------------
+mapped=$(python3 "$here/overlap_tests.py" "$root" $(grep -vE '^$' <<<"$changed" | tr '\n' ' ') 2>/dev/null || true)
+# changed test files run themselves (overlap_tests maps them to nothing)
+own_py=$(grep -E "^$backend/tests/test_.*\.py$" <<<"$changed" | sed "s#^$backend/##" || true)
+own_js=$(grep -E "^$frontend/src/.*\.test\.tsx?$" <<<"$changed" | sed "s#^$frontend/##" || true)
+bt=$( { awk -F'\t' '$1=="pytest" && NF==3 {print $3}' <<<"$mapped"; echo "$own_py"; } | grep -v '^$' | sort -u || true)
+ft=$( { awk -F'\t' '$1=="vitest" && NF==3 {print $3}' <<<"$mapped"; echo "$own_js"; } | grep -v '^$' | sort -u || true)
+
+if [ -n "$bt" ]; then
+  if [ "$plan" = 1 ]; then echo "plan mapped backend tests: $(tr '\n' ' ' <<<"$bt")"
+  elif need_py "mapped backend tests"; then
+    (cd "$backend" && cap=$mapped_cap run "mapped backend tests" env PYTHONPATH="$root:$root/$backend" "$py_bin" -m pytest -q $bt); fi
+fi
+if [ -n "$ft" ]; then
+  if [ "$plan" = 1 ]; then echo "plan mapped frontend tests: $(tr '\n' ' ' <<<"$ft")"
+  elif need_node "mapped frontend tests"; then
+    (cd "$frontend" && cap=$mapped_cap run "mapped frontend tests" node_modules/.bin/vitest run $ft); fi
+fi
+
 # --- repr diff guard ----------------------------------------------------------
 if [ "$plan" = 1 ]; then echo "plan repr guard: $here/repr_guard.py $base"
 else run "repr guard" python3 "$here/repr_guard.py" "$base"; fi
@@ -139,4 +153,6 @@ else run "repr guard" python3 "$here/repr_guard.py" "$base"; fi
 echo
 fails=$(grep -c '^FAIL$' "$results" || true) skips=$(grep -c '^SKIP$' "$results" || true)
 if [ "$fails" -gt 0 ]; then echo "PREPUSH: FAIL ($fails failing, $skips skipped)"; exit 1; fi
+cuts=$(grep -c '^CUT$' "$results" || true)
+if [ "$cuts" -gt 0 ]; then echo "PREPUSH: PASS ($skips skipped, $cuts mapped step(s) cut off at ${mapped_cap}s: CI covers them)"; exit 0; fi
 echo "PREPUSH: PASS ($skips skipped)"

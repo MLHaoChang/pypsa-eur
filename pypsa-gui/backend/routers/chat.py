@@ -141,6 +141,9 @@ class StreamRequest(BaseModel):
 class ConfirmRequest(BaseModel):
     token: str
     decision: str  # "approve" | "deny"
+    # LC-47: the rows a change-set card's approval applies (tool_use ids);
+    # absent means every row, and on any other card it is a 400.
+    ticked: list[str] | None = None
 
 
 class ApiKeyRequest(BaseModel):
@@ -2279,7 +2282,7 @@ def chat_confirm(session_id: str, body: ConfirmRequest,
                 "message": f"no chat session bound to {session_id!r}",
             },
         )
-    pc = session.record_decision(body.token, body.decision)
+    pc = session.record_decision(body.token, body.decision, body.ticked)
     return {
         "ok": True,
         "token": pc.token,

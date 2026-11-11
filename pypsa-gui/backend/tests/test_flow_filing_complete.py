@@ -189,11 +189,11 @@ def test_a_row_with_its_own_target_is_filed_there():
     assert got["assumed_connection_ramp"] == (
         {"section": "connection", "panel": None, "component": "Link",
          "entity": "grid_import", "field": "connection_ramp"},
-        "Connection ramp limit: 4 MW/min (assumed) — confirm it or set your own.")
+        "Connection ramp limit: 4 MW/min (assumed): confirm it or set your own.")
     assert got["assumed_fault_level"] == (
         {"section": "connection", "panel": None, "component": "Bus", "entity": "poc",
          "field": "eh_sk_mva"},
-        "Fault level: 800 MVA (assumed) — confirm it or set your own.")    # no label: humanised
+        "Fault level: 800 MVA (assumed): confirm it or set your own.")    # no label: humanised
     assert len(items) == 6
     assert got["assumed_lole_goal"][0] == {"section": "scenarios", "panel": "simparams",
                                            "component": None, "entity": None,
@@ -238,3 +238,134 @@ def test_an_assumed_value_shows_at_full_precision():
     assert got["assumed_import_efficiency"]["message"].startswith(
         "Import efficiency: 0.9876543 (assumed)")
     assert got["assumed_import_efficiency"]["_value"] == "0.9876543"
+
+
+# ── ui-modern 05: the words a Guided section shows ────────────────────────────
+
+#: Engineering keys a user-facing assumed row must not carry (audit finding 4).
+RAW_KEYS = ("p_max_pu", "tau_f", "i_max", "k_gfm", "island_constraints", "inv_power_lifetime",
+            "RoCoF", "sidecar")
+
+
+@pytest.mark.parametrize("tid", sorted(_ledgers()))
+def test_no_assumed_row_shows_an_engineering_key(tid):
+    for item in S._assumed_items({"ledger": _ledgers()[tid]}):
+        found = [k for k in RAW_KEYS if k in item["message"]]
+        assert not found, f"{tid}: {item['message']!r} shows {found}"
+
+
+def test_a_ledger_row_is_said_in_plain_words_and_keeps_its_record():
+    rows = [{"item": "island rows", "value": "off (island_constraints false)", "source": "assumed"},
+            {"item": "transition RoCoF limit", "value": "2 Hz/s over 500 ms", "source": "assumed"},
+            {"item": "island unit data", "source": "assumed",
+             "value": "diesel droop 4 %, H 1.5 s; batteries tau_f 0.1 s, i_max 1.2 pu, "
+                      "k_gfm_min 1.0, pf 0.95"}]
+    items = S._assumed_items({"ledger": rows})
+    assert [i["message"] for i in items] == [
+        "Island limits in the optimisation: off (assumed): confirm it or set your own.",
+        "Rate-of-change limit during the transition: 2 Hz/s over 500 ms (assumed): "
+        "confirm it or set your own.",
+        "Island unit settings: diesel droop 4 %, inertia constant 1.5 s; batteries frequency "
+        "filter time 0.1 s, current limit 1.2 p.u., grid-forming current at least 1.0, "
+        "power factor 0.95 (assumed): confirm it or set your own."]
+    # The acknowledgement binds to the ledger's own value, not to the plain words.
+    assert items[0]["_value"] == "off (island_constraints false)"
+
+
+def test_the_rate_of_change_word_is_the_island_panels():
+    panel = (pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages"
+             / "CampusIslandSection.tsx").read_text()
+    assert "'Rate of change (Hz/s)'" in panel
+    label, _ = S._LEDGER_PLAIN["transition RoCoF limit"]
+    assert label.replace("-", " ").lower().startswith("rate of change")
+
+
+CONFIG_URL = "/api/simulation/solver_config"
+
+
+def _microgrid_flow(client, name: str, tid: str = "eh_microgrid") -> dict:
+    r = client.post(f"/api/projects/from_template/{tid}", params={"name": name})
+    assert r.status_code == 200, r.text
+    return client.get(f"/api/projects/{name}/flow").json()
+
+
+def _connection_defaults(flow: dict) -> tuple[dict, list[dict]]:
+    conn = next(s for s in flow["sections"] if s["section"] == "connection")
+    return conn, [i for i in conn["items"] if i["code"].startswith("assumed_")]
+
+
+def test_an_off_grid_section_keeps_its_defaults_out_of_scope(client, tmp_projects_dir):
+    """Section 3 is "not needed" off-grid: its four assumed rows stay listed (the
+    audit trail) but are out of scope and counted nowhere; nothing else moves."""
+    flow = _microgrid_flow(client, "mg_words")
+    conn, defaults = _connection_defaults(flow)
+    assert conn["state"] == "not_needed"
+    assert sorted(i["code"] for i in defaults) == [
+        "assumed_connection_ramp", "assumed_default", "assumed_import_efficiency",
+        "assumed_oscillation"]
+    assert [i["in_scope"] for i in defaults] == [False] * 4
+    assert not any(i["blocking"] for i in defaults)
+    by_id = {s["section"]: s for s in flow["sections"]}
+    assert by_id["readiness"]["summary"] == "0 to do, 14 to check"
+    # The assumed rows of the sections the project does need are still asked for.
+    assert all(i["in_scope"] for s in ("assets", "commercial", "scenarios")
+               for i in by_id[s]["items"] if i["code"].startswith("assumed_"))
+    assert flow["run_ready"] is True and flow["run_blocker"] is None
+    assert flow["verdicts"]["optimisation"] == {"ready": True, "blocker": None}
+
+
+def test_the_staged_microgrid_keeps_its_feeder_losses_counted(client, tmp_projects_dir):
+    """The staged island files a fifth row to section 3, the hospital feeder's
+    losses: that link carries flow, so its default is still asked for."""
+    flow = _microgrid_flow(client, "mg_staged", "eh_microgrid_staged")
+    conn, defaults = _connection_defaults(flow)
+    assert conn["state"] == "not_needed"
+    scope = {i["target"]["entity"]: i["in_scope"] for i in defaults}
+    assert scope == {"hospital feeder losses": True, "point of connection": False,
+                     "subsea_tie": False}
+    assert len(defaults) == 5
+    readiness = next(s for s in flow["sections"] if s["section"] == "readiness")
+    assert readiness["summary"] == "0 to do, 11 to check"
+
+
+def test_a_section_the_scope_leaves_out_says_so(client, tmp_projects_dir, monkeypatch):
+    """Every not-needed section keeps its reason as the summary, never a count;
+    only the off-grid connection's defaults leave the scope."""
+    real = S.S.needed_sections
+    monkeypatch.setattr(S.S, "needed_sections", lambda scope: set(real(scope)) - {"loads"})
+    flow = _microgrid_flow(client, "mg_scope")
+    by_id = {s["section"]: s for s in flow["sections"]}
+    assert by_id["loads"]["state"] == "not_needed"
+    assert by_id["loads"]["summary"] == "Not needed by the cards in scope"
+    assert by_id["connection"]["summary"] == "Off-grid: no grid connection needed"
+    assert all(i["in_scope"] for i in by_id["loads"]["items"])
+
+
+def _row(code: str, entity: str, severity: str = "warning") -> dict:
+    return S._item(code, severity, "m", "template", "connection", entity=entity)
+
+
+def test_only_the_open_connections_own_defaults_leave_the_scope():
+    rows = [_row("assumed_connection_ramp", "tie"), _row("assumed_default", "point of connection"),
+            _row("assumed_default", "hospital feeder losses"),      # another link: has flow
+            _row("link_efficiency_out_of_range", "tie"),             # a warning, not a default
+            _row("assumed_default", "tie", severity="error")]
+    S._unused_connection_defaults(rows, frozenset({"tie"}))
+    assert [r["in_scope"] for r in rows] == [False, False, True, True, True]
+
+
+def test_a_grid_connection_brings_the_connection_defaults_back(client, tmp_projects_dir):
+    """Keyed on the live section state, not the template: a user who says the
+    site has a grid connection is asked to confirm its defaults again."""
+    _microgrid_flow(client, "mg_grid")
+    r = client.put(CONFIG_URL, json={"site_archetype": "weak_flexible"})
+    assert r.status_code == 200, r.text
+    conn, defaults = _connection_defaults(client.get("/api/projects/mg_grid/flow").json())
+    assert conn["state"] != "not_needed"
+    assert len(defaults) == 4 and all(i["in_scope"] for i in defaults)
+
+
+@pytest.mark.parametrize("n, words", [(0, "0 assets"), (1, "1 asset"), (9, "9 assets")])
+def test_a_summary_count_uses_a_real_plural(n, words):
+    assert S._count(n, "asset") == words
+    assert "(s)" not in words

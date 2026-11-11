@@ -3,7 +3,7 @@
 
 # RP-20 — should chat confirm unrecorded series?
 
-Status: needs-triage
+Status: needs-info (owner question: build a chat tool for confirming unrecorded series?)
 Type: task
 Raised by: RP-18 (`18-rp-14-old-projects-native-series-unrecorded.md`), GK B condition R3.
 
@@ -15,3 +15,9 @@ To decide: build a chat tool for it? If so it is carded with the user deciding, 
 lists every series it stamps with their digests (RP-18 R3, R4).
 
 ## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `POST /api/projects/{name}/profiles/unrecorded/confirm` exists (`routers/profiles.py`), is listed in `services/not_via_chat.py`, and chat has no tool for it. Verdict: needs-info.
+
+Exact question, sent to the owner through the coordinator: build a chat tool that confirms unrecorded series (carded, the user deciding, every series and digest listed), or keep it route-only and wontfix this issue?

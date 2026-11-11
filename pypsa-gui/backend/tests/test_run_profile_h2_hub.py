@@ -201,8 +201,7 @@ def baseline(client, session_ctx, install_network, template, tmp_path):
     # The template's own solver settings (its VoLL slacks) and a stored reliability goal (h/yr).
     ctx.solver_state["solver_config"] = SolverConfig(
         **{
-            **T.SOLVER_CONFIG,
-            **T.SOLVER_CONFIG_EXTRA.get(template, {}),
+            **T.solver_config(template),
             "target_lole_h": 2.0,
         }
     )
@@ -337,18 +336,28 @@ def test_an_electrolyser_beyond_the_envelopes_bound_is_refused_and_nothing_chang
 
 
 @pytest.mark.parametrize("template", list(REFS), indirect=True)
-def test_a_run_on_each_template_stops_at_the_result_gate_on_the_loops_typed_refusal(
+def test_a_run_on_each_template_reaches_a_loop_verdict_on_the_sampled_grid_import(
     goal_granted, rated, fake_report, template
 ):
-    """Acceptance 1 is blocked by .scratch/adequacy-loops/issues/01 (GK A (19)
-    SH11-L1, L2, L3, L5): the shipped profile, EH study and coupling loop
-    real. The offtake passes on the run's own solve; the coupling loop
-    refuses (the templates' outages sit on Links), the LOLE rule reads that
-    typed reason, never passed or not_started, and the run stops at the
-    result gate. The refused loop charges no solve."""
+    """Adequacy loops 01 (closes the loop half of study-harness 11's
+    acceptance 1): the shipped profile, EH study and coupling loop real, on
+    the template's own solver settings (its tariff moves the electrolyser's
+    dispatch, and with it what an import outage sheds).
+    The loop samples the hub side, its grid_import Link a two-state unit, and
+    the store-fed fuel cell is not credited (GK A (20) AL-1). The loop runs to
+    a verdict and the LOLE rule evaluates it (GK A (21) AL-8):
+    - eh_h2_hub meets the goal on the first solve, the rule passes and the
+      run completes (block before, pass now). Its 1.46 h/yr is two sampled
+      shortfall events; a third would miss the 2 h/yr goal;
+    - eh_h2_hub_staged misses on the import's outages alone and no lever
+      moves them, so the rule reads fail and the run stops at the result gate
+      (block before, block now).
+    The solve count is the loop's own: solves used + probe solves + the
+    closing re-solve."""
     from tests.test_harness_run_report_handoff import runner as run_runner
     from tests.test_harness_runner import Clicks
 
+    met = template == "eh_h2_hub"
     task, path = goal_granted(REFS[template])
     clicks = Clicks(refs={"solve.2"})
     record = go(run_runner(clicks), path, task)
@@ -357,41 +366,41 @@ def test_a_run_on_each_template_stops_at_the_result_gate_on_the_loops_typed_refu
         r["rule"]: r
         for r in (run["stages"]["result_gate"].get("gate") or {}).get("rules", [])
     }
-    assert run["stage"] == "result_gate" and run["status"] == "needs_user", (
-        run["stage"],
-        run["status"],
-    )
-    assert (
-        run["stages"]["result_gate"]["status"] == "failed"
-        and run["stages"]["handoff"]["status"] != "passed"
+    assert (run["stage"], run["status"]) == (
+        ("handoff", "completed") if met else ("result_gate", "needs_user")
     )
     assert clicks.used == ["solve.2"]
+    engine = next(s for s in record["steps"] if s.get("engine"))
+    assert engine["tool"] == "run_coupling_loop" and engine["status"] == "completed"
     lole = verdicts["eh.adequacy.lole"]
-    assert lole["verdict"] == "not_evaluated" and lole["severity"] == "block"
-    assert lole["facts"][0]["value"] == run_gates.LOOP_NOTHING_TO_SAMPLE
-    # GK A (19) F1: the reason names both causes, never only the Links.
-    assert lole["reason"] == run_gates.NOTHING_TO_SAMPLE_DETAIL
-    assert lole["facts"][0]["value"] not in (
-        "passed",
-        "not_started",
-    ) and not run_gates.passed([lole])
+    loop = lole["facts"][0]["loop"]
+    assert loop["status"] == ("met" if met else "unreachable") and loop["error"] is None
+    assert loop["solves_used"] == (1 if met else 2)
+    assert lole["facts"][0]["value"] is met
+    assert (
+        lole["verdict"] == ("pass" if met else "fail") and lole["severity"] == "block"
+    )
+    assert run_gates.passed([lole]) is met
     assert verdicts["h2.offtake.met"]["verdict"] == "pass"
     assert verdicts["h2.ic.counterfactual"]["verdict"] == "not_evaluated"
-    assert verdicts["h2.ic.counterfactual"]["reason"].startswith("not_run")
+    # The typed state stays in the fact's value; the reason is words (SH-10b).
+    investment = verdicts["h2.ic.counterfactual"]
+    assert investment["facts"][0]["value"] == "not_run"
+    assert investment["reason"] == "No investment case has been run"
     use = verdicts["h2.electrolyser.utilisation"]
     assert use["verdict"] in ("pass", "fail") and 0.0 < use["facts"][0]["value"] <= 1.0
-    engine = next(s for s in record["steps"] if s.get("engine"))
-    assert engine["tool"] == "run_coupling_loop" and engine["status"] == "failed"
-    assert "nothing to sample" in engine["error"]
-    # L2: the refused loop's reservation is released; only the solve and the EH study are charged.
     envelope = envelope_of(path)
     [row] = [
         a
         for a in envelope["audit"]
         if a.get("tool") == "run_coupling_loop" and "reserved" in a
     ]
-    assert row["solves"] == 0
-    assert run_envelope.solves_used(envelope) == 2
+    closing = 1 if loop["restore"] == "base" else 0
+    assert (
+        row["solves"]
+        == loop["solves_used"] + int(loop.get("probe_solves") or 0) + closing
+    )
+    assert run_envelope.solves_used(envelope) == 2 + row["solves"]
 
 
 @pytest.mark.parametrize("ref", REFS.values())
@@ -673,19 +682,20 @@ def test_staged_offtake_without_its_own_capture_is_no_evidence(
 
 
 @pytest.mark.parametrize(
-    "state, reasons, verdict",
+    "state, reasons, verdict, words",
     [
-        ("established", [], "pass"),
+        ("established", [], "pass", None),
         (
             "not_established",
             ["counterfactual_not_established:no_reference_price"],
             "not_evaluated",
+            "The counterfactual is not established (no reference price)",
         ),
-        ("not_run", ["no_case"], "not_evaluated"),
+        ("not_run", ["no_case"], "not_evaluated", "No investment case has been run"),
     ],
 )
 def test_the_investment_rule_is_evaluated_once_established_and_never_blocks(
-    monkeypatch, state, reasons, verdict
+    monkeypatch, state, reasons, verdict, words
 ):
     from services import ic_counterfactual as ic
 
@@ -698,7 +708,9 @@ def test_the_investment_rule_is_evaluated_once_established_and_never_blocks(
     [result] = run_gates.evaluate([_rule("h2.ic.counterfactual")], env)
     assert result["verdict"] == verdict and result["severity"] == "warn"
     if verdict == "not_evaluated":
-        assert result["reason"] == f"{state}: {', '.join(reasons)}"
+        # The typed state stays in the fact's value; the reason is words (SH-10b).
+        assert result["facts"][0]["value"] == state
+        assert result["reason"] == words
     assert run_gates.passed([result])
 
 

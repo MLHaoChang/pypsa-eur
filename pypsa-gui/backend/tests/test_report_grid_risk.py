@@ -97,7 +97,7 @@ def test_a_missing_line_reads_missing_with_the_forms_word_never_zero(net):
     assert G.LABELS["outside_blocks"] not in rows  # no island rows without the line
     text = " ".join(ev.required_disclosures)
     assert (
-        "incomplete: 2 lines are missing" in text and "A missing line is not 0" in text
+        "incomplete, 2 lines are missing" in text and "A missing line is not 0" in text
     )
 
 
@@ -317,3 +317,113 @@ def test_a_sub_row_bounded_by_the_outage_length_never_also_says_units_are_unknow
     assert C._sub_row_flags(["lower_bound"]) == [
         "lower_bound"
     ]  # alone, it is still said
+
+
+def _lower_bound_n_1(monkeypatch):
+    from tests.test_grid_risk_production import _fake_loss, _prod, _two_trafos
+
+    _fake_loss(
+        monkeypatch,
+        {
+            "site_trafo": {"_": ([_prod(2.0, 200.0)], "lower")},
+            "site_trafo_b": {"_": ([_prod(1.0, 1.0)], None)},
+        },
+    )
+    return _section(_two_trafos())
+
+
+def test_the_n_1_line_bounded_by_the_outage_length_says_so_in_its_own_notes(
+    monkeypatch,
+):
+    """G2P-13: the line's Notes and the disclosure give the true reason, never "some units are not known"."""
+    ev = _collect(grid_risk=_lower_bound_n_1(monkeypatch))
+    _, rows = _rows(ev)
+    line = rows[G.LABELS["n_1"]]
+    assert line[3] == "partial"
+    assert line[4] == (
+        "no inventory credit, so it is conservative; "
+        "the outage is longer than the period, so this is a lower bound"
+    )
+    text = " ".join(ev.required_disclosures)
+    assert (
+        f"Grid risk to production: lower bound for {G.LABELS['n_1']} "
+        "(the outage is longer than the period)." in text
+    )
+    assert "some units are not known" not in text
+
+
+def test_a_lower_bound_from_unknown_units_still_says_so():
+    line = {
+        "label": "Ride-through",
+        "status": "partial",
+        "stale": False,
+        "flags": ["lower_bound"],
+        "by_period": {},
+    }
+    n_1 = {
+        **line,
+        "label": "N-1",
+        "flags": ["outage_longer_than_period", "lower_bound"],
+    }
+    out = C.grid_risk_disclosures({"lines": [line, n_1], "periods": ["_"]})
+    assert out[1] == (
+        "Grid risk to production: lower bound for Ride-through (some units are not known) · "
+        "N-1 (the outage is longer than the period)."
+    )
+
+
+def test_a_lower_bound_line_without_that_reason_keeps_the_generic_words(net, tmp_path):
+    """GK A N28-4: only an outage longer than the period on the same line drops the generic words."""
+    sec = _section(net, _write_campus(tmp_path / "run"))
+    ride = next(ln for ln in sec["lines"] if ln["key"] == "ride_through")
+    ride["flags"], ride["status"] = ["lower_bound"], "partial"
+    ev = _collect(grid_risk=sec)
+    row = _rows(ev)[1][G.LABELS["ride_through"]]
+    assert row[4] == "some units are not known, so this is a lower bound"
+    assert f"{G.LABELS['ride_through']} (some units are not known)" in " ".join(
+        ev.required_disclosures
+    )
+
+
+def test_a_stamp_with_no_words_leaves_no_empty_brackets_in_the_source(net):
+    """G2P-13: an unknown stamp key gives no words, so the Source is the file alone, never "file ()"."""
+    sec = _section(net)
+    n1 = next(ln for ln in sec["lines"] if ln["key"] == "n_1")
+    n1["stamp"] = {"solver": "highs"}
+    conn = next(ln for ln in sec["lines"] if ln["key"] == "connection")
+    conn["stamp"] = {"revision": 7}
+    _, rows = _rows(_collect(grid_risk=sec))
+    assert rows[G.LABELS["n_1"]][5] == ", ".join(n1["source_files"])
+    assert rows[G.LABELS["connection"]][5] == (
+        ", ".join(conn["source_files"]) + " (revision 7)"
+    )
+    assert not [r for r in _rows(_collect(grid_risk=sec))[0].rows if "()" in r[-1]]
+
+
+def test_the_disclosures_join_with_a_colon_never_an_em_dash(net, tmp_path):
+    """G2P-13 (docs/agents/review-ux.md): a colon, not an em dash, joins clauses."""
+    campus = _write_campus(tmp_path / "run")
+    stale = G.CampusRun(run_dir=campus.run_dir, stale=True, stamp=campus.stamp)
+    two = _network(periods=[2030, 2040])
+    lines = [
+        d
+        for sec in (
+            _section(net),  # missing lines
+            _section(net, stale),  # out of date
+            _section(two),  # two periods
+            _section(_network(lpv=None), campus),  # EUR unavailable
+        )
+        for d in _collect(grid_risk=sec).required_disclosures
+        if d.startswith("Grid risk to production")
+    ]
+    flat = " ".join(lines)
+    for kind in (
+        "each grid risk",
+        "incomplete",
+        "out of date",
+        "EUR is unavailable",
+        "one row set per period",
+    ):
+        assert kind in flat, kind
+    assert all(d.startswith("Grid risk to production: ") for d in lines)
+    assert not [d for d in lines if "—" in d]

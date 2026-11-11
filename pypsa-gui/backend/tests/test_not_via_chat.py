@@ -67,7 +67,7 @@ def test_the_issue_rows_are_declared():
         'intent_comparison': ('unbuilt', None),
         'dc_backup': ('unbuilt', None),
         'dc_architecture': ('unbuilt', None),
-        'dc_operational_gap': ('manual', 'results'),
+        'dc_operational_gap': ('manual', 'results'), 'results_headline_strip': ('manual', 'results'),
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
         'unrecorded_series_confirm': ('manual', None),
@@ -98,6 +98,10 @@ def test_the_issue_rows_are_declared():
     ('Save the efficiency for another project', 'memory_parameter_suggestions'),
     ('Remember this capex for later', 'memory_parameter_suggestions'),
     ('Remember this value for next time', 'memory_parameter_suggestions'),
+    ('Read me the headline strip', 'results_headline_strip'), ('What is in the KPI strip', 'results_headline_strip'),
+    ('Which KPIs are in the strip', 'results_headline_strip'),
+    ('Why is the LCOE KPI not shown in the strip?', 'results_headline_strip'), ('Add a KPI to the strip', 'results_headline_strip'),
+    ('Hide the headline strip', 'results_headline_strip'), ('What does the headline strip show?', 'results_headline_strip'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -130,6 +134,16 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Store the excess energy for later use and lower the cost',
     'Keep the capacity under 50 MW for future years', 'Keep the price fixed and use it again',
     'Remember to use the price again in the next solve', 'Save the capacity for future years',
+    # ui-modern 03 (GK B F3): 'headline' and 'strip' each belong to real tools.
+    'Headline KPIs for run A vs run B', 'Show the investment case headlines', 'List the files in the chat file strip',
+    'Export the headline results to the file strip', 'Compare headline KPIs of run A and run B and export to the file strip',
+    'Put the KPI report in the file strip',
+    # GK B R1: export, report, compare and the verb "strip" are chat tools' work.
+    'Export the headline strip to Excel', 'Export the KPI strip', 'Download the KPI strip as CSV',
+    'Put the headline strip in the report', 'Add the headline strip KPIs to the Word report',
+    'Compare the headline strip of two runs', 'Compare the KPI strip of run A and run B',
+    'Strip the headline from the report', 'Strip KPI names of units in the export', 'Save the KPI strip to my files',
+    'Add the KPI strip to the export', 'What is in the chat file strip',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)

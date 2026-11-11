@@ -163,6 +163,28 @@ def test_the_fmea_top_slice_sent_to_the_provider_has_no_frontier_key(tmp_path, e
 
 # ── failures, disclosures, repairs ──────────────────────────────────────────
 
+def test_a_report_kept_busy_fails_the_job_where_the_user_sees_it(tmp_path, evidence, monkeypatch):
+    """A bundle copy can keep a report past the writer's bound (study harness
+    07e): the job ends `failed` with the reason, it neither hangs nor stays
+    `running`."""
+    def busy(*_a, **_k):
+        raise store.ReportBusy("report 00000000000000aa is being written")
+
+    monkeypatch.setattr(store, "create_report", busy)
+    provider = FakeProvider([
+        _draft(EXECUTIVE_SUMMARY_ID, "The plan meets 3.2 h/yr at 1,234,568 €.",
+               bullets=["MC LOLE 3.21 h/yr"]),
+        _draft("frontier", "The frontier has one point at 10 ‱."),
+        _draft("fmea_top", "One residual mode dominates: generator g, rank 1."),
+    ])
+    job = _job(tmp_path, evidence, provider)
+    with pytest.raises(store.ReportBusy):
+        run_report_job(job)
+    assert job.record["status"] == "failed"
+    assert "is being written" in job.record["error"]
+    assert job.record.get("finished_at")
+
+
 def test_a_failing_section_keeps_its_code_blocks_and_records_the_failure(tmp_path, evidence):
     provider = FakeProvider([
         _draft(EXECUTIVE_SUMMARY_ID, "Summary."),

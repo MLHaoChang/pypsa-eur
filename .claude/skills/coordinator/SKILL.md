@@ -66,7 +66,7 @@ Done when the routine fires into the new session, every live session has the new
 
 Decide yourself when the answer follows from a rule or an earlier owner decision, then tell the owner what you decided and why. Ask the owner when the answer changes scope, cost, what users see, or a rule. Escalate a disagreement between a session and the gatekeeper only when the gatekeeper holds its position.
 
-Every `AskUserQuestion` is also written in the turn's final reply text, in the same options form: a worker restart drops a pending question, and the text survives it.
+Every `AskUserQuestion` is also written in the turn's final reply text, in the same options form: a worker restart drops a pending question, and the text survives it. When the dialog is dropped (an arriving notification or a worker restart closes it), ask in the reply text only (the question, the options, the recommended one first) and take the owner's typed answer.
 
 Append every owner decision to `docs/agents/owner-decisions.md`, in the PR that lands the next coordination change or as its own tiny docs PR. Briefs cite the row.
 
@@ -114,7 +114,7 @@ Leave `outcome_branch` unset, so the session can open each PR on its own `claude
 
 Always pass `source_url` `https://github.com/MLHaoChang/pypsa-eur`, `model`, `title` and `tags` (lowercase `team:<lead|review|build|assurance>`) on `create_session`. Before opening a package, check `git log origin/master` for it: it may have landed.
 
-Build the brief with `python3 scripts/coord/brief.py` (`--help`; template `docs/agents/session-brief.md`) and send the file it writes as the first message. From flags it takes the task (the owner's own words for the goal, and what "done" looks like), decisions, file pointers, the master SHA, the reviewer and the stream; it builds "Stay out of" from the open PRs' files and the live sessions (the inputs of Sweep's Capacity step); and it appends Context budget (hand off at 300k, USE-2), Process, and for stream DC the CONFIDENTIALITY text (SAGC-1). Paste a rotating session's hand-off note into the task verbatim. Briefs keep "Hand off at 300k" (USE-2) for builders and reviewers alike; never lower it per brief. When the brief is long, write it to the scratchpad and have a Sonnet subagent call `create_session` with it verbatim.
+Build the brief with `python3 scripts/coord/brief.py` (`--help`; template `docs/agents/session-brief.md`) and send the file it writes as the first message. From flags it takes the task (the owner's own words for the goal, and what "done" looks like), decisions, file pointers, the master SHA, the reviewer and the stream; it builds "Stay out of" from the open PRs' files and the live sessions (the inputs of Sweep's Capacity step); and it appends Context budget (hand off at 300k, USE-2), Process, and for stream DC the CONFIDENTIALITY text (SAGC-1). Paste a rotating session's hand-off note into the task verbatim: `python3 scripts/coord/handoff.py '<start-marker>' '<end-marker>' <out-file>` copies the note from this session's transcript into a file (markers are its first and last words), so its text never passes through your output. Briefs keep "Hand off at 300k" (USE-2) for builders and reviewers alike; never lower it per brief. When the brief is long, write it to the scratchpad and have a Sonnet subagent call `create_session` with it verbatim.
 
 Never tell a session to disregard an auto-mode or classifier flag; it sends the coordinator a `PERMISSION` message. A builder with uncommitted helper scripts pushes them before you archive it.
 
@@ -197,6 +197,8 @@ Routine prompt to apply with `update_trigger` (append to the dashboard routine's
 - `list_sessions` with `limit: 100` overflows a subagent: use `limit: 25` and have it copy the saved tool-results JSON to the file. `list_pull_requests` overflows too: parse its saved file with python.
 - `list_events` output is large too. Save it and read it with `python3 scripts/coord/events.py <file> --chars 200`: each assistant event's time, text and last tool call. Read a session's events only that way, from a saved file.
 - Read a PR's file list with `git diff --stat origin/master...<head>`; `pull_request_read get_files` returns hundreds of thousands of characters on a large PR (684k on #491).
+- A role's current session id: `python3 scripts/coord/whois.py [coordinator|gka|gkb|ux]` reads it from `docs/agents/coordinator.md` on `origin/master`, so a message never goes to a rotated id.
+- A screenshot: run `scripts/coord/shots.sh <image>...` and Read the `.small` file it prints (longest side 800 px), never the full-size image.
 
 ## Retro
 

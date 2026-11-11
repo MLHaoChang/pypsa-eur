@@ -10,7 +10,7 @@ import { nk } from '../utils/queryKeys'
 import { readableWindow } from '../utils/readableTime'
 import { ResultsFilterProvider, defaultWindow } from './results/filterContext'
 import { ChartSourceProvider, type ChartSource } from '../components/charts/chartTheme'
-import { REFERENCE_CONDITION_WORDS } from './results/OperationalGap'
+import { solveWords } from './results/solveWords'
 import { type TSPayload, type WeightCtx } from './results/shared'
 import CompareView, { type Tab as CompareTab } from './CompareView'
 import { ErrorBoundary } from '../components/ErrorBoundary'
@@ -172,6 +172,7 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   island: 'overview',
   grid_forming: 'overview',
 }
+
 
 export default function Results() {
   const [tab, setTabState] = useState<ResultsTab>(loadInitialTab)
@@ -653,11 +654,9 @@ export default function Results() {
   // (chart theme, ui-modern 02; VISUALS-1).
   // Plain words, no solver terms (#1194): "solved", "all periods".
   const stamp = (iso: string) => toDisplay(iso).replace('T', ' ')
-  const solveWords = status?.condition === 'optimal' ? 'solved'
-    : (status?.condition && REFERENCE_CONDITION_WORDS[status.condition]) || 'did not solve'
   const chartSource: ChartSource = {
     line: status?.condition
-      ? `Latest solve · ${solveWords} · ${stamp(fromIso || firstSnap16 || '') || 'start'} → ${
+      ? `Latest solve · ${solveWords(status.condition)} · ${stamp(fromIso || firstSnap16 || '') || 'start'} → ${
         stamp(toIso || lastSnap16 || '') || 'end'} · ${selectedPeriod === 'all' ? 'all periods' : `period ${selectedPeriod}`}`
       : null,
     stale: status?.dispatch === 'stale',

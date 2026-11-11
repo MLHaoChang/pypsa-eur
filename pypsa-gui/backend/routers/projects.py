@@ -45,6 +45,7 @@ from services.atomic_io import (
 from services.dispatch_status import network_has_dispatch
 from services.project_context import RESULT_STATE_KEYS
 from services.pypsa_service import PyPSAService
+from services.reports import store as report_store
 from services.http_filenames import content_disposition
 from settings import get_settings
 from starlette.responses import StreamingResponse
@@ -296,6 +297,28 @@ def _force_rmtree(target: pathlib.Path) -> None:
         raise last
 
 
+@contextlib.contextmanager
+def _reports_copy_guard(src: pathlib.Path | None = None, dst: pathlib.Path | None = None,
+                        *, incoming=()):
+    """
+    `report_store.reports_copy_lock` for a route (study harness 07e): the
+    report locks a bundle copy needs, taken before its first write. Busy →
+    the report routes' own 409 `report_busy`, and nothing is written.
+
+    Take it AFTER `PyPSAService.get_lock()` when the copy holds both: no
+    report writer takes the network lock inside a report lock.
+    """
+    try:
+        with report_store.reports_copy_lock(src, dst, incoming=incoming) as held:
+            yield held
+    except report_store.ReportBusy as exc:
+        raise HTTPException(409, {
+            "error_kind": "report_busy",
+            "message": "A report of this project is being written, so its reports "
+                       "could not be copied; nothing was changed. Try again in a moment.",
+        }) from exc
+
+
 def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
     """
     Recursively copy each `_BUNDLE_DIRS` subdir from `src` to `dst`,
@@ -310,6 +333,11 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
     Errors are swallowed individually per dir so a failure copying
     one dir (e.g. an in-use file in uploads/) doesn't abort the
     project save itself — a future Save will retry.
+
+    `reports/` is copied report by report under the report locks (study
+    harness 07e), taken here before any dir is touched: `ReportBusy` is
+    raised, not swallowed, and nothing was written. A route holds them
+    already (`_reports_copy_guard`), so this is its backstop.
     """
     import shutil as _shutil
 
@@ -321,22 +349,26 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
     # the destination as it was. Orphan, superseded and failed generations
     # are never copied.
     scene_blobs = scene_store.closure_blobs(src)
-    for dname in _BUNDLE_DIRS:
-        src_d, dst_d = src / dname, dst / dname
-        if not src_d.exists():
-            continue
-        if dname == "sites":
-            _swap_in_sites(src_d, dst_d, scene_blobs)
-            continue
-        try:
-            if dst_d.exists():
-                _force_rmtree(dst_d)
-            _shutil.copytree(str(src_d), str(dst_d))
-        except OSError as exc:
-            logger.warning(
-                "bundle: copy_bundle_dir %s → %s failed: %s",
-                src_d, dst_d, exc,
-            )
+    with report_store.reports_copy_lock(src, dst):
+        for dname in _BUNDLE_DIRS:
+            src_d, dst_d = src / dname, dst / dname
+            if not src_d.exists():
+                continue
+            if dname == "sites":
+                _swap_in_sites(src_d, dst_d, scene_blobs)
+                continue
+            try:
+                if dname == report_store.REPORTS_DIRNAME:
+                    report_store.copy_reports(src, dst)
+                    continue
+                if dst_d.exists():
+                    _force_rmtree(dst_d)
+                _shutil.copytree(str(src_d), str(dst_d))
+            except OSError as exc:
+                logger.warning(
+                    "bundle: copy_bundle_dir %s → %s failed: %s",
+                    src_d, dst_d, exc,
+                )
 
 
 def _swap_in_sites(src_d: pathlib.Path, dst_d: pathlib.Path, scene_blobs: list) -> None:
@@ -1216,6 +1248,73 @@ def import_unclaimed_project(
     }
 
 
+def _bundle_report_ids(members: set[str]) -> frozenset[str]:
+    """
+    The report ids a bundle's `reports/` members name (study harness 07e).
+
+    Each one names a lock file and a directory under the imported project, and
+    the archive is untrusted: an entry that is neither a report id nor a
+    report lock file refuses the import, 400 `invalid_report_id`.
+    """
+    ids = set()
+    for member in members:
+        parts = pathlib.PurePosixPath(member).parts
+        if len(parts) < 2 or parts[0] != report_store.REPORTS_DIRNAME:
+            continue
+        if len(parts) == 2 and report_store.is_lock_file(parts[1]):
+            continue  # `reports/.<id>.lock`, skipped on extraction
+        try:
+            ids.add(report_store.validate_report_id(parts[1]))
+        except report_store.InvalidReportId as exc:
+            raise HTTPException(400, {
+                "error_kind": "invalid_report_id",
+                "message": f"The bundle's reports folder holds '{parts[1]}', "
+                           "which is not a report. Nothing was imported.",
+            }) from exc
+    return frozenset(ids)
+
+
+def _extract_bundle(zf: zipfile.ZipFile, members: set[str], dest: pathlib.Path,
+                    incoming_reports: frozenset[str]) -> None:
+    """Write a bundle's files and folders into `dest`. The caller holds the
+    report locks for `incoming_reports` (`_reports_copy_guard`)."""
+    for fname in _BUNDLE_FILES:
+        if fname in members:
+            # Atomic because the process can be KILLED mid-write, leaving a
+            # live project's `network.nc` truncated.
+            #
+            # NOT because `write_bytes` truncates before reading the member:
+            # `zf.read(fname)` is fully evaluated first, so that hazard never
+            # existed at this call. It DOES exist at the `copy2` site below,
+            # which opens the destination before reading the source.
+            atomic_write_bytes(dest / fname, zf.read(fname))
+    for fname in _BUNDLE_CAMPUS_FILES:
+        if fname in members:
+            (dest / fname).parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_bytes(dest / fname, zf.read(fname))
+    # Chatbot uploads (Phase A) — extract any `uploads/...` entries the
+    # exporting GUI included. Each archive member's path is verified to
+    # stay inside `dest` before writing (zip-slip defence) and the parent
+    # subdirs are created on demand.
+    for member in members:
+        for dname in _BUNDLE_DIRS + _HISTORY_DIRS:
+            if not member.startswith(f"{dname}/"):
+                continue
+            # Sanity: refuse any member that resolves outside dest.
+            target_path = (dest / member).resolve()
+            try:
+                target_path.relative_to(dest.resolve())
+            except ValueError:
+                continue  # zip-slip attempt — silently drop the member
+            parts = pathlib.PurePosixPath(member).parts
+            if dname == report_store.REPORTS_DIRNAME and (
+                len(parts) < 2 or parts[1] not in incoming_reports
+            ):
+                continue  # an exported lock file is not part of the bundle
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_bytes(target_path, zf.read(member))
+
+
 @router.post("/import_bundle")
 async def import_bundle(
     file: UploadFile = File(...),
@@ -1295,6 +1394,8 @@ async def import_bundle(
     from services import project_registry
 
     project_registry.require_user(user)
+    # Before the project row exists: a bad report id refuses the import.
+    incoming_reports = _bundle_report_ids(members)
     # Carry the bundle's scenario labels onto the ROW, not just onto the files.
     # `_project_info_db` serves the DB row and overrides whatever the storage
     # dir says, so a row created without these makes the restored
@@ -1310,36 +1411,8 @@ async def import_bundle(
     )
     target_name = _imported_project.name
     dest = project_registry.ensure_project_dir(_imported_project)
-    for fname in _BUNDLE_FILES:
-        if fname in members:
-            # Atomic because the process can be KILLED mid-write, leaving a
-            # live project's `network.nc` truncated.
-            #
-            # NOT because `write_bytes` truncates before reading the member:
-            # `zf.read(fname)` is fully evaluated first, so that hazard never
-            # existed at this call. It DOES exist at the `copy2` site below,
-            # which opens the destination before reading the source.
-            atomic_write_bytes(dest / fname, zf.read(fname))
-    for fname in _BUNDLE_CAMPUS_FILES:
-        if fname in members:
-            (dest / fname).parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_bytes(dest / fname, zf.read(fname))
-    # Chatbot uploads (Phase A) — extract any `uploads/...` entries the
-    # exporting GUI included. Each archive member's path is verified to
-    # stay inside `dest` before writing (zip-slip defence) and the parent
-    # subdirs are created on demand.
-    for member in members:
-        for dname in _BUNDLE_DIRS + _HISTORY_DIRS:
-            if not member.startswith(f"{dname}/"):
-                continue
-            # Sanity: refuse any member that resolves outside dest.
-            target_path = (dest / member).resolve()
-            try:
-                target_path.relative_to(dest.resolve())
-            except ValueError:
-                continue  # zip-slip attempt — silently drop the member
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_bytes(target_path, zf.read(member))
+    with _reports_copy_guard(None, dest, incoming=incoming_reports):
+        _extract_bundle(zf, members, dest, incoming_reports)
 
     nc_path = dest / "network.nc"
     from services.commercial.settlement_inputs import reserved_buses_in_netcdf
@@ -2192,7 +2265,16 @@ def save_project(
     # after it would leave the row behind and the retry would fail with
     # "already exists" — the Phase 11 review's own finding, in the save path.
     _refuse_save_during_study(PyPSAService.get_active_context())
+    # Likewise a Save-As / Save-a-Copy whose source has a report being written
+    # (study harness 07e). `_save_context` takes the locks again, and holds
+    # them, around its writes.
     project = project_registry.find_project(db, user, name)
+    # By the project's own name, as `_save_context` compares it: `name` may
+    # be the bound project's id.
+    _refuse_copy_of_busy_reports(
+        PyPSAService.get_active_context(),
+        project.name if project is not None else name, db, user,
+    )
     if project is None:
         # First save of a new project — register a root row in the DB.
         project = project_registry.create_root(
@@ -2260,6 +2342,28 @@ def _refuse_save_during_study(ctx) -> None:
     detail = _study_in_flight_detail(ctx.solver_state, "save the project")
     if detail:
         raise HTTPException(status_code=409, detail=detail)
+
+
+def _save_source_dir(loaded: str, db=None, user=None) -> pathlib.Path:
+    """Where the project a save started from lives: through the registry in
+    auth mode (storage is org-scoped), else the flat projects dir."""
+    src_dir = _safe_project_dir(loaded)
+    if db is not None and user is not None:
+        from services import project_registry
+
+        src_project = project_registry.find_project(db, user, loaded)
+        if src_project is not None:
+            src_dir = project_registry.project_dir(src_project)
+    return src_dir
+
+
+def _refuse_copy_of_busy_reports(ctx, name: str, db=None, user=None) -> None:
+    """409 `report_busy` when a save to another name would copy a report that
+    is being written. A save to the bound project copies none."""
+    loaded = ctx.loaded_project
+    if loaded is not None and loaded != name:
+        with ctx.mutation_lock, _reports_copy_guard(_save_source_dir(loaded, db, user)):
+            pass
 
 
 def _carry_sidecars_on_move(
@@ -2330,13 +2434,7 @@ def _carry_sidecars_on_move(
         # project lives under tenancy, so Save-As and Save-a-Copy carried no
         # conversation at all there. One resolution, used by both, is also the
         # only way the two cannot drift apart again.
-        src_dir = _safe_project_dir(loaded)
-        if db is not None and user is not None:
-            from services import project_registry
-
-            src_project = project_registry.find_project(db, user, loaded)
-            if src_project is not None:
-                src_dir = project_registry.project_dir(src_project)
+        src_dir = _save_source_dir(loaded, db, user)
 
         try:
             from services import chat_service
@@ -2370,6 +2468,8 @@ def _carry_sidecars_on_move(
             # where the source project is.
             _copy_bundle_dirs(src_dir, dest)
             _copy_history_dirs(src_dir, dest)
+        except report_store.ReportBusy:
+            raise  # never a silent skip (07e); `_save_context` holds the locks
         except Exception:  # noqa: BLE001 — best-effort, never abort save
             logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
 
@@ -2546,7 +2646,34 @@ def _check_save_allowed(
 
 
 
-def _save_context(
+def _save_context(ctx, name: str, *args, **kwargs):
+    """
+    `_write_context` (the save itself; its docstring is the contract), with
+    the report locks a Save-As / Save-a-Copy needs (study harness 07e).
+
+    A save whose target differs from the context's binding copies the
+    source's `reports/` over the target's. It takes the report locks of both
+    before anything is written, after `ctx.mutation_lock` (the order
+    `_reports_copy_guard` documents) and keeps that lock for the whole save,
+    so the binding it read is the one the save copies from. Busy → 409
+    `report_busy` and nothing is written. A save to the bound project copies
+    no reports and takes neither here.
+    """
+    with contextlib.ExitStack() as held:
+        held.enter_context(ctx.mutation_lock)
+        loaded = ctx.loaded_project
+        if loaded is None or loaded == name:
+            held.close()
+        else:
+            storage_dir = kwargs.get("storage_dir")
+            held.enter_context(_reports_copy_guard(
+                _save_source_dir(loaded, kwargs.get("db"), kwargs.get("user")),
+                storage_dir if storage_dir is not None else _safe_project_dir(name),
+            ))
+        return _write_context(ctx, name, *args, **kwargs)
+
+
+def _write_context(
     ctx,
     name: str,
     objective: float | None = None,
@@ -3718,6 +3845,18 @@ def load_project(
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:
+    """`_copy_scenario_db` under the base's report locks (study harness 07e),
+    taken before the child's row or directory exists: busy → 409
+    `report_busy` and nothing is created."""
+    from services import project_registry
+
+    project_registry.require_user(user)
+    base_dir = project_registry.project_dir(project_registry.resolve_project(db, user, base))
+    with _reports_copy_guard(base_dir):
+        return _copy_scenario_db(db, user, base, req)
+
+
+def _copy_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:
     """
     Auth-mode scenario create. Unlike the legacy path (which serialises the
     live in-memory singleton), this copies ``base``'s on-disk bundle into the
@@ -4987,7 +5126,10 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
         raise HTTPException(404, f"Project '{name}' not found")
 
     buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    # The report locks (study harness 07e): no report is read while one
+    # write to it is in progress; busy → 409 `report_busy`.
+    with _reports_copy_guard(src) as reports_held, \
+            zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for fname in _BUNDLE_FILES:
             p = src / fname
             if p.exists():
@@ -5013,7 +5155,13 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
                     full = root_p / fname
                     if scene_store.is_scene_path(full.relative_to(src)):
                         continue
-                    arc = full.relative_to(src).as_posix()
+                    rel = full.relative_to(src)
+                    if (dname == report_store.REPORTS_DIRNAME
+                            and rel.parts[1] not in reports_held["src"]):
+                        # A lock file, a report created meanwhile, or a stray
+                        # file an import would refuse.
+                        continue
+                    arc = rel.as_posix()
                     zf.write(full, arcname=arc)
         for rel, data in scene_blobs:
             zf.writestr(rel.as_posix(), data)

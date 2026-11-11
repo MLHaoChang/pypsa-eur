@@ -174,6 +174,28 @@
    token-driven children mounted inside it — NewProjectWizard and friends —
    must read the dark ramp even when the user's workbench preference is light.
    Custom properties cascade, so redeclaring them on a subtree is enough. */
+/* The projects home in the light theme: the `--brand-*` names the home page
+   uses map onto the light tokens, so it follows the workspace theme. */
+[data-pypsa-surface="brand-light"] {
+  --brand-black: var(--color-bg);
+  --brand-surface: var(--color-bg-2);
+  --brand-surface-2: var(--color-panel);
+  --brand-panel: var(--color-bg-2);
+  --brand-ink: var(--color-text);
+  --brand-ink-dim: var(--color-muted);
+  --brand-line: var(--color-border-2);
+  --brand-line-strong: var(--color-accent);
+  --brand-red: var(--color-accent);
+  --brand-red-soft: var(--color-accent);
+  --brand-red-deep: var(--color-accent-700);
+  --brand-red-deeper: var(--color-accent-700);
+  --brand-on-red: var(--color-on-accent);
+  --brand-danger: var(--color-danger);
+  --brand-warn: var(--color-warn);
+  --brand-red-gradient: linear-gradient(135deg, var(--color-accent), var(--color-accent-700));
+  --brand-red-glow: 0 10px 24px rgba(179, 38, 30, 0.22);
+}
+
 :root[data-theme="dark"],
 [data-pypsa-surface="brand-dark"] {
   /* Surface ramp. --color-bg sits at Material's dark-theme baseline luminance

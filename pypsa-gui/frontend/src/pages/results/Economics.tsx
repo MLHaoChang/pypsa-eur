@@ -13,7 +13,7 @@ import {
   type LinkEconomicsRow,
 } from '../../api/simulation'
 import {
-  KPI, ChartCard, ChartActions, Seg, fmtCurrency, fmtEnergy, downloadCSV,
+  KPI, ChartFrame, CHART_HEIGHT, ChartActions, Seg, fmtCurrency, fmtEnergy, downloadCSV,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
   isRenewableCarrier, colourForCarrier, COST_UNAVAILABLE,
 } from './shared'
@@ -677,7 +677,7 @@ export default function Economics() {
   const periodLabel = filter.selectedPeriod != null ? ` (period ${filter.selectedPeriod})` : ''
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
 
       {/* ── Capital costs unavailable ─────────────────────────────────── */}
       {/* Deliberately a banner and not an early return: the resolver's failure
@@ -786,21 +786,18 @@ export default function Economics() {
 
       {/* ── Top profit / loss chart ───────────────────────────────────── */}
       {profitChartData.length > 0 && (
-        <ChartCard
+        <ChartFrame
           title="Top profitable & loss-making assets"
-          hint="Bar height = net profit; green > 0, red < 0."
+          hint="Bar height is net profit. Green is above 0, red is below."
           right={<ChartActions chartRef={profitChartRef} onExportCSV={onExportCSV} filename={`asset_economics_profit${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} />}
         >
           <div ref={profitChartRef}>
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={CHART_HEIGHT.lg}>
               <BarChart data={profitChartData} margin={{ top: 18, right: 20, left: 30, bottom: 60 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} angle={-30} textAnchor="end" height={80} interval={0} />
                 <YAxis {...CHART_AXIS} label={yAxisLabel('€')}
-                  tickFormatter={(v: number) =>
-                    Math.abs(v) >= 1e9 ? `${(v / 1e9).toFixed(1)}B` :
-                    Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(1)}M` :
-                    Math.abs(v) >= 1e3 ? `${(v / 1e3).toFixed(1)}k` : `${v.toFixed(0)}`} />
+                  tickFormatter={(v: number) => fmtCurrency(v, 0)} />
                 <RTooltip {...CHART_TOOLTIP}
                   formatter={(v: number) => [fmtCurrency(v), 'Net profit']} />
                 <Bar dataKey="value">
@@ -811,18 +808,18 @@ export default function Economics() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartFrame>
       )}
 
       {/* ── LCOE / LCOS bar chart ─────────────────────────────────────── */}
       {lcoeChartData.length > 0 && (
-        <ChartCard
+        <ChartFrame
           title="Per-asset LCOE / LCOS"
-          hint="Ranked low → high. Storage shows LCOS (includes charging electricity cost). Electrolysers are Link components — their LCOH lives in the Hydrogen panel below, so an H₂ storage bar here is a different asset, not the electrolyser."
+          hint="Ranked low → high. Storage shows LCOS (includes charging electricity cost). Electrolysers are Link components and their LCOH is in the Hydrogen panel below, so an H₂ storage bar here is a different asset, not the electrolyser."
           right={<ChartActions chartRef={lcoeChartRef} onExportCSV={onExportCSV} filename={`asset_lcoe_lcos${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} />}
         >
           <div ref={lcoeChartRef}>
-            <ResponsiveContainer width="100%" height={Math.max(300, lcoeChartData.length * 22)}>
+            <ResponsiveContainer width="100%" height={Math.max(CHART_HEIGHT.lg, lcoeChartData.length * 22)}>
               <BarChart data={lcoeChartData} layout="vertical" margin={{ top: 18, right: 30, left: 100, bottom: 5 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis type="number" {...CHART_AXIS} label={yAxisLabel('€/MWh')} />
@@ -841,11 +838,11 @@ export default function Economics() {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </ChartCard>
+        </ChartFrame>
       )}
 
       {/* ── Per-asset / per-group table ───────────────────────────────── */}
-      <ChartCard
+      <ChartFrame
         title={view === 'groups' ? 'By asset group' : 'By individual asset'}
         hint={view === 'groups' ? 'Click a group to expand individual assets.' : 'Click an asset to expand per-period breakdown.'}
         count={view === 'groups' ? 3 : sortedAssets.length}
@@ -959,7 +956,7 @@ export default function Economics() {
             </tbody>
           </table>
         </div>
-      </ChartCard>
+      </ChartFrame>
 
       {/* ── Hydrogen LCOH (Link-based electrolysers) ──────────────────── */}
       {/* Moved here from above the per-asset table so the user reads

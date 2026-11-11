@@ -58,7 +58,7 @@ export function SiteThumbnailCard() {
         )}
         {state === 'none' && (
           <p data-testid="hub-site-thumbnail-none" className="absolute inset-0 flex items-center justify-center px-4 text-center text-[11px] text-muted">
-            No picture yet — open the site in 3D; one is taken after each solve, or with Snapshot.
+            No picture yet: open the site in 3D; one is taken after each solve, or with Snapshot.
           </p>
         )}
       </div>

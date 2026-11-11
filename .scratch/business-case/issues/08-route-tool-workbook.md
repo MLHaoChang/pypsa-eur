@@ -3,7 +3,7 @@
 
 # 08 — Route, chat tools and workbook sheet
 
-Status: needs-triage (blocked by 05)
+Status: ready-for-agent (blocked by 05; Opus; GK B)
 Type: task
 Blocked by: 05
 Gated: yes (GK B)
@@ -31,3 +31,9 @@ BC10 first.
 BC10: route ACL, `route_chat_disposition`, write-surface lock, the error-kind
 fragment, inventory, route-parity and control-matrix `--check`s; solver config
 through `_solver_config_from_dict` (#1009).
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.

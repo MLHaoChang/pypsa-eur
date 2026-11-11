@@ -5,7 +5,7 @@
 // Polyline / Marker records its event handlers so the test drives Leaflet's
 // gestures directly — there is no map in jsdom to drag on.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 
 type Handlers = Record<string, (e: unknown) => void>
@@ -20,9 +20,9 @@ vi.mock('react-leaflet', () => ({
   Tooltip: ({ children }: { children?: ReactNode }) => <div data-testid="tooltip">{children}</div>,
   useMap: () => ({}),
   useMapEvents: () => ({}),
-  Polyline: ({ children, eventHandlers, positions }: { children?: ReactNode; eventHandlers: Handlers; positions: unknown[] }) => {
+  Polyline: ({ children, eventHandlers, positions, className, interactive }: { children?: ReactNode; eventHandlers: Handlers; positions: unknown[]; className?: string; interactive?: boolean }) => {
     polylines.push({ handlers: eventHandlers, positions })
-    return <div data-testid="polyline">{children}</div>
+    return <div data-testid={className ? 'flow-polyline' : 'polyline'} data-class={className} data-interactive={String(interactive ?? true)}>{children}</div>
   },
   Marker: ({ eventHandlers, position, icon }: { eventHandlers: Handlers; position: [number, number]; icon: { options: { className: string } } }) => {
     markers.push({ cls: icon.options.className, position, handlers: eventHandlers })
@@ -145,6 +145,45 @@ describe('EditableLine', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Use geometry' }))
     expect(onUse).toHaveBeenCalledTimes(1)
     expect(screen.getByText(/1\.0 km stored · 66\.5 km geometry/)).toBeTruthy()
+  })
+})
+
+describe('EditableLine flow (ui-modern 04 slice 2)', () => {
+  const line = (flow?: { p: number; rating: number | null }) =>
+    render(<EditableLine id="line:L3" source={A} target={B} waypoints={[]} onUpdate={() => {}} onSelect={() => {}} color="#000" weight={4} permanentLabel="10.0 MW (50%)" flow={flow} />)
+  const arrowAngle = () => screen.getByTestId('map-flow-arrow').querySelector('g')!.getAttribute('transform')!
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('a forward flow gets a moving dash at its speed bucket and an arrow pointing source to target', () => {
+    line({ p: 10, rating: 20 })
+    const dash = screen.getByTestId('flow-polyline')
+    expect(dash.dataset.class).toBe('canvas-flow flow-b3')
+    expect(dash.dataset.interactive).toBe('false')
+    // A is west of B on one latitude: the arrow points east (0 degrees).
+    expect(arrowAngle()).toBe('rotate(0 5.5 5.5)')
+  })
+
+  it('a reverse flow moves and points the other way', () => {
+    line({ p: -19, rating: 20 })
+    expect(screen.getByTestId('flow-polyline').dataset.class).toBe('canvas-flow flow-b5 canvas-flow-rev')
+    expect(arrowAngle()).toBe('rotate(180 5.5 5.5)')
+  })
+
+  it('reduced motion: no moving dash, the arrow stays', () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduce'), addEventListener: () => {}, removeEventListener: () => {} }))
+    line({ p: 10, rating: 20 })
+    expect(screen.queryByTestId('flow-polyline')).toBeNull()
+    expect(screen.getByTestId('map-flow-arrow')).toBeTruthy()
+  })
+
+  it('an idle line, or one with no overlay, has neither', () => {
+    line({ p: 0, rating: 20 })
+    expect(screen.queryByTestId('flow-polyline')).toBeNull()
+    expect(screen.queryByTestId('map-flow-arrow')).toBeNull()
+    cleanup()
+    line()
+    expect(screen.queryByTestId('flow-polyline')).toBeNull()
+    expect(screen.queryByTestId('map-flow-arrow')).toBeNull()
   })
 })
 

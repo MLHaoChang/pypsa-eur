@@ -27,7 +27,7 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `.claude/skills/coordinator/SKILL.md` | Bootstrap, task intake, sweep, merge, dashboard, retro |
 | `.claude/skills/steward/SKILL.md` | How a work session drives its PR to green and reports it |
 | `.claude/skills/gatekeeper/SKILL.md` | Plan checks, repeated-failure help and head-exact reviews |
-| `.claude/settings.json`, `.claude/hooks/session-start.sh` | SessionStart hook skeleton for cloud sessions |
+| `.claude/settings.json`, `.claude/hooks/session-start.sh` | SessionStart hook skeleton for cloud sessions. `permissions.deny` and `skillOverrides` drop the tools and skills no procedure calls from every session's starting context (see LEARNINGS, 10 Nov 2026) |
 | `.claude/hooks/context-guard.sh`, `test-context-guard.sh` | PostToolUse hook: tells the agent to write its hand-off note once context passes 200k (300k when `~/.claude-coordinator` exists), then every +20k |
 | `.claude/hooks/block-dangerous-git.sh`, `test-block-dangerous-git.sh` | PreToolUse hook on Bash: allows a normal `git push`, blocks force-push, a coordinator push that creates a remote branch other than its own (`~/.claude-coordinator`), `reset --hard`, `rebase`, `commit --amend`, `filter-branch`/`filter-repo`, `clean -f`, `branch -D`; with its matcher tests |
 | `docs/agents/roles.md` | The one place for the gatekeeper's session id, the dashboard link, the routine id and the template home |
@@ -38,13 +38,16 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `docs/agents/issue-tracker.md`, `triage-labels.md`, `domain.md` | Local markdown issues under `.scratch/`, triage roles, glossary layout |
 | `scripts/coord/premerge.sh` | The whole merge gate: conflicts, overlap, optional semantic tests, reviewer verdict comments, every check run |
 | `scripts/coord/sessions.py` | One line per live session from a saved `list_sessions` result, with context used and a `ROTATE` flag past 200k |
-| `scripts/coord/mutants.py` | AST mutants on the lines a PR changed in one module, run against one targeted test; prints survivors. A project-specific pre-push script (lint, mapped tests, contract tests, a diff guard such as `scripts/coord/prepush.sh` here) is written per project |
+| `scripts/coord/mutants.py` | AST mutants on the lines a PR changed in one module, run against one targeted test; prints survivors. A project-specific pre-push script (lint, the fixed contract tests first, mapped tests under a wall-clock cap, a diff guard such as `scripts/coord/prepush.sh` here) is written per project |
 | `scripts/coord/ciwait.sh` | Waits for CI on a PR that has no session; prints READY, FAIL, MACOS or TIMEOUT |
 | `scripts/coord/events.py` | Time, assistant text and last tool call per event from a saved `list_events` result |
 | `scripts/coord/frontier.py` | The frontier from the issue headers: ready, unblocked, unclaimed issues no open PR or live session covers; `--stages` gives the dashboard stage per issue |
 | `scripts/coord/brief.py` | Fills `docs/agents/session-brief.md` from flags, adds Context budget, Process, any stream paragraph and a "Stay out of" built from open PRs and live sessions |
 | `scripts/coord/board.py` | Edits the dashboard's `board.json` from flags, logs the change and prints the upload path; `--list` prints the open-PR and session rows for a brief |
 | `scripts/coord/board.example.json` | The dashboard's row shape |
+| `scripts/coord/whois.py` | The current coordinator, gatekeeper and UX reviewer session ids, read from `docs/agents/coordinator.md` and `roles.md` on the base branch |
+| `scripts/coord/handoff.py` | Copies a hand-off note from the session's own transcript into a file, between two markers, so the session never re-types it |
+| `scripts/coord/shots.sh` | Downscales screenshots to 800 px on the longest side and prints the small file's path, which is the one a session reads |
 | `{{RELEASE_NOTES_DIR}}/README.md`, `.github/workflows/release-notes-guard.yaml` | One release-note fragment per PR, so notes never conflict, plus a guard against editing the collated file |
 | `.github/pull_request_template.md` | PR body headings, including the fragment line |
 
@@ -106,7 +109,7 @@ This repo runs the live instance of the setup. When a rule changes here, from a 
 When a change is specific to this project, such as a pypsa-gui test path in `semantic_tests`, the coordinator runs `PREMERGE_TEMPLATE_SYNC=skip scripts/coord/premerge.sh <pr>` and logs why.
 
 **Intentional differences** between the live files and the template:
-- The live files name pypsa-gui paths, tests, models and session ids. The template uses placeholders and `docs/agents/roles.md`.
+- The live files name pypsa-gui paths, tests, models and session ids. The template uses placeholders and `docs/agents/roles.md`. So the live `whois.py` reads four roles from `coordinator.md`, and the template's reads the gatekeeper and UX reviewer from `roles.md`; the live `shots.sh` also tries the backend venv and pixi pythons.
 - The live premerge.sh also has the semantic test list, the assistant-inventory check, the error-kind tests and the frontend tool-list tests; the template has an empty `semantic_re`.
 - Bootstrap exists only in the template, because this repo is already set up. The live gatekeeper runs from its first message rather than from a skill file.
 

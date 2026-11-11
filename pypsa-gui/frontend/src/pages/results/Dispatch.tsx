@@ -13,11 +13,11 @@ import { nk } from '../../utils/queryKeys'
 import type { Generator, Load, StorageUnit, Store, Link as LinkT } from '../../api/types'
 import {
   type TSPayload, type WeightCtx, type ResultsViewMode, type Season,
-  generatorGroup, aggregateTS, isRenewableCarrier, durationCurvePoints, useWeightCtx,
+  generatorGroup, aggregateTS, isRenewableCarrier, useWeightCtx,
   weightedSum, weightedSumSplit, effectiveWeightAt, snapshotWeightAt, averageScaling, hasScaling,
   fmtEnergy, fmtCurrency, fmtPower, shortStamp, downloadCSV, downloadSVG, KPI, Seg,
-  ChartFrame, ChartSourceLine, CHART_HEIGHT, chartFigure, carrierColour, directLabel, seriesDash,
-  ChartActions, WindowCapBanner,
+  ChartFrame, ChartSourceLine, CHART_HEIGHT, chartFigure, carrierColour, seriesDash,
+  WindowCapBanner,
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   SEASONS, SEASON_OF_MONTH, SEASON_ACCENT,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, WEEKDAYS,
@@ -30,10 +30,19 @@ import {
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import DispatchStack from './DispatchStack'
+import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
+import HourDayHeatmap from './HourDayHeatmap'
+import { hourDayGrid, spansPeriods, PICK_ONE_PERIOD, type HeatScale } from './hourDay'
 import StorageHeatmap from './StorageHeatmap'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { storageCarrierKey, storageCarrierLabel } from './carrierAliases'
 import NotSolved from './NotSolved'
+
+// The load duration curve's two series: total load, then load minus renewables.
+const LOAD_SERIES: DurationSeries = { key: 'load', name: 'Load', colour: carrierColour('load'), csv: 'load_MW' }
+// Every state-of-charge map shares this scale: empty to full.
+const SOC_SCALE: HeatScale = { min: 0, max: 100 }
+const RESIDUAL_SERIES: DurationSeries = { key: 'residual', name: 'Residual load', colour: 'var(--color-series-2)', csv: 'residual_load_MW' }
 
 // Module-level constant so we don't allocate a fresh Set on every parent
 // render. Passed to <DispatchStack> for non-electrical stacks where the
@@ -553,7 +562,6 @@ export default function Dispatch() {
   const refPeriods = refTs?.periods
   const range = resolveRange(refIndex, filter, refPeriods)
 
-  const durationChartRef = useRef<HTMLDivElement | null>(null)
   // Load- and residual-load-duration curves. Total load and residual load
   // (load − variable-renewable generation) are each sorted descending over the
   // (range-sliced) horizon. The residual curve is the net demand the
@@ -572,15 +580,8 @@ export default function Dispatch() {
       loadArr[i] = l
       resArr[i] = l - (vre ? (vre[i]?.value ?? 0) : 0)
     }
-    const loadPts = durationCurvePoints(loadArr)
-    const resPts = durationCurvePoints(resArr)
     const hasVre = !!vre && vre.some(v => Math.abs(v.value) > 1e-9)
-    return {
-      hasVre,
-      rows: loadPts.map((p, i) => ({
-        pct: p.pct, load: p.value, residual: resPts[i].value,
-      })),
-    }
+    return { hasVre, rows: durationRows({ load: loadArr, residual: resArr }) }
   }, [loadTS, gensTS, loadNames, groupCols.renew, range])
 
   // Weight context — assembled once and shared across every weightedSum call.
@@ -678,6 +679,30 @@ export default function Dispatch() {
     aggPower: aggregateTS(storPowerTS as TSPayload | null, g.nameSet, range),
     aggSoC: aggregateTS(storTS as TSPayload | null, g.nameSet, range),
   })), [storageGroups, storPowerTS, storTS, range.from, range.to])
+
+  // State of charge by calendar day and hour of day, one map per storage
+  // carrier, all on one 0–100 % scale so a small battery reads as clearly as a
+  // large store. 100 % is the carrier's energy capacity (Σ p_nom_opt ×
+  // max_hours); a carrier with no capacity on record falls back to the highest
+  // state of charge in the window, and its key says so.
+  const socMaps = useMemo(() => storageSeriesByCarrier.map(g => {
+    const rows = g.aggSoC ?? []
+    const capacity = g.assets.reduce((s, a) => {
+      const cap = (a.p_nom_opt ?? a.p_nom ?? 0) * (a.max_hours ?? 0)
+      return s + (Number.isFinite(cap) ? cap : 0)
+    }, 0)
+    const peak = rows.reduce((m, r) => Math.max(m, r.value), 0)
+    const full = capacity > 0 ? capacity : peak
+    const stamps = rows.map(r => r.snapshot)
+    return {
+      carrier: g.carrier,
+      byCapacity: capacity > 0,
+      pct: hourDayGrid(stamps, rows.map(r => (full > 0 ? (r.value / full) * 100 : null))),
+      mwh: hourDayGrid(stamps, rows.map(r => r.value)),
+    }
+  // A carrier with no state-of-charge series (nothing built) gets no map; the
+  // section above it already says so.
+  }).filter(m => m.pct.days.length > 0), [storageSeriesByCarrier])
 
 
   // Renewable curtailment time-series — same filter range as everything else.
@@ -1566,65 +1591,22 @@ export default function Dispatch() {
 
       {/* ── Load- & residual-load duration curves ─────────────────── */}
       {durationCurves && durationCurves.rows.length > 1 && (
-        <ChartFrame
+        <DurationCurve
           title="Load duration curve"
           figure={chartFigure(fmtPower(durationCurves.rows[0]?.load ?? 0), 'peak')}
           hint={durationCurves.hasVre ? 'total load vs residual (load − renewables), each sorted descending'
                                        : 'total load, sorted descending'}
-          right={
-            <ChartActions
-              chartRef={durationChartRef}
-              onExportCSV={() => {
-                downloadCSV('load_duration_curve.csv',
-                  ['pct_of_hours', 'load_MW', 'residual_load_MW'],
-                  durationCurves.rows.map(r => [r.pct, r.load, r.residual]))
-                toast.success('Exported')
-              }}
-              filename="load_duration_curve" />
-          }
-          bodyClassName="p-3"
-        >
-          <p className="text-[11px] text-muted mb-2">
+          note={<>
             Total system load sorted high-to-low (x = % of hours). {durationCurves.hasVre && (
               <>The <span className="font-medium text-text">residual</span> curve subtracts variable-renewable
               generation: the net demand the dispatchable + storage fleet must meet (its peak sizes firm
               capacity; a dip below zero flags renewable-surplus hours).</>
             )}
-          </p>
-          <div ref={durationChartRef}>
-            <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-              <AreaChart data={durationCurves.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="ldc-load-grad" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor={carrierColour('load')} stopOpacity={0.22} />
-                    <stop offset="100%" stopColor={carrierColour('load')} stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="ldc-res-grad" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="var(--color-series-2)" stopOpacity={0.28} />
-                    <stop offset="100%" stopColor="var(--color-series-2)" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid {...CHART_GRID} />
-                <XAxis dataKey="pct" type="number" domain={[0, 100]}
-                  tickFormatter={(v: number) => `${v.toFixed(0)} %`} {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} width={64} tickFormatter={(v: number) => fmtPower(v, 1)} label={yAxisLabel('MW')} />
-                <RTooltip {...CHART_TOOLTIP}
-                  labelFormatter={(v: number) => `${Number(v).toFixed(1)} % of hours`}
-                  formatter={(v: number, n: string) => [fmtPower(v), n === 'residual' ? 'Residual load' : 'Load']} />
-                {durationCurves.hasVre && <Legend {...CHART_LEGEND} />}
-                <Area type="monotone" dataKey="load" name="Load" stroke={carrierColour('load')}
-                      fill="url(#ldc-load-grad)" strokeWidth={1.4} isAnimationActive={false}
-                      label={directLabel('Load', Math.floor(durationCurves.rows.length * 0.1), 'line')} />
-                {durationCurves.hasVre && (
-                  <Area type="monotone" dataKey="residual" name="Residual load" stroke="var(--color-series-2)"
-                        strokeDasharray={seriesDash(1)}
-                        fill="url(#ldc-res-grad)" strokeWidth={1.6} isAnimationActive={false}
-                        label={directLabel('Residual load', Math.floor(durationCurves.rows.length * 0.6), 'line')} />
-                )}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartFrame>
+          </>}
+          rows={durationCurves.rows}
+          series={durationCurves.hasVre ? [LOAD_SERIES, RESIDUAL_SERIES] : [LOAD_SERIES]}
+          unit="MW" format={v => fmtPower(v)} tickFormat={v => fmtPower(v, 1)} yWidth={64}
+          filename="load_duration_curve" />
       )}
 
       {effectiveMode !== 'timeframe' && seasonalViewByCarrier ? (
@@ -1942,6 +1924,24 @@ export default function Dispatch() {
             snapshotPeriods={(storTS as TSPayload | null)?.periods}
             rowRange={range}
           />
+          {socMaps.filter(m => m.carrier === group.carrier).map(m => (
+            <HourDayHeatmap
+              key={`soc-map-${m.carrier}`}
+              title={`Storage SoC by hour and day · ${storageCarrierLabel(m.carrier)}`}
+              hint={m.byCapacity ? '% of energy capacity' : '% of highest state of charge in this window'}
+              grid={m.pct} scale={SOC_SCALE}
+              scaleNote={[
+                m.byCapacity ? '% of energy capacity' : '% of highest state of charge in this window',
+                socMaps.length > 1 ? 'same scale as the other storage carriers' : '',
+              ].filter(Boolean).join(' · ')}
+              colour={carrierColour('storage')}
+              format={(v, cell) => {
+                const e = cell ? m.mwh.cells[cell.day]?.[cell.hour] : null
+                return e == null ? `${v.toFixed(0)} %` : `${v.toFixed(0)} % · ${fmtEnergy(e)}`
+              }}
+              csv="state_of_charge_pct" filename={`storage_soc_hour_by_day_${m.carrier}`}
+              unavailable={spansPeriods((storTS as TSPayload | null)?.periods, range.from, range.to) ? PICK_ONE_PERIOD : null} />
+          ))}
         </Fragment>
       ))}
       {/* Stores power flow (signed MW): same convention as Storage. */}

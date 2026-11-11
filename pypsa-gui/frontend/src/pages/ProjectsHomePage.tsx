@@ -57,12 +57,12 @@ const PRIMARY_BUTTON
   + `disabled:hover:translate-y-0 ${FOCUS_RING}`
 
 const GHOST_BUTTON
-  = 'inline-flex items-center justify-center gap-2 rounded-[14px] border border-white/14 '
-  + 'bg-[rgba(33,27,28,0.6)] px-4 py-2.5 text-sm font-medium text-[var(--brand-ink)] transition '
-  + `hover:border-[rgba(255,82,82,0.45)] hover:bg-[rgba(42,34,36,0.85)] ${FOCUS_RING}`
+  = 'inline-flex items-center justify-center gap-2 rounded-[14px] border border-[var(--brand-line)] '
+  + 'bg-[color-mix(in_srgb,var(--brand-surface)_60%,transparent)] px-4 py-2.5 text-sm font-medium text-[var(--brand-ink)] transition '
+  + `hover:border-[rgba(255,82,82,0.45)] hover:bg-[color-mix(in_srgb,var(--brand-surface-2)_85%,transparent)] ${FOCUS_RING}`
 
 const GLASS_PANEL
-  = 'rounded-[24px] border border-white/14 bg-[rgba(33,27,28,0.78)] '
+  = 'rounded-[24px] border border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-surface)_78%,transparent)] '
   + 'shadow-[0_30px_80px_rgba(0,0,0,0.55),inset_0_1px_0_rgba(255,255,255,0.08)] '
   + 'backdrop-blur-[26px]'
 
@@ -128,7 +128,7 @@ function errorDetail(error: unknown, fallback: string): string {
 
 function Eyebrow({ children, pulse = false }: { children: ReactNode; pulse?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-white/14 bg-[rgba(33,27,28,0.55)] px-3 py-1.5 text-[11px] uppercase tracking-[0.14em] text-[var(--brand-ink-dim)]">
+    <span className="inline-flex items-center gap-2 rounded-full border border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-surface)_55%,transparent)] px-3 py-1.5 text-[11px] uppercase tracking-[0.14em] text-[var(--brand-ink-dim)]">
       {pulse && (
         <span
           aria-hidden="true"
@@ -150,7 +150,7 @@ function Badge({
   tone?: 'neutral' | 'mint' | 'warn'
 }) {
   const tones = {
-    neutral: 'border-white/12 bg-white/[0.05] text-[var(--brand-ink-dim)]',
+    neutral: 'border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-ink)_5%,transparent)] text-[var(--brand-ink-dim)]',
     mint: 'border-[rgba(255,82,82,0.35)] bg-[rgba(255,82,82,0.12)] text-[var(--brand-red-soft)]',
     warn: 'border-[rgba(246,198,138,0.35)] bg-[rgba(246,198,138,0.12)] text-[var(--brand-warn)]',
   }
@@ -180,14 +180,14 @@ function StatChips({ project, scenarios }: { project: ProjectInfo; scenarios: nu
           Files missing
         </span>
       )}
-      <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+      <span className="inline-flex items-center rounded-full border border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-ink)_4%,transparent)] px-2.5 py-1">
         {formatCount(project.bus_count, 'bus', 'buses')}
       </span>
-      <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+      <span className="inline-flex items-center rounded-full border border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-ink)_4%,transparent)] px-2.5 py-1">
         {formatCount(project.snapshot_count, 'snapshot', 'snapshots')}
       </span>
       {scenarioLabel && (
-        <span className="inline-flex items-center rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1">
+        <span className="inline-flex items-center rounded-full border border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-ink)_4%,transparent)] px-2.5 py-1">
           {scenarioLabel}
         </span>
       )}
@@ -200,6 +200,7 @@ export default function ProjectsHomePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const lastProjectId = useUIStore(s => s.lastProjectId)
+  const dark = useUIStore(s => s.theme) === 'dark'
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName = useUIStore(s => s.setProjectName)
   const addTab = useUIStore(s => s.addTab)
@@ -378,20 +379,19 @@ export default function ProjectsHomePage() {
   }
 
   return (
-    // `data-pypsa-surface="brand-dark"` pins the dark token ramp onto this
-    // subtree (see index.css). The projects home is always the dark front door
-    // — token-driven children like NewProjectWizard must follow it rather than
-    // the user's workbench light/dark preference.
+    // The home follows the workspace theme (ui-modern 04): `data-pypsa-surface`
+    // is `brand-dark` (pins the dark token ramp, see index.css) or
+    // `brand-light` (maps the `--brand-*` names onto the light tokens), so
+    // token-driven children like NewProjectWizard follow it too.
     // The assistant is a COLUMN here, not an overlay: `/` redirects to this
     // page, so it is the first screen of every session and was the one screen
     // with no assistant at all (the dock is mounted by App.tsx, which only
-    // renders at `/app`). It sits inside the `brand-dark` subtree on purpose —
+    // renders at `/app`). It sits inside the surface subtree on purpose —
     // the dock is token-driven, so mounting it outside would render a
-    // light-themed panel against the dark front door for anyone whose
-    // workbench preference is light. See ProjectsHomePage.assistant.test.tsx.
+    // panel in the wrong theme. See ProjectsHomePage.assistant.test.tsx.
     <div
-      className="flex h-dvh overflow-hidden bg-[var(--brand-black)] text-[var(--brand-ink)] [color-scheme:dark]"
-      data-pypsa-surface="brand-dark"
+      className={`flex h-dvh overflow-hidden bg-[var(--brand-black)] text-[var(--brand-ink)] ${dark ? '[color-scheme:dark]' : '[color-scheme:light]'}`}
+      data-pypsa-surface={dark ? 'brand-dark' : 'brand-light'}
     >
     <div className="relative flex-1 min-w-0 overflow-y-auto">
       <style>{`
@@ -405,8 +405,8 @@ export default function ProjectsHomePage() {
       `}</style>
 
       <div aria-hidden="true" className="pointer-events-none fixed inset-0">
-        <div className="absolute inset-0 bg-[url('/img/login-bg.jpg')] bg-cover bg-[center_55%] opacity-[0.34] blur-[1px] brightness-[1.25] saturate-[1.15]" />
-        <div className="absolute inset-0 bg-[radial-gradient(1100px_700px_at_10%_-10%,rgba(255,82,82,0.12),transparent_62%),linear-gradient(180deg,rgba(21,17,18,0.82)_0%,rgba(21,17,18,0.62)_42%,rgba(21,17,18,0.90)_100%)]" />
+        <div className={`absolute inset-0 bg-[url('/img/login-bg.jpg')] bg-cover ${dark ? '' : 'hidden'} bg-[center_55%] opacity-[0.34] blur-[1px] brightness-[1.25] saturate-[1.15]`} />
+        <div className="absolute inset-0 bg-[radial-gradient(1100px_700px_at_10%_-10%,rgba(255,82,82,0.12),transparent_62%),linear-gradient(180deg,color-mix(in_srgb,var(--brand-black)_82%,transparent)_0%,color-mix(in_srgb,var(--brand-black)_62%,transparent)_42%,color-mix(in_srgb,var(--brand-black)_90%,transparent)_100%)]" />
         <div className="absolute inset-0 [background-image:linear-gradient(rgba(255,82,82,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,82,82,0.05)_1px,transparent_1px)] [background-size:64px_64px] [mask-image:radial-gradient(900px_620px_at_18%_0%,#000_0%,transparent_78%)]" />
       </div>
 
@@ -528,11 +528,11 @@ export default function ProjectsHomePage() {
 
           <div>
             {isLoading ? (
-              <div className="rounded-[20px] border border-dashed border-white/14 bg-[rgba(33,27,28,0.5)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
+              <div className="rounded-[20px] border border-dashed border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-surface)_50%,transparent)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
                 Loading accessible projects…
               </div>
             ) : rootProjects.length === 0 ? (
-              <div className="rounded-[20px] border border-dashed border-white/14 bg-[rgba(33,27,28,0.5)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
+              <div className="rounded-[20px] border border-dashed border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-surface)_50%,transparent)] px-5 py-8 text-sm text-[var(--brand-ink-dim)]">
                 No saved root projects yet.{' '}
                 <button
                   className={`font-medium text-[var(--brand-red-soft)] underline underline-offset-4 hover:text-[var(--brand-ink)] ${FOCUS_RING} rounded-sm`}
@@ -553,8 +553,8 @@ export default function ProjectsHomePage() {
                       <article
                         className={`group relative flex h-full flex-col justify-between gap-4 rounded-[20px] border p-5 backdrop-blur-[18px] transition duration-200 ${
                           isLaunching
-                            ? 'border-[rgba(255,82,82,0.55)] bg-[rgba(42,34,36,0.9)] shadow-[0_0_0_1px_rgba(255,82,82,0.35),0_30px_70px_rgba(0,0,0,0.55)] motion-safe:-translate-y-1 motion-safe:scale-[1.015]'
-                            : 'border-white/12 bg-[rgba(33,27,28,0.7)] shadow-[0_18px_50px_rgba(0,0,0,0.35)] hover:border-[rgba(255,82,82,0.4)] hover:bg-[rgba(40,33,34,0.82)] motion-safe:hover:-translate-y-0.5'
+                            ? 'border-[rgba(255,82,82,0.55)] bg-[color-mix(in_srgb,var(--brand-surface-2)_90%,transparent)] shadow-[0_0_0_1px_rgba(255,82,82,0.35),0_30px_70px_rgba(0,0,0,0.55)] motion-safe:-translate-y-1 motion-safe:scale-[1.015]'
+                            : 'border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-surface)_70%,transparent)] shadow-[0_18px_50px_rgba(0,0,0,0.35)] hover:border-[rgba(255,82,82,0.4)] hover:bg-[color-mix(in_srgb,var(--brand-surface-2)_82%,transparent)] motion-safe:hover:-translate-y-0.5'
                         }`}
                       >
                         <div className="space-y-3">
@@ -630,7 +630,7 @@ export default function ProjectsHomePage() {
               <li key={tab}>
                 <button
                   disabled={desktopOnly}
-                  className={`group flex h-full w-full flex-col items-start gap-2 rounded-[18px] border border-white/12 bg-[rgba(33,27,28,0.7)] p-4 text-left backdrop-blur-[18px] transition duration-200 hover:border-[rgba(255,82,82,0.4)] hover:bg-[rgba(40,33,34,0.85)] motion-safe:hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 ${FOCUS_RING}`}
+                  className={`group flex h-full w-full flex-col items-start gap-2 rounded-[18px] border border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-surface)_70%,transparent)] p-4 text-left backdrop-blur-[18px] transition duration-200 hover:border-[rgba(255,82,82,0.4)] hover:bg-[color-mix(in_srgb,var(--brand-surface-2)_85%,transparent)] motion-safe:hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0 ${FOCUS_RING}`}
                   onClick={() => setWizardTab(tab)}
                   type="button"
                 >
@@ -662,7 +662,7 @@ export default function ProjectsHomePage() {
             <div aria-live="polite">
               {imported.map(([name, result]) => (
                 <div
-                  className="mt-4 rounded-[13px] border border-[rgba(255,82,82,0.45)] bg-[rgba(255,255,255,0.35)] px-4 py-3 text-sm leading-6 text-[var(--brand-red-soft)]"
+                  className="mt-4 rounded-[13px] border border-[rgba(255,82,82,0.45)] bg-[color-mix(in_srgb,var(--brand-ink)_6%,transparent)] px-4 py-3 text-sm leading-6 text-[var(--brand-red-soft)]"
                   key={name}
                 >
                   <p>{result.message}</p>
@@ -696,7 +696,7 @@ export default function ProjectsHomePage() {
                 const scenarioText = resolveScenType(row).text
                 return (
                   <li
-                    className="rounded-[18px] border border-white/10 bg-[rgba(29,24,25,0.66)] p-4"
+                    className="rounded-[18px] border border-[var(--brand-line)] bg-[color-mix(in_srgb,var(--brand-surface)_66%,transparent)] p-4"
                     key={row.name}
                   >
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
