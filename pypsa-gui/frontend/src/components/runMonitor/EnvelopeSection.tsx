@@ -63,9 +63,36 @@ const showValue = (v: unknown, unit: string | null) => {
   if (unit === 'EUR' && typeof v === 'number') return fmtCurrency(v)
   return unit ? `${v} ${unit}` : String(v)
 }
-const showDefault = (d: { param: string; value: unknown }) =>
-  d.param === 'critical_share' && typeof d.value === 'number' ? `${+(d.value * 100).toFixed(1)} %`
-    : showValue(d.value, DEFAULT_UNITS[d.param] ?? null)
+/** The labels of a default's nested values, as `run_profiles.EH_SITE_FIELDS` words them (a parity test
+ *  reads them), with the unit each is shown in. Every bound value is on the card (GK B F2, #1283). */
+export const PATH_WORDS: Record<string, [string, string | null]> = {
+  'existing.gensets.count': ['Existing gensets', null], 'existing.gensets.unit_mw': ['Existing genset size', 'MW'],
+  'existing.gensets.fuel': ['Existing genset fuel', null], 'existing.pv_mw': ['Existing PV', 'MW'],
+  'existing.battery.mw': ['Existing battery power', 'MW'], 'existing.battery.mwh': ['Existing battery energy', 'MWh'],
+  'existing.ups.mw': ['Existing UPS power', 'MW'], 'existing.ups.minutes': ['Existing UPS autonomy', 'min'],
+  'candidates.genset.enabled': ['Consider new gensets', null], 'candidates.bess.enabled': ['Consider new batteries', null],
+  'candidates.pv.enabled': ['Consider new PV', null], 'candidates.genset.max_mw': ['New genset size cap', 'MW'],
+  'candidates.bess.max_mw': ['New battery size cap', 'MW'], 'candidates.pv.max_mw': ['New PV size cap', 'MW'],
+}
+const showDefault = (d: { param: string; value: unknown }): string[] => {
+  const { param, value } = d
+  if (param === 'critical_share' && typeof value === 'number') return [`${+(value * 100).toFixed(1)} %`]
+  if (Array.isArray(value)) {   // one line per entry: the year, then its value
+    const [key, tail] = param === 'stages' ? ['peak_mw', 'MW peak'] : ['mw', 'MW energized']
+    return value.map((e: Record<string, unknown>) => `${e.year}: ${e[key]} ${tail}`)
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: string[] = []
+    const walk = (path: string, v: unknown) => {
+      if (v !== null && typeof v === 'object') { for (const [k, x] of Object.entries(v)) walk(`${path}.${k}`, x); return }
+      const [label, unit] = PATH_WORDS[path] ?? ['Another setting', null]
+      out.push(`${label}: ${showValue(v, unit)}`)
+    }
+    for (const [k, x] of Object.entries(value)) walk(`${param}.${k}`, x)
+    return out
+  }
+  return [showValue(value, DEFAULT_UNITS[param] ?? null)]
+}
 
 /** Issue 21 "Inputs from the chat": each row with its value, unit and source; read-only here. */
 function IntakeRows({ intake }: { intake: RunIntake }) {
@@ -92,8 +119,13 @@ function IntakeRows({ intake }: { intake: RunIntake }) {
     {defaults.length > 0 && <>
       <div className="text-muted">Not given, so the preset default is used:</div>
       <ul aria-label="Preset defaults" className="space-y-0.5">
-        {defaults.map(d => <li key={d.param} data-testid="envelope-intake-default">
-          {DEFAULT_WORDS[d.param] ?? 'Another setting'}: {showDefault(d)} <span className="text-muted">· preset default</span></li>)}
+        {defaults.map(d => {
+          const lines = showDefault(d)
+          return <li key={d.param} data-testid="envelope-intake-default">
+            {DEFAULT_WORDS[d.param] ?? 'Another setting'}: {lines.length === 1 ? lines[0] : ''} <span className="text-muted">· preset default</span>
+            {lines.length > 1 && <ul className="ml-3 text-[11px]">{lines.map(l => <li key={l} data-testid="envelope-intake-default-line">{l}</li>)}</ul>}
+          </li>
+        })}
       </ul></>}
   </div>
 }

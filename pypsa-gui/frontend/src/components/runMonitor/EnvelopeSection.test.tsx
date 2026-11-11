@@ -10,7 +10,7 @@ import { useUIStore } from '../../store/uiStore'
 import * as api from '../../api/runMonitor'
 import { RELIABILITY_GOAL_LABEL } from '../../hooks/useReliabilityGoal'
 import realIntake from './intakeCard.fixture.json'
-import { DEFAULT_WORDS, setupWords } from './EnvelopeSection'
+import { DEFAULT_WORDS, PATH_WORDS, setupWords } from './EnvelopeSection'
 import { ENVELOPE, STATES, TASK_ID } from './runFixtures'
 
 vi.mock('../../api/runMonitor', () => ({
@@ -382,5 +382,32 @@ describe('EnvelopeSection reliability goal', () => {
     await screen.findByTestId('envelope-intake')
     expect(screen.getByTestId('envelope-intake-conflict').className).toContain('text-warn')
     expect(screen.getByTestId('envelope-intake-struck').className).toContain('text-muted')
+  })
+
+  it('shows every entry and nested value of a default, none as "N values" (GK B F2)', async () => {
+    const view = { ...STATES.proposal, envelope: { ...ENVELOPE, setup: SETUP },
+      run: { ...STATES.proposal.run, intake: realIntake } }
+    vi.mocked(api.getRun).mockResolvedValue(view as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope: { ...ENVELOPE, setup: SETUP } } }] })
+    render(<ChoiceCard />)
+    await screen.findByTestId('envelope-intake')
+    const text = screen.getByTestId('envelope-intake').textContent!
+    const stages = realIntake.card.defaults.find(d => d.param === 'stages')!.value as { year: number; peak_mw: number }[]
+    for (const e of stages) expect(text).toContain(`${e.year}: ${e.peak_mw} MW peak`)
+    const leaves: [string, unknown][] = []
+    const walk = (path: string, v: unknown) => { if (v && typeof v === 'object') Object.entries(v).forEach(([k, x]) => walk(`${path}.${k}`, x)); else leaves.push([path, v]) }
+    for (const d of realIntake.card.defaults) if (d.param === 'existing' || d.param === 'candidates') walk(d.param, d.value)
+    expect(leaves.length).toBeGreaterThan(10)
+    for (const [path] of leaves) { expect(PATH_WORDS[path], path).toBeTruthy(); expect(text).toContain(PATH_WORDS[path][0]) }
+    expect(text).not.toMatch(/\d+ (entries|values)/)
+  })
+
+  it("PATH_WORDS agree with the backend profile's field labels", () => {
+    const src = readFileSync(resolve(__dirname, '../../../../backend/services/run_profiles.py'), 'utf8')
+    for (const key of ['existing.gensets.count', 'existing.gensets.unit_mw', 'existing.gensets.fuel', 'existing.pv_mw', 'existing.battery.mw',
+      'existing.battery.mwh', 'existing.ups.mw', 'existing.ups.minutes']) {
+      const label = new RegExp(`"${key.replace(/\./g, '\\.')}": _(?:num|enum|bool)\\("([^"]+)"`).exec(src)?.[1]
+      expect(PATH_WORDS[key][0], key).toBe(label)
+    }
   })
 })
