@@ -1,6 +1,6 @@
 # `commercial.provenance` cells on the graph
 
-Status: in progress
+Status: done (#1375)
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 
