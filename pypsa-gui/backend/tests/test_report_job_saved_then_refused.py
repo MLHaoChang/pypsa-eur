@@ -105,8 +105,9 @@ def test_saved_then_refused_is_failed_with_the_saved_version(
     assert store.load_report(tmp_path, v1.report_id, 2).version == 2
 
 
-def _refused_v2(tmp_path, evidence, monkeypatch):
-    v1 = run_report_job(_job(tmp_path, evidence, _full()))
+def _refused_v2(tmp_path, evidence, monkeypatch, *, v1=None):
+    """Version 2 saved by a regenerate whose generation receipt was refused."""
+    v1 = v1 or run_report_job(_job(tmp_path, evidence, _full()))
     assert store.load_meta(tmp_path, v1.report_id).generation is not None
     job = _job(tmp_path, evidence, _rewrite(), base_document=v1,
                regenerate_section="fmea_top", instruction="shorter")
@@ -127,6 +128,8 @@ def test_the_report_list_shows_no_receipt_for_a_version_whose_receipt_was_refuse
     [meta] = store.list_reports(tmp_path)
     assert meta.latest_version == 2
     assert meta.generation is None  # never version 1's
+    # E1: told apart from a report no job ever wrote (also `generation: null`).
+    assert meta.settings_unrecorded == {"version": 2, "fields": ["generation"]}
 
 
 def test_a_written_receipt_is_the_new_versions_own(tmp_path, evidence):
@@ -137,3 +140,79 @@ def test_a_written_receipt_is_the_new_versions_own(tmp_path, evidence):
     [meta] = store.list_reports(tmp_path)
     assert meta.latest_version == 2
     assert meta.generation["sections"] == ["fmea_top"]
+    assert meta.settings_unrecorded is None  # the job's last write removed the mark
+
+
+def test_a_new_reports_settings_refused_are_marked_unrecorded(
+    tmp_path, evidence, monkeypatch,
+):
+    job = _job(tmp_path, evidence, _full(),
+               meta_updates={"template_mode": "tagged", "template_language": "de"})
+    _settings_refused(monkeypatch, tmp_path, job.report_id)
+    with pytest.raises(store.ReportBusy):
+        run_report_job(job)
+    meta = store.load_meta(tmp_path, job.report_id)
+    assert meta.template_mode is None and meta.generation is None
+    assert meta.settings_unrecorded == {
+        "version": 1, "fields": ["generation", "template_language", "template_mode"]}
+
+
+def test_a_field_the_job_does_not_write_still_carries(tmp_path, evidence, monkeypatch):
+    """E4: the save clears only `generation` and this job's settings."""
+    v1 = run_report_job(_job(tmp_path, evidence, _full()))
+    store.update_meta(tmp_path, v1.report_id, template_language="de",
+                      roundtrip_file_id="up-1")
+    _refused_v2(tmp_path, evidence, monkeypatch, v1=v1)
+    meta = store.load_meta(tmp_path, v1.report_id)
+    assert meta.template_language == "de" and meta.roundtrip_file_id == "up-1"
+    assert meta.settings_unrecorded["fields"] == ["generation"]
+
+
+def test_a_user_edit_carries_every_field_and_the_mark(tmp_path, evidence, monkeypatch):
+    v1 = _refused_v2(tmp_path, evidence, monkeypatch)
+    store.update_meta(tmp_path, v1.report_id, template_language="de")
+    v2 = store.load_report(tmp_path, v1.report_id, 2)
+    assert store.save_version(tmp_path, v2) == 3
+    meta = store.load_meta(tmp_path, v1.report_id)
+    assert meta.template_language == "de"
+    assert meta.settings_unrecorded == {"version": 2, "fields": ["generation"]}
+
+
+def test_a_field_that_is_not_carried_cannot_be_pending(tmp_path, evidence):
+    v1 = run_report_job(_job(tmp_path, evidence, _full()))
+    for bad in (("title",), ("settings_unrecorded",)):
+        with pytest.raises(TypeError):
+            store.save_version(tmp_path, v1, pending=bad)
+    assert store.load_meta(tmp_path, v1.report_id).latest_version == 1
+
+
+# ── E3 (d): the strict check reads version n's document, never the meta ────
+
+def test_a_strict_regenerate_of_an_unrecorded_version_checks_its_document(
+    tmp_path, evidence, monkeypatch,
+):
+    from tests.assurance_acceptance.test_p4_reports import _dropping_disclosures
+
+    v1 = _refused_v2(tmp_path, evidence, monkeypatch)
+    v2 = store.load_report(tmp_path, v1.report_id, 2)
+    required = [b for s in v2.sections for b in s.blocks
+                if b.type == "callout" and b.kind == "disclosure"]
+    assert required  # version n's own disclosures are what the check needs
+    _dropping_disclosures(monkeypatch)
+    job = _job(tmp_path, evidence, _rewrite(), base_document=v2,
+               regenerate_section="fmea_top", strict=True)
+    with pytest.raises(Exception, match="disclosure"):
+        run_report_job(job)
+    assert job.record["error_kind"] == "report_disclosure_missing"
+    assert store.load_meta(tmp_path, v1.report_id).latest_version == 2
+
+
+def test_the_mark_never_blocks_a_strict_regenerate(tmp_path, evidence, monkeypatch):
+    v1 = _refused_v2(tmp_path, evidence, monkeypatch)
+    v2 = store.load_report(tmp_path, v1.report_id, 2)
+    job = _job(tmp_path, evidence, _rewrite(), base_document=v2,
+               regenerate_section="fmea_top", strict=True)
+    run_report_job(job)
+    assert job.record["status"] == "done" and job.record["version"] == 3
+    meta = store.load_meta(tmp_path, v1.report_id)
+    assert meta.settings_unrecorded is None and meta.generation is not None

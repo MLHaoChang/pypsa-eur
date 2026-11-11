@@ -146,7 +146,18 @@ def _now_iso() -> str:
 # `generation` (WP3/WP6) and the template binding + mapping plan (WP11). A
 # meta rewrite from a document carries them over; `update_meta` sets them.
 _CARRIED_META_FIELDS = ("generation", "template_mode", "template_language", "mapping_plan",
-                        "roundtrip_file_id")
+                        "roundtrip_file_id", "settings_unrecorded")
+# What a report job may write after its save (`pending`, 07f-b).
+_PENDING_FIELDS = frozenset(_CARRIED_META_FIELDS) - {"settings_unrecorded"}
+
+
+def _pending_mark(pending: tuple[str, ...], version: int) -> dict:
+    """The `settings_unrecorded` mark for fields a caller writes after its
+    save of `version` (07f-b, GK B E1). `TypeError` for any other field."""
+    unknown = sorted(set(pending) - _PENDING_FIELDS)
+    if unknown:
+        raise TypeError(f"not a pending meta field: {', '.join(unknown)}")
+    return {"settings_unrecorded": {"version": version, "fields": sorted(set(pending))}}
 
 
 def _meta_from_doc(doc: ReportDocument, *, latest_version: int,
@@ -612,7 +623,8 @@ def clear_closing(project_dir: pathlib.Path) -> None:
         logger.warning("could not remove the closing marker of %s", project_dir)
 
 
-def create_report(project_dir: pathlib.Path, doc: ReportDocument) -> ReportMeta:
+def create_report(project_dir: pathlib.Path, doc: ReportDocument, *,
+                  pending: tuple[str, ...] = ()) -> ReportMeta:
     """Create `reports/<id>/` with `v1.json` and `meta.json`. The id must be new."""
     rdir = report_dir(project_dir, doc.report_id)
     with report_lock(project_dir, doc.report_id):
@@ -623,6 +635,8 @@ def create_report(project_dir: pathlib.Path, doc: ReportDocument) -> ReportMeta:
         first = doc.model_copy(update={"version": 1})
         _write_version(rdir, first)
         meta = _meta_from_doc(first, latest_version=1)
+        if pending:  # see `save_version`
+            meta = meta.model_copy(update=_pending_mark(pending, 1))
         _write_meta(rdir, meta)
     return meta
 
@@ -630,7 +644,7 @@ def create_report(project_dir: pathlib.Path, doc: ReportDocument) -> ReportMeta:
 def save_version(project_dir: pathlib.Path, doc: ReportDocument, *,
                  revised_from: RevisedFrom | None = None,
                  expected_base: int | None = None,
-                 clear: tuple[str, ...] = ()) -> int:
+                 pending: tuple[str, ...] = ()) -> int:
     """
     Write the next version of an existing report and return its number.
 
@@ -642,14 +656,15 @@ def save_version(project_dir: pathlib.Path, doc: ReportDocument, *,
     given and `latest` is not it, another writer saved in between: nothing is
     written and `ReportVersionConflict` is raised (study harness 07c, GK B F1).
 
-    `clear` names carried meta fields this save writes as null: the ones the
-    caller writes for the new version after it (a report job's `generation`
-    and settings). If that later write is refused, the meta shows version n
-    without them rather than with version n-1's (07f-b, GK B Q2).
+    `pending` names the carried meta fields the caller writes for the new
+    version after this save (a report job's `generation` and settings). This
+    save writes them as null and marks them `settings_unrecorded`, so if
+    that later write is refused the meta shows version n without them,
+    never with version n-1's (07f-b, GK B Q2, E1). Every other carried field
+    still carries (E4).
     """
-    unknown = set(clear) - set(_CARRIED_META_FIELDS)
-    if unknown:
-        raise TypeError(f"not carried meta fields: {sorted(unknown)}")
+    if pending:
+        _pending_mark(pending, 0)  # a wrong field name refuses before any write
     rdir = _existing_report_dir(project_dir, doc.report_id)
     with report_lock(project_dir, doc.report_id):
         meta = load_meta(project_dir, doc.report_id)
@@ -669,7 +684,9 @@ def save_version(project_dir: pathlib.Path, doc: ReportDocument, *,
         # version from any caller keeps them rather than silently dropping them.
         _write_meta(rdir, _meta_from_doc(
             bumped, latest_version=next_version, created_at=meta.created_at,
-            carried=meta.model_copy(update=dict.fromkeys(clear)),
+            carried=meta.model_copy(update={
+                **dict.fromkeys(pending), **_pending_mark(pending, next_version),
+            }) if pending else meta,
         ))
     return next_version
 

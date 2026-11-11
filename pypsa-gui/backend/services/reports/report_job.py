@@ -551,7 +551,7 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
     return doc, aborted
 
 
-def _write_generation_meta(job: ReportJob, *, aborted: bool) -> None:
+def _write_generation_meta(job: ReportJob, *, aborted: bool, version: int) -> None:
     """
     `meta.json` gains a `generation` object (repairs, prose failures, the
     sections written). `ReportMeta` ignores unknown keys, so WP1's readers
@@ -567,6 +567,9 @@ def _write_generation_meta(job: ReportJob, *, aborted: bool) -> None:
         except (OSError, ValueError):
             logger.warning("reports: meta.json unreadable after save (%s)", path)
             return
+        mark = raw.get("settings_unrecorded")
+        if isinstance(mark, dict) and mark.get("version") == version:
+            raw.pop("settings_unrecorded")  # this job's receipt is its last write
         with job.lock:
             raw["generation"] = {
                 "repairs": job.record["repairs"],
@@ -665,24 +668,24 @@ def run_report_job(job: ReportJob) -> ReportDocument:
             "language": job.language,
             "created_at": datetime.now(tz=UTC).isoformat(),
         })
+        # The receipt and this job's settings are written for the version
+        # below; until then the meta marks them unrecorded and holds none,
+        # never the last version's (07f-b, GK B E1/E4).
+        pending = ("generation", *sorted(job.meta_updates))
         if job.new_report:
-            store.create_report(job.project_dir, doc)
+            store.create_report(job.project_dir, doc, pending=pending)
             version = 1
             for figure_id, png in job.figure_pngs.items():
                 if figure_id in doc.figures:
                     store.write_figure(job.project_dir, job.report_id, figure_id, png)
         else:
-            # The receipt and settings are written for this version below;
-            # until then the meta holds none, never the last version's.
-            version = store.save_version(
-                job.project_dir, doc,
-                clear=("generation", *sorted(job.meta_updates)))
+            version = store.save_version(job.project_dir, doc, pending=pending)
         if job.meta_updates:
             store.update_meta(job.project_dir, job.report_id, **job.meta_updates)
         saved = store.load_report(job.project_dir, job.report_id, version)
         # Terminal status lets clients consume the generation receipt or
         # start another job, so publish it only after that receipt is saved.
-        _write_generation_meta(job, aborted=aborted)
+        _write_generation_meta(job, aborted=aborted, version=version)
         _set(job, status="aborted" if aborted else "done", version=version,
              error=None, finished_at=time.time())
         return saved

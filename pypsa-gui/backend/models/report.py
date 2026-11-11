@@ -216,3 +216,9 @@ class ReportMeta(_Model):
     # Increment 3 (WP12/WP13, additive): the upload id (`kind="report_roundtrip"`)
     # of the last edited copy merged into this report, None until one was.
     roundtrip_file_id: str | None = None
+    # Study harness 07f-b (GK B E1): `{version, fields}` while a report job
+    # has saved version n but not yet written `fields` (its `generation` and
+    # settings) for it. The save clears those fields in the same write and
+    # the job's last write removes the mark, so a mark that stays says that
+    # version n has none of them, never version n-1's.
+    settings_unrecorded: dict | None = None
