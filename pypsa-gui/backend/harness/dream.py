@@ -144,7 +144,7 @@ def view(job: MemoryDreamJob | None) -> dict | None:
         "created_at": iso(job.created_at),
         "started_at": iso(job.started_at),
         "finished_at": iso(job.finished_at),
-        "analyzer_model": job.analyzer_model,
+        "analyzer": job.analyzer,
     }
 
 
@@ -855,9 +855,10 @@ def _key_used(db, user: User, key: str) -> bool:
 
 
 def _default_provider(db, user: User):
-    """The provider and model of the profile marked `memory_analyzer`, or of
-    the active profile when none is. Any profile works: the wiring picks the
-    wire; this module never names one."""
+    """The provider, model, error and analyzer label ("<profile id> · <wire>
+    · <model>") of the profile marked `memory_analyzer`, or of the active
+    profile when none is. Any profile works: the wiring picks the wire; this
+    module never names one."""
     from harness.providers import wiring
     from services import llm_config
 
@@ -866,9 +867,9 @@ def _default_provider(db, user: User):
     except llm_config.ProfileNotConfiguredError:
         # The marked profile is on disk but does not load: a named failure,
         # never a silent switch to the active profile (GK B T7).
-        return None, "", ERR_ANALYZER
+        return None, "", ERR_ANALYZER, None
     provider, err = wiring._provider_for_profile(profile)
-    return provider, profile.model, err
+    return provider, profile.model, err, f"{profile.id} · {profile.wire} · {profile.model}"
 
 
 class _Lost(Exception):
@@ -884,7 +885,7 @@ class Worker:
         *,
         instance: str | None = None,
         provider_for: Callable[
-            [Any, User], tuple[Any, str, str | None]
+            [Any, User], tuple[Any, str, str | None] | tuple[Any, str, str | None, str | None]
         ] = _default_provider,
         clock: Callable[[], float] = time.time,
     ) -> None:
@@ -1031,11 +1032,15 @@ class Worker:
                 # another one the user may also belong to.
                 self._finish(db, job, "failed", "memory_no_org")
                 return
-            provider, model, err = self.provider_for(db, user)
+            got = self.provider_for(db, user)
+            provider, model, err = got[:3]
             if err is not None or provider is None:
                 self._finish(db, job, "failed", err or ERR_PROVIDER)
                 return
-            self._write(db, job.id, analyzer_model=str(model)[:200])  # T7
+            # The job states what it ran on: profile, wire and model (T7e).
+            # A 3-tuple provider (tests) records the model alone.
+            analyzer = got[3] if len(got) > 3 and got[3] else str(model)
+            self._write(db, job.id, analyzer=analyzer[:200])
             cursor = json.loads(job.cursor_json)
             candidates = json.loads(job.candidates_json)
             spent = json.loads(job.spent_json)

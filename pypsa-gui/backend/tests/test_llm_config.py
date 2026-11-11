@@ -1197,3 +1197,30 @@ def test_save_profiles_refuses_an_unknown_role_or_a_non_id(appdata):
     with pytest.raises(llm_config.ProfileValidationError):
         llm_config.save_profiles([], "anthropic-sonnet", {"memory_analyzer": ["x"]})
     assert not llm_config.profiles_path().exists()
+
+
+@pytest.mark.parametrize("roles", [
+    ["memory_analyzer"], "anthropic-opus", 7,
+    {"memory_analyzer": ["anthropic-opus"]}, {"memory_analyzer": 3},
+    {"memory_analyzer": {"id": "anthropic-opus"}},
+])
+def test_a_malformed_roles_map_fails_by_name_never_the_active_profile(appdata, roles):
+    # GK B T7d: load_roles reads these as "no role", but resolving must not
+    # fall back to the active profile.
+    from services import llm_config
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1, "active_profile_id": "anthropic-opus", "profiles": [],
+        "roles": roles,
+    }), encoding="utf-8")
+    with pytest.raises(llm_config.ProfileNotConfiguredError):
+        llm_config.resolve_role("memory_analyzer")
+
+
+@pytest.mark.parametrize("roles", [None, {}, {"other": 5}])
+def test_no_roles_or_an_absent_role_still_resolves_to_the_active_profile(appdata, roles):
+    from services import llm_config
+    data = {"version": 1, "active_profile_id": "anthropic-opus", "profiles": []}
+    if roles is not None:
+        data["roles"] = roles
+    llm_config.profiles_path().write_text(json.dumps(data), encoding="utf-8")
+    assert llm_config.resolve_role("memory_analyzer").id == "anthropic-opus"

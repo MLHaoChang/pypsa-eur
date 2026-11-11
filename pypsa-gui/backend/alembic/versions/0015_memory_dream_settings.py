@@ -42,7 +42,7 @@ def upgrade() -> None:
     # 0014 is left as it is.
     op.add_column("memory_dream_jobs", sa.Column("trigger_key", sa.String(96)))
     op.add_column("memory_dream_jobs", sa.Column("org_id", sa.Uuid(as_uuid=True)))
-    op.add_column("memory_dream_jobs", sa.Column("analyzer_model", sa.String(200)))
+    op.add_column("memory_dream_jobs", sa.Column("analyzer", sa.String(200)))
     op.create_index(
         "ux_memory_dream_jobs_trigger_key",
         "memory_dream_jobs",
@@ -57,7 +57,7 @@ def downgrade() -> None:
     """Drop the opt-in table and the job columns: automatic reviews go back to
     off; job history keeps its other fields."""
     op.drop_index("ux_memory_dream_jobs_trigger_key", "memory_dream_jobs")
-    op.drop_column("memory_dream_jobs", "analyzer_model")
+    op.drop_column("memory_dream_jobs", "analyzer")
     op.drop_column("memory_dream_jobs", "org_id")
     op.drop_column("memory_dream_jobs", "trigger_key")
     op.drop_table("memory_dream_settings")

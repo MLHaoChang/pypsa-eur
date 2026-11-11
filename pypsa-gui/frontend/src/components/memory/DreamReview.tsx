@@ -91,8 +91,8 @@ function AutomaticReviews() {
         After {s?.sessions_needed ?? 10} new chats
       </label>
       <span>
-        Off unless you turn them on: a review sends your past chats to
-        {s?.analyzer ? ` ${s.analyzer}` : ' the configured model'}.
+        {s?.nightly || s?.after_sessions ? 'A review sends' : 'Off unless you turn them on: a review sends'}
+        {' '}your past chats to{s?.analyzer ? ` ${s.analyzer}` : ' the configured model'}.
         {' '}The nightly review runs only while the app is running at {at}; a night it is off is skipped.
       </span>
       {(settingsQ.error || save.error) && (

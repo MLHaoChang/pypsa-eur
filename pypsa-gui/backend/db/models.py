@@ -433,7 +433,7 @@ class MemoryDreamJob(Base):
     # The org the job reads and writes for (GK B T3); NULL on 04a manual jobs.
     org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     # The model the analyzer and organizer ran on (GK B T7).
-    analyzer_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    analyzer: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class MemoryDreamSettings(Base):

@@ -908,12 +908,18 @@ def resolve_role(role: str) -> LLMProfile:
     by name rather than silently running on another provider (GK B T7)."""
     profiles, active_id = load_profiles()
     by_id = {p.id: p for p in profiles}
-    pid = load_roles().get(role)
+    data = _read_file() or {}
+    if "roles" in data and not isinstance(data["roles"], dict):
+        # A malformed roles map is not "no role set" (GK B T7d).
+        raise ProfileNotConfiguredError(f"the profile roles are malformed; {role} cannot be resolved")
+    pid = (data.get("roles") or {}).get(role)
+    if pid is not None and not isinstance(pid, str):
+        raise ProfileNotConfiguredError(f"the profile marked for {role} is not a profile id: {pid!r}")
     if pid is None:
         return by_id[active_id]
     if pid in by_id:
         return by_id[pid]
-    on_disk = (_read_file() or {}).get("profiles")
+    on_disk = data.get("profiles")
     if isinstance(on_disk, list) and any(
         isinstance(e, dict) and e.get("id") == pid for e in on_disk
     ):

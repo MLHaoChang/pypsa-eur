@@ -1297,6 +1297,45 @@ def test_a_malformed_log_header_is_skipped_and_the_rest_counted(factory, world):
     assert len(_fire(factory, datetime.now(UTC).timestamp() + 60)) == 1
 
 
+def test_each_opt_in_consents_only_to_its_own_trigger(factory, world):
+    # GK B M17b: nightly-only plus ten new chats never starts a sessions job.
+    _opt_in(factory, world, nightly=True)
+    for _ in range(dream.SESSIONS_TRIGGER + 2):
+        _chat(world.user_id, "new")
+    assert _fire(factory, _berlin(1, 12, 0)) == []
+    [job] = _fire(factory, _berlin(1, 3, 30))
+    assert _job(factory, uuid.UUID(job)).trigger == "nightly"
+    _settle(factory, job)
+    assert _fire(factory, _berlin(1, 3, 40)) == []
+    assert [j.trigger for j in _jobs(factory, world)] == ["nightly"]
+
+
+def test_sessions_only_never_starts_a_nightly_job(factory, world):
+    _opt_in(factory, world, after_sessions=True)
+    for _ in range(dream.SESSIONS_TRIGGER - 1):
+        _chat(world.user_id, "new")
+    assert _fire(factory, _berlin(1, 3, 30)) == []
+    assert _jobs(factory, world) == []
+
+
+def test_a_manual_job_done_before_0300_does_not_suppress_the_nightly(factory, world):
+    _opt_in(factory, world, nightly=True)
+    _settle(factory, _start(factory, world))  # today, before tomorrow's 03:00
+    [job] = _fire(factory, _berlin(1, 3, 5))
+    assert _job(factory, uuid.UUID(job)).trigger == "nightly"
+
+
+def test_a_live_manual_job_at_0300_defers_the_nightly_inside_the_hour(factory, world):
+    _opt_in(factory, world, nightly=True)
+    manual = _start(factory, world)
+    assert _fire(factory, _berlin(1, 3, 0)) == []  # skipped, the key unused
+    _settle(factory, manual)
+    [job] = _fire(factory, _berlin(1, 3, 40))  # retried inside the hour
+    assert _job(factory, uuid.UUID(job)).trigger == "nightly"
+    _settle(factory, job)
+    assert _fire(factory, _berlin(1, 3, 50)) == []
+
+
 def test_a_trigger_never_starts_a_second_live_job(factory, world):
     manual = _start(factory, world)
     _opt_in(factory, world, nightly=True, after_sessions=True)
@@ -1399,7 +1438,7 @@ def test_the_worker_scan_fires_due_triggers(factory, world):
     ran = _worker(factory, provider, clock=clock).run_once()
     j = _job(factory, uuid.UUID(ran))
     assert j.trigger == "nightly"
-    assert j.analyzer_model == "model-x"  # the job states what it ran on (T7)
+    assert j.analyzer == "model-x"  # the job states what it ran on (T7)
 
 
 def test_dream_settings_routes_are_the_callers_own_both_ways(
@@ -1460,14 +1499,28 @@ def test_the_analyzer_runs_on_the_profile_marked_for_it(monkeypatch):
     from harness.providers import wiring
     from services import llm_config
 
-    marked = SimpleNamespace(model="analyzer-model")
+    marked = SimpleNamespace(id="local-qwen", wire="openai", model="analyzer-model")
     asked = []
     monkeypatch.setattr(
         llm_config, "resolve_role", lambda role: asked.append(role) or marked
     )
     monkeypatch.setattr(wiring, "_provider_for_profile", lambda p: ("prov", None))
-    assert dream._default_provider(None, None) == ("prov", "analyzer-model", None)
+    assert dream._default_provider(None, None) == (
+        "prov", "analyzer-model", None, "local-qwen · openai · analyzer-model"
+    )
     assert asked == ["memory_analyzer"]
+
+
+def test_the_job_records_the_profile_wire_and_model_it_ran_on(factory, world):
+    # GK B T7e: the record names the profile and the provider, not only the model.
+    job_id = _start(factory, world)
+    provider = FakeProvider([_organized()] * 3)
+    dream.Worker(
+        factory,
+        provider_for=lambda db, u: (provider, "m", None, "local-qwen · openai · m"),
+        clock=Clock(),
+    ).run_once()
+    assert _job(factory, job_id).analyzer == "local-qwen · openai · m"
 
 
 def test_a_marked_profile_that_does_not_load_fails_the_job_by_name(

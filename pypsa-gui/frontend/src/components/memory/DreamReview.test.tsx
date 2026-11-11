@@ -90,11 +90,16 @@ describe('DreamReview', () => {
     await waitFor(() => expect((nightly as HTMLInputElement).disabled).toBe(false))
     expect((nightly as HTMLInputElement).checked).toBe(false)
     expect(screen.getByText(/sends your past chats to/).textContent).toContain('Claude Sonnet')
+    expect(screen.getByText(/sends your past chats to/).textContent).toMatch(/^Off unless you turn them on/)
     expect((chats as HTMLInputElement).checked).toBe(false)
     fireEvent.click(nightly)
     await waitFor(() => expect((nightly as HTMLInputElement).checked).toBe(true))
     expect(setSettings).toHaveBeenCalledWith({ nightly: true })
     expect((chats as HTMLInputElement).checked).toBe(false)
+    // Once either is on, "Off unless…" would be false (UX 19).
+    const words = screen.getByText(/sends your past chats to/).textContent ?? ''
+    expect(words).toMatch(/^A review sends your past chats to Claude Sonnet\./)
+    expect(words).not.toContain('Off unless')
   })
 })
 

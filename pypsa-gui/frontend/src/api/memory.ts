@@ -109,7 +109,7 @@ export interface DreamJob {
   started_at: string | null
   finished_at: string | null
   /** The model the review ran on, once it started. */
-  analyzer_model?: string | null
+  analyzer?: string | null
 }
 
 export interface DreamSettings {
