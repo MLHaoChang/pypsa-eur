@@ -447,3 +447,44 @@ def test_an_extendable_flag_stored_as_text_counts(flag, expected):
 def test_a_blank_carrier_is_null(blank):
     assert S._held("Generator", "g", carrier=blank)["carrier"] is None
     assert S._held("Generator", "g", carrier="gas")["carrier"] == "gas"
+
+
+_FLAGS = [
+    "true",
+    "True",
+    "1",
+    "1.0",
+    "yes",
+    "false",
+    "0",
+    "",
+    "nan",
+    1.0,
+    0.0,
+    1,
+    0,
+    True,
+    False,
+    float("nan"),
+    None,
+    np.float64(1.0),
+    np.float64("nan"),
+]
+
+
+@pytest.mark.parametrize("flag", _FLAGS, ids=repr)
+def test_the_fallback_flag_rule_reads_as_the_engines(flag):
+    from gridspine.drivers.process_chain import truthy
+
+    assert S._fallback_truthy(flag) is truthy(flag)
+
+
+def test_without_gridspine_the_extendable_flag_still_follows_the_rule(monkeypatch):
+    monkeypatch.setattr(S, "_engine_truthy", None)
+    for flag in _FLAGS:
+        assert S._held("Generator", "g", extendable=flag)[
+            "extendable"
+        ] is S._fallback_truthy(flag)
+    assert S._held("Generator", "g", extendable="1.0")["extendable"] is True
+    assert S._held("Generator", "g", extendable=np.float64(1.0))["extendable"] is True
+    assert S._held("Generator", "g", extendable=float("nan"))["extendable"] is False

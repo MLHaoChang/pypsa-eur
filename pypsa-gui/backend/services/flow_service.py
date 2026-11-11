@@ -427,15 +427,27 @@ def _size_unit(n, bus, *, stock: bool) -> str | None:
     return None
 
 
+try:
+    from gridspine.drivers.process_chain import truthy as _engine_truthy
+except ImportError:  # a build without gridspine: the fallback below
+    _engine_truthy = None
+
+
+def _fallback_truthy(v) -> bool:
+    """The flag rule for a build WITHOUT gridspine only. The one rule is
+    ``gridspine.drivers.process_chain.truthy``; a test pins the two to the same values."""
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "1.0", "yes")
+    return False if v is None or v != v else bool(v)
+
+
 def _held(component: str, entity: str, *, carrier=None, field_name: str | None = None,
           value=None, unit: str | None = None, extendable=False, series: bool = False) -> dict:
-    from gridspine.drivers.process_chain import truthy
-
     carrier = str(carrier) if carrier is not None and str(carrier) not in ("", "nan") else None
     return {"component": component, "entity": entity, "carrier": carrier, "field": field_name,
             "value": _number(value), "unit": unit,
             # The engine's own flag rule: 1.0 and "True" count, a blank (NaN) one does not.
-            "extendable": truthy(extendable),
+            "extendable": (_engine_truthy or _fallback_truthy)(extendable),
             # Whether the value is read from a time series (a load's peak).
             "series": bool(series)}
 
