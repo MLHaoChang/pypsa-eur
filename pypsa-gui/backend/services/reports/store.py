@@ -574,8 +574,17 @@ def reports_closed(project_dir: pathlib.Path):
 
 def clear_closing(project_dir: pathlib.Path) -> None:
     """Remove `reports/.closing` from `project_dir`, if it is there."""
+    # Realpath plus a prefix check: the marker must resolve to a file directly
+    # inside `reports/` (the form CodeQL reads as a py/path-injection barrier,
+    # as `harness.durable.file_lock` spells it).
+    root = os.path.realpath(reports_dir(project_dir))
+    marker = os.path.realpath(os.path.join(root, CLOSING_MARKER))
+    if not marker.startswith(root + os.sep) or os.path.dirname(marker) != root:
+        return
     try:
-        (reports_dir(project_dir) / CLOSING_MARKER).unlink(missing_ok=True)
+        os.unlink(marker)
+    except FileNotFoundError:
+        pass
     except OSError:
         logger.warning("could not remove the closing marker of %s", project_dir)
 
