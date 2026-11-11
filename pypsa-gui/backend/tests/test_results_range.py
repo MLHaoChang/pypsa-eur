@@ -309,6 +309,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/cost_breakdown", "/objective_decomposition", "/economics_by_carrier",
         "/statistics", "/lcoh", "/ac_pf/status", "/losses", "/carrier_kpis",
         "/emissions", "/line_duals", "/price_drivers", "/asset_economics",
+        # The Results headline strip's cards (ui-modern 03): one figure each.
+        "/headline_kpis",
         # Grid-to-process process view (ticket 04): per-product and per-unit
         # records; each inventory carries its own level list, not index/columns/data.
         "/process_view",

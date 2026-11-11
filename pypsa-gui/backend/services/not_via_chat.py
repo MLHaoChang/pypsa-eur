@@ -286,6 +286,25 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        # ui-modern 03: the strip is a screen layout over figures chat already
+        # reads (get_results cost_breakdown and lost_load, the checked answers).
+        'id': 'results_headline_strip',
+        'title': 'Results headline strip',
+        'disposition': 'manual',
+        'reason': "The Results headline strip's own card list is not read from chat. Chat reads the same figures one by one (cost breakdown, lost load, the checked answers). Open Results › Summary to see the strip.",
+        'page': 'Results › Summary',
+        'panel': 'results',
+        # 'headline' alone is in six tool descriptions (compare-runs headline
+        # KPIs, …) and 'strip' alone in the chat file strip's: `matches` also
+        # needs `_asks_about_the_strip`.
+        'keywords': frozenset({
+            'strip',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/results/headline_kpis'),
+        }),
+    },
+    {
         'id': 'site_scene',
         'title': 'Site 3D: legacy Site adoption and results overlay',
         'disposition': 'unbuilt',
@@ -384,6 +403,19 @@ NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the 
         "if panel is set you may open it with ui_open_panel. Do not look for another tool or an API for them.")
 
 
+# The headline strip entry answers only what the strip itself owns: what it
+# shows, why a card is missing, adding or hiding a card. Exporting, reporting
+# or comparing the same figures is a chat tool's job and must not be refused.
+_STRIP_NAMES = frozenset({'headline', 'kpi', 'kpis'})
+_STRIP_ASKS = frozenset({'why', 'what', 'which', 'read', 'add', 'hide'})
+# "Add the strip to the report/export" puts it elsewhere: a tool does that.
+_STRIP_ELSEWHERE = frozenset({'report', 'export'})
+
+
+def _asks_about_the_strip(words: set[str]) -> bool:
+    return bool(words & _STRIP_NAMES and words & _STRIP_ASKS and not words & _STRIP_ELSEWHERE)
+
+
 def matches(words: set[str], limit: int = 2) -> list[dict]:
     """Keyword hits, ranked by count then declaration order; return public copies.
 
@@ -394,6 +426,8 @@ def matches(words: set[str], limit: int = 2) -> list[dict]:
     for index, entry in enumerate(NOT_VIA_CHAT):
         if (entry['id'] == 'solve_queue_instance_controls' and words & {'goal', 'task', 'plan'}
                 and 'queue' not in words):
+            continue
+        if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):
             continue
         hits = len(words & entry['keywords'])
         if hits:

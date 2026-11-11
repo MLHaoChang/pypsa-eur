@@ -1942,6 +1942,10 @@ def _scoped_read(ctx, scope, owner):
     return raw
 
 
+#: The same read for callers outside this module (the Results headline strip).
+scoped_read = _scoped_read
+
+
 # AA-05 S5a (A4.6): identity keys an evidence record stores for the
 # cross-surface checks. No existing reader's output carries them (GK B (34) Q2).
 IDENTITY_KEYS = frozenset({"window", "solve_stamp"})
