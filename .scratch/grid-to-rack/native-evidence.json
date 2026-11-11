@@ -1,0 +1,232 @@
+{
+  "baseline": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
+  "scope": "read-only source assessment, not runtime test results",
+  "files": [
+    {
+      "path": "pypsa-gui/backend/models/flex_archetypes.py",
+      "sha256": "172dfc44ec9da11a187b6b816e877042bde0d4d3299cafabbc7d32af0ca154d5",
+      "bytes": 6852,
+      "relevant_symbols": [
+        {
+          "name": "DcPhase",
+          "line": 23,
+          "end_line": 30
+        },
+        {
+          "name": "AiWorkloadSpec",
+          "line": 41,
+          "end_line": 70
+        },
+        {
+          "name": "DataCentreLoadSpec",
+          "line": 73,
+          "end_line": 105
+        },
+        {
+          "name": "BessSpec",
+          "line": 108,
+          "end_line": 120
+        }
+      ]
+    },
+    {
+      "path": "pypsa-gui/backend/services/dc_load_profile.py",
+      "sha256": "88b1560c334cd47cf351755df16f86dcb217f170b6b884696fd7f580df704846",
+      "bytes": 11093,
+      "relevant_symbols": [
+        {
+          "name": "hourly_profile",
+          "line": 119,
+          "end_line": 123
+        },
+        {
+          "name": "_phase_envelope",
+          "line": 126,
+          "end_line": 156
+        },
+        {
+          "name": "dynamic_envelope",
+          "line": 159,
+          "end_line": 183
+        }
+      ]
+    },
+    {
+      "path": "pypsa-gui/backend/services/adequacy/grid_readiness.py",
+      "sha256": "715c28c4c1ef89333647ee189723278399851cc7486fa32b8ca400e580fc65ec",
+      "bytes": 39175,
+      "relevant_symbols": []
+    },
+    {
+      "path": "pypsa-gui/backend/services/adequacy/site_peak.py",
+      "sha256": "e73439b079242b6aea32a50e1ea84bdf5258338a06cdc4375b7346ac9805e8cd",
+      "bytes": 7173,
+      "relevant_symbols": []
+    },
+    {
+      "path": "pypsa-gui/backend/services/adequacy/island_config.py",
+      "sha256": "e8a0fd9245e6b9ef3ed753a381f8a655bc4a7bb83a89b83093e699dc7ff0b840",
+      "bytes": 4986,
+      "relevant_symbols": []
+    },
+    {
+      "path": "pypsa-gui/backend/services/adequacy/energization.py",
+      "sha256": "afeddaf399e1cc0dd2c647b9a3afa48e65bd88b0d951493442f11ec18e86eb08",
+      "bytes": 5109,
+      "relevant_symbols": []
+    },
+    {
+      "path": "pypsa-gui/backend/services/campus_island_cuts.py",
+      "sha256": "13d53b9f29b40c99380e17dadbe69b3fe85daf39d6bf14b11c1bf2e7e31cae1b",
+      "bytes": 17955,
+      "relevant_symbols": [
+        {
+          "name": "get_cuts",
+          "line": 129,
+          "end_line": 155
+        }
+      ]
+    },
+    {
+      "path": "pypsa-gui/backend/project_templates/eh_templates.py",
+      "sha256": "9914ad9c0afdc704a5681044ca49f420d9c3e78b3dc5b1ba2446a7eac0f49b4c",
+      "bytes": 70776,
+      "relevant_symbols": [
+        {
+          "name": "build_eh_datacenter",
+          "line": 113,
+          "end_line": 207
+        },
+        {
+          "name": "build_eh_datacenter_staged",
+          "line": 354,
+          "end_line": 355
+        }
+      ]
+    },
+    {
+      "path": "pypsa-gui/backend/routers/projects.py",
+      "sha256": "84c4105a91fba1e6941a572a06c52f5e1a9acb3662513230bb69ac35c569a4ae",
+      "bytes": 225519,
+      "relevant_symbols": []
+    },
+    {
+      "path": "gridspine/static/frequency.py",
+      "sha256": "de84ce2561b9d88156c278e50d2d91d2f1d25a16e76cffb5f355c6b83a373b70",
+      "bytes": 86247,
+      "relevant_symbols": [
+        {
+          "name": "Unit",
+          "line": 80,
+          "end_line": 126
+        },
+        {
+          "name": "UpsLog",
+          "line": 143,
+          "end_line": 155
+        },
+        {
+          "name": "simulate",
+          "line": 326,
+          "end_line": 416
+        },
+        {
+          "name": "campus_frequency_study",
+          "line": 1326,
+          "end_line": 1357
+        }
+      ]
+    },
+    {
+      "path": "gridspine/static/campus_flow.py",
+      "sha256": "2cab5c8a11e56da28b7720a9b7de7605efec29a1d6e9bf09d812ce569d5c35c8",
+      "bytes": 13989,
+      "relevant_symbols": []
+    },
+    {
+      "path": "gridspine/static/campus_reactive.py",
+      "sha256": "9845aca8b441c8eb54f35deacaf59c8c3f4810cdaeccde714bbe66310636f978",
+      "bytes": 18317,
+      "relevant_symbols": []
+    },
+    {
+      "path": "gridspine/static/campus_invest.py",
+      "sha256": "73fbfd846e5eccb047a1a35e8b038e508ea3ebac31b61743ff964d339806c837",
+      "bytes": 79955,
+      "relevant_symbols": []
+    },
+    {
+      "path": "gridspine/static/campus_milp.py",
+      "sha256": "bf87a3271afd40afe2d52894869eabf4c6951c156bc2f4f1515a6b7b267dffb8",
+      "bytes": 69292,
+      "relevant_symbols": []
+    },
+    {
+      "path": "gridspine/schema/island.py",
+      "sha256": "0259c20d02b7253e9cb8bb1a4570adc8e7405a56ff247ffd83f582c21e7c51ef",
+      "bytes": 40189,
+      "relevant_symbols": [
+        {
+          "name": "select_preset",
+          "line": 724,
+          "end_line": 766
+        }
+      ]
+    },
+    {
+      "path": "gridspine/schema/dc.py",
+      "sha256": "db21ea460c23c5d7be6de76e4f9dc7ac65f8c8f305e8a0ef444cc494f2a606f5",
+      "bytes": 4571,
+      "relevant_symbols": []
+    },
+    {
+      "path": "gridspine/handoff/dyr_writer.py",
+      "sha256": "47fd063f0d97b773f20040bef94be06a92b3edd4e93ea6c94b48794561cc8512",
+      "bytes": 10121,
+      "relevant_symbols": []
+    },
+    {
+      "path": "gridspine/handoff/campus_bundle.py",
+      "sha256": "1ee850c89226cddbc94ba8e82c337c14391a476d7fe643b79a5cd50e9b25e595",
+      "bytes": 14096,
+      "relevant_symbols": []
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_dc_load_profile.py",
+      "sha256": "f21efdd98aea1aa3b806ea31c304a74a6a921f9437937704068fd8e8ee1cab3c",
+      "bytes": 14767,
+      "relevant_symbols": []
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_grid_readiness.py",
+      "sha256": "e2374a9addff1ccdb526167c53a826f0f2fc7f17d16686b4fea20fa54edd7d15",
+      "bytes": 28142,
+      "relevant_symbols": []
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-07-campus-island-operation.md",
+      "sha256": "4da4c3fe20ca45ea279077b6328864f48cf9cddb9051f6ae7e0ff5221e52b802",
+      "bytes": 183232
+    },
+    {
+      "path": ".scratch/datacenter-grid-readiness/spec.md",
+      "sha256": "207972c79f192a7a8207dd2b195bd8bdce232311a4aaf0ba38685555d3cddc6e",
+      "bytes": 3347
+    },
+    {
+      "path": ".scratch/datacenter-grid-readiness/issues/03-battery-backup.md",
+      "sha256": "537c4ff167cc683884a9ca7ca62d44d8104190227edd01c40222254ca280e022",
+      "bytes": 655
+    },
+    {
+      "path": ".scratch/datacenter-grid-readiness/issues/05-architecture-comparison.md",
+      "sha256": "c3fb6e06876e8daaddcd1f8768cb250a34eb59512eee87c50ac4b8fdc5350cc0",
+      "bytes": 525
+    },
+    {
+      "path": ".scratch/datacenter-grid-readiness/issues/07-rolling-operations.md",
+      "sha256": "c391fcf7fd4f0966aee184a341a565fd8d249555bcbb602805f9d4c87ef516b1",
+      "bytes": 363
+    }
+  ]
+}

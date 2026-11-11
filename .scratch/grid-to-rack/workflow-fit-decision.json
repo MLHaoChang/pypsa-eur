@@ -1,0 +1,152 @@
+{
+  "baseline": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
+  "recommendation_version": 3,
+  "supersedes": "Initial next-integration recommendation in PR527 head1bbee03c0fe0aee3fe616a8705d73fd3cd899fbd",
+  "summary": "Native contextual capability first; no new external runtime dependency or top-level workflow section in the initial proposal.",
+  "runtime_implementation": false,
+  "initial_new_external_runtime_dependencies": [],
+  "new_mandatory_flow_sections": [],
+  "native_near_term_packages": [
+    "GTR-00",
+    "GTR-01",
+    "GTR-02",
+    "GTR-06"
+  ],
+  "conditional_native_followup": [
+    "GTR-05"
+  ],
+  "deferred_packages": [
+    "GTR-03",
+    "GTR-04"
+  ],
+  "ux_acceptance_ids": [
+    "UX01",
+    "UX02",
+    "UX03",
+    "UX04",
+    "UX05",
+    "UX06",
+    "UX07",
+    "UX08",
+    "UX09",
+    "UX10",
+    "UX11",
+    "UX12",
+    "UX13",
+    "UX14",
+    "UX15",
+    "UX16",
+    "UX17",
+    "UX18",
+    "UX19"
+  ],
+  "tools": [
+    {
+      "id": "native",
+      "name": "Native envelope/event/reserve assessment",
+      "disposition": "proceed_native_proposal",
+      "reason": "Existing project/load/asset/result extensions; no new external runtime",
+      "revisit_gate": "Named load/connection/reserve question; independently validated limits and planner effects",
+      "implemented": false
+    },
+    {
+      "id": "openg2g",
+      "name": "OpenG2G",
+      "disposition": "deferred_research",
+      "reason": "Overlaps coordinator/grid topology and introduces workload/performance/data assumptions",
+      "revisit_gate": "Explicit compute-performance need, local source-cleared data, single native project mapping and independent validation",
+      "implemented": false
+    },
+    {
+      "id": "dpsim",
+      "name": "DPsim",
+      "disposition": "deferred_specialist",
+      "reason": "Building blocks still need device parameters, a physical chain, initialization and benchmark",
+      "revisit_gate": "Requested detailed question/operator need, supplied source-backed model and passed engineering/deployment gates",
+      "implemented": false
+    },
+    {
+      "id": "telemetry",
+      "name": "Zeus / DCGM",
+      "disposition": "optional_external_acquisition",
+      "reason": "Accept generic measured data without mandatory hardware or runtime",
+      "revisit_gate": "Authorized measurement with verified plane/API/bandwidth/time basis; no live control",
+      "implemented": false
+    },
+    {
+      "id": "helics",
+      "name": "HELICS",
+      "disposition": "outside_current_product",
+      "reason": "Current staged artifact exchange does not justify a second orchestration system",
+      "revisit_gate": "A demonstrated concurrent closed-loop need that existing artifact jobs cannot answer",
+      "implemented": false
+    },
+    {
+      "id": "vessim",
+      "name": "Vessim",
+      "disposition": "outside_current_product",
+      "reason": "Duplicates native planning/dispatch/SOC/comparison responsibilities",
+      "revisit_gate": "A separately requested research/live-software experiment and non-duplicating integration contract",
+      "implemented": false
+    },
+    {
+      "id": "opendss",
+      "name": "Additional OpenDSS backend",
+      "disposition": "outside_current_product",
+      "reason": "Native pandapower already supplies the initial static campus study",
+      "revisit_gate": "A concrete unsupported distribution study and validated lossless project/asset mapping",
+      "implemented": false
+    },
+    {
+      "id": "thermal",
+      "name": "Modelica Buildings",
+      "disposition": "conditional_later",
+      "reason": "Detailed cooling inputs/runtime unjustified for ordinary PUE-based planning",
+      "revisit_gate": "A material thermal/energy/control/availability question with real facility parameters and validation",
+      "implemented": false
+    },
+    {
+      "id": "pybamm",
+      "name": "PyBaMM",
+      "disposition": "outside_current_product",
+      "reason": "Cell models/calibration exceed current planning needs",
+      "revisit_gate": "A calibrated aging/thermal study that materially affects a named decision",
+      "implemented": false
+    },
+    {
+      "id": "ups_references",
+      "name": "UPS research / PSCAD references",
+      "disposition": "reference_only",
+      "reason": "Research/OEM/runtime/rights limitations prevent automatic production admission",
+      "revisit_gate": "A source-cleared independent benchmark role, not claimed hardware truth or bundled compliance",
+      "implemented": false
+    }
+  ],
+  "independent_usability_study": "pending",
+  "domain_hardware_validation": "pending",
+  "rapid_response_placement": {
+    "study_label": "Response to rapid load changes",
+    "primary_capability": "Control Strategy",
+    "primary_result_home": "Control Strategy",
+    "study_request_owner": "scenarios",
+    "input_owners": {
+      "event": "loads",
+      "connection_limits": "connection",
+      "asset_response_and_reserve": "assets"
+    },
+    "secondary_result_summaries": [
+      "Grid",
+      "Reliability"
+    ],
+    "canonical_result_per_variant": true,
+    "secondary_views_start_duplicate_jobs": false,
+    "grid_coupled_requires_compatible_operating_point": true,
+    "standalone_analytical_baseline_must_be_declared": true,
+    "initial_scope": "power/energy/reserve screen; optional explicitly modeled frequency",
+    "short_event_establishes_annual_reliability": false,
+    "load_flow_establishes_transient_response": false,
+    "planning_effect_requires_supported_enforced_verified_constraint": true,
+    "dependency_and_terminal_states_shared_across_views": true,
+    "new_top_level_flow_section": false
+  }
+}
