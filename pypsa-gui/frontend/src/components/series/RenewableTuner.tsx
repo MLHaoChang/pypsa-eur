@@ -26,7 +26,8 @@ export default function RenewableTuner({ project, row, onApplied }: {
   const weather = useQuery({ queryKey: weatherKey(project), queryFn: () => profilesApi.weather(project) })
   const presets = useQuery({ queryKey: nk(project, 'profile_presets', row.technology), queryFn: () => profilesApi.presets(row.technology) })
   const source = weather.data?.source
-  const available = presets.data ?? []
+  // Only the presets for the weather bar's source; an older server that omits source_type lists all.
+  const available = (presets.data ?? []).filter(p => !p.source_type || p.source_type === source)
   const [choice, setChoice] = useState('')
   const preset = available.find(p => p.name === choice)?.name ?? available[0]?.name ?? ''
   const schema = useQuery({ queryKey: nk(project, 'profile_schema', row.technology, preset),
