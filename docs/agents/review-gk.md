@@ -36,6 +36,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - Byte-identity against master's tests: copy master's test file into the PR worktree and run it there (a recording pytest plugin can capture rows). Running it from the master worktree imports master's code even with PYTHONPATH on the PR, because the rootdir wins.
 - A merge commit M has no hand resolution when `git merge-tree --write-tree M^1 M^2` equals `M^{tree}`.
 - A delta that only adds a test can still collide in CI order. Run the colliding files in CI's order without randomisation: red with the old file, then green at the head (#1311).
+- A test-only delta that "carries the OK" still gets a check of the files its PR renamed or moved code out of: grep the tests for frame names and monkeypatch targets of the moved functions (#1345: CI found `test_project_settings_autonomy` keyed on `_save_context`).
 
 ## Known container-only failures
 
@@ -89,6 +90,8 @@ A "never swallowed" test injects the module's own error class (e.g. `DefaultsPac
 
 Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded float for `Finite` (#1320 F1).
 - A cleanup that reads a render-time ref after unmount acts on stale state; read the store at cleanup (#1328 F5).
+- A fingerprint or "leaves the inputs alone" test reads the session's own context, never `get_active_context()` from the test thread, and is shown red under a writing mutant (#1353).
+- A unit guard compares the asset's real (bus) unit, never the catalogue unit with itself. A list, a card and the drawer show the same unit for the same field (#1347, #1353).
 
 ## Rulings
 
@@ -197,7 +200,12 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - An out-of-scope or "not needed" tag is keyed on what the row is (the unused element's own rows), never on every row filed to the section; pin each template that reaches it (#1340).
 - A default used to excuse a changed value comes from the declared default, never inferred from neighbouring cells (#1331).
 - A `not_via_chat` keyword is a word only that feature owns; one hit attaches "do not look for another tool" (#1343 `headline`, #1347 `saved`).
+- A `not_via_chat` entry matches on a feature noun AND an ask word, with real tool-doable goals tested as non-hits. Excluding one word at a time does not converge (#1343 and #1347 took three rounds each).
+- A receipt row for an item that never ran has its own state; "not confirmed yet" is only for an item that reached its gate. An unticked row stays `unticked` and uncounted whatever stopped the set (#1352).
+- A strip or summary gate calls the answer path's own predicate, never one of its inputs (#1343: the profile list without the mode).
+- A cap on a list carries the true total, and every printed count comes from the total, never the list length (#1353).
 - A read-only route that reuses chat-path readers catches the chat path's exception set per item, so one busy lock degrades one card (#1343).
 - A PR that makes a lock's hold longer re-checks every waiter's bound on that lock (#1345).
 - A reviewer rule for visibility ("admin sees a nominated item") is not reused as a rule for use (#1347).
 - Review through a subagent: it reads the diff, runs the trial merge, tests and mutants, and returns file:line findings; the gatekeeper reads only the hunks those point at (GK B (42) and (43) each reached 300k in about 80 minutes).
+- One subagent per PR with a 30–40 line report costs about 10–15k of the gatekeeper's context per review. Re-review rounds are what add up, so ask the builder for one push and give the property plus the test, not the fix (GK B (44)).
