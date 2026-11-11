@@ -3,7 +3,7 @@
 
 # 37 — Plan card renders the intake and sends its digest
 
-Status: ready-for-agent (Sonnet; GK B plan, UX review)
+Status: done (#1379)
 Type: task
 Gated: yes (GK B plan, UX review)
 Model tier: sonnet
