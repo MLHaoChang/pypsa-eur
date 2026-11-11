@@ -1523,6 +1523,23 @@ def test_the_job_records_the_profile_wire_and_model_it_ran_on(factory, world):
     assert _job(factory, job_id).analyzer == "local-qwen · openai · m"
 
 
+@pytest.mark.parametrize("roles", [
+    ["memory_analyzer"], "anthropic-sonnet", 7, {"memory_analyzer": 5},
+])
+def test_a_malformed_roles_map_on_disk_fails_the_job_by_name(factory, world, roles):
+    # GK B D1 (T7d): never the active profile, one test per shape.
+    from services import llm_config
+
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1, "active_profile_id": "anthropic-sonnet", "profiles": [],
+        "roles": roles,
+    }), encoding="utf-8")
+    job_id = _start(factory, world)
+    dream.Worker(factory, clock=Clock()).run_once()
+    j = _job(factory, job_id)
+    assert (j.status, j.error_kind, j.analyzer) == ("failed", dream.ERR_ANALYZER, None)
+
+
 def test_a_marked_profile_that_does_not_load_fails_the_job_by_name(
     factory, world, monkeypatch
 ):
