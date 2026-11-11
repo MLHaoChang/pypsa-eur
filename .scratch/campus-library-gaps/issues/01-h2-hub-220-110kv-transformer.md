@@ -3,7 +3,7 @@
 
 # The H2 hub's MILP invest finds no 220/110 kV transformer in the library
 
-Status: done (#1173; losses check open, issue 02)
+Status: done (#1173; losses check recorded in issue 02, follow-up issue 03)
 Type: task
 Blocked by: None
 
