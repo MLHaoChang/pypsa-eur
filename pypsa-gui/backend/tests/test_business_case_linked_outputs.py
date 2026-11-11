@@ -892,7 +892,9 @@ def test_reading_every_output_leaves_the_network_untouched():
 
 def test_no_engine_imports_the_business_case():
     """Nothing here can enter the LP, the IC, its hash or the adequacy facts: no engine module imports
-    `services.business_case` or the line-item model."""
+    `services.business_case` or the line-item model. The one exception is the business case's own engine
+    run, `services/finance/business_case.py` (BC 05): it reads the engine, and the engine never reads it."""
+    own = BACKEND / "services/finance/business_case.py"
     offenders = []
     for folder in (
         "services/finance",
@@ -902,6 +904,8 @@ def test_no_engine_imports_the_business_case():
         "services/commercial",
     ):
         for path in sorted((BACKEND / folder).rglob("*.py")):
+            if path == own:
+                continue
             for node in ast.walk(ast.parse(path.read_text())):
                 names = (
                     [a.name for a in node.names]
