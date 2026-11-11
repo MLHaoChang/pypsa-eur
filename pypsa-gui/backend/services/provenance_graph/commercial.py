@@ -17,7 +17,10 @@ import re
 from services.provenance_graph.types import Broken, CellStamp, Edge, Node
 
 #: The entry fields the commercial config can supply now, in the order they are compared.
-COMPARED = ("value", "unit", "currency", "currency_year")
+# A tariff cell compares the tariff's own currency at approval (`tariff_currency`) with the one it states or
+# implies now: the entry's `currency` is what the document stated, which the plan checked, not a property of the
+# cell. An entry written before `tariff_currency` was recorded leaves it uncompared.
+COMPARED = ("value", "unit", "tariff_currency", "currency_year")
 MALFORMED = "stamp record malformed"
 GONE = "cell no longer exists"
 UNREADABLE = "cell cannot be read now"
@@ -56,7 +59,7 @@ def add_cells(b, commercial: dict | None) -> None:
 
 def fields(config, key: str, entry: dict) -> tuple[list[str], list[str]]:
     """`(compared, uncompared)`: the entry's fields the comparison covers, and the ones it does not because the
-    config supplies no current value for them (a source, an approver, a currency the tariff does not state)."""
+    config supplies no current value for them (a source, an approver, the currency the document stated)."""
     from services import document_values_commercial as DC
 
     try:

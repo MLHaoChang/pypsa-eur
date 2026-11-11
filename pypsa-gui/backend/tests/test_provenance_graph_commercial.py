@@ -16,6 +16,8 @@ from services.provenance_graph.types import CellStamp, Edge, Node
 from tests.test_document_values_commercial import (  # noqa: F401  (`site` is a fixture)
     EUR_PRICE,
     PEAK,
+    TARIFF,
+    _commercial,
     _dispatch,
     _pdf,
     _preview,
@@ -30,7 +32,7 @@ PPA_KEY = "ppa:ppa1/price"
 TENOR_KEY = "ppa:ppa1/tenor_years"
 
 
-def _entry(value, unit, currency="EUR", year=None, source="pdf:abc p1 'quote'") -> dict:
+def _entry(value, unit, currency="EUR", year=None, source="pdf:abc p1 'quote'", **tariff) -> dict:
     return {
         "source": source,
         "value": value,
@@ -39,6 +41,7 @@ def _entry(value, unit, currency="EUR", year=None, source="pdf:abc p1 'quote'") 
         "currency_year": year,
         "approved_by": "ann",
         "approved_at": "2026-11-10T10:00:00+00:00",
+        **tariff,
     }
 
 
@@ -86,9 +89,9 @@ def _config() -> dict:
         "import_tariff": tariff,
         "contracts": [ppa],
         "provenance": {
-            PEAK_KEY: _entry(0.2, "/kWh"),
-            PTIER_KEY: _entry(0.4, "/kWh"),
-            TIER_KEY: _entry(12.0, "/kW/month"),
+            PEAK_KEY: _entry(0.2, "/kWh", tariff_currency="EUR"),
+            PTIER_KEY: _entry(0.4, "/kWh", tariff_currency="EUR"),
+            TIER_KEY: _entry(12.0, "/kW/month", tariff_currency="EUR"),
             PPA_KEY: _entry(55.0, "/MWh", year=2030),
             TENOR_KEY: _entry(10, "years", currency=None),
         },
@@ -238,16 +241,25 @@ def test_an_error_outside_cell_gone_while_reading_the_value_propagates(monkeypat
 
 
 def test_a_tariff_currency_that_appeared_or_vanished_is_stale():
-    """None is a value: a currency the tariff no longer implies, or one the stamp did not record, differs."""
+    """None is a value: a currency the tariff no longer implies, or one it did not imply at approval, differs."""
     config = _config()
     config["import_tariff"]["jurisdiction"] = "generic"
     broke = _broke(config, PEAK_KEY)
-    assert (broke.field, broke.recorded, broke.current) == ("currency", "EUR", None)
-    config = _config()
-    config["provenance"][PEAK_KEY]["currency"] = None
+    assert (broke.field, broke.recorded, broke.current) == ("tariff_currency", "EUR", None)
+    config["provenance"][PEAK_KEY]["tariff_currency"] = None  # approved while the tariff implied none
+    assert _state(config, PEAK_KEY) == "fresh"
     config["import_tariff"]["currency"] = "USD"
     broke = _broke(config, PEAK_KEY)
-    assert (broke.field, broke.recorded, broke.current) == ("currency", None, "USD")
+    assert (broke.field, broke.recorded, broke.current) == ("tariff_currency", None, "USD")
+
+
+def test_an_entry_from_before_the_tariff_currency_was_recorded_leaves_it_uncompared():
+    config = _config()
+    del config["provenance"][PEAK_KEY]["tariff_currency"]
+    config["import_tariff"]["jurisdiction"] = "generic"
+    wire = Q.cell_wire(config, PEAK_KEY)
+    assert (wire["state"], wire["compared"]) == ("fresh", ["value", "unit"])
+    assert "currency" in wire["uncompared"]
 
 
 def test_a_price_stamped_with_no_money_year_is_stale_once_the_contract_states_one():
@@ -274,7 +286,7 @@ def test_an_equal_value_whose_tariff_currency_moved_is_stale(change):
     config = _config()
     config["import_tariff"].update(change)
     broke = _broke(config, PEAK_KEY)
-    assert (broke.field, broke.recorded, broke.current) == ("currency", "EUR", "USD")
+    assert (broke.field, broke.recorded, broke.current) == ("tariff_currency", "EUR", "USD")
 
 
 def test_an_equal_price_whose_contract_money_year_moved_is_stale():
@@ -309,8 +321,8 @@ def test_the_wire_names_the_fields_compared_and_the_ones_not():
     assert wire == {
         "entry": config["provenance"][PEAK_KEY],
         "state": "fresh",
-        "compared": ["value", "unit", "currency"],
-        "uncompared": ["source", "currency_year", "approved_by", "approved_at"],
+        "compared": ["value", "unit", "tariff_currency"],
+        "uncompared": ["source", "currency", "currency_year", "approved_by", "approved_at"],
     }
     assert Q.cell_wire(config, PPA_KEY)["compared"] == [
         "value",
@@ -326,7 +338,7 @@ def test_the_wire_names_the_fields_compared_and_the_ones_not():
     wire = Q.cell_wire(config, PEAK_KEY)
     assert (wire["state"], wire["compared"], wire["stale"]["current"]) == (
         "stale",
-        ["value", "unit", "currency"],
+        ["value", "unit", "tariff_currency"],
         None,
     )
     _item(config, "energy")["periods"][0]["rate"] = 0.5
@@ -438,7 +450,7 @@ def test_an_entry_that_records_no_unit_leaves_it_uncompared():
     config = _config()
     del config["provenance"][PEAK_KEY]["unit"]
     wire = Q.cell_wire(config, PEAK_KEY)
-    assert (wire["state"], wire["compared"]) == ("fresh", ["value", "currency"])
+    assert (wire["state"], wire["compared"]) == ("fresh", ["value", "tariff_currency"])
     assert "unit" not in wire["uncompared"]
 
 
@@ -675,6 +687,26 @@ def test_a_verdict_writes_nothing_and_reads_the_store_once(site, monkeypatch):  
     assert reads == [] and stored == passed  # the caller's one read is the only one
     monkeypatch.undo()
     assert _digest() == before
+
+
+@pytest.mark.parametrize("jurisdiction", ["DE", "generic"])
+def test_an_apply_then_a_read_with_nothing_moved_reads_fresh(site, jurisdiction):  # noqa: F811
+    """D1: stale means something moved. A tariff that implies no currency at approval is recorded as such."""
+    from services import chat_tools
+
+    tariff = {**TARIFF, "jurisdiction": jurisdiction}
+    chat_tools.DISPATCHERS["update_solver_config"](partial={"commercial": _commercial(import_tariff=tariff)})
+    _, args = _preview(_pdf(), [PEAK])
+    _dispatch(site, "apply_commercial_document_values", args)
+    stored = _stored()
+    assert stored["provenance"][PEAK_KEY]["tariff_currency"] == (
+        "EUR" if jurisdiction == "DE" else None
+    )
+    assert Q.cell_verdict(stored, PEAK_KEY).state == "fresh"
+    assert DC.document_source(stored, PEAK_KEY) == stored["provenance"][PEAK_KEY]
+    other = "generic" if jurisdiction == "DE" else "DE"
+    stored["import_tariff"]["jurisdiction"] = other  # the tariff's currency moved: now stale
+    assert _broke(stored, PEAK_KEY).field == "tariff_currency"
 
 
 def test_live_still_prunes_a_gone_cell_and_keeps_the_rest():

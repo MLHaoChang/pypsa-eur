@@ -582,15 +582,19 @@ def _new_errors(n, before: dict, after: dict) -> list[tuple]:
 
 def provenance(p: dict, *, approved_by: str | None) -> dict:
     """`commercial.provenance` entries for the written cells: `<target>:<entity>/<path>` →
-    `{source, value, unit, currency, currency_year, approved_by, approved_at}`."""
+    `{source, value, unit, currency, currency_year, approved_by, approved_at}`, and for a tariff cell the
+    `tariff_currency` the written tariff states or implies (None when neither), which later reads compare."""
     when = datetime.now(UTC).isoformat(timespec="seconds")
     out = {}
     for c in changed(p):
         if c["source"] is None:
             continue
-        out[f"{c['target']}:{c['entity']}/{c['path']}"] = {
+        entry = {
             "source": T.source_id(c["source"]), "value": c["value"], "unit": c["unit"], "currency": c["currency"],
             "currency_year": c["money_year"], "approved_by": approved_by, "approved_at": when}
+        if c["target"] == "tariff":
+            entry["tariff_currency"] = _tariff_currency(p["after"])
+        out[f"{c['target']}:{c['entity']}/{c['path']}"] = entry
     return out
 
 
@@ -606,22 +610,25 @@ def cell_value(commercial: dict, key: str):
     return read(commercial, target, entity, _where({"target_kind": target, "field": path}))
 
 
-def cell_now(commercial: dict, key: str) -> dict:
-    """What the config holds for a provenance key now: its `value` and `unit`, the `currency` a tariff
-    states or its jurisdiction implies (None when it neither states nor implies one), and a PPA price's
-    `currency_year` (the contract's `base_year`, None when it states none). Raises (`CELL_GONE`) like `cell_value`."""
+def _tariff_currency(commercial: dict) -> str | None:
+    """The currency the import tariff states or its jurisdiction implies; None when it does neither."""
     from models.commercial import jurisdiction_currency
 
+    tariff = commercial["import_tariff"]
+    return tariff.get("currency") or jurisdiction_currency(tariff.get("jurisdiction"), tariff.get("valid_from"))
+
+
+def cell_now(commercial: dict, key: str) -> dict:
+    """What the config holds for a provenance key now: its `value` and `unit`, a tariff's `tariff_currency`
+    (see `_tariff_currency`), and a PPA price's `currency_year` (the contract's `base_year`, None when it
+    states none). Raises (`CELL_GONE`) like `cell_value`."""
     target, _, rest = key.partition(":")
     entity, _, path = rest.partition("/")
     now = {"value": cell_value(commercial, key)}
     owner = _owner(commercial, target, entity)
     if target == "tariff":
-        tariff = commercial["import_tariff"]
         now["unit"] = UNIT_LABELS[owner["unit"]]
-        currency = tariff.get("currency") or jurisdiction_currency(tariff.get("jurisdiction"),
-                                                                    tariff.get("valid_from"))
-        now["currency"] = currency
+        now["tariff_currency"] = _tariff_currency(commercial)
     else:
         money = PPA_FIELDS[path][2]
         now["unit"] = "/MWh" if money else PPA_UNIT_LABELS[path]
