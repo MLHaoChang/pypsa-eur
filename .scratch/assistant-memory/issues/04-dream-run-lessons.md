@@ -93,5 +93,9 @@ Minors left as they are: `spent_today` keys on the job's `created_at`, so a job 
 - `memory_analyzer` role:
   - It is a top-level `roles` map in `llm-profiles.json`, so a built-in profile can carry it too. It is set by `POST /api/chat/settings/llm/roles` (super admin; unknown role 422, unknown profile 404) and picked in Assistant model settings ("Memory reviews use", default "The active model (<name>)").
   - `llm_config.resolve_role` falls back to the active profile only when the role is unset or its profile was deleted. A marked profile on disk that does not load fails the job with `dream_analyzer_unavailable`; one without a key fails with the wiring's own kind.
-  - The job records `analyzer_model`.
+  - A `roles` value that is not a map, or a `memory_analyzer` id that is not a string, also fails the job by name (T7d); a missing map or role falls back.
+  - The job records `analyzer` as "<profile id> · <wire> · <model>" (T7e).
+- Consent: each box starts only its own trigger; nightly-only plus 10+ new chats never starts a sessions job, and sessions-only never starts a nightly one.
+- A manual job does not suppress that night's run: one settled before 03:00 leaves the nightly to fire; one live at 03:00 makes the scan skip without using the key, so a later scan inside the hour fires it.
+- UI copy: "Off unless you turn them on" shows only while both boxes are off; otherwise "A review sends your past chats to <model>." (UX 19).
 - Route-parity fragment `claude-am-04b-dream-ui-triggers.json` (ui-pointer, MEMORY-DREAM-1; the role route as assistant-self-config).
