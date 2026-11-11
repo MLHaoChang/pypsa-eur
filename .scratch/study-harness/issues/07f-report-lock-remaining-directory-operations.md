@@ -113,6 +113,7 @@ The timed waiters on the same lock, any of which can now time out during one of 
 | `routers/results.py:1147` | 5 s | 409 |
 | `routers/results.py:2191`, `:2944` | 2 s | `network_busy` / 409 |
 | `routers/simulation.py:783` | 2 s | `network_busy` |
+| `services/adequacy/eh_study_runner.py:302` | non-blocking from the polled caller (`flow_service.py:490`); blocking by default | `EhStudyLockBusy` |
 | `harness/durable.py:21` `network_guard` | 1 s | 409 `assurance_context_changed` |
 
 `routers/simulation.py:1162`, `:1275` and `:1430` are non-blocking and only defer or report. The worst new hold is about 3 s × targets on a busy cascade delete; with no report busy, it is the moves alone.
@@ -129,3 +130,10 @@ Code review (mp-code-review, 11 Nov), fixed:
 Left as follow-ups:
 - No sweeper removes a `.pypsa-deleting-*` directory left by a crash or a failed removal. It is hidden, logged and outside every listing.
 - A partly failed cross-device `shutil.move` in the claim can leave `.closing` in the partial copy; it goes stale.
+
+11 Nov, GK B (46) review of #1373: NOT OK @0c6ecd01, D1. Fixed:
+
+- **D1.** The close locked only the reports that already existed. A `create_report` for a new id could take that id's lock after the close listed the reports and before the marker existed, and then write inside the closed window. Now, after writing the marker, `reports_closed` re-lists the ids. A writer's lock file exists before it locks, so every such writer shows up. The close takes each new id's lock once, past its own marker, inside the same 3 s deadline; if one is still busy at the deadline it refuses `ReportBusy` and removes the marker. `create_report` and `write_figure` make their directory without `parents=True`, so neither can rebuild a removed report or project.
+- **Tests.** One forces the interleaving: a writer locks a new id just before the marker is written, and the close does not yield until it is done. One shows that such a writer held past the deadline refuses the close. One shows `write_figure` never rebuilds a removed report. Each is red with the fix removed (mutants M25–M28).
+- **Minor: the waiter table** now includes `eh_study_runner.py:302`.
+- **Minor: known limit.** A `rebase_row` copy that runs past `CLOSING_STALE_S` (600 s), a tree of many GB, lets writers back in before the copy ends. The CLI then commits a copy that may miss their last write; the source stays, so `--forget-legacy` should wait for a check.

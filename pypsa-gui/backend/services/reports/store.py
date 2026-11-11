@@ -278,7 +278,8 @@ class ReportVersionConflict(ReportStoreError):
 
 
 @contextmanager
-def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | None = None):
+def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | None = None,
+                _closing_ok: bool = False):
     """The one lock for every writer of `reports/<report_id>/` (study harness
     07c, GK B R5): `create_report`, `save_version`, `update_meta`,
     `write_figure`, `delete_report` and the job's generation meta take it,
@@ -322,7 +323,7 @@ def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | N
         try:
             with file_lock(str(root / f".{rid}.lock"), timeout=left,
                            busy=f"report {rid} is being written"):
-                if _closing_active(root):
+                if not _closing_ok and _closing_active(root):
                     raise ReportBusy(f"report {rid}: its project is being deleted or moved")
                 held.add(key)
                 try:
@@ -562,14 +563,36 @@ def reports_closed(project_dir: pathlib.Path):
     Order: after `PyPSAService.get_lock()` when the caller holds that, like
     every bundle copy (07e, L1)."""
     root = reports_dir(project_dir)
-    with reports_copy_lock(None, project_dir):
+    with reports_copy_lock(None, project_dir) as held:
         if project_dir.is_dir():
             root.mkdir(exist_ok=True)
             atomic_write_text(root / CLOSING_MARKER, f"{os.getpid()}\n")
+            try:
+                _drain_new_reports(project_dir, held["dst"])
+            except BaseException:
+                clear_closing(project_dir)
+                raise
     try:
         yield
     finally:
         clear_closing(project_dir)
+
+
+def _drain_new_reports(project_dir: pathlib.Path, held: frozenset[str]) -> None:
+    """Wait out a writer of a report the close did not lock (GK B D1).
+
+    A `create_report` for a new id takes that id's lock, which the close does
+    not hold, and may have checked the marker before it was written. Its lock
+    file exists before it locks (`file_lock` opens, then locks), so once the
+    marker is written every such writer is listed here: take each new id's
+    lock once (past the marker, which this close wrote) and let it go. A
+    writer that locks later meets the marker. Shares one
+    `COPY_LOCK_TIMEOUT_S` deadline; `ReportBusy` past it."""
+    deadline = time.monotonic() + COPY_LOCK_TIMEOUT_S
+    for rid in sorted(_lockable_ids(project_dir) - set(held)):
+        with report_lock(project_dir, rid, _closing_ok=True,
+                         timeout=max(0.0, deadline - time.monotonic())):
+            pass
 
 
 def clear_closing(project_dir: pathlib.Path) -> None:
@@ -595,7 +618,8 @@ def create_report(project_dir: pathlib.Path, doc: ReportDocument) -> ReportMeta:
     with report_lock(project_dir, doc.report_id):
         if rdir.exists():
             raise ReportExists(f"report {doc.report_id} already exists")
-        rdir.mkdir(parents=True, exist_ok=False)
+        # `report_lock` made `reports/`; never the project directory (07f).
+        rdir.mkdir(exist_ok=False)
         first = doc.model_copy(update={"version": 1})
         _write_version(rdir, first)
         meta = _meta_from_doc(first, latest_version=1)
@@ -713,7 +737,12 @@ def write_figure(project_dir: pathlib.Path, report_id: str, figure_id: str,
     _existing_report_dir(project_dir, report_id)
     path = fdir / f"{fid}.png"
     with report_lock(project_dir, report_id):
-        fdir.mkdir(parents=True, exist_ok=True)
+        try:
+            # Never the report's directory (07f, GK B D1): one removed since
+            # the check above stays removed.
+            fdir.mkdir(exist_ok=True)
+        except FileNotFoundError as exc:
+            raise ReportNotFound(f"report {report_id} not found") from exc
         atomic_write_bytes(path, png_bytes)
     return path
 

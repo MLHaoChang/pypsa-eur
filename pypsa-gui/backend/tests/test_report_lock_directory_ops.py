@@ -10,6 +10,7 @@ option forks, the legacy import and the legacy claim."""
 from __future__ import annotations
 
 import os
+import pathlib
 import threading
 import time
 from types import SimpleNamespace
@@ -127,6 +128,79 @@ def test_reports_closed_refuses_every_writer_until_it_ends(tmp_path):
     assert not (store.reports_dir(tmp_path) / store.CLOSING_MARKER).exists()
     with store.report_lock(tmp_path, RID_A):
         pass
+
+
+RID_NEW = "00000000000000cc"
+
+
+def test_a_new_report_locked_just_before_the_marker_is_waited_out(
+    tmp_path, monkeypatch
+):
+    """GK B D1: a `create_report` for an id the close did not lock takes its
+    lock after the close listed the reports and before the marker exists.
+    The close must not yield until that writer is done."""
+    monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 5)
+    _seed(tmp_path, RID_A)
+    locked, done = threading.Event(), threading.Event()
+    real = store.atomic_write_text
+
+    def writer():
+        with store.report_lock(tmp_path, RID_NEW):
+            locked.set()
+            time.sleep(0.5)
+            (store.reports_dir(tmp_path) / RID_NEW).mkdir()
+            done.set()
+
+    def writing(path, text, *a, **k):
+        if pathlib.Path(path).name == store.CLOSING_MARKER and not locked.is_set():
+            threading.Thread(target=writer).start()
+            assert locked.wait(5)
+        return real(path, text, *a, **k)
+
+    monkeypatch.setattr(store, "atomic_write_text", writing)
+    with store.reports_closed(tmp_path):
+        assert done.is_set(), "the close yielded while a new report was being written"
+        with pytest.raises(store.ReportBusy):
+            with store.report_lock(tmp_path, RID_NEW, timeout=1):
+                pass
+
+
+def test_a_new_report_writer_past_the_bound_refuses_the_close(tmp_path, monkeypatch):
+    _seed(tmp_path, RID_A)
+    real = store.atomic_write_text
+    holding = []
+
+    def writing(path, text, *a, **k):
+        if pathlib.Path(path).name == store.CLOSING_MARKER and not holding:
+            holding.append(held_elsewhere(tmp_path, RID_NEW))
+            holding[0].__enter__()
+        return real(path, text, *a, **k)
+
+    monkeypatch.setattr(store, "atomic_write_text", writing)
+    try:
+        with pytest.raises(store.ReportBusy):
+            with store.reports_closed(tmp_path):
+                pytest.fail("closed while a new report was being written")
+    finally:
+        holding[0].__exit__(None, None, None)
+    assert not (store.reports_dir(tmp_path) / store.CLOSING_MARKER).exists()
+
+
+def test_write_figure_never_makes_a_removed_report_again(tmp_path, monkeypatch):
+    rdir = _seed(tmp_path, RID_A)
+    real = store._existing_report_dir
+
+    def then_removed(*a, **k):
+        out = real(*a, **k)
+        import shutil
+
+        shutil.rmtree(rdir)
+        return out
+
+    monkeypatch.setattr(store, "_existing_report_dir", then_removed)
+    with pytest.raises(store.ReportNotFound):
+        store.write_figure(tmp_path, RID_A, "fig1", b"png")
+    assert not rdir.exists()
 
 
 def test_reports_closed_waits_for_a_write_in_progress_and_then_refuses(tmp_path):
