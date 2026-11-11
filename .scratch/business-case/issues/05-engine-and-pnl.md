@@ -3,7 +3,7 @@
 
 # 05 — Business-case engine, P&L and KPIs
 
-Status: in progress (claude/bc-05-engine-and-pnl; GK B plan GO 2026-11-11)
+Status: done (PR #1404; GK B plan GO 2026-11-11)
 Type: task
 Blocked by: 02, 04
 Gated: yes (GK B)
