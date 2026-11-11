@@ -1,0 +1,152 @@
+{
+  "baseline": "a68db6cfcf254df17a5b0d96da7a4c995f26423f",
+  "review_date": "2026-10-21",
+  "runtime_implementation": false,
+  "features": [
+    {
+      "id": "PM01",
+      "feature_and_expectation": "Discover projects and identify recent work",
+      "master_behavior_and_verdict": "**Partial.** Accessible root cards, missing-folder state and Resume exist. Recency uses creation time; UI calls it Updated. No home search/filter/list/pin/archive feature.",
+      "evidence_and_remaining_work": "Home helpers and frontend tests; F06/F09 below. Search/pins are new UX, not failed existing requirements."
+    },
+    {
+      "id": "PM02",
+      "feature_and_expectation": "Resume correct project and section",
+      "master_behavior_and_verdict": "**Exists with limits.** Last-project resume exists; active section is already persisted per project in browser storage. Guided/Expert share section context.",
+      "evidence_and_remaining_work": "`store/activeSection.ts`, `uiStore.ts`, project-actions tests. Do not propose building last-section resume from scratch. Browser key is project name, not a server-owned cross-device user/org preference."
+    },
+    {
+      "id": "PM03",
+      "feature_and_expectation": "Create blank/example/imported/duplicate project",
+      "master_behavior_and_verdict": "**Implemented for existing paths; broader Builder remains planned.** Wizard supports blank/template/file/clone; specialized studies and local folder behavior remain mode-specific.",
+      "evidence_and_remaining_work": "Wizard clone/home creation tests; creation/template backend paths reviewed. No full live-browser test of every example in this audit. Reuse existing paths and reconcile W2/#496, rather than invent another creator."
+    },
+    {
+      "id": "PM04",
+      "feature_and_expectation": "Save/autosave and reload model/config/results",
+      "master_behavior_and_verdict": "**Substantial tested foundation.** Identity guards and per-file atomic writes; sidecars/config/results-state and user input series travel through explicit bundle paths.",
+      "evidence_and_remaining_work": "Save guards, reload, sidecar tests and standalone save/load QA. A sequence of atomic file writes is not an all-or-nothing multi-file transaction. Browser autosave timing is not a full UI E2E result here."
+    },
+    {
+      "id": "PM05",
+      "feature_and_expectation": "Switch projects without losing/misrouting state",
+      "master_behavior_and_verdict": "**Implemented and targeted-tested.** Session-bound contexts, resident registry, save/switch logic and undo separation.",
+      "evidence_and_remaining_work": "Project-switch/undo/session tests; frontend switch tests. Do not claim stale process-global warning is current architecture. Same-user multiple tabs and pending requests remain important release scenarios."
+    },
+    {
+      "id": "PM06",
+      "feature_and_expectation": "Create independent variant from intended source",
+      "master_behavior_and_verdict": "**Implemented with explicit saved-source semantics.** Authenticated scenario creation copies the base's on-disk bundle. UI saves an active source first. Parent link does not make a live inherited configuration.",
+      "evidence_and_remaining_work": "Scenario-type/tenancy/bundle tests; `projects._create_scenario_db`. Route docstrings referring to an in-memory fork are stale. Later base edits do not automatically propagate."
+    },
+    {
+      "id": "PM07",
+      "feature_and_expectation": "List and navigate nested variants",
+      "master_behavior_and_verdict": "**Implemented; summary needs correction.** Scenario forest handles nested branches. Home count helper counts direct children only.",
+      "evidence_and_remaining_work": "Forest/helper/frontend tests. Define direct-child vs family count; avoid flattening ancestry or creating a new variant table detached from existing project IDs."
+    },
+    {
+      "id": "PM08",
+      "feature_and_expectation": "Edit variant category/description",
+      "master_behavior_and_verdict": "**Implemented.** Scenario category is typed metadata; old description prefixes are migrated/tolerated.",
+      "evidence_and_remaining_work": "Scenario-type/tenancy tests. Category baseline is a label, not a unique enforced comparison-baseline pointer. Generic root descriptions/client/tags remain new metadata work."
+    },
+    {
+      "id": "PM09",
+      "feature_and_expectation": "Run one project or several variants",
+      "master_behavior_and_verdict": "**Implemented for native queue solves.** Scenario tree can queue a branch/subtree with confirmation, active-project save handling and duplicate protection. Queue captures config and stores job states.",
+      "evidence_and_remaining_work": "Scenario panel/frontend tests; queue config/dedupe/authz tests. This does not certify a generic all-modules Run for every variant; the newer orchestration/scope work must supply that."
+    },
+    {
+      "id": "PM10",
+      "feature_and_expectation": "Cancel/retry/recover interrupted jobs",
+      "master_behavior_and_verdict": "**Implemented with tested controls.** Cancel queued/running work, terminal status, explicit requeue, persisted listing and boot reconciliation.",
+      "evidence_and_remaining_work": "Queue suites. Interrupted work is not silently called completed. Queue dismissal is a view/history action, not restore or deletion of every result artifact."
+    },
+    {
+      "id": "PM11",
+      "feature_and_expectation": "Undo recent edits",
+      "master_behavior_and_verdict": "**Implemented for a limited write surface.** Per-context in-memory network/user-series undo, default 20 steps/500 MB and burst coalescing; save/load/reset can change the undo baseline.",
+      "evidence_and_remaining_work": "Undo tests and middleware source. Not a durable history of commercial/config/sidecar changes, not batch rollback across variants, and not a universal redo/restore facility."
+    },
+    {
+      "id": "PM12",
+      "feature_and_expectation": "Save version/checkpoint",
+      "master_behavior_and_verdict": "**Implemented for last-saved bundle files.** Source is on disk; explicit UI copy says Save first for unsaved edits. Maximum 50 saved snapshots with pruning.",
+      "evidence_and_remaining_work": "Snapshot and bundle tests; router source. Not all project kinds/artifacts are covered: current snapshot route requires network.nc. Newest snapshot is labelled current without proving equality to the working model (F05)."
+    },
+    {
+      "id": "PM13",
+      "feature_and_expectation": "Restore a checkpoint and recover previous working state",
+      "master_behavior_and_verdict": "**Fails stronger safe-revert expectation.** Successful saved-state restore/rekey is covered, but three fresh HTTP probes expose omitted unsaved changes and post-checkpoint state surviving.",
+      "evidence_and_remaining_work": "F01\u2013F03 reproduced. Current UI safety-net wording overstates protection. No single-click safe full-project rollback should be promised yet."
+    },
+    {
+      "id": "PM14",
+      "feature_and_expectation": "Compare exact saved version without restoring",
+      "master_behavior_and_verdict": "**Missing exact-source integration.** Snapshot-row Compare opens general saved-project A/B rail without the clicked snapshot ID.",
+      "evidence_and_remaining_work": "F04 source-confirmed. Need source-bound version reader and request, or remove/rename misleading action."
+    },
+    {
+      "id": "PM15",
+      "feature_and_expectation": "Compare two saved projects/variants",
+      "master_behavior_and_verdict": "**Implemented, detailed and tested; comparison basis incomplete.** Ten result tabs, availability states and numerical invariants exist. Scenario-row comparability only checks snapshot count; global Best objective spans the supplied project list.",
+      "evidence_and_remaining_work": "Compare suites and F07. Keep the engines; add basis metadata and scoped ranking rules. Equality of counts is insufficient for a like-for-like comparison."
+    },
+    {
+      "id": "PM16",
+      "feature_and_expectation": "Compare base plus many variants",
+      "master_behavior_and_verdict": "**Planned, not complete native feature.** Existing compare is A/B. LC-18 and S6 specify base plus up to eight cases, software deltas and incompatibility reasons.",
+      "evidence_and_remaining_work": "Source/plan comparison. Do not mark spec text as shipped. No need for a competing new comparison engine."
+    },
+    {
+      "id": "PM17",
+      "feature_and_expectation": "Export/import complete declared project bundle",
+      "master_behavior_and_verdict": "**Implemented for an explicit file/dir set.** Network/results/config and named sidecars, uploads/reports/studies/sites travel; licensed texts excluded. Raw network import is narrower.",
+      "evidence_and_remaining_work": "Bundle/campus/Library tests and save/load QA. Document included/excluded artifacts. Sensitivity receipt, experiment history and retained run evidence are not universally covered by that allowlist (F10). No \u201ceverything in this folder\u201d guarantee."
+    },
+    {
+      "id": "PM18",
+      "feature_and_expectation": "Rename/delete without breaking descendants or active work",
+      "master_behavior_and_verdict": "**Implemented with confirmations/guards and tests.** Stable registry ID, rename updates, descendant/cascade checks, queue/lock refusals; deletion is permanent.",
+      "evidence_and_remaining_work": "Tenancy/frontend/save-guard tests. Trash/soft-delete was expressly deferred by existing spec; Archive is new scope, not an incomplete trash implementation."
+    },
+    {
+      "id": "PM19",
+      "feature_and_expectation": "Sharing, locks and tenant isolation",
+      "master_behavior_and_verdict": "**Implemented and tested with specific semantics.** Membership is inherited through the root tree; locks are project-node/user keyed, not a single tree lock. Session-bound context resolves the active project.",
+      "evidence_and_remaining_work": "ACL/lock/tenancy tests. Workspace copy incorrectly describes root-owned lock/global active slot. No branch-private ACL or real-time same-project coediting claim."
+    },
+    {
+      "id": "PM20",
+      "feature_and_expectation": "Readiness and result freshness",
+      "master_behavior_and_verdict": "**Implemented for native section/run contracts, still uneven across management.** Flow items target owning fields; acknowledgements are value-bound; result evidence is source-bound.",
+      "evidence_and_remaining_work": "Project-flow and retained-evidence tests. A non-null objective is not enough to say all selected work is fresh or checked. A management summary must project canonical states, not invent a global green percentage."
+    },
+    {
+      "id": "PM21",
+      "feature_and_expectation": "Reports/files/activity management",
+      "master_behavior_and_verdict": "**Pieces implemented, not one complete project index.** Existing report store, uploads, sidecars, logs and retained evidence are separate sources.",
+      "evidence_and_remaining_work": "Bundle/report/queue paths read; no full Files-view or audit-trail UI E2E exercised. Build an authorized summary/index; do not create a duplicate file or result store."
+    },
+    {
+      "id": "PM22",
+      "feature_and_expectation": "Generate sensitivity variants from parameter changes",
+      "master_behavior_and_verdict": "**Implemented in a bounded tool seam.** `run_sensitivity_sweep`: 1\u20134 new child cases, 1\u201320 changes each, six component classes, explicit attribute allowlist; isolated preflight, saved base, receipts/fingerprints, queue/reuse and partial outcomes.",
+      "evidence_and_remaining_work": "`workflow_tools.py` and tests. Static updates preserve time-series overrides. Not arbitrary tariffs/finance/horizon/process writes; not existing-variant bulk edit; not proof all higher-level conversational LC-17 work is complete."
+    },
+    {
+      "id": "PM23",
+      "feature_and_expectation": "Change one assumption across existing variants",
+      "master_behavior_and_verdict": "**Not implemented as proposed.** Component bulk-update operates within one active model. Sweeps create cases; tree Run queues solves. Neither provides reviewed multi-variant common-assumption application.",
+      "evidence_and_remaining_work": "Search/read across routes, scenario UI, workflow tools and sensitivity receipts. Recommend the bounded feature in `02-SHARED-ASSUMPTIONS-SPEC.md`."
+    },
+    {
+      "id": "PM24",
+      "feature_and_expectation": "Run an earlier version without disturbing the working design",
+      "master_behavior_and_verdict": "**No dedicated first-class action found.** A saved version can be restored before running, but that mutates working files and has the F01\u2013F03 limitations.",
+      "evidence_and_remaining_work": "Snapshot and queue contracts. Prefer an explicit isolated branch from the selected version, then ordinary queue execution; requires provenance and supported version-copy path, not a restore hidden behind Run."
+    }
+  ],
+  "all_features_certified_complete": false
+}

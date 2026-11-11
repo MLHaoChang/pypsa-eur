@@ -1,0 +1,102 @@
+{
+  "baseline": "87546ef5d184a9b20c80a65e2164f7fac0930f15",
+  "checked_at_utc": "2026-10-21T20:28:57.672111+00:00",
+  "method": "Focused current-master source assessment plus existing targeted backend tests, no paid model calls or implementation",
+  "files": [
+    {
+      "path": "pypsa-gui/backend/services/flow_service.py",
+      "sha256": "72daed691852b41d351b5032d20a823c554c23297b4e2c301f52447ef6bdc3a5"
+    },
+    {
+      "path": "pypsa-gui/backend/routers/flow.py",
+      "sha256": "eab65744ccdd721bfb1feb3875f1458d897cfbbffbb2723296a5d7b87ef82902"
+    },
+    {
+      "path": "pypsa-gui/backend/services/workflow_tools.py",
+      "sha256": "e0a82c3fbad5efbe7fe942e3d0cbd563019c6aaeadb2673d1127d2b5b03f6af0"
+    },
+    {
+      "path": "pypsa-gui/backend/services/adequacy/eh_readiness.py",
+      "sha256": "b691299c5a4c55b19c983850730113a222fac1fc3ac7f00d7b0500184c0aafd0"
+    },
+    {
+      "path": "pypsa-gui/backend/services/result_views.py",
+      "sha256": "d334d2a0ff7f77bc43bccc789eb98be000cb5397ce94ef17ff99660a984917a5"
+    },
+    {
+      "path": "pypsa-gui/backend/services/run_evidence.py",
+      "sha256": "3d1198124dbec39bde2a373a8980d22a8321c21eee2b0959329f0504a3833f57"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/catalogue.py",
+      "sha256": "1ed67ff7fb1e5a37400e649d5b9b2ce4f8a07a7a197e8069fead91a50086bbe7"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/README.md",
+      "sha256": "5d77d313ddcf167e07fdd1953c86b85014f7502917c6a6660c3426a73d57482c"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/budget.py",
+      "sha256": "d4d9da12f0d6668187211b82a4694b2770d4261e5984c25482a982b087585c31"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/reviewer.py",
+      "sha256": "6cd8cfd77a0b7ac360d373caf515750f8a1ed148e1c9e2e94df9c7c017215663"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/assurance.py",
+      "sha256": "66f02d06d228b7b0135d093875497bbac38addec1ead14e36b972e7c678f236f"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/SectionView.tsx",
+      "sha256": "c3a361672acb51d7b59a07f4eb7afed974f2e8be1aa0bad25c3a504b39f14449"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/shared/CardShell.tsx",
+      "sha256": "5fb4e8202d5a7a89f3504c184598ebc1a8acff6852d18cf15805727b7ac608ec"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/delegate.ts",
+      "sha256": "dfa0acd232612c2c2da614da7657c86d5a4f4c73c76be2b77cdf641e3f4ff09b"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/ChaptersSection.tsx",
+      "sha256": "fe75ea8d7c10a32cda00245229c73d1013a3f2d96b97f821e73b9ac6199c2d91"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/layout/flowNavigation.ts",
+      "sha256": "8d4836593597a5dabf8d1028a6a62553c1a92392d588531326cc69a11407f155"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/CompareView.tsx",
+      "sha256": "8fc9050f2ca12204f0aa3d0d81774e82dd76fb46a5ba37f6b22396ff10587b2e"
+    }
+  ],
+  "existing_test_run": {
+    "cases": 120,
+    "passed": 120,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "duration_seconds": 49.448,
+    "files": [
+      "tests/test_workflow_tools.py",
+      "tests/test_result_views.py",
+      "tests/test_chat_budget_gates_seam.py",
+      "tests/test_reference_ladder.py",
+      "tests/test_energy_balance_assurance.py"
+    ],
+    "command": "PYTHONPATH=<focused-master-worktree> NUMBA_CACHE_DIR=/tmp/gridspine-pmai-numba MPLCONFIGDIR=/tmp/gridspine-pmai-mpl OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 <test-python> -m pytest <five listed files> -q -p no:warnings -o faulthandler_timeout=45 --junitxml=<output>",
+    "xml_sha256": "b27dcba49da0cceee0be928e43f927f3e7b133ab1ff03027459bfdf28c9a8e50"
+  },
+  "native_support_change_since_original_audit": "Energy flow adds energy-balance/1 for bounded validated totals; attribution rows not certified",
+  "not_performed": [
+    "new ROI feature implementation",
+    "new ROI acceptance tests",
+    "paid provider/media calls",
+    "real-use ROI or latency benchmark",
+    "dollar-price verification",
+    "full regression or premerge",
+    "domain approval"
+  ]
+}
