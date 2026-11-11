@@ -890,6 +890,38 @@ def test_reading_every_output_leaves_the_network_untouched():
     assert _frames(n) == before
 
 
+def _imported_names(source: str, package: str) -> list[str]:
+    """Every dotted name `source` imports, in any form: `import a.b`, `from a import b` (as `a` and
+    `a.b`), and relative imports resolved against `package` (#1404 GK B item 4)."""
+    out: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            out += [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            parts = package.split(".")
+            base = ".".join(parts[: len(parts) - node.level + 1]) if node.level else ""
+            module = ".".join(x for x in (base, node.module or "") if x)
+            out.append(module)
+            out += [f"{module}.{a.name}" for a in node.names]
+    return out
+
+
+def test_the_import_scan_sees_every_form():
+    pkg = "services.results"
+    for src in (
+        "import services.finance.business_case",
+        "from services.finance import business_case",
+        "from services.finance.business_case import pnl",
+        "from ..finance import business_case",
+        "from .. import business_case",
+        "from models.business_case import LineItem",
+    ):
+        assert any("business_case" in n for n in _imported_names(src, pkg)), src
+    assert not any(
+        "business_case" in n for n in _imported_names("from . import x", pkg)
+    )
+
+
 def test_no_engine_imports_the_business_case():
     """Nothing here can enter the LP, the IC, its hash or the adequacy facts: no engine module imports
     `services.business_case` or the line-item model. The one exception is the business case's own engine
@@ -906,16 +938,12 @@ def test_no_engine_imports_the_business_case():
         for path in sorted((BACKEND / folder).rglob("*.py")):
             if path == own:
                 continue
-            for node in ast.walk(ast.parse(path.read_text())):
-                names = (
-                    [a.name for a in node.names]
-                    if isinstance(node, ast.Import)
-                    else [node.module or ""]
-                    if isinstance(node, ast.ImportFrom)
-                    else []
-                )
-                if any("business_case" in name for name in names):
-                    offenders.append(str(path.relative_to(BACKEND)))
+            rel = path.relative_to(BACKEND).with_suffix("")
+            package = ".".join(rel.parts[:-1])
+            if any(
+                "business_case" in n for n in _imported_names(path.read_text(), package)
+            ):
+                offenders.append(str(path.relative_to(BACKEND)))
     assert not offenders
 
 

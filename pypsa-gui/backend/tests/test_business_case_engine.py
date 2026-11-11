@@ -320,11 +320,26 @@ def test_c9_the_ic_digests_are_unchanged_by_the_bc_import_and_a_build():
     from services.finance.investment_case_runner import json_digest
 
     ic = _ic()
-    build_business_case(ic, _inputs(_line(), _capex(refresh_years=2.0)), {})
-    here = [_fallback_hash(ic), json_digest(ic.inputs.model_dump(mode="json"))]
+
+    def digests():
+        return [_fallback_hash(ic), json_digest(ic.inputs.model_dump(mode="json"))]
+
+    raw = ic.inputs.model_dump_json()
+    before = digests()
+    build_business_case(
+        ic,
+        _inputs(
+            _line(), _capex(refresh_years=2.0), _capex(name="later", start_year=2033)
+        ),
+        {},
+    )
+    # The build changes no IC digest (taken before and after it, #1404 item 5) ...
+    assert digests() == before
+    here = before
+    # ... and the BC import changes none: a process that never imports it agrees.
     out = subprocess.run(
         [sys.executable, "-c", _DIGESTS],
-        input=ic.inputs.model_dump_json(),
+        input=raw,
         capture_output=True,
         text=True,
         check=True,
@@ -1097,3 +1112,129 @@ def test_c4_a_difference_line_netting_to_zero_still_prices_its_volume():
     with pytest.raises(DoubleCount) as e:
         build_business_case(_ic(lines=(cfd,)), _inputs(ln), {"exp": s})
     assert e.value.stream == "cfd_settlement"
+
+
+# ── GK B (49) #1404 NOT OK items ────────────────────────────────────────────
+
+
+def _strict(k):
+    json.dumps(dataclasses.asdict(k), allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    "capacity",
+    [{"pv": math.inf}, {"pv": math.nan}, {"pv": 100.0, "battery": -99.0}, {"pv": 0.0}],
+)
+def test_item1_a_non_finite_or_non_positive_capacity_is_not_established(capacity):
+    _, r = _run(_inputs(_line()))
+    k = kpis(r, pnl(r), capacity=capacity)
+    for name in ("revenue_per_capacity_gross", "revenue_per_capacity_net"):
+        assert k[name].status == "not_established" and k[name].value is None
+        assert k[name].basis["capacity"] is None
+    for v in k.values():
+        _strict(v)
+
+
+def test_item2_a_tiny_revenue_gives_no_infinite_margin():
+    tiny = _line(unit="unit", quantity=1.0, price=1e-310)
+    ic = _ic(lines=(TemplateLine("fom", "fom", -20.0, "opex"),))
+    _, r = _run(_inputs(tiny), ic)
+    p = pnl(r)
+    assert any(v != 0.0 for v in p.rows["revenue"])
+    assert all(v is None or math.isfinite(v) for v in p.rows["ebitda_margin"])
+    k = kpis(r, p)
+    for v in k.values():
+        _strict(v)
+
+
+def test_item3_an_overflowing_line_is_not_established_never_inf():
+    huge = _line(quantity=1e200, price=1e200)
+    bc, r = _run(_inputs(huge))
+    amounts = [
+        ln.amount for t in bc.case.templates for ln in t.lines if ln.key == "product"
+    ]
+    assert amounts and all(a is None for a in amounts)
+    assert "line_not_established:product" in r.op.reasons["operating"]
+    for row in pnl(r).rows.values():
+        if isinstance(row, np.ndarray):
+            assert np.isfinite(row).all()
+    big = _capex(quantity=1e200, price=1e200)
+    bc = build_business_case(_ic(), _inputs(big), {})
+    assert next(a for a in bc.case.assets if a.name == "plant").overnight_cost is None
+
+
+def test_item6_a_rerun_outside_the_tolerance_is_not_converged(monkeypatch):
+    monkeypatch.setattr(bcm, "_npv_at", lambda *a: a[-1] - 1.2)
+    monkeypatch.setattr(bcm, "brentq", lambda f, lo, hi, **kw: 1.3)
+    be = break_even(_ic(), _inputs(_line()), {}, "product", PACK)
+    assert be["status"] == "break_even_not_converged" and be["price"] is None
+
+
+def test_item6_a_none_inside_the_bracket_is_not_established_never_a_500(monkeypatch):
+    def f(*a):
+        s = a[-1]
+        return s - 1.2 if s in (0.0, 1.0, 1.5) else None
+
+    monkeypatch.setattr(bcm, "_npv_at", f)
+    be = break_even(_ic(), _inputs(_line()), {}, "product", PACK)
+    assert be["status"] == "break_even_not_established"
+
+
+def test_item6_brentq_maxiter_is_not_converged_never_a_500(monkeypatch):
+    monkeypatch.setattr(bcm, "_npv_at", lambda *a: a[-1] - 1.2)
+
+    def stuck(*a, **kw):
+        raise RuntimeError("Failed to converge after 200 iterations")
+
+    monkeypatch.setattr(bcm, "brentq", stuck)
+    be = break_even(_ic(), _inputs(_line()), {}, "product", PACK)
+    assert be["status"] == "break_even_not_converged"
+
+
+def test_item7_a_zero_export_line_that_is_no_difference_line_prices_nothing():
+    ic = _ic(
+        lines=(
+            TemplateLine("export", "energy_export", 0.0, "export"),
+            TemplateLine("fom", "fom", -20.0, "opex"),
+        )
+    )
+    ln = _line(
+        name="exp",
+        category="other",
+        unit="MWh",
+        quantity=None,
+        quantity_source="linked:export.poc_grid@1",
+    )
+    s = Series("export.poc_grid", "MWh", {None: 10.0}, {})
+    bc = build_business_case(ic, _inputs(ln), {"exp": s})
+    assert any(ln.key == "exp" for t in bc.case.templates for ln in t.lines)
+
+
+def test_item7_a_served_product_line_beside_lost_production_builds():
+    """G3's drop verdict is slice 06's, never a refusal here."""
+    ic = _ic(
+        lines=(
+            TemplateLine("lp", "lost_production", -50.0, "fuel"),
+            TemplateLine("fom", "fom", -20.0, "opex"),
+        )
+    )
+    ln = _line(name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1")
+    s = Series("served_product.nh3", "t", {None: 100.0}, {})
+    bc = build_business_case(ic, _inputs(ln), {"nh3": s})
+    assert any(ln.key == "nh3" for t in bc.case.templates for ln in t.lines)
+
+
+def test_item8_a_revenue_line_named_like_an_ic_asset_builds():
+    bc = build_business_case(_ic(), _inputs(_line(name="pv")), {})
+    assert any(ln.key == "pv" for t in bc.case.templates for ln in t.lines)
+
+
+def test_a_linked_line_without_outputs_is_refused_and_hashes_with_none():
+    ic = _ic()
+    inputs = _inputs(
+        _line(name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1")
+    )
+    with pytest.raises(LinkedOutputMissing):
+        build_business_case(ic, inputs)
+    assert business_case_hash(ic, inputs) == business_case_hash(ic, inputs, {})
+    assert break_even(ic, _inputs(_line()), None, "product", PACK)["status"] == "ok"

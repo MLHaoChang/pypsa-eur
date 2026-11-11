@@ -69,6 +69,12 @@ BREAK_EVEN_MAX_SCALE = 1e4
 _SIGN = {"revenue": 1.0, "opex": -1.0}
 
 
+def _finite(v: float | None) -> float | None:
+    """`v`, or None (not established) when it is not a finite number: an overflowed
+    quantity × price never reaches the engine (GK B #1404 item 3)."""
+    return v if v is not None and math.isfinite(v) else None
+
+
 @dataclass(frozen=True)
 class BusinessCase:
     case: FinanceCase
@@ -223,7 +229,7 @@ def build_business_case(
             if not first <= y <= last:
                 continue
             q, pc = _quantity(ln, y, outputs), ln.cell("price", y)
-            amount = (
+            amount = _finite(
                 None if q is None or pc.value is None else _SIGN[ln.kind] * q * pc.value
             )
             # A grid cell is that year's price: no escalation, so its money year is y.
@@ -274,15 +280,19 @@ def build_business_case(
                     for b in lines
                     if b.source != "share_of" and _in_base(b, kind, category)
                 ]
-                v = None if None in vals else share * sum(vals)
+                v = _finite(None if None in vals else share * sum(vals))
             else:
                 b = operating_base(kind, category, first)
-                v = _to_base(None if b is None else share * b, first, base, r_capex)
+                v = _finite(
+                    _to_base(None if b is None else share * b, first, base, r_capex)
+                )
         else:
             q, pc = _quantity(ln, first, outputs), ln.cell("price", first)
             v = None if q is None or pc.value is None else q * pc.value
-            v = _to_base(
-                v, (ln.money_year or base) if pc.escalates else first, base, r_capex
+            v = _finite(
+                _to_base(
+                    v, (ln.money_year or base) if pc.escalates else first, base, r_capex
+                )
             )
         overnight[ln.name] = v
         assets.append(AssetFinance(ln.name, SOURCE, v, math.inf))
@@ -319,7 +329,7 @@ def build_business_case(
                 b, my = (None if None in vals else sum(vals)), base
             else:
                 b, my = operating_base(kind, category, y), y
-            amount = None if b is None else _SIGN[ln.kind] * share * b
+            amount = _finite(None if b is None else _SIGN[ln.kind] * share * b)
             by_year.setdefault(y, []).append(_operating_line(ln, amount, my, None))
 
     case = dataclasses.replace(
@@ -480,7 +490,7 @@ def pnl(result, *, receivable_days: float | None = None) -> PnL:
         "ebitda_net_of_pass_through": None if ebitda is None else ebitda - pt,
         "ebitda_margin": None
         if ebitda is None
-        else [None if r == 0.0 else float(e / r) for e, r in zip(ebitda, revenue)],
+        else [_finite_ratio(e, r) for e, r in zip(ebitda, revenue)],
         "terminal": terminal,
         "depreciation": dep,
         "ebit": ebit,
@@ -527,6 +537,11 @@ class Kpi:
     basis: dict | None = None
 
 
+def _finite_ratio(num: float, den: float) -> float | None:
+    """Num / den, or None when den is 0 or the ratio is not finite (a tiny divisor)."""
+    return None if den == 0.0 else _finite(float(num) / float(den))
+
+
 def _ok(v, unit=None, basis=None) -> Kpi:
     if v is None or not math.isfinite(v):
         return Kpi(None, "n/a", "not_finite", unit, basis)
@@ -544,7 +559,7 @@ def _missing(result, sections: tuple[str, ...]) -> str:
 def _ratio(num: float, den: float, unit=None) -> Kpi:
     if den == 0.0:
         return Kpi(None, "n/a", "no_revenue", unit)
-    return _ok(num / den, unit)
+    return _ok(_finite_ratio(num, den), unit)
 
 
 def kpis(
@@ -583,15 +598,17 @@ def kpis(
         pt = float(p.rows["pass_through"][ops].sum())
         out["ebitda_margin_gross"] = _ratio(e, r)
         out["ebitda_margin_net"] = _ratio(e - pt, r - pt)
-        cap = sum((capacity or {}).values())
+        # Each member finite and > 0, so the basis never holds inf or NaN (C5).
+        members = capacity or {}
+        # NaN fails `> 0`; an inf member makes the sum inf, which `_finite` drops.
+        stated = bool(members) and all(
+            isinstance(c, (int, float)) and c > 0.0 for c in members.values()
+        )
+        cap = _finite(float(sum(members.values()))) if stated else None
         unit = f"{ccy}/{capacity_unit}-year"
-        basis = {
-            "assets": sorted(capacity or {}),
-            "capacity": cap,
-            "unit": capacity_unit,
-        }
+        basis = {"assets": sorted(members), "capacity": cap, "unit": capacity_unit}
         for k, v in (("gross", r), ("net", r - pt)):
-            if not capacity or not math.isfinite(cap) or cap <= 0.0:
+            if cap is None:
                 out[f"revenue_per_capacity_{k}"] = Kpi(
                     None, "not_established", "capacity_not_stated", unit, basis
                 )
@@ -677,6 +694,17 @@ def _npv_at(ic_case, inputs, outputs, i, pack, layers, s) -> float | None:
     return None if cash is None else npv(ic_case.inputs.wacc_nominal, cash)
 
 
+class _NotEstablished(Exception):
+    """A trial inside brentq's interval is not established: never a TypeError (500)."""
+
+
+def _npv_or_raise(*args) -> float:
+    v = _npv_at(*args)
+    if v is None:
+        raise _NotEstablished
+    return v
+
+
 def break_even(
     ic_case: FinanceCase,
     inputs: BusinessCaseInputs,
@@ -694,7 +722,6 @@ def break_even(
     is `break_even_not_established`. A line priced only by grid cells has no single price:
     `price` is None and `price_scale` is the factor on every cell. A share line that
     reads this line moves with it; every other line is the same in every trial (C7)."""
-    outputs = outputs or {}
     out = {
         "status": None,
         "price_scale": None,
@@ -725,21 +752,34 @@ def break_even(
             root = s
             break
         if prev_f is not None and (prev_f < 0.0) != (f < 0.0):
-            root = brentq(
-                lambda x: _npv_at(ic_case, inputs, outputs, i, pack, layers, x),
-                prev_s,
-                s,
-                xtol=BREAK_EVEN_XTOL,
-                rtol=BREAK_EVEN_XTOL,
-                maxiter=200,
-            )
+            try:
+                root = brentq(
+                    lambda x: _npv_or_raise(
+                        ic_case, inputs, outputs, i, pack, layers, x
+                    ),
+                    prev_s,
+                    s,
+                    xtol=BREAK_EVEN_XTOL,
+                    rtol=BREAK_EVEN_XTOL,
+                    maxiter=200,
+                )
+            except _NotEstablished:
+                out["status"] = "break_even_not_established"
+                return out
+            except RuntimeError:  # brentq's maxiter
+                out["status"] = "break_even_not_converged"
+                return out
             break
         prev_s, prev_f = s, f
     else:
         out["status"] = "break_even_not_bracketed"
         return out
     # The re-run (C7): |NPV| at the solved scale within the tolerance of the line's revenue.
-    r = _result_at(ic_case, inputs, outputs, i, pack, layers, root)
+    try:
+        r = _result_at(ic_case, inputs, outputs, i, pack, layers, root)
+    except FinanceRefused:
+        out["status"] = "break_even_not_established"
+        return out
     v = _npv_at(ic_case, inputs, outputs, i, pack, layers, root)
     series = r.op.lines.get(line)
     if v is None or series is None:
