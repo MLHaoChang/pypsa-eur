@@ -720,7 +720,7 @@ export function fmtMW(mw: number, digits = 1): string {
 // the legend key (components/LoadingKey.tsx), highest band first.
 export const LOADING_BANDS: readonly { min: number; color: string; label: string }[] = [
   { min: 90, color: '#dc2626', label: '90 % and over' },
-  { min: 50, color: '#d97706', label: '50 to 90 %' },
+  { min: 50, color: '#d97706', label: '50–90 %' },
   { min: -Infinity, color: '#16a34a', label: 'Under 50 %' },
 ]
 export function loadingColor(pct: number): string {

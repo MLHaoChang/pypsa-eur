@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event'
 import MapLegend from './MapLegend'
 import { VOLTAGE_TIERS, lineColor } from '../utils/voltageTiers'
 import { legendFor } from '../utils/assetTypes'
+import { CanvasResultsContext, LOADING_BANDS, loadingColor, type OverlayData } from './CanvasResultsContext'
 
 beforeEach(() => { localStorage.clear() })
 
@@ -22,6 +23,21 @@ describe('MapLegend', () => {
     const types = screen.getAllByTestId('legend-asset-type').map(e => e.textContent)
     // Table order (generators, then storage), the same order the schematic lists them in.
     expect(types).toEqual(['PV field', 'Engine gensets (gas)', 'Battery storage'])
+  })
+
+  it('with the results overlay on, adds the loading key in the colours loadingColor gives the lines', () => {
+    const legend = (enabled: boolean) => render(
+      <CanvasResultsContext.Provider value={{ enabled } as OverlayData}>
+        <MapLegend linkCarriers={[]} assetRows={[]} />
+      </CanvasResultsContext.Provider>,
+    )
+    const off = legend(false)
+    expect(screen.queryByTestId('legend-loading')).toBeNull()
+    off.unmount()
+    legend(true)
+    const strokes = [...screen.getByTestId('legend-loading').querySelectorAll('line')].map(l => l.getAttribute('stroke'))
+    expect(strokes).toEqual([loadingColor(49), loadingColor(50), loadingColor(90)])
+    expect(strokes).toEqual([...LOADING_BANDS].reverse().map(b => b.color))
   })
 
   it('folds to a toggle and remembers it', async () => {

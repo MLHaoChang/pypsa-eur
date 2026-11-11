@@ -9,7 +9,7 @@ export default function LoadingKey() {
   if (!results.enabled) return null
   return (
     <div data-testid="legend-loading">
-      <p className="text-[9px] font-bold text-muted uppercase tracking-[0.14em] mb-2 mt-3">Flow · loading</p>
+      <p className="text-[9px] font-bold text-muted uppercase tracking-[0.14em] mb-2 mt-3">Loading (% of rating)</p>
       {[...LOADING_BANDS].reverse().map(b => (
         <div key={b.label} className="flex items-center gap-2 mb-1">
           <svg width="20" height="3" style={{ flexShrink: 0 }}><line x1="0" y1="1.5" x2="20" y2="1.5" stroke={b.color} strokeWidth="2.5" strokeLinecap="round" /></svg>

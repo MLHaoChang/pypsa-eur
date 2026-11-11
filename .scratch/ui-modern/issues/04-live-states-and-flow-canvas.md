@@ -23,7 +23,7 @@ Re-scoped from the screenshot audit (`audit.md` findings 2, 8, 9, 10) into three
 
 - Animated flow direction and line-loading colours during playback, switched off under `prefers-reduced-motion`.
 - The schematic already had both (`utils/flowMotion.ts`). This slice brings the map level: lines, links and transformers carry the same moving dash, and the flow label gains a direction arrow that stays when motion is off.
-- Both legends show a "Flow · loading" key while the results overlay is on, since the overlay replaces the voltage and carrier colours.
+- Both legends show a "Loading (% of rating)" key while the results overlay is on, since the overlay replaces the voltage and carrier colours.
 
 ## Slice 3: solver progress
 
