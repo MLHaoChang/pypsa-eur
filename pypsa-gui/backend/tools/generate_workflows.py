@@ -13,6 +13,7 @@ loads any workflow. Edit the source or the profile, then run
 `python tools/generate_workflows.py`; `tests/test_workflows_from_profiles.py`
 fails while a checked-in file differs from the generated one.
 """
+
 from __future__ import annotations
 
 import re
@@ -53,21 +54,25 @@ def generate(source: Path) -> str:
             continue
         rules, tools = _stage_facts(profile, stage)
         if rules:
-            step["done_when"] = (f"{step['done_when']} Gate rules ({profile['id']} {stage}): "
-                                 + ", ".join(rules) + ".")
+            step["done_when"] = (
+                f"{step['done_when']} Gate rules ({profile['id']} {stage}): "
+                + ", ".join(rules)
+                + "."
+            )
         if tools:
-            extra[step["id"]] = ("Harness tools for this stage (profile "
-                                 f"{profile['id']}, {stage}): " + ", ".join(f"`{t}`" for t in tools) + ".")
+            extra[step["id"]] = (
+                "Harness tools for this stage (profile "
+                f"{profile['id']}, {stage}): "
+                + ", ".join(f"`{t}`" for t in tools)
+                + "."
+            )
     parts = _STEP.split(body)
     out = [parts[0]]
     for i in range(1, len(parts), 3):
-        sid, text = parts[i + 1], parts[i + 2]
-        text = text.rstrip("\n") + "\n"
-        if sid in extra:
-            text += "\n" + extra[sid] + "\n"
-        out += [parts[i], text if i + 3 < len(parts) else text]
-        if i + 3 < len(parts):
-            out[-1] += "\n"
+        text = parts[i + 2].rstrip("\n") + "\n"
+        if parts[i + 1] in extra:
+            text += "\n" + extra[parts[i + 1]] + "\n"
+        out += [parts[i], text + ("\n" if i + 3 < len(parts) else "")]
     front = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True, width=10_000)
     return f"---\n{front}---\n" + "".join(out)
 
