@@ -698,7 +698,9 @@ def test_a_crash_at_the_final_write_resumes_without_duplicate_proposals(
     first = FakeProvider(
         [_analysis(_lesson("once")), _organized(_lesson("once", **{"from": [0]}))]
     )
-    _worker(factory, first, clock=clock, instance="A").run_once()  # killed at the final write
+    _worker(
+        factory, first, clock=clock, instance="A"
+    ).run_once()  # killed at the final write
     assert crashed and _job(factory, job_id).status == "running"
     assert _items(factory, world) == []  # the proposals rolled back with the status
     assert json.loads(
