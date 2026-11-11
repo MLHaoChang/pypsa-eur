@@ -240,7 +240,11 @@ def survival(n, island, *, solve=None) -> dict:
     return {
         **out,
         "state": NOT_EVALUATED,
-        "reason": f"the island check's solve ended {str(condition).replace('_', ' ')}, not optimal",
+        "reason": (
+            f"the island check's solve ended with status {status}"
+            if str(condition) == "optimal"
+            else f"the island check's solve ended {str(condition).replace('_', ' ')}, not optimal"
+        ),
     }
 
 

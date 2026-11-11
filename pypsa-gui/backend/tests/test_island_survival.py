@@ -330,6 +330,12 @@ def test_an_event_row_short_of_its_step_fails_with_the_shortfall_in_words(
             S.NOT_EVALUATED,
             "the island check's solve ended unknown, not optimal",
         ),
+        # The verdict needs both: an optimal condition under a status that is not ok is no pass.
+        (
+            ("warning", "optimal"),
+            S.NOT_EVALUATED,
+            "the island check's solve ended with status warning",
+        ),
     ],
 )
 def test_the_solver_endings_stay_apart(solved, ending, state, reason):
