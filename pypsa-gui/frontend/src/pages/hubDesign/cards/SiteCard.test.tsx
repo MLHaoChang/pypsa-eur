@@ -199,7 +199,7 @@ describe('SiteCard next step', () => {
 // assistant do this", which fixes the gaps — are disabled with one plain
 // sentence instead of sending requests the backend will refuse.
 describe('SiteCard while a risk check runs (A1-FE)', () => {
-  const LIVE = 'A risk check is running — wait for it to finish or abort it before changing the network.'
+  const LIVE = 'A risk check is running: wait for it to finish or abort it before changing the network.'
   const gaps = () => vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
     import: { rule: 'eh_role', links: [], applied: false }, import_p_nom_mw: null,
   }))

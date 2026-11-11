@@ -18,6 +18,7 @@ import {
   blankContract, CONNECTION, CONTRACT_FIELDS, CONTRACT_TYPES, contractErrors, contractType,
   missingRequired, nextContractId, setField, type ContractType, type FieldSpec,
 } from './contractModel'
+import { ACTION } from './actionStyle'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
 
@@ -105,7 +106,7 @@ function ConnectionEditor({ current, series, errors, onSave }: {
     return (
       <div className="space-y-1">
         <p className="text-muted">No connection agreement: the import link is uncapped by a contract.</p>
-        <button type="button" className="underline" onClick={() => setC({ kind: 'firm', import_cap_mw: noCap,
+        <button type="button" className={ACTION} onClick={() => setC({ kind: 'firm', import_cap_mw: noCap,
           available_from: `${new Date().getFullYear()}-01-01` })}>Add a connection agreement</button>
       </div>
     )
@@ -153,7 +154,7 @@ function ConnectionEditor({ current, series, errors, onSave }: {
                       remove={() => set({ capacity_fee: null })} errors={[]} />
         </>
       ) : (
-        <button type="button" className="underline"
+        <button type="button" className={ACTION}
                 onClick={() => set({ capacity_fee: { ...blankItem('capacity', 'capacity_fee') } })}>
           Add a capacity fee</button>
       )}
@@ -162,7 +163,7 @@ function ConnectionEditor({ current, series, errors, onSave }: {
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent"
                 onClick={() => { void onSave(c) }}>Save the connection agreement</button>
         {/* Removed only once the server has removed it (WP3.7c review #4). */}
-        <button type="button" className="underline"
+        <button type="button" className={ACTION}
                 onClick={async () => { if (await onSave(null)) setC(null) }}>
           Remove the connection agreement</button>
       </div>
@@ -299,7 +300,7 @@ export default function ContractsEditor() {
               <p className="text-muted">A contract type this editor does not know: kept as stored.</p>
             )}
             <Errors list={errors.get(i) ?? []} />
-            <button type="button" className="underline" aria-label={`Remove ${label}`}
+            <button type="button" className={ACTION} aria-label={`Remove ${label}`}
                     onClick={() => edit(contracts.filter((_, j) => j !== i), true)}>Remove</button>
           </fieldset>
         )
@@ -309,11 +310,11 @@ export default function ContractsEditor() {
           <select aria-label="New contract type" className={input} value={newType}
                   onChange={e => setNewType(e.target.value as ContractType)}>
             {CONTRACT_TYPES.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}</select></label>
-        <button type="button" className="underline" onClick={() => edit([...contracts,
+        <button type="button" className={ACTION} onClick={() => edit([...contracts,
           blankContract(newType, nextContractId(contracts, newType), site)], true)}>Add contract</button>
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent"
                 onClick={() => { void saveContracts() }}>Save the contracts</button>
-        <button type="button" className="underline" onClick={() => { void reload() }}>
+        <button type="button" className={ACTION} onClick={() => { void reload() }}>
           Reload the contracts</button>
       </div>
       <ConnectionEditor current={cfg.connection} series={refs} errors={errors.get(CONNECTION) ?? []}
