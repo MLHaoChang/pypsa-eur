@@ -288,6 +288,12 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("POST", "/api/memory/dismissals"): (NOT_PROJECT_DATA, _R_MEMORY),
     ("PATCH", "/api/memory/items/{item_id}"): (NOT_PROJECT_DATA, _R_MEMORY),
     ("POST", "/api/memory/items/{item_id}/{action}"): (NOT_PROJECT_DATA, _R_MEMORY),
+    ("POST", "/api/memory/parameters"): (NOT_PROJECT_DATA, _R_MEMORY + " Save for reuse reads "
+        "the ACTIVE project's field and writes only a memory row."),
+    ("POST", "/api/memory/suggestions/{item_id}/preview"): (NOT_PROJECT_DATA,
+        "a POST only to carry a body (the target asset and item version): it plans the saved "
+        "value on the ACTIVE project's network, builds the edit card on a copy, and writes "
+        "nothing. The write is `/api/network/memory_parameter/apply`, behind the foreign-lock gate."),
     ("POST", "/api/local-settings/reveal-log"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/dictation/transcribe"): (NOT_PROJECT_DATA, _R_NO_PROJECT),
     ("POST", "/api/projects/{name}/intent-comparison"): (NOT_PROJECT_DATA, _R_INTENT_COMPARISON),

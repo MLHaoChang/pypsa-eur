@@ -4,11 +4,13 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { ChoiceCard } from '../ChatPanel'
+import { ChoiceCard, KIND_COPY } from '../ChatPanel'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore } from '../../store/uiStore'
 import * as api from '../../api/runMonitor'
 import { RELIABILITY_GOAL_LABEL } from '../../hooks/useReliabilityGoal'
+import realIntake from './intakeCard.fixture.json'
+import { curly, DEFAULT_WORDS, PATH_WORDS, setupWords } from './EnvelopeSection'
 import { ENVELOPE, STATES, TASK_ID } from './runFixtures'
 
 vi.mock('../../api/runMonitor', () => ({
@@ -258,5 +260,184 @@ describe('EnvelopeSection reliability goal', () => {
       const ledger = JSON.parse(readFileSync(resolve(backend, `project_templates/${t}/eh_template.json`), 'utf8')).ledger
       expect(ledger.find((r: { field: string }) => r.field === 'target_lole_h').label).toBe(RELIABILITY_GOAL_LABEL)
     }
+  })
+
+  // Issue 37: the intake rows and the digest a grant sends back.
+  const DIGEST = 'a'.repeat(64)
+  const SETUP = { tool: 'create_project_from_template', template: 'eh_site', name: 'Acme site', params_digest: DIGEST }
+  const row = (i: number, over: Record<string, unknown> = {}) => ({ index: i, param: `p${i}`, label: `Input ${i}`, value: i, unit: 'MW',
+    status: 'confirmed', source: `you wrote 'x${i}'`, from_document: false, mapped: false, ...over })
+  function openIntake(rows: ReturnType<typeof row>[], defaults: unknown[] = []) {
+    const view = { ...STATES.proposal, envelope: { ...ENVELOPE, setup: SETUP },
+      run: { ...STATES.proposal.run, intake: { card: { rows, defaults }, digest: DIGEST, missing: [] } } }
+    vi.mocked(api.getRun).mockResolvedValue(view as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope: { ...ENVELOPE, setup: SETUP } } }] })
+    render(<ChoiceCard />)
+  }
+
+  it('shows the setup row first, in words, with no digest in Guided or Expert', async () => {
+    for (const mode of ['guided', 'expert'] as const) {
+      cleanup(); useUIStore.setState({ uiMode: mode }); openIntake([row(0)])
+      await screen.findByTestId('envelope-intake')
+      const section = screen.getByTestId('envelope-section')
+      expect(section.firstElementChild!.getAttribute('data-testid')).toBe('envelope-setup')
+      expect(screen.getByTestId('envelope-setup').textContent).toBe('Creates project Acme site from the site template')
+      expect(section.textContent).not.toContain(DIGEST.slice(0, 8))
+    }
+  })
+
+  it('lists rows with source, document mark, struck and conflict words, and preset defaults', async () => {
+    openIntake([row(0, { from_document: true, source: 'sheet.pdf, page 2' }), row(1, { status: 'struck' }),
+      row(2, { param: 'c', status: 'conflict', source: "you wrote 'a'" }), row(3, { param: 'c', status: 'conflict', source: 'b.xlsx S!A1' })],
+      [{ param: 'critical_share', value: 0.4, preset_default: true }])
+    await screen.findByTestId('envelope-intake')
+    const rows = screen.getAllByTestId('envelope-intake-row')
+    expect(rows[0].textContent).toContain('Input 0: 0 MW')
+    expect(rows[0].textContent).toContain('read from a document')
+    expect(rows[0].textContent).toContain('sheet.pdf, page 2')
+    expect(rows[1].textContent).toContain('Struck')
+    expect(rows[2].textContent).toContain('Not used: conflicts with the other value (b.xlsx S!A1)')
+    expect(screen.getByTestId('envelope-intake-default').textContent).toBe('Critical load share: 40 % · preset default')
+  })
+
+  it('shows every row and default, none folded', async () => {
+    openIntake([0, 1, 2, 3, 4, 5, 6].map(i => row(i)), [{ param: 'a_b', value: 1, preset_default: true }])
+    await screen.findByTestId('envelope-intake')
+    expect(screen.getAllByTestId('envelope-intake-row')).toHaveLength(7)
+    expect(screen.getAllByTestId('envelope-intake-default')).toHaveLength(1)
+    expect(screen.queryByText(/Show all/)).toBeNull()
+  })
+
+  it('missing inputs are listed and no approve can be sent', async () => {
+    const view = { ...STATES.proposal, envelope: { ...ENVELOPE, setup: SETUP },
+      run: { ...STATES.proposal.run, intake: { card: { rows: [row(0)], defaults: [] }, digest: DIGEST,
+        missing: [{ param: 'connection_mw' }], request: 'Connection capacity (MW)' } } }
+    vi.mocked(api.getRun).mockResolvedValue(view as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope: { ...ENVELOPE, setup: SETUP } } }] })
+    render(<ChoiceCard />)
+    expect((await screen.findByTestId('envelope-intake-missing')).textContent).toContain('Connection capacity (MW)')
+    const [unattended, stepwise] = screen.getAllByTestId('envelope-verdict') as HTMLButtonElement[]
+    expect(unattended.disabled).toBe(true); expect(stepwise.disabled).toBe(true)
+    expect(screen.getByTestId('envelope-stepwise-reason').textContent).toContain('missing')
+  })
+
+  it('both approvals send the digest from the intake; step by step says it creates the project', async () => {
+    openIntake([row(0)])
+    await screen.findByTestId('envelope-intake')
+    const buttons = await screen.findAllByTestId('envelope-verdict')
+    expect(buttons[1].textContent).toContain('Creates project Acme site now; every other change and run asks you first.')
+    await waitFor(() => expect((buttons[0] as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(buttons[0])
+    expect(useChatStore.getState().requestQueue[0].harness!.envelope_decision!.intake_digest).toBe(DIGEST)
+    useChatStore.setState({ choice: REVIEW, requestQueue: [], lastRequest: null })
+    fireEvent.click((await screen.findAllByTestId('envelope-verdict'))[1])
+    expect(useChatStore.getState().requestQueue[0].harness).toEqual(
+      { envelope_decision: { task_id: TASK_ID, verdict: 'stepwise', intake_digest: DIGEST } })
+  })
+
+  it('a card without an intake keeps its rows and sends no digest', async () => {
+    open()
+    await screen.findByTestId('envelope-budgets')
+    expect(screen.queryByTestId('envelope-setup')).toBeNull()
+    expect(screen.queryByTestId('envelope-intake')).toBeNull()
+    fireEvent.click((await screen.findAllByTestId('envelope-verdict'))[0])
+    expect(useChatStore.getState().requestQueue[0].harness!.envelope_decision).not.toHaveProperty('intake_digest')
+  })
+
+  // GK B (46) F4: the return of `run_intake.card_view` + digest, dumped from the backend's own
+  // test data (test_run_intake `_given`), not written by hand.
+  it('renders the backend-shaped intake: every row and default, and echoes its digest', async () => {
+    const view = { ...STATES.proposal, envelope: { ...ENVELOPE, setup: SETUP },
+      run: { ...STATES.proposal.run, intake: realIntake } }
+    vi.mocked(api.getRun).mockResolvedValue(view as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope: { ...ENVELOPE, setup: SETUP } } }] })
+    render(<ChoiceCard />)
+    await screen.findByTestId('envelope-intake')
+    expect(screen.getAllByTestId('envelope-intake-row')).toHaveLength(realIntake.card.rows.length)
+    expect(screen.getAllByTestId('envelope-intake-default')).toHaveLength(realIntake.card.defaults.length)
+    expect(screen.getAllByTestId('envelope-intake-row')[0].textContent).toContain("Grid connection: 12 MW")
+    expect(screen.getAllByTestId('envelope-intake-row')[0].textContent).toContain("grid.pdf, page 1")
+    const stepwise = (await screen.findAllByTestId('envelope-verdict'))[1]
+    await waitFor(() => expect((stepwise as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(stepwise)
+    expect(useChatStore.getState().requestQueue[0].harness!.envelope_decision!.intake_digest).toBe(realIntake.digest)
+  })
+
+  it('a preset default opens with its field label, never its key; an unknown template is not named by its id', async () => {
+    for (const d of realIntake.card.defaults) expect(DEFAULT_WORDS[d.param], d.param).toBeTruthy()
+    expect(setupWords('Acme', 'other_tpl')).toBe('Creates project Acme from the chosen template')
+    expect(setupWords('Acme', 'eh_site')).toBe('Creates project Acme from the site template')
+  })
+
+  it("DEFAULT_WORDS agree with the backend profile's own field labels", () => {
+    const src = readFileSync(resolve(__dirname, '../../../../backend/services/run_profiles.py'), 'utf8')
+    for (const key of ['site_type', 'connection_mw', 'critical_share', 'load_profile', 'ride_through', 'fault_level_mva', 'horizon_end']) {
+      const label = new RegExp(`"${key}": _(?:num|enum|bool)\\("([^"]+)"`).exec(src)?.[1]
+      expect(DEFAULT_WORDS[key], key).toBe(label)
+    }
+  })
+
+  it('a conflict row is warn-coloured, a struck row only muted', async () => {
+    openIntake([row(0, { status: 'conflict', param: 'c' }), row(1, { status: 'struck' })])
+    await screen.findByTestId('envelope-intake')
+    expect(screen.getByTestId('envelope-intake-conflict').className).toContain('text-warn')
+    expect(screen.getByTestId('envelope-intake-struck').className).toContain('text-muted')
+  })
+
+  it('shows every entry and nested value of a default, none as "N values" (GK B F2)', async () => {
+    const view = { ...STATES.proposal, envelope: { ...ENVELOPE, setup: SETUP },
+      run: { ...STATES.proposal.run, intake: realIntake } }
+    vi.mocked(api.getRun).mockResolvedValue(view as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope: { ...ENVELOPE, setup: SETUP } } }] })
+    render(<ChoiceCard />)
+    await screen.findByTestId('envelope-intake')
+    const text = screen.getByTestId('envelope-intake').textContent!
+    const stages = realIntake.card.defaults.find(d => d.param === 'stages')!.value as { year: number; peak_mw: number }[]
+    for (const e of stages) expect(text).toContain(`${e.year}: ${e.peak_mw} MW peak`)
+    const leaves: [string, unknown][] = []
+    const walk = (path: string, v: unknown) => { if (v && typeof v === 'object') Object.entries(v).forEach(([k, x]) => walk(`${path}.${k}`, x)); else leaves.push([path, v]) }
+    for (const d of realIntake.card.defaults) if (d.param === 'existing' || d.param === 'candidates') walk(d.param, d.value)
+    expect(leaves.length).toBeGreaterThan(10)
+    // F2a: every leaf shows its label, its value and its unit.
+    for (const [path, v] of leaves) {
+      const [label, unit] = PATH_WORDS[path]
+      const shown = typeof v === 'boolean' ? (v ? 'Yes' : 'No') : unit ? `${v} ${unit}` : String(v)
+      expect(text, path).toContain(`${label}: ${shown}`)
+    }
+    // F2b: every year-entry of both lists shows its year and its value.
+    for (const [param, key, tail] of [['stages', 'peak_mw', 'MW peak'], ['energization', 'mw', 'MW energized']] as const) {
+      const entries = realIntake.card.defaults.find(d => d.param === param)!.value as Record<string, number>[]
+      expect(entries.length).toBeGreaterThan(0)
+      for (const e of entries) expect(text, param).toContain(`${e.year}: ${e[key]} ${tail}`)
+    }
+    expect(text).not.toMatch(/\d+ (entries|values)/)
+  })
+
+  it("PATH_WORDS agree with the backend profile's field labels", () => {
+    const src = readFileSync(resolve(__dirname, '../../../../backend/services/run_profiles.py'), 'utf8')
+    for (const key of ['existing.gensets.count', 'existing.gensets.unit_mw', 'existing.gensets.fuel', 'existing.pv_mw', 'existing.battery.mw',
+      'existing.battery.mwh', 'existing.ups.mw', 'existing.ups.minutes']) {
+      const label = new RegExp(`"${key.replace(/\./g, '\\.')}": _(?:num|enum|bool)\\("([^"]+)"`).exec(src)?.[1]
+      expect(PATH_WORDS[key][0], key).toBe(label)
+    }
+  })
+
+  it('a refused intake digest has a plain-words title, never its kind key', () => {
+    expect(KIND_COPY.intake_stale.title).toBe('The inputs changed: review them again')
+  })
+
+  it('quotes in source lines are curly, a fraction shows as a percentage, a conflict names the other value in words', async () => {
+    expect(curly("you wrote 'critical load is 40 %'")).toBe('you wrote “critical load is 40 %”')
+    expect(curly("grid.pdf, page 1: 'Grid connection: 12 MW'")).toBe('grid.pdf, page 1: “Grid connection: 12 MW”')
+    expect(curly('b.xlsx S!A1')).toBe('b.xlsx S!A1')
+    openIntake([row(0, { param: 'critical_share', label: 'Critical load share', value: 0.4, unit: 'fraction', source: "you wrote 'critical load is 40 %'" }),
+      row(1, { param: 'c', status: 'conflict', source: 'a.pdf, page 1' }), row(2, { param: 'c', status: 'conflict', source: "you wrote 'x'" })])
+    await screen.findByTestId('envelope-intake')
+    const rows = screen.getAllByTestId('envelope-intake-row')
+    expect(rows[0].textContent).toContain('Critical load share: 40 %')
+    expect(rows[0].textContent).not.toContain('fraction')
+    expect(rows[0].textContent).toContain('you wrote “critical load is 40 %”')
+    expect(rows[1].textContent).toContain('Not used: conflicts with the other value (you wrote “x”)')
+    expect(screen.getByTestId('envelope-intake').textContent).not.toContain("'")
   })
 })

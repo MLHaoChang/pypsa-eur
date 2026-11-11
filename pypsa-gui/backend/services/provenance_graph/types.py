@@ -70,6 +70,16 @@ class Edge:
 
 
 @dataclass(frozen=True)
+class CellStamp:
+    """What a `stamped_with` edge records for a `commercial.provenance` cell: its key and the stored entry. The
+    walk follows a stamp edge only when it carries one (`queries.walked`); an asset's stamp (a dict) is not
+    compared."""
+
+    key: str
+    entry: Any
+
+
+@dataclass(frozen=True)
 class Graph:
     """Built per query from records the app already stores (`ctx`: the network read); it writes nothing."""
 

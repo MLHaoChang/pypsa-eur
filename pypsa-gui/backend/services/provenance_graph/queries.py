@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from services.provenance_graph import money
+from services.provenance_graph import commercial, money
 from services.provenance_graph.types import (
     WALKED,
     Broken,
+    CellStamp,
     Edge,
     Graph,
     Node,
@@ -26,6 +27,7 @@ from services.provenance_graph.types import (
 #: The one comparison per edge kind. `computed_in` joins with the runs slice (04).
 COMPARATORS: dict[str, Callable[[Graph, Edge], Broken | None]] = {
     "priced_through": money.compare_priced_through,
+    "stamped_with": commercial.compare_stamp,
 }
 
 
@@ -60,6 +62,52 @@ def money_graph(n, assets) -> Graph:
     return b.build()
 
 
+def commercial_graph(config: dict | None) -> Graph:
+    """The `commercial.provenance` cells of the commercial config `config` (`Graph.ctx`), read once by the caller."""
+    b = Builder(config)
+    commercial.add_cells(b, config)
+    return b.build()
+
+
+def cell_verdict(config: dict | None, key: str) -> Verdict:
+    """Whether the cell at provenance key `key` still holds what its stamp approved (issue 08). A key with no
+    stored entry has no stamp to compare: uncompared, never fresh."""
+    return staleness(commercial_graph(config), commercial.cell_id(key))
+
+
+def cell_wire(config: dict | None, key: str) -> dict | None:
+    """One cell for a surface: its stored entry, `state`, the entry fields that were `compared` and the ones
+    `uncompared`, and `stale` (TCU-05's shape) when a compared field broke. None for a key with no entry."""
+    entry = ((config or {}).get("provenance") or {}).get(key)
+    if not isinstance(entry, dict):
+        return None
+    verdict = cell_verdict(config, key)
+    compared, uncompared = commercial.fields(config, key, entry)
+    out = {
+        "entry": entry,
+        "state": verdict.state,
+        "compared": compared,
+        "uncompared": uncompared,
+    }
+    if verdict.broken:
+        out["stale"] = verdict.broken[0].wire()
+    return out
+
+
+def walked(g: Graph, node_id: str) -> list[Edge]:
+    """The edges both queries follow from a node: the `WALKED` kinds, and a `stamped_with` edge only when it
+    records a commercial cell (`CellStamp`). An asset's stamp describes its input; it is not a comparison."""
+    return [
+        e
+        for e in g.edges
+        if e.src == node_id
+        and (
+            e.kind in WALKED
+            or (e.kind == "stamped_with" and isinstance(e.recorded, CellStamp))
+        )
+    ]
+
+
 def _check(g: Graph, edge: Edge) -> tuple[State, Broken | None]:
     compare = COMPARATORS.get(edge.kind)
     if compare is None or edge.recorded is None:
@@ -83,7 +131,7 @@ def staleness(g: Graph, node_id: str) -> Verdict:
         if nid in seen:
             return
         seen.add(nid)
-        edges = g.out(nid, WALKED)
+        edges = walked(g, nid)
         if not edges:
             uncompared.append(nid)
         for e in edges:
@@ -114,7 +162,11 @@ def _stamp(g: Graph, node_id: str) -> dict | None:
     for nid in (node_id, node_id.replace("derived:", "input:", 1)):
         for e in g.edges:
             if e.kind == "stamped_with" and e.src == nid:
-                return e.recorded
+                return (
+                    e.recorded.entry
+                    if isinstance(e.recorded, CellStamp)
+                    else e.recorded
+                )
     return None
 
 
@@ -130,7 +182,7 @@ def why(g: Graph, node_id: str) -> Walk:
         seen.add(nid)
         node = g.nodes.get(nid) or Node("input", nid)
         steps.append(Step(node, via, _stamp(g, nid), state))
-        for e in g.out(nid, WALKED):
+        for e in walked(g, nid):
             visit(
                 e.dst,
                 e,

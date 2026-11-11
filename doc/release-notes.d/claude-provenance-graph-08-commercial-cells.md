@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The provenance graph now holds the commercial values approved from a document (tariff rates and PPA terms). A value reads as current only while the tariff or contract still holds the approved value, unit, currency and money year; an edited value, or one whose item, period, tier or contract was removed, reads as stale.

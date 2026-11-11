@@ -48,11 +48,13 @@ it('sends changed fields only, compares before apply, and applies the single pen
   await userEvent.click(await screen.findByRole('button', { name: 'Apply' }))
   await waitFor(() => expect(api.apply).toHaveBeenCalledWith('P', 'job', 'PV'))
 })
-it('explains source-disabled fields', async () => {
+it('explains source-disabled fields and lists only the presets for the weather source', async () => {
   api.weather.mockResolvedValue({ source: 'synthetic', year: 2025 })
   mount()
   expect((await screen.findByLabelText('Inverter efficiency (fraction)') as HTMLInputElement).disabled).toBe(true)
   expect(screen.getAllByText('ERA5 only: switch the weather source to use it').length).toBeGreaterThan(0)
+  expect(screen.queryByRole('option', { name: 'pv' })).toBeNull()
+  expect(screen.getByRole('option', { name: 'synthetic' })).toBeTruthy()
 })
 it('keeps presets visible when an older server omits source_type', async () => {
   api.presets.mockResolvedValue([{ name: 'legacy', technology: 'solar', params: {} }])

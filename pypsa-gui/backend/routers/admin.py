@@ -13,6 +13,7 @@ from deps import require_user
 from services import email_service
 from services.auth_service import issue_password_token
 from services.legacy_migrate import claim_legacy_project, list_legacy_projects
+from services.reports import store as _report_store
 from services.tenancy_service import (
     is_org_admin,
     ConflictError,
@@ -291,6 +292,10 @@ def claim_legacy_project_endpoint(
         )
     except (PermissionDenied, ConflictError, ValidationError) as exc:
         _raise_http_error(exc)
+    except _report_store.ReportBusy as exc:
+        from services import project_registry
+
+        raise project_registry.report_busy_http("imported") from exc
 
     return {
         "root": _serialize_project(result.root),
