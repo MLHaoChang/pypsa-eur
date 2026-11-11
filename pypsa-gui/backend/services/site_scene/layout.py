@@ -241,8 +241,6 @@ def _normalize_geojson(doc: Any) -> dict[str, Any]:
         raise _refuse(
             "layout_document", "The GeoJSON file's features could not be read"
         )
-    if len(features) > native.MAX_BUILDINGS:  # parts can only add to this
-        raise native._limit("buildings", native.MAX_BUILDINGS, len(features))
     footprints: list[dict[str, Any]] = []
     skipped: dict[str, int] = {}
     for i, f in enumerate(features):

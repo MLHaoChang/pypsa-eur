@@ -82,7 +82,7 @@ def _scene_block(project: AuthorizedProject, db: DBSession, user: User | None) -
     can later be associated with; no Bus is needed for any native action."""
     from services import project_locks
     from services.pypsa_service import PyPSAService
-    from services.site_scene import proposals, verdicts
+    from services.site_scene import chat, proposals, verdicts
 
     can_edit = True
     try:
@@ -95,7 +95,8 @@ def _scene_block(project: AuthorizedProject, db: DBSession, user: User | None) -
     native_runs = int(not n.generators_t.p.empty)
     owner = str(user.id) if user is not None else None
     return verdicts.scene_block(project.directory, can_edit=can_edit, targets=targets, native_runs=native_runs,
-                                pending_proposal=proposals.has_ready(project.registry_key, owner))
+                                pending_proposal=proposals.has_ready(project.registry_key, owner,
+                                                                      chat.CHAT_ACTIONS))
 
 
 @router.post("/{name}/flow/ack")

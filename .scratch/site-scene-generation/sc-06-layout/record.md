@@ -110,6 +110,16 @@ Also in this push:
 - Tests for mutants.py survivors: input shapes, the building caps on both paths, a non-text kind, and an import with no layout.
 - `_json_body` RecursionError: filed as `.scratch/site-scene-generation/issues/09-json-body-recursion-error.md`.
 
+## GK B (49) review round 2 (NOT OK @623b19e2)
+
+| Item | Change | Test |
+|---|---|---|
+| G1 | `proposals.ROUTE_ONLY_ACTIONS`; `store.apply` marks such a receipt `route_only`. The chat read and apply fallbacks treat a `route_only` receipt as not found, as they do while the map holds the entry. Other receipts are unchanged. | `test_route_only_import_layout_is_invisible_to_the_chat`: route apply, then chat read and apply, then `proposals.clear()` and the same again, give the same not_found/404 |
+| G2 | The early cap on GeoJSON features is gone. The cap counts footprints, so skipped features never count; the body cap bounds the loop. | `test_skipped_features_do_not_count_towards_the_building_cap` (MAX polygons plus one Point admitted) |
+| G3 | `proposals.has_ready(..., actions)`; `/flow` passes `chat.CHAT_ACTIONS` | same test: `has_ready` filtered, and `/flow` `apply_proposal` is unavailable with only a route-only preview open |
+
+Hand mutants for G1 (4 guards) and G3 (2) are all killed.
+
 ## Next
 
 - Photo half: blocked on the engine choice (Q-SS-1) and on SC-00 P.

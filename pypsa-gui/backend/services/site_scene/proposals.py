@@ -32,6 +32,9 @@ from services.site_scene import associations, layout, native, store
 from services.site_scene.contract import SceneError
 from services.site_scene.verdicts import REASON_NO_BOUNDARY
 
+# GK B G1: route-only actions are marked on their receipt, so the chat can tell
+# them apart even after the proposal map has lost the entry.
+ROUTE_ONLY_ACTIONS = ("import_layout",)
 ACTIONS = ("generate_native", "edit_buildings", "import_layout", "bind_targets", "rebind", "place_existing", "detach", "undo_detach")
 # SC-02a: the inputs each action takes. The model actions read the open network.
 INPUT_KEYS = {"generate_native": {"greenfield", "sources"}, "edit_buildings": {"greenfield", "sources"},
@@ -297,6 +300,8 @@ def _commit_entry(project_dir, site_id: str, pid: str, entry: dict[str, Any], ex
     if scene["last_receipt"] and scene["last_receipt"]["proposal_id"] == pid:
         return scene["last_receipt"]
     proposal = {"id": pid, "base_revision": entry["base_revision"], "input_hash": entry["input_hash"]}
+    if entry["action"] in ROUTE_ONLY_ACTIONS:
+        proposal["route_only"] = True
     if scene["revision"] != entry["base_revision"]:
         # A receipt further back in the chain is still read back (store.apply); otherwise refuse.
         return store.apply(project_dir, site_id, {**proposal, "changes": {}}, expected)
@@ -340,9 +345,10 @@ def _record_bindings(project_dir, updates: dict[str, str | None]) -> None:
     site_service.write_sites(project_dir, doc)
 
 
-def has_ready(project_key: str, owner: str | None) -> bool:
-    """Whether the caller has a live, unapplied proposal in this project."""
+def has_ready(project_key: str, owner: str | None, actions=None) -> bool:
+    """Whether the caller has a live, unapplied proposal in this project (of `actions`, when given)."""
     with _lock:
         _evict(time.monotonic())
         return any(k[0] == project_key and e["owner"] == owner and e["status"] == "ready"
+                   and (actions is None or e["action"] in actions)
                    for k, e in _entries.items())

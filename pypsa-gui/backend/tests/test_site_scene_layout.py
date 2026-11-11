@@ -607,6 +607,19 @@ def test_too_many_buildings_is_413_before_geometry(monkeypatch, kind):
     assert calls == []
 
 
+def test_skipped_features_do_not_count_towards_the_building_cap():
+    # GK B G2: the cap counts footprints, so MAX polygons plus one Point is admitted.
+    n = native.MAX_BUILDINGS
+    point = {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [ORIGIN["lng"], ORIGIN["lat"]]},
+        "properties": {},
+    }
+    raw = geojson(*[feature(rect_lnglat(), fid=f"b{i}") for i in range(n)], point)
+    out = layout.normalize(raw)
+    assert len(out["footprints"]) == n and out["skipped"] == {"Point": 1}
+
+
 def test_too_many_segment_pairs_is_413_before_geometry(monkeypatch):
     n = native.MAX_FOOTPRINT_VERTICES
     ring = [
@@ -1121,14 +1134,21 @@ def test_route_only_import_layout_is_invisible_to_the_chat(
 ):
     # GK B F2: import_layout is route-only, so a route-made preview is neither
     # listed by the chat read nor applied or cancelled through the chat tools.
-    from types import SimpleNamespace
-
     from fastapi import HTTPException
 
     from services import chat_tools
     from services.pypsa_service import PyPSAService
 
-    foreground = SimpleNamespace(project_uuid=str(project_row("geo").id))
+    real = PyPSAService.get_active_context()
+
+    class _Foreground:  # `geo` in the foreground, for the chat tools and /flow
+        project_uuid = str(project_row("geo").id)
+        storage_dir = str(geo)
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+    foreground = _Foreground()
     monkeypatch.setattr(
         PyPSAService, "get_active_context", classmethod(lambda cls: foreground)
     )
@@ -1144,8 +1164,50 @@ def test_route_only_import_layout_is_invisible_to_the_chat(
     assert chat_tools.site_scene_cancel("campus", prop["id"])["status"] == "not_found"
     scene = client.get(URL).json()
     assert scene["revision"] == 1 and scene["buildings"] == []
+    # GK B G3: the /flow verdict offers no chat apply for a route-only preview.
+    from services.site_scene import chat
+
+    key, owner = _entry_key_owner(prop)
+    assert proposals.has_ready(key, owner)
+    assert not proposals.has_ready(key, owner, chat.CHAT_ACTIONS)
+    flow = client.get("/api/projects/geo/flow")
+    assert flow.status_code == 200, flow.text
+    (apply_verdict,) = [
+        a for a in flow.json()["scene"]["actions"] if a["action"] == "apply_proposal"
+    ]
+    assert apply_verdict["available"] is False
     # The route still applies its own preview.
-    assert _apply(client, prop["id"], 1).status_code == 200
+    receipt = _apply(client, prop["id"], 1)
+    assert receipt.status_code == 200 and receipt.json()["route_only"] is True
+    live = (
+        chat_tools.site_scene_read("campus", prop["id"])["proposal"],
+        _chat_apply_status(chat_tools, prop),
+    )
+    # GK B G1: after eviction or a restart the chain receipt answers the same.
+    proposals.clear()
+    after = (
+        chat_tools.site_scene_read("campus", prop["id"])["proposal"],
+        _chat_apply_status(chat_tools, prop),
+    )
+    assert live == after == ({"id": prop["id"], "status": "not_found"}, 404)
+
+
+def _entry_key_owner(prop):
+    return next(
+        (key, e["owner"])
+        for (key, pid), e in proposals._entries.items()
+        if pid == prop["id"]
+    )
+
+
+def _chat_apply_status(chat_tools, prop):
+    from fastapi import HTTPException
+
+    try:
+        chat_tools.site_scene_apply("campus", prop["id"], prop["input_hash"], 1)
+    except HTTPException as exc:
+        return exc.status_code
+    return 200
 
 
 def test_route_import_layout_without_a_layout_is_named(client, geo):

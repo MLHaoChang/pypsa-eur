@@ -40,6 +40,7 @@ from services.site_scene.contract import SceneError
 GEOMETRY_ACTIONS = ("generate_native", "edit_buildings")
 MODEL_ACTIONS = ("bind_targets", "place_existing", "rebind", "detach", "undo_detach")
 CHAT_ACTIONS = GEOMETRY_ACTIONS + MODEL_ACTIONS
+ROUTE_ONLY_MESSAGE = "This preview was made in the 3D site panel: review it there"
 # G9: a target prepare cannot resolve is asked about, never guessed. Only an
 # ambiguous one has candidates (H2: zero candidates is unknown_target).
 CLARIFY_CODES = ("ambiguous_target", "unknown_target", "unsupported_target")
@@ -545,9 +546,7 @@ def _chat_entry(project, owner: str | None, site_id: str, pid: str) -> dict[str,
     """The caller's live preview when the chat may see it (GK B F2): a route-only action reads as not found."""
     entry = proposals.get(project.registry_key, owner, site_id, pid)
     if entry["action"] not in CHAT_ACTIONS:
-        raise SceneError(
-            "not_found", "This preview was made in the 3D site panel: review it there"
-        )
+        raise SceneError("not_found", ROUTE_ONLY_MESSAGE)
     return entry
 
 
@@ -577,7 +576,7 @@ def _proposal_status(
         receipt = proposals._committed(project.directory, site_id, pid)
         return (
             {"id": pid, "status": "applied", "receipt": _receipt(receipt)}
-            if receipt
+            if receipt and not receipt.get("route_only")  # GK B G1
             else {"id": pid, "status": "not_found"}
         )
 
@@ -1040,6 +1039,9 @@ def apply(
                 raise
             # A restart or eviction loses the map, not the commit: read back a receipt for this exact hash.
             receipt = proposals._committed(project.directory, site_id, proposal_id)
+            if receipt is not None and receipt.get("route_only"):
+                # GK B G1: as while the map held it, a route-only apply is not the chat's.
+                raise SceneError("not_found", ROUTE_ONLY_MESSAGE) from None
             if receipt is None or receipt.get("input_hash") != input_hash:
                 raise
             if exc.kind == "proposal_cancelled":
