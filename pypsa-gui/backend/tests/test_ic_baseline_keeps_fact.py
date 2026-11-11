@@ -179,7 +179,7 @@ def test_a_case_whose_network_was_edited_is_not_run(ic, client, session_ctx):
     _cf, keeps = gate()
     assert keeps["facts"][0]["value"] == F.NOT_RUN
     assert keeps["reason"] == (
-        "The investment case is out of date; the solve's results no longer describe the network"
+        "The investment case is out of date · the solve's results no longer describe the network"
     )
 
 

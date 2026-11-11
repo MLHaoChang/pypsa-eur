@@ -55,7 +55,7 @@ DROPS_WORDS = "The case's baseline drops the owned asset diesel_1"
                 "kept": [],
                 "reasons": ["baseline_drops:diesel_1", "baseline_drops:island_battery"],
             },
-            DROPS_WORDS + "; the case's baseline drops the owned asset island_battery",
+            DROPS_WORDS + " · the case's baseline drops the owned asset island_battery",
         ),
         (
             {"state": ic.NOT_RUN, "kept": [], "reasons": ["no_case"]},
