@@ -269,18 +269,27 @@ def _loop_converged(env, rule):
     return Looped(converged(loop), {k: loop[k] for k in LOOP_FIELDS if k in loop})
 
 
+_UNREADABLE = object()
+
+
 def _granted_goal(env):
-    """The goal the grant froze (`{"value", "unit", "source"}`), or None when
-    the run has no granted envelope or its envelope froze no goal."""
+    """The goal the envelope froze (`{"value", "unit", "source"}`); None when
+    the run has no envelope file, or its envelope is only proposed or froze no
+    goal; `_UNREADABLE` when the file is there but is not a whole envelope or
+    its goal is malformed (GK B (46) G1/G2). Any state past `proposed` counts:
+    a spent (`exhausted`), `expired` or `revoked` grant still froze its goal."""
     from services import run_envelope
     task_id = env.task.get("task_id")
     if env.project_dir is None or not isinstance(task_id, str):
         return None
-    envelope = run_envelope._load(Path(env.project_dir) / "assistant_tasks" / f"{task_id}.json")
-    if envelope is None or envelope.get("state") != "granted":
+    task_path = Path(env.project_dir) / "assistant_tasks" / f"{task_id}.json"
+    envelope = run_envelope._load(task_path)
+    if envelope is None:
+        return _UNREADABLE if run_envelope.path_for(task_path).exists() else None
+    if envelope.get("state") == "proposed" or "goal" not in envelope:
         return None
-    goal = envelope.get("goal")
-    return goal if isinstance(goal, dict) else None
+    goal = envelope["goal"]
+    return goal if isinstance(goal, dict) else _UNREADABLE
 
 
 GOAL_REL_TOL, GOAL_ABS_TOL = 1e-9, 1e-9  # the loop target vs the frozen goal on the horizon basis
@@ -299,6 +308,8 @@ def _goal_problem(env, loop):
     goal = _granted_goal(env)
     if goal is None:
         return None
+    if goal is _UNREADABLE:
+        return ("goal_unreadable", "the granted envelope or its frozen goal could not be read")
     from services.reliability_goal import loop_goal
     value, years, target = goal.get("value"), loop.get("horizon_years"), loop.get("target_lole_h")
     if (goal.get("unit") != "h/yr" or not _number(value) or value < 0 or not _number(years) or years <= 0

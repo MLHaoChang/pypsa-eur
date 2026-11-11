@@ -770,9 +770,16 @@ def _loop(**over):
             "goal_sources": {"target_lole_h": "user", "mc_draws": "default"}, **over}
 
 
-def _read(tmp_path, monkeypatch, loop=None, goal=FROZEN, state="granted"):
-    envelope = {"state": state, **({"goal": goal} if goal is not None else {})}
-    monkeypatch.setattr(run_envelope, "_load", lambda path: envelope)
+def _read(tmp_path, monkeypatch, loop=None, goal=FROZEN, state="granted", file=True, envelope=None):
+    """`file`: the envelope file is on disk (its content is what `_load` is patched to return:
+    `envelope`, else a whole one with `state` and `goal`; None is a file `_load` rejects)."""
+    whole = {"state": state, **({"goal": goal} if goal is not None else {})}
+    monkeypatch.setattr(run_envelope, "_load", lambda path: (whole if envelope is None else (envelope or None)) if file else None)
+    if file:
+        (tmp_path / "assistant_tasks").mkdir(exist_ok=True)
+        (tmp_path / "assistant_tasks" / "t1.envelope.json").write_text("{}")
+    else:
+        (tmp_path / "assistant_tasks" / "t1.envelope.json").unlink(missing_ok=True)
     task = {"task_id": "t1", "steps": [{"engine": "r1", "status": "done",
                                         "result": {"loop": loop if loop is not None else _loop()}}]}
     env = run_gates.Env(task=task, ctx=None, project=None, project_dir=tmp_path)
@@ -823,3 +830,19 @@ def test_a_run_with_no_frozen_goal_or_no_granted_envelope_keeps_its_verdicts(tmp
         alone = run_gates.Looped(run_gates.converged(loop), {k: loop[k] for k in run_gates.LOOP_FIELDS if k in loop})
         assert _read(tmp_path, monkeypatch, loop, goal=None) == alone
         assert _read(tmp_path, monkeypatch, loop, state="proposed") == alone
+        assert _read(tmp_path, monkeypatch, loop, file=False) == alone  # only a missing file is no goal
+
+
+@pytest.mark.parametrize("state", ["granted", "exhausted", "expired", "revoked"])
+def test_a_mismatched_loop_is_caught_in_every_state_past_proposed(tmp_path, monkeypatch, state):
+    """A spent, expired or revoked grant still froze its goal (GK B G1)."""
+    _no_evidence(_read(tmp_path, monkeypatch, _loop(target_lole_h=9.0), state=state), "goal_mismatch")
+
+
+def test_an_envelope_file_that_cannot_be_loaded_is_goal_unreadable(tmp_path, monkeypatch):
+    _no_evidence(_read(tmp_path, monkeypatch, envelope={}), "goal_unreadable")
+
+
+@pytest.mark.parametrize("bad", ["2.0", [2.0], 2.0, None])
+def test_a_malformed_frozen_goal_is_goal_unreadable(tmp_path, monkeypatch, bad):
+    _no_evidence(_read(tmp_path, monkeypatch, envelope={"state": "granted", "goal": bad}), "goal_unreadable")
