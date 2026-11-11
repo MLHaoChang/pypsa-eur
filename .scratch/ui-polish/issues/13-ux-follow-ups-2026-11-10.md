@@ -3,7 +3,7 @@
 
 # UX follow-ups from the 10 Nov reviews
 
-Status: ready-for-agent (Sonnet; reviewer UX)
+Status: in review (Sonnet; reviewer UX)
 Type: polish (wording, consistency)
 Found by: UX (15) and UX (16) reviews on 2026-11-10, relayed by the coordinator.
 
@@ -29,7 +29,14 @@ Checked on master: `ic_counterfactual.reason_words` still joins with "; " (`serv
 - Likely files: `services/ic_counterfactual.py` (+ its tests), the Expert EditCard table (`frontend/src/components/EditCard*`), the Guided grid-study jump, the microgrid ledger defaults view. Reviewer: UX.
 
 Acceptance:
-- [ ] `reason_words` joins with " · "; its test says so.
-- [ ] The Expert EditCard table reads "Rating" where Guided does, with the unit.
-- [ ] The Guided grid-study jump shows one Back control.
-- [ ] Microgrid ledger horizon and dates have an Expert home, or the file says why they stay Guided-only.
+- [x] `reason_words` joins with " · "; its test says so.
+- [x] The Expert EditCard table reads "Rating" where Guided does, with the unit.
+- [x] The Guided grid-study jump shows one Back control.
+- [x] Microgrid ledger horizon and dates have an Expert home, or the file says why they stay Guided-only.
+
+### 2026-11-11: built
+
+- `reason_words` joins with " · " (`test_reason_words_joins_reasons_with_a_middle_dot`).
+- Expert EditCard shows the field label ("Rating"); the raw field (`s_nom`) is the cell's tooltip and the Unit column already carries "MVA".
+- `FullPageTab` hides the header "Back to Results" when the jump set its own `flowReturn`, so the floating "Back to <origin>" is the only Back.
+- Microgrid ledger "single-year horizon" and "dates": they already file to section 1 (`flow_service._LEDGER_SECTIONS`) and are read-only descriptions of how the template combines inputs that have Expert homes: the modelled week and years in Model Horizon, financial close, COD per asset and analysis years in Results › Investment case › finance inputs. No new Expert field, because no stored input exists behind the row; no engine change.

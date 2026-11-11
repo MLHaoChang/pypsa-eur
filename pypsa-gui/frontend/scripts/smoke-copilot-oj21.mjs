@@ -132,7 +132,7 @@ try {
     assert.equal(await page.getByText(/wants to use preview project changes/i).count(), 0, 'no card for the preview')
     const rows = await shown.getByTestId('chat-edit-row-typed').allInnerTexts()
     assert.equal(rows.length, 3, rows.join('\n'))
-    const capacity = mode === 'guided' ? 'Capacity' : 's_nom'
+    const capacity = 'Capacity'
     assert.match(rows[0], new RegExp(`L1”?\\s+${capacity}\\s+(?:Show in Properties\\s+)?300\\s+500\\s+MVA`), rows[0])
     assert.match(rows[1], new RegExp(`L2”?\\s+${capacity}\\s+(?:Show in Properties\\s+)?300\\s+450\\s+MVA`), rows[1])
     assert.match(rows[2], /Battery[\s\S]*150[\s,.]?000\s+EUR\/MW/, rows[2])
@@ -163,7 +163,7 @@ try {
   await undo.waitFor({ timeout: 60000 })
   shots.undo = 'oj21-undo-expert.png'
   await undo.screenshot({ path: path.join(artifacts, shots.undo) })
-  assert.match(await undo.innerText(), /Battery[\s\S]*inv_power_overnight/, 'the undo card names the battery')
+  assert.match(await undo.innerText(), /Battery[\s\S]*Power part: overnight cost/, 'the undo card names the battery')
   await page.getByTestId('chat-confirm-approve').last().click()
   for (let i = 0; JSON.stringify(await read()) !== JSON.stringify(BEFORE); i += 1) {
     assert(i < 60, `undo did not restore all three: ${JSON.stringify(await read())}`)
