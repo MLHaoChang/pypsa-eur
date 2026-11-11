@@ -559,3 +559,65 @@ def test_the_critical_tag_and_the_sidecar_must_name_the_same_load():
     }
     n.buses["eh_critical"] = False
     assert S.critical_state(n, IC.validate(raw))["state"] == "none"
+
+
+# ── cases the mutant run asked for ──────────────────────────────────────────
+
+
+def test_an_infinite_solved_size_is_no_solved_size():
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(range(2))
+    n.add("Bus", "a")
+    n.add("Generator", "g", bus="a", p_nom_extendable=True)
+    n.generators["p_nom_opt"] = float("inf")
+    n.generators_t["p"] = pd.DataFrame(0.0, index=n.snapshots, columns=["g"])
+    with pytest.raises(S.NotSolved, match="g is extendable and has no solved size"):
+        S.fix_design(n)
+
+
+@pytest.mark.parametrize("objective", [float("nan"), float("inf"), "n/a"])
+def test_an_objective_that_is_not_a_finite_number_is_not_solved(objective):
+    n = T.BUILDERS["eh_microgrid"]()
+    n._objective = objective
+    out = S.survival(n, _island("eh_microgrid"))
+    assert (out["state"], out["reason"]) == (
+        S.NOT_SOLVED,
+        "the network has no solved plan",
+    )
+    assert out["fixed"] == [] and out["periods"] == {} and out["missing"] == {}
+
+
+def test_rows_the_solve_skipped_are_not_a_pass_and_missing_units_are_reported(solved):
+    def solve(c, fn, **kw):
+        c._island_facts = {"skipped": "dispatch-only solve"}
+        return ("ok", "optimal")
+
+    out = S.survival(solved["eh_microgrid"], _island("eh_microgrid"), solve=solve)
+    assert (out["state"], out["reason"]) == (
+        S.NOT_EVALUATED,
+        "the island rows were not added to the solve",
+    )
+
+    def solve(c, fn, **kw):
+        c._island_facts = {"missing": {"genset": ["ghost"]}}
+        return ("warning", "infeasible")
+
+    out = S.survival(solved["eh_microgrid"], _island("eh_microgrid"), solve=solve)
+    assert out["state"] == S.FAILS and out["missing"] == {"genset": ["ghost"]}
+
+
+def test_a_branch_between_two_poc_buses_is_not_a_tie():
+    n = T.BUILDERS["eh_microgrid"]()
+    n.add("Bus", "mainland_2")
+    n.buses.at["mainland_2", "eh_poc"] = True
+    n.add("Line", "grid_side", bus0="mainland", bus1="mainland_2", x=0.1, s_nom=5.0)
+    assert S.tie_state(n) == {"state": "open", "ties": ["subsea_tie"], "carrying": []}
+
+
+def test_only_the_port_columns_are_read_as_a_branch_s_ends():
+    n = T.BUILDERS["eh_microgrid"]()
+    n.links["bus_zone"] = "mainland"
+    n.links["tag1"] = "mainland"
+    assert S.tie_state(n)["ties"] == ["subsea_tie"]
