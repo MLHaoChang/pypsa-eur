@@ -1041,3 +1041,25 @@ def test_a_real_output_token_budget_is_still_accepted(super_admin_client):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["max_output_tokens"] == 1
+
+
+def test_super_admin_marks_and_clears_the_memory_analyzer_role(super_admin_client, mock_openai_profile):
+    c = super_admin_client
+    assert c.get("/api/chat/settings/llm").json()["roles"] == {}
+    r = c.post("/api/chat/settings/llm/roles",
+               json={"role": "memory_analyzer", "profile_id": mock_openai_profile})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"roles": {"memory_analyzer": mock_openai_profile}}
+    assert c.get("/api/chat/settings/llm").json()["roles"] == {"memory_analyzer": mock_openai_profile}
+    assert c.post("/api/chat/settings/llm/roles",
+                  json={"role": "memory_analyzer", "profile_id": "nope"}).status_code == 404
+    assert c.post("/api/chat/settings/llm/roles",
+                  json={"role": "voice", "profile_id": mock_openai_profile}).status_code == 404
+    cleared = c.post("/api/chat/settings/llm/roles", json={"role": "memory_analyzer", "profile_id": None})
+    assert cleared.json() == {"roles": {}}
+
+
+def test_only_a_super_admin_sets_a_profile_role(client):
+    r = client.post("/api/chat/settings/llm/roles",
+                    json={"role": "memory_analyzer", "profile_id": "anthropic-opus"})
+    assert r.status_code == 403

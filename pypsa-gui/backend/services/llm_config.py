@@ -682,7 +682,9 @@ def _entries_a_load_would_skip(written_ids: set[str]) -> list:
     return preserved
 
 
-def save_profiles(profiles: list[LLMProfile], active_id: str) -> None:
+def save_profiles(
+    profiles: list[LLMProfile], active_id: str, roles: dict[str, str] | None = None
+) -> None:
     """
     Validate every profile, then write `llm-profiles.json` at 0600.
 
@@ -711,12 +713,21 @@ def save_profiles(profiles: list[LLMProfile], active_id: str) -> None:
     if active_id not in seen_ids and active_id not in _BUILTIN_IDS:
         raise ProfileValidationError(f"active_profile_id {active_id!r} is not a known profile")
 
+    # Profile roles (assistant-memory 04b) are kept across every save; a role
+    # whose profile is gone is dropped, so it falls back to the active one.
+    roles = load_roles() if roles is None else dict(roles)
+    roles = {
+        role: pid for role, pid in roles.items()
+        if role in PROFILE_ROLES and (pid in seen_ids or pid in _BUILTIN_IDS)
+    }
+
     # C-14 — re-emit the entries this build cannot load, so a write does not
     # silently delete them. Appended after the known-good ones; `load_profiles`
     # will skip them again on the next read, exactly as before.
     payload = {
         "version": _FILE_VERSION,
         "active_profile_id": active_id,
+        "roles": roles,
         "profiles": (
             [_profile_to_dict(p) for p in profiles]
             + _entries_a_load_would_skip({p.id for p in profiles})
@@ -839,6 +850,51 @@ def set_active(profile_id: str) -> None:
         raise ProfileValidationError(f"unknown profile id {profile_id!r}")
     file_profiles = [p for p in profiles if p.id not in _BUILTIN_IDS]
     save_profiles(file_profiles, profile_id)
+
+
+# Optional profile roles: a task that may run on a profile other than the
+# active one (assistant-memory plan §6). Unset means the active profile.
+PROFILE_ROLES = ("memory_analyzer",)
+
+
+def load_roles() -> dict[str, str]:
+    """`{role: profile_id}` as stored; unknown roles and non-string ids are
+    ignored. Never raises, like `_read_file`."""
+    data = _read_file() or {}
+    raw = data.get("roles")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        role: pid for role, pid in raw.items()
+        if role in PROFILE_ROLES and isinstance(pid, str)
+    }
+
+
+def set_role(role: str, profile_id: str | None) -> dict[str, str]:
+    """Mark `profile_id` for `role`, or clear the role with None. Raises
+    `ProfileValidationError` for an unknown role or profile id."""
+    if role not in PROFILE_ROLES:
+        raise ProfileValidationError(f"unknown profile role {role!r}")
+    profiles, current_active = load_profiles()
+    roles = load_roles()
+    if profile_id is None:
+        roles.pop(role, None)
+    else:
+        if profile_id not in {p.id for p in profiles}:
+            raise ProfileValidationError(f"unknown profile id {profile_id!r}")
+        roles[role] = profile_id
+    file_profiles = [p for p in profiles if p.id not in _BUILTIN_IDS]
+    save_profiles(file_profiles, current_active, roles)
+    return load_roles()
+
+
+def resolve_role(role: str) -> LLMProfile:
+    """The profile marked for `role`, or the active profile when none is
+    marked or the marked one no longer loads."""
+    profiles, active_id = load_profiles()
+    by_id = {p.id: p for p in profiles}
+    pid = load_roles().get(role)
+    return by_id.get(pid) if pid in by_id else by_id[active_id]
 
 
 def load_presets() -> list[dict]:

@@ -418,3 +418,26 @@ class MemoryDreamJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MemoryDreamSettings(Base):
+    """A user's opt-in for automatic dream jobs (assistant-memory plan §6).
+
+    Both triggers are off until the user turns them on in Memory settings: a
+    job sends past transcripts to the configured provider. No row means both
+    off.
+    """
+
+    __tablename__ = "memory_dream_settings"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    nightly: Mapped[bool] = mapped_column(Boolean, default=False)
+    after_sessions: Mapped[bool] = mapped_column(Boolean, default=False)
+    # When `after_sessions` was last turned on: with no job yet, only chats
+    # after it count, so turning it on never fires on old chats.
+    after_sessions_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

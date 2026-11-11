@@ -26,6 +26,14 @@ vi.mock('../../api/memory', async (orig) => {
       edit: (...a: unknown[]) => edit(...a),
       versions: (...a: unknown[]) => versions(...a),
     },
+    dreamApi: {
+      latest: () => Promise.resolve(null),
+      start: () => Promise.reject(new Error('not in this test')),
+      settings: () => Promise.resolve({
+        nightly: false, after_sessions: false, nightly_at: '03:00 Europe/Berlin', sessions_needed: 10,
+      }),
+      setSettings: () => Promise.reject(new Error('not in this test')),
+    },
   }
 })
 vi.mock('../../hooks/useAssetSchema', () => ({ useAssetSchema: () => ({ data: undefined }) }))

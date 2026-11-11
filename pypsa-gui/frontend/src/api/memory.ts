@@ -92,6 +92,76 @@ export const memoryApi = {
     client.post<MemoryItem>('/memory/dismissals', card).then(r => r.data),
 }
 
+// ── Slice 04b: "Review my recent work", the dream job (routers/memory_dream.py,
+// `dream.view()`). Refusals are shown in place, so these skip the toast.
+
+export type DreamStatus = 'queued' | 'running' | 'done' | 'failed' | 'capped' | 'cancelled'
+
+export interface DreamJob {
+  id: string
+  trigger: 'manual' | 'nightly' | 'sessions'
+  status: DreamStatus
+  error_kind: string | null
+  counts: Record<string, number>
+  spent: { input_tokens?: number; output_tokens?: number; calls?: number }
+  budget: { tokens?: number; daily_tokens?: number }
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface DreamSettings {
+  nightly: boolean
+  after_sessions: boolean
+  nightly_at: string
+  sessions_needed: number
+}
+
+export const dreamApi = {
+  latest: () =>
+    client.get<{ job: DreamJob | null }>('/memory/dream', { skipErrorToast: true })
+      .then(r => r.data.job),
+  start: () =>
+    client.post<{ job: DreamJob }>('/memory/dream', undefined, { skipErrorToast: true })
+      .then(r => r.data.job),
+  settings: () =>
+    client.get<{ settings: DreamSettings }>('/memory/dream/settings', { skipErrorToast: true })
+      .then(r => r.data.settings),
+  setSettings: (s: Partial<Pick<DreamSettings, 'nightly' | 'after_sessions'>>) =>
+    client.put<{ settings: DreamSettings }>('/memory/dream/settings', s, { skipErrorToast: true })
+      .then(r => r.data.settings),
+}
+
+export const isDreamLive = (job: DreamJob | null | undefined) =>
+  job?.status === 'queued' || job?.status === 'running'
+
+const DREAM_FAILURE: Record<string, string> = {
+  dream_provider_error: 'the model could not be reached',
+  dream_restarts: 'it was interrupted too often',
+  dream_user_inactive: 'your account is not active',
+  dream_internal_error: 'of an internal error',
+}
+
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`
+
+/** One line for the latest review, in the user's words. */
+export function dreamStatusWords(job: DreamJob | null | undefined): string {
+  if (!job) return 'Not reviewed yet.'
+  const proposed = job.counts.proposed ?? 0
+  const read = job.counts.analyzed ?? 0
+  const by = job.trigger === 'nightly' ? ' (nightly)' : job.trigger === 'sessions' ? ' (after new chats)' : ''
+  switch (job.status) {
+    case 'queued': return `Review queued${by}…`
+    case 'running': return `Reviewing${by}… ${read} of your chats and runs read so far.`
+    case 'done': return proposed
+      ? `Last review${by}: ${plural(proposed, 'proposal')} below.`
+      : `Last review${by}: nothing new to propose.`
+    case 'capped': return `Last review${by} reached its token budget: ${plural(proposed, 'proposal')} kept. The next review continues from there.`
+    case 'failed': return `Last review${by} failed because ${DREAM_FAILURE[job.error_kind ?? ''] ?? (job.error_kind ?? 'of an unknown error')}.`
+    case 'cancelled': return `Last review${by} was cancelled.`
+  }
+}
+
 // ── Slice 03: saved parameter values (routes in routers/memory.py and
 // routers/network_memory_parameter.py). Each refusal is shown in place, so none
 // of these toasts through the client's interceptor (`skipErrorToast`).

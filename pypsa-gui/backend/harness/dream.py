@@ -43,7 +43,7 @@ only create `proposed` items, never confirm one.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 import json
 import logging
 import os
@@ -52,11 +52,12 @@ import time
 from typing import Any
 from collections.abc import Callable
 import uuid
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
-from db.models import MemoryDreamJob, Project, SolveJobRow, User
+from db.models import MemoryDreamJob, MemoryDreamSettings, Project, SolveJobRow, User
 from harness import eventlog, fence
 from harness.protocol import LLMRequest
 from services import memory_store as M
@@ -147,9 +148,12 @@ def latest(db, user: User) -> MemoryDreamJob | None:
     )
 
 
-def start(db, user: User, trigger: str = "manual") -> MemoryDreamJob:
+def start(
+    db, user: User, trigger: str = "manual", *, now: datetime | None = None
+) -> MemoryDreamJob:
     """Queue a job, or DreamError `dream_job_live` (409) when one is queued or
-    running. The partial unique index decides a race (D4)."""
+    running. The partial unique index decides a race (D4). `now` is the
+    worker's clock for a trigger, so its once-a-night check reads one clock."""
     if trigger not in TRIGGERS:
         raise DreamError(f"trigger must be one of {', '.join(TRIGGERS)}")
     if M.org_of(db, user) is None:
@@ -175,7 +179,7 @@ def start(db, user: User, trigger: str = "manual") -> MemoryDreamJob:
         counts_json=json.dumps({}),
         restarts=0,
         restart_times_json="[]",
-        created_at=_now_dt(),
+        created_at=now or _now_dt(),
     )
     db.add(job)
     try:
@@ -627,16 +631,130 @@ def _checked_item(raw: Any) -> dict | None:
 
 
 # --------------------------------------------------------------------------
+# Automatic triggers (plan §6): opt-in, both off by default
+
+
+NIGHTLY_TZ = ZoneInfo("Europe/Berlin")
+NIGHTLY_HOUR = 3  # 03:00 local; fires on the first scan in [03:00, 04:00)
+SESSIONS_TRIGGER = 10  # new chats since the last job (or since the opt-in)
+
+
+def settings_view(db, user: User) -> dict:
+    """The caller's opt-in; no row is both off."""
+    row = db.get(MemoryDreamSettings, user.id)
+    return {
+        "nightly": bool(row and row.nightly),
+        "after_sessions": bool(row and row.after_sessions),
+        "nightly_at": f"{NIGHTLY_HOUR:02d}:00 Europe/Berlin",
+        "sessions_needed": SESSIONS_TRIGGER,
+    }
+
+
+def set_settings(
+    db, user: User, *, nightly: bool | None = None, after_sessions: bool | None = None
+) -> dict:
+    """Turn either trigger on or off for the caller only."""
+    row = db.get(MemoryDreamSettings, user.id)
+    now = _now_dt()
+    if row is None:
+        row = MemoryDreamSettings(
+            user_id=user.id, nightly=False, after_sessions=False, updated_at=now
+        )
+        db.add(row)
+    if nightly is not None:
+        row.nightly = bool(nightly)
+    if after_sessions is not None:
+        if after_sessions and not row.after_sessions:
+            row.after_sessions_since = now
+        row.after_sessions = bool(after_sessions)
+    row.updated_at = now
+    db.commit()
+    return settings_view(db, user)
+
+
+def _nightly_due(db, user_id, now: float) -> bool:
+    """Inside [03:00, 04:00) Berlin time and no nightly job since today's 03:00."""
+    local = datetime.fromtimestamp(now, NIGHTLY_TZ)
+    if local.hour != NIGHTLY_HOUR:
+        return False
+    since = local.replace(hour=NIGHTLY_HOUR, minute=0, second=0, microsecond=0)
+    since_utc = since.astimezone(UTC)
+    last = db.scalar(
+        select(func.max(MemoryDreamJob.created_at)).where(
+            MemoryDreamJob.user_id == user_id, MemoryDreamJob.trigger == "nightly"
+        )
+    )
+    return last is None or _aware(last) < since_utc
+
+
+def new_sessions(db, user: User, row: MemoryDreamSettings) -> int:
+    """The user's own chats created after their latest job, or after the
+    opt-in when there is none yet (whichever is later). Headers only."""
+    marks = [_aware(row.after_sessions_since)]
+    prev = latest(db, user)
+    if prev is not None:
+        marks.append(_aware(prev.created_at))
+    mark = max((m for m in marks if m is not None), default=None)
+    directory = eventlog._owner_dir(str(user.id))
+    if not directory.is_dir():
+        return 0
+    count = 0
+    for path in directory.glob("*.jsonl"):
+        try:
+            header = eventlog.read_header(path) or {}
+            if str(header.get("owner_user_id")) != str(user.id):
+                continue
+            created = _aware(datetime.fromisoformat(str(header.get("created_at"))))
+        except Exception:  # noqa: BLE001 — a torn or undated log is not counted
+            continue
+        if mark is None or created > mark:
+            count += 1
+    return count
+
+
+def fire_triggers(db, now: float) -> list[str]:
+    """Start the due automatic jobs; the job ids started. Only users who
+    opted in are looked at. A trigger never makes a second live job: `start`
+    refuses with `dream_job_live` (D4) and the trigger is skipped until the
+    next scan; an inactive user or one without an org is skipped too."""
+    started: list[str] = []
+    rows = db.scalars(
+        select(MemoryDreamSettings).where(
+            or_(MemoryDreamSettings.nightly, MemoryDreamSettings.after_sessions)
+        )
+    ).all()
+    for row in rows:
+        user = db.get(User, row.user_id)
+        if user is None or user.status != "active":
+            continue
+        trigger = None
+        if row.nightly and _nightly_due(db, user.id, now):
+            trigger = "nightly"
+        elif row.after_sessions and new_sessions(db, user, row) >= SESSIONS_TRIGGER:
+            trigger = "sessions"
+        if trigger is None:
+            continue
+        try:
+            job = start(db, user, trigger, now=datetime.fromtimestamp(now, UTC))
+        except DreamError as exc:
+            log.info("dream trigger %s for %s skipped: %s", trigger, user.id, exc.kind)
+            continue
+        started.append(str(job.id))
+    return started
+
+
+# --------------------------------------------------------------------------
 # The worker
 
 
 def _default_provider(db, user: User):
-    """The active profile's provider and model. Any profile works: the wiring
-    picks the wire; this module never names one."""
+    """The provider and model of the profile marked `memory_analyzer`, or of
+    the active profile when none is. Any profile works: the wiring picks the
+    wire; this module never names one."""
     from harness.providers import wiring
     from services import llm_config
 
-    profile = llm_config.resolve_profile(None)
+    profile = llm_config.resolve_role("memory_analyzer")
     provider, err = wiring._provider_for_profile(profile)
     return provider, profile.model, err
 
@@ -709,6 +827,11 @@ class Worker:
         with self.factory() as db:
             now = self.clock()
             settle_lapsed(db, now)
+            try:
+                fire_triggers(db, now)
+            except Exception:  # noqa: BLE001 — a trigger scan never blocks a queued job
+                db.rollback()
+                log.exception("dream trigger scan failed")
             ids = db.scalars(
                 select(MemoryDreamJob.id)
                 .where(MemoryDreamJob.status == "queued")

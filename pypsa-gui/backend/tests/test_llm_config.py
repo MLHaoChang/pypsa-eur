@@ -1111,3 +1111,64 @@ def test_a_wrongly_typed_entry_is_preserved_on_disk_not_deleted(appdata):
         f"{[e.get('id') for e in raw]}"
     )
     assert kept["label"] == 123, "the entry must be preserved VERBATIM to repair"
+
+
+# -- optional profile roles (assistant-memory 04b) ----------------------------
+
+def _local_profile(pid="local"):
+    from services import llm_config
+    return llm_config.LLMProfile(
+        id=pid, label="Local", preset="custom", wire="openai",
+        base_url="http://localhost:11434/v1", model="qwen3:8b", tools=True,
+        vision=False, auth="none", fallback_model=None, max_output_tokens=None)
+
+
+def test_memory_analyzer_falls_back_to_the_active_profile(appdata):
+    from services import llm_config
+    assert llm_config.load_roles() == {}
+    assert llm_config.resolve_role("memory_analyzer").id == "anthropic-sonnet"
+    llm_config.set_active("anthropic-opus")
+    assert llm_config.resolve_role("memory_analyzer").id == "anthropic-opus"
+
+
+def test_a_marked_profile_serves_the_role_and_survives_other_saves(appdata):
+    from services import llm_config
+    llm_config.save_profiles([_local_profile()], "anthropic-sonnet")
+    assert llm_config.set_role("memory_analyzer", "local") == {"memory_analyzer": "local"}
+    assert llm_config.resolve_role("memory_analyzer").id == "local"
+    llm_config.set_active("anthropic-opus")  # a save that names no roles keeps them
+    assert llm_config.load_roles() == {"memory_analyzer": "local"}
+    assert llm_config.resolve_profile(None).id == "anthropic-opus"
+    llm_config.set_role("memory_analyzer", "anthropic-sonnet")  # a built-in works too
+    assert llm_config.resolve_role("memory_analyzer").id == "anthropic-sonnet"
+    llm_config.set_role("memory_analyzer", None)
+    assert llm_config.load_roles() == {}
+    assert llm_config.resolve_role("memory_analyzer").id == "anthropic-opus"
+
+
+def test_deleting_the_marked_profile_drops_the_role(appdata):
+    from services import llm_config
+    llm_config.save_profiles([_local_profile()], "anthropic-sonnet")
+    llm_config.set_role("memory_analyzer", "local")
+    llm_config.save_profiles([], "anthropic-sonnet")
+    assert llm_config.load_roles() == {}
+    assert llm_config.resolve_role("memory_analyzer").id == "anthropic-sonnet"
+
+
+def test_unknown_roles_and_profiles_are_refused(appdata):
+    from services import llm_config
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config.set_role("voice", "anthropic-sonnet")
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config.set_role("memory_analyzer", "nope")
+    assert not llm_config.profiles_path().exists()
+
+
+def test_a_hand_edited_role_naming_nothing_falls_back(appdata):
+    from services import llm_config
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1, "active_profile_id": "anthropic-opus", "profiles": [],
+        "roles": {"memory_analyzer": "gone", "other": "anthropic-sonnet"},
+    }), encoding="utf-8")
+    assert llm_config.load_roles() == {"memory_analyzer": "gone"}
+    assert llm_config.resolve_role("memory_analyzer").id == "anthropic-opus"

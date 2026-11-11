@@ -39,6 +39,7 @@ import {
   deleteLLMProfile,
   deleteLLMProfileKey,
   postLLMActive,
+  postLLMRole,
   postLLMTest,
   putLLMProfile,
   putLLMProfileKey,
@@ -475,6 +476,12 @@ export default function AssistantModelSettings() {
     onError: () => toast.error('Could not switch the active model.'),
   })
 
+  const roleMutation = useMutation({
+    mutationFn: (id: string | null) => postLLMRole('memory_analyzer', id),
+    onSuccess: refreshAll,
+    onError: () => toast.error('Could not change the model for memory reviews.'),
+  })
+
   const saveKeyMutation = useMutation({
     mutationFn: (vars: { id: string; value: string }) => putLLMProfileKey(vars.id, vars.value),
     onSuccess: (_r, vars) => {
@@ -607,7 +614,7 @@ export default function AssistantModelSettings() {
   // in api/llmSettings.ts.
   if (data == null) return null
 
-  const { profiles, active_profile_id, presets } = data
+  const { profiles, active_profile_id, presets, roles } = data
   const takenIds = new Set(profiles.map(p => p.id))
 
   return (
@@ -637,6 +644,21 @@ export default function AssistantModelSettings() {
           />
         ))}
       </ul>
+
+      <label className="flex items-center gap-2 text-xs text-muted">
+        Memory reviews use
+        <select
+          aria-label="Model for memory reviews"
+          data-testid="assistant-model-memory-analyzer"
+          value={roles?.memory_analyzer ?? ''}
+          disabled={roleMutation.isPending}
+          onChange={e => roleMutation.mutate(e.target.value || null)}
+          className="h-[22px] text-[10.5px] bg-bg border border-border rounded px-1 text-text"
+        >
+          <option value="">The active model</option>
+          {profiles.map(p => <option key={p.id} value={p.id}>{`${p.label} · ${p.model}`}</option>)}
+        </select>
+      </label>
 
       {!adding ? (
         <button

@@ -3,7 +3,7 @@
 
 # Slice 3: run lessons via a dream job
 
-Status: ready-for-agent (blocked by 02, whose UI part 02b is in progress; Opus; GK B plan first)
+Status: done
 Blocked by: 02
 Type: feature
 Model: Opus. Reviewer: GK B.
@@ -23,11 +23,11 @@ Checked on master: `services/memory_store.py` exists (02a, #1309); no dream job 
 - Likely files: a new `harness/` task module for the dream job, `services/memory_store.py`, `services/memory_tools.py`, tests beside them. Reviewer: GK B (plan first).
 
 Acceptance:
-- [ ] A durable harness task runs one analyzer per past transcript and run, then one organizer; a fake provider drives it in tests.
-- [ ] It writes only proposed lessons; nothing is stored until the user confirms each (COPILOT-1).
-- [ ] A token/cost budget cap stops it with a typed reason and keeps the lessons proposed so far.
-- [ ] The same code path works with any provider profile (no provider name in the task).
-- [ ] A confirmed lesson is a memory item with its source chats and runs.
+- [x] A durable harness task runs one analyzer per past transcript and run, then one organizer; a fake provider drives it in tests.
+- [x] It writes only proposed lessons; nothing is stored until the user confirms each (COPILOT-1).
+- [x] A token/cost budget cap stops it with a typed reason and keeps the lessons proposed so far.
+- [x] The same code path works with any provider profile (no provider name in the task).
+- [x] A confirmed lesson is a memory item with its source chats and runs.
 
 ### 2026-11-11: plan GO (GK B), slices 04a backend and 04b UI + triggers
 
@@ -61,3 +61,12 @@ All four 04a departures are accepted:
 - The D4 race test runs on SQLite only.
 
 Minors left as they are: `spent_today` keys on the job's `created_at`, so a job that runs past midnight counts to the day it was queued. A name-keyed chat project is re-resolved by name in the user's current org.
+
+### 2026-11-11: 04b build notes
+
+- UI: "Review my recent work" and the job status line head the Proposals tab (`components/memory/DreamReview.tsx`); it polls `GET /api/memory/dream` every 3 s while a job is live and refreshes the proposals when it ends. Under it, "Automatic reviews": two checkboxes, both off.
+- Opt-in: table `memory_dream_settings` (migration 0015), routes `GET/PUT /api/memory/dream/settings`, caller's own row only. No row is off. `after_sessions_since` keeps turning the trigger on from firing on old chats.
+- Triggers: `dream.fire_triggers`, run in the worker's scan (`Worker.run_once`). Nightly fires on the first scan in [03:00, 04:00) Europe/Berlin with no nightly job since that day's 03:00; there is no catch-up when the app was down for that hour. The sessions trigger fires at 10 of the user's own chat logs created after their latest job (or after the opt-in). Both go through `dream.start`, so a live job refuses them (D4) and they retry on the next scan.
+- `memory_analyzer` role: a top-level `roles` map in `llm-profiles.json` (so a built-in profile can carry it too), set by `POST /api/chat/settings/llm/roles` (super admin), picked in Assistant model settings ("Memory reviews use"). `llm_config.resolve_role` falls back to the active profile when the role is unset or its profile is gone; deleting the profile drops the role.
+- Route-parity fragment `claude-am-04b-dream-ui-triggers.json` (ui-pointer, MEMORY-DREAM-1; the role route as assistant-self-config).
+

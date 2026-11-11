@@ -5,7 +5,7 @@
 // appear in this component's inputs — that is asserted explicitly below,
 // not just assumed from the API shape.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
@@ -14,6 +14,7 @@ import {
   deleteLLMProfileKey,
   fetchLLMSettingsOrNull,
   postLLMActive,
+  postLLMRole,
   postLLMTest,
   putLLMProfile,
   putLLMProfileKey,
@@ -28,6 +29,7 @@ vi.mock('../api/llmSettings', async (importOriginal) => {
     ...actual,
     fetchLLMSettingsOrNull: vi.fn(),
     postLLMActive: vi.fn(),
+    postLLMRole: vi.fn(),
     putLLMProfileKey: vi.fn(),
     deleteLLMProfileKey: vi.fn(),
     postLLMTest: vi.fn(),
@@ -523,5 +525,20 @@ describe('A8 — unredactable key disclosure', () => {
     renderSection()
     await screen.findByText('No Key')
     expect(screen.queryByTestId('assistant-model-key-unredactable-no-key')).toBeNull()
+  })
+
+  it('picks the model for memory reviews, defaulting to the active one, and clears it', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    vi.mocked(postLLMRole).mockResolvedValue({ roles: {} })
+    renderSection()
+    const select = await screen.findByLabelText('Model for memory reviews') as HTMLSelectElement
+    expect(select.value).toBe('')
+    expect(select.options[0].textContent).toBe('The active model')
+    const other = payload().profiles[payload().profiles.length - 1].id
+    fireEvent.change(select, { target: { value: other } })
+    await waitFor(() => expect(postLLMRole).toHaveBeenCalledWith('memory_analyzer', other))
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({ roles: { memory_analyzer: other } }))
+    fireEvent.change(select, { target: { value: '' } })
+    await waitFor(() => expect(postLLMRole).toHaveBeenLastCalledWith('memory_analyzer', null))
   })
 })
