@@ -8,6 +8,7 @@ One test (or a small group) per condition GK B set: V1 to V12 and W1 to W8
 
 from __future__ import annotations
 
+import contextlib
 import json
 import struct
 import threading
@@ -1346,6 +1347,29 @@ def test_k1_add_to_a_deleted_project_raises_gone_and_makes_nothing(tmp_path):
 def test_k1_add_refuses_report_busy_while_the_project_is_closing(tmp_path):
     (tmp_path / "reports").mkdir()
     (store.reports_dir(tmp_path) / store.CLOSING_MARKER).write_text("1\n")
+    with pytest.raises(store.ReportBusy):
+        cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint=None)
+    assert not any(cs.charts_dir(tmp_path).glob("chart-*"))
+
+
+def test_k1b_the_closing_check_sits_inside_the_chart_lock(tmp_path, monkeypatch):
+    """A `.closing` marker written while `add` takes the chart lock still refuses.
+
+    The wrapper writes the marker on entry to the lock, the way a closer that
+    holds the project does. A check made before the lock would miss it.
+    """
+    from harness import durable
+
+    (tmp_path / "reports").mkdir()
+    real = durable.file_lock
+
+    @contextlib.contextmanager
+    def lock_then_close(*args, **kwargs):
+        with real(*args, **kwargs):
+            (store.reports_dir(tmp_path) / store.CLOSING_MARKER).write_text("1\n")
+            yield
+
+    monkeypatch.setattr(durable, "file_lock", lock_then_close)
     with pytest.raises(store.ReportBusy):
         cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint=None)
     assert not any(cs.charts_dir(tmp_path).glob("chart-*"))
