@@ -267,6 +267,11 @@ class ReportBusy(ReportStoreError):
     lock past the caller's bound (`LOCK_TIMEOUT_S`, or a copy's deadline)."""
 
 
+class ReportProjectGone(ReportStoreError):
+    """The project directory a writer was given no longer exists: it was
+    deleted or renamed while the writer ran (study harness 07f)."""
+
+
 class ReportVersionConflict(ReportStoreError):
     """`save_version(expected_base=n)` found a later version than `n`: another
     writer saved in between, so this one would silently supersede it."""
@@ -307,11 +312,18 @@ def report_lock(project_dir: pathlib.Path, report_id: str, *, timeout: float | N
         if key in held:
             yield
             return
-        root.mkdir(parents=True, exist_ok=True)
+        # Never the project directory itself (study harness 07f): a writer
+        # that outlived a delete or a rename would make it again.
+        try:
+            root.mkdir(exist_ok=True)
+        except FileNotFoundError as exc:
+            raise ReportProjectGone(f"report {rid}: its project directory is gone") from exc
         left = max(0.0, budget - (time.monotonic() - started))
         try:
             with file_lock(str(root / f".{rid}.lock"), timeout=left,
                            busy=f"report {rid} is being written"):
+                if _closing_active(root):
+                    raise ReportBusy(f"report {rid}: its project is being deleted or moved")
                 held.add(key)
                 try:
                     yield
@@ -396,6 +408,10 @@ def reports_copy_lock(src: pathlib.Path | None = None, dst: pathlib.Path | None 
 
     for _ in range(_COPY_LOCK_ROUNDS):
         src_ids, dst_ids = wanted()
+        if dst is not None and dst_ids:
+            # A copy makes its own destination; `report_lock` makes only
+            # `reports/` (07f), so a writer cannot bring a project back.
+            pathlib.Path(dst).mkdir(parents=True, exist_ok=True)
         keys = sorted(
             {(src_key, rid, "src") for rid in src_ids}
             | {(dst_key, rid, "dst") for rid in dst_ids}
@@ -496,6 +512,64 @@ def clear_reports(project_dir: pathlib.Path) -> None:
         for entry in list(root.iterdir()):
             if entry.name in held["dst"]:
                 _remove_entry(entry)
+
+
+# ── closing a directory (study harness 07f) ─────────────────────────────────
+
+CLOSING_MARKER = ".closing"
+# A marker older than this is left from a crash: every operation that writes
+# one moves its directory away within moments, so nothing refuses for ever.
+CLOSING_STALE_S = 60
+
+
+def _closing_active(root: pathlib.Path) -> bool:
+    try:
+        written = (root / CLOSING_MARKER).stat().st_mtime
+    except OSError:
+        return False
+    return time.time() - written < CLOSING_STALE_S
+
+
+def reports_closing(project_dir: pathlib.Path) -> bool:
+    """Whether a delete, rename or move of `project_dir` is under way."""
+    return _closing_active(reports_dir(project_dir))
+
+
+@contextmanager
+def reports_closed(project_dir: pathlib.Path):
+    """Close a directory's reports for an operation that moves or removes the
+    whole directory (project delete and rename, snapshot delete and prune, a
+    legacy claim; study harness 07f).
+
+    Takes `reports_copy_lock` on every report, so it waits for a write in
+    progress (one `COPY_LOCK_TIMEOUT_S` deadline, then `ReportBusy`), and
+    writes `reports/.closing` while they are held. It then releases them, so
+    no lock file is open when the caller moves the directory (Windows cannot
+    move or remove one), and yields. Until the marker goes, `report_lock`
+    refuses `ReportBusy` in every process: it checks the marker under its own
+    file lock. The marker is removed on exit; one that moved with the
+    directory is the caller's (`clear_closing`), and one a crash left goes
+    stale after `CLOSING_STALE_S`.
+
+    Order: after `PyPSAService.get_lock()` when the caller holds that, like
+    every bundle copy (07e, L1)."""
+    root = reports_dir(project_dir)
+    with reports_copy_lock(None, project_dir):
+        if project_dir.is_dir():
+            root.mkdir(exist_ok=True)
+            atomic_write_text(root / CLOSING_MARKER, f"{os.getpid()}\n")
+    try:
+        yield
+    finally:
+        clear_closing(project_dir)
+
+
+def clear_closing(project_dir: pathlib.Path) -> None:
+    """Remove `reports/.closing` from `project_dir`, if it is there."""
+    try:
+        (reports_dir(project_dir) / CLOSING_MARKER).unlink(missing_ok=True)
+    except OSError:
+        logger.warning("could not remove the closing marker of %s", project_dir)
 
 
 def create_report(project_dir: pathlib.Path, doc: ReportDocument) -> ReportMeta:

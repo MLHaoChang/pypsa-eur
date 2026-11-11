@@ -45,7 +45,10 @@ import re
 import shutil
 import uuid
 from dataclasses import asdict
+from contextlib import ExitStack
 from datetime import UTC, datetime
+
+from services.reports import store as report_store
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +137,18 @@ def _copy_walk(src: pathlib.Path, dst: pathlib.Path) -> None:
         if dname in SKIPPED:
             continue
         d = src / dname
+        if dname == report_store.REPORTS_DIRNAME:
+            # Under each report's lock, and without the `.<id>.lock` files
+            # (study harness 07f): `copy_reports` copies only the reports.
+            if d.is_dir() and not d.is_symlink():
+                try:
+                    report_store.copy_reports(src, dst)
+                except report_store.ReportBusy as exc:
+                    raise ForkError(
+                        "report_busy",
+                        "a report of the base project is being written; "
+                        "run the study again in a moment") from exc
+            continue
         if d.is_dir() and not d.is_symlink():
             shutil.copytree(str(d), str(dst / dname), dirs_exist_ok=True)
 
@@ -154,9 +169,10 @@ def delete_fork(db, fork_row, *, study_id: str, base_uuid: str) -> bool:
     verify. Raises `ForkError` while the queue holds an active job for it or
     when a user has branched a project from it.
     """
-    from routers.projects import _force_rmtree
+    from routers.projects import _remove_closed_dir
     from services import project_registry
     from services.pypsa_service import PyPSAService
+    from services.reports import report_job
     from services.solve_queue import solve_queue
 
     if not is_study_owned(fork_row, study_id=study_id, base_uuid=base_uuid):
@@ -172,8 +188,21 @@ def delete_fork(db, fork_row, *, study_id: str, base_uuid: str) -> bool:
             f"a project was branched from the study fork '{fork_row.name}'; it "
             "is left in place rather than deleted with the fork")
     target = project_registry.project_dir(fork_row)
-    if target.exists():
-        _force_rmtree(target)
+    # As a project delete (study harness 07f): the network lock, then the
+    # fork's reports closed; busy, or a report job running for it, refuses.
+    with PyPSAService.get_lock(), ExitStack() as closed:
+        try:
+            closed.enter_context(report_store.reports_closed(target))
+        except report_store.ReportBusy as exc:
+            raise ForkError("report_busy",
+                            f"a report of '{fork_row.name}' is being written; "
+                            "try again in a moment") from exc
+        if report_job.running_for(target):
+            raise ForkError("report_busy",
+                            f"a report is being generated for '{fork_row.name}'; "
+                            "abort it in Reports first")
+        if target.exists():
+            _remove_closed_dir(target)
     project_registry.delete_project_row(db, fork_row)
     try:
         PyPSAService.drop(key)

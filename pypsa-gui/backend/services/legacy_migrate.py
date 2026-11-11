@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from db.models import Organization, OrgMembership, Project, ProjectMembership, User
 from services import project_registry
+from services.reports import store as report_store
 from services.storage_paths import (
     storage_path_for,
     storage_value,
@@ -337,8 +338,13 @@ def claim_legacy_project(
                     f"Storage path for legacy project '{name}' is nested inside its source directory"
                 )
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source), str(destination))
-            moved_paths.append((destination, source))
+            # Study harness 07f: not while a report of it is being written
+            # (`ReportBusy`, which the routes answer 409 `report_busy`). The
+            # closing marker moves with the directory and is removed there.
+            with report_store.reports_closed(source):
+                shutil.move(str(source), str(destination))
+                moved_paths.append((destination, source))
+            report_store.clear_closing(destination)
 
         db.commit()
     except Exception:

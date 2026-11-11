@@ -65,6 +65,7 @@ import app_paths
 from db.models import Project
 from services import project_registry
 from services.atomic_io import atomic_write_text
+from services.reports import store as report_store
 from services.safe_names import unique_dir_name
 from services.storage_paths import (
     allocate_storage_path,
@@ -315,9 +316,34 @@ def inventory(root) -> list[LegacyProject]:
 
 # ── Copy + verify ────────────────────────────────────────────────────────────
 
+def _is_report_lock_name(name: str) -> bool:
+    """A `reports/.<id>.lock` or `reports/.closing` name (study harness 07f)."""
+    return name == report_store.CLOSING_MARKER or report_store._lock_file_id(name) is not None
+
+
+def _skip_report_locks(root: Path):
+    """A `copytree` ignore callback: a project's report lock files and closing
+    marker are never copied (study harness 07f). They name a lock, not data,
+    and a copied one is a second lock file for the same report. No lock is
+    taken: a legacy tree is outside the registry, so no report writer of this
+    app reaches it, and locking it would write into the user's original."""
+    reports = os.path.normcase(os.path.abspath(root / report_store.REPORTS_DIRNAME))
+
+    def ignore(directory: str, names: list[str]) -> set[str]:
+        if os.path.normcase(os.path.abspath(directory)) != reports:
+            return set()
+        return {n for n in names if _is_report_lock_name(n)}
+
+    return ignore
+
+
 def _relative_files(root: Path) -> list[Path]:
     return sorted(
-        path.relative_to(root) for path in root.rglob("*") if path.is_file()
+        path.relative_to(root) for path in root.rglob("*")
+        if path.is_file() and not (
+            len(path.relative_to(root).parts) == 2
+            and path.relative_to(root).parts[0] == report_store.REPORTS_DIRNAME
+            and _is_report_lock_name(path.name))
     )
 
 
@@ -836,7 +862,8 @@ def rebase_row(db: DBSession, row: Project) -> Path:
         shutil.rmtree(staged, ignore_errors=True)
 
     try:
-        shutil.copytree(source, staged, symlinks=False, ignore_dangling_symlinks=True)
+        shutil.copytree(source, staged, symlinks=False, ignore_dangling_symlinks=True,
+                        ignore=_skip_report_locks(source))
         _normalise_modes(staged)
         problem = _verify_copy(source, staged)
         if problem is not None:
@@ -903,7 +930,8 @@ def _stage_and_rename(source_root, candidate, dest_root, taken, report) -> Path 
         # `--forget-legacy` step this CLI actively recommends destroys the
         # imported project. A copy has to be a copy.
         shutil.copytree(
-            candidate.path, staged, symlinks=False, ignore_dangling_symlinks=True
+            candidate.path, staged, symlinks=False, ignore_dangling_symlinks=True,
+            ignore=_skip_report_locks(candidate.path),
         )
         _normalise_modes(staged)
         problem = _verify_copy(candidate.path, staged)
