@@ -44,6 +44,7 @@ import json
 import math
 import pathlib
 from typing import Any
+from gridspine.drivers.process_chain import truthy as _truthy
 
 SCHEMA = 1
 VERDICTS = ("pass", "warn", "fail", "unknown")
@@ -1058,10 +1059,6 @@ def _poc_sk_min(inp: _Inputs):
     except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError):
         # No, or no readable, campus description: the entered S_k'' is used, and the row says so.
         return None, None
-
-
-def _truthy(v) -> bool:
-    return v is True or str(v).lower() in ("true", "1")
 
 
 def _process_units(links) -> list[str]:

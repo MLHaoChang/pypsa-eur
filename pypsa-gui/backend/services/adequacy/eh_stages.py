@@ -37,6 +37,7 @@ from models.energy_hub import (
     DEFAULT_EH_FRONTIER_LADDER,
 )
 from services.adequacy.worksheet import zero_reason
+from gridspine.drivers.process_chain import truthy as _truthy
 
 logger = logging.getLogger("pypsa_gui.eh_stages")
 
@@ -282,10 +283,6 @@ class FleetScope:
             "copt_import_note": self.copt_import_note(),
             "note": self.note,
         }
-
-
-def _truthy(v) -> bool:
-    return v is True or str(v).strip().lower() in ("true", "1", "yes")
 
 
 def _branch_edges(n, skip_links: set[str]) -> list[tuple[str, str]]:
