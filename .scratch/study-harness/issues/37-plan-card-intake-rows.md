@@ -34,11 +34,11 @@ Checked on master: `frontend/src` has no `intake_digest` and `EnvelopeSection.ts
 - Reviewers: GK B (plan), UX (against `.scratch/project-workflow/design.md`). Send the UI plan to UX before code.
 
 Acceptance:
-- [ ] The card's first row reads "Creates project <name> from the <template> template"; the short digest shows in Expert only.
-- [ ] The intake rows appear with their sources (issue 21).
-- [ ] "Approve and run unattended" and "Approve, step by step" send `envelope_decision.intake_digest` from `run.intake.digest`; a Vitest asserts the request body for both.
-- [ ] The step-by-step verdict's words state the creation.
-- [ ] A card without an intake keeps today's rows and sends no digest.
+- [x] The card's first row reads "Creates project <name> from the <template> template"; no digest shows in any row (UX ruling, #1332; the digest is only sent with the verdict).
+- [x] The intake rows appear with their sources (issue 21); every row and default is shown, none folded (GK B F2).
+- [x] "Approve and run unattended" and "Approve, step by step" send `envelope_decision.intake_digest` from `run.intake.digest`; a Vitest asserts the request body for both.
+- [x] The step-by-step verdict's words state the creation.
+- [x] A card without an intake keeps today's rows and sends no digest.
 
 ### 2026-11-11: reviewer plan verdicts
 
