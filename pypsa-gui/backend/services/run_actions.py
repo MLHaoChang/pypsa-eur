@@ -385,7 +385,9 @@ def approval_card(step) -> dict | None:
     frozen = step.get("frozen") if isinstance(step, dict) else None
     if not isinstance(frozen, dict) or not isinstance(frozen.get("digest"), str):
         return None
-    if (REGISTRY.get(step.get("tool")) or {}).get("kind") != DC_KIND or record_kind(frozen) != DC_KIND:
+    if (REGISTRY.get(step.get("tool")) or {}).get("kind") != DC_KIND or record_kind(
+        frozen
+    ) != DC_KIND:
         return None  # M2: only the grid-code record has this card
     from services import campus_electrical_service as ce
 
@@ -440,11 +442,7 @@ def fill(steps, frozen, kind=DC_KIND) -> None:
     the user. M2: a record of another kind is never put on a step; the step
     stops for the user instead."""
     for step in steps:
-        if (
-            kind_of(step) != kind
-            or step["args"] != MARKERS[kind]
-            or frozen is None
-        ):
+        if kind_of(step) != kind or step["args"] != MARKERS[kind] or frozen is None:
             continue
         if "unfrozen" in frozen:
             step["unfrozen"] = dict(frozen["unfrozen"])
@@ -483,7 +481,10 @@ def stage_frozen(task, kind=DC_KIND) -> dict:
         return copy.deepcopy(prior)
     if kind not in MARKERS:
         return {
-            "unfrozen": {"state": "kind_unknown", "message": "the action's record kind is unknown"}
+            "unfrozen": {
+                "state": "kind_unknown",
+                "message": "the action's record kind is unknown",
+            }
         }
     from services import run_profiles
 
@@ -930,7 +931,9 @@ def _mg_publish(path, step_id, attempt, instance, result):
 
     runner._update(path, done)
     if not wrote:
-        logger.info("run %s: the island check's result was not kept (run taken over)", path.stem)
+        logger.info(
+            "run %s: the island check's result was not kept (run taken over)", path.stem
+        )
         return "taken_over"
     return MG_SURVIVAL
 
@@ -1473,7 +1476,9 @@ MG_FREQUENCY_LISTS = (
     "bridge_failing_hours",
     "planned_infeasible_hours",
 )
-MG_FREQUENCY_BASIS = "hours of the campus run's year, each (period, hour) once, not weighted"
+MG_FREQUENCY_BASIS = (
+    "hours of the campus run's year, each (period, hour) once, not weighted"
+)
 
 
 def mg_frequency(project, task, revision) -> dict:
@@ -1486,7 +1491,10 @@ def mg_frequency(project, task, revision) -> dict:
 
     step = latest(task, CAMPUS)
     if step is None or step.get("status") != "completed":
-        return {"state": "not_run", "reason": "the run's own campus study has not finished"}
+        return {
+            "state": "not_run",
+            "reason": "the run's own campus study has not finished",
+        }
     result = step.get("result") or {}
     run = _project_dir(project) / ce.SUBDIR / "run"
     files = result.get("run_files")
@@ -1500,7 +1508,11 @@ def mg_frequency(project, task, revision) -> dict:
             "reason": "the published campus run is not the run's own campus study",
         }
     recorded = result.get("network_revision")
-    if isinstance(recorded, bool) or not isinstance(recorded, int) or recorded != revision:
+    if (
+        isinstance(recorded, bool)
+        or not isinstance(recorded, int)
+        or recorded != revision
+    ):
         return {
             "state": "edited",
             "reason": "the network was edited since the run's campus study read it",
@@ -1513,15 +1525,17 @@ def mg_frequency(project, task, revision) -> dict:
             "reason": "the campus run has no frequency judgement (no island hours were studied)",
         }
     except (OSError, ValueError):
-        return {"state": "unreadable", "reason": "the campus run's frequency summary cannot be read"}
+        return {
+            "state": "unreadable",
+            "reason": "the campus run's frequency summary cannot be read",
+        }
     try:
         hours = sorted(
-            {
-                (int(p), int(h))
-                for key in MG_FREQUENCY_LISTS
-                for p, h in summary[key]
-            }
+            {(int(p), int(h)) for key in MG_FREQUENCY_LISTS for p, h in summary[key]}
         )
     except (KeyError, TypeError, ValueError):
-        return {"state": "unreadable", "reason": "the campus run's frequency summary cannot be read"}
+        return {
+            "state": "unreadable",
+            "reason": "the campus run's frequency summary cannot be read",
+        }
     return {"hours": hours}

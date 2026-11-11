@@ -111,7 +111,9 @@ def _start(path, ctx):
 
 
 def _granted(path, solves):
-    envelope = run_envelope.propose(path, _read(path), run_profiles.resolve("eh_site@1"))
+    envelope = run_envelope.propose(
+        path, _read(path), run_profiles.resolve("eh_site@1")
+    )
     envelope.update(
         state="granted",
         granted_at="2026-11-08T00:00:00+00:00",
@@ -122,7 +124,11 @@ def _granted(path, solves):
 
 
 def _row(path):
-    rows = [a for a in run_envelope._load(path)["audit"] if a["event"] == run_actions.MG_EVENT]
+    rows = [
+        a
+        for a in run_envelope._load(path)["audit"]
+        if a["event"] == run_actions.MG_EVENT
+    ]
     assert len(rows) == 1
     return rows[0]
 
@@ -175,11 +181,13 @@ def test_the_island_check_is_a_read_only_registry_row_of_its_own_kind():
         "kind": run_actions.MG_KIND,
     }
     run_actions.check(
-        {"tool": MG, "native": run_actions.KIND, "args": {"frozen": "mg_island"}}, "solve"
+        {"tool": MG, "native": run_actions.KIND, "args": {"frozen": "mg_island"}},
+        "solve",
     )
     with pytest.raises(ValueError, match="frozen marker"):
         run_actions.check(
-            {"tool": MG, "native": run_actions.KIND, "args": dict(run_actions.FROZEN)}, "solve"
+            {"tool": MG, "native": run_actions.KIND, "args": dict(run_actions.FROZEN)},
+            "solve",
         )
     with pytest.raises(ValueError, match="frozen marker"):
         run_actions.check(
@@ -196,9 +204,13 @@ def test_the_island_check_is_a_read_only_registry_row_of_its_own_kind():
 def test_an_unknown_record_kind_is_refused_at_load_and_at_dispatch(hub, monkeypatch):
     _sidecar(hub)
     frozen = run_actions.mg_freeze(hub)
-    monkeypatch.setitem(run_actions.REGISTRY, MG, {**run_actions.REGISTRY[MG], "kind": "zz"})
+    monkeypatch.setitem(
+        run_actions.REGISTRY, MG, {**run_actions.REGISTRY[MG], "kind": "zz"}
+    )
     with pytest.raises(ValueError, match="no record kind"):
-        run_actions.check({"tool": MG, "native": run_actions.KIND, "args": {"frozen": "zz"}}, "solve")
+        run_actions.check(
+            {"tool": MG, "native": run_actions.KIND, "args": {"frozen": "zz"}}, "solve"
+        )
     assert run_actions.kind_of({"tool": MG, "native": run_actions.KIND}) is None
     assert run_actions.kinds([{"tool": MG, "native": run_actions.KIND}]) == []
     monkeypatch.setitem(run_actions.MARKERS, "zz", {"frozen": "zz"})
@@ -225,7 +237,9 @@ def test_the_mg_record_digests_the_validated_settings_canonically(hub):
     _sidecar(hub)
     frozen = run_actions.mg_freeze(hub)
     assert set(frozen) == {"kind", "version", "settings_digest", "solves", "digest"}
-    assert frozen["settings_digest"] == run_actions.digest(IC.validate(T.ISLAND_CONFIG[TID]))
+    assert frozen["settings_digest"] == run_actions.digest(
+        IC.validate(T.ISLAND_CONFIG[TID])
+    )
     # Key order in the file does not move the digest.
     raw = T.ISLAND_CONFIG[TID]
     _sidecar(hub, dict(reversed(list(raw.items()))))
@@ -255,10 +269,18 @@ def test_records_never_cross_kinds_at_fill(hub):
 
     def steps():
         return [
-            {"id": "solve.1", "tool": run_actions.READINESS, "native": run_actions.KIND,
-             "args": dict(run_actions.FROZEN)},
-            {"id": "solve.2", "tool": MG, "native": run_actions.KIND,
-             "args": run_actions.marker(MG)},
+            {
+                "id": "solve.1",
+                "tool": run_actions.READINESS,
+                "native": run_actions.KIND,
+                "args": dict(run_actions.FROZEN),
+            },
+            {
+                "id": "solve.2",
+                "tool": MG,
+                "native": run_actions.KIND,
+                "args": run_actions.marker(MG),
+            },
         ]
 
     both = steps()
@@ -329,9 +351,14 @@ def test_the_check_runs_only_with_its_own_valid_record(hub, monkeypatch, change)
     task["steps"][0]["card"] = {"island_settings": "x", "solves": 1}
     if change != "card":
         task["steps"][0].pop("card")
-        if run_actions.record_kind(frozen) == run_actions.MG_KIND and "settings_digest" in frozen:
-            task["steps"][0]["card"] = {"island_settings": str(frozen["settings_digest"])[:12],
-                                        "solves": frozen.get("solves")}
+        if (
+            run_actions.record_kind(frozen) == run_actions.MG_KIND
+            and "settings_digest" in frozen
+        ):
+            task["steps"][0]["card"] = {
+                "island_settings": str(frozen["settings_digest"])[:12],
+                "solves": frozen.get("solves"),
+            }
     path.write_text(json.dumps(task))
     _stub(monkeypatch, during=lambda: pytest.fail("never run"))
     assert _start(path, _ctx(hub)) == "mg_args"
@@ -420,7 +447,9 @@ def test_the_check_completes_with_its_record_and_spends_one_solve(hub, monkeypat
     assert seen[0] is not n  # M4: a copy, never the live network
     row = _row(path)
     assert row["reserved"] == 1 and row["solves"] == 1 and row["tool"] == MG
-    assert not run_actions.release(path, step["attempt_id"], 1, event=run_actions.MG_EVENT)
+    assert not run_actions.release(
+        path, step["attempt_id"], 1, event=run_actions.MG_EVENT
+    )
 
 
 def test_the_check_solves_on_a_context_of_its_own(hub, monkeypatch):
@@ -437,7 +466,11 @@ def test_the_check_solves_on_a_context_of_its_own(hub, monkeypatch):
     monkeypatch.setattr(S, "survival", fake)
     ctx = _ctx(hub)
     assert _start(path, ctx) == MG
-    assert bound[0] is not None and bound[0] is not ctx and bound[0].network is not ctx.network
+    assert (
+        bound[0] is not None
+        and bound[0] is not ctx
+        and bound[0].network is not ctx.network
+    )
     assert getattr(PyPSAService._solving_ctx, "ctx", None) is None
 
 
@@ -447,10 +480,16 @@ def test_no_solve_left_stops_before_any_solve(hub, monkeypatch):
     _granted(path, 0)
     _stub(monkeypatch, during=lambda: pytest.fail("never run"))
     assert _start(path, _ctx(hub)) == "mg_no_solve"
-    assert not [a for a in run_envelope._load(path)["audit"] if a["event"] == run_actions.MG_EVENT]
+    assert not [
+        a
+        for a in run_envelope._load(path)["audit"]
+        if a["event"] == run_actions.MG_EVENT
+    ]
 
 
-def test_a_second_solve_raises_and_the_reservation_settles_what_was_spent(hub, monkeypatch):
+def test_a_second_solve_raises_and_the_reservation_settles_what_was_spent(
+    hub, monkeypatch
+):
     """C1, M7: one dispatch makes one solver call; the second raises, the
     step stops, and the row settles once with the calls made."""
     _sidecar(hub)
@@ -458,7 +497,9 @@ def test_a_second_solve_raises_and_the_reservation_settles_what_was_spent(hub, m
     _granted(path, 3)
     _stub(monkeypatch, solves=2)
     assert _start(path, _ctx(hub)) == "mg_start_failed"
-    assert _row(path)["solves"] == 2  # the refused second call counted: never under-reported
+    assert (
+        _row(path)["solves"] == 2
+    )  # the refused second call counted: never under-reported
 
 
 def test_a_check_that_raises_before_its_solve_settles_at_zero(hub, monkeypatch):
@@ -477,7 +518,9 @@ def test_a_check_that_raises_before_its_solve_settles_at_zero(hub, monkeypatch):
 
 def test_the_solve_is_held_to_the_time_limit(monkeypatch):
     got = {}
-    monkeypatch.setattr(S, "_solve", lambda n, ef, **kw: got.update(kw) or ("ok", "optimal"))
+    monkeypatch.setattr(
+        S, "_solve", lambda n, ef, **kw: got.update(kw) or ("ok", "optimal")
+    )
     calls = []
     solve = run_actions._mg_solve(calls)
     assert solve(None, None, linearized_unit_commitment=True) == ("ok", "optimal")
@@ -507,8 +550,14 @@ def test_an_edit_during_the_check_makes_its_result_no_evidence(hub, monkeypatch,
     _stub(monkeypatch, during=during)
     assert _start(path, ctx) == MG
     result = _read(path)["steps"][0]["result"]
-    assert result["state"] == run_actions.INPUTS_CHANGED and result["checked"] == "survives"
-    words = {"revision": "the network was edited", "settings": "the island settings changed"}
+    assert (
+        result["state"] == run_actions.INPUTS_CHANGED
+        and result["checked"] == "survives"
+    )
+    words = {
+        "revision": "the network was edited",
+        "settings": "the island settings changed",
+    }
     for key, w in words.items():
         assert (w in result["reason"]) == (edit in (key, "both"))
 
@@ -587,7 +636,9 @@ def test_a_restart_mid_check_settles_its_reservation_once(hub, monkeypatch):
     task["steps"][0].update(status="running", attempt_id="gone")
     path.write_text(json.dumps(task))
     envelope = run_envelope._load(path)
-    run_envelope._audit(envelope, run_actions.MG_EVENT, call_id="gone", tool=MG, reserved=1)
+    run_envelope._audit(
+        envelope, run_actions.MG_EVENT, call_id="gone", tool=MG, reserved=1
+    )
     run_envelope._save(path, envelope)
     assert run_actions._interrupted(path, _read(path))
     assert _row(path)["solves"] == 1
@@ -600,7 +651,9 @@ def test_a_restart_mid_check_settles_its_reservation_once(hub, monkeypatch):
 def test_a_model_turn_is_refused_the_check_even_under_a_grant_listing_it():
     envelope = {"runs": [{"tool": MG}], "edits": [], "gaps": [], "state": "granted"}
     assert (
-        run_envelope._refusal(None, envelope, {}, MG, {}, "execution", False, None, None, {})
+        run_envelope._refusal(
+            None, envelope, {}, MG, {}, "execution", False, None, None, {}
+        )
         == "unknown_tool"
     )
 
@@ -620,7 +673,14 @@ def _env(hub, task=None, ctx=None):
 
 
 def _rule(fact, op="eq", value=None):
-    return {"id": fact, "fact": fact, "op": op, "value": value, "severity": "warn", "reads": "x"}
+    return {
+        "id": fact,
+        "fact": fact,
+        "op": op,
+        "value": value,
+        "severity": "warn",
+        "reads": "x",
+    }
 
 
 def _gate(hub, fact, op="eq", value=None, task=None, ctx=None):
@@ -642,8 +702,14 @@ def _done(hub, result_over=None, drop=None, revision=7):
         result.pop(drop)
     return {
         "steps": [
-            {"id": "solve.3", "tool": MG, "native": run_actions.KIND, "status": "completed",
-             "frozen": frozen, "result": result}
+            {
+                "id": "solve.3",
+                "tool": MG,
+                "native": run_actions.KIND,
+                "status": "completed",
+                "frozen": frozen,
+                "result": result,
+            }
         ]
     }
 
@@ -694,7 +760,10 @@ def test_survival_is_no_evidence_unless_current_and_judged(hub, case, state):
     elif case == "bool_revision":
         result["network_revision"] = True
     elif case == "inputs_changed":
-        result.update(state="inputs_changed", reason="the network was edited while the island check ran")
+        result.update(
+            state="inputs_changed",
+            reason="the network was edited while the island check ran",
+        )
     elif case == "edited":
         ctx.network_revision = 8
     elif case == "island_changed":
@@ -732,11 +801,18 @@ def _island_network():
 
 
 @pytest.mark.parametrize("state", ["open", "closed", "no_tie", "no_island"])
-def test_the_tie_reads_the_live_network_and_fails_closed_by_name(hub, monkeypatch, state):
+def test_the_tie_reads_the_live_network_and_fails_closed_by_name(
+    hub, monkeypatch, state
+):
     _sidecar(hub)
     monkeypatch.setattr(
-        S, "tie_state",
-        lambda n, island: {"state": state, "ties": [], "carrying": ["subsea_tie"] if state == "closed" else []},
+        S,
+        "tie_state",
+        lambda n, island: {
+            "state": state,
+            "ties": [],
+            "carrying": ["subsea_tie"] if state == "closed" else [],
+        },
     )
     g = _gate(hub, "mg.tie.open", value="open")
     if state == "no_island":
@@ -757,7 +833,9 @@ def test_the_tie_and_critical_loads_are_no_evidence_when_unreadable(hub, monkeyp
     monkeypatch.setattr(S, "critical_state", boom)
     for fact in ("mg.tie.open", "mg.critical.tagged"):
         g = _gate(hub, fact, value="x")
-        assert g["verdict"] == "not_evaluated" and g["facts"][0]["value"] == "unreadable"
+        assert (
+            g["verdict"] == "not_evaluated" and g["facts"][0]["value"] == "unreadable"
+        )
         assert "KeyError" in g["reason"]
     monkeypatch.setattr(S, "tie_state", lambda n, i: {"state": "weird"})
     assert _gate(hub, "mg.tie.open", value="open")["facts"][0]["value"] == "unreadable"
@@ -768,25 +846,40 @@ def test_the_tie_on_a_real_network(hub):
     n = T.BUILDERS[TID]()
     g = _gate(hub, "mg.tie.open", value="open", ctx=_ctx(hub, n))
     assert g["facts"][0]["value"] in ("open", "no_tie", "closed")
-    assert g["facts"][0]["value"] == S.tie_state(n, IC.validate(T.ISLAND_CONFIG[TID]))["state"]
+    assert (
+        g["facts"][0]["value"]
+        == S.tie_state(n, IC.validate(T.ISLAND_CONFIG[TID]))["state"]
+    )
 
 
 @pytest.mark.parametrize("state", ["tagged", "none", "mismatch"])
 def test_critical_tagging_names_each_load_out_of_step(hub, monkeypatch, state):
     _sidecar(hub)
     monkeypatch.setattr(
-        S, "critical_state",
-        lambda n, island: {"state": state, "loads": [], "network_only": ["a"] if state == "mismatch" else [],
-                           "sidecar_only": ["b"] if state == "mismatch" else []},
+        S,
+        "critical_state",
+        lambda n, island: {
+            "state": state,
+            "loads": [],
+            "network_only": ["a"] if state == "mismatch" else [],
+            "sidecar_only": ["b"] if state == "mismatch" else [],
+        },
     )
     g = _gate(hub, "mg.critical.tagged", value="tagged")
     assert g["verdict"] == ("pass" if state == "tagged" else "fail")
     if state == "mismatch":
-        assert g["facts"][0]["detail"] == ["a: on the network only", "b: in the island settings only"]
+        assert g["facts"][0]["detail"] == [
+            "a: on the network only",
+            "b: in the island settings only",
+        ]
 
 
 def _eh(monkeypatch, section, edited=False):
-    record = {"status": "done", "report": {"sections": {"dtc": section}}, "network_revision": 7}
+    record = {
+        "status": "done",
+        "report": {"sections": {"dtc": section}},
+        "network_revision": 7,
+    }
     from harness import run_eh
     from services import study_state
 
@@ -799,10 +892,23 @@ def _dtc(rows, status="ok"):
 
 
 def test_critical_served_sums_each_contingency_with_its_name(hub, monkeypatch):
-    _eh(monkeypatch, _dtc([
-        {"contingency": "subsea_tie", "status": "ok", "critical_unserved_mwh": 1.5},
-        {"contingency": "tie_2", "status": "optimal", "critical_unserved_mwh": 0.25},
-    ]))
+    _eh(
+        monkeypatch,
+        _dtc(
+            [
+                {
+                    "contingency": "subsea_tie",
+                    "status": "ok",
+                    "critical_unserved_mwh": 1.5,
+                },
+                {
+                    "contingency": "tie_2",
+                    "status": "optimal",
+                    "critical_unserved_mwh": 0.25,
+                },
+            ]
+        ),
+    )
     g = _gate(hub, "mg.island.critical_served", op="le", value=0.0)
     assert g["facts"][0]["value"] == 1.75 and g["facts"][0]["unit"] == "MWh"
     assert g["verdict"] == "fail"
@@ -823,11 +929,17 @@ def test_critical_served_sums_each_contingency_with_its_name(hub, monkeypatch):
         ("bool_value", "not_solved"),
     ],
 )
-def test_critical_served_is_no_evidence_unless_every_contingency_solved(hub, monkeypatch, case, state):
+def test_critical_served_is_no_evidence_unless_every_contingency_solved(
+    hub, monkeypatch, case, state
+):
     row = {"contingency": "subsea_tie", "status": "ok", "critical_unserved_mwh": 0.0}
     section = _dtc([row])
     if case == "skipped":
-        section = {"status": "skipped", "note": "dtc_stress was not requested", "payload": None}
+        section = {
+            "status": "skipped",
+            "note": "dtc_stress was not requested",
+            "payload": None,
+        }
     elif case == "not_established":
         section = _dtc([], status="not_established")
     elif case == "no_section":
@@ -844,7 +956,11 @@ def test_critical_served_is_no_evidence_unless_every_contingency_solved(hub, mon
         row["critical_unserved_mwh"] = False
     _eh(monkeypatch, section, edited=case == "edited")
     g = _gate(hub, "mg.island.critical_served", op="le", value=0.0)
-    assert g["verdict"] == "not_evaluated" and g["facts"][0]["value"] == state and g["reason"]
+    assert (
+        g["verdict"] == "not_evaluated"
+        and g["facts"][0]["value"] == state
+        and g["reason"]
+    )
 
 
 def test_critical_unserved_energy_is_weighted_by_the_snapshot_weightings():
@@ -874,9 +990,16 @@ def _campus_step(hub, monkeypatch, summary, revision=7, files_match=True):
     monkeypatch.setattr(run_actions, "run_files", lambda r: {"x": "1"})
     return {
         "steps": [
-            {"id": "solve.2", "tool": run_actions.CAMPUS, "native": run_actions.KIND,
-             "status": "completed",
-             "result": {"run_files": {"x": "1" if files_match else "2"}, "network_revision": revision}}
+            {
+                "id": "solve.2",
+                "tool": run_actions.CAMPUS,
+                "native": run_actions.KIND,
+                "status": "completed",
+                "result": {
+                    "run_files": {"x": "1" if files_match else "2"},
+                    "network_revision": revision,
+                },
+            }
         ]
     }
 
@@ -887,14 +1010,22 @@ def _summary(**over):
 
 
 def test_frequency_counts_each_failing_hour_once_and_names_it(hub, monkeypatch):
-    task = _campus_step(hub, monkeypatch, _summary(
-        failing_hours=[[2030, 5], [2030, 7]],
-        e1_failing_hours=[[2030, 5]],
-        bridge_failing_hours=[[2030, 7], [2040, 1]],
-    ))
+    task = _campus_step(
+        hub,
+        monkeypatch,
+        _summary(
+            failing_hours=[[2030, 5], [2030, 7]],
+            e1_failing_hours=[[2030, 5]],
+            bridge_failing_hours=[[2030, 7], [2040, 1]],
+        ),
+    )
     g = _gate(hub, "mg.island.frequency", op="le", value=0, task=task)
     assert g["facts"][0]["value"] == 3 and g["facts"][0]["unit"] == "h"
-    assert g["facts"][0]["detail"] == ["period 2030 hour 5", "period 2030 hour 7", "period 2040 hour 1"]
+    assert g["facts"][0]["detail"] == [
+        "period 2030 hour 5",
+        "period 2030 hour 7",
+        "period 2040 hour 1",
+    ]
     assert g["verdict"] == "fail"
     assert "not weighted" in run_actions.MG_FREQUENCY_BASIS
 
@@ -923,7 +1054,9 @@ def test_frequency_counts_hours_not_weighted_hours(hub, monkeypatch):
         ("no_counter", "edited"),
     ],
 )
-def test_frequency_is_no_evidence_unless_the_run_is_its_own_and_current(hub, monkeypatch, case, state):
+def test_frequency_is_no_evidence_unless_the_run_is_its_own_and_current(
+    hub, monkeypatch, case, state
+):
     summary = _summary()
     if case == "no_summary":
         summary = None
@@ -933,13 +1066,22 @@ def test_frequency_is_no_evidence_unless_the_run_is_its_own_and_current(hub, mon
         summary.pop("failing_hours")
     elif case == "bad_hour":
         summary["failing_hours"] = [["x", 1]]
-    task = _campus_step(hub, monkeypatch, summary, files_match=case != "rerun",
-                        revision=8 if case == "edited" else 7)
+    task = _campus_step(
+        hub,
+        monkeypatch,
+        summary,
+        files_match=case != "rerun",
+        revision=8 if case == "edited" else 7,
+    )
     if case == "not_run":
         task = {"steps": []}
     ctx = SimpleNamespace(network=pypsa.Network()) if case == "no_counter" else None
     g = _gate(hub, "mg.island.frequency", op="le", value=0, task=task, ctx=ctx)
-    assert g["verdict"] == "not_evaluated" and g["facts"][0]["value"] == state and g["reason"]
+    assert (
+        g["verdict"] == "not_evaluated"
+        and g["facts"][0]["value"] == state
+        and g["reason"]
+    )
 
 
 def test_each_mg_fact_is_registered_with_its_unit():
@@ -975,7 +1117,11 @@ def test_the_check_on_the_microgrid_templates_own_solve(hub, monkeypatch):
         assert result["state"] in (S.SURVIVES, S.FAILS), result
         assert result["solves"] == 1 and _row(path)["solves"] == 1
         assert float(n.objective) == objective  # the live network is never solved
-        g = _gate(hub, "mg.island.survival", value="survives", task=_read(path), ctx=ctx)
+        g = _gate(
+            hub, "mg.island.survival", value="survives", task=_read(path), ctx=ctx
+        )
         assert g["facts"][0]["value"] == result["state"]
     finally:
-        defaults.drop(index=[a for a in defaults.index if a not in before], inplace=True)
+        defaults.drop(
+            index=[a for a in defaults.index if a not in before], inplace=True
+        )
