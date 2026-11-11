@@ -396,6 +396,11 @@ def _results_stale() -> bool:
     return bool(solved) and solved != _fingerprint()
 
 
+# Tools whose route pushes their own one undo step (not a turn snapshot, so the
+# turn pushes none and an approval costs exactly one): RP-20, GK B C7.
+SELF_UNDO_TOOLS: frozenset[str] = frozenset({"confirm_unrecorded_series"})
+
+
 def _undo(tool_name: str) -> dict:
     from services import chat_tools
 
@@ -406,10 +411,6 @@ def _undo(tool_name: str) -> dict:
     captured = tool_name in chat_tools.UNDO_CAPTURED_TOOLS or tool_name in SELF_UNDO_TOOLS
     return {"tool": "undo_last", "available": captured and depth > 0}
 
-
-# Tools whose route pushes their own one undo step (not a turn snapshot, so the
-# turn pushes none and an approval costs exactly one): RP-20, GK B C7.
-SELF_UNDO_TOOLS: frozenset[str] = frozenset({"confirm_unrecorded_series"})
 
 
 def receipt(card: dict, args: dict) -> dict:

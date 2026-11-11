@@ -185,7 +185,7 @@ def test_no_cap_on_the_card_or_the_result(session, ctx, monkeypatch):
 # ── precheck: refused before any card (C1, C3) ──────────────────────────────
 
 
-@pytest.mark.parametrize("bad", ["a string", ["a", "list"], 7])
+@pytest.mark.parametrize("bad", ["a string", ["a", "list"], 7, [], ""])
 def test_a_malformed_record_is_not_confirmable_by_route_or_tool(client, session, ctx, monkeypatch, bad):
     """C1: one reader decides, and a malformed meta is refused, never a 500."""
     ctx.user_ts_meta[KEY] = bad

@@ -300,7 +300,9 @@ component (`frontend/src/components/EditCard.tsx`).
 - **Receipt.** The tool result gains `_edit_receipt`: each row read back
   natively, `outcome: verified` only when every value equals the card's `new`
   (otherwise `uncertain`), `results_stale` (the last solve's input fingerprint
-  differs from now) and `undo: {tool: 'undo_last', available}`. A card with
+  differs from now) and `undo: {tool: 'undo_last', available}` (`available`
+  for a turn-captured tool, or one in `edit_card.SELF_UNDO_TOOLS` whose route
+  pushes its own one step, such as `confirm_unrecorded_series`). A card with
   `sets` passes them on, so Guided words the receipt as the card did; each set
   also lists `inactive_names`, which the table marks "(inactive)".
 - **Adding an edit kind** (TS-04's series refinement, a new settings tool):

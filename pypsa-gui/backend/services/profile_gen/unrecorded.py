@@ -44,7 +44,7 @@ def _pairs(items: Iterable[Any]) -> list[tuple[str, str]]:
         if isinstance(it, Mapping):
             out.append((str(it.get("component") or ""), str(it.get("digest") or "")))
         else:
-            out.append((str(it.component), str(it.digest)))
+            out.append((str(getattr(it, "component", "") or ""), str(getattr(it, "digest", "") or "")))
     return out
 
 
@@ -89,6 +89,12 @@ def confirm(ctx, items: Iterable[Any]) -> dict[str, Any]:
     from services.user_timeseries import NETWORK_NATIVE_META, _user_ts_lock
 
     with PyPSAService.get_lock(), _user_ts_lock:
+        if PyPSAService.get_active_context() is not ctx:
+            # The foreground changed since the caller resolved it: the snapshot
+            # would capture another network than the one stamped.
+            raise UnrecordedRefused({"error_kind": "project_not_open", "components": [],
+                                     "message": "the open project changed; open it again, "
+                                                "then confirm"})
         pairs = check(ctx, items)
         push_undo_snapshot()
         for component, _ in pairs:

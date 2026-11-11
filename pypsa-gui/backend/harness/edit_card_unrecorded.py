@@ -49,7 +49,12 @@ def _preview(args: dict) -> list[dict]:
 
 
 def _binding(args: dict) -> dict:
-    proj, _ = _scope(args)
+    """The project by its id (the gates already ran in `_preview`)."""
+    from routers.deps import require_project_access
+    from services import chat_tools
+
+    with chat_tools._acting() as (db, user):
+        proj = require_project_access(str(args.get("project_id") or ""), db=db, user=user)
     return {"project": proj.uuid or proj.name}
 
 

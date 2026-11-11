@@ -1851,24 +1851,6 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id", "job_ids"],
     ),
     _t(
-        "confirm_unrecorded_series",
-        "Record that wind/solar series with no provenance record (get_profile_readiness rows "
-        "with profile `unrecorded`) are the network's own, after the user approves its card. "
-        "Only when the user says so: never infer it. Pass every series with the `digest` its "
-        "readiness row shows. Writes only the record, never the values, under ONE undo step. "
-        "All or nothing: a series listed twice (unrecorded_duplicate), one that is no longer "
-        "unrecorded (not_unrecorded) or one whose values changed since that read "
-        "(unrecorded_stale) refuses the whole batch and writes nothing; read the readiness "
-        "again. `project_id` is the project NAME and must be the open project. Safety: write.",
-        {"project_id": {"type": "string"},
-         "items": {"type": "array", "minItems": 1,
-                   "items": {"type": "object",
-                             "properties": {"component": {"type": "string", "minLength": 1},
-                                            "digest": {"type": "string", "minLength": 1}},
-                             "required": ["component", "digest"]}}},
-        ["project_id", "items"],
-    ),
-    _t(
         "list_load_profile_archetypes",
         "List the load-profile archetypes (industrial, commercial, "
         "residential, ev_charging, heat, data_centre, library) with every "
@@ -5119,6 +5101,24 @@ TOOLS: list[dict[str, Any]] = [
         {"name": {"type": "string"},
          "site_id": {"type": "string", "maxLength": 128}},
         ["name", "site_id"],
+    ),
+    _t(
+        "confirm_unrecorded_series",
+        "Record that wind/solar series with no provenance record (get_profile_readiness rows "
+        "with profile `unrecorded`) are the network's own, after the user approves its card. "
+        "Only when the user says so: never infer it. Pass every series with the `digest` its "
+        "readiness row shows. Writes only the record, never the values, under ONE undo step. "
+        "All or nothing: a series listed twice (unrecorded_duplicate), one that is no longer "
+        "unrecorded (not_unrecorded) or one whose values changed since that read "
+        "(unrecorded_stale) refuses the whole batch and writes nothing; read the readiness "
+        "again. `project_id` is the project NAME and must be the open project. Safety: write.",
+        {"project_id": {"type": "string"},
+         "items": {"type": "array", "minItems": 1,
+                   "items": {"type": "object",
+                             "properties": {"component": {"type": "string", "minLength": 1},
+                                            "digest": {"type": "string", "minLength": 1}},
+                             "required": ["component", "digest"]}}},
+        ["project_id", "items"],
     ),
 ]
 
