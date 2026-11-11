@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { EditCardTable, editCardWords, HEADLINE_CAP, type EditCard } from './EditCard'
+import { EditCardTable, editCardHeader, editCardWords, HEADLINE_CAP, type EditCard } from './EditCard'
 import { ConfirmationCard } from './ConfirmationCard'
 import AssistantResultCard from './AssistantResultCard'
 import { useChatStore } from '../store/chatStore'
@@ -440,4 +440,18 @@ it('RP-20 (UX #1396): Guided heads the unrecorded-series card with its own sente
     edit_card: { ...card, tool: 'confirm_unrecorded_series', says, rows: [row] } as unknown as EditCard } })
   render(<ConfirmationCard />)
   expect(screen.getByTestId('chat-confirmation-summary').textContent).toBe(says)
+})
+
+it('RP-20 (UX #1396): the unrecorded-series card names 5 series then "(N more)"; other cards name all', () => {
+  const rows = Array.from({ length: 24 }, (_, i) => ({ component_class: 'Generator', name: `wind_${i + 1}`,
+    field: 'provenance', label: 'Series record', old: 'no record', new: "the network's own", unit: '', role: 'typed',
+    target: { section: 'profiles', panel: 'timeseries', component: 'Generator', entity: `wind_${i + 1}`, field: 'provenance' } }))
+  const base = { ...card, section: { id: 'profiles', label: 'Profiles' }, rows }
+  const names = (n: number) => Array.from({ length: n }, (_, i) => `Generator “wind_${i + 1}”`).join(', ')
+  expect(editCardHeader({ ...base, tool: 'confirm_unrecorded_series' } as unknown as EditCard))
+    .toBe(`Profiles › ${names(5)} (19 more)`)
+  expect(editCardHeader({ ...base, tool: 'update_component' } as unknown as EditCard)).toBe(`Profiles › ${names(24)}`)
+  // At the cap, no "(0 more)".
+  expect(editCardHeader({ ...base, tool: 'confirm_unrecorded_series', rows: rows.slice(0, 5) } as unknown as EditCard))
+    .toBe(`Profiles › ${names(5)}`)
 })

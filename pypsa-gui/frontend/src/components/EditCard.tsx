@@ -213,8 +213,16 @@ export function editCardHeader(card: EditCard): string {
     if (!names.includes(words)) names.push(words)
     byKey.set(key, names)
   }
-  return [...byKey].map(([key, names]) => key ? `${key} \u203a ${names.join(', ')}` : names.join(', ')).join('; ')
+  const capped = CAPPED_SCOPE.has(card.tool)
+  const list = (names: string[]) => capped && names.length > SCOPE_NAME_CAP
+    ? `${names.slice(0, SCOPE_NAME_CAP).join(', ')} (${names.length - SCOPE_NAME_CAP} more)` : names.join(', ')
+  return [...byKey].map(([key, names]) => key ? `${key} \u203a ${list(names)}` : list(names)).join('; ')
 }
+
+/** Cards whose scope line names at most SCOPE_NAME_CAP assets then "(N more)": RP-20's record
+ * of N series (UX #1396), whose table lists every one. Other cards keep their full line. */
+export const CAPPED_SCOPE: ReadonlySet<string> = new Set(['confirm_unrecorded_series'])
+export const SCOPE_NAME_CAP = 5
 
 /** `text` with its trailing `code` in the mono id style; plain when it does not end with it. */
 function withCode(text: string, code?: string) {
