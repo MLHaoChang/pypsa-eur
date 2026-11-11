@@ -914,7 +914,7 @@ def resolve_role(role: str) -> LLMProfile:
         raise ProfileNotConfiguredError(f"the profile roles are malformed; {role} cannot be resolved")
     pid = (data.get("roles") or {}).get(role)
     if pid is not None and not isinstance(pid, str):
-        raise ProfileNotConfiguredError(f"the profile marked for {role} is not a profile id: {pid!r}")
+        raise ProfileNotConfiguredError(f"the profile marked for {role} is not a profile id ({type(pid).__name__})")
     if pid is None:
         return by_id[active_id]
     if pid in by_id:

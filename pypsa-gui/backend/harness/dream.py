@@ -869,7 +869,12 @@ def _default_provider(db, user: User):
         # never a silent switch to the active profile (GK B T7).
         return None, "", ERR_ANALYZER, None
     provider, err = wiring._provider_for_profile(profile)
-    return provider, profile.model, err, f"{profile.id} · {profile.wire} · {profile.model}"
+    return (
+        provider,
+        profile.model,
+        err,
+        f"{profile.id} · {profile.wire} · {profile.model}",
+    )
 
 
 class _Lost(Exception):
@@ -885,7 +890,8 @@ class Worker:
         *,
         instance: str | None = None,
         provider_for: Callable[
-            [Any, User], tuple[Any, str, str | None] | tuple[Any, str, str | None, str | None]
+            [Any, User],
+            tuple[Any, str, str | None] | tuple[Any, str, str | None, str | None],
         ] = _default_provider,
         clock: Callable[[], float] = time.time,
     ) -> None:

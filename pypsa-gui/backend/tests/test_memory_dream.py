@@ -1506,7 +1506,10 @@ def test_the_analyzer_runs_on_the_profile_marked_for_it(monkeypatch):
     )
     monkeypatch.setattr(wiring, "_provider_for_profile", lambda p: ("prov", None))
     assert dream._default_provider(None, None) == (
-        "prov", "analyzer-model", None, "local-qwen · openai · analyzer-model"
+        "prov",
+        "analyzer-model",
+        None,
+        "local-qwen · openai · analyzer-model",
     )
     assert asked == ["memory_analyzer"]
 
@@ -1523,17 +1526,30 @@ def test_the_job_records_the_profile_wire_and_model_it_ran_on(factory, world):
     assert _job(factory, job_id).analyzer == "local-qwen · openai · m"
 
 
-@pytest.mark.parametrize("roles", [
-    ["memory_analyzer"], "anthropic-sonnet", 7, {"memory_analyzer": 5},
-])
+@pytest.mark.parametrize(
+    "roles",
+    [
+        ["memory_analyzer"],
+        "anthropic-sonnet",
+        7,
+        {"memory_analyzer": 5},
+    ],
+)
 def test_a_malformed_roles_map_on_disk_fails_the_job_by_name(factory, world, roles):
     # GK B D1 (T7d): never the active profile, one test per shape.
     from services import llm_config
 
-    llm_config.profiles_path().write_text(json.dumps({
-        "version": 1, "active_profile_id": "anthropic-sonnet", "profiles": [],
-        "roles": roles,
-    }), encoding="utf-8")
+    llm_config.profiles_path().write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "active_profile_id": "anthropic-sonnet",
+                "profiles": [],
+                "roles": roles,
+            }
+        ),
+        encoding="utf-8",
+    )
     job_id = _start(factory, world)
     dream.Worker(factory, clock=Clock()).run_once()
     j = _job(factory, job_id)
