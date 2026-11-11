@@ -1312,3 +1312,22 @@ def test_a_dangling_record_symlink_can_be_deleted(tmp_path):
         not record.is_symlink()
         and not (cs.charts_dir(tmp_path) / f"{snap.id}.png").exists()
     )
+
+
+def test_codeql_every_file_path_stays_inside_the_charts_directory(tmp_path):
+    """The chart paths are resolved and compared against `<project>/reports/_charts`:
+    a charts directory that is a link out of the project serves, lists and deletes nothing."""
+    import shutil
+
+    snap = cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint=None)
+    charts = cs.charts_dir(tmp_path)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    shutil.move(str(charts), str(outside))
+    charts.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(cs.ChartNotFound):
+        cs.png_bytes(tmp_path, snap.id)
+    with pytest.raises(cs.ChartNotFound):
+        cs.delete(tmp_path, snap.id)
+    with pytest.raises(cs.ChartNotFound):
+        cs._load(tmp_path, snap.id)
+    assert (outside / f"{snap.id}.png").exists()

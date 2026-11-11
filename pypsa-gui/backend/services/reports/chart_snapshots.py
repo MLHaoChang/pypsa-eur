@@ -192,7 +192,13 @@ def _valid_id(chart_id: Any) -> str:
 
 
 def _file(project_dir: pathlib.Path, chart_id: str, suffix: str) -> pathlib.Path:
-    return charts_dir(project_dir) / f"{_valid_id(chart_id)}{suffix}"
+    # The name comes only from the fullmatch-checked id; the resolved parent must
+    # be `<project>/reports/_charts` itself (not a link out of the project).
+    path = charts_dir(project_dir) / f"{_valid_id(chart_id)}{suffix}"
+    root = pathlib.Path(project_dir).resolve() / "reports" / CHARTS_DIRNAME
+    if path.parent.resolve() != root:
+        raise ChartNotFound("no such chart")
+    return path
 
 
 def _regular(path: pathlib.Path) -> bool:
