@@ -3,7 +3,8 @@
 //   node s6-shots.mjs <project> <state.json> steps…
 //
 // Env: BASE_URL (default http://127.0.0.1:5173), PREFIX (default s6-before), OUT (default ../s6),
-//      VH (viewport height, default 900), THEMES (default dark,light), MAXPAGES (default 6).
+//      VH (viewport height, default 900), VW (viewport width, default 1440), THEMES (default dark,light), MAXPAGES (default 6).
+//      MODE=guided opens the project in Guided and does NOT click Results (reach a tab with tid::hub-chapter-<id>-open).
 //      MOCK_RESERVES=1 answers /api/results/reserves with a made-up two-product payload (no template
 //      carries reserve products), so Storage cycling shows the Reserve commitments section.
 // Files: <OUT>/<PREFIX>-<slug>-<n>-<dark|light>.png; n counts per slug.
@@ -15,6 +16,8 @@
 //   info               print group / card-tab / sub-view buttons, the headings and the scroller size
 //   pages::<slug>      shoot the whole tab body, one viewport per shot, from the top
 //   at::<slug>::<text> scroll the first heading/label containing <text> to the top, then shoot
+//   shot::<name>       shoot what is on screen as <OUT>/<PREFIX>-<name>-<theme>.png (no counter)
+//   text::<text>       print whether the page shows <text>
 //   wait::<ms>
 //   vh::<px>           resize the viewport height (Load shape has no scroller of its own: shoot it tall)
 import { createRequire } from 'module'
@@ -26,8 +29,9 @@ const BASE = (process.env.BASE_URL || 'http://127.0.0.1:5173').replace(/\/$/, ''
 const PREFIX = process.env.PREFIX || 's6-before'
 const OUT = process.env.OUT || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 's6')
 const THEMES = (process.env.THEMES || 'dark,light').split(',')
+const VW = Number(process.env.VW || 1440), GUIDED = process.env.MODE === 'guided'
 const b = await chromium.launch()
-const ctx = await b.newContext({ viewport: { width: 1440, height: Number(process.env.VH || 900) }, deviceScaleFactor: 2, storageState: state })
+const ctx = await b.newContext({ viewport: { width: VW, height: Number(process.env.VH || 900) }, deviceScaleFactor: 2, storageState: state })
 const p = await ctx.newPage()
 p.setDefaultTimeout(20000)
 const log = (...a) => console.log(...a)
@@ -50,8 +54,9 @@ if (process.env.MOCK_RESERVES) {
 }
 await p.goto(BASE + '/'); await p.waitForTimeout(2500)
 await p.locator('article').filter({ hasText: new RegExp(`${project}(?!\\w)`) }).first().click({ timeout: 8000 }); await p.waitForTimeout(4500)
-await p.getByRole('button', { name: 'Expert', exact: true }).first().click(); await p.waitForTimeout(1200)
-await p.getByRole('button', { name: 'Results', exact: true }).first().click({ timeout: 8000 }); await p.waitForTimeout(3500)
+await p.getByRole('button', { name: GUIDED ? 'Guided' : 'Expert', exact: true }).first().click(); await p.waitForTimeout(1200)
+if (!GUIDED) await p.getByRole('button', { name: 'Results', exact: true }).first().click({ timeout: 8000 })
+await p.waitForTimeout(3500)
 
 const theme = () => p.evaluate(() => document.documentElement.getAttribute('data-theme') || 'dark')
 const setTheme = async t => {
@@ -78,12 +83,12 @@ const counters = {}
 const visibleHeads = () => p.evaluate(() => [...document.querySelectorAll('h2, h3, h4')].filter(h => {
   const r = h.getBoundingClientRect(); return r.width > 0 && r.top >= 0 && r.bottom <= innerHeight
 }).map(h => h.textContent.replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean))
-const shoot = async slug => {
-  const n = counters[slug] = (counters[slug] || 0) + 1
+const shoot = async (slug, plain) => {
+  const n = plain ? 0 : counters[slug] = (counters[slug] || 0) + 1
   const start = await theme()
   for (const t of THEMES) {
     await setTheme(t); await p.waitForTimeout(700)
-    const f = `${PREFIX}-${slug}-${n}-${t}.png`
+    const f = plain ? `${PREFIX}-${slug}-${t}.png` : `${PREFIX}-${slug}-${n}-${t}.png`
     await p.screenshot({ path: path.join(OUT, f) })
     log('shot', f, t === THEMES[0] ? JSON.stringify(await visibleHeads()).slice(0, 600) : '')
   }
@@ -95,8 +100,10 @@ for (const s of steps) {
     if (op === 'g') { await p.getByTestId(`results-group-${arg}`).first().click({ timeout: 6000 }); await p.waitForTimeout(2500) }
     else if (op === 'ct') { await p.getByTestId(`results-cardtab-${arg}`).first().click({ timeout: 6000 }); await p.waitForTimeout(2500) }
     else if (op === 'tid') { await p.getByTestId(arg).first().click({ timeout: 6000 }); await p.waitForTimeout(2500) }
+    else if (op === 'shot') { await shoot(arg, true) }
+    else if (op === 'text') { log('text', JSON.stringify(arg), await p.getByText(arg).count()) }
     else if (op === 'wait') { await p.waitForTimeout(Number(arg)) }
-    else if (op === 'vh') { await p.setViewportSize({ width: 1440, height: Number(arg) }); await p.waitForTimeout(1500) }
+    else if (op === 'vh') { await p.setViewportSize({ width: VW, height: Number(arg) }); await p.waitForTimeout(1500) }
     else if (op === 'click') {
       const exact = p.getByRole('button', { name: arg, exact: true })
       const l = (await exact.count()) ? exact : p.getByRole('button', { name: arg })

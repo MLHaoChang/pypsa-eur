@@ -97,7 +97,7 @@ export default function Curtailment() {
   // 8760 x-axis ticks, and Recharts measures every one of them on each render.
   const overTime = useMemo(() => aggSeries && (
     <ResponsiveContainer width="100%" height={CHART_HEIGHT.lg}>
-      <AreaChart data={aggSeries} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+      <AreaChart data={aggSeries} margin={{ top: 18, right: 28, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="curtGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor={ACCENT} stopOpacity={0.4} />

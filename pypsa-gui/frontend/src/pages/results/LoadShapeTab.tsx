@@ -149,8 +149,9 @@ export default function LoadShapeTab() {
         <WindowSlider testId="ls-window" snapshots={win.snapshots} from={win.from} to={win.to}
                       start={win.start} end={win.end} drag={drag} setDrag={setDrag} whole={whole} />
         <div className="grid gap-4 md:grid-cols-2">
+          {/* The export token is written out: Tailwind only emits a theme variable it finds as a literal in the source. */}
           <Heatmap title="Grid import" testId="ls-heat-import" heat={data.heatmaps!.import} colour={carrierColour('grid')} />
-          <Heatmap title="Export" testId="ls-heat-export" heat={data.heatmaps!.export} colour={carrierColour('link_outflows')} />
+          <Heatmap title="Export" testId="ls-heat-export" heat={data.heatmaps!.export} colour="var(--color-carrier-link-out)" />
         </div>
       </ChartFrame>
 

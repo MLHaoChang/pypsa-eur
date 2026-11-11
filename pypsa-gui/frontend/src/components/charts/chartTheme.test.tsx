@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import {
-  CHART_HEIGHT, CHART_TICK, ChartFrame, ChartSourceLine, ChartSourceProvider, SERIES_TOKENS, chartFigure,
+  CHART_HEIGHT, CHART_TICK, ChartFrame, ChartSourceLine, ChartSourceProvider, SERIES_TOKENS, SERIES_COLOURS, chartFigure,
   carrierColour, directLabel, seriesDash, thickestIndex,
 } from './chartTheme'
 
@@ -128,5 +128,12 @@ describe('thickestIndex on a long series', () => {
   it('keeps the label off the plot edges', () => {
     const rows = Array.from({ length: 100 }, (_, i) => ({ a: i === 0 || i === 99 ? 50 : i === 40 ? 9 : 1 }))
     expect(thickestIndex(rows, 'a')).toBe(40)
+  })
+})
+
+describe('SERIES_COLOURS (ui-modern 02 slice 6)', () => {
+  it('is the series tokens in order, one per token, as carrierColour hands them out', () => {
+    expect(SERIES_COLOURS).toHaveLength(SERIES_TOKENS)
+    SERIES_COLOURS.forEach((c, i) => expect(c).toBe(carrierColour('', i)))
   })
 })

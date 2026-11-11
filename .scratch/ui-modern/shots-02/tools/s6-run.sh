@@ -31,3 +31,14 @@ run loadshape   node s6-shots.mjs s6-ipp "$STATE" g::capacity ct::operation "cli
 run curtailment node s6-shots.mjs s6-micro "$STATE" g::capacity ct::curtailment pages::curtailment
 # 9 Reserve commitments (in Storage cycling; the payload is mocked, see MOCK_RESERVES in s6-shots.mjs)
 run reserve     env MOCK_RESERVES=1 node s6-shots.mjs s6-single "$STATE" g::capacity ct::operation "click::Storage cycling" pages::reserve
+# Extras (dark only, plain names; run one at a time: parallel runs switch the session's active project).
+#   tools/s6-run.sh extras            AFTER extras on BASE_URL
+#   BASE_URL=http://127.0.0.1:5174 PREFIX=s6-before tools/s6-run.sh guided
+x() { THEMES=dark "$@"; }
+tmp() { mv "$OUT/$PREFIX-$1tmp-1-dark.png" "$OUT/$PREFIX-$1-dark.png"; }
+run extras      x env VW=900 VH=1300 MOCK_RESERVES=1 node s6-shots.mjs s6-single "$STATE" g::capacity ct::operation "click::Storage cycling" wait::3000 "at::reserve-w900tmp::Reserve products" && { [ "$ONLY" != extras ] || tmp reserve-w900; }
+run extras      x env VW=900 VH=1300 node s6-shots.mjs s6-multi "$STATE" g::capacity ct::build click::Overview click::Aggregated "at::overview-w900tmp::Generation · energy mix per period" && { [ "$ONLY" != extras ] || tmp overview-w900; }
+# ChartZero: s6-multi has no curtailment (real data).
+run extras      x node s6-shots.mjs s6-multi "$STATE" g::capacity ct::curtailment "at::chartzerotmp::Curtailment over time" && { [ "$ONLY" != extras ] || tmp chartzero; }
+# Guided reaches Results > Investment from Hub design > Results > "The whole picture" (an ADVANCED tab).
+[ "$ONLY" = extras ] || [ "$ONLY" = guided ] && { echo "== guided"; x env MODE=guided node s6-shots.mjs s6-ipp "$STATE" click::Results tid::hub-chapter-investment-open wait::3000 shot::investment-guided; }

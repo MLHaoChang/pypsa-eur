@@ -503,7 +503,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   }
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
 
       <div className="text-[11px] text-muted -mt-2">
         Aggregated view spans every investment period. KPIs use snapshot

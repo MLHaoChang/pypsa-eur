@@ -215,7 +215,7 @@ export default function Prices() {
   }
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
 
       {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
           final review) — a narrow-but-wide window can still hit the
@@ -390,7 +390,7 @@ export default function Prices() {
               <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
                 <LineChart
                   data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
-                  margin={{ top: 18, right: 8, left: 0, bottom: 0 }}
+                  margin={{ top: 18, right: 28, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />

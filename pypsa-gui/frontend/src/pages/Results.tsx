@@ -173,6 +173,9 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   grid_forming: 'overview',
 }
 
+/** The solve conditions that mean success (backend `failure_taxonomy._SUCCESS_CONDITIONS`, plus the AC power flow's own). */
+const SOLVED_CONDITIONS = new Set(['optimal', 'ok', 'lopf+ac_pf_ok', 'ac_pf_ok'])
+
 export default function Results() {
   const [tab, setTabState] = useState<ResultsTab>(loadInitialTab)
   // A group with no tab yet (Control, Hand-off) is picked as a group.
@@ -653,7 +656,8 @@ export default function Results() {
   // (chart theme, ui-modern 02; VISUALS-1).
   // Plain words, no solver terms (#1194): "solved", "all periods".
   const stamp = (iso: string) => toDisplay(iso).replace('T', ' ')
-  const solveWords = status?.condition === 'optimal' ? 'solved'
+  // A run whose AC power flow also converged reports its own success condition.
+  const solveWords = status?.condition && SOLVED_CONDITIONS.has(status.condition) ? 'solved'
     : (status?.condition && REFERENCE_CONDITION_WORDS[status.condition]) || 'did not solve'
   const chartSource: ChartSource = {
     line: status?.condition
