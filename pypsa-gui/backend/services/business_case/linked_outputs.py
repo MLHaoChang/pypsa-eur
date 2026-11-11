@@ -195,6 +195,8 @@ def _capture_frame(n, solve: LinkedSolve) -> pd.DataFrame:
         if solve.voll == 0:
             return pd.DataFrame(index=n.snapshots)
         raise _Unread("no_lost_load_capture")
+    if not isinstance(frame, pd.DataFrame):
+        raise _Unread("lost_load_capture_other_solve")
     known = set(map(str, n.loads.index)) | set(map(str, n.buses.index))
     if not frame.index.equals(n.snapshots) or not set(map(str, frame.columns)) <= known:
         raise _Unread("lost_load_capture_other_solve")
@@ -207,12 +209,15 @@ def _unserved(n, solve: LinkedSolve, bus: str) -> pd.DataFrame:
     - a Load's own VoLL slack, from the capture, or still a Generator row when the capture has no such column;
     - an involuntary slack of the bus itself (`slack.involuntary_slack_mask`), split across the bus's Loads
       pro rata by p_set(t), as the DC Q4 rule does on `dc_mv` (LO-3);
-    - on a product bus, `process_products.shortfalls`, split the same way (LO-2).
+    - the bus's lost-production slack, `process_products.shortfalls`, split the same way (LO-2). Any bus with
+      a `lost_production_value` gets one (`services.solver.lost_production`), not only a product bus.
 
     Curtailment, demand response and buy-in are not unserved. In an hour where the bus's Loads sum to zero
-    (a slack filling a store), the bus slack is split equally, so none is lost."""
+    (a slack filling a store), the bus slack is split by each Load's share of the period's Σ p_set · w, so
+    none is lost and a Load that draws nothing takes none; with no Load drawing in the whole period it is
+    not evaluated. A missing value in a capture column this read uses is not evaluated, never 0."""
     from services.adequacy.slack import involuntary_slack_mask, strip_slack_prefix
-    from services.process_products import generator_role, is_product_bus, shortfalls
+    from services.process_products import generator_role, shortfalls
 
     loads = _loads_on(n, bus)
     out = pd.DataFrame(0.0, index=n.snapshots, columns=loads)
@@ -222,10 +227,13 @@ def _unserved(n, solve: LinkedSolve, bus: str) -> pd.DataFrame:
     for col in capture.columns:
         key = str(col)
         seen.add(key)
+        used = key in loads or (key == str(bus) and key not in n.loads.index)
+        if used and capture[col].isna().any():
+            raise _Unread("lost_load_capture_not_finite")
         if key in loads:
-            out[key] += capture[col].fillna(0.0)
-        elif key == str(bus) and key not in n.loads.index:
-            shared += capture[col].fillna(0.0)
+            out[key] += capture[col]
+        elif used:
+            shared += capture[col]
     gens = n.generators
     p = n.generators_t.p
     for g in gens.index[
@@ -238,13 +246,12 @@ def _unserved(n, solve: LinkedSolve, bus: str) -> pd.DataFrame:
             out[key] += p[g].reindex(n.snapshots).fillna(0.0)
         else:
             shared += p[g].reindex(n.snapshots).fillna(0.0)
-    if is_product_bus(n, bus):
-        for s in shortfalls(n, solve.lost_load):
-            if s.bus != str(bus):
-                continue
-            if s.p is None or (s.flag or "").startswith("lost_production_capture"):
-                raise _Unread(s.flag or "lost_production_not_read")
-            shared += s.p.reindex(n.snapshots).fillna(0.0)
+    for s in shortfalls(n, solve.lost_load):
+        if s.bus != str(bus):
+            continue
+        if s.p is None or (s.flag or "").startswith("lost_production_capture"):
+            raise _Unread(s.flag or "lost_production_not_read")
+        shared += s.p.reindex(n.snapshots).fillna(0.0)
     if loads:
         # A share is of what the Loads draw: a negative (feeding) or missing p_set takes none.
         p_set = (
@@ -253,13 +260,31 @@ def _unserved(n, solve: LinkedSolve, bus: str) -> pd.DataFrame:
             .clip(lower=0.0)
         )
         total = p_set.sum(axis=1)
-        share = p_set.div(total.where(total != 0), axis=0).fillna(1.0 / len(loads))
-        out += share.mul(shared, axis=0)
+        share = p_set.div(total.where(total != 0), axis=0)
+        idle = total == 0
+        if idle.any():
+            period = (
+                n.snapshots.get_level_values(0)
+                if isinstance(n.snapshots, pd.MultiIndex)
+                else pd.Index([0] * len(n.snapshots))
+            )
+            weighted = p_set.mul(n.snapshot_weightings.generators, axis=0)
+            annual = weighted.groupby(period.to_numpy()).transform("sum")
+            annual_total = annual.sum(axis=1)
+            by_period = annual.div(annual_total.where(annual_total != 0), axis=0)
+            share.loc[idle] = by_period.loc[idle]
+            if share[shared != 0].isna().any().any():
+                raise _Unread("unserved_no_load_to_split")
+        out += share.fillna(0.0).mul(shared, axis=0)
     return out
 
 
 def _served(n, solve: LinkedSolve, loads: list[str], bus: str) -> dict:
-    """Σ (p_set − unserved) per year of each period, over `loads` of one bus."""
+    """Σ (p_set − unserved) per year of each period, over `loads` of one bus.
+
+    The identity (P4, F7): served + ProductShortfall's quantity on the bus + the Loads' own VoLL slack =
+    contracted (Σ p_set · w ÷ years). A VoLL slack on a product Load lowers served, but `ProductShortfall`
+    does not count it."""
     p_set = n.get_switchable_as_dense("Load", "p_set")[loads].sum(axis=1)
     return _per_period(n, p_set - _unserved(n, solve, bus)[loads].sum(axis=1))
 
@@ -383,7 +408,12 @@ def _it_periods(n, solve) -> pd.DataFrame:
     keys = _periods(n)
     if len(periods) != len(keys):
         raise _Unread("it_energy_periods_mismatch")
-    return periods.set_axis(keys)
+    if keys == [None]:
+        # A flat network: DC 03 keys its one period by the snapshots' year.
+        return periods.set_axis(keys)
+    if len(pd.Index(keys).difference(periods.index)):
+        raise _Unread("it_energy_periods_mismatch")
+    return periods.reindex(keys)
 
 
 def _read_it_energy(n, solve, name, unit, params) -> dict:

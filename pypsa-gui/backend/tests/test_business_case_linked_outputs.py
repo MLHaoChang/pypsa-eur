@@ -425,7 +425,9 @@ def test_a_bus_slack_is_split_pro_rata_by_p_set_and_nothing_is_lost():
 
 
 def test_a_bus_slack_in_an_hour_with_no_load_is_still_counted():
-    """P4 (b): Σ p_set(t) = 0 with slack ≠ 0 (a store filling): no divide by zero, nothing lost."""
+    """P4 (b): Σ p_set(t) = 0 with slack ≠ 0 (a store filling): no divide by zero, nothing lost. F3: that
+    hour's slack is split by each Load's share of the period's Σ p_set · w, so site_a, which draws nothing
+    all period, takes none of it and never reads a negative served."""
     n = _plant()
     n.loads.at["site_a", "p_set"] = 0.0
     shed = np.tile([0.0, 6.0, 0.0, 0.0], 2)  # hour 2: both loads are 0
@@ -436,7 +438,9 @@ def test_a_bus_slack_in_an_hour_with_no_load_is_still_counted():
     b_set = np.tile([30.0, 0.0, 10.0, 0.0], 2)
     for p in PERIODS:
         assert a[p] + b[p] == pytest.approx(_per_year(n, b_set - shed)[p])
-        assert a[p] == pytest.approx(-3.0 * W) and np.isfinite(b[p])
+        # site_a's period share is 0 (it draws nothing), site_b's 1: all 6 MW are site_b's.
+        assert a[p] == pytest.approx(0.0)
+        assert b[p] == pytest.approx(_per_year(n, b_set - shed)[p])
 
 
 def test_a_slack_in_both_the_capture_and_the_generators_frame_counts_once():
@@ -1179,3 +1183,142 @@ def test_a_non_finite_quantity_is_not_evaluated_never_a_number():
     n.links_t.p1["grid_export"] = np.r_[-np.inf, np.zeros(7)]
     got = L.read(n, _solve(n, export_link="grid_export"), "export.grid_export", "MWh")
     assert got == L.NotEvaluated("export.grid_export", "not_finite")
+
+
+# ── GK A second pass: B1, F2-F6 ────────────────────────────────────────────────
+
+
+def _lost_production(n, bus, value, p):
+    """A solve's lost-production capture on `bus` (`services.solver.lost_production`), keyed to this network."""
+    from services.process_products import capture_key
+
+    if "lost_production_value" not in n.buses.columns:
+        n.buses["lost_production_value"] = np.nan
+    n.buses.at[bus, "lost_production_value"] = value
+    return {
+        **_capture(n),
+        "lost_production": {
+            "p_t": pd.DataFrame({bus: p}, index=n.snapshots),
+            "value": {bus: value},
+            "key": {bus: capture_key(n, bus, value)},
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("bus", "output_ids", "contracted"),
+    [
+        ("h2", ["served_h2.h2_offtake"], 25.0),
+        (
+            "hub",
+            ["served_load.site_a", "served_load.site_b"],
+            10.0 + np.tile([30.0, 0.0, 10.0, 0.0], 2),
+        ),
+    ],
+)
+def test_a_lost_production_slack_on_any_bus_lowers_what_it_serves(
+    bus, output_ids, contracted
+):
+    """B1: `lost_production_value` is a field of every bus and the solve adds a slack on each; served plus
+    ProductShortfall's own per-year quantity is the contracted quantity, the slack counted once."""
+    from services.process_products import shortfalls
+    from services.results.finance_case import _per_year as shortfall_per_year
+
+    n = _plant()
+    lost = np.tile([5.0, 5.0, 0.0, 0.0], 2)
+    solve = _solve(n, _lost_production(n, bus, 100.0, lost))
+    (s,) = [s for s in shortfalls(n, solve.lost_load) if s.bus == bus]
+    assert s.flag is None
+    unit = "MWh_H2" if bus == "h2" else "MWh"
+    served = [_value(L.read(n, solve, o, unit)) for o in output_ids]
+    for p in PERIODS:
+        assert shortfall_per_year(n, s.p, p) == pytest.approx(10.0 * W)
+        assert sum(v[p] for v in served) + shortfall_per_year(
+            n, s.p, p
+        ) == pytest.approx(_per_year(n, contracted)[p])
+
+
+def test_tonnes_by_this_buses_own_mwh_per_t():
+    """F2: the factor is the bus's own `mwh_per_t`, never the ammonia template's constant."""
+    n = _plant()
+    n.buses.at["nh3", "mwh_per_t"] = 4.0
+    solve = _solve(n)
+    mwh = _value(L.read(n, solve, "served_product.nh3", "MWh"))
+    assert _value(L.read(n, solve, "served_product.nh3", "t")) == _approx(
+        {p: v / 4.0 for p, v in mwh.items()}
+    )
+
+
+def test_a_bus_slack_in_a_period_with_no_load_is_not_evaluated():
+    """F3: no Load on the bus draws in the whole period, so the slack has no one to be split to."""
+    n = _plant()
+    n.loads.at["site_a", "p_set"] = 0.0
+    n.loads_t.p_set["site_b"] = np.r_[np.zeros(4), [30.0, 0.0, 10.0, 0.0]]
+    n.generators_t.p["shed_hub"] = np.tile([0.0, 6.0, 0.0, 0.0], 2)
+    for load in ("site_a", "site_b"):
+        got = L.read(n, _solve(n), f"served_load.{load}", "MWh")
+        assert got == L.NotEvaluated(f"served_load.{load}", "unserved_no_load_to_split")
+    # The same period with no slack in it reads 0 served.
+    n.generators_t.p["shed_hub"] = np.r_[np.zeros(4), [0.0, 6.0, 0.0, 0.0]]
+    got = _value(L.read(n, _solve(n), "served_load.site_b", "MWh"))
+    assert got == _approx({2030: 0.0, 2035: (40.0 - 6.0) * W})
+
+
+def test_a_capture_that_is_not_a_frame_is_not_evaluated():
+    """F4."""
+    n = _plant()
+    got = L.read(n, _solve(n, {"lost_load_t": [1.0, 2.0]}), "served_load.site_a", "MWh")
+    assert got == L.NotEvaluated("served_load.site_a", "lost_load_capture_other_solve")
+
+
+def test_a_capture_with_a_missing_value_in_a_used_column_is_not_evaluated():
+    """F5: a NaN unserved MW is unknown, never 0 (served)."""
+    n = _plant()
+    lost = np.r_[np.nan, np.zeros(7)]
+    for col in ("site_a", "hub"):
+        got = L.read(
+            n, _solve(n, _capture(n, **{col: lost})), "served_load.site_a", "MWh"
+        )
+        assert got == L.NotEvaluated(
+            "served_load.site_a", "lost_load_capture_not_finite"
+        )
+    # A NaN in a column this read does not use leaves it alone.
+    ok = L.read(n, _solve(n, _capture(n, h2_offtake=lost)), "served_load.site_a", "MWh")
+    assert _value(ok) == _approx(_per_year(n, 10.0))
+
+
+def test_it_energy_periods_are_matched_by_label_never_by_position(monkeypatch):
+    """F6."""
+    from services import dc_it_energy as E
+
+    spec, n, solve = _dc()
+    want = _value(L.read(n, solve, "it_energy", "MWh"))
+    real = E.it_energy
+
+    def reorder(*a, **k):
+        return SimpleNamespace(periods=real(*a, **k).periods.iloc[::-1])
+
+    monkeypatch.setattr(E, "it_energy", reorder)
+    assert _value(L.read(n, solve, "it_energy", "MWh")) == _approx(want)
+
+    def relabel(*a, **k):
+        periods = real(*a, **k).periods
+        return SimpleNamespace(periods=periods.set_axis(periods.index + 1))
+
+    monkeypatch.setattr(E, "it_energy", relabel)
+    for output_id, unit in (("it_energy", "MWh"), ("contracted_it_kw", "kW_month")):
+        got = L.read(n, solve, output_id, unit)
+        assert got == L.NotEvaluated(output_id, "it_energy_periods_mismatch")
+
+
+def test_an_edit_below_the_lossy_fingerprints_precision_is_still_not_evaluated():
+    """P2: only the exact fingerprint sees a 1e-12 edit; the lossy one rounds it away."""
+    from services import workflow_tools
+
+    n = _plant()
+    ctx = _ctx(n)
+    n.loads.at["site_a", "p_set"] = 10.0 + 1e-12
+    assert n.meta[
+        "assistant_solve_input_fingerprint"
+    ] == workflow_tools._network_input_fingerprint(ctx)
+    assert not L.bind(ctx).fresh
