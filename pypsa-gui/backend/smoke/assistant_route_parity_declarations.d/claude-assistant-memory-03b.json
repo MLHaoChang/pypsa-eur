@@ -1,0 +1,28 @@
+{
+ "limitations": [
+  {
+   "method": "POST",
+   "path": "/api/memory/parameters",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-1"
+  },
+  {
+   "method": "GET",
+   "path": "/api/memory/suggestions",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/memory/suggestions/{item_id}/preview",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/network/memory_parameter/apply",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-1"
+  }
+ ]
+}

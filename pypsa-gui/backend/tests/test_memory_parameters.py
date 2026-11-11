@@ -1760,3 +1760,70 @@ def test_another_orgs_or_users_item_answers_the_same_404_as_a_ghost(
     assert ghost.status_code == other_org_reply.status_code == 404
     assert other_user.status_code == 404
     assert ghost.content == other_org_reply.content == other_user.content
+
+
+# ── 03b: the UI's Save button and Undo (GK B 47 A1, A2) ───────────────────────
+
+
+def _saveable(client, proj, name="gas"):
+    r = client.get(
+        SUGGEST,
+        params={"project_id": proj.id, "component_class": "Generator", "name": name},
+    )
+    assert r.status_code == 200, r.text
+    return set(r.json()["saveable"])
+
+
+@pytest.mark.parametrize("setup", ["plain_stamped", "plain_unstamped", "tonnes_bus"])
+def test_saveable_is_exactly_where_save_succeeds(client, proj, setup):
+    """Every schema field of the asset, derived and money fields included: listed in
+    `saveable` if and only if Save for reuse accepts it, in both directions."""
+    from services.asset_schema.fields import fields_for
+
+    if setup == "plain_stamped":
+        proj.stamp()  # marginal_cost has a money basis
+    elif setup == "tonnes_bus":
+        _on_bus(proj, "gas", "t")
+    keys = [f.key for f in fields_for("Generator")]
+    assert any(f.derived for f in fields_for("Generator"))
+    offered = _saveable(client, proj)
+    succeeded = {k for k in keys if _save(client, proj, field=k).status_code == 201}
+    assert offered == succeeded
+    if setup == "tonnes_bus":
+        assert offered == set()
+    else:
+        assert "p_nom" in offered
+        assert ("marginal_cost" in offered) is (setup == "plain_stamped")
+
+
+def test_saveable_drops_a_field_set_by_a_time_series(client, proj):
+    proj.stamp()
+    assert "marginal_cost" in _saveable(client, proj)
+    proj.net().generators_t.marginal_cost["gas"] = 5.0
+    assert "marginal_cost" not in _saveable(client, proj)
+    assert _save(client, proj).status_code == 422
+
+
+def test_save_says_whether_it_created_the_item(client, proj):
+    a = _save(client, proj, field="p_nom")
+    assert a.status_code == 201 and a.json()["created"] is True
+    _set_value(proj, 250.0, "p_nom")
+    b = _save(client, proj, field="p_nom").json()
+    assert b["created"] is False and b["id"] == a.json()["id"]
+    versions = client.get(f"/api/memory/items/{b['id']}/versions").json()["versions"]
+    assert sorted(v["body"]["value"] for v in versions) == sorted(
+        [a.json()["body"]["value"], 250.0]
+    )
+
+
+def test_undo_after_a_first_save_retires_exactly_that_item(client, proj):
+    other = _save(client, proj, field="p_nom", name="solar").json()
+    a = _save(client, proj, field="p_nom").json()
+    assert a["created"] is True
+    r = client.post(f"/api/memory/items/{a['id']}/retire")
+    assert r.status_code == 200, r.text
+    rows = client.get(
+        "/api/memory/items", params={"kind": "parameter", "status": "all"}
+    ).json()["items"]
+    status = {row["id"]: row["status"] for row in rows}
+    assert status == {a["id"]: "retired", other["id"]: "confirmed"}

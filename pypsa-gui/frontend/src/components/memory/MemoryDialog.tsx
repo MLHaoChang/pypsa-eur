@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../../auth/AuthProvider'
 import { useMemoryStore, type MemoryTab } from '../../store/memoryStore'
 import MemoryEditForm from './MemoryEditForm'
+import { ParameterSummary, parameterBodyOf } from './ParameterMemory'
 import MemoryHistory from './MemoryHistory'
 
 // The Memory page (assistant-memory plan §4): account-level, so it opens as a
@@ -271,7 +272,10 @@ function MemoryRow({
     <>
       <tr className="border-t border-border align-top" data-testid="memory-row" data-item-id={item.id}>
         <td className="px-3 py-1.5"><Tag tone="accent">{KIND_WORDS[item.kind]}</Tag></td>
-        <td className="px-2 py-1.5 text-text">{item.summary}</td>
+        <td className="px-2 py-1.5 text-text">
+          {item.kind === 'parameter' && parameterBodyOf(item.body)
+            ? <ParameterSummary body={parameterBodyOf(item.body)!} /> : item.summary}
+        </td>
         <td className="px-2 py-1.5 text-muted">{appliesToWords(item.applies_to)}</td>
         <td className="px-2 py-1.5 text-muted">{own ? 'Just me' : 'Workspace'}</td>
         <td className="px-2 py-1.5">

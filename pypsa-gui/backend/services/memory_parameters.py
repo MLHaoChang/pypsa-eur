@@ -235,18 +235,21 @@ def bound_project(db: DBSession, user: User, project_id: str) -> Project:
 # ── Save for reuse ────────────────────────────────────────────────────────────
 
 
-def save(
+def save_plan(
     db: DBSession,
     user: User,
-    project: Project,
+    n,
     component_class: str,
     name: str,
     field: str,
-) -> M.ItemView:
-    """Save the field's stored value for reuse (§2.1): the click is the confirmation.
-    The value, unit, carrier and money stamp come from the project, never the client."""
+) -> tuple[dict[str, Any], list[str]]:
+    """Save's accept-or-refuse rule: the checked item body and concept keys Save would
+    write for `field`, or the typed refusal. `save()` writes exactly this, and
+    `saveable()` asks it, so the Save button is offered only where Save succeeds
+    (GK B 47 A1, #1343). Writes nothing."""
+    if M.org_of(db, user) is None:
+        raise _refuse("memory needs an organisation membership", "memory_no_org", 403)
     spec = M.parameter_spec(component_class, field)
-    n = _network()
     value, _source, carrier = _current(n, component_class, name, field)
     if _has_series(n, component_class, name, field):
         raise _refuse_series(spec, name)
@@ -278,6 +281,41 @@ def save(
                 "memory_money_basis_missing",
             )
         body["currency"], body["currency_year"] = currency, year
+    keys = [f"param:{component_class}.{field}"] + (
+        [f"carrier:{body['carrier']}"] if carrier else []
+    )
+    return M.validate_body("parameter", body, parameter_ok=True), (
+        M.validate_concept_keys(keys)
+    )
+
+
+def saveable(db: DBSession, user: User, component_class: str, name: str) -> list[str]:
+    """The fields of the asset `name` that Save for reuse would accept now: each
+    schema field `save_plan` accepts (GK B 47 A1)."""
+    from services.asset_schema.fields import fields_for
+
+    n = _network()
+    out = []
+    for spec in fields_for(component_class):
+        try:
+            save_plan(db, user, n, component_class, name, spec.key)
+        except M.MemoryError:
+            continue
+        out.append(spec.key)
+    return out
+
+
+def save(
+    db: DBSession,
+    user: User,
+    project: Project,
+    component_class: str,
+    name: str,
+    field: str,
+) -> M.ItemView:
+    """Save the field's stored value for reuse (§2.1): the click is the confirmation.
+    The value, unit, carrier and money stamp come from the project, never the client."""
+    body, keys = save_plan(db, user, _network(), component_class, name, field)
     evidence = [
         {
             "kind": "project",
@@ -286,9 +324,6 @@ def save(
             "at": datetime.now(UTC).isoformat(timespec="seconds"),
         }
     ]
-    keys = [f"param:{component_class}.{field}"] + (
-        [f"carrier:{body['carrier']}"] if carrier else []
-    )
     return M.create_item(
         db,
         user,
