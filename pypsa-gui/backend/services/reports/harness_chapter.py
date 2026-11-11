@@ -131,6 +131,8 @@ def build(
     coverage: list[dict] | None = None,
 ) -> tuple[dict, dict[str, tuple[list[str], list[list[str]], str]]]:
     """(payload, tables): tables by id as (columns, rows, caption)."""
+    from harness import run_handoff
+
     run = task.get("run") or {}
     coverage = coverage or []
     gap_lines = gaps(missing_chapters, coverage)
@@ -148,6 +150,12 @@ def build(
             "source_rows": len((run.get("research") or {}).get("rows") or []),
             "envelope_refusals": len(refusals),
             "gaps": len(gap_lines),
+            # Study harness 12c (G8): the result gate's rules by verdict; a rule
+            # not evaluated is its own count, never a pass.
+            **{
+                f"result_checks_{v}": n
+                for v, n in run_handoff.checks(run)["counts"].items()
+            },
         },
         "gaps": gap_lines,
     }
