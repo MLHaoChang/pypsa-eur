@@ -110,7 +110,9 @@ def _refuse_clashes(ic: FinanceCase, inputs: BusinessCaseInputs, outputs: dict) 
     whose output the IC ledger already prices is `double_count` (G2, C4)."""
     keys = {ln.key for t in ic.templates for ln in t.lines}
     assets = {a.name for a in ic.assets}
-    valued = {ln.stream for t in ic.templates for ln in t.lines if ln.amount != 0.0}
+    # A difference line (a CfD, a financial PPA) prices its volume even when it nets to 0.
+    valued = {ln.stream for t in ic.templates for ln in t.lines
+              if ln.amount != 0.0 or ln.price_qty_mwh is not None}
     for i, ln in enumerate(inputs.lines):
         if ln.name in keys or (ln.kind == "capex" and ln.name in assets):
             raise NameDuplicate(f"lines[{i}].name")
@@ -146,7 +148,7 @@ def _to_base(v: float | None, money_year: int, base: int, r_capex: float | None)
     return v * (1.0 + r_capex) ** (base - money_year)
 
 
-def _operating_line(ln: LineItem, year: int, amount: float | None, money_year: int,
+def _operating_line(ln: LineItem, amount: float | None, money_year: int,
                     price: float | None) -> TemplateLine:
     stream = CATEGORY_STREAM[(ln.kind, ln.category)][0]
     return TemplateLine(
@@ -205,7 +207,7 @@ def build_business_case(ic_case: FinanceCase, inputs: BusinessCaseInputs,
             amount = None if q is None or pc.value is None else _SIGN[ln.kind] * q * pc.value
             # A grid cell is that year's price: no escalation, so its money year is y.
             my = (ln.money_year or base) if pc.escalates else y
-            by_year.setdefault(y, []).append(_operating_line(ln, y, amount, my, pc.value))
+            by_year.setdefault(y, []).append(_operating_line(ln, amount, my, pc.value))
 
     # Nominal values of the non-share operating lines, for the shares that read them.
     # This runs the engine's own escalation (pass 1), so there is no second copy of it.
@@ -238,9 +240,16 @@ def build_business_case(ic_case: FinanceCase, inputs: BusinessCaseInputs,
         first, last = _span(ln, horizon)
         if ln.source == "share_of":
             kind, category = _share_base(ln)
-            b = operating_base(kind, category, first)
             share = ln.cell("quantity", first).value
-            v = _to_base(None if b is None else share * b, first, base, r_capex)
+            if kind == "capex":
+                # The base capex lines, already in base money; they are never shares
+                # (G6), so they sort, and are priced, before this line.
+                vals = [overnight[b.name] for b in lines
+                        if b.source != "share_of" and _in_base(b, kind, category)]
+                v = None if None in vals else share * sum(vals)
+            else:
+                b = operating_base(kind, category, first)
+                v = _to_base(None if b is None else share * b, first, base, r_capex)
         else:
             q, pc = _quantity(ln, first, outputs), ln.cell("price", first)
             v = None if q is None or pc.value is None else q * pc.value
@@ -279,7 +288,7 @@ def build_business_case(ic_case: FinanceCase, inputs: BusinessCaseInputs,
             else:
                 b, my = operating_base(kind, category, y), y
             amount = None if b is None else _SIGN[ln.kind] * share * b
-            by_year.setdefault(y, []).append(_operating_line(ln, y, amount, my, None))
+            by_year.setdefault(y, []).append(_operating_line(ln, amount, my, None))
 
     case = dataclasses.replace(
         ic_case,
@@ -375,7 +384,8 @@ def cash_bridge(rows: dict) -> dict[str, np.ndarray | None]:
 
 def _working_capital(revenue: np.ndarray, days: float) -> np.ndarray:
     """The cash effect of receivables at `days` of revenue: built up as revenue grows
-    and released in the last year, so it sums to 0 over life (BC3)."""
+    and released in the last year, so it sums to 0 over life (BC3). The last year's
+    receivables are collected within that year (the case ends there)."""
     level = revenue * days / 365.0
     change = -np.diff(level, prepend=0.0)
     change[-1] += level[-1]
@@ -435,9 +445,9 @@ def pnl(result, *, receivable_days: float | None = None) -> PnL:
     if receivable_days is not None and revenue is not None:
         wc = _working_capital(revenue, receivable_days)
     rows["working_capital_change"] = wc
-    rows["project_after_working_capital"] = (
-        None if wc is None or rows["project_post_tax"] is None
-        else rows["project_post_tax"] + wc)
+    for k in ("project", "equity"):
+        post = rows[f"{k}_post_tax"]
+        rows[f"{k}_after_working_capital"] = None if wc is None or post is None else post + wc
     return PnL(years=[int(y) for y in tl.years], streams=streams, rows=rows)
 
 
@@ -474,7 +484,8 @@ def _ratio(num: float, den: float, unit=None) -> Kpi:
     return _ok(num / den, unit)
 
 
-def kpis(result, p: PnL, *, capacity_mw: dict[str, float] | None = None) -> dict[str, Kpi]:
+def kpis(result, p: PnL, *, capacity: dict[str, float] | None = None,
+         capacity_unit: str = "MW") -> dict[str, Kpi]:
     """The business case's KPIs (spec §7).
 
     - EBITDA margin and revenue per MW, gross and net of pass-through (BC2).
@@ -482,31 +493,33 @@ def kpis(result, p: PnL, *, capacity_mw: dict[str, float] | None = None) -> dict
       never from a partial tax (GK B Q3), and working capital never enters them (Q4).
     - DSCR is n/a without debt (BC8).
 
-    Revenue per MW divides the mean operating-year revenue by the capacity stated in
-    `capacity_mw` (asset → MW). With no capacity stated it is not established (C5)."""
+    Revenue per unit of capacity divides the mean operating-year revenue by the plant's
+    capacity, stated in `capacity` (asset → amount in `capacity_unit`: MW, t/yr, ...).
+    The KPI names the set and the unit. With no capacity stated it is not established
+    (C5)."""
     out: dict[str, Kpi] = {}
     ccy = result.case.inputs.currency
     ops = [result.tl.index(y) for y in result.tl.operating_years]
     rev, ebitda = p.rows["revenue"], p.rows["ebitda"]
     if rev is None or ebitda is None:
         why = _missing(result, ("operating",))
-        for k in ("ebitda_margin_gross", "ebitda_margin_net", "revenue_per_mw_gross",
-                  "revenue_per_mw_net"):
+        for k in ("ebitda_margin_gross", "ebitda_margin_net", "revenue_per_capacity_gross",
+                  "revenue_per_capacity_net"):
             out[k] = Kpi(None, "not_established", why)
     else:
         r, e = float(rev[ops].sum()), float(ebitda[ops].sum())
         pt = float(p.rows["pass_through"][ops].sum())
         out["ebitda_margin_gross"] = _ratio(e, r)
         out["ebitda_margin_net"] = _ratio(e - pt, r - pt)
-        mw = sum((capacity_mw or {}).values())
-        unit = f"{ccy}/MW-year"
-        basis = {"assets": sorted(capacity_mw or {}), "mw": mw}
+        cap = sum((capacity or {}).values())
+        unit = f"{ccy}/{capacity_unit}-year"
+        basis = {"assets": sorted(capacity or {}), "capacity": cap, "unit": capacity_unit}
         for k, v in (("gross", r), ("net", r - pt)):
-            if not capacity_mw or not math.isfinite(mw) or mw <= 0.0:
-                out[f"revenue_per_mw_{k}"] = Kpi(None, "not_established",
-                                                  "capacity_not_stated", unit, basis)
+            if not capacity or not math.isfinite(cap) or cap <= 0.0:
+                out[f"revenue_per_capacity_{k}"] = Kpi(None, "not_established",
+                                                        "capacity_not_stated", unit, basis)
             else:
-                out[f"revenue_per_mw_{k}"] = _ok(v / len(ops) / mw, unit, basis)
+                out[f"revenue_per_capacity_{k}"] = _ok(v / len(ops) / cap, unit, basis)
     m = result.metrics
     for name, series, sections in (
         ("project", "project_post_tax", ("operating", "incentives", "tax")),
@@ -522,8 +535,9 @@ def kpis(result, p: PnL, *, capacity_mw: dict[str, float] | None = None) -> dict
         out[f"{name}_npv"] = (_ok(npv_v, ccy) if npv_v is not None else
                               Kpi(None, "not_established", f"{rate}_missing", ccy))
         irr_v = m.get(f"{series}_irr")
-        out[f"{name}_irr"] = (_ok(irr_v) if irr_v is not None else
-                              Kpi(None, "n/a", "no_sign_change"))
+        why = next((f.split(":", 1)[1] for f in result.flags
+                    if f.startswith(f"{series}:irr_not_established")), "irr_not_established")
+        out[f"{name}_irr"] = _ok(irr_v) if irr_v is not None else Kpi(None, "n/a", why)
     if result.cash.get("equity_post_tax") is None:
         out["payback_years"] = Kpi(None, "not_established",
                                    _missing(result, ("operating", "incentives", "debt", "tax")))
@@ -579,7 +593,9 @@ def break_even(ic_case: FinanceCase, inputs: BusinessCaseInputs, outputs: dict |
     The price scale is tried at 0, 1, then × 1.5 up to `BREAK_EVEN_MAX_SCALE`. A root is
     solved (brentq) only between two trials of opposite sign. No sign change is
     `break_even_not_bracketed`, never an extrapolation (BC8). Any trial not established
-    is `break_even_not_established`."""
+    is `break_even_not_established`. A line priced only by grid cells has no single price:
+    `price` is None and `price_scale` is the factor on every cell. A share line that
+    reads this line moves with it; every other line is the same in every trial (C7)."""
     outputs = outputs or {}
     out = {"status": None, "price_scale": None, "price": None,
            "money_year": None, "basis": "project_post_tax_npv@wacc_nominal"}
@@ -609,10 +625,14 @@ def break_even(ic_case: FinanceCase, inputs: BusinessCaseInputs, outputs: dict |
     else:
         out["status"] = "break_even_not_bracketed"
         return out
+    # The re-run (C7): |NPV| at the solved scale within the tolerance of the line's revenue.
     r = _result_at(ic_case, inputs, outputs, i, pack, layers, root)
-    v = npv(ic_case.inputs.wacc_nominal, r.cash["project_post_tax"])
-    line_revenue = float(np.sum(r.op.lines.get(line)))
-    if abs(v) > BREAK_EVEN_TOL * max(abs(line_revenue), 1.0):
+    v = _npv_at(ic_case, inputs, outputs, i, pack, layers, root)
+    series = r.op.lines.get(line)
+    if v is None or series is None:
+        out["status"] = "break_even_not_established"
+        return out
+    if abs(v) > BREAK_EVEN_TOL * max(abs(float(np.sum(series))), 1.0):
         out["status"] = "break_even_not_converged"
         return out
     out.update(status="ok", price_scale=root,
