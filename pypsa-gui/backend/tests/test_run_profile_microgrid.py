@@ -1193,3 +1193,116 @@ def test_the_grant_of_a_pass_above_the_cap_is_refused_by_its_kind(session, site,
         and "= 21 solves" in exc.value.detail["message"]
     )
     assert run_envelope._load(task_path(site[1], task))["state"] == "proposed"
+
+
+def _capped_lole(tmp_path):
+    """K = 3 (20 solves, the cap): 11 spent, so one pass (7) fits in the 9
+    left, and after it the coupling loop's reservation gets 1 of its 3."""
+    n = T.build_eh_microgrid()
+    _second_tie(n, "tie_2")
+    _second_tie(n, "tie_3")
+    profile = run_profiles.resolve("eh_microgrid@1")
+    held = run_envelope.counted(profile, _ctx(tmp_path, network=n))
+    assert (held["count"], held["solves"]) == (3, 20)
+    path, task = _task(tmp_path)
+    _grant(path, budget={**profile["envelope"]["budget"], "solves": held["solves"]})
+    _solve_entry(path, used=11, loop=False)
+    envelope = run_envelope._load(path)
+    left = envelope["budget"]["solves"] - run_envelope.solves_used(envelope)
+    assert run_profiles.mg_pass_solves(3) == 7 <= left == 9  # the pass fits (Q1-i)
+    for i in range(7):
+        run_envelope._audit(
+            envelope, "used", tool="solve_queue_enqueue", call_id=f"pass{i}"
+        )
+    run_envelope._save(path, envelope)
+    lole = _rules("eh_microgrid@1")["eh.adequacy.lole"]
+    granted, refused = run_envelope.reserve_engine(
+        path,
+        call_id="loop",
+        tool=lole["engine"]["tool"],
+        rule=lole["id"],
+        max_solves=lole["engine"]["max_solves"],
+        overhead=run_loops._overhead(lole["engine"]["tool"]),
+        restore=lole["engine"]["restore"],
+    )
+    assert (granted, refused) == (1, None)  # the loop cannot finish: 1 of its 3
+    return path, lole, granted
+
+
+def _looped(lole, granted, status="budget_exhausted"):
+    return {
+        "id": "result_gate.9",
+        "tool": lole["engine"]["tool"],
+        "engine": lole["id"],
+        "status": "completed",
+        "job": {"kind": "engine", "max_solves": granted, "outcome": status},
+        "result": {
+            "loop": {
+                "status": status,
+                "solves_used": granted,
+                "probe_solves": 0,
+                "target_lole_h": 2.0,
+                "eps_star": 40.0,
+            }
+        },
+    }
+
+
+def test_a_lole_loop_the_cap_cut_short_is_not_evaluated_and_ends_on_the_cap(tmp_path):
+    """GK B (47) Q4: K = 3, one pass fits but the LOLE loop cannot finish. The
+    rule reads its own not-evaluated state with words, never met, and never the
+    loop's last unconverged value; the stage ends on the cap."""
+    path, lole, granted = _capped_lole(tmp_path)
+    task = json.loads(path.read_text())
+    task["steps"].append(_looped(lole, granted))
+    [result] = run_gates.evaluate([lole], run_gates.Env(task, None, None, None))
+    assert result["verdict"] == "not_evaluated"
+    assert result["facts"][0]["value"] == run_gates.LOOP_CAPPED == "budget_spent"
+    assert (
+        "1 of its 3 solves" in result["reason"]
+        and "never counts as met" in result["reason"]
+    )
+    assert (
+        "loop" not in result["facts"][0]
+    )  # the unconverged record is not read as the result
+    task["run"]["stage"] = "result_gate"
+    task["run"]["stages"]["result_gate"] = {"status": "active", "attempts": 1}
+    gate = {"verdict": "fail", "rules": [result]}
+    assert (
+        run_loops.after_failed_result(
+            path, task, gate, run_profiles.resolve("eh_microgrid@1")
+        )
+        is False
+    )
+    assert task["run"]["stages"]["result_gate"]["reason"] == "budget_spent"
+
+
+def test_a_loop_that_had_all_its_solves_and_did_not_converge_still_fails(tmp_path):
+    """The contrast: the loop's own 3 solves ran out, the cap did not cut it,
+    so the rule fails on the loop's verdict (not_converged), as before."""
+    path, lole, _ = _capped_lole(tmp_path)
+    task = json.loads(path.read_text())
+    task["steps"].append(_looped(lole, lole["engine"]["max_solves"]))
+    [result] = run_gates.evaluate([lole], run_gates.Env(task, None, None, None))
+    assert (
+        result["verdict"] == "fail"
+        and result["facts"][0]["loop"]["status"] == "budget_exhausted"
+    )
+
+
+def test_a_lole_loop_with_no_solve_left_is_not_evaluated_with_words(tmp_path):
+    path, lole, _ = _capped_lole(tmp_path)
+    task = json.loads(path.read_text())
+    step = {
+        **_looped(lole, 0),
+        "status": "failed",
+        "error": "budget_spent",
+        "result": None,
+    }
+    task["steps"].append(step)
+    [result] = run_gates.evaluate([lole], run_gates.Env(task, None, None, None))
+    assert (
+        result["verdict"] == "not_evaluated"
+        and result["facts"][0]["value"] == "budget_spent"
+    )
+    assert "never counts as met" in result["reason"]

@@ -119,6 +119,14 @@ B14 holds. If the change adds error kinds, also run `tests/test_tool_error_kind_
   - An eh_site test shows its output unchanged.
   - A2 goes to UX too, if UX reads the "Stated targets" wording as theirs.
 
+12c answers on A1 as built, from GK B (47), 2026-11-11:
+
+- **Q1-i: accepted as built.** `pass_short` holds because a run's steps dispatch one at a time and only the run spends its envelope; a stress short of K reads `partial`, never a pass. The A1 PR body states the assumption "nothing spends between a run's steps" and names the test that would catch a parallel dispatch, or says none exists.
+- **Q1-ii, Q1-iii: accepted** (`eh_pass_over_cap` at K = 17; the capped arithmetic on the card for K = 2 and K = 3).
+- **Q3: (a).** A1 stays whole (about 1,800 lines: about 540 of code, docs and notes, the rest tests); the PR body lists the split.
+- **Q4: (a), one pass, with a condition.** When the cap cuts the LOLE loop, the LOLE rule reads its own not-evaluated state with words: never met, never the loop's last unconverged value (G8). Built in A1: the gate reads a coupling loop that ended `budget_exhausted` on fewer solves than its own `max_solves` (the envelope clamped it), or one refused for no solve left, as `not_evaluated`, value `budget_spent` (the engine's existing refusal kind), with words; the result stage ends `budget_spent`, not `not_converged`. Test: K = 3, 11 solves spent, one pass (7) fits in the 9 left, the loop gets 1 of its 3. A loop that had all its solves still fails as before. The hand-off's not-evaluated count is asserted in A2, where G8 adds the count.
+- **A2 (G8 on every profile, Q2 (a)): accepted as described.**
+
 ### Slices
 
 - 12a (GK A): the off-grid exclusion on the scorecard, the island survival check and the tie and critical-load predicates. Engine only.
