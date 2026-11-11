@@ -45,3 +45,9 @@ Seam: its own `memory_dream_jobs` table (migration 0014) and a lease worker in `
 - D10 Shutdown stops the worker and releases its lease (owner-checked); tests drive the loop entry directly.
 
 04b goes to UX, and to GK B for the triggers (nightly and after-10-sessions both default off, tested; a trigger never starts a second live job).
+
+### 2026-11-11: 04a build notes
+
+- Deferred to 04b: the `memory_analyzer` profile role (04a uses the active profile), the route-parity declarations for `/api/memory/dream` (the check refuses them until the UI calls the routes), and the triggers.
+- Budget is in tokens only. The plan names token and cost caps; a cost cap needs per-profile prices, which the app does not hold. Dream spend is tallied per user against `PYPSA_GUI_CHAT_DAILY_TOKEN_CAP`, apart from chat's per-project tally (no per-user chat ledger exists). Both are open for GK B.
+- The concurrent-start test (D4) runs on SQLite; CI has no Postgres.
