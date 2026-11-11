@@ -64,7 +64,7 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - A carrier colour has one token, and canvas hex maps are pinned to it by a test (#1336).
 - Skeletons appear after about 200 ms in an `aria-busy` status region of the same size; animations honour `prefers-reduced-motion` (#1335).
 - A long list in a banner folds after 5 with "(N more) Show all", and a bulk action over folded rows stays off until they are shown (#1332).
-- Hashes and digests never show in user rows (#1332).
+- Hashes and digests never show in user rows (#1332). One exception: a confirmation card where the user vouches for exact values and a ticket asks each row to show its digest (RP-18 R4). There it reads "no record · values <digest>" in the mono id style, with one muted line under the table saying what the code identifies (#1396).
 - An auto-fit or auto-scroll stops at the first user pan, zoom or select (#1335).
 - Dates display ISO (2026-11-08) (#1327).
 - A chart header never gives two units: the figure and its hint agree (#1354).
