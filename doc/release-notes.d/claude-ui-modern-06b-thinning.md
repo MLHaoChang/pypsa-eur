@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Full-year charts on Load flow, Lost load, Branch loading, Reserve commitments, Energy flows, Load shape and Costs & prices now draw a thinned series with fixed x-axis ticks, so those tabs open and stay idle on an 8760-step project. The "Drawn: n of N" note says "time steps" when the step is not an hour.

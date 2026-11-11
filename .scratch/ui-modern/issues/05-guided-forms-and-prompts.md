@@ -3,7 +3,7 @@
 
 # Guided forms and prompts
 
-Status: ready-for-agent
+Status: done (slice 1 #1340, slice 2 #1353)
 Blocked by: 01
 Type: feature
 Model: Sonnet. Reviewer: UX.

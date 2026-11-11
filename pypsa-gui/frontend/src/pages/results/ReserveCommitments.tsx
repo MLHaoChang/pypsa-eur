@@ -14,7 +14,7 @@ import ResultState from '../../components/ResultState'
 import { Tag } from '../../components/PageKit'
 import { money } from '../DcBackupSection'
 import {
-  ChartFrame, CHART_HEIGHT, Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, shortStamp, colourForCarrier,
+  ChartFrame, CHART_HEIGHT, Seg, CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_TOOLTIP, yAxisLabel, shortStamp, colourForCarrier,
 } from './shared'
 
 // ── Reserve products on the backup storage (DC grid readiness 06) ───────────
@@ -275,10 +275,11 @@ function StorageCharts({ storage, snapshots, series }: {
           )}
         </div>
         {storage.soc_mwh ? (
+          <>
           <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-            <ComposedChart data={energyRows} margin={{ top: 18, right: 40, left: 0, bottom: 4 }}>
+            <ComposedChart data={thinRows(energyRows)} margin={{ top: 18, right: 40, left: 0, bottom: 4 }}>
               <CartesianGrid {...CHART_GRID} />
-              <XAxis dataKey="t" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} />
+              <XAxis dataKey="t" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} {...timeAxis(thinRows(energyRows).length)} />
               <YAxis {...CHART_AXIS} label={yAxisLabel('MWh')}
                 domain={[0, storage.e_cap_mwh ?? 'auto']} allowDataOverflow={false} />
               <Tooltip {...CHART_TOOLTIP} labelFormatter={l => shortStamp(String(l))}
@@ -308,6 +309,8 @@ function StorageCharts({ storage, snapshots, series }: {
                 dot={false} connectNulls={false} isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
+          <ThinNote rows={energyRows} />
+          </>
         ) : (
           <p className="py-4 text-center text-[11px] text-muted">State of charge: not solved.</p>
         )}
@@ -329,10 +332,10 @@ function StorageCharts({ storage, snapshots, series }: {
             ))}
           </div>
           <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-            <AreaChart data={powerRows} stackOffset="sign" margin={{ top: 18, right: 40, left: 0, bottom: 4 }}>
+            <AreaChart data={thinRows(powerRows)} stackOffset="sign" margin={{ top: 18, right: 40, left: 0, bottom: 4 }}>
               {hatches(base, shown)}
               <CartesianGrid {...CHART_GRID} />
-              <XAxis dataKey="t" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} />
+              <XAxis dataKey="t" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} {...timeAxis(thinRows(powerRows).length)} />
               <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} tickFormatter={(v: number) => num(Math.abs(v))} />
               <Tooltip {...CHART_TOOLTIP} labelFormatter={l => shortStamp(String(l))}
                 formatter={(v: number) => fmtMw(v)} />
@@ -350,6 +353,7 @@ function StorageCharts({ storage, snapshots, series }: {
               })}
             </AreaChart>
           </ResponsiveContainer>
+          <ThinNote rows={powerRows} />
         </div>
       )}
     </div>

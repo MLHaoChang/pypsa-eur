@@ -57,3 +57,20 @@ G3-4 choice: the pro-rata drop (LO-3 rule), not a refusal (item 2).
 ### 2026-11-11: triage
 
 Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.
+
+### 2026-11-11: GK B (47) ruling on served_load against the bill streams (BC 04 F1, PR #1383)
+
+Ruling (a): a linked `served_load.<load>` meets no bill stream. Against a valued
+`eaas_fee` it is refused `double_count:eaas_fee` (fail closed). Conditions:
+
+- **C1 Pin the premise.** The ruling holds only while every bill stream prices grid
+  import. Pin that with a test; a future bill item that prices the load joins
+  `served_load`'s clash set, and the `ledger_clash` docstring says so.
+- **C2 Tests here in 06.** One per stream: `served_load` against each bill stream is
+  admitted; against `eaas_fee` refused; with both valued, refused on `eaas_fee`. Then
+  mutate the `eaas_fee` branch and show the mutant killed.
+- **C3 Help text.** The microgrid preset's typed "Availability / EaaS fee" row's help
+  says the locked rows and the help are what stop duplication.
+
+04's `ledger_clash` (PR #1383) returns None for `served_load` against every stream;
+06 adds the `eaas_fee` branch, the C1 pin and the C2 tests.
