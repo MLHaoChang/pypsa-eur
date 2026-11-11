@@ -398,3 +398,34 @@ def test_a_record_only_write_leaves_the_lp_inputs_alone(session, ctx, monkeypatc
     assert not results[-1].get("is_error"), results[-1]
     assert _network_input_fingerprint(ctx) == fp
     assert dirty_state.revision(ctx) == rev
+
+
+def test_a_refusal_names_every_failing_series(ctx):
+    [b, c] = _seed(ctx, 2)
+    for nm in (b, c):
+        ctx.user_ts_meta[_key(nm)] = {"provenance": "measured"}
+    with pytest.raises(unrecorded.UnrecordedRefused) as one:
+        unrecorded.check(ctx, _items(ctx, ["g_a", b]))
+    assert one.value.components == [b] and f"{b} no longer has a series" in str(one.value)
+    with pytest.raises(unrecorded.UnrecordedRefused) as two:
+        unrecorded.check(ctx, _items(ctx, ["g_a", b, c]))
+    assert two.value.components == [b, c] and f"{b}, {c} no longer have a series" in str(two.value)
+    assert two.value.detail()["component"] == b
+
+
+def test_the_card_binds_the_project(ctx, monkeypatch):
+    """A card names the project by its id, so a same-named project is another card."""
+    from routers import deps
+
+    card = edit_card.preview(TOOL, {"project_id": NAME, "items": _items(ctx, ["g_a"])}, with_state=False)
+    real = deps.require_project_access
+
+    def renamed(*a, **k):
+        proj = real(*a, **k)
+        return type(proj)(**{**proj.__dict__, "uuid": "00000000-0000-0000-0000-000000000001"}) \
+            if hasattr(proj, "__dict__") else proj
+
+    monkeypatch.setattr(deps, "require_project_access", renamed)
+    with pytest.raises(HTTPException) as exc:
+        edit_card.require_current(TOOL, {"project_id": NAME, "items": _items(ctx, ["g_a"])}, card)
+    assert exc.value.detail["error_kind"] == "edit_preview_stale"

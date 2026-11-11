@@ -66,7 +66,7 @@ def check(ctx, items: Iterable[Any]) -> list[tuple[str, str]]:
         raise UnrecordedRefused({
             "error_kind": "unrecorded_duplicate", "components": dupes,
             "message": f"each series may be listed once; listed more than once: {', '.join(dupes)}"})
-    gone = [c for c in names if not c or profile_kind(ctx, c) != "unrecorded"]
+    gone = [c for c in names if profile_kind(ctx, c) != "unrecorded"]
     if gone:
         raise UnrecordedRefused({
             "error_kind": "not_unrecorded", "components": gone,
