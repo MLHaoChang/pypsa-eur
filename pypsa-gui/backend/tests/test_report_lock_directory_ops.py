@@ -186,6 +186,34 @@ def test_a_new_report_writer_past_the_bound_refuses_the_close(tmp_path, monkeypa
     assert not (store.reports_dir(tmp_path) / store.CLOSING_MARKER).exists()
 
 
+def test_the_wait_for_a_new_report_writer_keeps_the_copy_bound(tmp_path, monkeypatch):
+    """C4: the close holds the network lock while it waits, so its wait for
+    a new id's writer ends at `COPY_LOCK_TIMEOUT_S`, never at a writer's
+    `LOCK_TIMEOUT_S`."""
+    _seed(tmp_path, RID_A)
+    monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(store, "LOCK_TIMEOUT_S", 5)
+    real = store.atomic_write_text
+    holding = []
+
+    def writing(path, text, *a, **k):
+        if pathlib.Path(path).name == store.CLOSING_MARKER and not holding:
+            holding.append(held_elsewhere(tmp_path, RID_NEW))
+            holding[0].__enter__()
+        return real(path, text, *a, **k)
+
+    monkeypatch.setattr(store, "atomic_write_text", writing)
+    started = time.monotonic()
+    try:
+        with pytest.raises(store.ReportBusy):
+            with store.reports_closed(tmp_path):
+                pytest.fail("closed while a new report was being written")
+        waited = time.monotonic() - started
+    finally:
+        holding[0].__exit__(None, None, None)
+    assert waited < 2.5
+
+
 def test_write_figure_never_makes_a_removed_report_again(tmp_path, monkeypatch):
     rdir = _seed(tmp_path, RID_A)
     real = store._existing_report_dir
