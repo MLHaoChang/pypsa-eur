@@ -121,8 +121,15 @@ def test_every_template_produces_a_scorecard_whose_limits_cite_a_source(tmp_path
 @pytest.mark.parametrize("tid", TIDS)
 def test_without_the_ai_profile_the_envelope_rows_are_unknown(tmp_path, tid):
     d, n = _project(tmp_path, tid)
-    rows = _rows(G.grid_readiness(d, n, PROFILE))
+    out = G.grid_readiness(d, n, PROFILE)
+    rows = _rows(out)
+    # Study harness 12: an off-grid template has no fault-level row to be unknown; it is excluded with the reason.
+    gone = {e["id"]: e["reason"] for e in out["excluded"]}
+    assert bool(gone) is tid.startswith("eh_microgrid")
     for rid in ENVELOPE_ROWS:
+        if rid in gone:
+            assert gone[rid] == G.SK_OFF_GRID and rid not in rows, rid
+            continue
         assert rows[rid]["verdict"] == "unknown", rid
         if rid != "rapid_voltage_change" or rows[rid]["limit"] is not None:
             assert "AI-training load profile" in rows[rid]["note"] \

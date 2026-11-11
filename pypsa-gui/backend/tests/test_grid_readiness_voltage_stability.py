@@ -233,8 +233,11 @@ def test_off_grid_excludes_both_rows_with_the_reason(tmp_path, setup):
     _write(tmp_path)
     pv, qv, out = _vs(tmp_path)
     assert pv is None and qv is None
-    assert [e["id"] for e in out["excluded"]] == list(IDS)
-    assert all(e["reason"] == G.VS_OFF_GRID for e in out["excluded"])
+    vs = [e for e in out["excluded"] if e["id"] in IDS]
+    assert [e["id"] for e in vs] == list(IDS)
+    assert all(e["reason"] == G.VS_OFF_GRID for e in vs)
+    # Study harness 12: the other off-grid exclusions are the fault-level rows, with their own reason.
+    assert all(e["reason"] == G.SK_OFF_GRID for e in out["excluded"] if e["id"] not in IDS)
     assert sum(out["summary"][v] for v in G.VERDICTS) == len(out["rows"])
 
 

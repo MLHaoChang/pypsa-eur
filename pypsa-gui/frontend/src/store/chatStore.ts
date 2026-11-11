@@ -182,6 +182,8 @@ export interface HarnessTurn {
   envelope_decision?: {
     task_id: string; verdict: 'unattended' | 'stepwise' | 'revoke'
     envelope?: Record<string, unknown>; notify_email?: boolean
+    /** Issue 21: the digest of the intake rows the card showed (a plan with a setup entry). */
+    intake_digest?: string
     goal?: { value: number | null; unit: 'h/yr'; source: string }
   }
 }
