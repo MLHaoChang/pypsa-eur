@@ -881,14 +881,14 @@ def set_role(role: str, profile_id: str | None) -> dict[str, str]:
     """Mark `profile_id` for `role`, or clear the role with None. Raises
     `ProfileValidationError` for an unknown role or profile id."""
     if role not in PROFILE_ROLES:
-        raise ProfileValidationError(f"unknown profile role {role!r}")
+        raise ProfileValidationError(f"unknown profile role: {role}")
     profiles, current_active = load_profiles()
     roles = load_roles()
     if profile_id is None:
         roles.pop(role, None)
     else:
         if profile_id not in {p.id for p in profiles}:
-            raise ProfileValidationError(f"unknown profile id {profile_id!r}")
+            raise ProfileValidationError(f"no profile with the id {profile_id}")
         roles[role] = profile_id
     file_profiles = [p for p in profiles if p.id not in _BUILTIN_IDS]
     save_profiles(file_profiles, current_active, roles)
