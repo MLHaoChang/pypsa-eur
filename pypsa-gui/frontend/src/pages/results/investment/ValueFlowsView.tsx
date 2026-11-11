@@ -8,6 +8,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { ResponsiveContainer, Sankey, Tooltip, Layer, Rectangle } from 'recharts'
 import type { ValueFlowsPayload } from '../../../api/commercial'
 import { useResultsFilter } from '../filterContext'
+import { displayName } from '../../../utils/displayName'
 import { downloadCSV, ChartFrame, ChartActions, ChartZero, UnavailableBlock, UnavailableCell } from '../shared'
 import {
   conservationState, csvRows, CSV_HEADER, fmtAmount, participantRows, periodKeys, periodLabel,
@@ -47,7 +48,7 @@ function SankeyNode(props: {
                  fill={payload.internal ? INTERNAL : EXTERNAL} fillOpacity={0.9} />
       <text x={left ? x - 4 : x + width + 4} y={y + height / 2} dy="0.35em"
             textAnchor={left ? 'end' : 'start'} fontSize={10} fill="currentColor">
-        {payload.name}
+        {displayName(payload.name)}
       </text>
     </Layer>
   )
@@ -62,7 +63,7 @@ function SankeyTip({ active, payload }: {
   if (!active || !d || d.stream === undefined) return null
   return (
     <div className="rounded border border-border bg-panel px-2 py-1 text-[11px]">
-      <div>{d.source?.name} → {d.target?.name}</div>
+      <div>{displayName(d.source?.name ?? '')} → {displayName(d.target?.name ?? '')}</div>
       <div>{streamLabel(d.stream)}: {fmtAmount(d.value)}</div>
     </div>
   )
@@ -188,7 +189,7 @@ export default function ValueFlowsView({ payload, sankeyWidth }: {
         </span>
       </div>
       <ParticipantTable payload={payload} periodKey={periodKey} />
-      <ChartFrame testId="vf-flow" title={`Money flows · ${periodLabel(periodKey)}`} hint="payer → payee"
+      <ChartFrame testId="vf-flow" title={`Money flows · ${periodLabel(periodKey)}`} hint="payer → payee · per year, in the tariff's currency"
         right={state.status === 'ok' && period
           ? <ChartActions chartRef={chart} filename={`value_flows_${periodKey}`} /> : undefined}>
         {state.status === 'ok' && period ? (

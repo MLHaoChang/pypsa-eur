@@ -636,7 +636,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                 <YAxis {...CHART_AXIS} tickFormatter={(v: number) => fmtCurrency(v, 0)} />
                 <RTooltip {...CHART_TOOLTIP} formatter={(v: number, name: string) => [fmtCurrency(v), name]} />
                 <Legend {...CHART_LEGEND} />
-                <Bar dataKey="CAPEX" stackId="cost" fill={carrierColour('gas')} />
+                <Bar dataKey="CAPEX" stackId="cost" fill="var(--color-series-6)" />
                 <Bar dataKey="OPEX"  stackId="cost" fill="var(--color-warn)" />
                 {!vollNotRecorded && (
                   <Bar dataKey="VOLL"  stackId="cost" fill="var(--color-danger)" radius={[3, 3, 0, 0]} />
@@ -744,7 +744,8 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                 {/* Two stacks per period: discharge (positive direction)
                     stacks together, charge (gross positive bars in a
                     separate stack) stacks alongside. Each carrier gets a
-                    stable colour from the shared palette. The naming
+                    stable colour from the shared palette, and its charge
+                    a series colour of its own. The naming
                     convention ` discharged` / ` charged` reads cleanly
                     in the legend even with multiple carriers. */}
                 {storageBars.carriers.map((c, i) => (
@@ -755,7 +756,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                 {storageBars.carriers.map((c, i) => (
                   <Bar key={`${c}_c`} dataKey={`${c}_c`} name={`${c} charged`}
                     stackId="charged"
-                    fill={colourForCarrier(c, i)} fillOpacity={0.55}
+                    fill={carrierColour(null, storageBars.carriers.length + i)}
                     radius={[3, 3, 0, 0]} />
                 ))}
               </BarChart>
@@ -776,7 +777,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
           title="Renewables · curtailment per period"
           hint={curtailmentBars.carriers.length > 1
             ? `by carrier · ${curtailmentBars.carriers.join(' · ')}`
-            : 'Σ max(p_max_pu × p_nom − p, 0)'}
+            : 'available renewable energy not used'}
           right={
             <ChartActions
               chartRef={curtailmentRef}

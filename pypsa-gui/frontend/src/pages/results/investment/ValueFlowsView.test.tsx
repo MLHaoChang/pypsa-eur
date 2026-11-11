@@ -33,7 +33,9 @@ describe('ValueFlowsView', () => {
     const labels = [...svg!.querySelectorAll('text')].map(t => t.textContent)
     expect(labels.filter(l => l === 'Netz AG')).toHaveLength(2)
     expect(labels.filter(l => l === 'Developer')).toHaveLength(2)
-    expect(labels).toContain('retailer')
+    // Node names read as the table's do, never as a raw id.
+    expect(labels).toContain('Retailer')
+    expect(labels).not.toContain('retailer')
     expect(svg!.querySelectorAll('path.recharts-sankey-link, .recharts-sankey-link path, path')
       .length).toBeGreaterThanOrEqual(3)
     expectAllButtonsNamed(container)

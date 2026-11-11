@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AnnualRow, HeatmapState, MonthRow, WeekView } from '../../api/loadShape'
 import {
-  annualStack, cellTitle, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH, heatMax, missingGroups, monthRows, socRows, weekRows,
+  annualStack, GROUP_COLOR, MONTH_STACK, WEEK_LINES, cellTitle, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH, heatMax, missingGroups, monthRows, socRows, weekRows,
 } from './loadShape'
 
 const HEAT: HeatmapState = {
@@ -45,6 +45,15 @@ describe('heatmap colours', () => {
   })
   it('has no peak for a heatmap the server did not draw', () => {
     expect(heatMax({ status: 'not_modelled', reason: 'x' })).toBe(0)
+  })
+})
+
+describe('series colours', () => {
+  it('gives every series drawn together its own colour', () => {
+    for (const keys of [WEEK_LINES, MONTH_STACK]) {
+      const colours = keys.map(k => GROUP_COLOR[k])
+      expect(new Set(colours).size).toBe(keys.length)
+    }
   })
 })
 

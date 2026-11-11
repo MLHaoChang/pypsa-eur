@@ -800,7 +800,7 @@ export default function Economics() {
                 <YAxis {...CHART_AXIS} label={yAxisLabel('€')}
                   tickFormatter={(v: number) => `${v < 0 ? '\u2212' : ''}${money(v)}`} />
                 <RTooltip {...CHART_TOOLTIP}
-                  formatter={(v: number) => [fmtCurrency(v), 'Net profit']} />
+                  formatter={(v: number) => [`${v < 0 ? '\u2212' : ''}${money(v, 'EUR')}`, 'Net profit']} />
                 <Bar dataKey="value">
                   {profitChartData.map((row, i) => (
                     <Cell key={i} fill={row.value > 0 ? 'var(--color-success)' : 'var(--color-danger)'} />

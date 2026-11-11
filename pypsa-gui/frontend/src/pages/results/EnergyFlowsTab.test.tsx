@@ -158,6 +158,8 @@ describe('the source line on a multi-period run', () => {
     const source = frame.querySelector('[data-chart-source]')!.textContent!
     expect(source).toContain('period 2027')
     expect(source).not.toContain('all periods')
+    // The dates are the whole horizon's, not the drawn period's.
+    expect(source).not.toContain('2030-12-31')
     expect(screen.getByTestId('ef-one-period').textContent).toBe('All periods are selected above. The diagram draws one period: 2027.')
     // The supply and demand charts below read the same period.
     expect(screen.getByTestId('ef-series-supply').querySelector('[data-chart-source]')!.textContent).toContain('period 2027')

@@ -10,9 +10,9 @@ export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 // Literal hex on purpose: `var(--…)` does not resolve inside SVG attributes.
 // Chart theme tokens (components/charts/chartTheme.tsx), so they follow light / dark.
 export const GROUP_COLOR: Record<string, string> = {
-  grid: 'var(--color-series-1)', export: 'var(--color-carrier-ror)', solar: 'var(--color-carrier-solar)',
+  grid: 'var(--color-carrier-grid)', export: 'var(--color-carrier-ror)', solar: 'var(--color-carrier-solar)',
   wind: 'var(--color-carrier-wind)', genset: 'var(--color-carrier-oil)', ev: 'var(--color-carrier-electricity)',
-  flexible: 'var(--color-series-5)', unserved: 'var(--color-danger)', excess: 'var(--color-series-8)',
+  flexible: 'var(--color-series-5)', unserved: 'var(--color-danger)', excess: 'var(--color-series-6)',
 }
 export const GROUP_LABEL: Record<string, string> = {
   grid: 'Grid import', export: 'Export', solar: 'Solar', wind: 'Wind', genset: 'Genset',

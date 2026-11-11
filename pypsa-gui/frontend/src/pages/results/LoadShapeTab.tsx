@@ -61,7 +61,7 @@ function Heatmap({ title, testId, heat, colour }: { title: string; testId: strin
           <span aria-hidden className="h-2 w-24 rounded-sm border border-border"
             style={{ background: `linear-gradient(to right, ${heatColor(0, max, colour)}, ${heatColor(max, max, colour)})` }} />
           <span className="font-mono tabular-nums">{fmtMw(max)}</span>
-          <span>mean MW per weekday and hour; stronger colour is higher</span>
+          <span>mean MW per weekday and hour · stronger colour is higher</span>
         </span>
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="h-2 w-4 rounded-sm border border-border" style={{ background: NO_SNAPSHOT_HATCH }} />
@@ -172,16 +172,17 @@ export default function LoadShapeTab() {
         {weekView?.status === 'ok' && wk ? (
           <>
             <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-              <ComposedChart data={wk.rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+              <ComposedChart data={wk.rows} margin={{ top: 18, right: 28, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} />
                 <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
                 <Tooltip {...CHART_TOOLTIP} />
-                <Legend {...CHART_LEGEND} />
-                <Bar dataKey="flag" name="Flagged interval" fill="var(--color-danger)" fillOpacity={0.12} barSize={6} isAnimationActive={false} />
+                {/* A line swatch, so the key shows each series' dash as well as its colour. */}
+                <Legend {...CHART_LEGEND} iconType="plainline" iconSize={24} />
+                <Bar dataKey="flag" name="Flagged interval" legendType="square" fill="var(--color-danger)" fillOpacity={0.12} barSize={6} isAnimationActive={false} />
                 {wk.keys.map((k, i) => (
                   <Line key={k} type="monotone" dataKey={k} name={GROUP_LABEL[k]} dot={false} stroke={GROUP_COLOR[k]}
-                        strokeDasharray={seriesDash(i)} strokeWidth={1.5} isAnimationActive={false} />
+                        legendType="plainline" strokeDasharray={seriesDash(i)} strokeWidth={1.5} isAnimationActive={false} />
                 ))}
               </ComposedChart>
             </ResponsiveContainer>
@@ -192,7 +193,7 @@ export default function LoadShapeTab() {
             </p>
             {soc ? (
               <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
-                <AreaChart data={soc} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+                <AreaChart data={soc} margin={{ top: 18, right: 28, left: 0, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} />
                   <YAxis {...CHART_AXIS} label={yAxisLabel('Battery SoC, MWh')} />
@@ -209,9 +210,7 @@ export default function LoadShapeTab() {
       </ChartFrame>
 
       {data.monthly?.status === 'ok' ? (
-        <ChartFrame testId="ls-monthly" title="Monthly site energy"
-          figure={data.monthly.average_daily_generation_mwh != null
-            ? `${fmtMwh(data.monthly.average_daily_generation_mwh)} per day on average` : undefined}>
+        <ChartFrame testId="ls-monthly" title="Monthly site energy">
           <>
             <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
               <ComposedChart data={monthRows(data.monthly.months)} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
@@ -226,7 +225,7 @@ export default function LoadShapeTab() {
                        isAnimationActive={false} />
                 ))}
                 <Line yAxisId="d" type="monotone" dataKey="daily" name="Daily generation" stroke="var(--color-text)"
-                      dot={false} strokeWidth={1.5} isAnimationActive={false} />
+                      legendType="plainline" dot={false} strokeWidth={1.5} isAnimationActive={false} />
                 {data.monthly.average_daily_generation_mwh != null && (
                   <ReferenceLine yAxisId="d" y={data.monthly.average_daily_generation_mwh} stroke="var(--color-text)"
                                  strokeDasharray="4 3" />
@@ -270,7 +269,12 @@ export default function LoadShapeTab() {
                 ))}
               </div>
               <ul className="flex flex-wrap gap-x-4 text-[11px]">
-                {st.segments.map(s => <li key={s.key} data-testid={`ls-annual-${s.key}`}>{s.label}: {fmtMwh(s.mwh)}</li>)}
+                {st.segments.map(s => (
+                  <li key={s.key} data-testid={`ls-annual-${s.key}`} className="flex items-center gap-1">
+                    <span aria-hidden className="h-2 w-2 rounded-sm" style={{ background: s.color }} />
+                    {s.label}: {fmtMwh(s.mwh)}
+                  </li>
+                ))}
                 <li data-testid="ls-annual-export">Export: {st.export == null ? 'not modelled' : fmtMwh(st.export)}</li>
                 <li data-testid="ls-annual-excess">Excess: {st.excess == null ? 'not modelled' : fmtMwh(st.excess)}</li>
                 <li data-testid="ls-annual-load">Load served: {fmtMwh(st.load)}</li>

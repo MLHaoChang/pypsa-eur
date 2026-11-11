@@ -145,7 +145,7 @@ function SeriesChart({ title, series, index }: {
     <ChartFrame testId={`ef-series-${title.toLowerCase()}`}
       title={`${title} by carrier`} figure={chartFigure(fmtPower(peak), 'peak')} hint="hourly average">
       <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-        <AreaChart data={data} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+        <AreaChart data={data} margin={{ top: 18, right: 28, left: 0, bottom: 0 }}>
           <CartesianGrid {...CHART_GRID} />
           <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} />
           <YAxis {...CHART_AXIS} label={yAxisLabel('MW (average)')} />
@@ -212,9 +212,10 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   const graph = sankeyData(data.rows)
   const total = data.rows.reduce((s, r) => s + r.mwh, 0)
   // With "all periods" chosen above, this tab still draws ONE period (its own
-  // picker, the first by default): its charts' source line names that period.
+  // picker, the first by default): its charts' source line names that period
+  // and drops the dates, which are the whole horizon's and not that period's.
   const frameSource: ChartSource = shellPeriod == null && data.period != null && source.line
-    ? { ...source, line: source.line.replace(/all periods$/, `period ${data.period}`) }
+    ? { ...source, line: source.line.replace(/(?: · [^·]*→[^·]*)? · all periods$/, ` · period ${data.period}`) }
     : source
   const lossShare = share(data.rows.filter(r => r.destination === 'Losses').reduce((s, r) => s + r.mwh, 0), total)
   const periods = data.periods.filter((p): p is number => p != null)

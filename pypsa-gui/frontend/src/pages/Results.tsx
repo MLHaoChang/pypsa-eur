@@ -657,8 +657,11 @@ export default function Results() {
   // Plain words, no solver terms (#1194): "solved", "all periods".
   const stamp = (iso: string) => toDisplay(iso).replace('T', ' ')
   // A run whose AC power flow also converged reports its own success condition.
-  const solveWords = status?.condition && SOLVED_CONDITIONS.has(status.condition) ? 'solved'
-    : (status?.condition && REFERENCE_CONDITION_WORDS[status.condition]) || 'did not solve'
+  // The optimisation's own condition is the part before ";": a later stage's
+  // failure ("optimal; ac_pf_failed: …") does not unsolve the dispatch drawn.
+  const solveCondition = status?.condition?.split(';')[0].trim()
+  const solveWords = solveCondition && SOLVED_CONDITIONS.has(solveCondition) ? 'solved'
+    : (solveCondition && REFERENCE_CONDITION_WORDS[solveCondition]) || 'did not solve'
   const chartSource: ChartSource = {
     line: status?.condition
       ? `Latest solve · ${solveWords} · ${stamp(fromIso || firstSnap16 || '') || 'start'} → ${
