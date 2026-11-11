@@ -22,6 +22,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - Never run two mutant batches in one worktree at once: the edits cross-contaminate (#1246).
 - Run root `tests/` and `pypsa-gui/backend` tests in separate pytest invocations: mixing them fails on the `tests._shard` plugin.
 - A PR that adds an import of gridspine or another third-party module to `pypsa-gui/backend`: run `tests/test_packaging_requirements.py` at the trial merge (the frozen-app pin test; #707 missed it).
+- A pydantic custom error class (pydantic_core) imported in the backend is a new third-party import: run `tests/test_packaging_requirements.py` (#1350).
 
 - A PR that adds a route: run `test_route_chat_disposition`, `test_project_route_acl_policy` and `test_write_surface_lock_policy` at the trial merge (#725 and #741 both missed it).
 
@@ -207,5 +208,8 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A read-only route that reuses chat-path readers catches the chat path's exception set per item, so one busy lock degrades one card (#1343).
 - A PR that makes a lock's hold longer re-checks every waiter's bound on that lock (#1345).
 - A reviewer rule for visibility ("admin sees a nominated item") is not reused as a rule for use (#1347).
+- A solver ending is judged on its termination CONDITION, never on linopy's status: linopy maps time_limit, iteration_limit, suboptimal and imprecise to status "ok". Test with a real time limit, not a mocked ("warning", …) (#1361 F1).
+- A fuel-fed firm unit is bounded per input BUS: sum the draw of every port on one bus before dividing its fuel, and check every input port (bus0 and each busN with negative efficiencyN), not only bus0 (#1341 F1/D1).
+- A check that needs "the mainland" or "the island" defines the island from its own buses, never from a tag on one external bus (#1361 F3).
 - Review through a subagent: it reads the diff, runs the trial merge, tests and mutants, and returns file:line findings; the gatekeeper reads only the hunks those point at (GK B (42) and (43) each reached 300k in about 80 minutes).
 - One subagent per PR with a 30–40 line report costs about 10–15k of the gatekeeper's context per review. Re-review rounds are what add up, so ask the builder for one push and give the property plus the test, not the fix (GK B (44)).
