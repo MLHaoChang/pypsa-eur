@@ -23,5 +23,5 @@ export function solveStageIndex(lines: readonly string[]): number {
 
 export function solveStageLabel(lines: readonly string[]): string {
   const i = solveStageIndex(lines)
-  return `${SOLVE_STAGES[i]}, step ${i + 1} of ${SOLVE_STAGES.length}`
+  return `${SOLVE_STAGES[i]} · step ${i + 1} of ${SOLVE_STAGES.length}`
 }

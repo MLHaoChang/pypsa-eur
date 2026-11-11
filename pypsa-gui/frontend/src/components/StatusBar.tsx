@@ -145,9 +145,9 @@ export default function StatusBar() {
       />
       {/* Solver status */}
       <span className={`flex items-center gap-1 ${color}`}>
-        <span className={`inline-block w-1.5 h-1.5 rounded-full bg-current ${status === 'running' ? 'animate-pulse' : ''}`} />
+        <span className={`inline-block w-1.5 h-1.5 rounded-full bg-current ${status === 'running' ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
         {status.charAt(0).toUpperCase() + status.slice(1)}
-        {status === 'running' && <span data-testid="solve-stage">· {solveStageLabel(logLines)}</span>}
+        {status === 'running' && <span role="status" data-testid="solve-stage">· {solveStageLabel(logLines)}</span>}
         {elapsedStr && <span className="tabular-nums" title="Elapsed solve time">· {elapsedStr}</span>}
       </span>
       <span className="text-border">|</span>

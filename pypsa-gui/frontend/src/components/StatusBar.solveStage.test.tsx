@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import StatusBar from './StatusBar'
@@ -31,10 +31,20 @@ describe('StatusBar solve stage', () => {
       logLines: ['[PHASE] Validation passed (0 warnings).', '[PHASE] Optimising via highs (LOPF)...'],
     })
     const { unmount } = renderBar()
-    expect(screen.getByTestId('solve-stage').textContent).toContain('Solving, step 3 of 4')
+    expect(screen.getByTestId('solve-stage').textContent).toContain('Solving · step 3 of 4')
     unmount()
     useSimulationStore.setState({ status: 'idle', runStartedAt: null })
     renderBar()
     expect(screen.queryByTestId('solve-stage')).toBeNull()
+  })
+
+  it('is a status region without the timer, and resets to the first stage on a new run', () => {
+    useSimulationStore.setState({ status: 'running', runStartedAt: Date.now(), logLines: ['[PHASE] Solve complete (status=ok)'] })
+    renderBar()
+    const el = screen.getByTestId('solve-stage')
+    expect(el.getAttribute('role')).toBe('status')
+    expect(el.textContent).toBe('· Saving results · step 4 of 4')
+    act(() => useSimulationStore.getState().clearLog())
+    expect(screen.getByTestId('solve-stage').textContent).toBe('· Checking inputs · step 1 of 4')
   })
 })
