@@ -119,8 +119,12 @@ def test_presets_lists_the_catalogue(client):
 
 
 def test_every_preset_names_the_weather_source_it_is_for(client):
-    presets = client.get("/api/profiles/presets").json()["presets"]
-    assert presets and all(p["source_type"] in ("synthetic", "atlite") for p in presets)
+    from services.profile_gen import presets as catalogue
+
+    listed = client.get("/api/profiles/presets").json()["presets"]
+    expected = {(p.name, p.technology): p.source_type for p in catalogue.list_presets()}
+    assert {s for s in expected.values()} == {"synthetic", "atlite"}
+    assert {(p["name"], p["technology"]): p["source_type"] for p in listed} == expected
 
 
 def test_presets_filter_by_technology(client):
