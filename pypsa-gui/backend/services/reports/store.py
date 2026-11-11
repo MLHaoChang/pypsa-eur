@@ -629,7 +629,8 @@ def create_report(project_dir: pathlib.Path, doc: ReportDocument) -> ReportMeta:
 
 def save_version(project_dir: pathlib.Path, doc: ReportDocument, *,
                  revised_from: RevisedFrom | None = None,
-                 expected_base: int | None = None) -> int:
+                 expected_base: int | None = None,
+                 clear: tuple[str, ...] = ()) -> int:
     """
     Write the next version of an existing report and return its number.
 
@@ -640,7 +641,15 @@ def save_version(project_dir: pathlib.Path, doc: ReportDocument, *,
     `expected_base` is the version the caller read and edited. When it is
     given and `latest` is not it, another writer saved in between: nothing is
     written and `ReportVersionConflict` is raised (study harness 07c, GK B F1).
+
+    `clear` names carried meta fields this save writes as null: the ones the
+    caller writes for the new version after it (a report job's `generation`
+    and settings). If that later write is refused, the meta shows version n
+    without them rather than with version n-1's (07f-b, GK B Q2).
     """
+    unknown = set(clear) - set(_CARRIED_META_FIELDS)
+    if unknown:
+        raise TypeError(f"not carried meta fields: {sorted(unknown)}")
     rdir = _existing_report_dir(project_dir, doc.report_id)
     with report_lock(project_dir, doc.report_id):
         meta = load_meta(project_dir, doc.report_id)
@@ -660,7 +669,7 @@ def save_version(project_dir: pathlib.Path, doc: ReportDocument, *,
         # version from any caller keeps them rather than silently dropping them.
         _write_meta(rdir, _meta_from_doc(
             bumped, latest_version=next_version, created_at=meta.created_at,
-            carried=meta,
+            carried=meta.model_copy(update=dict.fromkeys(clear)),
         ))
     return next_version
 

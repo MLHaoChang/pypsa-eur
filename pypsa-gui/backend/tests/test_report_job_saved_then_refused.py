@@ -103,3 +103,37 @@ def test_saved_then_refused_is_failed_with_the_saved_version(
     assert job.record["error"].startswith("version 2 was saved")
     # Version 2 exists and can be opened.
     assert store.load_report(tmp_path, v1.report_id, 2).version == 2
+
+
+def _refused_v2(tmp_path, evidence, monkeypatch):
+    v1 = run_report_job(_job(tmp_path, evidence, _full()))
+    assert store.load_meta(tmp_path, v1.report_id).generation is not None
+    job = _job(tmp_path, evidence, _rewrite(), base_document=v1,
+               regenerate_section="fmea_top", instruction="shorter")
+    with _receipt_refused(monkeypatch, tmp_path, v1.report_id):
+        with pytest.raises(store.ReportBusy):
+            run_report_job(job)
+    monkeypatch.setattr(store, "load_report", _real_load)
+    return v1
+
+
+_real_load = store.load_report
+
+
+def test_the_report_list_shows_no_receipt_for_a_version_whose_receipt_was_refused(
+    tmp_path, evidence, monkeypatch,
+):
+    v1 = _refused_v2(tmp_path, evidence, monkeypatch)
+    [meta] = store.list_reports(tmp_path)
+    assert meta.latest_version == 2
+    assert meta.generation is None  # never version 1's
+
+
+def test_a_written_receipt_is_the_new_versions_own(tmp_path, evidence):
+    v1 = run_report_job(_job(tmp_path, evidence, _full()))
+    job = _job(tmp_path, evidence, _rewrite(), base_document=v1,
+               regenerate_section="fmea_top", instruction="shorter")
+    run_report_job(job)
+    [meta] = store.list_reports(tmp_path)
+    assert meta.latest_version == 2
+    assert meta.generation["sections"] == ["fmea_top"]

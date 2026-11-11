@@ -672,7 +672,11 @@ def run_report_job(job: ReportJob) -> ReportDocument:
                 if figure_id in doc.figures:
                     store.write_figure(job.project_dir, job.report_id, figure_id, png)
         else:
-            version = store.save_version(job.project_dir, doc)
+            # The receipt and settings are written for this version below;
+            # until then the meta holds none, never the last version's.
+            version = store.save_version(
+                job.project_dir, doc,
+                clear=("generation", *sorted(job.meta_updates)))
         if job.meta_updates:
             store.update_meta(job.project_dir, job.report_id, **job.meta_updates)
         saved = store.load_report(job.project_dir, job.report_id, version)
