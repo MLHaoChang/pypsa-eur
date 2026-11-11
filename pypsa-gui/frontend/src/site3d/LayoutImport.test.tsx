@@ -144,6 +144,8 @@ describe('layout import (SC-06-layout)', () => {
     fireEvent.click(screen.getByTestId('layout-trace-preview'))
     const alerts = await screen.findAllByText(/more than 10 km from this site/)
     expect(alerts).toHaveLength(1)                                   // in the dialog, not again in the panel
+    fireEvent.change(screen.getByTestId('layout-anchor-east'), { target: { value: '1' } })
+    expect(screen.queryByText(/more than 10 km from this site/)).toBeNull()      // cleared by the change
     fireEvent.click(screen.getByText('Cancel'))
     expect((await screen.findAllByText('Discard the traced buildings?')).length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
@@ -153,6 +155,7 @@ describe('layout import (SC-06-layout)', () => {
   it('keeps traced names non-empty and unique', () => {
     const fps = [{ id: 'hall', ring_px: [] as [number, number][] }, { id: 'hall ', ring_px: [] }, { id: ' ', ring_px: [] }]
     expect(nameError(fps, 1)).toBe('Name: another building already has this name')
+    expect(nameError(fps, 0)).toBeNull()
     expect(nameError(fps, 2)).toBe('Name: enter a name')
     expect(previewReason([[0, 0], [1, 0]], 1, [0, 0], fps, false)).toBe('Give every building its own name')
   })

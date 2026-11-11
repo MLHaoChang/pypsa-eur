@@ -1,52 +1,41 @@
 # SC-06-layout shots
 
 Real Chromium (Playwright 1440x900, deviceScaleFactor 2) against a local
-backend + Vite on branch `claude/site-scene-06-layout`. Synthetic data only:
-an empty saved project with one Site "Demo Campus" (rectangular boundary,
-origin 11.58 E / 48.14 N), adopted as a 3D scene through the API; a
-1000x800 synthetic floor plan (4 dark rectangles, 20 m scale bar at
-x 100-300 px, y 700). Base set is the light theme, Guided mode.
-`*.small.png` are the `scripts/coord/shots.sh` downscales.
+backend + Vite (no reload) on branch `claude/site-scene-06-layout` at
+cf402f95 (UX conditions + shot findings). Synthetic data only: saved
+projects with one Site "Demo Campus" (rectangular boundary, origin
+11.58 E / 48.14 N) adopted as a 3D scene through the API; a 1000x800
+synthetic floor plan (4 dark rectangles, 20 m scale bar). Light theme,
+Guided mode unless named. Project `layout-light` already held two accepted
+layout buildings (Hall A, Office), so the import below is a re-import.
 
 | Shot | Shows |
 |---|---|
-| 01-import-button.png | Generate part of an enabled scene with no buildings: Add building / Generate buildings, then "Import layout..." with its format hint. |
-| 02-trace-dialog-empty.png | "Trace a layout drawing" just opened: drawing at left, Scale tool selected, "mark 2 points (0/2)" / "mark the anchor" hints, Preview disabled. |
-| 03-trace-dialog-calibrated-traced.png | Scale marked on the 20 m bar (distance 20 m), anchor at Hall A's lower-left (East -40, North 20), two outlines finished (Hall A 9 m, Office no height), a third outline in progress ("Outline: 2 corners"). |
-| 03-dark.png | Same state as 03 in the dark theme. |
-| 04-preview-readback.png | Panel after Preview: "Preview: 2 buildings", read-back "Drawing at 0.1 m per pixel · spans 70 x 21 m (east x north)", Apply / Discard; red preview footprints in the scene. |
-| 04-expert.png | Same preview in Expert mode (light), with the expert sidebar and bottom table. This project already had 2 accepted layout buildings, so the preview replaces them. |
-| 05-applied-corner-table.png | After Apply: building `layout:Hall A` selected, Correct pressed: Height field and the corner table (4 corners, East/North in metres from the site origin), Preview change / Cancel. |
-| 06-refused-dxf.png | `plan.dxf` ("0\nSECTION...") chosen: named refusal "DXF files are not accepted: export the layout as GeoJSON, or as a PNG, JPEG or WebP image and trace it". |
-| 07-geojson-summary.png | `site-buildings.geojson` chosen: summary row "site-buildings.geojson · 2 features · WGS84 longitude/latitude" with Preview / Cancel. |
+| 01-import-button.png | Generate part with 2 accepted buildings: "Import layout..." on one line, format hint below it. |
+| 02-trace-dialog-empty.png | Dialog just opened: "Distance (m)", Preview disabled with the grey reason "Mark the two ends of a known distance with the Scale tool". |
+| 03-trace-dialog-calibrated-traced.png | Scale marked (20 m), anchor at Workshop's lower-left (East 0, North -20), Workshop finished (7 m), a second outline at 2 corners; reason "Finish or undo the outline you are tracing". |
+| 03-dark.png | Same as 03, dark theme: anchor ring and crosshair now visible thanks to the halo. |
+| 08-dialog-name-error.png | Second building renamed "Workshop": red "Name: another building already has this name" under both rows; reason "Give every building its own name". |
+| 09-dialog-refusal.png | Anchor East 20000, Preview: red refusal "Layout building Workshop is more than 10 km from this site: check the layout is for this site and where it is placed". |
+| 09-dark.png | Same as 09, dark theme. |
+| 10-discard-guard.png | Cancel with outlines traced: "Discard the traced buildings?" with Cancel / Discard. |
+| 04-preview-readback.png | After Preview: "Preview: 2 buildings", read-back "Drawing at 0.1 m per pixel · spans 66 x 20 m (east x north) · 2 earlier layout buildings stay"; camera panned (right-drag) so the red preview is visible. |
+| 05-applied-corner-table.png | After Apply: `layout:Workshop` selected, Correct: title "Layout building Workshop", Height 7, corner table with left-aligned "East (m)" / "North (m)" headers. |
+| 06-refused-dxf.png | `plan.dxf` chosen: named refusal naming GeoJSON / PNG / JPEG / WebP. |
+| 07-geojson-summary.png | `site-buildings.geojson` chosen: "site-buildings.geojson · 2 features · WGS84 longitude/latitude" with Preview / Cancel. |
 
-## What looked wrong
+## What still looks off
 
-- **"Import layout..." button wraps onto two lines** (01, 06, 07): the button
-  shares a row with the helper text and gets squeezed to "Import / layout...".
-  Needs `whitespace-nowrap`/`shrink-0`, or the hint on its own line.
-- **Dark theme: anchor ring and crosshair vanish on the drawing** (03-dark):
-  both use `stroke-text`, which is near-white in dark mode, drawn over a white
-  drawing. The anchor marker at Hall A's corner and the cursor crosshair are
-  barely visible; in the light theme they are clearly black. They should use a
-  fixed high-contrast colour (or a dark+light double stroke) independent of theme.
-- **Corner table columns misaligned** (05): the "East" and "North" headers sit
-  centred over wide columns while the inputs are left-aligned, so "North" floats
-  far right of its inputs and the gap between the East and North input columns is large.
-- **Accepted layout building is titled "Proposed building"** (05), and the chip
-  reads "Explain Proposed building", although the traced name was "Hall A" (id
-  `layout:Hall A`). The user's own name is lost in the correction header.
-- **Preview footprints hidden under the overlays** (04, 04-expert): with the
-  default camera, the red preview buildings sit at the top-left of the
-  boundary, behind the Generate panel and the "Library dimensions are
-  estimates..." note; only a sliver is visible. The scene does not frame the preview.
-- Expert mode has no visible "Open 3D site"/"Resume site setup" entry on the
-  landing canvas; for 04-expert the Site 3D view was opened with the app's own
-  `openSite3D('generate')` from the browser console.
-- Environment only: the "Site context unavailable: the map data service could
-  not be reached" toast and status line come from the sandbox's blocked map
-  service, not from this feature.
+- **Stale refusal** (10): after the far_from_site refusal, setting East back
+  to 0 leaves the red refusal line in the dialog until the next Preview. It
+  should clear when a calibration field or outline changes.
+- **Duplicate name flagged on both rows** (08): the first, original "Workshop"
+  row also turns red. Defensible, but flagging only the later duplicate would
+  point at the field the user just changed.
+- Known and out of scope: the default camera puts the preview behind the
+  Generate panel (04 needed a manual pan).
+- Environment only: the "Site context unavailable" toast and status line come
+  from the sandbox's blocked map service.
 
-How the selection in 05 was made: `setSitePartSelection({kind:'building', id:'layout:Hall A'})`
-via the store (clicking a mesh in the WebGL scene by pixel was not attempted);
-Correct was a real click.
+The building selection in 05 was set through the store
+(`setSitePartSelection`); Correct was a real click.

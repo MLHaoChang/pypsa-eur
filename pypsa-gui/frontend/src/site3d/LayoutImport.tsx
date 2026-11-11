@@ -22,7 +22,8 @@ const FIELD = 'w-16 rounded border border-border bg-bg px-1 py-0.5 text-[11px] t
 export function nameError(footprints: TracedFootprint[], i: number): string | null {
   const name = footprints[i].id.trim()
   if (!name) return 'Name: enter a name'
-  return footprints.some((f, j) => j !== i && f.id.trim() === name) ? 'Name: another building already has this name' : null
+  // Only the later of two equal names is flagged: the one just typed or traced.
+  return footprints.some((f, j) => j < i && f.id.trim() === name) ? 'Name: another building already has this name' : null
 }
 
 /** Why Preview is off, in words, or null when the drawing can be previewed. */
@@ -112,6 +113,8 @@ function TraceDialog({ raster, disabled, onClose, onPropose }: {
   const [cursor, setCursor] = useState<Pt>([Math.round(w / 2), Math.round(h / 2)])
   const [error, setError] = useState<string | null>(null)
   const svg = useRef<SVGSVGElement>(null)
+  // A refusal is about the inputs it was given: any change clears it until the next Preview.
+  useEffect(() => { setError(null) }, [scale, distance, unit, anchor, east, north, rotation, traced])
 
   const place = (p: Pt) => {
     setCursor(p)
