@@ -81,6 +81,31 @@ GK B (46) GO for slice 12b, standing on its own: B1–B14 as recorded above, plu
 
 12c needs from 12b: the EH study's `dtc_stress` stage listed in the profile, with its solves budgeted, for `mg.island.critical_served`. A campus run of the run's own for `mg.island.frequency`; its draft is a native write with its own card (B9).
 
+### 12c plan verdicts (2026-11-11)
+
+GK B (47) GO for slice 12c, conditions G1–G9.
+
+- **Q1: (a).** 12c has no campus step. The native campus draft moves to 12d under B9. `mg.island.frequency` reads not_evaluated "not_run" with its words. It is a warn and never counts toward a pass or an "all checks met" line.
+- **Q2: (a).** `experiment_source_unavailable` for a missing solver_config stays as it is. The unused `_completed_child` goes in the GK A follow-up PR.
+
+Conditions:
+
+- **G1 (budget).** The number of islanding contingencies, K, is counted at freeze, shown on the card and bound in the grant digest. A different K at the solve refuses by a typed kind before any solve, and never stress-tests only the first K. Test: add a contingency after the grant, then expect a refusal and no solve.
+- **G2 (solve count).** Count solves_used + probe_solves + any closing re-solve + the 12b island solve, on every path (an L2 round, needs_user). Test: in a run with one L2 round, the recorded count equals the profile comment's arithmetic.
+- **G3 (survival fails closed).** `mg.island.survival` blocks on every state but survives: not_evaluated, a time limit, infeasible, interrupted, and a stale revision. Test each by state, at least one under a real HiGHS time limit.
+- **G4 (L2 resize).** The L2 resize is a write the card bounded:
+  - The bess_new p_nom/e_nom bounds come from template data, are shown on the card with value, unit and source, and are frozen by the grant.
+  - A resize outside the bounds, or with no bound shown, ends needs_user.
+  - After a resize, the island check and every gate that reads the resized asset run again on the new revision.
+  - Tests: a resize at the bound passes; one just over it ends needs_user.
+- **G5 (B12 words).** Before rewording a reason, git grep every substring of the old reason. List each reader in the PR body, with a test per reader.
+- **G6 (instruction files).** The instruction-file test enumerates profiles and stages from PROFILES itself. Show it red by deleting one microgrid file.
+- **G7 (off-grid rows).** The excluded S_k'' rows carry 12a's reason. "No scr rule" is asserted for both profiles. LOLE goes through `loop_goal(horizon_years(n))` with the h/yr basis.
+- **G8 (not evaluated is never met).** `mg.fuel.autonomy` and every not_evaluated warn appear as their own state on the hand-off and in the receipt counts, never as "met".
+- **G9 (PR size).** If the change goes over about 1,500 lines (excluding generated files, fixtures and shots), split it: profiles and gate first, then instructions and live tests. Tell GK B the split before opening.
+
+B14 holds. If the change adds error kinds, also run `tests/test_tool_error_kind_manifest.py` at the trial merge, with each kind in its own `tool-error-kinds.d` fragment.
+
 ### Slices
 
 - 12a (GK A): the off-grid exclusion on the scorecard, the island survival check and the tie and critical-load predicates. Engine only.
