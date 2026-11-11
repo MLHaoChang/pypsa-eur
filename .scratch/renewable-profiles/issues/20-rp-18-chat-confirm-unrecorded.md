@@ -3,7 +3,7 @@
 
 # RP-20 — should chat confirm unrecorded series?
 
-Status: done (RP20-CHAT-1: `confirm_unrecorded_series`, carded; PR pending)
+Status: done (RP20-CHAT-1: `confirm_unrecorded_series`, carded; #1396)
 Type: task
 Raised by: RP-18 (`18-rp-14-old-projects-native-series-unrecorded.md`), GK B condition R3.
 
