@@ -333,13 +333,18 @@ def list_suggestions(
     user: User = Depends(require_user),
 ) -> dict:
     """Saved values for each field of the asset `name` in the open project, scoped to
-    its org (§9 M1) and carrier (GK B P3), as chips. A read: nothing is applied
-    (COPILOT-1)."""
+    its org (§9 M1) and carrier (GK B P3), as chips, and the fields Save for reuse
+    accepts now (`saveable`). A read: nothing is applied (COPILOT-1)."""
     from services import memory_parameters as P
 
     try:
         project = P.bound_project(db, user, project_id)
-        return {"fields": P.suggestions(db, user, project, component_class, name)}
+        fields = P.suggestions(db, user, project, component_class, name)
+        # Save's own predicate per field (GK B 47 A1): the UI offers Save only there.
+        return {
+            "fields": fields,
+            "saveable": P.saveable(db, user, component_class, name),
+        }
     except M.MemoryError as exc:
         _raise(exc)
 
@@ -360,7 +365,9 @@ def save_parameter(
         )
     except M.MemoryError as exc:
         _raise(exc)
-    return _out(db, user, v)
+    # A re-save is version n+1 of the same item (§2.1); only a new item may be undone
+    # by retiring it (GK B 47 A2). `edit_item` always writes a new version.
+    return {**_out(db, user, v), "created": v.version == 1}
 
 
 @router.post("/suggestions/{item_id}/preview")

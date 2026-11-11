@@ -149,18 +149,21 @@ export function InfoTip({ text, children }: { text?: string; children: React.Rea
 }
 
 // ── Read-only row ──────────────────────────────────────────────────────────────
-export function Row({ label, value, unit, tip, badge, note }: {
+export function Row({ label, value, unit, tip, badge, note, action }: {
   label: string; value: unknown; unit?: string; tip?: string; badge?: React.ReactNode
   /** A muted line under the row: what a chip in the label means (e.g. why a cost is out of date). */
   note?: string
+  /** A row control after the label, e.g. Save for reuse (shown on row hover / focus-within). */
+  action?: React.ReactNode
 }) {
   if (value == null || value === '' || value === false) return null
   const display = typeof value === 'boolean' ? '✓' : typeof value === 'number' ? (value as number).toLocaleString(undefined, { maximumFractionDigits: 4 }) : String(value)
   return (
-    <div className="flex flex-wrap justify-between items-baseline py-0.5 border-b border-border/50 last:border-0">
+    <div className="group flex flex-wrap justify-between items-baseline py-0.5 border-b border-border/50 last:border-0">
       <span className="text-xs text-muted shrink-0 mr-2">
         <InfoTip text={tip}>{label}</InfoTip>
         {badge}
+        {action}
       </span>
       <span className="text-xs font-mono text-text text-right">{display}{unit ? <span className="text-muted ml-0.5">{unit}</span> : null}</span>
       {note && <p className="basis-full text-[9px] leading-snug text-muted" data-testid="row-note">{note}</p>}
@@ -181,8 +184,16 @@ export function Section({ title, children }: { title: string; children: React.Re
 // Used by every asset card (Generator / StorageUnit / Store / Load / Link) so
 // that each card shows its full parameter list expanded by default — the user
 // can hover for descriptions and click the Edit pencil to mutate values.
-export type ExpandedItem = { label: string; value: unknown; unit?: string; tip?: string; badge?: React.ReactNode; note?: string }
-export function ExpandedProps({ items }: { items: ExpandedItem[] }) {
+export type ExpandedItem = {
+  label: string; value: unknown; unit?: string; tip?: string; badge?: React.ReactNode; note?: string
+  /** The schema field the row reads, when it reads one. */
+  field?: string
+}
+export function ExpandedProps({ items, action }: {
+  items: ExpandedItem[]
+  /** A per-row control (e.g. `useSaveAction`): rendered after the row's label. */
+  action?: (field: string | undefined, label: string) => React.ReactNode
+}) {
   // Filter out empty / false / null values so the layout stays tight when an
   // attribute isn't set on this asset.
   const visible = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
@@ -190,7 +201,8 @@ export function ExpandedProps({ items }: { items: ExpandedItem[] }) {
   return (
     <div className="mt-1.5 pt-1.5 border-t border-border/40">
       {visible.map(i => (
-        <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
+        <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note}
+          action={action?.(i.field, i.label)} />
       ))}
     </div>
   )
