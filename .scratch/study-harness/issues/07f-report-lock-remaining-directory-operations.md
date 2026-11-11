@@ -68,3 +68,13 @@ Acceptance, added:
 - One test each for the 5 s network-lock timeout branches: `run_envelope.answering` (yields without the lock), the `run_loops` `agent_turn` guard (returns False, card withdrawn, tool not run), and `continuation.settle_engine` (returns `"running"`).
 
 What 07f-a still leaves: the closing set is per process. A report writer in another process that takes its lock inside the quiesced window is not refused by it. After a delete or a rename it meets the missing-directory backstop and fails; during a snapshot removal it writes nothing there, since no writer writes into a snapshot.
+
+11 Nov, GK B (46) plan verdict: GO for 07f-a under C1–C5. 07f-b goes ahead with these answers:
+
+- **Q1.** Delete and rename refuse 409 `report_busy` while a report job runs. The detail names the job and says to abort it in Reports. Nothing discards a user's running job.
+- **Q2.** Saved then refused → `failed`, `error_kind: report_busy`, `version: n`; never `done` (the #1170 rule). Every reader of version n (version list, export, regenerate base, strict/audited claims) shows that it has no settings or receipt and never borrows version n-1's. One test per reader.
+- **C1.** "Closing" holds across processes. Chosen: (a) a marker file `reports/.closing`, written while the locks are held. `report_lock` checks it under its own file lock. The marker is not held open. The operation then moves the directory aside (`os.replace` to a dot-named tombstone, or to the new name for a rename) before it removes anything, so a writer keeping the old path finds no project directory (the backstop). Test: a writer that bypasses the in-process state refuses during the window.
+- **C2.** No TOCTOU on the job check. `running_for(dir)` runs after `get_lock()` and the marker. `_launch` refuses a job for a directory that is closing, under the same `_SLOT_LOCK` hold as its claim. Test: a job starting between the check and the quiesce.
+- **C3.** The lock order is written down, with a two-thread timed test that goes red when it is reversed.
+- **C4.** Every waiter on `get_lock` and on the report locks is listed with its bound, and the PR says which can now time out where they could not before.
+- **C5.** Each new guard is mutated on its own and run on its single test; the table goes in the PR body. Prune skipping a busy snapshot must not let the count grow across repeated prunes.
