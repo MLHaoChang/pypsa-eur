@@ -9,6 +9,7 @@ route tests run the real proposals/apply lifecycle on a real project.
 Raster images never reach the server: it receives only the declared frame,
 the calibration and the traced pixel rings.
 """
+
 from __future__ import annotations
 
 import copy
@@ -27,8 +28,14 @@ from services.site_scene.contract import SceneError
 # ── fixtures ────────────────────────────────────────────────────────────────
 
 ORIGIN = {"lng": 11.58, "lat": 48.14}
-SITE = {"id": "campus", "name": "Campus", "buses": [], "origin": dict(ORIGIN),
-        "boundary": [[11.579, 48.139], [11.581, 48.139], [11.581, 48.141]], "placements": {}}
+SITE = {
+    "id": "campus",
+    "name": "Campus",
+    "buses": [],
+    "origin": dict(ORIGIN),
+    "boundary": [[11.579, 48.139], [11.581, 48.139], [11.581, 48.141]],
+    "placements": {},
+}
 
 # 1000 × 800 px drawing; the scale bar is 200 px = 20 m (0.1 m/px).
 IMAGE = {"width_px": 1000, "height_px": 800, "media_type": "image/png"}
@@ -37,13 +44,30 @@ SCALE = {"a_px": [100, 700], "b_px": [300, 700], "distance": 20, "unit": "m"}
 RECT_PX = [[100, 700], [300, 700], [300, 600], [100, 600]]
 
 
-def raster(rotation=0.0, anchor_px=(100, 700), anchor_local=(0, 0), scale=None, footprints=None, image=None,
-           **extra):
-    cal = {"scale": copy.deepcopy(scale or SCALE), "anchor_px": list(anchor_px),
-           "anchor_local": list(anchor_local), "rotation_deg": rotation}
-    return {"kind": "raster", "image": dict(image or IMAGE), "calibration": cal,
-            "footprints": footprints if footprints is not None else [{"id": "hall", "ring_px": RECT_PX,
-                                                                       "height_m": 8}], **extra}
+def raster(
+    rotation=0.0,
+    anchor_px=(100, 700),
+    anchor_local=(0, 0),
+    scale=None,
+    footprints=None,
+    image=None,
+    **extra,
+):
+    cal = {
+        "scale": copy.deepcopy(scale or SCALE),
+        "anchor_px": list(anchor_px),
+        "anchor_local": list(anchor_local),
+        "rotation_deg": rotation,
+    }
+    return {
+        "kind": "raster",
+        "image": dict(image or IMAGE),
+        "calibration": cal,
+        "footprints": footprints
+        if footprints is not None
+        else [{"id": "hall", "ring_px": RECT_PX, "height_m": 8}],
+        **extra,
+    }
 
 
 def _lng(origin_lat, metres):
@@ -64,15 +88,25 @@ def feature(ring, fid="hall", props=None, holes=(), geom_type="Polygon"):
     coords = [ring, *holes]
     if geom_type == "MultiPolygon":
         coords = [coords]
-    f = {"type": "Feature", "geometry": {"type": geom_type, "coordinates": coords},
-         "properties": {"height": 8} if props is None else props}
+    f = {
+        "type": "Feature",
+        "geometry": {"type": geom_type, "coordinates": coords},
+        "properties": {"height": 8} if props is None else props,
+    }
     if fid is not None:
         f["id"] = fid
     return f
 
 
 def geojson(*features, **members):
-    return {"kind": "geojson", "document": {"type": "FeatureCollection", "features": list(features), **members}}
+    return {
+        "kind": "geojson",
+        "document": {
+            "type": "FeatureCollection",
+            "features": list(features),
+            **members,
+        },
+    }
 
 
 def run(site, raw):
@@ -96,10 +130,14 @@ def code_of(err):
 
 # ── V39: calibrated dimensions and vertices (L3) ────────────────────────────
 
+
 def test_raster_north_up_yields_the_drawn_rectangle():
     out = run(SITE, raster())
     (b,) = out["buildings"]
-    assert b["id"] == "layout:hall" and b["source"] == {"namespace": "layout", "source_id": "hall"}
+    assert b["id"] == "layout:hall" and b["source"] == {
+        "namespace": "layout",
+        "source_id": "hall",
+    }
     assert vertices(b) == [(0, 0), (0, 10), (20, 0), (20, 10)]
     assert out["layout"]["metres_per_pixel"] == pytest.approx(0.1)
     assert out["layout"]["extent_m"] == pytest.approx([20, 10])
@@ -122,12 +160,16 @@ def test_raster_rotation_30_degrees_keeps_size_and_turns_clockwise():
     out = run(SITE, raster(rotation=30))
     fp = out["buildings"][0]["footprint"]
     s, c = math.sin(math.radians(30)), math.cos(math.radians(30))
-    expected = sorted((round(dx * c + dy * s, 2), round(-dx * s + dy * c, 2))
-                      for dx, dy in [(0, 0), (20, 0), (20, 10), (0, 10)])
+    expected = sorted(
+        (round(dx * c + dy * s, 2), round(-dx * s + dy * c, 2))
+        for dx, dy in [(0, 0), (20, 0), (20, 10), (0, 10)]
+    )
     assert sorted((round(e, 2), round(n, 2)) for e, n in fp) == expected
 
 
-@pytest.mark.parametrize("unit,distance", [("m", 20), ("mm", 20_000), ("ft", 20 / 0.3048)])
+@pytest.mark.parametrize(
+    "unit,distance", [("m", 20), ("mm", 20_000), ("ft", 20 / 0.3048)]
+)
 def test_scale_units_agree(unit, distance):
     out = run(SITE, raster(scale={**SCALE, "unit": unit, "distance": distance}))
     assert vertices(out["buildings"][0]) == [(0, 0), (0, 10), (20, 0), (20, 10)]
@@ -143,7 +185,13 @@ def test_geojson_rectangle_lands_at_its_metric_offset():
 def test_geojson_at_60_north_uses_the_cosine_of_latitude():
     # Hand-checked: 0.001° of longitude at 60°N is 111 319.49 m × cos 60° × 0.001 = 55.66 m.
     site = {**SITE, "origin": {"lng": 10.0, "lat": 60.0}}
-    ring = [[10.0, 60.0], [10.001, 60.0], [10.001, 60.0001], [10.0, 60.0001], [10.0, 60.0]]
+    ring = [
+        [10.0, 60.0],
+        [10.001, 60.0],
+        [10.001, 60.0001],
+        [10.0, 60.0001],
+        [10.0, 60.0],
+    ]
     (b,) = run(site, geojson(feature(ring)))["buildings"]
     assert max(e for e, _ in b["footprint"]) == pytest.approx(55.66, abs=0.01)
     assert max(n for _, n in b["footprint"]) == pytest.approx(11.13, abs=0.01)
@@ -155,6 +203,7 @@ def test_a_single_feature_document_is_accepted():
 
 
 # ── V39: absent scale/CRS named; unsupported formats not silently accepted ──
+
 
 def test_missing_scale_is_named():
     raw = raster()
@@ -177,18 +226,26 @@ def test_unknown_scale_unit_is_refused_not_guessed():
     assert refused(no_unit).detail["field"] == "unit"
 
 
-@pytest.mark.parametrize("distance,code", [(0, "scale_distance"), (-5, "scale_distance")])
+@pytest.mark.parametrize(
+    "distance,code", [(0, "scale_distance"), (-5, "scale_distance")]
+)
 def test_zero_or_negative_scale_distance_is_named(distance, code):
     assert code_of(refused(raster(scale={**SCALE, "distance": distance}))) == code
 
 
 @pytest.mark.parametrize("distance", [float("inf"), float("nan"), "20 m", None])
 def test_non_finite_scale_distance_is_refused(distance):
-    assert refused(raster(scale={**SCALE, "distance": distance})).detail["field"] == "value"
+    assert (
+        refused(raster(scale={**SCALE, "distance": distance})).detail["field"]
+        == "value"
+    )
 
 
 def test_coincident_scale_points_are_named():
-    assert code_of(refused(raster(scale={**SCALE, "b_px": [100, 700]}))) == "scale_points_equal"
+    assert (
+        code_of(refused(raster(scale={**SCALE, "b_px": [100, 700]})))
+        == "scale_points_equal"
+    )
 
 
 @pytest.mark.parametrize("rotation", [float("inf"), float("nan"), "90", True])
@@ -196,10 +253,16 @@ def test_non_finite_rotation_is_named(rotation):
     assert code_of(refused(raster(rotation=rotation))) == "rotation_invalid"
 
 
-@pytest.mark.parametrize("name,crs", [
-    ("EPSG:25832", {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::25832"}}),
-    ("EPSG:3857", {"type": "name", "properties": {"name": "EPSG:3857"}}),
-])
+@pytest.mark.parametrize(
+    "name,crs",
+    [
+        (
+            "EPSG:25832",
+            {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::25832"}},
+        ),
+        ("EPSG:3857", {"type": "name", "properties": {"name": "EPSG:3857"}}),
+    ],
+)
 def test_a_projected_crs_is_named(name, crs):
     err = refused(geojson(feature(rect_lnglat()), crs=crs))
     assert code_of(err) == "crs_unsupported" and name.split(":")[1] in err.message
@@ -228,9 +291,14 @@ def test_cad_and_vector_formats_are_not_accepted(kind):
     assert code_of(err) == "unsupported_format" and "GeoJSON" in err.message
 
 
-@pytest.mark.parametrize("media_type", ["image/svg+xml", "application/pdf", "image/tiff", "", None])
+@pytest.mark.parametrize(
+    "media_type", ["image/svg+xml", "application/pdf", "image/tiff", "", None]
+)
 def test_raster_media_types_outside_png_jpeg_webp_are_not_accepted(media_type):
-    assert code_of(refused(raster(image={**IMAGE, "media_type": media_type}))) == "unsupported_format"
+    assert (
+        code_of(refused(raster(image={**IMAGE, "media_type": media_type})))
+        == "unsupported_format"
+    )
 
 
 @pytest.mark.parametrize("media_type", ["image/png", "image/jpeg", "image/webp"])
@@ -250,8 +318,11 @@ def test_polygon_holes_are_refused_by_name():
 
 
 def test_non_polygon_features_are_skipped_and_counted():
-    line = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": rect_lnglat()[:2]},
-            "properties": {}}
+    line = {
+        "type": "Feature",
+        "geometry": {"type": "LineString", "coordinates": rect_lnglat()[:2]},
+        "properties": {},
+    }
     empty = {"type": "Feature", "geometry": None, "properties": {}}
     out = run(SITE, geojson(feature(rect_lnglat()), line, empty))
     assert len(out["buildings"]) == 1
@@ -259,21 +330,38 @@ def test_non_polygon_features_are_skipped_and_counted():
 
 
 def test_a_layout_with_no_footprints_is_named():
-    line = {"type": "Feature", "geometry": {"type": "LineString", "coordinates": rect_lnglat()[:2]},
-            "properties": {}}
+    line = {
+        "type": "Feature",
+        "geometry": {"type": "LineString", "coordinates": rect_lnglat()[:2]},
+        "properties": {},
+    }
     assert code_of(refused(geojson(line))) == "layout_empty"
     assert code_of(refused(raster(footprints=[]))) == "layout_empty"
 
 
 # ── V40: unsafe / oversized / remote-linked inputs fail before geometry ─────
 
-@pytest.mark.parametrize("member", [
-    {"crs": {"type": "link", "properties": {"href": "http://example.org/crs", "type": "proj4"}}},
-    {"$ref": "http://example.org/other.geojson"},
-    {"crs": {"type": "link", "properties": {"type": "proj4"}}},     # a link with no href still names a remote CRS
-])
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        {
+            "crs": {
+                "type": "link",
+                "properties": {"href": "http://example.org/crs", "type": "proj4"},
+            }
+        },
+        {"$ref": "http://example.org/other.geojson"},
+        {
+            "crs": {"type": "link", "properties": {"type": "proj4"}}
+        },  # a link with no href still names a remote CRS
+    ],
+)
 def test_remote_references_are_refused(member):
-    assert code_of(refused(geojson(feature(rect_lnglat()), **member))) == "remote_reference"
+    assert (
+        code_of(refused(geojson(feature(rect_lnglat()), **member)))
+        == "remote_reference"
+    )
 
 
 def test_a_drawing_anchored_far_off_the_site_is_named():
@@ -283,7 +371,9 @@ def test_a_drawing_anchored_far_off_the_site_is_named():
 
 def test_an_href_inside_properties_is_not_a_reference():
     # Properties are never fetched or stored (L2): only height, levels and id are read.
-    f = feature(rect_lnglat(), props={"height": 8, "href": "http://example.org/photo.jpg"})
+    f = feature(
+        rect_lnglat(), props={"height": 8, "href": "http://example.org/photo.jpg"}
+    )
     assert run(SITE, geojson(f))["buildings"]
 
 
@@ -294,19 +384,31 @@ def test_a_nested_remote_reference_is_refused():
 
 
 def test_an_image_over_50_megapixels_is_413():
-    err = refused(raster(image={**IMAGE, "width_px": 10_000, "height_px": 6_000}), kind="resource_limit")
-    assert (err.detail["limit"], err.detail["max"], err.detail["actual"]) == ("decoded_pixels", 50_000_000,
-                                                                             60_000_000)
+    err = refused(
+        raster(image={**IMAGE, "width_px": 10_000, "height_px": 6_000}),
+        kind="resource_limit",
+    )
+    assert (err.detail["limit"], err.detail["max"], err.detail["actual"]) == (
+        "decoded_pixels",
+        50_000_000,
+        60_000_000,
+    )
 
 
 def test_an_image_side_over_20000_px_is_413():
-    err = refused(raster(image={**IMAGE, "width_px": 20_001, "height_px": 10}), kind="resource_limit")
+    err = refused(
+        raster(image={**IMAGE, "width_px": 20_001, "height_px": 10}),
+        kind="resource_limit",
+    )
     assert err.detail["limit"] == "image_side"
 
 
 @pytest.mark.parametrize("w,h", [(0, 10), (-1, 10), (10.5, 10), (True, 10), ("10", 10)])
 def test_image_dimensions_must_be_positive_integers(w, h):
-    assert refused(raster(image={**IMAGE, "width_px": w, "height_px": h})).detail["field"] == "image"
+    assert (
+        refused(raster(image={**IMAGE, "width_px": w, "height_px": h})).detail["field"]
+        == "image"
+    )
 
 
 @pytest.mark.parametrize("where", ["ring", "a_px", "b_px", "anchor_px"])
@@ -322,7 +424,11 @@ def test_pixels_outside_the_declared_image_are_named(where):
 
 
 def test_pixel_on_the_image_edge_is_inside():
-    raw = raster(footprints=[{"id": "edge", "ring_px": [[0, 0], [1000, 0], [1000, 800]], "height_m": 3}])
+    raw = raster(
+        footprints=[
+            {"id": "edge", "ring_px": [[0, 0], [1000, 0], [1000, 800]], "height_m": 3}
+        ]
+    )
     assert run(SITE, raw)["buildings"]
 
 
@@ -342,13 +448,16 @@ def _spy_geometry(monkeypatch):
     def boom(*a, **k):
         calls.append(a)
         raise AssertionError("geometry ran before admission")
+
     monkeypatch.setattr(native, "check_footprint", boom)
     monkeypatch.setattr(layout.frames, "lnglat_to_local", boom)
     return calls
 
 
 def test_too_many_footprints_is_413_before_geometry(monkeypatch):
-    feats = [feature(rect_lnglat(), fid=f"b{i}") for i in range(native.MAX_BUILDINGS + 1)]
+    feats = [
+        feature(rect_lnglat(), fid=f"b{i}") for i in range(native.MAX_BUILDINGS + 1)
+    ]
     calls = _spy_geometry(monkeypatch)
     err = refused(geojson(*feats), kind="resource_limit")
     assert err.detail["limit"] == "buildings" and calls == []
@@ -356,15 +465,29 @@ def test_too_many_footprints_is_413_before_geometry(monkeypatch):
 
 def test_too_many_vertices_is_413_before_geometry(monkeypatch):
     n = native.MAX_FOOTPRINT_VERTICES + 1
-    ring = [[500 + 100 * math.cos(2 * math.pi * k / n), 400 + 100 * math.sin(2 * math.pi * k / n)] for k in range(n)]
+    ring = [
+        [
+            500 + 100 * math.cos(2 * math.pi * k / n),
+            400 + 100 * math.sin(2 * math.pi * k / n),
+        ]
+        for k in range(n)
+    ]
     calls = _spy_geometry(monkeypatch)
-    err = refused(raster(footprints=[{"id": "round", "ring_px": ring}]), kind="resource_limit")
+    err = refused(
+        raster(footprints=[{"id": "round", "ring_px": ring}]), kind="resource_limit"
+    )
     assert err.detail["limit"] == "footprint_vertices" and calls == []
 
 
 def test_too_many_segment_pairs_is_413_before_geometry(monkeypatch):
     n = native.MAX_FOOTPRINT_VERTICES
-    ring = [[500 + 100 * math.cos(2 * math.pi * k / n), 400 + 100 * math.sin(2 * math.pi * k / n)] for k in range(n)]
+    ring = [
+        [
+            500 + 100 * math.cos(2 * math.pi * k / n),
+            400 + 100 * math.sin(2 * math.pi * k / n),
+        ]
+        for k in range(n)
+    ]
     count = native.MAX_SEGMENT_PAIRS // native.segment_pairs(n) + 1
     fps = [{"id": f"r{i}", "ring_px": ring} for i in range(count)]
     calls = _spy_geometry(monkeypatch)
@@ -375,9 +498,19 @@ def test_too_many_segment_pairs_is_413_before_geometry(monkeypatch):
 def test_too_many_triangles_is_413_before_geometry(monkeypatch):
     monkeypatch.setattr(native, "MAX_TRIANGLES", 10)
     calls = _spy_geometry(monkeypatch)
-    err = refused(raster(footprints=[{"id": "a", "ring_px": RECT_PX}, {"id": "b", "ring_px": RECT_PX}]),
-                  kind="resource_limit")
-    assert (err.detail["limit"], err.detail["actual"]) == ("triangles", 24) and calls == []
+    err = refused(
+        raster(
+            footprints=[
+                {"id": "a", "ring_px": RECT_PX},
+                {"id": "b", "ring_px": RECT_PX},
+            ]
+        ),
+        kind="resource_limit",
+    )
+    assert (err.detail["limit"], err.detail["actual"]) == (
+        "triangles",
+        24,
+    ) and calls == []
 
 
 def test_preview_bytes_limit_applies_to_layouts(monkeypatch):
@@ -388,11 +521,19 @@ def test_preview_bytes_limit_applies_to_layouts(monkeypatch):
 
 # ── L5: ids ─────────────────────────────────────────────────────────────────
 
+
 def test_multipolygon_parts_get_distinct_ids():
     a, b = rect_lnglat(), rect_lnglat(e0=40)
-    f = {"type": "Feature", "id": "wing", "properties": {},
-         "geometry": {"type": "MultiPolygon", "coordinates": [[a], [b]]}}
-    assert [x["id"] for x in run(SITE, geojson(f))["buildings"]] == ["layout:wing#1", "layout:wing#2"]
+    f = {
+        "type": "Feature",
+        "id": "wing",
+        "properties": {},
+        "geometry": {"type": "MultiPolygon", "coordinates": [[a], [b]]},
+    }
+    assert [x["id"] for x in run(SITE, geojson(f))["buildings"]] == [
+        "layout:wing#1",
+        "layout:wing#2",
+    ]
 
 
 def test_a_single_part_multipolygon_keeps_its_id():
@@ -421,15 +562,21 @@ def test_raster_footprint_ids_must_be_unique():
 
 @pytest.mark.parametrize("fid", ["", " ", "x" * 129, ["a"]])
 def test_raster_footprint_ids_must_be_short_non_empty_text(fid):
-    assert refused(raster(footprints=[{"id": fid, "ring_px": RECT_PX}])).detail["field"] == "footprints"
+    assert (
+        refused(raster(footprints=[{"id": fid, "ring_px": RECT_PX}])).detail["field"]
+        == "footprints"
+    )
 
 
 # ── L6: heights ─────────────────────────────────────────────────────────────
 
+
 def _height(props, kind="geojson"):
     if kind == "geojson":
         return run(SITE, geojson(feature(rect_lnglat(), props=props)))["buildings"][0]
-    return run(SITE, raster(footprints=[{"id": "hall", "ring_px": RECT_PX, **props}]))["buildings"][0]
+    return run(SITE, raster(footprints=[{"id": "hall", "ring_px": RECT_PX, **props}]))[
+        "buildings"
+    ][0]
 
 
 @pytest.mark.parametrize("kind,key", [("geojson", "height"), ("raster", "height_m")])
@@ -441,12 +588,19 @@ def test_height_in_metres_is_tagged(kind, key):
 @pytest.mark.parametrize("key", ["building:levels", "levels"])
 def test_levels_use_the_d08_storey_height(key):
     b = _height({key: 4})
-    assert (b["height_m"], b["height_evidence"], b["levels"]) == (4 * native.LEVEL_HEIGHT_M, "levels", 4)
+    assert (b["height_m"], b["height_evidence"], b["levels"]) == (
+        4 * native.LEVEL_HEIGHT_M,
+        "levels",
+        4,
+    )
 
 
 def test_no_height_falls_back_with_evidence():
     b = _height({})
-    assert (b["height_m"], b["height_evidence"]) == (native.FALLBACK_HEIGHT_M, "fallback")
+    assert (b["height_m"], b["height_evidence"]) == (
+        native.FALLBACK_HEIGHT_M,
+        "fallback",
+    )
 
 
 @pytest.mark.parametrize("value", ["12 m", "12", True])
@@ -457,7 +611,10 @@ def test_a_text_height_is_refused_not_parsed(value):
 
 @pytest.mark.parametrize("value", [-3, 0, 1001, float("inf"), float("nan")])
 def test_a_negative_zero_huge_or_non_finite_height_is_refused(value):
-    err = refused(geojson(feature(rect_lnglat(), props={"height": value})), kind="invalid_geometry")
+    err = refused(
+        geojson(feature(rect_lnglat(), props={"height": value})),
+        kind="invalid_geometry",
+    )
     assert "height" in err.message
 
 
@@ -473,7 +630,10 @@ MARK = "MARK-c0ffee-private"
 
 
 def _marked_geojson():
-    f = feature(rect_lnglat(), props={"height": 8, "owner": MARK, "p_nom": 999, "marginal_cost": 1})
+    f = feature(
+        rect_lnglat(),
+        props={"height": 8, "owner": MARK, "p_nom": 999, "marginal_cost": 1},
+    )
     f["foreign"] = MARK
     return geojson(f, name=MARK, filename=f"/home/{MARK}/plan.geojson")
 
@@ -487,10 +647,29 @@ def test_normalize_keeps_only_the_used_fields():
 
 # ── L7: generate() unchanged by the shared admission ────────────────────────
 
+
 def test_native_generate_output_is_unchanged():
-    inputs = {"greenfield": [{"id": "hall", "center": [0, 0], "width": 10, "depth": 20, "height": 8,
-                              "heading": 0, "unit": "m"}],
-              "sources": [{"namespace": "osm", "source_id": "7", "ring": rect_lnglat()[:-1], "levels": 2}]}
+    inputs = {
+        "greenfield": [
+            {
+                "id": "hall",
+                "center": [0, 0],
+                "width": 10,
+                "depth": 20,
+                "height": 8,
+                "heading": 0,
+                "unit": "m",
+            }
+        ],
+        "sources": [
+            {
+                "namespace": "osm",
+                "source_id": "7",
+                "ring": rect_lnglat()[:-1],
+                "levels": 2,
+            }
+        ],
+    }
     out = native.generate(SITE, inputs)
     digest = hashlib.sha256(json.dumps(out, sort_keys=True).encode()).hexdigest()
     # Recorded on master 701328bd9 before the refactor.
@@ -502,6 +681,7 @@ NATIVE_DIGEST = "e86a946c331e73af8ad4d122bf0765ecb6cc31b492a3fbf532d9ecaf06aef9e
 
 # ══ the real routes ════════════════════════════════════════════════════════
 
+
 def _empty_network() -> pypsa.Network:
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2025-01-01", periods=24, freq="h"))
@@ -511,7 +691,12 @@ def _empty_network() -> pypsa.Network:
 @pytest.fixture
 def geo(client, install_network, project_storage_dir):
     install_network(_empty_network(), name="geo")
-    assert client.post("/api/projects/geo", params={"force": True, "rebind": True}).status_code == 200
+    assert (
+        client.post(
+            "/api/projects/geo", params={"force": True, "rebind": True}
+        ).status_code
+        == 200
+    )
     return project_storage_dir("geo")
 
 
@@ -520,7 +705,10 @@ URL = "/api/projects/geo/sites/campus/scene"
 
 def _adopted(client, project, site=SITE):
     from services.site_scene import store
-    r = client.put("/api/projects/geo/sites", json={"version": 1, "sites": [copy.deepcopy(site)]})
+
+    r = client.put(
+        "/api/projects/geo/sites", json={"version": 1, "sites": [copy.deepcopy(site)]}
+    )
     assert r.status_code == 200, r.text
     digest = store.legacy_site_digest(site_service.read_sites(project), "campus")
     r = client.post(f"{URL}/adopt", json={"expected_digest": digest})
@@ -528,11 +716,16 @@ def _adopted(client, project, site=SITE):
 
 
 def _propose(client, base, raw, action="import_layout"):
-    return client.post(f"{URL}/proposals", json={"action": action, "base_revision": base, "inputs": {"layout": raw}})
+    return client.post(
+        f"{URL}/proposals",
+        json={"action": action, "base_revision": base, "inputs": {"layout": raw}},
+    )
 
 
 def _apply(client, pid, expected):
-    return client.post(f"{URL}/proposals/{pid}/apply", json={"expected_revision": expected})
+    return client.post(
+        f"{URL}/proposals/{pid}/apply", json={"expected_revision": expected}
+    )
 
 
 def _detail(r):
@@ -549,46 +742,86 @@ def test_route_preview_then_explicit_apply_then_retry(client, geo):
     r = _propose(client, 1, raster())
     assert r.status_code == 200, r.text
     prop = r.json()
-    assert prop["action"] == "import_layout" and prop["preview"]["layout"]["metres_per_pixel"] == 0.1
+    assert (
+        prop["action"] == "import_layout"
+        and prop["preview"]["layout"]["metres_per_pixel"] == 0.1
+    )
     assert [b["id"] for b in prop["preview"]["buildings"]] == ["layout:hall"]
     # V36/V78: the preview writes nothing; nothing applies on its own.
-    assert client.get(URL).json()["revision"] == 1 and client.get(URL).json()["buildings"] == []
+    assert (
+        client.get(URL).json()["revision"] == 1
+        and client.get(URL).json()["buildings"] == []
+    )
     receipt = _apply(client, prop["id"], 1)
     assert receipt.status_code == 200, receipt.text
     scene = client.get(URL).json()
-    assert scene["revision"] == 2 and vertices(scene["buildings"][0]) == [(0, 0), (0, 10), (20, 0), (20, 10)]
+    assert scene["revision"] == 2 and vertices(scene["buildings"][0]) == [
+        (0, 0),
+        (0, 10),
+        (20, 0),
+        (20, 10),
+    ]
     assert scene["buildings"][0]["height_evidence"] == "tagged"
     again = _apply(client, prop["id"], 1)
     assert again.status_code == 200 and again.json() == receipt.json()
     assert client.get(URL).json()["revision"] == 2
-    assert _nc(geo) == nc                                   # V38
+    assert _nc(geo) == nc  # V38
 
 
 def test_route_import_merges_by_id_and_keeps_other_buildings(client, geo):
     _adopted(client, geo)
-    box = {"id": "shed", "center": [100, 100], "width": 5, "depth": 5, "height": 3, "heading": 0, "unit": "m"}
-    r = client.post(f"{URL}/proposals", json={"action": "generate_native", "base_revision": 1,
-                                             "inputs": {"greenfield": [box]}})
+    box = {
+        "id": "shed",
+        "center": [100, 100],
+        "width": 5,
+        "depth": 5,
+        "height": 3,
+        "heading": 0,
+        "unit": "m",
+    }
+    r = client.post(
+        f"{URL}/proposals",
+        json={
+            "action": "generate_native",
+            "base_revision": 1,
+            "inputs": {"greenfield": [box]},
+        },
+    )
     _apply(client, r.json()["id"], 1)
     pid = _propose(client, 2, raster()).json()["id"]
     _apply(client, pid, 2)
     other = raster(footprints=[{"id": "annex", "ring_px": RECT_PX, "height_m": 4}])
     kept = _propose(client, 3, other).json()["preview"]["layout"]["kept_layout_ids"]
-    assert kept == ["layout:hall"]                                         # V78: said before Apply
-    pid = _propose(client, 3, raster(anchor_local=(1, 1))).json()["id"]   # re-import replaces by id
+    assert kept == ["layout:hall"]  # V78: said before Apply
+    pid = _propose(client, 3, raster(anchor_local=(1, 1))).json()[
+        "id"
+    ]  # re-import replaces by id
     _apply(client, pid, 3)
     ids = sorted(b["id"] for b in client.get(URL).json()["buildings"])
     assert ids == ["greenfield:shed", "layout:hall"]
-    hall = next(b for b in client.get(URL).json()["buildings"] if b["id"] == "layout:hall")
+    hall = next(
+        b for b in client.get(URL).json()["buildings"] if b["id"] == "layout:hall"
+    )
     assert vertices(hall)[0] == (1, 1)
 
 
 def test_route_manual_correction_keeps_the_layout_id(client, geo):
     _adopted(client, geo)
     _apply(client, _propose(client, 1, raster()).json()["id"], 1)
-    fixed = {"namespace": "layout", "source_id": "hall", "ring": rect_lnglat(w=22)[:-1], "height_m": 9}
-    r = client.post(f"{URL}/proposals", json={"action": "edit_buildings", "base_revision": 2,
-                                             "inputs": {"sources": [fixed]}})
+    fixed = {
+        "namespace": "layout",
+        "source_id": "hall",
+        "ring": rect_lnglat(w=22)[:-1],
+        "height_m": 9,
+    }
+    r = client.post(
+        f"{URL}/proposals",
+        json={
+            "action": "edit_buildings",
+            "base_revision": 2,
+            "inputs": {"sources": [fixed]},
+        },
+    )
     assert r.status_code == 200, r.text
     _apply(client, r.json()["id"], 2)
     (b,) = client.get(URL).json()["buildings"]
@@ -621,38 +854,64 @@ def test_route_cancelled_layout_cannot_be_applied(client, geo):
 def test_route_errors_carry_kind_status_and_code(client, geo):
     _adopted(client, geo)
     r = _propose(client, 1, {"kind": "dxf"})
-    assert (r.status_code, _detail(r)["error_kind"], _detail(r)["code"]) == (422, "invalid_input",
-                                                                             "unsupported_format")
-    r = _propose(client, 1, raster(image={**IMAGE, "width_px": 10_000, "height_px": 6_000}))
-    assert (r.status_code, _detail(r)["error_kind"], _detail(r)["limit"]) == (413, "resource_limit",
-                                                                              "decoded_pixels")
+    assert (r.status_code, _detail(r)["error_kind"], _detail(r)["code"]) == (
+        422,
+        "invalid_input",
+        "unsupported_format",
+    )
+    r = _propose(
+        client, 1, raster(image={**IMAGE, "width_px": 10_000, "height_px": 6_000})
+    )
+    assert (r.status_code, _detail(r)["error_kind"], _detail(r)["limit"]) == (
+        413,
+        "resource_limit",
+        "decoded_pixels",
+    )
 
 
 def test_route_import_layout_takes_only_the_layout_input(client, geo):
     _adopted(client, geo)
-    r = client.post(f"{URL}/proposals", json={"action": "import_layout", "base_revision": 1,
-                                             "inputs": {"layout": raster(), "greenfield": []}})
+    r = client.post(
+        f"{URL}/proposals",
+        json={
+            "action": "import_layout",
+            "base_revision": 1,
+            "inputs": {"layout": raster(), "greenfield": []},
+        },
+    )
     assert (r.status_code, _detail(r)["field"]) == (422, "inputs")
 
 
 def test_route_body_over_the_cap_is_refused_before_parsing(client, geo, monkeypatch):
     # L1: the route's `_json_body` cap; the bytes are not JSON, so parsing them would 422.
     from routers import site_scene as route
+
     _adopted(client, geo)
     over = b"{" * (route.MAX_PROPOSAL_BODY + 1)
-    r = client.post(f"{URL}/proposals", content=over, headers={"content-type": "application/json"})
+    r = client.post(
+        f"{URL}/proposals", content=over, headers={"content-type": "application/json"}
+    )
     assert (r.status_code, _detail(r)["limit"]) == (413, "request_bytes")
 
 
-def test_route_foreign_lock_refuses_propose_and_apply(client, geo, _auth_db, seeded_identity, second_identity,
-                                                     project_row):
+def test_route_foreign_lock_refuses_propose_and_apply(
+    client, geo, _auth_db, seeded_identity, second_identity, project_row
+):
     from services import project_locks
+
     _adopted(client, geo)
     pid = _propose(client, 1, raster()).json()["id"]
     _engine, session_local = _auth_db
     with session_local() as db:
-        project_locks.release_lock(db, project_row("geo").id, seeded_identity["user_id"])
-        assert project_locks.acquire_lock(db, project_row("geo").id, second_identity["user_id"]) is not None
+        project_locks.release_lock(
+            db, project_row("geo").id, seeded_identity["user_id"]
+        )
+        assert (
+            project_locks.acquire_lock(
+                db, project_row("geo").id, second_identity["user_id"]
+            )
+            is not None
+        )
     try:
         r = _propose(client, 1, raster())
         assert (r.status_code, _detail(r)["error_kind"]) == (409, "project_locked")
@@ -661,14 +920,22 @@ def test_route_foreign_lock_refuses_propose_and_apply(client, geo, _auth_db, see
         assert client.get(URL).json()["revision"] == 1
     finally:
         with session_local() as db:
-            project_locks.release_lock(db, project_row("geo").id, second_identity["user_id"])
+            project_locks.release_lock(
+                db, project_row("geo").id, second_identity["user_id"]
+            )
             db.commit()
 
 
 def test_route_another_org_cannot_propose(client, other_org_client, geo):
     _adopted(client, geo)
-    r = other_org_client.post(f"{URL}/proposals", json={"action": "import_layout", "base_revision": 1,
-                                                       "inputs": {"layout": raster()}})
+    r = other_org_client.post(
+        f"{URL}/proposals",
+        json={
+            "action": "import_layout",
+            "base_revision": 1,
+            "inputs": {"layout": raster()},
+        },
+    )
     assert r.status_code in (403, 404)
     assert client.get(URL).json()["revision"] == 1
 
@@ -678,11 +945,20 @@ def test_route_v55_no_marked_input_reaches_the_proposal_or_the_project(client, g
     r = _propose(client, 1, _marked_geojson())
     assert r.status_code == 200, r.text
     assert MARK not in r.text
-    entry = proposals._entries[next(k for k in proposals._entries if k[1] == r.json()["id"])]
+    entry = proposals._entries[
+        next(k for k in proposals._entries if k[1] == r.json()["id"])
+    ]
     assert MARK not in json.dumps(entry, default=str)
     assert _apply(client, r.json()["id"], 1).status_code == 200
     for path in geo.rglob("*"):
         if path.is_file():
             assert MARK.encode() not in path.read_bytes(), path
     (b,) = client.get(URL).json()["buildings"]
-    assert set(b) == {"id", "source", "footprint", "height_m", "height_evidence", "levels"}
+    assert set(b) == {
+        "id",
+        "source",
+        "footprint",
+        "height_m",
+        "height_evidence",
+        "levels",
+    }
