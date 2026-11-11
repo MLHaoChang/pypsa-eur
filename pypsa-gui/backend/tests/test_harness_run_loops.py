@@ -846,3 +846,9 @@ def test_an_envelope_file_that_cannot_be_loaded_is_goal_unreadable(tmp_path, mon
 @pytest.mark.parametrize("bad", ["2.0", [2.0], 2.0, None])
 def test_a_malformed_frozen_goal_is_goal_unreadable(tmp_path, monkeypatch, bad):
     _no_evidence(_read(tmp_path, monkeypatch, envelope={"state": "granted", "goal": bad}), "goal_unreadable")
+
+
+def test_a_settled_step_keeps_the_horizon_the_goal_check_reads():
+    """The step's copy of the loop record is `LOOP_FIELDS` only; without `horizon_years` every real
+    run with a frozen goal read goal_unreadable (found by CI on the first push)."""
+    assert "horizon_years" in run_gates.LOOP_FIELDS

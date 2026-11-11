@@ -223,7 +223,7 @@ NOTHING_TO_SAMPLE_DETAIL = ("the loop found no outage to sample: no electrical g
 # gate shows: the verdict, what it cost, how the network was left, and the
 # goal it was judged against with where each part came from.
 LOOP_FIELDS = ("status", "solves_used", "probe_solves", "restore", "base_restored", "base_restore_status",
-               "target_lole_h", "draws", "basis", "goal_sources", "lever_star", "eps_star", "confident",
+               "target_lole_h", "horizon_years", "draws", "basis", "goal_sources", "lever_star", "eps_star", "confident",
                "started_at", "finished_at", "error", "network_revision")
 
 
