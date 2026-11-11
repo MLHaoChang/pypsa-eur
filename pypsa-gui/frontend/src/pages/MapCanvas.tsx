@@ -34,7 +34,7 @@ import { networkApi, type LengthsFromGeometryResult } from '../api/network'
 import { projectsApi } from '../api/projects'
 import { appLog } from '../store/simulationStore'
 import type { Bus, Generator, Line as LineT, Link as LinkT, Load, ProjectInfo, StorageUnit, Store, Transformer } from '../api/types'
-import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor } from '../components/CanvasResultsContext'
+import { CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor, NO_RESULT_COLOR } from '../components/CanvasResultsContext'
 import { derivedPortFlow, getLinkColor, linkPorts } from './topologyEdges'
 import { busLatLng, fmtKm, lengthDisagrees, routeLengthKm, unplacedBusNames } from '../utils/geo'
 import { nextBusToPlace, canSkip } from '../utils/placement'
@@ -1556,13 +1556,13 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               waypoints={wps}
               onUpdate={(next) => updateWaypoints(edgeId, next)}
               onSelect={() => setSelectedComponent({ type: 'Line', name: line.name })}
-              color={flow ? loadingColor(flow.loadingPct) : lineColor(v)}
+              color={flow ? loadingColor(flow.loadingPct) : results.enabled ? NO_RESULT_COLOR : lineColor(v)}
               weight={flow ? 4 : 3}
               tooltip={flow
                 ? `${line.name} · ${fmtMW(flow.p0)} · ${flow.loadingPct.toFixed(0)}% of ${flow.sNom.toFixed(0)} MVA · ${fmtKm(line.length)}`
                 : `${line.name} · ${line.s_nom?.toFixed(0) ?? '—'} MVA · ${fmtKm(line.length)}`}
               permanentLabel={flow
-                ? `${fmtMW(Math.abs(flow.p0))} (${flow.loadingPct.toFixed(0)}%)`
+                ? `${fmtMW(Math.abs(flow.p0))} (${Math.floor(flow.loadingPct)}%)`
                 : undefined}
               flow={flow ? { p: flow.p0, rating: flow.sNom } : undefined}
               lengthBadge={lengthDisagrees(line.length, geometryKm) ? {
@@ -1610,7 +1610,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
                 ? `${link.name} · ${link.carrier || 'Link'} · ${fmtMW(linkFlow.p0)} · ${linkFlow.loadingPct.toFixed(0)}% of ${linkFlow.pNom.toFixed(0)} MW${linkLength}`
                 : `${link.name} · ${link.carrier || 'Link'} · ${link.p_nom?.toFixed(0) ?? '—'} MW${linkLength}`}
               permanentLabel={linkFlow
-                ? `${fmtMW(Math.abs(linkFlow.p0))} (${linkFlow.loadingPct.toFixed(0)}%)`
+                ? `${fmtMW(Math.abs(linkFlow.p0))} (${Math.floor(linkFlow.loadingPct)}%)`
                 : undefined}
               flow={linkFlow ? { p: linkFlow.p0, rating: linkFlow.pNom } : undefined}
               lengthBadge={link.length > 0 && lengthDisagrees(link.length, geometryKm) ? {
@@ -1701,7 +1701,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
                   ? `${tr.name} · ${tr.v_nom_0 ?? '?'}/${tr.v_nom_1 ?? '?'} kV · ${fmtMW(trFlow.p0)} · ${trFlow.loadingPct.toFixed(0)}% of ${trFlow.sNom.toFixed(0)} MVA`
                   : `${tr.name} · ${tr.v_nom_0 ?? '?'}/${tr.v_nom_1 ?? '?'} kV · ${tr.s_nom?.toFixed(0) ?? '—'} MVA`}
                 permanentLabel={trFlow
-                  ? `${fmtMW(Math.abs(trFlow.p0))} (${trFlow.loadingPct.toFixed(0)}%)`
+                  ? `${fmtMW(Math.abs(trFlow.p0))} (${Math.floor(trFlow.loadingPct)}%)`
                   : undefined}
                 flow={trFlow ? { p: trFlow.p0, rating: trFlow.sNom } : undefined}
               />

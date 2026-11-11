@@ -6,7 +6,7 @@ import userEvent from '@testing-library/user-event'
 import MapLegend from './MapLegend'
 import { VOLTAGE_TIERS, lineColor } from '../utils/voltageTiers'
 import { legendFor } from '../utils/assetTypes'
-import { CanvasResultsContext, LOADING_BANDS, loadingColor, type OverlayData } from './CanvasResultsContext'
+import { CanvasResultsContext, LOADING_BANDS, loadingColor, NO_RESULT_COLOR, type OverlayData } from './CanvasResultsContext'
 
 beforeEach(() => { localStorage.clear() })
 
@@ -36,8 +36,9 @@ describe('MapLegend', () => {
     off.unmount()
     legend(true)
     const strokes = [...screen.getByTestId('legend-loading').querySelectorAll('line')].map(l => l.getAttribute('stroke'))
-    expect(strokes).toEqual([loadingColor(49), loadingColor(50), loadingColor(90)])
-    expect(strokes).toEqual([...LOADING_BANDS].reverse().map(b => b.color))
+    expect(strokes).toEqual([loadingColor(49), loadingColor(50), loadingColor(90), NO_RESULT_COLOR])
+    expect(strokes.slice(0, 3)).toEqual([...LOADING_BANDS].reverse().map(b => b.color))
+    expect(screen.getByTestId('legend-loading').textContent).toContain('No result')
   })
 
   it('folds to a toggle and remembers it', async () => {

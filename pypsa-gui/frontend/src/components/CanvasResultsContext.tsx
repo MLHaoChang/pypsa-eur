@@ -723,6 +723,8 @@ export const LOADING_BANDS: readonly { min: number; color: string; label: string
   { min: 50, color: '#d97706', label: '50–90 %' },
   { min: -Infinity, color: '#16a34a', label: 'Under 50 %' },
 ]
+// Stroke for a branch with no result in the time step while the overlay is on.
+export const NO_RESULT_COLOR = '#94a3b8'
 export function loadingColor(pct: number): string {
   return (LOADING_BANDS.find(b => pct >= b.min) ?? LOADING_BANDS[LOADING_BANDS.length - 1]).color
 }
