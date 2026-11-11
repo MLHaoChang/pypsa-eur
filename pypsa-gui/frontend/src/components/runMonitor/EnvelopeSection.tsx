@@ -115,15 +115,15 @@ function IntakeRows({ intake }: { intake: RunIntake }) {
         </li>
       })}
     </ul>
-    {intake.missing.length > 0 && <div data-testid="envelope-intake-missing">Still missing: {intake.request ?? `${intake.missing.length} inputs`}</div>}
+    {intake.missing.length > 0 && <div data-testid="envelope-intake-missing" className="text-warn">Still missing: {intake.request ?? `${intake.missing.length} inputs`}</div>}
     {defaults.length > 0 && <>
       <div className="text-muted">Not given, so the preset default is used:</div>
       <ul aria-label="Preset defaults" className="space-y-0.5">
         {defaults.map(d => {
           const lines = showDefault(d)
           return <li key={d.param} data-testid="envelope-intake-default">
-            {DEFAULT_WORDS[d.param] ?? 'Another setting'}: {lines.length === 1 ? lines[0] : ''} <span className="text-muted">· preset default</span>
-            {lines.length > 1 && <ul className="ml-3 text-[11px]">{lines.map(l => <li key={l} data-testid="envelope-intake-default-line">{l}</li>)}</ul>}
+            {DEFAULT_WORDS[d.param] ?? 'Another setting'}{lines.length === 1 ? `: ${lines[0]}` : ''} <span className="text-muted">· preset default</span>
+            {lines.length > 1 && <ul className="ml-3 text-[11px] text-muted">{lines.map(l => <li key={l} data-testid="envelope-intake-default-line">{l}</li>)}</ul>}
           </li>
         })}
       </ul></>}
