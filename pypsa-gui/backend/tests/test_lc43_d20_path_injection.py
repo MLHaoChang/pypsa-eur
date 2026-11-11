@@ -10,7 +10,10 @@ uses. Three name sinks are read independently:
   project's own ``uploads`` directory;
 - the ``Content-Disposition`` header of the download: one line, its quoted
   ``filename`` is the stored name, and it carries no ``filename*`` (the stored name
-  has nothing the quoted form cannot hold);
+  has nothing the quoted form cannot hold). A delivery named ``Müller "Plan" CR LF 日本.zip``
+  is stored as ``Muller _Plan___.zip``; a row written before that sanitiser that still
+  holds the raw name is sent as one line with the quoted fallback
+  ``Muller _Plan___.zip`` and a ``filename*`` that decodes to the raw name;
 - the zip member a bundle names (``build_delivery``): ``<file_id>_<name>`` with every
   character outside ``[A-Za-z0-9_.-]`` replaced by ``_`` and at most 100 characters
   after the prefix.
@@ -20,11 +23,12 @@ Hand oracle for the member: a stored name ``a b;c'd(1).csv`` becomes the member
 characters.
 
 The upload route refuses ``..``, ``/`` and ``\\`` in a name with 400 invalid_filename
-and stores nothing.
+and leaves ``lc43_gates.state`` as it was.
 """
 
 # ruff: noqa: F811 -- shared public harness fixtures
 import io
+import json
 import re
 import urllib.parse
 import zipfile
@@ -33,9 +37,11 @@ from pathlib import Path
 import pytest
 
 from services import chat_tools, upload_service
+from tests.lc43_gates import state
 from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
 
 HOSTILE = '..\\..\\a/b"c\r\nd<e>.zip'
+NON_ASCII = 'Müller "Plan"\r\n日本.zip'
 
 
 def _uploads(project_dir: Path) -> list[str]:
@@ -94,15 +100,15 @@ def test_each_zip_member_is_the_file_id_and_a_plain_bounded_name(
     long_name = "x" * 146 + ".csv"
     named = []
     for name in ("a b;c'd(1).csv", long_name):
-        monkeypatch.setattr(
-            chat_tools, "_export_preflight", lambda data, _n=name: "Tool Baseline"
-        )
-        named.append(
-            chat_tools._save_agent_export(
-                b"bus,v_nom\nB1,110\n" + name.encode(), name, "text/csv"
+        with monkeypatch.context() as patched:
+            patched.setattr(
+                chat_tools, "_export_preflight", lambda data, _n=name: "Tool Baseline"
             )
-        )
-    monkeypatch.undo()
+            named.append(
+                chat_tools._save_agent_export(
+                    b"bus,v_nom\nB1,110\n" + name.encode(), name, "text/csv"
+                )
+            )
     stored = {item["file_id"]: item["filename"] for item in named}
     assert stored[named[0]["file_id"]] == "a b;c'd(1).csv"
     assert stored[named[1]["file_id"]] == long_name
@@ -122,11 +128,49 @@ def test_the_upload_route_refuses_a_path_in_the_name_and_stores_nothing(
     baseline, client, name
 ):
     _ctx, project_id, project_dir = baseline
-    before = _uploads(project_dir)
+    before = state(project_dir)
     response = client.post(
         f"/api/projects/{project_id}/uploads",
         files={"file": (name, b"bus,v_nom\nB1,110\n", "text/csv")},
     )
     assert response.status_code == 400, response.text
     assert response.json()["detail"]["error_kind"] == "invalid_filename"
-    assert _uploads(project_dir) == before
+    assert state(project_dir) == before
+
+
+def test_a_non_ascii_name_is_stored_plain_and_a_legacy_row_is_sent_as_filename_star(
+    baseline, client
+):
+    _ctx, _project_id, project_dir = baseline
+    source = chat_tools.export_csv_bundle()
+
+    delivery = chat_tools.build_delivery([source["file_id"]], NON_ASCII)
+
+    # The stored name drops the non-ASCII letters' marks and the rest, so its header
+    # needs no ``filename*``.
+    assert delivery["filename"] == "Muller _Plan___.zip"
+    quoted, star = _header_name(
+        client.get(delivery["download_url"]).headers["content-disposition"]
+    )
+    assert (quoted, star) == ("Muller _Plan___.zip", None)
+
+    # A row written before ``safe_upload_filename`` keeps the raw name: the header is
+    # still one line, its quoted fallback is plain ASCII, and ``filename*`` carries the
+    # raw name exactly.
+    blob = upload_service.get_upload_path(
+        "Tool Baseline", delivery["file_id"], project_dir=project_dir
+    )
+    meta_path = blob.parent / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta_path.write_text(json.dumps({**meta, "filename": NON_ASCII}))
+    before = state(project_dir)
+    response = client.get(delivery["download_url"])
+    assert response.status_code == 200, response.text
+    header = response.headers["content-disposition"]
+    quoted, star = _header_name(header)
+    assert quoted == "Muller _Plan___.zip"
+    _assert_plain_name(quoted)
+    assert star == NON_ASCII
+    assert re.search(r"filename\*=UTF-8''[A-Za-z0-9%._~!#$&+^`|-]+$", header), header
+    assert blob.resolve().is_relative_to((Path(project_dir) / "uploads").resolve())
+    assert state(project_dir) == before

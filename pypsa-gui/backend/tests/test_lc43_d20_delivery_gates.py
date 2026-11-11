@@ -5,12 +5,14 @@ The seam is the copilot's delivery and import tools (``build_delivery``,
 ``create_chart``, ``export_run_evidence``) and the authenticated blob download.
 
 Hand oracle, the baseline project (B1 110 kV, G1 20 MW at 10 EUR/MWh, L1 5 MW, two
-snapshots). Each refusal names its kind and status, and afterwards the project's
-uploads and G1's 20 MW are exactly as before:
+snapshots). Each refusal names its kind and status, and afterwards ``lc43_gates.state``
+(the open network's fingerprint, each report's version count, every upload directory
+and the blob count) is exactly as before:
 
 - an id that lives in another project's uploads is 404 upload_not_found here, and
   malformed ids (``..``, 15 hex digits, upper-case hex) are 404 upload_not_found too;
-- another organisation's client fetching a delivery's download URL gets 404;
+- another organisation's client fetching a delivery's download URL gets 404 with the
+  plain detail ``Project not found``;
 - an upload whose blob was never finished (``blob_ready`` false) is 404 upload_not_found
   to the delivery tool and to the download;
 - an export over the per-file cap is 413 file_too_large, for each of the network, CSV,
@@ -35,18 +37,9 @@ import pytest
 
 from services import chat_tools, upload_service
 from services.pypsa_service import PyPSAService
-from tests.lc43_gates import refused
+from tests.lc43_gates import refused, state
 from tests.test_assistant_capabilities import dispatch, session  # noqa: F401
 from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
-
-
-def _state(project_dir) -> tuple[list[str], float]:
-    uploads = sorted(
-        m.file_id
-        for m in upload_service.list_uploads("Tool Baseline", project_dir=project_dir)
-    )
-    g1 = float(PyPSAService.get_active_context().network.generators.at["G1", "p_nom"])
-    return uploads, g1
 
 
 def test_an_id_from_another_project_or_a_malformed_id_reaches_no_file(
@@ -61,7 +54,7 @@ def test_an_id_from_another_project_or_a_malformed_id_reaches_no_file(
         kind="agent_export",
         project_dir=tmp_path / "elsewhere",
     )
-    before = _state(project_dir)
+    before = state(project_dir)
     for file_id in (foreign.file_id, "..", "0" * 15, foreign.file_id.upper()):
         refused(
             lambda f=file_id: chat_tools.build_delivery([f]), 404, "upload_not_found"
@@ -69,16 +62,20 @@ def test_an_id_from_another_project_or_a_malformed_id_reaches_no_file(
         refused(
             lambda f=file_id: chat_tools.get_file_delivery(f), 404, "upload_not_found"
         )
-    assert _state(project_dir) == before
+    assert state(project_dir) == before
 
 
 def test_another_organisation_cannot_download_a_delivery(
     baseline, client, other_org_client
 ):
+    _ctx, _project_id, project_dir = baseline
     delivery = chat_tools.export_network_nc()
     assert client.get(delivery["download_url"]).status_code == 200
+    before = state(project_dir)
     response = other_org_client.get(delivery["download_url"])
     assert response.status_code == 404, response.text
+    assert response.json() == {"detail": "Project not found"}, response.text
+    assert state(project_dir) == before
     assert delivery["sha256"].encode() not in response.content
 
 
@@ -93,6 +90,7 @@ def test_an_unfinished_upload_is_never_delivered(baseline, client):
     )
     meta = json.loads(meta_path.read_text())
     meta_path.write_text(json.dumps({**meta, "blob_ready": False}))
+    before = state(project_dir)
     refused(
         lambda: chat_tools.get_file_delivery(delivery["file_id"]),
         404,
@@ -106,6 +104,7 @@ def test_an_unfinished_upload_is_never_delivered(baseline, client):
     response = client.get(delivery["download_url"])
     assert response.status_code == 404, response.text
     assert response.json()["detail"]["error_kind"] == "upload_not_found"
+    assert state(project_dir) == before
 
 
 @pytest.mark.parametrize(
@@ -116,23 +115,23 @@ def test_an_export_over_the_cap_is_refused_and_saves_nothing(
     baseline, monkeypatch, export
 ):
     _ctx, _project_id, project_dir = baseline
-    before = _state(project_dir)
+    before = state(project_dir)
     monkeypatch.setattr(upload_service, "MAX_FILE_BYTES", 64)
     refused(getattr(chat_tools, export), 413, "file_too_large")
-    assert _state(project_dir) == before
+    assert state(project_dir) == before
 
 
 def test_a_delivery_over_the_cap_is_refused_and_saves_nothing(baseline, monkeypatch):
     _ctx, _project_id, project_dir = baseline
     source = chat_tools.export_csv_bundle()
-    before = _state(project_dir)
+    before = state(project_dir)
     monkeypatch.setattr(upload_service, "MAX_FILE_BYTES", 100_000 + source["size"] - 1)
     refused(
         lambda: chat_tools.build_delivery([source["file_id"]]),
         413,
         "delivery_too_large",
     )
-    assert _state(project_dir) == before
+    assert state(project_dir) == before
     monkeypatch.setattr(upload_service, "MAX_FILE_BYTES", 100_000 + source["size"])
     assert chat_tools.build_delivery([source["file_id"]])["files_total"] == 1
 
@@ -140,7 +139,7 @@ def test_a_delivery_over_the_cap_is_refused_and_saves_nothing(baseline, monkeypa
 def test_an_import_needs_a_named_format_and_unchanged_bytes(baseline):
     _ctx, _project_id, project_dir = baseline
     source = chat_tools.export_network_nc()
-    before = _state(project_dir)
+    before = state(project_dir)
     for fmt in ("pdf", "", "NETCDF"):
         refused(
             lambda f=fmt: chat_tools.import_uploaded_network(source["file_id"], f),
@@ -156,7 +155,7 @@ def test_an_import_needs_a_named_format_and_unchanged_bytes(baseline):
         409,
         "import_file_changed",
     )
-    assert _state(project_dir) == before
+    assert state(project_dir) == before
 
 
 @pytest.mark.parametrize(
@@ -173,22 +172,22 @@ def test_a_chart_outside_its_shape_is_refused_and_draws_nothing(
     baseline, component, names
 ):
     _ctx, _project_id, project_dir = baseline
-    before = _state(project_dir)
+    before = state(project_dir)
     refused(
         lambda: chat_tools.create_chart(component, "p_nom", names), 422, "invalid_chart"
     )
-    assert _state(project_dir) == before
+    assert state(project_dir) == before
     assert (
         chat_tools.create_chart("Generator", "p_nom", ["G1"])["file_id"]
-        not in before[0]
+        not in before["uploads"]
     )
 
 
 def test_run_evidence_is_never_exported_for_a_run_nobody_named(baseline):
     _ctx, _project_id, project_dir = baseline
-    before = _state(project_dir)
+    before = state(project_dir)
     refused(chat_tools.export_run_evidence, 409, "discussed_run_required")
-    assert _state(project_dir) == before
+    assert state(project_dir) == before
 
 
 @pytest.mark.parametrize(
@@ -203,11 +202,12 @@ def test_a_malformed_bundle_or_workbook_is_refused_and_keeps_the_open_network(
     upload = upload_service.add_upload(
         "Tool Baseline", data, name, "application/octet-stream", project_dir=project_dir
     )
-    before = _state(project_dir)
+    before = state(project_dir)
     frames = dispatch(
         session, "import_uploaded_network", {"file_id": upload.file_id, "format": fmt}
     )
     assert [d["error_kind"] for e, d in frames if e == "tool_error"] == ["tool_error"]
     assert not [d for e, d in frames if e == "tool_result"]
     assert str(PyPSAService.get_active_context().project_uuid) == project_id
-    assert _state(project_dir) == before == (before[0], 33.0)
+    assert state(project_dir) == before
+    assert PyPSAService.get_network().generators.at["G1", "p_nom"] == 33.0
