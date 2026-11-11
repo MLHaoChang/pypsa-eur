@@ -79,6 +79,8 @@ def test_the_issue_rows_are_declared():
         ('POST', '/api/simulation/queue/pause'), ('POST', '/api/simulation/queue/resume'),
     })
     assert 'series_file_upload' not in entries
+    # ui-modern 03 S3 (GK B S8): the strip's changes are not chat's comparison.
+    assert 'compares a case with its base on other measures' in entries['results_headline_strip']['reason']
 
 
 @pytest.mark.parametrize('goal,entry_id', [
