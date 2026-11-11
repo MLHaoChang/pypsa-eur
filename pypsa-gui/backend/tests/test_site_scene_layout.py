@@ -270,6 +270,7 @@ def test_a_layout_with_no_footprints_is_named():
 @pytest.mark.parametrize("member", [
     {"crs": {"type": "link", "properties": {"href": "http://example.org/crs", "type": "proj4"}}},
     {"$ref": "http://example.org/other.geojson"},
+    {"crs": {"type": "link", "properties": {"type": "proj4"}}},     # a link with no href still names a remote CRS
 ])
 def test_remote_references_are_refused(member):
     assert code_of(refused(geojson(feature(rect_lnglat()), **member))) == "remote_reference"
