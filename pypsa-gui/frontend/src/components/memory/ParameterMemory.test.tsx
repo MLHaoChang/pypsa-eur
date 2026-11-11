@@ -15,7 +15,7 @@ import { AssetFieldsEdit } from '../../layout/properties/AssetFields'
 import { ExpandedProps } from '../../layout/properties/cardKit'
 import { FieldDrawer } from '../FieldDrawer'
 import {
-  PickCard, SuggestionChips, chipWords, memoryLine, parameterWords, useSaveAction,
+  PickCard, SuggestionChips, chipWords, memoryLine, parameterWords, targetWords, useSaveAction,
 } from './ParameterMemory'
 
 const api = vi.hoisted(() => ({
@@ -143,6 +143,19 @@ describe('the pick card (GK B 47 A4–A6, UX P3)', () => {
     await open()
     await screen.findByTestId('memory-line')
     expect(screen.getByTestId('memory-pick-card').textContent).not.toBe(before)
+  })
+
+  it.each([
+    [null, 'Applies to gas, replacing 100 MW you typed.'],
+    ['pack:eu-dea', 'Applies to gas, replacing 100 MW from a defaults pack.'],
+    ['eu-dea-2026-08#e034aad727495a36/solar-utility@2030',
+      'Applies to gas, replacing 100 MW from the Danish Energy Agency technology catalogue.'],
+    ['memory:mem_9@v2', 'Applies to gas, replacing 100 MW from a saved value.'],
+    ['upload:site_survey_v3', 'Applies to gas, replacing 100 MW from another source.'],
+  ])('the replaced value\'s source %s reads in words, never as its key', (source, words) => {
+    const m = preview({ target: { component_class: 'Generator', name: 'gas', value: 100, source } }).memory
+    expect(targetWords(m, spec('p_nom'))).toBe(words)
+    if (source) expect(targetWords(m, spec('p_nom'))).not.toContain(source.split(':')[0] + ':')
   })
 
   it('the source project is on the card and moves with the chip', () => {

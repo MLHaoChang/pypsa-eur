@@ -79,13 +79,23 @@ function shownAs(spec: AssetFieldSpec, m: ParameterMemory) {
   return { scale: spec.scale, unit_display: m.unit_display, unit_storage: m.unit }
 }
 
-/** "Applies to gas, replacing 100 MW (source: pack:eu-dea)": the target value and source
+/** Where the replaced value came from, in words: a provenance source key is never shown
+ *  (UX 18, #1194). No recorded source is a value the user typed. */
+export function replacedSourceWords(source: string | null): string {
+  if (!source) return 'you typed'
+  if (source.startsWith('pack:')) return 'from a defaults pack'
+  if (source.startsWith('eu-dea-')) return 'from the Danish Energy Agency technology catalogue'
+  if (source.startsWith('memory:')) return 'from a saved value'
+  return 'from another source'
+}
+
+/** "Applies to gas, replacing 100 MW from a defaults pack.": the target value and source
  *  the apply replaces, both bound by the digest (GK B 47 A4). */
 export function targetWords(m: ParameterMemory, spec: AssetFieldSpec): string {
   const t = m.target
   if (t.value == null) return `Applies to ${t.name}, which has no value yet.`
   return `Applies to ${t.name}, replacing ${valueWords(shownAs(spec, m), t.value, m.currency)} `
-    + `(source: ${t.source ?? 'typed'}).`
+    + `${replacedSourceWords(t.source)}.`
 }
 
 /** UX P1: "Used before: 7 % in Project A" / "Saved 2026-11-03 · 2024 EUR". */
