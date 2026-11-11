@@ -750,9 +750,130 @@ def _eh_h2_hub(staged: bool) -> dict:
 EH_H2_HUB = _eh_h2_hub(staged=False)
 EH_H2_HUB_STAGED = _eh_h2_hub(staged=True)
 
+# Study harness 12c (design §9.3 "eh_microgrid"; GK B (47) G1-G9): eh_microgrid@1
+# and eh_microgrid_staged@1. The solve, the EH study with the off-grid stress
+# (`dtc_stress`, one solve per islanding contingency) and the island check of
+# the plan as built (`mg_island_survival`, 12b). The result gate reads the
+# island facts (no SCR rule: the tie is open, so the PoC's fault level does
+# not apply), LOLE as eh_datacenter (Q5) and the diesel-fleet investment case
+# (issue 20), both investment rules warn only. Archetype off_grid comes from
+# the template's own card.
+#
+# G1: K, the islanding contingencies, is counted when the EH study's args are
+# frozen (`harness/run_eh.freeze`): its budget is then 2 + K, never capped
+# down, and a different K at the solve refuses before any solve.
+MG_CONTINGENCY_SOLVES = 1  # `dtc.run_dtc_stress`: one solve per islanding contingency
+MG_CONTINGENCIES = 1  # K on both shipped templates: the subsea tie (pinned by a test)
+# G4: the battery the L2 loop may resize, by template: its name glob and the
+# shipped candidate's cap (MW) and duration (h). The bounds are twice each,
+# from 0 MW and 1 h. A StorageUnit has no e_nom: its energy is p_nom × max_hours.
+MG_BESS = {"eh_microgrid": ("bess_new", 15.0, 4.0), "eh_microgrid_staged": ("bess_new_*", 10.0, 4.0)}
+
+
+def _mg_levers(template: str):
+    name, cap, hours = MG_BESS[template]
+    source = f"the {template} template's {name} candidate"
+    return [
+        {"tool": "update_component", "target": {"component": "StorageUnit", "name": name, "attr": "p_nom_max"},
+         "bounds": {"min": 0.0, "max": 2 * cap}, "unit": "MW",
+         "source": f"twice {source}'s {cap:g} MW cap"},
+        {"tool": "update_component", "target": {"component": "StorageUnit", "name": name, "attr": "max_hours"},
+         "bounds": {"min": 1.0, "max": 2 * hours}, "unit": "h",
+         "source": f"twice {source}'s {hours:g} h duration"},
+    ]
+
+
+# G2: what one pass of the solve stage spends: the queued solve, the EH study
+# (2 + K) and the island check's one solve.
+MG_PASS_SOLVES = 1 + (2 + MG_CONTINGENCY_SOLVES * MG_CONTINGENCIES) + run_actions.SOLVES
+# The worst case, every reservation at its cap: the first pass and each L2
+# round's (L2_ROUNDS = 2), then the coupling loop's 3 and its closing
+# re-solve: (1 + (2 + K) + 1) x (1 + 2) + 3 + 1 = 5 x 3 + 4 = 19 with K = 1.
+MG_BUDGET_SOLVES = MG_PASS_SOLVES * (1 + L2_ROUNDS) + 3 + 1
+MG_FUEL_BASIS = ("The gensets' fuel lasts the island's fuel autonomy (h). The gensets draw no modelled "
+                 "fuel, so it is not evaluated and never counts toward a pass.")
+
+
+def _eh_microgrid(staged: bool) -> dict:
+    template = "eh_microgrid_staged" if staged else "eh_microgrid"
+    lole = copy.deepcopy(next(r for r in EH_RESULT_RULES if r.get("engine")))
+    lole["engine"] = {"tool": "run_coupling_loop", "max_solves": 3, "restore": "base"}
+    edits = _mg_levers(template)
+    tunable = [(e["target"]["component"], e["target"]["attr"]) for e in edits]
+    eh_study = copy.deepcopy(EH_SITE["eh_study"])
+    eh_study["stages"].insert(eh_study["stages"].index("assemble"), "dtc_stress")
+    eh_study["contingency_solves"] = MG_CONTINGENCY_SOLVES
+    return {
+        "id": template, "version": 1,
+        "templates": [template],
+        "scope": "flow_scope.preset_for",
+        "params": {"required": [], "ask": [GOAL_PARAM, "planning"], "fields": {
+            GOAL_PARAM: _num("Reliability goal (LOLE)", {"native_type": "float", "unit_storage": "h/yr"}),
+            # B13: the template's own planning check (`eh_templates.planning_spec`) judges them.
+            "planning.start_year": _num("First operating year", {}, kind="year"),
+            "planning.end_year": _num("Study horizon end", {}, kind="year")}},
+        "inputs": {"required": []},
+        "stages": {
+            "setup": {"actions": [], "rules": [
+                *GENERIC["setup"]["rules"],
+                _rule("set.project.template", "project.template", "eq", template,
+                      basis=f"The profile serves the {template} template only."),
+            ]},
+            "solve": {"actions": [*GENERIC["solve"]["actions"], EH_STUDY_ACTION,
+                                  {"tool": run_actions.MG_SURVIVAL,
+                                   "args": dict(run_actions.MARKERS[run_actions.MG_KIND]),
+                                   "native": run_actions.KIND}],
+                      "rules": [*GENERIC["solve"]["rules"], *EH_SOLVE_RULES]},
+            "result_gate": {**GENERIC["result_gate"], "rules": [
+                *CORE_RESULT_RULES,
+                {**_rule("mg.island.survival", "mg.island.survival", "eq", "survives",
+                         basis="The plan as built, every size fixed, holds the island settings' N+k ride-through "
+                               "over the sustained hours and the islanding step (the run's own island check on "
+                               "the current network and island settings)."),
+                 "tunable": [f"{c}.{a}" for c, a in tunable]},
+                _rule("mg.tie.open", "mg.tie.open", "eq", "open",
+                      basis="The island's tie to the mainland is open on the live network."),
+                _rule("mg.critical.tagged", "mg.critical.tagged", "eq", "tagged",
+                      basis="The island settings and the network name the same critical loads."),
+                {**_rule("mg.island.critical_served", "mg.island.critical_served", "le", 0.0,
+                         basis="No critical load is shed on island (MWh, summed over the islanding contingencies "
+                               "of the run's own EH study's off-grid stress)."), "unit": "MWh"},
+                {**_rule("mg.island.frequency", "mg.island.frequency", "le", 0, severity="warn",
+                         basis="No island hour fails the frequency judge (h, a count of hours of the run's own "
+                               "campus run). 12c runs no campus study, so it reads not run and never counts "
+                               "toward a pass."), "unit": "h"},
+                _rule("mg.fuel.autonomy", "mg.fuel.autonomy", "eq", True, severity="warn", basis=MG_FUEL_BASIS),
+                lole,
+                _rule("mg.ic.counterfactual", "ic.counterfactual", "eq", "established", severity="warn",
+                      basis="The investment case compares against an established counterfactual (the island as "
+                            "it stands today); until then it is not evaluated and never blocks the run."),
+                _rule("mg.ic.baseline_keeps", "ic.baseline_keeps", "nonempty", severity="warn",
+                      basis="The case's baseline keeps every owned existing asset of the island; until the case "
+                            "reads established it is not evaluated and never blocks the run."),
+            ]},
+            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
+        },
+        "eh_study": eh_study,
+        "tunable": [{"component": c, "attr": a} for c, a in tunable],
+        "envelope": {
+            "edits": edits,
+            "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
+            "budget": {"solves": MG_BUDGET_SOLVES, "rounds": 6, "wall_time_h": 8.0},
+        },
+        "kpis": copy.deepcopy(EH_SITE["kpis"]),
+        "chapters": ["sizing", "mc", "investment_case"],
+        "missing_tools": [],
+    }
+
+
+EH_MICROGRID = _eh_microgrid(staged=False)
+EH_MICROGRID_STAGED = _eh_microgrid(staged=True)
+
 PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_datacenter@1": EH_DATACENTER,
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
-                              "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED}
+                              "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
+                              "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED}
 
 
 def needs_goal(profile: dict) -> bool:

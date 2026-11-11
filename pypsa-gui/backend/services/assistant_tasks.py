@@ -1640,6 +1640,8 @@ def begin_step(session, tool, args):
                 _save(path, task)  # the run, stopped for the user
                 if refused[0] == run_eh.BUDGET_KIND:
                     _refuse("eh_budget", refused[1])
+                if refused[0] == run_eh.CONTINGENCY_KIND:  # study harness 12c (G1)
+                    _refuse("eh_contingencies", refused[1])
                 _refuse("eh_args", refused[1])
         step.pop("claim", None)
         _clear_waiting(task, step["id"])

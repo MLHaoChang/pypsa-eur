@@ -164,8 +164,12 @@ def _number(value):
 def _check_edit(entry):
     from harness import confirm, edit_card
     from services import run_profiles
-    if not isinstance(entry, dict) or not {"tool", "target"} <= set(entry) <= {"tool", "target", "bounds", "enum"}:
+    if not isinstance(entry, dict) or not {"tool", "target"} <= set(entry) <= {"tool", "target", "bounds", "enum",
+                                                                             "unit", "source"}:
         raise EnvelopeError(f"An edit names tool, target and bounds or enum: {entry!r}")
+    # Study harness 12c (G4): a bound's unit and where it comes from, shown on the card.
+    if not all(isinstance(entry.get(k, "x"), str) and entry.get(k, "x") for k in ("unit", "source")):
+        raise EnvelopeError(f"An edit's unit and source are words: {entry!r}")
     tool, target = entry["tool"], entry["target"]
     if not isinstance(tool, str) or tool in NEVER_ADMITTED or not edit_card.is_edit(tool) \
             or confirm._safety_tier_for(tool) != "write":
@@ -195,7 +199,8 @@ def _check_edit(entry):
         if not isinstance(enum, list) or not 0 < len(enum) <= 20 \
                 or not all(isinstance(v, str) or _number(v) for v in enum):
             raise EnvelopeError(f"{component}.{attr}: an enum lists 1-20 allowed values.")
-    return {"tool": tool, "target": dict(target), **{k: copy.deepcopy(entry[k]) for k in ("bounds", "enum") if k in entry}}
+    return {"tool": tool, "target": dict(target),
+            **{k: copy.deepcopy(entry[k]) for k in ("bounds", "enum", "unit", "source") if k in entry}}
 
 
 def _check_run(entry):
@@ -316,8 +321,13 @@ def narrow(block, candidate):
     except EnvelopeError as exc:
         _invalid(str(exc)[:300])
     for edit in mine["edits"]:
-        if not any(_within(edit, wide) for wide in block["edits"]):
+        wide = next((w for w in block["edits"] if _within(edit, w)), None)
+        if wide is None:
             _invalid(f"{edit['tool']} on {edit['target']} is wider than the profile's envelope.")
+        for key in ("unit", "source"):  # the profile's own words, never a caller's
+            edit.pop(key, None)
+            if key in wide:
+                edit[key] = wide[key]
     for gap in mine["gaps"]:
         if not any(gap["tool"] == wide["tool"] and gap["target"]["component"] == wide["target"]["component"]
                    and gap["target"]["attr"] == wide["target"]["attr"]
@@ -597,7 +607,15 @@ def _rows(envelope):
         t = e["target"]
         allowed = ", ".join(map(str, e["enum"])) if "enum" in e else ", ".join(
             f"{k} {v:g}" if k != "rel" else f"±{v:.0%} of the value at grant" for k, v in e["bounds"].items())
-        lines.append(f"- Edit {t['component']} `{t['name']}` {t['attr']} ({allowed}) with {e['tool']}")
+        unit = f" {e['unit']}" if e.get("unit") else ""
+        source = f"; source: {e['source']}" if e.get("source") else ""
+        lines.append(f"- Edit {t['component']} `{t['name']}` {t['attr']} ({allowed}{unit}{source}) with {e['tool']}")
+    held = (envelope.get("eh_study") or {}).get("contingencies")
+    if isinstance(held, dict):  # study harness 12c (G1): K, frozen at the grant
+        k = held.get("count")
+        lines.append(f"- The Energy Hub study stress-tests {k} islanding contingenc{'y' if k == 1 else 'ies'} "
+                     f"({', '.join(map(str, held.get('links') or []))}) on "
+                     f"{(envelope['eh_study'].get('args') or {}).get('budget_solves')} solves")
     lines += [_gap_row(g) for g in envelope.get("gaps", [])]
     lines += [f"- Run {r['tool']}" + (f" ({r['kind']})" if r.get("kind") else "") for r in envelope["runs"]]
     b = envelope["budget"]

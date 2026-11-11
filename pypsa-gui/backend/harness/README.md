@@ -1614,6 +1614,45 @@ kind refuses (GK B (46) M2). The data-centre record is unchanged (M1).
   - `mg.fuel.autonomy`: always no evidence: the gensets draw no modelled
     fuel (GK A Q5).
 
+### The microgrid profiles (study harness 12c)
+
+`eh_microgrid@1` and `eh_microgrid_staged@1` (`run_profiles._eh_microgrid`,
+GK B (47) G1-G9). The scope is the template's (`flow_scope._MICROGRID`), the
+archetype `off_grid` the template card's.
+
+- **Solve stage.** The queued solve, the EH study with `dtc_stress` listed
+  (the off_grid pack does not run it by default), then `mg_island_survival`.
+- **K (G1).** The EH block's `contingency_solves` makes `run_eh.freeze`
+  count the islanding contingencies K on the project's network
+  (`run_eh.islanding`, as the study derives them), freeze them as the args'
+  `dtc_config` (so the digest binds them) and set `budget_solves = 2 + K`,
+  never capped down: too few solves left refuses the freeze. The step's
+  `card` and the granted envelope's text show K and the links. `admit`
+  derives them again before any reservation; a different set stops the run
+  with `eh_contingencies`.
+- **Budget (G2).** `MG_BUDGET_SOLVES`: one pass is the solve, the study and
+  the island check, `1 + (2 + K) + 1`, for the first pass and each L2 round,
+  plus the coupling loop's 3 and its closing re-solve: 19 with the shipped
+  K = 1. A project with a larger K may run out and stop for the user.
+- **Result gate.** `mg.island.survival` (block; its levers are the
+  `StorageUnit` `p_nom_max` and `max_hours` of the battery candidate),
+  `mg.tie.open`, `mg.critical.tagged`, `mg.island.critical_served` (MWh),
+  `mg.island.frequency` (h, warn; 12c runs no campus study, so it reads
+  `not_run`), `mg.fuel.autonomy` (warn), LOLE on the coupling loop, and
+  the investment rules `ic.counterfactual` and `ic.baseline_keeps` (warn).
+  No scorecard and no SCR rule.
+- **Envelope (G4).** The battery's cap up to twice the template's (MW) and its
+  duration from 1 h up to twice the template's (h). An edit entry may carry
+  `unit` and `source`; the card text shows them, and a narrowed envelope
+  keeps the profile's.
+- **Not evaluated (G8).** `run_handoff.checks` counts the result gate's
+  rules by verdict and names each one not evaluated. "Stated targets" is
+  `partly`, never `covered`, while one is. The report's harness chapter
+  carries the counts.
+- **Stage files.** The `harness/workflows/profiles/eh_microgrid*` stage
+  instructions come with 12c's second PR. Until then an agent turn on these
+  profiles has no instruction and does not run.
+
 ### The approval envelope (study harness issue 03)
 
 `services/run_envelope.py` (design §7; SH-ENVELOPE-1). "Approve once, run
