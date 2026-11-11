@@ -150,6 +150,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A test for a ticketed defect asserts only what holds under every fix the ticket allows, "refuse" included (#1372 L1, GK B (46)).
 - A card shows every value its approval digest binds; a list or series is never summarised as a count (#1379 F2, GK B (46)).
 - An apply-then-read with nothing moved reads fresh; stale compares against what was recorded at approval (#1375 D1, GK B (46)).
+- A linked quantity clashes with a ledger stream only when that stream prices the same quantity. A served load meets the bill (grid import) but not an EaaS fee (the same delivery). The bill must stay import-only, pinned by a test (BC-04 F1, GK B (47)).
 
 ## Engineering rules
 
