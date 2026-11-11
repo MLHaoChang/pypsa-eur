@@ -58,15 +58,22 @@ def short_timeout(monkeypatch):
 @pytest.fixture
 def running_job(monkeypatch):
     """Make this process run a report job for the directory given."""
+
     def start(project_dir):
-        monkeypatch.setattr(report_job, "_ACTIVE", {"status": "running", "thread": None})
+        monkeypatch.setattr(
+            report_job, "_ACTIVE", {"status": "running", "thread": None}
+        )
         monkeypatch.setattr(report_job, "_ACTIVE_DIR", project_dir)
+
     return start
 
 
 def _lock_files(root) -> list[str]:
-    return sorted(p.name for p in root.rglob("*")
-                  if p.name.endswith(".lock") or p.name == store.CLOSING_MARKER)
+    return sorted(
+        p.name
+        for p in root.rglob("*")
+        if p.name.endswith(".lock") or p.name == store.CLOSING_MARKER
+    )
 
 
 def _retired(parent) -> list[str]:
@@ -76,7 +83,9 @@ def _retired(parent) -> list[str]:
 # ── the store: closing a directory (GK B C1) ────────────────────────────────
 
 
-def test_a_closing_marker_refuses_a_writer_that_shares_no_state_with_the_closer(tmp_path):
+def test_a_closing_marker_refuses_a_writer_that_shares_no_state_with_the_closer(
+    tmp_path,
+):
     """The marker is a file, checked under the writer's own file lock, so a
     writer in another process is refused too: nothing in memory says closing."""
     _seed(tmp_path, RID_A)
@@ -141,12 +150,17 @@ def test_a_job_cannot_start_for_a_directory_that_is_closing(tmp_path):
     """GK B C2: `_launch` asks under the slot lock, so a job either started
     before the close (and `running_for` sees it) or is refused."""
     _seed(tmp_path, RID_A)
-    job = SimpleNamespace(project_dir=tmp_path, record={"status": "running"},
-                          report_id=RID_A)
+    job = SimpleNamespace(
+        project_dir=tmp_path, record={"status": "running"}, report_id=RID_A
+    )
     with store.reports_closed(tmp_path):
         with pytest.raises(store.ReportBusy):
-            report_job._launch(prepare=lambda: job, run=lambda _job: None,
-                               lock=threading.Lock(), state={})
+            report_job._launch(
+                prepare=lambda: job,
+                run=lambda _job: None,
+                lock=threading.Lock(),
+                state={},
+            )
     assert report_job._ACTIVE is None or report_job._ACTIVE is not job.record
     assert not report_job.running_for(tmp_path)
 
@@ -165,7 +179,10 @@ def test_delete_refuses_while_a_report_is_being_written(client, project):
     with held_elsewhere(pdir, RID_A):
         _busy(client.delete(f"/api/projects/{name}"))
     assert (pdir / "network.nc").exists()
-    assert sorted(p.name for p in store.reports_dir(pdir).iterdir() if p.is_dir()) == [RID_A, RID_B]
+    assert sorted(p.name for p in store.reports_dir(pdir).iterdir() if p.is_dir()) == [
+        RID_A,
+        RID_B,
+    ]
     assert not (store.reports_dir(pdir) / store.CLOSING_MARKER).exists()
 
 
@@ -260,7 +277,9 @@ def test_the_moved_tree_is_removed_outside_the_network_lock(
     assert free == [True]
 
 
-def test_delete_takes_the_network_lock_before_any_report_lock(client, project, monkeypatch):
+def test_delete_takes_the_network_lock_before_any_report_lock(
+    client, project, monkeypatch
+):
     """GK B C3: while another thread holds the network lock, the delete waits
     for it holding no report lock, so a report writer still gets its lock."""
     from services.solve_queue import solve_queue
@@ -268,8 +287,12 @@ def test_delete_takes_the_network_lock_before_any_report_lock(client, project, m
     name, pdir = project
     monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 5)
     resp = _with_the_sites_network_lock_held_elsewhere(
-        monkeypatch, solve_queue, "list_jobs",
-        lambda: client.delete(f"/api/projects/{name}"), pdir)
+        monkeypatch,
+        solve_queue,
+        "list_jobs",
+        lambda: client.delete(f"/api/projects/{name}"),
+        pdir,
+    )
     assert resp.status_code == 200, resp.text
     assert not pdir.exists()
 
@@ -333,8 +356,12 @@ def test_rename_takes_the_network_lock_before_any_report_lock(movable, monkeypat
     db, row, old_dir, new_dir = movable
     monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 5)
     _with_the_sites_network_lock_held_elsewhere(
-        monkeypatch, project_registry, "_queued_job_blocks_rename",
-        lambda: project_registry.rename_project(db, row, "New Name"), old_dir)
+        monkeypatch,
+        project_registry,
+        "_queued_job_blocks_rename",
+        lambda: project_registry.rename_project(db, row, "New Name"),
+        old_dir,
+    )
     assert new_dir.exists() and not old_dir.exists()
 
 
@@ -363,7 +390,9 @@ def _fake_snapshots(pdir, count: int) -> list:
     return dirs
 
 
-def test_prune_skips_a_snapshot_a_restore_reads_and_takes_the_next(tmp_path, monkeypatch):
+def test_prune_skips_a_snapshot_a_restore_reads_and_takes_the_next(
+    tmp_path, monkeypatch
+):
     from routers import snapshots
 
     monkeypatch.setattr(snapshots, "_MAX_SNAPSHOTS_PER_PROJECT", 3)
@@ -406,8 +435,12 @@ def test_snapshot_delete_takes_the_network_lock_before_any_report_lock(
     snap_dir = pdir / "snapshots" / sid
     monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 5)
     resp = _with_the_sites_network_lock_held_elsewhere(
-        monkeypatch, snapshots, "_read_snapshot_meta",
-        lambda: client.delete(f"/api/projects/{name}/snapshots/{sid}"), snap_dir)
+        monkeypatch,
+        snapshots,
+        "_read_snapshot_meta",
+        lambda: client.delete(f"/api/projects/{name}/snapshots/{sid}"),
+        snap_dir,
+    )
     assert resp.status_code == 204, resp.text
 
 
@@ -428,8 +461,11 @@ def test_a_fork_carries_the_reports_and_no_lock_file(tmp_path):
     assert _tree(store.reports_dir(dst)) == _tree(store.reports_dir(src))
     # Taking the fork's own locks leaves it empty lock files, as a snapshot
     # gets (07e); none of the base's travels.
-    copied = [p for p in store.reports_dir(dst).iterdir()
-              if p.name.endswith(".lock") and p.read_bytes() == b"base"]
+    copied = [
+        p
+        for p in store.reports_dir(dst).iterdir()
+        if p.name.endswith(".lock") and p.read_bytes() == b"base"
+    ]
     assert copied == []
 
 
@@ -477,10 +513,13 @@ def test_a_legacy_claim_refuses_while_a_report_is_being_written(
     with session_local() as db:
         with held_elsewhere(legacy_root_dir / "Root", RID_A):
             with pytest.raises(store.ReportBusy):
-                claim_legacy_project(db, "Root", org.id, admin.id, [],
-                                     include_descendants=True)
+                claim_legacy_project(
+                    db, "Root", org.id, admin.id, [], include_descendants=True
+                )
     assert (legacy_root_dir / "Root" / "network.nc").exists()
-    assert not (store.reports_dir(legacy_root_dir / "Root") / store.CLOSING_MARKER).exists()
+    assert not (
+        store.reports_dir(legacy_root_dir / "Root") / store.CLOSING_MARKER
+    ).exists()
 
 
 def test_a_legacy_claim_moves_the_reports_and_leaves_no_marker(
@@ -491,8 +530,9 @@ def test_a_legacy_claim_moves_the_reports_and_leaves_no_marker(
     _write_legacy_project(legacy_root_dir, "Root")
     _seed(legacy_root_dir / "Root", RID_A)
     with session_local() as db:
-        result = claim_legacy_project(db, "Root", org.id, admin.id, [],
-                                      include_descendants=True)
+        result = claim_legacy_project(
+            db, "Root", org.id, admin.id, [], include_descendants=True
+        )
         moved = project_registry.project_dir(result.root)
     assert not (legacy_root_dir / "Root").exists()
     assert (store.reports_dir(moved) / RID_A / "v1.json").exists()
@@ -509,8 +549,15 @@ def _outside_row(db_session, tmp_path):
     outside.mkdir(parents=True)
     (outside / "network.nc").write_text("irreplaceable", encoding="utf-8")
     _seed(outside, RID_A)
-    row = Project(id=uuid.uuid4(), org_id=_ORG, name="3_nodes_system", created_by=_USER,
-                  storage_path=str(outside), created_at=_now(), updated_at=_now())
+    row = Project(
+        id=uuid.uuid4(),
+        org_id=_ORG,
+        name="3_nodes_system",
+        created_by=_USER,
+        storage_path=str(outside),
+        created_at=_now(),
+        updated_at=_now(),
+    )
     db_session.add(row)
     db_session.commit()
     return row, outside
@@ -531,7 +578,9 @@ def test_a_rebase_refuses_while_a_report_of_the_row_is_being_written(
     assert not (store.reports_dir(outside) / store.CLOSING_MARKER).exists()
 
 
-def test_a_rebase_copies_the_reports_and_no_lock_file(db_session, identity, tmp_path, dest_root):
+def test_a_rebase_copies_the_reports_and_no_lock_file(
+    db_session, identity, tmp_path, dest_root
+):
     from services.legacy_import import rebase_row
 
     row, outside = _outside_row(db_session, tmp_path)
