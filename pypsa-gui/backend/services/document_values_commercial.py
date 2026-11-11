@@ -621,7 +621,7 @@ def cell_now(commercial: dict, key: str) -> dict:
         now["unit"] = UNIT_LABELS[owner["unit"]]
         currency = tariff.get("currency") or jurisdiction_currency(tariff.get("jurisdiction"),
                                                                     tariff.get("valid_from"))
-        now["currency"] = currency or None
+        now["currency"] = currency
     else:
         money = PPA_FIELDS[path][2]
         now["unit"] = "/MWh" if money else PPA_UNIT_LABELS[path]
