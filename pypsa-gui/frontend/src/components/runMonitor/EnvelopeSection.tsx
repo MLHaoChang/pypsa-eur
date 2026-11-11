@@ -43,11 +43,29 @@ const heldOutcome = (n: number) => n === 1
 
 // Issue 37 (UX): the template in words, never its engine id (#1194).
 const TEMPLATE_WORDS: Record<string, string> = { eh_site: 'site' }
-const unitWords = (u: string | null) => (u === 'EUR' ? '€' : u ?? '')
-const showValue = (v: unknown, unit: string | null) => {
-  const text = Array.isArray(v) ? `${v.length} values` : typeof v === 'object' && v !== null ? 'a series' : String(v)
-  return unit ? `${text} ${unitWords(unit)}` : text
+/** "Creates project <name> from the site template", or the generic words for a template with none. */
+export const setupWords = (name: string, template: string) =>
+  TEMPLATE_WORDS[template] ? `Creates project ${name} from the ${TEMPLATE_WORDS[template]} template`
+    : `Creates project ${name} from the chosen template`
+/** A preset default opens with the field's own label, never its key (#1199, #1190). The labels are
+ *  those of `run_profiles.EH_SITE_FIELDS` (a parity test reads them); a group opens with its group's name. */
+export const DEFAULT_WORDS: Record<string, string> = {
+  site_type: 'Site type', stages: 'Growth stages', connection_mw: 'Grid connection', energization: 'Connection energization',
+  critical_share: 'Critical load share', load_profile: 'Load shape', existing: 'Existing equipment',
+  candidates: 'New equipment considered', ride_through: 'Ride-through required', fault_level_mva: 'Grid fault level',
+  horizon_end: 'Study horizon end',
 }
+const DEFAULT_UNITS: Record<string, string> = { connection_mw: 'MW', fault_level_mva: 'MVA' }
+const showValue = (v: unknown, unit: string | null) => {
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No'
+  if (Array.isArray(v)) return `${v.length} entries`
+  if (typeof v === 'object' && v !== null) return 'several values'
+  if (unit === 'EUR' && typeof v === 'number') return fmtCurrency(v)
+  return unit ? `${v} ${unit}` : String(v)
+}
+const showDefault = (d: { param: string; value: unknown }) =>
+  d.param === 'critical_share' && typeof d.value === 'number' ? `${+(d.value * 100).toFixed(1)} %`
+    : showValue(d.value, DEFAULT_UNITS[d.param] ?? null)
 
 /** Issue 21 "Inputs from the chat": each row with its value, unit and source; read-only here. */
 function IntakeRows({ intake }: { intake: RunIntake }) {
@@ -63,7 +81,7 @@ function IntakeRows({ intake }: { intake: RunIntake }) {
         return <li key={r.index} data-testid="envelope-intake-row" data-status={r.status}>
           <span className={struck ? 'text-muted line-through' : undefined}>{r.label}: {showValue(r.value, r.unit)}</span>
           {struck && <>{' '}<span className="text-muted" data-testid="envelope-intake-struck">· Struck</span></>}
-          {r.status === 'conflict' && <>{' '}<span className="text-muted" data-testid="envelope-intake-conflict">
+          {r.status === 'conflict' && <>{' '}<span className="text-warn" data-testid="envelope-intake-conflict">
             · Not used: {other ? `conflicts with ${other.source}` : 'two sources disagree'}</span></>}
           {r.from_document && <>{' '}<span className="text-muted" data-testid="envelope-intake-document">· read from a document</span></>}
           <div className="text-[11px] text-muted" data-testid="envelope-intake-source">{r.source}</div>
@@ -75,7 +93,7 @@ function IntakeRows({ intake }: { intake: RunIntake }) {
       <div className="text-muted">Not given, so the preset default is used:</div>
       <ul aria-label="Preset defaults" className="space-y-0.5">
         {defaults.map(d => <li key={d.param} data-testid="envelope-intake-default">
-          {d.param.replace(/_/g, ' ')}: {showValue(d.value, null)} <span className="text-muted">· preset default</span></li>)}
+          {DEFAULT_WORDS[d.param] ?? 'Another setting'}: {showDefault(d)} <span className="text-muted">· preset default</span></li>)}
       </ul></>}
   </div>
 }
@@ -145,7 +163,7 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
 
   return <div data-testid="envelope-section" className="mb-2 rounded border border-border bg-bg-2/40 px-2.5 py-1.5 text-[12px]">
     {setup && <div data-testid="envelope-setup" className="mb-1 font-medium text-text">
-      Creates project {setup.name} from the {TEMPLATE_WORDS[setup.template] ?? setup.template} template</div>}
+      {setupWords(setup.name, setup.template)}</div>}
     {intake && <IntakeRows intake={intake} />}
     <div className="text-[10px] uppercase tracking-wide text-accent">Envelope</div>
     <p className="text-muted">What the run may do without asking you, if you approve it to run unattended:</p>

@@ -10,6 +10,7 @@ import { useUIStore } from '../../store/uiStore'
 import * as api from '../../api/runMonitor'
 import { RELIABILITY_GOAL_LABEL } from '../../hooks/useReliabilityGoal'
 import realIntake from './intakeCard.fixture.json'
+import { DEFAULT_WORDS, setupWords } from './EnvelopeSection'
 import { ENVELOPE, STATES, TASK_ID } from './runFixtures'
 
 vi.mock('../../api/runMonitor', () => ({
@@ -296,7 +297,7 @@ describe('EnvelopeSection reliability goal', () => {
     expect(rows[0].textContent).toContain('sheet.pdf, page 2')
     expect(rows[1].textContent).toContain('Struck')
     expect(rows[2].textContent).toContain("Not used: conflicts with b.xlsx S!A1")
-    expect(screen.getByTestId('envelope-intake-default').textContent).toBe('critical share: 0.4 · preset default')
+    expect(screen.getByTestId('envelope-intake-default').textContent).toBe('Critical load share: 40 % · preset default')
   })
 
   it('shows every row and default, none folded', async () => {
@@ -360,5 +361,26 @@ describe('EnvelopeSection reliability goal', () => {
     await waitFor(() => expect((stepwise as HTMLButtonElement).disabled).toBe(false))
     fireEvent.click(stepwise)
     expect(useChatStore.getState().requestQueue[0].harness!.envelope_decision!.intake_digest).toBe(realIntake.digest)
+  })
+
+  it('a preset default opens with its field label, never its key; an unknown template is not named by its id', async () => {
+    for (const d of realIntake.card.defaults) expect(DEFAULT_WORDS[d.param], d.param).toBeTruthy()
+    expect(setupWords('Acme', 'other_tpl')).toBe('Creates project Acme from the chosen template')
+    expect(setupWords('Acme', 'eh_site')).toBe('Creates project Acme from the site template')
+  })
+
+  it("DEFAULT_WORDS agree with the backend profile's own field labels", () => {
+    const src = readFileSync(resolve(__dirname, '../../../../backend/services/run_profiles.py'), 'utf8')
+    for (const key of ['site_type', 'connection_mw', 'critical_share', 'load_profile', 'ride_through', 'fault_level_mva', 'horizon_end']) {
+      const label = new RegExp(`"${key}": _(?:num|enum|bool)\\("([^"]+)"`).exec(src)?.[1]
+      expect(DEFAULT_WORDS[key], key).toBe(label)
+    }
+  })
+
+  it('a conflict row is warn-coloured, a struck row only muted', async () => {
+    openIntake([row(0, { status: 'conflict', param: 'c' }), row(1, { status: 'struck' })])
+    await screen.findByTestId('envelope-intake')
+    expect(screen.getByTestId('envelope-intake-conflict').className).toContain('text-warn')
+    expect(screen.getByTestId('envelope-intake-struck').className).toContain('text-muted')
   })
 })
