@@ -85,7 +85,7 @@ Found with `grep -rnE "_stale|stale_keys|staleNote|out[- ]of[- ]date|staleness|f
 | `pypsa-gui/frontend/src/layout/properties/AssetFields.tsx:57`, `:351` | asset card and read-out call `staleNote` per field |
 | `pypsa-gui/frontend/src/pages/economics/AssetCostsTable.tsx:28` `staleOf` | first stale scaled money field of a row |
 | `pypsa-gui/frontend/src/pages/decision/LedgerReview.tsx:67` | ledger row shows provenance label only, no out-of-date note (TCU-07) |
-| `pypsa-gui/backend/services/document_values_commercial.py:584` `provenance`, `:653` `_live` (slice 08) | `commercial.provenance` cell entries and whether the cell still holds the approved value |
+| `pypsa-gui/backend/services/document_values_commercial.py:583` `provenance`, `:634` `_live` (slice 08) | `commercial.provenance` cell entries and whether the cell still holds the approved value |
 
 ### Runs and results (slice 04)
 
@@ -151,7 +151,7 @@ OK as well.
 | 05 | Studies, reports and the investment case | needs-triage, blocked by 04 |
 | 06 | Campus and site-scene checks | needs-triage, blocked by 02 and #1295 |
 | 07 | Memory nodes (`recalled_from`) | needs-triage, blocked by 02 and the MEMORY-1 build |
-| 08 | `commercial.provenance` cells (GK B ruling (b)) | needs-triage, blocked by 02 |
+| 08 | `commercial.provenance` cells (GK B ruling (b)) | in progress |
 
 ## Acceptance (whole feature)
 

@@ -3,7 +3,7 @@
 
 # 05 — Business-case engine, P&L and KPIs
 
-Status: needs-triage (blocked by 02, 04; TDD plan to GK B first)
+Status: ready-for-agent (blocked by 02, 04; Opus; GK B TDD plan first)
 Type: task
 Blocked by: 02, 04
 Gated: yes (GK B)
@@ -42,3 +42,7 @@ line on revenue and on capex; refresh capex appears in the right years.
 ## Not in this slice
 
 Double count, lost production and reference purchases (06), presets (07).
+
+### 2026-11-11: triage
+
+Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.

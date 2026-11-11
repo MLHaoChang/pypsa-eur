@@ -1726,6 +1726,22 @@ def _load_profile(profile_id: str, profile_dirs) -> tuple[dict | None, str | Non
         return None, str(exc)
 
 
+#: Why the SCR row and every row built from the PoC's entered S_k'' leave the
+#: scorecard on an off-grid project (study harness 12, GK A).
+SK_OFF_GRID = ("off-grid: the tie is open, so the PoC's fault level does not apply; "
+               "the island's fault level comes from its own units")
+#: The scorecard's row builders, in the scorecard's order.
+_BUILDERS = (_scr_rows, _peak_rows, _ramp_row, _oscillation_row, _rvc_row, _rvc_infrequent_row,
+             _harmonic_row, _tdd_row, _flicker_row, _motor_start_rows, _unbalance_row, _vs_rows,
+             _reactive_row, _support_rows, _island_rows, _lole_row)
+#: The builders whose rows are judged against the PoC's fault level: the SCR
+#: row and each builder that reads ``_poc_sk_mva`` (pinned by a test that
+#: reads the builders' source, so a new S_k''-built row cannot stay on an
+#: off-grid scorecard unnoticed).
+SK_BUILDERS = frozenset({_scr_rows, _rvc_row, _rvc_infrequent_row, _harmonic_row, _tdd_row,
+                         _flicker_row, _motor_start_rows, _unbalance_row})
+
+
 def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
                    eh_study: dict | None = None, study_edited: bool | None = None) -> dict:
     """The scorecard of the project at ``project_dir`` (``network`` its saved
@@ -1736,15 +1752,19 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     whether the network was edited since (``study_state.edited_since``)."""
     profile, error = _load_profile(profile_id, profile_dirs)
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
-    rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
-            _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _tdd_row(inp), _flicker_row(inp),
-            *_motor_start_rows(inp), _unbalance_row(inp), *_vs_rows(inp),
-            _reactive_row(inp), *_support_rows(inp), *_island_rows(inp), _lole_row(inp)]
+    rows, sk_built = [], set()
+    for build in _BUILDERS:
+        out = build(inp)
+        out = out if isinstance(out, list) else [out]
+        if build in SK_BUILDERS:
+            sk_built.update(r["id"] for r in out)
+        rows += out
     excluded = []
     if _archetype(inp) == "off_grid":
-        excluded = [{"id": r["id"], "requirement": r["requirement"], "reason": VS_OFF_GRID}
-                    for r in rows if r["id"] in _VS]
-        rows = [r for r in rows if r["id"] not in _VS]
+        why = {**dict.fromkeys(sk_built, SK_OFF_GRID), **dict.fromkeys(_VS, VS_OFF_GRID)}
+        excluded = [{"id": r["id"], "requirement": r["requirement"], "reason": why[r["id"]]}
+                    for r in rows if r["id"] in why]
+        rows = [r for r in rows if r["id"] not in why]
     _after_battery(inp, rows)
     settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
                 "oscillation": ("oscillation", GENERIC_OSCILLATION_PCT),

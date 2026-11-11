@@ -32,6 +32,11 @@ export interface ChatMessage {
   tool_name?: string
   // Bounded structured result metadata for task state and authenticated files.
   tool_result?: unknown
+  /** LC-47: a change set's one receipt, with each row's label and a failed row's reason
+   *  (components/ChangeSetCard.tsx). Not persisted: a reloaded transcript keeps `content`. */
+  change_set_receipt?: { receipt: unknown; labels: Record<string, string>; reasons: Record<string, string>
+    /** Set on the line the browser wrote itself for the card with this confirmation token. */
+    token?: string }
   // Phase D — file_ids that were attached to this user turn (for replay).
   // Read-only chip strip renders below the message bubble.
   attachment_file_ids?: string[]
@@ -113,6 +118,8 @@ export interface PendingConfirmationCard {
   sweep_card?: unknown
   /** Issue 04 S5: the earlier job call this card repeats (components/ConfirmationCard.tsx). */
   repeat_card?: unknown
+  /** LC-47: the rows of a change-set card, each with a tick box (components/ChangeSetCard.tsx). */
+  change_set?: unknown
   /** Issue 19: set when the tool comes from an admin's MCP server (harness/confirm.py). */
   external?: { server: string }
   /** Study harness 08: a run's card, answered on the run's own session (`run:<task_id>`). */
@@ -175,6 +182,8 @@ export interface HarnessTurn {
   envelope_decision?: {
     task_id: string; verdict: 'unattended' | 'stepwise' | 'revoke'
     envelope?: Record<string, unknown>; notify_email?: boolean
+    /** Issue 21: the digest of the intake rows the card showed (a plan with a setup entry). */
+    intake_digest?: string
     goal?: { value: number | null; unit: 'h/yr'; source: string }
   }
 }

@@ -125,7 +125,7 @@ describe('StartCard', () => {
     const b = screen.getByTestId('hub-start-template-eh_h2_hub') as HTMLButtonElement
     await vi.waitFor(() => expect(b.disabled).toBe(true))
     expect(b.getAttribute('title')).toBe(
-      'A study is still running — wait for it to finish or abort it before switching project.')
+      'A study is still running: wait for it to finish or abort it before switching project.')
   })
 
   it('"Use my network" moves the rail to Site', async () => {

@@ -3,7 +3,7 @@
 
 # 07d — Model-drafted report revisions as a runner stage (HH-08A, part 2)
 
-Status: needs-triage
+Status: ready-for-agent (Opus; GK B plan first)
 Type: task
 Blocked by: 07c
 Gated: yes (GK B)
@@ -31,3 +31,10 @@ Split from: [07c](07c-report-comment-revisions.md), its fifth acceptance criteri
 `pypsa-gui/backend/harness/` (a draft stage), `pypsa-gui/backend/services/reports/revisions.py` (07c), tests beside them
 
 ## Comments
+
+### 2026-11-11: triage
+
+Checked on master: 07c is done (#1300) and `send_reservation` exists (`services/run_monitor.py`, `durable_conversation.py`, `reports/report_job.py`). `reports/revisions.py` has no draft stage. Verdict: ready-for-agent.
+
+- Blocked by: none.
+- Reviewer: GK B (plan first). Likely files and acceptance are in the body.

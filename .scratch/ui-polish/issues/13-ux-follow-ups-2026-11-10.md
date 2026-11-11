@@ -3,7 +3,7 @@
 
 # UX follow-ups from the 10 Nov reviews
 
-Status: needs-triage
+Status: ready-for-agent (Sonnet; reviewer UX)
 Type: polish (wording, consistency)
 Found by: UX (15) and UX (16) reviews on 2026-11-10, relayed by the coordinator.
 
@@ -18,3 +18,18 @@ Found by: UX (15) and UX (16) reviews on 2026-11-10, relayed by the coordinator.
 
 - Results header says "optimal" / "period all" / "window …T00:00" while chart source lines say "solved" / "all periods" (#1336), and Build KPI tiles say "(annualised)" while charts say "per year": both are in ui-modern 03 slice 2.
 - `.scratch/live-copilot/issues/44` is done by #1325 (Status line updated here).
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `ic_counterfactual.reason_words` still joins with "; " (`services/ic_counterfactual.py:119`). The other three items are UI wording and were not found fixed. live-copilot 44 is `done (#1325)`. Verdict: ready-for-agent, one small PR.
+
+- Blocked by: none.
+- Likely files: `services/ic_counterfactual.py` (+ its tests), the Expert EditCard table (`frontend/src/components/EditCard*`), the Guided grid-study jump, the microgrid ledger defaults view. Reviewer: UX.
+
+Acceptance:
+- [ ] `reason_words` joins with " · "; its test says so.
+- [ ] The Expert EditCard table reads "Rating" where Guided does, with the unit.
+- [ ] The Guided grid-study jump shows one Back control.
+- [ ] Microgrid ledger horizon and dates have an Expert home, or the file says why they stay Guided-only.

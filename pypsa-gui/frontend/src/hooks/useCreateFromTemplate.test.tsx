@@ -195,7 +195,7 @@ describe('useCreateFromTemplate', () => {
     const { hook } = render('/app')
     act(() => hook.result.current.mutate('eh_h2_hub'))
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
-      'A study is still running — wait for it to finish or abort it before switching project.'))
+      'A study is still running: wait for it to finish or abort it before switching project.'))
   })
 
   it('a taken name stays on screen and offers to open the existing project (N17)', async () => {

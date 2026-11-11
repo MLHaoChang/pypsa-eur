@@ -1,0 +1,45 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# 42 — A Link with a third port in one network breaks the next solve of a network already in memory
+
+Status: needs-triage
+Type: bug
+Found by: study harness 12, slice 12a (#1361), diagnosing two tests that failed only in the full file run
+Owner decisions: none yet
+
+## What was seen
+
+PyPSA 1.1.2 keeps one Link attribute table for the whole process
+(`n.components["Link"]["defaults"]`). Adding a Link with `bus2` to any network
+adds `bus2`, `efficiency2` and `p2` to that table
+(`pypsa/descriptors.py:_update_linkports_component_attrs`), and only the network
+that got the Link receives the matching time-series frames. A network built
+before that has no `efficiency2` frame, so its next `n.optimize()` stops in
+`consistency_check` with `KeyError: 'efficiency2'` (`pypsa/consistency.py:254`).
+`n.copy()` does not repair it.
+
+Repro, 2 s, no solver:
+
+```python
+import pypsa
+def net():
+    n = pypsa.Network(); n.set_snapshots(range(2))
+    n.add("Bus", ["a", "b", "c"]); n.add("Link", "l", bus0="a", bus1="b", p_nom=1)
+    return n
+a = net()
+net().add("Link", "three", bus0="a", bus1="b", bus2="c", p_nom=1)
+a.consistency_check()   # KeyError: 'efficiency2'
+```
+
+In #1361 this showed as test-order dependence only
+(`tests/test_island_survival.py` now restores the table after each test). The
+island survival check reads such a failure as `not_evaluated`, never a pass.
+
+## To decide
+
+Whether the app can hit this outside tests: a long-lived process that holds a
+network in memory, loads or edits another one with a heat pump or other
+three-port Link (`services/process_heat.py` adds them), then solves the first.
+Not checked here. If it can, the options are to add the missing frames before a
+solve, or to report it upstream and pin a fixed PyPSA.
