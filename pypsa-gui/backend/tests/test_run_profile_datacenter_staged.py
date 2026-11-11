@@ -1324,6 +1324,4 @@ def test_a_network_edited_after_the_case_has_no_returns(monkeypatch):
 
 def test_reason_words_joins_reasons_with_a_middle_dot():
     text = ic.reason_words({"reasons": ["no_case", "case_failed"]})
-    assert text == (
-        "No investment case has been run · the investment case failed"
-    )
+    assert text == ("No investment case has been run · the investment case failed")
