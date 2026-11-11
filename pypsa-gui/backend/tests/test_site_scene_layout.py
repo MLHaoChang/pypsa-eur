@@ -276,6 +276,17 @@ def test_remote_references_are_refused(member):
     assert code_of(refused(geojson(feature(rect_lnglat()), **member))) == "remote_reference"
 
 
+def test_a_drawing_anchored_far_off_the_site_is_named():
+    assert code_of(refused(raster(anchor_local=(10_500, 0)))) == "far_from_site"
+    assert run(SITE, raster(anchor_local=(9_000, 0)))["buildings"]
+
+
+def test_an_href_inside_properties_is_not_a_reference():
+    # Properties are never fetched or stored (L2): only height, levels and id are read.
+    f = feature(rect_lnglat(), props={"height": 8, "href": "http://example.org/photo.jpg"})
+    assert run(SITE, geojson(f))["buildings"]
+
+
 def test_a_nested_remote_reference_is_refused():
     f = feature(rect_lnglat())
     f["geometry"]["$ref"] = "file:///etc/passwd"
@@ -561,6 +572,9 @@ def test_route_import_merges_by_id_and_keeps_other_buildings(client, geo):
     _apply(client, r.json()["id"], 1)
     pid = _propose(client, 2, raster()).json()["id"]
     _apply(client, pid, 2)
+    other = raster(footprints=[{"id": "annex", "ring_px": RECT_PX, "height_m": 4}])
+    kept = _propose(client, 3, other).json()["preview"]["layout"]["kept_layout_ids"]
+    assert kept == ["layout:hall"]                                         # V78: said before Apply
     pid = _propose(client, 3, raster(anchor_local=(1, 1))).json()["id"]   # re-import replaces by id
     _apply(client, pid, 3)
     ids = sorted(b["id"] for b in client.get(URL).json()["buildings"])

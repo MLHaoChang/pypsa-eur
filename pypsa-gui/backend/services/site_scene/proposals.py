@@ -158,7 +158,11 @@ def create(project_dir, project_key: str, owner: str | None, site_id: str, body:
         buildings, generated = _buildings(action, scene["buildings"], scene["site"], inputs)
         preview, size = {"buildings": buildings, "stats": generated["stats"]}, generated["stats"]["bytes"]
         if "layout" in generated:
-            preview["layout"] = generated["layout"]
+            # V78: a re-import merges by id, so say which earlier layout buildings stay.
+            imported = {b["id"] for b in generated["buildings"]}
+            kept = [b["id"] for b in scene["buildings"]
+                    if b["source"]["namespace"] == "layout" and b["id"] not in imported]
+            preview["layout"] = {**generated["layout"], "kept_layout_ids": kept}
     pid = f"p-{uuid.uuid4().hex}"
     entry = {"id": pid, "site_id": site_id, "owner": owner, "action": action, "base_revision": base,
              "inputs": copy.deepcopy(inputs), "input_hash": input_hash(site_id, action, base, inputs),

@@ -65,7 +65,7 @@ def _finite(v: Any) -> bool:
 def normalize(raw: Any) -> dict[str, Any]:
     """The validated, stripped layout a proposal stores. Raises SceneError."""
     if not isinstance(raw, dict):
-        raise _refuse("layout_kind", "Layout: send an object with kind geojson or raster")
+        raise _refuse("layout_kind", "The layout could not be read: choose a GeoJSON file or a drawing")
     kind = raw.get("kind")
     if isinstance(kind, str) and kind.lower() in UNSUPPORTED_KINDS:
         raise _refuse("unsupported_format", f"{kind.upper()} files are not accepted: export the layout as "
@@ -75,7 +75,7 @@ def normalize(raw: Any) -> dict[str, Any]:
     elif kind == "raster":
         out = _normalize_raster(raw)
     else:
-        raise _refuse("layout_kind", "Layout: kind must be geojson or raster")
+        raise _refuse("layout_kind", "The layout could not be read: choose a GeoJSON file or a drawing")
     if not out["footprints"]:
         raise _refuse("layout_empty", "The layout has no building outlines")
     _admit(out["footprints"], "ring" if kind == "geojson" else "ring_px")
@@ -103,6 +103,8 @@ def _no_remote(node: Any, depth: int = 0) -> None:
         raise _refuse("layout_too_deep", "The layout is nested too deeply")
     if isinstance(node, dict):
         for k, v in node.items():
+            if k == "properties":
+                continue        # never fetched or stored: only height/levels/id are read from it
             if k in _REMOTE_KEYS:
                 raise _refuse("remote_reference", "The layout refers to another file or address: "
                               "include everything in the file itself")
@@ -161,12 +163,12 @@ def _heights(props: dict[str, Any], height_key: str, name: str) -> dict[str, Any
 
 def _normalize_geojson(doc: Any) -> dict[str, Any]:
     if not isinstance(doc, dict) or doc.get("type") not in ("FeatureCollection", "Feature"):
-        raise _refuse("layout_document", "The GeoJSON must be a FeatureCollection or a Feature")
+        raise _refuse("layout_document", "The GeoJSON file must hold a FeatureCollection or a Feature")
     _no_remote(doc)
     _check_crs(doc)
     features = doc.get("features") if doc["type"] == "FeatureCollection" else [doc]
     if not isinstance(features, list):
-        raise _refuse("layout_document", "The GeoJSON features must be a list")
+        raise _refuse("layout_document", "The GeoJSON file's features could not be read")
     if len(features) > native.MAX_BUILDINGS:     # parts can only add to this
         raise native._limit("buildings", native.MAX_BUILDINGS, len(features))
     footprints: list[dict[str, Any]] = []
@@ -214,14 +216,14 @@ def _pixel(p: Any, image: dict[str, int], what: str) -> list[float]:
 
 def _image(image: Any) -> dict[str, Any]:
     if not isinstance(image, dict):
-        raise _refuse("layout_image", "Raster layout: image is required", "image")
+        raise _refuse("layout_image", "The drawing's size is missing: choose the drawing again", "image")
     media = image.get("media_type")
     if media not in RASTER_TYPES:
         raise _refuse("unsupported_format", f"Images of type {media or 'unknown'} are not accepted: "
                       "use PNG, JPEG or WebP. GeoJSON layouts are accepted too", "image")
     w, h = image.get("width_px"), image.get("height_px")
     if not all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in (w, h)):
-        raise _refuse("layout_image", "Raster layout: image width and height must be whole pixels", "image")
+        raise _refuse("layout_image", "The drawing's size could not be read: choose the drawing again", "image")
     if max(w, h) > MAX_IMAGE_SIDE_PX:
         raise SceneError("resource_limit", f"Too large: the drawing is {max(w, h)} pixels across, "
                          f"the limit is {MAX_IMAGE_SIDE_PX}",
@@ -260,7 +262,7 @@ def _normalize_raster(raw: dict[str, Any]) -> dict[str, Any]:
                       "calibration")
     footprints = raw.get("footprints")
     if not isinstance(footprints, list):
-        raise _refuse("layout_footprints", "Raster layout: footprints must be a list", "footprints")
+        raise _refuse("layout_footprints", "The traced buildings could not be read: trace them again", "footprints")
     if len(footprints) > native.MAX_BUILDINGS:
         raise native._limit("buildings", native.MAX_BUILDINGS, len(footprints))
     out_fps = []
@@ -301,6 +303,10 @@ def pixel_transform(cal: dict[str, Any]):
 
 def _building(fid: str, ring: list[tuple[float, float]], fp: dict[str, Any]) -> dict[str, Any]:
     where = f"Layout building {fid}"
+    if any(math.hypot(e, n) > MAX_SITE_DISTANCE_M for e, n in ring):
+        # Both kinds: a GeoJSON in the wrong place or a drawing anchored far off the Site.
+        raise _refuse("far_from_site", f"{where} is more than {MAX_SITE_DISTANCE_M / 1000:g} km from this site: "
+                      "check the layout is for this site and where it is placed")
     ring = native.check_footprint(ring, where)
     if "height_m" in fp:
         height, evidence = native._height(fp["height_m"], where), "tagged"
@@ -325,9 +331,6 @@ def generate(site: dict[str, Any], layout: dict[str, Any]) -> dict[str, Any]:
     else:
         for fp in layout["footprints"]:
             ring = [frames.lnglat_to_local(origin, tuple(p)) for p in fp["ring"]]
-            if any(math.hypot(e, n) > MAX_SITE_DISTANCE_M for e, n in ring):
-                raise _refuse("far_from_site", f"Layout building {fp['id']} is more than "
-                              f"{MAX_SITE_DISTANCE_M / 1000:g} km from this site: check the file is for this site")
             buildings.append(_building(fp["id"], ring, fp))
         summary = {"kind": "geojson", "metres_per_pixel": None, "crs": "CRS84", "skipped": dict(layout["skipped"])}
     stats = native.admit_output(buildings)

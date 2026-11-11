@@ -47,6 +47,15 @@ The frozen allowlist, plus one test outside it:
 - **Backend tests.** `tests/test_site_scene_layout.py` (new) and `tests/test_site_scene_proto_flow_verdicts.py`, plus `tests/test_sc07_scene_tools.py`. That last file is outside the allowlist: its one-line route/chat action parity now excludes `import_layout`, which stays route-only and is not a chat action.
 - **Frontend.** `site3d/{LayoutImport.tsx, LayoutImport.test.tsx, layoutFile.ts, layoutFile.test.ts, SiteScenePanel.tsx}` and `api/siteScene.ts`.
 
+### Review notes (mp-code-review, before the GK OK)
+
+- **Read-only (L9/V37).** The scene routes have no viewer role: every member of the project's org may call them, and a read-only session is one where another user holds the edit lock. So "read-only is refused" is tested as the foreign lock (409 `project_locked`) plus the org boundary (`test_route_another_org_cannot_propose`), and the `/flow` verdict gives `read_only` for `can_edit=False`. Raised here for GK B; it is not yet accepted.
+- **`properties.id` (L2).** A GeoJSON feature with no top-level `id` uses `properties.id` as its source id. That one property is kept, as the building's id; every other property, foreign member and name is dropped (`test_normalize_keeps_only_the_used_fields`).
+- **Distance.** The 10 km check covers both kinds: a GeoJSON in the wrong place, and a drawing anchored far off the Site.
+- **Re-import.** The preview's `layout.kept_layout_ids` names the earlier layout buildings a merge keeps (V78), before Apply.
+- **Remote references.** `$ref`/`href` keys are refused anywhere except inside feature `properties`, which are never fetched or stored.
+- **Limits.** The 50 MP and 20 000 px limits are written twice: in `layoutFile.ts` for the browser check, and in `layout.py`, which is authoritative. No test checks that the two agree.
+
 ### Exclusions
 
 - The photo half.
