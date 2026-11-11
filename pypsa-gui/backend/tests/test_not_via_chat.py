@@ -103,6 +103,7 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Set the load profile from the uploaded file', 'Resume my task', 'Resume the plan',
     'Switch to my OpenAI profile', 'Switch to my Anthropic profile', 'Pause my goal', 'Pause the plan',
     'Extract the grid code from this PDF', 'Geocode the site address',
+    'Pin the slack bus to bus 3', 'Pin the battery capacity at 50 MW', 'Which pinned settings does the scenario use',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)
@@ -157,3 +158,8 @@ def test_saved_report_charts_are_human_only_and_found_by_their_goal(discovery):
             ('DELETE', '/api/projects/{name}/report-charts/{chart_id}')} <= entry['routes']
     out = chat_tools.find_capabilities('Pin this chart for the report.')
     assert [e['title'] for e in out.get('not_via_chat', [])][:1] == [entry['title']]
+
+
+def test_a_real_chart_pin_phrase_is_still_refused(discovery):
+    out = chat_tools.find_capabilities('Which charts are pinned to the report?')
+    assert out['not_via_chat'][0]['title'] == 'Saving a chart for the report'

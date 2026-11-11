@@ -234,10 +234,12 @@ def test_w2_an_oversized_request_is_refused_before_it_is_read_and_writes_nothing
     r = _post(client, name, png=_png() + b"\0" * (site_service.MAX_THUMB_BYTES + 1))
     assert r.status_code == 413 and _kind(r) == "chart_png_too_large"
     assert "2 MB" in r.json()["detail"]["message"]
+    assert "png" in r.json()["detail"]["message"].lower()
     big = json.dumps(_spec(source_line="s", title="t")) + " " * cs.MAX_SPEC_BYTES
     r = _post(client, name, big)
     assert r.status_code == 413 and _kind(r) == "chart_spec_too_large"
     assert "MB" in r.json()["detail"]["message"]
+    assert "spec" in r.json()["detail"]["message"].lower()
     assert (
         not any((pdir / "reports" / "_charts").glob("chart-*"))
         if (pdir / "reports" / "_charts").exists()
@@ -258,6 +260,20 @@ def test_w2_a_body_over_the_total_cap_is_refused_on_its_length(client, project):
     )
     assert r.status_code == 413 and _kind(r) == "chart_spec_too_large"
     assert "KB" in r.json()["detail"]["message"]
+
+
+def test_w2_no_content_length_is_411(client, project):
+    name, _ = project
+
+    def body():
+        yield b"x"
+
+    r = client.post(
+        f"/api/projects/{name}/report-charts",
+        content=body(),
+        headers={"content-type": "multipart/form-data; boundary=zzz"},
+    )
+    assert r.status_code == 411 and _kind(r) == "length_required"
 
 
 def test_w2_a_missing_part_or_bad_json_is_422(client, project):

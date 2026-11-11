@@ -413,6 +413,8 @@ def matches(words: set[str], limit: int = 2) -> list[dict]:
         if (entry['id'] == 'solve_queue_instance_controls' and words & {'goal', 'task', 'plan'}
                 and 'queue' not in words):
             continue
+        if entry['id'] == 'report_chart_snapshots' and not words & {'chart', 'charts', 'graph', 'plot'}:
+            continue  # bare `pin` also means "pin a bus or a capacity"
         hits = len(words & entry['keywords'])
         if hits:
             ranked.append((-hits, index, entry))

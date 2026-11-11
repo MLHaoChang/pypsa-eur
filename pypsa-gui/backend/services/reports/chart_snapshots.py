@@ -229,7 +229,7 @@ def validate_png(data: bytes) -> None:
     try:
         site_service.validate_thumbnail(data)
     except site_service.ThumbnailTooLarge as exc:
-        raise ChartPngTooLarge(str(exc)) from exc
+        raise ChartPngTooLarge(f"the png part is too large: {exc}") from exc
     except site_service.ThumbnailInvalid as exc:
         raise ChartSnapshotInvalid(str(exc)) from exc
     if len(data) < _MIN_PNG:
