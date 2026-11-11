@@ -3,7 +3,7 @@
 
 # 38 — The LOLE loop's goal matches the granted goal
 
-Status: ready-for-agent (Sonnet; GK B)
+Status: done (#1374)
 Type: task
 Gated: yes (GK B)
 Model tier: sonnet
