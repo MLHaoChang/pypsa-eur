@@ -1331,3 +1331,146 @@ def test_codeql_every_file_path_stays_inside_the_charts_directory(tmp_path):
     with pytest.raises(cs.ChartNotFound):
         cs._load(tmp_path, snap.id)
     assert (outside / f"{snap.id}.png").exists()
+
+
+# ── GK B K1: the chart lock never makes a project folder ─────────────────────
+
+
+def test_k1_add_to_a_deleted_project_raises_gone_and_makes_nothing(tmp_path):
+    gone = tmp_path / "deleted-project"
+    with pytest.raises(store.ReportProjectGone):
+        cs.add(gone, _spec_model(), _png(), solve_fingerprint=None)
+    assert not gone.exists()
+
+
+def test_k1_add_refuses_report_busy_while_the_project_is_closing(tmp_path):
+    (tmp_path / "reports").mkdir()
+    (store.reports_dir(tmp_path) / store.CLOSING_MARKER).write_text("1\n")
+    with pytest.raises(store.ReportBusy):
+        cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint=None)
+    assert not any(cs.charts_dir(tmp_path).glob("chart-*"))
+
+
+def test_k1_the_route_answers_404_for_a_gone_project_and_409_while_closing(
+    client, project, monkeypatch
+):
+    name, _ = project
+
+    def gone(*a, **k):
+        raise store.ReportProjectGone("gone")
+
+    monkeypatch.setattr(cs, "add", gone)
+    assert _post(client, name).status_code == 404
+
+    def busy(*a, **k):
+        raise store.ReportBusy("closing")
+
+    monkeypatch.setattr(cs, "add", busy)
+    r = _post(client, name)
+    assert (r.status_code, _kind(r)) == (409, "report_busy")
+
+
+def test_k1_reports_closed_takes_the_chart_lock_last_with_the_marker_written(
+    tmp_path,
+):
+    (tmp_path / "reports" / cs.CHARTS_DIRNAME).mkdir(parents=True)
+    seen = []
+    real = cs._lock
+
+    def spy(project_dir, **kw):
+        seen.append(store.reports_closing(project_dir))
+        return real(project_dir, **kw)
+
+    cs._lock = spy
+    try:
+        with store.reports_closed(tmp_path):
+            pass
+    finally:
+        cs._lock = real
+    assert seen == [True]
+
+
+def test_k1_reports_closed_waits_for_an_add_and_refuses_busy_on_timeout(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(store, "COPY_LOCK_TIMEOUT_S", 0.2)
+    _mk(tmp_path)
+    with cs._lock(tmp_path):
+        with pytest.raises(store.ReportBusy):
+            with store.reports_closed(tmp_path):
+                pass
+    # The marker is gone again: the close did not go ahead.
+    assert not store.reports_closing(tmp_path)
+
+
+def test_k1_lockable_ids_never_match_the_chart_lock(tmp_path):
+    cs.add(_mk(tmp_path), _spec_model(), _png(), solve_fingerprint=None)
+    assert (cs.charts_dir(tmp_path) / cs.LOCK_FILE).exists()
+    assert store._lockable_ids(tmp_path) == set()
+
+
+def _mk(path):
+    (path / "reports").mkdir(exist_ok=True)
+    return path
+
+
+# ── GK B K2: a copy of a project never carries reports/_charts ───────────────
+
+
+def _with_charts(project):
+    _mk(project)
+    rid = _seed(project)
+    cs.add(project, _spec_model(), _png(), solve_fingerprint=None)
+    assert (cs.charts_dir(project) / cs.LOCK_FILE).exists()
+    return rid
+
+
+def test_k2_a_fork_child_has_no_charts_dir(tmp_path):
+    from services.study import forks
+
+    src, dst = tmp_path / "base", tmp_path / "fork"
+    src.mkdir()
+    dst.mkdir()
+    rid = _with_charts(src)
+    forks._copy_walk(src, dst)
+    assert (store.reports_dir(dst) / rid / "v1.json").exists()
+    assert not cs.charts_dir(dst).exists()
+
+
+def test_k2_copy_reports_never_carries_charts_even_over_an_existing_one(tmp_path):
+    src, dst = tmp_path / "a", tmp_path / "b"
+    src.mkdir()
+    dst.mkdir()
+    _with_charts(src)
+    store.copy_reports(src, dst)
+    assert not cs.charts_dir(dst).exists()
+
+
+def test_k2_save_as_snapshot_and_restore_carry_no_charts(
+    client, api_project, project_storage_dir
+):
+    name = api_project("k2-src")
+    d = project_storage_dir(name)
+    _with_charts(d)
+
+    assert client.post(
+        f"/api/projects/{name}/snapshots", json={"label": "s"}
+    ).status_code in (200, 201)
+    snaps = [p for p in (d / "snapshots").iterdir() if p.is_dir()]
+    assert snaps and all(
+        not (p / "reports" / cs.CHARTS_DIRNAME).exists() for p in snaps
+    )
+    snap_id = client.get(f"/api/projects/{name}/snapshots").json()
+    snap_id = (snap_id[0] if isinstance(snap_id, list) else snap_id["snapshots"][0])[
+        "id"
+    ]
+    assert (
+        client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore").status_code
+        == 200
+    )
+    # A restore replaces reports/ but leaves the live charts as they were.
+    assert any(cs.charts_dir(d).glob("chart-*.json"))
+
+    r = client.post("/api/projects/k2-copy")
+    assert r.status_code == 200, r.text[:200]
+    assert not cs.charts_dir(project_storage_dir("k2-copy")).exists()

@@ -17,7 +17,8 @@ Rules:
   by its IHDR (side and pixel caps).
 * One lock (`_charts/.lock`, `harness.durable.file_lock`) covers the count and
   the write, so the cap of 12 holds under concurrency. Nothing else is taken
-  inside it.
+  inside it. It never makes the project directory and refuses while the
+  project is closing; `store.reports_closed` takes it last (SH-07f, GK B K1).
 * Reading never raises for a bad file: `report_figures` turns it into a gap.
 * A snapshot is outside the evidence hash and never reaches a model prompt.
 """
@@ -30,6 +31,7 @@ import pathlib
 import re
 import secrets
 import struct
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
@@ -219,12 +221,31 @@ def _ids(project_dir: pathlib.Path) -> list[str]:
     )
 
 
-def _lock(project_dir: pathlib.Path):
+@contextmanager
+def _lock(
+    project_dir: pathlib.Path,
+    *,
+    timeout: float = LOCK_TIMEOUT_S,
+    closing_ok: bool = False,
+):
+    """The chart lock. Never makes the project directory (a missing one is
+    `ReportProjectGone`, as `report_lock`), and refuses `ReportBusy` once the
+    project is being deleted or moved (`reports/.closing`), checked under the
+    lock; `reports_closed` takes it with `closing_ok`. `TimeoutError` when it
+    stays held."""
     from harness.durable import file_lock
+    from services.reports import store
 
     root = charts_dir(project_dir)
-    root.mkdir(parents=True, exist_ok=True)
-    return file_lock(root / LOCK_FILE, timeout=LOCK_TIMEOUT_S, busy="chart store busy")
+    try:
+        root.parent.mkdir(exist_ok=True)
+        root.mkdir(exist_ok=True)
+    except FileNotFoundError as exc:
+        raise store.ReportProjectGone("the project directory is gone") from exc
+    with file_lock(root / LOCK_FILE, timeout=timeout, busy="chart store busy"):
+        if not closing_ok and store.reports_closing(pathlib.Path(project_dir)):
+            raise store.ReportBusy("the project is being deleted or moved")
+        yield
 
 
 def validate_png(data: bytes) -> None:

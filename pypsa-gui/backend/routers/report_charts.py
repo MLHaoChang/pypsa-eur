@@ -36,6 +36,7 @@ from routers.deps import AuthorizedProject, ProjectAccessDep
 from routers.reports import _check_lock
 from services import site_service
 from services.reports import chart_snapshots as cs
+from services.reports import store
 
 router = APIRouter()
 
@@ -49,6 +50,14 @@ def _err(status: int, kind: str, message: str, **extra) -> HTTPException:
 
 def _not_found() -> HTTPException:
     return _err(404, "chart_not_found", "No such saved chart in this project.")
+
+
+def _closing() -> HTTPException:
+    return _err(
+        409,
+        "report_busy",
+        "This project is being deleted or moved; nothing was saved.",
+    )
 
 
 def _row(snapshot: cs.ChartSnapshot, current_fp: str | None) -> dict:
@@ -121,6 +130,10 @@ async def add_report_chart(
             png,
             solve_fingerprint=cs.active_solve_fingerprint(),
         )
+    except store.ReportProjectGone:
+        raise _not_found() from None
+    except store.ReportBusy as exc:
+        raise _closing() from exc
     except cs.ChartPngTooLarge as exc:
         raise _err(413, "chart_png_too_large", str(exc)) from exc
     except cs.ChartLimitReached as exc:
@@ -151,8 +164,10 @@ def delete_report_chart(
     _check_lock(project, db, user)
     try:
         cs.delete(project.directory, chart_id)
-    except cs.ChartNotFound:
+    except (cs.ChartNotFound, store.ReportProjectGone):
         raise _not_found() from None
+    except store.ReportBusy as exc:
+        raise _closing() from exc
     except cs.ChartBusy as exc:
         raise _err(
             409, "chart_busy", "Saved charts are being written; try again in a moment."
