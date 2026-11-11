@@ -154,3 +154,6 @@ Q4 every electric Load is offered: the catalogue offers, the preset bills.
   slacks are removed after the solve, so `unserved_facility_mw(n)` alone reads 0 on
   a real solve. Follow-up for the DC owner: `unserved_facility_mw` has the same gap
   for any other caller.
+- GK B (47) ruled on `served_load` against the bill streams: admitted, except
+  against a valued `eaas_fee` (refused `double_count:eaas_fee`). Recorded with its
+  conditions C1-C3 in 06's comments; 06 implements it.
