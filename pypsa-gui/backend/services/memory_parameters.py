@@ -23,6 +23,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
+import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DBSession
 
@@ -66,47 +67,61 @@ def _has_series(n, component_class: str, name: str, field: str) -> bool:
     return (component.list_name, field, name) in PyPSAService.get_user_ts()
 
 
-_PLAIN_BUS_UNITS = ("", "MW", "MWh", "None")
+_PLAIN_BUS_UNITS = ("", "MW", "None")
 
 
-def _bus_is_plain(n, bus) -> bool:
-    """A bus that counts in MW (power) and MWh (energy): its own `unit` column says
-    nothing else and its carrier is no catalogued product (`ore`, NH3, …), read as
-    `process_products.bus_unit` reads it. A missing bus is not plain (GK B P5, P6)."""
+def _empty(bus) -> bool:
+    """No bus in this port: None, "" or a missing value (NaN)."""
+    return bus == "" if isinstance(bus, str) else bool(pd.isna(bus))
+
+
+def _bus_unit_reason(n, bus) -> str | None:
+    """Why a value on `bus` does not mean what its MW-based stored unit says, or None
+    when the bus counts in MW (power) and MWh (energy): its own `unit` column says
+    nothing else and its carrier is no catalogued product (`ore`, NH3 in t, …), read
+    as `process_products.bus_unit` reads it. A bus that states MWh itself is not
+    plain: its card rows read MWh where the item says MW (GK B P5, P6, N4)."""
     from services.process_products import bus_unit
 
+    if _empty(bus):
+        return "is not connected to a bus"
     if not isinstance(bus, str) or bus not in n.buses.index:
-        return False
+        return f"is on a missing bus {bus}"
     own = n.buses.at[bus, "unit"] if "unit" in n.buses.columns else None
     if isinstance(own, str) and own.strip() not in _PLAIN_BUS_UNITS:
-        return False
-    return bus_unit(n, bus) in ("", "MWh")
+        return f"is on bus {bus}, which counts in {own.strip()}"
+    catalogue = bus_unit(n, bus)
+    if catalogue not in ("", "MWh"):
+        return f"is on bus {bus}, which counts in {catalogue}"
+    return None
 
 
-def _units_plain(n, component_class: str, name: str) -> bool:
-    """Every bus the asset touches counts in MW and MWh, so each of its fields means
-    what its stored unit says: a rate in MW, a price per MWh, an efficiency in MWh
-    per MWh. A value on a product bus (t, t/h, …) is not saved or applied: nothing
-    is converted, and the item holds MW-based units only (GK B N1, P1–P6)."""
+def _units_reason(n, component_class: str, name: str) -> str | None:
+    """None when every bus the asset touches counts in MW and MWh, so each of its
+    fields means what its stored unit says: a rate in MW, a price per MWh, an
+    efficiency in MWh per MWh. Otherwise the first reason. A value on a product bus
+    (t, t/h, …) is not saved or applied: nothing is converted, and the item holds
+    MW-based units only (GK B N1, P1–P6)."""
     if component_class == "Bus":
-        return _bus_is_plain(n, name)
+        return _bus_unit_reason(n, name)
     frame = _frame(n, component_class)
     for column in frame.columns:
-        if not re.fullmatch(r"bus\d*", column):
+        port = re.fullmatch(r"bus(\d*)", column)
+        if not port:
             continue
         bus = frame.at[name, column]
-        if column in ("bus2", "bus3", "bus4") and bus in ("", None):
+        if int(port.group(1) or 0) >= 2 and _empty(bus):
             continue  # an unused extra port of a Link
-        if not _bus_is_plain(n, bus):
-            return False
-    return True
+        reason = _bus_unit_reason(n, bus)
+        if reason:
+            return reason
+    return None
 
 
-def _refuse_units(spec, name: str, kind: str) -> M.MemoryError:
+def _refuse_units(spec, name: str, reason: str, kind: str) -> M.MemoryError:
     return _refuse(
-        f"{spec.label} of {name} counts in its bus's own unit (t, t/h, …). A saved value "
-        "holds MW-based units only, so it is not saved or applied here. Nothing is "
-        "converted.",
+        f"{spec.label}: {name} {reason}. A saved value holds MW-based units only, so "
+        "it is not saved or applied here. Nothing is converted.",
         kind,
     )
 
@@ -235,8 +250,9 @@ def save(
     value, _source, carrier = _current(n, component_class, name, field)
     if _has_series(n, component_class, name, field):
         raise _refuse_series(spec, name)
-    if not _units_plain(n, component_class, name):
-        raise _refuse_units(spec, name, "memory_unit_unsupported")
+    reason = _units_reason(n, component_class, name)
+    if reason:
+        raise _refuse_units(spec, name, reason, "memory_unit_unsupported")
     if value is None:
         raise _refuse(f"{spec.label} has no value to save.", "memory_value_missing")
     if carrier and not M.carrier_ok(str(carrier)):
@@ -310,7 +326,7 @@ def suggestions(
         )
     n = _network()
     _v, _s, carrier = _current(n, component_class, name, "carrier")
-    if not _units_plain(n, component_class, name):
+    if _units_reason(n, component_class, name):
         return {}  # no saved value means what it says on a product bus (GK B N1)
     rows = db.scalars(
         select(MemoryItem).where(
@@ -439,8 +455,9 @@ def plan(
     current, source, carrier = _current(n, component_class, name, spec.key)
     if _has_series(n, component_class, name, spec.key):
         raise _refuse_series(spec, name)
-    if not _units_plain(n, component_class, name):
-        raise _refuse_units(spec, name, "memory_unit_mismatch")
+    reason = _units_reason(n, component_class, name)
+    if reason:
+        raise _refuse_units(spec, name, reason, "memory_unit_mismatch")
     if body.get("carrier") and body["carrier"] != carrier:
         raise _refuse(
             f"{spec.label}: saved for {body['carrier']}, this asset is {carrier or 'without a carrier'}.",
@@ -477,6 +494,7 @@ def plan(
         "label": spec.label,
         "value": body["value"],
         "unit": body["unit"],
+        "unit_display": spec.unit_display,
         "currency": body.get("currency"),
         "currency_year": body.get("currency_year"),
         "carrier": body.get("carrier"),
@@ -523,7 +541,7 @@ def preview(
     m = p["memory"]
     before = m["target"]["value"]
     note = (
-        f"Saved value (version {m['version']}): {m['value']:g} {m['unit']}"
+        f"Saved value (version {m['version']}): {m['value']:g} {m['unit'] or m['unit_display']}"
         + (f", {m['currency_year']} {m['currency']}" if m["currency"] else "")
         + (f", {m['carrier']}" if m["carrier"] else "")
         + (

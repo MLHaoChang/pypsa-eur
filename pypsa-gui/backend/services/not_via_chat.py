@@ -403,10 +403,16 @@ NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the 
         "if panel is set you may open it with ui_open_panel. Do not look for another tool or an API for them.")
 
 
-# A saved field value: a chip, or "save"/"saved"/"reuse" together with a value or a
-# field, unless the saved thing is a scenario, run, snapshot, tariff or project.
+# A saved field value. Three asks reach it:
+# - a chip, or a value made "reusable";
+# - using one ("saved"/"reuse" with a value or a field), unless the saved thing is a
+#   scenario, run, snapshot, tariff or project;
+# - keeping one: "save" with a value or a field AND a word that says it is kept for
+#   another time or place. "Save" alone also means storing the project, a table or a
+#   report, so a value word is not enough (GK B N2). "Project" does not exclude here:
+#   "for my next project" is where the value is reused.
 _SAVED_VALUE_NAMES = frozenset({'reusable', 'chip', 'chips'})
-_SAVED_WORDS = frozenset({'saved', 'save', 'reuse'})
+_USE_WORDS = frozenset({'saved', 'reuse'})
 _VALUE_WORDS = frozenset({
     'value', 'values', 'parameter', 'parameters', 'efficiency', 'capex', 'opex',
     'cost', 'costs', 'price', 'prices', 'capacity', 'lifetime',
@@ -415,11 +421,20 @@ _SAVED_ELSEWHERE = frozenset({
     'scenario', 'scenarios', 'run', 'runs', 'snapshot', 'snapshots', 'tariff',
     'tariffs', 'project', 'projects',
 })
+_KEPT_FOR_REUSE = frozenset({
+    'later', 'next', 'again', 'reuse', 'another', 'other', 'future', 'elsewhere',
+})
+_KEPT_ELSEWHERE = _SAVED_ELSEWHERE - {'project', 'projects'}
 
 
 def _asks_for_a_saved_value(words: set[str]) -> bool:
-    return bool(words & _SAVED_VALUE_NAMES or (
-        words & _SAVED_WORDS and words & _VALUE_WORDS and not words & _SAVED_ELSEWHERE))
+    if words & _SAVED_VALUE_NAMES:
+        return True
+    if not words & _VALUE_WORDS:
+        return False
+    if words & _USE_WORDS and not words & _SAVED_ELSEWHERE:
+        return True
+    return bool('save' in words and words & _KEPT_FOR_REUSE and not words & _KEPT_ELSEWHERE)
 
 
 def matches(words: set[str], limit: int = 2) -> list[dict]:

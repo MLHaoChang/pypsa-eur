@@ -93,6 +93,9 @@ def test_the_issue_rows_are_declared():
     ('Reuse a parameter I saved', 'memory_parameter_suggestions'),
     ('Apply my saved lifetime', 'memory_parameter_suggestions'),
     ('Save this value for later', 'memory_parameter_suggestions'),
+    ('Save the lifetime of this battery for my next project', 'memory_parameter_suggestions'),
+    ('Save this capex so I can use it again', 'memory_parameter_suggestions'),
+    ('Save the efficiency for another project', 'memory_parameter_suggestions'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -112,6 +115,10 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'List my saved snapshots', 'Reuse the last run settings', 'Any suggestion for the battery size', 'Save the project', 'Saved project list', 'Show saved scenarios',
     'Reuse my saved scenario parameters', 'Show saved scenario costs', 'What did the last saved run cost',
     'Compare capacity with the saved snapshot', 'Reuse the price from the saved tariff',
+    'Set the capacity to 50 MW and save', 'Save my changes to the capex', 'Save the cost table as csv',
+    'Export costs and save the report', 'Save results with prices', 'Save the price series I uploaded',
+    'Save the scenario costs for later', 'Save this run with its prices and solve again',
+    'Show my saved charts', 'Save the report for later',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)

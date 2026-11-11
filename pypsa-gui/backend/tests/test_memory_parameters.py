@@ -1419,21 +1419,29 @@ def _ore_bus(proj, name):
 
 
 @pytest.mark.parametrize(
-    "put",
+    ("put", "says"),
     [
-        lambda proj: _on_bus(proj, "gas", "t"),
-        lambda proj: _on_bus(proj, "gas", "t/h"),
-        lambda proj: _ore_bus(proj, "gas"),
-        lambda proj: proj.net().generators.__setitem__(
-            "bus",
-            proj.net()
-            .generators["bus"]
-            .where(proj.net().generators.index != "gas", "nowhere"),
+        (
+            lambda proj: _on_bus(proj, "gas", "t"),
+            "is on bus bus_gas, which counts in t.",
+        ),
+        (lambda proj: _on_bus(proj, "gas", "t/h"), "which counts in t/h."),
+        (lambda proj: _ore_bus(proj, "gas"), "is on bus bus_gas, which counts in t."),
+        (
+            lambda proj: proj.net().generators.__setitem__(
+                "bus",
+                proj.net()
+                .generators["bus"]
+                .where(proj.net().generators.index != "gas", "nowhere"),
+            ),
+            "gas is on a missing bus nowhere.",
         ),
     ],
     ids=["t", "t_per_h", "ore_catalogue", "dangling"],
 )
-def test_a_value_on_a_product_or_missing_bus_is_not_saved_or_offered(client, proj, put):
+def test_a_value_on_a_product_or_missing_bus_is_not_saved_or_offered(
+    client, proj, put, says
+):
     _no_carrier(proj, "gas", "solar")
     chip = _saved_chip(client, proj)  # saved on the plain bus first
     card = _preview(client, proj, chip).json()
@@ -1442,24 +1450,50 @@ def test_a_value_on_a_product_or_missing_bus_is_not_saved_or_offered(client, pro
     assert r.status_code == 422 and r.json()["detail"]["error_kind"] == (
         "memory_unit_unsupported"
     )
-    assert "own unit" in r.json()["detail"]["message"]
+    assert says in r.json()["detail"]["message"]
     assert _chips(client, proj, "gas") == {}
-    assert _preview(client, proj, chip).json()["detail"]["error_kind"] == (
-        "memory_unit_mismatch"
-    )
+    refused = _preview(client, proj, chip).json()["detail"]
+    assert refused["error_kind"] == "memory_unit_mismatch"
+    assert says in refused["message"]
     r = _apply(client, proj, chip, card["digest"])
     assert r.json()["detail"]["error_kind"] == "memory_unit_mismatch"
     assert proj.net().generators.at["gas", "p_nom"] == 10.0
 
 
-def test_an_mwh_bus_counts_like_an_mw_bus(client, proj):
+@pytest.mark.parametrize("unit", ["MW", " MW ", "None", ""])
+def test_a_bus_that_states_mw_or_nothing_is_plain(client, proj, unit):
     _no_carrier(proj, "gas", "solar")
-    _on_bus(proj, "gas", "MWh")
+    _on_bus(proj, "gas", unit)
     chip = _saved_chip(client, proj)
     assert chip["unit"] == "MW"
     _set_value(proj, 10.0, "p_nom", "solar")
     assert _chips(client, proj, "solar")["p_nom"][0]["id"] == chip["id"]
-    assert _preview(client, proj, chip, name="solar").status_code == 200
+    card = _preview(client, proj, chip, name="solar")
+    assert card.status_code == 200, card.text
+    row = next(r for r in card.json()["rows"] if r.get("field") == "p_nom")
+    assert row["unit"] == "MW"  # the card row and the memory block agree
+
+
+@pytest.mark.parametrize("unit", ["MWh", "MW_th"])
+def test_a_bus_that_states_another_unit_is_refused_by_that_unit(client, proj, unit):
+    """An explicit MWh bus shows MWh on its card rows, where the item says MW (N4)."""
+    _on_bus(proj, "gas", unit)
+    r = _save(client, proj, field="p_nom", name="gas")
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "memory_unit_unsupported"
+    assert f"gas is on bus bus_gas, which counts in {unit}." in detail["message"]
+    assert _chips(client, proj, "gas") == {}
+
+
+def test_a_catalogue_carrier_that_counts_in_mwh_is_plain(client, proj):
+    from services.process_products import CARRIER_CATALOG
+
+    carrier = next(c for c, row in CARRIER_CATALOG.items() if row.get("unit") == "MWh")
+    n = proj.net()
+    n.add("Bus", "bus_gas", carrier=carrier)  # no unit of its own
+    n.generators.at["gas", "bus"] = "bus_gas"
+    assert _save(client, proj, field="p_nom", name="gas").status_code == 201
 
 
 def test_a_bus_price_on_a_tonnes_bus_is_not_saved(client, proj):
@@ -1490,6 +1524,114 @@ def test_a_link_efficiency_into_a_tonnes_bus_is_not_saved(client, proj):
     assert r.json()["detail"]["error_kind"] == "memory_unit_unsupported"
     r = client.post(SAVE, json={**body, "name": "plain"})
     assert r.status_code == 201, r.text
+
+
+@pytest.mark.parametrize("port", ["bus2", "bus3"])
+def test_a_link_with_an_extra_port_on_a_tonnes_bus_is_not_saved(client, proj, port):
+    """MW in, MW out, and a by-product in tonnes: `efficiency2` is t per MWh (N1)."""
+    n = proj.net()
+    gas_bus = n.generators.at["gas", "bus"]
+    n.add("Bus", "power_out")
+    n.add("Bus", "slag", unit="t")
+    ports = {"bus2": gas_bus, "efficiency2": 0.1} if port == "bus3" else {}
+    n.add(
+        "Link",
+        "furnace",
+        bus0=gas_bus,
+        bus1="power_out",
+        **ports,
+        **{port: "slag", f"efficiency{port[3:]}": 0.2},
+    )
+    body = {"project_id": proj.id, "component_class": "Link", "name": "furnace"}
+    for field in ("efficiency2", "efficiency"):
+        r = client.post(SAVE, json={**body, "field": field})
+        assert r.status_code == 422, r.text
+        detail = r.json()["detail"]
+        assert detail["error_kind"] == "memory_unit_unsupported"
+        assert "furnace is on bus slag, which counts in t." in detail["message"]
+
+
+def test_an_empty_port_of_any_index_is_skipped(client, proj):
+    """A 6-port link gives every link a bus5 column; a plain link still saves (N3)."""
+    n = proj.net()
+    gas_bus = n.generators.at["gas", "bus"]
+    n.add(
+        "Link",
+        "six",
+        bus0=gas_bus,
+        bus1=gas_bus,
+        **{f"bus{i}": gas_bus for i in range(2, 6)},
+    )
+    n.add("Link", "plain", bus0=gas_bus, bus1=gas_bus, efficiency=0.5)
+    assert "bus5" in n.links.columns and not n.links.at["plain", "bus5"]
+    body = {"project_id": proj.id, "component_class": "Link", "field": "efficiency"}
+    r = client.post(SAVE, json={**body, "name": "plain"})
+    assert r.status_code == 201, r.text
+    n.add("Bus", "slag", unit="t")
+    n.links.at["plain", "bus5"] = "slag"  # a used port 5 counts
+    r = client.post(SAVE, json={**body, "name": "plain"})
+    assert r.json()["detail"]["error_kind"] == "memory_unit_unsupported"
+
+
+@pytest.mark.parametrize("port", ["bus0", "bus1"])
+def test_a_link_with_an_unconnected_main_port_is_refused(client, proj, port):
+    n = proj.net()
+    gas_bus = n.generators.at["gas", "bus"]
+    n.add("Link", "loose", **({"bus0": gas_bus, "bus1": gas_bus} | {port: ""}))
+    r = client.post(
+        SAVE,
+        json={
+            "project_id": proj.id,
+            "component_class": "Link",
+            "name": "loose",
+            "field": "efficiency",
+        },
+    )
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "memory_unit_unsupported"
+    assert "Efficiency: loose is not connected to a bus." in detail["message"]
+
+
+def test_a_bus_price_note_shows_the_unit_the_field_displays(client, proj):
+    """`Bus.product_value` stores no unit; the note falls back to EUR/unit (N5)."""
+    n = proj.net()
+    first = n.buses.index[0]
+    n.add("Bus", "second", carrier=n.buses.at[first, "carrier"])
+    n.buses["product_value"] = float("nan")
+    n.buses.at[first, "product_value"] = 500.0
+    n.buses.at["second", "product_value"] = 20.0
+    for bus in (first, "second"):
+        PV.record(
+            n,
+            "Bus",
+            bus,
+            "product_value",
+            status="default",
+            source="pack:x",
+            currency="EUR",
+            currency_year=2024,
+        )
+    body = {"project_id": proj.id, "component_class": "Bus", "field": "product_value"}
+    r = client.post(SAVE, json={**body, "name": first})
+    assert r.status_code == 201, r.text
+    chip = client.get(
+        SUGGEST,
+        params={"project_id": proj.id, "component_class": "Bus", "name": "second"},
+    ).json()["fields"]["product_value"][0]
+    r = client.post(
+        f"{SUGGEST}/{chip['id']}/preview",
+        json={
+            "project_id": proj.id,
+            "version": chip["version"],
+            "component_class": "Bus",
+            "name": "second",
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["memory"]["unit"] == ""
+    assert r.json()["memory"]["unit_display"] == "EUR/unit"
+    assert "500 EUR/unit, 2024 EUR" in r.json()["memory_note"]
 
 
 def test_a_held_user_series_is_neither_saved_nor_applied(client, proj, bound_ctx):
