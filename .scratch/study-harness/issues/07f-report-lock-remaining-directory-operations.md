@@ -78,3 +78,43 @@ What 07f-a still leaves: the closing set is per process. A report writer in anot
 - **C3.** The lock order is written down, with a two-thread timed test that goes red when it is reversed.
 - **C4.** Every waiter on `get_lock` and on the report locks is listed with its bound, and the PR says which can now time out where they could not before.
 - **C5.** Each new guard is mutated on its own and run on its single test; the table goes in the PR body. Prune skipping a busy snapshot must not let the count grow across repeated prunes.
+
+11 Nov, 07f-a built (`claude/sh-07f-report-lock-dirs`):
+
+- **What was built.** `store.reports_closed(dir)`: the report locks (3 s), then `reports/.closing` written while they are held, then the locks released. Every `report_lock` refuses `ReportBusy` while the marker is fresh; a marker older than 60 s (a crash) is ignored. Delete, snapshot delete and fork delete move the directory to a hidden `.pypsa-deleting-<hex>` sibling under the locks and remove it after them. Rename moves it to its new name and clears the marker there. `report_lock` makes `reports/` only, never the project directory, so a writer whose project is gone gets `ReportProjectGone` (404 `report_not_found` at the report routes). A bundle copy still makes its own destination.
+- **Deviation from the plan, legacy import.** It copies without taking the report locks, skipping `reports/.<id>.lock` and `.closing` in both the copy and its verification. A legacy tree is outside the registry, so no report writer of the app reaches it, and taking a lock would write lock files into the user's original tree, which that module guarantees never to change. The claim (`shutil.move` into the registry) does take `reports_closed`.
+- **Fork delete** (`forks.delete_fork`) is a project delete too, and gets the same closing, job refusal and move-aside. A fork's own empty lock files come from `copy_reports` locking the destination, as a snapshot's do (07e). None of the base's lock files is copied.
+
+**C3, lock order.** In order, outermost first:
+1. `PyPSAService.get_lock()` (the active context's `mutation_lock`).
+2. `reports_copy_lock` / `reports_closed`: each report's `report_lock` in sorted `(reports dir, id)` order. Each one is the thread `RLock`, then the file lock `reports/.<id>.lock`.
+3. A job's own `job.lock`, which no copy or close takes.
+
+No report writer takes `get_lock` inside a `report_lock`; the 07e holder list is unchanged. `reports_closed` releases the report locks before it yields, so the move runs under `get_lock` alone, with the marker refusing writers. Tests: `test_{delete,rename,snapshot_delete}_takes_the_network_lock_before_any_report_lock` hold the network lock in a second thread while the operation waits, and a report writer still gets its lock at once. Each is red with the two swapped (mutants M8, M11, M14).
+
+**C4, waiters.** New holders of `get_lock`:
+- project delete: one 3 s close per target, plus the moves;
+- snapshot delete: one 3 s close plus the move;
+- rename: one 3 s close plus the DB commit and the move;
+- fork delete: one 3 s close plus the move.
+
+The removal of a moved tree runs after the lock (`test_the_moved_tree_is_removed_outside_the_network_lock`). Prune runs inside a snapshot create's existing hold, as before 07f; it now also waits up to 3 s per busy snapshot.
+
+The timed waiters on the same lock, any of which can now time out during one of those holds where before 07f it could not:
+
+| Waiter | Bound | On timeout |
+|---|---|---|
+| `harness/run_loops.py:491` `agent_turn` guard | 5 s | card withdrawn |
+| `harness/continuation.py:442` `settle_engine` | 5 s | `"running"`, next poll retries |
+| `harness/runner.py:1041` `take_locks` | 5 s | busy |
+| `services/run_envelope.py:1755`, `:1757` | 5 s | refused |
+| `services/run_envelope.py:2217`, `:2221` `answering` | 5 s | ordinary write |
+| `services/study/runner.py:479`, `tornado_runner.py:298` | 5 s | 409 `solver_in_flight` |
+| `routers/results.py:1147` | 5 s | 409 |
+| `routers/results.py:2191`, `:2944` | 2 s | `network_busy` / 409 |
+| `routers/simulation.py:783` | 2 s | `network_busy` |
+| `harness/durable.py:21` `network_guard` | 1 s | 409 `assurance_context_changed` |
+
+`routers/simulation.py:1162`, `:1275` and `:1430` are non-blocking and only defer or report. The worst new hold is about 3 s × targets on a busy cascade delete; with no report busy, it is the moves alone.
+
+No caller passes `report_lock` a timeout. Writers keep `LOCK_TIMEOUT_S` = 30 s, and they meet these holds only through the closing marker, which refuses at once rather than making them wait. The three 5 s branches are tested in 07f-b.

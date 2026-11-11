@@ -301,17 +301,19 @@ def _force_rmtree(target: pathlib.Path) -> None:
 _RETIRED_PREFIX = ".pypsa-deleting-"
 
 
-def _remove_closed_dir(target: pathlib.Path) -> None:
+def _retire_closed_dir(target: pathlib.Path) -> pathlib.Path | None:
     """
-    Remove a directory whose reports are closed (`project_registry.
-    reports_closed_or_409`, study harness 07f): first move it to a hidden
-    sibling, then `_force_rmtree` that. A report writer still holding the old
-    path finds no directory there and fails (`ReportProjectGone`) instead of
-    making `reports/<id>/` again under a half-removed tree.
+    Move a directory whose reports are closed (`project_registry.
+    reports_closed_or_409`, study harness 07f) to a hidden sibling and return
+    that, or None when `target` was already gone. A report writer still
+    holding the old path then finds no directory there and fails
+    (`ReportProjectGone`) instead of making `reports/<id>/` again under a
+    half-removed tree.
 
-    The move is retried like `_force_rmtree` (a OneDrive or AV handle) and
-    raises its last `OSError`; nothing is removed then. Once moved, a removal
-    that fails leaves only the hidden sibling, which is logged.
+    Only the move needs the caller's locks: `_remove_retired` runs after
+    them, so a large tree never keeps the network lock's 5 s waiters out
+    (GK B C4). The move is retried like `_force_rmtree` (a OneDrive or AV
+    handle) and raises its last `OSError`; nothing is moved then.
     """
     if target.is_symlink():
         raise OSError(f"refusing to remove a symbolic link: {target}")
@@ -319,17 +321,31 @@ def _remove_closed_dir(target: pathlib.Path) -> None:
     for attempt in range(4):
         try:
             os.replace(target, retired)
-            break
+            return retired
         except FileNotFoundError:
-            return
+            return None
         except OSError:
             if attempt == 3:
                 raise
             time.sleep(0.4 * (attempt + 1))
+    return None
+
+
+def _remove_retired(retired: pathlib.Path | None) -> None:
+    """`_force_rmtree` a directory `_retire_closed_dir` moved aside. A failure
+    leaves only that hidden directory, which is logged."""
+    if retired is None:
+        return
     try:
         _force_rmtree(retired)
     except OSError as exc:
-        logger.warning("could not remove %s (moved from %s): %s", retired, target, exc)
+        logger.warning("could not remove %s: %s", retired, exc)
+
+
+def _remove_closed_dir(target: pathlib.Path) -> None:
+    """`_retire_closed_dir` then `_remove_retired`, for a caller whose lock
+    already spans the removal (snapshot prune, inside a snapshot create)."""
+    _remove_retired(_retire_closed_dir(target))
 
 
 @contextlib.contextmanager
@@ -4248,6 +4264,7 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
     deleted: list[str] = []
     failed: list[str] = []
     dropped: list[tuple[str, Any]] = []
+    retired: list[pathlib.Path | None] = []
     # Leaves-first: reverse the BFS order so a child is always removed before
     # its parent, keeping the DB parent graph consistent at every step.
     targets = list(reversed(child_projects)) + [project]
@@ -4266,7 +4283,7 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
             target_dir = target_dirs[target.name]
             try:
                 if target_dir.exists():
-                    _remove_closed_dir(target_dir)
+                    retired.append(_retire_closed_dir(target_dir))
             except OSError as exc:  # noqa: BLE001
                 failed.append(target.name)
                 change_log_service.log(
@@ -4279,7 +4296,10 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
             dropped.append((target.name, project_registry.registry_key(target)))
             project_registry.delete_project_row(db, target)
             deleted.append(target.name)
-    # Outside the network lock: evicting a context takes its own locks.
+    # Outside the network lock: removing a moved tree can take long (GK B C4),
+    # and evicting a context takes its own locks.
+    for path in retired:
+        _remove_retired(path)
     for target_name, target_key in dropped:
         try:
             PyPSAService.drop(target_key)

@@ -169,7 +169,7 @@ def delete_fork(db, fork_row, *, study_id: str, base_uuid: str) -> bool:
     verify. Raises `ForkError` while the queue holds an active job for it or
     when a user has branched a project from it.
     """
-    from routers.projects import _remove_closed_dir
+    from routers.projects import _remove_retired, _retire_closed_dir
     from services import project_registry
     from services.pypsa_service import PyPSAService
     from services.reports import report_job
@@ -201,8 +201,8 @@ def delete_fork(db, fork_row, *, study_id: str, base_uuid: str) -> bool:
             raise ForkError("report_busy",
                             f"a report is being generated for '{fork_row.name}'; "
                             "abort it in Reports first")
-        if target.exists():
-            _remove_closed_dir(target)
+        retired = _retire_closed_dir(target) if target.exists() else None
+    _remove_retired(retired)  # outside the network lock (GK B C4)
     project_registry.delete_project_row(db, fork_row)
     try:
         PyPSAService.drop(key)

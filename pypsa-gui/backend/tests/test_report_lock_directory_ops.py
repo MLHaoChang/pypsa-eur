@@ -219,6 +219,47 @@ def test_a_writer_arriving_while_the_tree_is_removed_finds_no_project(
     assert not pdir.exists()
 
 
+def _network_lock_free_elsewhere() -> bool:
+    """Whether another thread can take the network lock right now."""
+    from services.pypsa_service import PyPSAService
+
+    lock, got = PyPSAService.get_lock(), []
+
+    def probe():
+        if lock.acquire(timeout=0.5):
+            got.append(True)
+            lock.release()
+
+    thread = threading.Thread(target=probe)
+    thread.start()
+    thread.join(5)
+    return got == [True]
+
+
+@pytest.mark.parametrize("what", ["project", "snapshot"])
+def test_the_moved_tree_is_removed_outside_the_network_lock(
+    client, project, monkeypatch, what
+):
+    """GK B C4: only the move holds the network lock; removing a large tree
+    after it must not keep the lock's 5 s waiters out."""
+    from routers import projects
+
+    name, pdir = project
+    url = f"/api/projects/{name}"
+    if what == "snapshot":
+        url += f"/snapshots/{_snapshot(client, name)}"
+    free = []
+    real = projects._force_rmtree
+
+    def removing(target):
+        free.append(_network_lock_free_elsewhere())
+        real(target)
+
+    monkeypatch.setattr(projects, "_force_rmtree", removing)
+    assert client.delete(url).status_code in (200, 204)
+    assert free == [True]
+
+
 def test_delete_takes_the_network_lock_before_any_report_lock(client, project, monkeypatch):
     """GK B C3: while another thread holds the network lock, the delete waits
     for it holding no report lock, so a report writer still gets its lock."""

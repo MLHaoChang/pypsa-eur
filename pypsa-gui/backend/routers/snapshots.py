@@ -64,6 +64,8 @@ from routers.projects import (
     _force_rmtree,
     _read_meta,
     _remove_closed_dir,
+    _remove_retired,
+    _retire_closed_dir,
     _restore_results_state,
     _safe_project_dir,
     _solver_config_from_dict,
@@ -1040,13 +1042,14 @@ def delete_snapshot(
     try:
         with PyPSAService.get_lock(), \
                 project_registry.reports_closed_or_409(snap_dir, "deleted"):
-            _remove_closed_dir(snap_dir)
+            retired = _retire_closed_dir(snap_dir)
     except OSError as exc:
         raise HTTPException(
             500,
             f"Could not delete snapshot '{label}': {exc}. The folder is "
             f"locked (OneDrive sync / AV scan?) — retry, or remove it manually.",
         ) from exc
+    _remove_retired(retired)  # outside the network lock (GK B C4)
     change_log_service.log(
         "delete_snapshot", "Project", name,
         f"Deleted snapshot '{label}' of '{name}'",
