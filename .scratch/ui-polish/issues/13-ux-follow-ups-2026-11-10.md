@@ -3,7 +3,7 @@
 
 # UX follow-ups from the 10 Nov reviews
 
-Status: in review (Sonnet; reviewer UX)
+Status: done (#1381)
 Type: polish (wording, consistency)
 Found by: UX (15) and UX (16) reviews on 2026-11-10, relayed by the coordinator.
 
