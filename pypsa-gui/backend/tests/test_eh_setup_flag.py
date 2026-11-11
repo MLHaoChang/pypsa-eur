@@ -4,6 +4,7 @@
 
 import math
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -12,7 +13,7 @@ from services.adequacy.eh_setup import _flag
 
 VALUES = [
     "yes", " Yes ", "TRUE", "true", "1", "1.0", " 1 ", 1, 1.0, True,
-    "0", "", "no", "false", "2", None, 0, False, math.nan,
+    "0", "", "no", "false", "2", None, 0, False, math.nan, np.True_, np.False_, pd.NA,
 ]  # fmt: skip
 
 
@@ -30,3 +31,9 @@ def test_text_false_is_false(value):
 
 def test_missing_column_is_false():
     assert _flag(pd.DataFrame(index=["b"]), "b", "eh_poc") is False
+
+
+@pytest.mark.parametrize("value", [[1, 2], [], ["yes", "no"]], ids=repr)
+def test_array_like_cell_is_false_not_an_error(value):
+    df = pd.DataFrame({"eh_poc": [value]}, index=["b"], dtype=object)
+    assert _flag(df, "b", "eh_poc") is False

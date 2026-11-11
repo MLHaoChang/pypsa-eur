@@ -14,3 +14,13 @@ Found by: GK A review of #1388 (issue 27).
 Acceptance:
 - [x] `_flag` equals `process_chain.truthy` on the pinned table (`tests/test_eh_setup_flag.py`).
 - [x] "no", "false", "0" read False (red on master before the fix).
+
+## Comments
+
+### 2026-11-11: GK A plan GO, conditions
+
+- C1: the column guard and `except (TypeError, ValueError): return False` stay around the `truthy` call; a multi-element list cell raises in `pd.isna` and reads False, as before. Test added.
+- C2: `np.True_`, `np.False_` and `pd.NA` are in the table.
+- C3: the revert-to-`bool()` mutant on the guard fails `test_flag_equals_shared_rule['0']` (single test, `-x`).
+- C4: readers are `eh_setup.py` `p_nom_extendable` (a link whose flag is the text "no" is no longer treated as sizeable), `already_poc` / `already_crit`, and the proposal "current" fields. No existing test relied on `bool()`.
+- C5: same guarded import and `process_uc._fallback_truthy` fallback; `test_packaging_requirements` (bar the container-only defusedxml test), `test_bus_flag_truthy` and the eh_setup suites pass.
