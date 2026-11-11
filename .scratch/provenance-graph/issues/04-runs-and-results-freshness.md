@@ -1,6 +1,6 @@
 # Runs and results freshness on the graph
 
-Status: needs-triage
+Status: ready-for-agent (Opus; GK B plan first, UX for UI parts)
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 
@@ -24,3 +24,12 @@ and the client's `useStaleRunKinds` and `ReserveCommitments` reads.
 - One PR within PR-SIZE-1; the plan GO may split the client part off.
 
 ## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `provenance_graph/types.py` reserves `run` and `computed_in` ("built by the runs slice (04)"); 01-03 are done (#1302, #1311, #1339). Verdict: ready-for-agent.
+
+- Blocked by: none (02 is done).
+- Likely files: `services/provenance_graph/`, `run_gates.py`, `run_envelope.py`, `assistant_tasks.py`, `flow_service`, `dispatch_status.py`, `edit_card.py`, `chat_tools.py`; client `useStaleRunKinds`, `ReserveCommitments`. Reviewers: GK B plan first (P4), UX for the client part.
+
+The acceptance in the body stands. Add: [ ] a pin test shows `_network_input_fingerprint` and every stored digest byte-identical (P4).

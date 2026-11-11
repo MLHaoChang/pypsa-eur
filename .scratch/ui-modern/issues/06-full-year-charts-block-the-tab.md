@@ -3,7 +3,7 @@
 
 # Full-year time-series charts block the Results tab
 
-Status: needs-triage
+Status: ready-for-agent (Sonnet; reviewer UX)
 Type: bug
 Model: Sonnet. Reviewer: UX.
 
@@ -50,3 +50,13 @@ Full year, idle: 0.1 s and 46 mutations per 5 s. `Curtailment.test.tsx` guards i
 
 Done when `settle.mjs` on `eh_ipp_hybrid` reports the three tabs idle (no long task
 over 200 ms after the first 5 s) and Dispatch > Full timeframe opens in under 3 s.
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `useProjectMismatchDetection` still polls every 5 s and no shared explicit-ticks helper exists next to `CHART_AXIS` in `frontend/src`. Verdict: ready-for-agent.
+
+- Blocked by: none. Do not touch `.scratch/ui-modern/issues/` files other than this one (open PRs #1343, #1353, #1359 edit its neighbours).
+- Likely files: `pypsa-gui/frontend/src/hooks/useProjectMismatchDetection.ts`, the shared `CHART_AXIS` module, the Dispatch full-timeframe, Curtailment and Costs & prices tabs, their tests. Reviewer: UX.
+- The Done-when in the body is the acceptance, measured with `shots-02/tools/settle.mjs` on `eh_ipp_hybrid`.

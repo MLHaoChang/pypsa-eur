@@ -3,7 +3,7 @@
 
 # Bus-flag `_truthy` copies still differ from `process_chain.truthy`
 
-Status: needs-triage
+Status: ready-for-agent (Sonnet; reviewer GK A)
 Type: task
 Found by: GK A review of #1242 (issue 26).
 
@@ -14,3 +14,19 @@ Issue 26 unified the link flag rule in `gridspine.drivers.process_chain.truthy`.
 ## Where to look
 
 The four files above.
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: four copies remain (`services/adequacy/eh_stages.py:287` `_truthy`, `grid_readiness.py:1063` `_truthy`, `archetypes.py:37` inline test, `scr_gate.py:73` `_truthy_poc`) next to `gridspine/drivers/process_chain.py:54` `truthy`. Verdict: ready-for-agent.
+
+- Blocked by: none.
+- Likely files: the four above, `gridspine/drivers/process_chain.py`, tests beside each.
+- Reviewer: GK A (found by GK A on #1242).
+
+Acceptance:
+- [ ] Each of the four readers calls `process_chain.truthy` (or a shared import of it); no private bus-flag copy remains.
+- [ ] A table test feeds the same values ("yes", " Yes ", "TRUE", 1, "0", "", None, "no") to the shared rule and to each reader and asserts equal answers.
+- [ ] A bus flag that read True before and reads False now (or the reverse) is listed in the PR body with the reason.
+- [ ] A hand mutant that restores one private copy fails the table test.

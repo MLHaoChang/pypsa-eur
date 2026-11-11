@@ -3,7 +3,7 @@
 
 # 12 — IPP, IPP hybrid and microgrid presets
 
-Status: needs-triage (blocked by 06, 07)
+Status: ready-for-agent (blocked by 06, 07; Sonnet; GK B, GK A for linked outputs)
 Type: task
 Blocked by: 06, 07
 Gated: yes (GK B; GK A for the linked outputs)
@@ -24,3 +24,9 @@ and `served_load:hospital_load`, EaaS fee off by default, opex rows.
 A linked export line on the IPP is refused `double_count` (G2); IPP business-case
 revenue includes the PPA exactly once; unserved microgrid load earns no tariff and
 no VoLL appears (B4).
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.
