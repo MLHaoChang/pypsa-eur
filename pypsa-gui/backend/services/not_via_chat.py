@@ -398,6 +398,21 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'memory_dream_review',
+        'title': 'Reviewing your recent work for lessons',
+        'disposition': 'out of chat',
+        'reason': ('A review of your past chats and runs proposes lessons for you to confirm. It is '
+                   'started, and its proposals confirmed one by one, on the Memory page, so it never '
+                   'runs from inside a chat turn.'),
+        'page': 'Memory page (account menu)',
+        'panel': None,
+        'keywords': frozenset({'dream', 'lessons', 'consolidate'}),
+        'routes': frozenset({
+            ('GET', '/api/memory/dream'),
+            ('POST', '/api/memory/dream'),
+        }),
+    },
+    {
         'id': 'memory_parameter_suggestions',
         'title': 'Saving a field value for reuse, or applying a saved one',
         'disposition': 'out of chat',
