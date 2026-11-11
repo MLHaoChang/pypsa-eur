@@ -3,7 +3,7 @@
 
 # 04 — Linked model outputs and unit conversions
 
-Status: done (branch claude/bc-04-linked-outputs; GK A LO-1..LO-10, P1..P8)
+Status: ready-for-agent after 01 merges and 02 (GK A LO-1..LO-10; L7 waits on DC 03)
 Type: task
 Blocked by: 02; ../../dc-business-case/issues/03-it-energy-series.md (L7 only)
 Gated: yes (GK A)
