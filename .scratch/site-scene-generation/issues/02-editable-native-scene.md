@@ -3,7 +3,7 @@
 
 # SC-01 — native campus generation and editable buildings
 
-Status: in-progress — SC-01a (backend: routes, scene service, /flow scene block, closure copies) in review on `claude/site3d-sc01a`; SC-01b (UI) opens after it merges. Record: [sc-01/record.md](../sc-01/record.md)
+Status: done (SC-01a #807, SC-01b #821)
 Type: task
 Dependencies: accepted SC-00 N only; Blender/Photo not required
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -37,3 +37,9 @@ Deliver this slice's in-place explanation, typed proposed action or truthful UI 
 ## Optional coordinate-first workflow clarification
 
 Implement optional Create/Open/Resume in the existing coordinate/site-configuration context. Server admission needs a confirmed valid site anchor to open mapping and a valid confirmed boundary before generating/materializing a Site. No automatic creation on load/coordinate entry; no model component is required. Deliver campus review/correction/explicit regenerate, previous-scene preservation and buildings-only save/exit/resume. Cover V73–V79/V84 and relevant V89–V90. Read [optional-site-workflow.md](../optional-site-workflow.md) and [workflow-assessment.md](../workflow-assessment.md).
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked: `sc-02/plan.md` records SC-01a #807 and SC-01b #821 merged, and the SC-01b UI (`site3d/SiteEntryAction.tsx`, "Save project first") is on master. The old Status line said SC-01a was still in review. Verdict: done. Not re-run: V01-10 and V45-60 evidence (the sc-01 record holds it).

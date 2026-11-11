@@ -3,7 +3,7 @@
 
 # 06 — Ledger guards: double count, lost production, reference purchases
 
-Status: needs-triage (blocked by 05; GK A (20) GO G3-1..G3-6, G4-1, G4-2, G-A1, 2026-11-10)
+Status: ready-for-agent (blocked by 05; Opus; GK B and GK A)
 Type: task
 Blocked by: 05
 Gated: yes (GK B, GK A)
@@ -53,3 +53,7 @@ In `build_business_case` (05):
 - **G-A1 VoLL check.** Show by a test that a business case with an L4 `served_load` line on a bus with VoLL shed has no project-side line pricing that shed. If one exists, the G3 rule covers it too.
 
 G3-4 choice: the pro-rata drop (LO-3 rule), not a refusal (item 2).
+
+### 2026-11-11: triage
+
+Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.

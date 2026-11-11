@@ -3,7 +3,7 @@
 
 # AS-15 — Control-settings sheet reads the shared store latency
 
-Status: ready-for-human
+Status: done (built on master before this triage; PR number not traced)
 Type: task
 Blocked by: AS-07, AS-09
 
@@ -23,3 +23,7 @@ While there: a trace-sourced oscillation (`source: "trace"`, from `spectrum.repl
 ## PRs
 
 ## Comments
+
+### 2026-11-11: triage
+
+Checked both acceptance items on master: (1) `services/control_settings.py:48` imports `store_latency` and `tiers_from_solved` fills `latency_s` and `latency_basis` from it (line ~277); `tests/test_control_settings*.py:308` asserts the sheet equals `S.store_latency(n, "fast")[0]` and AS-09's `tier_split`. (2) The sheet's latency band uses `max(1/T, f_c_hz)` for a trace-sourced oscillation (lines 111-122). Both boxes were already ticked. The Status said ready-for-human; nothing is left for a human. Verdict: done.
