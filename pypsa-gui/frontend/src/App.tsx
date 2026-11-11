@@ -51,7 +51,7 @@ import { GuidedTourHost } from './components/GuidedTour'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
 import ProjectMismatchBanner from './components/ProjectMismatchBanner'
-import { useProjectMismatchDetection } from './hooks/useProjectMismatchDetection'
+import { ProjectMismatchWatcher } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AssistantDock from './components/AssistantDock'
 import { useDockAutoCollapse } from './layout/dockAutoCollapse'
@@ -332,7 +332,6 @@ export default function App() {
   // still loading we cannot tell, so the check waits for it.
   const tabIsStudy = projectsPending || (!!currentProject && !!backendProjects
     && recoveryFor(backendProjects, currentProject) === 'study')
-  useProjectMismatchDetection(tabIsStudy)
 
   useEffect(() => {
     if (!backendProjects) return
@@ -691,6 +690,7 @@ export default function App() {
     <AuthMismatchGate>
       <AppErrorBoundary>
       <div className="flex flex-col h-screen overflow-hidden bg-bg">
+        <ProjectMismatchWatcher isStudy={tabIsStudy} />
         {/* ── Crash recovery banner ──────────────────────────────────── */}
         {/* Renders only when a project has an orphaned `.tmp` sibling — a
             tell-tale of a save killed before the atomic rename. Hidden

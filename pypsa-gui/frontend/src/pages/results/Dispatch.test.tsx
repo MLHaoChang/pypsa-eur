@@ -44,6 +44,16 @@ vi.mock('../../api/network', async (importOriginal) => {
   }
 })
 
+// Count draws of the dispatch group charts (transparent wrapper: the real chart
+// still renders).
+const chartDraws = vi.hoisted(() => ({ count: 0 }))
+vi.mock('recharts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('recharts')>()
+  const counted = <P extends object>(C: React.ComponentType<P>) =>
+    (props: P) => { chartDraws.count += 1; return <C {...props} /> }
+  return { ...actual, AreaChart: counted(actual.AreaChart as never), LineChart: counted(actual.LineChart as never) }
+})
+
 afterEach(() => cleanup())
 
 beforeEach(() => {
@@ -303,4 +313,20 @@ it('shows one — note for the page when a carrier panel and the lost-load heade
     .querySelectorAll('[aria-label="Not recorded by this solve"]').length).toBe(1))
   expect(screen.getAllByTestId('not-recorded-note').length).toBe(1)
   expect(screen.queryByText(/\(—: not recorded by this solve\)/)).toBeNull()
+})
+
+it('does not redraw the group charts when the page re-renders with the same data', async () => {
+  // The app re-renders Results every few seconds while it polls. A full year
+  // is 8760 points per chart, so a redraw per poll blocks the tab (ui-modern 06).
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const page = () => (
+    <QueryClientProvider client={client}><Dispatch /></QueryClientProvider>
+  )
+  const { rerender } = render(page())
+  await waitFor(() => expect(chartDraws.count).toBeGreaterThan(0))
+  await new Promise(r => setTimeout(r, 50))
+  const drawn = chartDraws.count
+  rerender(page())
+  rerender(page())
+  expect(chartDraws.count).toBe(drawn)
 })
