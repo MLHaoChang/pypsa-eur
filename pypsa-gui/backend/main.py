@@ -99,6 +99,7 @@ from routers import (
     profiles,
     project_network,
     projects,
+    report_charts,
     report_jobs,
     reports,
     reserves,
@@ -1444,6 +1445,12 @@ app.include_router(
 # regenerate — the LLM job over the same evidence, same guard, same lock check.
 app.include_router(
     report_jobs.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
+# Charts saved from Results for the report (ui-modern 02 slice 7a): same guard and
+# ProjectAccessDep as the reports; the writes are lock-checked and human-only.
+app.include_router(
+    report_charts.router, prefix="/api/projects", tags=["reports"],
     dependencies=_projects_router_guard,
 )
 # The renewable profile generator (profile_gen Tasks 6–7). Global

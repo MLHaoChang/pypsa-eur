@@ -9326,7 +9326,8 @@ def create_evidence_report(title: str | None = None) -> dict:
     """The Reports panel's evidence-only report (`POST …/reports`); the route checks the lock."""
     from routers.reports import CreateReportBody, create_report as _h
 
-    out = _route(_h, CreateReportBody(title=title), project=_report_project())
+    with _assistant_strict():  # the assistant's report is strict: it carries no saved charts
+        out = _route(_h, CreateReportBody(title=title), project=_report_project())
     document = out.pop("document", None) or {}
     rid = out.get("report_id")
     return _b2b_fit({

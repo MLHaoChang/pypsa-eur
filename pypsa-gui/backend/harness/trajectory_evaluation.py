@@ -180,8 +180,12 @@ REPORT_ID_LEN, REPORT_ID_CHARS = 16, frozenset("0123456789abcdef")
 
 def _transient(path: str) -> bool:
     """A report's lock file (`reports/.<id>.lock`, services/reports/store.py):
-    a concurrency guard the store creates on every write, not an effect."""
+    a concurrency guard the store creates on every write, not an effect. A file
+    of the saved Results charts (`reports/_charts/...`, `chart_snapshots`) is no
+    report either: a person pins them, the assistant cannot."""
     parts = path.split("/")
+    if len(parts) > 2 and parts[0] == "reports" and parts[1] == "_charts":
+        return True
     if len(parts) != 2 or parts[0] != "reports":
         return False
     name = parts[1]

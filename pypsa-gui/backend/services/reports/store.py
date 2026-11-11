@@ -621,6 +621,7 @@ def reports_closed(project_dir: pathlib.Path):
             atomic_write_text(root / CLOSING_MARKER, f"{os.getpid()}\n")
             try:
                 _drain_new_reports(project_dir, held["dst"])
+                _drain_charts(project_dir)
             except BaseException:
                 clear_closing(project_dir)
                 raise
@@ -645,6 +646,21 @@ def _drain_new_reports(project_dir: pathlib.Path, held: frozenset[str]) -> None:
         with report_lock(project_dir, rid, _closing_ok=True,
                          timeout=max(0.0, deadline - time.monotonic())):
             pass
+
+
+def _drain_charts(project_dir: pathlib.Path) -> None:
+    """Wait out a chart `add` (GK B K1): take the chart lock last, with the
+    marker already written, and let it go. An `add` that locks later meets
+    the marker. Same `COPY_LOCK_TIMEOUT_S` deadline; `ReportBusy` past it."""
+    from services.reports import chart_snapshots as cs
+
+    if not cs.charts_dir(project_dir).is_dir():
+        return  # an add that makes it later locks past the marker
+    try:
+        with cs._lock(project_dir, timeout=COPY_LOCK_TIMEOUT_S, closing_ok=True):
+            pass
+    except TimeoutError as exc:
+        raise ReportBusy("saved charts are being written") from exc
 
 
 def clear_closing(project_dir: pathlib.Path) -> None:
