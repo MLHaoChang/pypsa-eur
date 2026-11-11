@@ -1559,7 +1559,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               color={flow ? loadingColor(flow.loadingPct) : results.enabled ? NO_RESULT_COLOR : lineColor(v)}
               weight={flow ? 4 : 3}
               tooltip={flow
-                ? `${line.name} · ${fmtMW(flow.p0)} · ${flow.loadingPct.toFixed(0)}% of ${flow.sNom.toFixed(0)} MVA · ${fmtKm(line.length)}`
+                ? `${line.name} · ${fmtMW(flow.p0)} · ${Math.floor(flow.loadingPct)}% of ${flow.sNom.toFixed(0)} MVA · ${fmtKm(line.length)}`
                 : `${line.name} · ${line.s_nom?.toFixed(0) ?? '—'} MVA · ${fmtKm(line.length)}`}
               permanentLabel={flow
                 ? `${fmtMW(Math.abs(flow.p0))} (${Math.floor(flow.loadingPct)}%)`
@@ -1607,7 +1607,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               weight={linkFlow ? 3 : 2}
               dashArray="6 4"
               tooltip={linkFlow
-                ? `${link.name} · ${link.carrier || 'Link'} · ${fmtMW(linkFlow.p0)} · ${linkFlow.loadingPct.toFixed(0)}% of ${linkFlow.pNom.toFixed(0)} MW${linkLength}`
+                ? `${link.name} · ${link.carrier || 'Link'} · ${fmtMW(linkFlow.p0)} · ${Math.floor(linkFlow.loadingPct)}% of ${linkFlow.pNom.toFixed(0)} MW${linkLength}`
                 : `${link.name} · ${link.carrier || 'Link'} · ${link.p_nom?.toFixed(0) ?? '—'} MW${linkLength}`}
               permanentLabel={linkFlow
                 ? `${fmtMW(Math.abs(linkFlow.p0))} (${Math.floor(linkFlow.loadingPct)}%)`
@@ -1698,7 +1698,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
                 color={trFlow ? loadingColor(trFlow.loadingPct) : trColor}
                 weight={trFlow ? 4 : 2.5}
                 tooltip={trFlow
-                  ? `${tr.name} · ${tr.v_nom_0 ?? '?'}/${tr.v_nom_1 ?? '?'} kV · ${fmtMW(trFlow.p0)} · ${trFlow.loadingPct.toFixed(0)}% of ${trFlow.sNom.toFixed(0)} MVA`
+                  ? `${tr.name} · ${tr.v_nom_0 ?? '?'}/${tr.v_nom_1 ?? '?'} kV · ${fmtMW(trFlow.p0)} · ${Math.floor(trFlow.loadingPct)}% of ${trFlow.sNom.toFixed(0)} MVA`
                   : `${tr.name} · ${tr.v_nom_0 ?? '?'}/${tr.v_nom_1 ?? '?'} kV · ${tr.s_nom?.toFixed(0) ?? '—'} MVA`}
                 permanentLabel={trFlow
                   ? `${fmtMW(Math.abs(trFlow.p0))} (${Math.floor(trFlow.loadingPct)}%)`
