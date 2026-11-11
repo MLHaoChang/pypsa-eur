@@ -1048,6 +1048,44 @@ export const CHART_AXIS = {
   tickLine: false,
 }
 
+/** X-axis props for a time-series chart over `n` snapshots. Past a day of
+ *  hourly stamps the axis gets a numeric `interval`: Recharts then picks every
+ *  k-th tick by index and never measures a label, where its default measures
+ *  every one of a full year's 8760 (77 % of a Curtailment draw, ui-modern 06).
+ *  Spread after CHART_AXIS: `<XAxis dataKey="snapshot" {...CHART_AXIS} {...timeAxis(rows.length)} />`. */
+export const FULL_YEAR_TICKS = 8
+export function timeAxis(n: number): { interval?: number } {
+  return n > 200 ? { interval: Math.ceil(n / FULL_YEAR_TICKS) - 1 } : {}
+}
+
+/** Most rows a time-series chart draws. A full year of hourly rows is 8760
+ *  points per series, far more than the ~1000 px plot has columns; drawing them
+ *  all is what kept Dispatch > Full timeframe busy for 12 s (ui-modern 06). */
+export const MAX_CHART_POINTS = 1500
+
+/** `rows` thinned for drawing: whole rows, so stacked bands stay consistent,
+ *  keeping the first and last row and, per bucket, the row with the largest
+ *  summed magnitude, so peaks survive. Returns `rows` itself when short. Use
+ *  for the chart's `data` only; exports and totals read the full rows. */
+export function thinRows<T extends object>(rows: readonly T[], max = MAX_CHART_POINTS): T[] {
+  const n = rows.length
+  if (n <= max) return rows as T[]
+  const size = Math.ceil(n / max)
+  const out: T[] = [rows[0]]
+  for (let start = 1; start < n - 1; start += size) {
+    const end = Math.min(start + size, n - 1)
+    let best = start, bestW = -1
+    for (let i = start; i < end; i++) {
+      let w = 0
+      for (const v of Object.values(rows[i])) if (typeof v === 'number' && Number.isFinite(v)) w += Math.abs(v)
+      if (w > bestW) { bestW = w; best = i }
+    }
+    out.push(rows[best])
+  }
+  out.push(rows[n - 1])
+  return out
+}
+
 /** A legend entry in plain words: no `Gen:` prefix, no snake_case id
  *  (UX review N18: `storage_discharge` -> "Storage discharge"). */
 export const legendName = (v: unknown): string =>

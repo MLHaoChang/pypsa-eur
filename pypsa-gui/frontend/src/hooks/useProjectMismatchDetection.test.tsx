@@ -11,7 +11,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 const getMeta = vi.fn()
 vi.mock('../api/network', () => ({ networkApi: { getMeta: (...a: unknown[]) => getMeta(...a) } }))
 const { useUIStore } = await import('../store/uiStore')
-const { useProjectMismatchDetection, mismatchPoll } = await import('./useProjectMismatchDetection')
+const { useProjectMismatchDetection, ProjectMismatchWatcher, mismatchPoll } = await import('./useProjectMismatchDetection')
 
 function H({ study }: { study: boolean }) { useProjectMismatchDetection(study); return null }
 const meta = (loaded_project: string | null) => ({ name: 'n', bus_count: 3, snapshot_count: 1, loaded_project })
@@ -101,5 +101,22 @@ describe('what counts as a sample', () => {
       mismatchPoll.confirmMs = 1_000
       mismatchPoll.idleMs = 5_000
     }
+  })
+})
+
+describe('re-render isolation (ui-modern 06)', () => {
+  // The poll reads `isFetching`, so whatever hosts the hook re-renders twice a
+  // poll. Hosted in App that re-rendered the Results tree every 5 s.
+  it('a poll does not re-render the parent of the watcher', async () => {
+    vi.useFakeTimers()
+    getMeta.mockReset().mockResolvedValue(meta('X'))
+    useUIStore.setState({ currentProject: 'X', projectMismatch: null, projectSwitchInProgress: false })
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    let parentRenders = 0
+    function Parent() { parentRenders += 1; return <ProjectMismatchWatcher isStudy={false} /> }
+    render(<QueryClientProvider client={qc}><Parent /></QueryClientProvider>)
+    await advance(30_000)
+    expect(getMeta.mock.calls.length).toBeGreaterThan(5)
+    expect(parentRenders).toBe(1)
   })
 })

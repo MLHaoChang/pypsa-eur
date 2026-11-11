@@ -6,7 +6,7 @@ import {
 import type { Generator, Load, StorageUnit, Link as LinkT } from '../../api/types'
 import { type TSPayload, shortStamp, stampWithPeriod, fmtPower, isRenewableCarrier,
   ChartActions, downloadCSV, colourForCarrier,
-  CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
+  CHART_GRID, CHART_AXIS, timeAxis, thinRows, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   ChartFrame, CHART_HEIGHT, chartFigure, LABEL_PASS, directLabel, bandLabelIndices, legendName } from './shared'
 
 // ── Per-period generation dispatch stack ────────────────────────────────────
@@ -307,6 +307,8 @@ export default function DispatchStack({
       linkCoeffs, hasLinkContribs,
       genNames, hasGenFilter,
       genCarriers, stackOrder, range.from, range.to])
+  // What is drawn: a full year thinned to the plot's resolution (peaks kept).
+  const drawn = useMemo(() => thinRows(rows), [rows])
 
   // Above the early return, unconditionally: a hook below it is called only
   // on data-bearing renders, so the first render after dispatch data arrives
@@ -363,7 +365,7 @@ export default function DispatchStack({
     >
       <div ref={chartRef}>
         <ResponsiveContainer width="100%" height={CHART_HEIGHT.lg}>
-          <ComposedChart data={rows} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}
+          <ComposedChart data={drawn} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}
             stackOffset="sign">
             <CartesianGrid {...CHART_GRID} />
             <XAxis
@@ -373,13 +375,13 @@ export default function DispatchStack({
                 // operational-year timestamps under different periods aren't
                 // ambiguous. Single-period rows have period_label='' so the
                 // formatter falls through to the bare ISO stamp.
-                if (typeof idx === 'number' && rows[idx]) {
-                  const p = rows[idx].period_label
+                if (typeof idx === 'number' && drawn[idx]) {
+                  const p = drawn[idx].period_label
                   if (p) return stampWithPeriod(s, Number(p))
                 }
                 return shortStamp(s)
               }}
-              {...CHART_AXIS} />
+              {...CHART_AXIS} {...timeAxis(drawn.length)} />
             <YAxis {...CHART_AXIS} label={yAxisLabel('Power (MW)')} />
             <RTooltip
               {...CHART_TOOLTIP}
