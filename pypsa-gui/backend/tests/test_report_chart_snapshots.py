@@ -1211,3 +1211,84 @@ def test_deleting_from_a_project_with_no_charts_creates_nothing(tmp_path):
     with pytest.raises(cs.ChartNotFound):
         cs.delete(tmp_path, "chart-" + "0" * 16)
     assert not (tmp_path / "reports").exists()
+
+
+# ── mutant survivors, second run ─────────────────────────────────────────────
+
+
+def test_a_side_of_exactly_the_cap_is_valid_in_either_direction():
+    cs.validate_png(_header(1, 8000))
+    cs.validate_png(_header(8000, 1))
+
+
+def test_report_figures_default_to_no_charts():
+    assert cs.ReportFigures({}).charts == [] and cs.ReportFigures().charts == []
+    assert cs.ReportFigures({"a": b"x"}, None).charts == [] and dict(
+        cs.ReportFigures({"a": b"x"})
+    ) == {"a": b"x"}
+
+
+def test_only_id_named_record_files_count(tmp_path):
+    cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint=None)
+    root = cs.charts_dir(tmp_path)
+    for name in (
+        "notes.json",
+        ".lock.json",
+        "chart-short.json",
+        "chart-" + "A" * 16 + ".json",
+        ".lock",
+    ):
+        (root / name).write_text("{}")
+    (root / ("chart-" + "a" * 16 + ".png")).write_bytes(
+        _png()
+    )  # a ghost: a picture, no record
+    (root / ("chart-" + "b" * 16 + ".txt")).write_text("x")
+    assert len(cs._ids(tmp_path)) == 1
+
+
+def test_a_delete_under_a_held_chart_lock_is_busy(tmp_path, monkeypatch):
+    snap = cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint=None)
+    monkeypatch.setattr(cs, "LOCK_TIMEOUT_S", 0.05)
+    from harness.durable import file_lock
+
+    with file_lock(cs.charts_dir(tmp_path) / cs.LOCK_FILE):
+        with pytest.raises(cs.ChartBusy):
+            cs.delete(tmp_path, snap.id)
+        with pytest.raises(cs.ChartBusy):
+            cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint=None)
+    cs.delete(tmp_path, snap.id)
+
+
+def test_an_unreadable_png_file_is_not_found(tmp_path, monkeypatch):
+    snap = cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint=None)
+
+    def boom(self):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(type(cs.charts_dir(tmp_path)), "read_bytes", boom)
+    with pytest.raises(cs.ChartNotFound):
+        cs.png_bytes(tmp_path, snap.id)
+
+
+def test_a_failed_record_write_leaves_neither_file_and_raises(tmp_path, monkeypatch):
+    from services import atomic_io
+
+    def boom(path, text, encoding="utf-8"):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(atomic_io, "atomic_write_text", boom)
+    with pytest.raises(OSError, match="disk full"):
+        cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint=None)
+    assert not list(cs.charts_dir(tmp_path).glob("chart-*"))
+
+
+def test_a_dangling_record_symlink_can_be_deleted(tmp_path):
+    snap = cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint=None)
+    record = cs.charts_dir(tmp_path) / f"{snap.id}.json"
+    record.unlink()
+    record.symlink_to(tmp_path / "gone.json")
+    cs.delete(tmp_path, snap.id)
+    assert (
+        not record.is_symlink()
+        and not (cs.charts_dir(tmp_path) / f"{snap.id}.png").exists()
+    )
