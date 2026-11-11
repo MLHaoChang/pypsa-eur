@@ -141,6 +141,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('PUT', '/api/chat/settings/api-key'),
             ('PUT', '/api/chat/settings/llm/profiles/{profile_id}'),
             ('PUT', '/api/chat/settings/llm/profiles/{profile_id}/key'),
+            ('POST', '/api/chat/settings/llm/roles'),
             ('PUT', '/api/local-settings/anthropic-key'),
         }),
     },
@@ -414,6 +415,8 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'routes': frozenset({
             ('GET', '/api/memory/dream'),
             ('POST', '/api/memory/dream'),
+            ('GET', '/api/memory/dream/settings'),
+            ('PUT', '/api/memory/dream/settings'),
         }),
     },
     {
