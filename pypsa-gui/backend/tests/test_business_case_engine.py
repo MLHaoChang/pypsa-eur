@@ -88,10 +88,14 @@ def _fin(**over) -> FinanceInputs:
 
 
 def _ic(*, lines=None, **fin_over) -> FinanceCase:
-    lines = lines if lines is not None else (
-        TemplateLine("bill", "energy_import", -300.0, "tariff"),
-        TemplateLine("export", "energy_export", 120.0, "export"),
-        TemplateLine("fom", "fom", -20.0, "opex"),
+    lines = (
+        lines
+        if lines is not None
+        else (
+            TemplateLine("bill", "energy_import", -300.0, "tariff"),
+            TemplateLine("export", "energy_export", 120.0, "export"),
+            TemplateLine("fom", "fom", -20.0, "opex"),
+        )
     )
     return FinanceCase(
         inputs=_fin(**fin_over),
@@ -160,18 +164,37 @@ def _at(r, year):
 
 # The rows before slice 05, frozen (C8): slice 05 adds rows, never changes one.
 _FROZEN_STREAM_CLASS = {
-    "energy_import": "tariff", "network_capacity": "tariff", "network_energy": "tariff",
-    "demand_charge": "tariff", "retail_fixed": "tariff", "certificates": "tariff",
-    "tax": "tariff", "energy_export": "export", "ancillary": "export",
-    "energy_wholesale": "export", "ppa_settlement": CONTRACT_CLASS,
-    "cfd_settlement": CONTRACT_CLASS, "lease": CONTRACT_CLASS, "eaas_fee": CONTRACT_CLASS,
-    "dr_availability": CONTRACT_CLASS, "dr_activation": CONTRACT_CLASS, "fom": "opex",
-    "vom": "opex", "other": "opex", "fuel": "fuel", "lost_production": "fuel",
+    "energy_import": "tariff",
+    "network_capacity": "tariff",
+    "network_energy": "tariff",
+    "demand_charge": "tariff",
+    "retail_fixed": "tariff",
+    "certificates": "tariff",
+    "tax": "tariff",
+    "energy_export": "export",
+    "ancillary": "export",
+    "energy_wholesale": "export",
+    "ppa_settlement": CONTRACT_CLASS,
+    "cfd_settlement": CONTRACT_CLASS,
+    "lease": CONTRACT_CLASS,
+    "eaas_fee": CONTRACT_CLASS,
+    "dr_availability": CONTRACT_CLASS,
+    "dr_activation": CONTRACT_CLASS,
+    "fom": "opex",
+    "vom": "opex",
+    "other": "opex",
+    "fuel": "fuel",
+    "lost_production": "fuel",
     "capex": "capex",
 }
 _FROZEN_BILL_STREAMS = (
-    "certificates", "demand_charge", "energy_import", "network_capacity",
-    "network_energy", "retail_fixed", "tax",
+    "certificates",
+    "demand_charge",
+    "energy_import",
+    "network_capacity",
+    "network_energy",
+    "retail_fixed",
+    "tax",
 )
 
 
@@ -195,7 +218,9 @@ def test_an_empty_business_case_is_the_ic_on_its_own_line_for_line():
     """Per-year templates change nothing: no BC lines = the IC without counterfactual."""
     ic = _ic()
     _, r = _run(_inputs(), ic)
-    ref = run_case(dataclasses.replace(ic, counterfactual=(), counterfactual_hash=None), PACK)
+    ref = run_case(
+        dataclasses.replace(ic, counterfactual=(), counterfactual_hash=None), PACK
+    )
     assert set(r.op.lines) == set(ref.op.lines)
     assert {m.stream for m in r.op.line_meta.values()} == {
         m.stream for m in ref.op.line_meta.values()
@@ -240,7 +265,9 @@ def test_bc1_the_build_leaves_the_ic_case_and_its_dicts_untouched():
 
 def test_bc1_the_bc_hash_is_its_own_domain_and_covers_each_input():
     ic = _ic()
-    linked = _line(name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1")
+    linked = _line(
+        name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1"
+    )
     s = Series("served_product.nh3", "t", {None: 100.0}, {})
     base = _inputs(_line(), linked, preset="eh_site@1", receivable_days=30.0)
     h = business_case_hash(ic, base, {"nh3": s})
@@ -250,14 +277,25 @@ def test_bc1_the_bc_hash_is_its_own_domain_and_covers_each_input():
     # Nothing else: an output no line links to does not enter the hash.
     assert h == business_case_hash(ic, base, {"nh3": s, "unused": s})
     changed = [
-        business_case_hash(ic, base.model_copy(update={"preset": "eh_site@2"}), {"nh3": s}),
-        business_case_hash(ic, base.model_copy(update={"receivable_days": 45.0}), {"nh3": s}),
         business_case_hash(
-            ic, _inputs(_line(price=51.0), linked, preset="eh_site@1", receivable_days=30.0),
+            ic, base.model_copy(update={"preset": "eh_site@2"}), {"nh3": s}
+        ),
+        business_case_hash(
+            ic, base.model_copy(update={"receivable_days": 45.0}), {"nh3": s}
+        ),
+        business_case_hash(
+            ic,
+            _inputs(
+                _line(price=51.0), linked, preset="eh_site@1", receivable_days=30.0
+            ),
             {"nh3": s},
         ),
-        business_case_hash(ic, base, {"nh3": Series("served_product.nh3", "t", {None: 99.0}, {})}),
-        business_case_hash(ic, base, {"nh3": NotEvaluated("served_product.nh3", "stale")}),
+        business_case_hash(
+            ic, base, {"nh3": Series("served_product.nh3", "t", {None: 99.0}, {})}
+        ),
+        business_case_hash(
+            ic, base, {"nh3": NotEvaluated("served_product.nh3", "stale")}
+        ),
     ]
     assert h not in changed and len(set(changed)) == len(changed)
 
@@ -300,7 +338,12 @@ def test_b2_the_bc_has_no_counterfactual_and_the_ic_no_bc_line():
     bc = build_business_case(ic, _inputs(_line()), {})
     assert bc.case.counterfactual == () and bc.case.counterfactual_hash is None
     assert not any(ln.source == "business_case" for t in ic.templates for ln in t.lines)
-    bc_lines = {ln.key for t in bc.case.templates for ln in t.lines if ln.source == "business_case"}
+    bc_lines = {
+        ln.key
+        for t in bc.case.templates
+        for ln in t.lines
+        if ln.source == "business_case"
+    }
     assert bc_lines == {"product"}
 
 
@@ -308,8 +351,19 @@ def test_b2_the_bc_has_no_counterfactual_and_the_ic_no_bc_line():
 
 
 def test_a_revenue_line_is_its_category_stream_signed_and_escalated():
-    _, r = _run(_inputs(_line(), _line(name="staff", kind="opex", category="staff",
-                                       unit="unit", quantity=2.0, price=30.0)))
+    _, r = _run(
+        _inputs(
+            _line(),
+            _line(
+                name="staff",
+                kind="opex",
+                category="staff",
+                unit="unit",
+                quantity=2.0,
+                price=30.0,
+            ),
+        )
+    )
     assert r.op.line_meta["product"].stream == "product_revenue"
     assert r.op.line_meta["staff"].stream == "bc_staff"
     for y in range(2031, 2036):
@@ -322,30 +376,44 @@ def test_a_revenue_line_is_its_category_stream_signed_and_escalated():
 def test_a_line_with_a_non_base_money_year_escalates_from_it():
     _, r = _run(_inputs(_line(money_year=2028)))
     for y in range(2031, 2036):
-        assert r.op.lines["product"][_at(r, y)] == pytest.approx(500.0 * 1.02 ** (y - 2028))
+        assert r.op.lines["product"][_at(r, y)] == pytest.approx(
+            500.0 * 1.02 ** (y - 2028)
+        )
 
 
 def test_a_contract_line_uses_its_indexation_and_a_grid_cell_does_not_escalate():
-    ln = _line(escalation="contract", indexation=0.05, price_by_year={2033: 70.0},
-               quantity_by_year={2034: 4.0}, start_year=2032, end_year=2034)
+    ln = _line(
+        escalation="contract",
+        indexation=0.05,
+        price_by_year={2033: 70.0},
+        quantity_by_year={2034: 4.0},
+        start_year=2032,
+        end_year=2034,
+    )
     _, r = _run(_inputs(ln))
     v = r.op.lines["product"]
     assert v[_at(r, 2031)] == 0.0 and v[_at(r, 2035)] == 0.0
     assert v[_at(r, 2032)] == pytest.approx(500.0 * 1.05)
-    assert v[_at(r, 2033)] == pytest.approx(700.0)                 # the cell, unescalated
-    assert v[_at(r, 2034)] == pytest.approx(4.0 * 50.0 * 1.05 ** 3)
+    assert v[_at(r, 2033)] == pytest.approx(700.0)  # the cell, unescalated
+    assert v[_at(r, 2034)] == pytest.approx(4.0 * 50.0 * 1.05**3)
 
 
 def test_kw_month_and_kw_year_are_real_units():
-    a = _line(name="a", category="lease", unit="kW_month", quantity=100.0 * 12, price=2.0)
+    a = _line(
+        name="a", category="lease", unit="kW_month", quantity=100.0 * 12, price=2.0
+    )
     b = _line(name="b", category="lease", unit="kW_year", quantity=100.0, price=24.0)
     _, r = _run(_inputs(a, b))
     np.testing.assert_allclose(r.op.lines["a"], r.op.lines["b"])
 
 
 def test_bc6_a_linked_line_reads_served_only_and_unserved_earns_nothing():
-    ln = _line(name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1",
-               price=400.0)
+    ln = _line(
+        name="nh3",
+        quantity=None,
+        quantity_source="linked:served_product.nh3@1",
+        price=400.0,
+    )
     full = Series("served_product.nh3", "t", {None: 100.0}, {})
     short = Series("served_product.nh3", "t", {None: 90.0}, {})
     _, r_full = _run(_inputs(ln), outputs={"nh3": full})
@@ -353,10 +421,15 @@ def test_bc6_a_linked_line_reads_served_only_and_unserved_earns_nothing():
     for y in range(2031, 2036):
         i = _at(r_full, y)
         assert r_full.op.lines["nh3"][i] - r_short.op.lines["nh3"][i] == pytest.approx(
-            10.0 * 400.0 * 1.02 ** (y - 2031))
+            10.0 * 400.0 * 1.02 ** (y - 2031)
+        )
     blob = json.dumps(
         [dataclasses.asdict(t) for t in bc.case.templates]
-        + [bc.case.inputs.model_dump(mode="json"), r_short.flags, list(pnl(r_short).rows)],
+        + [
+            bc.case.inputs.model_dump(mode="json"),
+            r_short.flags,
+            list(pnl(r_short).rows),
+        ],
         default=str,
     ).lower()
     assert "voll" not in blob and "lost_load" not in blob
@@ -364,7 +437,9 @@ def test_bc6_a_linked_line_reads_served_only_and_unserved_earns_nothing():
 
 def test_a_not_evaluated_or_uncovered_linked_quantity_is_never_zero():
     ln = _line(name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1")
-    _, r = _run(_inputs(ln), outputs={"nh3": NotEvaluated("served_product.nh3", "stale")})
+    _, r = _run(
+        _inputs(ln), outputs={"nh3": NotEvaluated("served_product.nh3", "stale")}
+    )
     assert r.op.revenue is None
     assert "line_not_established:nh3" in r.op.reasons["operating"]
     # A multi-period series that covers only 2031–2032: later years are not established.
@@ -377,10 +452,18 @@ def test_a_not_evaluated_or_uncovered_linked_quantity_is_never_zero():
 
 
 def test_a_capex_line_is_an_owner_asset_on_its_own_depreciation_class():
-    bc, r = _run(_inputs(_capex(), _capex(name="kit", depreciation="declining_balance",
-                                          rate=0.25, life_years=8.0)))
+    bc, r = _run(
+        _inputs(
+            _capex(),
+            _capex(
+                name="kit", depreciation="declining_balance", rate=0.25, life_years=8.0
+            ),
+        )
+    )
     a = {x.name: x for x in bc.case.assets}
-    assert a["plant"].overnight_cost == 600.0 and a["plant"].component == "business_case"
+    assert (
+        a["plant"].overnight_cost == 600.0 and a["plant"].component == "business_case"
+    )
     assert math.isinf(a["plant"].lifetime_years)
     cls = bc.case.inputs.depreciation_class_by_asset
     assert cls["plant"] == "slm_10" and cls["kit"] == "db_0.25_8"
@@ -414,7 +497,9 @@ def test_q2_capex_after_cod_is_a_stage_and_past_the_horizon_is_refused():
 
 def test_q2_the_staged_incentive_refusal_fires_through_the_bc_path():
     grant = Incentive(kind="grant", amount=100.0, grant_tax_treatment="taxable")
-    bc = build_business_case(_ic(incentives=[grant]), _inputs(_capex(start_year=2033)), {})
+    bc = build_business_case(
+        _ic(incentives=[grant]), _inputs(_capex(start_year=2033)), {}
+    )
     with pytest.raises(FinanceRefused) as e:
         run_case(bc.case, PACK)
     assert e.value.code == "staged_incentive_not_supported:plant"
@@ -422,15 +507,17 @@ def test_q2_the_staged_incentive_refusal_fires_through_the_bc_path():
 
 def test_refresh_capex_lands_in_start_plus_k_refresh_up_to_end_inclusive():
     bc, r = _run(_inputs(_capex(refresh_years=2.0)))
-    assert sorted(bc.case.inputs.replacement_capex) == [(2033, "plant", 600.0),
-                                                       (2035, "plant", 600.0)]
+    assert sorted(bc.case.inputs.replacement_capex) == [
+        (2033, "plant", 600.0),
+        (2035, "plant", 600.0),
+    ]
     rep = r.op.replacement
     hit = [y for y in _years(r) if rep[_at(r, y)] != 0.0]
     assert hit == [2033, 2035]
-    assert rep[_at(r, 2033)] == pytest.approx(600.0 * 1.02 ** 2)
+    assert rep[_at(r, 2033)] == pytest.approx(600.0 * 1.02**2)
     _, r0 = _run(_inputs(_capex()))
     dep, dep0 = r.tax.depreciation["federal"], r0.tax.depreciation["federal"]
-    assert dep[_at(r, 2033)] > dep0[_at(r, 2033)]                 # the vintage depreciates
+    assert dep[_at(r, 2033)] > dep0[_at(r, 2033)]  # the vintage depreciates
     bc, _ = _run(_inputs(_capex(refresh_years=2.0, end_year=2034)))
     assert [y for y, *_ in bc.case.inputs.replacement_capex] == [2033]
 
@@ -439,10 +526,18 @@ def test_q3_a_non_integral_life_leaves_tax_and_every_post_tax_kpi_not_establishe
     ic, inputs = _ic(), _inputs(_line(price=200.0), _capex(life_years=7.5))
     bc, r = _run(inputs, ic)
     assert r.tax_unlevered is None
-    assert any(x.startswith("tax_input_missing:depreciation_class:plant") for x in
-               r.reasons["tax"])
+    assert any(
+        x.startswith("tax_input_missing:depreciation_class:plant")
+        for x in r.reasons["tax"]
+    )
     k = kpis(r, pnl(r))
-    for name in ("project_npv", "project_irr", "equity_npv", "equity_irr", "payback_years"):
+    for name in (
+        "project_npv",
+        "project_irr",
+        "equity_npv",
+        "equity_irr",
+        "payback_years",
+    ):
         assert k[name].value is None and k[name].status == "not_established", name
         assert "tax" in k[name].reason, name
     be = break_even(ic, inputs, {}, "product", PACK)
@@ -453,9 +548,16 @@ def test_q3_a_non_integral_life_leaves_tax_and_every_post_tax_kpi_not_establishe
 
 
 def test_a_share_of_revenue_reads_the_revenue_lines_nominal_value():
-    share = _line(name="royalty", kind="opex", category="other", unit="share",
-                  quantity=0.1, price=None, quantity_source="share_of:revenue",
-                  escalation="opex")
+    share = _line(
+        name="royalty",
+        kind="opex",
+        category="other",
+        unit="share",
+        quantity=0.1,
+        price=None,
+        quantity_source="share_of:revenue",
+        escalation="opex",
+    )
     other = _line(name="o2", category="by_product", price=10.0, escalation="export")
     _, r = _run(_inputs(_line(), other, share))
     rev = r.op.lines["product"] + r.op.lines["o2"]
@@ -463,21 +565,39 @@ def test_a_share_of_revenue_reads_the_revenue_lines_nominal_value():
 
 
 def test_a_share_of_capex_is_base_money_escalated_by_the_lines_class():
-    share = _line(name="upkeep", kind="opex", category="maintenance", unit="share",
-                  quantity=0.02, price=None, quantity_source="share_of:capex",
-                  escalation="tariff")
+    share = _line(
+        name="upkeep",
+        kind="opex",
+        category="maintenance",
+        unit="share",
+        quantity=0.02,
+        price=None,
+        quantity_source="share_of:capex",
+        escalation="tariff",
+    )
     _, r = _run(_inputs(_capex(), _capex(name="kit", price=400.0), share))
     for y in range(2031, 2036):
         assert r.op.lines["upkeep"][_at(r, y)] == pytest.approx(
-            -0.02 * 1000.0 * 1.03 ** (y - 2031))
+            -0.02 * 1000.0 * 1.03 ** (y - 2031)
+        )
 
 
 def test_c3_a_share_whose_base_holds_a_share_is_refused_at_build():
-    a = _line(name="s1", kind="opex", category="other", unit="share", quantity=0.1,
-              price=None, quantity_source="share_of:opex")
+    a = _line(
+        name="s1",
+        kind="opex",
+        category="other",
+        unit="share",
+        quantity=0.1,
+        price=None,
+        quantity_source="share_of:opex",
+    )
     with pytest.raises(ShareCycle) as e:
-        build_business_case(_ic(), _inputs(_line(name="staff", kind="opex", category="staff",
-                                                 unit="unit"), a), {})
+        build_business_case(
+            _ic(),
+            _inputs(_line(name="staff", kind="opex", category="staff", unit="unit"), a),
+            {},
+        )
     assert e.value.field == "lines[1].quantity_source"
 
 
@@ -485,22 +605,44 @@ def test_c3_a_share_whose_base_holds_a_share_is_refused_at_build():
 
 
 def test_bc7_c2_c4_build_refuses_with_the_line_and_column():
-    req = PresetRule(requires=["it_hardware", "facility", "equipment"], excludes=["other"])
+    req = PresetRule(
+        requires=["it_hardware", "facility", "equipment"], excludes=["other"]
+    )
     cases = [
         (_inputs(_line(price=None)), PriceNotEstablished, "lines[0].price"),
-        (_inputs(_line(preset_rule=req), _capex(category="other")), ItCapexMissing,
-         "lines[0].preset_rule.requires[it_hardware]"),
-        (_inputs(_line(preset_rule=PresetRule(requires=["facility"]))),
-         FacilityCapexMissing, "lines[0].preset_rule.requires[facility]"),
-        (_inputs(_line(preset_rule=PresetRule(requires=["equipment"]))), CapexMissing,
-         "lines[0].preset_rule.requires[equipment]"),
-        (_inputs(_line(preset_rule=PresetRule(excludes=["equipment"])), _capex()),
-         CapexNotOwned, "lines[1].category"),
+        (
+            _inputs(_line(preset_rule=req), _capex(category="other")),
+            ItCapexMissing,
+            "lines[0].preset_rule.requires[it_hardware]",
+        ),
+        (
+            _inputs(_line(preset_rule=PresetRule(requires=["facility"]))),
+            FacilityCapexMissing,
+            "lines[0].preset_rule.requires[facility]",
+        ),
+        (
+            _inputs(_line(preset_rule=PresetRule(requires=["equipment"]))),
+            CapexMissing,
+            "lines[0].preset_rule.requires[equipment]",
+        ),
+        (
+            _inputs(_line(preset_rule=PresetRule(excludes=["equipment"])), _capex()),
+            CapexNotOwned,
+            "lines[1].category",
+        ),
         (_inputs(_line(name="bill")), NameDuplicate, "lines[0].name"),
         (_inputs(_line(), _capex(name="pv")), NameDuplicate, "lines[1].name"),
-        (_inputs(_line(name="nh3", quantity=None,
-                       quantity_source="linked:served_product.nh3@1")),
-         LinkedOutputMissing, "served_product.nh3"),
+        (
+            _inputs(
+                _line(
+                    name="nh3",
+                    quantity=None,
+                    quantity_source="linked:served_product.nh3@1",
+                )
+            ),
+            LinkedOutputMissing,
+            "served_product.nh3",
+        ),
     ]
     for inputs, exc, field in cases:
         with pytest.raises(exc) as e:
@@ -509,20 +651,39 @@ def test_bc7_c2_c4_build_refuses_with_the_line_and_column():
 
 
 def test_c4_a_linked_quantity_the_ic_ledger_prices_is_refused_double_count():
-    ln = _line(name="exp", category="other", unit="MWh", quantity=None,
-               quantity_source="linked:export.poc_grid@1")
+    ln = _line(
+        name="exp",
+        category="other",
+        unit="MWh",
+        quantity=None,
+        quantity_source="linked:export.poc_grid@1",
+    )
     s = Series("export.poc_grid", "MWh", {None: 10.0}, {})
     with pytest.raises(DoubleCount) as e:
         build_business_case(_ic(), _inputs(ln), {"exp": s})
-    assert e.value.field == "lines[0].quantity_source" and e.value.stream == "energy_export"
+    assert (
+        e.value.field == "lines[0].quantity_source"
+        and e.value.stream == "energy_export"
+    )
 
 
 # ── the P&L (BC3, BC4, BC5, C6) ─────────────────────────────────────────────
 
 
 def test_bc4_the_pnl_is_op_by_stream_and_ebitda_ties_to_net_total():
-    _, r = _run(_inputs(_line(price=200.0), _line(name="staff", kind="opex", category="staff",
-                                                  unit="unit", quantity=1.0, price=100.0)))
+    _, r = _run(
+        _inputs(
+            _line(price=200.0),
+            _line(
+                name="staff",
+                kind="opex",
+                category="staff",
+                unit="unit",
+                quantity=1.0,
+                price=100.0,
+            ),
+        )
+    )
     p = pnl(r)
     net = _net(r.op)
     np.testing.assert_array_equal(p.rows["ebitda"], net)
@@ -532,15 +693,28 @@ def test_bc4_the_pnl_is_op_by_stream_and_ebitda_ties_to_net_total():
     i = _at(r, 2032)
     # A year with net > 0 where gross ≠ net: op_incremental's clipped revenue is not it.
     assert net[i] > 0 and p.rows["revenue"][i] != pytest.approx(net[i])
-    assert p.rows["revenue"][i] != pytest.approx(np.clip(r.op_incremental["net"], 0, None)[i])
+    assert p.rows["revenue"][i] != pytest.approx(
+        np.clip(r.op_incremental["net"], 0, None)[i]
+    )
 
 
 def test_c6_the_ebitda_tie_is_exact_on_order_sensitive_values():
     ic = _ic(lines=(TemplateLine("fom", "fom", -1.0, "opex"),))
-    _, r = _run(_inputs(_line(name="big", unit="unit", quantity=1.0, price=1e16),
-                        _line(name="one", unit="unit", quantity=1.0, price=1.0),
-                        _line(name="c1", kind="opex", category="staff", unit="unit",
-                              quantity=1.0, price=1.0)), ic)
+    _, r = _run(
+        _inputs(
+            _line(name="big", unit="unit", quantity=1.0, price=1e16),
+            _line(name="one", unit="unit", quantity=1.0, price=1.0),
+            _line(
+                name="c1",
+                kind="opex",
+                category="staff",
+                unit="unit",
+                quantity=1.0,
+                price=1.0,
+            ),
+        ),
+        ic,
+    )
     np.testing.assert_array_equal(pnl(r).rows["ebitda"], _net(r.op))
 
 
@@ -549,9 +723,19 @@ def _tol(p, i):
 
 
 def test_bc5_the_tax_is_the_engines_and_the_cash_ties_each_year():
-    loan = DebtTranche(kind="term_loan", amount=800.0, rate=0.05, tenor_years=4,
-                       upfront_fee=0.0, dsra_months=0, grace_years=0, commitment_fee=0.0)
-    _, r = _run(_inputs(_line(price=200.0), _capex(refresh_years=2.0)), _ic(debt=[loan]))
+    loan = DebtTranche(
+        kind="term_loan",
+        amount=800.0,
+        rate=0.05,
+        tenor_years=4,
+        upfront_fee=0.0,
+        dsra_months=0,
+        grace_years=0,
+        commitment_fee=0.0,
+    )
+    _, r = _run(
+        _inputs(_line(price=200.0), _capex(refresh_years=2.0)), _ic(debt=[loan])
+    )
     p = pnl(r)
     np.testing.assert_array_equal(p.rows["tax"], r.tax_unlevered.total_liability)
     np.testing.assert_array_equal(p.rows["tax_equity"], r.tax.total_liability)
@@ -562,8 +746,10 @@ def test_bc5_the_tax_is_the_engines_and_the_cash_ties_each_year():
     rows = dict(p.rows)
     rows["tax"] = np.clip(0.21 * rows["ebit"], 0, None)
     bad = cash_bridge(rows)
-    assert any(abs(bad["project_post_tax"][i] - r.cash["project_post_tax"][i]) > _tol(p, i)
-               for i in range(r.tl.n))
+    assert any(
+        abs(bad["project_post_tax"][i] - r.cash["project_post_tax"][i]) > _tol(p, i)
+        for i in range(r.tl.n)
+    )
 
 
 def test_bc3_working_capital_is_in_the_cash_bridge_only():
@@ -571,28 +757,47 @@ def test_bc3_working_capital_is_in_the_cash_bridge_only():
     _, r = _run(inputs)
     p0 = pnl(r)
     p30 = pnl(r, receivable_days=30.0)
-    for row in ("revenue", "ebitda", "depreciation", "ebit", "tax", "net_income",
-                "project_post_tax", "equity_post_tax"):
+    for row in (
+        "revenue",
+        "ebitda",
+        "depreciation",
+        "ebit",
+        "tax",
+        "net_income",
+        "project_post_tax",
+        "equity_post_tax",
+    ):
         np.testing.assert_array_equal(p0.rows[row], p30.rows[row])
     assert p0.rows["working_capital_change"] is None
     wc = p30.rows["working_capital_change"]
     assert abs(wc.sum()) < 1e-9 and wc[_at(r, 2031)] < 0 and wc[-1] > 0
     for k in ("project", "equity"):
-        np.testing.assert_allclose(p30.rows[f"{k}_after_working_capital"],
-                                   p30.rows[f"{k}_post_tax"] + wc)
+        np.testing.assert_allclose(
+            p30.rows[f"{k}_after_working_capital"], p30.rows[f"{k}_post_tax"] + wc
+        )
 
 
 def test_a_hand_checked_three_year_case():
     """Revenue 100, staff 20, plant 200 straight-line over 2 years refreshed in 2033,
     no escalation, 21 % federal tax, no debt."""
-    ic = _ic(lines=(TemplateLine("fom", "fom", 0.0, "opex"),), analysis_years=3,
-             escalation={k: 0.0 for k in ESC})
-    ic = dataclasses.replace(ic, assets=(AssetFinance("pv", "Generator", 0.0, 25.0,
-                                                      carrier="solar"),))
+    ic = _ic(
+        lines=(TemplateLine("fom", "fom", 0.0, "opex"),),
+        analysis_years=3,
+        escalation={k: 0.0 for k in ESC},
+    )
+    ic = dataclasses.replace(
+        ic, assets=(AssetFinance("pv", "Generator", 0.0, 25.0, carrier="solar"),)
+    )
     inputs = _inputs(
         _line(unit="unit", quantity=1.0, price=100.0),
-        _line(name="staff", kind="opex", category="staff", unit="unit", quantity=1.0,
-              price=20.0),
+        _line(
+            name="staff",
+            kind="opex",
+            category="staff",
+            unit="unit",
+            quantity=1.0,
+            price=20.0,
+        ),
         _capex(price=200.0, life_years=2.0, refresh_years=2.0),
     )
     _, r = _run(inputs, ic)
@@ -601,11 +806,15 @@ def test_a_hand_checked_three_year_case():
     assert [p.rows["revenue"][i] for i in ops] == pytest.approx([100.0] * 3)
     assert [p.rows["ebitda"][i] for i in ops] == pytest.approx([80.0] * 3)
     # 200 over two years; the 2033 refresh (200) is written off in the last year.
-    assert [p.rows["depreciation"][i] for i in ops] == pytest.approx([100.0, 100.0, 200.0])
+    assert [p.rows["depreciation"][i] for i in ops] == pytest.approx(
+        [100.0, 100.0, 200.0]
+    )
     assert [p.rows["ebit"][i] for i in ops] == pytest.approx([-20.0, -20.0, -120.0])
     # Losses offset other income: tax is 21 % of EBIT, a credit when negative.
     assert [p.rows["tax"][i] for i in ops] == pytest.approx([-4.2, -4.2, -25.2])
-    assert [p.rows["net_income"][i] for i in ops] == pytest.approx([-15.8, -15.8, -94.8])
+    assert [p.rows["net_income"][i] for i in ops] == pytest.approx(
+        [-15.8, -15.8, -94.8]
+    )
     assert p.rows["capex"][_at(r, 2030)] == pytest.approx(200.0)
     assert p.rows["replacement"][_at(r, 2033)] == pytest.approx(200.0)
 
@@ -614,39 +823,64 @@ def test_a_hand_checked_three_year_case():
 
 
 def test_bc2_a_margin_zero_pass_through_nets_out():
-    pt = _line(name="pt", category="cost_recovery", unit="unit", quantity=1.0, price=300.0,
-               escalation="tariff")
+    pt = _line(
+        name="pt",
+        category="cost_recovery",
+        unit="unit",
+        quantity=1.0,
+        price=300.0,
+        escalation="tariff",
+    )
     cap = {"pv": 2.0, "battery": 1.0}
     _, ra = _run(_inputs(_line()))
     _, rb = _run(_inputs(_line(), pt))
     ka, kb = kpis(ra, pnl(ra), capacity=cap), kpis(rb, pnl(rb), capacity=cap)
     pb = pnl(rb)
-    np.testing.assert_allclose(pb.rows["ebitda_net_of_pass_through"], pnl(ra).rows["ebitda"])
-    assert kb["ebitda_margin_net"].value == pytest.approx(ka["ebitda_margin_gross"].value)
-    assert kb["revenue_per_capacity_net"].value == pytest.approx(ka["revenue_per_capacity_gross"].value)
-    assert kb["ebitda_margin_gross"].value != pytest.approx(ka["ebitda_margin_gross"].value)
+    np.testing.assert_allclose(
+        pb.rows["ebitda_net_of_pass_through"], pnl(ra).rows["ebitda"]
+    )
+    assert kb["ebitda_margin_net"].value == pytest.approx(
+        ka["ebitda_margin_gross"].value
+    )
+    assert kb["revenue_per_capacity_net"].value == pytest.approx(
+        ka["revenue_per_capacity_gross"].value
+    )
+    assert kb["ebitda_margin_gross"].value != pytest.approx(
+        ka["ebitda_margin_gross"].value
+    )
     assert kb["revenue_per_capacity_gross"].unit == "USD/MW-year"
-    assert kb["revenue_per_capacity_gross"].basis == {"assets": ["battery", "pv"],
-                                                      "capacity": 3.0, "unit": "MW"}
+    assert kb["revenue_per_capacity_gross"].basis == {
+        "assets": ["battery", "pv"],
+        "capacity": 3.0,
+        "unit": "MW",
+    }
     t = kpis(rb, pb, capacity={"nh3_loop": 2.0}, capacity_unit="t_per_year")
     assert t["revenue_per_capacity_gross"].unit == "USD/t_per_year-year"
     assert t["revenue_per_capacity_gross"].value == pytest.approx(
-        kb["revenue_per_capacity_gross"].value * 3.0 / 2.0)
+        kb["revenue_per_capacity_gross"].value * 3.0 / 2.0
+    )
 
 
 def test_c5_no_kpi_is_ever_non_finite():
     ic = _ic(lines=(TemplateLine("fom", "fom", -20.0, "opex"),))
     # No capex either, so every year's post-tax cash is ≤ 0.
-    ic = dataclasses.replace(ic, assets=(AssetFinance("pv", "Generator", 0.0, 25.0,
-                                                      carrier="solar"),))
+    ic = dataclasses.replace(
+        ic, assets=(AssetFinance("pv", "Generator", 0.0, 25.0, carrier="solar"),)
+    )
     _, r = _run(_inputs(), ic)
     p = pnl(r)
     k = kpis(r, p, capacity={"pv": 0.0})
-    assert k["ebitda_margin_gross"].status == "n/a" and k["ebitda_margin_gross"].value is None
+    assert (
+        k["ebitda_margin_gross"].status == "n/a"
+        and k["ebitda_margin_gross"].value is None
+    )
     assert all(v is None for v in p.rows["ebitda_margin"])
     assert k["revenue_per_capacity_gross"].status == "not_established"
     assert kpis(r, p)["revenue_per_capacity_gross"].status == "not_established"
-    assert kpis(r, p, capacity={})["revenue_per_capacity_gross"].status == "not_established"
+    assert (
+        kpis(r, p, capacity={})["revenue_per_capacity_gross"].status
+        == "not_established"
+    )
     # All cash negative: no sign change, so the IRR is n/a.
     assert k["project_irr"].status == "n/a" and k["project_irr"].value is None
     for v in k.values():
@@ -657,18 +891,38 @@ def test_bc8_dscr_is_na_without_debt_and_a_number_with_it():
     _, r = _run(_inputs(_line(price=200.0)))
     k = kpis(r, pnl(r))
     assert k["min_dscr"].status == "n/a" and k["min_dscr"].value is None
-    loan = DebtTranche(kind="term_loan", amount=800.0, rate=0.05, tenor_years=4,
-                       upfront_fee=0.0, dsra_months=0, grace_years=0, commitment_fee=0.0)
+    loan = DebtTranche(
+        kind="term_loan",
+        amount=800.0,
+        rate=0.05,
+        tenor_years=4,
+        upfront_fee=0.0,
+        dsra_months=0,
+        grace_years=0,
+        commitment_fee=0.0,
+    )
     _, r = _run(_inputs(_line(price=200.0)), _ic(debt=[loan]))
     k = kpis(r, pnl(r))
     assert k["min_dscr"].status == "ok" and math.isfinite(k["min_dscr"].value)
 
 
 def test_bc8_c7_break_even_brackets_its_root_and_reruns_to_zero(monkeypatch):
-    ic, inputs = _ic(), _inputs(_line(price=50.0), _line(name="o2", category="by_product"),
-                                _line(name="fee", kind="opex", category="other", unit="share",
-                                      quantity=0.05, price=None,
-                                      quantity_source="share_of:revenue/by_product"))
+    ic, inputs = (
+        _ic(),
+        _inputs(
+            _line(price=50.0),
+            _line(name="o2", category="by_product"),
+            _line(
+                name="fee",
+                kind="opex",
+                category="other",
+                unit="share",
+                quantity=0.05,
+                price=None,
+                quantity_source="share_of:revenue/by_product",
+            ),
+        ),
+    )
     seen = []
     real = bcm.run_case
 
@@ -679,10 +933,16 @@ def test_bc8_c7_break_even_brackets_its_root_and_reruns_to_zero(monkeypatch):
     monkeypatch.setattr(bcm, "run_case", spy)
     be = break_even(ic, inputs, {}, "product", PACK)
     assert be["status"] == "ok" and be["money_year"] == 2031
+
     # Only the named line moves: every other line is byte-equal across two trials.
     def others(case):
-        return [(t.first_year, ln) for t in case.templates for ln in t.lines
-                if ln.key != "product"]
+        return [
+            (t.first_year, ln)
+            for t in case.templates
+            for ln in t.lines
+            if ln.key != "product"
+        ]
+
     assert len(seen) >= 2 and others(seen[0]) == others(seen[1])
     assert seen[0].assets == seen[1].assets
     monkeypatch.setattr(bcm, "run_case", real)
@@ -698,9 +958,15 @@ def test_bc8_no_sign_change_in_the_bracket_is_refused_never_extrapolated():
     rich = _line(name="subsidy", category="other", unit="unit", quantity=1.0, price=1e5)
     be = break_even(_ic(), _inputs(_line(), rich), {}, "product", PACK)
     assert be["status"] == "break_even_not_bracketed" and be["price"] is None
-    be = break_even(_ic(), _inputs(_line(), _line(name="staff", kind="opex",
-                                                  category="staff", unit="unit")),
-                    {}, "staff", PACK)
+    be = break_even(
+        _ic(),
+        _inputs(
+            _line(), _line(name="staff", kind="opex", category="staff", unit="unit")
+        ),
+        {},
+        "staff",
+        PACK,
+    )
     assert be["status"] == "break_even_line_not_revenue"
     be = break_even(_ic(), _inputs(_line()), {}, "nope", PACK)
     assert be["status"] == "break_even_line_not_revenue"
@@ -717,17 +983,31 @@ def test_bc8_npv_falling_with_price_is_not_bracketed(monkeypatch):
 
 
 def test_a_capex_share_of_another_capex_category_is_base_money():
-    cont = _capex(name="contingency", category="other", unit="share", quantity=0.1,
-                  price=None, quantity_source="share_of:capex/equipment")
-    bc = build_business_case(_ic(), _inputs(_capex(), _capex(name="kit", price=400.0), cont),
-                             {})
+    cont = _capex(
+        name="contingency",
+        category="other",
+        unit="share",
+        quantity=0.1,
+        price=None,
+        quantity_source="share_of:capex/equipment",
+    )
+    bc = build_business_case(
+        _ic(), _inputs(_capex(), _capex(name="kit", price=400.0), cont), {}
+    )
     a = {x.name: x.overnight_cost for x in bc.case.assets}
     assert a["contingency"] == pytest.approx(0.1 * 1000.0)
 
 
 def test_a_capex_share_of_revenue_is_its_first_years_nominal_in_base_money():
-    cap = _capex(name="dev", category="other", unit="share", quantity=0.5, price=None,
-                 quantity_source="share_of:revenue", start_year=2032)
+    cap = _capex(
+        name="dev",
+        category="other",
+        unit="share",
+        quantity=0.5,
+        price=None,
+        quantity_source="share_of:revenue",
+        start_year=2032,
+    )
     bc = build_business_case(_ic(), _inputs(_line(), cap), {})
     dev = next(x for x in bc.case.assets if x.name == "dev")
     # 2032 revenue 500 × 1.02 (opex class), back to 2031 money at the capex rate 2 %.
@@ -741,25 +1021,37 @@ def test_capex_in_base_money_needs_no_capex_rate():
 
 
 def test_a_not_evaluated_linked_capex_stays_not_established_in_any_money_year():
-    ln = _capex(unit="t", quantity=None, quantity_source="linked:served_product.nh3@1",
-                money_year=2028)
-    bc = build_business_case(_ic(), _inputs(ln),
-                             {"plant": NotEvaluated("served_product.nh3", "stale")})
+    ln = _capex(
+        unit="t",
+        quantity=None,
+        quantity_source="linked:served_product.nh3@1",
+        money_year=2028,
+    )
+    bc = build_business_case(
+        _ic(), _inputs(ln), {"plant": NotEvaluated("served_product.nh3", "stale")}
+    )
     assert next(a for a in bc.case.assets if a.name == "plant").overnight_cost is None
 
 
 def test_outputs_default_to_none_everywhere():
     ic, inputs = _ic(), _inputs(_line())
-    assert build_business_case(ic, inputs).hash == business_case_hash(ic, inputs) == \
-        build_business_case(ic, inputs, {}).hash
+    assert (
+        build_business_case(ic, inputs).hash
+        == business_case_hash(ic, inputs)
+        == build_business_case(ic, inputs, {}).hash
+    )
     assert break_even(ic, inputs, None, "product", PACK)["status"] == "ok"
 
 
 def test_the_hash_tells_not_evaluated_reasons_apart():
     ic = _ic()
     ln = _line(name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1")
-    a = business_case_hash(ic, _inputs(ln), {"nh3": NotEvaluated("served_product.nh3", "x")})
-    b = business_case_hash(ic, _inputs(ln), {"nh3": NotEvaluated("served_product.nh3", "y")})
+    a = business_case_hash(
+        ic, _inputs(ln), {"nh3": NotEvaluated("served_product.nh3", "x")}
+    )
+    b = business_case_hash(
+        ic, _inputs(ln), {"nh3": NotEvaluated("served_product.nh3", "y")}
+    )
     assert a != b
 
 
@@ -777,17 +1069,30 @@ def test_a_non_finite_kpi_reads_na():
 
 def test_the_irr_reason_is_the_engines():
     ic = _ic(lines=(TemplateLine("fom", "fom", -20.0, "opex"),))
-    ic = dataclasses.replace(ic, assets=(AssetFinance("pv", "Generator", 0.0, 25.0,
-                                                      carrier="solar"),))
+    ic = dataclasses.replace(
+        ic, assets=(AssetFinance("pv", "Generator", 0.0, 25.0, carrier="solar"),)
+    )
     _, r = _run(_inputs(), ic)
     assert kpis(r, pnl(r))["project_irr"].reason == "irr_not_established:no_sign_change"
 
 
 def test_c4_a_difference_line_netting_to_zero_still_prices_its_volume():
-    cfd = TemplateLine("cfd", "cfd_settlement", 0.0, CONTRACT_CLASS, indexation=0.0,
-                       price=50.0, price_qty_mwh=10.0)
-    ln = _line(name="exp", category="other", unit="MWh", quantity=None,
-               quantity_source="linked:export.poc_grid@1")
+    cfd = TemplateLine(
+        "cfd",
+        "cfd_settlement",
+        0.0,
+        CONTRACT_CLASS,
+        indexation=0.0,
+        price=50.0,
+        price_qty_mwh=10.0,
+    )
+    ln = _line(
+        name="exp",
+        category="other",
+        unit="MWh",
+        quantity=None,
+        quantity_source="linked:export.poc_grid@1",
+    )
     s = Series("export.poc_grid", "MWh", {None: 10.0}, {})
     with pytest.raises(DoubleCount) as e:
         build_business_case(_ic(lines=(cfd,)), _inputs(ln), {"exp": s})
