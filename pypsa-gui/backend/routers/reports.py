@@ -304,12 +304,28 @@ def _current_study_report() -> dict | None:
 
 
 def _render_figures(eh_report: dict | None,
-                    project_dir: pathlib.Path | None = None) -> dict[str, bytes]:
+                    project_dir: pathlib.Path | None = None, *,
+                    charts: bool = True) -> dict[str, bytes]:
     """
     WP4's three PNGs from the EH sections that are established, each may be
     absent; plus the 3D site view's capture (`sites/<id>/thumb.png`, plan 3
-    S5) when `project_dir` is given and a site has one.
+    S5) when `project_dir` is given and a site has one. With `charts` and a
+    `project_dir`, the result is a `ReportFigures`: the charts the user saved
+    from Results (`chart_snapshots`) ride on its `.charts`, and their PNGs sit
+    in the dict. A strict (assistant) report passes `charts=False`.
     """
+    out = _base_figures(eh_report, project_dir)
+    if not charts or project_dir is None:
+        return out
+    from services.reports import chart_snapshots
+
+    found = chart_snapshots.report_figures(project_dir, chart_snapshots.active_solve_fingerprint())
+    figures = chart_snapshots.ReportFigures(out, found)
+    figures.update({c.figure_id: c.png for c in found if c.png is not None})
+    return figures
+
+
+def _base_figures(eh_report: dict | None, project_dir: pathlib.Path | None) -> dict[str, bytes]:
     from services import site_service
     from services.reports.assemble import SITE_FIGURE_ID
     from services.reports.figures import capacity_mix_png, fmea_pareto_png, frontier_png
@@ -488,7 +504,7 @@ def create_report(body: CreateReportBody,
     _check_lock(project, db, user)
 
     evidence, eh_report = _current_evidence(project)
-    figure_pngs = _render_figures(eh_report, project.directory)
+    figure_pngs = _render_figures(eh_report, project.directory, charts=not assistant_strict_active())
     title = (body.title or "").strip() or f"{DEFAULT_TITLE} — {project.name}"
     doc = evidence_only_document(evidence, title=title,
                                  report_id=store.new_report_id(),

@@ -42,6 +42,7 @@ from models.report import Block, Bullets, Callout, Paragraph, ReportDocument, Se
 from services.atomic_io import atomic_write_text
 from services.reports import store
 from services.reports.assemble import (
+    CHARTS_SECTION_ID,
     DEFAULT_TITLE,
     EXECUTIVE_SUMMARY_ID,
     evidence_only_document,
@@ -89,7 +90,7 @@ def declare_summaries(document: ReportDocument,
         sections = [s.model_copy(update={"summarises": list(dict.fromkeys(summaries[s.section_id]))})
                     if s.section_id in summaries else s for s in document.sections]
         document = document.model_copy(update={"sections": sections})
-    known = {s.section_id for s in document.sections}
+    known = {s.section_id for s in document.sections if s.section_id != CHARTS_SECTION_ID}
     for sid in summaries or {}:
         if sid not in known:
             raise SummarySectionUnknown(sid)
@@ -187,7 +188,7 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
         if template_file_id is not None:
             document = document.model_copy(update={"template_file_id": template_file_id})
     document = declare_summaries(document, summaries)
-    known = {s.section_id for s in document.sections}
+    known = {s.section_id for s in document.sections if s.section_id != CHARTS_SECTION_ID}
     if regenerate_section is not None:
         wanted = [regenerate_section]
     elif sections:

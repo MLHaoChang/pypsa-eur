@@ -71,6 +71,7 @@ def test_the_issue_rows_are_declared():
         'power_trace_spectrum': ('unbuilt', None),
         'unrecorded_series_confirm': ('manual', None),
         'report_comment_revisions': ('unbuilt', None),
+        'report_chart_snapshots': ('manual', 'results'),
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
     assert {k: (e['disposition'], e['panel']) for k, e in entries.items()} == expected
@@ -145,3 +146,14 @@ def test_matching_is_bounded_ranked_and_returns_detached_public_records():
     assert len(out) <= 2 and matches({'account'}, limit=0) == []
     out[0]['reason'] = 'changed by a caller'
     assert matches({'account'})[0]['reason'] != 'changed by a caller'
+
+
+def test_saved_report_charts_are_human_only_and_found_by_their_goal(discovery):
+    from services.not_via_chat import NOT_VIA_CHAT
+
+    entry = next(e for e in NOT_VIA_CHAT if e['id'] == 'report_chart_snapshots')
+    assert entry['disposition'] == 'manual'
+    assert {('POST', '/api/projects/{name}/report-charts'),
+            ('DELETE', '/api/projects/{name}/report-charts/{chart_id}')} <= entry['routes']
+    out = chat_tools.find_capabilities('Pin this chart for the report.')
+    assert [e['title'] for e in out.get('not_via_chat', [])][:1] == [entry['title']]

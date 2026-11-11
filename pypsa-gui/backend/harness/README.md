@@ -1106,6 +1106,14 @@ and pointing to the "Numbers to check" appendix. The appendix (docx, the PDF's
 docx, the tagged template's `unverified`, `get_report`'s `audit.withheld`)
 lists the values marked withheld.
 
+A strict report carries no charts. The charts a person saved from Results
+(`reports/_charts/`, `services/reports/chart_snapshots.py`) are added only to
+a human report; `create_evidence_report` and `generate_report` run strict, so
+their reports leave the "Charts from Results" section out, and a saved chart's
+text never reaches an admitted fact or a draft prompt. The saving routes
+(`POST` and `DELETE .../report-charts`) are human-only (`not_via_chat`), and
+`reports/_charts` is not a "report" effect in the trajectory evaluation.
+
 A strict job and the assistant's `export_report_docx` and `export_report_pdf`
 check that every required disclosure of the version they start from is still
 there. A lost one fails the job, or refuses the export, with

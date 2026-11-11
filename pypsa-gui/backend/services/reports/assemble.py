@@ -82,6 +82,8 @@ FIGURE_CAPTIONS: dict[str, str] = {
 }
 
 EXECUTIVE_SUMMARY_ID = "executive_summary"
+# The charts the user pinned from Results (`chart_snapshots`): code-built, never drafted.
+CHARTS_SECTION_ID = "charts_from_results"
 
 #: The report follows the four categories the screens use (UX review N9, owner decision E):
 #: Investment, Grid plan, Reliability, Operation. A section's category is fixed here, by id; the
@@ -107,7 +109,7 @@ def section_category(section_id: str) -> str | None:
     sections and the expert FMEA worksheet are reliability."""
     if section_id in _CATEGORY_OF_SECTION:
         return _CATEGORY_OF_SECTION[section_id]
-    if section_id in (EXECUTIVE_SUMMARY_ID, PIPELINE_ID, "template_ledger", "harness_run"):
+    if section_id in (EXECUTIVE_SUMMARY_ID, PIPELINE_ID, CHARTS_SECTION_ID, "template_ledger", "harness_run"):
         return None
     return "reliability"
 
@@ -397,6 +399,27 @@ def _pipeline_section(evidence: Evidence) -> Section:
                              f"{NO_DATA_HINTS['eh_reference_design']}.")])
 
 
+def _charts_section(charts: list, figures: dict[str, Figure]) -> Section | None:
+    """The charts the user saved from Results: a figure per readable snapshot (with an
+    "out of date" callout when it is from an earlier solve than the one this report
+    reads), a gap callout per unreadable one. None when there are none."""
+    if not charts:
+        return None
+    blocks: list[Block] = []
+    for chart in charts:
+        if chart.png is None:
+            blocks.append(Callout(kind="gap", text=chart.gap or "A saved chart could not be read."))
+            continue
+        figures[chart.figure_id] = Figure(
+            figure_id=chart.figure_id, png_file=f"figures/{chart.figure_id}.png", caption=chart.caption)
+        blocks.append(FigureRef(figure_id=chart.figure_id, caption=chart.caption))
+        if chart.earlier:
+            blocks.append(Callout(kind="gap", text="This chart is out of date: it was saved from an earlier "
+                                                   "solve than the one this report reads."))
+    return Section(section_id=CHARTS_SECTION_ID, heading="Charts from Results", source="code",
+                   status="ok", blocks=blocks)
+
+
 # ── entry point ──────────────────────────────────────────────────────────
 
 
@@ -438,6 +461,8 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
     # harness issue 07), each only when its source was passed.
     sections.extend(_eh_section(evidence, sid, figure_pngs, figures, extra_tables)
                     for sid, sec in evidence.sections.items() if sec.kind in ("network", "harness_run"))
+    if (charts := _charts_section(list(getattr(figure_pngs, "charts", ())), figures)) is not None:
+        sections.append(charts)
     sections.append(_pipeline_section(evidence))
     sections = _grouped(sections)
 

@@ -1722,3 +1722,21 @@ def test_the_lock_shape_is_the_report_stores_own():
     assert store.REPORT_ID_RE == r"\A[0-9a-f]{16}\Z"
     assert te.REPORT_ID_LEN == 16
     assert te.REPORT_ID_CHARS == frozenset("0123456789abcdef")
+
+
+def test_a_saved_results_chart_is_not_a_report_effect_but_a_report_write_still_is():
+    """ui-modern 02 slice 7a (V11, W8): `reports/_charts/...` is keyed on the exact folder name."""
+
+    def snap(files):
+        return {"projects": {P: {"files": files}}}
+
+    cid = "chart-0123456789abcdef"
+    before = snap({})
+    for path in (f"reports/_charts/{cid}.json", f"reports/_charts/{cid}.png", "reports/_charts/.lock"):
+        assert te.diff(before, snap({path: "h"})) == [], path
+    for path, key in (("reports/_chartsx/a.json", "_chartsx"), ("reports/_chart/a.json", "_chart"),
+                      ("reports/0123456789abcdef/v1.json", "0123456789abcdef")):
+        (row,) = te.diff(before, snap({path: "h"}))
+        assert (row["kind"], row["key"]) == ("report", key), path
+    (row,) = te.diff(before, snap({"reports/_charts": "h"}))  # the folder name itself is no file inside it
+    assert (row["kind"], row["key"]) == ("report", "_charts")

@@ -315,6 +315,24 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'report_chart_snapshots',
+        'title': 'Saving a chart for the report',
+        'disposition': 'manual',
+        'reason': 'Only you can pin a chart you are looking at in Results for the report, list the pinned ones or remove one. Use "Add to report" on the chart; chat reports never carry saved charts.',
+        'page': 'Results (chart "Add to report")',
+        'panel': 'results',
+        'keywords': frozenset({
+            'pin',
+            'pinned',
+        }),
+        'routes': frozenset({
+            ('DELETE', '/api/projects/{name}/report-charts/{chart_id}'),
+            ('GET', '/api/projects/{name}/report-charts'),
+            ('GET', '/api/projects/{name}/report-charts/{chart_id}.png'),
+            ('POST', '/api/projects/{name}/report-charts'),
+        }),
+    },
+    {
         'id': 'unrecorded_series_confirm',
         'title': 'Confirming where a series with no provenance record came from',
         'disposition': 'manual',
