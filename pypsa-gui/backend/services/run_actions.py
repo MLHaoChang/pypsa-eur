@@ -598,16 +598,17 @@ def _stop(path, step_id, reason, detail=None, held=None):
     return reason
 
 
-def _reserve(path, call_id, tool=CAMPUS, event=EVENT):
+def _reserve(path, call_id, tool=CAMPUS, event=EVENT, *, granted_only=False):
     """D5: reserve `SOLVES` on a granted envelope's ledger before the job
     starts (row `event`, for `tool`). False when the solves left do not
-    cover it."""
+    cover it. With no granted envelope nothing is reserved: True, or None
+    with `granted_only` (a solve that runs only on a granted budget)."""
     from services import assistant_tasks, run_envelope
 
     with assistant_tasks._LOCK:
         envelope = run_envelope._load(path)
         if envelope is None or envelope.get("state") != "granted":
-            return True
+            return None if granted_only else True
         if envelope["budget"]["solves"] - run_envelope.solves_used(envelope) < SOLVES:
             return False
         run_envelope._audit(
@@ -812,8 +813,50 @@ MG_RESULT = {
     "periods": dict,
     "critical_loads": list,
     "missing": dict,
+    "skipped": list,
 }
 INPUTS_CHANGED = "inputs_changed"
+
+#: The steps of a project solve's own chain (`solver_service.run_simulation`,
+#: `build_lp_chain`) the island check does not take, each in words, in the
+#: order the result lists those this project has on (C1).
+MG_SKIPPED = {
+    "island_apply": "the island constraints switched on in the solver settings "
+    "(the check adds the island rows as a check of its own)",
+    "poc_writer": "the PoC energy prices of the commercial settings",
+    "user_code": "the project's user code (extra_functionality)",
+    "solver_options": "the project's solver options",
+    "solver_config": "the project's solver settings, which cannot be read",
+}
+
+
+def mg_skipped(project_dir) -> list:
+    """The `MG_SKIPPED` keys this project's saved solver settings have on,
+    each by the test its own solve step makes: `_wrap_with_island`
+    (`island_constraints` on an LOPF), `materialise_poc_prices` (a
+    commercial config), `_compile_extra_functionality` (code that is not
+    blank) and the solver options merged into the solve. Settings that
+    cannot be read are named as such."""
+    from routers.projects import _solver_config_from_dict
+    from services.campus_electrical_service import SOLVER_CONFIG_FILE
+
+    path = Path(project_dir) / SOLVER_CONFIG_FILE
+    try:
+        raw = json.loads(path.read_text()) if path.is_file() else {}
+        if not isinstance(raw, dict):  # N2b: `[]`, `null` or `"x"` is not settings
+            return ["solver_config"]
+        cfg = _solver_config_from_dict(raw)
+        code = cfg.extra_functionality_code
+        on = {
+            "island_apply": bool(getattr(cfg, "island_constraints", False))
+            and getattr(cfg, "mode", "lopf") == "lopf",
+            "poc_writer": bool(getattr(cfg, "commercial", None)),
+            "user_code": bool((code or "").strip()),
+            "solver_options": bool(cfg.solver_options),
+        }
+    except Exception:  # noqa: BLE001 — N2b: settings it cannot read are named, never raised
+        return ["solver_config"]
+    return [k for k in MG_SKIPPED if on.get(k)]
 
 
 def _locked(ctx, read):
@@ -907,7 +950,15 @@ def _mg_island(path, step, project_dir, frozen, attempt, ctx, instance):
     def stop(reason, detail):
         return _stop(path, step["id"], reason, detail, held=(attempt, instance))
 
-    if not _reserve(path, call_id, tool=MG_SURVIVAL, event=MG_EVENT):
+    reserved = _reserve(
+        path, call_id, tool=MG_SURVIVAL, event=MG_EVENT, granted_only=True
+    )
+    if reserved is None:  # B1: its one solve comes from a granted budget only
+        return stop(
+            "mg_no_grant",
+            "the island check solves only on the run's granted budget, and none is granted",
+        )
+    if not reserved:
         return stop(
             "mg_no_solve",
             "the run's granted solves do not cover the island check's one solve",
@@ -922,6 +973,7 @@ def _mg_island(path, step, project_dir, frozen, attempt, ctx, instance):
                 island,
                 settings_digest(island),
                 copy_network(ctx.network),
+                mg_skipped(project_dir),
             )
 
         try:
@@ -930,7 +982,7 @@ def _mg_island(path, step, project_dir, frozen, attempt, ctx, instance):
             return stop("mg_" + exc.state, str(exc))
         if inputs is None:
             return stop("mg_busy", "the project is busy; run the check again")
-        revision, island, settings, n = inputs
+        revision, island, settings, n, skipped = inputs
         if settings != frozen["settings_digest"]:
             return stop(
                 "mg_island_changed",
@@ -960,6 +1012,7 @@ def _mg_island(path, step, project_dir, frozen, attempt, ctx, instance):
                     "settings_digest": settings,
                     "network_revision": revision,
                     "solves": len(calls),
+                    "skipped": skipped,
                 },
                 default=str,
             )
