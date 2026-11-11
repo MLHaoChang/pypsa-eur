@@ -1732,13 +1732,22 @@ def test_a_saved_results_chart_is_not_a_report_effect_but_a_report_write_still_i
 
     cid = "chart-0123456789abcdef"
     before = snap({})
-    for path in (f"reports/_charts/{cid}.json", f"reports/_charts/{cid}.png", "reports/_charts/.lock"):
+    for path in (
+        f"reports/_charts/{cid}.json",
+        f"reports/_charts/{cid}.png",
+        "reports/_charts/.lock",
+    ):
         assert te.diff(before, snap({path: "h"})) == [], path
     (row,) = te.diff(before, snap({"other/_charts/a.json": "h"}))
     assert (row["kind"], row["key"]) == ("file", "other/_charts/a.json")
-    for path, key in (("reports/_chartsx/a.json", "_chartsx"), ("reports/_chart/a.json", "_chart"),
-                      ("reports/0123456789abcdef/v1.json", "0123456789abcdef")):
+    for path, key in (
+        ("reports/_chartsx/a.json", "_chartsx"),
+        ("reports/_chart/a.json", "_chart"),
+        ("reports/0123456789abcdef/v1.json", "0123456789abcdef"),
+    ):
         (row,) = te.diff(before, snap({path: "h"}))
         assert (row["kind"], row["key"]) == ("report", key), path
-    (row,) = te.diff(before, snap({"reports/_charts": "h"}))  # the folder name itself is no file inside it
+    (row,) = te.diff(
+        before, snap({"reports/_charts": "h"})
+    )  # the folder name itself is no file inside it
     assert (row["kind"], row["key"]) == ("report", "_charts")

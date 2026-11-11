@@ -880,7 +880,9 @@ def test_v3_w8_the_charts_section_is_not_draftable_by_name_or_default(tmp_path):
                 **kw, base_document=doc, sections=sections, regenerate_section=regen
             )
     declared = report_job.declare_summaries(doc, {"executive_summary": ["target"]})
-    assert next(s for s in declared.sections if s.section_id == "executive_summary").summarises == ["target"]
+    assert next(
+        s for s in declared.sections if s.section_id == "executive_summary"
+    ).summarises == ["target"]
     with pytest.raises(report_job.SummarySectionUnknown):
         report_job.declare_summaries(doc, {"executive_summary": [CHARTS_SECTION_ID]})
     with pytest.raises(report_job.SummarySectionUnknown):
