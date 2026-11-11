@@ -412,6 +412,36 @@ def test_staleness_walks_a_cell_stamp():
     assert Q.staleness(g, C.cell_id(PEAK_KEY)).state == "fresh"
 
 
+def test_the_walk_takes_walked_kinds_and_a_cell_stamp_only_on_a_stamped_with_edge():
+    """`walked`: a `WALKED` kind is followed whatever it records; a `CellStamp` on any other kind is not."""
+    stamp = CellStamp(PEAK_KEY, _entry(0.2, "/kWh"))
+    b = Q.Builder(None)
+    b.node(Node("input", "input:a"))
+    b.edge(Edge("derived_from", "input:a", "input:b"))
+    b.edge(Edge("shown_in", "input:a", "input:c", recorded=stamp))
+    assert [e.kind for e in Q.walked(b.build(), "input:a")] == ["derived_from"]
+
+
+def test_a_cell_graph_whose_context_is_no_config_reads_malformed_not_gone():
+    b = Q.Builder(None)
+    C.add_cells(b, _config())
+    verdict = Q.staleness(b.build(), C.cell_id(PEAK_KEY))
+    assert (verdict.state, verdict.broken[0].reason) == ("stale", C.MALFORMED)
+
+
+@pytest.mark.parametrize("config", [None, {}, {"provenance": None}])
+def test_the_wire_of_a_config_with_no_provenance_is_none(config):
+    assert Q.cell_wire(config, PEAK_KEY) is None
+
+
+def test_an_entry_that_records_no_unit_leaves_it_uncompared():
+    config = _config()
+    del config["provenance"][PEAK_KEY]["unit"]
+    wire = Q.cell_wire(config, PEAK_KEY)
+    assert (wire["state"], wire["compared"]) == ("fresh", ["value", "currency"])
+    assert "unit" not in wire["uncompared"]
+
+
 def test_why_walks_a_cell_stamp_and_shows_its_entry():
     config = _config()
     _item(config, "energy")["periods"][0]["rate"] = 0.09
