@@ -1322,3 +1322,34 @@ def test_an_edit_below_the_lossy_fingerprints_precision_is_still_not_evaluated()
         "assistant_solve_input_fingerprint"
     ] == workflow_tools._network_input_fingerprint(ctx)
     assert not L.bind(ctx).fresh
+
+
+def test_it_energy_with_a_period_the_network_lacks_is_not_evaluated(monkeypatch):
+    """F6: an extra period is a mismatch, never dropped by the label match."""
+    from services import dc_it_energy as E
+
+    spec, n, solve = _dc()
+    real = E.it_energy
+
+    def extra(*a, **k):
+        periods = real(*a, **k).periods
+        row = periods.iloc[[-1]].set_axis([periods.index.max() + 50])
+        return SimpleNamespace(periods=pd.concat([periods, row]))
+
+    monkeypatch.setattr(E, "it_energy", extra)
+    assert L.read(n, solve, "it_energy", "MWh") == L.NotEvaluated(
+        "it_energy", "it_energy_periods_mismatch"
+    )
+
+
+def test_it_energy_on_a_flat_network_reads_its_one_period_as_none(monkeypatch):
+    """F6: DC 03 keys a flat network's one period by the snapshots' year; the read keys it None."""
+    from services import dc_it_energy as E
+
+    n = _plant(periods=())
+    solve = _solve(n, dc=(None, "UTC"))
+    frame = pd.DataFrame(
+        {"billable_it_mwh": [12.0], "contracted_it_kw": [3.0]}, index=[2030]
+    )
+    monkeypatch.setattr(E, "it_energy", lambda *a, **k: SimpleNamespace(periods=frame))
+    assert _value(L.read(n, solve, "it_energy", "MWh")) == {None: 12.0}
