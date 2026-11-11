@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AnnualRow, HeatmapState, MonthRow, WeekView } from '../../api/loadShape'
 import {
-  annualStack, GROUP_COLOR, MONTH_STACK, WEEK_LINES, cellTitle, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH, heatMax, missingGroups, monthRows, socRows, weekRows,
+  annualStack, DAILY_COLOR, GROUP_COLOR, MONTH_STACK, WEEK_LINES, cellTitle, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH, heatMax, missingGroups, monthRows, socRows, weekRows,
 } from './loadShape'
 
 const HEAT: HeatmapState = {
@@ -54,6 +54,8 @@ describe('series colours', () => {
       const colours = keys.map(k => GROUP_COLOR[k])
       expect(new Set(colours).size).toBe(keys.length)
     }
+    // The monthly chart also draws the daily-generation line over its bars.
+    expect(MONTH_STACK.map(k => GROUP_COLOR[k])).not.toContain(DAILY_COLOR)
   })
 })
 

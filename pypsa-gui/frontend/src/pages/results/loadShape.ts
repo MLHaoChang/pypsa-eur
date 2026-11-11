@@ -14,6 +14,8 @@ export const GROUP_COLOR: Record<string, string> = {
   wind: 'var(--color-carrier-wind)', genset: 'var(--color-carrier-oil)', ev: 'var(--color-carrier-electricity)',
   flexible: 'var(--color-series-5)', unserved: 'var(--color-danger)', excess: 'var(--color-series-6)',
 }
+/** The monthly chart's daily-generation line: a colour none of its bars has. */
+export const DAILY_COLOR = 'var(--color-series-3)'
 export const GROUP_LABEL: Record<string, string> = {
   grid: 'Grid import', export: 'Export', solar: 'Solar', wind: 'Wind', genset: 'Genset',
   ev: 'EV charging', flexible: 'Flexible load', battery_soc: 'Battery state of charge',

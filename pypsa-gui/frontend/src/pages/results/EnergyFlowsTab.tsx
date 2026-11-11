@@ -128,6 +128,12 @@ function ConservationChip({ c }: { c: NonNullable<EnergyFlowsPayload['conservati
   )
 }
 
+/** A series key in plain words: "ups_battery discharge" reads "UPS battery discharge". */
+export function seriesName(key: string): string {
+  const m = /^(.*) (discharge|charge)$/.exec(key)
+  return m ? `${legendName(m[1])} ${m[2]}` : legendName(key)
+}
+
 function SeriesChart({ title, series, index }: {
   title: string; series: Record<string, number[]>; index: string[]
 }) {
@@ -139,7 +145,7 @@ function SeriesChart({ title, series, index }: {
   const labelAt = bandLabelIndices(data, keys, peak)
   const bandLabel = (k: string) => {
     const i = labelAt.get(k)
-    return i == null ? undefined : directLabel(legendName(k), i)
+    return i == null ? undefined : directLabel(seriesName(k), i)
   }
   return (
     <ChartFrame testId={`ef-series-${title.toLowerCase()}`}
@@ -152,7 +158,7 @@ function SeriesChart({ title, series, index }: {
           <Tooltip {...CHART_TOOLTIP} />
           <Legend {...CHART_LEGEND} />
           {keys.map((k, i) => (
-            <Area key={k} type="monotone" dataKey={k} stackId="s" stroke={carrierColour(k, i)}
+            <Area key={k} type="monotone" dataKey={k} name={seriesName(k)} stackId="s" stroke={carrierColour(k, i)}
                   fill={carrierColour(k, i)} fillOpacity={0.6} isAnimationActive={false} />
           ))}
           {keys.map(k => (

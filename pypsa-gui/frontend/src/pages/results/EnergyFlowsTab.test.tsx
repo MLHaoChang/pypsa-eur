@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { energyFlowsApi, type EnergyFlowsPayload } from '../../api/energyFlows'
-import EnergyFlowsTab, { FlowSankeyChart } from './EnergyFlowsTab'
+import EnergyFlowsTab, { FlowSankeyChart, seriesName } from './EnergyFlowsTab'
 import { fmtMwh, sankeyData } from './energyFlows'
 import { ROWS } from './energyFlows.test'
 import { expectAllButtonsNamed } from '../../test-utils/accessibleName'
@@ -188,5 +188,14 @@ describe('FlowSankeyChart', () => {
   it('draws a path per link', () => {
     const { container } = render(<FlowSankeyChart data={sankeyData(ROWS)} width={700} />)
     expect(container.querySelectorAll('svg path').length).toBeGreaterThanOrEqual(6)
+  })
+})
+
+describe('seriesName', () => {
+  it('reads a storage series in plain words, never as a raw id', () => {
+    expect(seriesName('ups_battery discharge')).toBe('UPS battery discharge')
+    expect(seriesName('bess_new_2027 charge')).toBe('BESS new 2027 charge')
+    expect(seriesName('solar')).toBe('Solar')
+    expect(seriesName('Grid import')).toBe('Grid import')
   })
 })

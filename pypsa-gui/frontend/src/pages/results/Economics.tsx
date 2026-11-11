@@ -17,7 +17,6 @@ import {
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
   isRenewableCarrier, colourForCarrier, COST_UNAVAILABLE,
 } from './shared'
-import { money } from '../../utils/money'
 import { useResultsFilter } from './filterContext'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
 import { useUIStore } from '../../store/uiStore'
@@ -798,9 +797,9 @@ export default function Economics() {
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="name" {...CHART_AXIS} angle={-30} textAnchor="end" height={80} interval={0} />
                 <YAxis {...CHART_AXIS} label={yAxisLabel('€')}
-                  tickFormatter={(v: number) => `${v < 0 ? '\u2212' : ''}${money(v)}`} />
+                  tickFormatter={(v: number) => fmtCurrency(v, 0)} />
                 <RTooltip {...CHART_TOOLTIP}
-                  formatter={(v: number) => [`${v < 0 ? '\u2212' : ''}${money(v, 'EUR')}`, 'Net profit']} />
+                  formatter={(v: number) => [fmtCurrency(v), 'Net profit']} />
                 <Bar dataKey="value">
                   {profitChartData.map((row, i) => (
                     <Cell key={i} fill={row.value > 0 ? 'var(--color-success)' : 'var(--color-danger)'} />

@@ -21,7 +21,7 @@ import {
   ChartFrame, CHART_HEIGHT, chartFigure, CHART_LEGEND, carrierColour, seriesDash,
 } from './shared'
 import {
-  GROUP_COLOR, GROUP_LABEL, MONTH_STACK, WEEKDAYS, annualStack, cellTitle, fmtMw, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH,
+  DAILY_COLOR, GROUP_COLOR, GROUP_LABEL, MONTH_STACK, WEEKDAYS, annualStack, cellTitle, fmtMw, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH,
   heatMax, missingGroups, monthRows, periodLabel, socRows, weekRows,
 } from './loadShape'
 
@@ -178,7 +178,7 @@ export default function LoadShapeTab() {
                 <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
                 <Tooltip {...CHART_TOOLTIP} />
                 {/* A line swatch, so the key shows each series' dash as well as its colour. */}
-                <Legend {...CHART_LEGEND} iconType="plainline" iconSize={24} />
+                <Legend {...CHART_LEGEND} iconType={undefined} iconSize={16} />
                 <Bar dataKey="flag" name="Flagged interval" legendType="square" fill="var(--color-danger)" fillOpacity={0.12} barSize={6} isAnimationActive={false} />
                 {wk.keys.map((k, i) => (
                   <Line key={k} type="monotone" dataKey={k} name={GROUP_LABEL[k]} dot={false} stroke={GROUP_COLOR[k]}
@@ -225,10 +225,10 @@ export default function LoadShapeTab() {
                   <Bar key={k} yAxisId="e" stackId="m" dataKey={k} name={GROUP_LABEL[k]} fill={GROUP_COLOR[k]} legendType="square"
                        isAnimationActive={false} />
                 ))}
-                <Line yAxisId="d" type="monotone" dataKey="daily" name="Daily generation" stroke="var(--color-text)"
+                <Line yAxisId="d" type="monotone" dataKey="daily" name="Daily generation" stroke={DAILY_COLOR}
                       legendType="plainline" dot={false} strokeWidth={1.5} isAnimationActive={false} />
                 {data.monthly.average_daily_generation_mwh != null && (
-                  <ReferenceLine yAxisId="d" y={data.monthly.average_daily_generation_mwh} stroke="var(--color-text)"
+                  <ReferenceLine yAxisId="d" y={data.monthly.average_daily_generation_mwh} stroke={DAILY_COLOR}
                                  strokeDasharray="4 3" />
                 )}
               </ComposedChart>

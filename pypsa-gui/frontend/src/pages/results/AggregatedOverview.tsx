@@ -540,7 +540,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                value={kpis.curtailEnergy != null
                  ? `${fmtEnergy(kpis.curtailEnergy)}${kpis.curtailPct != null ? ` · ${kpis.curtailPct.toFixed(1)} %` : ''}`
                  : '—'}
-               hint={'Σ max(p_max_pu × p_nom − p, 0) over renewable generators' + scaleHint} />
+               hint={'available renewable energy not used' + scaleHint} />
           <KPI label="Lost load" sub="this dispatch solve, no outages"
                {...(lostLoadTotals && lostLoadTotals.mwh == null ? NOT_RECORDED_KPI
                  : { value: lostLoadTotals ? fmtEnergy(lostLoadTotals.mwh) : '—' })}
@@ -763,8 +763,8 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
             </ResponsiveContainer>
             <p className="text-[10px] text-muted mt-2">
               Bars are independent (not net) so the user sees gross energy moved in each direction.
-              Discharge and charge are shown as separate stacked bars side-by-side per period;
-              charge bars are rendered slightly transparent.
+              Discharge and charge are shown as separate stacked bars side-by-side per period,
+              each in its own colour (see the key).
             </p>
           </div>
         </ChartFrame>
