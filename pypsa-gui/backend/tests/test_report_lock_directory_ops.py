@@ -338,6 +338,27 @@ def test_a_writer_arriving_while_the_tree_is_removed_finds_no_project(
     assert not pdir.exists()
 
 
+def test_a_moved_tree_that_will_not_go_still_deletes_the_project(
+    client, project, monkeypatch
+):
+    """The project is gone once its tree is moved aside: a removal of the
+    moved tree that fails is logged and leaves only that hidden directory,
+    never a failed delete (GK B (47) follow-up)."""
+    from routers import projects
+
+    name, pdir = project
+
+    def stuck(target):
+        raise OSError(39, "Directory not empty", str(target))
+
+    monkeypatch.setattr(projects, "_force_rmtree", stuck)
+    assert client.delete(f"/api/projects/{name}").status_code == 200
+    assert not pdir.exists()
+    left = [p for p in pdir.parent.iterdir() if p.name.startswith(".pypsa-deleting-")]
+    assert left  # the hidden leftover, outside every listing
+    assert client.get(f"/api/projects/{name}").status_code == 404
+
+
 def _network_lock_free_elsewhere() -> bool:
     """Whether another thread can take the network lock right now."""
     from services.pypsa_service import PyPSAService
