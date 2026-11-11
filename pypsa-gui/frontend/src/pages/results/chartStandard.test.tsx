@@ -139,8 +139,12 @@ describe('time ticks (S4b)', () => {
 
 // ui-modern 02 slice 1: the Operation and Build charts are on the chart theme.
 describe('the chart theme on Operation and Build (ui-modern 02)', () => {
-  const THEMED = ['CapacityExpansion', 'Dispatch', 'DispatchStack', 'EnergyFlowsTab', 'LoadShapeTab',
-    'StorageCycling', 'LostLoadTab']
+  const THEMED = ['CapacityExpansion', 'Dispatch', 'DispatchStack', 'DurationCurve', 'EnergyFlowsTab', 'HourDayHeatmap',
+    'LoadShapeTab',
+    'StorageCycling', 'LostLoadTab', 'TornadoChart',
+    // slice 6: the rest of Results
+    'Prices', 'Economics', 'AggregatedOverview', 'Curtailment', 'LoadFlow', 'BranchLoading', 'ReserveCommitments',
+    'StorageHeatmap', 'investment/ValueFlowsView']
   it('sizes every chart with CHART_HEIGHT, never a one-off pixel height', () => {
     const offenders = THEMED.flatMap(f => [...readFileSync(resolve(here, `${f}.tsx`), 'utf8')
       .matchAll(/<ResponsiveContainer[^>]*height=\{(\d+)/g)].map(m => `${f}: ${m[1]}`))

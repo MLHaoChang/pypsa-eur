@@ -326,7 +326,7 @@ describe('a failed first read (re-gate B4)', () => {
     await user.click(readinessRail())
     const run = await screen.findByTestId('hub-run-start') as HTMLButtonElement
     expect(run.disabled).toBe(true)
-    expect(run.title).toBe('The template could not be read — retry below.')
+    expect(run.title).toBe('The template could not be read: retry below.')
   })
 
   it('study 500 → the line names the study state', async () => {

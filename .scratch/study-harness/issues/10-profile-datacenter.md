@@ -3,7 +3,7 @@
 
 # 10 — Harness profile: eh_datacenter and eh_datacenter_staged
 
-Status: ready-for-agent (10a done: PR #1283 and its test follow-up merged; 10b is next)
+Status: done (10a: #1283 and its test follow-up; 10b: #1333)
 Type: task
 Blocked by: 07
 Gated: yes (GK A for the engine gates and the grid-readiness actions; GK B for the harness parts)
@@ -108,3 +108,50 @@ Conditions:
 - The follow-up PR adds the two `_dc_gridcode_frequency` tests the module mutants found missing (another param's confirmed row; a confirmed `grid.frequency_hz` row that carries `write`).
 - Left for 10b: eh_datacenter_staged@1 (per-period rules; IC NPV/IRR in the result gate), `dc.campus.contingency` (Q3) and L2's DC13-SCOPE restriction, the TOOLSEL-1 count test (Q4), the chat intake for `grid.frequency_hz` (50|60 enum on the card, never tunable, not a template creation param), and step-card rendering in the frontend.
 - Risk carried: no test drives the native card through the real `/confirm` route end to end.
+
+### GK A (20): 10b plan verdict, GO WITH CONDITIONS (2026-11-10, verbatim in substance)
+
+Q3 source confirmed: `campus_compliance_invested.csv` from the run's own campus job.
+- CT-1 Column. Read `status_with_measures` from the invested CSV, never `status_as_is`. `not_rechecked`, `unknown`, `not_rated` or a missing status → NoEvidence, never pass. Test each.
+- CT-2 No silent fallback. invest=True is frozen, so a missing invested CSV is NoEvidence. Fall back to `campus_compliance.csv` (its `status_as_is`) only if the job record positively says invest bought nothing; state which, test both.
+- CT-3 Same run, three bindings, each tested with real files: (a) `campus_profile_used.json` profile == frozen id and sha256 == frozen fingerprint; (b) the published `campus_electrical/run/` is the one the run's own job published (an identity recorded at settle); (c) the network revision the campus job read == the revision at the result gate (the step records it; an edit after the job reads stale).
+- CT-4 Rows present. Each named check (transformer_loading, pcc_voltage, campus_voltage) has its row, else NoEvidence; a missing transformer_loading row is "not applicable" only with the `NO_TRANSFORMER` detail on the voltage row.
+- CT-5 D3 applies. A pass whose `source` is `assumed` or `extracted` never passes this block row. State what the shipped DC templates read, check by check, and pin it; bring it back before building if it blocks every shipped run.
+- CT-6 Value. The failing list carries check, `worst_case`, `worst_period`, value and limit; the label says "intact and transformer N-1".
+- ST-1 Periods. The `energization_peak:<year>` rules come from the network's own `investment_periods` at gate time, never TEMPLATE_META or NATIVE_PLANNING; an emitted period row with no rule is NoEvidence block. Test a staged project whose periods were edited.
+- ST-2 LOLE per period. On staged the h/yr goal goes through `loop_goal(horizon_years(n))`, worst period, non-unit weightings in the test.
+- ST-3 IC returns. `ic.returns` reads the stored case only if classify says it is current for this network; stale is NoEvidence; warn; never a hurdle.
+- L2-1 NEVER_TUNABLE also gets the shunt and compensation attributes; a profile listing any is refused at load.
+- L2-2 The redispatch exclusion is a test on the frozen settings and on `run_actions`' refusal, plus the grep pin.
+- Mutants on run_actions too; hand mutants of CT-1, CT-3 (each binding dropped) and ST-1.
+- Frequency intake: agrees with A (10c, a separate PR); GK B's call.
+
+### 10b build notes (session_01G7qCukvjkKproA4DUNhn6F)
+
+- CT-2: no fallback is built. A completed campus job with invest on always writes the invested table (`campus_electrical_service.run`), so the as-is table is never read and a missing invested table is NoEvidence.
+- CT-5 probe (shipped templates solved, generic code published, frozen settings): on both `eh_datacenter` and `eh_datacenter_staged` the three checks read `pass` with measures, all `assumed`. The engine tags transformer_loading `assumed` by construction (`gridspine/static/campus_compliance.py:153`). Proposed to GK A: the transformer's own rating counts as an equipment limit (`run_actions.EQUIPMENT_LIMIT`); D3 holds the voltage checks, so the shipped template waits for the user's own PCC and campus bands.
+
+### GK A (20): CT-5 amended (2026-11-10, verbatim in substance)
+
+Option A, with conditions. transformer_loading's "assumed" is 100 % of the unit's own rating ("equipment rating (not a grid-code clause)"), not an assumed input.
+- CT-5a The exemption is keyed narrowly: check == "transformer_loading" AND the clause starts with "equipment rating". A changed clause or tag fails closed to not_evaluated (a mutant that changes the clause reads not_evaluated).
+- CT-5b campus_voltage passes only with the profile's own `campus_voltage` band; `assumed` → not_evaluated, needs_user "state the campus voltage band in the grid-code profile". `extracted` never passes, on pcc_voltage too.
+- CT-5c Pinned both ways: the shipped template + generic code reads not_evaluated (needs_user), never block-fail or pass; a user profile with code/user-tagged PCC and campus bands can pass.
+- CT-5d The pass shows its measures (#1172): a pass resting on a recommended resize carries that detail in the fact value, and the gate words read "passes with the campus study's measures: …", never a plain pass. State whether `ic.returns` includes the campus costs; if not, say the measures are not costed. Test the wording on the shipped template.
+- Option B (warn) rejected: N-1 is the check DC13-SCOPE ties to a remedy, so it stays block. Option C not needed.
+
+### GK B (41): 10b plan verdict, GO with E1–E7 (2026-11-10, verbatim in substance)
+
+- Frequency intake: A, a separate **10c** PR after 10b, with UX. GK B (36)'s "there is no 10c" was about the chat tool; this 10c is the intake slice. Until it lands the DC run stops at the input gate with "state the grid frequency (Hz)", pinned on the staged profile too. 10c carries GK B (36)'s 2026-11-08 conditions (user-given 50|60 enum, on the card with its unit, never tunable, never a template param, no fallback).
+- E1 `ic.returns` is bound to this run: the stored case counts only when its input fingerprint matches the run's network; stale or no fingerprint → NoEvidence, never the old numbers; test an edit after the case. Show the value with its currency; a warn reading NoEvidence shows "not evaluated" (D4). (Same as GK A ST-3: name the line where classify's "current" compares it, or add the check.)
+- E2 = CT-3 (c): the campus job's input revision equals the network's at the gate.
+- E3 Completeness: transformer_loading, pcc_voltage and campus_voltage present for the intact case and transformer N-1; missing or truncated → NoEvidence (#1079).
+- E4 = CT-2: a missing invested CSV is NoEvidence; fall back only when the job record shows invest ran and by design wrote none.
+- E5 Each period's `energization_peak:<year>` is gated; a missing period row fails closed; the D8 test runs on the staged template and a staged project with sidecars.
+- E6 The shunt/compensation attributes join NEVER_TUNABLE with the tap attributes, each refused at load with its own test.
+- E7 Mutants on run_gates, run_profiles and run_actions; hand mutants of the E1–E4 guards and the `irr_not_established` path, each with the test that kills it.
+
+### 10b build notes, continued
+
+- E3 finding: the engine solves a transformer N-1 case only for a group with a parallel unit (`gridspine/static/campus_flow.py` `solve_cases`). The shipped DC campus has none, so its `campus_lf_pcc.csv` holds intact cases only. 10b reads that as not_evaluated ("no transformer group has a parallel unit to lose"), never a pass.
+- CT-5d: the investment case takes the campus study's purchases as extra owner assets (IC G3, `routers/results.py` "the campus study's equipment as extra owner assets"), and its report goes stale when the campus study changes. So on the staged profile a current `ic.returns` costs the measures.

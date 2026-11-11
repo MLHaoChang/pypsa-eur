@@ -485,6 +485,48 @@ def test_a_carded_effectful_step_dispatches_without_deadlock_when_its_handler_lo
     assert str(active.project_uuid) == json.loads(path.read_text())['project_id']
 
 
+def test_a_step_that_cannot_get_the_projects_lock_stops_the_run_for_the_user(detached, site, monkeypatch):
+    """A long hold elsewhere (a Save-As keeps the lock for its whole save, study
+    harness 07e): the bounded wait gives up, nothing is dispatched and the run
+    waits for the user as `locked`."""
+    from services import chat_tools as tools
+    _, root = site
+    task = detached()
+    path = task_path(root, task)
+    ran, armed = [], []
+    held, release = threading.Event(), threading.Event()
+    dispatch = harness_runner.Runner.dispatch
+
+    def hold(lock):
+        with lock:
+            held.set()
+            release.wait(30)
+
+    def while_held(self, path, ctx, *rest):
+        if armed and not held.is_set():
+            threading.Thread(target=hold, args=(ctx.mutation_lock,), daemon=True).start()
+            assert held.wait(10)
+        return dispatch(self, path, ctx, *rest)
+
+    monkeypatch.setattr(harness_runner.Runner, 'dispatch', while_held)
+    monkeypatch.setitem(tools.DISPATCHERS, 'solve_queue_enqueue', lambda *a, **k: ran.append(a))
+    monkeypatch.setattr(harness_runner, 'LOCK_TIMEOUT_SECONDS', 0.2)
+    runner = harness_runner.Runner('a', decisions=Clicks())
+    until_waiting_on(harness_runner.Runner('a'), path, task['task_id'], 'solve')
+    armed.append(True)
+    try:
+        runner.tick(path)  # the COP-1 Continue
+        runner.tick(path)  # the solve's card, decided; its dispatch waits for the lock
+        flight = runner._inflight[task['task_id']][1]
+        flight.join(30)
+        assert not flight.is_alive()
+    finally:
+        release.set()
+    run = json.loads(path.read_text())['run']
+    assert ran == []
+    assert (run['status'], run['reason']) == ('needs_user', 'locked')
+
+
 def test_a_claim_that_lapses_while_the_handler_runs_still_lets_no_one_else_dispatch(detached, site, monkeypatch):
     """GK B (c): the claim only guards pending -> running; once the step runs,
     its `running` status is the authority, however late the clock reads."""

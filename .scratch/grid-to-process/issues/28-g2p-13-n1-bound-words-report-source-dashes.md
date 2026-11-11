@@ -3,7 +3,7 @@
 
 # G2P-13: N-1 bound wording, the report's empty "()" source, em dashes in the disclosures
 
-Status: needs-triage
+Status: done (#1338)
 Type: task
 Found by: UX (13) review of G2P #22 (#1249); pre-existing, not asks there.
 

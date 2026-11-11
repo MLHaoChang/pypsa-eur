@@ -377,7 +377,10 @@ def test_a_run_on_each_template_stops_at_the_result_gate_on_the_loops_typed_refu
     ) and not run_gates.passed([lole])
     assert verdicts["h2.offtake.met"]["verdict"] == "pass"
     assert verdicts["h2.ic.counterfactual"]["verdict"] == "not_evaluated"
-    assert verdicts["h2.ic.counterfactual"]["reason"].startswith("not_run")
+    # The typed state stays in the fact's value; the reason is words (SH-10b).
+    investment = verdicts["h2.ic.counterfactual"]
+    assert investment["facts"][0]["value"] == "not_run"
+    assert investment["reason"] == "No investment case has been run"
     use = verdicts["h2.electrolyser.utilisation"]
     assert use["verdict"] in ("pass", "fail") and 0.0 < use["facts"][0]["value"] <= 1.0
     engine = next(s for s in record["steps"] if s.get("engine"))
@@ -673,19 +676,20 @@ def test_staged_offtake_without_its_own_capture_is_no_evidence(
 
 
 @pytest.mark.parametrize(
-    "state, reasons, verdict",
+    "state, reasons, verdict, words",
     [
-        ("established", [], "pass"),
+        ("established", [], "pass", None),
         (
             "not_established",
             ["counterfactual_not_established:no_reference_price"],
             "not_evaluated",
+            "The counterfactual is not established (no reference price)",
         ),
-        ("not_run", ["no_case"], "not_evaluated"),
+        ("not_run", ["no_case"], "not_evaluated", "No investment case has been run"),
     ],
 )
 def test_the_investment_rule_is_evaluated_once_established_and_never_blocks(
-    monkeypatch, state, reasons, verdict
+    monkeypatch, state, reasons, verdict, words
 ):
     from services import ic_counterfactual as ic
 
@@ -698,7 +702,9 @@ def test_the_investment_rule_is_evaluated_once_established_and_never_blocks(
     [result] = run_gates.evaluate([_rule("h2.ic.counterfactual")], env)
     assert result["verdict"] == verdict and result["severity"] == "warn"
     if verdict == "not_evaluated":
-        assert result["reason"] == f"{state}: {', '.join(reasons)}"
+        # The typed state stays in the fact's value; the reason is words (SH-10b).
+        assert result["facts"][0]["value"] == state
+        assert result["reason"] == words
     assert run_gates.passed([result])
 
 

@@ -3,7 +3,7 @@
 
 # DC-07 S3 test nit: the reference-before-window ordering test passes with no windows
 
-Status: needs-triage
+Status: done (#1337)
 Type: bug (test)
 Found by: DC-07 S3 review (#1255, merged a6b4b3e4), follow-up noted by the coordinator.
 

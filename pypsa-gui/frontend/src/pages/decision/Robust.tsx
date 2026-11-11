@@ -4,8 +4,17 @@
 // drivers skipped (`robustness.skipped`, key -> code) are named in words.
 import type { Findings, LedgerRow, StudyError, TornadoRecord } from '../../api/decisionStudies'
 import { HELP, RUN_STATUS_LABELS, helpFor } from '../../utils/decisionVocabulary'
-import { sortTornado, valueText } from './decisionModel'
+import { money } from '../../utils/money'
+import TornadoChart from '../results/TornadoChart'
+import { isMoneyUnit, sortTornado, valueText } from './decisionModel'
 import { Banner, Button, Card, Refusal } from './DecisionUi'
+
+/** A driver's input value; money in the one money notation ("€ 6.3 k/MW/month"). */
+function inputText(value: number, unit: string | null): string {
+  if (!isMoneyUnit(unit)) return valueText(value, unit)
+  const [cur, ...per] = (unit as string).split('/')
+  return [`${value < 0 ? '\u2212' : ''}${money(value, cur.trim().toUpperCase())}`, ...per].join('/')
+}
 
 export default function Robust({ findings, tornado, error, onStart, onAbort, busy, ledgerRows = [] }: {
   findings: Findings
@@ -21,12 +30,10 @@ export default function Robust({ findings, tornado, error, onStart, onAbort, bus
   const labelOf = (key: string) => rob.tornado.find(r => r.key === key)?.label
     ?? ledgerRows.find(r => r.key === key)?.label
     ?? key.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase())
-  const vals = rows.flatMap(r => [r.npv_low, r.npv_high, rob.npv_centre]).filter((v): v is number => v != null)
-  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals)
-  const pos = (v: number) => ((v - lo) / (hi - lo || 1)) * 100
   const running = tornado?.status === 'running'
   return (
-    <div className="flex flex-col gap-4">
+    // results-scroll-clear: room below the chart for the floating "Chat here" launcher.
+    <div className="flex flex-col gap-4 results-scroll-clear">
       <Card title="Run the robustness check" right={running
         ? <Button kind="danger" onClick={onAbort}>Stop</Button>
         : <Button kind="primary" onClick={onStart} disabled={busy}>{rob.tornado.length ? 'Run it again' : 'Run it'}</Button>}>
@@ -50,33 +57,25 @@ export default function Robust({ findings, tornado, error, onStart, onAbort, bus
       )}
 
       {rows.length > 0 && (
-        <Card title="Battery NPV at each driver’s low and high value">
-          <p className="text-[11px] text-muted">{HELP.tornado_method_redispatch_fixed_sizes} Centre: {valueText(rob.npv_centre, 'EUR')}.</p>
-          <ul className="flex flex-col gap-2">
-            {rows.map(r => {
-              const a = r.npv_low, b = r.npv_high
-              const left = a != null && b != null ? pos(Math.min(a, b)) : 0
-              const width = a != null && b != null ? Math.max(1, pos(Math.max(a, b)) - left) : 0
-              return (
-                <li key={r.key} data-testid="tornado-bar" data-key={r.key} className="grid grid-cols-[14rem_1fr] gap-2 items-center">
-                  <span>{r.label}<br />
-                    <span className="text-[10.5px] text-muted font-mono">
-                      {valueText(r.low_value, r.unit)} → {valueText(r.high_value, r.unit)} · swing {valueText(r.swing, 'EUR')}
-                    </span>
-                  </span>
-                  <span className="relative h-4 rounded-sm bg-panel" aria-label={`NPV ${valueText(a, 'EUR')} to ${valueText(b, 'EUR')}`}>
-                    <span className="absolute inset-y-0 bg-accent/70 rounded-sm" style={{ left: `${left}%`, width: `${width}%` }} />
-                    {lo < 0 && <span className="absolute inset-y-0 w-px bg-text" style={{ left: `${pos(0)}%` }} />}
-                  </span>
-                  <span data-testid="tornado-values" className="col-span-2 text-[11px] font-mono">
-                    NPV at the low value: {valueText(a, 'EUR')} · at the high value: {valueText(b, 'EUR')}
-                  </span>
-                  {r.notes.length > 0 && <span className="col-span-2 text-[10.5px] text-muted">{r.notes.map(n => helpFor(n).text).join(' ')}</span>}
-                </li>
-              )
-            })}
-          </ul>
-        </Card>
+        <TornadoChart
+          title="Battery NPV at each driver’s low and high value"
+          measure="Battery NPV"
+          rows={rows}
+          base={rob.npv_centre}
+          baseWord="Centre"
+          formatInput={inputText}
+          note={HELP.tornado_method_redispatch_fixed_sizes}
+          filename="battery-npv-drivers"
+          testId="tornado-chart"
+        >
+          {rows.some(r => r.notes.length > 0) && (
+            <ul className="mt-2 flex flex-col gap-1 text-[10.5px] text-muted" data-testid="tornado-notes">
+              {rows.filter(r => r.notes.length > 0).map(r => (
+                <li key={r.key}>{r.label}: {r.notes.map(n => helpFor(n).text).join(' ')}</li>
+              ))}
+            </ul>
+          )}
+        </TornadoChart>
       )}
 
       {rob.pending.length > 0 && (

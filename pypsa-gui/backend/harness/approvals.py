@@ -46,6 +46,9 @@ DECIDERS = frozenset({"user", "ttl", "session", "system", "policy"})
 RETENTION_SECONDS: int = 90 * 24 * 3600
 # Issue 03: a decision the run's granted envelope made, named by its id.
 _ENVELOPE_DECIDER = re.compile(r"envelope:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+# LC-47 K8: a ticked row of a change-set card, decided by the user on the set's
+# card; the token's first six hex characters, as `asked` records them.
+_CHANGE_SET_DECIDER = re.compile(r"change_set:[0-9a-f]{6}")
 _LINKS = ("operation_id", "preview_id", "envelope_id")
 
 
@@ -135,7 +138,8 @@ def links(session: Any, args: Any) -> dict[str, str]:
 
 def decided(session: Any, *, call_id: str, tool: str, tier: str, outcome: str, by: str,
             link: dict[str, str] | None = None) -> bool:
-    if outcome not in OUTCOMES or (by not in DECIDERS and not (isinstance(by, str) and _ENVELOPE_DECIDER.fullmatch(by))):
+    if outcome not in OUTCOMES or (by not in DECIDERS and not (isinstance(by, str) and (
+            _ENVELOPE_DECIDER.fullmatch(by) or _CHANGE_SET_DECIDER.fullmatch(by)))):
         raise ValueError(f"approval outcome {outcome!r} by {by!r} is not in the closed set")
     record = _base(session, "approval/decided", call_id, tool, tier)
     record.update(outcome=outcome, by=by)

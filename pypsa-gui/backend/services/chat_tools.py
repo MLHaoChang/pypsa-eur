@@ -1360,6 +1360,29 @@ def get_asset_reference(view: str, component: str | None = None) -> dict:
     return R.get_attribute_catalog(component)
 
 
+def why_this_number(component: str | None = None, name: str | None = None, field: str | None = None,
+                    project: str | None = None, study_id: str | None = None,
+                    ledger_key: str | None = None, option_id: str | None = None) -> dict:
+    """The provenance graph's walk for one number (provenance-graph 03): an asset field
+    (`GET /api/network/asset_schema/{component}/provenance/{name}/why/{field}`) or a Guided
+    ledger row on one option's fork (`GET .../studies/{study_id}/ledger/{key}/why`). Reads only
+    (COPILOT-1)."""
+    asset = (component, name, field)
+    ledger = (project, study_id, ledger_key, option_id)
+    if all(v is not None for v in asset) and all(v is None for v in ledger):
+        from routers.network import get_asset_provenance_why as _asset_why
+
+        return _asset_why(component, name, field)
+    if all(v is not None for v in ledger) and all(v is None for v in asset):
+        from routers.studies import get_ledger_row_why as _row_why
+
+        return _route(_row_why, study_id, ledger_key, option_id, project=_authorized_project(project))
+    raise HTTPException(status_code=422, detail={
+        "error_kind": "invalid_tool_args",
+        "message": "pass component, name and field (an asset field), or project, study_id, "
+                   "ledger_key and option_id (a Guided ledger row), and nothing else"})
+
+
 def geocode_place(query: str) -> list[dict]:
     """`GET /api/geocode`: the configured geocoder's matches (its own timeout)."""
     from routers.geocode import geocode_search as _h
@@ -9873,6 +9896,7 @@ DISPATCHERS: dict[str, Any] = {
     "attach_tariff": attach_tariff,
     "list_library_references": list_library_references,
     "get_library_reference": get_library_reference,
+    "why_this_number": why_this_number,
     "apply_library_reference": apply_library_reference,
     "preview_equipment_mapping": preview_equipment_mapping,
     "apply_equipment_mapping": apply_equipment_mapping,

@@ -54,6 +54,9 @@ export const FACT_WORDS: Record<string, string> = {
   // Study harness 11: the hydrogen hubs.
   'h2.offtake.shed_hours': 'The hydrogen offtake is served in every hour',
   'h2.electrolyser.utilisation': 'The electrolyser runs within its sizing band',
+  // Study harness 10b: the staged data-centre run.
+  'dc.campus.contingency': 'The campus checks pass in the intact case and in each transformer outage the study solves',
+  'ic.returns': 'The investment case reports its NPV and IRR',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,

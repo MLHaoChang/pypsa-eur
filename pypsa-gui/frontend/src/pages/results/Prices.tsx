@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  ResponsiveContainer, LineChart, Line, AreaChart, Area,
+  ResponsiveContainer, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, Legend, ReferenceLine,
 } from 'recharts'
 import { Download } from 'lucide-react'
@@ -12,9 +12,12 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import type { Bus } from '../../api/types'
 import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
-  ChartCard, Seg, CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
-  useSeasonalViewMode, SeasonalLineCardGrid, durationCurvePoints, WindowCapBanner,
-  WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine } from './shared'
+  ChartFrame, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, Seg, CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
+  useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
+  WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine, chartFigure, carrierColour } from './shared'
+import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
+import HourDayHeatmap from './HourDayHeatmap'
+import { heatScale, hourDayGrid, spansPeriods, PICK_ONE_PERIOD } from './hourDay'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import NotSolved from './NotSolved'
@@ -45,6 +48,9 @@ type PricesPayload = TSPayload & {
 }
 
 const PER_BUS_CHART_CAP = 12
+// The price duration curve's one series: the system mean electricity price. It takes the
+// electricity colour, which stays apart from the grey mean line in both themes.
+const PRICE_SERIES: DurationSeries = { key: 'price', name: 'Price', colour: carrierColour('electricity'), csv: 'price_EUR_per_MWh' }
 
 export default function Prices() {
   const currentProject = useUIStore(s => s.currentProject)
@@ -54,7 +60,6 @@ export default function Prices() {
   const { win, winValid, fetchRange } = useResultsWindow(currentProject)
   // Refs for SVG export — one per chart section.
   const hourlyChartRef   = useRef<HTMLDivElement | null>(null)
-  const durationChartRef = useRef<HTMLDivElement | null>(null)
   // Marginal prices are LP duals — they only exist on the LOPF/SCLOPF solve.
   // PyPSA's `n.pf()` doesn't compute duals, so always pin source='lopf'.
   const { data: priceTS } = useQuery({
@@ -163,11 +168,19 @@ export default function Prices() {
   // Price duration curve — sorted descending, x-axis = % of hours, y-axis = €/MWh.
   // Single trace (system mean). Reads "what % of hours did the price exceed X?"
   // off the chart at a glance.
+  // The same system mean price by calendar day and hour of day: when in the
+  // day and the season prices run high. The scale runs from the lowest to the
+  // highest price, since prices can be negative.
+  const priceMap = useMemo(() => {
+    if (!priceChart) return null
+    const grid = hourDayGrid(priceChart.avgRows.map(r => r.snapshot), priceChart.avgRows.map(r => r.avg))
+    return { grid, scale: heatScale([grid]) }
+  }, [priceChart])
   const durationCurve = useMemo(() => {
     if (!priceChart) return null
     const arr = priceChart.avgRows.map(r => r.avg).filter(v => Number.isFinite(v))
     if (arr.length === 0) return null
-    return durationCurvePoints(arr).map(p => ({ pct: p.pct, price: p.value }))
+    return durationRows({ price: arr })
   }, [priceChart])
 
   // KPI strip: weighted-mean / peak / trough across the slice + system spread
@@ -202,7 +215,7 @@ export default function Prices() {
   }
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
 
       {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
           final review) — a narrow-but-wide window can still hit the
@@ -293,7 +306,7 @@ export default function Prices() {
 
       {/* ── Hourly marginal price chart ───────────────────────── */}
       {priceChart && (
-        <ChartCard
+        <ChartFrame
           title="Hourly marginal price"
           hint={priceView === 'per_bus' && priceChart.busTotal > priceChart.cols.length
             ? `top ${priceChart.cols.length} of ${priceChart.busTotal} buses by mean`
@@ -367,20 +380,17 @@ export default function Prices() {
                 mode={effectiveMode}
                 rows={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
                 cols={priceView === 'avg' ? ['avg'] : priceChart.cols}
-                colors={priceView === 'avg' ? ['#0369a1'] : [
-                  '#dc2626', '#0369a1', '#16a34a', '#d97706', '#7c3aed',
-                  '#db2777', '#0891b2', '#65a30d', '#c2410c', '#6d28d9',
-                  '#e11d48', '#1d4ed8',
-                ]}
+                colors={priceView === 'avg' ? [PRICE_SERIES.colour] : SERIES_COLOURS}
                 unit="€/MWh"
                 valueFormatter={(v: number) => `${v.toFixed(2)} €/MWh`}
+                dashed={priceView !== 'avg'}
                 height={170}
               />
             ) : (
-              <ResponsiveContainer width="100%" height={200}>
+              <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
                 <LineChart
                   data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
-                  margin={{ top: 18, right: 8, left: 0, bottom: 0 }}
+                  margin={{ top: 18, right: 40, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
@@ -394,15 +404,12 @@ export default function Prices() {
                   )}
                   {priceView === 'avg' ? (
                     <Line type="monotone" dataKey="avg" name="Average"
-                          stroke="#0369a1" strokeWidth={1.8} dot={false} />
+                          stroke={PRICE_SERIES.colour} strokeWidth={1.8} dot={false} />
                   ) : (
                     priceChart.cols.map((c, i) => (
                       <Line key={c} type="monotone" dataKey={c} name={c}
-                            stroke={[
-                              '#dc2626', '#0369a1', '#16a34a', '#d97706', '#7c3aed',
-                              '#db2777', '#0891b2', '#65a30d', '#c2410c', '#6d28d9',
-                              '#e11d48', '#1d4ed8',
-                            ][i % 12]}
+                            stroke={SERIES_COLOURS[i % SERIES_TOKENS]}
+                            strokeDasharray={seriesDash(i + Math.floor(i / SERIES_TOKENS))}
                             strokeWidth={1.2} dot={false} />
                     ))
                   )}
@@ -410,7 +417,20 @@ export default function Prices() {
               </ResponsiveContainer>
             )}
           </div>
-        </ChartCard>
+        </ChartFrame>
+      )}
+
+      {/* ── Price by hour and day ────────────────────────────── */}
+      {priceMap && (
+        <HourDayHeatmap
+          title="Price by hour and day"
+          figure={priceChart?.mean != null ? chartFigure(`${priceChart.mean.toFixed(2)} €/MWh`, 'mean') : undefined}
+          hint="system mean price in each hour"
+          grid={priceMap.grid} scale={priceMap.scale}
+          colour={PRICE_SERIES.colour}
+          format={v => `${v.toFixed(1)} €/MWh`}
+          csv="price_EUR_per_MWh" filename="prices_hour_by_day"
+          unavailable={spansPeriods(tsP?.periods, range.from, range.to) ? PICK_ONE_PERIOD : null} />
       )}
 
       {/* ── Price duration curve ─────────────────────────────── */}
@@ -418,47 +438,15 @@ export default function Prices() {
           Y axis = €/MWh. Reads "what % of hours did the price exceed X" at
           a glance — the natural shape for revenue/cost/utilisation analysis. */}
       {durationCurve && durationCurve.length > 0 && (
-        <ChartCard
+        <DurationCurve
           title="Price duration curve"
+          figure={chartFigure(`${durationCurve[0].price.toFixed(2)} €/MWh`, 'highest hourly mean')}
           hint="system mean, sorted descending"
-          right={
-            <ChartActions
-              chartRef={durationChartRef}
-              onExportCSV={() => {
-                downloadCSV('prices_duration_curve.csv',
-                  ['pct_of_hours', 'price_EUR_per_MWh'],
-                  durationCurve.map(r => [r.pct, r.price]))
-                toast.success('Exported')
-              }}
-              filename="prices_duration_curve" />
-          }
-          bodyClassName="p-3"
-        >
-          <div ref={durationChartRef}>
-            <ResponsiveContainer width="100%" height={180}>
-              <AreaChart data={durationCurve} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="price-duration-grad" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0%" stopColor="#0369a1" stopOpacity={0.28} />
-                    <stop offset="100%" stopColor="#0369a1" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid {...CHART_GRID} />
-                <XAxis dataKey="pct" type="number" domain={[0, 100]}
-                  tickFormatter={(v: number) => `${v.toFixed(0)} %`} {...CHART_AXIS} />
-                <YAxis {...CHART_AXIS} label={yAxisLabel('€/MWh')} />
-                <RTooltip {...CHART_TOOLTIP}
-                  labelFormatter={(v: number) => `${v.toFixed(1)} % of hours`}
-                  formatter={(v: number) => `${v.toFixed(2)} €/MWh`} />
-                <Area type="monotone" dataKey="price" stroke="#0369a1" fill="url(#price-duration-grad)"
-                      strokeWidth={1.6} />
-                {priceChart?.mean != null && (
-                  <ReferenceLine {...refLine('mean', 'mean', priceChart.mean, '€/MWh')} />
-                )}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </ChartCard>
+          rows={durationCurve}
+          series={[PRICE_SERIES]}
+          unit="€/MWh" format={v => `${v.toFixed(2)} €/MWh`}
+          mean={priceChart?.mean}
+          filename="prices_duration_curve" />
       )}
 
       {/* ── Price drivers table ───────────────────────────────── */}

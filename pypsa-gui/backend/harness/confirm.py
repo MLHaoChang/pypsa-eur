@@ -223,9 +223,17 @@ def _confirm_destructive_tool(
     # SC-07 S3 (GK B N1): a 3D site apply is only ever its own card, in a task or not.
     confirm_only = violated or tool_name == _requirements.TOOL or repeat_card is not None \
         or tool_name in CARD_ONLY_TOOLS or tool_name in ALWAYS_CARD_TOOLS
+    from harness import approvals, change_set
+
+    # LC-47: a change-set member was decided on the set's one card.
+    member = change_set.held(session, tool_use_id)
+    if member is not None:
+        return (yield from change_set.member_gate(
+            session, member, tool_use_id=tool_use_id, tool_name=tool_name, tier=tier, args=args,
+            edit_card=edit_card, link=approvals.links(session, args),
+            restriction_snapshot=restriction_snapshot, tool_results_collector=tool_results_collector))
     if policy == 'none' and not confirm_only:
         return True
-    from harness import approvals
 
     link = approvals.links(session, args)
     if policy == 'policy' and not confirm_only:

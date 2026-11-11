@@ -13,7 +13,7 @@ import type { Bus } from '../../api/types'
 import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, Seg,
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
-  WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS } from './shared'
+  WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, carrierColour, ChartFrame } from './shared'
 import { NOT_RECORDED_KPI, NotRecordedNote } from './NotRecorded'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
@@ -415,7 +415,7 @@ export default function LoadFlow() {
 
 
   return (
-    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm results-scroll-clear [&>*]:shrink-0">
 
       {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
           final review) — a narrow-but-wide window can still hit the
@@ -826,7 +826,7 @@ export default function LoadFlow() {
                           </td>
                           {sampledIndices.map(ti => {
                             const v = grid.data[ti]?.[gi] ?? 0
-                            const bg = v > 0.5 ? '#16a34a' : '#e5e7eb'
+                            const bg = v > 0.5 ? 'var(--color-success)' : 'var(--color-border)'
                             return (
                               <td key={ti} title={`${grid.index[ti]}: ${v > 0.5 ? 'on' : 'off'}`}
                                   style={{ background: bg, width: 3, height: 12, padding: 0 }} />
@@ -1063,8 +1063,10 @@ export default function LoadFlow() {
             </table>
           </div>
           {voltageChart && voltageChart.cols.length > 0 && (
-            <div>
-              <div className="flex items-center justify-end mb-1">
+            <ChartFrame className="mt-3" testId="bus-voltage-chart" title="Bus voltage over time"
+              hint={voltageChart.busTotal > voltageChart.cols.length
+                ? `top ${voltageChart.cols.length} of ${voltageChart.busTotal} buses by deviation from 1.0 p.u.` : undefined}
+              right={
                 <ChartActions
                   chartRef={voltageChartRef}
                   onExportCSV={() => {
@@ -1075,20 +1077,21 @@ export default function LoadFlow() {
                     toast.success('Exported')
                   }}
                   filename="results_bus_voltage" />
-              </div>
+              }>
               <div ref={voltageChartRef}>
                 {lfMode !== 'timeframe' ? (
                   <SeasonalLineCardGrid
                     mode={lfMode}
                     rows={voltageChart.rows}
                     cols={voltageChart.cols}
-                    colors={['#dc2626', '#0ea5e9', '#16a34a', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d']}
+                    colors={SERIES_COLOURS}
+                    dashed
                     unit="p.u."
                     valueFormatter={(v: number) => `${v.toFixed(4)} p.u.`}
                     height={170}
                   />
                 ) : (
-                  <ResponsiveContainer width="100%" height={200}>
+                  <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
                     <LineChart data={voltageChart.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                       <CartesianGrid {...CHART_GRID} />
                       <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
@@ -1098,19 +1101,14 @@ export default function LoadFlow() {
                       <Legend {...CHART_LEGEND} />
                       {voltageChart.cols.map((c, i) => (
                         <Line key={c} type="monotone" dataKey={c} name={c}
-                              stroke={['#dc2626', '#0ea5e9', '#16a34a', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d'][i % 8]}
+                              stroke={SERIES_COLOURS[i % SERIES_TOKENS]} strokeDasharray={seriesDash(i + Math.floor(i / SERIES_TOKENS))}
                               strokeWidth={1.4} dot={false} />
                       ))}
                     </LineChart>
                   </ResponsiveContainer>
                 )}
               </div>
-            </div>
-          )}
-          {voltageChart && voltageChart.busTotal > voltageChart.cols.length && (
-            <p className="text-[10px] text-muted mt-1">
-              Showing top {voltageChart.cols.length} of {voltageChart.busTotal} buses by deviation from 1.0 p.u.
-            </p>
+            </ChartFrame>
           )}
         </section>
       )}
@@ -1253,7 +1251,7 @@ export default function LoadFlow() {
               without that subsidy.
             </div>
           )}
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
             <LineChart
               data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
               margin={{ top: 18, right: 4, left: 0, bottom: 0 }}
@@ -1267,15 +1265,11 @@ export default function LoadFlow() {
               )}
               {priceView === 'avg' ? (
                 <Line type="monotone" dataKey="avg" name="Average"
-                      stroke="#0ea5e9" strokeWidth={1.8} dot={false} />
+                      stroke={carrierColour('electricity')} strokeWidth={1.8} dot={false} />
               ) : (
                 priceChart.cols.map((c, i) => (
                   <Line key={c} type="monotone" dataKey={c} name={c}
-                        stroke={[
-                          '#dc2626', '#0ea5e9', '#16a34a', '#d97706', '#7c3aed',
-                          '#db2777', '#0891b2', '#65a30d', '#c2410c', '#6d28d9',
-                          '#e11d48', '#1d4ed8',
-                        ][i % 12]}
+                        stroke={SERIES_COLOURS[i % SERIES_TOKENS]} strokeDasharray={seriesDash(i + Math.floor(i / SERIES_TOKENS))}
                         strokeWidth={1.2} dot={false} />
                 ))
               )}
