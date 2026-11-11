@@ -3,7 +3,7 @@
 
 # A sensitivity case shows the plain-network headline cards, not its base's
 
-Status: needs-triage
+Status: ready-for-agent (UM07-KIND-1)
 Type: bug (found while taking the 03 S3 shots)
 Reviewer: GK B.
 
@@ -24,6 +24,14 @@ the case simply never gets an LCOE or unserved-energy card.
 
 Whether a case should take its base's project type for the strip (and for
 whatever else reads the template marker), or the sweep should copy the marker.
+
+## Decided (UM07-KIND-1, owner 2026-11-11 23:52Z)
+
+A case takes its base's project type, read-side: one helper resolves a
+project's template marker, following a sensitivity case to its base, and
+`headline_kpis.project_kind` and every other reader of the template marker
+use it. Existing cases are fixed with no migration; the sweep does not copy
+`eh_template.json`. GK B reviews (TDD plan first).
 
 ## Also seen, not this package's
 
