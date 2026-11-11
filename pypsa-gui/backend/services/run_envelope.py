@@ -597,7 +597,23 @@ def counted(profile, ctx):
     except Exception:  # noqa: BLE001 — not counted is never a K
         return {"count": None, "links": [], "needed": None, "solves": None}
     needed = run_profiles.mg_budget(len(links))
-    return {"count": len(links), "links": links, "needed": needed, "solves": min(needed, CAPS["solves"])}
+    held = {"count": len(links), "links": links, "needed": needed, "solves": min(needed, CAPS["solves"])}
+    one_pass = run_profiles.mg_pass_solves(len(links))
+    if one_pass > CAPS["solves"]:
+        # GK B (47) Q1-ii: a budget that cannot finish one pass is never offered.
+        held.update(refused=PASS_OVER_CAP, one_pass=one_pass)
+    return held
+
+
+# Study harness 12c (GK B (47) Q1-ii): one solve pass alone is above the hard cap.
+PASS_OVER_CAP = "eh_pass_over_cap"
+
+
+def _over_cap_words(shown):
+    k = shown["count"]
+    return (f"- K = {k} islanding contingencies on this project: one solve pass needs 1 + (2 + {k}) + 1 = "
+            f"{shown['one_pass']} solves, above the hard cap of {CAPS['solves']}, so this run cannot be "
+            "granted; run it step by step")
 
 
 def _count_on_card(envelope, task, profile, ctx=None):
@@ -654,14 +670,17 @@ def _rows(envelope):
     shown = envelope.get("contingencies")
     if isinstance(shown, dict):  # study harness 12c (G1): K and the budget it sets
         k = shown.get("count")
+        links = ", ".join(map(str, shown.get("links") or []))
         if k is None:
             lines.append("- The islanding contingencies cannot be counted now, so the run cannot be granted")
+        elif shown.get("refused"):
+            lines.append(_over_cap_words(shown))
         else:
-            lines.append(f"- K = {k} islanding contingenc{'y' if k == 1 else 'ies'} on this project "
-                         f"({', '.join(map(str, shown.get('links') or []))}): (1 + (2 + {k}) + 1) x 3 + 4 = "
-                         f"{shown['needed']} solves" + (f", held to the hard cap of {CAPS['solves']}: the last "
-                                                       "L2 round may stop for you" if shown["needed"] > shown["solves"]
-                                                       else ""))
+            # Q1-iii: the arithmetic, and the capped figure whenever the cap applies.
+            lines.append(f"- K = {k} islanding contingenc{'y' if k == 1 else 'ies'} on this project ({links}): "
+                         f"(1 + (2 + {k}) + 1) x 3 + 4 = {shown['needed']} solves"
+                         + (f"; the budget is the hard cap of {CAPS['solves']} solves, so the last L2 round "
+                            "may stop for you" if shown["needed"] > shown["solves"] else ""))
     held = (envelope.get("eh_study") or {}).get("contingencies")
     if isinstance(held, dict):  # study harness 12c (G1): K, frozen at the grant
         k = held.get("count")
@@ -978,6 +997,8 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
                     if held["count"] is None or held != current.get("contingencies"):
                         _refuse("eh_contingencies", "The project's islanding contingencies changed since the "
                                 "card was shown, or cannot be counted; review the card again.")
+                    if held.get("refused") == PASS_OVER_CAP:
+                        _refuse("eh_pass_over_cap", _over_cap_words(held)[2:])
                     block = {**block, "budget": {**block["budget"], "solves": held["solves"]}}
             chosen = narrow(block, envelope if envelope is not None else block)
             if current.get("setup"):

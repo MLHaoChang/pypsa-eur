@@ -816,6 +816,19 @@ def _advance_run(path, ctx=None):
                     # Study harness 12b (M2): one record per kind, never crossed.
                     for kind in run_actions.kinds(steps):
                         run_actions.fill(steps, run_actions.stage_frozen(task, kind), kind)
+                short = run_eh.pass_short(path, steps)
+                if short is not None:
+                    # Study harness 12c (Q1-i): a pass the solves left cannot finish never
+                    # starts; nothing of it is materialised and the stage stays pending.
+                    loop = run.get("loop")
+                    if loop and not loop.get("ended"):
+                        loop.pop("due", None)
+                        run_loops._end_cycle(loop, None, run_eh.BUDGET_KIND)
+                        loop["ended"] = run_eh.BUDGET_KIND
+                    stage["refused"] = {"kind": run_eh.BUDGET_KIND, "need": short[0], "left": short[1]}
+                    run["status"], run["reason"], task["status"] = "needs_user", run_eh.BUDGET_KIND, "needs_review"
+                    _save(path, task)
+                    return
                 stage.update(status="active", entered_at=_now())
                 task["steps"].extend(steps)
                 if any(_carded(s) for s in steps):

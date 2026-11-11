@@ -223,6 +223,38 @@ def card(frozen):
     }
 
 
+def pass_short(path, steps):
+    """Study harness 12c (GK B (47) Q1-i): a granted run's solve pass whose EH
+    study counted its islanding contingencies starts only when the solves
+    left cover all of it: the queued solve, the study's frozen `budget_solves`
+    (its stages and the K stress solves) and each native action's solves.
+    `(need, left)` when they do not, else None. The first pass and each L2
+    round enter the solve stage through the one place that calls this
+    (`assistant_tasks._advance_run`), and the run's steps dispatch one at a
+    time, so nothing else spends between the check and the pass's own
+    reservations."""
+    from services import run_actions, run_envelope
+
+    if not any(
+        is_eh_step(s) and isinstance((s.get("frozen") or {}).get("contingencies"), dict)
+        for s in steps
+    ):
+        return None
+    envelope = run_envelope._load(path)
+    if envelope is None or envelope.get("state") != "granted":
+        return None  # step by step: each step's own card and check
+    need = 0
+    for s in steps:
+        if is_eh_step(s):  # before RUN_TOOLS, which lists it too
+            need += int((s.get("args") or {}).get("budget_solves") or 0)
+        elif s["tool"] in run_envelope.RUN_TOOLS:
+            need += 1
+        elif run_actions.is_action(s):
+            need += int((s.get("frozen") or {}).get("solves") or run_actions.SOLVES)
+    left = envelope["budget"]["solves"] - run_envelope.solves_used(envelope)
+    return (need, left) if need > left else None
+
+
 def fill(steps, frozen) -> None:
     """Put the frozen args on a freshly materialised EH step (in place); a
     step with none keeps `UNFROZEN`, which `admit` refuses."""

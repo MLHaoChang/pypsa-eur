@@ -858,9 +858,17 @@ def _mg_critical_served(env):
     if status != "ok":
         return NoEvidence(str(status or "unreadable"),
                           str(section.get("note") or f"the off-grid stress reads {status}")[:240])
-    rows = (section.get("payload") or {}).get("contingencies")
+    payload = section.get("payload") or {}
+    rows = payload.get("contingencies")
     if not isinstance(rows, list) or not rows:
         return NoEvidence("unreadable", "the off-grid stress names no contingency")
+    # Study harness 12c (Q1-i): a stress that covered only some of the K
+    # contingencies the run's study was frozen with is never read.
+    held = _eh_contingencies(env.task)
+    names = [str((row or {}).get("contingency")) for row in rows]
+    if payload.get("budget_exhausted") or payload.get("aborted") or (held is not None and names != held):
+        return NoEvidence("partial", f"the off-grid stress covered {', '.join(names)} of "
+                                     f"{', '.join(held) if held is not None else 'its contingencies'}")
     total, detail = 0.0, []
     for row in rows:
         name = str((row or {}).get("contingency"))
@@ -871,6 +879,16 @@ def _mg_critical_served(env):
         total += float(value)
         detail.append(f"{name}: {float(value):.4g} MWh")
     return Detailed(total, detail)
+
+
+def _eh_contingencies(task):
+    """The islanding contingencies the run's latest EH step was frozen with
+    (study harness 12c G1), or None when it counted none."""
+    from harness import run_eh
+    step = next((s for s in reversed(task.get("steps") or []) if run_eh.is_eh_step(s) and not s.get("superseded")),
+                None)
+    held = ((step or {}).get("frozen") or {}).get("contingencies")
+    return list(held["links"]) if isinstance(held, dict) and isinstance(held.get("links"), list) else None
 
 
 def _mg_frequency(env):

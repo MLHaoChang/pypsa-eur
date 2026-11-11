@@ -1645,6 +1645,14 @@ archetype `off_grid` the template card's.
   the plan card is proposed or read; the card shows K and the budget, held to
   the hard cap of 20 (K >= 2 then covers the first pass and one L2 round).
   The grant counts again and refuses `eh_contingencies` when K moved.
+- **The cap (GK B (47) Q1).** The card shows the arithmetic and, when the
+  cap applies, the capped budget (Q1-iii). A K whose one pass, `1 + (2 + K)
+  + 1`, is above the cap is refused on the card and at the grant,
+  `eh_pass_over_cap` (Q1-ii). Every entry to the solve stage (the first pass
+  and each L2 round's) checks `run_eh.pass_short`: a granted pass the solves
+  left cannot finish never starts; the stage stays pending, any L2 loop ends
+  and the run stops `eh_budget` (Q1-i). `mg.island.critical_served` reads a
+  stress only when it covered all K contingencies the study was frozen with.
 - **Result gate.** `mg.island.survival` (block; its levers are the
   `StorageUnit` `p_nom_max` and `max_hours` of the battery candidate),
   `mg.tie.open`, `mg.critical.tagged`, `mg.island.critical_served` (MWh),

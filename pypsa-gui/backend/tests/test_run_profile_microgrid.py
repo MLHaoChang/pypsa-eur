@@ -928,8 +928,13 @@ def test_the_card_names_k_and_the_grant_holds_the_budget_it_sets(
     assert envelope["budget"]["solves"] == min(needed, run_envelope.CAPS["solves"])
     assert f"K = {k} islanding contingencies on this project" in message
     assert f"= {needed} solves" in message
-    if needed > run_envelope.CAPS["solves"]:
-        assert "held to the hard cap of 20" in message
+    if (
+        needed > run_envelope.CAPS["solves"]
+    ):  # Q1-iii: the arithmetic and the capped figure
+        assert (
+            f"(1 + (2 + {k}) + 1) x 3 + 4 = {needed} solves; the budget is the hard cap of 20 solves"
+            in message
+        )
     frozen = envelope["eh_study"]
     assert (
         frozen["contingencies"]["count"] == k
@@ -1004,3 +1009,187 @@ def test_a_k_changed_after_the_card_refuses_the_grant(session, site, detached, t
         )
     assert exc.value.detail["error_kind"] == "eh_contingencies"
     assert run_envelope._load(path)["state"] == "proposed"
+
+
+# ── GK B (47) Q1-i..ii: a pass never starts that the solves cannot finish ────
+
+
+def _solve_entry(path, used, loop=True):
+    """The run at the solve stage's entry, `used` solves already spent (an L2
+    round's re-solve when `loop`)."""
+    record = json.loads(path.read_text())
+    run = record["run"]
+    for name in run_profiles.STAGES[: run_profiles.STAGES.index("solve")]:
+        run["stages"][name]["status"] = "passed"
+    run["stage"], run["status"], record["status"] = "solve", "running", "ready"
+    run["stages"]["solve"] = {"status": "pending", "attempts": 0}
+    if loop:
+        run["loop"] = {
+            "kind": "L2",
+            "stage": "result_gate",
+            "rounds": 1,
+            "limit": 2,
+            "refusals": 0,
+            "history": [{"round": 1, "outcome": None}],
+            "due": None,
+        }
+    path.write_text(json.dumps(record))
+    envelope = run_envelope._load(path)
+    for i in range(used):
+        run_envelope._audit(
+            envelope, "used", tool="solve_queue_enqueue", call_id=f"spent{i}"
+        )
+    run_envelope._save(path, envelope)
+
+
+@pytest.mark.parametrize("ties", [2], indirect=True)
+def test_an_l2_pass_the_solves_left_cannot_finish_never_starts(session, site, ties):
+    """Q1-i: K = 3, a pass is 1 + (2 + 3) + 1 = 7 solves; with 6 left the
+    round's pass is refused `eh_budget`: no step of it, no DTC, nothing spent."""
+    from tests.test_harness_run_skeleton import start
+    from tests.test_harness_runner import task_path
+
+    task = start(run={"profile": "eh_microgrid@1", "mode": "stepwise"})
+    run_envelope.decide(
+        session, task["task_id"], "unattended", goal=task["envelope"]["goal"]
+    )
+    path = task_path(site[1], task)
+    budget = run_envelope._load(path)["budget"]["solves"]
+    assert run_profiles.mg_pass_solves(3) == 7 and budget == 20
+    _solve_entry(path, used=budget - 6)
+    before = run_envelope.solves_used(run_envelope._load(path))
+    assistant_tasks._advance_run(path, _live())
+    record = json.loads(path.read_text())
+    run = record["run"]
+    assert run["status"] == "needs_user" and run["reason"] == "eh_budget", (
+        run["stage"],
+        {k: v["status"] for k, v in run["stages"].items()},
+        record["status"],
+        [
+            (s["id"], s["tool"], s.get("frozen", {}).get("contingencies"))
+            for s in record["steps"]
+        ],
+    )
+    assert run["stages"]["solve"]["status"] == "pending"
+    assert run["stages"]["solve"]["refused"] == {
+        "kind": "eh_budget",
+        "need": 7,
+        "left": 6,
+    }
+    assert (
+        run["loop"]["ended"] == "eh_budget"
+        and run["loop"]["history"][-1]["outcome"] == "eh_budget"
+    )
+    assert not [
+        s for s in record["steps"] if s["id"].startswith("solve.")
+    ]  # nothing half-run
+    assert run_envelope.solves_used(run_envelope._load(path)) == before
+    # With 7 left the same entry starts the whole pass.
+    envelope = run_envelope._load(path)
+    envelope["audit"] = [a for a in envelope["audit"] if a.get("call_id") != "spent0"]
+    run_envelope._save(path, envelope)
+    _solve_entry(path, used=0, loop=False)
+    assistant_tasks._advance_run(path, _live())
+    tools = [
+        s["tool"]
+        for s in json.loads(path.read_text())["steps"]
+        if s["id"].startswith("solve.")
+    ]
+    assert tools == ["solve_queue_enqueue", "run_eh_study", run_actions.MG_SURVIVAL]
+
+
+def test_a_stress_that_covered_only_some_contingencies_is_never_read(hub, monkeypatch):
+    """Q1-i: the K the run's study was frozen with, all of them, or no evidence."""
+    rule = _rules("eh_microgrid@1")["mg.island.critical_served"]
+    rows = [
+        {"contingency": c, "status": "ok", "critical_unserved_mwh": 0.0}
+        for c in ("subsea_tie", "tie_2")
+    ]
+    task = {
+        "steps": [
+            {
+                "id": "solve.2",
+                "tool": "run_eh_study",
+                "status": "completed",
+                "frozen": {
+                    "contingencies": {
+                        "count": 3,
+                        "links": ["subsea_tie", "tie_2", "tie_3"],
+                    }
+                },
+            }
+        ]
+    }
+    for payload in (
+        {"contingencies": rows, "budget_exhausted": True},
+        {"contingencies": rows},
+    ):
+        MG._eh(monkeypatch, {"status": "ok", "note": None, "payload": payload})
+        [result] = run_gates.evaluate([rule], MG._env(hub, task))
+        assert (
+            result["verdict"] == "not_evaluated"
+            and result["facts"][0]["value"] == "partial"
+        ), result
+        assert run_gates.passed([result]) is False
+    full = rows + [
+        {"contingency": "tie_3", "status": "ok", "critical_unserved_mwh": 0.0}
+    ]
+    MG._eh(
+        monkeypatch, {"status": "ok", "note": None, "payload": {"contingencies": full}}
+    )
+    [result] = run_gates.evaluate([rule], MG._env(hub, task))
+    assert result["verdict"] == "pass" and result["facts"][0]["value"] == 0.0
+
+
+def test_a_k_whose_one_pass_is_above_the_cap_is_refused_on_the_card(tmp_path):
+    """Q1-ii: K = 17 needs 1 + (2 + 17) + 1 = 21 > 20 solves for one pass."""
+    n = T.build_eh_microgrid()
+    for i in range(16):
+        _second_tie(n, f"tie_{i + 2}")
+    held = run_envelope.counted(
+        run_profiles.resolve("eh_microgrid@1"), _ctx(tmp_path, network=n)
+    )
+    assert (
+        held["count"] == 17
+        and held["one_pass"] == 21
+        and held["refused"] == "eh_pass_over_cap"
+    )
+    card = run_envelope.describe(
+        {
+            "id": "e",
+            "state": "proposed",
+            "expires_at": None,
+            "audit": [],
+            "notify": {},
+            "edits": [],
+            "gaps": [],
+            "runs": [],
+            "contingencies": held,
+            "budget": {"solves": 20, "rounds": 6, "wall_time_h": 8.0},
+            "research": {"allowed": False, "cost_cap_eur": 2.0},
+        }
+    )
+    assert (
+        "one solve pass needs 1 + (2 + 17) + 1 = 21 solves, above the hard cap of 20, so this run "
+        "cannot be granted"
+    ) in card["detail"]
+
+
+@pytest.mark.parametrize("ties", [16], indirect=True)
+def test_the_grant_of_a_pass_above_the_cap_is_refused_by_its_kind(session, site, ties):
+    from fastapi import HTTPException
+
+    from tests.test_harness_run_skeleton import start
+    from tests.test_harness_runner import task_path
+
+    task = start(run={"profile": "eh_microgrid@1", "mode": "stepwise"})
+    assert "above the hard cap of 20" in task["envelope"]["detail"]
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(
+            session, task["task_id"], "unattended", goal=task["envelope"]["goal"]
+        )
+    assert (
+        exc.value.detail["error_kind"] == "eh_pass_over_cap"
+        and "= 21 solves" in exc.value.detail["message"]
+    )
+    assert run_envelope._load(task_path(site[1], task))["state"] == "proposed"
