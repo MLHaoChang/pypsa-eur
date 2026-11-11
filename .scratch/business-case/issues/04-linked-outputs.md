@@ -3,7 +3,7 @@
 
 # 04 — Linked model outputs and unit conversions
 
-Status: ready-for-agent after 01 merges and 02 (GK A LO-1..LO-10; L7 waits on DC 03)
+Status: done (#1383)
 Type: task
 Blocked by: 02; ../../dc-business-case/issues/03-it-energy-series.md (L7 only)
 Gated: yes (GK A)
