@@ -1339,9 +1339,7 @@ def test_a_share_line_is_in_each_years_template_once_and_only_in_its_span():
     bc = build_business_case(
         _ic(), _inputs(_line(), _royalty(start_year=2033, end_year=2034)), {}
     )
-    by_year = {
-        t.first_year: [ln.key for ln in t.lines] for t in bc.case.templates
-    }
+    by_year = {t.first_year: [ln.key for ln in t.lines] for t in bc.case.templates}
     for y in range(2031, 2036):
         assert by_year[y].count("royalty") == (1 if y in (2033, 2034) else 0), y
     _, r = _run(_inputs(_line(), _royalty(start_year=2033, end_year=2034)))
@@ -1421,7 +1419,8 @@ def test_an_opex_share_of_capex_reads_its_kind_and_category_only():
 def test_a_bc_line_without_a_money_year_is_in_base_money_on_a_template_in_another():
     ic = _ic()
     ic = dataclasses.replace(
-        ic, templates=tuple(dataclasses.replace(t, money_year=2029) for t in ic.templates)
+        ic,
+        templates=tuple(dataclasses.replace(t, money_year=2029) for t in ic.templates),
     )
     _, r = _run(_inputs(_line()), ic)
     for y in range(2031, 2036):
@@ -1628,7 +1627,9 @@ def test_the_npv_irr_and_payback_kpis_are_the_engines_numbers():
 def test_a_missing_rate_names_its_own_rate():
     _, r = _run(_inputs(_line()), _ic(wacc_nominal=None))
     k = kpis(r, pnl(r))
-    assert k["project_npv"] == Kpi(None, "not_established", "wacc_nominal_missing", "USD")
+    assert k["project_npv"] == Kpi(
+        None, "not_established", "wacc_nominal_missing", "USD"
+    )
     assert k["equity_npv"].status == "ok"
     _, r = _run(_inputs(_line()), _ic(cost_of_equity=None))
     k = kpis(r, pnl(r))
@@ -1745,7 +1746,9 @@ def test_break_even_scales_every_price_cell_by_the_scale():
     # The mixed line: the base price and its cell scale together.
     mixed = _line(price=50.0, price_by_year={2033: 70.0})
     be = break_even(ic, _inputs(mixed), {}, "product", PACK)
-    assert be["status"] == "ok" and be["price"] == pytest.approx(50.0 * be["price_scale"])
+    assert be["status"] == "ok" and be["price"] == pytest.approx(
+        50.0 * be["price_scale"]
+    )
     solved = _line(price=be["price"], price_by_year={2033: 70.0 * be["price_scale"]})
     assert bcm._npv_at(ic, _inputs(solved), {}, 0, PACK, None, 1.0) == pytest.approx(
         0.0, abs=1e-3
@@ -1755,12 +1758,12 @@ def test_break_even_scales_every_price_cell_by_the_scale():
 def test_break_even_tries_scales_up_to_the_maximum_and_no_further():
     ic = _ic()
     s1 = break_even(ic, _inputs(_line()), {}, "product", PACK)["price_scale"]
-    top = max(
-        s for s in (1.5**k for k in range(60)) if s <= bcm.BREAK_EVEN_MAX_SCALE
-    )
+    top = max(s for s in (1.5**k for k in range(60)) if s <= bcm.BREAK_EVEN_MAX_SCALE)
     assert top < bcm.BREAK_EVEN_MAX_SCALE < top * 1.5
     for target, status in ((0.6 * top, "ok"), (1.2 * top, "break_even_not_bracketed")):
-        be = break_even(ic, _inputs(_line(price=50.0 * s1 / target)), {}, "product", PACK)
+        be = break_even(
+            ic, _inputs(_line(price=50.0 * s1 / target)), {}, "product", PACK
+        )
         assert be["status"] == status, target
         if status == "ok":
             assert be["price_scale"] == pytest.approx(target, rel=1e-6)
