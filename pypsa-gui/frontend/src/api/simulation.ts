@@ -1308,9 +1308,9 @@ export interface HeadlineCard {
 /** The open project against its base case: the base itself, or a sensitivity case of it. */
 export interface HeadlineComparison {
   role: 'base' | 'case'
-  /** Null when the base is not open to the user. */
-  base_name: string | null
-  base_project_id: string | null
+  /** The base case's name and id; the server always sends both. */
+  base_name: string
+  base_project_id: string
   comparable: boolean
   /** One plain sentence when the case is not compared with its base. */
   reason: string | null

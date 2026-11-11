@@ -30,6 +30,7 @@ BASIS = (
 )
 NO_BASE_FIGURE = "The base case has no figure here to compare with."
 OTHER_UNIT = "The base case reports this figure in another unit."
+NOT_FINITE = "The change is too large to show as a number."
 #: The card states that carry a figure; no other state is ever subtracted.
 VALUE_STATES = ("ready", "zero")
 
@@ -123,7 +124,7 @@ def base_case(ctx):
         logger.exception("headline strip: the base case could not be read")
         return _block("case", base, False, BASE_UNREADABLE), None
     if reasons:
-        why = sc._not_comparable("", reasons).split(": ", 1)[1]
+        why = _plain(sc._not_comparable("", reasons).split(": ", 1)[1])
         return _block(
             "case", base, False, f"Not compared with the base case: {why}."
         ), None
@@ -135,6 +136,18 @@ def _figure(card) -> float | None:
     if card is None or card.get("state") not in VALUE_STATES or value is None:
         return None
     return value if math.isfinite(value) else None
+
+
+def _finite(x):
+    return x if isinstance(x, (int, float)) and math.isfinite(x) else None
+
+
+def _plain(why):
+    """The comparison's reasons in the strip's words: each reason is its own
+    sentence (the chat joins them with a semicolon), and a case is "created"
+    from its base, never "branched"."""
+    parts = [p.replace("branched", "created") for p in why.split("; ")]
+    return ". ".join([parts[0]] + [p[:1].upper() + p[1:] for p in parts[1:]])
 
 
 def add_deltas(cards: list[dict], base_cards: list[dict]) -> None:
@@ -160,8 +173,10 @@ def add_deltas(cards: list[dict], base_cards: list[dict]) -> None:
             card["delta"] = {"value": None, "pct": None, "note": OTHER_UNIT}
         else:
             cell = sc._cell(("", 1.0), base_value, value)
-            card["delta"] = {
-                "value": cell["delta"],
-                "pct": cell["delta_pct"],
-                "note": cell.get("delta_pct_note"),
-            }
+            # An overflow or a vanishing base gives inf: no number, never one the
+            # route cannot serialise.
+            value_d, pct_d = _finite(cell["delta"]), _finite(cell["delta_pct"])
+            note = cell.get("delta_pct_note")
+            if value_d is None or (pct_d is None and note is None):
+                note = note or NOT_FINITE
+            card["delta"] = {"value": value_d, "pct": pct_d, "note": note}

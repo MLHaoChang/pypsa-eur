@@ -1,6 +1,7 @@
 """The headline figures at the top of Results (ui-modern 03 S1)."""
 # ruff: noqa: F811 -- imported shared fixtures.
 
+import math
 from types import SimpleNamespace
 
 import pandas as pd
@@ -753,7 +754,7 @@ def test_a_case_whose_base_changed_says_why_and_carries_no_delta(swept, client):
         basis=None,
         reason=(
             "Not compared with the base case: the base's inputs or finance "
-            "settings changed since this case was branched."
+            "settings changed since this case was created."
         ),
     )
     assert no_deltas(by_id)
@@ -766,8 +767,8 @@ def test_a_base_out_of_date_is_named_first(swept, client):
     body, by_id = strip(client, "Gas 20")
     assert body["comparison"]["reason"] == (
         "Not compared with the base case: the base has no current results to "
-        "compare with; the base's inputs or finance settings changed since "
-        "this case was branched."
+        "compare with. The base's inputs or finance settings changed since "
+        "this case was created."
     )
     assert no_deltas(by_id)
 
@@ -953,6 +954,21 @@ def deltas(cards, base):
     return {c["id"]: c["delta"] for c in cards}
 
 
+@pytest.mark.parametrize(
+    "base, case",
+    [
+        (5e-324, 1.0),  # the percentage overflows to inf
+        (1e308, -1e308),  # the difference overflows to inf
+    ],
+)
+def test_a_change_that_is_not_finite_gives_no_number(base, case):
+    """GK B S7: inf would be a 500 under allow_nan=False; the card says why."""
+    got = deltas([card("a", case)], [card("a", base)])["a"]
+    assert got["value"] is None or math.isfinite(got["value"])
+    assert got["pct"] is None or math.isfinite(got["pct"])
+    assert got["note"] == hd.NOT_FINITE
+
+
 def test_a_delta_is_the_case_minus_the_base_over_the_bases_size():
     got = deltas(
         [card("a", 90.0), card("f", -30.0), card("z", 0.0, state="zero")],
@@ -1084,8 +1100,12 @@ def test_the_trend_of_a_solved_multi_period_run_adds_up_with_uneven_periods(
         )
     )
     n.investment_periods = [2030, 2040]
+    # GK B T1: snapshot weights that are not 1 and years that differ from the
+    # objective weights, so a dropped snapshot weight or a years/objective swap
+    # changes a point.
+    n.snapshot_weightings.loc[:, :] = 3.0
     n.investment_period_weightings["years"] = [10.0, 5.0]
-    n.investment_period_weightings["objective"] = [10.0, 5.0]
+    n.investment_period_weightings["objective"] = [7.0, 2.0]
     n.add("Bus", "B1")
     n.add("Generator", "G1", bus="B1", p_nom=20, marginal_cost=10)
     n.add("Load", "L1", bus="B1", p_set=5)
@@ -1097,9 +1117,10 @@ def test_the_trend_of_a_solved_multi_period_run_adds_up_with_uneven_periods(
     )
     system = next(c for c in payload["cards"] if c["id"] == "system_cost")
     points = system["trend"]["points"]
-    # 5 MW for 2 h at 10 per MWh is 100 a year: 1,000 over ten years, 500 over five.
+    # 5 MW for 2 snapshots of 3 h at 10 per MWh is 300 a year: 3,000 over ten
+    # years, 1,500 over five.
     assert [(p["period"], p["value"]) for p in points] == [
-        (2030, pytest.approx(1000)),
-        (2040, pytest.approx(500)),
+        (2030, pytest.approx(3000)),
+        (2040, pytest.approx(1500)),
     ]
     assert sum(p["value"] for p in points) == pytest.approx(system["value"])
