@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { ChoiceCard } from '../ChatPanel'
+import { ChoiceCard, KIND_COPY } from '../ChatPanel'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore } from '../../store/uiStore'
 import * as api from '../../api/runMonitor'
@@ -409,5 +409,9 @@ describe('EnvelopeSection reliability goal', () => {
       const label = new RegExp(`"${key.replace(/\./g, '\\.')}": _(?:num|enum|bool)\\("([^"]+)"`).exec(src)?.[1]
       expect(PATH_WORDS[key][0], key).toBe(label)
     }
+  })
+
+  it('a refused intake digest has a plain-words title, never its kind key', () => {
+    expect(KIND_COPY.intake_stale.title).toBe('The inputs changed: review them again')
   })
 })
