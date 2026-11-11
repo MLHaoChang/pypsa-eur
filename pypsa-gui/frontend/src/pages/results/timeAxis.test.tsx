@@ -38,3 +38,13 @@ it('thinRows draws a full year in at most the point budget, whole rows, in order
 it('thinRows keeps the peak of its bucket', () => {
   expect(thinRows(year).some(r => r.b === 900)).toBe(true)
 })
+
+import { render, screen } from '@testing-library/react'
+import { ThinNote } from './shared'
+
+it('ThinNote says how many rows are drawn, only when it thinned', () => {
+  const { rerender } = render(<ThinNote rows={year} />)
+  expect(screen.getByTestId('thin-note').textContent).toMatch(/Drawn: 1,4\d\d of 8,760 hours/)
+  rerender(<ThinNote rows={year.slice(0, 100)} />)
+  expect(screen.queryByTestId('thin-note')).toBeNull()
+})

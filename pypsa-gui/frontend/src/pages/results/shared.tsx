@@ -1086,6 +1086,18 @@ export function thinRows<T extends object>(rows: readonly T[], max = MAX_CHART_P
   return out
 }
 
+/** The muted line under a chart whose rows were thinned by `thinRows`; renders
+ *  nothing when the chart shows every row. */
+export function ThinNote({ rows }: { rows: readonly object[] }) {
+  const drawn = rows.length > MAX_CHART_POINTS ? thinRows(rows).length : rows.length
+  if (drawn >= rows.length) return null
+  return (
+    <p data-testid="thin-note" className="px-1 pt-1 text-[10px] text-muted">
+      Drawn: {drawn.toLocaleString('en-US')} of {rows.length.toLocaleString('en-US')} hours · the largest hour of each stretch is kept · totals use every hour
+    </p>
+  )
+}
+
 /** A legend entry in plain words: no `Gen:` prefix, no snake_case id
  *  (UX review N18: `storage_discharge` -> "Storage discharge"). */
 export const legendName = (v: unknown): string =>

@@ -18,7 +18,7 @@ import {
   fmtEnergy, fmtCurrency, fmtPower, shortStamp, downloadCSV, downloadSVG, KPI, Seg,
   ChartFrame, ChartSourceLine, CHART_HEIGHT, chartFigure, carrierColour, seriesDash,
   WindowCapBanner,
-  CHART_GRID, CHART_AXIS, timeAxis, thinRows, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
+  CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   SEASONS, SEASON_OF_MONTH, SEASON_ACCENT,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, WEEKDAYS,
   parseSeasonStamp, useSeasonalViewMode, colourForCarrier, isAllZero, ChartZero,
@@ -3244,6 +3244,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
           ) : (
           <div ref={mainChartRef}>
             {mainChart}
+            <ThinNote rows={perAsset && perAssetView ? perAssetView.rows : (aggView ?? agg ?? [])} />
           </div>
           )}
 
@@ -3287,6 +3288,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                     <Area type="monotone" dataKey="value" stroke="var(--color-warn)" fill="var(--color-warn)" fillOpacity={0.22} strokeWidth={1.6}  isAnimationActive={false} />
                   </AreaChart>
                 </ResponsiveContainer>
+                <ThinNote rows={curtailmentSeries} />
               </div>
               )}
             </div>
@@ -3337,6 +3339,7 @@ function GroupSection<T extends { name: string }>(props: GroupSectionProps<T>) {
                     <Area type="monotone" dataKey="value" stroke="var(--color-danger)" fill="var(--color-danger)" fillOpacity={0.22} strokeWidth={1.6}  isAnimationActive={false} />
                   </AreaChart>
                 </ResponsiveContainer>
+                <ThinNote rows={lostLoadSeries} />
               </div>
             </div>
           )}

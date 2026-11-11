@@ -6,7 +6,7 @@ import {
 import type { Generator, Load, StorageUnit, Link as LinkT } from '../../api/types'
 import { type TSPayload, shortStamp, stampWithPeriod, fmtPower, isRenewableCarrier,
   ChartActions, downloadCSV, colourForCarrier,
-  CHART_GRID, CHART_AXIS, timeAxis, thinRows, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
+  CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   ChartFrame, CHART_HEIGHT, chartFigure, LABEL_PASS, directLabel, bandLabelIndices, legendName } from './shared'
 
 // ── Per-period generation dispatch stack ────────────────────────────────────
@@ -485,6 +485,7 @@ export default function DispatchStack({
               name={hasElectricalFilter ? `Load (${carrierLabel})` : 'Load (total)'} />
           </ComposedChart>
         </ResponsiveContainer>
+        <ThinNote rows={rows} />
         {/* Per-carrier colours live in the Recharts <Legend> above; the peak
             load now sits in the header figure (chart theme, ui-modern 02). */}
       </div>

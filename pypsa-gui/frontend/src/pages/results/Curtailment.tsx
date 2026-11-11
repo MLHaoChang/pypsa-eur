@@ -14,7 +14,7 @@ import type { Generator } from '../../api/types'
 import {
   type TSPayload, type WeightCtx, weightedSum, aggregateTS,
   isRenewableCarrier, shortStamp, useWeightCtx, WindowCapBanner,
-  CHART_GRID, CHART_AXIS, timeAxis, thinRows, CHART_TOOLTIP, yAxisLabel, chartFigure, ChartFrame, ChartZero, CHART_HEIGHT,
+  CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_TOOLTIP, yAxisLabel, chartFigure, ChartFrame, ChartZero, CHART_HEIGHT,
 } from './shared'
 import HourDayHeatmap from './HourDayHeatmap'
 import { heatScale, hourDayGrid, spansPeriods, PICK_ONE_PERIOD } from './hourDay'
@@ -226,7 +226,7 @@ export default function Curtailment() {
         {nothingCurtailed ? (
           <ChartZero>No curtailment in this range: all available renewable energy was used.</ChartZero>
         ) : aggSeries && aggSeries.length > 0 ? (
-          overTime
+          <>{overTime}<ThinNote rows={aggSeries} /></>
         ) : (
           <ChartZero>No curtailment time series for the selected range.</ChartZero>
         )}
