@@ -296,6 +296,22 @@ def test_an_event_row_short_of_its_step_fails_with_the_shortfall_in_words(
             S.NOT_EVALUATED,
             "the island check's solve ended time limit, not optimal",
         ),
+        # linopy reports these endings with status "ok": still no verdict.
+        (
+            ("ok", "time_limit"),
+            S.NOT_EVALUATED,
+            "the island check's solve ended time limit, not optimal",
+        ),
+        (
+            ("ok", "iteration_limit"),
+            S.NOT_EVALUATED,
+            "the island check's solve ended iteration limit, not optimal",
+        ),
+        (
+            ("ok", "suboptimal"),
+            S.NOT_EVALUATED,
+            "the island check's solve ended suboptimal, not optimal",
+        ),
         (
             ("warning", "unknown"),
             S.NOT_EVALUATED,
@@ -393,7 +409,11 @@ def test_the_rows_are_skipped_on_a_dispatch_only_solve_unless_checked(solved):
 @pytest.mark.parametrize("tid", TEMPLATES)
 def test_the_shipped_tie_is_open_and_the_critical_load_agrees(tid):
     n = T.BUILDERS[tid]()
-    assert S.tie_state(n) == {"state": "open", "ties": ["subsea_tie"], "carrying": []}
+    assert S.tie_state(n, _island(tid)) == {
+        "state": "open",
+        "ties": ["subsea_tie"],
+        "carrying": [],
+    }
     assert S.critical_state(n, _island(tid)) == {
         "state": "tagged",
         "loads": ["hospital_load"],
@@ -406,7 +426,7 @@ def test_a_tie_that_can_carry_power_in_any_hour_or_direction_is_closed():
     def state(change):
         n = T.BUILDERS["eh_microgrid"]()
         change(n)
-        return S.tie_state(n)
+        return S.tie_state(n, _island("eh_microgrid"))
 
     def set_tie(attr, value):
         return lambda n: n.links.loc[["subsea_tie"], attr].pipe(
@@ -519,11 +539,54 @@ def test_a_tie_that_can_carry_power_in_any_hour_or_direction_is_closed():
     )
 
 
-def test_no_poc_bus_and_no_tagged_link_is_no_tie():
+def test_the_island_side_is_the_sidecar_units_buses_not_the_poc_mark():
+    island = _island("eh_microgrid")
     n = T.BUILDERS["eh_microgrid"]()
+    assert S.island_buses(n, island) == {"island", "hospital"}
+    # The PoC mark and the import tag play no part: without them the tie is still the tie.
     n.buses["eh_poc"] = False
     n.links["eh_role"] = ""
-    assert S.tie_state(n) == {"state": "no_tie", "ties": [], "carrying": []}
+    assert S.tie_state(n, island) == {
+        "state": "open",
+        "ties": ["subsea_tie"],
+        "carrying": [],
+    }
+    n.remove("Link", "subsea_tie")
+    assert S.tie_state(n, island) == {"state": "no_tie", "ties": [], "carrying": []}
+    import pypsa
+
+    assert S.tie_state(pypsa.Network(), island) == {
+        "state": "no_island",
+        "ties": [],
+        "carrying": [],
+    }
+
+
+def test_a_tie_to_a_bus_that_is_not_the_poc_is_seen_and_a_mainland_line_never_is():
+    """GK A F3, probes A2 and A."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    n.add("Bus", "m2")
+    n.add("Generator", "m2_supply", bus="m2", p_nom=100.0)
+    n.add("Link", "tie_b", bus0="m2", bus1="island", p_nom=5.0)
+    assert S.tie_state(n, island) == {
+        "state": "closed",
+        "ties": ["subsea_tie", "tie_b"],
+        "carrying": ["tie_b"],
+    }
+    n.add("Line", "ml", bus0="mainland", bus1="m2", x=0.1, s_nom=50.0)
+    out = S.tie_state(n, island)
+    assert out == {
+        "state": "closed",
+        "ties": ["subsea_tie", "tie_b"],
+        "carrying": ["tie_b"],
+    }
+    n.links.at["tie_b", "p_nom"] = 0.0
+    assert S.tie_state(n, island) == {
+        "state": "open",
+        "ties": ["subsea_tie", "tie_b"],
+        "carrying": [],
+    }
 
 
 def test_the_critical_tag_and_the_sidecar_must_name_the_same_load():
@@ -608,16 +671,135 @@ def test_rows_the_solve_skipped_are_not_a_pass_and_missing_units_are_reported(so
     assert out["state"] == S.FAILS and out["missing"] == {"genset": ["ghost"]}
 
 
-def test_a_branch_between_two_poc_buses_is_not_a_tie():
+def test_a_branch_with_both_ends_on_the_island_is_not_a_tie():
     n = T.BUILDERS["eh_microgrid"]()
-    n.add("Bus", "mainland_2")
-    n.buses.at["mainland_2", "eh_poc"] = True
-    n.add("Line", "grid_side", bus0="mainland", bus1="mainland_2", x=0.1, s_nom=5.0)
-    assert S.tie_state(n) == {"state": "open", "ties": ["subsea_tie"], "carrying": []}
+    assert "hospital_feeder" not in S.tie_state(n, _island("eh_microgrid"))["ties"]
 
 
 def test_only_the_port_columns_are_read_as_a_branch_s_ends():
     n = T.BUILDERS["eh_microgrid"]()
     n.links["bus_zone"] = "mainland"
     n.links["tag1"] = "mainland"
-    assert S.tie_state(n)["ties"] == ["subsea_tie"]
+    n.links["bus_zone"] = n.links["bus_zone"].where(
+        n.links.index != "hospital_feeder", "mainland"
+    )
+    assert S.tie_state(n, _island("eh_microgrid"))["ties"] == ["subsea_tie"]
+
+
+# ── GK A review (F1, F2, F4, F5) ───────────────────────────────────────────
+
+
+def test_a_real_time_limit_is_not_evaluated_never_survives(solved):
+    """F1: HiGHS stopped by its time limit ends status ok, condition time_limit, with the rows built."""
+    seen = {}
+
+    def solve(c, fn, **kw):
+        ending = c.optimize(
+            solver_name="highs",
+            extra_functionality=fn,
+            solver_options={"time_limit": 1e-6},
+            **kw,
+        )
+        seen["ending"], seen["rows"] = (
+            ending,
+            bool((c._island_facts or {}).get("periods")),
+        )
+        return ending
+
+    out = S.survival(solved["eh_microgrid"], _island("eh_microgrid"), solve=solve)
+    assert seen == {"ending": ("ok", "time_limit"), "rows": True}
+    assert (out["state"], out["reason"]) == (
+        S.NOT_EVALUATED,
+        "the island check's solve ended time limit, not optimal",
+    )
+    assert out["solves"] == 1 and out["solver"] == {
+        "status": "ok",
+        "condition": "time_limit",
+    }
+    assert out["binding"] == []
+
+
+def test_a_time_limit_with_the_rows_built_and_no_shortfall_is_not_evaluated(solved):
+    def solve(c, fn, **kw):
+        c._island_facts = {
+            "events": [],
+            "periods": {"None": {"window_snapshots": 24, "critical_peak_mw": 1.7}},
+        }
+        return ("ok", "time_limit")
+
+    out = S.survival(solved["eh_microgrid"], _island("eh_microgrid"), solve=solve)
+    assert (
+        out["state"] == S.NOT_EVALUATED
+        and out["periods"]["None"]["window_snapshots"] == 24
+    )
+
+
+@pytest.mark.parametrize(
+    "step", ["copy_network", "fix_design", "uc_gensets", "apply_energization"]
+)
+def test_a_step_before_the_solve_that_breaks_is_not_evaluated(
+    solved, monkeypatch, step
+):
+    """F2: no exception leaves ``survival`` raw; nothing was solved, so no solve is counted."""
+    import services.adequacy.energization as energization
+    import services.study.findings as findings
+
+    def boom(*a, **kw):
+        raise RuntimeError("broke")
+
+    target = {
+        "copy_network": findings,
+        "fix_design": S,
+        "uc_gensets": I,
+        "apply_energization": energization,
+    }[step]
+    monkeypatch.setattr(target, step, boom)
+    out = S.survival(solved["eh_microgrid"], _island("eh_microgrid"))
+    assert (out["state"], out["reason"]) == (
+        S.NOT_EVALUATED,
+        "the island check could not be set up (RuntimeError)",
+    )
+    assert out["solves"] == 0 and out["solver"] is None
+
+
+def test_the_single_year_check_agrees_with_the_island_study(solved):
+    """F4: the single-year template's own solve has the rows off, so the check is pinned against the
+    island study's ``seamless`` variant on the facts that do not depend on unit commitment. The study
+    sizes the site with the rows; the check fixes the plan and tests it."""
+    from services.study.findings import copy_network
+
+    island = _island("eh_microgrid")
+    study = I.island_study(copy_network(solved["eh_microgrid"]), island)
+    variant = study["variants"]["seamless"]
+    assert variant["status"] == "ok" and variant["condition"] == "optimal"
+    out = S.survival(solved["eh_microgrid"], island)
+    assert out["state"] == S.SURVIVES
+    assert (
+        out["periods"]
+        == {
+            str(p): {
+                "window_snapshots": v["window_snapshots"],
+                "critical_peak_mw": v["critical_peak_mw"],
+            }
+            for p, v in variant["facts"]["periods"].items()
+        }
+        == {"None": {"window_snapshots": 24, "critical_peak_mw": pytest.approx(1.7)}}
+    )
+    assert out["critical_loads"] == variant["facts"]["critical_loads"]
+    assert out["seamless_bridge"] == variant["facts"]["seamless_bridge"]
+    assert {b["row"] for b in out["binding"]} <= {
+        b["row"] for b in variant["binding"]
+    } | {"Island-n1-down-island_battery", "Island-n1-down-bess_new"}
+
+
+def test_the_rows_stay_skipped_by_default_on_a_dispatch_only_solve(solved):
+    """F5: ``add_island_rows`` called without ``check`` builds nothing on a fixed design."""
+    from services.study.findings import copy_network
+
+    c = copy_network(solved["eh_microgrid"])
+    S.fix_design(c)
+    facts = I.add_island_rows(c, c.snapshots, _island("eh_microgrid"))
+    assert facts == {
+        "skipped": "dispatch-only: nothing the rows can size is extendable"
+    }
+    assert c._island_facts == facts

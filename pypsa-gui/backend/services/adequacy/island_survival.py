@@ -9,7 +9,9 @@ plan the project has: it holds the sidecar's N+k ride-through over
 
 Four outcomes, never folded into one another:
 
-* ``survives``: the LP with the rows is optimal and no event row is short;
+* ``survives``: the LP with the rows is optimal (the solver's condition is
+  ``optimal``; a time or iteration limit, or a suboptimal or imprecise
+  ending, is not) and no event row is short;
 * ``fails``: a row the fixed sizes cannot hold (a fixed check that is short,
   an infeasible LP, or an event row short of its step), each named;
 * ``not_evaluated``: the rows could not be built from the sidecar and the
@@ -163,18 +165,24 @@ def survival(n, island, *, solve=None) -> dict:
         return {**out, "reason": "the network has no solved plan"}
     from services.study.findings import copy_network
 
-    c = copy_network(n)
-    if isinstance(n.snapshots, pd.MultiIndex):
-        c.snapshots.name = "snapshot"  # PyPSA's copy() drops the MultiIndex name
     try:
+        c = copy_network(n)
+        if isinstance(n.snapshots, pd.MultiIndex):
+            c.snapshots.name = "snapshot"  # PyPSA's copy() drops the MultiIndex name
         out["fixed"] = fix_design(c)
+        # A fixed-size run: the linearised unit commitment still commits (#448 §3.1),
+        # but only the gensets the own solve committed (it never commits one it sizes).
+        setattr(c, rows.FIXED_DESIGN_ATTR, True)
+        setattr(c, rows.AS_SIZED_ATTR, frozenset(rows.uc_gensets(n, island)[1]))
+        apply_energization(c)
     except NotSolved as exc:
         return {**out, "reason": str(exc)}
-    # A fixed-size run: the linearised unit commitment still commits (#448 §3.1),
-    # but only the gensets the own solve committed (it never commits one it sizes).
-    setattr(c, rows.FIXED_DESIGN_ATTR, True)
-    setattr(c, rows.AS_SIZED_ATTR, frozenset(rows.uc_gensets(n, island)[1]))
-    apply_energization(c)
+    except Exception as exc:  # noqa: BLE001 — a check that could not be set up is no verdict
+        return {
+            **out,
+            "state": NOT_EVALUATED,
+            "reason": f"the island check could not be set up ({type(exc).__name__})",
+        }
     out["solves"] = 1  # from here the solve is attempted, whatever its ending
     try:
         with rows.linearised_uc(c, island) as kw:
@@ -210,7 +218,7 @@ def survival(n, island, *, solve=None) -> dict:
         {"row": sh["row"], "sentence": rows.shortfall_sentence(sh)}
         for sh in rows.island_shortfalls(facts)
     ]
-    if status == "ok" and not short:
+    if status == "ok" and str(condition) == "optimal" and not short:
         if (facts or {}).get("skipped") or not facts:
             return {
                 **out,
@@ -239,15 +247,30 @@ def survival(n, island, *, solve=None) -> dict:
 # ── the input rules (GK A I8, I9) ──────────────────────────────────────────
 
 
-def _ties(n) -> list[tuple[str, str]]:
-    """(component, name) of every branch between the mainland and the island:
-    a Link (any of its ports), Line or Transformer touching both a PoC bus
-    (``eh_poc``, the mainland side of the tie) and another bus, and every
-    Link tagged as the grid import or export."""
-    from services.adequacy.archetypes import _poc_buses
-    from services.solver.island import _pcc_links
+def island_buses(n, island) -> set[str]:
+    """The island's own buses: the bus of every unit the island sidecar names
+    that the network has (the set the island rows cover). A genset or
+    storage modelled as a Link counts on its output bus."""
+    out = set()
+    for unit in island["units"]:
+        for table, col in (
+            ("generators", "bus"),
+            ("storage_units", "bus"),
+            ("loads", "bus"),
+            ("stores", "bus"),
+            ("links", "bus1"),
+        ):
+            df = getattr(n, table)
+            if unit in df.index:
+                out.add(str(df.at[unit, col]))
+    return out
 
-    poc = _poc_buses(n)
+
+def _ties(n, own: set[str]) -> list[tuple[str, str]]:
+    """(component, name) of every branch between the island and anything
+    else: a Link (any of its ports), Line or Transformer with an end on one of
+    the island's own buses ``own`` and an end off them. A branch with every
+    end off the island (mainland-internal) is not a tie."""
     out = []
     for comp, table in (
         ("Link", "links"),
@@ -261,12 +284,8 @@ def _ties(n) -> list[tuple[str, str]]:
                 for col in df.columns
                 if col.startswith("bus") and col[3:].isdigit()
             } - {"", "nan"}
-            if ends & poc and ends - poc:
+            if ends & own and ends - own:
                 out.append((comp, str(name)))
-    pcc = _pcc_links(n)
-    out += [
-        ("Link", x) for x in (*pcc["import"], *pcc["export"]) if ("Link", x) not in out
-    ]
     return out
 
 
@@ -289,12 +308,20 @@ def _carries(n, comp, name) -> bool:
     return False
 
 
-def tie_state(n) -> dict:
+def tie_state(n, island) -> dict:
     """``{state, ties, carrying}``: ``open`` when every branch between the
-    mainland and the island is at 0 in both directions in every hour (the
-    island runs alone), ``closed`` naming each branch that can carry power,
-    ``no_tie`` when the network marks no PoC bus and tags no grid Link."""
-    ties = _ties(n)
+    island's own buses (``island_buses``) and any other bus is at 0 in both
+    directions in every hour (the island runs alone), ``closed`` naming each
+    branch that can carry power, ``no_tie`` when no branch leaves the island
+    and ``no_island`` when the network has none of the sidecar's units.
+
+    A bus with no sidecar unit on it is off the island, so a feeder to such a
+    bus reads as a tie (closed when it carries power): never an open tie
+    that is not one."""
+    own = island_buses(n, island)
+    if not own:
+        return {"state": "no_island", "ties": [], "carrying": []}
+    ties = _ties(n, own)
     if not ties:
         return {"state": "no_tie", "ties": [], "carrying": []}
     carrying = [name for comp, name in ties if _carries(n, comp, name)]

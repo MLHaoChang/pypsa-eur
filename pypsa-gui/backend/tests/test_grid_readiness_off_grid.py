@@ -3,8 +3,10 @@ row built from the PoC's entered S_k'' leave the scorecard with the reason."""
 
 from __future__ import annotations
 
+import ast
 import inspect
 import json
+import textwrap
 
 from services.adequacy import grid_readiness as G
 from tests.test_grid_readiness import PROFILE
@@ -13,9 +15,51 @@ from tests.test_grid_readiness_voltage_stability import IDS as VS_IDS
 from tests.test_grid_readiness_voltage_stability import _template, _write
 
 
+#: The module's readers of the PoC's entered fault level.
+_SK_READERS = {"_poc_sks", "_poc_sk_mva", "_poc_sk_min", "_governing_poc"}
+
+
+def _calls(fn) -> set:
+    """The names ``fn`` calls or refers to, from its source."""
+    tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    return {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)} | {
+        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
+    }
+
+
 def _reads_the_poc_fault_level(build) -> bool:
-    src = inspect.getsource(build)
-    return "_poc_sk_mva(" in src or "_poc_sk_min(" in src
+    """True when ``build`` reaches a fault-level reader directly or through the module's own helpers
+    (followed transitively), or reads the ``eh_sk_mva`` column itself."""
+    seen, todo = set(), [build]
+    while todo:
+        fn = todo.pop()
+        if fn in seen:
+            continue
+        seen.add(fn)
+        names = _calls(fn)
+        if names & _SK_READERS or "eh_sk_mva" in inspect.getsource(fn):
+            return True
+        todo += [
+            f
+            for name in names
+            if inspect.isfunction(f := getattr(G, name, None))
+            and f.__module__ == G.__name__
+            and f not in G._BUILDERS
+        ]
+    return False
+
+
+def test_a_builder_that_reads_the_fault_level_through_a_helper_is_caught(monkeypatch):
+    def _helper(inp):
+        return G._poc_sk_mva(inp.n)
+
+    def _new_row(inp):
+        return {"id": "new", "value": _helper(inp)}
+
+    _helper.__module__ = _new_row.__module__ = G.__name__
+    monkeypatch.setattr(G, "_helper", _helper, raising=False)
+    assert _reads_the_poc_fault_level(_new_row)
+    assert not _reads_the_poc_fault_level(G._lole_row)
 
 
 def _sk_ids(d) -> set:
@@ -33,6 +77,9 @@ def test_the_fault_level_builders_are_read_from_the_code():
     or this fails: the set is every builder reading the PoC's fault level,
     plus the SCR row (which reads it through the SCR gate)."""
     derived = {b for b in G._BUILDERS if _reads_the_poc_fault_level(b)} | {G._scr_rows}
+    # The voltage-stability rows name the governing PoC; they leave an off-grid scorecard by their own rule.
+    assert G._vs_rows in derived
+    derived -= {G._vs_rows}
     assert derived == set(G.SK_BUILDERS)
     named = {b.__name__ for b in G.SK_BUILDERS}
     assert named == {
