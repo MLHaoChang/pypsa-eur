@@ -146,6 +146,12 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A grant freezes only what the card showed; a field the card did not show stays outside the grant (#1257 F1).
 - A 409 detail that changes from a string to an object is checked against every frontend consumer of that route (#1261 R1).
 
+- A directory close (`.closing`) covers every lock under `reports/`, including new report ids and side stores such as `_charts`; no writer under it uses `mkdir(parents=True)` (#1373 D1, #1378 K1, GK B (46)).
+- A test for a ticketed defect asserts only what holds under every fix the ticket allows, "refuse" included (#1372 L1, GK B (46)).
+- A card shows every value its approval digest binds; a list or series is never summarised as a count (#1379 F2, GK B (46)).
+- An apply-then-read with nothing moved reads fresh; stale compares against what was recorded at approval (#1375 D1, GK B (46)).
+- A linked quantity clashes with a ledger stream only when that stream prices the same quantity. A served load meets the bill (grid import) but not an EaaS fee (the same delivery). The bill must stay import-only, pinned by a test (BC-04 F1, GK B (47)).
+
 ## Engineering rules
 
 - Grid source impedance derived from an entered S_k'' carries the IEC 60909 voltage factor c (Z = c·Un²/S_k''; S_sc2 = S_k''/c), in every screen: unbalance, the flicker note, the impedance scan.
