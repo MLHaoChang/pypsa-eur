@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import copy
 import json
+import contextlib
 import math
+import os
 import sys
 import threading
 import time
@@ -279,7 +281,7 @@ def test_records_never_cross_kinds_at_fill(hub):
                 "id": "solve.2",
                 "tool": MG,
                 "native": run_actions.KIND,
-                "args": run_actions.marker(MG),
+                "args": dict(run_actions.MARKERS[run_actions.MG_KIND]),
             },
         ]
 
@@ -496,7 +498,7 @@ def test_a_second_solve_raises_and_the_reservation_settles_what_was_spent(
     path = _task_file(hub, run_actions.mg_freeze(hub))
     _granted(path, 3)
     _stub(monkeypatch, solves=2)
-    assert _start(path, _ctx(hub)) == "mg_start_failed"
+    assert _start(path, _ctx(hub)) == "mg_check_failed"
     assert (
         _row(path)["solves"] == 2
     )  # the refused second call counted: never under-reported
@@ -511,7 +513,7 @@ def test_a_check_that_raises_before_its_solve_settles_at_zero(hub, monkeypatch):
         raise KeyError("efficiency2")
 
     monkeypatch.setattr(S, "survival", boom)
-    assert _start(path, _ctx(hub)) == "mg_start_failed"
+    assert _start(path, _ctx(hub)) == "mg_check_failed"
     assert _row(path)["solves"] == 0
     assert _read(path)["run"]["status"] == "needs_user"
 
@@ -590,6 +592,63 @@ def test_a_run_taken_over_during_the_check_keeps_nothing(hub, monkeypatch, loss)
     step = _read(path)["steps"][0]
     assert "result" not in step and step["status"] != "completed"
     assert _row(path)["solves"] == 1
+
+
+@pytest.mark.parametrize("loss", ["lease", "attempt"])
+def test_a_check_that_fails_after_a_takeover_records_nothing(hub, monkeypatch, loss):
+    """C3: the stop of a check that broke is written only while the run is
+    still this attempt's, like its result."""
+    from harness import runner
+
+    _sidecar(hub)
+    path = _task_file(hub, run_actions.mg_freeze(hub))
+    _granted(path, 3)
+
+    def boom(n, island, *, solve=None):
+        def change(t):
+            if loss == "lease":
+                t["run"]["runner"]["lease_owner"] = "b"
+            else:
+                t["steps"][0]["attempt_id"] = "other"
+
+        runner._update(path, change)
+        raise RuntimeError("solver crashed")
+
+    monkeypatch.setattr(S, "survival", boom)
+    _start(path, _ctx(hub))
+    task = _read(path)
+    assert task["steps"][0]["status"] == "running" and "error" not in task["steps"][0]
+    assert task["run"]["status"] == "running"
+    assert _row(path)["solves"] == 0
+
+
+def test_the_database_session_is_closed_while_the_check_solves(hub, monkeypatch):
+    """M5: the project is resolved in a session that ends before the solve."""
+    from services import chat_tools
+
+    _sidecar(hub)
+    path = _task_file(hub, run_actions.mg_freeze(hub))
+    real, open_ = chat_tools._acting, []
+
+    @contextlib.contextmanager
+    def acting():
+        with real() as pair:
+            open_.append(True)
+            try:
+                yield pair
+            finally:
+                open_.pop()
+
+    monkeypatch.setattr(chat_tools, "_acting", acting)
+    seen = []
+
+    def fake(n, island, *, solve=None):
+        seen.append(list(open_))
+        return _out()
+
+    monkeypatch.setattr(S, "survival", fake)
+    assert _start(path, _ctx(hub)) == MG
+    assert seen == [[]]
 
 
 def test_a_slowed_solve_holds_neither_lock(hub, monkeypatch):
@@ -963,16 +1022,39 @@ def test_critical_served_is_no_evidence_unless_every_contingency_solved(
     )
 
 
-def test_critical_unserved_energy_is_weighted_by_the_snapshot_weightings():
-    """C5: the off-grid stress weights each hour's shortfall; with a
-    weighting of 3 h a 1 MW shortfall over two snapshots is 6 MWh."""
+def test_critical_served_reads_energy_weighted_by_the_snapshot_weightings(
+    hub, monkeypatch
+):
+    """C5: the off-grid stress turns each hour's shortfall into MWh with the
+    snapshot weightings (`dtc._bus_unserved_mwh`, the bus roll-up the stress
+    stores as `critical_unserved_mwh`), and the fact reads that energy.
+    With a weighting of 3 h, 1 MW short over two snapshots is 6 MWh; a
+    missing weighting would read 2."""
     from services.adequacy import dtc
 
     n = _island_network()
     n.snapshot_weightings.loc[:, :] = 3.0
-    frame = pd.DataFrame({"hospital_load": [1.0, 1.0]}, index=n.snapshots)
-    weights = dtc._energy_weights(n)
-    assert float((frame.mul(weights, axis=0)).sum().sum()) == 6.0
+    lost = pd.DataFrame({"hospital_load": [1.0, 1.0]}, index=n.snapshots)
+    mwh = dtc._bus_unserved_mwh(
+        n, {"hospital"}, sink={"last_lost_load": {"lost_load_t": lost}}
+    )
+    assert mwh == 6.0
+    _eh(
+        monkeypatch,
+        _dtc(
+            [
+                {
+                    "contingency": "subsea_tie",
+                    "status": "ok",
+                    "critical_unserved_mwh": mwh,
+                }
+            ]
+        ),
+    )
+    g = _gate(hub, "mg.island.critical_served", op="le", value=0.0)
+    assert g["facts"][0]["value"] == 6.0 and g["facts"][0]["detail"] == [
+        "subsea_tie: 6 MWh"
+    ]
 
 
 # The frequency fact reads the run's own campus step and its run files.
@@ -983,6 +1065,8 @@ def _campus_step(hub, monkeypatch, summary, revision=7, files_match=True):
 
     run = _project_dir(hub) / ce.SUBDIR / "run"
     run.mkdir(parents=True, exist_ok=True)
+    sidecar = _sidecar(hub)
+    os.utime(sidecar, (time.time() - 60, time.time() - 60))  # set before the campus run
     if summary is not None:
         (run / ce.cs.FREQ_SUMMARY_JSON).write_text(
             summary if isinstance(summary, str) else json.dumps(summary)
@@ -1027,6 +1111,7 @@ def test_frequency_counts_each_failing_hour_once_and_names_it(hub, monkeypatch):
         "period 2040 hour 1",
     ]
     assert g["verdict"] == "fail"
+    assert g["facts"][0]["basis"] == run_actions.MG_FREQUENCY_BASIS
     assert "not weighted" in run_actions.MG_FREQUENCY_BASIS
 
 
@@ -1052,6 +1137,8 @@ def test_frequency_counts_hours_not_weighted_hours(hub, monkeypatch):
         ("missing_list", "unreadable"),
         ("bad_hour", "unreadable"),
         ("no_counter", "edited"),
+        ("island_changed", "island_changed"),
+        ("no_island", "island_changed"),
     ],
 )
 def test_frequency_is_no_evidence_unless_the_run_is_its_own_and_current(
@@ -1075,6 +1162,10 @@ def test_frequency_is_no_evidence_unless_the_run_is_its_own_and_current(
     )
     if case == "not_run":
         task = {"steps": []}
+    elif case == "island_changed":
+        _change_sidecar(hub)  # B6: the settings moved after the judgement
+    elif case == "no_island":
+        (_project_dir(hub) / IC.SIDECAR_NAME).unlink()
     ctx = SimpleNamespace(network=pypsa.Network()) if case == "no_counter" else None
     g = _gate(hub, "mg.island.frequency", op="le", value=0, task=task, ctx=ctx)
     assert (

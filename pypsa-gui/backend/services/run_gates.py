@@ -760,18 +760,19 @@ class Detailed:
 
     value: Any
     detail: list
+    basis: str | None = None  # what the value counts, shown beside it (C5)
 
 
 MG_NO_FUEL = "the gensets draw no modelled fuel, so fuel autonomy is not checked"
 
 
-def _mg_island(env):
+def _mg_settings(env):
     """The project's validated island settings, or NoEvidence by name (M10)."""
     from services import run_actions
     if env.project is None:
         return NoEvidence("not_run", "the run has no project")
     try:
-        return run_actions.island_settings(env.project)
+        return run_actions.island_settings(run_actions._project_dir(env.project))
     except run_actions.FreezeError as exc:
         return NoEvidence(exc.state, str(exc))
 
@@ -781,7 +782,7 @@ def _mg_survival(env):
     shortfall named) while it is current on the live network and island
     settings (B4); no evidence otherwise (B5, B7, M10)."""
     from services import dirty_state, run_actions
-    island = _mg_island(env)
+    island = _mg_settings(env)
     if isinstance(island, NoEvidence):
         return island
     if not hasattr(env.ctx, "network_revision"):
@@ -801,7 +802,7 @@ def _mg_tie(env):
     """M12: the island's tie on the live network: `open`, `closed` (each
     tie carrying named) or `no_tie`; no evidence by name otherwise."""
     from services.adequacy import island_survival
-    island = _mg_island(env)
+    island = _mg_settings(env)
     if isinstance(island, NoEvidence):
         return island
     try:
@@ -821,7 +822,7 @@ def _mg_critical(env):
     the sidecar and the network name the same loads; `none` or `mismatch`
     (each load named) otherwise."""
     from services.adequacy import island_survival
-    island = _mg_island(env)
+    island = _mg_settings(env)
     if isinstance(island, NoEvidence):
         return island
     try:
@@ -841,7 +842,9 @@ def _mg_critical_served(env):
     summed over the islanding contingencies of the reliability study's
     off-grid stress (`dtc.run_dtc_stress`, weighted there by the snapshot
     weightings), from the run's own EH study record while it is current;
-    each contingency named. A contingency left unsolved is no evidence."""
+    each contingency named. A contingency left unsolved is no evidence.
+    B6's currency is the EH record's revision alone: the stress reads the
+    network's own tags, never the island sidecar."""
     record = _eh_record(env)
     if isinstance(record, NoEvidence):
         return record
@@ -879,7 +882,8 @@ def _mg_frequency(env):
     out = run_actions.mg_frequency(env.project, env.task, dirty_state.revision(env.ctx))
     if "hours" not in out:
         return NoEvidence(out["state"], out["reason"])
-    return Detailed(len(out["hours"]), [f"period {p} hour {h}" for p, h in out["hours"]])
+    return Detailed(len(out["hours"]), [f"period {p} hour {h}" for p, h in out["hours"]],
+                    run_actions.MG_FREQUENCY_BASIS)
 
 
 FACTS: dict[str, Fact] = {
@@ -933,7 +937,7 @@ FACTS: dict[str, Fact] = {
     "dc.gridcode.unchanged": Fact("services.campus_electrical_service.profile_fingerprint", "sha256", None,
                                   _dc_gridcode_unchanged),
     "dc.campus.study": Fact("services.run_actions.outcome", "outcome", None, _dc_campus_study),
-    # Study harness 12b: the microgrid island (GK A (21) Q1-Q5; GK B (45) M10-M12).
+    # Study harness 12b: the microgrid island (GK A (21) Q1-Q5; GK B (46) M10-M12).
     "mg.island.survival": Fact("services.run_actions.mg_outcome", "state", None, _mg_survival),
     "mg.fuel.autonomy": Fact("services.adequacy.island_survival.survival", "fuel", None, _mg_fuel),
     "mg.tie.open": Fact("services.adequacy.island_survival.tie_state", "state", None, _mg_tie),
@@ -1169,6 +1173,8 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
             result["facts"][0]["loop"] = looped.record
         if detailed is not None:
             result["facts"][0]["detail"] = list(detailed.detail)
+            if detailed.basis:
+                result["facts"][0]["basis"] = detailed.basis
         if problem is None:
             try:
                 result["verdict"] = "pass" if _holds(rule["op"], value, rule.get("value")) else "fail"
