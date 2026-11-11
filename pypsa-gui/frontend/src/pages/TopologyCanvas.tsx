@@ -61,6 +61,7 @@ import {
   FLOW_CYCLE_VAR, FLOW_DASH, flowAnimationCss, flowClass, flowCycleValue, flowDirection, flowShare, flowSpeedBucket, flowWidth,
 } from '../utils/flowMotion'
 import { useReducedMotion } from '../site3d/motion'
+import LoadingKey from '../components/LoadingKey'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type AssetCategory = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -3415,6 +3416,7 @@ export default function TopologyCanvas() {
                   ))}
                 </>
               )}
+              <LoadingKey />
             </div>
             )}
           </div>

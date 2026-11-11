@@ -716,11 +716,15 @@ export function fmtMW(mw: number, digits = 1): string {
   return `${mw.toFixed(digits)} MW`
 }
 
-// Color band for line loading: green/amber/red.
+// Color band for line loading: green/amber/red. One table for the colour and
+// the legend key (components/LoadingKey.tsx), highest band first.
+export const LOADING_BANDS: readonly { min: number; color: string; label: string }[] = [
+  { min: 90, color: '#dc2626', label: '90 % and over' },
+  { min: 50, color: '#d97706', label: '50 to 90 %' },
+  { min: -Infinity, color: '#16a34a', label: 'Under 50 %' },
+]
 export function loadingColor(pct: number): string {
-  if (pct >= 90) return '#dc2626'
-  if (pct >= 50) return '#d97706'
-  return '#16a34a'
+  return (LOADING_BANDS.find(b => pct >= b.min) ?? LOADING_BANDS[LOADING_BANDS.length - 1]).color
 }
 
 // Color band for storage state of charge (%): red below 20, amber below 80,

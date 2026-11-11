@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker, Polyline, Polygon, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
+import { useReducedMotion } from '../site3d/motion'
+import { FLOW_DASH, flowAnimationCss, flowArrowAngle, flowClassDirected, flowDirection, flowSpeedBucket } from '../utils/flowMotion'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { isRenewableCarrier } from '../utils/carriers'
@@ -478,12 +480,27 @@ interface EditableLineProps {
   // results overlay to surface flow magnitude + loading % on the edge itself
   // so the user doesn't have to hover every line to read the numbers.
   permanentLabel?: string
+  /**
+   * Results overlay: the flow at the selected time step (`p`, signed along
+   * source → target) and its rating. A non-zero flow adds a direction arrow to
+   * the permanent label and, unless the user prefers reduced motion, the same
+   * moving dash the schematic draws (utils/flowMotion).
+   */
+  flow?: { p: number; rating: number | null }
   lengthBadge?: LengthBadge
 }
 
+/** Web-Mercator pixel position of a point (y down), for the label arrow's angle. */
+const screenPoint = (p: LatLngTuple): [number, number] => {
+  const pt = L.CRS.EPSG3857.latLngToPoint(L.latLng(p[0], p[1]), 0)
+  return [pt.x, pt.y]
+}
+
 export function EditableLine({
-  id, source, target, waypoints, onUpdate, onSelect, color, weight, dashArray, tooltip, permanentLabel, lengthBadge,
+  id, source, target, waypoints, onUpdate, onSelect, color, weight, dashArray, tooltip, permanentLabel, flow, lengthBadge,
 }: EditableLineProps) {
+  const reducedMotion = useReducedMotion()
+  const flowRef = useRef<L.Polyline | null>(null)
   const [hovered, setHovered] = useState(false)
   const [ctxAt, setCtxAt] = useState<{ x: number; y: number } | null>(null)
   const polylineRef = useRef<L.Polyline | null>(null)
@@ -521,8 +538,13 @@ export function EditableLine({
   const allPoints: LatLngTuple[] = [source, ...waypoints, target]
   const showHandles = hovered
 
+  const flowBucket = flow ? flowSpeedBucket(flow.p, flow.rating) : 0
+  const flowCls = flowBucket > 0 && !reducedMotion ? flowClassDirected(flowBucket, flowDirection(flow!.p)) : ''
+
   const paintLive = (wps: LatLngTuple[]) => {
-    polylineRef.current?.setLatLngs([source, ...wps, target] as L.LatLngExpression[])
+    const pts = [source, ...wps, target] as L.LatLngExpression[]
+    polylineRef.current?.setLatLngs(pts)
+    flowRef.current?.setLatLngs(pts)
   }
 
   // Close ctxMenu on Escape / outside click.
@@ -563,6 +585,16 @@ export function EditableLine({
             on top of the always-visible short label. */}
         {permanentLabel && (
           <Tooltip permanent direction="center" className="map-edge-label">
+            {flowBucket > 0 && (
+              <svg
+                width="9" height="9" viewBox="0 0 11 11" aria-hidden="true" data-testid="map-flow-arrow"
+                style={{ display: 'inline-block', verticalAlign: '-1px', marginRight: 3 }}
+              >
+                <g transform={`rotate(${flowArrowAngle(allPoints.map(screenPoint), flow!.p)} 5.5 5.5)`}>
+                  <path d="M1 5.5 H9 M6 2.5 L9 5.5 L6 8.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                </g>
+              </svg>
+            )}
             {permanentLabel}
           </Tooltip>
         )}
@@ -591,6 +623,25 @@ export function EditableLine({
           </Tooltip>
         )}
       </Polyline>
+
+      {/* The moving dash (ui-modern 04): light packets over the loading
+          colour, advancing toward the receiving bus. Leaflet reads a path's
+          class only when it creates it, so the key remounts the path when the
+          speed bucket or the direction changes. Not interactive: hover and
+          clicks stay with the line beneath. */}
+      {flowCls && (
+        <Polyline
+          key={flowCls}
+          ref={flowRef as unknown as React.Ref<L.Polyline>}
+          positions={allPoints as L.LatLngExpression[]}
+          interactive={false}
+          className={flowCls}
+          color="#ffffff"
+          opacity={0.85}
+          weight={Math.max(1.5, weight - 1)}
+          dashArray={FLOW_DASH}
+        />
+      )}
 
       {/* Existing waypoint handles. Shown whenever the line is hovered, plus
           permanently for any line that already has at least one waypoint —
@@ -1362,6 +1413,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
     // isolate: local stacking context so z-40 companion isn't buried under Leaflet panes (see placement-strip z-index note below).
     // ref: the canvas measures itself for the minimap's fold rule (plan M5).
     <div className="relative isolate h-full w-full" ref={setCanvasEl}>
+      <style>{flowAnimationCss()}</style>
       <MapContainer
         center={initialCenter}
         zoom={5}
@@ -1512,6 +1564,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               permanentLabel={flow
                 ? `${fmtMW(Math.abs(flow.p0))} (${flow.loadingPct.toFixed(0)}%)`
                 : undefined}
+              flow={flow ? { p: flow.p0, rating: flow.sNom } : undefined}
               lengthBadge={lengthDisagrees(line.length, geometryKm) ? {
                 stored: line.length, geometry: geometryKm,
                 onUseGeometry: readOnly ? undefined : () => useGeometryMut.mutate([edgeId]),
@@ -1559,6 +1612,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               permanentLabel={linkFlow
                 ? `${fmtMW(Math.abs(linkFlow.p0))} (${linkFlow.loadingPct.toFixed(0)}%)`
                 : undefined}
+              flow={linkFlow ? { p: linkFlow.p0, rating: linkFlow.pNom } : undefined}
               lengthBadge={link.length > 0 && lengthDisagrees(link.length, geometryKm) ? {
                 stored: link.length, geometry: geometryKm,
                 onUseGeometry: readOnly ? undefined : () => useGeometryMut.mutate([edgeId]),
@@ -1649,6 +1703,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
                 permanentLabel={trFlow
                   ? `${fmtMW(Math.abs(trFlow.p0))} (${trFlow.loadingPct.toFixed(0)}%)`
                   : undefined}
+                flow={trFlow ? { p: trFlow.p0, rating: trFlow.sNom } : undefined}
               />
               <Marker
                 position={mid}
