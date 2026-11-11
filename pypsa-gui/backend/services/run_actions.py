@@ -842,18 +842,20 @@ def mg_skipped(project_dir) -> list:
 
     path = Path(project_dir) / SOLVER_CONFIG_FILE
     try:
-        cfg = _solver_config_from_dict(
-            json.loads(path.read_text()) if path.is_file() else {}
-        )
-    except (OSError, TypeError, ValueError):
+        raw = json.loads(path.read_text()) if path.is_file() else {}
+        if not isinstance(raw, dict):  # N2b: `[]`, `null` or `"x"` is not settings
+            return ["solver_config"]
+        cfg = _solver_config_from_dict(raw)
+        code = cfg.extra_functionality_code
+        on = {
+            "island_apply": bool(getattr(cfg, "island_constraints", False))
+            and getattr(cfg, "mode", "lopf") == "lopf",
+            "poc_writer": bool(getattr(cfg, "commercial", None)),
+            "user_code": bool((code or "").strip()),
+            "solver_options": bool(cfg.solver_options),
+        }
+    except Exception:  # noqa: BLE001 — N2b: settings it cannot read are named, never raised
         return ["solver_config"]
-    on = {
-        "island_apply": bool(getattr(cfg, "island_constraints", False))
-        and getattr(cfg, "mode", "lopf") == "lopf",
-        "poc_writer": bool(getattr(cfg, "commercial", None)),
-        "user_code": bool((cfg.extra_functionality_code or "").strip()),
-        "solver_options": bool(cfg.solver_options),
-    }
     return [k for k in MG_SKIPPED if on.get(k)]
 
 

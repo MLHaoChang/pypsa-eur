@@ -1391,9 +1391,14 @@ def test_the_result_names_each_solve_step_the_check_skipped(
         assert "basis" not in fact
 
 
-def test_unreadable_solver_settings_are_named_as_skipped(hub, monkeypatch):
+@pytest.mark.parametrize(
+    "raw", ["{not json", '"x"', '{"extra_functionality_code": 5}', "[]", "null"]
+)
+def test_unreadable_solver_settings_are_named_as_skipped(hub, monkeypatch, raw):
+    """N2b: settings the check cannot read are named; never raised, never []."""
     _sidecar(hub)
-    (_project_dir(hub) / "solver_config.json").write_text("{not json")
+    (_project_dir(hub) / "solver_config.json").write_text(raw)
+    assert run_actions.mg_skipped(_project_dir(hub)) == ["solver_config"]
     path = _task_file(hub, run_actions.mg_freeze(hub))
     _stub(monkeypatch)
     assert _start(path, _ctx(hub)) == MG
