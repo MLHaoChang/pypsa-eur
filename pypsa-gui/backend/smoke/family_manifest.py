@@ -707,14 +707,16 @@ VARIANTS: list[dict] = [
              B + 'test_lc06_d21_reports.py::test_a_regenerated_summary_cannot_change_the_admitted_numbers'),
     _covered('LC-D21.report_gates', 'the open network fingerprint, report version counts, upload directories and blob count (tests/lc43_gates.py state) unchanged after each refusal: an unknown section is 404 report_section_not_found on generate and regenerate, an unknown table '
              '404 report_table_not_found, an unknown version 404 report_not_found, a deleted report 404 report_not_found to get, regenerate and export; a second generate while one runs is 409 report_job_in_flight, an abort leaves each unwritten section '
-             'code-only with an aborted note and no prose, and the next generate is its own report; an edited Word copy (bound as template or not) becomes version 2 with source '
-             'user_edit while the headline table (3.21 h/yr) under its own id and version 1 stay, and a diff with version 3 is 404 report_version_not_found; a Word file that is not the report is 400 roundtrip_not_a_report; a mapping with no template is '
+             'code-only with an aborted note and no prose, and the next generate is its own report; an edited Word copy (bound as template or not) that changes MC LOLE to 1.00 '
+             'leaves the headline table (3.21 h/yr) under its own id and version 1 as delivered, whether it is imported or refused 4xx; a copy that edits only the summary prose '
+             'becomes version 2 with source user_edit, the same headline and version 1, and a diff with version 3 is 404 report_version_not_found; a Word file that is not the report is 400 roundtrip_not_a_report; a mapping with no template is '
              '400 no_template and an invalid plan 400 invalid_mapping_plan; PDF without LibreOffice is 501 pdf_not_available and saves nothing',
              'generate_report regenerate_report_section get_report get_report_table list_reports abort_report_generation import_edited_report diff_report_versions delete_report set_report_mapping export_report_pdf export_report_docx',
              B + 'test_lc43_d21_report_gates.py::test_an_unknown_section_table_or_version_is_refused_and_changes_nothing',
              B + 'test_lc43_d21_report_gates.py::test_a_deleted_report_is_gone_from_every_report_tool',
              B + 'test_lc43_d21_report_gates.py::test_a_second_run_is_refused_an_abort_writes_no_prose_and_a_restart_is_its_own_report',
-             B + 'test_lc43_d21_report_gates.py::test_an_edited_copy_is_a_new_user_version_and_leaves_the_admitted_table_and_version_one',
+             B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_leaves_the_headline_and_version_one',
+             B + 'test_lc43_d21_report_gates.py::test_a_prose_only_copy_is_a_new_user_version_and_leaves_version_one',
              B + 'test_lc43_d21_report_gates.py::test_a_word_file_that_is_not_the_report_merges_nothing',
              B + 'test_lc43_d21_report_gates.py::test_no_mapping_without_a_template_and_no_pdf_without_a_converter',
              B + 'test_chat_report_template_tools.py::test_set_report_mapping_strict_and_errors'),
