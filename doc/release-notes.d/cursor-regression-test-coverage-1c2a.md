@@ -1,0 +1,1 @@
+* Test(pypsa-gui): A closed project's damaged solver settings are refused by name and left as they are. A generated profile stays current at a half-degree bus move, goes stale just past it in either direction, and a single unmatched weather point is that series.
