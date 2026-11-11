@@ -322,19 +322,20 @@ def _wrap_with_island(network, user_fn, cfg, island=_UNSET, log_queue=None,
 
 
 def island_extra_functionality(island, *, user_fn=None, delta_p_plus=None, emit=None,
-                               event_rows=True):
+                               event_rows=True, check=False):
     """The ``extra_functionality`` callback that adds the island rows.
 
     ``delta_p_plus`` overrides the ``seamless`` step ΔP⁺ in MW (a number, a
     Series on the snapshots, or ``callable(n, sns)`` returning either); None,
     the default, builds it from the PCC Links and the late UPSs (I2b).
     ``event_rows`` is a test seam: False keeps the islanding step (E1) rows
-    alone; production never passes it."""
+    alone; production never passes it. ``check`` adds the rows to a solve
+    that sizes nothing (``add_island_rows``)."""
     def fn(n, snapshots):
         if user_fn is not None:
             user_fn(n, snapshots)
         add_island_rows(n, snapshots, island, delta_p_plus=delta_p_plus, emit=emit,
-                        event_rows=event_rows)
+                        event_rows=event_rows, check=check)
     return fn
 
 
@@ -429,6 +430,10 @@ OPERATIONAL_ATTR = "_ic_operational"
 # A fixed-size run (F1; = sweep.FIXED_DESIGN_ATTR): nothing is sized, but the
 # linearised UC still runs (it is a real dispatch).
 FIXED_DESIGN_ATTR = "_fixed_design"
+# The gensets the project's own solve sized, on the island survival check's
+# fixed copy (``services.adequacy.island_survival``): never committed there
+# either, so the check has the own solve's rows.
+AS_SIZED_ATTR = "_island_as_sized"
 
 
 def _sizable(n, island) -> list[tuple[str, str]]:
@@ -476,9 +481,14 @@ def uc_gensets(n, island, gensets=None) -> tuple[list[str], dict[str, str]]:
         gensets = [u for u, s in island["units"].items() if s["kind"] == "genset"
                    and (u in n.generators.index or u in n.links.index)]
     committed, skipped = [], {}
+    as_sized = getattr(n, AS_SIZED_ATTR, None) or ()
     for g in gensets:
         frame = n.generators if g in n.generators.index else n.links
-        if bool(frame.at[g, "p_nom_extendable"]):
+        if g in as_sized:
+            # The island survival check's copy: the own solve sized this
+            # genset, so it never committed it; the check keeps its rows.
+            skipped[g] = "not committed: extendable in the project's own solve"
+        elif bool(frame.at[g, "p_nom_extendable"]):
             # Owner, 2026-10-13 (option A): never committed, not refused; it
             # keeps I2b's spinning rule.
             skipped[g] = "not committed: extendable (big-M bilinear)"
@@ -641,16 +651,21 @@ def island_study(n, island, *, scenarios=None, solve=None, tol=1e-6) -> dict:
 
 
 def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None,
-                    event_rows=True) -> dict:
+                    event_rows=True, check=False) -> dict:
     """Add (a), (b) and (c) to ``n.model`` and record what was built on
     ``n._island_facts``. ``event_rows`` is a test seam: False keeps the
-    islanding step (E1) rows alone; production never passes it."""
+    islanding step (E1) rows alone; production never passes it.
+
+    ``check`` (study harness 12, ``island_survival``): the rows are added to
+    a dispatch-only solve too, where they size nothing and test the plan as
+    built; a row the fixed sizes cannot hold is then an ``IslandRefusal`` or
+    an infeasible LP, never a skipped row. Every other caller leaves it off."""
     # gridspine through the guarded seam (a build without it then says so).
     from services.adequacy.activity import active_mask
     from services.adequacy.island_config import GFM_CONTROLS
 
     emit = emit or (lambda msg: None)
-    skipped = dispatch_only(n, island)
+    skipped = None if check else dispatch_only(n, island)
     if skipped:
         n._island_facts = {"skipped": skipped}
         emit(f"island rows skipped ({skipped}); they size the site, and this solve cannot")
@@ -913,8 +928,10 @@ def _row(m, lhs: _Lin, rhs: _Lin, name, coord, refuse=None, facts=None) -> bool:
     if not terms:
         short = float(np.max(np.asarray(const, dtype=float))) if np.size(const) else 0.0
         if short > 1e-6:
-            raise IslandRefusal(f"{refuse or name}: short by {short:.4g} with nothing this "
+            exc = IslandRefusal(f"{refuse or name}: short by {short:.4g} with nothing this "
                                 "solve can size")
+            exc.row, exc.short = refuse or name, short   # a fixed check that failed, not a bad input
+            raise exc
         return False
     expr = terms[0]
     for t in terms[1:]:
