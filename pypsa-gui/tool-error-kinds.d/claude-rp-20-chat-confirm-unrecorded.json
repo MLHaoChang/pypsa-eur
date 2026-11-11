@@ -1,0 +1,4 @@
+{"kinds": {
+  "unrecorded_duplicate": {"surface": "inline", "why": "Confirming series with no provenance record listed one series more than once: the whole batch was refused and nothing was stamped. List each series once and confirm again."},
+  "unrecorded_empty": {"surface": "inline", "why": "Confirming series with no provenance record named no series: nothing was stamped. Read the readiness list and name the series the user confirms."}
+}}

@@ -166,16 +166,15 @@ def test_one_undo_restores_the_empty_meta(client, ctx, session_ctx):
     assert _row(client)["profile"] == "unrecorded"
 
 
-def test_confirm_is_not_a_chat_tool():
-    from harness.catalogue import TOOL_ROUTES, TOOLS
+def test_confirm_is_only_the_card_only_chat_tool():
+    """RP-20 (RP20-CHAT-1) replaced RP-18's "no chat tool": one tool reaches the
+    route, and only through the user's card."""
+    from harness.catalogue import TOOL_ROUTES
+    from harness.confirm import CARD_ONLY_TOOLS
 
-    assert not [
-        t
-        for t in TOOLS
-        if "unrecorded" in str(t.get("name", t)).lower()
-        and "readiness" not in str(t.get("name", t))
-    ]
-    assert not [r for r in TOOL_ROUTES.values() if "unrecorded" in str(r)]
+    reaching = [n for n, r in TOOL_ROUTES.items() if "unrecorded" in str(r)]
+    assert reaching == ["confirm_unrecorded_series"]
+    assert "confirm_unrecorded_series" in CARD_ONLY_TOOLS
 
 
 def test_a_component_with_no_series_is_refused_not_stamped(client, ctx):

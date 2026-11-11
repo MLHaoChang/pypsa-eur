@@ -303,6 +303,7 @@ POST    /api/projects/{name}/profiles/refine                                    
 POST    /api/projects/{name}/profiles/series/generate                              -> generate_series_profiles_api_projects__name__profiles_series_generate_post
 POST    /api/projects/{name}/profiles/series/upload                                -> upload_series_api_projects__name__profiles_series_upload_post
 POST    /api/projects/{name}/profiles/shape                                        -> shape_profile_api_projects__name__profiles_shape_post
+POST    /api/projects/{name}/profiles/unrecorded/confirm                           -> confirm_unrecorded_series_api_projects__name__profiles_unrecorded_confirm_post
 DELETE  /api/projects/{name}/profiles/weather                                      -> clear_weather_choice_api_projects__name__profiles_weather_delete
 GET     /api/projects/{name}/profiles/weather                                      -> get_weather_choice_api_projects__name__profiles_weather_get
 PUT     /api/projects/{name}/profiles/weather                                      -> put_weather_choice_api_projects__name__profiles_weather_put
