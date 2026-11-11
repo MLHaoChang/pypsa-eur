@@ -167,11 +167,23 @@ def test_approved_card_lists_every_series_and_stamps_only_the_record(
     p_before = ctx.network.generators_t.p_max_pu.copy()
     frames, results, asked, cards = dispatch(session, monkeypatch, args)
     assert len(asked) == 1 and not results[-1].get("is_error"), results[-1]
-    rows = cards[0]["edit_card"]["rows"]
+    card = cards[0]["edit_card"]
+    rows = [r for r in card["rows"] if r["role"] == "typed"]
     assert [(r["name"], r["digest"]) for r in rows] == [
         (i["component"], i["digest"]) for i in args["items"]
     ]
-    assert all(r["digest"] in r["old"] for r in rows)
+    # UX (#1396): the digest is a code after "values", set in the mono id style,
+    # and one footnote under the table says what it is.
+    assert all(
+        r["old"] == f"no record · values {r['digest']}" and r["old_code"] == r["digest"]
+        for r in rows
+    )
+    assert card["rows"][-1]["role"] == "note" and not card["rows"][-1]["name"]
+    assert card["rows"][-1]["note"].startswith("The code after each series identifies")
+    assert (
+        card["says"]
+        == "Records 3 series as the network's own. Their values are unchanged"
+    )
     for nm in names:
         assert profile_kind(ctx, nm) == "network_native"
         # C8: the values are untouched, byte for byte.
@@ -196,7 +208,8 @@ def test_no_cap_on_the_card_or_the_result(session, ctx, monkeypatch):
     args = {"project_id": NAME, "items": _items(ctx, names)}
     frames, results, asked, cards = dispatch(session, monkeypatch, args)
     card = cards[0]["edit_card"]
-    assert len(card["rows"]) == 250 and {r["name"] for r in card["rows"]} == set(names)
+    typed = [r for r in card["rows"] if r["role"] == "typed"]
+    assert len(typed) == 250 and {r["name"] for r in typed} == set(names)
     assert "250 series" in card["says"]
     assert not results[-1].get("is_error"), results[-1]
     # The result is kept whole (spilled), never cut: the model pages every row.
@@ -209,7 +222,7 @@ def test_no_cap_on_the_card_or_the_result(session, ctx, monkeypatch):
     rows = chat_tools.read_result(
         body["spill"]["locator"], pointer="/_edit_receipt/rows", limit=50
     )
-    assert rows["total"] == 250
+    assert rows["total"] == 251  # 250 series and the footnote
     assert all(profile_kind(ctx, nm) == "network_native" for nm in names)
 
 
@@ -518,6 +531,10 @@ def test_the_card_binds_the_project(ctx, monkeypatch):
 
     card = edit_card.preview(
         TOOL, {"project_id": NAME, "items": _items(ctx, ["g_a"])}, with_state=False
+    )
+    assert (
+        card["says"]
+        == "Records 1 series as the network's own. Their values are unchanged"
     )
     real = deps.require_project_access
 

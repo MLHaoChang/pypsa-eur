@@ -19,6 +19,7 @@ from harness.edit_card import Adapter, register
 
 OLD = "no record"
 NEW = "the network's own"
+FOOTNOTE = "The code after each series identifies the values you are confirming."
 _VERB = "confirm unrecorded series"
 
 
@@ -51,13 +52,28 @@ def _preview(args: dict) -> list[dict]:
             "name": component,
             "field": "provenance",
             "label": "Series record",
-            "old": f"{OLD} (series {digest})",
+            # UX (#1396): the digest reads as a code, not a series name; the
+            # table sets `old_code` in the mono id style.
+            "old": f"{OLD} · values {digest}",
+            "old_code": digest,
             "new": NEW,
             "unit": "",
             "role": "typed",
             "digest": digest,
         }
         for component, digest in pairs
+    ] + [
+        {
+            "component_class": "",
+            "name": "",
+            "field": "note_0",
+            "label": "note_0",
+            "old": None,
+            "new": None,
+            "unit": "",
+            "role": "note",
+            "note": FOOTNOTE,
+        }
     ]
 
 
@@ -80,12 +96,17 @@ def _readback(args: dict, rows: list[dict]) -> list[Any]:
 
     ctx = PyPSAService.get_active_context()
     words = {"network_native": NEW, "unrecorded": OLD}
-    return [words.get(profile_kind(ctx, row["name"]), "another record") for row in rows]
+    return [
+        None
+        if row["role"] == "note"
+        else words.get(profile_kind(ctx, row["name"]), "another record")
+        for row in rows
+    ]
 
 
 def _says(args: dict, rows: list[dict]) -> str:
-    n = len(rows)
-    return f"Records {n} series as {NEW}; their values are unchanged"
+    n = sum(1 for row in rows if row["role"] == "typed")
+    return f"Records {n} series as {NEW}. Their values are unchanged"
 
 
 register(
