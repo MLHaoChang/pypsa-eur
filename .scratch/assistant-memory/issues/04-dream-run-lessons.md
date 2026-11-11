@@ -51,3 +51,13 @@ Seam: its own `memory_dream_jobs` table (migration 0014) and a lease worker in `
 - Deferred to 04b: the `memory_analyzer` profile role (04a uses the active profile), the route-parity declarations for `/api/memory/dream` (the check refuses them until the UI calls the routes), and the triggers.
 - Budget is in tokens only. The plan names token and cost caps; a cost cap needs per-profile prices, which the app does not hold. Dream spend is tallied per user against `PYPSA_GUI_CHAT_DAILY_TOKEN_CAP`, apart from chat's per-project tally (no per-user chat ledger exists). Both are open for GK B.
 - The concurrent-start test (D4) runs on SQLite; CI has no Postgres.
+
+### 2026-11-11: GK B (47) rulings on #1389
+
+All four 04a departures are accepted:
+- No tool-error-kinds fragment for the dream kinds.
+- Dream spend is capped on its own: per user, against `PYPSA_GUI_CHAT_DAILY_TOKEN_CAP`, not added to chat's per-project tally.
+- The budget is tokens only; there is no cost cap, since the app holds no per-profile prices.
+- The D4 race test runs on SQLite only.
+
+Minors left as they are: `spent_today` keys on the job's `created_at`, so a job that runs past midnight counts to the day it was queued. A name-keyed chat project is re-resolved by name in the user's current org.

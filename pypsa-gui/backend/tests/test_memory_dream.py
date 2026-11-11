@@ -22,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from db.base import Base
 from db.models import (
     MemoryDreamJob,
+    MemoryItem,
     Organization,
     OrgMembership,
     Project,
@@ -341,7 +342,10 @@ def test_a_tool_call_from_the_model_is_dropped_unparsed():
     )
     result = dream.call_model(provider, "m", "s", "d", 10)
     assert (result.obj, result.dropped) == (None, "tool_use")
-    assert result.usage == {"input_tokens": 2, "output_tokens": 10}  # the worst case
+    assert result.usage == {
+        "input_tokens": dream._worst_case("s", "d", 0),
+        "output_tokens": 10,
+    }  # the worst case
 
 
 def test_an_unknown_stop_reason_reaches_the_job_as_truncated_and_is_dropped():
@@ -454,7 +458,10 @@ def test_the_daily_remainder_counts_earlier_dream_jobs_today(factory, world):
 def test_missing_usage_is_charged_at_the_worst_case():
     provider = FakeProvider([_analysis(_lesson("x"), usage={})])
     result = dream.call_model(provider, "m", "sys", "data", 50)
-    assert result.usage == {"input_tokens": 7, "output_tokens": 50}
+    assert result.usage == {
+        "input_tokens": dream._worst_case("sys", "data", 0),
+        "output_tokens": 50,
+    }
 
 
 # -- acceptance 4: provider-agnostic ------------------------------------------
@@ -1049,3 +1056,55 @@ def test_a_failed_heartbeat_stops_the_job_before_its_next_call(factory, world):
     w._lease_lost.clear = real_clear
     assert provider.requests == []
     assert _job(factory, job_id).status == "running"  # left for settlement (D3)
+
+
+# -- GK B (47): guards each with a killing test -------------------------------
+
+
+def test_a_lapsed_lease_refuses_its_holders_write_even_before_settlement(
+    factory, world
+):
+    job_id = _start(factory, world)
+    clock = Clock()
+    a = _worker(factory, FakeProvider([]), clock=clock, instance="A")
+    with factory() as db:
+        assert dream.claim(db, job_id, "A", clock())
+    clock.t += dream.LEASE_SECONDS + 1  # nobody settled it
+    with factory() as db:
+        with pytest.raises(dream._Lost):
+            a._write(db, job_id, cursor_json=json.dumps({"sessions": {"x": 9}}))
+    assert json.loads(_job(factory, job_id).cursor_json) == dream._empty_cursor()
+
+
+def test_a_claimed_job_cannot_be_claimed_again(factory, world):
+    job_id = _start(factory, world)
+    with factory() as db:
+        assert dream.claim(db, job_id, "A", 1000.0)
+        assert not dream.claim(db, job_id, "B", 1000.0)
+    assert _job(factory, job_id).lease_owner == "A"
+
+
+def test_access_revoked_before_the_organizer_leaves_no_proposal(factory, world):
+    _chat(world.user_id, "x", project=world.project)
+    with factory() as db:
+        other_org = db.get(Project, world.foreign).org_id
+
+    class Revoking(FakeProvider):
+        def stream(self, request):
+            if request.max_tokens == dream.ORGANIZER_MAX_TOKENS:
+                with factory() as db:  # the user moves to another org mid-job
+                    db.query(OrgMembership).filter_by(user_id=world.user_id).update(
+                        {"org_id": other_org}
+                    )
+                    db.commit()
+            yield from super().stream(request)
+
+    provider = Revoking(
+        [_analysis(_lesson("secret")), _organized(_lesson("secret", **{"from": [0]}))]
+    )
+    job_id = _start(factory, world)
+    _worker(factory, provider).run_once()
+    counts = json.loads(_job(factory, job_id).counts_json)
+    assert counts["skipped_no_evidence"] == 1
+    with factory() as db:
+        assert db.scalars(select(MemoryItem)).all() == []

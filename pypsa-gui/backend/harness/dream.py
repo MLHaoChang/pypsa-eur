@@ -537,7 +537,9 @@ def _organizer_data(candidates: list[dict], confirmed: list[str]) -> str:
 
 
 def _worst_case(system: str, data: str, max_tokens: int) -> int:
-    return len(system.encode()) + len(data.encode()) + max_tokens
+    """The call's most tokens: the system text and the fenced data as sent,
+    one token per UTF-8 byte at most, plus its output cap."""
+    return len(system.encode()) + len(fence.fenced(data).encode()) + max_tokens
 
 
 @dataclass
