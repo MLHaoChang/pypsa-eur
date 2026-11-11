@@ -73,7 +73,7 @@ function api(url, method, scene) {
   if (p === '/api/memory/suggestions') return [200, suggestions]
   if (p.endsWith('/preview')) {
     if (scene === 'refusal') return [422, { detail: { error_kind: 'currency_mismatch',
-      message: 'Capacity: saved in USD, this project uses EUR. Nothing is converted.' } }]
+      message: 'Capacity: this value was saved in USD and this project uses EUR. Nothing is converted.' } }]
     return [200, preview]
   }
   if (p === '/api/network/memory_parameter/apply') return [409, { detail: { error_kind: 'memory_stale',
@@ -113,7 +113,8 @@ useUIStore.setState({ currentProject: 'Demo', projectMismatch: null, uiMode: 'ex
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
 const GEN = { name: 'gas', bus: 'B1', carrier: 'gas', p_nom: 100, marginal_cost: 52, efficiency: 0.55,
   overnight_cost: 650000, lifetime: 30 }
-const fs = Object.fromEntries(Object.entries(GEN).map(([k, v]) => [k, String(v)]))
+// The form holds display values (efficiency in %, cost in EUR/kW), as the cards fill it.
+const fs = { ...Object.fromEntries(Object.entries(GEN).map(([k, v]) => [k, String(v)])), efficiency: '55', overnight_cost: '650' }
 function ReadOut() {
   const schema = useAssetSchema('Generator').data
   const action = useSaveAction('Generator', 'gas', GEN)

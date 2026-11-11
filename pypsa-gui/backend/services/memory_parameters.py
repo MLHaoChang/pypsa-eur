@@ -482,8 +482,8 @@ def plan(
         ) from None
     if spec.unit_storage != body["unit"]:
         raise _refuse(
-            f"{spec.label}: saved in {body['unit']}, this field is stored in "
-            f"{spec.unit_storage}. Nothing is converted.",
+            f"{spec.label}: this value was saved in {body['unit']} and this field is "
+            f"stored in {spec.unit_storage}. Nothing is converted.",
             "memory_unit_mismatch",
         )
     n = _network()
@@ -495,7 +495,8 @@ def plan(
         raise _refuse_units(spec, name, reason, "memory_unit_mismatch")
     if body.get("carrier") and body["carrier"] != carrier:
         raise _refuse(
-            f"{spec.label}: saved for {body['carrier']}, this asset is {carrier or 'without a carrier'}.",
+            f"{spec.label}: this value was saved for {body['carrier']} and this asset "
+            + (f"is {carrier}." if carrier else "has no carrier."),
             "memory_carrier_mismatch",
         )
     currency = year = None
@@ -509,14 +510,14 @@ def plan(
             )
         if body.get("currency") != currency:
             raise _refuse(
-                f"{spec.label}: saved in {body.get('currency')}, this project uses {currency}. "
-                "Nothing is converted.",
+                f"{spec.label}: this value was saved in {body.get('currency')} and this "
+                f"project uses {currency}. Nothing is converted.",
                 "currency_mismatch",
             )
         if body.get("currency_year") != year:
             raise _refuse(
-                f"{spec.label}: saved in {body.get('currency_year')} money, this project reads it "
-                f"in {year} money. Nothing is converted or relabelled.",
+                f"{spec.label}: this value was saved in {body.get('currency_year')} money and "
+                f"this project reads it in {year} money. Nothing is converted or relabelled.",
                 "memory_money_year_mismatch",
             )
     if current is not None and current == body["value"]:

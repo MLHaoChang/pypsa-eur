@@ -280,7 +280,9 @@ function MemoryRow({
         <td className="px-2 py-1.5 text-muted">{own ? 'Just me' : 'Workspace'}</td>
         <td className="px-2 py-1.5">
           <div className="flex flex-wrap gap-1">
-            {item.concept_keys.map(k => (
+            {/* A parameter row names its field and class in its summary (UX P5), so its
+                "<Class> setting" key is not shown again. */}
+            {item.concept_keys.filter(k => !(param && k.startsWith('param:'))).map(k => (
               <span key={k}
                 className="px-1 rounded bg-panel border border-border text-[9.5px] text-muted">
                 {conceptWords(k)}

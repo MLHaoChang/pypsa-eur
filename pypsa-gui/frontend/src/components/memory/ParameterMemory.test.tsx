@@ -175,10 +175,10 @@ describe('the pick card (GK B 47 A4–A6, UX P3)', () => {
   })
 
   it.each([
-    ['currency_mismatch', 'Capacity: saved in USD, this project uses EUR. Nothing is converted.'],
-    ['memory_money_year_mismatch', 'Capacity: saved in 2019 money, this project reads it in 2024 money. Nothing is converted or relabelled.'],
-    ['memory_carrier_mismatch', 'Capacity: saved for solar, this asset is gas.'],
-    ['memory_unit_mismatch', 'Capacity: saved in kW, this field is stored in MW. Nothing is converted.'],
+    ['currency_mismatch', 'Capacity: this value was saved in USD and this project uses EUR. Nothing is converted.'],
+    ['memory_money_year_mismatch', 'Capacity: this value was saved in 2019 money and this project reads it in 2024 money. Nothing is converted or relabelled.'],
+    ['memory_carrier_mismatch', 'Capacity: this value was saved for solar and this asset is gas.'],
+    ['memory_unit_mismatch', 'Capacity: this value was saved in kW and this field is stored in MW. Nothing is converted.'],
     ['memory_money_basis_missing', 'Capacity: this project states no currency and money year for it, so a saved price is not applied.'],
     ['memory_no_change', 'This field already has the saved value.'],
   ])('a %s refusal replaces the card, and nothing can be applied', async (kind, message) => {
@@ -237,7 +237,7 @@ describe('the pick card (GK B 47 A4–A6, UX P3)', () => {
   })
 
   it('a refused preview card still closes with Esc', async () => {
-    api.preview.mockRejectedValue(refusal(422, 'memory_carrier_mismatch', 'Capacity: saved for solar, this asset is gas.'))
+    api.preview.mockRejectedValue(refusal(422, 'memory_carrier_mismatch', 'Capacity: this value was saved for solar and this asset is gas.'))
     render(<PickCard chip={chip()} spec={spec('p_nom')} target={TARGET} onClose={vi.fn()} onApplied={vi.fn()} />)
     await screen.findByTestId('memory-pick-refusal')
     expect(screen.getByTestId('memory-pick-cancel').textContent).toBe('Close')

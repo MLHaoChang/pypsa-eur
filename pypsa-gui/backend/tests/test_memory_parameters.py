@@ -962,7 +962,9 @@ def test_a_carrier_refusal_names_an_asset_without_a_carrier(client, proj):
     chip = _saved_chip(client, proj)
     proj.net().generators.at["solar", "carrier"] = ""
     r = _preview(client, proj, chip, name="solar")
-    assert r.status_code == 422 and "without a carrier" in r.json()["detail"]["message"]
+    assert r.status_code == 422 and r.json()["detail"]["message"].endswith(
+        "and this asset has no carrier."
+    )
 
 
 @pytest.mark.parametrize(
@@ -1840,3 +1842,19 @@ def test_a_user_with_no_org_is_offered_no_save_and_save_refuses(
     assert _saveable(client, proj) == set()
     r = _save(client, proj, field="p_nom")
     assert r.status_code == 403 and r.json()["detail"]["error_kind"] == "memory_no_org"
+
+
+def test_a_currency_refusal_is_one_sentence_that_opens_with_the_field_label(
+    client, proj
+):
+    """UX 18 point 1: no comma-spliced clauses, no keys."""
+    proj.stamp(currency="USD", year=2024)
+    chip = _chips(client, proj).get("marginal_cost") or [
+        {"id": _save(client, proj).json()["id"], "version": 1}
+    ]
+    proj.stamp(currency="EUR", year=2024)
+    r = _preview(client, proj, chip[0])
+    assert r.json()["detail"]["message"] == (
+        "Marginal cost: this value was saved in USD and this project uses EUR. "
+        "Nothing is converted."
+    )
