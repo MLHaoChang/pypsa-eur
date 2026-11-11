@@ -1353,3 +1353,43 @@ def test_it_energy_on_a_flat_network_reads_its_one_period_as_none(monkeypatch):
     )
     monkeypatch.setattr(E, "it_energy", lambda *a, **k: SimpleNamespace(periods=frame))
     assert _value(L.read(n, solve, "it_energy", "MWh")) == {None: 12.0}
+
+
+def test_a_bus_slack_in_an_hour_with_no_load_on_a_flat_network_is_split_by_its_one_period():
+    """F3 on a flat network: the one period is every snapshot, so the idle hour's slack goes to the Load
+    that draws in that period (kills the mutant that keys the period by one row)."""
+    n = _plant(periods=())
+    n.loads.at["site_a", "p_set"] = 0.0
+    shed = np.array([0.0, 6.0, 0.0, 0.0])  # hour 2: both loads are 0
+    n.generators_t.p["shed_hub"] = shed
+    solve = _solve(n)
+    b_set = np.array([30.0, 0.0, 10.0, 0.0])
+    assert _value(L.read(n, solve, "served_load.site_a", "MWh")) == _approx({None: 0.0})
+    assert _value(L.read(n, solve, "served_load.site_b", "MWh")) == _approx(
+        _per_year(n, b_set - shed)
+    )
+
+
+def test_served_plus_the_product_shortfall_plus_the_loads_own_voll_is_contracted():
+    """GK A F7 pin: on a bus with both a lost-production slack and a Load's own VoLL slack, served +
+    ProductShortfall's per-year quantity + that VoLL slack = contracted, each slack counted once."""
+    from services.process_products import shortfalls
+    from services.results.finance_case import _per_year as shortfall_per_year
+
+    n = _plant()
+    lost = np.tile([5.0, 5.0, 0.0, 0.0], 2)
+    voll = np.tile([2.0, 0.0, 3.0, 0.0], 2)
+    capture = _lost_production(n, "hub", 100.0, lost)
+    capture["lost_load_t"] = _capture(n, site_a=voll)["lost_load_t"]
+    solve = _solve(n, capture)
+    (s,) = [s for s in shortfalls(n, solve.lost_load) if s.bus == "hub"]
+    served = [
+        _value(L.read(n, solve, o, "MWh"))
+        for o in ("served_load.site_a", "served_load.site_b")
+    ]
+    contracted = 10.0 + np.tile([30.0, 0.0, 10.0, 0.0], 2)
+    for p in PERIODS:
+        assert sum(v[p] for v in served) + shortfall_per_year(n, s.p, p) + _per_year(
+            n, voll
+        )[p] == pytest.approx(_per_year(n, contracted)[p])
+        assert _per_year(n, voll)[p] > 0 and shortfall_per_year(n, s.p, p) > 0

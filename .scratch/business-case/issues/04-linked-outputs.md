@@ -157,3 +157,6 @@ Q4 every electric Load is offered: the catalogue offers, the preset bills.
 - GK B (47) ruled on `served_load` against the bill streams: admitted, except
   against a valued `eaas_fee` (refused `double_count:eaas_fee`). Recorded with its
   conditions C1-C3 in 06's comments; 06 implements it.
+- GK A OK @6c4c9c6b with one non-blocking point: pin F7's three-term identity
+  (served + ProductShortfall + the Load's own VoLL slack = contracted) by a test.
+  Done here, with the flat-network F3 test the full mutation run asked for.
