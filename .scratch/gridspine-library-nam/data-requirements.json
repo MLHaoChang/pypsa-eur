@@ -1,0 +1,494 @@
+{
+  "baseline": "151fdc934d739bb790d0bd1237d85e7ac40e3719",
+  "scope": [
+    "US",
+    "Canada",
+    "Mexico"
+  ],
+  "requirements": [
+    {
+      "requirement_id": "T01",
+      "domain": "tariffs",
+      "title": "Utility, territory, customer class, service voltage and eligibility",
+      "native_bindings": [
+        "Tariff.jurisdiction",
+        "Tariff.dso_or_retailer"
+      ],
+      "boundary": "Geography is not evidence of eligibility; class/voltage metadata needs source-level preservation"
+    },
+    {
+      "requirement_id": "T02",
+      "domain": "tariffs",
+      "title": "Effective dates, filing revision, approval and supersession",
+      "native_bindings": [
+        "Tariff.valid_from",
+        "Tariff.valid_to"
+      ],
+      "boundary": "Current tariff may have riders changed after base schedule"
+    },
+    {
+      "requirement_id": "T03",
+      "domain": "tariffs",
+      "title": "Energy/TOU/tier rates and adjustments",
+      "native_bindings": [
+        "TariffItem.periods",
+        "TariffItem.tiers",
+        "TariffPeriod.tier_rates"
+      ],
+      "boundary": "Imported billing units kWh; distinguish component price from delivered all-in price"
+    },
+    {
+      "requirement_id": "T04",
+      "domain": "tariffs",
+      "title": "Season, weekday, hour and holiday schedules",
+      "native_bindings": [
+        "TariffPeriod.months",
+        "TariffPeriod.weekdays",
+        "TariffPeriod.start_hour",
+        "TariffPeriod.end_hour"
+      ],
+      "boundary": "Integer-hour windows; holiday/day-class exceptions need explicit treatment"
+    },
+    {
+      "requirement_id": "T05",
+      "domain": "tariffs",
+      "title": "Demand window, TOU peak and facility demand",
+      "native_bindings": [
+        "TariffItem.settlement",
+        "TariffItem.measured_on"
+      ],
+      "boundary": "15/30/60-minute demand requires original-resolution load, not an hourly mean"
+    },
+    {
+      "requirement_id": "T06",
+      "domain": "tariffs",
+      "title": "Contracted capacity, minimum billing demand and service commitments",
+      "native_bindings": [
+        "TariffItem.kind",
+        "ConnectionAgreement.capacity_fee"
+      ],
+      "boundary": "Actual contracted entitlement and billing-demand floor are not inferred from connected MW"
+    },
+    {
+      "requirement_id": "T07",
+      "domain": "tariffs",
+      "title": "Ratchet share, lookback and history",
+      "native_bindings": [
+        "Ratchet.share",
+        "Ratchet.lookback_months",
+        "Ratchet.months",
+        "Ratchet.cyclic_year"
+      ],
+      "boundary": "Imported ratchet subset only; missing history is not a zero peak"
+    },
+    {
+      "requirement_id": "T08",
+      "domain": "tariffs",
+      "title": "Fixed customer/meter/day fees",
+      "native_bindings": [
+        "TariffItem.unit",
+        "TariffItem.periods"
+      ],
+      "boundary": "Annual fixed fees may be divided by 12 only with disclosed convention"
+    },
+    {
+      "requirement_id": "T09",
+      "domain": "tariffs",
+      "title": "Transmission/distribution, riders, levies, taxes and wholesale pass-through",
+      "native_bindings": [
+        "Tariff.items",
+        "TariffItem.kind",
+        "TariffPayeeRule.item_id"
+      ],
+      "boundary": "Do not double count embedded transmission or treat retail average as a component schedule"
+    },
+    {
+      "requirement_id": "T10",
+      "domain": "tariffs",
+      "title": "Coincident peak, Ontario Class A/ICI and capacity contributions",
+      "native_bindings": [
+        "Tariff.unsupported_fields"
+      ],
+      "boundary": "Current URDB importer refuses coincidentrate fields; five-system-peak cost is not monthly site peak"
+    },
+    {
+      "requirement_id": "T11",
+      "domain": "tariffs",
+      "title": "Minimum bill, standby, reactive/kVA and excess demand",
+      "native_bindings": [
+        "Tariff.unsupported_fields"
+      ],
+      "boundary": "URDB importer refuses minimum bills and non-kW demand; generic tariff schema is not proof of billing support"
+    },
+    {
+      "requirement_id": "T12",
+      "domain": "tariffs",
+      "title": "Export/net billing, avoided cost and injection charges",
+      "native_bindings": [
+        "CommercialConfig.export_price_ref",
+        "TariffItem.direction"
+      ],
+      "boundary": "URDB sell tiers refused; distinct export price route does not establish a full net-metering scheme"
+    },
+    {
+      "requirement_id": "T13",
+      "domain": "tariffs",
+      "title": "Connection, non-firm access and one-time reinforcement",
+      "native_bindings": [
+        "ConnectionAgreement.kind",
+        "ConnectionAgreement.import_cap_mw",
+        "ConnectionAgreement.envelope"
+      ],
+      "boundary": "Customer-specific connection cost and contractual import limit need actual agreement"
+    },
+    {
+      "requirement_id": "T14",
+      "domain": "tariffs",
+      "title": "Fuel/power-cost adjustment and dynamic retail supply",
+      "native_bindings": [
+        "CommercialConfig.import_price_ref"
+      ],
+      "boundary": "Effective component series versus tariff rider must be reconciled to avoid double billing"
+    },
+    {
+      "requirement_id": "T15",
+      "domain": "tariffs",
+      "title": "Rate choices for data centres, industrial sites and renewable IPPs",
+      "native_bindings": [
+        "Tariff.id",
+        "CommercialConfig.import_tariff"
+      ],
+      "boundary": "Large-load service, interruptible/minimum term and credit requirements stay source-specific"
+    },
+    {
+      "requirement_id": "W01",
+      "domain": "wholesale",
+      "title": "Operator, system, node/hub/zone and market regime",
+      "native_bindings": [
+        "PriceSeriesRef.id",
+        "PriceSeriesRef.provider",
+        "MarketPack.region"
+      ],
+      "boundary": "Current MarketRegion enum supports only US_ERCOT/US_PJM/US_CAISO/CA_ON in NAM; raw series storage is broader than market-product execution"
+    },
+    {
+      "requirement_id": "W02",
+      "domain": "wholesale",
+      "title": "DA/RT/imbalance product and price components",
+      "native_bindings": [
+        "PriceSeriesRef.id",
+        "MarketPack.price_series"
+      ],
+      "boundary": "Separate energy, congestion, losses, scarcity/adders; do not sum total LMP and components"
+    },
+    {
+      "requirement_id": "W03",
+      "domain": "wholesale",
+      "title": "Interval length, hour ending/start and timestamps",
+      "native_bindings": [
+        "CommercialConfig.timezone"
+      ],
+      "boundary": "Preserve UTC offset/DST fold/time-standard rules; naive timestamp plus timezone is refused by series parser"
+    },
+    {
+      "requirement_id": "W04",
+      "domain": "wholesale",
+      "title": "Currency, price units and FX valuation basis",
+      "native_bindings": [
+        "Participant.currency",
+        "PriceSeriesRef.source",
+        "FinanceInputs.currency"
+      ],
+      "boundary": "FinanceInputs and Participant carry currency; SeriesMeta carries unit/source_unit; PriceSeriesRef has no dedicated currency/unit and several commercial fields remain EUR-named. Prove end-to-end USD/CAD/MXN valuation and semantic pinning; do not relabel values."
+    },
+    {
+      "requirement_id": "W05",
+      "domain": "wholesale",
+      "title": "Finality, revisions, missing/duplicate intervals and coverage",
+      "native_bindings": [
+        "PriceSeriesRef.version",
+        "PriceSeriesRef.hash"
+      ],
+      "boundary": "Newest publication is not always final; missing prices are not zero"
+    },
+    {
+      "requirement_id": "W06",
+      "domain": "wholesale",
+      "title": "Negative and extreme prices and validity flags",
+      "native_bindings": [
+        "PriceSeriesRef.hash"
+      ],
+      "boundary": "Retain signs and source status; do not clip to positive prices"
+    },
+    {
+      "requirement_id": "W07",
+      "domain": "wholesale",
+      "title": "Historical spot vs futures/forwards and scenario curves",
+      "native_bindings": [
+        "PriceSeriesRef.vintage_year"
+      ],
+      "boundary": "Historical data does not establish an actionable forward quote"
+    },
+    {
+      "requirement_id": "W08",
+      "domain": "wholesale",
+      "title": "Ancillary/reserve/DR/capacity products and performance terms",
+      "native_bindings": [
+        "MarketPack",
+        "DrContract"
+      ],
+      "boundary": "Prices alone do not establish accreditation, dispatch feasibility or simultaneous revenue eligibility"
+    },
+    {
+      "requirement_id": "W09",
+      "domain": "wholesale",
+      "title": "Ontario renewed market, legacy HOEP and Global Adjustment",
+      "native_bindings": [
+        "PriceSeriesRef.provider",
+        "Tariff.unsupported_fields"
+      ],
+      "boundary": "Keep pre/post-May-2025 regimes separate; OEMP/LMP/HOEP are not interchangeable"
+    },
+    {
+      "requirement_id": "W10",
+      "domain": "wholesale",
+      "title": "Mexico nodal PML components, system and time basis",
+      "native_bindings": [
+        "PriceSeriesRef.id",
+        "CommercialConfig.timezone"
+      ],
+      "boundary": "SIN/BCA/BCS and regional DST rules; pesos per MWh are not dollars per MWh"
+    },
+    {
+      "requirement_id": "W11",
+      "domain": "wholesale",
+      "title": "Wholesale fuel and carbon/certificate benchmarks",
+      "native_bindings": [
+        "CommercialConfig.co2_price"
+      ],
+      "boundary": "Heating value, delivered vs hub price, regional carbon scheme and certificate attribute must be retained"
+    },
+    {
+      "requirement_id": "P01",
+      "domain": "contracts",
+      "title": "Fixed price, strike, premium and observation vintage",
+      "native_bindings": [
+        "PpaContract.price",
+        "PpaContract.premium_eur_per_mwh",
+        "CfdContract.strike"
+      ],
+      "boundary": "Public awards and historical samples are benchmarks, not current signed bilateral offers"
+    },
+    {
+      "requirement_id": "P02",
+      "domain": "contracts",
+      "title": "Start/commissioning date, tenor and delivery year",
+      "native_bindings": [
+        "PpaContract.tenor_years",
+        "PpaContract.base_year"
+      ],
+      "boundary": "Base money/index year is not a full delivery-start schedule"
+    },
+    {
+      "requirement_id": "P03",
+      "domain": "contracts",
+      "title": "Pay-as-produced/baseload/consumption profile, share and volume",
+      "native_bindings": [
+        "PpaContract.kind",
+        "PpaContract.share",
+        "PpaContract.baseload_mw",
+        "PpaContract.volume_cap_mwh_per_year"
+      ],
+      "boundary": "Generation share, annual cap and fixed notional are different volume risks"
+    },
+    {
+      "requirement_id": "P04",
+      "domain": "contracts",
+      "title": "Physical/financial settlement, buyer/seller and asset binding",
+      "native_bindings": [
+        "PpaContract.settlement",
+        "PpaContract.seller",
+        "PpaContract.buyer",
+        "PpaContract.asset_ids"
+      ],
+      "boundary": "Financial PPA native validator allows fixed-price pay_as_produced only; not a general swap engine"
+    },
+    {
+      "requirement_id": "P05",
+      "domain": "contracts",
+      "title": "Reference hub/node, basis and capture-price calculation",
+      "native_bindings": [
+        "PpaContract.reference_price",
+        "CfdContract.reference"
+      ],
+      "boundary": "Node-to-hub basis, monthly capture and delivery location cannot be assumed equal"
+    },
+    {
+      "requirement_id": "P06",
+      "domain": "contracts",
+      "title": "Escalation, nominal/real basis and base year",
+      "native_bindings": [
+        "PpaContract.indexation_pct_per_year",
+        "PpaContract.base_year"
+      ],
+      "boundary": "Levelized PPA benchmark differs from first-year price; retain discount/escalation basis"
+    },
+    {
+      "requirement_id": "P07",
+      "domain": "contracts",
+      "title": "Caps/floors, negative-price suspension and curtailment",
+      "native_bindings": [
+        "PpaContract.floor",
+        "PpaContract.cap",
+        "PpaContract.suspend_on_negative_price"
+      ],
+      "boundary": "Native financial PPA refuses floor/cap; contractual curtailment compensation not implied"
+    },
+    {
+      "requirement_id": "P08",
+      "domain": "contracts",
+      "title": "Sleeving, shaping, imbalance, losses and network charges",
+      "native_bindings": [
+        "PpaContract.sleeving_fee_eur_per_mwh",
+        "PpaContract.sleeving_party"
+      ],
+      "boundary": "Named EUR fields and incomplete balancing-risk scope need currency-aware admission"
+    },
+    {
+      "requirement_id": "P09",
+      "domain": "contracts",
+      "title": "REC/GO/CEL/environmental attribute ownership",
+      "native_bindings": [
+        "ValueStream.kind",
+        "TariffItem.kind"
+      ],
+      "boundary": "Price may bundle certificates/tax value; no automatic claim of hourly matching or green hydrogen certification"
+    },
+    {
+      "requirement_id": "P10",
+      "domain": "contracts",
+      "title": "Credit, collateral, guarantees, termination and legal terms",
+      "native_bindings": [
+        "Tariff.unsupported_fields"
+      ],
+      "boundary": "No generic credit-risk/collateral/termination engine; document as unsupported contract terms"
+    },
+    {
+      "requirement_id": "P11",
+      "domain": "contracts",
+      "title": "Public contract files, awards, transaction observations and publication bias",
+      "native_bindings": [
+        "PpaContract.library_ref",
+        "CfdContract.library_ref"
+      ],
+      "boundary": "Public SEC/FERC filings and awards may omit prices/clauses; legal text rights separate from price facts"
+    },
+    {
+      "requirement_id": "P12",
+      "domain": "contracts",
+      "title": "Hydrogen/ammonia off-take, support and industrial product prices",
+      "native_bindings": [
+        "ValueStream.kind"
+      ],
+      "boundary": "Delivered product price, support premium and modelled break-even value are separate; exact native product bindings reviewed separately"
+    },
+    {
+      "requirement_id": "F01",
+      "domain": "economic inputs",
+      "title": "Wind/PV/storage/H2 CapEx, FOM/VOM and cost projections",
+      "native_bindings": [
+        "PackValue",
+        "CostPart"
+      ],
+      "boundary": "Source money year, capacity basis, component inclusion and actual operating vintage separate"
+    },
+    {
+      "requirement_id": "F02",
+      "domain": "economic inputs",
+      "title": "Maintenance, replacements, degradation and warranty",
+      "native_bindings": [
+        "CostPart.lifetime",
+        "FinanceInputs"
+      ],
+      "boundary": "Model-class benchmark is not a calibrated equipment/CMMS law"
+    },
+    {
+      "requirement_id": "F03",
+      "domain": "economic inputs",
+      "title": "Inflation/escalation and price indices",
+      "native_bindings": [
+        "FinanceInputs"
+      ],
+      "boundary": "Keep index, currency, real/nominal basis and money year explicit"
+    },
+    {
+      "requirement_id": "F04",
+      "domain": "economic inputs",
+      "title": "FX historical conversion and scenario convention",
+      "native_bindings": [
+        "Participant.currency",
+        "FinanceInputs.currency"
+      ],
+      "boundary": "Raw/derived value lineage and trade date; never relabel currencies"
+    },
+    {
+      "requirement_id": "F05",
+      "domain": "economic inputs",
+      "title": "Risk-free rates, WACC, debt terms and fees",
+      "native_bindings": [
+        "DebtTranche.rate",
+        "DebtTranche.tenor_years",
+        "DebtTranche.upfront_fee"
+      ],
+      "boundary": "Sovereign yield is not a project WACC, lending quote or calibrated credit spread"
+    },
+    {
+      "requirement_id": "F06",
+      "domain": "economic inputs",
+      "title": "Tax, depreciation and incentives",
+      "native_bindings": [
+        "TaxPack",
+        "DepreciationSchedule",
+        "Incentive"
+      ],
+      "boundary": "Current law, eligibility, geography and service date; do not assume a project qualifies"
+    },
+    {
+      "requirement_id": "X01",
+      "domain": "source contract",
+      "title": "Source identity, exact release/row and original document",
+      "native_bindings": [
+        "LibraryItemRef.hash",
+        "PriceSeriesRef.hash"
+      ],
+      "boundary": "Hash source evidence and transformation rules; link source clauses/cells"
+    },
+    {
+      "requirement_id": "X02",
+      "domain": "source contract",
+      "title": "Rights for commercial use, cache, derivatives, display/export and common scope",
+      "native_bindings": [
+        "LibraryItemRef"
+      ],
+      "boundary": "Publicly reachable does not establish reuse permission; source obligations propagate"
+    },
+    {
+      "requirement_id": "X03",
+      "domain": "source contract",
+      "title": "Applicability, uncertainty, actual/benchmark/synthetic and missing data",
+      "native_bindings": [
+        "PriceSeriesRef.source"
+      ],
+      "boundary": "Keep customer facts private; refuse unsupported/missing inputs instead of fabricating defaults"
+    },
+    {
+      "requirement_id": "X04",
+      "domain": "source contract",
+      "title": "Retrieval limits, credentials and private-data isolation",
+      "native_bindings": [
+        "LibraryItemRef"
+      ],
+      "boundary": "No API keys inside library payloads; fixed reviewed endpoints, bounded retrieval and tenant scope"
+    }
+  ]
+}

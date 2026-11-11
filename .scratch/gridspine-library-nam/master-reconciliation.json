@@ -1,0 +1,559 @@
+{
+  "extraction_baseline": "151fdc934d739bb790d0bd1237d85e7ac40e3719",
+  "reviewed_master": "14d8c1a9bc8c073757928eacea551b1374d5a107",
+  "files": [
+    {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "extraction_sha256": "5e5ad152879d62ec09a3fb2704a7d3cc86d98034eff3997dab769b0fd8c91ddf",
+      "reviewed_master_sha256": "5e5ad152879d62ec09a3fb2704a7d3cc86d98034eff3997dab769b0fd8c91ddf",
+      "changed": false
+    },
+    {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "extraction_sha256": "f121f1a1e52ea36cc58c846aac60d8875281645c5b0cde821e867fe29bfb042e",
+      "reviewed_master_sha256": "f121f1a1e52ea36cc58c846aac60d8875281645c5b0cde821e867fe29bfb042e",
+      "changed": false
+    },
+    {
+      "path": "pypsa-gui/backend/services/library/urdb.py",
+      "extraction_sha256": "f4c4aef4fc1fdde50513f708a33657f5d8faa6c68dba683fd33be3adf8e7ac3e",
+      "reviewed_master_sha256": "f4c4aef4fc1fdde50513f708a33657f5d8faa6c68dba683fd33be3adf8e7ac3e",
+      "changed": false
+    },
+    {
+      "path": "pypsa-gui/backend/services/library/series_io.py",
+      "extraction_sha256": "0ef37b1d68000db80d80c25f8680d55d5ceaefc8f40e1de07cc9da5c2cb91f3d",
+      "reviewed_master_sha256": "0ef37b1d68000db80d80c25f8680d55d5ceaefc8f40e1de07cc9da5c2cb91f3d",
+      "changed": false
+    },
+    {
+      "path": "pypsa-gui/backend/services/library/series_store.py",
+      "extraction_sha256": "51c2d16b0cfcbc282f6a0c537f263a8fc1f41c719e72b781e1303f07c7bde586",
+      "reviewed_master_sha256": "51c2d16b0cfcbc282f6a0c537f263a8fc1f41c719e72b781e1303f07c7bde586",
+      "changed": false
+    },
+    {
+      "path": "pypsa-gui/backend/services/library/items.py",
+      "extraction_sha256": "65c2ea4db508313953409e94c265ce97c8f0bebd47f5e62cfb19c9097861c297",
+      "reviewed_master_sha256": "65c2ea4db508313953409e94c265ce97c8f0bebd47f5e62cfb19c9097861c297",
+      "changed": false
+    },
+    {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "extraction_sha256": "5d15bc9b935fdc81d26458ae8ed17aace4ec354d28dd4d7319bff39fa07e5ef4",
+      "reviewed_master_sha256": "3b25e33f696d767d30bff4a7b7c0bca19febd6ee800c4839798de8e0d4eb6682",
+      "changed": true
+    }
+  ],
+  "requirement_bindings": [
+    {
+      "requirement_id": "T01",
+      "binding": "Tariff.jurisdiction",
+      "valid": true
+    },
+    {
+      "requirement_id": "T01",
+      "binding": "Tariff.dso_or_retailer",
+      "valid": true
+    },
+    {
+      "requirement_id": "T02",
+      "binding": "Tariff.valid_from",
+      "valid": true
+    },
+    {
+      "requirement_id": "T02",
+      "binding": "Tariff.valid_to",
+      "valid": true
+    },
+    {
+      "requirement_id": "T03",
+      "binding": "TariffItem.periods",
+      "valid": true
+    },
+    {
+      "requirement_id": "T03",
+      "binding": "TariffItem.tiers",
+      "valid": true
+    },
+    {
+      "requirement_id": "T03",
+      "binding": "TariffPeriod.tier_rates",
+      "valid": true
+    },
+    {
+      "requirement_id": "T04",
+      "binding": "TariffPeriod.months",
+      "valid": true
+    },
+    {
+      "requirement_id": "T04",
+      "binding": "TariffPeriod.weekdays",
+      "valid": true
+    },
+    {
+      "requirement_id": "T04",
+      "binding": "TariffPeriod.start_hour",
+      "valid": true
+    },
+    {
+      "requirement_id": "T04",
+      "binding": "TariffPeriod.end_hour",
+      "valid": true
+    },
+    {
+      "requirement_id": "T05",
+      "binding": "TariffItem.settlement",
+      "valid": true
+    },
+    {
+      "requirement_id": "T05",
+      "binding": "TariffItem.measured_on",
+      "valid": true
+    },
+    {
+      "requirement_id": "T06",
+      "binding": "TariffItem.kind",
+      "valid": true
+    },
+    {
+      "requirement_id": "T06",
+      "binding": "ConnectionAgreement.capacity_fee",
+      "valid": true
+    },
+    {
+      "requirement_id": "T07",
+      "binding": "Ratchet.share",
+      "valid": true
+    },
+    {
+      "requirement_id": "T07",
+      "binding": "Ratchet.lookback_months",
+      "valid": true
+    },
+    {
+      "requirement_id": "T07",
+      "binding": "Ratchet.months",
+      "valid": true
+    },
+    {
+      "requirement_id": "T07",
+      "binding": "Ratchet.cyclic_year",
+      "valid": true
+    },
+    {
+      "requirement_id": "T08",
+      "binding": "TariffItem.unit",
+      "valid": true
+    },
+    {
+      "requirement_id": "T08",
+      "binding": "TariffItem.periods",
+      "valid": true
+    },
+    {
+      "requirement_id": "T09",
+      "binding": "Tariff.items",
+      "valid": true
+    },
+    {
+      "requirement_id": "T09",
+      "binding": "TariffItem.kind",
+      "valid": true
+    },
+    {
+      "requirement_id": "T09",
+      "binding": "TariffPayeeRule.item_id",
+      "valid": true
+    },
+    {
+      "requirement_id": "T10",
+      "binding": "Tariff.unsupported_fields",
+      "valid": true
+    },
+    {
+      "requirement_id": "T11",
+      "binding": "Tariff.unsupported_fields",
+      "valid": true
+    },
+    {
+      "requirement_id": "T12",
+      "binding": "CommercialConfig.export_price_ref",
+      "valid": true
+    },
+    {
+      "requirement_id": "T12",
+      "binding": "TariffItem.direction",
+      "valid": true
+    },
+    {
+      "requirement_id": "T13",
+      "binding": "ConnectionAgreement.kind",
+      "valid": true
+    },
+    {
+      "requirement_id": "T13",
+      "binding": "ConnectionAgreement.import_cap_mw",
+      "valid": true
+    },
+    {
+      "requirement_id": "T13",
+      "binding": "ConnectionAgreement.envelope",
+      "valid": true
+    },
+    {
+      "requirement_id": "T14",
+      "binding": "CommercialConfig.import_price_ref",
+      "valid": true
+    },
+    {
+      "requirement_id": "T15",
+      "binding": "Tariff.id",
+      "valid": true
+    },
+    {
+      "requirement_id": "T15",
+      "binding": "CommercialConfig.import_tariff",
+      "valid": true
+    },
+    {
+      "requirement_id": "W01",
+      "binding": "PriceSeriesRef.id",
+      "valid": true
+    },
+    {
+      "requirement_id": "W01",
+      "binding": "PriceSeriesRef.provider",
+      "valid": true
+    },
+    {
+      "requirement_id": "W01",
+      "binding": "MarketPack.region",
+      "valid": true
+    },
+    {
+      "requirement_id": "W02",
+      "binding": "PriceSeriesRef.id",
+      "valid": true
+    },
+    {
+      "requirement_id": "W02",
+      "binding": "MarketPack.price_series",
+      "valid": true
+    },
+    {
+      "requirement_id": "W03",
+      "binding": "CommercialConfig.timezone",
+      "valid": true
+    },
+    {
+      "requirement_id": "W04",
+      "binding": "Participant.currency",
+      "valid": true
+    },
+    {
+      "requirement_id": "W04",
+      "binding": "PriceSeriesRef.source",
+      "valid": true
+    },
+    {
+      "requirement_id": "W04",
+      "binding": "FinanceInputs.currency",
+      "valid": true
+    },
+    {
+      "requirement_id": "W05",
+      "binding": "PriceSeriesRef.version",
+      "valid": true
+    },
+    {
+      "requirement_id": "W05",
+      "binding": "PriceSeriesRef.hash",
+      "valid": true
+    },
+    {
+      "requirement_id": "W06",
+      "binding": "PriceSeriesRef.hash",
+      "valid": true
+    },
+    {
+      "requirement_id": "W07",
+      "binding": "PriceSeriesRef.vintage_year",
+      "valid": true
+    },
+    {
+      "requirement_id": "W08",
+      "binding": "MarketPack",
+      "valid": true
+    },
+    {
+      "requirement_id": "W08",
+      "binding": "DrContract",
+      "valid": true
+    },
+    {
+      "requirement_id": "W09",
+      "binding": "PriceSeriesRef.provider",
+      "valid": true
+    },
+    {
+      "requirement_id": "W09",
+      "binding": "Tariff.unsupported_fields",
+      "valid": true
+    },
+    {
+      "requirement_id": "W10",
+      "binding": "PriceSeriesRef.id",
+      "valid": true
+    },
+    {
+      "requirement_id": "W10",
+      "binding": "CommercialConfig.timezone",
+      "valid": true
+    },
+    {
+      "requirement_id": "W11",
+      "binding": "CommercialConfig.co2_price",
+      "valid": true
+    },
+    {
+      "requirement_id": "P01",
+      "binding": "PpaContract.price",
+      "valid": true
+    },
+    {
+      "requirement_id": "P01",
+      "binding": "PpaContract.premium_eur_per_mwh",
+      "valid": true
+    },
+    {
+      "requirement_id": "P01",
+      "binding": "CfdContract.strike",
+      "valid": true
+    },
+    {
+      "requirement_id": "P02",
+      "binding": "PpaContract.tenor_years",
+      "valid": true
+    },
+    {
+      "requirement_id": "P02",
+      "binding": "PpaContract.base_year",
+      "valid": true
+    },
+    {
+      "requirement_id": "P03",
+      "binding": "PpaContract.kind",
+      "valid": true
+    },
+    {
+      "requirement_id": "P03",
+      "binding": "PpaContract.share",
+      "valid": true
+    },
+    {
+      "requirement_id": "P03",
+      "binding": "PpaContract.baseload_mw",
+      "valid": true
+    },
+    {
+      "requirement_id": "P03",
+      "binding": "PpaContract.volume_cap_mwh_per_year",
+      "valid": true
+    },
+    {
+      "requirement_id": "P04",
+      "binding": "PpaContract.settlement",
+      "valid": true
+    },
+    {
+      "requirement_id": "P04",
+      "binding": "PpaContract.seller",
+      "valid": true
+    },
+    {
+      "requirement_id": "P04",
+      "binding": "PpaContract.buyer",
+      "valid": true
+    },
+    {
+      "requirement_id": "P04",
+      "binding": "PpaContract.asset_ids",
+      "valid": true
+    },
+    {
+      "requirement_id": "P05",
+      "binding": "PpaContract.reference_price",
+      "valid": true
+    },
+    {
+      "requirement_id": "P05",
+      "binding": "CfdContract.reference",
+      "valid": true
+    },
+    {
+      "requirement_id": "P06",
+      "binding": "PpaContract.indexation_pct_per_year",
+      "valid": true
+    },
+    {
+      "requirement_id": "P06",
+      "binding": "PpaContract.base_year",
+      "valid": true
+    },
+    {
+      "requirement_id": "P07",
+      "binding": "PpaContract.floor",
+      "valid": true
+    },
+    {
+      "requirement_id": "P07",
+      "binding": "PpaContract.cap",
+      "valid": true
+    },
+    {
+      "requirement_id": "P07",
+      "binding": "PpaContract.suspend_on_negative_price",
+      "valid": true
+    },
+    {
+      "requirement_id": "P08",
+      "binding": "PpaContract.sleeving_fee_eur_per_mwh",
+      "valid": true
+    },
+    {
+      "requirement_id": "P08",
+      "binding": "PpaContract.sleeving_party",
+      "valid": true
+    },
+    {
+      "requirement_id": "P09",
+      "binding": "ValueStream.kind",
+      "valid": true
+    },
+    {
+      "requirement_id": "P09",
+      "binding": "TariffItem.kind",
+      "valid": true
+    },
+    {
+      "requirement_id": "P10",
+      "binding": "Tariff.unsupported_fields",
+      "valid": true
+    },
+    {
+      "requirement_id": "P11",
+      "binding": "PpaContract.library_ref",
+      "valid": true
+    },
+    {
+      "requirement_id": "P11",
+      "binding": "CfdContract.library_ref",
+      "valid": true
+    },
+    {
+      "requirement_id": "P12",
+      "binding": "ValueStream.kind",
+      "valid": true
+    },
+    {
+      "requirement_id": "F01",
+      "binding": "PackValue",
+      "valid": true
+    },
+    {
+      "requirement_id": "F01",
+      "binding": "CostPart",
+      "valid": true
+    },
+    {
+      "requirement_id": "F02",
+      "binding": "CostPart.lifetime",
+      "valid": true
+    },
+    {
+      "requirement_id": "F02",
+      "binding": "FinanceInputs",
+      "valid": true
+    },
+    {
+      "requirement_id": "F03",
+      "binding": "FinanceInputs",
+      "valid": true
+    },
+    {
+      "requirement_id": "F04",
+      "binding": "Participant.currency",
+      "valid": true
+    },
+    {
+      "requirement_id": "F04",
+      "binding": "FinanceInputs.currency",
+      "valid": true
+    },
+    {
+      "requirement_id": "F05",
+      "binding": "DebtTranche.rate",
+      "valid": true
+    },
+    {
+      "requirement_id": "F05",
+      "binding": "DebtTranche.tenor_years",
+      "valid": true
+    },
+    {
+      "requirement_id": "F05",
+      "binding": "DebtTranche.upfront_fee",
+      "valid": true
+    },
+    {
+      "requirement_id": "F06",
+      "binding": "TaxPack",
+      "valid": true
+    },
+    {
+      "requirement_id": "F06",
+      "binding": "DepreciationSchedule",
+      "valid": true
+    },
+    {
+      "requirement_id": "F06",
+      "binding": "Incentive",
+      "valid": true
+    },
+    {
+      "requirement_id": "X01",
+      "binding": "LibraryItemRef.hash",
+      "valid": true
+    },
+    {
+      "requirement_id": "X01",
+      "binding": "PriceSeriesRef.hash",
+      "valid": true
+    },
+    {
+      "requirement_id": "X02",
+      "binding": "LibraryItemRef",
+      "valid": true
+    },
+    {
+      "requirement_id": "X03",
+      "binding": "PriceSeriesRef.source",
+      "valid": true
+    },
+    {
+      "requirement_id": "X04",
+      "binding": "LibraryItemRef",
+      "valid": true
+    }
+  ],
+  "pr499": {
+    "state": "merged",
+    "merge_sha": "14d8c1a9bc8c073757928eacea551b1374d5a107"
+  },
+  "pr501": {
+    "state": "merged",
+    "merge_sha": "4040537f4102edc618d4bed1428112e25942b84a"
+  },
+  "runtime_tested": false
+}

@@ -1,0 +1,2852 @@
+{
+  "baseline": "151fdc934d739bb790d0bd1237d85e7ac40e3719",
+  "files": {
+    "pypsa-gui/backend/models/commercial.py": "5e5ad152879d62ec09a3fb2704a7d3cc86d98034eff3997dab769b0fd8c91ddf",
+    "pypsa-gui/backend/models/finance.py": "f121f1a1e52ea36cc58c846aac60d8875281645c5b0cde821e867fe29bfb042e",
+    "pypsa-gui/backend/services/library/urdb.py": "f4c4aef4fc1fdde50513f708a33657f5d8faa6c68dba683fd33be3adf8e7ac3e",
+    "pypsa-gui/backend/services/library/series_io.py": "0ef37b1d68000db80d80c25f8680d55d5ceaefc8f40e1de07cc9da5c2cb91f3d",
+    "pypsa-gui/backend/services/library/series_store.py": "51c2d16b0cfcbc282f6a0c537f263a8fc1f41c719e72b781e1303f07c7bde586",
+    "pypsa-gui/backend/services/library/items.py": "65c2ea4db508313953409e94c265ce97c8f0bebd47f5e62cfb19c9097861c297",
+    "pypsa-gui/backend/services/library/defaults_pack/loader.py": "5d15bc9b935fdc81d26458ae8ed17aace4ec354d28dd4d7319bff39fa07e5ef4"
+  },
+  "classes": {
+    "Participant": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 49,
+      "fields": [
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 50
+        },
+        {
+          "name": "name",
+          "annotation": "str",
+          "line": 51
+        },
+        {
+          "name": "role",
+          "annotation": "ParticipantRole",
+          "line": 52
+        },
+        {
+          "name": "currency",
+          "annotation": "str",
+          "line": 53
+        }
+      ]
+    },
+    "ValueStream": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 56,
+      "fields": [
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 57
+        },
+        {
+          "name": "kind",
+          "annotation": "ValueStreamKind",
+          "line": 58
+        },
+        {
+          "name": "label",
+          "annotation": "str | None",
+          "line": 59
+        }
+      ]
+    },
+    "AllocationKey": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 62,
+      "fields": [
+        {
+          "name": "basis",
+          "annotation": "Literal['contracted_capacity', 'peak_contribution', 'energy', 'fixed_shares']",
+          "line": 65
+        },
+        {
+          "name": "shares",
+          "annotation": "dict[str, float] | None",
+          "line": 66
+        }
+      ]
+    },
+    "TariffPayeeRule": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 89,
+      "fields": [
+        {
+          "name": "kind",
+          "annotation": "TariffItemKind | None",
+          "line": 92
+        },
+        {
+          "name": "item_id",
+          "annotation": "str | None",
+          "line": 93
+        },
+        {
+          "name": "payee",
+          "annotation": "str",
+          "line": 94
+        }
+      ]
+    },
+    "AssetOwnership": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 103,
+      "fields": [
+        {
+          "name": "asset_id",
+          "annotation": "str",
+          "line": 104
+        },
+        {
+          "name": "component",
+          "annotation": "Literal['Generator', 'StorageUnit', 'Store', 'Link', 'Line', 'Transformer']",
+          "line": 105
+        },
+        {
+          "name": "owner",
+          "annotation": "str",
+          "line": 106
+        }
+      ]
+    },
+    "HubMember": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 109,
+      "fields": [
+        {
+          "name": "link",
+          "annotation": "str",
+          "line": 110
+        },
+        {
+          "name": "participant",
+          "annotation": "str",
+          "line": 111
+        },
+        {
+          "name": "contracted_mw",
+          "annotation": "float | None",
+          "line": 112
+        }
+      ]
+    },
+    "ValueFlowConfig": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 115,
+      "fields": [
+        {
+          "name": "template",
+          "annotation": "Literal['single_owner', 'btm_ppa', 'landlord_tenant', 'dso_developer', 'energy_hub', 'custom']",
+          "line": 123
+        },
+        {
+          "name": "template_version",
+          "annotation": "str | None",
+          "line": 125
+        },
+        {
+          "name": "built_digest",
+          "annotation": "str | None",
+          "line": 126
+        },
+        {
+          "name": "built_inputs_digest",
+          "annotation": "str | None",
+          "line": 129
+        },
+        {
+          "name": "participants",
+          "annotation": "list[Participant]",
+          "line": 130
+        },
+        {
+          "name": "externals",
+          "annotation": "list[str]",
+          "line": 131
+        },
+        {
+          "name": "tariff_payees",
+          "annotation": "list[TariffPayeeRule]",
+          "line": 132
+        },
+        {
+          "name": "asset_owners",
+          "annotation": "list[AssetOwnership]",
+          "line": 133
+        },
+        {
+          "name": "hub_members",
+          "annotation": "list[HubMember]",
+          "line": 134
+        },
+        {
+          "name": "allocation",
+          "annotation": "AllocationKey | None",
+          "line": 135
+        },
+        {
+          "name": "export_revenue_to",
+          "annotation": "Literal['site_party', 'asset_owner']",
+          "line": 136
+        },
+        {
+          "name": "connection_fee_payee",
+          "annotation": "str | None",
+          "line": 138
+        }
+      ]
+    },
+    "PriceSeriesRef": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 144,
+      "fields": [
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 147
+        },
+        {
+          "name": "version",
+          "annotation": "int",
+          "line": 148
+        },
+        {
+          "name": "hash",
+          "annotation": "str",
+          "line": 149
+        },
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 150
+        },
+        {
+          "name": "vintage_year",
+          "annotation": "int | None",
+          "line": 151
+        },
+        {
+          "name": "provider",
+          "annotation": "str | None",
+          "line": 152
+        }
+      ]
+    },
+    "LibraryItemRef": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 164,
+      "fields": [
+        {
+          "name": "kind",
+          "annotation": "LibraryItemKind",
+          "line": 170
+        },
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 171
+        },
+        {
+          "name": "version",
+          "annotation": "int",
+          "line": 172
+        },
+        {
+          "name": "hash",
+          "annotation": "str",
+          "line": 173
+        }
+      ]
+    },
+    "TariffPeriod": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 176,
+      "fields": [
+        {
+          "name": "name",
+          "annotation": "str",
+          "line": 184
+        },
+        {
+          "name": "rate",
+          "annotation": "float",
+          "line": 185
+        },
+        {
+          "name": "months",
+          "annotation": "list[int]",
+          "line": 186
+        },
+        {
+          "name": "weekdays",
+          "annotation": "list[int]",
+          "line": 187
+        },
+        {
+          "name": "start_hour",
+          "annotation": "int | None",
+          "line": 188
+        },
+        {
+          "name": "end_hour",
+          "annotation": "int | None",
+          "line": 189
+        },
+        {
+          "name": "tier_rates",
+          "annotation": "list[float] | None",
+          "line": 193
+        }
+      ]
+    },
+    "Tier": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 210,
+      "fields": [
+        {
+          "name": "threshold",
+          "annotation": "float",
+          "line": 213
+        },
+        {
+          "name": "rate",
+          "annotation": "float",
+          "line": 214
+        }
+      ]
+    },
+    "Ratchet": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 217,
+      "fields": [
+        {
+          "name": "lookback_months",
+          "annotation": "int | None",
+          "line": 231
+        },
+        {
+          "name": "share",
+          "annotation": "float",
+          "line": 232
+        },
+        {
+          "name": "months",
+          "annotation": "list[int] | None",
+          "line": 233
+        },
+        {
+          "name": "cyclic_year",
+          "annotation": "bool",
+          "line": 234
+        }
+      ]
+    },
+    "TariffItem": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 253,
+      "fields": [
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 254
+        },
+        {
+          "name": "kind",
+          "annotation": "TariffItemKind",
+          "line": 255
+        },
+        {
+          "name": "unit",
+          "annotation": "TariffUnit",
+          "line": 256
+        },
+        {
+          "name": "periods",
+          "annotation": "list[TariffPeriod]",
+          "line": 257
+        },
+        {
+          "name": "tiers",
+          "annotation": "list[Tier] | None",
+          "line": 258
+        },
+        {
+          "name": "ratchet",
+          "annotation": "Ratchet | None",
+          "line": 259
+        },
+        {
+          "name": "settlement",
+          "annotation": "Settlement",
+          "line": 260
+        },
+        {
+          "name": "measured_on",
+          "annotation": "MeasuredOn",
+          "line": 261
+        },
+        {
+          "name": "direction",
+          "annotation": "Direction",
+          "line": 262
+        }
+      ]
+    },
+    "Tariff": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 364,
+      "fields": [
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 365
+        },
+        {
+          "name": "name",
+          "annotation": "str",
+          "line": 366
+        },
+        {
+          "name": "jurisdiction",
+          "annotation": "str",
+          "line": 367
+        },
+        {
+          "name": "dso_or_retailer",
+          "annotation": "str | None",
+          "line": 368
+        },
+        {
+          "name": "valid_from",
+          "annotation": "date",
+          "line": 369
+        },
+        {
+          "name": "valid_to",
+          "annotation": "date | None",
+          "line": 370
+        },
+        {
+          "name": "items",
+          "annotation": "list[TariffItem]",
+          "line": 371
+        },
+        {
+          "name": "pack_hash",
+          "annotation": "str | None",
+          "line": 372
+        },
+        {
+          "name": "unsupported_fields",
+          "annotation": "list[str]",
+          "line": 375
+        }
+      ]
+    },
+    "ConnectionAgreement": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 390,
+      "fields": [
+        {
+          "name": "kind",
+          "annotation": "ConnectionKind",
+          "line": 391
+        },
+        {
+          "name": "import_cap_mw",
+          "annotation": "float",
+          "line": 392
+        },
+        {
+          "name": "export_cap_mw",
+          "annotation": "float | None",
+          "line": 393
+        },
+        {
+          "name": "envelope",
+          "annotation": "TimeSeriesRef | None",
+          "line": 394
+        },
+        {
+          "name": "curtailment_hours_per_year",
+          "annotation": "float | None",
+          "line": 395
+        },
+        {
+          "name": "curtailment_compensation_eur_per_mwh",
+          "annotation": "float | None",
+          "line": 396
+        },
+        {
+          "name": "capacity_fee",
+          "annotation": "TariffItem | None",
+          "line": 397
+        },
+        {
+          "name": "available_from",
+          "annotation": "date",
+          "line": 398
+        },
+        {
+          "name": "group",
+          "annotation": "str | None",
+          "line": 399
+        },
+        {
+          "name": "library_ref",
+          "annotation": "LibraryItemRef | None",
+          "line": 402
+        }
+      ]
+    },
+    "PpaContract": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 431,
+      "fields": [
+        {
+          "name": "type",
+          "annotation": "Literal['ppa']",
+          "line": 434
+        },
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 435
+        },
+        {
+          "name": "kind",
+          "annotation": "PpaKind",
+          "line": 436
+        },
+        {
+          "name": "price",
+          "annotation": "float",
+          "line": 437
+        },
+        {
+          "name": "indexation_pct_per_year",
+          "annotation": "float",
+          "line": 438
+        },
+        {
+          "name": "volume_cap_mwh_per_year",
+          "annotation": "float | None",
+          "line": 439
+        },
+        {
+          "name": "floor",
+          "annotation": "float | None",
+          "line": 440
+        },
+        {
+          "name": "cap",
+          "annotation": "float | None",
+          "line": 441
+        },
+        {
+          "name": "tenor_years",
+          "annotation": "int",
+          "line": 442
+        },
+        {
+          "name": "seller",
+          "annotation": "str",
+          "line": 443
+        },
+        {
+          "name": "buyer",
+          "annotation": "str",
+          "line": 444
+        },
+        {
+          "name": "asset_ids",
+          "annotation": "UniqueIds",
+          "line": 445
+        },
+        {
+          "name": "reference_price",
+          "annotation": "TimeSeriesRef | None",
+          "line": 446
+        },
+        {
+          "name": "changes_dispatch",
+          "annotation": "bool",
+          "line": 447
+        },
+        {
+          "name": "base_year",
+          "annotation": "int | None",
+          "line": 449
+        },
+        {
+          "name": "library_ref",
+          "annotation": "LibraryItemRef | None",
+          "line": 450
+        },
+        {
+          "name": "pricing",
+          "annotation": "Literal['fixed', 'market_plus_premium']",
+          "line": 451
+        },
+        {
+          "name": "premium_eur_per_mwh",
+          "annotation": "float | None",
+          "line": 452
+        },
+        {
+          "name": "baseload_mw",
+          "annotation": "float | None",
+          "line": 453
+        },
+        {
+          "name": "sleeving_fee_eur_per_mwh",
+          "annotation": "float | None",
+          "line": 454
+        },
+        {
+          "name": "sleeving_party",
+          "annotation": "str | None",
+          "line": 455
+        },
+        {
+          "name": "share",
+          "annotation": "float",
+          "line": 458
+        },
+        {
+          "name": "settlement",
+          "annotation": "Literal['physical', 'financial']",
+          "line": 462
+        },
+        {
+          "name": "suspend_on_negative_price",
+          "annotation": "bool | None",
+          "line": 465
+        }
+      ]
+    },
+    "CfdContract": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 507,
+      "fields": [
+        {
+          "name": "type",
+          "annotation": "Literal['cfd']",
+          "line": 510
+        },
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 511
+        },
+        {
+          "name": "strike",
+          "annotation": "float",
+          "line": 512
+        },
+        {
+          "name": "reference_price",
+          "annotation": "TimeSeriesRef | None",
+          "line": 513
+        },
+        {
+          "name": "tenor_years",
+          "annotation": "int",
+          "line": 514
+        },
+        {
+          "name": "asset_ids",
+          "annotation": "UniqueIds",
+          "line": 515
+        },
+        {
+          "name": "base_year",
+          "annotation": "int | None",
+          "line": 517
+        },
+        {
+          "name": "library_ref",
+          "annotation": "LibraryItemRef | None",
+          "line": 518
+        },
+        {
+          "name": "generator_owner",
+          "annotation": "str | None",
+          "line": 519
+        },
+        {
+          "name": "counterparty",
+          "annotation": "str | None",
+          "line": 520
+        },
+        {
+          "name": "indexation_pct_per_year",
+          "annotation": "float",
+          "line": 521
+        },
+        {
+          "name": "reference",
+          "annotation": "Literal['interval', 'monthly_capture']",
+          "line": 522
+        },
+        {
+          "name": "suspend_on_negative_price",
+          "annotation": "bool",
+          "line": 523
+        },
+        {
+          "name": "share",
+          "annotation": "float",
+          "line": 525
+        }
+      ]
+    },
+    "DrContract": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 528,
+      "fields": [
+        {
+          "name": "type",
+          "annotation": "Literal['dr']",
+          "line": 531
+        },
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 532
+        },
+        {
+          "name": "availability_eur_per_mw_year",
+          "annotation": "float",
+          "line": 533
+        },
+        {
+          "name": "activation_eur_per_mwh",
+          "annotation": "float",
+          "line": 534
+        },
+        {
+          "name": "max_events",
+          "annotation": "int | None",
+          "line": 535
+        },
+        {
+          "name": "max_duration_h",
+          "annotation": "float | None",
+          "line": 536
+        },
+        {
+          "name": "notice_h",
+          "annotation": "float | None",
+          "line": 537
+        },
+        {
+          "name": "asset_ids",
+          "annotation": "UniqueIds",
+          "line": 538
+        },
+        {
+          "name": "load_ids",
+          "annotation": "UniqueIds",
+          "line": 539
+        },
+        {
+          "name": "counterparty",
+          "annotation": "str | None",
+          "line": 542
+        },
+        {
+          "name": "contracted_mw",
+          "annotation": "float | None",
+          "line": 543
+        },
+        {
+          "name": "base_year",
+          "annotation": "int | None",
+          "line": 544
+        },
+        {
+          "name": "library_ref",
+          "annotation": "LibraryItemRef | None",
+          "line": 545
+        }
+      ]
+    },
+    "LeaseContract": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 554,
+      "fields": [
+        {
+          "name": "type",
+          "annotation": "Literal['lease']",
+          "line": 557
+        },
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 558
+        },
+        {
+          "name": "lessor",
+          "annotation": "str",
+          "line": 559
+        },
+        {
+          "name": "lessee",
+          "annotation": "str",
+          "line": 560
+        },
+        {
+          "name": "annual_payment",
+          "annotation": "float",
+          "line": 561
+        },
+        {
+          "name": "tenor_years",
+          "annotation": "int",
+          "line": 562
+        },
+        {
+          "name": "asset_ids",
+          "annotation": "UniqueIds",
+          "line": 563
+        },
+        {
+          "name": "base_year",
+          "annotation": "int | None",
+          "line": 564
+        },
+        {
+          "name": "library_ref",
+          "annotation": "LibraryItemRef | None",
+          "line": 565
+        }
+      ]
+    },
+    "EaasContract": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 568,
+      "fields": [
+        {
+          "name": "type",
+          "annotation": "Literal['eaas']",
+          "line": 571
+        },
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 572
+        },
+        {
+          "name": "provider",
+          "annotation": "str",
+          "line": 573
+        },
+        {
+          "name": "customer",
+          "annotation": "str",
+          "line": 574
+        },
+        {
+          "name": "fee_eur_per_mwh",
+          "annotation": "float | None",
+          "line": 575
+        },
+        {
+          "name": "fee_eur_per_year",
+          "annotation": "float | None",
+          "line": 576
+        },
+        {
+          "name": "tenor_years",
+          "annotation": "int",
+          "line": 577
+        },
+        {
+          "name": "asset_ids",
+          "annotation": "UniqueIds",
+          "line": 578
+        },
+        {
+          "name": "base_year",
+          "annotation": "int | None",
+          "line": 579
+        },
+        {
+          "name": "library_ref",
+          "annotation": "LibraryItemRef | None",
+          "line": 580
+        }
+      ]
+    },
+    "RetailContract": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 590,
+      "fields": [
+        {
+          "name": "type",
+          "annotation": "Literal['retail']",
+          "line": 593
+        },
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 594
+        },
+        {
+          "name": "retailer",
+          "annotation": "str",
+          "line": 595
+        },
+        {
+          "name": "customer",
+          "annotation": "str",
+          "line": 596
+        },
+        {
+          "name": "tariff_id",
+          "annotation": "str",
+          "line": 597
+        },
+        {
+          "name": "tenor_years",
+          "annotation": "int",
+          "line": 598
+        },
+        {
+          "name": "base_year",
+          "annotation": "int | None",
+          "line": 599
+        },
+        {
+          "name": "library_ref",
+          "annotation": "LibraryItemRef | None",
+          "line": 600
+        }
+      ]
+    },
+    "AncillaryProduct": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 622,
+      "fields": [
+        {
+          "name": "name",
+          "annotation": "str",
+          "line": 623
+        },
+        {
+          "name": "capacity_price",
+          "annotation": "TimeSeriesRef | None",
+          "line": 624
+        },
+        {
+          "name": "activation_price",
+          "annotation": "TimeSeriesRef | None",
+          "line": 625
+        },
+        {
+          "name": "min_bid_mw",
+          "annotation": "float | None",
+          "line": 626
+        }
+      ]
+    },
+    "MarketPack": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 629,
+      "fields": [
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 630
+        },
+        {
+          "name": "region",
+          "annotation": "MarketRegion",
+          "line": 631
+        },
+        {
+          "name": "price_series",
+          "annotation": "dict[str, TimeSeriesRef]",
+          "line": 632
+        },
+        {
+          "name": "products",
+          "annotation": "list[AncillaryProduct]",
+          "line": 633
+        },
+        {
+          "name": "pack_hash",
+          "annotation": "str",
+          "line": 634
+        },
+        {
+          "name": "valid_year",
+          "annotation": "int",
+          "line": 635
+        }
+      ]
+    },
+    "ReferencePurchase": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 641,
+      "fields": [
+        {
+          "name": "load",
+          "annotation": "str",
+          "line": 648
+        },
+        {
+          "name": "price_eur_per_kg",
+          "annotation": "float",
+          "line": 650
+        },
+        {
+          "name": "lhv_kwh_per_kg",
+          "annotation": "float",
+          "line": 653
+        },
+        {
+          "name": "co2_t_per_kg",
+          "annotation": "float",
+          "line": 656
+        },
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 657
+        }
+      ]
+    },
+    "Co2Price": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 660,
+      "fields": [
+        {
+          "name": "eur_per_t_by_year",
+          "annotation": "dict[int, float]",
+          "line": 669
+        },
+        {
+          "name": "money_year",
+          "annotation": "int",
+          "line": 670
+        },
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 671
+        },
+        {
+          "name": "grid_t_per_mwh",
+          "annotation": "float | None",
+          "line": 675
+        },
+        {
+          "name": "grid_source",
+          "annotation": "str | None",
+          "line": 676
+        }
+      ]
+    },
+    "CommercialConfig": {
+      "path": "pypsa-gui/backend/models/commercial.py",
+      "line": 692,
+      "fields": [
+        {
+          "name": "poc_link",
+          "annotation": "str",
+          "line": 699
+        },
+        {
+          "name": "import_tariff_id",
+          "annotation": "str | None",
+          "line": 700
+        },
+        {
+          "name": "import_tariff",
+          "annotation": "Tariff | None",
+          "line": 703
+        },
+        {
+          "name": "import_tariff_ref",
+          "annotation": "LibraryItemRef | None",
+          "line": 707
+        },
+        {
+          "name": "export_price_ref",
+          "annotation": "TimeSeriesRef | None",
+          "line": 708
+        },
+        {
+          "name": "import_price_ref",
+          "annotation": "TimeSeriesRef | None",
+          "line": 712
+        },
+        {
+          "name": "export_link",
+          "annotation": "str | None",
+          "line": 715
+        },
+        {
+          "name": "timezone",
+          "annotation": "str | None",
+          "line": 718
+        },
+        {
+          "name": "connection",
+          "annotation": "ConnectionAgreement | None",
+          "line": 719
+        },
+        {
+          "name": "contracts",
+          "annotation": "list[Contract]",
+          "line": 722
+        },
+        {
+          "name": "grid_cfe_share_ref",
+          "annotation": "TimeSeriesRef | None",
+          "line": 725
+        },
+        {
+          "name": "site_party",
+          "annotation": "str",
+          "line": 728
+        },
+        {
+          "name": "group_contract",
+          "annotation": "str | None",
+          "line": 729
+        },
+        {
+          "name": "group_members",
+          "annotation": "list[str]",
+          "line": 732
+        },
+        {
+          "name": "group_cap_mw",
+          "annotation": "float | None",
+          "line": 733
+        },
+        {
+          "name": "demand_items",
+          "annotation": "list[str]",
+          "line": 735
+        },
+        {
+          "name": "meter_history_peaks_kw",
+          "annotation": "dict[str, float]",
+          "line": 738
+        },
+        {
+          "name": "meter_history_energy_kwh",
+          "annotation": "dict[str, float]",
+          "line": 742
+        },
+        {
+          "name": "initial_peak_lower_bound",
+          "annotation": "dict[str, float]",
+          "line": 744
+        },
+        {
+          "name": "power_factor",
+          "annotation": "float | None",
+          "line": 747
+        },
+        {
+          "name": "value_flows",
+          "annotation": "Any",
+          "line": 755
+        },
+        {
+          "name": "reference_purchases",
+          "annotation": "list[ReferencePurchase]",
+          "line": 760
+        },
+        {
+          "name": "co2_price",
+          "annotation": "Co2Price | None",
+          "line": 761
+        }
+      ]
+    },
+    "DebtTranche": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 64,
+      "fields": [
+        {
+          "name": "kind",
+          "annotation": "Literal['term_loan', 'mini_perm', 'construction', 'mezzanine']",
+          "line": 71
+        },
+        {
+          "name": "amount",
+          "annotation": "float | None",
+          "line": 72
+        },
+        {
+          "name": "gearing",
+          "annotation": "float | None",
+          "line": 73
+        },
+        {
+          "name": "gearing_base",
+          "annotation": "Literal['capex', 'total_uses']",
+          "line": 77
+        },
+        {
+          "name": "rate",
+          "annotation": "NonNegRate | list[NonNegRate]",
+          "line": 78
+        },
+        {
+          "name": "tenor_years",
+          "annotation": "int",
+          "line": 79
+        },
+        {
+          "name": "sculpting",
+          "annotation": "Literal['annuity', 'dscr_target', 'level']",
+          "line": 80
+        },
+        {
+          "name": "dscr_target",
+          "annotation": "float | None",
+          "line": 81
+        },
+        {
+          "name": "max_gearing",
+          "annotation": "float | None",
+          "line": 83
+        },
+        {
+          "name": "dsra_months",
+          "annotation": "int | None",
+          "line": 84
+        },
+        {
+          "name": "upfront_fee",
+          "annotation": "float | None",
+          "line": 85
+        },
+        {
+          "name": "commitment_fee",
+          "annotation": "float | None",
+          "line": 86
+        },
+        {
+          "name": "grace_years",
+          "annotation": "int | None",
+          "line": 87
+        }
+      ]
+    },
+    "DepreciationSchedule": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 111,
+      "fields": [
+        {
+          "name": "method",
+          "annotation": "Literal['straight_line', 'declining_balance', 'macrs', 'bonus']",
+          "line": 112
+        },
+        {
+          "name": "years",
+          "annotation": "int | None",
+          "line": 113
+        },
+        {
+          "name": "rate",
+          "annotation": "float | None",
+          "line": 114
+        },
+        {
+          "name": "macrs_class",
+          "annotation": "int | None",
+          "line": 115
+        },
+        {
+          "name": "bonus_share",
+          "annotation": "float | None",
+          "line": 116
+        }
+      ]
+    },
+    "TaxPack": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 131,
+      "fields": [
+        {
+          "name": "jurisdiction",
+          "annotation": "str",
+          "line": 132
+        },
+        {
+          "name": "corporate_rate",
+          "annotation": "float | None",
+          "line": 133
+        },
+        {
+          "name": "depreciation",
+          "annotation": "dict[str, DepreciationSchedule]",
+          "line": 134
+        },
+        {
+          "name": "loss_carryforward_years",
+          "annotation": "int | None",
+          "line": 135
+        },
+        {
+          "name": "interest_deductibility_cap",
+          "annotation": "float | None",
+          "line": 136
+        },
+        {
+          "name": "pack_hash",
+          "annotation": "str | None",
+          "line": 137
+        },
+        {
+          "name": "valid_from",
+          "annotation": "date | None",
+          "line": 138
+        },
+        {
+          "name": "source",
+          "annotation": "str | None",
+          "line": 139
+        }
+      ]
+    },
+    "EligibilityRule": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 142,
+      "fields": [
+        {
+          "name": "begin_construction_by",
+          "annotation": "date | None",
+          "line": 143
+        },
+        {
+          "name": "placed_in_service_by",
+          "annotation": "date | None",
+          "line": 144
+        },
+        {
+          "name": "asset_classes",
+          "annotation": "list[str]",
+          "line": 145
+        }
+      ]
+    },
+    "Incentive": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 148,
+      "fields": [
+        {
+          "name": "kind",
+          "annotation": "Literal['itc', 'ptc', 'grant', 'accelerated_depreciation', 'cfd', 'capacity_payment']",
+          "line": 158
+        },
+        {
+          "name": "rate",
+          "annotation": "float | None",
+          "line": 159
+        },
+        {
+          "name": "amount",
+          "annotation": "float | None",
+          "line": 160
+        },
+        {
+          "name": "eligibility",
+          "annotation": "EligibilityRule",
+          "line": 161
+        },
+        {
+          "name": "phase_out",
+          "annotation": "list[tuple[date, float]]",
+          "line": 162
+        },
+        {
+          "name": "feoc_flag",
+          "annotation": "bool | None",
+          "line": 163
+        },
+        {
+          "name": "grant_tax_treatment",
+          "annotation": "Literal['reduces_basis', 'taxable'] | None",
+          "line": 164
+        }
+      ]
+    },
+    "TaxEquityStructure": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 177,
+      "fields": [
+        {
+          "name": "kind",
+          "annotation": "Literal['partnership_flip', 'sale_leaseback', 'inverted_lease']",
+          "line": 181
+        },
+        {
+          "name": "te_share_pre_flip",
+          "annotation": "float",
+          "line": 182
+        },
+        {
+          "name": "te_share_post_flip",
+          "annotation": "float",
+          "line": 183
+        },
+        {
+          "name": "target_flip_irr",
+          "annotation": "float",
+          "line": 184
+        },
+        {
+          "name": "flip_year_cap",
+          "annotation": "int",
+          "line": 185
+        },
+        {
+          "name": "cash_share_pre_flip",
+          "annotation": "float",
+          "line": 186
+        },
+        {
+          "name": "cash_share_post_flip",
+          "annotation": "float",
+          "line": 187
+        },
+        {
+          "name": "dro_cap",
+          "annotation": "float",
+          "line": 188
+        },
+        {
+          "name": "itc_share_te",
+          "annotation": "float | None",
+          "line": 189
+        },
+        {
+          "name": "developer_fee",
+          "annotation": "float",
+          "line": 190
+        },
+        {
+          "name": "target_irr_basis",
+          "annotation": "Literal['after_tax_cash_plus_tax_benefits']",
+          "line": 191
+        },
+        {
+          "name": "itc_recapture_years",
+          "annotation": "int | None",
+          "line": 193
+        },
+        {
+          "name": "debt_in_structure",
+          "annotation": "bool",
+          "line": 194
+        }
+      ]
+    },
+    "SolvePpa": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 197,
+      "fields": [
+        {
+          "name": "contract_id",
+          "annotation": "str | None",
+          "line": 203
+        },
+        {
+          "name": "target_irr",
+          "annotation": "float",
+          "line": 204
+        },
+        {
+          "name": "target_year",
+          "annotation": "int",
+          "line": 205
+        }
+      ]
+    },
+    "IslandOutage": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 208,
+      "fields": [
+        {
+          "name": "hours_per_year",
+          "annotation": "float",
+          "line": 216
+        },
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 217
+        }
+      ]
+    },
+    "TerminalValueRule": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 220,
+      "fields": [
+        {
+          "name": "method",
+          "annotation": "Literal['none', 'book_value', 'multiple_of_ebitda', 'fixed', 'remaining_life_annuity']",
+          "line": 229
+        },
+        {
+          "name": "value",
+          "annotation": "float | None",
+          "line": 231
+        }
+      ]
+    },
+    "FinanceInputs": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 244,
+      "fields": [
+        {
+          "name": "currency",
+          "annotation": "str",
+          "line": 253
+        },
+        {
+          "name": "currency_year",
+          "annotation": "int | None",
+          "line": 264
+        },
+        {
+          "name": "price_basis",
+          "annotation": "Literal['nominal', 'real']",
+          "line": 265
+        },
+        {
+          "name": "financial_close",
+          "annotation": "date",
+          "line": 266
+        },
+        {
+          "name": "cod_by_asset",
+          "annotation": "dict[str, date]",
+          "line": 267
+        },
+        {
+          "name": "construction_months_by_asset",
+          "annotation": "dict[str, int]",
+          "line": 268
+        },
+        {
+          "name": "capex_phasing",
+          "annotation": "list[float]",
+          "line": 269
+        },
+        {
+          "name": "stage_capex_lead_years",
+          "annotation": "int",
+          "line": 272
+        },
+        {
+          "name": "contingency_share",
+          "annotation": "float | None",
+          "line": 275
+        },
+        {
+          "name": "escalation",
+          "annotation": "dict[str, float]",
+          "line": 276
+        },
+        {
+          "name": "degradation_by_asset",
+          "annotation": "dict[str, float | list[float]]",
+          "line": 280
+        },
+        {
+          "name": "analysis_years",
+          "annotation": "int | None",
+          "line": 283
+        },
+        {
+          "name": "acquisition_date",
+          "annotation": "date | None",
+          "line": 284
+        },
+        {
+          "name": "construction_start",
+          "annotation": "date | None",
+          "line": 285
+        },
+        {
+          "name": "annualise",
+          "annotation": "bool",
+          "line": 287
+        },
+        {
+          "name": "tax_losses",
+          "annotation": "Literal['offset_other_income', 'carryforward'] | None",
+          "line": 289
+        },
+        {
+          "name": "financing_fee_tax",
+          "annotation": "Literal['amortised', 'not_deducted'] | None",
+          "line": 290
+        },
+        {
+          "name": "hebesatz_pct",
+          "annotation": "float | None",
+          "line": 293
+        },
+        {
+          "name": "state_rate",
+          "annotation": "float | None",
+          "line": 294
+        },
+        {
+          "name": "pwa_met",
+          "annotation": "bool | None",
+          "line": 295
+        },
+        {
+          "name": "small_business_163j",
+          "annotation": "bool | None",
+          "line": 296
+        },
+        {
+          "name": "reserves_rate",
+          "annotation": "float | None",
+          "line": 297
+        },
+        {
+          "name": "solve_ppa",
+          "annotation": "SolvePpa | None",
+          "line": 298
+        },
+        {
+          "name": "island_outage",
+          "annotation": "IslandOutage | None",
+          "line": 300
+        },
+        {
+          "name": "depreciation_class_by_asset",
+          "annotation": "dict[str, str]",
+          "line": 305
+        },
+        {
+          "name": "replacement_capex",
+          "annotation": "list[tuple[int, str, float]]",
+          "line": 306
+        },
+        {
+          "name": "replacement_rule",
+          "annotation": "Literal['fixed', 'part_lifetimes']",
+          "line": 311
+        },
+        {
+          "name": "terminal_value",
+          "annotation": "TerminalValueRule",
+          "line": 312
+        },
+        {
+          "name": "wacc_nominal",
+          "annotation": "float | None",
+          "line": 313
+        },
+        {
+          "name": "cost_of_equity",
+          "annotation": "float | None",
+          "line": 314
+        },
+        {
+          "name": "inflation",
+          "annotation": "float | None",
+          "line": 317
+        },
+        {
+          "name": "debt",
+          "annotation": "list[DebtTranche]",
+          "line": 318
+        },
+        {
+          "name": "tax_pack_id",
+          "annotation": "str | None",
+          "line": 319
+        },
+        {
+          "name": "incentives",
+          "annotation": "list[Incentive]",
+          "line": 320
+        },
+        {
+          "name": "tax_equity",
+          "annotation": "TaxEquityStructure | None",
+          "line": 321
+        },
+        {
+          "name": "participants",
+          "annotation": "list[Participant]",
+          "line": 322
+        }
+      ]
+    },
+    "Provenance": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 341,
+      "fields": [
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 342
+        },
+        {
+          "name": "mode",
+          "annotation": "DispatchMode",
+          "line": 343
+        },
+        {
+          "name": "pack_hash",
+          "annotation": "str | None",
+          "line": 344
+        },
+        {
+          "name": "seed",
+          "annotation": "int | None",
+          "line": 345
+        },
+        {
+          "name": "source_id",
+          "annotation": "str | None",
+          "line": 347
+        },
+        {
+          "name": "contract_id",
+          "annotation": "str | None",
+          "line": 348
+        },
+        {
+          "name": "period",
+          "annotation": "str | None",
+          "line": 349
+        }
+      ]
+    },
+    "CashflowLine": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 360,
+      "fields": [
+        {
+          "name": "year",
+          "annotation": "int",
+          "line": 361
+        },
+        {
+          "name": "participant",
+          "annotation": "str",
+          "line": 362
+        },
+        {
+          "name": "counterparty",
+          "annotation": "str",
+          "line": 363
+        },
+        {
+          "name": "value_stream",
+          "annotation": "CashflowStream",
+          "line": 364
+        },
+        {
+          "name": "tariff_item",
+          "annotation": "str | None",
+          "line": 365
+        },
+        {
+          "name": "asset",
+          "annotation": "str | None",
+          "line": 366
+        },
+        {
+          "name": "amount",
+          "annotation": "float",
+          "line": 367
+        },
+        {
+          "name": "provenance",
+          "annotation": "Provenance",
+          "line": 368
+        }
+      ]
+    },
+    "IcSectionState": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 374,
+      "fields": [
+        {
+          "name": "status",
+          "annotation": "IcSectionStatus",
+          "line": 375
+        },
+        {
+          "name": "payload",
+          "annotation": "dict[str, Any] | None",
+          "line": 376
+        },
+        {
+          "name": "note",
+          "annotation": "str | None",
+          "line": 377
+        }
+      ]
+    },
+    "IcPipelineStageRecord": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 380,
+      "fields": [
+        {
+          "name": "stage",
+          "annotation": "IcPipelineStage",
+          "line": 381
+        },
+        {
+          "name": "status",
+          "annotation": "Literal['run', 'skipped', 'aborted', 'pending']",
+          "line": 382
+        },
+        {
+          "name": "solves_charged",
+          "annotation": "int",
+          "line": 383
+        },
+        {
+          "name": "note",
+          "annotation": "str | None",
+          "line": 384
+        }
+      ]
+    },
+    "IcStudyPipeline": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 387,
+      "fields": [
+        {
+          "name": "stages",
+          "annotation": "list[IcPipelineStageRecord]",
+          "line": 388
+        },
+        {
+          "name": "budget_solves",
+          "annotation": "int",
+          "line": 390
+        },
+        {
+          "name": "solves_consumed",
+          "annotation": "int",
+          "line": 391
+        },
+        {
+          "name": "aborted",
+          "annotation": "bool",
+          "line": 392
+        }
+      ]
+    },
+    "GatesBlock": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 395,
+      "fields": [
+        {
+          "name": "wacc_vs_discount_rate_consistent",
+          "annotation": "bool | None",
+          "line": 396
+        },
+        {
+          "name": "billing_vs_lp_gap_pct",
+          "annotation": "dict[str, float] | None",
+          "line": 397
+        },
+        {
+          "name": "conservation_ok",
+          "annotation": "bool | None",
+          "line": 398
+        }
+      ]
+    },
+    "InvestmentCaseReport": {
+      "path": "pypsa-gui/backend/models/finance.py",
+      "line": 401,
+      "fields": [
+        {
+          "name": "case_id",
+          "annotation": "str",
+          "line": 405
+        },
+        {
+          "name": "reference_design_id",
+          "annotation": "str | None",
+          "line": 406
+        },
+        {
+          "name": "assumptions_hash",
+          "annotation": "str",
+          "line": 407
+        },
+        {
+          "name": "packs",
+          "annotation": "dict[str, str]",
+          "line": 408
+        },
+        {
+          "name": "cost_at_target_eur",
+          "annotation": "float | None",
+          "line": 410
+        },
+        {
+          "name": "excludes_shed_cost",
+          "annotation": "Literal[True]",
+          "line": 411
+        },
+        {
+          "name": "haircut_pct",
+          "annotation": "float | None",
+          "line": 412
+        },
+        {
+          "name": "project_irr_pre_tax",
+          "annotation": "float | None",
+          "line": 413
+        },
+        {
+          "name": "project_irr_post_tax",
+          "annotation": "float | None",
+          "line": 414
+        },
+        {
+          "name": "npv_at_wacc",
+          "annotation": "float | None",
+          "line": 415
+        },
+        {
+          "name": "lcoe_finance_consistent_eur_per_mwh",
+          "annotation": "float | None",
+          "line": 416
+        },
+        {
+          "name": "ppa_price_for_target_irr_eur_per_mwh",
+          "annotation": "float | None",
+          "line": 417
+        },
+        {
+          "name": "min_dscr",
+          "annotation": "float | None",
+          "line": 418
+        },
+        {
+          "name": "avg_dscr",
+          "annotation": "float | None",
+          "line": 419
+        },
+        {
+          "name": "llcr",
+          "annotation": "float | None",
+          "line": 420
+        },
+        {
+          "name": "plcr",
+          "annotation": "float | None",
+          "line": 421
+        },
+        {
+          "name": "flip_year",
+          "annotation": "int | None",
+          "line": 422
+        },
+        {
+          "name": "gates",
+          "annotation": "GatesBlock",
+          "line": 423
+        },
+        {
+          "name": "sections",
+          "annotation": "dict[str, IcSectionState]",
+          "line": 426
+        },
+        {
+          "name": "completeness",
+          "annotation": "dict[str, IcSectionStatus]",
+          "line": 427
+        },
+        {
+          "name": "pipeline",
+          "annotation": "IcStudyPipeline",
+          "line": 428
+        },
+        {
+          "name": "cashflow_lines",
+          "annotation": "list[CashflowLine]",
+          "line": 429
+        }
+      ]
+    },
+    "SeriesMeta": {
+      "path": "pypsa-gui/backend/services/library/series_store.py",
+      "line": 59,
+      "fields": [
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 65
+        },
+        {
+          "name": "vintage_year",
+          "annotation": "int | None",
+          "line": 66
+        },
+        {
+          "name": "provider",
+          "annotation": "str | None",
+          "line": 67
+        },
+        {
+          "name": "description",
+          "annotation": "str | None",
+          "line": 68
+        },
+        {
+          "name": "settlement",
+          "annotation": "str | None",
+          "line": 71
+        },
+        {
+          "name": "unit",
+          "annotation": "str | None",
+          "line": 72
+        },
+        {
+          "name": "source_unit",
+          "annotation": "str | None",
+          "line": 73
+        },
+        {
+          "name": "label",
+          "annotation": "str | None",
+          "line": 74
+        },
+        {
+          "name": "notes",
+          "annotation": "list[str]",
+          "line": 75
+        }
+      ]
+    },
+    "SeriesPin": {
+      "path": "pypsa-gui/backend/services/library/series_store.py",
+      "line": 281,
+      "fields": [
+        {
+          "name": "project_dir",
+          "annotation": "Path",
+          "line": 286
+        },
+        {
+          "name": "via",
+          "annotation": "Literal['sidecar', 'config', 'unreadable']",
+          "line": 287
+        }
+      ]
+    },
+    "SeriesDeleted": {
+      "path": "pypsa-gui/backend/services/library/series_store.py",
+      "line": 291,
+      "fields": [
+        {
+          "name": "deleted_versions",
+          "annotation": "int",
+          "line": 296
+        },
+        {
+          "name": "kept",
+          "annotation": "Literal['series_pinned', 'series_pins_unreadable'] | None",
+          "line": 297
+        },
+        {
+          "name": "pinned_by",
+          "annotation": "tuple[SeriesPin, ...]",
+          "line": 298
+        }
+      ]
+    },
+    "ItemMeta": {
+      "path": "pypsa-gui/backend/services/library/items.py",
+      "line": 60,
+      "fields": [
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 62
+        },
+        {
+          "name": "provider",
+          "annotation": "str | None",
+          "line": 63
+        },
+        {
+          "name": "description",
+          "annotation": "str | None",
+          "line": 64
+        },
+        {
+          "name": "notes",
+          "annotation": "list[str]",
+          "line": 67
+        }
+      ]
+    },
+    "PackRange": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 187,
+      "fields": [
+        {
+          "name": "low",
+          "annotation": "float",
+          "line": 189
+        },
+        {
+          "name": "high",
+          "annotation": "float",
+          "line": 190
+        },
+        {
+          "name": "source",
+          "annotation": "Literal['assumed', 'source']",
+          "line": 191
+        }
+      ]
+    },
+    "Derived": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 194,
+      "fields": [
+        {
+          "name": "inputs",
+          "annotation": "list[str]",
+          "line": 196
+        },
+        {
+          "name": "formula_id",
+          "annotation": "str",
+          "line": 197
+        }
+      ]
+    },
+    "PackValue": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 200,
+      "fields": [
+        {
+          "name": "key",
+          "annotation": "str",
+          "line": 205
+        },
+        {
+          "name": "label",
+          "annotation": "str",
+          "line": 206
+        },
+        {
+          "name": "technology",
+          "annotation": "str | None",
+          "line": 207
+        },
+        {
+          "name": "part",
+          "annotation": "str | None",
+          "line": 208
+        },
+        {
+          "name": "basis",
+          "annotation": "Basis | None",
+          "line": 209
+        },
+        {
+          "name": "source_technology",
+          "annotation": "str | None",
+          "line": 210
+        },
+        {
+          "name": "parameter",
+          "annotation": "str",
+          "line": 211
+        },
+        {
+          "name": "value",
+          "annotation": "float | None",
+          "line": 212
+        },
+        {
+          "name": "unit",
+          "annotation": "str",
+          "line": 213
+        },
+        {
+          "name": "original_value",
+          "annotation": "float | None",
+          "line": 214
+        },
+        {
+          "name": "original_unit",
+          "annotation": "str",
+          "line": 215
+        },
+        {
+          "name": "conversion_factor",
+          "annotation": "float",
+          "line": 216
+        },
+        {
+          "name": "range",
+          "annotation": "PackRange | None",
+          "line": 217
+        },
+        {
+          "name": "currency",
+          "annotation": "str | None",
+          "line": 218
+        },
+        {
+          "name": "currency_year",
+          "annotation": "int | None",
+          "line": 219
+        },
+        {
+          "name": "price_basis",
+          "annotation": "Literal['real', 'nominal'] | None",
+          "line": 220
+        },
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 221
+        },
+        {
+          "name": "source_year",
+          "annotation": "int",
+          "line": 222
+        },
+        {
+          "name": "source_url",
+          "annotation": "str | None",
+          "line": 223
+        },
+        {
+          "name": "projection_year",
+          "annotation": "int | None",
+          "line": 224
+        },
+        {
+          "name": "domain",
+          "annotation": "str | None",
+          "line": 225
+        },
+        {
+          "name": "illustrative",
+          "annotation": "bool",
+          "line": 226
+        },
+        {
+          "name": "derived",
+          "annotation": "Derived | None",
+          "line": 227
+        },
+        {
+          "name": "note",
+          "annotation": "str | None",
+          "line": 228
+        },
+        {
+          "name": "status",
+          "annotation": "Literal['ok', 'not_available']",
+          "line": 229
+        }
+      ]
+    },
+    "CostPart": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 232,
+      "fields": [
+        {
+          "name": "technology",
+          "annotation": "str",
+          "line": 239
+        },
+        {
+          "name": "part",
+          "annotation": "Literal['power', 'energy', 'investment']",
+          "line": 240
+        },
+        {
+          "name": "basis",
+          "annotation": "Basis",
+          "line": 241
+        },
+        {
+          "name": "source_technology",
+          "annotation": "str",
+          "line": 242
+        },
+        {
+          "name": "overnight",
+          "annotation": "PackValue",
+          "line": 243
+        },
+        {
+          "name": "lifetime",
+          "annotation": "PackValue | None",
+          "line": 244
+        },
+        {
+          "name": "fom_share",
+          "annotation": "PackValue | None",
+          "line": 245
+        },
+        {
+          "name": "efficiency",
+          "annotation": "PackValue | None",
+          "line": 246
+        }
+      ]
+    },
+    "TariffSourceRow": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 249,
+      "fields": [
+        {
+          "name": "component",
+          "annotation": "str",
+          "line": 251
+        },
+        {
+          "name": "label",
+          "annotation": "str",
+          "line": 252
+        },
+        {
+          "name": "original_price",
+          "annotation": "float",
+          "line": 253
+        },
+        {
+          "name": "original_unit",
+          "annotation": "str",
+          "line": 254
+        },
+        {
+          "name": "basis",
+          "annotation": "str | None",
+          "line": 255
+        },
+        {
+          "name": "periods",
+          "annotation": "list[str]",
+          "line": 256
+        }
+      ]
+    },
+    "TariffExport": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 259,
+      "fields": [
+        {
+          "name": "price_per_mwh",
+          "annotation": "float | None",
+          "line": 264
+        },
+        {
+          "name": "series",
+          "annotation": "str | None",
+          "line": 265
+        },
+        {
+          "name": "cap_mw",
+          "annotation": "float | None",
+          "line": 266
+        },
+        {
+          "name": "label",
+          "annotation": "str | None",
+          "line": 267
+        }
+      ]
+    },
+    "HonestyNote": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 270,
+      "fields": [
+        {
+          "name": "code",
+          "annotation": "str",
+          "line": 272
+        },
+        {
+          "name": "help",
+          "annotation": "str",
+          "line": 273
+        }
+      ]
+    },
+    "PackTariffMeta": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 283,
+      "fields": [
+        {
+          "name": "currency",
+          "annotation": "str",
+          "line": 285
+        },
+        {
+          "name": "currency_year",
+          "annotation": "int",
+          "line": 286
+        },
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 287
+        },
+        {
+          "name": "source_year",
+          "annotation": "int",
+          "line": 288
+        },
+        {
+          "name": "source_url",
+          "annotation": "str | None",
+          "line": 289
+        },
+        {
+          "name": "illustrative",
+          "annotation": "bool",
+          "line": 290
+        },
+        {
+          "name": "billing_period",
+          "annotation": "Literal['month', 'year']",
+          "line": 291
+        },
+        {
+          "name": "default",
+          "annotation": "bool",
+          "line": 292
+        },
+        {
+          "name": "jurisdiction_rationale",
+          "annotation": "str",
+          "line": 293
+        },
+        {
+          "name": "export",
+          "annotation": "TariffExport",
+          "line": 294
+        },
+        {
+          "name": "honesty",
+          "annotation": "list[HonestyNote]",
+          "line": 295
+        },
+        {
+          "name": "items",
+          "annotation": "dict[str, list[TariffSourceRow]]",
+          "line": 296
+        }
+      ]
+    },
+    "PackTariff": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 299,
+      "fields": [
+        {
+          "name": "tariff",
+          "annotation": "Tariff",
+          "line": 301
+        },
+        {
+          "name": "meta",
+          "annotation": "PackTariffMeta",
+          "line": 302
+        }
+      ]
+    },
+    "LoadProfile": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 305,
+      "fields": [
+        {
+          "name": "id",
+          "annotation": "str",
+          "line": 310
+        },
+        {
+          "name": "label",
+          "annotation": "str",
+          "line": 311
+        },
+        {
+          "name": "file",
+          "annotation": "str",
+          "line": 312
+        },
+        {
+          "name": "sha256",
+          "annotation": "str",
+          "line": 313
+        },
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 314
+        },
+        {
+          "name": "source_year",
+          "annotation": "int",
+          "line": 315
+        },
+        {
+          "name": "synthetic",
+          "annotation": "bool",
+          "line": 316
+        },
+        {
+          "name": "illustrative",
+          "annotation": "bool",
+          "line": 317
+        },
+        {
+          "name": "unit",
+          "annotation": "str",
+          "line": 318
+        },
+        {
+          "name": "note",
+          "annotation": "str | None",
+          "line": 319
+        },
+        {
+          "name": "factors",
+          "annotation": "tuple[float, ...]",
+          "line": 320
+        }
+      ]
+    },
+    "FinanceBasis": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 323,
+      "fields": [
+        {
+          "name": "terms",
+          "annotation": "Literal['real', 'nominal']",
+          "line": 325
+        },
+        {
+          "name": "tax",
+          "annotation": "Literal['pre', 'post']",
+          "line": 326
+        },
+        {
+          "name": "subsidy",
+          "annotation": "Literal['excl', 'incl']",
+          "line": 327
+        }
+      ]
+    },
+    "HorizonRule": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 330,
+      "fields": [
+        {
+          "name": "horizon_years",
+          "annotation": "str",
+          "line": 332
+        },
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 333
+        }
+      ]
+    },
+    "ReplacementRule": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 336,
+      "fields": [
+        {
+          "name": "key",
+          "annotation": "str",
+          "line": 338
+        },
+        {
+          "name": "part",
+          "annotation": "str",
+          "line": 339
+        },
+        {
+          "name": "every_years",
+          "annotation": "str",
+          "line": 340
+        },
+        {
+          "name": "within",
+          "annotation": "Literal['horizon_exclusive']",
+          "line": 341
+        },
+        {
+          "name": "cost",
+          "annotation": "str",
+          "line": 342
+        },
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 343
+        }
+      ]
+    },
+    "FinanceDefaults": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 346,
+      "fields": [
+        {
+          "name": "seed_library",
+          "annotation": "str",
+          "line": 348
+        },
+        {
+          "name": "currency",
+          "annotation": "str",
+          "line": 349
+        },
+        {
+          "name": "currency_year",
+          "annotation": "int",
+          "line": 350
+        },
+        {
+          "name": "currency_year_source",
+          "annotation": "str",
+          "line": 351
+        },
+        {
+          "name": "basis",
+          "annotation": "FinanceBasis",
+          "line": 352
+        },
+        {
+          "name": "basis_source",
+          "annotation": "str",
+          "line": 353
+        },
+        {
+          "name": "perspective",
+          "annotation": "str",
+          "line": 354
+        },
+        {
+          "name": "perspective_source",
+          "annotation": "str",
+          "line": 355
+        },
+        {
+          "name": "discount_rate",
+          "annotation": "PackValue",
+          "line": 356
+        },
+        {
+          "name": "horizon_rule",
+          "annotation": "HorizonRule",
+          "line": 357
+        },
+        {
+          "name": "replacement_rules",
+          "annotation": "list[ReplacementRule]",
+          "line": 358
+        },
+        {
+          "name": "degradation",
+          "annotation": "str",
+          "line": 359
+        },
+        {
+          "name": "sizing_limit",
+          "annotation": "PackValue",
+          "line": 360
+        }
+      ]
+    },
+    "AssumptionRow": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 363,
+      "fields": [
+        {
+          "name": "section",
+          "annotation": "Literal['technology', 'finance', 'tariff', 'load_profile']",
+          "line": 368
+        },
+        {
+          "name": "key",
+          "annotation": "str",
+          "line": 369
+        },
+        {
+          "name": "label",
+          "annotation": "str",
+          "line": 370
+        },
+        {
+          "name": "value",
+          "annotation": "float | None",
+          "line": 371
+        },
+        {
+          "name": "unit",
+          "annotation": "str",
+          "line": 372
+        },
+        {
+          "name": "original_value",
+          "annotation": "float | None",
+          "line": 373
+        },
+        {
+          "name": "original_unit",
+          "annotation": "str | None",
+          "line": 374
+        },
+        {
+          "name": "range_low",
+          "annotation": "float | None",
+          "line": 375
+        },
+        {
+          "name": "range_high",
+          "annotation": "float | None",
+          "line": 376
+        },
+        {
+          "name": "range_source",
+          "annotation": "str | None",
+          "line": 377
+        },
+        {
+          "name": "currency",
+          "annotation": "str | None",
+          "line": 378
+        },
+        {
+          "name": "currency_year",
+          "annotation": "int | None",
+          "line": 379
+        },
+        {
+          "name": "source",
+          "annotation": "str",
+          "line": 380
+        },
+        {
+          "name": "source_year",
+          "annotation": "int",
+          "line": 381
+        },
+        {
+          "name": "source_url",
+          "annotation": "str | None",
+          "line": 382
+        },
+        {
+          "name": "illustrative",
+          "annotation": "bool",
+          "line": 383
+        },
+        {
+          "name": "note",
+          "annotation": "str | None",
+          "line": 384
+        },
+        {
+          "name": "pack_id",
+          "annotation": "str",
+          "line": 385
+        },
+        {
+          "name": "pack_version",
+          "annotation": "str",
+          "line": 386
+        },
+        {
+          "name": "pack_hash",
+          "annotation": "str",
+          "line": 387
+        }
+      ]
+    },
+    "DefaultsPack": {
+      "path": "pypsa-gui/backend/services/library/defaults_pack/loader.py",
+      "line": 390,
+      "fields": [
+        {
+          "name": "pack_id",
+          "annotation": "str",
+          "line": 395
+        },
+        {
+          "name": "version",
+          "annotation": "str",
+          "line": 396
+        },
+        {
+          "name": "title",
+          "annotation": "str",
+          "line": 397
+        },
+        {
+          "name": "seeded_from",
+          "annotation": "dict[str, Any]",
+          "line": 398
+        },
+        {
+          "name": "hash",
+          "annotation": "str",
+          "line": 399
+        },
+        {
+          "name": "cost_values",
+          "annotation": "list[PackValue]",
+          "line": 400
+        },
+        {
+          "name": "finance",
+          "annotation": "FinanceDefaults",
+          "line": 401
+        },
+        {
+          "name": "tariffs",
+          "annotation": "dict[str, PackTariff]",
+          "line": 402
+        },
+        {
+          "name": "load_profiles",
+          "annotation": "dict[str, LoadProfile]",
+          "line": 403
+        },
+        {
+          "name": "_tariff_json",
+          "annotation": "tuple[tuple[str, str], ...]",
+          "line": 406
+        }
+      ]
+    }
+  }
+}
