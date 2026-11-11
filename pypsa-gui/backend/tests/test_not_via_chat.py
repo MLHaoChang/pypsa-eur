@@ -91,6 +91,8 @@ def test_the_issue_rows_are_declared():
     ('Apply my saved value to this generator', 'memory_parameter_suggestions'),
     ('Use my saved efficiency', 'memory_parameter_suggestions'),
     ('Reuse a parameter I saved', 'memory_parameter_suggestions'),
+    ('Apply my saved lifetime', 'memory_parameter_suggestions'),
+    ('Save this value for later', 'memory_parameter_suggestions'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -108,6 +110,8 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Switch to my OpenAI profile', 'Switch to my Anthropic profile', 'Pause my goal', 'Pause the plan',
     'Extract the grid code from this PDF', 'Geocode the site address',
     'List my saved snapshots', 'Reuse the last run settings', 'Any suggestion for the battery size', 'Save the project', 'Saved project list', 'Show saved scenarios',
+    'Reuse my saved scenario parameters', 'Show saved scenario costs', 'What did the last saved run cost',
+    'Compare capacity with the saved snapshot', 'Reuse the price from the saved tariff',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)

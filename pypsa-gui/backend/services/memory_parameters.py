@@ -19,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -65,35 +66,49 @@ def _has_series(n, component_class: str, name: str, field: str) -> bool:
     return (component.list_name, field, name) in PyPSAService.get_user_ts()
 
 
-def _bus_unit(n, component_class: str, name: str, spec) -> str | None:
-    """The asset's own bus unit when the field counts in it: a rate, amount or price
-    per MW or MWh is in its bus's unit (t/h, MW_th, …), never an assumed MW (GK B N1).
-    None for an MW bus or a field that does not count in MW."""
-    if "MW" not in spec.unit_storage:
-        return None
+_PLAIN_BUS_UNITS = ("", "MW", "MWh", "None")
+
+
+def _bus_is_plain(n, bus) -> bool:
+    """A bus that counts in MW (power) and MWh (energy): its own `unit` column says
+    nothing else and its carrier is no catalogued product (`ore`, NH3, …), read as
+    `process_products.bus_unit` reads it. A missing bus is not plain (GK B P5, P6)."""
+    from services.process_products import bus_unit
+
+    if not isinstance(bus, str) or bus not in n.buses.index:
+        return False
+    own = n.buses.at[bus, "unit"] if "unit" in n.buses.columns else None
+    if isinstance(own, str) and own.strip() not in _PLAIN_BUS_UNITS:
+        return False
+    return bus_unit(n, bus) in ("", "MWh")
+
+
+def _units_plain(n, component_class: str, name: str) -> bool:
+    """Every bus the asset touches counts in MW and MWh, so each of its fields means
+    what its stored unit says: a rate in MW, a price per MWh, an efficiency in MWh
+    per MWh. A value on a product bus (t, t/h, …) is not saved or applied: nothing
+    is converted, and the item holds MW-based units only (GK B N1, P1–P6)."""
+    if component_class == "Bus":
+        return _bus_is_plain(n, name)
     frame = _frame(n, component_class)
-    column = (
-        "bus" if "bus" in frame.columns else "bus0" if "bus0" in frame.columns else None
-    )
-    bus = frame.at[name, column] if column else None
-    buses = n.buses
-    own = (
-        buses.at[bus, "unit"]
-        if "unit" in buses.columns and isinstance(bus, str) and bus in buses.index
-        else None
-    )
-    if not isinstance(own, str) or own.strip() in ("", "MW", "None"):
-        return None
-    return own.strip()
+    for column in frame.columns:
+        if not re.fullmatch(r"bus\d*", column):
+            continue
+        bus = frame.at[name, column]
+        if column in ("bus2", "bus3", "bus4") and bus in ("", None):
+            continue  # an unused extra port of a Link
+        if not _bus_is_plain(n, bus):
+            return False
+    return True
 
 
-def real_unit(unit: str, bus_unit: str | None) -> str:
-    """The unit a value is in on its asset: the stored unit with MW read as the bus's
-    own rate unit and MWh as its amount (t/h → t), as the edit card shows it."""
-    if not bus_unit:
-        return unit
-    amount = bus_unit[:-2] if bus_unit.endswith("/h") else f"{bus_unit}·h"
-    return unit.replace("MWh", "\0").replace("MW", bus_unit).replace("\0", amount)
+def _refuse_units(spec, name: str, kind: str) -> M.MemoryError:
+    return _refuse(
+        f"{spec.label} of {name} counts in its bus's own unit (t, t/h, …). A saved value "
+        "holds MW-based units only, so it is not saved or applied here. Nothing is "
+        "converted.",
+        kind,
+    )
 
 
 def _refuse_series(spec, name: str) -> M.MemoryError:
@@ -220,6 +235,8 @@ def save(
     value, _source, carrier = _current(n, component_class, name, field)
     if _has_series(n, component_class, name, field):
         raise _refuse_series(spec, name)
+    if not _units_plain(n, component_class, name):
+        raise _refuse_units(spec, name, "memory_unit_unsupported")
     if value is None:
         raise _refuse(f"{spec.label} has no value to save.", "memory_value_missing")
     if carrier and not M.carrier_ok(str(carrier)):
@@ -236,9 +253,6 @@ def save(
     }
     if carrier:
         body["carrier"] = str(carrier)
-    own = _bus_unit(n, component_class, name, spec)
-    if own:
-        body["bus_unit"] = own
     if is_money(spec):
         currency, year = money_stamp(n, component_class, name, field)
         if currency is None or year is None:
@@ -296,6 +310,8 @@ def suggestions(
         )
     n = _network()
     _v, _s, carrier = _current(n, component_class, name, "carrier")
+    if not _units_plain(n, component_class, name):
+        return {}  # no saved value means what it says on a product bus (GK B N1)
     rows = db.scalars(
         select(MemoryItem).where(
             MemoryItem.kind == "parameter",
@@ -323,8 +339,6 @@ def suggestions(
             continue  # the field left the schema: never offered (M6)
         if spec.unit_storage != body["unit"]:
             continue
-        if body.get("bus_unit") != _bus_unit(n, component_class, name, spec):
-            continue  # the asset counts in another unit (GK B N1)
         current = _current(n, component_class, name, spec.key)[0]
         evidence = M.evidence_for(db, user, json.loads(v.evidence_json or "[]"))
         source = next((e for e in evidence if e.get("kind") == "project"), None)
@@ -333,7 +347,7 @@ def suggestions(
             "version": item.current_version,
             "scope": item.owner_scope,
             "value": body["value"],
-            "unit": real_unit(body["unit"], body.get("bus_unit")),
+            "unit": body["unit"],
             "currency": body.get("currency"),
             "currency_year": body.get("currency_year"),
             "carrier": body.get("carrier"),
@@ -425,14 +439,8 @@ def plan(
     current, source, carrier = _current(n, component_class, name, spec.key)
     if _has_series(n, component_class, name, spec.key):
         raise _refuse_series(spec, name)
-    own = _bus_unit(n, component_class, name, spec)
-    if body.get("bus_unit") != own:
-        raise _refuse(
-            f"{spec.label}: saved in {real_unit(body['unit'], body.get('bus_unit'))}, "
-            f"this asset counts it in {real_unit(spec.unit_storage, own)}. Nothing is "
-            "converted.",
-            "memory_unit_mismatch",
-        )
+    if not _units_plain(n, component_class, name):
+        raise _refuse_units(spec, name, "memory_unit_mismatch")
     if body.get("carrier") and body["carrier"] != carrier:
         raise _refuse(
             f"{spec.label}: saved for {body['carrier']}, this asset is {carrier or 'without a carrier'}.",
@@ -468,7 +476,7 @@ def plan(
         "field": spec.key,
         "label": spec.label,
         "value": body["value"],
-        "unit": real_unit(body["unit"], body.get("bus_unit")),
+        "unit": body["unit"],
         "currency": body.get("currency"),
         "currency_year": body.get("currency_year"),
         "carrier": body.get("carrier"),

@@ -389,7 +389,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'panel': None,
         # 'saved' and 'reuse' alone are in project, scenario and snapshot asks:
         # `matches` also needs `_asks_for_a_saved_value` (GK B N4).
-        'keywords': frozenset({'reusable', 'chip', 'chips', 'saved', 'reuse'}),
+        'keywords': frozenset({'reusable', 'chip', 'chips', 'saved', 'save', 'reuse'}),
         'routes': frozenset({
             ('GET', '/api/memory/suggestions'),
             ('POST', '/api/memory/parameters'),
@@ -403,17 +403,23 @@ NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the 
         "if panel is set you may open it with ui_open_panel. Do not look for another tool or an API for them.")
 
 
-# A saved field value: a chip, or "saved"/"reuse" together with a value or a field.
+# A saved field value: a chip, or "save"/"saved"/"reuse" together with a value or a
+# field, unless the saved thing is a scenario, run, snapshot, tariff or project.
 _SAVED_VALUE_NAMES = frozenset({'reusable', 'chip', 'chips'})
-_SAVED_WORDS = frozenset({'saved', 'reuse'})
+_SAVED_WORDS = frozenset({'saved', 'save', 'reuse'})
 _VALUE_WORDS = frozenset({
     'value', 'values', 'parameter', 'parameters', 'efficiency', 'capex', 'opex',
-    'cost', 'costs', 'price', 'prices', 'capacity',
+    'cost', 'costs', 'price', 'prices', 'capacity', 'lifetime',
+})
+_SAVED_ELSEWHERE = frozenset({
+    'scenario', 'scenarios', 'run', 'runs', 'snapshot', 'snapshots', 'tariff',
+    'tariffs', 'project', 'projects',
 })
 
 
 def _asks_for_a_saved_value(words: set[str]) -> bool:
-    return bool(words & _SAVED_VALUE_NAMES or (words & _SAVED_WORDS and words & _VALUE_WORDS))
+    return bool(words & _SAVED_VALUE_NAMES or (
+        words & _SAVED_WORDS and words & _VALUE_WORDS and not words & _SAVED_ELSEWHERE))
 
 
 def matches(words: set[str], limit: int = 2) -> list[dict]:
