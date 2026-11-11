@@ -193,6 +193,32 @@ def test_after_a_delete_no_report_comes_back(client, project):
     assert not pdir.exists()
 
 
+def test_a_writer_arriving_while_the_tree_is_removed_finds_no_project(
+    client, project, monkeypatch
+):
+    """The directory is moved aside before anything in it is removed, so a
+    writer that arrives mid-removal cannot rebuild `reports/<id>/` under a
+    half-removed tree."""
+    from routers import projects
+
+    name, pdir = project
+    seen = []
+    real = projects._force_rmtree
+
+    def removing(target):
+        try:
+            with store.report_lock(pdir, RID_A, timeout=1):
+                seen.append("wrote")
+        except store.ReportStoreError as exc:
+            seen.append(type(exc).__name__)
+        real(target)
+
+    monkeypatch.setattr(projects, "_force_rmtree", removing)
+    assert client.delete(f"/api/projects/{name}").status_code == 200
+    assert seen == ["ReportProjectGone"]
+    assert not pdir.exists()
+
+
 def test_delete_takes_the_network_lock_before_any_report_lock(client, project, monkeypatch):
     """GK B C3: while another thread holds the network lock, the delete waits
     for it holding no report lock, so a report writer still gets its lock."""
