@@ -66,4 +66,26 @@ describe('WeatherBar', () => {
     await userEvent.type(year, '2099{Enter}')
     expect((await screen.findByTestId('weather-error')).textContent).toContain('completed year')
   })
+
+  it('says which dates a sampled window takes from the weather year', async () => {
+    prof.weather.mockResolvedValue(answer({ year: 2025, window: { first: '2025-07-01T00:00:00', last: '2025-07-07T23:00:00', hours: 168, runs: 1 } }))
+    renderIt()
+    const line = (await screen.findByTestId('weather-window')).textContent!
+    expect(line).toContain('1–7 Jul')
+    expect(line).toContain('168 h')
+    expect(line).toContain('2025')
+  })
+
+  it('counts the periods when two weeks are sampled', async () => {
+    prof.weather.mockResolvedValue(answer({ window: { first: '2023-01-02T00:00:00', last: '2023-07-09T23:00:00', hours: 336, runs: 2 } }))
+    renderIt()
+    expect((await screen.findByTestId('weather-window')).textContent).toContain('2 sampled periods')
+  })
+
+  it('adds no window line for one full calendar year', async () => {
+    prof.weather.mockResolvedValue(answer({ window: null }))
+    renderIt()
+    await screen.findByTestId('weather-year')
+    expect(screen.queryByTestId('weather-window')).toBeNull()
+  })
 })

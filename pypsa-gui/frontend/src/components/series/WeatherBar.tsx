@@ -4,7 +4,7 @@
 // is shown read-only: it is set in the site connection.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { errorText, profilesApi, type ProfileSource } from '../../api/profiles'
+import { errorText, profilesApi, type ProfileSource, type WeatherChoice } from '../../api/profiles'
 import { nk } from '../../utils/queryKeys'
 import { Seg } from '../PageKit'
 import { openSiteConnection } from '../../pages/economics/SiteConnectionLink'
@@ -16,6 +16,19 @@ const YEAR_WORDS = {
 } as const
 
 export const weatherKey = (project: string | null) => nk(project, 'profile_weather')
+
+const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+
+/** One line when the snapshots are a sampled window rather than one calendar year. */
+function windowLine(w: WeatherChoice): string | null {
+  const win = w.window
+  if (!win || 'unsupported' in win) return null
+  if (win.runs > 1) return `Your model has ${win.runs} sampled periods (${win.hours} h): a generated profile takes these dates from ${w.year}.`
+  const [a, b] = [DAY.format(new Date(win.first)), DAY.format(new Date(win.last))]
+  const [da, db] = [a.split(' '), b.split(' ')]
+  const span = a === b ? a : da[1] === db[1] ? `${da[0]}–${b}` : `${a} – ${b}`
+  return `Your model covers ${span} (${win.hours} h): a generated profile takes these dates from ${w.year}.`
+}
 
 export function WeatherBar({ project }: { project: string }) {
   const qc = useQueryClient()
@@ -58,6 +71,7 @@ export function WeatherBar({ project }: { project: string }) {
           Edit in Connection &amp; grid ›
         </button>
       </p>
+      {windowLine(w) && <p className="text-muted" data-testid="weather-window">{windowLine(w)}</p>}
       {save.isError && <p className="text-warn" data-testid="weather-error">{errorText(save.error)}</p>}
     </div>
   )
