@@ -186,12 +186,13 @@ def _ic_returns(env):
 def _ic_baseline_keeps(env):
     """The owned existing assets the case's baseline keeps (study harness
     20): the names, else no evidence with the state and the reasons (an
-    asset of the template's declared set the baseline drops)."""
+    asset of the template's declared set the baseline drops). Study harness
+    12c (B12): the typed state stays in the value, the reason is words."""
     from services import ic_counterfactual as ic
     fact = ic.read_baseline_keeps(env.ctx, lambda fn: _on(env.ctx, fn), _template(env))
     if fact["state"] == ic.ESTABLISHED:
         return fact["kept"]
-    return NoEvidence(fact["state"], f"{fact['state']}: {', '.join(fact['reasons'])}")
+    return NoEvidence(fact["state"], ic.reason_words(fact))
 
 
 def _loads_without_series(env):
