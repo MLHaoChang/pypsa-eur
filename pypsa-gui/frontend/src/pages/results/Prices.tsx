@@ -12,7 +12,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import type { Bus } from '../../api/types'
 import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
-  ChartFrame, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, Seg, CHART_GRID, CHART_AXIS, timeAxis, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
+  ChartFrame, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, Seg, CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine, chartFigure, carrierColour } from './shared'
 import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
@@ -387,13 +387,14 @@ export default function Prices() {
                 height={170}
               />
             ) : (
+              <>
               <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
                 <LineChart
-                  data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
+                  data={thinRows(priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows)}
                   margin={{ top: 18, right: 40, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid {...CHART_GRID} />
-                  <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis((priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows).length)} />
+                  <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis(thinRows(priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows).length)} />
                   <YAxis {...CHART_AXIS} label={yAxisLabel('€/MWh')} />
                   <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} €/MWh`} />
                   {priceView === 'per_bus' && priceChart.cols.length <= 8 && (
@@ -415,6 +416,8 @@ export default function Prices() {
                   )}
                 </LineChart>
               </ResponsiveContainer>
+              <ThinNote rows={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows} />
+              </>
             )}
           </div>
         </ChartFrame>

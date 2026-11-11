@@ -11,7 +11,7 @@ import { resultsApi, type AcPfConvergenceRow } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import type { Bus } from '../../api/types'
 import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, Seg,
-  CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
+  CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
   useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, carrierColour, ChartFrame } from './shared'
 import { NOT_RECORDED_KPI, NotRecordedNote } from './NotRecorded'
@@ -1091,10 +1091,11 @@ export default function LoadFlow() {
                     height={170}
                   />
                 ) : (
+                  <>
                   <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-                    <LineChart data={voltageChart.rows} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
+                    <LineChart data={thinRows(voltageChart.rows)} margin={{ top: 18, right: 4, left: 0, bottom: 0 }}>
                       <CartesianGrid {...CHART_GRID} />
-                      <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
+                      <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis(thinRows(voltageChart.rows).length)} />
                       <YAxis {...CHART_AXIS} domain={['auto', 'auto']}
                         label={yAxisLabel('p.u.')} />
                       <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(4)} p.u.`} />
@@ -1106,6 +1107,8 @@ export default function LoadFlow() {
                       ))}
                     </LineChart>
                   </ResponsiveContainer>
+                  <ThinNote rows={voltageChart.rows} />
+                  </>
                 )}
               </div>
             </ChartFrame>
@@ -1253,11 +1256,11 @@ export default function LoadFlow() {
           )}
           <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
             <LineChart
-              data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
+              data={thinRows(priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows)}
               margin={{ top: 18, right: 4, left: 0, bottom: 0 }}
             >
               <CartesianGrid {...CHART_GRID} />
-              <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
+              <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis(thinRows(priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows).length)} />
               <YAxis {...CHART_AXIS} label={yAxisLabel('€/MWh')} />
               <RTooltip {...CHART_TOOLTIP} labelFormatter={shortStamp} formatter={(v: number) => `${v.toFixed(2)} €/MWh`} />
               {priceView === 'per_bus' && priceChart.cols.length <= 8 && (
@@ -1275,6 +1278,7 @@ export default function LoadFlow() {
               )}
             </LineChart>
           </ResponsiveContainer>
+          <ThinNote rows={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows} />
         </section>
       )}
 
