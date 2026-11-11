@@ -133,6 +133,9 @@ def test_off_grid_excludes_scr_and_every_fault_level_row_with_the_reason(tmp_pat
         "the island's fault level comes from its own units"
     )
     assert not sk & {r["id"] for r in out["rows"]}
+    # The voltage-stability rows also read the PoC's fault level and leave by their own rule.
+    assert not set(VS_IDS) & {r["id"] for r in out["rows"]}
+    assert all(excluded[i]["reason"] == G.VS_OFF_GRID for i in VS_IDS) and VS_IDS
     # An excluded row is never counted, as a pass or as anything else.
     assert sum(out["summary"][v] for v in G.VERDICTS) == len(out["rows"])
     for i in sk:

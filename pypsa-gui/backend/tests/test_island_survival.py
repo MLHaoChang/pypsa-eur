@@ -9,6 +9,7 @@ import pathlib
 import sys
 
 import pandas as pd
+import pypsa
 import pytest
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
@@ -44,6 +45,18 @@ def _own_solve(n, tid):
         "optimal",
     )
     return n
+
+
+@pytest.fixture(autouse=True)
+def _link_ports_stay_in_their_test():
+    """PyPSA 1.1 keeps one Link attribute table for the whole process. A Link with a third port
+    adds ``bus2``, ``efficiency2`` and ``p2`` to it, and a network built before that then fails
+    its consistency check on the next solve (KeyError 'efficiency2'). Each test leaves the table
+    as it found it, so the module's shared solves do not depend on the test order."""
+    defaults = pypsa.Network().components.links.defaults
+    before = set(defaults.index)
+    yield
+    defaults.drop(index=[a for a in defaults.index if a not in before], inplace=True)
 
 
 class _Solved(dict):
