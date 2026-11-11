@@ -1118,8 +1118,12 @@ from zoneinfo import ZoneInfo  # noqa: E402
 BERLIN = ZoneInfo("Europe/Berlin")
 
 
-def _berlin(day, hour, minute=0):
-    return datetime(2026, 11, day, hour, minute, tzinfo=BERLIN).timestamp()
+def _berlin(days_ahead, hour, minute=0):
+    """A Berlin wall-clock time `days_ahead` days after today (the opt-in is now)."""
+    day = datetime.now(BERLIN).date() + timedelta(days=days_ahead)
+    return datetime(
+        day.year, day.month, day.day, hour, minute, tzinfo=BERLIN
+    ).timestamp()
 
 
 def _fire(factory, now):
@@ -1154,29 +1158,54 @@ def test_automatic_reviews_are_off_by_default_and_never_fire_off(factory, world)
     assert (view["nightly"], view["after_sessions"]) == (False, False)
     for _ in range(dream.SESSIONS_TRIGGER + 2):
         _chat(world.user_id, "hello")
-    assert _fire(factory, _berlin(12, 3, 30)) == []
+    assert _fire(factory, _berlin(1, 3, 30)) == []
     # A row turned on and off again is off too.
     _opt_in(factory, world, nightly=True, after_sessions=True)
     _opt_in(factory, world, nightly=False, after_sessions=False)
-    assert _fire(factory, _berlin(13, 3, 30)) == []
+    assert _fire(factory, _berlin(2, 3, 30)) == []
     assert _live(factory, world) == []
 
 
-def test_nightly_fires_once_inside_the_0300_berlin_hour(factory, world):
+def test_nightly_fires_once_a_night_from_0300_berlin(factory, world):
     assert _opt_in(factory, world, nightly=True)["nightly"] is True
-    assert _fire(factory, _berlin(12, 2, 59)) == []
-    assert _fire(factory, _berlin(12, 4, 0)) == []
-    [job] = _fire(factory, _berlin(12, 3, 5))
+    assert (
+        _fire(factory, _berlin(0, 23, 59)) == []
+    )  # the opt-in waits for the next 03:00
+    assert _fire(factory, _berlin(1, 2, 59)) == []
+    [job] = _fire(factory, _berlin(1, 3, 5))
     assert _job(factory, uuid.UUID(job)).trigger == "nightly"
     _settle(factory, job)
-    assert _fire(factory, _berlin(12, 3, 50)) == []  # once a night
-    [nxt] = _fire(factory, _berlin(13, 3, 1))
+    assert _fire(factory, _berlin(1, 3, 50)) == []  # once a night
+    assert _fire(factory, _berlin(2, 2, 59)) == []
+    [nxt] = _fire(factory, _berlin(2, 3, 1))
     assert nxt != job
+
+
+def test_a_missed_0300_fires_later_that_day_only_once(factory, world):
+    # The worker was busy or the app was down at 03:00: the next scan catches up.
+    _opt_in(factory, world, nightly=True)
+    [job] = _fire(factory, _berlin(1, 14, 0))
+    _settle(factory, job)
+    assert _fire(factory, _berlin(1, 23, 0)) == []
+    assert _fire(factory, _berlin(2, 2, 0)) == []
 
 
 def test_nightly_follows_berlin_summer_time(factory, world):
     _opt_in(factory, world, nightly=True)
-    summer = datetime(2026, 7, 1, 3, 10, tzinfo=BERLIN).timestamp()  # 01:10 UTC
+    with factory() as db:
+        db.get(MemoryDreamSettings, world.user_id).nightly_since = datetime(
+            2026, 6, 1, tzinfo=UTC
+        )
+        db.commit()
+    before = datetime(2026, 7, 1, 2, 59, tzinfo=BERLIN).timestamp()  # 00:59 UTC
+    with factory() as db:  # 02:59 on 1 July is still the 30 June night: due once
+        assert len(dream.fire_triggers(db, before)) == 1
+    for j in _live(factory, world):
+        _settle(factory, str(j.id))
+    assert (
+        _fire(factory, datetime(2026, 7, 1, 2, 59, 30, tzinfo=BERLIN).timestamp()) == []
+    )
+    summer = datetime(2026, 7, 1, 3, 0, tzinfo=BERLIN).timestamp()  # 01:00 UTC
     assert len(_fire(factory, summer)) == 1
 
 
@@ -1205,7 +1234,7 @@ def test_a_trigger_never_starts_a_second_live_job(factory, world):
         db.commit()
     for _ in range(dream.SESSIONS_TRIGGER):
         _chat(world.user_id, "hello")
-    assert _fire(factory, _berlin(12, 3, 30)) == []
+    assert _fire(factory, _berlin(1, 3, 30)) == []
     assert [j.id for j in _live(factory, world)] == [manual]
 
 
@@ -1214,36 +1243,100 @@ def test_a_user_without_an_org_or_inactive_is_skipped(factory, world):
     with factory() as db:
         db.get(User, world.user_id).status = "disabled"
         db.commit()
-    assert _fire(factory, _berlin(12, 3, 30)) == []
+    assert _fire(factory, _berlin(1, 3, 30)) == []
     with factory() as db:
         db.get(User, world.user_id).status = "active"
-        for m in db.scalars(select(OrgMembership).where(OrgMembership.user_id == world.user_id)):
+        for m in db.scalars(
+            select(OrgMembership).where(OrgMembership.user_id == world.user_id)
+        ):
             db.delete(m)
         db.commit()
-    assert _fire(factory, _berlin(12, 3, 30)) == []
+    assert _fire(factory, _berlin(1, 3, 30)) == []
 
 
 def test_the_worker_scan_fires_due_triggers(factory, world):
     _opt_in(factory, world, nightly=True)
     clock = Clock()
-    clock.t = _berlin(12, 3, 30)
+    clock.t = _berlin(1, 3, 30)
     provider = FakeProvider([_organized()] * 3)
     ran = _worker(factory, provider, clock=clock).run_once()
     assert ran is not None and _job(factory, uuid.UUID(ran)).trigger == "nightly"
 
 
-def test_dream_settings_routes_are_the_callers_own(client, other_org_client, anon_client):
+def test_dream_settings_routes_are_the_callers_own(
+    client, other_org_client, anon_client
+):
     off = client.get("/api/memory/dream/settings").json()["settings"]
     assert (off["nightly"], off["after_sessions"]) == (False, False)
     assert off["sessions_needed"] == dream.SESSIONS_TRIGGER
     r = client.put("/api/memory/dream/settings", json={"nightly": True})
     assert r.status_code == 200, r.text
-    assert (r.json()["settings"]["nightly"], r.json()["settings"]["after_sessions"]) == (True, False)
-    assert other_org_client.get("/api/memory/dream/settings").json()["settings"]["nightly"] is False
-    assert client.put("/api/memory/dream/settings", json={"nightly": "yes"}).status_code == 422
-    assert client.put("/api/memory/dream/settings", json={"user_id": "x"}).status_code == 422
+    assert (
+        r.json()["settings"]["nightly"],
+        r.json()["settings"]["after_sessions"],
+    ) == (True, False)
+    assert (
+        other_org_client.get("/api/memory/dream/settings").json()["settings"]["nightly"]
+        is False
+    )
+    assert (
+        client.put("/api/memory/dream/settings", json={"nightly": "yes"}).status_code
+        == 422
+    )
+    assert (
+        client.put("/api/memory/dream/settings", json={"user_id": "x"}).status_code
+        == 422
+    )
     assert anon_client.get("/api/memory/dream/settings").status_code == 401
-    assert anon_client.put("/api/memory/dream/settings", json={"nightly": True}).status_code in (401, 403)
+    assert anon_client.put(
+        "/api/memory/dream/settings", json={"nightly": True}
+    ).status_code in (401, 403)
+
+
+def test_one_failing_user_does_not_stop_the_others(factory, world, monkeypatch):
+    _opt_in(factory, world, nightly=True)
+    with factory() as db:
+        ghost = User(
+            id=uuid.uuid4(),
+            email="g@x.test",
+            status="active",
+            is_super_admin=False,
+            created_at=datetime.now(UTC),
+        )
+        db.add(ghost)
+        db.flush()
+        db.add(
+            MemoryDreamSettings(
+                user_id=ghost.id,
+                nightly=True,
+                after_sessions=False,
+                nightly_since=None,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+    real = dream._nightly_due
+
+    def boom(db, row, now):
+        if row.user_id == ghost.id:
+            raise OSError("disk")
+        return real(db, row, now)
+
+    monkeypatch.setattr(dream, "_nightly_due", boom)
+    assert len(_fire(factory, _berlin(1, 3, 30))) == 1
+
+
+def test_the_opt_in_names_the_model_reviews_go_to(factory, world, monkeypatch):
+    from services import llm_config
+
+    monkeypatch.setattr(
+        llm_config, "resolve_role", lambda role: SimpleNamespace(label="Local Ollama")
+    )
+    with factory() as db:
+        assert (
+            dream.settings_view(db, db.get(User, world.user_id))["analyzer"]
+            == "Local Ollama"
+        )
 
 
 def test_the_analyzer_runs_on_the_profile_marked_for_it(monkeypatch):
@@ -1252,7 +1345,9 @@ def test_the_analyzer_runs_on_the_profile_marked_for_it(monkeypatch):
 
     marked = SimpleNamespace(model="analyzer-model")
     asked = []
-    monkeypatch.setattr(llm_config, "resolve_role", lambda role: asked.append(role) or marked)
+    monkeypatch.setattr(
+        llm_config, "resolve_role", lambda role: asked.append(role) or marked
+    )
     monkeypatch.setattr(wiring, "_provider_for_profile", lambda p: ("prov", None))
     assert dream._default_provider(None, None) == ("prov", "analyzer-model", None)
     assert asked == ["memory_analyzer"]

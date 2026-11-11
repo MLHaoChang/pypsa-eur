@@ -115,6 +115,9 @@ export interface DreamSettings {
   after_sessions: boolean
   nightly_at: string
   sessions_needed: number
+  /** The model a review sends past chats to (the `memory_analyzer` profile,
+   * else the active one); null when it cannot be read. */
+  analyzer: string | null
 }
 
 export const dreamApi = {
@@ -157,7 +160,7 @@ export function dreamStatusWords(job: DreamJob | null | undefined): string {
       ? `Last review${by}: ${plural(proposed, 'proposal')} below.`
       : `Last review${by}: nothing new to propose.`
     case 'capped': return `Last review${by} reached its token budget: ${plural(proposed, 'proposal')} kept. The next review continues from there.`
-    case 'failed': return `Last review${by} failed because ${DREAM_FAILURE[job.error_kind ?? ''] ?? (job.error_kind ?? 'of an unknown error')}.`
+    case 'failed': return `Last review${by} failed because ${DREAM_FAILURE[job.error_kind ?? ''] ?? 'of an unexpected error'}.`
     case 'cancelled': return `Last review${by} was cancelled.`
   }
 }

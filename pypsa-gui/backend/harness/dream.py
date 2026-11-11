@@ -635,19 +635,30 @@ def _checked_item(raw: Any) -> dict | None:
 
 
 NIGHTLY_TZ = ZoneInfo("Europe/Berlin")
-NIGHTLY_HOUR = 3  # 03:00 local; fires on the first scan in [03:00, 04:00)
+NIGHTLY_HOUR = 3  # 03:00 local; due from then until the next 03:00, once
 SESSIONS_TRIGGER = 10  # new chats since the last job (or since the opt-in)
 
 
 def settings_view(db, user: User) -> dict:
-    """The caller's opt-in; no row is both off."""
+    """The caller's opt-in; no row is both off. `analyzer` names the model a
+    review sends past chats to, so the opt-in can say where they go."""
     row = db.get(MemoryDreamSettings, user.id)
     return {
         "nightly": bool(row and row.nightly),
         "after_sessions": bool(row and row.after_sessions),
         "nightly_at": f"{NIGHTLY_HOUR:02d}:00 Europe/Berlin",
         "sessions_needed": SESSIONS_TRIGGER,
+        "analyzer": _analyzer_label(),
     }
+
+
+def _analyzer_label() -> str | None:
+    from services import llm_config
+
+    try:
+        return llm_config.resolve_role("memory_analyzer").label
+    except Exception:  # noqa: BLE001 — the label is copy, never a reason to fail
+        return None
 
 
 def set_settings(
@@ -662,6 +673,8 @@ def set_settings(
         )
         db.add(row)
     if nightly is not None:
+        if nightly and not row.nightly:
+            row.nightly_since = now
         row.nightly = bool(nightly)
     if after_sessions is not None:
         if after_sessions and not row.after_sessions:
@@ -672,19 +685,26 @@ def set_settings(
     return settings_view(db, user)
 
 
-def _nightly_due(db, user_id, now: float) -> bool:
-    """Inside [03:00, 04:00) Berlin time and no nightly job since today's 03:00."""
+def _nightly_due(db, row: MemoryDreamSettings, now: float) -> bool:
+    """The night's review is due from 03:00 Berlin time until the next 03:00,
+    once: no nightly job since the latest 03:00, which must also follow the
+    opt-in (turning it on in the afternoon waits for the next night). A night
+    whose 03:00 passed while the worker ran a job or the app was down fires on
+    the next scan that day."""
     local = datetime.fromtimestamp(now, NIGHTLY_TZ)
-    if local.hour != NIGHTLY_HOUR:
+    mark = local.replace(hour=NIGHTLY_HOUR, minute=0, second=0, microsecond=0)
+    if local < mark:
+        mark = mark - timedelta(days=1)  # wall-clock arithmetic: 03:00 local
+    mark_utc = mark.astimezone(UTC)
+    since = _aware(row.nightly_since)
+    if since is not None and since > mark_utc:
         return False
-    since = local.replace(hour=NIGHTLY_HOUR, minute=0, second=0, microsecond=0)
-    since_utc = since.astimezone(UTC)
     last = db.scalar(
         select(func.max(MemoryDreamJob.created_at)).where(
-            MemoryDreamJob.user_id == user_id, MemoryDreamJob.trigger == "nightly"
+            MemoryDreamJob.user_id == row.user_id, MemoryDreamJob.trigger == "nightly"
         )
     )
-    return last is None or _aware(last) < since_utc
+    return last is None or _aware(last) < mark_utc
 
 
 def new_sessions(db, user: User, row: MemoryDreamSettings) -> int:
@@ -698,9 +718,14 @@ def new_sessions(db, user: User, row: MemoryDreamSettings) -> int:
     directory = eventlog._owner_dir(str(user.id))
     if not directory.is_dir():
         return 0
+    floor = mark.timestamp() if mark is not None else None
     count = 0
     for path in directory.glob("*.jsonl"):
         try:
+            # A log last written before the mark was created before it too:
+            # skipped unread, so a scan costs the new chats, not the history.
+            if floor is not None and path.stat().st_mtime < floor:
+                continue
             header = eventlog.read_header(path) or {}
             if str(header.get("owner_user_id")) != str(user.id):
                 continue
@@ -724,23 +749,34 @@ def fire_triggers(db, now: float) -> list[str]:
         )
     ).all()
     for row in rows:
-        user = db.get(User, row.user_id)
-        if user is None or user.status != "active":
-            continue
-        trigger = None
-        if row.nightly and _nightly_due(db, user.id, now):
-            trigger = "nightly"
-        elif row.after_sessions and new_sessions(db, user, row) >= SESSIONS_TRIGGER:
-            trigger = "sessions"
-        if trigger is None:
-            continue
         try:
-            job = start(db, user, trigger, now=datetime.fromtimestamp(now, UTC))
-        except DreamError as exc:
-            log.info("dream trigger %s for %s skipped: %s", trigger, user.id, exc.kind)
+            job_id = _fire_one(db, row, now)
+        except Exception:  # noqa: BLE001 — one user's failure skips only that user
+            db.rollback()
+            log.exception("dream trigger for %s failed", row.user_id)
             continue
-        started.append(str(job.id))
+        if job_id is not None:
+            started.append(job_id)
     return started
+
+
+def _fire_one(db, row: MemoryDreamSettings, now: float) -> str | None:
+    user = db.get(User, row.user_id)
+    if user is None or user.status != "active":
+        return None
+    trigger = None
+    if row.nightly and _nightly_due(db, row, now):
+        trigger = "nightly"
+    elif row.after_sessions and new_sessions(db, user, row) >= SESSIONS_TRIGGER:
+        trigger = "sessions"
+    if trigger is None:
+        return None
+    try:
+        job = start(db, user, trigger, now=datetime.fromtimestamp(now, UTC))
+    except DreamError as exc:
+        log.info("dream trigger %s for %s skipped: %s", trigger, user.id, exc.kind)
+        return None
+    return str(job.id)
 
 
 # --------------------------------------------------------------------------

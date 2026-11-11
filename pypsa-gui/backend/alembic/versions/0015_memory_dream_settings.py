@@ -27,6 +27,7 @@ def upgrade() -> None:
         sa.Column(
             "after_sessions", sa.Boolean(), nullable=False, server_default=sa.false()
         ),
+        sa.Column("nightly_since", sa.DateTime(timezone=True), nullable=True),
         sa.Column("after_sessions_since", sa.DateTime(timezone=True), nullable=True),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("user_id"),

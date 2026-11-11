@@ -715,10 +715,17 @@ def save_profiles(
 
     # Profile roles (assistant-memory 04b) are kept across every save; a role
     # whose profile is gone is dropped, so it falls back to the active one.
+    # A role on an entry this build cannot load but keeps on disk (C-14) is
+    # kept too; `resolve_role` falls back while that entry does not load.
     roles = load_roles() if roles is None else dict(roles)
+    kept_ids = {
+        e["id"] for e in _entries_a_load_would_skip(seen_ids)
+        if isinstance(e, dict) and isinstance(e.get("id"), str)
+    }
     roles = {
         role: pid for role, pid in roles.items()
-        if role in PROFILE_ROLES and (pid in seen_ids or pid in _BUILTIN_IDS)
+        if role in PROFILE_ROLES
+        and (pid in seen_ids or pid in _BUILTIN_IDS or pid in kept_ids)
     }
 
     # C-14 — re-emit the entries this build cannot load, so a write does not

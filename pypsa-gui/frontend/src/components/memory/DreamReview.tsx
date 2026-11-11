@@ -11,6 +11,8 @@ import {
 // The automatic triggers sit under it, both off until the user turns them on.
 
 const POLL_MS = 3000
+// While the tab is open, a nightly or after-chats review can start on its own.
+const IDLE_POLL_MS = 30_000
 
 export default function DreamReview() {
   const qc = useQueryClient()
@@ -19,7 +21,7 @@ export default function DreamReview() {
   const jobQ = useQuery({
     queryKey: ['memory', 'dream'],
     queryFn: dreamApi.latest,
-    refetchInterval: q => (isDreamLive(q.state.data) ? POLL_MS : false),
+    refetchInterval: q => (isDreamLive(q.state.data) ? POLL_MS : IDLE_POLL_MS),
   })
   const job = jobQ.data
   const live = isDreamLive(job)
@@ -81,14 +83,17 @@ function AutomaticReviews() {
       <label className="flex items-center gap-1">
         <input type="checkbox" checked={!!s?.nightly} disabled={busy}
           onChange={e => save.mutate({ nightly: e.target.checked })} />
-        Every night at {at}
+        Every night at {at} (Berlin time)
       </label>
       <label className="flex items-center gap-1">
         <input type="checkbox" checked={!!s?.after_sessions} disabled={busy}
           onChange={e => save.mutate({ after_sessions: e.target.checked })} />
         After {s?.sessions_needed ?? 10} new chats
       </label>
-      <span>Off unless you turn them on: a review sends your past chats to the configured model.</span>
+      <span>
+        Off unless you turn them on: a review sends your past chats to
+        {s?.analyzer ? ` ${s.analyzer}` : ' the configured model'}.
+      </span>
       {(settingsQ.error || save.error) && (
         <span role="alert" className="text-danger">
           Settings could not be {save.error ? 'saved' : 'loaded'}: {errorWords(save.error ?? settingsQ.error)}

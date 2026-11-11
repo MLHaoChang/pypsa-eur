@@ -30,7 +30,7 @@ vi.mock('../../api/memory', async (orig) => {
       latest: () => Promise.resolve(null),
       start: () => Promise.reject(new Error('not in this test')),
       settings: () => Promise.resolve({
-        nightly: false, after_sessions: false, nightly_at: '03:00 Europe/Berlin', sessions_needed: 10,
+        nightly: false, after_sessions: false, nightly_at: '03:00 Europe/Berlin', sessions_needed: 10, analyzer: null,
       }),
       setSettings: () => Promise.reject(new Error('not in this test')),
     },

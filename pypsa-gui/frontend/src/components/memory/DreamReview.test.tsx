@@ -33,7 +33,7 @@ function job(over: Partial<DreamJob> = {}): DreamJob {
   }
 }
 
-const OFF = { nightly: false, after_sessions: false, nightly_at: '03:00 Europe/Berlin', sessions_needed: 10 }
+const OFF = { nightly: false, after_sessions: false, nightly_at: '03:00 Europe/Berlin', sessions_needed: 10, analyzer: 'Claude Sonnet' }
 
 let qc: QueryClient
 function renderIt() {
@@ -85,10 +85,11 @@ describe('DreamReview', () => {
   it('shows both automatic reviews off by default and saves a change', async () => {
     setSettings.mockResolvedValue({ ...OFF, nightly: true })
     renderIt()
-    const nightly = await screen.findByRole('checkbox', { name: 'Every night at 03:00' })
+    const nightly = await screen.findByRole('checkbox', { name: 'Every night at 03:00 (Berlin time)' })
     const chats = screen.getByRole('checkbox', { name: 'After 10 new chats' })
     await waitFor(() => expect((nightly as HTMLInputElement).disabled).toBe(false))
     expect((nightly as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByText(/sends your past chats to/).textContent).toContain('Claude Sonnet')
     expect((chats as HTMLInputElement).checked).toBe(false)
     fireEvent.click(nightly)
     await waitFor(() => expect((nightly as HTMLInputElement).checked).toBe(true))
@@ -105,5 +106,7 @@ describe('dreamStatusWords', () => {
     expect(dreamStatusWords(job({ status: 'failed', error_kind: 'dream_provider_error' })))
       .toBe('Last review failed because the model could not be reached.')
     expect(dreamStatusWords(job({ status: 'queued', trigger: 'nightly' }))).toBe('Review queued (nightly)…')
+    expect(dreamStatusWords(job({ status: 'failed', error_kind: 'dream_some_new_kind' })))
+      .toBe('Last review failed because of an unexpected error.')
   })
 })

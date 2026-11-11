@@ -434,6 +434,10 @@ class MemoryDreamSettings(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     nightly: Mapped[bool] = mapped_column(Boolean, default=False)
+    # When `nightly` was last turned on: the first night is the next 03:00.
+    nightly_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     after_sessions: Mapped[bool] = mapped_column(Boolean, default=False)
     # When `after_sessions` was last turned on: with no job yet, only chats
     # after it count, so turning it on never fires on old chats.

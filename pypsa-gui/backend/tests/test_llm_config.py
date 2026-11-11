@@ -1172,3 +1172,17 @@ def test_a_hand_edited_role_naming_nothing_falls_back(appdata):
     }), encoding="utf-8")
     assert llm_config.load_roles() == {"memory_analyzer": "gone"}
     assert llm_config.resolve_role("memory_analyzer").id == "anthropic-opus"
+
+
+def test_a_role_on_a_kept_unloadable_entry_survives_other_saves(appdata):
+    from services import llm_config
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1, "active_profile_id": "anthropic-sonnet",
+        "profiles": [{"id": "broken", "label": "B", "preset": "custom", "wire": "openai",
+                      "base_url": None, "model": "m", "tools": "no", "vision": False,
+                      "auth": "none", "fallback_model": None, "max_output_tokens": None}],
+        "roles": {"memory_analyzer": "broken"},
+    }), encoding="utf-8")
+    llm_config.set_active("anthropic-opus")
+    assert llm_config.load_roles() == {"memory_analyzer": "broken"}
+    assert llm_config.resolve_role("memory_analyzer").id == "anthropic-opus"
