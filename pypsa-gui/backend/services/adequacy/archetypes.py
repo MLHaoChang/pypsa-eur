@@ -9,10 +9,14 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from models.energy_hub import ArchetypePack, ImportOverlaySpec
-from gridspine.drivers.process_chain import truthy as _truthy
+try:
+    from gridspine.drivers.process_chain import truthy as _truthy
+except ImportError:  # a build without gridspine: the one pinned fallback, not a new copy
+    from services.solver.process_uc import _fallback_truthy as _truthy
 
 
 class ArchetypePackError(ValueError):

@@ -37,7 +37,10 @@ from models.energy_hub import (
     DEFAULT_EH_FRONTIER_LADDER,
 )
 from services.adequacy.worksheet import zero_reason
-from gridspine.drivers.process_chain import truthy as _truthy
+try:
+    from gridspine.drivers.process_chain import truthy as _truthy
+except ImportError:  # a build without gridspine: the one pinned fallback, not a new copy
+    from services.solver.process_uc import _fallback_truthy as _truthy
 
 logger = logging.getLogger("pypsa_gui.eh_stages")
 

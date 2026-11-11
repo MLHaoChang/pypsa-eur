@@ -29,7 +29,10 @@ import math
 from typing import Any
 
 from models.energy_hub import GatesBlock, SectionStatus
-from gridspine.drivers.process_chain import truthy as _truthy
+try:
+    from gridspine.drivers.process_chain import truthy as _truthy
+except ImportError:  # a build without gridspine: the one pinned fallback, not a new copy
+    from services.solver.process_uc import _fallback_truthy as _truthy
 
 # gridspine is repo-root (not in gui-requirements pip freeze). Guard like
 # ``gridspine_service`` so the frozen desktop build 503s/fail-closes instead of

@@ -52,3 +52,10 @@ def test_reader_matches_shared_rule(name, value):
 @pytest.mark.parametrize("name", list(READERS))
 def test_no_private_copy(name):
     assert READERS[name] is truthy
+
+
+@pytest.mark.parametrize(("value", "expected"), PINNED, ids=repr)
+def test_no_gridspine_fallback_equals_shared_rule(value, expected):
+    from services.solver.process_uc import _fallback_truthy
+
+    assert _fallback_truthy(value) is truthy(value) is expected
