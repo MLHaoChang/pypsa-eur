@@ -259,4 +259,73 @@ describe('EnvelopeSection reliability goal', () => {
       expect(ledger.find((r: { field: string }) => r.field === 'target_lole_h').label).toBe(RELIABILITY_GOAL_LABEL)
     }
   })
+
+  // Issue 37: the intake rows and the digest a grant sends back.
+  const DIGEST = 'a'.repeat(64)
+  const SETUP = { tool: 'create_project_from_template', template: 'eh_site', name: 'Acme site', params_digest: DIGEST }
+  const row = (i: number, over: Record<string, unknown> = {}) => ({ index: i, param: `p${i}`, label: `Input ${i}`, value: i, unit: 'MW',
+    status: 'confirmed', source: `you wrote 'x${i}'`, from_document: false, mapped: false, ...over })
+  function openIntake(rows: ReturnType<typeof row>[], defaults: unknown[] = []) {
+    const view = { ...STATES.proposal, envelope: { ...ENVELOPE, setup: SETUP },
+      run: { ...STATES.proposal.run, intake: { card: { rows, defaults }, digest: DIGEST, missing: [] } } }
+    vi.mocked(api.getRun).mockResolvedValue(view as never)
+    useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope: { ...ENVELOPE, setup: SETUP } } }] })
+    render(<ChoiceCard />)
+  }
+
+  it('shows the setup row first, in words, with no digest in Guided or Expert', async () => {
+    for (const mode of ['guided', 'expert'] as const) {
+      cleanup(); useUIStore.setState({ uiMode: mode }); openIntake([row(0)])
+      await screen.findByTestId('envelope-intake')
+      const section = screen.getByTestId('envelope-section')
+      expect(section.firstElementChild!.getAttribute('data-testid')).toBe('envelope-setup')
+      expect(screen.getByTestId('envelope-setup').textContent).toBe('Creates project Acme site from the site template')
+      expect(section.textContent).not.toContain(DIGEST.slice(0, 8))
+    }
+  })
+
+  it('lists rows with source, document mark, struck and conflict words, and preset defaults', async () => {
+    openIntake([row(0, { from_document: true, source: 'sheet.pdf, page 2' }), row(1, { status: 'struck' }),
+      row(2, { param: 'c', status: 'conflict', source: "you wrote 'a'" }), row(3, { param: 'c', status: 'conflict', source: 'b.xlsx S!A1' })],
+      [{ param: 'critical_share', value: 0.4, preset_default: true }])
+    await screen.findByTestId('envelope-intake')
+    const rows = screen.getAllByTestId('envelope-intake-row')
+    expect(rows[0].textContent).toContain('Input 0: 0 MW')
+    expect(rows[0].textContent).toContain('read from a document')
+    expect(rows[0].textContent).toContain('sheet.pdf, page 2')
+    expect(rows[1].textContent).toContain('Struck')
+    expect(rows[2].textContent).toContain("Not used: conflicts with b.xlsx S!A1")
+    expect(screen.getByTestId('envelope-intake-default').textContent).toBe('critical share: 0.4 · preset default')
+  })
+
+  it('folds after five rows', async () => {
+    openIntake([0, 1, 2, 3, 4, 5, 6].map(i => row(i)))
+    await screen.findByTestId('envelope-intake')
+    expect(screen.getAllByTestId('envelope-intake-row')).toHaveLength(5)
+    fireEvent.click(screen.getByText('(2 more) Show all'))
+    expect(screen.getAllByTestId('envelope-intake-row')).toHaveLength(7)
+  })
+
+  it('both approvals send the digest from the intake; step by step says it creates the project', async () => {
+    openIntake([row(0)])
+    await screen.findByTestId('envelope-intake')
+    const buttons = await screen.findAllByTestId('envelope-verdict')
+    expect(buttons[1].textContent).toContain('Creates project Acme site now; every other change and run asks you first.')
+    await waitFor(() => expect((buttons[0] as HTMLButtonElement).disabled).toBe(false))
+    fireEvent.click(buttons[0])
+    expect(useChatStore.getState().requestQueue[0].harness!.envelope_decision!.intake_digest).toBe(DIGEST)
+    useChatStore.setState({ choice: REVIEW, requestQueue: [], lastRequest: null })
+    fireEvent.click((await screen.findAllByTestId('envelope-verdict'))[1])
+    expect(useChatStore.getState().requestQueue[0].harness).toEqual(
+      { envelope_decision: { task_id: TASK_ID, verdict: 'stepwise', intake_digest: DIGEST } })
+  })
+
+  it('a card without an intake keeps its rows and sends no digest', async () => {
+    open()
+    await screen.findByTestId('envelope-budgets')
+    expect(screen.queryByTestId('envelope-setup')).toBeNull()
+    expect(screen.queryByTestId('envelope-intake')).toBeNull()
+    fireEvent.click((await screen.findAllByTestId('envelope-verdict'))[0])
+    expect(useChatStore.getState().requestQueue[0].harness!.envelope_decision).not.toHaveProperty('intake_digest')
+  })
 })

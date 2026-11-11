@@ -5,7 +5,7 @@
 // The user may narrow it (untick an edit or run, lower a budget), never
 // widen it: the server checks again (`run_envelope.narrow`).
 import { useEffect, useState } from 'react'
-import { getRun, type Envelope, type EnvelopeGoal, type RunMonitorView } from '../../api/runMonitor'
+import { getRun, type Envelope, type EnvelopeGoal, type IntakeRow, type RunIntake, type RunMonitorView } from '../../api/runMonitor'
 import { UNATTENDED_BLOCK_WORDS, editLimits, editSubject, runWords } from './runWords'
 import { fmtCurrency } from '../../utils/format'
 import { useUIStore } from '../../store/uiStore'
@@ -27,8 +27,8 @@ function GoalRow({ goal }: { goal: EnvelopeGoal }) {
 const GOAL_BLOCK = 'Set the reliability goal first: see above.'
 
 export type EnvelopeVerdict =
-  | { verdict: 'unattended'; envelope: Record<string, unknown>; notify_email: boolean; goal?: EnvelopeGoal }
-  | { verdict: 'stepwise' }
+  | { verdict: 'unattended'; envelope: Record<string, unknown>; notify_email: boolean; goal?: EnvelopeGoal; intake_digest?: string }
+  | { verdict: 'stepwise'; intake_digest?: string }
   | { verdict: 'change' }
 
 // SH-26 (UX): what a plan-state tariff gap says about the Library tariffs held now, as the outcome of approving.
@@ -40,6 +40,49 @@ const HELD_WORDS: Record<string, string> = {
 const heldOutcome = (n: number) => n === 1
   ? 'Approving fills it with this one if it is still the only one.'
   : `${n} are held now, so approving fills none: keep one in the Library to fill it.`
+
+// Issue 37 (UX): the template in words, never its engine id (#1194).
+const TEMPLATE_WORDS: Record<string, string> = { eh_site: 'site' }
+const FOLD_AT = 5
+const unitWords = (u: string | null) => (u === 'EUR' ? '€' : u ?? '')
+const showValue = (v: unknown, unit: string | null) => {
+  const text = Array.isArray(v) ? `${v.length} values` : typeof v === 'object' && v !== null ? 'a series' : String(v)
+  return unit ? `${text} ${unitWords(unit)}` : text
+}
+
+/** Issue 21 "Inputs from the chat": each row with its value, unit and source; read-only here. */
+function IntakeRows({ intake }: { intake: RunIntake }) {
+  const [all, setAll] = useState(false)
+  const rows = intake.card.rows
+  const shown = all ? rows : rows.slice(0, FOLD_AT)
+  const rival = (r: IntakeRow) => rows.find(o => o.index !== r.index && o.param === r.param && o.status === 'conflict')
+  const defaults = intake.card.defaults
+  return <div data-testid="envelope-intake" className="my-1">
+    <div className="text-[10px] uppercase tracking-wide text-accent">Inputs from the chat</div>
+    <ul aria-label="Inputs from the chat" className="space-y-0.5">
+      {shown.map(r => {
+        const struck = r.status === 'struck'
+        const other = r.status === 'conflict' ? rival(r) : undefined
+        return <li key={r.index} data-testid="envelope-intake-row" data-status={r.status}>
+          <span className={struck ? 'text-muted line-through' : undefined}>{r.label}: {showValue(r.value, r.unit)}</span>
+          {struck && <>{' '}<span className="text-muted" data-testid="envelope-intake-struck">· Struck</span></>}
+          {r.status === 'conflict' && <>{' '}<span className="text-muted" data-testid="envelope-intake-conflict">
+            · Not used: {other ? `conflicts with ${other.source}` : 'two sources disagree'}</span></>}
+          {r.from_document && <>{' '}<span className="text-muted" data-testid="envelope-intake-document">· read from a document</span></>}
+          <div className="text-[11px] text-muted" data-testid="envelope-intake-source">{r.source}</div>
+        </li>
+      })}
+    </ul>
+    {rows.length > FOLD_AT && !all && <button type="button" data-testid="envelope-intake-more" onClick={() => setAll(true)}
+      className="text-accent hover:underline">({rows.length - FOLD_AT} more) Show all</button>}
+    {defaults.length > 0 && <>
+      <div className="text-muted">Not given, so the preset default is used:</div>
+      <ul aria-label="Preset defaults" className="space-y-0.5">
+        {defaults.map(d => <li key={d.param} data-testid="envelope-intake-default">
+          {d.param.replace(/_/g, ' ')}: {showValue(d.value, null)} <span className="text-muted">· preset default</span></li>)}
+      </ul></>}
+  </div>
+}
 
 const VERDICT = 'w-full text-left px-2.5 py-1.5 text-[12px] rounded border transition-colors disabled:opacity-50'
 
@@ -80,15 +123,20 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
   const [hours, setHours] = useState(proposed.budget.wall_time_h)
   const [email, setEmail] = useState(false)
 
+  // A plan that creates a project binds its grant to the intake digest the card shows: echo it, never compute it.
+  const setup = envelope.setup ?? proposed.setup
+  const intake = view?.run.intake
+  const digest = setup && intake ? { intake_digest: intake.digest } : {}
   const unattended = view?.monitor.unattended
   const block = !view ? 'Checking whether this server can run it unattended…'
+    : setup && !intake ? 'The inputs this plan creates the project from are not shown yet.'
     : unattended && !unattended.available ? UNATTENDED_BLOCK_WORDS[unattended.reason ?? ''] ?? 'Not available here'
       : envelope.goal?.value === null ? GOAL_BLOCK : null
   const emailOk = view?.monitor.email.available === true
   const costCap = view?.monitor.budgets.cost_eur.limit
 
   const grant = () => onVerdict({
-    verdict: 'unattended', notify_email: emailOk && email,
+    verdict: 'unattended', notify_email: emailOk && email, ...digest,
     envelope: {
       edits: envelope.edits.filter((_, i) => edits[i]), runs: envelope.runs.filter((_, i) => runs[i]),
       budget: { solves, rounds: envelope.budget.rounds, wall_time_h: hours }, research: envelope.research,
@@ -98,6 +146,9 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
   })
 
   return <div data-testid="envelope-section" className="mb-2 rounded border border-border bg-bg-2/40 px-2.5 py-1.5 text-[12px]">
+    {setup && <div data-testid="envelope-setup" className="mb-1 font-medium text-text">
+      Creates project {setup.name} from the {TEMPLATE_WORDS[setup.template] ?? setup.template} template</div>}
+    {intake && <IntakeRows intake={intake} />}
     <div className="text-[10px] uppercase tracking-wide text-accent">Envelope</div>
     <p className="text-muted">What the run may do without asking you, if you approve it to run unattended:</p>
     <ul className="my-1 space-y-0.5" aria-label="Edits it may make">
@@ -165,11 +216,11 @@ export default function EnvelopeSection({ taskId, proposed, disabled, onVerdict 
         <span className="font-medium text-text">Approve and run unattended</span>
       </button>
       {block && <div className="text-[11px] text-muted" data-testid="envelope-unattended-reason">{block}</div>}
-      <button type="button" data-testid="envelope-verdict" data-verdict="stepwise" disabled={disabled}
-        onClick={() => onVerdict({ verdict: 'stepwise' })}
+      <button type="button" data-testid="envelope-verdict" data-verdict="stepwise" disabled={disabled || (setup !== undefined && setup !== null && !intake)}
+        onClick={() => onVerdict({ verdict: 'stepwise', ...digest })}
         className={`${VERDICT} border-border bg-bg-2/60 hover:bg-bg-3/50`}>
         <span className="font-medium text-text">Approve, step by step</span>
-        <div className="text-[11px] text-muted mt-0.5">Every change and run asks you first.</div>
+        <div className="text-[11px] text-muted mt-0.5">{setup ? `Creates project ${setup.name} now; every other change and run asks you first.` : 'Every change and run asks you first.'}</div>
       </button>
       <button type="button" data-testid="envelope-verdict" data-verdict="change" disabled={disabled}
         onClick={() => onVerdict({ verdict: 'change' })}

@@ -41,6 +41,21 @@ export interface Envelope {
   notify: { email: boolean }
   used: number; refused: number
   goal?: EnvelopeGoal
+  /** Issue 21: the project this run creates from the intake, bound to the intake's digest. */
+  setup?: EnvelopeSetup | null
+}
+export interface EnvelopeSetup { tool: string; template: string; name: string; params_digest: string }
+/** Issue 21: one intake row as the plan card shows it (`run_intake.card_view`). */
+export interface IntakeRow {
+  index: number; param: string; label: string; write?: string; value: unknown; unit: string | null
+  status: 'proposed' | 'confirmed' | 'struck' | 'conflict' | string
+  source: string; from_document: boolean; mapped: boolean
+}
+export interface IntakeDefault { param: string; value: unknown; preset_default: true }
+export interface RunIntake {
+  card: { rows: IntakeRow[]; defaults: IntakeDefault[] }
+  /** What a grant sends back as `envelope_decision.intake_digest`; never computed here. */
+  digest: string; missing: unknown[]; request?: string
 }
 /** The run session's live card: the same payload the chat's
  *  `tool_pending_confirmation` frame carries, plus its session. */
@@ -72,6 +87,7 @@ export interface RunMonitorView {
     profile: string; mode: string; status: string; stage: string; reason?: string
     gate_due?: boolean; next_stage?: string | null; stages: RunStage[]
     waiting?: { kind: string; ref: string }
+    intake?: RunIntake
     /** The agent loop's ending (issue 25); `notice` is the email about it, once claimed. */
     loop?: { ended?: string; notice?: { sent: boolean | null; error?: 'send_failed' | 'no_address' | 'no_mailer' | 'uncertain' | string } }
   }
