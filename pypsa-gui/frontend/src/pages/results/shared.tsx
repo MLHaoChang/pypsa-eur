@@ -1053,7 +1053,7 @@ export const CHART_AXIS = {
  *  k-th tick by index and never measures a label, where its default measures
  *  every one of a full year's 8760 (77 % of a Curtailment draw, ui-modern 06).
  *  Spread after CHART_AXIS: `<XAxis dataKey="snapshot" {...CHART_AXIS} {...timeAxis(rows.length)} />`. */
-export const FULL_YEAR_TICKS = 8
+export const FULL_YEAR_TICKS = 6
 export function timeAxis(n: number): { interval?: number } {
   return n > 200 ? { interval: Math.ceil(n / FULL_YEAR_TICKS) - 1 } : {}
 }
