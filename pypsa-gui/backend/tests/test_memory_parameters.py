@@ -1827,3 +1827,14 @@ def test_undo_after_a_first_save_retires_exactly_that_item(client, proj):
     ).json()["items"]
     status = {row["id"]: row["status"] for row in rows}
     assert status == {a["id"]: "retired", other["id"]: "confirmed"}
+
+
+def test_a_user_with_no_org_is_offered_no_save_and_save_refuses(client, proj, monkeypatch):
+    """Save's own org rule, so `saveable` stays exactly where Save succeeds (A1)."""
+    from services import memory_store as M
+
+    assert "p_nom" in _saveable(client, proj)
+    monkeypatch.setattr(M, "org_of", lambda db, user: None)
+    assert _saveable(client, proj) == set()
+    r = _save(client, proj, field="p_nom")
+    assert r.status_code == 403 and r.json()["detail"]["error_kind"] == "memory_no_org"
