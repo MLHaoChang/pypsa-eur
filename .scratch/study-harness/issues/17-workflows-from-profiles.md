@@ -3,7 +3,7 @@
 
 # 17 — Generate the hub-design, run-study and investment-decision workflow files from profiles
 
-Status: ready-for-agent
+Status: in-review
 Type: task
 Blocked by: 07
 Gated: yes (GK B)
@@ -17,8 +17,8 @@ Design: [design.md](../design.md) §2, §12
 
 ## Acceptance criteria
 
-- [ ] Generated files are checked in; a byte-check test compares them with the generator output (GK B), and editing a profile without regenerating fails it.
-- [ ] Existing workflow tests pass; each step's `done_when` names the gate rule ids it mirrors.
+- [x] Generated files are checked in; a byte-check test compares them with the generator output (GK B), and editing a profile without regenerating fails it.
+- [x] Existing workflow tests pass; each step's `done_when` names the gate rule ids it mirrors.
 
 ## Likely files
 

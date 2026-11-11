@@ -2,23 +2,25 @@
 id: investment-decision
 title: Is this investment worth it?
 intent: A question-led decision study (today, a battery at my site) with an assumptions ledger, a verdict and a report.
-when: [guided, expert]
+when:
+- guided
+- expert
 order: 70
 status: active
 opening_request: Help me decide whether an investment is worth it. Ask me which question I have and what you need to know.
 steps:
-  - id: question
-    title: Pick the question
-    done_when: A decision question is chosen and a Decision study exists.
-  - id: parameters
-    title: Key parameters
-    done_when: Every key parameter has a user value or an accepted generic default in the ledger.
-  - id: verdict
-    title: Verdict
-    done_when: The user has heard the verdict, its drivers and whether it is marginal.
-  - id: report
-    title: Report
-    done_when: The report is generated or declined.
+- id: question
+  title: Pick the question
+  done_when: A decision question is chosen and a Decision study exists.
+- id: parameters
+  title: Key parameters
+  done_when: Every key parameter has a user value or an accepted generic default in the ledger.
+- id: verdict
+  title: Verdict
+  done_when: 'The user has heard the verdict, its drivers and whether it is marginal. Gate rules (eh_site explore): ex.cases.settled.'
+- id: report
+  title: Report
+  done_when: 'The report is generated or declined. Gate rules (eh_site report): rp.report.status, rp.report.unsupported_listed.'
 ---
 
 Each study tool takes **project** and **study_id**. **project** is the study's own
@@ -61,3 +63,5 @@ A figure that is not established is said so, never read as zero.
 
 Offer `generate_study_report` (Word by default, the workbook on request);
 say that the report lists every generic default it relies on.
+
+Harness tools for this stage (profile eh_site, report): `generate_report`.
