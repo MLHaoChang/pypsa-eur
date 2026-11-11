@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { CURTAILMENT_RATE } from './headlineWords'
 import { useQuery } from '@tanstack/react-query'
 import Kpi from '../../components/Kpi'
 import ResultState from '../../components/ResultState'
@@ -13,7 +14,7 @@ import type { Generator } from '../../api/types'
 import {
   type TSPayload, type WeightCtx, weightedSum, aggregateTS,
   isRenewableCarrier, shortStamp, useWeightCtx, WindowCapBanner,
-  CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel, chartFigure, ChartFrame, ChartZero, CHART_HEIGHT,
+  CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_TOOLTIP, yAxisLabel, chartFigure, ChartFrame, ChartZero, CHART_HEIGHT,
 } from './shared'
 import HourDayHeatmap from './HourDayHeatmap'
 import { heatScale, hourDayGrid, spansPeriods, PICK_ONE_PERIOD } from './hourDay'
@@ -97,7 +98,7 @@ export default function Curtailment() {
   // 8760 x-axis ticks, and Recharts measures every one of them on each render.
   const overTime = useMemo(() => aggSeries && (
     <ResponsiveContainer width="100%" height={CHART_HEIGHT.lg}>
-      <AreaChart data={aggSeries} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
+      <AreaChart data={thinRows(aggSeries)} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="curtGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="5%" stopColor={ACCENT} stopOpacity={0.4} />
@@ -105,7 +106,7 @@ export default function Curtailment() {
           </linearGradient>
         </defs>
         <CartesianGrid {...CHART_GRID} />
-        <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />
+        <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} {...timeAxis(thinRows(aggSeries).length)} />
         <YAxis {...CHART_AXIS} label={yAxisLabel('Curtailment (MW)')} />
         <Tooltip {...CHART_TOOLTIP}
           labelFormatter={shortStamp}
@@ -177,7 +178,7 @@ export default function Curtailment() {
              {...tileState} />
         <Kpi label="Delivered renewable" value={fmtEnergy(totals.delivered)}
              hint="Σ renewable dispatch over the same range, for context." />
-        <Kpi label="Curtailment rate" value={`${totals.pct.toFixed(2)} %`}
+        <Kpi label={CURTAILMENT_RATE} value={`${totals.pct.toFixed(2)} %`}
              hint="curtailed ÷ (curtailed + delivered)."
              {...tileState} />
       </div>
@@ -225,7 +226,7 @@ export default function Curtailment() {
         {nothingCurtailed ? (
           <ChartZero>No curtailment in this range: all available renewable energy was used.</ChartZero>
         ) : aggSeries && aggSeries.length > 0 ? (
-          overTime
+          <>{overTime}<ThinNote rows={aggSeries} /></>
         ) : (
           <ChartZero>No curtailment time series for the selected range.</ChartZero>
         )}

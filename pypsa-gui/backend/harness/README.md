@@ -1573,6 +1573,63 @@ solve stage uses.
   against the intake param `grid.frequency_hz`), `dc.gridcode.unchanged`,
   `dc.campus.study`.
 
+### The microgrid island check (study harness 12b)
+
+`mg_island_survival` is the registry's third native action, for the
+microgrid profiles (12c). Each registry row names its record kind
+(`dc_grid_code` for the two data-centre actions, `mg_island` for this one;
+`run_actions.MARKERS` gives each kind's frozen marker). A step is frozen,
+filled and dispatched only with a record of its own kind, and an unknown
+kind refuses (GK B (46) M2). The data-centre record is unchanged (M1).
+
+- **Record.** `{kind, version, settings_digest, solves: 1, digest}`, where
+  `settings_digest` is the canonical digest of the validated island sidecar.
+  No sidecar, or one that does not validate, leaves the step `unfrozen`
+  (`mg_no_island`, `mg_island_unreadable`); a record without a digest of
+  64 hex characters, or of another version, stops it (`mg_args`).
+- **Run (GK B (46): M4-M8, C1-C3).** Synchronous, in the
+  runner step, with no card: it writes nothing, and its one solve comes from
+  the granted budget (`mg_island` ledger row, settled once on every exit
+  with the solver calls it made). With no granted envelope it stops before
+  it reads the network (`mg_no_grant`), and reserves nothing. The project is resolved in a database
+  session that closes before the solve. Under the context's mutation lock it reads
+  the edit counter, the sidecar and a copy of the live network together;
+  a sidecar that changed since the freeze stops the step
+  (`mg_island_changed`). `island_survival.survival` then solves its own copy
+  on a `ProjectContext` of its own: plain HiGHS with
+  `time_limit = MG_TIME_LIMIT_S` (60 s, inside the 90 s lease), the island
+  rows of the project's own solve as a check, every size fixed. It does not
+  go through `build_lp_chain`: no island apply, PoC writer, user code or the
+  project's solver options. The result's `skipped` lists those of them the
+  project's saved solver settings (`solver_config.json`, read with the other
+  inputs) have on, each by the test its own solve step makes
+  (`run_actions.mg_skipped`: `island_constraints` on an LOPF, a
+  `commercial` config, user code that is not blank, `solver_options` not
+  empty; `solver_config` when the settings cannot be read), and the
+  `mg.island.survival` gate record names them in words in its `basis`
+  (`run_actions.MG_SKIPPED`); a plain project lists none. A second solver
+  call raises. While it solves it holds the runner's one worker thread, and
+  neither the mutation lock nor the task lock. Both inputs are read again
+  after the solve; a change makes the result `inputs_changed`. The result is
+  written, and a stop recorded, only while this attempt still holds the run
+  (step running under its attempt, lease still this instance's); a run
+  taken over keeps nothing.
+- **Facts.** Each is no evidence with words when it cannot be read (M10).
+  - `mg.island.survival`: `survives` or `fails` (shortfalls in `detail`),
+    current only at the live edit counter and sidecar digest (B4).
+  - `mg.island.critical_served` (MWh): the critical load's unserved energy
+    over the islanding contingencies of the EH study's `dtc_stress` stage,
+    from the run's own current EH record (B6: its revision; the stress reads
+    no island sidecar).
+  - `mg.island.frequency` (h): the island hours the run's own campus run
+    fails the frequency judge in, each (period, hour) once and named, not
+    weighted, with that basis in the gate record (M11, C5); no evidence once
+    the island sidecar is newer than the judgement (B6).
+  - `mg.tie.open`: `open`, `closed` or `no_tie` on the live network (M12).
+  - `mg.critical.tagged`: `tagged`, `none` or `mismatch` (M12).
+  - `mg.fuel.autonomy`: always no evidence: the gensets draw no modelled
+    fuel (GK A Q5).
+
 ### The approval envelope (study harness issue 03)
 
 `services/run_envelope.py` (design §7; SH-ENVELOPE-1). "Approve once, run

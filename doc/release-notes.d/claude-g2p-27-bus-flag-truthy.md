@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The bus-flag readers (`eh_poc`, `eh_critical`) now share the one `process_chain.truthy` rule; `grid_readiness` now also accepts "yes" and trims whitespace, and a float 1.0 now reads true everywhere.

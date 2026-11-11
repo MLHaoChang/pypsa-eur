@@ -565,9 +565,17 @@ def _write_generation_meta(job: ReportJob, *, aborted: bool) -> None:
     with store.report_lock(job.project_dir, job.report_id):
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            logger.warning("reports: meta.json unreadable after save (%s)", path)
-            return
+        except (OSError, ValueError) as exc:
+            # Never `done` without the receipt (07f-b): the job fails, naming the version.
+            raise store.ReportStoreError(
+                f"meta.json of report {job.report_id} unreadable after save") from exc
+        # The receipt lands: it leaves the unrecorded mark (07f-b).
+        mark = store.without_unrecorded(raw.get("settings_unrecorded"), ("generation",),
+                                        raw.get("latest_version"))
+        if mark is None:
+            raw.pop("settings_unrecorded", None)
+        else:
+            raw["settings_unrecorded"] = mark
         with job.lock:
             raw["generation"] = {
                 "repairs": job.record["repairs"],
@@ -643,8 +651,15 @@ def run_report_job(job: ReportJob) -> ReportDocument:
     the stored version for a regenerate, V5) is still in the document; a
     lost one fails the job with `report_disclosure_missing` and saves
     nothing.
+
+    A report lock held past its bound fails the job with `report_busy`
+    (07f-b). When that, or anything else, refuses a write after the version
+    was saved (its figures, settings or generation receipt), the record is
+    still `failed`, never `done`, and carries `version: n`: version n exists
+    and can be opened, and the error says what of it was not written.
     """
     required = disclosure_texts(job.document) if job.strict else []
+    version: int | None = None
     try:
         doc, aborted = _generate_all(job)
         lost = missing_disclosures(required, disclosure_texts(doc)) if job.strict else []
@@ -659,14 +674,18 @@ def run_report_job(job: ReportJob) -> ReportDocument:
             "language": job.language,
             "created_at": datetime.now(tz=UTC).isoformat(),
         })
+        # The receipt and this job's settings are written for the version
+        # below; until then the meta marks them unrecorded and holds none,
+        # never the last version's (07f-b, GK B E1/E4).
+        pending = ("generation", *sorted(job.meta_updates))
         if job.new_report:
-            store.create_report(job.project_dir, doc)
+            store.create_report(job.project_dir, doc, pending=pending)
+            version = 1
             for figure_id, png in job.figure_pngs.items():
                 if figure_id in doc.figures:
                     store.write_figure(job.project_dir, job.report_id, figure_id, png)
-            version = 1
         else:
-            version = store.save_version(job.project_dir, doc)
+            version = store.save_version(job.project_dir, doc, pending=pending)
         if job.meta_updates:
             store.update_meta(job.project_dir, job.report_id, **job.meta_updates)
         saved = store.load_report(job.project_dir, job.report_id, version)
@@ -677,8 +696,20 @@ def run_report_job(job: ReportJob) -> ReportDocument:
              error=None, finished_at=time.time())
         return saved
     except Exception as exc:
-        kind = {"error_kind": exc.kind} if isinstance(exc, ReportDisclosureMissing) else {}
-        _set(job, status="failed", error=str(exc), finished_at=time.time(), **kind)
+        fields: dict[str, Any] = {}
+        if isinstance(exc, ReportDisclosureMissing):
+            fields["error_kind"] = exc.kind
+        elif isinstance(exc, store.ReportBusy):
+            fields["error_kind"] = "report_busy"
+        error = str(exc)
+        if version is not None:
+            fields["version"] = version
+            unwritten = [*(["figures"] if job.new_report else []), "generation receipt",
+                         *([f"settings ({', '.join(sorted(job.meta_updates))})"]
+                           if job.meta_updates else [])]
+            error = (f"version {version} was saved, but not all of its "
+                     f"{', '.join(unwritten)} were written: {exc}")
+        _set(job, status="failed", error=error, finished_at=time.time(), **fields)
         raise
     finally:
         if isinstance(job.provider, RunSends):

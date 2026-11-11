@@ -57,6 +57,13 @@ export const FACT_WORDS: Record<string, string> = {
   // Study harness 10b: the staged data-centre run.
   'dc.campus.contingency': 'The campus checks pass in the intact case and in each transformer outage the study solves',
   'ic.returns': 'The investment case reports its NPV and IRR',
+  // Study harness 12b: the microgrid's island facts.
+  'mg.island.survival': 'The island check finds the plan rides through losing the grid tie',
+  'mg.island.critical_served': 'The critical load is served in each islanding contingency the study solves',
+  'mg.island.frequency': 'The island keeps its frequency in every island hour the campus run judges',
+  'mg.tie.open': 'The grid tie is open when the site runs as an island',
+  'mg.critical.tagged': 'The critical load is marked in the model',
+  'mg.fuel.autonomy': 'The genset fuel lasts as long as the island must run alone',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,

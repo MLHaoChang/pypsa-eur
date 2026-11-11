@@ -28,6 +28,7 @@ vi.mock('../../api/memory', async (orig) => {
     },
   }
 })
+vi.mock('../../hooks/useAssetSchema', () => ({ useAssetSchema: () => ({ data: undefined }) }))
 vi.mock('../../api/auth', () => ({ authApi: { orgMembers: () => orgMembers() } }))
 vi.mock('../../auth/AuthProvider', () => ({ useAuth: () => ({ user: { id: 'u1' } }) }))
 
@@ -65,6 +66,18 @@ beforeEach(() => {
 afterEach(() => { cleanup(); useMemoryStore.getState().closeMemory() })
 
 describe('Memory dialog', () => {
+  it('a saved parameter reads by field and class, with no "<Class> setting" key chip (UX P5)', async () => {
+    listing({ confirmed: [item({ kind: 'parameter', summary: 'Generator.p_nom = 250 MW',
+      concept_keys: ['carrier:gas', 'param:Generator.p_nom'],
+      body: { component_class: 'Generator', field: 'p_nom', value: 250, unit: 'MW', carrier: 'gas' } })] })
+    renderDialog()
+    const row = await screen.findByTestId('memory-row')
+    expect(row.textContent).toContain('p nom (Generator): 250 MW · carrier gas')
+    expect(row.textContent).not.toContain('Generator setting')
+    expect(row.textContent).not.toContain('Generator.p_nom')
+    expect(row.textContent).toContain('gas')
+  })
+
   it('says how items get there when there are none', async () => {
     listing({})
     renderDialog()

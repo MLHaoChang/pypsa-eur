@@ -1,0 +1,18 @@
+import { createRequire } from 'module'
+const { chromium } = createRequire('/home/user/pypsa-eur/.scratch/ui-modern/shots-02/tools/x.mjs')('playwright')
+const [state, tag, out] = process.argv.slice(2)
+const b = await chromium.launch()
+const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, storageState: state })
+const p = await ctx.newPage(); p.setDefaultTimeout(60000)
+await p.goto('http://127.0.0.1:5173/'); await p.waitForTimeout(2500)
+await p.locator('article').filter({ hasText: 'eh_ipp_hybrid' }).first().click(); await p.waitForTimeout(4500)
+await p.getByRole('button', { name: 'Expert', exact: true }).first().click(); await p.waitForTimeout(1200)
+await p.getByRole('button', { name: 'Results', exact: true }).first().click(); await p.waitForTimeout(3500)
+await p.getByRole('button', { name: 'Capacity expansion' }).first().click(); await p.waitForTimeout(2500)
+const shot = async n => { await p.waitForTimeout(3000); await p.locator('[data-testid=thin-note]').first().scrollIntoViewIfNeeded().catch(()=>{}); await p.evaluate(() => { const n = document.querySelector('[data-testid=thin-note]'); if (n) n.scrollIntoView({block:'center'}) }); await p.waitForTimeout(800); await p.screenshot({ path: `${out}/${tag}-${n}.png` }) }
+await p.getByRole('button', { name: 'Operation' }).first().click(); await p.waitForTimeout(2000)
+await p.getByRole('button', { name: 'Dispatch' }).first().click(); await p.waitForTimeout(2000)
+await p.getByRole('button', { name: 'Full timeframe' }).first().click(); await shot('dispatch')
+await p.getByRole('button', { name: 'Curtailment' }).first().click(); await shot('curtailment')
+await p.getByRole('button', { name: 'Costs & prices' }).first().click(); await shot('costs')
+await b.close()

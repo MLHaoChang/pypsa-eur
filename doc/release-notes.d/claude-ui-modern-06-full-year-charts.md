@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Full-year charts no longer block the Results tab. Time-series charts draw at the plot's resolution with explicit x-axis ticks, Dispatch > Full timeframe opens in about a second instead of 13 s, and the 5 s project check no longer re-renders and redraws the Results tabs.

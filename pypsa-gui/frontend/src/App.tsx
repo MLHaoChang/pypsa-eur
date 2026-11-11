@@ -51,7 +51,7 @@ import { GuidedTourHost } from './components/GuidedTour'
 import CrashRecoveryBanner from './components/CrashRecoveryBanner'
 import LockBanner from './components/LockBanner'
 import ProjectMismatchBanner from './components/ProjectMismatchBanner'
-import { useProjectMismatchDetection } from './hooks/useProjectMismatchDetection'
+import { ProjectMismatchWatcher } from './hooks/useProjectMismatchDetection'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import AssistantDock from './components/AssistantDock'
 import { useDockAutoCollapse } from './layout/dockAutoCollapse'
@@ -195,6 +195,8 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
 
 export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: () => void }) {
   const uiMode = useUIStore(s => s.uiMode)
+  // A jump that set its own "Back to <origin>" (FlowReturnButton) is the one way back.
+  const hasFlowReturn = useUIStore(s => !!s.flowReturn)
   // Guided reaches the grid checks from the hub design's Results step, so the
   // header names that step and offers the way back (UX template audit N5).
   const fromHub = uiMode === 'guided' && (panel === 'campusElectrical' || panel === 'campusStudy' || panel === 'campusResults')
@@ -229,7 +231,7 @@ export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: ()
         <span className="text-border-3">/</span>
         <span className="text-[12px] font-semibold text-text tracking-[-0.005em]">{meta.title}</span>
         <span className="flex-1" />
-        {fromHub && <BackToHubResults />}
+        {fromHub && !hasFlowReturn && <BackToHubResults />}
         {next}
         <button
           onClick={onClose}
@@ -330,7 +332,6 @@ export default function App() {
   // still loading we cannot tell, so the check waits for it.
   const tabIsStudy = projectsPending || (!!currentProject && !!backendProjects
     && recoveryFor(backendProjects, currentProject) === 'study')
-  useProjectMismatchDetection(tabIsStudy)
 
   useEffect(() => {
     if (!backendProjects) return
@@ -689,6 +690,7 @@ export default function App() {
     <AuthMismatchGate>
       <AppErrorBoundary>
       <div className="flex flex-col h-screen overflow-hidden bg-bg">
+        <ProjectMismatchWatcher isStudy={tabIsStudy} />
         {/* ── Crash recovery banner ──────────────────────────────────── */}
         {/* Renders only when a project has an orphaned `.tmp` sibling — a
             tell-tale of a save killed before the atomic rename. Hidden

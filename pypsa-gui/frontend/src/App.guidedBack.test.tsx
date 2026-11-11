@@ -31,6 +31,13 @@ describe('Guided way back from the grid checks', () => {
     expect(useHubDesignStore.getState().step).toBe('results')
   })
 
+  it('a jump with its own Back to <origin> shows that one control, not the header one too', () => {
+    useUIStore.setState({ flowReturn: { label: 'the cards' } } as never)
+    renderTab('campusElectrical')
+    expect(screen.queryByRole('button', { name: /Back to Results/ })).toBeNull()
+    useUIStore.setState({ flowReturn: null } as never)
+  })
+
   it('Expert keeps the section crumb and has no Back control', () => {
     useUIStore.setState({ uiMode: 'expert' })
     renderTab('campusElectrical')

@@ -92,6 +92,105 @@ export const memoryApi = {
     client.post<MemoryItem>('/memory/dismissals', card).then(r => r.data),
 }
 
+// ── Slice 03: saved parameter values (routes in routers/memory.py and
+// routers/network_memory_parameter.py). Each refusal is shown in place, so none
+// of these toasts through the client's interceptor (`skipErrorToast`).
+
+/** A saved value offered beside a field: stored units, as saved (no conversion). */
+export interface ParameterChip {
+  id: string
+  version: number
+  scope: 'user' | 'org'
+  value: number
+  unit: string
+  currency: string | null
+  currency_year: number | null
+  carrier: string | null
+  /** The server's own equality with the field's value (GK B 47 A3). */
+  current: boolean
+  saved_at: string
+  source: { label: string | null; id: string | null; access: boolean } | null
+}
+
+export interface ParameterSuggestions {
+  fields: Record<string, ParameterChip[]>
+  /** The fields Save for reuse accepts now: Save's own predicate (GK B 47 A1). */
+  saveable: string[]
+}
+
+export interface ParameterTarget {
+  project_id: string
+  component_class: string
+  name: string
+}
+
+/** The memory block of a preview: every fact its digest binds (GK B P4). */
+export interface ParameterMemory {
+  item: string
+  version: number
+  field: string
+  label: string
+  value: number
+  unit: string
+  unit_display: string
+  currency: string | null
+  currency_year: number | null
+  carrier: string | null
+  target: { component_class: string; name: string; value: number | null; source: string | null }
+}
+
+export interface ParameterPreview {
+  memory: ParameterMemory
+  memory_note: string
+  /** The approval digest: the edit card's digest and the memory block. Posted untouched. */
+  digest: string
+  card_digest: string
+  [card: string]: unknown
+}
+
+export interface ParameterApplied {
+  component_class: string
+  name: string
+  written: Record<string, number>
+  source: string
+  memory: ParameterMemory
+  apply_counted: boolean
+}
+
+export const memoryParameterApi = {
+  suggestions: (t: ParameterTarget) =>
+    client.get<ParameterSuggestions>('/memory/suggestions', { params: t, skipErrorToast: true })
+      .then(r => r.data),
+  /** Save for reuse: which field only; the server reads the value (GK B P1). */
+  save: (t: ParameterTarget & { field: string }) =>
+    client.post<MemoryItem & { created: boolean }>('/memory/parameters', t, { skipErrorToast: true })
+      .then(r => r.data),
+  preview: (chip: Pick<ParameterChip, 'id' | 'version'>, t: ParameterTarget) =>
+    client.post<ParameterPreview>(
+      `/memory/suggestions/${encodeURIComponent(chip.id)}/preview`,
+      { ...t, version: chip.version }, { skipErrorToast: true },
+    ).then(r => r.data),
+  /** The body is built from the preview alone: the ids and digest it showed (GK B 47 A4). */
+  apply: (p: ParameterPreview, projectId: string) =>
+    client.post<ParameterApplied>('/network/memory_parameter/apply', {
+      item_id: p.memory.item,
+      version: p.memory.version,
+      project_id: projectId,
+      component_class: p.memory.target.component_class,
+      name: p.memory.target.name,
+      digest: p.digest,
+    }, { skipErrorToast: true }).then(r => r.data),
+}
+
+/** The `error_kind` of a typed refusal, if any. */
+export function errorKind(err: unknown): string | null {
+  const detail = (err as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+  if (detail && typeof detail === 'object' && 'error_kind' in (detail as object)) {
+    return String((detail as { error_kind: unknown }).error_kind)
+  }
+  return null
+}
+
 export const KIND_WORDS: Record<MemoryKind, string> = {
   preference: 'Preference',
   chart_spec: 'Chart',

@@ -3,7 +3,7 @@
 
 # Full-year time-series charts block the Results tab
 
-Status: ready-for-agent (Sonnet; reviewer UX)
+Status: in-review (PR on claude/ui-modern-06-full-year-charts; reviewer UX)
 Type: bug
 Model: Sonnet. Reviewer: UX.
 
@@ -60,3 +60,12 @@ Checked on master: `useProjectMismatchDetection` still polls every 5 s and no sh
 - Blocked by: none. Do not touch `.scratch/ui-modern/issues/` files other than this one (open PRs #1343, #1353, #1359 edit its neighbours).
 - Likely files: `pypsa-gui/frontend/src/hooks/useProjectMismatchDetection.ts`, the shared `CHART_AXIS` module, the Dispatch full-timeframe, Curtailment and Costs & prices tabs, their tests. Reviewer: UX.
 - The Done-when in the body is the acceptance, measured with `shots-02/tools/settle.mjs` on `eh_ipp_hybrid`.
+
+### 2026-11-11: built
+
+Measured with `settle.mjs` on `eh_ipp_hybrid` (Vite dev build): Dispatch > Full timeframe opens in 1.2 s (was 12.4 s) and every later second is idle; Curtailment and Costs & prices have no long task after 3 s.
+
+- Source of the re-render confirmed: `useProjectMismatchDetection` read `isFetching` in `App`, so `App` and the Results tree re-rendered twice per poll. The hook now lives in `ProjectMismatchWatcher`, a component that renders nothing; a test counts the parent's renders across polls. (Hook-in-`App` was confirmed by that test and by the idle mutations stopping, not by the React profiler.)
+- `timeAxis(n)` (next to `CHART_AXIS`) gives a series over 200 rows a numeric `interval`, so Recharts measures no label. `thinRows` draws a full year at 1500 whole rows (first, last, the largest row of each bucket), for chart `data` only; CSV and totals use the full rows.
+- Dispatch keeps `range` per window and each group's main chart element while its series is the same.
+- Not done: LoadFlow, LostLoad and other full-year axes still use the default ticks.

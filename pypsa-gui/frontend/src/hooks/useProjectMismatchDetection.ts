@@ -83,3 +83,12 @@ export function useProjectMismatchDetection(isStudy: boolean): void {
     pending.current = { tab, backend, at: seq }
   }, [data, seq, isFetching, isStudy, currentProject])
 }
+
+/** The hook in a component of its own that renders nothing. The poll reads
+ *  `isFetching`, so its host re-renders twice every 5 s; hosted in `App` that
+ *  re-rendered the whole Results tree with unchanged data and redrew its
+ *  full-year charts (ui-modern 06). Here only this empty node re-renders. */
+export function ProjectMismatchWatcher({ isStudy }: { isStudy: boolean }): null {
+  useProjectMismatchDetection(isStudy)
+  return null
+}
