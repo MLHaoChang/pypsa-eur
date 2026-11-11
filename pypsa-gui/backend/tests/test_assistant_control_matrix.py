@@ -164,7 +164,7 @@ def test_full_coverage_is_explicitly_not_claimed_while_manifest_variants_are_pen
     open_suites = {v.split('.')[0] for row in pending for v in row['variants']['pending']}
     for suite in sorted(r3):
         if suite in open_suites:
-            assert blockers[f'r3-uncovered:{suite}']['issue'] == 'LC-43'
+            assert blockers[f'r3-uncovered:{suite}']['issue'] == 'LC-48'
         else:
             assert f'r3-uncovered:{suite}' not in blockers
     assert 'behavioral-fixtures-pending' not in blockers
@@ -174,7 +174,7 @@ def test_full_coverage_is_explicitly_not_claimed_while_manifest_variants_are_pen
     for family, routes in parity['needs_tool_by_family'].items():
         assert routes and f'route-parity:needs-tool:{family}' in blockers
     for blocker in block['blockers']:
-        assert blocker['issue'] in {'05', '08', 'LC-06', 'LC-43'} and blocker['summary']
+        assert blocker['issue'] in {'05', '08', 'LC-06', 'LC-48'} and blocker['summary']
 
 
 def test_a_variant_going_pending_reopens_its_family_and_the_claim_reads_the_manifest():

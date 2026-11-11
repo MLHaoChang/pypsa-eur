@@ -3,7 +3,7 @@
 
 # LC-43 — Owner of the pending LC-D20 to LC-D23 gate rows
 
-Status: ready-for-human
+Status: done (#1372; open rows and LC-43a/b/c moved to LC-48 under LC43-ROWS-1)
 Type: task
 
 Opened under owner decision LV14-OWNER-1 (live-voice issue 14). Issue 32 is done
@@ -31,3 +31,4 @@ drop it. LC-D03 and LC-D24 went to fix packages 33 and 35.
 - C3. One mutant per gate, sibling layers mutated together, a base-class or except-widening mutant per typed refusal, each on its single test with `-x` and a timeout; the table goes in the PR body.
 - C4. Exact refusal kind or status; "nothing changed" means equal bytes or fingerprint, version count and upload count. D23 timeout: never success or completed, and the text says the outcome is unknown. D20: check `filename*` and that the stored path stays in the project's upload dir. D22: the foreign lock is a real holder, not a monkeypatched check.
 - C5. Re-run `test_assistant_control_matrix.py`, the `assistant_control_matrix.py --check` and `assistant_inventory.py --check` smokes, `test_json_fragments` and the family-manifest tests; add one release-note fragment.
+- LC43-ROWS-1 (owner, via the coordinator): LC-48 (`48-pending-delivery-report-undo-wire-rows.md`) owns the 12 rows still `_pending` in D20 to D23 and LC-43a/b/c as its fix tickets; `R3_ISSUE` now points there and this issue closes with #1372.

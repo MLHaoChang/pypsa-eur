@@ -699,7 +699,7 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_bundle_or_workbook_is_refused_and_keeps_the_open_network'),
     _pending('LC-D20.malformed_import', 'a malformed netCDF import fails after dropping the open project and its unsaved edits, and a malformed MATPOWER file imports as an empty network '
              '(LC-43c, .scratch/live-copilot/issues/43c-malformed-import-replaces-the-network.md)'),
-    _pending('LC-D20.delivery_ttl', 'a delivery and its download never expire: no expiry gate is built (LC-43, .scratch/live-copilot/issues/43-r3-uncovered-delivery-report-undo-wire-gates.md)'),
+    _pending('LC-D20.delivery_ttl', 'a delivery and its download never expire: no expiry gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D21.reports', 'exported DOCX read with python-docx: headline table MC LOLE 3.21 h/yr, ENS cap 10.00, unrun sections say not established; scripted 3.2 h/yr audited verified; '
              'regenerated 9.9 h/yr is version 2, unverified and listed in Numbers to check, tables and other sections unchanged, version 1 intact (one stored study report, scripted model)',
              'generate_report get_report_status list_reports get_report get_report_table regenerate_report_section diff_report_versions export_report_docx',
@@ -720,8 +720,8 @@ VARIANTS: list[dict] = [
              B + 'test_chat_report_template_tools.py::test_set_report_mapping_strict_and_errors'),
     _pending('LC-D21.edited_admitted_number', 'an edited Word table or prose changes an admitted headline number in the next delivered version with no Numbers to check entry '
              '(LC-43a, .scratch/live-copilot/issues/43a-edited-table-bypasses-number-check.md)'),
-    _pending('LC-D21.stale_report', 'a report generated or exported after its study changed is neither refused nor flagged (only the IC case note): no stale gate is built (LC-43, .scratch/live-copilot/issues/43-r3-uncovered-delivery-report-undo-wire-gates.md)'),
-    _pending('LC-D21.report_resume', 'a report job interrupted by a restart is not resumed (its record is in-process state): no resume is built (LC-43, .scratch/live-copilot/issues/43-r3-uncovered-delivery-report-undo-wire-gates.md)'),
+    _pending('LC-D21.stale_report', 'a report generated or exported after its study changed is neither refused nor flagged (only the IC case note): no stale gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _pending('LC-D21.report_resume', 'a report job interrupted by a restart is not resumed (its record is in-process state): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D22.undo_checkpoints', 'input-table fingerprint before/after: undo restores the exact fingerprint and the matching results (objective 100, current again), '
              'a second undo is refused; a pre-solve checkpoint (read from its network.nc) restores the inputs but no results (not current); an unknown checkpoint id changes nothing',
              'update_component undo_last run_simulation create_project_snapshot restore_project_snapshot list_project_snapshots',
@@ -737,8 +737,8 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d22_concurrency_gates.py::test_another_users_lock_refuses_checkpoint_restore_and_edit',
              B + 'test_lc43_d22_concurrency_gates.py::test_undo_reverts_the_newest_step_even_when_it_is_the_persons',
              B + 'test_lc43_d22_concurrency_gates.py::test_a_missing_checkpoint_restores_nothing_and_the_run_evidence_stays'),
-    _pending('LC-D22.rebind', 'an edit racing a switch of the active project (build_delivery project_changed, a write rebinding mid-turn) is not tested (LC-43, .scratch/live-copilot/issues/43-r3-uncovered-delivery-report-undo-wire-gates.md)'),
-    _pending('LC-D22.viewer_role', 'project ACL knows only admin and member: no read-only role refuses an edit, undo or restore (LC-43, .scratch/live-copilot/issues/43-r3-uncovered-delivery-report-undo-wire-gates.md)'),
+    _pending('LC-D22.rebind', 'an edit racing a switch of the active project (build_delivery project_changed, a write rebinding mid-turn) is not tested (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _pending('LC-D22.viewer_role', 'project ACL knows only admin and member: no read-only role refuses an edit, undo or restore (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D23.provider_parity', 'one journey on the Claude wire only (LC32-OPEN-1), read from the request bodies: toolset results offers a strict subset without update_component; '
              'the unoffered call is refused tool_not_offered with G1 still 20 MW; toolset all restores the first offer; approved write gives G1 35 MW and a 20 -> 35 receipt, denied leaves 20 MW',
              'use_toolset update_component',
@@ -760,10 +760,10 @@ VARIANTS: list[dict] = [
              B + 'test_chat_tool_pairing_invariant.py::test_a_stopped_turn_still_records_the_results_it_collected'),
     _pending('LC-D23.timeout_outcome_text', 'a timed-out write is sent to the model as the bare kind tool_timeout, without saying its outcome is unknown '
              '(LC-43b, .scratch/live-copilot/issues/43b-timeout-result-hides-unknown-outcome.md)'),
-    _pending('LC-D23.history_repair', 'a stored history with an unpaired tool_use is sent as it is: no repair step is built (the harness only avoids writing one) (LC-43, .scratch/live-copilot/issues/43-r3-uncovered-delivery-report-undo-wire-gates.md)'),
-    _pending('LC-D23.approval_resume', 'a pending approval is not resumed after a restart (it expires or reads unknown_confirmation_token): no resume is built (LC-43, .scratch/live-copilot/issues/43-r3-uncovered-delivery-report-undo-wire-gates.md)'),
-    _pending('LC-D23.profile_recovery', 'after a refused provider switch or a deleted profile, recovery (a new chat, or picking a profile and resending) is not tested (LC-43, .scratch/live-copilot/issues/43-r3-uncovered-delivery-report-undo-wire-gates.md)'),
-    _pending('LC-D23.goal_switch', 'no gate refuses or recovers a workflow, goal or task switch mid-turn: none is built (LC-43, .scratch/live-copilot/issues/43-r3-uncovered-delivery-report-undo-wire-gates.md)'),
+    _pending('LC-D23.history_repair', 'a stored history with an unpaired tool_use is sent as it is: no repair step is built (the harness only avoids writing one) (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _pending('LC-D23.approval_resume', 'a pending approval is not resumed after a restart (it expires or reads unknown_confirmation_token): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _pending('LC-D23.profile_recovery', 'after a refused provider switch or a deleted profile, recovery (a new chat, or picking a profile and resending) is not tested (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
+    _pending('LC-D23.goal_switch', 'no gate refuses or recovers a workflow, goal or task switch mid-turn: none is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D24.ui', 'the four ui_* tools only: ui_event frames carry the hand snapshot index (01:00 = 1), asset and panel as asked; an off-axis time, an unknown component opened in the editor, or an unknown panel '
              'moves nothing; frontend uiNavigate.lc06.test.ts drives the store from those frames and drops a frame older than a manual navigation',
              'ui_set_snapshot ui_select_component ui_open_asset_detail ui_open_panel',
