@@ -24,7 +24,8 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - A PR that adds an import of gridspine or another third-party module to `pypsa-gui/backend`: run `tests/test_packaging_requirements.py` at the trial merge (the frozen-app pin test; #707 missed it).
 - A pydantic custom error class (pydantic_core) imported in the backend is a new third-party import: run `tests/test_packaging_requirements.py` (#1350).
 
-- A PR that adds a route: run `test_route_chat_disposition`, `test_project_route_acl_policy` and `test_write_surface_lock_policy` at the trial merge (#725 and #741 both missed it).
+- A PR that adds a route: run `test_route_chat_disposition`, `test_project_route_acl_policy`, `test_write_surface_lock_policy` and `test_golden_coverage` at the trial merge (#725 and #741 both missed it; #1343's review missed the `ROUTE_SURFACES` row).
+- Review subagents that run at the same time each get their own scratch folder; a shared one let one overwrite another's mutant script (#1352).
 
 - A PR that touches project templates: check native byte-identity. Load `eh_templates` by path, `write_sidecars` into a temp dir per `TEMPLATE_META` id, and `filecmp` each file against `project_templates/<id>/`.
 
