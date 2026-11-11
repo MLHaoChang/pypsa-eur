@@ -10,6 +10,7 @@ counterfactual. The business-case lines are typed (and two linked) on top of it.
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import math
 import subprocess
@@ -1306,3 +1307,498 @@ def test_a_linked_line_without_outputs_is_refused_and_hashes_with_none():
         build_business_case(ic, inputs)
     assert business_case_hash(ic, inputs) == business_case_hash(ic, inputs, {})
     assert break_even(ic, _inputs(_line()), None, "product", PACK)["status"] == "ok"
+
+
+# ── mutants.py survivors: the build ─────────────────────────────────────────
+
+_NE_NH3 = {"nh3": NotEvaluated("served_product.nh3", "stale")}
+
+
+def _linked(**kw):
+    return _line(
+        name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1", **kw
+    )
+
+
+def _royalty(**kw):
+    base = dict(
+        name="royalty",
+        kind="opex",
+        category="other",
+        unit="share",
+        quantity=0.1,
+        price=None,
+        quantity_source="share_of:revenue",
+        escalation="opex",
+    )
+    base.update(kw)
+    return _line(**base)
+
+
+def test_a_share_line_is_in_each_years_template_once_and_only_in_its_span():
+    bc = build_business_case(
+        _ic(), _inputs(_line(), _royalty(start_year=2033, end_year=2034)), {}
+    )
+    by_year = {
+        t.first_year: [ln.key for ln in t.lines] for t in bc.case.templates
+    }
+    for y in range(2031, 2036):
+        assert by_year[y].count("royalty") == (1 if y in (2033, 2034) else 0), y
+    _, r = _run(_inputs(_line(), _royalty(start_year=2033, end_year=2034)))
+    v = r.op.lines["royalty"]
+    for y in range(2031, 2036):
+        want = -0.1 * 500.0 * 1.02 ** (y - 2031) if y in (2033, 2034) else 0.0
+        assert v[_at(r, y)] == pytest.approx(want), y
+
+
+def test_a_share_of_opex_is_a_cost_on_a_cost_base():
+    staff = _line(
+        name="staff", kind="opex", category="staff", unit="unit", quantity=2.0,
+        price=30.0,
+    )  # fmt: skip
+    ovh = _royalty(name="ovh", quantity_source="share_of:opex/staff")
+    _, r = _run(_inputs(_line(), staff, ovh))
+    for y in range(2031, 2036):
+        assert r.op.lines["ovh"][_at(r, y)] == pytest.approx(
+            -0.1 * 60.0 * 1.02 ** (y - 2031)
+        )
+
+
+def test_a_share_of_a_not_established_base_is_not_established_never_a_crash():
+    capex_share = _capex(
+        name="dev",
+        category="other",
+        unit="share",
+        quantity=0.5,
+        price=None,
+        quantity_source="share_of:revenue",
+    )
+    bc = build_business_case(
+        _ic(), _inputs(_linked(), _royalty(quantity_source="share_of:revenue"),
+                       capex_share),
+        _NE_NH3,
+    )  # fmt: skip
+    assert next(a for a in bc.case.assets if a.name == "dev").overnight_cost is None
+    amounts = [
+        ln.amount for t in bc.case.templates for ln in t.lines if ln.key == "royalty"
+    ]
+    assert amounts and all(a is None for a in amounts)
+
+
+def test_a_capex_share_base_is_its_kind_and_category_only():
+    cont = _capex(
+        name="contingency",
+        category="other",
+        unit="share",
+        quantity=0.1,
+        price=None,
+        quantity_source="share_of:capex/equipment",
+    )
+    inputs = _inputs(
+        _line(), _capex(), _capex(name="kit", price=400.0, category="other"), cont
+    )
+    bc = build_business_case(_ic(), inputs, {})
+    a = {x.name: x.overnight_cost for x in bc.case.assets}
+    assert a["contingency"] == pytest.approx(0.1 * 600.0)
+
+
+def test_an_opex_share_of_capex_reads_its_kind_and_category_only():
+    upkeep = _royalty(
+        name="upkeep",
+        category="maintenance",
+        quantity=0.02,
+        quantity_source="share_of:capex/equipment",
+        escalation="tariff",
+    )
+    other = _capex(name="kit", price=400.0, category="other")
+    _, r = _run(_inputs(_line(), _capex(), other, upkeep))
+    for y in range(2031, 2036):
+        assert r.op.lines["upkeep"][_at(r, y)] == pytest.approx(
+            -0.02 * 600.0 * 1.03 ** (y - 2031)
+        )
+
+
+def test_a_bc_line_without_a_money_year_is_in_base_money_on_a_template_in_another():
+    ic = _ic()
+    ic = dataclasses.replace(
+        ic, templates=tuple(dataclasses.replace(t, money_year=2029) for t in ic.templates)
+    )
+    _, r = _run(_inputs(_line()), ic)
+    for y in range(2031, 2036):
+        assert r.op.lines["product"][_at(r, y)] == pytest.approx(
+            500.0 * 1.02 ** (y - 2031)
+        )
+
+
+def test_a_capex_at_cod_is_no_stage_and_a_later_one_gives_every_asset_its_cod():
+    ic = _ic()
+    bc = build_business_case(ic, _inputs(_capex()), {})
+    assert bc.case.asset_cod == {} and ic.asset_cod == {}
+    bc = build_business_case(ic, _inputs(_capex(start_year=2031)), {})
+    assert bc.case.asset_cod == {}
+    bc = build_business_case(ic, _inputs(_capex(start_year=2033)), {})
+    assert bc.case.asset_cod == {
+        "pv": date(2031, 1, 1),
+        "battery": date(2031, 1, 1),
+        "plant": date(2033, 1, 1),
+    }
+
+
+def test_a_refresh_of_a_not_established_capex_adds_no_replacement():
+    ln = _capex(
+        unit="t",
+        quantity=None,
+        quantity_source="linked:served_product.nh3@1",
+        refresh_years=2.0,
+        name="nh3",
+    )
+    bc = build_business_case(_ic(), _inputs(ln), _NE_NH3)
+    assert bc.case.inputs.replacement_capex == []
+    assert next(a for a in bc.case.assets if a.name == "nh3").overnight_cost is None
+
+
+def test_the_hash_is_the_domain_the_ic_and_the_inputs_exactly():
+    ic = _ic()
+    inputs = _inputs(_line(), preset="eh_site@1", receivable_days=30.0)
+    assert bcm.HASH_DOMAIN == "business_case/v1"
+    blob = {
+        "domain": "business_case/v1",
+        "ic": _fallback_hash(ic),
+        "preset": "eh_site@1",
+        "receivable_days": 30.0,
+        "lines": [ln.model_dump(mode="json") for ln in inputs.lines],
+        "bound": {},
+    }
+
+    def digest(b):
+        raw = json.dumps(b, sort_keys=True, default=str)
+        return hashlib.sha256(raw.encode()).hexdigest()[:32]
+
+    h = business_case_hash(ic, inputs)
+    assert h == digest(blob)
+    for drop in ("domain", "ic"):
+        assert h != digest({k: v for k, v in blob.items() if k != drop})
+    assert h != business_case_hash(_ic(wacc_nominal=0.08), inputs)
+
+
+# ── mutants.py survivors: the cash bridge and the P&L ───────────────────────
+
+
+def _bridge_rows(**over):
+    a = lambda *v: np.array(v, dtype=float)  # noqa: E731
+    rows = dict(
+        ebitda=a(0, 10, 20),
+        terminal=a(0, 0, 5),
+        capex=a(100, 0, 0),
+        stage_capex=a(0, 1, 0),
+        replacement=a(0, 0, 2),
+        grant=a(3, 0, 0),
+        tax=a(0, 4, 6),
+        credits=a(0, 1, 1),
+        tax_equity=a(0, 5, 7),
+        debt_established=True,
+        fees=a(1, 0, 0),
+        debt_service=a(0, 3, 3),
+        draws=a(60, 0, 0),
+        reserve_interest=a(0, 0.5, 0.5),
+        dsra_funding=a(0, 1, 0),
+    )
+    rows.update(over)
+    return rows
+
+
+def test_the_cash_bridge_hand_checked_and_each_post_tax_row_needs_its_inputs():
+    out = cash_bridge(_bridge_rows())
+    pre = [-97.0, 9.0, 23.0]  # ebitda + terminal - capex - stage - repl + grant
+    np.testing.assert_allclose(out["project_pre_tax"], pre)
+    np.testing.assert_allclose(out["project_post_tax"], [-97.0, 6.0, 18.0])
+    eq = [-97.0 - 1 + 60, 9.0 - 3 + 0.5 - 1, 23.0 - 3 + 0.5]
+    np.testing.assert_allclose(out["equity_pre_tax"], eq)
+    np.testing.assert_allclose(
+        out["equity_post_tax"], [eq[0] - 0 + 0, eq[1] - 5 + 1, eq[2] - 7 + 1]
+    )
+    # No credits row: neither post-tax series is made up.
+    out = cash_bridge(_bridge_rows(credits=None))
+    assert out["project_pre_tax"] is not None and out["equity_pre_tax"] is not None
+    assert out["project_post_tax"] is None and out["equity_post_tax"] is None
+    # No tax row: project post-tax is not established, equity's own tax still ties.
+    out = cash_bridge(_bridge_rows(tax=None))
+    assert out["project_post_tax"] is None and out["equity_post_tax"] is not None
+    out = cash_bridge(_bridge_rows(tax_equity=None))
+    assert out["project_post_tax"] is not None
+    assert out["equity_pre_tax"] is not None and out["equity_post_tax"] is None
+    # No debt: no equity series at all, whatever the tax rows hold.
+    out = cash_bridge(_bridge_rows(debt_established=False))
+    assert out["equity_pre_tax"] is None and out["equity_post_tax"] is None
+    assert out["project_post_tax"] is not None
+
+
+def test_working_capital_is_receivable_days_of_revenue_released_in_the_last_year():
+    _, r = _run(_inputs(_line()))
+    p = pnl(r, receivable_days=36.5)  # a tenth of the revenue
+    rev = r.op.revenue
+    level = rev / 10.0
+    want = -np.diff(level, prepend=0.0)
+    want[-1] += level[-1]
+    np.testing.assert_allclose(p.rows["working_capital_change"], want)
+    assert p.rows["working_capital_change"][_at(r, 2031)] == pytest.approx(
+        -rev[_at(r, 2031)] / 10.0
+    )
+    assert float(np.sum(p.rows["working_capital_change"])) == pytest.approx(0.0)
+    np.testing.assert_allclose(
+        p.rows["project_after_working_capital"],
+        p.rows["project_post_tax"] + p.rows["working_capital_change"],
+    )
+
+
+def test_the_stage_capex_row_is_the_engines_and_zero_without_a_stage():
+    _, r = _run(_inputs(_line(), _capex(start_year=2033)))
+    p = pnl(r)
+    assert p.rows["stage_capex"].max() > 0.0
+    np.testing.assert_array_equal(p.rows["stage_capex"], r.op.stage_capex)
+    _, r = _run(_inputs(_line(), _capex()))
+    p = pnl(r)
+    np.testing.assert_array_equal(p.rows["stage_capex"], np.zeros(len(_years(r))))
+
+
+def test_ebit_and_net_income_need_every_part_and_the_tax():
+    _, ok = _run(_inputs(_line(), _capex()))
+    base = pnl(ok).rows
+    np.testing.assert_allclose(
+        base["ebit"], base["ebitda"] + base["terminal"] - base["depreciation"]
+    )
+    np.testing.assert_allclose(base["net_income"], base["ebit"] - base["tax"])
+    # Each part missing alone (the engine's own results state this per section).
+    no_terminal = pnl(dataclasses.replace(ok, terminal=None)).rows
+    assert no_terminal["ebit"] is None and no_terminal["tax"] is not None
+    assert no_terminal["net_income"] is None
+    _, ne = _run(_inputs(_linked()), outputs=_NE_NH3)
+    no_ebitda = pnl(dataclasses.replace(ok, op=ne.op)).rows
+    assert no_ebitda["ebitda"] is None and no_ebitda["terminal"] is not None
+    assert no_ebitda["depreciation"] is not None and no_ebitda["ebit"] is None
+    no_dep = dataclasses.replace(
+        ok, tax_unlevered=dataclasses.replace(ok.tax_unlevered, depreciation={})
+    )
+    assert pnl(no_dep).rows["ebit"] is None
+    # EBIT present, tax not: net income is not established.
+    no_tax = dataclasses.replace(
+        ok, tax_unlevered=dataclasses.replace(ok.tax_unlevered, total_liability=None)
+    )
+    rows = pnl(no_tax).rows
+    assert rows["ebit"] is not None and rows["tax"] is None
+    assert rows["net_income"] is None
+    # EBIT absent, tax present.
+    assert no_terminal["tax"] is not None and no_terminal["net_income"] is None
+
+
+def test_working_capital_needs_revenue_and_after_wc_needs_the_post_tax_row():
+    _, ne = _run(_inputs(_linked()), outputs=_NE_NH3)
+    p = pnl(ne, receivable_days=30.0)
+    assert p.rows["revenue"] is None and p.rows["working_capital_change"] is None
+    _, r = _run(_inputs(_line(), _capex(life_years=7.5)))  # tax not established (Q3)
+    p = pnl(r, receivable_days=30.0)
+    assert p.rows["working_capital_change"] is not None
+    assert p.rows["project_post_tax"] is None
+    assert p.rows["project_after_working_capital"] is None
+    assert p.rows["equity_after_working_capital"] is None
+    _, ok = _run(_inputs(_line()))
+    p = pnl(ok)
+    assert p.rows["working_capital_change"] is None
+    assert p.rows["project_post_tax"] is not None
+    assert p.rows["project_after_working_capital"] is None
+    assert p.rows["equity_after_working_capital"] is None
+
+
+# ── mutants.py survivors: the KPIs ──────────────────────────────────────────
+
+
+def test_the_npv_irr_and_payback_kpis_are_the_engines_numbers():
+    _, r = _run(_inputs(_line(price=100.0), _capex()))
+    k, m = kpis(r, pnl(r)), r.metrics
+    assert k["project_npv"] == Kpi(m["project_post_tax_npv"], "ok", None, "USD")
+    assert k["equity_npv"] == Kpi(m["equity_post_tax_npv"], "ok", None, "USD")
+    assert k["project_irr"] == Kpi(m["project_post_tax_irr"], "ok")
+    assert k["equity_irr"] == Kpi(m["equity_post_tax_irr"], "ok")
+    assert k["payback_years"] == Kpi(m["payback_years"], "ok", None, "years")
+    _, r = _run(_inputs(_line(), _capex()))
+    assert r.metrics.get("payback_years") is None
+    assert kpis(r, pnl(r))["payback_years"] == Kpi(None, "n/a", "never_recovers")
+
+
+def test_a_missing_rate_names_its_own_rate():
+    _, r = _run(_inputs(_line()), _ic(wacc_nominal=None))
+    k = kpis(r, pnl(r))
+    assert k["project_npv"] == Kpi(None, "not_established", "wacc_nominal_missing", "USD")
+    assert k["equity_npv"].status == "ok"
+    _, r = _run(_inputs(_line()), _ic(cost_of_equity=None))
+    k = kpis(r, pnl(r))
+    assert k["equity_npv"] == Kpi(
+        None, "not_established", "cost_of_equity_missing", "USD"
+    )
+    assert k["project_npv"].status == "ok"
+
+
+def test_a_section_not_established_gives_its_reasons_in_the_kpi():
+    _, r = _run(_inputs(_line(), _capex(life_years=7.5)))
+    why = ", ".join(r.reasons["tax"])
+    assert why.startswith("tax_input_missing:depreciation_class:plant")
+    k = kpis(r, pnl(r))
+    for name in ("project_npv", "project_irr", "equity_npv", "payback_years"):
+        assert k[name].status == "not_established", name
+        assert k[name].reason == f"tax_not_established: {why}", name
+    # A section without reasons names only itself.
+    _, ne = _run(_inputs(_linked()), outputs=_NE_NH3)
+    assert kpis(ne, pnl(ne))["project_npv"].reason == "operating_not_established"
+
+
+def test_a_case_without_revenue_has_no_margin_and_says_why():
+    ic = _ic(lines=(TemplateLine("bill", "energy_import", -300.0, "tariff"),))
+    _, r = _run(_inputs(), ic)
+    k = kpis(r, pnl(r))
+    assert k["ebitda_margin_gross"] == Kpi(None, "n/a", "no_revenue")
+    assert k["ebitda_margin_net"] == Kpi(None, "n/a", "no_revenue")
+
+
+def test_a_kpi_without_its_revenue_or_its_ebitda_is_not_established():
+    _, r = _run(_inputs(_line()))
+    p = pnl(r)
+    for gone in ("revenue", "ebitda"):
+        q = dataclasses.replace(p, rows={**p.rows, gone: None})
+        k = kpis(r, q, capacity={"pv": 1.0})
+        for name in (
+            "ebitda_margin_gross",
+            "ebitda_margin_net",
+            "revenue_per_capacity_gross",
+            "revenue_per_capacity_net",
+        ):
+            assert k[name] == Kpi(None, "not_established", "not_established"), (
+                gone,
+                name,
+            )
+
+
+def test_a_capacity_that_is_not_a_number_is_not_stated():
+    _, r = _run(_inputs(_line()))
+    k = kpis(r, pnl(r), capacity={"pv": "5"})
+    for name in ("revenue_per_capacity_gross", "revenue_per_capacity_net"):
+        assert k[name].status == "not_established"
+        assert k[name].reason == "capacity_not_stated"
+        assert k[name].basis["capacity"] is None
+
+
+# ── mutants.py survivors: break-even ────────────────────────────────────────
+
+from services.finance.business_case import Kpi  # noqa: E402
+
+_BE_BASIS = "project_post_tax_npv@wacc_nominal"
+
+
+def test_break_even_always_returns_every_key_and_the_lines_money_year():
+    def keys(be):
+        assert set(be) == {"status", "price_scale", "price", "money_year", "basis"}
+        assert be["basis"] == _BE_BASIS
+        return be
+
+    be = keys(break_even(_ic(), _inputs(_line()), {}, "nope", PACK))
+    assert be == {
+        "status": "break_even_line_not_revenue",
+        "price_scale": None,
+        "price": None,
+        "money_year": None,
+        "basis": _BE_BASIS,
+    }
+    rich = _line(name="subsidy", category="other", unit="unit", quantity=1.0, price=1e5)
+    be = keys(break_even(_ic(), _inputs(_line(), rich), {}, "product", PACK))
+    assert be["status"] == "break_even_not_bracketed"
+    assert be["price_scale"] is None and be["price"] is None
+    assert be["money_year"] == 2031
+    be = keys(break_even(_ic(), _inputs(_line(money_year=2028)), {}, "product", PACK))
+    assert be["status"] == "ok" and be["money_year"] == 2028
+    be = keys(break_even(_ic(), _inputs(_line()), {}, "product", PACK))
+    assert be["status"] == "ok" and be["money_year"] == 2031
+
+
+def test_a_share_revenue_line_has_no_break_even_price():
+    share = _line(
+        name="grant_rev",
+        category="by_product",
+        unit="share",
+        quantity=0.1,
+        price=None,
+        quantity_source="share_of:capex",
+    )
+    be = break_even(_ic(), _inputs(_capex(), share), {}, "grant_rev", PACK)
+    assert be["status"] == "break_even_line_not_revenue"
+
+
+def test_break_even_scales_every_price_cell_by_the_scale():
+    ln = _line(price=None, price_by_year={y: 50.0 for y in range(2031, 2036)})
+    ic = _ic()
+    be = break_even(ic, _inputs(ln), {}, "product", PACK)
+    assert be["status"] == "ok" and be["price"] is None
+    s = be["price_scale"]
+    assert 0.0 < s < 1e4 and s != 1.0
+    solved = _line(price=None, price_by_year={y: 50.0 * s for y in range(2031, 2036)})
+    assert bcm._npv_at(ic, _inputs(solved), {}, 0, PACK, None, 1.0) == pytest.approx(
+        0.0, abs=1e-3
+    )
+    # The mixed line: the base price and its cell scale together.
+    mixed = _line(price=50.0, price_by_year={2033: 70.0})
+    be = break_even(ic, _inputs(mixed), {}, "product", PACK)
+    assert be["status"] == "ok" and be["price"] == pytest.approx(50.0 * be["price_scale"])
+    solved = _line(price=be["price"], price_by_year={2033: 70.0 * be["price_scale"]})
+    assert bcm._npv_at(ic, _inputs(solved), {}, 0, PACK, None, 1.0) == pytest.approx(
+        0.0, abs=1e-3
+    )
+
+
+def test_break_even_tries_scales_up_to_the_maximum_and_no_further():
+    ic = _ic()
+    s1 = break_even(ic, _inputs(_line()), {}, "product", PACK)["price_scale"]
+    top = max(
+        s for s in (1.5**k for k in range(60)) if s <= bcm.BREAK_EVEN_MAX_SCALE
+    )
+    assert top < bcm.BREAK_EVEN_MAX_SCALE < top * 1.5
+    for target, status in ((0.6 * top, "ok"), (1.2 * top, "break_even_not_bracketed")):
+        be = break_even(ic, _inputs(_line(price=50.0 * s1 / target)), {}, "product", PACK)
+        assert be["status"] == status, target
+        if status == "ok":
+            assert be["price_scale"] == pytest.approx(target, rel=1e-6)
+        else:
+            assert be["price"] is None and be["price_scale"] is None
+
+
+def _rerun_stub(monkeypatch, *, series, at, v):
+    """A break-even whose solved scale is `at`, its re-run NPV `v` and the line's
+    re-run series `series` (None: the line is not in the re-run)."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(bcm, "brentq", _brentq_at(at))
+    monkeypatch.setattr(bcm, "_npv_at", lambda *a: v if a[-1] == at else a[-1] - 1.2)
+    lines = {} if series is None else {"product": series}
+    monkeypatch.setattr(
+        bcm, "_result_at", lambda *a: SimpleNamespace(op=SimpleNamespace(lines=lines))
+    )
+    return break_even(_ic(), _inputs(_line()), {}, "product", PACK)
+
+
+def test_c7_the_rerun_tolerance_is_relative_to_the_lines_revenue_and_inclusive(
+    monkeypatch,
+):
+    series = np.array([400.0, 600.0])
+    bound = BREAK_EVEN_TOL * max(abs(float(np.sum(series))), 1.0)
+    assert bound > BREAK_EVEN_TOL  # the revenue scales the tolerance
+    be = _rerun_stub(monkeypatch, series=series, at=7.0, v=bound)
+    assert be["status"] == "ok" and be["price_scale"] == 7.0
+    be = _rerun_stub(monkeypatch, series=series, at=7.0, v=-bound)
+    assert be["status"] == "ok"
+    be = _rerun_stub(monkeypatch, series=series, at=7.0, v=np.nextafter(bound, 1.0))
+    assert be["status"] == "break_even_not_converged" and be["price"] is None
+
+
+def test_c7_a_rerun_without_its_npv_or_its_line_is_not_established(monkeypatch):
+    series = np.array([400.0, 600.0])
+    be = _rerun_stub(monkeypatch, series=series, at=7.0, v=None)
+    assert be["status"] == "break_even_not_established" and be["price"] is None
+    be = _rerun_stub(monkeypatch, series=None, at=7.0, v=0.0)
+    assert be["status"] == "break_even_not_established" and be["price"] is None
