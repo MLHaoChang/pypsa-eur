@@ -61,7 +61,7 @@ import {
   FLOW_CYCLE_VAR, FLOW_DASH, flowAnimationCss, flowClass, flowCycleValue, flowDirection, flowShare, flowSpeedBucket, flowWidth,
 } from '../utils/flowMotion'
 import { useReducedMotion } from '../site3d/motion'
-import LoadingKey from '../components/LoadingKey'
+import LoadingKey, { VoltageKeyTitle } from '../components/LoadingKey'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 type AssetCategory = 'Thermal' | 'Renewables' | 'Storage' | 'Load'
@@ -3360,7 +3360,7 @@ export default function TopologyCanvas() {
                 className="flex items-center gap-1 mb-2 -ml-0.5 text-left text-muted hover:text-text"
               >
                 <ChevronDown size={10} className="shrink-0" />
-                <span className="text-[9px] font-bold uppercase tracking-[0.14em]">Buses &amp; Lines · voltage</span>
+                <span className="text-[9px] font-bold uppercase tracking-[0.14em]"><VoltageKeyTitle /></span>
               </button>
               {[['> 300 kV', '#ef4444'], ['200–300 kV', '#16a34a'], ['100–200 kV', '#2563eb'], ['< 100 kV', '#6b7280']].map(([label, color]) => (
                 <div key={label} className="flex items-center gap-2 mb-1">

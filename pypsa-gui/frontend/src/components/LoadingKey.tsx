@@ -19,3 +19,11 @@ export default function LoadingKey() {
     </div>
   )
 }
+
+/**
+ * The voltage key's heading. With the overlay on the lines are coloured by
+ * loading, so the voltage colours then describe the buses only.
+ */
+export function VoltageKeyTitle() {
+  return <>{useCanvasResults().enabled ? 'Buses · voltage' : 'Buses & Lines · voltage'}</>
+}
