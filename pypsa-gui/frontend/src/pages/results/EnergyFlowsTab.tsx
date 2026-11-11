@@ -42,7 +42,7 @@ function FlowNodeShape(props: {
             dy={payload.column === 'via' ? 0 : '0.35em'}
             textAnchor={payload.column === 'via' ? 'middle' : anchor}
             fontSize={10} fill="currentColor">
-        {payload.name}
+        {legendName(payload.name)}
       </text>
     </Layer>
   )
@@ -145,7 +145,7 @@ function SeriesChart({ title, series, index }: {
     <ChartFrame testId={`ef-series-${title.toLowerCase()}`}
       title={`${title} by carrier`} figure={chartFigure(fmtPower(peak), 'peak')} hint="hourly average">
       <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-        <AreaChart data={data} margin={{ top: 18, right: 28, left: 0, bottom: 0 }}>
+        <AreaChart data={data} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
           <CartesianGrid {...CHART_GRID} />
           <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} />
           <YAxis {...CHART_AXIS} label={yAxisLabel('MW (average)')} />

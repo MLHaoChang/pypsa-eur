@@ -390,7 +390,7 @@ export default function Prices() {
               <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
                 <LineChart
                   data={priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows}
-                  margin={{ top: 18, right: 28, left: 0, bottom: 0 }}
+                  margin={{ top: 18, right: 40, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="snapshot" tickFormatter={shortStamp} {...CHART_AXIS} />

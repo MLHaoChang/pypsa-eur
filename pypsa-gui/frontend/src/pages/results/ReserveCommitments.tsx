@@ -276,7 +276,7 @@ function StorageCharts({ storage, snapshots, series }: {
         </div>
         {storage.soc_mwh ? (
           <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-            <ComposedChart data={energyRows} margin={{ top: 18, right: 28, left: 0, bottom: 4 }}>
+            <ComposedChart data={energyRows} margin={{ top: 18, right: 40, left: 0, bottom: 4 }}>
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="t" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} />
               <YAxis {...CHART_AXIS} label={yAxisLabel('MWh')}
@@ -329,7 +329,7 @@ function StorageCharts({ storage, snapshots, series }: {
             ))}
           </div>
           <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-            <AreaChart data={powerRows} stackOffset="sign" margin={{ top: 18, right: 28, left: 0, bottom: 4 }}>
+            <AreaChart data={powerRows} stackOffset="sign" margin={{ top: 18, right: 40, left: 0, bottom: 4 }}>
               {hatches(base, shown)}
               <CartesianGrid {...CHART_GRID} />
               <XAxis dataKey="t" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} />

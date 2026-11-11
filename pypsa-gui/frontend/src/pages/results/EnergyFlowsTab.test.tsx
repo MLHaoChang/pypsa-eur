@@ -43,7 +43,7 @@ describe('EnergyFlowsTab', () => {
     const { container } = mount()
     const svg = (await screen.findByTestId('ef-sankey')).querySelector('svg')!
     const labels = [...svg.querySelectorAll('text')].map(t => t.textContent)
-    for (const l of ['solar', 'Grid import', 'Battery', 'Direct', 'load', 'Losses']) expect(labels).toContain(l)
+    for (const l of ['Solar', 'Grid import', 'Battery', 'Direct', 'Load', 'Losses']) expect(labels).toContain(l)
     expect(screen.getByTestId('ef-conservation').getAttribute('data-status')).toBe('ok')
     expect(screen.getByTestId('ef-series-supply')).toBeTruthy()
     expectAllButtonsNamed(container)

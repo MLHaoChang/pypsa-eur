@@ -172,7 +172,7 @@ export default function LoadShapeTab() {
         {weekView?.status === 'ok' && wk ? (
           <>
             <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-              <ComposedChart data={wk.rows} margin={{ top: 18, right: 28, left: 0, bottom: 0 }}>
+              <ComposedChart data={wk.rows} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
                 <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} />
                 <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
@@ -193,7 +193,7 @@ export default function LoadShapeTab() {
             </p>
             {soc ? (
               <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
-                <AreaChart data={soc} margin={{ top: 18, right: 28, left: 0, bottom: 0 }}>
+                <AreaChart data={soc} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
                   <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} />
                   <YAxis {...CHART_AXIS} label={yAxisLabel('Battery SoC, MWh')} />
@@ -219,9 +219,10 @@ export default function LoadShapeTab() {
                 <YAxis yAxisId="e" {...CHART_AXIS} label={yAxisLabel('MWh per month')} />
                 <YAxis yAxisId="d" orientation="right" {...CHART_AXIS} label={yAxisLabel('MWh per day')} />
                 <Tooltip {...CHART_TOOLTIP} />
-                <Legend {...CHART_LEGEND} />
+                {/* Each series' own swatch: a square for a bar, a line for the daily line. */}
+                <Legend {...CHART_LEGEND} iconType={undefined} iconSize={12} />
                 {MONTH_STACK.map(k => (
-                  <Bar key={k} yAxisId="e" stackId="m" dataKey={k} name={GROUP_LABEL[k]} fill={GROUP_COLOR[k]}
+                  <Bar key={k} yAxisId="e" stackId="m" dataKey={k} name={GROUP_LABEL[k]} fill={GROUP_COLOR[k]} legendType="square"
                        isAnimationActive={false} />
                 ))}
                 <Line yAxisId="d" type="monotone" dataKey="daily" name="Daily generation" stroke="var(--color-text)"
