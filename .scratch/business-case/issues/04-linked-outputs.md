@@ -3,7 +3,7 @@
 
 # 04 — Linked model outputs and unit conversions
 
-Status: ready-for-agent after 01 merges and 02 (GK A LO-1..LO-10; L7 waits on DC 03)
+Status: done (branch claude/bc-04-linked-outputs; GK A LO-1..LO-10, P1..P8)
 Type: task
 Blocked by: 02; ../../dc-business-case/issues/03-it-energy-series.md (L7 only)
 Gated: yes (GK A)
@@ -108,3 +108,49 @@ template's IC basis, and no BC line in the IC or adequacy facts.
 
 - The IT energy read is `it_energy(spec, snapshots, generators weightings, unserved_facility_mw(n), timezone=_dc_timezone(tid))`. On a single index it uses the week-start phase (GK A F1 on #1319).
 - Unserved IT MWh is a quantity only: 04 needs its own test that no BC line prices it.
+
+### 2026-11-11: GK A (22) plan GO, conditions P1-P8
+
+Answers: Q1 one named constant `O2_KG_PER_KG_H2 = 7.94`, the only new literal. Q2
+this slice ships the two refusal kinds and the pure `ledger_clash` rule with its
+tests; 06 wires it. Export against a PPA or CfD settlement is a refuse case too.
+Q3 a series is keyed per investment period; a flat network has the one key `None`.
+Q4 every electric Load is offered: the catalogue offers, the preset bills.
+
+- P1 L3 is offered for the built electrolyser (carrier `electrolysis`, `eh_role`
+  `electrolyser`), and not for another Link into the H2 bus.
+- P2 The own-solve check is `harness.calculations.solve_matches_inputs`: inputs
+  re-hashed now, completed and optimal, no AC power flow or LOPF frames. Never the
+  network's own stamp.
+- P3 An absent lost-load capture is never "zero unserved": not evaluated, unless
+  the capture is explicitly empty or the solve's VoLL is 0.
+- P4 Each slack MW counts once across the per-Load capture, the bus slack and
+  `process_products.shortfalls`; served + ProductShortfall's number = contracted.
+- P5 MWh to t only through `process_products.t_per_unit` on the bus.
+- P6 `eh_ammonia_staged` offers `served_product.nh3` and no `served_h2`.
+- P7 Export is −p1 (grid side, after losses); the existing billed export is p0.
+- P8 `active_mask` with `"ALL"` on a flat axis; IT energy read once; contracted kW
+  × 12 per year.
+
+### 2026-11-11: as built
+
+- Ids use a dot, not a colon (`served_product.nh3`, `capacity.Link.electrolyser`),
+  because 02's `QUANTITY_SOURCE_PATTERN` allows only `[A-Za-z0-9_.-]` in an id. A
+  component whose name has other characters (a space) is not offered.
+- Capacity reads in the line units `MW_year`, `kW_year` and `kW_month`; the unit
+  enum has no bare MW or kW.
+- `LinkedSolve` carries the solve: `bind(ctx)` builds it; the caller passes the DC
+  spec and timezone for L7 (`dc=`), and the line's LHV or the preset row's kW per
+  GPU to `read`.
+- Follow-up for the route slice (08): register the 22 `REFUSAL_KINDS` in a
+  `tool-error-kinds.d` fragment.
+- `ledger_clash` refuses an export quantity against `energy_export`, `ppa_settlement`
+  or `cfd_settlement`, and drops `lost_production` for a product quantity. A served
+  electric load meets no stream: the bill streams price the site's grid import, which
+  is no catalogue output, and a served load is what a microgrid sells (spec §6.7).
+  For GK B to confirm in 06.
+- L7 passes `it_energy` the facility's unserved MW by DC 03's Q4 rule, read from
+  the solve's lost-load capture as well as the Generator rows: the per-Load VoLL
+  slacks are removed after the solve, so `unserved_facility_mw(n)` alone reads 0 on
+  a real solve. Follow-up for the DC owner: `unserved_facility_mw` has the same gap
+  for any other caller.
