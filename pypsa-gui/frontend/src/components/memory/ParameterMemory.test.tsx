@@ -222,6 +222,20 @@ describe('the pick card (GK B 47 A4–A6, UX P3)', () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('memory-chip')))
   })
 
+  it('after an Apply, focus follows the chip to its "current" marker', async () => {
+    const p = preview()
+    api.preview.mockResolvedValue(p)
+    api.apply.mockResolvedValue({ written: { p_nom: 250 }, apply_counted: true, memory: p.memory })
+    const { rerender } = render(<SuggestionChips chips={[chip()]} spec={spec('p_nom')} target={TARGET} onApplied={vi.fn()} />)
+    await userEvent.click(screen.getByTestId('memory-chip'))
+    await userEvent.click(await screen.findByTestId('memory-pick-apply'))
+    await waitFor(() => expect(screen.queryByTestId('memory-pick-card')).toBeNull())
+    // The refetch marks the applied chip current.
+    rerender(<QueryClientProvider client={qc}><SuggestionChips chips={[chip({ current: true })]} spec={spec('p_nom')}
+      target={TARGET} onApplied={vi.fn()} /></QueryClientProvider>)
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('memory-chip-current')))
+  })
+
   it('a refused preview card still closes with Esc', async () => {
     api.preview.mockRejectedValue(refusal(422, 'memory_carrier_mismatch', 'Capacity: saved for solar, this asset is gas.'))
     render(<PickCard chip={chip()} spec={spec('p_nom')} target={TARGET} onClose={vi.fn()} onApplied={vi.fn()} />)

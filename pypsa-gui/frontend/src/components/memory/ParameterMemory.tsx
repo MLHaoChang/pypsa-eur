@@ -53,7 +53,7 @@ const isMoneyUnit = (u: string | null | undefined) => !!u && u.split('/')[0] ===
 export function valueWords(spec: Pick<AssetFieldSpec, 'scale' | 'unit_display' | 'unit_storage'>,
   stored: number, currency?: string | null): string {
   const d = displayValue(spec as AssetFieldSpec, stored)
-  if (d === null) return '—'
+  if (d === null) return 'no value'  // the store keeps finite numbers only; never a bare dash
   if (isMoneyUnit(spec.unit_display) || isMoneyUnit(spec.unit_storage)) {
     const unit = spec.unit_display || spec.unit_storage
     const per = unit.includes('/') ? `/${unit.split('/').slice(1).join('/')}` : ''
@@ -97,7 +97,7 @@ export function memoryLine(m: ParameterMemory, chip: ParameterChip): string {
 
 /** The asset's chips and saveable fields. The key holds the asset's whole record, so
  *  any edit to it (bus, carrier or a value) refetches (GK B 47 A6). */
-export function useParameterMemory(componentClass: string | null, name: string | null,
+export function useParameterSuggestions(componentClass: string | null, name: string | null,
   asset: Record<string, unknown>) {
   const project = useUIStore(s => s.currentProject)
   const shown = memoryShown(useUIStore(s => s.uiMode))
@@ -165,7 +165,7 @@ export function SaveForReuse({ componentClass, name, field, label }: {
     <>
       <button type="button" onClick={save} disabled={busy} data-testid={`memory-save-${field}`}
         aria-label={`Save ${label} for reuse`}
-        className="ml-1.5 text-[9px] text-muted hover:text-accent underline-offset-2 hover:underline opacity-0 group-hover:opacity-100 focus:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent rounded-sm disabled:opacity-50">
+        className="ml-1.5 text-[9px] text-muted hover:text-accent underline-offset-2 hover:underline opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent rounded-sm disabled:opacity-50">
         Save for reuse
       </button>
       <span role="status" className="basis-full text-[9px] leading-snug text-danger empty:hidden" data-testid={`memory-save-refusal-${field}`}>
@@ -178,7 +178,7 @@ export function SaveForReuse({ componentClass, name, field, label }: {
 /** The read-out rows' action slot: Save for reuse where Save accepts the field. */
 export function useSaveAction(componentClass: string | null, name: string | null,
   asset: Record<string, unknown>): (field: string | undefined, label: string) => ReactNode {
-  const q = useParameterMemory(componentClass, name, asset)
+  const q = useParameterSuggestions(componentClass, name, asset)
   const saveable = new Set(q.data?.saveable ?? [])
   return (field, label) => field && componentClass && name && saveable.has(field)
     ? <SaveForReuse componentClass={componentClass} name={name} field={field} label={label} />
@@ -194,6 +194,7 @@ type CardState =
   | { at: 'gone' }
 
 const STALE = new Set(['edit_preview_stale', 'memory_stale'])
+const refused = (e: unknown): CardState => ({ at: 'refused', message: errorWords(e), stale: STALE.has(errorKind(e) ?? '') })
 
 /** The chips under one field. A chip the server marks `current` is a marker, not a
  *  button: Apply never proposes a no-op (UX P2, GK B 47 A3). */
@@ -202,12 +203,20 @@ export function SuggestionChips({ chips, spec, target, onApplied }: {
   onApplied: (written: Record<string, number>) => void
 }) {
   const [open, setOpen] = useState<string | null>(null)
-  const refs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const refs = useRef<Record<string, HTMLElement | null>>({})
+  // Esc, Apply and Cancel return focus to the chip (UX P3). After an Apply the refetch
+  // redraws that chip as its "current" marker, so focus follows it there too.
+  const [returnTo, setReturnTo] = useState<string | null>(null)
+  useEffect(() => {
+    if (!returnTo) return
+    refs.current[returnTo]?.focus()
+    const t = window.setTimeout(() => setReturnTo(null), 3000)
+    return () => window.clearTimeout(t)
+  }, [returnTo, chips])
   if (!chips.length) return null
   const close = (id: string) => {
     setOpen(null)
-    // Esc, Apply and Cancel return focus to the chip (UX P3).
-    window.setTimeout(() => refs.current[id]?.focus(), 0)
+    setReturnTo(id)
   }
   const picked = chips.find(c => c.id === open)
   return (
@@ -216,7 +225,8 @@ export function SuggestionChips({ chips, spec, target, onApplied }: {
         {chips.map(chip => {
           const [line1, line2] = chipWords(chip, spec)
           return chip.current ? (
-            <span key={chip.id} data-testid="memory-chip-current"
+            <span key={chip.id} data-testid="memory-chip-current" tabIndex={-1}
+              ref={el => { refs.current[chip.id] = el }}
               className="inline-flex flex-col rounded border border-border/60 px-1.5 py-0.5 text-[9px] text-muted max-w-full">
               <span className="truncate">{line1} <span className="font-semibold">· current</span></span>
               <span className="truncate">{line2}</span>
@@ -261,7 +271,7 @@ export function PickCard({ chip, spec, target, onClose, onApplied }: {
     try {
       setState({ at: 'card', preview: await memoryParameterApi.preview(c, { project_id: project, ...target }) })
     } catch (e) {
-      setState({ at: 'refused', message: errorWords(e), stale: STALE.has(errorKind(e) ?? '') })
+      setState(refused(e))
     }
   }
   useEffect(() => { void preview(chip) }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -290,7 +300,7 @@ export function PickCard({ chip, spec, target, onClose, onApplied }: {
       if (!out.apply_counted) toast('Applied. The saved value’s use count was not recorded.')
     } catch (e) {
       // A 409 applies nothing (GK B 47 A6): the card offers only "Preview again".
-      setState({ at: 'refused', message: errorWords(e), stale: STALE.has(errorKind(e) ?? '') })
+      setState(refused(e))
     } finally {
       setBusy(false)
     }

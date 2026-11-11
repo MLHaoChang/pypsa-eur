@@ -8,7 +8,7 @@ import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/ass
 import { ProvenanceChip, staleNote } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
 import { ReferenceApplyDrawer } from '../../pages/results/investment/ReferenceApplyDrawer'
-import { SuggestionChips, useParameterMemory } from '../../components/memory/ParameterMemory'
+import { SuggestionChips, useParameterSuggestions } from '../../components/memory/ParameterMemory'
 import { derivedStored, displayValue, isRevealed, tidy, unitLabel, visibleUnit } from '../../utils/assetForm'
 import type { SeriesField } from '../../components/series/useSeriesFields'
 import {
@@ -316,7 +316,7 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
   // Generators and Links can take a shipped cost reference (wind, PV, electrolysers).
   const referenceClass = schema.component === 'Generator' || schema.component === 'Link' ? schema.component : null
   const assetName = typeof current.name === 'string' ? current.name : null
-  const memory = useParameterMemory(suggestions ? schema.component : null, assetName, current)
+  const memory = useParameterSuggestions(suggestions ? schema.component : null, assetName, current)
   const chipsFor = (f: AssetFieldSpec) => {
     const chips = memory.data?.fields[f.key]
     if (!chips?.length || !assetName || f.derived || series?.[f.key]?.set) return null

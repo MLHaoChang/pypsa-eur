@@ -247,7 +247,7 @@ def save_plan(
     write for `field`, or the typed refusal. `save()` writes exactly this, and
     `saveable()` asks it, so the Save button is offered only where Save succeeds
     (GK B 47 A1, #1343). Writes nothing."""
-    if M.org_of(db, user) is None:
+    if (M.org_of(db, user) is not None):
         raise _refuse("memory needs an organisation membership", "memory_no_org", 403)
     spec = M.parameter_spec(component_class, field)
     value, _source, carrier = _current(n, component_class, name, field)

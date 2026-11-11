@@ -268,13 +268,13 @@ function MemoryRow({
   const used = item.apply_count
     ? `${item.apply_count}× · ${dateWords(item.last_used_at)}`
     : 'Not yet'
+  const param = item.kind === 'parameter' ? parameterBodyOf(item.body) : null
   return (
     <>
       <tr className="border-t border-border align-top" data-testid="memory-row" data-item-id={item.id}>
         <td className="px-3 py-1.5"><Tag tone="accent">{KIND_WORDS[item.kind]}</Tag></td>
         <td className="px-2 py-1.5 text-text">
-          {item.kind === 'parameter' && parameterBodyOf(item.body)
-            ? <ParameterSummary body={parameterBodyOf(item.body)!} /> : item.summary}
+          {param ? <ParameterSummary body={param} /> : item.summary}
         </td>
         <td className="px-2 py-1.5 text-muted">{appliesToWords(item.applies_to)}</td>
         <td className="px-2 py-1.5 text-muted">{own ? 'Just me' : 'Workspace'}</td>
