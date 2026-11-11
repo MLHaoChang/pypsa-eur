@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from models.business_case import CATEGORY_STREAM
 from models.finance import ESCALATION_CLASSES
 from services.finance.case import (
     CONTRACT_CLASS, UPFRONT_FROM_CAPITAL_COST, FinanceCase, Template, TemplateLine, cod_year_of,
@@ -41,6 +42,12 @@ STREAM_CLASS: dict[str, str] = {
     "fom": "opex", "vom": "opex", "other": "opex",
     "fuel": "fuel", "lost_production": "fuel", "capex": "capex",
 }
+# The business-case line streams (spec §3, G-C1): one row per (kind, category), added
+# after the ledger's own rows and never changing one (BC 05 plan C8).
+_BC_STREAMS = {s: c for s, c in CATEGORY_STREAM.values() if s is not None}
+if set(_BC_STREAMS) & set(STREAM_CLASS):
+    raise RuntimeError("a business-case stream reuses a ledger row")
+STREAM_CLASS.update(_BC_STREAMS)
 
 
 #: The escalation class of a difference line's reference leg (`TemplateLine.price_qty_mwh`):
