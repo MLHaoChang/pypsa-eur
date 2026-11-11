@@ -12,6 +12,7 @@ import {
   type TSPayload, WindowCapBanner, useWeightCtx, snapshotWeightAt,
   CHART_GRID, CHART_AXIS, CHART_TOOLTIP, yAxisLabel,
   ChartFrame, CHART_HEIGHT, carrierColour,
+  ChartZero,
 } from './shared'
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
@@ -331,8 +332,11 @@ export default function StorageCycling() {
 
       {/* Carrier-level cycle counts as a bar chart */}
       <ChartFrame title="Equivalent full cycles by carrier" hint="capacity-weighted"
-        figure={carrierStats.length > 0
+        figure={carrierStats.some(c => c.cycles > 0)
           ? `${Math.max(...carrierStats.map(c => c.cycles)).toFixed(1)} cycles highest` : undefined}>
+        {!carrierStats.some(c => c.cycles > 0) ? (
+          <ChartZero>No storage completed a cycle in this window.</ChartZero>
+        ) : (
           <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
             <BarChart
               data={carrierStats.map(c => ({ ...c, label: storageCarrierLabel(c.carrier) }))}
@@ -346,6 +350,7 @@ export default function StorageCycling() {
               <Bar dataKey="cycles" fill={carrierColour('storage')} maxBarSize={72} />
             </BarChart>
           </ResponsiveContainer>
+        )}
       </ChartFrame>
 
       <PerUnitCyclingSection units={units} />

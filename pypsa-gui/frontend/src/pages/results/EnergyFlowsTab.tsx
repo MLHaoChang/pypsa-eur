@@ -21,7 +21,7 @@ import { useResultsFilter } from './filterContext'
 import WindowSlider, { useWindowRange } from './WindowSlider'
 import {
   CHART_AXIS, CHART_GRID, CHART_TOOLTIP, downloadCSV, shortStamp, yAxisLabel,
-  ChartFrame, ChartActions, ChartZero, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
+  ChartFrame, ChartSourceProvider, useChartSource, type ChartSource, ChartActions, ChartZero, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
 } from './shared'
 import {
   CSV_HEADER, csvRows, fmtMwh, periodLabel, sankeyData, share,
@@ -42,7 +42,7 @@ function FlowNodeShape(props: {
             dy={payload.column === 'via' ? 0 : '0.35em'}
             textAnchor={payload.column === 'via' ? 'middle' : anchor}
             fontSize={10} fill="currentColor">
-        {payload.name}
+        {legendName(payload.name)}
       </text>
     </Layer>
   )
@@ -128,6 +128,12 @@ function ConservationChip({ c }: { c: NonNullable<EnergyFlowsPayload['conservati
   )
 }
 
+/** A series key in plain words: "ups_battery discharge" reads "UPS battery discharge". */
+export function seriesName(key: string): string {
+  const m = /^(.*) (discharge|charge)$/.exec(key)
+  return m ? `${legendName(m[1])} ${m[2]}` : legendName(key)
+}
+
 function SeriesChart({ title, series, index }: {
   title: string; series: Record<string, number[]>; index: string[]
 }) {
@@ -139,20 +145,20 @@ function SeriesChart({ title, series, index }: {
   const labelAt = bandLabelIndices(data, keys, peak)
   const bandLabel = (k: string) => {
     const i = labelAt.get(k)
-    return i == null ? undefined : directLabel(legendName(k), i)
+    return i == null ? undefined : directLabel(seriesName(k), i)
   }
   return (
     <ChartFrame testId={`ef-series-${title.toLowerCase()}`}
       title={`${title} by carrier`} figure={chartFigure(fmtPower(peak), 'peak')} hint="hourly average">
       <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-        <AreaChart data={data} margin={{ top: 18, right: 8, left: 0, bottom: 0 }}>
+        <AreaChart data={data} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
           <CartesianGrid {...CHART_GRID} />
           <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} />
           <YAxis {...CHART_AXIS} label={yAxisLabel('MW (average)')} />
           <Tooltip {...CHART_TOOLTIP} />
           <Legend {...CHART_LEGEND} />
           {keys.map((k, i) => (
-            <Area key={k} type="monotone" dataKey={k} stackId="s" stroke={carrierColour(k, i)}
+            <Area key={k} type="monotone" dataKey={k} name={seriesName(k)} stackId="s" stroke={carrierColour(k, i)}
                   fill={carrierColour(k, i)} fillOpacity={0.6} isAnimationActive={false} />
           ))}
           {keys.map(k => (
@@ -182,6 +188,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
     placeholderData: keepPreviousData,
   })
   const chartRef = useRef<HTMLDivElement>(null)
+  const source = useChartSource()
 
   if (!data) {
     if (!isFetched) return null
@@ -210,6 +217,12 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
   const win = data.window!
   const graph = sankeyData(data.rows)
   const total = data.rows.reduce((s, r) => s + r.mwh, 0)
+  // With "all periods" chosen above, this tab still draws ONE period (its own
+  // picker, the first by default): its charts' source line names that period
+  // and drops the dates, which are the whole horizon's and not that period's.
+  const frameSource: ChartSource = shellPeriod == null && data.period != null && source.line
+    ? { ...source, line: source.line.replace(/(?: · [^·]*→[^·]*)? · all periods$/, ` · period ${data.period}`) }
+    : source
   const lossShare = share(data.rows.filter(r => r.destination === 'Losses').reduce((s, r) => s + r.mwh, 0), total)
   const periods = data.periods.filter((p): p is number => p != null)
   const exportName = `energy_flows_${data.period ?? 'year'}`
@@ -242,6 +255,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
       <WindowSlider testId="ef-window" snapshots={win.snapshots} from={win.from} to={win.to}
                     start={win.start} end={win.end} drag={drag} setDrag={setDrag} whole={whole} />
 
+      <ChartSourceProvider value={frameSource}>
       <ChartFrame testId="ef-flow"
         title={`Energy flow · ${periodLabel(data.period)}`}
         figure={graph.links.length ? chartFigure(fmtMwh(total), 'delivered or lost') : undefined}
@@ -254,6 +268,11 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
             }} />
         }
         bodyClassName="p-3">
+        {frameSource !== source && (
+          <p className="mb-2 text-[11px] text-muted" data-testid="ef-one-period">
+            All periods are selected above. The diagram draws one period: {periodLabel(data.period)}.
+          </p>
+        )}
         {graph.links.length ? (
           <div ref={chartRef} data-testid="ef-sankey"><FlowSankeyChart data={graph} width={sankeyWidth} /></div>
         ) : (
@@ -276,6 +295,7 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
           <SeriesChart title="Demand" series={data.series.demand} index={data.series.index} />
         </div>
       )}
+      </ChartSourceProvider>
     </div>
   )
 }

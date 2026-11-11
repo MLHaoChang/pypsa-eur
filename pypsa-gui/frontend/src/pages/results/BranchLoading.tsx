@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend } from 'recharts'
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts'
 import { resultsEvidenceApi } from '../../api/resultsEvidence'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import { downloadCSV, KPI, fmtPower } from './shared'
+import { downloadCSV, KPI, fmtPower, shortStamp, CHART_HEIGHT, seriesDash, carrierColour,
+  ChartFrame, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel } from './shared'
 import ResultState, { type NonValueState } from '../../components/ResultState'
 
 const number = (value: number | null | undefined, unit = '') =>
@@ -88,13 +89,17 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
     {(data.skipped ?? []).map(r => <p key={`${r.class}:${r.name}`} className="text-xs text-muted mt-1">{r.class}: {r.name} — unavailable: {r.reason}</p>)}
     {data.skipped_truncated && <p>Additional unavailable branches omitted from this bounded view.</p>}
     {(data.missing_evidence ?? []).map(reason => <p key={reason} className="text-xs text-muted mt-1">{reason}</p>)}
-    {!!chartRows.length && <><h3 className="mt-4 mb-2">Loading against effective limit (%) · ranked branches</h3>
-      {data.series_truncated && <p className="text-xs">Chart bounded to ten branches and the first 800 selected snapshots. Table statistics cover the entire selected window.</p>}
-      <ResponsiveContainer width="100%" height={220}><LineChart data={chartRows}><XAxis dataKey="snapshot" hide /><YAxis unit="%" /><Tooltip /><Legend />
+    {!!chartRows.length && <ChartFrame className="mt-4" testId="branch-loading-chart" title="Loading against effective limit · ranked branches">
+      {data.series_truncated && <p className="text-[11px] text-muted mb-2">Chart bounded to ten branches and the first 800 selected snapshots. Table statistics cover the entire selected window.</p>}
+      <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}><LineChart data={chartRows} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
+        <CartesianGrid {...CHART_GRID} /><XAxis dataKey="snapshot" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} />
+        <YAxis {...CHART_AXIS} domain={[0, 'auto']} label={yAxisLabel('%')} />
+        {/* A wide swatch, so the key shows each line's dash as well as its colour. */}
+        <Tooltip {...CHART_TOOLTIP} /><Legend {...CHART_LEGEND} iconType="plainline" iconSize={24} />
         {(data.series ?? []).map((s, i) => <Line key={s.asset_key ?? `${s.class}:${s.name}`}
           dataKey={s.asset_key ?? `${s.class}: ${s.name}`}
           name={`${s.class}: ${s.name}${s.name_truncated ? `… [${s.asset_key?.slice(0, 8)}]` : ''}`}
-          stroke={['#0ea5e9', '#16a34a', '#dc2626', '#d97706', '#7c3aed'][i % 5]} dot={false} connectNulls={false} />)}
-      </LineChart></ResponsiveContainer></>}
+          stroke={carrierColour(null, i)} legendType="plainline" strokeDasharray={seriesDash(i + Math.floor(i / 4))} dot={false} connectNulls={false} />)}
+      </LineChart></ResponsiveContainer></ChartFrame>}
   </section>
 }
