@@ -162,6 +162,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A difference or ratio of two finite figures is checked for a finite RESULT too (a tiny divisor, opposite extremes), not only for finite inputs. Under allow_nan=False an inf is a 500 (#1392 T2, GK B (48)).
 - A survivor called "equivalent" because two quantities "never equal" is checked against what the guard actually compares (e.g. a clamped min(), not the raw value). A card sentence behind such a guard is pinned both absent and present (#1398 A1, GK B (48)).
 - A scheduled trigger that checks "not yet fired" and then creates a job carries a unique fire key, or takes the check and create under one cross-process lock. A one-live-job index does not stop a second job once the first settles. Test the race (#1401 T1, GK B (48)).
+- A PR that adds or renames run-profile levers runs `test_harness_run_monitor` at the trial merge. Its envelope-words test catches a lever name with no NAME_WORDS entry (#1398, GK B (48)).
 
 ## Engineering rules
 
