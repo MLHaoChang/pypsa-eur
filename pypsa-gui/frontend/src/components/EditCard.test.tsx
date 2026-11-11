@@ -455,3 +455,17 @@ it('RP-20 (UX #1396): the unrecorded-series card names 5 series then "(N more)";
   expect(editCardHeader({ ...base, tool: 'confirm_unrecorded_series', rows: rows.slice(0, 5) } as unknown as EditCard))
     .toBe(`Profiles › ${names(5)}`)
 })
+
+it('RP-20 (GK B #1396): a 250-series card caps only its scope line; the table shows all 250 rows and digests', () => {
+  const code = (i: number) => i.toString(16).padStart(16, '0')
+  const rows = Array.from({ length: 250 }, (_, i) => ({ component_class: 'Generator', name: `wind_${i + 1}`,
+    field: 'provenance', label: 'Series record', old: `no record · values ${code(i)}`, old_code: code(i),
+    new: "the network's own", unit: '', role: 'typed',
+    target: { section: 'profiles', panel: 'timeseries', component: 'Generator', entity: `wind_${i + 1}`, field: 'provenance' } }))
+  const big = { ...card, tool: 'confirm_unrecorded_series', section: { id: 'profiles', label: 'Profiles' }, rows }
+  render(<EditCardTable card={big as unknown as EditCard} guided />)
+  expect(screen.getByTestId('chat-edit-header').textContent).toMatch(/ \(245 more\)$/)
+  const shown = screen.getAllByTestId('chat-edit-row-typed')
+  expect(shown).toHaveLength(250)
+  expect(shown.map(r => within(r).getByTestId('chat-edit-code').textContent)).toEqual(rows.map((_, i) => code(i)))
+})
