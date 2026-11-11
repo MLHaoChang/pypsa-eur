@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import pathlib
 import re
 import secrets
@@ -194,13 +195,17 @@ def _valid_id(chart_id: Any) -> str:
 
 
 def _file(project_dir: pathlib.Path, chart_id: str, suffix: str) -> pathlib.Path:
-    # The name comes only from the fullmatch-checked id; the resolved parent must
-    # be `<project>/reports/_charts` itself (not a link out of the project).
-    path = charts_dir(project_dir) / f"{_valid_id(chart_id)}{suffix}"
-    root = pathlib.Path(project_dir).resolve() / "reports" / CHARTS_DIRNAME
-    if path.parent.resolve() != root:
+    # Only the parent is resolved (a record that is itself a link stays a link,
+    # so it can be seen and removed as one). It must be `<project>/reports/
+    # _charts` itself, not a link out of the project, and the file a direct
+    # child of it. Realpath plus a prefix check, inline: the form CodeQL reads
+    # as a py/path-injection barrier, as `store.clear_closing` spells it.
+    root = os.path.realpath(charts_dir(project_dir))
+    expected = os.path.join(os.path.realpath(project_dir), "reports", CHARTS_DIRNAME)
+    target = os.path.normpath(os.path.join(root, f"{_valid_id(chart_id)}{suffix}"))
+    if root != expected or not target.startswith(root + os.sep):
         raise ChartNotFound("no such chart")
-    return path
+    return pathlib.Path(target)
 
 
 def _regular(path: pathlib.Path) -> bool:

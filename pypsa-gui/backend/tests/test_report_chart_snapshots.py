@@ -1498,3 +1498,27 @@ def test_k2_save_as_snapshot_and_restore_carry_no_charts(
     r = client.post("/api/projects/k2-copy")
     assert r.status_code == 200, r.text[:200]
     assert not cs.charts_dir(project_storage_dir("k2-copy")).exists()
+
+
+def test_a_project_dir_whose_charts_dir_links_out_is_refused_by_every_entry(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "c1.json").write_text("{}")
+    (outside / "c1.png").write_bytes(b"x")
+    proj = tmp_path / "p"
+    (proj / "reports").mkdir(parents=True)
+    (proj / "reports" / cs.CHARTS_DIRNAME).symlink_to(outside, target_is_directory=True)
+    for call in (cs._load, cs.delete, cs.png_bytes):
+        with pytest.raises(cs.ChartNotFound):
+            call(proj, "c1")
+    assert (outside / "c1.json").exists() and (outside / "c1.png").exists()
+
+
+def test_a_file_path_never_leaves_the_charts_dir_whatever_the_id_or_suffix(tmp_path):
+    proj = tmp_path / "p"
+    (proj / "reports" / cs.CHARTS_DIRNAME).mkdir(parents=True)
+    for bad in ("../x", "..", "a/b", "/etc/passwd"):
+        with pytest.raises(cs.ChartNotFound):
+            cs._file(proj, bad, ".json")
+    with pytest.raises(cs.ChartNotFound):
+        cs._file(proj, "c1", "/../../x")
