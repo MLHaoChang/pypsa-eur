@@ -335,6 +335,7 @@ def test_a_different_declaration_is_a_different_version_hash(
     hashes = []
     for i, d in enumerate((doc, declared)):
         root = tmp_path / str(i)
+        root.mkdir()  # a report writer never makes its project directory (07f-a)
         store.create_report(root, d)
         hashes.append(store.version_sha256(root, d.report_id, d.version))
     assert hashes[0] != hashes[1]
