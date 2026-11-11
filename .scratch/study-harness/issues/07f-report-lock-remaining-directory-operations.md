@@ -3,7 +3,7 @@
 
 # 07f — Whole-directory operations that still bypass the report lock
 
-Status: ready-for-agent
+Status: done (07f-a #1373, 07f-b #1390)
 Type: task
 Gated: yes (GK B)
 Split from: [07e](07e-report-copies-take-the-report-lock.md), GK B (43)'s finding F3 on #1345
