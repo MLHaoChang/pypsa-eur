@@ -25,7 +25,7 @@ substring of the old text: `baseline_drops`, `no_baseline_plan`,
 No code parses the gate's reason text. The reason travels as a string field
 of the gate record; these are the places it is read:
 
-| Reader | What it does with the reason | Test (`tests/test_run_profile_microgrid.py`) |
+| Reader | What it does with the reason | Test (`tests/test_run_ic_words_and_counts.py`) |
 |---|---|---|
 | `run_gates.evaluate` (the gate record, `run.stages.result_gate.gate.rules[].reason`) | stores it beside the typed state | `test_the_gate_keeps_the_typed_state_and_gives_the_reason_in_words` |
 | `assistant_tasks._run_view` (the chat tool `get_task` and the run monitor's view) | copies it to the stage's `gate` entry | `test_the_words_reach_the_task_view_the_chat_tool_and_the_monitor_read` |

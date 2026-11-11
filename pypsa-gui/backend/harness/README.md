@@ -1664,6 +1664,14 @@ archetype `off_grid` the template card's.
   duration from 1 h up to twice the template's (h). An edit entry may carry
   `unit` and `source`; the card text shows them, and a narrowed envelope
   keeps the profile's.
+- **Not evaluated (G8, all profiles).** `run_handoff.checks` counts the result
+  gate's rules by verdict and names each one not evaluated. "Stated targets"
+  is `partly`, never `covered`, while one is (the data-centre, H2 hub and
+  microgrid profiles' warn rules; eh_site has none). The report's harness
+  chapter carries the counts.
+- **Reason words (G5).** `ic.baseline_keeps` keeps its typed state as the
+  value; its reason is `ic.reason_words`, with words for
+  `baseline_drops:<asset>` and `no_baseline_plan`.
 - **Stage files.** The `harness/workflows/profiles/eh_microgrid*` stage
   instructions come with 12c's second PR. Until then an agent turn on these
   profiles has no instruction and does not run.
