@@ -1351,3 +1351,312 @@ def test_a_lole_loop_with_no_solve_left_is_not_evaluated_with_words(tmp_path):
         and result["facts"][0]["value"] == "budget_spent"
     )
     assert "never counts as met" in result["reason"]
+
+
+# ── Edges the mutant run found unpinned ──────────────────────────────────────
+
+
+def test_a_full_loop_that_did_not_converge_ends_the_stage_not_converged(tmp_path):
+    """Q4, the contrast on the stage: the loop had all its solves, so the
+    final gate ends on `not_converged`, never on the cap."""
+    path, lole, _ = _capped_lole(tmp_path)
+    task = json.loads(path.read_text())
+    task["steps"].append(_looped(lole, lole["engine"]["max_solves"]))
+    [result] = run_gates.evaluate([lole], run_gates.Env(task, None, None, None))
+    task["run"]["stage"] = "result_gate"
+    task["run"]["stages"]["result_gate"] = {"status": "active", "attempts": 1}
+    gate = {"verdict": "fail", "rules": [result]}
+    assert (
+        run_loops.after_failed_result(
+            path, task, gate, run_profiles.resolve("eh_microgrid@1")
+        )
+        is False
+    )
+    assert task["run"]["stages"]["result_gate"]["reason"] == "not_converged"
+
+
+def test_a_met_loop_on_fewer_solves_than_the_rule_allows_still_passes(tmp_path):
+    """Q4: only a loop that ran out (`budget_exhausted`) on a cut grant is
+    read as capped; one that met its target on fewer solves is met."""
+    lole = _rules("eh_microgrid@1")["eh.adequacy.lole"]
+    task = {"steps": [_looped(lole, 1, status="met")]}
+    assert 1 < lole["engine"]["max_solves"]
+    [result] = run_gates.evaluate([lole], run_gates.Env(task, None, None, None))
+    assert result["verdict"] == "pass", result
+    assert result["facts"][0]["value"] != run_gates.LOOP_BUDGET_SPENT
+
+
+def _stress_task(*frozen_links, superseded=None):
+    steps = [
+        {
+            "id": f"solve.{i + 2}",
+            "tool": "run_eh_study",
+            "status": "completed",
+            "frozen": (
+                {"contingencies": {"count": len(links), "links": list(links)}}
+                if links is not None
+                else {}
+            ),
+            **({"superseded": True} if i == superseded else {}),
+        }
+        for i, links in enumerate(frozen_links)
+    ]
+    return {"steps": steps}
+
+
+def _stress_rows(*names):
+    return [
+        {"contingency": c, "status": "ok", "critical_unserved_mwh": 0.0} for c in names
+    ]
+
+
+@pytest.mark.parametrize("flag", ["budget_exhausted", "aborted"])
+def test_a_stress_that_named_all_k_but_stopped_early_is_never_read(
+    hub, monkeypatch, flag
+):
+    """Q1-i: rows for every contingency, but the stress says it ran out
+    (`budget_exhausted`) or was cut (`aborted`): partial, never a pass."""
+    rule = _rules("eh_microgrid@1")["mg.island.critical_served"]
+    task = _stress_task(["subsea_tie", "tie_2"])
+    payload = {"contingencies": _stress_rows("subsea_tie", "tie_2"), flag: True}
+    MG._eh(monkeypatch, {"status": "ok", "note": None, "payload": payload})
+    [result] = run_gates.evaluate([rule], MG._env(hub, task))
+    assert (
+        result["verdict"] == "not_evaluated"
+        and result["facts"][0]["value"] == "partial"
+    ), result
+    assert run_gates.passed([result]) is False
+
+
+def test_a_stress_of_a_study_that_counted_no_contingencies_is_read_as_it_stands(
+    hub, monkeypatch
+):
+    """G1: a study frozen without a K (none held) reads its stress rows as
+    they stand; only a held K can make them partial."""
+    rule = _rules("eh_microgrid@1")["mg.island.critical_served"]
+    task = _stress_task(None)
+    payload = {"contingencies": _stress_rows("subsea_tie")}
+    MG._eh(monkeypatch, {"status": "ok", "note": None, "payload": payload})
+    [result] = run_gates.evaluate([rule], MG._env(hub, task))
+    assert result["verdict"] == "pass" and result["facts"][0]["value"] == 0.0, result
+
+
+def test_a_superseded_eh_step_holds_no_k_for_the_stress(hub, monkeypatch):
+    """G1: the K is the latest current EH step's; a superseded one, with
+    another K, is history and never makes the stress partial."""
+    rule = _rules("eh_microgrid@1")["mg.island.critical_served"]
+    task = _stress_task(["subsea_tie", "tie_2"], ["subsea_tie"], superseded=1)
+    payload = {"contingencies": _stress_rows("subsea_tie", "tie_2")}
+    MG._eh(monkeypatch, {"status": "ok", "note": None, "payload": payload})
+    [result] = run_gates.evaluate([rule], MG._env(hub, task))
+    assert result["verdict"] == "pass" and result["facts"][0]["value"] == 0.0, result
+
+
+def test_a_profile_that_counts_no_contingencies_has_no_k_on_its_card(tmp_path):
+    """G1: `counted` is None for any profile but the microgrid's, and its
+    proposed card shows no K line."""
+    profile = run_profiles.resolve("eh_site@1")
+    held = run_envelope.counted(profile, _ctx(tmp_path))
+    assert held is None
+    path, task = _task(tmp_path, "eh_site@1")
+    envelope = run_envelope.propose(path, task, profile, held)
+    assert "contingencies" not in envelope
+    assert "islanding contingenc" not in run_envelope.describe(envelope)["detail"]
+
+
+def test_a_k_whose_one_pass_is_exactly_the_cap_is_still_offered(tmp_path):
+    """Q1-ii: K = 16, one pass is 1 + (2 + 16) + 1 = 20, the cap itself:
+    offered (capped), never refused."""
+    n = T.build_eh_microgrid()
+    for i in range(15):
+        _second_tie(n, f"tie_{i + 2}")
+    held = run_envelope.counted(
+        run_profiles.resolve("eh_microgrid@1"), _ctx(tmp_path, network=n)
+    )
+    assert held["count"] == 16 and run_profiles.mg_pass_solves(16) == 20
+    assert "refused" not in held and held["solves"] == run_envelope.CAPS["solves"]
+
+
+def test_the_card_names_the_contingency_links_and_the_budget_k_sets(tmp_path):
+    """G1, Q1-iii: K = 2 on the card names both links, and its budget line is
+    the K's budget held to the cap (20), not the profile's own (19)."""
+    profile = run_profiles.resolve("eh_microgrid@1")
+    n = T.build_eh_microgrid()
+    _second_tie(n)
+    held = run_envelope.counted(profile, _ctx(tmp_path, network=n))
+    assert (held["needed"], held["solves"]) == (22, 20)
+    assert profile["envelope"]["budget"]["solves"] == 19
+    path, task = _task(tmp_path)
+    run_envelope.propose(path, task, profile, held)
+    envelope = run_envelope._load(path)  # K stored on disk at propose
+    assert envelope["contingencies"] == held
+    detail = run_envelope.describe(envelope)["detail"]
+    assert (
+        "K = 2 islanding contingencies on this project (subsea_tie, second_tie)"
+        in detail
+    )
+    assert "- Up to 20 solves" in detail
+
+
+@pytest.mark.parametrize("ties", [1], indirect=True)
+def test_k_is_stored_at_propose_and_a_later_k_on_the_card_is_the_one_granted(
+    session, site, detached, ties
+):
+    """G1: propose on the run's open project stores K on disk; K changed
+    after it, the card read again shows (and stores) the new K, and the grant
+    then holds it."""
+    from tests.test_harness_envelope import envelope_of
+    from tests.test_harness_run_skeleton import start
+    from tests.test_harness_runner import task_path
+
+    task = start(run={"profile": "eh_microgrid@1", "mode": "stepwise"})
+    path = task_path(site[1], task)
+    assert envelope_of(path)["contingencies"]["count"] == 2
+    _second_tie(_live().network, "late_tie")
+    card = run_envelope.read_for_card(path, json.loads(path.read_text()))
+    assert "K = 3 islanding contingencies" in card["detail"]
+    assert envelope_of(path)["contingencies"]["count"] == 3
+    # The brief reviewed again on the new inputs (SC-11), so only K is at stake.
+    record = json.loads(path.read_text())
+    record["fingerprint"] = assistant_tasks._fingerprint()
+    path.write_text(json.dumps(record))
+    run_envelope.decide(
+        session, task["task_id"], "unattended", goal=task["envelope"]["goal"]
+    )
+    envelope = envelope_of(path)
+    assert envelope["state"] == "granted"
+    assert envelope["contingencies"]["count"] == 3
+    assert envelope["budget"]["solves"] == run_envelope.CAPS["solves"]
+
+
+@pytest.mark.parametrize("ties", [1], indirect=True)
+def test_the_grant_is_refused_while_k_cannot_be_counted(session, site, detached, ties):
+    """G1: no critical bus, so K cannot be counted: the card says so and the
+    grant is refused by its kind, even with the card read just before."""
+    from fastapi import HTTPException
+
+    from tests.test_harness_run_skeleton import start
+    from tests.test_harness_runner import task_path
+
+    task = start(run={"profile": "eh_microgrid@1", "mode": "stepwise"})
+    path = task_path(site[1], task)
+    _live().network.buses["eh_critical"] = False
+    card = run_envelope.read_for_card(path, json.loads(path.read_text()))
+    assert card["contingencies"]["count"] is None
+    assert "cannot be counted now" in card["detail"]
+    with pytest.raises(HTTPException) as exc:
+        run_envelope.decide(
+            session, task["task_id"], "unattended", goal=task["envelope"]["goal"]
+        )
+    assert exc.value.detail["error_kind"] == "eh_contingencies"
+    assert run_envelope._load(path)["state"] == "proposed"
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"unit": 5},
+        {"source": ["template"]},
+        {"why": "an unknown key"},
+    ],
+)
+def test_an_edit_with_an_unknown_key_or_a_unit_that_is_not_words_is_invalid(entry):
+    """G4: an edit names only its known keys; its unit and source are words."""
+    block = run_profiles.resolve("eh_microgrid@1")["envelope"]
+    with pytest.raises(run_envelope.EnvelopeError):
+        run_envelope.check_block({**block, "edits": [{**block["edits"][0], **entry}]})
+
+
+def test_the_freeze_takes_a_k_whose_solves_are_exactly_those_left(tmp_path):
+    """G1: K = 1 needs 2 + 1 = 3 solves; with exactly 3 left it freezes."""
+    frozen = run_eh.freeze(_ctx(tmp_path), run_profiles.resolve("eh_microgrid@1"), 3)
+    assert frozen["args"]["budget_solves"] == 3
+
+
+def test_no_critical_bus_or_an_unreadable_dtc_config_refuses_the_freeze(
+    tmp_path, monkeypatch
+):
+    """G1: no contingency the stress can run, or none readable, is a
+    FreezeError with words, never a crash."""
+    from services.adequacy import eh_study
+
+    profile = run_profiles.resolve("eh_microgrid@1")
+    n = T.build_eh_microgrid()
+    n.buses["eh_critical"] = False
+    with pytest.raises(run_eh.FreezeError, match="no islanding contingency"):
+        run_eh.freeze(_ctx(tmp_path, network=n), profile, 19)
+
+    def broken(*a, **kw):
+        raise KeyError("dtc")
+
+    monkeypatch.setattr(eh_study, "derive_dtc_config", broken)
+    with pytest.raises(run_eh.FreezeError, match="cannot be read"):
+        run_eh.freeze(_ctx(tmp_path), profile, 19)
+
+
+def _short_pass(tmp_path, **grant):
+    profile = run_profiles.resolve("eh_microgrid@1")
+    frozen = run_eh.freeze(_ctx(tmp_path), profile, run_profiles.MG_BUDGET_SOLVES)
+    steps = run_profiles.materialise(profile, "solve", PROJECT)
+    run_eh.fill(steps, frozen)
+    path, _ = _task(tmp_path)
+    _grant(path, budget={**profile["envelope"]["budget"], "solves": 3}, **grant)
+    return path, steps
+
+
+def test_pass_short_checks_only_a_granted_run_with_a_counted_eh_step(tmp_path):
+    """Q1-i: a granted pass of 5 solves with 3 left is short; the same steps
+    with no counted EH step, or a run step by step, are not checked here."""
+    path, steps = _short_pass(tmp_path)
+    assert run_eh.pass_short(path, steps) == (5, 3)
+    uncounted = copy.deepcopy(steps)
+    for s in uncounted:
+        if run_eh.is_eh_step(s):
+            s["frozen"].pop("contingencies")
+    assert run_eh.pass_short(path, uncounted) is None
+    (tmp_path / "stepwise").mkdir()
+    path2, steps2 = _short_pass(tmp_path / "stepwise", state="proposed")
+    assert run_eh.pass_short(path2, steps2) is None
+
+
+def _eh_step(frozen):
+    return {
+        "id": "solve.2",
+        "tool": "run_eh_study",
+        "args": dict(frozen["args"]),
+        "frozen": frozen,
+        "status": "pending",
+        "attempt_id": "a1",
+    }
+
+
+def test_a_frozen_k_whose_count_is_not_its_links_is_never_admitted(tmp_path):
+    """G1: the shown count is its own links' count, or the args are not the
+    card's (`eh_args`); nothing is reserved."""
+    ctx = _ctx(tmp_path)
+    frozen = run_eh.freeze(
+        ctx, run_profiles.resolve("eh_microgrid@1"), run_profiles.MG_BUDGET_SOLVES
+    )
+    frozen["contingencies"]["count"] = 2
+    path, task = _task(tmp_path)
+    _grant(path, eh_study=frozen)
+    step = _eh_step(frozen)
+    kind, _ = run_eh.admit(path, task, step, step["args"], ctx)
+    assert kind == run_eh.ARGS_KIND
+    assert not [a for a in run_envelope._load(path)["audit"] if "reserved" in a]
+
+
+def test_a_changed_k_refusal_names_the_links_the_project_has_now(tmp_path):
+    """G1: the refusal says what the card showed and the project's new links."""
+    ctx = _ctx(tmp_path)
+    frozen = run_eh.freeze(
+        ctx, run_profiles.resolve("eh_microgrid@1"), run_profiles.MG_BUDGET_SOLVES
+    )
+    path, task = _task(tmp_path)
+    _grant(path, eh_study=frozen)
+    _second_tie(ctx.network)
+    step = _eh_step(frozen)
+    kind, message = run_eh.admit(path, task, step, step["args"], ctx)
+    assert kind == run_eh.CONTINGENCY_KIND
+    assert "showed 1 islanding contingencies (subsea_tie)" in message
+    assert "the project now has 2 (subsea_tie, second_tie)" in message
