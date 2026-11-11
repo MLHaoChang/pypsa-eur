@@ -1829,7 +1829,9 @@ def test_undo_after_a_first_save_retires_exactly_that_item(client, proj):
     assert status == {a["id"]: "retired", other["id"]: "confirmed"}
 
 
-def test_a_user_with_no_org_is_offered_no_save_and_save_refuses(client, proj, monkeypatch):
+def test_a_user_with_no_org_is_offered_no_save_and_save_refuses(
+    client, proj, monkeypatch
+):
     """Save's own org rule, so `saveable` stays exactly where Save succeeds (A1)."""
     from services import memory_store as M
 
