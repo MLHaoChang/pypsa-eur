@@ -3,7 +3,7 @@
 
 # Slice 2: reusable parameter suggestions
 
-Status: ready-for-agent (03a in progress, 03b after it)
+Status: done (03a #1347; 03b #1386)
 Blocked by: 02
 Type: feature
 Model: Opus. Reviewers: GK B, and UX for the UI.
