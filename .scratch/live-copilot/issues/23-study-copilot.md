@@ -3,7 +3,7 @@
 
 # LC-23 — study copilot: goal → study brief → approved steps → Hand-off
 
-Status: folded into the study harness (owner decision SH-FOLD-1, 2026-10-28): the core continues as `.scratch/study-harness/issues/01-run-skeleton-eh-site.md`; slice 3 (plan card UI) → `.scratch/study-harness/issues/08-run-monitor-and-envelope-card.md`; slice 4 (hand-off) → `.scratch/study-harness/issues/07-report-handoff-and-pilot.md`. Its cases SC-01–SC-16 stay binding there.
+Status: done (core study-harness 01, plan card 08, hand-off 07 #1257; SH-FOLD-1; SC-01 to SC-16 bind there)
 Previous status: design (phase 1), awaiting gatekeeper plan OK and UX placement OK
 Progress: Slices 1 (#573) and 2 (#582) merged; slice 3 plan card UI and slice 4 hand-off not on master.
 Type: task
@@ -184,3 +184,9 @@ UX gate conditions for slice 3 (UX reviewer, 2026-10-21, on `3889eafe`):
 
 S02 (unsupported dynamics goal) is the native refusal already in
 `find_capabilities`/catalogue support and stays a test of slice 1.
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: study-harness 01, 08 and 07 are done. Verdict: done.

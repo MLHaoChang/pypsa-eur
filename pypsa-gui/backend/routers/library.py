@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session as DBSession
 from db.models import Organization, User
 from db.session import get_db
 from deps import require_user
-from models.commercial import LibraryItemRef, PriceSeriesRef, tariff_payload_resolved
+from models.commercial import LibraryItemRef, PriceSeriesRef
 from services import library_acl
 from services.library import items as I
 from services.library import series_io
@@ -319,6 +319,8 @@ def put_item(kind: ItemKind, name: str, body: ItemIn, org_id: UUID | None = None
         raise HTTPException(409, {"code": "library_item_common_readonly", "message": str(exc)}) from exc
     except I.TariffCurrencyRequired as exc:
         raise HTTPException(422, _currency_required(exc)) from exc
+    except I.TariffStampUnreadable as exc:
+        raise HTTPException(422, {"code": exc.code, "message": str(exc)}) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -350,8 +352,10 @@ def get_item(kind: ItemKind, name: str, version: int | None = None,
         raise HTTPException(409, {"code": "library_ref_stale", "message": str(exc)}) from exc
     if kind == ItemKind.tariff:
         # The stored form leaves out a currency the jurisdiction implies; a read states it
-        # (GK B C2, gridspine-library-eu 01).
-        payload = tariff_payload_resolved(payload)
+        # (GK B C2, gridspine-library-eu 01), and a generic pack copy's stamped one (05).
+        from services.commercial.binding import tariff_payload_read
+
+        payload = tariff_payload_read(payload)
     return ItemOut(ref=ref, payload=payload, meta=I.item_meta(db, org, ref))
 
 

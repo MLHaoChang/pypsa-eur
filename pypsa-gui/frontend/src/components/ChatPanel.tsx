@@ -1,6 +1,8 @@
 import { navigationEpoch, manualNavigation } from '../utils/navigationEpoch'
 import AssistantResultCard, { SCENE_APPLY_OUTCOME_UNKNOWN, SCENE_UNKNOWN_KEY } from './AssistantResultCard'
 import { TOOL_OUTCOME_DENIED_DETAIL_WORDS } from './activityWords'
+import { ChangeSetReceiptCard, changeSetItemLabel, changeSetOf, changeSetReceiptOf, changeSetReceiptText,
+  settledChangeSet } from './ChangeSetCard'
 import EnvelopeSection, { type EnvelopeVerdict } from './runMonitor/EnvelopeSection'
 import { runUnderReview } from './runMonitor/planReview'
 import { UNATTENDED_BLOCK_WORDS } from './runMonitor/runWords'
@@ -182,6 +184,7 @@ interface ToolPendingFrame {
   edit_card?: unknown
   sweep_card?: unknown
   repeat_card?: unknown
+  change_set?: unknown
   external?: { server: string }
 }
 
@@ -702,6 +705,8 @@ export const KIND_COPY: Record<
   project_exists: { title: 'Project name already exists' },
   descendants_exist: { title: 'Project has descendants' },
   confirmation_expired: { title: 'Confirmation expired' },
+  // Study harness 37: a grant whose intake digest is not the card's (the inputs changed since it was shown).
+  intake_stale: { title: 'The inputs changed: review them again' },
   // Chat harness issue 18: approvals fail closed when they cannot be recorded.
   approval_unavailable: {
     title: 'Approval could not be recorded',
@@ -1500,6 +1505,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
   // rehydrated into a transcript.
   const [historyGap, setHistoryGap] = useState<number>(0)
   const [interruptedTurn, setInterruptedTurn] = useState<InterruptedTurn | null>(null)
+  // LC-47: the open change set's row labels and each failed row's reason, for its receipt.
+  const changeSetRef = useRef<{ labels: Record<string, string>; reasons: Record<string, string>; token: string }>({ labels: {}, reasons: {}, token: '' })
 
   // Reset chat state on project switch (mirrors simulationStore pattern).
   useEffect(() => {
@@ -2312,8 +2319,30 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           edit_card: d.edit_card,
           sweep_card: d.sweep_card,
           repeat_card: d.repeat_card,
+          change_set: d.change_set,
           external: d.external,
         })
+        // LC-47: the receipt names each row as the card did.
+        const set = changeSetOf(d.change_set)
+        if (set) {
+          changeSetRef.current = {
+            labels: Object.fromEntries(set.items.map(i => [i.tool_use_id, changeSetItemLabel(i)])), reasons: {},
+            token: d.confirmation_token,
+          }
+        }
+        break
+      }
+      case 'change_set_receipt': {
+        const receipt = changeSetReceiptOf(_frame_data<unknown>(frame))
+        const { labels, reasons, token } = changeSetRef.current
+        changeSetRef.current = { labels: {}, reasons: {}, token: '' }
+        const card = useChatStore.getState().pending
+        // Cancel all, the card's own timeout and Stop each withdrew this card and said their line already.
+        if (!receipt || (token && useChatStore.getState().messages.some(m => m.change_set_receipt?.token === token))) break
+        // A set the server settled on its own (timed out, withdrawn) takes its card with it.
+        if (card?.change_set !== undefined) setPending(null)
+        appendMessage({ role: 'tool', content: changeSetReceiptText(receipt),
+          change_set_receipt: { receipt, labels, reasons } })
         break
       }
       case 'tool_progress': {
@@ -2421,6 +2450,11 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           const tool_result = sceneUnknown ? { ...outcomeBlock, [SCENE_UNKNOWN_KEY]: true } : outcomeBlock
           const outcome = outcomeBlock && d.tool_name ? toolOutcomeOf(outcomeBlock, d.tool_name) : null
           const why = outcome ? refusalDetail(short, d.error_kind) : null
+          // LC-47 (UX C6): a change-set row's reason goes on its row of the receipt.
+          if (d.tool_use_id && d.tool_use_id in changeSetRef.current.labels) {
+            const reason = refusalDetail(short, d.error_kind)
+            if (reason) changeSetRef.current.reasons[d.tool_use_id] = reason.replace(/\.$/, '')
+          }
           appendMessage({
             role: 'tool',
             content: outcome && d.tool_name
@@ -2999,12 +3033,18 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
     // P25 re-gate note 1: Stop ends the card run too — nothing a card
     // queued is sent after the user stopped.
     useChatStore.setState({ requestQueue: [] })
+    // LC-47 (UX C4): Stop with a change-set card open withdraws it; no row was applied.
+    const openCard = useChatStore.getState().pending
+    if (openCard && (openCard.change_set !== undefined || openCard.tool_name === 'change_set')) {
+      setPending(null)
+      appendMessage(settledChangeSet('aborted', openCard.confirmation_token))
+    }
     if (!sessionId) return
     try {
       await postChatAbort(sessionId)
     } catch { /* idempotent */ }
     setStreaming(false)
-  }, [sessionId, setStreaming])
+  }, [sessionId, setStreaming, setPending, appendMessage])
 
   // SSE cleanup on unmount (CLAUDE.md rule) — but NOT while a turn is running.
   //
@@ -3621,7 +3661,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           // Issue 04 (S1b): a job tool's mark follows its `_outcome`.
           const outcomeNow = m.role === 'tool' ? currentToolOutcome(messages, index) : null
           // P26 item 6: Guided renders a declined card as one plain line.
-          const toolLine = m.role === 'tool' && uiMode === 'guided'
+          const setReceipt = changeSetReceiptOf(m.change_set_receipt?.receipt)
+          const toolLine = m.role === 'tool' && uiMode === 'guided' && !setReceipt
             ? (outcomeNow && m.tool_name ? guidedOutcomeLine(m.tool_name, outcomeNow) : guidedToolLine(m.content)) : null
           if (toolLine?.hidden) return null
           if (toolLine && m.tool_use_id && REQUEST_LINE.test(m.content)
@@ -3680,6 +3721,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
             {m.role === 'assistant'
               ? <ChatMarkdown>{m.content}</ChatMarkdown>
               : m.role === 'user' ? <UserMessageText message={m} />
+              : setReceipt ? <ChangeSetReceiptCard receipt={setReceipt} labels={m.change_set_receipt?.labels}
+                  reasons={m.change_set_receipt?.reasons} />
               // SC-07 S5b R6: a Site 3D open's row says only what the ACK has shown (UX (14) ask 1).
               : m.role === 'tool' && m.tool_use_id && site3dOpen[m.tool_use_id]
                 ? <Site3dOpenHeader state={site3dOpen[m.tool_use_id]} guided={uiMode === 'guided'} />

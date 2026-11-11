@@ -101,6 +101,31 @@ def resolved_tariff_currency(tariff) -> tuple[str | None, str | None]:
     return None, None
 
 
+def tariff_payload_read(payload):
+    """A stored tariff payload as an API read shows it (gridspine-library-eu 05): the
+    stated or implied currency (`models.commercial.tariff_payload_resolved`), else the
+    currency a `generic` pack copy's `pack_hash` stamp names, with
+    `currency_source: "stamp"`, the one the currency gate reads. A new dict: nothing
+    is written onto the tariff, and a write drops the echo (GK A G5-1). A pack that
+    cannot be read shows no currency and `currency_source: "pack_unreadable"`, never a
+    500 (G5-2); any other error propagates, and a bind or run still refuses (GLE3-1)."""
+    from models.commercial import Tariff, tariff_payload_resolved
+    from services.library.defaults_pack.loader import DefaultsPackError
+
+    out = tariff_payload_resolved(payload)
+    if not isinstance(out, dict) or out.get("currency") is not None:
+        return out
+    try:
+        tariff = Tariff.model_validate(out)
+    except ValueError:
+        return out
+    try:
+        cur, source = resolved_tariff_currency(tariff)
+    except DefaultsPackError:
+        return {**out, "currency_source": "pack_unreadable"}
+    return {**out, "currency": cur, "currency_source": source} if source == "stamp" else out
+
+
 def tariff_currency_mismatch(tariff, currency: str | None) -> str | None:
     """Why `tariff` cannot price a project in `currency` (the #499 `currency_mismatch`
     rule, gridspine-library-eu 01), or None: both known and equal, or either unknown.

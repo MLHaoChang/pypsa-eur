@@ -22,8 +22,10 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - Never run two mutant batches in one worktree at once: the edits cross-contaminate (#1246).
 - Run root `tests/` and `pypsa-gui/backend` tests in separate pytest invocations: mixing them fails on the `tests._shard` plugin.
 - A PR that adds an import of gridspine or another third-party module to `pypsa-gui/backend`: run `tests/test_packaging_requirements.py` at the trial merge (the frozen-app pin test; #707 missed it).
+- A pydantic custom error class (pydantic_core) imported in the backend is a new third-party import: run `tests/test_packaging_requirements.py` (#1350).
 
-- A PR that adds a route: run `test_route_chat_disposition`, `test_project_route_acl_policy` and `test_write_surface_lock_policy` at the trial merge (#725 and #741 both missed it).
+- A PR that adds a route: run `test_route_chat_disposition`, `test_project_route_acl_policy`, `test_write_surface_lock_policy` and `test_golden_coverage` at the trial merge (#725 and #741 both missed it; #1343's review missed the `ROUTE_SURFACES` row).
+- Review subagents that run at the same time each get their own scratch folder; a shared one let one overwrite another's mutant script (#1352).
 
 - A PR that touches project templates: check native byte-identity. Load `eh_templates` by path, `write_sidecars` into a temp dir per `TEMPLATE_META` id, and `filecmp` each file against `project_templates/<id>/`.
 
@@ -36,6 +38,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - Byte-identity against master's tests: copy master's test file into the PR worktree and run it there (a recording pytest plugin can capture rows). Running it from the master worktree imports master's code even with PYTHONPATH on the PR, because the rootdir wins.
 - A merge commit M has no hand resolution when `git merge-tree --write-tree M^1 M^2` equals `M^{tree}`.
 - A delta that only adds a test can still collide in CI order. Run the colliding files in CI's order without randomisation: red with the old file, then green at the head (#1311).
+- A test-only delta that "carries the OK" still gets a check of the files its PR renamed or moved code out of: grep the tests for frame names and monkeypatch targets of the moved functions (#1345: CI found `test_project_settings_autonomy` keyed on `_save_context`).
 
 ## Known container-only failures
 
@@ -89,6 +92,8 @@ A "never swallowed" test injects the module's own error class (e.g. `DefaultsPac
 
 Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded float for `Finite` (#1320 F1).
 - A cleanup that reads a render-time ref after unmount acts on stale state; read the store at cleanup (#1328 F5).
+- A fingerprint or "leaves the inputs alone" test reads the session's own context, never `get_active_context()` from the test thread, and is shown red under a writing mutant (#1353).
+- A unit guard compares the asset's real (bus) unit, never the catalogue unit with itself. A list, a card and the drawer show the same unit for the same field (#1347, #1353).
 
 ## Rulings
 
@@ -140,6 +145,12 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - An adequacy proof and its cost leg describe the same fleet. An extendable candidate with no size reads `not_shown`, never `fail` (#1172).
 - A grant freezes only what the card showed; a field the card did not show stays outside the grant (#1257 F1).
 - A 409 detail that changes from a string to an object is checked against every frontend consumer of that route (#1261 R1).
+
+- A directory close (`.closing`) covers every lock under `reports/`, including new report ids and side stores such as `_charts`; no writer under it uses `mkdir(parents=True)` (#1373 D1, #1378 K1, GK B (46)).
+- A test for a ticketed defect asserts only what holds under every fix the ticket allows, "refuse" included (#1372 L1, GK B (46)).
+- A card shows every value its approval digest binds; a list or series is never summarised as a count (#1379 F2, GK B (46)).
+- An apply-then-read with nothing moved reads fresh; stale compares against what was recorded at approval (#1375 D1, GK B (46)).
+- A linked quantity clashes with a ledger stream only when that stream prices the same quantity. A served load meets the bill (grid import) but not an EaaS fee (the same delivery). The bill must stay import-only, pinned by a test (BC-04 F1, GK B (47)).
 
 ## Engineering rules
 
@@ -197,7 +208,15 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - An out-of-scope or "not needed" tag is keyed on what the row is (the unused element's own rows), never on every row filed to the section; pin each template that reaches it (#1340).
 - A default used to excuse a changed value comes from the declared default, never inferred from neighbouring cells (#1331).
 - A `not_via_chat` keyword is a word only that feature owns; one hit attaches "do not look for another tool" (#1343 `headline`, #1347 `saved`).
+- A `not_via_chat` entry matches on a feature noun AND an ask word, with real tool-doable goals tested as non-hits. Excluding one word at a time does not converge (#1343 and #1347 took three rounds each).
+- A receipt row for an item that never ran has its own state; "not confirmed yet" is only for an item that reached its gate. An unticked row stays `unticked` and uncounted whatever stopped the set (#1352).
+- A strip or summary gate calls the answer path's own predicate, never one of its inputs (#1343: the profile list without the mode).
+- A cap on a list carries the true total, and every printed count comes from the total, never the list length (#1353).
 - A read-only route that reuses chat-path readers catches the chat path's exception set per item, so one busy lock degrades one card (#1343).
 - A PR that makes a lock's hold longer re-checks every waiter's bound on that lock (#1345).
 - A reviewer rule for visibility ("admin sees a nominated item") is not reused as a rule for use (#1347).
+- A solver ending is judged on its termination CONDITION, never on linopy's status: linopy maps time_limit, iteration_limit, suboptimal and imprecise to status "ok". Test with a real time limit, not a mocked ("warning", …) (#1361 F1).
+- A fuel-fed firm unit is bounded per input BUS: sum the draw of every port on one bus before dividing its fuel, and check every input port (bus0 and each busN with negative efficiencyN), not only bus0 (#1341 F1/D1).
+- A check that needs "the mainland" or "the island" defines the island from its own buses, never from a tag on one external bus (#1361 F3).
 - Review through a subagent: it reads the diff, runs the trial merge, tests and mutants, and returns file:line findings; the gatekeeper reads only the hunks those point at (GK B (42) and (43) each reached 300k in about 80 minutes).
+- One subagent per PR with a 30–40 line report costs about 10–15k of the gatekeeper's context per review. Re-review rounds are what add up, so ask the builder for one push and give the property plus the test, not the fix (GK B (44)).

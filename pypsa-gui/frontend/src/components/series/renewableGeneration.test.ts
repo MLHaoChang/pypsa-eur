@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReadinessRow } from '../../api/profiles'
-import { generateAndApply, notReadyReason, readyRows, waitForJob } from './renewableGeneration'
+import { generateAndApply, generatePending, notReadyReason, readyRows, waitForJob } from './renewableGeneration'
 
 const prof = vi.hoisted(() => ({ generate: vi.fn(), pending: vi.fn(), applyBatch: vi.fn() }))
 vi.mock('../../api/profiles', async () => {
@@ -50,5 +50,24 @@ describe('generation', () => {
       { technology: 'wind', generators: ['g_wind'], applied: 0, error: 'cds_credential' },
       { technology: 'solar', generators: ['g_pv'], applied: 1 },
     ])
+  })
+})
+
+describe('generatePending', () => {
+  it('posts the tuning params, waits for the job and applies nothing', async () => {
+    prof.generate.mockResolvedValue({ id: 'j1' })
+    prof.pending.mockResolvedValue({ pending: [{ job_id: 'j1' }], jobs: [], keep: 10 })
+    const id = await generatePending('P', 'wind', ['g_wind'], { preset: 'default', params: { losses: 0.1 } }, 0)
+    expect(id).toBe('j1')
+    expect(prof.generate).toHaveBeenCalledWith('P', { points: [], from_generators: ['g_wind'], technology: 'wind', preset: 'default', params: { losses: 0.1 } })
+    expect(prof.applyBatch).not.toHaveBeenCalled()
+  })
+
+  it('leaves generateAndApply posting no params', async () => {
+    prof.generate.mockResolvedValue({ id: 'j2' })
+    prof.pending.mockResolvedValue({ pending: [{ job_id: 'j2' }], jobs: [], keep: 10 })
+    prof.applyBatch.mockResolvedValue({ applied: [{}], count: 1, skipped: [] })
+    await generateAndApply('P', [row({})], 0)
+    expect(prof.generate).toHaveBeenCalledWith('P', { points: [], from_generators: ['g_wind'], technology: 'wind' })
   })
 })

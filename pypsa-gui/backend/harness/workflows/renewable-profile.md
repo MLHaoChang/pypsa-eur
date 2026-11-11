@@ -138,8 +138,11 @@ CDS credentials fails exactly the way the weather step describes).
 ## Step: apply
 
 One pending profile feeds one generator per call: `apply_generated_profile`
-with the job id and the component name. The write is undoable and goes
-through a confirmation card — tell the user that before calling. The point
+with the job id and the component name. When several generators have a
+pending profile, propose all of the step's applies in one response, one
+call per generator: the user gets one card with a tick box per generator and
+applies the ticked ones together. Each write is undoable and goes through
+that confirmation card — tell the user that before calling. The point
 feeding the component defaults to the component's own name, which is why
 the scope step named points after generators. Report the summary: hours
 written, weather year, mean and peak capacity factor, whether Feb 29 was

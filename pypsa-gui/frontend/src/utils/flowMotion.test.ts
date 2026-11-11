@@ -2,7 +2,7 @@
 // buckets, clamped, and the CSS it drives is one block.
 import { describe, it, expect } from 'vitest'
 import {
-  FLOW_BUCKET_PERIOD_S, FLOW_CYCLE_PX, FLOW_SPEED_BUCKETS, flowAnimationCss, flowClass, flowCycleValue, flowDirection,
+  FLOW_BUCKET_PERIOD_S, FLOW_CYCLE_PX, FLOW_SPEED_BUCKETS, flowAnimationCss, flowArrowAngle, flowClass, flowClassDirected, flowCycleValue, flowDirection,
   flowShare, flowSpeedBucket, flowWidth,
 } from './flowMotion'
 
@@ -58,5 +58,22 @@ describe('what an edge carries', () => {
     for (let b = 1; b <= 5; b++) expect(css).toContain(`.flow-b${b} { animation-duration: ${FLOW_BUCKET_PERIOD_S[b]}s; }`)
     for (let b = 1; b < 5; b++) expect(FLOW_BUCKET_PERIOD_S[b]).toBeGreaterThan(FLOW_BUCKET_PERIOD_S[b + 1])
     expect(css).toContain('@media (prefers-reduced-motion: reduce) { .canvas-flow { animation: none; } }')
+  })
+
+  it('flowClassDirected adds the reverse class only to a moving reverse flow', () => {
+    expect(flowClassDirected(3, 1)).toBe('canvas-flow flow-b3')
+    expect(flowClassDirected(3, -1)).toBe('canvas-flow flow-b3 canvas-flow-rev')
+    expect(flowClassDirected(0, -1)).toBe('')
+    expect(flowAnimationCss()).toContain(`.canvas-flow-rev { --flow-cycle: ${FLOW_CYCLE_PX}px; }`)
+  })
+
+  it('flowArrowAngle follows the segment at half the route length, turned for a reverse flow', () => {
+    // Short leg east (10), long leg south (100): the half-way point is on the south leg.
+    const route = [[0, 0], [10, 0], [10, 100]] as const
+    expect(flowArrowAngle(route, 5)).toBe(90)
+    expect(flowArrowAngle(route, -5)).toBe(-90)
+    expect(flowArrowAngle([[0, 0], [10, 0]], 1)).toBe(0)
+    expect(flowArrowAngle([[0, 0], [0, 0]], 1)).toBe(0)
+    expect(flowArrowAngle([], 1)).toBe(0)
   })
 })

@@ -110,6 +110,7 @@ from routers import (
     uploads,
     vintage,
 )
+from services.commercial import stamp_currency
 from services.pypsa_service import PyPSAService
 from services.site_scene.contract import SceneError
 from services.study.body_limit import StudyBodyLimitMiddleware
@@ -697,6 +698,10 @@ app = FastAPI(
     dependencies=[Depends(bind_active_project)],
 )
 
+# The Tariff model's defaults-pack stamp lookup (gridspine-library-eu 05, GK A G5-1):
+# a model module holds no service imports, so the app registers it, in any import order.
+stamp_currency.register()
+
 
 def _json_safe(obj):
     """Replace a non-finite float anywhere in ``obj`` with its repr string,
@@ -718,10 +723,22 @@ async def _request_validation_as_422(request: Request, exc: RequestValidationErr
     JSON encoder raises ``Out of range float values are not JSON compliant``
     while writing the 422 — so the client saw a 500 (measured live, S29.6).
     Same body FastAPI's default handler builds, with non-finite inputs
-    rendered as their repr."""
+    rendered as their repr. A tariff stamp refusal keeps its own kind
+    (gridspine-library-eu 05, GK A G5-1): pydantic reports any ValueError as
+    ``value_error``, so it is re-typed ``tariff_stamp_unreadable`` here."""
     return JSONResponse(
         status_code=422,
-        content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
+        content={"detail": _json_safe(jsonable_encoder(
+            [_typed_tariff_stamp_error(e) for e in exc.errors()]))})
+
+
+def _typed_tariff_stamp_error(err: dict) -> dict:
+    from models.commercial import TariffStampUnreadableError
+
+    cause = (err.get("ctx") or {}).get("error")
+    if not isinstance(cause, TariffStampUnreadableError):
+        return err
+    return {**err, "type": cause.code, "msg": str(cause)}
 
 
 @app.exception_handler(SceneError)

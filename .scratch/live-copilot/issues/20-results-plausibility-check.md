@@ -3,7 +3,7 @@
 
 # LC-20 — "do these results make sense?"
 
-Status: folded into the study harness (owner decision SH-FOLD-1, 2026-10-28): built as the result gate in `.scratch/study-harness/issues/05-result-gate-and-rerun-loop.md`; the rule list and done-when below stay its spec.
+Status: done (built as study-harness 05, #1123, SH-FOLD-1; plausibility box stays open, K #851)
 Previous status: ready-for-agent. Owner decision Q5 = A (2026-10-19): the first item
 Progress: Only interim rung (prompt chains pre-solve checks, says rules absent) merged; no native post-solve plausibility rule set or tool.
 after LC-05 closes, ahead of the other LC-06 work, with the interim rung
@@ -70,3 +70,9 @@ OJ-18 and OJ-19 pass in Tier A on `oj-grid` (clean) and `oj-grid-bad`
 (seeded defects, one per rule) with every finding traced to a fact; a
 fixture with no defects returns no warnings; LC-T19 extra-claim injection is
 withheld.
+
+## Comments
+
+### 2026-11-11: triage
+
+Checked on master: the study-harness 05 file is `done (#1123)`; the rule list lives in `run_gates.py`. Nothing left here that is not K #851. Verdict: done.

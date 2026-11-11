@@ -22,12 +22,13 @@ The seam has four parts, all keyed by the response's `tool_use_id`s:
   native read-back) is unchanged, so each row is read back on its own.
 - `receipt_frame` is one `change_set_receipt` frame after the batch. Each row
   is applied (verified and changed), unchanged (verified, nothing differed),
-  uncertain (not confirmed by read-back), failed, stale or unticked, plus a
+  uncertain (not confirmed by read-back), failed, stale, unticked or not_run
+  (the turn ended before the member's gate), plus a
   `landed` count. `all_applied` is true only when every ticked row landed.
 
 Destructive rows (deletes, imports), `CARD_ONLY_TOOLS`, memory proposals and
-requirements never join. Membership is off (`ENABLED`) until the card renders
-(LC-47 S2), so master never emits a frame the browser cannot show.
+requirements never join. `ENABLED` is the one switch: off, every call keeps
+its own card. The browser shows the card in `ChangeSetCard.tsx`.
 """
 
 from __future__ import annotations
@@ -37,7 +38,7 @@ import json
 from typing import Any
 from collections.abc import Callable, Generator, Iterable
 
-ENABLED = False
+ENABLED = True
 VERSION = 1
 TOOL = "change_set"
 SOURCE_ASSISTANT = "proposed by the assistant"
@@ -379,6 +380,8 @@ def _state(
                 "digest": i["digest"],
                 "ticked": i["tool_use_id"] in ticked,
                 "status": None,
+                "reached": False,
+                "args": i["args"],
                 "card": i["edit_card"],
                 "error_kind": None,
                 "label": i["edit_card"].get("says"),
@@ -478,6 +481,8 @@ def _still_shown(
     if item_digest(tool, args, fresh) == held_row["digest"]:
         return True
     shown = held_row["card"]
+    if args != held_row["args"]:
+        return False
     if fresh.get("binding") != shown.get("binding") or fresh.get(
         "complete"
     ) != shown.get("complete"):
@@ -530,6 +535,7 @@ def member_gate(
     state = session.change_set
     decision = state["decision"]
     token6 = state["token"][:6]
+    row["reached"] = True  # K7: from here on the member may write
     if decision == "approve" and not row["ticked"]:
         approvals.decided(
             session,
@@ -662,22 +668,54 @@ def note_error(session, tool_use_id: str, error_kind: str | None) -> None:
     row = held(session, tool_use_id)
     if row is None or row["status"] is not None:
         return
+    state = session.change_set
     row["error_kind"] = error_kind
-    row["status"] = {"change_unticked": "unticked", "edit_preview_stale": "stale"}.get(
-        error_kind or "", "failed"
-    )
+    if state["decision"] == "approve" and not row["ticked"]:
+        row["status"] = "unticked"  # whatever refused it, the user left it out
+        return
+    row["status"] = {
+        "change_unticked": "unticked",
+        "edit_preview_stale": "stale",
+        # Refused before the gate, with the turn ending: the call never ran.
+        "tool_call_cap_exceeded": _unreached(state, row),
+        "project_switched_mid_turn": _unreached(state, row),
+    }.get(error_kind or "", "failed")
+
+
+def _unreached(state: dict, row: dict) -> str:
+    """K7: a member the dispatch never brought to its gate (the turn ended
+    first: the tool-call cap, a project switch, an error). Nothing was
+    written, so a ticked, approved row reads `not_run`, never `uncertain`; a
+    set that was not approved reads as refused."""
+    return "not_run" if state["decision"] == "approve" else "failed"
 
 
 def observe(session, frames: Generator) -> Generator[tuple[str, dict], None, Any]:
-    """Pass a dispatch's frames through, noting each member's refusal."""
+    """Pass a dispatch's frames through, noting each member's refusal. A
+    dispatch that ends the turn itself gets the set's receipt first: the
+    client stops reading at `session_done`."""
     while True:
         try:
             event, payload = next(frames)
         except StopIteration as stop:
             return stop.value
+        except Exception:
+            # An error that escapes the dispatch ends the turn too: say first
+            # which rows landed and which never ran.
+            yield from _settle(session)
+            raise
         if event == "tool_error" and isinstance(payload, dict):
             note_error(session, payload.get("tool_use_id"), payload.get("error_kind"))
+        if event == "session_done":
+            yield from _settle(session)
         yield event, payload
+
+
+def _settle(session) -> Generator[tuple[str, dict], None, None]:
+    receipt = receipt_frame(session)
+    session.change_set = None
+    if receipt is not None:
+        yield "change_set_receipt", receipt
 
 
 def receipt_frame(session) -> dict | None:
@@ -688,11 +726,16 @@ def receipt_frame(session) -> dict | None:
     rows = []
     for tool_use_id in state["order"]:
         row = state["rows"][tool_use_id]
-        status = row["status"] or (
-            "uncertain"
-            if row["ticked"] and state["decision"] == "approve"
-            else "failed"
-        )
+        approved = state["decision"] == "approve"
+        if row["status"]:
+            status = row["status"]
+        elif approved and not row["ticked"]:
+            status = "unticked"
+        elif not row["reached"]:
+            status = _unreached(state, row)
+        else:
+            # A reached member with no receipt and no refusal may have written.
+            status = "uncertain" if approved else "failed"
         rows.append(
             {
                 "tool_use_id": tool_use_id,
