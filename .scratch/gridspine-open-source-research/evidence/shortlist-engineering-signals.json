@@ -1,0 +1,370 @@
+[
+  {
+    "repo": "NatLabRockies/BLAST-Lite",
+    "tree_sha": "b093495b47dc40dd96dba865d91f553619501e94",
+    "truncated": false,
+    "test_examples": [
+      "MATLAB BLAST-Lite/Functions/func_LifeMdl_UpdateStates.m"
+    ],
+    "workflows": [],
+    "package_files": [
+      "environment.yml",
+      "pyproject.toml"
+    ],
+    "tests_count_heuristic": 1,
+    "conventional_test_paths_count": 0,
+    "conventional_test_examples": [],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "oemof/oemof-demand",
+    "tree_sha": "3505f6d70288461d328fb4e4af1d2fc746fc1b9d",
+    "truncated": false,
+    "test_examples": [
+      "tests/test_config.py",
+      "tests/test_data/__init__.py",
+      "tests/test_data/config_test.ini",
+      "tests/test_elec_slp.py",
+      "tests/test_examples.py"
+    ],
+    "workflows": [
+      ".github/workflows/coverage.yml",
+      ".github/workflows/lint.yml",
+      ".github/workflows/packaging.yml",
+      ".github/workflows/tox_checks.yml",
+      ".github/workflows/tox_pytests.yml"
+    ],
+    "package_files": [
+      "pyproject.toml"
+    ],
+    "tests_count_heuristic": 8,
+    "conventional_test_paths_count": 7,
+    "conventional_test_examples": [
+      "tests/test_config.py",
+      "tests/test_data/__init__.py",
+      "tests/test_elec_slp.py",
+      "tests/test_examples.py",
+      "tests/test_particular_profiles.py",
+      "tests/test_tools.py",
+      "tests/test_vdi4655.py"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "NatLabRockies/pysam",
+    "tree_sha": "fa7ec34c4d0f9398db8f04a26ca0fd739be2d2ab",
+    "truncated": false,
+    "test_examples": [
+      "tests/test_BatteryTools.py",
+      "tests/test_GeothermalCosts.py",
+      "tests/test_LoadTools.py",
+      "tests/test_Pvsamv1Tools.py",
+      "tests/test_Reopt_sizing.py"
+    ],
+    "workflows": [
+      ".github/workflows/ci-linux.yml",
+      ".github/workflows/ci-macos.yml",
+      ".github/workflows/ci-windows.yml",
+      ".github/workflows/linter.yml"
+    ],
+    "package_files": [
+      "pyproject.toml",
+      "requirements.txt",
+      "setup.py"
+    ],
+    "tests_count_heuristic": 14,
+    "conventional_test_paths_count": 14,
+    "conventional_test_examples": [
+      "tests/test_BatteryTools.py",
+      "tests/test_GeothermalCosts.py",
+      "tests/test_LoadTools.py",
+      "tests/test_Pvsamv1Tools.py",
+      "tests/test_Reopt_sizing.py",
+      "tests/test_ResourceTools.py",
+      "tests/test_UtilityRateForecast.py",
+      "tests/test_UtilityRateTools.py"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "CURENT/andes",
+    "tree_sha": "eda5163c9ee8d19945a1dd5d1771fec5da608c27",
+    "truncated": false,
+    "test_examples": [
+      "andes/models/experimental/testmodel.py",
+      "tests/__init__.py",
+      "tests/extra_interop/__init__.py",
+      "tests/extra_interop/extra_test_gridcal.py",
+      "tests/extra_interop/extra_test_pandapower.py"
+    ],
+    "workflows": [
+      ".github/workflows/pythonapp.yml"
+    ],
+    "package_files": [
+      "pyproject.toml"
+    ],
+    "tests_count_heuristic": 50,
+    "conventional_test_paths_count": 49,
+    "conventional_test_examples": [
+      "tests/__init__.py",
+      "tests/extra_interop/__init__.py",
+      "tests/extra_interop/extra_test_gridcal.py",
+      "tests/extra_interop/extra_test_pandapower.py",
+      "tests/extra_interop/extra_test_pflow_matpower.py",
+      "tests/integration/__init__.py",
+      "tests/integration/test_api_ergonomics.py",
+      "tests/integration/test_case.py"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "HewlettPackard/sustain-cluster",
+    "tree_sha": "3f6ea95cb835b89ba50b0ef76d66d14b8037643e",
+    "truncated": false,
+    "test_examples": [
+      "data/electricity_prices/scripts/test_prices.py",
+      "tests/__init__.py",
+      "tests/test_env_setup.py",
+      "tests/test_model.py",
+      "tests/test_training_loop.py"
+    ],
+    "workflows": [
+      ".github/workflows/test.yml"
+    ],
+    "package_files": [
+      "requirements.txt"
+    ],
+    "tests_count_heuristic": 5,
+    "conventional_test_paths_count": 5,
+    "conventional_test_examples": [
+      "data/electricity_prices/scripts/test_prices.py",
+      "tests/__init__.py",
+      "tests/test_env_setup.py",
+      "tests/test_model.py",
+      "tests/test_training_loop.py"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "CATIA-Systems/FMPy",
+    "tree_sha": "e42e288f448830c5f146ae334b38e91d17ff19fa",
+    "truncated": false,
+    "test_examples": [
+      "tests/conftest.py",
+      "tests/container_fmu/test_feedthrough.py",
+      "tests/container_fmu/test_write_model_description.py",
+      "tests/run_ompython.py",
+      "tests/test_c_code.py"
+    ],
+    "workflows": [
+      ".github/workflows/build.yml"
+    ],
+    "package_files": [
+      "pyproject.toml"
+    ],
+    "tests_count_heuristic": 28,
+    "conventional_test_paths_count": 28,
+    "conventional_test_examples": [
+      "tests/conftest.py",
+      "tests/container_fmu/test_feedthrough.py",
+      "tests/container_fmu/test_write_model_description.py",
+      "tests/run_ompython.py",
+      "tests/test_c_code.py",
+      "tests/test_command_line.py",
+      "tests/test_common_functions.py",
+      "tests/test_cvode.py"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "NatLabRockies/PRAS",
+    "tree_sha": "70e92f44f5c511ab609efd12c4f5001286197215",
+    "truncated": false,
+    "test_examples": [
+      "PRAS.jl/test/runtests.jl",
+      "PRASCapacityCredits.jl/test/runtests.jl",
+      "PRASCore.jl/src/Systems/TestData.jl",
+      "PRASCore.jl/test/Results/availability.jl",
+      "PRASCore.jl/test/Results/energy.jl"
+    ],
+    "workflows": [
+      ".github/workflows/PRAS.jl.yml",
+      ".github/workflows/PRASCapacityCredits.jl.yml",
+      ".github/workflows/PRASCore.jl.yml",
+      ".github/workflows/PRASFiles.jl.yml",
+      ".github/workflows/docs.yml",
+      ".github/workflows/docsCleanup.yml"
+    ],
+    "package_files": [],
+    "tests_count_heuristic": 20,
+    "conventional_test_paths_count": 19,
+    "conventional_test_examples": [
+      "PRAS.jl/test/runtests.jl",
+      "PRASCapacityCredits.jl/test/runtests.jl",
+      "PRASCore.jl/test/Results/availability.jl",
+      "PRASCore.jl/test/Results/energy.jl",
+      "PRASCore.jl/test/Results/flow.jl",
+      "PRASCore.jl/test/Results/metrics.jl",
+      "PRASCore.jl/test/Results/runtests.jl",
+      "PRASCore.jl/test/Results/shortfall.jl"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "do-mpc/do-mpc",
+    "tree_sha": "9d5a8df0e4d6acac899bf0a65ffd4c30a6e2e4cc",
+    "truncated": false,
+    "test_examples": [
+      "examples/kite/test_wind_model.py",
+      "examples/tools/sampling/multiprocessing/test_fun/mp_sampling_test_01.py",
+      "examples/tools/sampling/multiprocessing/test_fun/mp_sampling_test_02.py",
+      "examples/tools/sampling/regular/test_fun/sampling_test.py",
+      "testing/test_CSTR.py"
+    ],
+    "workflows": [
+      ".github/workflows/pythonpublish.yml",
+      ".github/workflows/pythontest.yml"
+    ],
+    "package_files": [
+      "requirements.txt",
+      "setup.py"
+    ],
+    "tests_count_heuristic": 20,
+    "conventional_test_paths_count": 18,
+    "conventional_test_examples": [
+      "examples/kite/test_wind_model.py",
+      "examples/tools/sampling/regular/test_fun/sampling_test.py",
+      "testing/test_CSTR.py",
+      "testing/test_CSTR_approx_MPC.py",
+      "testing/test_CSTR_lqr.py",
+      "testing/test_DIP.py",
+      "testing/test_batch_reactor.py",
+      "testing/test_batch_reactor_lqr_dae.py"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "python-control/python-control",
+    "tree_sha": "b4cf7360138985f84afe299337ef9ee6c25e9c38",
+    "truncated": false,
+    "test_examples": [
+      ".github/scripts/set-conda-test-matrix.py",
+      ".github/scripts/set-pip-test-matrix.py",
+      "benchmarks/optestim_bench.py",
+      "control/tests/__init__.py",
+      "control/tests/bdalg_test.py"
+    ],
+    "workflows": [
+      ".github/workflows/control-slycot-src.yml",
+      ".github/workflows/doctest.yml",
+      ".github/workflows/install_examples.yml",
+      ".github/workflows/os-blas-test-matrix.yml",
+      ".github/workflows/python-package-conda.yml",
+      ".github/workflows/ruff-check.yml"
+    ],
+    "package_files": [
+      "pyproject.toml"
+    ],
+    "tests_count_heuristic": 57,
+    "conventional_test_paths_count": 51,
+    "conventional_test_examples": [
+      "control/tests/bdalg_test.py",
+      "control/tests/bspline_test.py",
+      "control/tests/canonical_test.py",
+      "control/tests/config_test.py",
+      "control/tests/convert_test.py",
+      "control/tests/ctrlplot_test.py",
+      "control/tests/ctrlutil_test.py",
+      "control/tests/delay_test.py"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "open-energy-transition/pypsa-ppa",
+    "tree_sha": "1f36510a1ba4e5e15b3dfddba08a30b3c373ddf3",
+    "truncated": false,
+    "test_examples": [
+      "pytest.ini",
+      "tests/conftest.py",
+      "tests/test_bidding_zones.py",
+      "tests/test_capacity_optimization.py",
+      "tests/test_counterfactuals.py"
+    ],
+    "workflows": [
+      ".github/workflows/codeql.yaml",
+      ".github/workflows/scorecard.yml",
+      ".github/workflows/test.yaml"
+    ],
+    "package_files": [
+      "requirements.txt"
+    ],
+    "tests_count_heuristic": 24,
+    "conventional_test_paths_count": 23,
+    "conventional_test_examples": [
+      "tests/conftest.py",
+      "tests/test_bidding_zones.py",
+      "tests/test_capacity_optimization.py",
+      "tests/test_counterfactuals.py",
+      "tests/test_custom_timeseries.py",
+      "tests/test_data_download.py",
+      "tests/test_data_loader.py",
+      "tests/test_e2e_matching.py"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "opendsm/opendsm",
+    "tree_sha": "1ed6d9d9d6f47c9a0c7201bf12663336e7c75930",
+    "truncated": false,
+    "test_examples": [
+      "opendsm/common/test_data.py",
+      "opendsm/comparison_groups/savings/dev/cg_correction_testing.py",
+      "opendsm/eemeter/models/daily/utilities/ellipsoid_test.py",
+      "tests/common/__init__.py",
+      "tests/common/clustering/__init__.py"
+    ],
+    "workflows": [
+      ".github/workflows/publish.yml",
+      ".github/workflows/test.yml",
+      ".github/workflows/update-win-snapshots.yml"
+    ],
+    "package_files": [
+      "pyproject.toml"
+    ],
+    "tests_count_heuristic": 114,
+    "conventional_test_paths_count": 113,
+    "conventional_test_examples": [
+      "opendsm/common/test_data.py",
+      "opendsm/eemeter/models/daily/utilities/ellipsoid_test.py",
+      "tests/common/__init__.py",
+      "tests/common/clustering/__init__.py",
+      "tests/common/clustering/conftest.py",
+      "tests/common/clustering/test_affinity.py",
+      "tests/common/clustering/test_algorithms.py",
+      "tests/common/clustering/test_birch.py"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  },
+  {
+    "repo": "dss-extensions/OpenDSSDirect.py",
+    "tree_sha": "d654af2055564881f10c343c94e640d0cfa6da4b",
+    "truncated": false,
+    "test_examples": [
+      "tests/test_evaluate_expression.py",
+      "tests/test_opendssdirect.py"
+    ],
+    "workflows": [
+      ".github/workflows/tests.yml"
+    ],
+    "package_files": [
+      "pyproject.toml"
+    ],
+    "tests_count_heuristic": 2,
+    "conventional_test_paths_count": 2,
+    "conventional_test_examples": [
+      "tests/test_evaluate_expression.py",
+      "tests/test_opendssdirect.py"
+    ],
+    "interpretation": "Path-level discovery only; tests were not executed and numerical/model coverage was not audited."
+  }
+]

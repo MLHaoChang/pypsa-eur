@@ -1,0 +1,59 @@
+{
+  "research_date": "2026-10-20",
+  "native_baseline_sha": "c7be9512861914b40aeb31bb6b555421f61b1642",
+  "unique_repository_candidates": 35,
+  "deeper_tree_checks": 12,
+  "candidate_installations": 0,
+  "candidate_test_runs": 0,
+  "paid_model_media_calls": 0,
+  "repository_code_changes": 0,
+  "published_pr": null,
+  "artifacts": {
+    "RESEARCH.md": "3cbc0ab7ffd176d5e07e83525020c763fee0de4f3af42cb03120593e3b4bed95",
+    "REPOSITORIES.md": "8ce4fbbf0142e3fd1340746ffae0103ee32181b7168ff1b9d4a4606ee7608499",
+    "README.md": "9323f135fc7fdca5f4525a766ebb3fcc4c7019abc0cf937a20f3ae266b5ebc62",
+    "SECTOR-DESIGN-PLAN.md": "6a5b1630cc3437362e00d1d4724dc3643c3a6e86ae508c0fffa287bcfd3b5fed",
+    "IMPLEMENTATION-BACKLOG.md": "b354c3bf04e89aed323a4ce510e2f9c38ce5e4538b33a61c9dacdffcce317623",
+    "SECTOR-TEST-MATRIX.md": "b46f15beeffd6829818fa28a0b7b428d69a86ef94ea343ed5da6b59e66cb661b",
+    "SECTOR-SOURCES.md": "20a990a938bced382f2dcf6d7ecfc92070223b1245ef541ff3f3fb3dad9a5b41",
+    "SECTOR-HANDOFF.md": "33a713fabd14383dcb59501d9add56d57e647f89314c5362e9321dc275a0737c",
+    "FIVE-CARD-MODULARITY.md": "f8f6e9569bccc9b1d8697c92094362bb267efa8680eec6e2a1634eeb43cd3f11",
+    "INDEPENDENT-REVIEW.md": "162783ff28113f4b2ebaf9dcf380c80d134d866eaf1d31fcd730087507cbca4d",
+    "ADAPTER-READINESS.md": "83fc05c9102fca8a2585968606a297427f38c5ecf79121f89c0c3be13c208564"
+  },
+  "sector_plan": {
+    "created_at": "2026-10-20T18:36:00.855434+00:00",
+    "native_baseline_sha": "51ddf8b0bf11f5375b30c0bf84825ff411ae5d45",
+    "use_case_families": 8,
+    "additional_source_repositories": 4,
+    "new_integrations_implemented": 0,
+    "new_candidate_tests_run": 0,
+    "local_document_validation": "relative links, family sections, unique backlog IDs and trailing whitespace checked",
+    "artifacts": [
+      "SECTOR-DESIGN-PLAN.md",
+      "IMPLEMENTATION-BACKLOG.md",
+      "SECTOR-TEST-MATRIX.md",
+      "SECTOR-SOURCES.md",
+      "SECTOR-HANDOFF.md"
+    ]
+  },
+  "five_card_revision": {
+    "native_baseline_sha": "90c7b8ffcec104397383361212da0aa21f545f1b",
+    "card_count": 5,
+    "backlog_slices": 38,
+    "review": "INDEPENDENT-REVIEW.md",
+    "review_sha256": "162783ff28113f4b2ebaf9dcf380c80d134d866eaf1d31fcd730087507cbca4d",
+    "review_verdict": "GO for full revised staged implementation plan; exact-component build and availability gates remain; no domain certification",
+    "reviewed_artifacts": {
+      "FIVE-CARD-MODULARITY.md": "f8f6e9569bccc9b1d8697c92094362bb267efa8680eec6e2a1634eeb43cd3f11",
+      "SECTOR-DESIGN-PLAN.md": "6a5b1630cc3437362e00d1d4724dc3643c3a6e86ae508c0fffa287bcfd3b5fed",
+      "IMPLEMENTATION-BACKLOG.md": "b354c3bf04e89aed323a4ce510e2f9c38ce5e4538b33a61c9dacdffcce317623",
+      "SECTOR-TEST-MATRIX.md": "b46f15beeffd6829818fa28a0b7b428d69a86ef94ea343ed5da6b59e66cb661b",
+      "ADAPTER-READINESS.md": "83fc05c9102fca8a2585968606a297427f38c5ecf79121f89c0c3be13c208564",
+      "SECTOR-SOURCES.md": "20a990a938bced382f2dcf6d7ecfc92070223b1245ef541ff3f3fb3dad9a5b41",
+      "SECTOR-HANDOFF.md": "33a713fabd14383dcb59501d9add56d57e647f89314c5362e9321dc275a0737c"
+    },
+    "application_integrations_implemented": 0,
+    "candidate_package_tests_executed": 0
+  }
+}

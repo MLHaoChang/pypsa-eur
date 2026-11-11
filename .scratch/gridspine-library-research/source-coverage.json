@@ -1,0 +1,4870 @@
+{
+  "status": "complete_family_level_research_mapping_not_a_populated_database",
+  "research_completion_date": "2026-10-21",
+  "native_inventory_baseline": "46035b4d853df2db8500d2fc1784da02d38bf539",
+  "family_count": 80,
+  "source_assessments": 114,
+  "definitions": {
+    "P": "partial_candidates",
+    "B": "benchmark_only",
+    "M": "method_reference_only",
+    "G": "public_data_gap"
+  },
+  "records": [
+    {
+      "family_id": "E01",
+      "title": "Technology overnight CapEx",
+      "card_ids": [
+        "energy",
+        "commercial"
+      ],
+      "parameters": [
+        "overnight_cost",
+        "investment",
+        "power and energy parts",
+        "equipment and balance-of-system scope"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+        "gridspine/templates/data/campus_assets.yaml"
+      ],
+      "native_support": "Native cost fields and pack rows",
+      "units": "currency/MW, currency/MWh, currency/unit",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "cost_pypsa_technology_data",
+          "role": "candidate_subset",
+          "url": "https://github.com/PyPSA/technology-data",
+          "source_geography": [
+            "Europe representative",
+            "source-dependent other regions"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_generation",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/node/3449",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_storage",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_us_atb_2025",
+          "role": "candidate_subset",
+          "url": "https://atb.nlr.gov/electricity/2025/data",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_canada_cer_ef2026",
+          "role": "candidate_subset",
+          "url": "https://open.canada.ca/data/en/dataset/5ab871c2-d811-4b33-93cc-6bb1683c26d2",
+          "source_geography": [
+            "Canada",
+            "all provinces and territories"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_uk_desnz_2025",
+          "role": "candidate_subset",
+          "url": "https://www.gov.uk/government/publications/electricity-generation-costs-2025",
+          "source_geography": [
+            "United Kingdom"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_eia_reference_plants",
+          "role": "candidate_subset",
+          "url": "https://www.eia.gov/analysis/studies/powerplants/capitalcost/",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Regional planning estimates; installed scope, size, year and actual quote remain separate.",
+      "site_specific_exclusion": "Actual EPC/vendor tender, project contingency and site works",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E02",
+      "title": "Fixed O&M",
+      "card_ids": [
+        "energy",
+        "commercial"
+      ],
+      "parameters": [
+        "fom_cost",
+        "fom_share",
+        "opex_frac"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+        "gridspine/templates/data/campus_assets.yaml"
+      ],
+      "native_support": "Native FOM and pack rows",
+      "units": "currency/MW-year; share/year; currency/unit-year",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "cost_pypsa_technology_data",
+          "role": "candidate_subset",
+          "url": "https://github.com/PyPSA/technology-data",
+          "source_geography": [
+            "Europe representative",
+            "source-dependent other regions"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_generation",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/node/3449",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_us_atb_2025",
+          "role": "candidate_subset",
+          "url": "https://atb.nlr.gov/electricity/2025/data",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_canada_cer_ef2026",
+          "role": "candidate_subset",
+          "url": "https://open.canada.ca/data/en/dataset/5ab871c2-d811-4b33-93cc-6bb1683c26d2",
+          "source_geography": [
+            "Canada",
+            "all provinces and territories"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_uk_desnz_2025",
+          "role": "candidate_subset",
+          "url": "https://www.gov.uk/government/publications/electricity-generation-costs-2025",
+          "source_geography": [
+            "United Kingdom"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Separate fixed O&M components and inclusions; site staffing and maintenance contracts remain private.",
+      "site_specific_exclusion": "Site staffing, insurance and maintenance contract",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E03",
+      "title": "Variable O&M and consumables",
+      "card_ids": [
+        "energy",
+        "commercial"
+      ],
+      "parameters": [
+        "marginal_cost",
+        "variable O&M",
+        "consumables per throughput"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/attribute_catalog.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+      ],
+      "native_support": "Native marginal costs; disaggregation may require extension",
+      "units": "currency/MWh_input or output; currency/t",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "cost_pypsa_technology_data",
+          "role": "candidate_subset",
+          "url": "https://github.com/PyPSA/technology-data",
+          "source_geography": [
+            "Europe representative",
+            "source-dependent other regions"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_generation",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/node/3449",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_renewable_fuels",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_eia_reference_plants",
+          "role": "candidate_subset",
+          "url": "https://www.eia.gov/analysis/studies/powerplants/capitalcost/",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Variable O&M and consumables need input/output basis; fuel and carbon charged separately when applicable.",
+      "site_specific_exclusion": "Actual fuel contract and utilization",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E04",
+      "title": "Technical/economic lifetime",
+      "card_ids": [
+        "energy",
+        "commercial"
+      ],
+      "parameters": [
+        "lifetime",
+        "lifetime_a",
+        "component part lifetime"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+        "gridspine/templates/data/campus_assets.yaml",
+        "pypsa-gui/backend/models/finance.py"
+      ],
+      "native_support": "Native lifetime and replacement rules",
+      "units": "years; hours; cycles",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "cost_pypsa_technology_data",
+          "role": "candidate_subset",
+          "url": "https://github.com/PyPSA/technology-data",
+          "source_geography": [
+            "Europe representative",
+            "source-dependent other regions"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_storage",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_generation",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/node/3449",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_renewable_fuels",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Planning life is not warranty, tax life, remaining useful life or verified failure distribution.",
+      "site_specific_exclusion": "Actual COD, age, remaining useful life and project horizon",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E05",
+      "title": "Construction duration and lead time",
+      "card_ids": [
+        "energy",
+        "commercial"
+      ],
+      "parameters": [
+        "construction_months_by_asset",
+        "capex_phasing",
+        "stage_capex_lead_years"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/finance.py"
+      ],
+      "native_support": "Native finance fields",
+      "units": "months; years; share",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "cost_dea_generation",
+          "role": "benchmark",
+          "url": "https://ens.dk/node/3449",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_netl_qgess",
+          "role": "benchmark",
+          "url": "https://www.netl.doe.gov/node/7513",
+          "source_geography": [
+            "United States reference engineering"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_doe_h2a",
+          "role": "benchmark",
+          "url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis/h2a-production",
+          "source_geography": [
+            "United States reference cases"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Selected construction/scaling references only; actual permits, lead time and procurement schedule need project evidence.",
+      "site_specific_exclusion": "Permits, project procurement schedule and actual energization dates",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E06",
+      "title": "Replacement and refurbishment",
+      "card_ids": [
+        "energy",
+        "commercial"
+      ],
+      "parameters": [
+        "replacement_capex",
+        "replacement_rule",
+        "part_lifetimes",
+        "replacement share"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/finance.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+      ],
+      "native_support": "Native replacement input/rules",
+      "units": "currency; year; share of original cost",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "cost_dea_storage",
+          "role": "benchmark",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_pnnl_storage_2024",
+          "role": "benchmark",
+          "url": "https://www.pnnl.gov/projects/esgc-cost-performance/download-reports",
+          "source_geography": [
+            "United States reference"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_doe_h2a",
+          "role": "benchmark",
+          "url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis/h2a-production",
+          "source_geography": [
+            "United States reference cases"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Replacement scope and fraction require exact technology/chapter; actual refurbishment quote and reset policy not supplied.",
+      "site_specific_exclusion": "Actual replacement quote, dates and warranty",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E07",
+      "title": "PV/wind annual degradation",
+      "card_ids": [
+        "energy",
+        "commercial"
+      ],
+      "parameters": [
+        "degradation_by_asset",
+        "annual output fade",
+        "performance loss distribution"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/finance.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+      ],
+      "native_support": "Finance degradation exists; physical dispatch feedback separate",
+      "units": "share/year; efficiency curve",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "cost_us_atb_2025",
+          "role": "benchmark",
+          "url": "https://atb.nlr.gov/electricity/2025/data",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_lbl_solar",
+          "role": "benchmark",
+          "url": "https://eta.lbl.gov/publications/us-utility-scale-solar-2025-data",
+          "source_geography": [
+            "US utility-scale solar and PV+battery samples"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Performance/degradation assumptions and historical samples; no universal fleet-to-site fade law or wind ageing dataset established.",
+      "site_specific_exclusion": "Actual inspection/performance history",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E08",
+      "title": "Battery calendar ageing",
+      "card_ids": [
+        "energy",
+        "reliability",
+        "commercial"
+      ],
+      "parameters": [
+        "degradation_calendar",
+        "SOC/temperature calendar fade",
+        "resistance growth"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+        "pypsa-gui/backend/models/finance.py"
+      ],
+      "native_support": "Pack placeholder explicitly not modeled; physical model adapter pending",
+      "units": "share/year; empirical model coefficients",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "cost_batteryarchive_empirical",
+          "role": "candidate_subset",
+          "url": "https://www.batteryarchive.org/faq.html",
+          "source_geography": [
+            "North American and European/international laboratory studies; filter per study"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_oxford_battery_degradation",
+          "role": "unverified_reference_only",
+          "url": "https://ora.ox.ac.uk/objects/uuid%3A03ba4b01-cfed-46d3-9b1a-7d4a7bdf6fac",
+          "source_geography": [
+            "United Kingdom laboratory experiments"
+          ],
+          "redistribution_status": "unknown",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_storage",
+          "role": "benchmark",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Study-specific cell/calendar evidence and planning life; exact file rights, chemistry, temperature, SOC and pack mapping pending.",
+      "site_specific_exclusion": "Actual cell provenance, thermal history, pack health",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E09",
+      "title": "Battery cycle ageing",
+      "card_ids": [
+        "energy",
+        "reliability",
+        "commercial"
+      ],
+      "parameters": [
+        "degradation_cycling",
+        "cycle life vs DoD",
+        "C-rate",
+        "EOL threshold"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+        "pypsa-gui/backend/models/finance.py"
+      ],
+      "native_support": "Pack placeholder; physical dispatch model pending",
+      "units": "share/cycle; cycles; C; curve",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "cost_batteryarchive_empirical",
+          "role": "candidate_subset",
+          "url": "https://www.batteryarchive.org/faq.html",
+          "source_geography": [
+            "North American and European/international laboratory studies; filter per study"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_oxford_battery_degradation",
+          "role": "unverified_reference_only",
+          "url": "https://ora.ox.ac.uk/objects/uuid%3A03ba4b01-cfed-46d3-9b1a-7d4a7bdf6fac",
+          "source_geography": [
+            "United Kingdom laboratory experiments"
+          ],
+          "redistribution_status": "unknown",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_storage",
+          "role": "benchmark",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Study-specific cycle/duty evidence; no generic pack degradation or inferred power capability.",
+      "site_specific_exclusion": "Measured duty cycle, cell vendor/warranty and replacement policy",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E10",
+      "title": "Generator/converter efficiency",
+      "card_ids": [
+        "energy"
+      ],
+      "parameters": [
+        "efficiency",
+        "efficiency2",
+        "efficiency3",
+        "part-load efficiency"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/attribute_catalog.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+      ],
+      "native_support": "Native static/time-varying efficiencies",
+      "units": "per unit; heat rate; curve",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "cost_dea_generation",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/node/3449",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_industrial_heat",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/node/3455",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH03",
+          "role": "candidate_subset",
+          "url": "https://www.energy.ca.gov/programs-and-topics/programs/solar-equipment-lists",
+          "source_geography": [
+            "North America: United States/California; exported products require local applicability"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH04",
+          "role": "candidate_subset",
+          "url": "https://samrepo.nlr.gov/help/component_models_databases.html",
+          "source_geography": [
+            "North America: US source lists; Europe where exact product applicable"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH07",
+          "role": "candidate_subset",
+          "url": "https://www.regulations.doe.gov/certification-data/products.html",
+          "source_geography": [
+            "North America: United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH08",
+          "role": "candidate_subset",
+          "url": "https://www.energystar.gov/products/productstr",
+          "source_geography": [
+            "North America: US/Canada marketed product scope; verify exact model"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH09",
+          "role": "candidate_subset",
+          "url": "https://natural-resources.canada.ca/energy-efficiency/product-energy-ratings/electric-motors",
+          "source_geography": [
+            "North America: Canada"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH10",
+          "role": "candidate_subset",
+          "url": "https://api.heatpumpkeymark.com/model",
+          "source_geography": [
+            "Europe: certified model scope"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH11",
+          "role": "candidate_subset",
+          "url": "https://www.eurovent-certification.com/en/advancedsearch/result?program=AC",
+          "source_geography": [
+            "Europe: listed HVACR market scope"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Each selected equipment record supplies only documented operating points, not every off-design map.",
+      "site_specific_exclusion": "Actual asset condition and calibrated vendor map",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E11",
+      "title": "Dispatchable operating constraints",
+      "card_ids": [
+        "energy",
+        "control"
+      ],
+      "parameters": [
+        "p_min_pu",
+        "ramp_limit_up",
+        "ramp_limit_down",
+        "min_up_time",
+        "min_down_time",
+        "start_up_cost"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/attribute_catalog.py",
+        "pypsa-gui/backend/models/process_unit.py"
+      ],
+      "native_support": "Native fields; committable/weighted restrictions apply",
+      "units": "pu; pu/interval; h; currency/start",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "cost_dea_generation",
+          "role": "benchmark",
+          "url": "https://ens.dk/node/3449",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH13",
+          "role": "benchmark",
+          "url": "https://www.epa.gov/chp/chp-technologies",
+          "source_geography": [
+            "North America: United States reference assumptions"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Technology-class operating references only; unit commitment, actual start state and weighted-time restrictions require native validation.",
+      "site_specific_exclusion": "Actual dispatch schedule, unit status and startup state",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E12",
+      "title": "Renewable performance and derates",
+      "card_ids": [
+        "energy"
+      ],
+      "parameters": [
+        "wind power curve",
+        "PV module/inverter derates",
+        "temperature coefficients",
+        "availability factors"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/profile_gen/data/profile_presets.yaml",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+        "pypsa-gui/backend/models/schemas.py"
+      ],
+      "native_support": "Native profile generators/presets; detailed catalog adapter may extend",
+      "units": "kW; pu; per-degree coefficient",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "TECH03",
+          "role": "candidate_subset",
+          "url": "https://www.energy.ca.gov/programs-and-topics/programs/solar-equipment-lists",
+          "source_geography": [
+            "North America: United States/California; exported products require local applicability"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH04",
+          "role": "candidate_subset",
+          "url": "https://samrepo.nlr.gov/help/component_models_databases.html",
+          "source_geography": [
+            "North America: US source lists; Europe where exact product applicable"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH05",
+          "role": "candidate_subset",
+          "url": "https://github.com/NatLabRockies/turbine-models",
+          "source_geography": [
+            "Europe: applicable turbine models",
+            "North America: applicable turbine models"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_us_atb_2025",
+          "role": "candidate_subset",
+          "url": "https://atb.nlr.gov/electricity/2025/data",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Selected module/inverter/turbine curves; equipment and environmental derates must not duplicate mechanical outages.",
+      "site_specific_exclusion": "Actual installed layout, curtailment and fault history",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E13",
+      "title": "Renewable resource time series",
+      "card_ids": [
+        "energy",
+        "reliability"
+      ],
+      "parameters": [
+        "solar irradiance",
+        "wind speed",
+        "temperature",
+        "capacity-factor series"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/profile_gen/data/profile_presets.yaml",
+        "pypsa-gui/backend/services/library/series_store.py"
+      ],
+      "native_support": "Native profile-generation and series stores",
+      "units": "W/m2; m/s; degC; pu",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "PRO-ERA5",
+          "role": "candidate_subset",
+          "url": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=overview",
+          "source_geography": [
+            "Europe",
+            "North America (subset of global dataset)"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "PRO-PVGIS",
+          "role": "candidate_subset",
+          "url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en",
+          "source_geography": [
+            "Europe; verify selected radiation database footprint for NA"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "PRO-NSRDB",
+          "role": "candidate_subset",
+          "url": "https://developer.nlr.gov/docs/solar/nsrdb/",
+          "source_geography": [
+            "North America; endpoint-specific geographic footprint"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Resource/reanalysis/model profiles; exact footprint, weather year and intervals. No measured site resource or forecast inferred.",
+      "site_specific_exclusion": "Actual coordinates and measured resource series",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E14",
+      "title": "Electrical demand archetypes",
+      "card_ids": [
+        "energy"
+      ],
+      "parameters": [
+        "office/two-shift/load-shape archetypes",
+        "annual energy normalization",
+        "peak and load factor"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/study_library/load_profiles/index.csv",
+        "pypsa-gui/backend/services/library/series_store.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+      ],
+      "native_support": "Shipped archetypes/series exist",
+      "units": "pu shape; kWh/year; kW",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "PRO-COMSTOCK",
+          "role": "candidate_subset",
+          "url": "https://comstock.nlr.gov/page/datasets",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "PRO-OPSD",
+          "role": "candidate_subset",
+          "url": "https://data.open-power-system-data.org/household_data/",
+          "source_geography": [
+            "Southern Germany; selected small businesses/households"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH14",
+          "role": "benchmark_fixture",
+          "url": "https://simbench.de/en/download/datasets/",
+          "source_geography": [
+            "Europe: German reference systems"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH15",
+          "role": "benchmark_fixture",
+          "url": "https://catalog.data.gov/dataset/smart-ds-synthetic-electrical-network-data-opendss-models-for-sfo-gso-and-aus",
+          "source_geography": [
+            "North America: US SFO/Greensboro/Austin synthetic regions"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "US simulated buildings, small German measurements and synthetic networks are distinct; no universal DC/mine/industrial measured shape.",
+      "site_specific_exclusion": "Actual meter data, annual energy and peak",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E15",
+      "title": "Thermal demand and temperature dependence",
+      "card_ids": [
+        "energy"
+      ],
+      "parameters": [
+        "space/process heat shapes",
+        "cooling/heating degree dependence",
+        "COP series"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/profile_gen/data/profile_presets.yaml",
+        "pypsa-gui/backend/services/library/series_store.py",
+        "pypsa-gui/backend/models/schemas.py"
+      ],
+      "native_support": "Time-series/Link support; calibrated thermal model pending",
+      "units": "MW_th; degC; pu; COP",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "PRO-COMSTOCK",
+          "role": "candidate_subset",
+          "url": "https://comstock.nlr.gov/page/datasets",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "PRO-ERA5",
+          "role": "weather_context",
+          "url": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=overview",
+          "source_geography": [
+            "Europe",
+            "North America (subset of global dataset)"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_industrial_heat",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/node/3455",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH06",
+          "role": "candidate_subset",
+          "url": "https://energy-efficient-products.ec.europa.eu/eprel_en",
+          "source_geography": [
+            "Europe: EU/EEA marketed regulated labelled products"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH10",
+          "role": "candidate_subset",
+          "url": "https://api.heatpumpkeymark.com/model",
+          "source_geography": [
+            "Europe: certified model scope"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH11",
+          "role": "candidate_subset",
+          "url": "https://www.eurovent-certification.com/en/advancedsearch/result?program=AC",
+          "source_geography": [
+            "Europe: listed HVACR market scope"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Building/thermal archetypes and equipment points only; process envelope and heat demand need calibration.",
+      "site_specific_exclusion": "Actual building/process envelope and measured heat demand",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E16",
+      "title": "Data-center IT/cooling archetypes",
+      "card_ids": [
+        "energy",
+        "control"
+      ],
+      "parameters": [
+        "utilization",
+        "PUE temperature slope",
+        "AI workload/checkpoint/ramp envelope",
+        "idle/critical fractions"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/dc_load_profile.py",
+        "gridspine/schema/dc.py"
+      ],
+      "native_support": "Native assumed DC profile/envelope; calibrated cooling pending",
+      "units": "MW; pu; PUE; MW/s; seconds",
+      "coverage_class": "public_data_gap",
+      "source_links": [
+        {
+          "source_id": "TECH08",
+          "role": "context_not_parameter",
+          "url": "https://www.energystar.gov/products/productstr",
+          "source_geography": [
+            "North America: US/Canada marketed product scope; verify exact model"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "PRO-ERA5",
+          "role": "context_not_parameter",
+          "url": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=overview",
+          "source_geography": [
+            "Europe",
+            "North America (subset of global dataset)"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "UPS efficiency and weather are partial context; no representative open validated DC IT/cooling/workload operating database identified.",
+      "site_specific_exclusion": "Actual IT job deadlines, cooling plant, measured PUE and rack allocation",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E17",
+      "title": "Process conversion recipes",
+      "card_ids": [
+        "energy"
+      ],
+      "parameters": [
+        "throughput_unit",
+        "specific_energy_kwh_per_t",
+        "multiport recipe",
+        "mass yield/recovery",
+        "efficiency2/3"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/process_unit.py",
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/project_templates/eh_ammonia.py"
+      ],
+      "native_support": "Native custom process columns/multiport links",
+      "units": "kWh/t; kg/kg; t/h; MWh_product",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "cost_dea_renewable_fuels",
+          "role": "benchmark",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_industrial_heat",
+          "role": "benchmark",
+          "url": "https://ens.dk/node/3455",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_doe_h2a",
+          "role": "benchmark",
+          "url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis/h2a-production",
+          "source_geography": [
+            "United States reference cases"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Selected process/energy assumptions; not customer flowsheet, ore quality, calibrated recovery or safety model.",
+      "site_specific_exclusion": "Customer flowsheet, ore grade, catalyst condition and production commitments",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E18",
+      "title": "Hydrogen/electrolyser performance",
+      "card_ids": [
+        "energy"
+      ],
+      "parameters": [
+        "kg H2/kWh",
+        "part-load yield",
+        "compression/water auxiliaries",
+        "stack life",
+        "minimum load"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+        "pypsa-gui/backend/project_templates/eh_h2_hub/eh_template.json"
+      ],
+      "native_support": "Native H2 hub; detailed component model pending",
+      "units": "kg/h; kWh/kg; L/kg; h",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "cost_dea_renewable_fuels",
+          "role": "benchmark",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_doe_h2a",
+          "role": "benchmark",
+          "url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis/h2a-production",
+          "source_geography": [
+            "United States reference cases"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Electrolyser planning assumptions, auxiliaries and costs; actual pressure, vendor map and water quality need exact boundaries.",
+      "site_specific_exclusion": "Actual vendor map, water source, output pressure/quality",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E19",
+      "title": "Ammonia synthesis performance",
+      "card_ids": [
+        "energy"
+      ],
+      "parameters": [
+        "H2 and N2 consumption",
+        "ASU load",
+        "NH3 energy content",
+        "turndown/startup",
+        "heat recovery"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/process_unit.py",
+        "pypsa-gui/backend/project_templates/eh_ammonia.py"
+      ],
+      "native_support": "Merged native tracer; ASU excluded there; deeper model pending",
+      "units": "t/day; kg/kg; MWh/t; h",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "cost_dea_renewable_fuels",
+          "role": "benchmark",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_pypsa_technology_data",
+          "role": "benchmark",
+          "url": "https://github.com/PyPSA/technology-data",
+          "source_geography": [
+            "Europe representative",
+            "source-dependent other regions"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "NH3 process assumptions only where exact chapter supports them; ASU, standby/start energy and chronological model require explicit validation.",
+      "site_specific_exclusion": "Actual synthesis-loop design, startup energy and delivery schedule",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E20",
+      "title": "Product physical properties",
+      "card_ids": [
+        "energy",
+        "commercial"
+      ],
+      "parameters": [
+        "mwh_per_t",
+        "LHV/HHV",
+        "density",
+        "purity",
+        "temperature-pressure basis"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/process_unit.py",
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Native product tonne factors/reference purchase LHV; richer properties extend",
+      "units": "MWh/t; kWh/kg; kg/m3; percent",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "cost_dea_renewable_fuels",
+          "role": "method_reference",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_doe_h2a",
+          "role": "method_reference",
+          "url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis/h2a-production",
+          "source_geography": [
+            "United States reference cases"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Specific documented product/calorific bases may be cited; general mixture/property database and actual purity not established here.",
+      "site_specific_exclusion": "Actual mixture composition and specification",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E21",
+      "title": "Fuel physical/emissions factors",
+      "card_ids": [
+        "energy",
+        "commercial"
+      ],
+      "parameters": [
+        "co2_emissions",
+        "LHV/HHV",
+        "heat rate",
+        "fuel density",
+        "upstream emissions factor"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Native carrier emissions; upstream boundary may extend",
+      "units": "tCO2/MWh_fuel; kWh/kg; kg/l",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "TECH13",
+          "role": "benchmark",
+          "url": "https://www.epa.gov/chp/chp-technologies",
+          "source_geography": [
+            "North America: United States reference assumptions"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_eia_reference_plants",
+          "role": "benchmark",
+          "url": "https://www.eia.gov/analysis/studies/powerplants/capitalcost/",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Selected fuel/heat-rate/combustion reference only; EPA grid averages cannot substitute fuel-specific or upstream factors.",
+      "site_specific_exclusion": "Actual supplier fuel quality and certification",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E22",
+      "title": "Storage efficiency/self-discharge",
+      "card_ids": [
+        "energy",
+        "reliability"
+      ],
+      "parameters": [
+        "efficiency_store",
+        "efficiency_dispatch",
+        "standing_loss",
+        "max_hours",
+        "charge/discharge limit"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/attribute_catalog.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+      ],
+      "native_support": "Native storage attributes/pack",
+      "units": "pu; share/hour; hours; MW/MWh",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "cost_dea_storage",
+          "role": "candidate_subset",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_pnnl_storage_2024",
+          "role": "candidate_subset",
+          "url": "https://www.pnnl.gov/projects/esgc-cost-performance/download-reports",
+          "source_geography": [
+            "United States reference"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH03",
+          "role": "candidate_subset",
+          "url": "https://www.energy.ca.gov/programs-and-topics/programs/solar-equipment-lists",
+          "source_geography": [
+            "North America: United States/California; exported products require local applicability"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Selected storage-efficiency/system assumptions; usable energy, power, loss/time basis and actual condition separate.",
+      "site_specific_exclusion": "Actual sizing, SOC reserve and measured health",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E23",
+      "title": "H2/thermal/product storage performance",
+      "card_ids": [
+        "energy",
+        "reliability"
+      ],
+      "parameters": [
+        "storage losses",
+        "pressure/temperature operating envelope",
+        "compressor/liquefaction energy",
+        "usable inventory"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+        "pypsa-gui/backend/project_templates/eh_ammonia.py"
+      ],
+      "native_support": "Native Store/losses; pressure/vessel safety not implied",
+      "units": "kg; MWh; bar; degC; kWh/kg",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "cost_dea_storage",
+          "role": "benchmark",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_dea_renewable_fuels",
+          "role": "benchmark",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_doe_h2a",
+          "role": "benchmark",
+          "url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis/h2a-production",
+          "source_geography": [
+            "United States reference cases"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Storage planning boundaries; no pressure-vessel safety, full pressure-cycle or physical inventory certification.",
+      "site_specific_exclusion": "Actual vessel approval, inventory, pressure and safety design",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E24",
+      "title": "Water/treatment auxiliaries",
+      "card_ids": [
+        "energy"
+      ],
+      "parameters": [
+        "water required by process",
+        "recovery",
+        "purity",
+        "desalination/treatment electricity"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/models/process_unit.py"
+      ],
+      "native_support": "Representable conversion; detailed treatment schema/adapter pending",
+      "units": "m3/t; kWh/m3; percent",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "cost_dea_renewable_fuels",
+          "role": "method_reference",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+          "source_geography": [
+            "Denmark",
+            "European representative planning"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_doe_h2a",
+          "role": "method_reference",
+          "url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis/h2a-production",
+          "source_geography": [
+            "United States reference cases"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Process water/auxiliary reference if explicitly documented; detailed quality, treatment and water rights remain unsupported/site-specific.",
+      "site_specific_exclusion": "Actual water permit/source quality and supply constraints",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E25",
+      "title": "Mining throughput/flexibility archetypes",
+      "card_ids": [
+        "energy",
+        "reliability"
+      ],
+      "parameters": [
+        "crusher/mill/flotation electricity",
+        "recovery",
+        "stockpile bounds",
+        "restart",
+        "ore/product yield"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/process_unit.py",
+        ".scratch/grid-to-process/issues/10-b-tracer-concentrator-template.md"
+      ],
+      "native_support": "Existing process schema and planned concentrator; not generic mine engine",
+      "units": "kWh/t; t/h; tonnes; h",
+      "coverage_class": "public_data_gap",
+      "source_links": [],
+      "scope_and_remaining_gap": "No general open calibrated mine/concentrator throughput, ore-recovery and flexibility dataset identified; customer process data required.",
+      "site_specific_exclusion": "Actual mine geology, CMMS, production plan, recovery and fleet routes",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "E26",
+      "title": "Flexible demand archetypes",
+      "card_ids": [
+        "energy",
+        "control"
+      ],
+      "parameters": [
+        "shiftable vs curtailable load",
+        "notice",
+        "maximum interruption",
+        "rebound",
+        "deadline"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/flex_archetypes.py",
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Native flex/DR fields; shifting vs curtailment semantics differ",
+      "units": "MW; h; MWh; events/year",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "PRO-COMSTOCK",
+          "role": "method_reference",
+          "url": "https://comstock.nlr.gov/page/datasets",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Building retrofit/scenario context is not a measured curtailable/shiftable-load entitlement or industrial rebound/deadline dataset.",
+      "site_specific_exclusion": "Actual customer consent, workload deadlines and production restrictions",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G01",
+      "title": "Voltage/frequency and grid standard context",
+      "card_ids": [
+        "grid",
+        "control"
+      ],
+      "parameters": [
+        "nominal voltage class",
+        "system frequency",
+        "per-unit base",
+        "phase convention"
+      ],
+      "native_paths": [
+        "gridspine/templates/data/campus_assets.yaml",
+        "gridspine/templates/data/grid_codes.yaml",
+        "gridspine/schema/network.py"
+      ],
+      "native_support": "Native network fields/grid profiles",
+      "units": "kV; Hz; MVA base",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "TECH01",
+          "role": "candidate_subset",
+          "url": "https://docs.pypsa.org/v1.1.2/user-guide/components/line-types/",
+          "source_geography": [
+            "Europe: reference types; applicability must be checked"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH02",
+          "role": "candidate_subset",
+          "url": "https://pandapower.readthedocs.io/en/v3.1.2/std_types/basic.html",
+          "source_geography": [
+            "Europe: 50 Hz reference equipment"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH14",
+          "role": "benchmark_fixture",
+          "url": "https://simbench.de/en/download/datasets/",
+          "source_geography": [
+            "Europe: German reference systems"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH15",
+          "role": "benchmark_fixture",
+          "url": "https://catalog.data.gov/dataset/smart-ds-synthetic-electrical-network-data-opendss-models-for-sfo-gso-and-aus",
+          "source_geography": [
+            "North America: US SFO/Greensboro/Austin synthetic regions"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Preserve50/60Hz, voltage, phase and base applicability; native50Hz types are not North American60Hz evidence.",
+      "site_specific_exclusion": "Actual site voltage/base and earthing arrangement",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G02",
+      "title": "Overhead conductor/line types",
+      "card_ids": [
+        "grid"
+      ],
+      "parameters": [
+        "type",
+        "r",
+        "x",
+        "b",
+        "s_nom",
+        "thermal current",
+        "temperature and length basis"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/attribute_catalog.py",
+        "gridspine/templates/data/campus_assets.yaml"
+      ],
+      "native_support": "Native PyPSA types/explicit params and campus library",
+      "units": "ohm/km; S/km; A; MVA",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "TECH01",
+          "role": "candidate_subset",
+          "url": "https://docs.pypsa.org/v1.1.2/user-guide/components/line-types/",
+          "source_geography": [
+            "Europe: reference types; applicability must be checked"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH02",
+          "role": "candidate_subset",
+          "url": "https://pandapower.readthedocs.io/en/v3.1.2/std_types/basic.html",
+          "source_geography": [
+            "Europe: 50 Hz reference equipment"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH14",
+          "role": "benchmark_fixture",
+          "url": "https://simbench.de/en/download/datasets/",
+          "source_geography": [
+            "Europe: German reference systems"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH15",
+          "role": "benchmark_fixture",
+          "url": "https://catalog.data.gov/dataset/smart-ds-synthetic-electrical-network-data-opendss-models-for-sfo-gso-and-aus",
+          "source_geography": [
+            "North America: US SFO/Greensboro/Austin synthetic regions"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Type/reference values need installation, temperature, frequency and line-length basis; not actual utility conductor selection.",
+      "site_specific_exclusion": "Actual route, length, installation and clearance",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G03",
+      "title": "Cable types and ampacity",
+      "card_ids": [
+        "grid"
+      ],
+      "parameters": [
+        "conductor material/size",
+        "R/X/C",
+        "ampacity",
+        "installation derating",
+        "voltage"
+      ],
+      "native_paths": [
+        "gridspine/templates/data/campus_assets.yaml",
+        "pypsa-gui/backend/models/schemas.py",
+        "gridspine/schema/campus.py"
+      ],
+      "native_support": "Campus cable library/native lines",
+      "units": "mm2; ohm/km; nF/km; A; kV",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "TECH01",
+          "role": "candidate_subset",
+          "url": "https://docs.pypsa.org/v1.1.2/user-guide/components/line-types/",
+          "source_geography": [
+            "Europe: reference types; applicability must be checked"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH02",
+          "role": "candidate_subset",
+          "url": "https://pandapower.readthedocs.io/en/v3.1.2/std_types/basic.html",
+          "source_geography": [
+            "Europe: 50 Hz reference equipment"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH14",
+          "role": "benchmark_fixture",
+          "url": "https://simbench.de/en/download/datasets/",
+          "source_geography": [
+            "Europe: German reference systems"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH15",
+          "role": "benchmark_fixture",
+          "url": "https://catalog.data.gov/dataset/smart-ds-synthetic-electrical-network-data-opendss-models-for-sfo-gso-and-aus",
+          "source_geography": [
+            "North America: US SFO/Greensboro/Austin synthetic regions"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Selected cable model/reference, not local installation ampacity; soil, grouping, burial and standard-type rules apply.",
+      "site_specific_exclusion": "Actual installation, route, soil and thermal study",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G04",
+      "title": "Transformer ratings and impedance",
+      "card_ids": [
+        "grid"
+      ],
+      "parameters": [
+        "s_mva",
+        "hv_kv",
+        "lv_kv",
+        "vk_percent",
+        "vkr_percent",
+        "pfe_kw",
+        "i0_percent",
+        "tap data"
+      ],
+      "native_paths": [
+        "gridspine/templates/data/campus_assets.yaml",
+        "pypsa-gui/backend/models/schemas.py",
+        "gridspine/schema/transformer.py"
+      ],
+      "native_support": "Native transformer/campus fields",
+      "units": "MVA; kV; percent; kW; tap steps",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "TECH01",
+          "role": "candidate_subset",
+          "url": "https://docs.pypsa.org/v1.1.2/user-guide/components/line-types/",
+          "source_geography": [
+            "Europe: reference types; applicability must be checked"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH02",
+          "role": "candidate_subset",
+          "url": "https://pandapower.readthedocs.io/en/v3.1.2/std_types/basic.html",
+          "source_geography": [
+            "Europe: 50 Hz reference equipment"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH07",
+          "role": "candidate_subset",
+          "url": "https://www.regulations.doe.gov/certification-data/products.html",
+          "source_geography": [
+            "North America: United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH14",
+          "role": "benchmark_fixture",
+          "url": "https://simbench.de/en/download/datasets/",
+          "source_geography": [
+            "Europe: German reference systems"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH15",
+          "role": "benchmark_fixture",
+          "url": "https://catalog.data.gov/dataset/smart-ds-synthetic-electrical-network-data-opendss-models-for-sfo-gso-and-aus",
+          "source_geography": [
+            "North America: US SFO/Greensboro/Austin synthetic regions"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Transformer electrical/efficiency reference subsets; factory tests, tap state and actual nameplate remain project data.",
+      "site_specific_exclusion": "Actual factory test certificate and tap state",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G05",
+      "title": "Switchgear and breaker ratings",
+      "card_ids": [
+        "grid"
+      ],
+      "parameters": [
+        "voltage class",
+        "continuous current",
+        "short-time and peak withstand",
+        "breaking duty"
+      ],
+      "native_paths": [
+        "gridspine/templates/data/campus_assets.yaml",
+        "gridspine/schema/campus.py",
+        "gridspine/static/campus_sc.py"
+      ],
+      "native_support": "Native screening/library fields",
+      "units": "kV; A; kA RMS; kA peak; s",
+      "coverage_class": "public_data_gap",
+      "source_links": [],
+      "scope_and_remaining_gap": "No sufficient openly reusable cross-region breaker/switchgear duty catalog established; vendor/standard-specific source needed.",
+      "site_specific_exclusion": "Actual protection study, installed serial/nameplate and duty",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G06",
+      "title": "Shunt/STATCOM/reactive support equipment",
+      "card_ids": [
+        "grid",
+        "control"
+      ],
+      "parameters": [
+        "q_mvar",
+        "voltage",
+        "reactive range",
+        "losses",
+        "response capability"
+      ],
+      "native_paths": [
+        "gridspine/templates/data/campus_assets.yaml",
+        "gridspine/static/campus_reactive.py"
+      ],
+      "native_support": "Native campus shunt/reactive sizing",
+      "units": "MVAr; kV; pu; seconds",
+      "coverage_class": "public_data_gap",
+      "source_links": [],
+      "scope_and_remaining_gap": "No sufficient openly reusable STATCOM/shunt off-design/dynamic catalog established; actual vendor ratings and model needed.",
+      "site_specific_exclusion": "Actual switching schedule/control tuning",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G07",
+      "title": "Converter/UPS/inverter electrical limits",
+      "card_ids": [
+        "grid",
+        "control"
+      ],
+      "parameters": [
+        "rated MW/MVA",
+        "Q range",
+        "i_max",
+        "overload duration",
+        "fault contribution",
+        "UPS transfer"
+      ],
+      "native_paths": [
+        "gridspine/schema/island.py",
+        "gridspine/schema/dc.py"
+      ],
+      "native_support": "Native island/converter parameters; detailed vendor model varies",
+      "units": "MW; MVA; pu current; s/ms",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "TECH03",
+          "role": "candidate_subset",
+          "url": "https://www.energy.ca.gov/programs-and-topics/programs/solar-equipment-lists",
+          "source_geography": [
+            "North America: United States/California; exported products require local applicability"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH08",
+          "role": "candidate_subset",
+          "url": "https://www.energystar.gov/products/productstr",
+          "source_geography": [
+            "North America: US/Canada marketed product scope; verify exact model"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH18",
+          "role": "method_reference",
+          "url": "https://www.wecc.org/committees/mvs",
+          "source_geography": [
+            "North America: Western Interconnection model context"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Catalog ratings/efficiency and model structures are partial; fault current, overload/transient limits and OEM controller need separate proof.",
+      "site_specific_exclusion": "Actual inverter firmware/settings and UPS acceptance tests",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G08",
+      "title": "Network benchmark/topology examples",
+      "card_ids": [
+        "grid"
+      ],
+      "parameters": [
+        "standard topology",
+        "component type references",
+        "benchmark impedance"
+      ],
+      "native_paths": [
+        "gridspine/templates/data/case39_units.yaml",
+        "gridspine/producers/pypsa_nodal.py"
+      ],
+      "native_support": "Native benchmark support",
+      "units": "network/model artifact with explicit base",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "TECH14",
+          "role": "benchmark_fixture",
+          "url": "https://simbench.de/en/download/datasets/",
+          "source_geography": [
+            "Europe: German reference systems"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH15",
+          "role": "benchmark_fixture",
+          "url": "https://catalog.data.gov/dataset/smart-ds-synthetic-electrical-network-data-opendss-models-for-sfo-gso-and-aus",
+          "source_geography": [
+            "North America: US SFO/Greensboro/Austin synthetic regions"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Synthetic/reference grids for tests and demos; not a measured customer topology or procurement inventory; ODbL/CC terms scoped.",
+      "site_specific_exclusion": "Actual site topology and asset identities",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G09",
+      "title": "Connection agreement archetypes",
+      "card_ids": [
+        "grid",
+        "commercial"
+      ],
+      "parameters": [
+        "import_cap_mw",
+        "export_cap_mw",
+        "envelope",
+        "available_from",
+        "capacity_fee"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Existing typed item kind and connection object",
+      "units": "MW; datetime; currency/capacity-year",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "EU-C08",
+          "role": "benchmark",
+          "url": "https://www.liander.nl/grootzakelijk/tarieven",
+          "source_geography": "Liander service area, Netherlands",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C09",
+          "role": "benchmark",
+          "url": "https://www.acm.nl/nl/publicaties/tarievenbesluit-tennet-2026",
+          "source_geography": "TenneT Netherlands HS/EHS connection classes",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C22",
+          "role": "restricted_reference_only",
+          "url": "https://catalogue-prestations.enedis.fr/",
+          "source_geography": "Enedis distribution service territory, France",
+          "redistribution_status": "restricted",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_pge_tariffs",
+          "role": "benchmark",
+          "url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+          "source_geography": [
+            "US-CA"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_bchydro",
+          "role": "benchmark",
+          "url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions/electric-tariff.html",
+          "source_geography": [
+            "CA-BC"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Published connection/access schedule references, not the actual signed offer, fault level or guaranteed connection envelope.",
+      "site_specific_exclusion": "Actual negotiated import/export cap and energization offer",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G10",
+      "title": "Grid-code/compliance limit profiles",
+      "card_ids": [
+        "grid",
+        "control"
+      ],
+      "parameters": [
+        "voltage_bands",
+        "q_range_demand",
+        "rvc_limit_pct",
+        "frequency/FRT/RoCoF requirements"
+      ],
+      "native_paths": [
+        "gridspine/templates/data/grid_codes.yaml",
+        "pypsa-gui/backend/services/campus_grid_code_service.py"
+      ],
+      "native_support": "Native profiles/upload extraction; library-kind extension pending",
+      "units": "pu; percent; Hz; Hz/s; voltage-time curve",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "TECH16",
+          "role": "method_reference",
+          "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32016R0631",
+          "source_geography": [
+            "Europe: EU/EEA and applicable synchronous areas; national limits required"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH17",
+          "role": "restricted_reference_only",
+          "url": "https://www.neso.energy/industry-information/codes/grid-code-gc/grid-code-documents",
+          "source_geography": [
+            "Europe: Great Britain"
+          ],
+          "redistribution_status": "restricted",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH18",
+          "role": "method_reference",
+          "url": "https://www.wecc.org/committees/mvs",
+          "source_geography": [
+            "North America: Western Interconnection model context"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Grid-code clauses and model standards reference only; jurisdiction/class applicability and rights required, no automatic compliance verdict.",
+      "site_specific_exclusion": "Actual applicable connection agreement and confirmed extracted profile",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G11",
+      "title": "Protection/interconnection device settings",
+      "card_ids": [
+        "grid",
+        "control"
+      ],
+      "parameters": [
+        "trip thresholds/delays",
+        "relay curve",
+        "voltage-frequency ride-through",
+        "reconnection window"
+      ],
+      "native_paths": [
+        "gridspine/schema/island.py",
+        "gridspine/templates/data/grid_codes.yaml"
+      ],
+      "native_support": "Some island requirements exist; full protection coordination not implied",
+      "units": "pu; Hz; seconds; curve",
+      "coverage_class": "public_data_gap",
+      "source_links": [
+        {
+          "source_id": "TECH16",
+          "role": "context_not_parameter",
+          "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32016R0631",
+          "source_geography": [
+            "Europe: EU/EEA and applicable synchronous areas; national limits required"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH17",
+          "role": "restricted_reference_only",
+          "url": "https://www.neso.energy/industry-information/codes/grid-code-gc/grid-code-documents",
+          "source_geography": [
+            "Europe: Great Britain"
+          ],
+          "redistribution_status": "restricted",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH18",
+          "role": "context_not_parameter",
+          "url": "https://www.wecc.org/committees/mvs",
+          "source_geography": [
+            "North America: Western Interconnection model context"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Requirements/generic models do not supply approved relay settings or protection coordination; plant studies and rights required.",
+      "site_specific_exclusion": "Actual approved protection settings and coordination",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G12",
+      "title": "Fault-level and source-strength scenarios",
+      "card_ids": [
+        "grid"
+      ],
+      "parameters": [
+        "fault MVA",
+        "SCR",
+        "X/R",
+        "sequence impedance",
+        "grounding assumption"
+      ],
+      "native_paths": [
+        "gridspine/schema/campus.py",
+        "gridspine/static/strength.py",
+        "gridspine/static/campus_sc.py"
+      ],
+      "native_support": "Native strength/SC screening",
+      "units": "MVA; ratio; ohm/pu",
+      "coverage_class": "public_data_gap",
+      "source_links": [],
+      "scope_and_remaining_gap": "Actual fault level/SCR and upstream source model require utility/site evidence; no valid universal geographic default.",
+      "site_specific_exclusion": "Actual operator-provided short-circuit level; public benchmark cannot replace it",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "G13",
+      "title": "Motor/start method performance",
+      "card_ids": [
+        "grid",
+        "control"
+      ],
+      "parameters": [
+        "motor power",
+        "start current multiple",
+        "DOL/soft/VFD",
+        "acceleration",
+        "power factor"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/process_unit.py",
+        ".scratch/grid-to-process/issues/12-minutes-scale-motor-start-restart.md"
+      ],
+      "native_support": "Process fields exist; richer motor/restart schema planned",
+      "units": "kW; pu current; s; pu PF",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "TECH07",
+          "role": "candidate_subset",
+          "url": "https://www.regulations.doe.gov/certification-data/products.html",
+          "source_geography": [
+            "North America: United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH09",
+          "role": "candidate_subset",
+          "url": "https://natural-resources.canada.ca/energy-efficiency/product-energy-ratings/electric-motors",
+          "source_geography": [
+            "North America: Canada"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Motor efficiency/product lists are partial; starting current, torque, VFD response and safe restart need selected vendor/site data.",
+      "site_specific_exclusion": "Actual motor/load test and startup sequence",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R01",
+      "title": "Generation forced unavailability",
+      "card_ids": [
+        "reliability"
+      ],
+      "parameters": [
+        "outage_rate_value",
+        "outage_rate_basis",
+        "FOR",
+        "EFORd"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/adequacy/occurrence.py",
+        "pypsa-gui/backend/models/schemas.py"
+      ],
+      "native_support": "Native per-asset override and carrier screening defaults",
+      "units": "unavailability fraction; denominator/service/demand basis",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "rel-nerc-gads",
+          "role": "benchmark",
+          "url": "https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-conventional/generating-unit-statistical-brochures",
+          "source_geography": [
+            "North American reporting fleet; per-table cohort"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-entsoe-eraa",
+          "role": "benchmark",
+          "url": "https://www.entsoe.eu/eraa/2025/modelling-data/",
+          "source_geography": [
+            "European participating power systems"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-nerc-renewables",
+          "role": "benchmark",
+          "url": "https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-wind",
+          "source_geography": [
+            "North American reporting wind/solar assets; publication cohort specific"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Fleet statistics/planning assumptions require exact cohort/exposure/FOR-vs-EFORd basis; no automatic campus conversion.",
+      "site_specific_exclusion": "Actual unit outage log and demand-factor/service/reserve-shutdown hours",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R02",
+      "title": "Partial derating and availability states",
+      "card_ids": [
+        "reliability",
+        "energy"
+      ],
+      "parameters": [
+        "partial outage states",
+        "derated MW",
+        "availability factors",
+        "includes-outages flag"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/adequacy/occurrence.py",
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/adequacy/copt.py"
+      ],
+      "native_support": "Native availability/outage flag; richer distributions may extend",
+      "units": "MW; pu; state probability",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "rel-entsoe-outages",
+          "role": "benchmark",
+          "url": "https://www.entsoe.eu/data/transparency-platform/",
+          "source_geography": [
+            "Europe; reporting-area coverage varies"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-elexon-remit",
+          "role": "benchmark",
+          "url": "https://bmrs.elexon.co.uk/api-documentation/endpoint/REMIT",
+          "source_geography": [
+            "Great Britain"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-rte-unavailability",
+          "role": "benchmark",
+          "url": "https://data.rte-france.org/web/guest/catalog/-/api/generation/Unavailability-Additional-Information/v7.0",
+          "source_geography": [
+            "France; dataset scope"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-nerc-gads",
+          "role": "benchmark",
+          "url": "https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-conventional/generating-unit-statistical-brochures",
+          "source_geography": [
+            "North American reporting fleet; per-table cohort"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Availability notices and fleet statistics separate; events are not calibrated partial-state transition distributions.",
+      "site_specific_exclusion": "Actual measured availability and derating causes",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R03",
+      "title": "Repair duration and failure frequency",
+      "card_ids": [
+        "reliability"
+      ],
+      "parameters": [
+        "mttr_hours",
+        "MTTF",
+        "events/year",
+        "repair-duration distribution"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/adequacy/occurrence.py",
+        "pypsa-gui/backend/services/adequacy/mc.py",
+        "pypsa-gui/backend/models/schemas.py"
+      ],
+      "native_support": "Native MTTR/Markov model; nongeometric repair not assumed",
+      "units": "hours; events/year",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "rel-nerc-gads",
+          "role": "method_reference",
+          "url": "https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-conventional/generating-unit-statistical-brochures",
+          "source_geography": [
+            "North American reporting fleet; per-table cohort"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-nrc-inl-parameters",
+          "role": "method_reference",
+          "url": "https://nrcoe.inl.gov/avgperf/",
+          "source_geography": [
+            "U.S. commercial nuclear fleet"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Only selected published repair/component methods; nuclear scope cannot supply generic industrial MTTR/repair distributions.",
+      "site_specific_exclusion": "Actual spare-parts/crew response and CMMS records",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R04",
+      "title": "Planned maintenance archetypes",
+      "card_ids": [
+        "reliability",
+        "energy"
+      ],
+      "parameters": [
+        "planned outage frequency/duration",
+        "maintenance interval",
+        "inspection task",
+        "seasonal scheduling"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/adequacy/occurrence.py",
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/library/series_store.py"
+      ],
+      "native_support": "Planned calendars explicitly deferred in occurrence scope; time-series can carry availability",
+      "units": "hours/year; events/year; running-hours/cycles",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "rel-entsoe-eraa",
+          "role": "benchmark",
+          "url": "https://www.entsoe.eu/eraa/2025/modelling-data/",
+          "source_geography": [
+            "European participating power systems"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-entsoe-outages",
+          "role": "benchmark",
+          "url": "https://www.entsoe.eu/data/transparency-platform/",
+          "source_geography": [
+            "Europe; reporting-area coverage varies"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Planning maintenance profiles/event calendars are not site CMMS history; native planned-calendar support still required.",
+      "site_specific_exclusion": "Actual maintenance calendar, vendor warranty tasks and staffing",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R05",
+      "title": "Transmission/distribution branch exposure failures",
+      "card_ids": [
+        "reliability",
+        "grid"
+      ],
+      "parameters": [
+        "line/cable outage events per length-year",
+        "repair",
+        "circuit outages",
+        "weather class"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/adequacy/occurrence.py",
+        "gridspine/static/contingency.py"
+      ],
+      "native_support": "Per-asset columns exist; full branch stochastic scope varies",
+      "units": "events/(km-year); h/event; fraction",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "rel-nerc-tads",
+          "role": "benchmark",
+          "url": "https://prod.nerc.com/programs/reliability-assessment--performance-analysis/transmission-availability-data-system",
+          "source_geography": [
+            "Reporting North American bulk transmission systems"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-nordic-baltic-grid",
+          "role": "benchmark",
+          "url": "https://www.entsoe.eu/publications/system-operations-reports/",
+          "source_geography": [
+            "Nordic and Baltic transmission systems"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Transmission exposure data uses circuit/length/voltage denominators; no generator probability or universal distribution-line default.",
+      "site_specific_exclusion": "Actual route exposure, joint circuits and operator interruption records",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R06",
+      "title": "Transformer/switchgear equipment failures",
+      "card_ids": [
+        "reliability",
+        "grid"
+      ],
+      "parameters": [
+        "failure frequency",
+        "repair/replacement duration",
+        "failure-mode fractions",
+        "spare availability"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "gridspine/templates/data/campus_assets.yaml",
+        "pypsa-gui/backend/services/adequacy/fmea_sweep_runner.py"
+      ],
+      "native_support": "Native occurrence/FMEA inputs; equipment-model mapping required",
+      "units": "events/unit-year; hours; probability",
+      "coverage_class": "public_data_gap",
+      "source_links": [
+        {
+          "source_id": "rel-nrc-inl-parameters",
+          "role": "context_not_parameter",
+          "url": "https://nrcoe.inl.gov/avgperf/",
+          "source_geography": [
+            "U.S. commercial nuclear fleet"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-nordic-baltic-grid",
+          "role": "context_not_parameter",
+          "url": "https://www.entsoe.eu/publications/system-operations-reports/",
+          "source_geography": [
+            "Nordic and Baltic transmission systems"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Nuclear/transmission references not enough for generic campus transformer/switchgear conditional failure laws.",
+      "site_specific_exclusion": "Actual equipment age/health, spare transformer and protection record",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R07",
+      "title": "UPS/BESS/genset start and service availability",
+      "card_ids": [
+        "reliability",
+        "control"
+      ],
+      "parameters": [
+        "failure to start",
+        "failure while running",
+        "UPS transfer failure",
+        "BESS availability"
+      ],
+      "native_paths": [
+        "gridspine/schema/island.py",
+        "pypsa-gui/backend/services/adequacy/occurrence.py",
+        "pypsa-gui/backend/models/schemas.py"
+      ],
+      "native_support": "Generic occurrence/island inputs; demand-event model needs admission",
+      "units": "probability/demand; events/h; repair h",
+      "coverage_class": "public_data_gap",
+      "source_links": [
+        {
+          "source_id": "rel-nrc-inl-parameters",
+          "role": "context_not_parameter",
+          "url": "https://nrcoe.inl.gov/avgperf/",
+          "source_geography": [
+            "U.S. commercial nuclear fleet"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "No open cross-sector calibrated UPS/BESS/genset fail-on-demand/service/repair database established; nuclear method reference only.",
+      "site_specific_exclusion": "Actual test-run log, battery health, fuel/UPS architecture",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R08",
+      "title": "Fuel supply/logistics interruptions",
+      "card_ids": [
+        "reliability",
+        "energy"
+      ],
+      "parameters": [
+        "delivery disruption duration",
+        "fuel-stock replenishment",
+        "pipeline curtailment",
+        "weather correlation"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/energy_hub.py",
+        "gridspine/schema/island.py",
+        "pypsa-gui/backend/services/library/series_store.py"
+      ],
+      "native_support": "Native stress/island context; probabilistic logistics extensions needed",
+      "units": "hours; days; probabilities; usable energy",
+      "coverage_class": "public_data_gap",
+      "source_links": [
+        {
+          "source_id": "rel-doe417",
+          "role": "context_not_parameter",
+          "url": "https://doe417.energy.gov/",
+          "source_geography": [
+            "United States reportable events"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-noaa-storm",
+          "role": "context_not_parameter",
+          "url": "https://www.ncei.noaa.gov/access/storm-events-database/",
+          "source_geography": [
+            "United States and adjacent waters"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Hazard/emergency context lacks site fuel-supply exposure and logistics interruption probability; customer data required.",
+      "site_specific_exclusion": "Actual tank level, delivery contract and replenishment schedule",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R09",
+      "title": "Common-cause/correlated outages",
+      "card_ids": [
+        "reliability"
+      ],
+      "parameters": [
+        "common-mode group",
+        "weather/fuel dependence",
+        "conditional failure probabilities"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/adequacy/mc.py",
+        "pypsa-gui/backend/services/adequacy/mc_zonal.py"
+      ],
+      "native_support": "Some native models explicitly limited; correlated support must be admitted",
+      "units": "group IDs; probability; scenario weights",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "rel-noaa-storm",
+          "role": "method_reference",
+          "url": "https://www.ncei.noaa.gov/access/storm-events-database/",
+          "source_geography": [
+            "United States and adjacent waters"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-doe417",
+          "role": "method_reference",
+          "url": "https://doe417.energy.gov/",
+          "source_geography": [
+            "United States reportable events"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-entsoe-outages",
+          "role": "method_reference",
+          "url": "https://www.entsoe.eu/data/transparency-platform/",
+          "source_geography": [
+            "Europe; reporting-area coverage varies"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Event co-occurrence is not common-cause calibration; exposure, selection bias, dependency method and native support needed.",
+      "site_specific_exclusion": "Actual shared substations, routes, cooling and control systems",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R10",
+      "title": "Weather/hazard/stress scenario libraries",
+      "card_ids": [
+        "reliability",
+        "energy",
+        "grid"
+      ],
+      "parameters": [
+        "heatwave",
+        "low-wind/dark week",
+        "flood/storm/cold",
+        "hazard fragility"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/library/series_store.py",
+        "pypsa-gui/backend/models/energy_hub.py",
+        "pypsa-gui/backend/project_templates/eh_microgrid/adequacy_stress_scenarios.json"
+      ],
+      "native_support": "Native stress sets; calibrated fragility may extend",
+      "units": "weather series; exceedance probability; fragility curve",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "PRO-ERA5",
+          "role": "candidate_subset",
+          "url": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=overview",
+          "source_geography": [
+            "Europe",
+            "North America (subset of global dataset)"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-noaa-storm",
+          "role": "candidate_subset",
+          "url": "https://www.ncei.noaa.gov/access/storm-events-database/",
+          "source_geography": [
+            "United States and adjacent waters"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-doe417",
+          "role": "candidate_subset",
+          "url": "https://doe417.energy.gov/",
+          "source_geography": [
+            "United States reportable events"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Weather/hazard scenario evidence; not validated asset fragility or future outage forecast.",
+      "site_specific_exclusion": "Actual site exposure/flood elevation and approved climate scenario",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R11",
+      "title": "Utility service interruption benchmarks",
+      "card_ids": [
+        "reliability"
+      ],
+      "parameters": [
+        "SAIDI",
+        "SAIFI",
+        "CAIDI",
+        "major-event exclusion",
+        "customer class"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/finance.py",
+        "pypsa-gui/backend/models/energy_hub.py"
+      ],
+      "native_support": "Can inform declared site-outage assumption; not a direct generation-rate mapping",
+      "units": "minutes/customer-year; interruptions/customer-year",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "rel-eia861",
+          "role": "benchmark",
+          "url": "https://www.eia.gov/electricity/data/eia861/",
+          "source_geography": [
+            "United States reporting utilities"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-oeb-scorecard",
+          "role": "benchmark",
+          "url": "https://www.oeb.ca/open-data/electricity-distributor-performance-scorecard",
+          "source_geography": [
+            "Ontario electricity distributors, Canada"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-enedis-quality",
+          "role": "benchmark",
+          "url": "https://opendata.enedis.fr/datasets/duree-moyenne-de-coupure-bt",
+          "source_geography": [
+            "Enedis service network, France"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-bnetza-saidi",
+          "role": "benchmark",
+          "url": "https://www.bundesnetzagentur.de/EN/Areas/Energy/SecurityOfSupply/QualityOfSupply/start.html",
+          "source_geography": [
+            "Germany"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-ceer-quality",
+          "role": "benchmark",
+          "url": "https://www.ceer.eu/publication/7th-ceer-ecrb-benchmarking-report-on-the-quality-of-electricity-and-gas-supply/",
+          "source_geography": [
+            "European countries; per-report coverage"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "rel-cfe-distribution",
+          "role": "benchmark",
+          "url": "https://www.cfe.gob.mx/distribucion/cumplimiento/Documents/Programa%20de%20Ampliaci%C3%B3n%20y%20Modernizaci%C3%B3n%20de%20las%20Redes%20Generales%20de%20Distribuci%C3%B3n%202025-2039.pdf",
+          "source_geography": [
+            "Mexico; national/divisional report scope"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Utility supply indices with exclusions; not component FOR/MTTR or a site's uptime promise.",
+      "site_specific_exclusion": "Actual feeder/service and customer interruption history",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R12",
+      "title": "Interruption and lost-production valuation",
+      "card_ids": [
+        "reliability",
+        "commercial"
+      ],
+      "parameters": [
+        "voll",
+        "VoLL by segment",
+        "lost product value",
+        "restart lost revenue"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/models/process_unit.py",
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/services/adequacy/fmea_sweep_runner.py"
+      ],
+      "native_support": "Native VoLL/product value; richer tier coupling planned",
+      "units": "currency/MWh unserved; currency/t; currency/event",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "ADD-ACER",
+          "role": "benchmark",
+          "url": "https://acer.europa.eu/electricity/security-of-supply/european-resource-adequacy-assessment",
+          "source_geography": [
+            "EU; national implementation varies"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "ADD-ICE",
+          "role": "benchmark",
+          "url": "https://emp.lbl.gov/publications/ice-calculator-2-final-report-phase",
+          "source_geography": [
+            "United States; survey/case applicability"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Sector/duration/jurisdiction interruption-cost references; actual process contribution margin and customer risk remain private.",
+      "site_specific_exclusion": "Actual safety consequences, production margin, customer contracts",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R13",
+      "title": "Reliability criteria and accreditation references",
+      "card_ids": [
+        "reliability"
+      ],
+      "parameters": [
+        "target_lole_h",
+        "ens_cap_permyriad",
+        "reserve margin",
+        "capacity-credit methodology"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/energy_hub.py",
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/models/adequacy.py"
+      ],
+      "native_support": "Native user-set goals; formal accreditation separate",
+      "units": "h/year; fraction; MW credit",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "ADD-ACER",
+          "role": "method_reference",
+          "url": "https://acer.europa.eu/electricity/security-of-supply/european-resource-adequacy-assessment",
+          "source_geography": [
+            "EU; national implementation varies"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "National reliability-standard methodology is not customer service-tier certification or a mandatory universal LOLE target.",
+      "site_specific_exclusion": "Actual owner risk tolerance, capacity accreditation and binding SLA",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "R14",
+      "title": "Criticality and restoration archetypes",
+      "card_ids": [
+        "reliability",
+        "control"
+      ],
+      "parameters": [
+        "safety/process_critical/process_flexible/deferrable",
+        "pickup order",
+        "restart duration"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/process_unit.py",
+        "gridspine/schema/island.py"
+      ],
+      "native_support": "Native process tiers/island context; generic templating possible",
+      "units": "tier; order; h; service boundary",
+      "coverage_class": "public_data_gap",
+      "source_links": [],
+      "scope_and_remaining_gap": "No public certified site restoration/criticality recipe; native illustrative presets and customer safety/process requirements needed.",
+      "site_specific_exclusion": "Actual hospital/IT/process critical loads and safe restart procedure",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C01",
+      "title": "Wholesale electricity price history",
+      "card_ids": [
+        "commercial",
+        "energy"
+      ],
+      "parameters": [
+        "day-ahead/intraday/real-time",
+        "nodal/zonal price",
+        "negative prices"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/services/library/series_store.py"
+      ],
+      "native_support": "Native price refs/market packs",
+      "units": "currency/MWh; interval/timezone",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "EU-C01",
+          "role": "candidate_subset",
+          "url": "https://transparency.entsoe.eu/",
+          "source_geography": "European bidding zones; exact dataset/zone coverage varies",
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C02",
+          "role": "candidate_subset",
+          "url": "https://www.smard.de/en/downloadcenter/download-market-data",
+          "source_geography": "Germany and displayed neighboring market areas; validate dataset geography",
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C03",
+          "role": "candidate_subset",
+          "url": "https://www.energidataservice.dk/",
+          "source_geography": "DK1/DK2 and available neighboring PriceArea values; schema-specific",
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C04",
+          "role": "candidate_subset",
+          "url": "https://developer.data.elexon.co.uk/",
+          "source_geography": "Great Britain settlement and balancing system",
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_eia_prices",
+          "role": "context_not_parameter",
+          "url": "https://www.eia.gov/opendata/documentation.php",
+          "source_geography": [
+            "US"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_pjm",
+          "role": "restricted_reference_only",
+          "url": "https://dataminer2.pjm.com/",
+          "source_geography": [
+            "US-PJM region"
+          ],
+          "redistribution_status": "restricted",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_caiso",
+          "role": "candidate_subset",
+          "url": "https://www.caiso.com/systems-applications/portals-applications/open-access-same-time-information-system-oasis",
+          "source_geography": [
+            "US-CAISO and applicable western market locations"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_ercot",
+          "role": "candidate_subset",
+          "url": "https://www.ercot.com/services/mdt/data-portal",
+          "source_geography": [
+            "US-TX ERCOT region"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_miso",
+          "role": "candidate_subset",
+          "url": "https://www.misoenergy.org/markets-and-operations/real-time--market-data/market-reports/",
+          "source_geography": [
+            "US-MISO region",
+            "CA-Manitoba market interface where applicable"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_nyiso",
+          "role": "unverified_reference_only",
+          "url": "https://www.nyiso.com/energy-market-operational-data",
+          "source_geography": [
+            "US-NY"
+          ],
+          "redistribution_status": "unknown",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_isone",
+          "role": "candidate_subset",
+          "url": "https://www.iso-ne.com/participate/support/web-services-data",
+          "source_geography": [
+            "US-New England"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_spp",
+          "role": "candidate_subset",
+          "url": "https://portal.spp.org/groups/day-ahead-market",
+          "source_geography": [
+            "US-SPP region"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_ieso",
+          "role": "candidate_subset",
+          "url": "https://www.ieso.ca/en/Power-Data/Data-Directory",
+          "source_geography": [
+            "CA-ON"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_aeso",
+          "role": "restricted_reference_only",
+          "url": "https://www.aeso.ca/market/market-and-system-reporting/aeso-application-programming-interface-api/",
+          "source_geography": [
+            "CA-AB"
+          ],
+          "redistribution_status": "restricted",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_cenace",
+          "role": "candidate_subset",
+          "url": "https://www.cenace.gob.mx/Paginas/SIM/Reportes/PreEnerServConMDA.aspx",
+          "source_geography": [
+            "MX-SIN",
+            "MX-Baja California",
+            "MX-Baja California Sur"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Historical market/location/interval prices only. Restricted sources reference-only until rights; no forecasts or regional substitution.",
+      "site_specific_exclusion": "Actual bidding zone/node and commercial market access",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C02",
+      "title": "Retail/DSO energy tariff schedules",
+      "card_ids": [
+        "commercial",
+        "energy"
+      ],
+      "parameters": [
+        "TariffItem.kind",
+        "TariffPeriod.rate",
+        "TOU months/weekdays/hours",
+        "tier rates"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/services/library/urdb.py"
+      ],
+      "native_support": "Native tariff/URDB importer",
+      "units": "currency/kWh or MWh; tariff-local clock",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "na_urdb",
+          "role": "candidate_subset",
+          "url": "https://apps.openei.org/services/doc/rest/util_rates/",
+          "source_geography": [
+            "US"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_pge_tariffs",
+          "role": "candidate_subset",
+          "url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+          "source_geography": [
+            "US-CA"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_oeb",
+          "role": "candidate_subset",
+          "url": "https://www.oeb.ca/open-data/electricity-distribution-rates-databases",
+          "source_geography": [
+            "CA-ON"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_hydroquebec",
+          "role": "candidate_subset",
+          "url": "https://www.hydroquebec.com/business/customer-space/rates/",
+          "source_geography": [
+            "CA-QC"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_bchydro",
+          "role": "candidate_subset",
+          "url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions/electric-tariff.html",
+          "source_geography": [
+            "CA-BC"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_cfe",
+          "role": "candidate_subset",
+          "url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCRENegocio/Tarifas/GranDemandaMTH.aspx",
+          "source_geography": [
+            "MX tariff divisions/service classes"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C06",
+          "role": "candidate_subset",
+          "url": "https://www.50hertz.com/Partners/Gridcustomers/Gridaccess",
+          "source_geography": "German transmission-grid access in 50Hertz area",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C07",
+          "role": "candidate_subset",
+          "url": "https://www.netze-bw.de/partner/marktpartner/veroeffentlichungen",
+          "source_geography": "Netze BW distribution service territory, Germany",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C08",
+          "role": "candidate_subset",
+          "url": "https://www.liander.nl/grootzakelijk/tarieven",
+          "source_geography": "Liander service area, Netherlands",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C10",
+          "role": "candidate_subset",
+          "url": "https://www.cre.fr/actualites/toute-lactualite/la-cre-publie-levolution-annuelle-des-tarifs-dutilisation-des-reseaux-publics-delectricite-au-1er-aout-2026.html",
+          "source_geography": "France HTB transmission and HTA/BT distribution",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C11",
+          "role": "candidate_subset",
+          "url": "https://www.cnmc.es/gl/node/417840",
+          "source_geography": "Spain voltage and access-tariff classes",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C12",
+          "role": "candidate_subset",
+          "url": "https://www.e-distribuzione.it/a-chi-ci-rivolgiamo/societa-di-vendita/tariffe-di-distribuzione.html",
+          "source_geography": "Italy applicable distribution/measurement/transmission customer classes",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C15",
+          "role": "candidate_subset",
+          "url": "https://www.strompreis.abn.elcom.admin.ch/",
+          "source_geography": "Swiss municipalities, network operators and standard customer categories",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Published tariff/customer/operator/year subset; no public schedule is selected as actual customer tariff without review.",
+      "site_specific_exclusion": "Actual contracted tariff, meter and account eligibility",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C03",
+      "title": "Demand/capacity tariffs and ratchets",
+      "card_ids": [
+        "commercial",
+        "energy"
+      ],
+      "parameters": [
+        "measured_on",
+        "settlement",
+        "Tier.threshold",
+        "Ratchet.lookback_months/share",
+        "coincident peak"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Native demand/tiers/ratchets; unsupported complex structures refused",
+      "units": "currency/kW-month; currency/kVA; fraction",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "na_urdb",
+          "role": "candidate_subset",
+          "url": "https://apps.openei.org/services/doc/rest/util_rates/",
+          "source_geography": [
+            "US"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_pge_tariffs",
+          "role": "candidate_subset",
+          "url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+          "source_geography": [
+            "US-CA"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_oeb",
+          "role": "candidate_subset",
+          "url": "https://www.oeb.ca/open-data/electricity-distribution-rates-databases",
+          "source_geography": [
+            "CA-ON"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_hydroquebec",
+          "role": "candidate_subset",
+          "url": "https://www.hydroquebec.com/business/customer-space/rates/",
+          "source_geography": [
+            "CA-QC"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_bchydro",
+          "role": "candidate_subset",
+          "url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions/electric-tariff.html",
+          "source_geography": [
+            "CA-BC"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_cfe",
+          "role": "candidate_subset",
+          "url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCRENegocio/Tarifas/GranDemandaMTH.aspx",
+          "source_geography": [
+            "MX tariff divisions/service classes"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C06",
+          "role": "candidate_subset",
+          "url": "https://www.50hertz.com/Partners/Gridcustomers/Gridaccess",
+          "source_geography": "German transmission-grid access in 50Hertz area",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C07",
+          "role": "candidate_subset",
+          "url": "https://www.netze-bw.de/partner/marktpartner/veroeffentlichungen",
+          "source_geography": "Netze BW distribution service territory, Germany",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C08",
+          "role": "candidate_subset",
+          "url": "https://www.liander.nl/grootzakelijk/tarieven",
+          "source_geography": "Liander service area, Netherlands",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C09",
+          "role": "candidate_subset",
+          "url": "https://www.acm.nl/nl/publicaties/tarievenbesluit-tennet-2026",
+          "source_geography": "TenneT Netherlands HS/EHS connection classes",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C10",
+          "role": "candidate_subset",
+          "url": "https://www.cre.fr/actualites/toute-lactualite/la-cre-publie-levolution-annuelle-des-tarifs-dutilisation-des-reseaux-publics-delectricite-au-1er-aout-2026.html",
+          "source_geography": "France HTB transmission and HTA/BT distribution",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C11",
+          "role": "candidate_subset",
+          "url": "https://www.cnmc.es/gl/node/417840",
+          "source_geography": "Spain voltage and access-tariff classes",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C12",
+          "role": "candidate_subset",
+          "url": "https://www.e-distribuzione.it/a-chi-ci-rivolgiamo/societa-di-vendita/tariffe-di-distribuzione.html",
+          "source_geography": "Italy applicable distribution/measurement/transmission customer classes",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C13",
+          "role": "candidate_subset",
+          "url": "https://www.statnett.no/en/for-stakeholders-in-the-power-industry/tariffs/this-years-tariff/",
+          "source_geography": "Norway transmission-connected generation and demand",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C14",
+          "role": "candidate_subset",
+          "url": "https://www.swissgrid.ch/en/home/customers/topics/tariffs.html",
+          "source_geography": "Switzerland transmission charges; downstream pass-through depends on network level",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Demand/capacity/ratchet scope and units need native-supported-term check; billing interval chronology cannot be clustered away.",
+      "site_specific_exclusion": "Actual meter peak history/power factor and subscribed demand",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C04",
+      "title": "Fixed/customer/minimum bill charges",
+      "card_ids": [
+        "commercial"
+      ],
+      "parameters": [
+        "fixed charge",
+        "minimum bill",
+        "customer-service item"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Existing tariff item schema; exact term mapping checked",
+      "units": "currency/account-month; currency/year",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "na_urdb",
+          "role": "candidate_subset",
+          "url": "https://apps.openei.org/services/doc/rest/util_rates/",
+          "source_geography": [
+            "US"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_pge_tariffs",
+          "role": "candidate_subset",
+          "url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+          "source_geography": [
+            "US-CA"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_oeb",
+          "role": "candidate_subset",
+          "url": "https://www.oeb.ca/open-data/electricity-distribution-rates-databases",
+          "source_geography": [
+            "CA-ON"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_hydroquebec",
+          "role": "candidate_subset",
+          "url": "https://www.hydroquebec.com/business/customer-space/rates/",
+          "source_geography": [
+            "CA-QC"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_bchydro",
+          "role": "candidate_subset",
+          "url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions/electric-tariff.html",
+          "source_geography": [
+            "CA-BC"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_cfe",
+          "role": "candidate_subset",
+          "url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCRENegocio/Tarifas/GranDemandaMTH.aspx",
+          "source_geography": [
+            "MX tariff divisions/service classes"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C07",
+          "role": "candidate_subset",
+          "url": "https://www.netze-bw.de/partner/marktpartner/veroeffentlichungen",
+          "source_geography": "Netze BW distribution service territory, Germany",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C08",
+          "role": "candidate_subset",
+          "url": "https://www.liander.nl/grootzakelijk/tarieven",
+          "source_geography": "Liander service area, Netherlands",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C10",
+          "role": "candidate_subset",
+          "url": "https://www.cre.fr/actualites/toute-lactualite/la-cre-publie-levolution-annuelle-des-tarifs-dutilisation-des-reseaux-publics-delectricite-au-1er-aout-2026.html",
+          "source_geography": "France HTB transmission and HTA/BT distribution",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Fixed/minimum charges only where specifically published and supported; actual customer class/date eligibility required.",
+      "site_specific_exclusion": "Actual account counts and service contract",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C05",
+      "title": "Network levies/taxes/pass-throughs",
+      "card_ids": [
+        "commercial",
+        "energy"
+      ],
+      "parameters": [
+        "network energy charge",
+        "policy levy",
+        "VAT",
+        "tax",
+        "eligibility exemption"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/models/finance.py"
+      ],
+      "native_support": "Native supported tariff/finance subset",
+      "units": "currency/MWh; percentage; currency/month",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "EU-C10",
+          "role": "candidate_subset",
+          "url": "https://www.cre.fr/actualites/toute-lactualite/la-cre-publie-levolution-annuelle-des-tarifs-dutilisation-des-reseaux-publics-delectricite-au-1er-aout-2026.html",
+          "source_geography": "France HTB transmission and HTA/BT distribution",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C11",
+          "role": "candidate_subset",
+          "url": "https://www.cnmc.es/gl/node/417840",
+          "source_geography": "Spain voltage and access-tariff classes",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C12",
+          "role": "candidate_subset",
+          "url": "https://www.e-distribuzione.it/a-chi-ci-rivolgiamo/societa-di-vendita/tariffe-di-distribuzione.html",
+          "source_geography": "Italy applicable distribution/measurement/transmission customer classes",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_pge_tariffs",
+          "role": "candidate_subset",
+          "url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+          "source_geography": [
+            "US-CA"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_cfe",
+          "role": "candidate_subset",
+          "url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCRENegocio/Tarifas/GranDemandaMTH.aspx",
+          "source_geography": [
+            "MX tariff divisions/service classes"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Levies/taxes/pass-throughs are jurisdiction/date/contract-specific; no blanket complete-bill guarantee.",
+      "site_specific_exclusion": "Actual tax exemption/account status; not legal advice or inferred eligibility",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C06",
+      "title": "Export compensation and injection tariffs",
+      "card_ids": [
+        "commercial",
+        "energy"
+      ],
+      "parameters": [
+        "export_price_ref",
+        "TariffItem measured_on export",
+        "feed-in/net-metering rules"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Native export price/tariff supported subset",
+      "units": "currency/MWh; capacity charge",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "EU-C06",
+          "role": "candidate_subset",
+          "url": "https://www.50hertz.com/Partners/Gridcustomers/Gridaccess",
+          "source_geography": "German transmission-grid access in 50Hertz area",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C08",
+          "role": "candidate_subset",
+          "url": "https://www.liander.nl/grootzakelijk/tarieven",
+          "source_geography": "Liander service area, Netherlands",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C09",
+          "role": "candidate_subset",
+          "url": "https://www.acm.nl/nl/publicaties/tarievenbesluit-tennet-2026",
+          "source_geography": "TenneT Netherlands HS/EHS connection classes",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C13",
+          "role": "candidate_subset",
+          "url": "https://www.statnett.no/en/for-stakeholders-in-the-power-industry/tariffs/this-years-tariff/",
+          "source_geography": "Norway transmission-connected generation and demand",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C14",
+          "role": "candidate_subset",
+          "url": "https://www.swissgrid.ch/en/home/customers/topics/tariffs.html",
+          "source_geography": "Switzerland transmission charges; downstream pass-through depends on network level",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_pge_tariffs",
+          "role": "candidate_subset",
+          "url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+          "source_geography": [
+            "US-CA"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_bpa",
+          "role": "candidate_subset",
+          "url": "https://www.bpa.gov/energy-and-services/rate-and-tariff-proceedings/power-rates",
+          "source_geography": [
+            "US-Pacific Northwest eligible customers"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_cfe",
+          "role": "candidate_subset",
+          "url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCRENegocio/Tarifas/GranDemandaMTH.aspx",
+          "source_geography": [
+            "MX tariff divisions/service classes"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Injection/export rules vary; provider price history is not an actual export contract or netting entitlement.",
+      "site_specific_exclusion": "Actual interconnection/net-metering enrollment and export limits",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C07",
+      "title": "Connection cost and access products",
+      "card_ids": [
+        "commercial",
+        "grid"
+      ],
+      "parameters": [
+        "capacity_fee",
+        "connection upfront fee",
+        "non-firm/firm access",
+        "curtailment compensation"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Native connection agreement/capacity fee",
+      "units": "currency/MW-year; currency upfront; currency/MWh",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "EU-C08",
+          "role": "benchmark",
+          "url": "https://www.liander.nl/grootzakelijk/tarieven",
+          "source_geography": "Liander service area, Netherlands",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C09",
+          "role": "benchmark",
+          "url": "https://www.acm.nl/nl/publicaties/tarievenbesluit-tennet-2026",
+          "source_geography": "TenneT Netherlands HS/EHS connection classes",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C22",
+          "role": "restricted_reference_only",
+          "url": "https://catalogue-prestations.enedis.fr/",
+          "source_geography": "Enedis distribution service territory, France",
+          "redistribution_status": "restricted",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_bchydro",
+          "role": "benchmark",
+          "url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions/electric-tariff.html",
+          "source_geography": [
+            "CA-BC"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_pge_tariffs",
+          "role": "benchmark",
+          "url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+          "source_geography": [
+            "US-CA"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_bpa",
+          "role": "benchmark",
+          "url": "https://www.bpa.gov/energy-and-services/rate-and-tariff-proceedings/power-rates",
+          "source_geography": [
+            "US-Pacific Northwest eligible customers"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Published access/connection schedules, not actual site works, developer contributions or signed non-firm agreement.",
+      "site_specific_exclusion": "Actual queue position, reinforcement cost, negotiated offer and energized MW",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C08",
+      "title": "PPA contract archetypes and pricing benchmarks",
+      "card_ids": [
+        "commercial"
+      ],
+      "parameters": [
+        "PpaContract.kind",
+        "price",
+        "tenor",
+        "indexation",
+        "premium",
+        "volume_cap",
+        "negative-price clause",
+        "reference"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Native contracts; seller/share gaps identified by IPP spec",
+      "units": "currency/MWh; years; percent/year; MWh/year",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "EU-C17",
+          "role": "benchmark",
+          "url": "https://www.acer.europa.eu/electricity/market-monitoring/ppas",
+          "source_geography": "EU and country PPA market structures",
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_lbl_solar",
+          "role": "benchmark",
+          "url": "https://eta.lbl.gov/publications/us-utility-scale-solar-2025-data",
+          "source_geography": [
+            "US utility-scale solar and PV+battery samples"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_bpa",
+          "role": "benchmark",
+          "url": "https://www.bpa.gov/energy-and-services/rate-and-tariff-proceedings/power-rates",
+          "source_geography": [
+            "US-Pacific Northwest eligible customers"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Public archetypes/historical projects; Bonneville rates not corporate PPA quotes; legal templates may have separate rights.",
+      "site_specific_exclusion": "Confidential negotiated price, parties, credit terms and actual volumes",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C09",
+      "title": "CfD/auction award references",
+      "card_ids": [
+        "commercial"
+      ],
+      "parameters": [
+        "CfdContract.strike",
+        "tenor",
+        "reference",
+        "indexation",
+        "suspend_on_negative_price"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Native CfD; official awards can seed benchmarks",
+      "units": "currency/MWh; years",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "EU-C16",
+          "role": "benchmark",
+          "url": "https://www.gov.uk/government/publications/contracts-for-difference-cfd-allocation-round-7-results/contracts-for-difference-allocation-round-7-results-accessible-webpage",
+          "source_geography": "Great Britain awarded CfD projects/technologies",
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C18",
+          "role": "benchmark",
+          "url": "https://climate.ec.europa.eu/areas-action/eu-funding-climate-action/innovation-fund/calls-proposals/if25-hydrogen-auction_en",
+          "source_geography": "Selected EEA hydrogen-production projects",
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Auction strike/premium and awarded context, not corporate PPA, delivered hydrogen price or project eligibility. A hydrogen auction premium in EUR/kg must not be loaded as a native CfD strike in currency/MWh merely by unit conversion; instrument/settlement mapping needs separate justification.",
+      "site_specific_exclusion": "Actual eligibility/award and private contract deviations",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C10",
+      "title": "Ancillary/DR/capacity market products",
+      "card_ids": [
+        "commercial",
+        "control"
+      ],
+      "parameters": [
+        "capacity_price",
+        "activation_price",
+        "min_bid_mw",
+        "DR availability/activation/events/notice"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Native market/DR objects; exact dispatch/reserve coverage limited",
+      "units": "currency/MW-hour/year; currency/MWh; MW; h",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "EU-C01",
+          "role": "method_reference",
+          "url": "https://transparency.entsoe.eu/",
+          "source_geography": "European bidding zones; exact dataset/zone coverage varies",
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C04",
+          "role": "method_reference",
+          "url": "https://developer.data.elexon.co.uk/",
+          "source_geography": "Great Britain settlement and balancing system",
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_caiso",
+          "role": "method_reference",
+          "url": "https://www.caiso.com/systems-applications/portals-applications/open-access-same-time-information-system-oasis",
+          "source_geography": [
+            "US-CAISO and applicable western market locations"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_ercot",
+          "role": "method_reference",
+          "url": "https://www.ercot.com/services/mdt/data-portal",
+          "source_geography": [
+            "US-TX ERCOT region"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_miso",
+          "role": "method_reference",
+          "url": "https://www.misoenergy.org/markets-and-operations/real-time--market-data/market-reports/",
+          "source_geography": [
+            "US-MISO region",
+            "CA-Manitoba market interface where applicable"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_nyiso",
+          "role": "unverified_reference_only",
+          "url": "https://www.nyiso.com/energy-market-operational-data",
+          "source_geography": [
+            "US-NY"
+          ],
+          "redistribution_status": "unknown",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_isone",
+          "role": "method_reference",
+          "url": "https://www.iso-ne.com/participate/support/web-services-data",
+          "source_geography": [
+            "US-New England"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_spp",
+          "role": "method_reference",
+          "url": "https://portal.spp.org/groups/day-ahead-market",
+          "source_geography": [
+            "US-SPP region"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "na_cenace",
+          "role": "method_reference",
+          "url": "https://www.cenace.gob.mx/Paginas/SIM/Reportes/PreEnerServConMDA.aspx",
+          "source_geography": [
+            "MX-SIN",
+            "MX-Baja California",
+            "MX-Baja California Sur"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Market products/prices require exact duration/qualification/stacking/native reserve semantics; no automatic bankable revenue.",
+      "site_specific_exclusion": "Actual market access, qualified capacity and aggregator contract",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C11",
+      "title": "Gas/diesel/coal/biomass fuel prices",
+      "card_ids": [
+        "commercial",
+        "energy"
+      ],
+      "parameters": [
+        "commodity price",
+        "delivery/tax split",
+        "fuel escalation scenarios"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/services/library/series_store.py"
+      ],
+      "native_support": "Native marginal costs/ref purchase; commodity-source mapping needed",
+      "units": "currency/MWh_LHV; currency/MMBtu; currency/l or t",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "na_eia_prices",
+          "role": "benchmark",
+          "url": "https://www.eia.gov/opendata/documentation.php",
+          "source_geography": [
+            "US"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C19",
+          "role": "benchmark",
+          "url": "https://ec.europa.eu/eurostat/web/energy/data/database",
+          "source_geography": "EU/EFTA and other reported geography, subject to country-specific reuse exceptions",
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C20",
+          "role": "benchmark",
+          "url": "https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en",
+          "source_geography": "EU countries and petroleum product categories",
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Observed fuel/retail-average references; not firm delivered site fuel contract or forward curve; calorific/tax/delivery basis required.",
+      "site_specific_exclusion": "Actual delivered fuel contract and transport/logistics",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C12",
+      "title": "Carbon allowance/tax price",
+      "card_ids": [
+        "commercial",
+        "energy"
+      ],
+      "parameters": [
+        "Co2Price.eur_per_t_by_year",
+        "co2_price_per_period",
+        "carbon-price scenarios"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/models/schemas.py"
+      ],
+      "native_support": "Native period CO2 prices",
+      "units": "currency/tCO2",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "EU-C21",
+          "role": "benchmark",
+          "url": "https://www.eex.com/en/markets/environmentals/eu-ets1-eu-ets2-auctions/eu-ets1-auctions",
+          "source_geography": "EU ETS1 auction allowances/products",
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Historical EU allowance auction reference; carbon taxes/coverage/free allocation and Canada/Mexico policy inputs remain additional local research.",
+      "site_specific_exclusion": "Actual facility coverage, free allocation and compliance obligation",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C13",
+      "title": "Exchange-rate history and conversion policy",
+      "card_ids": [
+        "commercial"
+      ],
+      "parameters": [
+        "currency conversion rate",
+        "base/quote pair",
+        "observation/average date"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/finance.py",
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/services/library/series_store.py"
+      ],
+      "native_support": "Currency fields exist; explicit conversion adapter required",
+      "units": "currency pair ratio",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "MAC-ECB",
+          "role": "candidate_subset",
+          "url": "https://data.ecb.europa.eu/help/getting-data-web-services-sdmx",
+          "source_geography": [
+            "Europe",
+            "EUR reference rates incl USD/CAD/MXN"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "MAC-BOC",
+          "role": "candidate_subset",
+          "url": "https://www.bankofcanada.ca/valet/docs/",
+          "source_geography": [
+            "Canada"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "MAC-BANXICO",
+          "role": "unverified_reference_only",
+          "url": "https://www.banxico.org.mx/SieAPIRest/swagger/index.html",
+          "source_geography": [
+            "Mexico"
+          ],
+          "redistribution_status": "unknown",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Reference FX with date/pair/averaging policy; not forward hedge, project financing or automatic local-cost correction.",
+      "site_specific_exclusion": "Project functional currency and hedging policy",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C14",
+      "title": "Inflation/escalation/cost indices",
+      "card_ids": [
+        "commercial",
+        "energy"
+      ],
+      "parameters": [
+        "inflation",
+        "escalation",
+        "cost-index series",
+        "currency_year",
+        "price_basis"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/finance.py",
+        "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+      ],
+      "native_support": "Native inflation/escalation/bases; cost indexing must be explicit",
+      "units": "index; share/year; real/nominal money basis",
+      "coverage_class": "partial_candidates",
+      "source_links": [
+        {
+          "source_id": "MAC-EUROSTAT",
+          "role": "candidate_subset",
+          "url": "https://ec.europa.eu/eurostat/en/web/user-guides/data-browser/api-data-access/api-introduction",
+          "source_geography": [
+            "EU/EFTA; dataset-specific other Europe"
+          ],
+          "redistribution_status": "mixed",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "MAC-BLS",
+          "role": "candidate_subset",
+          "url": "https://www.bls.gov/developers/home.htm",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "MAC-STATCAN",
+          "role": "candidate_subset",
+          "url": "https://www.statcan.gc.ca/en/developers/wds",
+          "source_geography": [
+            "Canada"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "MAC-INEGI",
+          "role": "candidate_subset",
+          "url": "https://www.inegi.org.mx/servicios/api-indicadores/",
+          "source_geography": [
+            "Mexico"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Explicit selected country/index/base year; CPI not automatically technology-cost escalation. Eurostat rights conservative across duplicate entries.",
+      "site_specific_exclusion": "Project inflation assumptions and actual contract indexation",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C15",
+      "title": "Discount/WACC/debt benchmarks",
+      "card_ids": [
+        "commercial",
+        "energy"
+      ],
+      "parameters": [
+        "discount_rate",
+        "wacc_nominal",
+        "cost_of_equity",
+        "DebtTranche.rate/gearing/tenor/DSCR"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/finance.py",
+        "pypsa-gui/backend/models/schemas.py"
+      ],
+      "native_support": "Native finance/solver fields",
+      "units": "rate; years; gearing fraction; ratio",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "cost_us_atb_2025",
+          "role": "benchmark",
+          "url": "https://atb.nlr.gov/electricity/2025/data",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "MAC-ECB",
+          "role": "benchmark",
+          "url": "https://data.ecb.europa.eu/help/getting-data-web-services-sdmx",
+          "source_geography": [
+            "Europe",
+            "EUR reference rates incl USD/CAD/MXN"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "MAC-BOC",
+          "role": "benchmark",
+          "url": "https://www.bankofcanada.ca/valet/docs/",
+          "source_geography": [
+            "Canada"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "MAC-BANXICO",
+          "role": "unverified_reference_only",
+          "url": "https://www.banxico.org.mx/SieAPIRest/swagger/index.html",
+          "source_geography": [
+            "Mexico"
+          ],
+          "redistribution_status": "unknown",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Published scenario finance/reference rates, not credit spread, WACC, debt or owner hurdle quote; actual finance inputs reviewed by user.",
+      "site_specific_exclusion": "Actual lender quote, credit spread, leverage and owner hurdle rate",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C16",
+      "title": "Tax/depreciation rules",
+      "card_ids": [
+        "commercial"
+      ],
+      "parameters": [
+        "TaxPack.corporate_rate",
+        "DepreciationSchedule",
+        "loss carryforward",
+        "interest deductibility"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/finance.py"
+      ],
+      "native_support": "Native supported tax model",
+      "units": "rate; years; dated tax rule",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "ADD-IRS-DEPRECIATION",
+          "role": "method_reference",
+          "url": "https://www.irs.gov/forms-pubs/about-publication-946",
+          "source_geography": [
+            "United States; tax-year and entity-specific"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "US dated depreciation reference only; no complete EU/Canada/Mexico entity-level tax pack supplied. Legal applicability and model support needed.",
+      "site_specific_exclusion": "Actual taxpayer status, losses and legal interpretation",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C17",
+      "title": "Incentives/grants/credits",
+      "card_ids": [
+        "commercial"
+      ],
+      "parameters": [
+        "Incentive.kind/rate/amount",
+        "eligibility",
+        "phase_out",
+        "grant_tax_treatment"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/finance.py"
+      ],
+      "native_support": "Native incentive subset; policy support is not eligibility certification",
+      "units": "currency; currency/MWh; share; dates",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "ADD-IRS-CREDIT",
+          "role": "method_reference",
+          "url": "https://www.irs.gov/credits-deductions/clean-electricity-investment-credit",
+          "source_geography": [
+            "United States; statute/date/eligibility-specific"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "ADD-CA-ITC",
+          "role": "method_reference",
+          "url": "https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/corporations/business-tax-credits/clean-economy-itc.html",
+          "source_geography": [
+            "Canada; program/date/eligibility-specific"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C16",
+          "role": "method_reference",
+          "url": "https://www.gov.uk/government/publications/contracts-for-difference-cfd-allocation-round-7-results/contracts-for-difference-allocation-round-7-results-accessible-webpage",
+          "source_geography": "Great Britain awarded CfD projects/technologies",
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "EU-C18",
+          "role": "method_reference",
+          "url": "https://climate.ec.europa.eu/areas-action/eu-funding-climate-action/innovation-fund/calls-proposals/if25-hydrogen-auction_en",
+          "source_geography": "Selected EEA hydrogen-production projects",
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Dated program/auction references, not confirmed entitlement. EU national programs and Mexico remain scoped research gaps.",
+      "site_specific_exclusion": "Actual eligibility evidence, award/registration and legal review",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C18",
+      "title": "Grid and product emissions intensity",
+      "card_ids": [
+        "commercial",
+        "energy"
+      ],
+      "parameters": [
+        "grid_t_per_mwh",
+        "grid_cfe_share_ref",
+        "ReferencePurchase.co2_t_per_kg",
+        "emissions series"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/services/library/series_store.py"
+      ],
+      "native_support": "Native carbon/CFE refs; broader lifecycle method may extend",
+      "units": "tCO2/MWh; kgCO2/kg; CFE share",
+      "coverage_class": "benchmark_only",
+      "source_links": [
+        {
+          "source_id": "ENV-EGRID",
+          "role": "benchmark",
+          "url": "https://www.epa.gov/egrid",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "ENV-EEA",
+          "role": "benchmark",
+          "url": "https://www.eea.europa.eu/en/analysis/indicators/greenhouse-gas-emission-intensity-of-1",
+          "source_geography": [
+            "Europe; selected reported countries"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Regional average generation factors, not hourly marginal or certificate-matched green-product evidence; Canada/Mexico specific factors not established here.",
+      "site_specific_exclusion": "Actual certificates/cancellation, supplier emissions and regulatory green status",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "C19",
+      "title": "H2/NH3/product/offtake value benchmarks",
+      "card_ids": [
+        "commercial",
+        "energy",
+        "reliability"
+      ],
+      "parameters": [
+        "ReferencePurchase.price_eur_per_kg",
+        "Bus.product_value",
+        "product shortfall value",
+        "offtake schedule"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/models/commercial.py",
+        "pypsa-gui/backend/models/process_unit.py",
+        "pypsa-gui/backend/models/schemas.py"
+      ],
+      "native_support": "Native product value/reference purchase; real quotes commonly private",
+      "units": "currency/kg; currency/t; currency/MWh_product",
+      "coverage_class": "public_data_gap",
+      "source_links": [
+        {
+          "source_id": "EU-C18",
+          "role": "context_not_parameter",
+          "url": "https://climate.ec.europa.eu/areas-action/eu-funding-climate-action/innovation-fund/calls-proposals/if25-hydrogen-auction_en",
+          "source_geography": "Selected EEA hydrogen-production projects",
+          "redistribution_status": "open_verified",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "cost_doe_h2a",
+          "role": "context_not_parameter",
+          "url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis/h2a-production",
+          "source_geography": [
+            "United States reference cases"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Hydrogen support premiums and cost assumptions are not market/offtake quotes; no open current delivered H2/NH3/ore contract price database established.",
+      "site_specific_exclusion": "Actual offtake price/volume/penalty and lost-production margin",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "O01",
+      "title": "Grid-forming control presets",
+      "card_ids": [
+        "control",
+        "grid"
+      ],
+      "parameters": [
+        "control mode",
+        "droop",
+        "equivalent inertia H_v",
+        "tau_f",
+        "i_max",
+        "service flags"
+      ],
+      "native_paths": [
+        "gridspine/schema/island.py",
+        "gridspine/static/gfm_tuning.py"
+      ],
+      "native_support": "Native screened presets/search, not universal dynamics",
+      "units": "pu; percent; seconds; current pu",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "TECH17",
+          "role": "restricted_reference_only",
+          "url": "https://www.neso.energy/industry-information/codes/grid-code-gc/grid-code-documents",
+          "source_geography": [
+            "Europe: Great Britain"
+          ],
+          "redistribution_status": "restricted",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH18",
+          "role": "method_reference",
+          "url": "https://www.wecc.org/committees/mvs",
+          "source_geography": [
+            "North America: Western Interconnection model context"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Generic GFM guidance/model structures only; native screen or validated OEM controller required; rights may prohibit embedding.",
+      "site_specific_exclusion": "Actual validated vendor controller and applied tuning",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "O02",
+      "title": "Reactive/voltage control presets",
+      "card_ids": [
+        "control",
+        "grid"
+      ],
+      "parameters": [
+        "Q-V droop",
+        "voltage target",
+        "Q capability",
+        "deadband",
+        "limit priority"
+      ],
+      "native_paths": [
+        "gridspine/schema/island.py",
+        "gridspine/templates/data/grid_codes.yaml",
+        "gridspine/static/campus_reactive.py"
+      ],
+      "native_support": "Native reactive/island fields; detailed loop may extend",
+      "units": "pu; MVAr; percent",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "TECH18",
+          "role": "method_reference",
+          "url": "https://www.wecc.org/committees/mvs",
+          "source_geography": [
+            "North America: Western Interconnection model context"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Generic reactive-control schemas; no verified site tuning, limits or vendor response without model validation.",
+      "site_specific_exclusion": "Actual operator setting and site dynamic model",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "O03",
+      "title": "Frequency/governor/FFR parameters",
+      "card_ids": [
+        "control"
+      ],
+      "parameters": [
+        "frequency droop",
+        "governor response",
+        "inertia",
+        "FFR delay/duration",
+        "reserve headroom"
+      ],
+      "native_paths": [
+        "gridspine/schema/island.py",
+        "gridspine/static/frequency.py"
+      ],
+      "native_support": "Native reduced frequency/island models",
+      "units": "seconds; percent; MW; Hz",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "TECH18",
+          "role": "method_reference",
+          "url": "https://www.wecc.org/committees/mvs",
+          "source_geography": [
+            "North America: Western Interconnection model context"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Generic dynamic/governor model structures; plant-specific inertia, delay, reserve and response need independent evidence.",
+      "site_specific_exclusion": "Actual tested governor/turbine/inverter response and reserve policy",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "O04",
+      "title": "Ride-through/load response presets",
+      "card_ids": [
+        "control",
+        "grid",
+        "reliability"
+      ],
+      "parameters": [
+        "voltage-frequency ride-through curves",
+        "UPS bridge",
+        "critical load response",
+        "trip delays"
+      ],
+      "native_paths": [
+        "gridspine/schema/island.py",
+        "gridspine/templates/data/grid_codes.yaml",
+        "gridspine/schema/dc.py"
+      ],
+      "native_support": "Native island requirements/UPS response; eligibility scoped",
+      "units": "pu/Hz against time; seconds; MW",
+      "coverage_class": "method_reference_only",
+      "source_links": [
+        {
+          "source_id": "TECH16",
+          "role": "method_reference",
+          "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32016R0631",
+          "source_geography": [
+            "Europe: EU/EEA and applicable synchronous areas; national limits required"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH17",
+          "role": "restricted_reference_only",
+          "url": "https://www.neso.energy/industry-information/codes/grid-code-gc/grid-code-documents",
+          "source_geography": [
+            "Europe: Great Britain"
+          ],
+          "redistribution_status": "restricted",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH18",
+          "role": "method_reference",
+          "url": "https://www.wecc.org/committees/mvs",
+          "source_geography": [
+            "North America: Western Interconnection model context"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Grid-code requirement vs equipment immunity distinct; no automatic device ride-through certification.",
+      "site_specific_exclusion": "Actual device settings/acceptance and load-side immunity",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "O05",
+      "title": "Motor and process restart sequencing",
+      "card_ids": [
+        "control",
+        "reliability",
+        "grid"
+      ],
+      "parameters": [
+        "pickup order",
+        "restart delay",
+        "motor method",
+        "process ramp and standby"
+      ],
+      "native_paths": [
+        "gridspine/schema/island.py",
+        "pypsa-gui/backend/models/process_unit.py",
+        ".scratch/grid-to-process/issues/12-minutes-scale-motor-start-restart.md"
+      ],
+      "native_support": "Native island context; detailed process restart planned",
+      "units": "seconds/hours; sequence; pu current",
+      "coverage_class": "public_data_gap",
+      "source_links": [
+        {
+          "source_id": "TECH09",
+          "role": "context_not_parameter",
+          "url": "https://natural-resources.canada.ca/energy-efficiency/product-energy-ratings/electric-motors",
+          "source_geography": [
+            "North America: Canada"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Motor efficiency list does not supply safe restart sequence or process dependencies; site-approved procedure and validated replay required.",
+      "site_specific_exclusion": "Actual safe operating procedure and protection coordination",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "O06",
+      "title": "Black-start/reconnection/protection scenario references",
+      "card_ids": [
+        "control",
+        "grid"
+      ],
+      "parameters": [
+        "black-start sequence",
+        "synchronism window",
+        "protection coordination",
+        "voltage/frequency permissives"
+      ],
+      "native_paths": [
+        "gridspine/schema/island.py",
+        "gridspine/templates/data/grid_codes.yaml"
+      ],
+      "native_support": "Separate detailed model/admission required; GFM does not imply support",
+      "units": "scenario artifact; Hz; deg; pu; seconds",
+      "coverage_class": "public_data_gap",
+      "source_links": [
+        {
+          "source_id": "TECH17",
+          "role": "restricted_reference_only",
+          "url": "https://www.neso.energy/industry-information/codes/grid-code-gc/grid-code-documents",
+          "source_geography": [
+            "Europe: Great Britain"
+          ],
+          "redistribution_status": "restricted",
+          "automatic_import_approved": false
+        },
+        {
+          "source_id": "TECH18",
+          "role": "context_not_parameter",
+          "url": "https://www.wecc.org/committees/mvs",
+          "source_geography": [
+            "North America: Western Interconnection model context"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "No public universal approved black-start/protection/reconnection recipe; references are not operational authority or validated plant settings.",
+      "site_specific_exclusion": "Actual approved energization, relay settings and switching authority",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "O07",
+      "title": "EMS/storage dispatch policy presets",
+      "card_ids": [
+        "control",
+        "energy",
+        "reliability"
+      ],
+      "parameters": [
+        "reserve-SOC policy",
+        "rule thresholds",
+        "forecast horizon",
+        "constraint/fallback policy"
+      ],
+      "native_paths": [
+        "gridspine/schema/island.py",
+        "pypsa-gui/backend/models/schemas.py"
+      ],
+      "native_support": "Native optimization/island context; general controller adapter pending",
+      "units": "pu SOC; MW; h; model/policy artifact",
+      "coverage_class": "public_data_gap",
+      "source_links": [],
+      "scope_and_remaining_gap": "No reusable customer-approved EMS policy/forecast/calibration dataset established; native illustrative rules require their own admission.",
+      "site_specific_exclusion": "Actual operating policy, forecast/data access and plant actuation authorization",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    },
+    {
+      "family_id": "O08",
+      "title": "Workload/industrial scheduling policies",
+      "card_ids": [
+        "control",
+        "energy"
+      ],
+      "parameters": [
+        "training deferral limits",
+        "deadlines",
+        "temperature constraints",
+        "production shifts",
+        "DR activation"
+      ],
+      "native_paths": [
+        "pypsa-gui/backend/services/dc_load_profile.py",
+        "pypsa-gui/backend/models/flex_archetypes.py",
+        "pypsa-gui/backend/models/commercial.py"
+      ],
+      "native_support": "Native DC/flex contracts; advanced policy evaluation pending",
+      "units": "hours; MW; degC; product throughput",
+      "coverage_class": "public_data_gap",
+      "source_links": [
+        {
+          "source_id": "PRO-COMSTOCK",
+          "role": "context_not_parameter",
+          "url": "https://comstock.nlr.gov/page/datasets",
+          "source_geography": [
+            "United States"
+          ],
+          "redistribution_status": "public_terms_review",
+          "automatic_import_approved": false
+        }
+      ],
+      "scope_and_remaining_gap": "Building scenarios do not provide actual IT job deadlines or industrial scheduling consent/safety constraints; customer operational data needed.",
+      "site_specific_exclusion": "Actual job/production commitments, operator consent and safety limits",
+      "source_row_native_field_binding": "pending source-specific importer contract; this is family-level research mapping",
+      "release_state": "not_ingested_not_approved"
+    }
+  ]
+}

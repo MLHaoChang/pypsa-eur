@@ -1,0 +1,491 @@
+[
+  {
+    "source_id": "na_urdb",
+    "title": "OpenEI Utility Rate Database (URDB)",
+    "url": "https://apps.openei.org/services/doc/rest/util_rates/",
+    "publisher": "OpenEI / National Laboratory of the Rockies",
+    "geography": [
+      "US"
+    ],
+    "parameter_families": [
+      "retail energy and demand charges",
+      "TOU schedules",
+      "tier thresholds",
+      "ratchets",
+      "fixed charges",
+      "tariff eligibility and effective dates"
+    ],
+    "format": "REST JSON; full downloadable database advertised",
+    "access": "Free API key documented; manual search and download alternatives. Documentation/catalog primary search results inspected; direct pages returned429 during this research.",
+    "license_or_terms": "Record-specific primary reuse license must be verified before common seeding; conflicting third-party CC0/CC-BY descriptions are not sufficient. Raw utility documents have separate terms.",
+    "terms_url": "https://data.openei.org/submissions/5",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Continuously maintained; rates have individual start/end/update dates",
+    "limitations": "US-specific; not every rider/tax or tariff complete/current. Native importer already handles supported rates and explicit refusals; unsupported terms must not become a total bill.",
+    "priority": "P0",
+    "integration_mode": "Reuse native urdb_to_tariff importer; select by utility, voltage/class/service and valid date; review, pin, retain source URI and refused fields. Rights-gated common seed or tenant-local import.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_pge_tariffs",
+    "title": "PG&E official electric tariff book, including B-20",
+    "url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+    "publisher": "Pacific Gas and Electric Company",
+    "geography": [
+      "US-CA"
+    ],
+    "parameter_families": [
+      "retail energy and demand charges",
+      "industrial demand/TOU conditions",
+      "tariff applicability",
+      "riders and minimum conditions"
+    ],
+    "format": "HTML index; tariff PDF sheets",
+    "access": "Public tariff index and linked B-20 official PDF; no API established",
+    "license_or_terms": "Public regulatory material; specific copying/redistribution and document restrictions require review, not assumed open license.",
+    "terms_url": "https://www.pge.com/tariffs/en.html",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Tariff revisions/advice-letter effective dates; potentially multiple per year",
+    "limitations": "Example regional utility only. Official sheets govern; URDB record may lag. Rate schedules depend on class/voltage/options and bundled-versus-generation service; new B-20 versus legacy E-20 eligibility matters.",
+    "priority": "P1",
+    "integration_mode": "Curated official-host document parser into native tariff schema; per-field source spans and review; known-bill fixture. No whole-book copying until terms resolved.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_eia_prices",
+    "title": "EIA Open Data v2 and fuel/retail price series",
+    "url": "https://www.eia.gov/opendata/documentation.php",
+    "publisher": "US Energy Information Administration",
+    "geography": [
+      "US"
+    ],
+    "parameter_families": [
+      "industrial electricity benchmark prices",
+      "natural gas and petroleum price series",
+      "fuel-cost assumptions",
+      "historical national/state averages"
+    ],
+    "format": "REST JSON; spreadsheet/CSV and bulk routes",
+    "access": "Free API key required for API; public downloadable series also available",
+    "license_or_terms": "EIA states its publications are public domain, with attribution requested and exceptions for identified third-party content; API terms and rate limits still apply.",
+    "terms_url": "https://www.eia.gov/about/copyrights_reuse.php",
+    "redistribution_status": "open_verified",
+    "cadence": "Series-specific daily/weekly/monthly/annual and revisions",
+    "limitations": "State/sector average revenues per kWh are benchmarks, not executable tariffs. Gas/petroleum hub or retail prices require delivery/tax/heating-value basis; not PPA quotes or hourly forward forecasts.",
+    "priority": "P0",
+    "integration_mode": "Seed clearly labelled benchmark series from identified EIA-owned products; optional refresh adapter; stage timezone/currency/units and revision metadata in native series_store.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_pjm",
+    "title": "PJM Data Miner 2",
+    "url": "https://dataminer2.pjm.com/",
+    "publisher": "PJM Interconnection",
+    "geography": [
+      "US-PJM region"
+    ],
+    "parameter_families": [
+      "DA/RT locational marginal prices",
+      "ancillary market observations",
+      "load and market inputs"
+    ],
+    "format": "Web downloads and REST API",
+    "access": "Public search; PJM account/API subscription key for automation. Published connection limits differ by member status.",
+    "license_or_terms": "Official Data Miner terms restrict use to internal purposes and prohibit redistributing raw or derived data without a PJM-issued redistribution license.",
+    "terms_url": "https://dataminer2.pjm.com/",
+    "redistribution_status": "restricted",
+    "cadence": "Product-specific interval/daily publication; preliminary/final revisions",
+    "limitations": "Public does not mean seedable. Node/hub, DA/RT, finality and time basis differ. An open-source wrapper does not grant redistribution rights.",
+    "priority": "defer",
+    "integration_mode": "Reference catalog entry only until permitted use established; tenant/user-held licensed connection where allowed. No common seed, bundle export or transformed-data promotion without license.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_caiso",
+    "title": "CAISO OASIS and historical pricing downloader",
+    "url": "https://www.caiso.com/systems-applications/portals-applications/open-access-same-time-information-system-oasis",
+    "publisher": "California ISO",
+    "geography": [
+      "US-CAISO and applicable western market locations"
+    ],
+    "parameter_families": [
+      "DA/RT nodal and aggregate price series",
+      "market/ancillary observations",
+      "demand and outage context"
+    ],
+    "format": "OASIS ZIP/XML/CSV downloads; historical bulk portal",
+    "access": "Public OASIS report URLs and historical downloader. Historical pricing portal advertises records since2016; endpoint/product limits must be honored.",
+    "license_or_terms": "Website terms allow specified public-use materials with notices/credit but distinguish third-party and separate API/data rights. Exact OASIS/API clauses need review for product redistribution.",
+    "terms_url": "https://www.caiso.com/privacy-terms-of-use",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Market product intervals and subsequent revisions; bulk archive updates",
+    "limitations": "Not an executable retail tariff. LMP component, location, market and interval must be explicit. Separate public website statements cannot be treated as blanket API-data licensing.",
+    "priority": "P1",
+    "integration_mode": "Optional approved-source series import after scoped rights check; retain report ID/location/market/revision and archive source; avoid default live price dependency.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_ercot",
+    "title": "ERCOT Public API and Data Access Portal",
+    "url": "https://www.ercot.com/services/mdt/data-portal",
+    "publisher": "ERCOT",
+    "geography": [
+      "US-TX ERCOT region"
+    ],
+    "parameter_families": [
+      "DA/RT prices",
+      "settlement-point and ancillary observations",
+      "market load and related scenarios"
+    ],
+    "format": "Registered public reports API; archived CSV/XML/ZIP reports",
+    "access": "Account, authentication ID token and subscription key documented; no credential registration performed",
+    "license_or_terms": "ERCOT API-specific terms apply; source availability is public but redistribution grant not established here.",
+    "terms_url": "https://www.ercot.com/help/terms/data-portal",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Report-dependent intervals, posted/reposted reports and archive lag",
+    "limitations": "Settlement-point prices versus nodal LMP, DA versus RT and interval semantics differ. Auth and archived-report access are not evidence of common-library permission; terms page fetch returned403.",
+    "priority": "P1",
+    "integration_mode": "Optional tenant-scoped credentialed acquisition through native managed data access, not a key in library item; normalize/pin accepted series and revisions.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_miso",
+    "title": "MISO market reports and Data Exchange",
+    "url": "https://www.misoenergy.org/markets-and-operations/real-time--market-data/market-reports/",
+    "publisher": "MISO",
+    "geography": [
+      "US-MISO region",
+      "CA-Manitoba market interface where applicable"
+    ],
+    "parameter_families": [
+      "DA/RT LMPs",
+      "ancillary market clearing prices",
+      "load/market scenarios"
+    ],
+    "format": "Public CSV reports; JSON RT APIs; Data Exchange pricing API",
+    "access": "Public reports coexist with Data Exchange registration/subscription workflow; API product/auth details must be pinned",
+    "license_or_terms": "Official data/API terms require scoped review; no blanket open-data grant verified.",
+    "terms_url": "https://data-exchange.misoenergy.org/apis",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Interval/day product-specific; preliminary/final/corrected reports",
+    "limitations": "Report-to-API migration was paused in official notice; do not rely on abandoned endpoints. EST/hour-ending conventions and corrections require report-specific mapping; Manitoba interface is not Canada-wide coverage.",
+    "priority": "P2",
+    "integration_mode": "A versioned approved report adapter or Data Exchange connection, not both without deduplication; native series_store with location/settlement/time/finality metadata.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_nyiso",
+    "title": "NYISO market pricing and MIS public reports",
+    "url": "https://www.nyiso.com/energy-market-operational-data",
+    "publisher": "New York ISO",
+    "geography": [
+      "US-NY"
+    ],
+    "parameter_families": [
+      "DA/RT LBMPs",
+      "hub/zone/generator price locations",
+      "ancillary and capacity observations"
+    ],
+    "format": "Public report CSV/ZIP archives and web reports",
+    "access": "Official landing page requires browser verification in this research; native archived/report path must be verified in bounded adapter pilot",
+    "license_or_terms": "No applicable redistribution license established from primary material in this session; review actual report/website terms.",
+    "terms_url": "https://www.nyiso.com/",
+    "redistribution_status": "unknown",
+    "cadence": "Interval/day/month archive products with revisions",
+    "limitations": "Do not bypass robot check. LBMP node/zone/generator datasets have distinct meaning; market observations are not retail bill rates. Capability remains unavailable until supported endpoint and terms verified.",
+    "priority": "P2",
+    "integration_mode": "Catalog candidate and manual authorised upload initially; admitted official report adapter only after pilot/access/terms evidence.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_isone",
+    "title": "ISO New England Web Services v1.1",
+    "url": "https://www.iso-ne.com/participate/support/web-services-data",
+    "publisher": "ISO New England",
+    "geography": [
+      "US-New England"
+    ],
+    "parameter_families": [
+      "DA/RT LMPs",
+      "final/preliminary hourly prices",
+      "operating reserve and demand observations"
+    ],
+    "format": "REST XML/JSON; reports; published business-documentation spreadsheet",
+    "access": "Automated access requires registration/application; base https://webservices.iso-ne.com/api/v1.1 documented",
+    "license_or_terms": "Legal page reserves copyright and warns duplication/non-personal use may violate rights; no open redistribution license established.",
+    "terms_url": "https://www.iso-ne.com/legal-privacy",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Report-dependent real-time/hourly/day data, prelim/final states",
+    "limitations": "Some internal nodes opt out of publication. API scope/docs and finality are explicit; rights for product distribution need resolution before shared seeding.",
+    "priority": "P2",
+    "integration_mode": "Approved tenant-scoped data connection or manual upload; no common seed until rights resolved; retain location/product/finality and schema version.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_spp",
+    "title": "SPP Integrated Marketplace public portal",
+    "url": "https://portal.spp.org/groups/day-ahead-market",
+    "publisher": "Southwest Power Pool",
+    "geography": [
+      "US-SPP region"
+    ],
+    "parameter_families": [
+      "DA LMP and RTBM LMP",
+      "reserve clearing observations",
+      "hub/interface/price node series"
+    ],
+    "format": "Public downloadable report files via portal; market public-data guide",
+    "access": "Public portal DA and RTBM report pages; no general unrestricted API or auth guarantee established",
+    "license_or_terms": "Portal marks rights reserved and links Terms of Use; dataset redistribution rights need review.",
+    "terms_url": "https://portal.spp.org/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "DA operating-day and RT operating-interval reports",
+    "limitations": "SPP East/Western services and market/location coverage are separate. Official guide time conventions may be CST/hour-ending; pin per-product basis and revisions.",
+    "priority": "P2",
+    "integration_mode": "Versioned bounded public-report adapter or reviewed manual import into series_store; country-wide/national defaults inappropriate.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_bpa",
+    "title": "Bonneville Power Administration power/transmission rate schedules",
+    "url": "https://www.bpa.gov/energy-and-services/rate-and-tariff-proceedings/power-rates",
+    "publisher": "Bonneville Power Administration",
+    "geography": [
+      "US-Pacific Northwest eligible customers"
+    ],
+    "parameter_families": [
+      "wholesale power rate schedules",
+      "transmission charges",
+      "ancillary/control-area charges",
+      "risk and rate adjustments"
+    ],
+    "format": "Official PDF rate schedules and decision documents",
+    "access": "Public rate schedule and case pages; current rates include adjustments/supplemental proceedings",
+    "license_or_terms": "Federal agency primary documents; confirm document-specific third-party/notices and current published terms before common packaging.",
+    "terms_url": "https://www.bpa.gov/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Rate-case periods with interim/surcharge/adjustment events",
+    "limitations": "BPA means Bonneville, distinct from PPA. Base BP-26 schedules do not guarantee current bill without subsequent rate adjustments/BP-27 and eligibility/product terms. Not a generic US industrial tariff.",
+    "priority": "P1",
+    "integration_mode": "Curated rate/connection terms for an eligible customer, with exact effective dates and adjustment records; tariff/connection library plus source evidence.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_lbl_solar",
+    "title": "Berkeley Lab US Utility-Scale Solar 2025 public data update",
+    "url": "https://eta.lbl.gov/publications/us-utility-scale-solar-2025-data",
+    "publisher": "Lawrence Berkeley National Laboratory",
+    "geography": [
+      "US utility-scale solar and PV+battery samples"
+    ],
+    "parameter_families": [
+      "historical PPA price benchmarks",
+      "capital and O&M evidence",
+      "capture value and project performance context"
+    ],
+    "format": "Public nonconfidential XLSX with57 tabs, PDF slides/user guide; related OEDI hourly data",
+    "access": "Public download advertised; ~54MB workbook not downloaded here",
+    "license_or_terms": "Public database/report; confirm exact workbook/OEDI record license and source-level exclusions before redistribution, not assume lab authorship means public domain.",
+    "terms_url": "https://eta.lbl.gov/publications/us-utility-scale-solar-2025-data",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Annual release; release/vintage and confidentiality filtering",
+    "limitations": "Published historical/levelized PPAs from selected projects are not current executable quotes or complete bilateral contracts. Contract vintage, tax incentives/REC bundle and levelization basis matter; cannot infer missing confidential price.",
+    "priority": "P1",
+    "integration_mode": "Reference/range library with sample/vintage/basis labels; native contract archetypes remain illustrative; actual contract/quote is customer input.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_ieso",
+    "title": "IESO public market reports and Ontario price directory",
+    "url": "https://www.ieso.ca/en/Power-Data/Data-Directory",
+    "publisher": "Independent Electricity System Operator",
+    "geography": [
+      "CA-ON"
+    ],
+    "parameter_families": [
+      "DA Ontario Zonal Price",
+      "RT nodal/zonal prices",
+      "Ontario Electricity Market Price",
+      "legacy HOEP",
+      "Global Adjustment and reserve context"
+    ],
+    "format": "Public CSV/XML reports and help specifications",
+    "access": "Public reports directory and historical downloads; no credentials needed for listed public report browsing",
+    "license_or_terms": "Limited non-exclusive/non-sublicensable/non-transferable use/reproduction with copyright and terms notice; supplemental terms prevail. No blanket open-data distribution grant.",
+    "terms_url": "https://www.ieso.ca/Terms-of-Use",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Product-dependent intervals/hourly/monthly, corrections and regime changes",
+    "limitations": "OEMP replaces HOEP from2025-05-01; DA-OZP, LFDA, OEMP, nodal prices and Global Adjustment are different. Do not splice series or label wholesale price a delivered industrial bill.",
+    "priority": "P1",
+    "integration_mode": "Regime-aware optional series adapter with explicit CAD/MWh/timezone/finality and rights-gated scope; pair with applicable tariff/bill terms.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_aeso",
+    "title": "AESO market/system reports and API",
+    "url": "https://www.aeso.ca/market/market-and-system-reporting/aeso-application-programming-interface-api/",
+    "publisher": "Alberta Electric System Operator",
+    "geography": [
+      "CA-AB"
+    ],
+    "parameter_families": [
+      "pool price",
+      "system marginal price",
+      "operating reserve and annual market statistics"
+    ],
+    "format": "Documented API; public market reports; historical spreadsheets",
+    "access": "API developer registration/key workflow and public reporting routes; API changed2025, pin current product/version",
+    "license_or_terms": "Official site copyright permits non-commercial/personal/educational copying subject to conditions; other use needs written permission.",
+    "terms_url": "https://www.aeso.ca/legal/",
+    "redistribution_status": "restricted",
+    "cadence": "Hourly/market-product reports; annual statistics; corrections",
+    "limitations": "Commercial GridSpine seed/use must not assume permission from free access. Pool price is not total retail/site supply cost; Alberta time and market restructuring require versioned metadata.",
+    "priority": "defer",
+    "integration_mode": "Reference-only until commercial rights established; authorised user-held connection if permitted. Do not seed or transform into common library without clearance.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_oeb",
+    "title": "Ontario Energy Board distribution-rate open data",
+    "url": "https://www.oeb.ca/open-data/electricity-distribution-rates-databases",
+    "publisher": "Ontario Energy Board",
+    "geography": [
+      "CA-ON"
+    ],
+    "parameter_families": [
+      "historical distribution rates all rate classes",
+      "rate-class eligibility",
+      "utility service territory references",
+      "general-service small-customer rates"
+    ],
+    "format": "XLSX historical databases; XML current limited-class datasets; regulatory sheets",
+    "access": "Public downloads; historical distribution rates since2006. Current general-service XML covers <50kW, not large industrial all-in rates.",
+    "license_or_terms": "Publisher open-data inventory links Open Government Licence Ontario; attribution and exclusions apply. Verify each chosen asset is included before release.",
+    "terms_url": "https://www.ontario.ca/page/open-government-licence-ontario",
+    "redistribution_status": "open_verified",
+    "cadence": "Historical distribution-rate database annually; selected current rate XML monthly",
+    "limitations": "Distribution-only charges are not commodity/Global Adjustment/transmission/taxes total. Large-industrial applicability must come from actual rate class/sheets. Open/Public is access label, while licence coverage must remain attached to source asset.",
+    "priority": "P0",
+    "integration_mode": "Seed eligible OGL-labelled records and derived native tariff entries with exact classes/effective dates; reconcile known bill and explicitly unsupported charges.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_hydroquebec",
+    "title": "Hydro-Quebec official business electricity tariffs",
+    "url": "https://www.hydroquebec.com/business/customer-space/rates/",
+    "publisher": "Hydro-Quebec",
+    "geography": [
+      "CA-QC"
+    ],
+    "parameter_families": [
+      "Rate L/M/LG industrial/commercial energy and demand",
+      "minimum/contract demand",
+      "demand response and optional-rate terms"
+    ],
+    "format": "Official tariff PDF and explanatory HTML",
+    "access": "Public rate indexes/PDF; particular Rate L page returned403 in direct open, search-index primary evidence confirms official source",
+    "license_or_terms": "Public tariff material; website/document-specific copying/redistribution terms not established as open license.",
+    "terms_url": "https://www.hydroquebec.com/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Official tariff effective dates and amendments; document version must be pinned",
+    "limitations": "Rate L industrial versus LG general large-power distinction matters; billed demand/contract terms and optional DR not universal. A data center is not automatically Rate L.",
+    "priority": "P1",
+    "integration_mode": "Curated native tariff rows for chosen eligible service, source-span review and official PDF precedence; scoped tenant import until redistribution rights clear.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_bchydro",
+    "title": "BC Hydro Electric Tariff and large-load rates",
+    "url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions/electric-tariff.html",
+    "publisher": "BC Hydro / BCUC approvals",
+    "geography": [
+      "CA-BC"
+    ],
+    "parameter_families": [
+      "distribution/transmission service rates",
+      "large-load demand/energy charges",
+      "connection service terms",
+      "optional OATT schedules"
+    ],
+    "format": "Official approved tariff PDFs; explanatory rate pages",
+    "access": "Public official PDFs; separate distribution, transmission customer and OATT documents",
+    "license_or_terms": "Public regulatory material; provincial open-data licence does not automatically license BC Hydro tariff content. Review specific terms before common redistribution.",
+    "terms_url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions.html",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Approved effective dates/amendments; fiscal-year changes",
+    "limitations": "Official BCUC-approved version prevails over explanations. RS1830 energy-charge consolidation effective2026-04-01 illustrates structural changes; select actual schedule, voltage, customer and connection terms.",
+    "priority": "P1",
+    "integration_mode": "Curated schedule-version adapter and connection agreement references; do not collapse OATT into retail energy charge; validate dated sample bill.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_cenace",
+    "title": "CENACE public SIM PML and ancillary market reports",
+    "url": "https://www.cenace.gob.mx/Paginas/SIM/Reportes/PreEnerServConMDA.aspx",
+    "publisher": "CENACE",
+    "geography": [
+      "MX-SIN",
+      "MX-Baja California",
+      "MX-Baja California Sur"
+    ],
+    "parameter_families": [
+      "day-ahead nodal PML and components",
+      "distributed-node prices",
+      "ancillary service prices",
+      "historical market scenarios"
+    ],
+    "format": "Public report downloads; linked documented SW-PML/PEND/PSC web services",
+    "access": "Public reports plus web-service manuals; actual service authentication/limits not exercised here",
+    "license_or_terms": "CENACE open-data article describes free reuse/redistribution for its designated open datasets, but report/manual-specific terms and original/recalculated indicatory subsets need separate treatment.",
+    "terms_url": "https://www.gob.mx/cenace/articulos/conoce-los-datos-abiertos-del-cenace",
+    "redistribution_status": "mixed",
+    "cadence": "DA/RT products and monthly archives, corrections/republications",
+    "limitations": "Choose node/system/market, MXN and interval/time basis explicitly. Original/recalculated traceability section is described as demonstrative; do not treat every page item as operational settlement truth or blanket open feed.",
+    "priority": "P1",
+    "integration_mode": "Start with verified designated open dataset or approved current report; pin revision and provenance; controlled service adapter after exact manual/terms test, no guessed API endpoints.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  },
+  {
+    "source_id": "na_cfe",
+    "title": "CFE official industrial tariffs and government tariff decisions",
+    "url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCRENegocio/Tarifas/GranDemandaMTH.aspx",
+    "publisher": "Comision Federal de Electricidad / Mexican tariff authorities",
+    "geography": [
+      "MX tariff divisions/service classes"
+    ],
+    "parameter_families": [
+      "GDMTH/GDMTO and relevant industrial supply charges",
+      "energy/capacity/distribution components",
+      "tariff applicability and effective dates"
+    ],
+    "format": "Official interactive HTML schedules; government decisions/PDFs",
+    "access": "Public official schedule URL established; direct page returned502. Government official tariff-scheme publication available; full chosen monthly/division schedule still needs acquisition.",
+    "license_or_terms": "Public published tariff decisions; exact portal/document redistribution terms not verified as open license.",
+    "terms_url": "https://www.cfe.gob.mx/hogar/infcliente/Documents/esquematarifariovigente.pdf",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Month/year and tariff-division revisions plus annual regulatory decisions",
+    "limitations": "Energy, capacity, transmission/distribution and supplier/CENACE-service components differ. Mexico demand/timing/voltage/geographic applicability must be parsed; US URDB does not cover this. Access currently unproven for automation.",
+    "priority": "P1",
+    "integration_mode": "Manual verified source upload first; curated official-host parser later; source spans, division/month/service eligibility and refusal of unmappable charges before tariff admission.",
+    "reviewed_on": "2026-10-20",
+    "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed"
+  }
+]

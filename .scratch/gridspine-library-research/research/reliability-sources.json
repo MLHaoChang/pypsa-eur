@@ -1,0 +1,494 @@
+[
+  {
+    "source_id": "rel-entsoe-outages",
+    "title": "ENTSO-E Transparency Platform unavailability",
+    "url": "https://www.entsoe.eu/data/transparency-platform/",
+    "publisher": "ENTSO-E and reporting participants",
+    "geography": [
+      "Europe; reporting-area coverage varies"
+    ],
+    "parameter_families": [
+      "planned and forced unavailability events",
+      "generation deratings",
+      "transmission unavailability"
+    ],
+    "format": "XML/API/platform downloads",
+    "access": "Public platform; API registration/token and request limits; not exercised here",
+    "license_or_terms": "Specific datasets on the reuse list CC-BY4; other platform data terms must be checked individually",
+    "terms_url": "https://transparency.entsoe.eu/content/static_content/Static%20content/terms%20and%20conditions/220218_List_of_Data_available_for_reuse.pdf",
+    "redistribution_status": "mixed",
+    "cadence": "Event/update driven",
+    "limitations": [
+      "reporting thresholds and fleet coverage",
+      "not automatically failure-rate observations",
+      "revisions/cancellations/deratings need deduplication",
+      "actual versus forecast availability"
+    ],
+    "priority": "P1",
+    "integration_mode": "Versioned event archive/replay; reviewed estimation later"
+  },
+  {
+    "source_id": "rel-entsoe-eraa",
+    "title": "ERAA modelling inputs and thermal maintenance assumptions",
+    "url": "https://www.entsoe.eu/eraa/2025/modelling-data/",
+    "publisher": "ENTSO-E",
+    "geography": [
+      "European participating power systems"
+    ],
+    "parameter_families": [
+      "thermal forced-outage assumptions",
+      "thermal maintenance profiles",
+      "adequacy scenario parameters"
+    ],
+    "format": "Downloadable modelling-data files and PDF methodology",
+    "access": "Public downloads; selected attachment semantics not ingested here",
+    "license_or_terms": "Public modelling inputs; exact file reuse terms require review, not blanket Transparency Platform licence",
+    "terms_url": "https://www.entsoe.eu/eraa/2025/modelling-data/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Annual assessment edition; revisions possible",
+    "limitations": [
+      "planning assumptions, not user-asset measurements",
+      "target-year/scenario and rate basis must be retained",
+      "RES profiles may already include outages"
+    ],
+    "priority": "P1",
+    "integration_mode": "Curated dated scenario parameter pack after table/terms review"
+  },
+  {
+    "source_id": "rel-elexon-remit",
+    "title": "Elexon Insights REMIT and generation availability",
+    "url": "https://bmrs.elexon.co.uk/api-documentation/endpoint/REMIT",
+    "publisher": "Elexon",
+    "geography": [
+      "Great Britain"
+    ],
+    "parameter_families": [
+      "unit unavailability notices",
+      "availability forecasts",
+      "event revisions"
+    ],
+    "format": "Documented API; JSON/download interfaces",
+    "access": "Public Insights API documentation; no API called here",
+    "license_or_terms": "BMRS open-data licence exists; dataset classification and separate API terms require checking",
+    "terms_url": "https://www.elexon.co.uk/bsc/data/balancing-mechanism-reporting-agent/copyright-licence-bmrs-data/",
+    "redistribution_status": "mixed",
+    "cadence": "Event/update driven",
+    "limitations": [
+      "notice not necessarily measured equipment failure",
+      "planned/forced and revision states needed",
+      "not EU-wide or all UK distribution"
+    ],
+    "priority": "P1",
+    "integration_mode": "Bounded event retrieval and offline fixture parser"
+  },
+  {
+    "source_id": "rel-rte-unavailability",
+    "title": "RTE Unavailability Additional Information",
+    "url": "https://data.rte-france.org/web/guest/catalog/-/api/generation/Unavailability-Additional-Information/v7.0",
+    "publisher": "RTE and market participants",
+    "geography": [
+      "France; dataset scope"
+    ],
+    "parameter_families": [
+      "generation unavailability",
+      "transmission asset unavailability",
+      "planned/forced downtime notices"
+    ],
+    "format": "API",
+    "access": "API subscription/account/OAuth setup; not created or exercised here",
+    "license_or_terms": "Exact API/data conditions and participant-data reuse require review",
+    "terms_url": "https://data.rte-france.org/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Event/update driven",
+    "limitations": [
+      "participant notices republished",
+      "not a component failure distribution",
+      "version and unit matching required"
+    ],
+    "priority": "P2",
+    "integration_mode": "Optional authorized event adapter after terms/access admission"
+  },
+  {
+    "source_id": "rel-nordic-baltic-grid",
+    "title": "Nordic and Baltic Grid Disturbance Statistics",
+    "url": "https://www.entsoe.eu/publications/system-operations-reports/",
+    "publisher": "Nordic/Baltic TSOs via ENTSO-E",
+    "geography": [
+      "Nordic and Baltic transmission systems"
+    ],
+    "parameter_families": [
+      "transmission component disturbance statistics",
+      "availability",
+      "repair/outage duration context"
+    ],
+    "format": "Annual PDF reports/tables",
+    "access": "Public reports including2024 edition",
+    "license_or_terms": "Report-specific extraction/redistribution rights not established in this review",
+    "terms_url": "https://www.entsoe.eu/publications/system-operations-reports/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Annual",
+    "limitations": [
+      "voltage/equipment population and exposure denominators",
+      "not campus/distribution statistics",
+      "table extraction requires independent checks"
+    ],
+    "priority": "P2",
+    "integration_mode": "Curated transmission reference tables, not generation-shaped rates"
+  },
+  {
+    "source_id": "rel-ceer-quality",
+    "title": "CEER/ECRB quality-of-supply benchmark",
+    "url": "https://www.ceer.eu/publication/7th-ceer-ecrb-benchmarking-report-on-the-quality-of-electricity-and-gas-supply/",
+    "publisher": "CEER/ECRB and national regulators",
+    "geography": [
+      "European countries; per-report coverage"
+    ],
+    "parameter_families": [
+      "SAIDI",
+      "SAIFI",
+      "planned/unplanned and exceptional-event benchmarks"
+    ],
+    "format": "Reports/PDF tables",
+    "access": "Public reports",
+    "license_or_terms": "Public publication; unrestricted database redistribution not verified",
+    "terms_url": "https://www.ceer.eu/publication/7th-ceer-ecrb-benchmarking-report-on-the-quality-of-electricity-and-gas-supply/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Periodic benchmark editions",
+    "limitations": [
+      "cross-country definitions not identical",
+      "aggregate customer indices not component rates",
+      "exclusion/year comparability"
+    ],
+    "priority": "P1",
+    "integration_mode": "Cited benchmark references; terms-cleared extracts only"
+  },
+  {
+    "source_id": "rel-enedis-quality",
+    "title": "Enedis duration/frequency supply-quality datasets",
+    "url": "https://opendata.enedis.fr/datasets/duree-moyenne-de-coupure-bt",
+    "publisher": "Enedis",
+    "geography": [
+      "Enedis service network, France"
+    ],
+    "parameter_families": [
+      "BT/HTA interruption duration",
+      "BT/HTA interruption frequency"
+    ],
+    "format": "CSV/API/catalogue schema",
+    "access": "Public small datasets",
+    "license_or_terms": "Dataset catalogue explicitly states Licence Ouverte/Open Licence2.0",
+    "terms_url": "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
+    "redistribution_status": "open_verified",
+    "cadence": "Twice yearly per catalogue; annual metric observations",
+    "limitations": [
+      "excludes exceptional events and RTE",
+      "territory/network scope retained",
+      "customer benchmark not component MTTR/FOR"
+    ],
+    "priority": "P1",
+    "integration_mode": "Small licensed benchmark importer and reference fixture"
+  },
+  {
+    "source_id": "rel-bnetza-saidi",
+    "title": "Bundesnetzagentur electricity interruptions",
+    "url": "https://www.bundesnetzagentur.de/EN/Areas/Energy/SecurityOfSupply/QualityOfSupply/start.html",
+    "publisher": "Bundesnetzagentur",
+    "geography": [
+      "Germany"
+    ],
+    "parameter_families": [
+      "SAIDI variants",
+      "national/regional continuity benchmarks"
+    ],
+    "format": "HTML/PDF tables",
+    "access": "Public aggregates; operator submission system separate and restricted",
+    "license_or_terms": "Dataset-specific reuse/redistribution terms to review",
+    "terms_url": "https://www.bundesnetzagentur.de/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Annual",
+    "limitations": [
+      "SAIDI definition and event exclusions vary",
+      "interruptions >3minutes in stated standard scope",
+      "not a user-site outage distribution"
+    ],
+    "priority": "P1",
+    "integration_mode": "Curated regulatory benchmark"
+  },
+  {
+    "source_id": "rel-ukpn-iis",
+    "title": "UKPN Interruptions Incentive Scheme events",
+    "url": "https://ukpowernetworks.opendatasoft.com/explore/dataset/ukpn-iis/information/",
+    "publisher": "UK Power Networks",
+    "geography": [
+      "UKPN licence areas, Great Britain"
+    ],
+    "parameter_families": [
+      "fault/restoration times",
+      "customers affected",
+      "fault causes/equipment",
+      "substation linkage"
+    ],
+    "format": "Portal/API/CSV catalogue",
+    "access": "Official page currently says login required; no account created or access bypassed",
+    "license_or_terms": "Portal has open-licence datasets; exact current IIS dataset licence/access must be confirmed",
+    "terms_url": "https://ukpowernetworks.opendatasoft.com/terms/terms-and-conditions/",
+    "redistribution_status": "mixed",
+    "cadence": "Dataset release/update dependent",
+    "limitations": [
+      "regional DNO only",
+      "IIS inclusion/exclusion and restoration stages",
+      "not automatically manufacturer failure-rate data"
+    ],
+    "priority": "P2",
+    "integration_mode": "Detailed event pilot only after access and exact dataset rights verified"
+  },
+  {
+    "source_id": "rel-nerc-gads",
+    "title": "NERC GADS public conventional fleet statistics",
+    "url": "https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-conventional/generating-unit-statistical-brochures",
+    "publisher": "North American Electric Reliability Corporation",
+    "geography": [
+      "North American reporting fleet; per-table cohort"
+    ],
+    "parameter_families": [
+      "FOR/EFORd and fleet availability",
+      "outage/derating metrics",
+      "cause-code aggregates"
+    ],
+    "format": "Statistical brochure/report tables and methodology",
+    "access": "Public brochures; detailed unit-level products/reporting are separate/restricted",
+    "license_or_terms": "NERC copyright/all-rights notice; exact common-library extract permission not established",
+    "terms_url": "https://www.nerc.com/terms-of-use-policy",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Annual and multi-year windows",
+    "limitations": [
+      "metric denominator and reporting cohort",
+      "class average not local unit",
+      "repair time independently sourced may be inconsistent",
+      "not all North American jurisdictions/assets represented"
+    ],
+    "priority": "P1",
+    "integration_mode": "Exact table/basis curated reference; native defaults replaced only after review"
+  },
+  {
+    "source_id": "rel-nerc-tads",
+    "title": "NERC Transmission Availability Data System",
+    "url": "https://prod.nerc.com/programs/reliability-assessment--performance-analysis/transmission-availability-data-system",
+    "publisher": "NERC",
+    "geography": [
+      "Reporting North American bulk transmission systems"
+    ],
+    "parameter_families": [
+      "transmission outage aggregates",
+      "element inventory",
+      "cause/exposure statistics"
+    ],
+    "format": "Reports/dashboards/supporting tables",
+    "access": "Public summaries; detailed reporting portal restricted",
+    "license_or_terms": "Exact report/table reuse conditions require review; detailed confidential data not an open source",
+    "terms_url": "https://www.nerc.com/terms-of-use-policy",
+    "redistribution_status": "mixed",
+    "cadence": "Annual/reporting-rule revisions",
+    "limitations": [
+      "equipment/voltage/exposure scope",
+      "planned-outage collection scope changed/discontinued in prior data request",
+      "not a general maintenance calendar"
+    ],
+    "priority": "P2",
+    "integration_mode": "Transmission benchmark/referral, not unrestricted unit event ingestion"
+  },
+  {
+    "source_id": "rel-eia861",
+    "title": "EIA861 annual utility reliability files",
+    "url": "https://www.eia.gov/electricity/data/eia861/",
+    "publisher": "U.S. Energy Information Administration",
+    "geography": [
+      "United States reporting utilities"
+    ],
+    "parameter_families": [
+      "SAIDI",
+      "SAIFI",
+      "CAIDI/context",
+      "method/major-event flags"
+    ],
+    "format": "Annual ZIP/XLSX detailed files",
+    "access": "Public downloads; no token needed for files",
+    "license_or_terms": "EIA data public domain with source/date acknowledgement; protected contributed material separately excluded",
+    "terms_url": "https://www.eia.gov/about/copyrights_reuse.php",
+    "redistribution_status": "open_verified",
+    "cadence": "Annual with corrections",
+    "limitations": [
+      "utility/customer index, not component failure history",
+      "IEEE versus other method",
+      "major-event/loss-of-supply exclusions and missing reporting"
+    ],
+    "priority": "P1",
+    "integration_mode": "Versioned US supply-benchmark importer; actual small-file fixture required"
+  },
+  {
+    "source_id": "rel-doe417",
+    "title": "DOE417 electric emergency/disturbance reports",
+    "url": "https://doe417.energy.gov/",
+    "publisher": "U.S. DOE/CESER; official public summaries also republished by EIA",
+    "geography": [
+      "United States reportable events"
+    ],
+    "parameter_families": [
+      "major disturbance events",
+      "load/customer impact",
+      "emergency context"
+    ],
+    "format": "Reporting portal and public annual summary products",
+    "access": "Public summary availability/endpoints must be verified; reporting access is separate",
+    "license_or_terms": "Use only released public summaries; confirm terms and sensitive/withheld fields for exact product",
+    "terms_url": "https://doe417.energy.gov/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Incident based; summary releases/revisions",
+    "limitations": [
+      "threshold/reportability selection",
+      "not all outages",
+      "no population exposure denominator",
+      "security-driven omissions"
+    ],
+    "priority": "P2",
+    "integration_mode": "Stress-event context, never direct ordinary component rate"
+  },
+  {
+    "source_id": "rel-noaa-storm",
+    "title": "NOAA NCEI Storm Events Database",
+    "url": "https://www.ncei.noaa.gov/access/storm-events-database/",
+    "publisher": "NOAA/NCEI/National Weather Service",
+    "geography": [
+      "United States and adjacent waters"
+    ],
+    "parameter_families": [
+      "weather hazard events",
+      "storm location/time covariates",
+      "common-event stress context"
+    ],
+    "format": "Bulk CSV and public cloud data",
+    "access": "Public downloads; large files not downloaded here",
+    "license_or_terms": "Federal dataset catalogue lists CC0; retain source/vintage and caveats",
+    "terms_url": "https://catalog.data.gov/dataset/ncdc-storm-events-database",
+    "redistribution_status": "open_verified",
+    "cadence": "Periodic updates/revisions",
+    "limitations": [
+      "not electrical outage observations",
+      "event reporting history/coverage changes",
+      "causal failure calibration requires asset exposure"
+    ],
+    "priority": "P2",
+    "integration_mode": "Optional hazard covariate/stress-set source, no automatic probability inference"
+  },
+  {
+    "source_id": "rel-oeb-scorecard",
+    "title": "Ontario distributor scorecard open data",
+    "url": "https://www.oeb.ca/open-data/electricity-distributor-performance-scorecard",
+    "publisher": "Ontario Energy Board",
+    "geography": [
+      "Ontario electricity distributors, Canada"
+    ],
+    "parameter_families": [
+      "annual distributor reliability metrics",
+      "SAIDI/SAIFI benchmark",
+      "performance context"
+    ],
+    "format": "Annual XML files",
+    "access": "Explicit Open/Public catalogue;2025 and historical XML linked",
+    "license_or_terms": "OEB open-data page links Open Government Licence Ontario; full licence page returned403 during research, retain exact terms with ingestion",
+    "terms_url": "https://www.ontario.ca/page/open-government-licence-ontario",
+    "redistribution_status": "open_verified",
+    "cadence": "Annual with corrections",
+    "limitations": [
+      "Ontario not all Canada",
+      "scorecard normalized exclusions/definitions",
+      "not component rates"
+    ],
+    "priority": "P1",
+    "integration_mode": "Small Canadian benchmark importer with source year/definition preservation"
+  },
+  {
+    "source_id": "rel-cfe-distribution",
+    "title": "CFE distribution expansion/modernization reliability report",
+    "url": "https://www.cfe.gob.mx/distribucion/cumplimiento/Documents/Programa%20de%20Ampliaci%C3%B3n%20y%20Modernizaci%C3%B3n%20de%20las%20Redes%20Generales%20de%20Distribuci%C3%B3n%202025-2039.pdf",
+    "publisher": "CFE Distribución",
+    "geography": [
+      "Mexico; national/divisional report scope"
+    ],
+    "parameter_families": [
+      "SAIDI_D",
+      "SAIFI_D",
+      "distribution reliability context"
+    ],
+    "format": "Public planning PDF/tables",
+    "access": "Public report, not verified API/bulk dataset",
+    "license_or_terms": "Public visibility only; exact extract/database redistribution terms unverified",
+    "terms_url": "https://www.cfe.gob.mx/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Planning/report editions",
+    "limitations": [
+      "definitions/units/regions and observation years",
+      "not a countrywide component-rate library",
+      "table extraction/reuse review required"
+    ],
+    "priority": "P2",
+    "integration_mode": "Curated Mexico benchmark reference after semantic/terms review"
+  },
+  {
+    "source_id": "rel-nrc-inl-parameters",
+    "title": "NRC/INL industry-average component parameter estimates",
+    "url": "https://nrcoe.inl.gov/avgperf/",
+    "publisher": "NRC/Idaho National Laboratory",
+    "geography": [
+      "U.S. commercial nuclear fleet"
+    ],
+    "parameter_families": [
+      "failure-on-demand probabilities",
+      "failure-to-run rates",
+      "maintenance/test unavailability",
+      "uncertainty distributions",
+      "common-cause methodology"
+    ],
+    "format": "Published reports/tables; linked current parameter estimates",
+    "access": "Public reports; underlying operational databases may have separate access",
+    "license_or_terms": "Review exact report/contractor dataset rights; government hosting alone not all-content public-domain proof",
+    "terms_url": "https://www.osti.gov/biblio/1847110",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Parameter updates approximately four/five-year cycle per NRC/INL page",
+    "limitations": [
+      "nuclear maintenance/test/quality context",
+      "not automatically industrial or datacenter generator priors",
+      "exact release and distributions required"
+    ],
+    "priority": "P2",
+    "integration_mode": "Narrow component/method reference and reviewed applicability, not universal default"
+  },
+  {
+    "source_id": "rel-nerc-renewables",
+    "title": "NERC GADS Wind availability and Solar reporting definitions",
+    "url": "https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-wind",
+    "publisher": "NERC",
+    "geography": [
+      "North American reporting wind/solar assets; publication cohort specific"
+    ],
+    "parameter_families": [
+      "wind resource-equivalent forced outage metrics",
+      "renewable availability definitions",
+      "solar outage-reporting taxonomy"
+    ],
+    "format": "Wind metric brochures/dashboard and reporting-instruction documents",
+    "access": "Public wind summaries and wind/solar DRI; underlying asset reports restricted; public solar statistical coverage not established here",
+    "license_or_terms": "NERC copyright; exact public-report extraction permission requires review; reporting definitions do not imply access to submitted unit data",
+    "terms_url": "https://www.nerc.com/terms-of-use-policy",
+    "redistribution_status": "mixed",
+    "cadence": "Reporting cycles and dated public reports",
+    "limitations": [
+      "wind mechanical availability differs from weather resource variability",
+      "public solar distribution/statistical parameters not established",
+      "native outage-in-profile guard still applies",
+      "no campus BESS/UPS failure prior"
+    ],
+    "priority": "P2",
+    "integration_mode": "Methods and conditional dated wind reference; do not auto-apply mechanical outages on observed resource profiles"
+  }
+]

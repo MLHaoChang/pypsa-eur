@@ -1,0 +1,863 @@
+{
+  "retrieved_at": "2026-10-20T18:08:53.427938+00:00",
+  "repositories": [
+    {
+      "full_name": "PyPSA/PyPSA",
+      "html_url": "https://github.com/PyPSA/PyPSA",
+      "description": "PyPSA: Python for Power System Analysis",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-18T08:00:11Z",
+      "updated_at": "2026-10-20T15:12:49Z",
+      "stargazers_count": 2207,
+      "open_issues_count": 178,
+      "default_branch": "master",
+      "language": "Python",
+      "license": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "license_file": "https://github.com/PyPSA/PyPSA/blob/master/LICENSE",
+      "latest_release": {
+        "tag_name": "v1.4.0",
+        "published_at": "2026-10-09T12:28:26Z",
+        "html_url": "https://github.com/PyPSA/PyPSA/releases/tag/v1.4.0"
+      },
+      "readme_url": "https://github.com/PyPSA/PyPSA/blob/master/README.md"
+    },
+    {
+      "full_name": "e2nIEE/pandapower",
+      "html_url": "https://github.com/e2nIEE/pandapower",
+      "description": "Convenient Power System Modelling and Analysis based on PYPOWER and pandas",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-20T12:57:14Z",
+      "updated_at": "2026-10-20T16:42:54Z",
+      "stargazers_count": 1304,
+      "open_issues_count": 176,
+      "default_branch": "develop",
+      "language": "Python",
+      "license": {
+        "key": "other",
+        "name": "Other",
+        "spdx_id": "NOASSERTION",
+        "url": null,
+        "node_id": "MDc6TGljZW5zZTA="
+      },
+      "license_file": "https://github.com/e2nIEE/pandapower/blob/develop/LICENSE",
+      "latest_release": {
+        "tag_name": "v3.5.6",
+        "published_at": "2026-10-07T10:50:18Z",
+        "html_url": "https://github.com/e2nIEE/pandapower/releases/tag/v3.5.6"
+      },
+      "readme_url": "https://github.com/e2nIEE/pandapower/blob/develop/README.rst"
+    },
+    {
+      "full_name": "dss-extensions/OpenDSSDirect.py",
+      "html_url": "https://github.com/dss-extensions/OpenDSSDirect.py",
+      "description": "OpenDSSDirect.py: a cross-platform Python package that implements a native/direct library interface to the alternative OpenDSS engine from DSS-Extensions.org",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-02-26T06:34:19Z",
+      "updated_at": "2026-10-15T14:51:15Z",
+      "stargazers_count": 117,
+      "open_issues_count": 18,
+      "default_branch": "master",
+      "language": "Python",
+      "license": {
+        "key": "other",
+        "name": "Other",
+        "spdx_id": "NOASSERTION",
+        "url": null,
+        "node_id": "MDc6TGljZW5zZTA="
+      },
+      "license_file": "https://github.com/dss-extensions/OpenDSSDirect.py/blob/master/LICENSE",
+      "latest_release": {
+        "tag_name": "v0.9.4",
+        "published_at": "2024-03-29T06:18:05Z",
+        "html_url": "https://github.com/dss-extensions/OpenDSSDirect.py/releases/tag/v0.9.4"
+      },
+      "readme_url": "https://github.com/dss-extensions/OpenDSSDirect.py/blob/master/README.md"
+    },
+    {
+      "full_name": "CURENT/andes",
+      "html_url": "https://github.com/CURENT/andes",
+      "description": "Python toolbox / library for power system transient dynamics simulation with symbolic modeling and numerical analysis \ud83d\udd25",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-03-12T17:01:07Z",
+      "updated_at": "2026-10-19T21:48:18Z",
+      "stargazers_count": 386,
+      "open_issues_count": 13,
+      "default_branch": "master",
+      "language": "Python",
+      "license": {
+        "key": "other",
+        "name": "Other",
+        "spdx_id": "NOASSERTION",
+        "url": null,
+        "node_id": "MDc6TGljZW5zZTA="
+      },
+      "license_file": "https://github.com/CURENT/andes/blob/master/LICENSE",
+      "latest_release": {
+        "tag_name": "v1.6.2",
+        "published_at": "2022-03-27T17:07:13Z",
+        "html_url": "https://github.com/CURENT/andes/releases/tag/v1.6.2"
+      },
+      "readme_url": "https://github.com/CURENT/andes/blob/master/README.md"
+    },
+    {
+      "full_name": "OpenIPSL/OpenIPSL",
+      "html_url": "https://github.com/OpenIPSL/OpenIPSL",
+      "description": "A library of power system component models written in the Modelica language that can be used for power system dynamic analysis, such as phasor time-domain simulations.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-18T03:03:04Z",
+      "updated_at": "2026-10-16T05:14:49Z",
+      "stargazers_count": 110,
+      "open_issues_count": 23,
+      "default_branch": "master",
+      "language": "Modelica",
+      "license": {
+        "key": "bsd-3-clause",
+        "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "spdx_id": "BSD-3-Clause",
+        "url": "https://api.github.com/licenses/bsd-3-clause",
+        "node_id": "MDc6TGljZW5zZTU="
+      },
+      "license_file": "https://github.com/OpenIPSL/OpenIPSL/blob/master/LICENSE",
+      "latest_release": {
+        "tag_name": "v3.1.0",
+        "published_at": "2026-02-25T16:09:23Z",
+        "html_url": "https://github.com/OpenIPSL/OpenIPSL/releases/tag/v3.1.0"
+      },
+      "readme_url": "https://github.com/OpenIPSL/OpenIPSL/blob/master/README.md"
+    },
+    {
+      "full_name": "NatLabRockies/REopt.jl",
+      "html_url": "https://github.com/NatLabRockies/REopt.jl",
+      "description": null,
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-20T15:31:15Z",
+      "updated_at": "2026-10-19T21:37:44Z",
+      "stargazers_count": 47,
+      "open_issues_count": 116,
+      "default_branch": "master",
+      "language": "Julia",
+      "license": {
+        "key": "apache-2.0",
+        "name": "Apache License 2.0",
+        "spdx_id": "Apache-2.0",
+        "url": "https://api.github.com/licenses/apache-2.0",
+        "node_id": "MDc6TGljZW5zZTI="
+      },
+      "license_file": "https://github.com/NatLabRockies/REopt.jl/blob/master/LICENSE",
+      "latest_release": {
+        "tag_name": "v1.0.0",
+        "published_at": "2026-10-05T16:37:12Z",
+        "html_url": "https://github.com/NatLabRockies/REopt.jl/releases/tag/v1.0.0"
+      },
+      "readme_url": "https://github.com/NatLabRockies/REopt.jl/blob/master/README.md"
+    },
+    {
+      "full_name": "NatLabRockies/ssc",
+      "html_url": "https://github.com/NatLabRockies/ssc",
+      "description": "SAM Simulation Core (SSC) contains the underlying performance and financial models for SAM",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-19T21:38:57Z",
+      "updated_at": "2026-10-19T21:39:04Z",
+      "stargazers_count": 97,
+      "open_issues_count": 39,
+      "default_branch": "patch",
+      "language": "C++",
+      "license": {
+        "key": "bsd-3-clause",
+        "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "spdx_id": "BSD-3-Clause",
+        "url": "https://api.github.com/licenses/bsd-3-clause",
+        "node_id": "MDc6TGljZW5zZTU="
+      },
+      "license_file": "https://github.com/NatLabRockies/ssc/blob/patch/LICENSE",
+      "latest_release": {
+        "tag_name": "2026.7.3.r0.ssc.308",
+        "published_at": "2026-07-07T18:55:27Z",
+        "html_url": "https://github.com/NatLabRockies/ssc/releases/tag/2026.7.3.r0.ssc.308"
+      },
+      "readme_url": "https://github.com/NatLabRockies/ssc/blob/patch/README.md"
+    },
+    {
+      "full_name": "NatLabRockies/pysam",
+      "html_url": "https://github.com/NatLabRockies/pysam",
+      "description": "Python Wrapper for the System Advisor Model",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-09-27T17:13:04Z",
+      "updated_at": "2026-10-19T11:31:04Z",
+      "stargazers_count": 155,
+      "open_issues_count": 17,
+      "default_branch": "patch",
+      "language": "C",
+      "license": {
+        "key": "bsd-3-clause",
+        "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "spdx_id": "BSD-3-Clause",
+        "url": "https://api.github.com/licenses/bsd-3-clause",
+        "node_id": "MDc6TGljZW5zZTU="
+      },
+      "license_file": "https://github.com/NatLabRockies/pysam/blob/patch/LICENSE",
+      "latest_release": {
+        "tag_name": "v7.1.1",
+        "published_at": "2026-04-28T10:15:31Z",
+        "html_url": "https://github.com/NatLabRockies/pysam/releases/tag/v7.1.1"
+      },
+      "readme_url": "https://github.com/NatLabRockies/pysam/blob/patch/README.md"
+    },
+    {
+      "full_name": "NatLabRockies/BLAST-Lite",
+      "html_url": "https://github.com/NatLabRockies/BLAST-Lite",
+      "description": null,
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-09-22T19:35:50Z",
+      "updated_at": "2026-10-18T06:47:50Z",
+      "stargazers_count": 76,
+      "open_issues_count": 1,
+      "default_branch": "main",
+      "language": "Python",
+      "license": {
+        "key": "bsd-3-clause",
+        "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "spdx_id": "BSD-3-Clause",
+        "url": "https://api.github.com/licenses/bsd-3-clause",
+        "node_id": "MDc6TGljZW5zZTU="
+      },
+      "license_file": "https://github.com/NatLabRockies/BLAST-Lite/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": "v1.1.0",
+        "published_at": "2025-03-27T20:19:55Z",
+        "html_url": "https://github.com/NatLabRockies/BLAST-Lite/releases/tag/v1.1.0"
+      },
+      "readme_url": "https://github.com/NatLabRockies/BLAST-Lite/blob/main/README.md"
+    },
+    {
+      "full_name": "pybamm-team/PyBaMM",
+      "html_url": "https://github.com/pybamm-team/PyBaMM",
+      "description": "Fast and flexible physics-based battery models in Python",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-20T16:37:45Z",
+      "updated_at": "2026-10-20T15:25:37Z",
+      "stargazers_count": 1699,
+      "open_issues_count": 296,
+      "default_branch": "main",
+      "language": "Python",
+      "license": {
+        "key": "bsd-3-clause",
+        "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "spdx_id": "BSD-3-Clause",
+        "url": "https://api.github.com/licenses/bsd-3-clause",
+        "node_id": "MDc6TGljZW5zZTU="
+      },
+      "license_file": "https://github.com/pybamm-team/PyBaMM/blob/main/LICENSE.txt",
+      "latest_release": {
+        "tag_name": "pybamm-v26.10.1.1",
+        "published_at": "2026-10-20T02:26:52Z",
+        "html_url": "https://github.com/pybamm-team/PyBaMM/releases/tag/pybamm-v26.10.1.1"
+      },
+      "readme_url": "https://github.com/pybamm-team/PyBaMM/blob/main/README.md"
+    },
+    {
+      "full_name": "NatLabRockies/PRAS",
+      "html_url": "https://github.com/NatLabRockies/PRAS",
+      "description": "NLR's Probabilistic Resource Adequacy Suite (PRAS)",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-16T19:58:07Z",
+      "updated_at": "2026-10-16T19:35:38Z",
+      "stargazers_count": 77,
+      "open_issues_count": 25,
+      "default_branch": "main",
+      "language": "Julia",
+      "license": null,
+      "license_file": null,
+      "latest_release": {
+        "tag_name": null,
+        "published_at": null,
+        "html_url": null
+      },
+      "readme_url": "https://github.com/NatLabRockies/PRAS/blob/main/README.md"
+    },
+    {
+      "full_name": "do-mpc/do-mpc",
+      "html_url": "https://github.com/do-mpc/do-mpc",
+      "description": "Model predictive control python toolbox",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-09-22T12:07:27Z",
+      "updated_at": "2026-10-20T16:29:49Z",
+      "stargazers_count": 1471,
+      "open_issues_count": 97,
+      "default_branch": "master",
+      "language": "Python",
+      "license": {
+        "key": "lgpl-3.0",
+        "name": "GNU Lesser General Public License v3.0",
+        "spdx_id": "LGPL-3.0",
+        "url": "https://api.github.com/licenses/lgpl-3.0",
+        "node_id": "MDc6TGljZW5zZTEy"
+      },
+      "license_file": "https://github.com/do-mpc/do-mpc/blob/master/LICENSE.txt",
+      "latest_release": {
+        "tag_name": "v5.1.2",
+        "published_at": "2026-09-03T12:49:53Z",
+        "html_url": "https://github.com/do-mpc/do-mpc/releases/tag/v5.1.2"
+      },
+      "readme_url": "https://github.com/do-mpc/do-mpc/blob/master/README.md"
+    },
+    {
+      "full_name": "python-control/python-control",
+      "html_url": "https://github.com/python-control/python-control",
+      "description": " The Python Control Systems Library is a Python module that implements basic operations for analysis and design of feedback control systems.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-09-29T07:22:28Z",
+      "updated_at": "2026-10-20T12:18:30Z",
+      "stargazers_count": 2111,
+      "open_issues_count": 93,
+      "default_branch": "main",
+      "language": "Python",
+      "license": {
+        "key": "bsd-3-clause",
+        "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "spdx_id": "BSD-3-Clause",
+        "url": "https://api.github.com/licenses/bsd-3-clause",
+        "node_id": "MDc6TGljZW5zZTU="
+      },
+      "license_file": "https://github.com/python-control/python-control/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": "0.10.2",
+        "published_at": "2025-07-05T21:10:31Z",
+        "html_url": "https://github.com/python-control/python-control/releases/tag/0.10.2"
+      },
+      "readme_url": "https://github.com/python-control/python-control/blob/main/README.rst"
+    },
+    {
+      "full_name": "CATIA-Systems/FMPy",
+      "html_url": "https://github.com/CATIA-Systems/FMPy",
+      "description": "Simulate Functional Mock-up Units (FMUs) in Python",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-13T18:26:18Z",
+      "updated_at": "2026-10-18T09:00:35Z",
+      "stargazers_count": 598,
+      "open_issues_count": 161,
+      "default_branch": "main",
+      "language": "Python",
+      "license": {
+        "key": "other",
+        "name": "Other",
+        "spdx_id": "NOASSERTION",
+        "url": null,
+        "node_id": "MDc6TGljZW5zZTA="
+      },
+      "license_file": "https://github.com/CATIA-Systems/FMPy/blob/main/LICENSE.txt",
+      "latest_release": {
+        "tag_name": "v0.3.32",
+        "published_at": "2026-09-09T13:05:57Z",
+        "html_url": "https://github.com/CATIA-Systems/FMPy/releases/tag/v0.3.32"
+      },
+      "readme_url": "https://github.com/CATIA-Systems/FMPy/blob/main/README.md"
+    },
+    {
+      "full_name": "GMLC-TDC/HELICS",
+      "html_url": "https://github.com/GMLC-TDC/HELICS",
+      "description": "Hierarchical Engine for Large-scale Infrastructure Co-Simulation (HELICS) ",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-09-09T23:29:45Z",
+      "updated_at": "2026-09-29T12:07:47Z",
+      "stargazers_count": 175,
+      "open_issues_count": 94,
+      "default_branch": "main",
+      "language": "C++",
+      "license": {
+        "key": "bsd-3-clause",
+        "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "spdx_id": "BSD-3-Clause",
+        "url": "https://api.github.com/licenses/bsd-3-clause",
+        "node_id": "MDc6TGljZW5zZTU="
+      },
+      "license_file": "https://github.com/GMLC-TDC/HELICS/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": "v3.7.0",
+        "published_at": "2026-09-09T23:29:45Z",
+        "html_url": "https://github.com/GMLC-TDC/HELICS/releases/tag/v3.7.0"
+      },
+      "readme_url": "https://github.com/GMLC-TDC/HELICS/blob/main/README.md"
+    },
+    {
+      "full_name": "oemof/oemof-demand",
+      "html_url": "https://github.com/oemof/oemof-demand",
+      "description": "Creating heat and power demand profiles from annual values.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-20T12:35:58Z",
+      "updated_at": "2026-10-20T12:34:40Z",
+      "stargazers_count": 75,
+      "open_issues_count": 15,
+      "default_branch": "dev",
+      "language": "Python",
+      "license": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "license_file": "https://github.com/oemof/oemof-demand/blob/dev/LICENSE",
+      "latest_release": {
+        "tag_name": "v0.2.2",
+        "published_at": "2025-04-09T09:47:41Z",
+        "html_url": "https://github.com/oemof/oemof-demand/releases/tag/v0.2.2"
+      },
+      "readme_url": "https://github.com/oemof/oemof-demand/blob/dev/README.rst"
+    },
+    {
+      "full_name": "RAMP-project/RAMP",
+      "html_url": "https://github.com/RAMP-project/RAMP",
+      "description": "Repository of the open-source RAMP model for generating multi-energy loads profiles",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2025-05-25T13:16:51Z",
+      "updated_at": "2026-10-17T12:00:42Z",
+      "stargazers_count": 83,
+      "open_issues_count": 33,
+      "default_branch": "main",
+      "language": "Python",
+      "license": {
+        "key": "eupl-1.2",
+        "name": "European Union Public License 1.2",
+        "spdx_id": "EUPL-1.2",
+        "url": "https://api.github.com/licenses/eupl-1.2",
+        "node_id": "MDc6TGljZW5zZTM0"
+      },
+      "license_file": "https://github.com/RAMP-project/RAMP/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": "v0.5.2",
+        "published_at": "2024-06-08T12:55:56Z",
+        "html_url": "https://github.com/RAMP-project/RAMP/releases/tag/v0.5.2"
+      },
+      "readme_url": "https://github.com/RAMP-project/RAMP/blob/main/README.rst"
+    },
+    {
+      "full_name": "HewlettPackard/dc-rl",
+      "html_url": "https://github.com/HewlettPackard/dc-rl",
+      "description": "SustainDC is a set of Python environments for Data Center simulation and control using Heterogeneous Multi Agent Reinforcement Learning. Includes customizable environments for workload scheduling, cooling optimization, and battery management, with integration into Gymnasium.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2025-08-25T20:51:08Z",
+      "updated_at": "2026-10-13T23:23:53Z",
+      "stargazers_count": 128,
+      "open_issues_count": 1,
+      "default_branch": "main",
+      "language": "HTML",
+      "license": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "license_file": "https://github.com/HewlettPackard/dc-rl/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": null,
+        "published_at": null,
+        "html_url": null
+      },
+      "readme_url": "https://github.com/HewlettPackard/dc-rl/blob/main/README.md"
+    },
+    {
+      "full_name": "HewlettPackard/sustain-cluster",
+      "html_url": "https://github.com/HewlettPackard/sustain-cluster",
+      "description": "SustainCluster: A high-fidelity, open-source Gymnasium environment for benchmarking multi-objective, sustainable workload scheduling across geo-distributed data centers. Integrates real-world AI traces, energy/carbon/weather data, and detailed DC physics.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-01-12T22:30:29Z",
+      "updated_at": "2026-10-19T11:58:19Z",
+      "stargazers_count": 85,
+      "open_issues_count": 2,
+      "default_branch": "main",
+      "language": "Jupyter Notebook",
+      "license": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "license_file": "https://github.com/HewlettPackard/sustain-cluster/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": "v1.1.0",
+        "published_at": "2025-05-29T22:24:36Z",
+        "html_url": "https://github.com/HewlettPackard/sustain-cluster/releases/tag/v1.1.0"
+      },
+      "readme_url": "https://github.com/HewlettPackard/sustain-cluster/blob/main/README.md"
+    },
+    {
+      "full_name": "oemof/tespy",
+      "html_url": "https://github.com/oemof/tespy",
+      "description": "Thermal Engineering Systems in Python (TESPy). This package provides a powerful simulation toolkit for thermodynamic modeling of thermal engineering plants such as power plants, heat pumps or refrigeration machines.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-15T06:13:32Z",
+      "updated_at": "2026-10-15T06:13:36Z",
+      "stargazers_count": 426,
+      "open_issues_count": 57,
+      "default_branch": "dev",
+      "language": "Python",
+      "license": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "license_file": "https://github.com/oemof/tespy/blob/dev/LICENSE",
+      "latest_release": {
+        "tag_name": "v0.11.3",
+        "published_at": "2026-10-15T06:14:10Z",
+        "html_url": "https://github.com/oemof/tespy/releases/tag/v0.11.3"
+      },
+      "readme_url": "https://github.com/oemof/tespy/blob/dev/README.rst"
+    },
+    {
+      "full_name": "IDAES/idaes-pse",
+      "html_url": "https://github.com/IDAES/idaes-pse",
+      "description": "The IDAES Process Systems Engineering Framework",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-19T15:07:38Z",
+      "updated_at": "2026-10-19T15:07:49Z",
+      "stargazers_count": 351,
+      "open_issues_count": 164,
+      "default_branch": "main",
+      "language": "Python",
+      "license": {
+        "key": "other",
+        "name": "Other",
+        "spdx_id": "NOASSERTION",
+        "url": null,
+        "node_id": "MDc6TGljZW5zZTA="
+      },
+      "license_file": "https://github.com/IDAES/idaes-pse/blob/main/LICENSE.md",
+      "latest_release": {
+        "tag_name": "2.13.0",
+        "published_at": "2026-09-16T22:42:44Z",
+        "html_url": "https://github.com/IDAES/idaes-pse/releases/tag/2.13.0"
+      },
+      "readme_url": "https://github.com/IDAES/idaes-pse/blob/main/README.md"
+    },
+    {
+      "full_name": "pvlib/pvlib-python",
+      "html_url": "https://github.com/pvlib/pvlib-python",
+      "description": "A set of documented functions for simulating the performance of photovoltaic energy systems.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-20T14:13:16Z",
+      "updated_at": "2026-10-20T14:13:30Z",
+      "stargazers_count": 1701,
+      "open_issues_count": 255,
+      "default_branch": "main",
+      "language": "Python",
+      "license": {
+        "key": "bsd-3-clause",
+        "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "spdx_id": "BSD-3-Clause",
+        "url": "https://api.github.com/licenses/bsd-3-clause",
+        "node_id": "MDc6TGljZW5zZTU="
+      },
+      "license_file": "https://github.com/pvlib/pvlib-python/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": "v0.16.1",
+        "published_at": "2026-09-26T09:22:04Z",
+        "html_url": "https://github.com/pvlib/pvlib-python/releases/tag/v0.16.1"
+      },
+      "readme_url": "https://github.com/pvlib/pvlib-python/blob/main/README.md"
+    },
+    {
+      "full_name": "wind-python/windpowerlib",
+      "html_url": "https://github.com/wind-python/windpowerlib",
+      "description": "The windpowerlib is a library to model the output of wind turbines and farms.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2024-02-20T20:59:41Z",
+      "updated_at": "2026-09-13T09:05:45Z",
+      "stargazers_count": 396,
+      "open_issues_count": 24,
+      "default_branch": "dev",
+      "language": "Python",
+      "license": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "license_file": "https://github.com/wind-python/windpowerlib/blob/dev/LICENSE",
+      "latest_release": {
+        "tag_name": "v0.2.2",
+        "published_at": "2024-02-20T18:49:26Z",
+        "html_url": "https://github.com/wind-python/windpowerlib/releases/tag/v0.2.2"
+      },
+      "readme_url": "https://github.com/wind-python/windpowerlib/blob/dev/README.rst"
+    },
+    {
+      "full_name": "PyPSA/atlite",
+      "html_url": "https://github.com/PyPSA/atlite",
+      "description": "atlite: A Lightweight Python Package for Calculating Renewable Power Potentials and Time Series",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-15T08:22:11Z",
+      "updated_at": "2026-10-19T11:31:22Z",
+      "stargazers_count": 410,
+      "open_issues_count": 68,
+      "default_branch": "master",
+      "language": "Python",
+      "license": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "license_file": "https://github.com/PyPSA/atlite/blob/master/LICENSE",
+      "latest_release": {
+        "tag_name": "v0.7.0",
+        "published_at": "2026-10-07T15:43:01Z",
+        "html_url": "https://github.com/PyPSA/atlite/releases/tag/v0.7.0"
+      },
+      "readme_url": "https://github.com/PyPSA/atlite/blob/master/README.rst"
+    },
+    {
+      "full_name": "FZJ-IEK3-VSA/tsam",
+      "html_url": "https://github.com/FZJ-IEK3-VSA/tsam",
+      "description": "Time series aggregation module (tsam). Determines typical operation periods or decreases the temporal resolution.  Accelerates model or experiment runs.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-20T04:28:09Z",
+      "updated_at": "2026-10-20T04:28:14Z",
+      "stargazers_count": 182,
+      "open_issues_count": 28,
+      "default_branch": "develop",
+      "language": "Python",
+      "license": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "license_file": "https://github.com/FZJ-IEK3-VSA/tsam/blob/develop/LICENSE.txt",
+      "latest_release": {
+        "tag_name": "v4.1.1",
+        "published_at": "2026-09-17T19:25:56Z",
+        "html_url": "https://github.com/FZJ-IEK3-VSA/tsam/releases/tag/v4.1.1"
+      },
+      "readme_url": "https://github.com/FZJ-IEK3-VSA/tsam/blob/develop/README.md"
+    },
+    {
+      "full_name": "gridstatus/gridstatus",
+      "html_url": "https://github.com/gridstatus/gridstatus",
+      "description": "Extract data from ISOs and other energy grid sources",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-20T17:01:55Z",
+      "updated_at": "2026-10-16T19:00:47Z",
+      "stargazers_count": 451,
+      "open_issues_count": 45,
+      "default_branch": "main",
+      "language": "Python",
+      "license": {
+        "key": "bsd-3-clause",
+        "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "spdx_id": "BSD-3-Clause",
+        "url": "https://api.github.com/licenses/bsd-3-clause",
+        "node_id": "MDc6TGljZW5zZTU="
+      },
+      "license_file": "https://github.com/gridstatus/gridstatus/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": "v0.36.0",
+        "published_at": "2026-04-21T02:05:04Z",
+        "html_url": "https://github.com/gridstatus/gridstatus/releases/tag/v0.36.0"
+      },
+      "readme_url": "https://github.com/gridstatus/gridstatus/blob/main/README.md"
+    },
+    {
+      "full_name": "EnergieID/entsoe-py",
+      "html_url": "https://github.com/EnergieID/entsoe-py",
+      "description": "Python client for the ENTSO-E API (european network of transmission system operators for electricity)",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-13T22:23:52Z",
+      "updated_at": "2026-10-19T12:23:02Z",
+      "stargazers_count": 730,
+      "open_issues_count": 47,
+      "default_branch": "master",
+      "language": "Python",
+      "license": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "license_file": "https://github.com/EnergieID/entsoe-py/blob/master/LICENSE",
+      "latest_release": {
+        "tag_name": "V0.8.1",
+        "published_at": "2026-09-04T12:58:59Z",
+        "html_url": "https://github.com/EnergieID/entsoe-py/releases/tag/V0.8.1"
+      },
+      "readme_url": "https://github.com/EnergieID/entsoe-py/blob/master/README.md"
+    },
+    {
+      "full_name": "open-energy-transition/pypsa-ppa",
+      "html_url": "https://github.com/open-energy-transition/pypsa-ppa",
+      "description": "PyPSA based toolkit for simulating and optimizing PPAs under different scenarios. ",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-19T19:29:02Z",
+      "updated_at": "2026-10-19T19:28:59Z",
+      "stargazers_count": 5,
+      "open_issues_count": 4,
+      "default_branch": "main",
+      "language": "Python",
+      "license": {
+        "key": "mit",
+        "name": "MIT License",
+        "spdx_id": "MIT",
+        "url": "https://api.github.com/licenses/mit",
+        "node_id": "MDc6TGljZW5zZTEz"
+      },
+      "license_file": "https://github.com/open-energy-transition/pypsa-ppa/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": null,
+        "published_at": null,
+        "html_url": null
+      },
+      "readme_url": "https://github.com/open-energy-transition/pypsa-ppa/blob/main/README.md"
+    },
+    {
+      "full_name": "EllieKallmier/ppa_analysis",
+      "html_url": "https://github.com/EllieKallmier/ppa_analysis",
+      "description": "PPA Assessment Tool for C&I electricity users to model outcomes under a PPA.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-08-28T04:01:34Z",
+      "updated_at": "2026-08-28T04:02:09Z",
+      "stargazers_count": 0,
+      "open_issues_count": 6,
+      "default_branch": "main",
+      "language": "Jupyter Notebook",
+      "license": {
+        "key": "gpl-3.0",
+        "name": "GNU General Public License v3.0",
+        "spdx_id": "GPL-3.0",
+        "url": "https://api.github.com/licenses/gpl-3.0",
+        "node_id": "MDc6TGljZW5zZTk="
+      },
+      "license_file": "https://github.com/EllieKallmier/ppa_analysis/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": null,
+        "published_at": null,
+        "html_url": null
+      },
+      "readme_url": "https://github.com/EllieKallmier/ppa_analysis/blob/main/README.md"
+    },
+    {
+      "full_name": "OpenLEADR/openleadr-python",
+      "html_url": "https://github.com/OpenLEADR/openleadr-python",
+      "description": "Python library for OpenADR 2.0b",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-09-03T11:56:50Z",
+      "updated_at": "2026-09-12T02:43:57Z",
+      "stargazers_count": 159,
+      "open_issues_count": 41,
+      "default_branch": "main",
+      "language": "Python",
+      "license": {
+        "key": "apache-2.0",
+        "name": "Apache License 2.0",
+        "spdx_id": "Apache-2.0",
+        "url": "https://api.github.com/licenses/apache-2.0",
+        "node_id": "MDc6TGljZW5zZTI="
+      },
+      "license_file": "https://github.com/OpenLEADR/openleadr-python/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": "v0.5.36",
+        "published_at": "2026-09-03T11:57:10Z",
+        "html_url": "https://github.com/OpenLEADR/openleadr-python/releases/tag/v0.5.36"
+      },
+      "readme_url": "https://github.com/OpenLEADR/openleadr-python/blob/main/README.md"
+    },
+    {
+      "full_name": "Sienna-Platform/PowerSimulationsDynamics.jl",
+      "html_url": "https://github.com/Sienna-Platform/PowerSimulationsDynamics.jl",
+      "description": "Julia package to run Dynamic Power System simulations. ",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-09-30T22:43:48Z",
+      "updated_at": "2026-10-07T16:31:16Z",
+      "stargazers_count": 225,
+      "open_issues_count": 49,
+      "default_branch": "main",
+      "language": "Julia",
+      "license": {
+        "key": "bsd-3-clause",
+        "name": "BSD 3-Clause \"New\" or \"Revised\" License",
+        "spdx_id": "BSD-3-Clause",
+        "url": "https://api.github.com/licenses/bsd-3-clause",
+        "node_id": "MDc6TGljZW5zZTU="
+      },
+      "license_file": "https://github.com/Sienna-Platform/PowerSimulationsDynamics.jl/blob/main/LICENSE",
+      "latest_release": {
+        "tag_name": "v0.16.2",
+        "published_at": "2026-08-12T16:53:58Z",
+        "html_url": "https://github.com/Sienna-Platform/PowerSimulationsDynamics.jl/releases/tag/v0.16.2"
+      },
+      "readme_url": "https://github.com/Sienna-Platform/PowerSimulationsDynamics.jl/blob/main/README.md"
+    },
+    {
+      "full_name": "NatLabRockies/PVDegradationTools",
+      "html_url": "https://github.com/NatLabRockies/PVDegradationTools",
+      "description": "Set of tools to calculate degradation responses and degradation related parameters for PV.",
+      "archived": false,
+      "disabled": false,
+      "pushed_at": "2026-10-20T17:53:26Z",
+      "updated_at": "2026-10-03T13:53:09Z",
+      "stargazers_count": 49,
+      "open_issues_count": 57,
+      "default_branch": "main",
+      "language": "Jupyter Notebook",
+      "license": {
+        "key": "other",
+        "name": "Other",
+        "spdx_id": "NOASSERTION",
+        "url": null,
+        "node_id": "MDc6TGljZW5zZTA="
+      },
+      "license_file": "https://github.com/NatLabRockies/PVDegradationTools/blob/main/LICENSE.md",
+      "latest_release": {
+        "tag_name": "v0.7.4",
+        "published_at": "2026-10-03T13:54:33Z",
+        "html_url": "https://github.com/NatLabRockies/PVDegradationTools/releases/tag/v0.7.4"
+      },
+      "readme_url": "https://github.com/NatLabRockies/PVDegradationTools/blob/main/README.md"
+    }
+  ]
+}

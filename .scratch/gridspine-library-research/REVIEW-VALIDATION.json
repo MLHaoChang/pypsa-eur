@@ -1,0 +1,35 @@
+{
+  "review_sha256": "085cc0fb00fca4aad2d4dcce4b02fd8524147f200f024107de9a4a5a1fcf322c",
+  "review_scope": "source-discovery and family-level mapping; not importer/rights/domain approval",
+  "reviewed_files": {
+    "source-catalog.json": "188a3498f2d7e3f050de5ce4bf4dd226296daadccfec3fb5b8cd9b4bce786328",
+    "source-coverage.json": "ac90e22c4f0df1893817bbda4006091ba22dae64df2af28bff503ac9a8fe67dc",
+    "SOURCE-COVERAGE.md": "65dbafb15204fa687a72d053edfcfc7e2e036463a917036038d5f4707c90b277",
+    "RESEARCH-CONCLUSION.md": "4986bc37a5a30738a5796ee400168ddf9106b30fa8ed3f36bd58fbe54ad37248",
+    "INTEGRATION-PLAN.md": "6b227fe76546faa904698c6f0417a76cd8dc13f3066c9ceb532f1e8eaf37666e",
+    "README.md": "da47dfbc4a9cbe429c654a0c741dd874798b61b40b318c2141614c74b6232527",
+    "research/additional-reference-sources.json": "a97bf448901418eea806db9a1711a5527ea4ef7b3535e207dbcd44f9e8e56b45",
+    "research/cost-sources.json": "53cd9819018ad9d35df071c42afc49bf09b32c8c7cfca33e4cf68ef4115b1057",
+    "research/europe-commercial-sources.json": "aab881ab6eee30e4542dcec77ba8142666230f09849303db824ea19bb53a32fe",
+    "research/northamerica-commercial-sources.json": "14e7465a3fc7427075952cdb108356bcff5b36b4aee69eb6d6088f7c0d570bb2",
+    "research/profile-macro-sources.json": "0c8343447e380b61f5112a6a4f423b26cf214ebdb4bf622f7c6570fe213935ba",
+    "research/reliability-sources.json": "d4c86e4d184cecec0fd6f3a79fb165bef164ccc188873a8ae7c12e98b359e344",
+    "research/technical-sources.json": "9c56c68e09248935b0ea72e6493a3f5c4e616d5406bc538aa99fe7420142e670",
+    "research/COSTS-LIFECYCLE.md": "4a673eae742e950b05293683489fe3a29e950f873b0d096da1f3721f454b734c",
+    "research/EUROPE-COMMERCIAL.md": "29aa3d1c8ce053f00be40fd590f1a3c1f73efbbdbe282b587e5c01e5b176556b",
+    "research/NORTH-AMERICA-COMMERCIAL.md": "464c8e4a51cc9cda381897b0d1479582f80b2e60770844307c28768fc2c5317b",
+    "research/OUTAGE-MAINTENANCE.md": "34a01f603bd62040ffb250affb5176477bd422eef18dea7cb90374fd9da6f177",
+    "research/PROFILES-MACRO-EMISSIONS.md": "28b2b040e32f4046830b791a3ea42c9e289a96c9146db48026ebc52db50bb3ee",
+    "research/TECHNICAL-COMPONENTS.md": "dfde267a90ee0fa1ee460b9c7e22a11ed5f1d0a0538db324bac489f9c2b0e7c2"
+  },
+  "source_count": 114,
+  "family_count": 80,
+  "class_counts": {
+    "partial_candidates": 28,
+    "benchmark_only": 23,
+    "method_reference_only": 14,
+    "public_data_gap": 15
+  },
+  "all_automatic_import_flags": false,
+  "raw_data_ingestion_executed": false
+}
