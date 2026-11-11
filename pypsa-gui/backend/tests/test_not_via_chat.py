@@ -70,7 +70,6 @@ def test_the_issue_rows_are_declared():
         'dc_operational_gap': ('manual', 'results'), 'results_headline_strip': ('manual', 'results'),
         'library_uploads_and_tariff_edit': ('manual', 'library'),
         'power_trace_spectrum': ('unbuilt', None),
-        'unrecorded_series_confirm': ('manual', None),
         'report_comment_revisions': ('unbuilt', None),
     }
     assert 'grid_code_publish' not in entries  # GRIDCODE-CHAT-1: chat tools behind a card
