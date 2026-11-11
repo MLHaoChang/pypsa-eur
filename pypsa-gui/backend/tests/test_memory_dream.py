@@ -1181,6 +1181,14 @@ def test_nightly_fires_once_a_night_from_0300_berlin(factory, world):
     assert nxt != job
 
 
+def test_a_nightly_row_without_an_opt_in_time_still_fires(factory, world):
+    _opt_in(factory, world, nightly=True)
+    with factory() as db:
+        db.get(MemoryDreamSettings, world.user_id).nightly_since = None
+        db.commit()
+    assert len(_fire(factory, _berlin(0, 23, 59))) == 1
+
+
 def test_a_missed_0300_fires_later_that_day_only_once(factory, world):
     # The worker was busy or the app was down at 03:00: the next scan catches up.
     _opt_in(factory, world, nightly=True)
