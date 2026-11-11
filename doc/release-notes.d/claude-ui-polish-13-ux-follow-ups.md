@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): UX follow-ups: the investment-case gate joins reasons with " · ", the Expert edit card names the field ("Rating") as Guided does, and a Guided grid-study jump shows one Back control.

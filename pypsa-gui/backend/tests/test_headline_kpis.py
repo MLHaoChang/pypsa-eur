@@ -173,15 +173,15 @@ CASE = {
         ),
         (
             {**CASE, "status": "running"},
-            ("not_run", "The investment case is still running."),
+            ("running", "The investment case is still running."),
         ),
         (
             {**CASE, "stale": True},
-            ("not_run", "The investment case is older than its inputs."),
+            ("unavailable", "The investment case is out of date: run it again."),
         ),
         (
             {**CASE, "current_hash": "b"},
-            ("not_run", "The investment case is older than its inputs."),
+            ("unavailable", "The investment case is out of date: run it again."),
         ),
         # No key to compare against: its age is unknown, so it is not called old.
         (
@@ -591,5 +591,6 @@ def test_card_sets_are_short_and_reasons_carry_no_engine_identifier():
         "stale",
         "not_applicable",
         "not_run",
+        "running",
         "unavailable",
     }

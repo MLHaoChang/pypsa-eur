@@ -195,6 +195,8 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
 
 export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: () => void }) {
   const uiMode = useUIStore(s => s.uiMode)
+  // A jump that set its own "Back to <origin>" (FlowReturnButton) is the one way back.
+  const hasFlowReturn = useUIStore(s => !!s.flowReturn)
   // Guided reaches the grid checks from the hub design's Results step, so the
   // header names that step and offers the way back (UX template audit N5).
   const fromHub = uiMode === 'guided' && (panel === 'campusElectrical' || panel === 'campusStudy' || panel === 'campusResults')
@@ -229,7 +231,7 @@ export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: ()
         <span className="text-border-3">/</span>
         <span className="text-[12px] font-semibold text-text tracking-[-0.005em]">{meta.title}</span>
         <span className="flex-1" />
-        {fromHub && <BackToHubResults />}
+        {fromHub && !hasFlowReturn && <BackToHubResults />}
         {next}
         <button
           onClick={onClose}

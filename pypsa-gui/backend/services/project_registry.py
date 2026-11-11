@@ -23,6 +23,7 @@ read the raw column: ``project_dir`` rejoins it with the configured root,
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import uuid
@@ -345,6 +346,7 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
     if not _may_move_directory(project, old_dir):
         # Rename the ROW only. The directory keeps the name it was created
         # with, which is stale but readable, resolvable and safe.
+        refuse_running_report({old_name: old_dir}, "rename it")
         project.name = new_name
         project.updated_at = _now()
         try:
@@ -382,41 +384,60 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
             detail=f"A directory named '{new_dir.name}' already exists",
         )
 
-    project.name = new_name
-    project.storage_path = storage_value(new_rel)
-    project.updated_at = _now()
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=409, detail=f"Project '{new_name}' already exists"
-        ) from exc
+    # Study harness 07f: no report write runs while the directory moves, and
+    # none can start (GK B C1, C2). The network lock first, then the reports.
+    from services.pypsa_service import PyPSAService
+    from services.reports import store as report_store
 
-    # BYTE-WISE here, unlike the collision check above, and the difference is
-    # the whole point of having two predicates. A case-only rename is not a
-    # collision — the directory is the caller's own — but it IS still a move:
-    # skipping it leaves the row saying `renamed study` while the directory is
-    # `Renamed Study`, which resolves on APFS and NTFS and does not resolve on
-    # any case-sensitive filesystem. `os.replace` performs a case-only
-    # rename correctly on macOS and Linux, VERIFIED on APFS (which also
-    # rewrites the stored form to NFC). NOT verified on Windows, where it is
-    # `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` and Microsoft documents
-    # that flag as unusable when either name is a directory. If it raises there
-    # the failure path is still correct — `_compensate` restores both columns
-    # and re-raises — so this is a portability question, not a data one.
-    if old_dir.exists() and old_dir != new_dir:
+    with PyPSAService.get_lock(), reports_closed_or_409(old_dir, "renamed"):
+        refuse_running_report({old_name: old_dir}, "rename it")
+        project.name = new_name
+        project.storage_path = storage_value(new_rel)
+        project.updated_at = _now()
         try:
-            new_dir.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(old_dir, new_dir)
-        except OSError:
-            # The row is already committed — there is no transaction spanning
-            # the database and the filesystem — so put BOTH columns back or the
-            # project points at a directory that does not exist and vanishes
-            # from the UI. `name` too: restoring only `storage_path` leaves the
-            # project renamed in the database and not on disk.
-            _compensate(db, project, old_name, old_rel)
-            raise
+            db.commit()
+        except IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=409, detail=f"Project '{new_name}' already exists"
+            ) from exc
+
+        # BYTE-WISE here, unlike the collision check above, and the difference is
+        # the whole point of having two predicates. A case-only rename is not a
+        # collision — the directory is the caller's own — but it IS still a move:
+        # skipping it leaves the row saying `renamed study` while the directory is
+        # `Renamed Study`, which resolves on APFS and NTFS and does not resolve on
+        # any case-sensitive filesystem. `os.replace` performs a case-only
+        # rename correctly on macOS and Linux, VERIFIED on APFS (which also
+        # rewrites the stored form to NFC). NOT verified on Windows, where it is
+        # `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` and Microsoft documents
+        # that flag as unusable when either name is a directory. If it raises there
+        # the failure path is still correct — `_compensate` restores both columns
+        # and re-raises — so this is a portability question, not a data one.
+        if old_dir.exists() and old_dir != new_dir:
+            try:
+                # The destination must lie under the projects root. Only the
+                # parent is resolved: a case-only rename keeps the new name's
+                # spelling (realpath of an existing directory returns its
+                # on-disk case on Windows). normpath plus a prefix check is
+                # the form CodeQL reads as a py/path-injection barrier.
+                root = os.path.realpath(get_settings().projects_root)
+                target = os.path.normpath(
+                    os.path.join(os.path.realpath(new_dir.parent), new_dir.name))
+                if not target.startswith(root + os.sep):
+                    raise OSError(f"refusing to move a project outside the projects root: {new_dir}")
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                os.replace(old_dir, target)
+            except OSError:
+                # The row is already committed — there is no transaction spanning
+                # the database and the filesystem — so put BOTH columns back or the
+                # project points at a directory that does not exist and vanishes
+                # from the UI. `name` too: restoring only `storage_path` leaves the
+                # project renamed in the database and not on disk.
+                _compensate(db, project, old_name, old_rel)
+                raise
+            # The marker moved with the directory (study harness 07f).
+            report_store.clear_closing(new_dir)
 
     _rebind_resident_contexts(project)
     db.refresh(project)
@@ -471,6 +492,52 @@ def _may_move_directory(project: Project, old_dir: Path) -> bool:
     if stores_absolute_path(project):
         return False
     return old_dir.is_relative_to(Path(get_settings().projects_root))
+
+
+def report_busy_http(action: str) -> HTTPException:
+    """409 `report_busy` for a whole-directory operation that could not close
+    the project's reports (study harness 07f)."""
+    return HTTPException(status_code=409, detail={
+        "error_kind": "report_busy",
+        "message": f"A report of this project is being written, so it could not be "
+                   f"{action}; nothing was changed. Try again in a moment.",
+    })
+
+
+@contextlib.contextmanager
+def reports_closed_or_409(directory: Path, action: str):
+    """`store.reports_closed` for an operation that moves or removes a whole
+    directory (study harness 07f): it waits up to the copy bound for a report
+    write in progress, then holds every report writer off until the operation
+    is over. Busy → 409 `report_busy` before anything changes.
+
+    Take it AFTER `PyPSAService.get_lock()`: no report writer takes the
+    network lock inside a report lock (07e, L1)."""
+    from services.reports import store as report_store
+
+    stack = contextlib.ExitStack()
+    try:
+        stack.enter_context(report_store.reports_closed(directory))
+    except report_store.ReportBusy as exc:
+        raise report_busy_http(action) from exc
+    with stack:
+        yield
+
+
+def refuse_running_report(directories: dict[str, Path], action: str) -> None:
+    """409 `report_busy` when this process runs a report job for one of the
+    `{name: directory}` projects (study harness 07f, GK B Q1): a delete or a
+    rename never discards a running job. Ask it after `reports_closed_or_409`,
+    which stops a new job from starting (GK B C2)."""
+    from services.reports import report_job
+
+    for name, directory in directories.items():
+        if report_job.running_for(directory):
+            raise HTTPException(status_code=409, detail={
+                "error_kind": "report_busy",
+                "message": f"A report is being generated for '{name}'. Abort it in "
+                           f"Reports (or wait for it to finish), then {action}.",
+            })
 
 
 def _queued_job_blocks_rename(project: Project) -> bool:

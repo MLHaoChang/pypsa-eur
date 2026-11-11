@@ -121,7 +121,7 @@ def reason_words(fact: dict) -> str:
             out.append(f"the investment case has not finished ({_plain(r[len('case_'):])})")
         else:
             out.append(f"the investment case was refused ({_plain(r)})")
-    text = "; ".join(out) or "the investment case is not evaluated"
+    text = " \u00b7 ".join(out) or "the investment case is not evaluated"
     return text[0].upper() + text[1:]
 
 

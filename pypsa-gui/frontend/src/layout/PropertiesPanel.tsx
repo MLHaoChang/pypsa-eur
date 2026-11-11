@@ -40,6 +40,7 @@ import { useAssetSchema } from '../hooks/useAssetSchema'
 import { useAssetProvenance } from '../hooks/useAssetProvenance'
 import { buildPatch, seedForm } from '../utils/assetForm'
 import { AssetFieldsEdit, assetReadoutItems, fieldHelp, schemaFields } from './properties/AssetFields'
+import { useSaveAction } from '../components/memory/ParameterMemory'
 import { GuideButton } from '../components/GuidedTour'
 import CarrierPanel from './properties/CarrierPanel'
 import ShuntPanel from './properties/ShuntPanel'
@@ -153,6 +154,8 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   const series = useSeriesFields(currentProject, 'generators', gen.name, editors?.fields ?? {})
   const specs = schemaFields(schema)
   const asset = gen as unknown as Record<string, unknown>
+  // Save for reuse in the read-out rows (slice 03b; Expert only).
+  const saveAction = useSaveAction('Generator', gen.name, asset)
   // Curtailment cost prices spilled wind and solar; a thermal unit has none to spill.
   const hidden: ReadonlySet<string> = isRenewableCarrier((form.carrier || gen.carrier) ?? '')
     ? new Set() : new Set(['curtailment_cost'])
@@ -218,7 +221,8 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Generator Properties'}>
           <Row label="Carrier" value={gen.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note}
+              action={saveAction(i.field, i.label)} />
           ))}
         </Section>
         {showChart && hasProfile && (
@@ -268,7 +272,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
             : <span className="text-[9px] px-1.5 py-0.5 rounded bg-border/40 text-muted">static</span>
         }
       >
-        <ExpandedProps items={items} />
+        <ExpandedProps items={items} action={saveAction} />
         {showChart && hasProfile && (
           <MiniProfileChart component="generators" attribute="p_max_pu" name={gen.name} unit="pu" />
         )}
@@ -279,7 +283,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   return (
     <EditShell title={gen.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
       {schema ? (
-        <AssetFieldsEdit
+        <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset}
           carriers={carriers as Carrier[]} buses={buses as Bus[]} hidden={hidden} provenance={provenance} series={series}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
@@ -339,6 +343,8 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   const series = useSeriesFields(currentProject, 'storage_units', su.name, inflow?.applicable ? { inflow: 'Inflow' } : {})
   const specs = schemaFields(schema)
   const asset = su as unknown as Record<string, unknown>
+  // Save for reuse in the read-out rows (slice 03b; Expert only).
+  const saveAction = useSaveAction('StorageUnit', su.name, asset)
 
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteStorageUnit(su.name),
@@ -396,7 +402,8 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Storage Properties'}>
           <Row label="Carrier" value={su.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note}
+              action={saveAction(i.field, i.label)} />
           ))}
         </Section>
         <DetailFooter
@@ -435,7 +442,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
       >
-        <ExpandedProps items={items} />
+        <ExpandedProps items={items} action={saveAction} />
       </CardShell>
     )
   }
@@ -443,7 +450,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   return (
     <EditShell title={su.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
       {schema ? (
-        <AssetFieldsEdit
+        <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset}
           carriers={carriers as Carrier[]} buses={buses as Bus[]} provenance={provenance} series={series}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
@@ -502,6 +509,8 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   const provenance = useAssetProvenance('Store', store.name)
   const specs = schemaFields(schema)
   const asset = store as unknown as Record<string, unknown>
+  // Save for reuse in the read-out rows (slice 03b; Expert only).
+  const saveAction = useSaveAction('Store', store.name, asset)
 
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteStore(store.name),
@@ -558,7 +567,8 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Store Properties'}>
           <Row label="Carrier" value={store.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note}
+              action={saveAction(i.field, i.label)} />
           ))}
         </Section>
         <DetailFooter
@@ -581,7 +591,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
       >
-        <ExpandedProps items={items} />
+        <ExpandedProps items={items} action={saveAction} />
       </CardShell>
     )
   }
@@ -594,7 +604,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
           : <>A <strong>Store</strong> has no intrinsic power limit — charge/discharge rate is set by connected components. Only the energy capacity constrains storage.</>}
       </div>
       {schema ? (
-        <AssetFieldsEdit
+        <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset} provenance={provenance}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
           onCheck={{ e_nom_extendable: autofillNomMin('e_nom', 'e_nom_min') }}
@@ -663,6 +673,8 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   const series = useSeriesFields(currentProject, 'loads', load.name, { p_set: 'Profile' })
   const specs = schemaFields(schema)
   const asset = load as unknown as Record<string, unknown>
+  // Save for reuse in the read-out rows (slice 03b; Expert only).
+  const saveAction = useSaveAction('Load', load.name, asset)
 
   const saveMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
@@ -709,7 +721,8 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
         <Section title={title ?? 'Load Properties'}>
           <Row label="Carrier" value={load.carrier} tip={fieldHelp(schema, 'carrier')} />
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note}
+              action={saveAction(i.field, i.label)} />
           ))}
           <Row
             label="Profile"
@@ -749,7 +762,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
             : <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-muted/10 text-muted border border-border">static</span>
         }
       >
-        <ExpandedProps items={items} />
+        <ExpandedProps items={items} action={saveAction} />
         {showChart && hasProfile && (
           <MiniProfileChart component="loads" attribute="p_set" name={load.name} unit="MW" />
         )}
@@ -760,7 +773,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   return (
     <EditShell title={load.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
       {schema ? (
-        <AssetFieldsEdit
+        <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
         />
@@ -863,6 +876,8 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   })
   const specs = schemaFields(schema)
   const asset = link as unknown as Record<string, unknown>
+  // Save for reuse in the read-out rows (slice 03b; Expert only).
+  const saveAction = useSaveAction('Link', link.name, asset)
 
   const delMut = useMutation({
     mutationFn: () => networkApi.deleteLink(link.name),
@@ -939,7 +954,8 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
           <Row label="Carrier" value={link.carrier} tip={fieldHelp(schema, 'carrier')} />
           {categoryLabel && <Row label="Category" value={categoryLabel} />}
           {visibleItems.map(i => (
-            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
+            <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note}
+              action={saveAction(i.field, i.label)} />
           ))}
         </Section>
         {showChart && hasProfile && (
@@ -1000,7 +1016,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
           </span>
         }
       >
-        <ExpandedProps items={items} />
+        <ExpandedProps items={items} action={saveAction} />
         {showChart && hasProfile && (
           <MiniProfileChart component="links" attribute="p_max_pu" name={link.name} unit="pu" />
         )}
@@ -1018,7 +1034,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
         </div>
       )}
       {schema ? (
-        <AssetFieldsEdit
+        <AssetFieldsEdit suggestions
           schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
           focusField={focusField}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
@@ -1512,6 +1528,8 @@ export function LinePanel({ name }: { name: string }) {
   const provenance = useAssetProvenance('Line', name)
   const specs = schemaFields(schema)
   const asset = (line ?? {}) as unknown as Record<string, unknown>
+  // Save for reuse in the read-out rows (slice 03b; Expert only).
+  const saveAction = useSaveAction('Line', line?.name ?? null, asset)
 
   const numField = (key: string, fallback: number | null | undefined): number => {
     const v = parseFloat(form[key]); return isNaN(v) ? (fallback ?? 0) : v
@@ -1621,7 +1639,7 @@ export function LinePanel({ name }: { name: string }) {
         <Section title="Edit Parameters">
           <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 mb-2">
             {schema ? (
-              <AssetFieldsEdit
+              <AssetFieldsEdit suggestions
                 schema={schema} fs={form} set={setForm} current={asset} carriers={[]} buses={[]} provenance={provenance}
                 hidden={LINE_TOPOLOGY}
                 onCheck={{ s_nom_extendable: autofillNomMin('s_nom', 's_nom_min') }}
@@ -1670,7 +1688,8 @@ export function LinePanel({ name }: { name: string }) {
         <>
           <Section title="Parameters">
             {items.map(i => (
-              <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
+              <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note}
+              action={saveAction(i.field, i.label)} />
             ))}
             {/* Per-km + total pairs. PyPSA stores absolute Ohm / Siemens, but
                 the natural physical quantity is per-km — show both so the user
@@ -1715,6 +1734,8 @@ export function TransformerPanel({ name }: { name: string }) {
   const provenance = useAssetProvenance('Transformer', name)
   const specs = schemaFields(schema)
   const asset = (tr ?? {}) as unknown as Record<string, unknown>
+  // Save for reuse in the read-out rows (slice 03b; Expert only).
+  const saveAction = useSaveAction('Transformer', tr?.name ?? null, asset)
 
   const updateMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
@@ -1776,7 +1797,7 @@ export function TransformerPanel({ name }: { name: string }) {
         <Section title="Edit Parameters">
           <div className="grid grid-cols-2 gap-x-2 gap-y-1.5 mb-2">
             {schema ? (
-              <AssetFieldsEdit
+              <AssetFieldsEdit suggestions
                 schema={schema} fs={form} set={setForm} current={asset} carriers={[]} buses={[]} provenance={provenance}
                 hidden={TRANSFORMER_TOPOLOGY}
                 onCheck={{ s_nom_extendable: autofillNomMin('s_nom', 's_nom_min') }}
@@ -1818,7 +1839,8 @@ export function TransformerPanel({ name }: { name: string }) {
         <>
           <Section title="Parameters">
             {items.map(i => (
-              <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note} />
+              <Row key={i.label} label={i.label} value={i.value} unit={i.unit} tip={i.tip} badge={i.badge} note={i.note}
+              action={saveAction(i.field, i.label)} />
             ))}
           </Section>
           <button onClick={startEdit}

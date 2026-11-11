@@ -24,6 +24,8 @@ export interface ProfilePoint {
 export interface ProfilePreset {
   name: string
   technology: ProfileTechnology
+  /** The weather source the preset's parameters are for. */
+  source_type?: ProfileSource
   description: string
   params: Record<string, unknown>
 }

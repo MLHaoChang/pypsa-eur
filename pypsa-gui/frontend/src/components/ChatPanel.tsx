@@ -705,6 +705,8 @@ export const KIND_COPY: Record<
   project_exists: { title: 'Project name already exists' },
   descendants_exist: { title: 'Project has descendants' },
   confirmation_expired: { title: 'Confirmation expired' },
+  // Study harness 37: a grant whose intake digest is not the card's (the inputs changed since it was shown).
+  intake_stale: { title: 'The inputs changed: review them again' },
   // Chat harness issue 18: approvals fail closed when they cannot be recorded.
   approval_unavailable: {
     title: 'Approval could not be recorded',

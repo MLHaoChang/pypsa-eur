@@ -12,6 +12,7 @@ import {
 import { useAuth } from '../../auth/AuthProvider'
 import { useMemoryStore, type MemoryTab } from '../../store/memoryStore'
 import MemoryEditForm from './MemoryEditForm'
+import { ParameterSummary, parameterBodyOf } from './ParameterMemory'
 import MemoryHistory from './MemoryHistory'
 
 // The Memory page (assistant-memory plan §4): account-level, so it opens as a
@@ -267,16 +268,21 @@ function MemoryRow({
   const used = item.apply_count
     ? `${item.apply_count}× · ${dateWords(item.last_used_at)}`
     : 'Not yet'
+  const param = item.kind === 'parameter' ? parameterBodyOf(item.body) : null
   return (
     <>
       <tr className="border-t border-border align-top" data-testid="memory-row" data-item-id={item.id}>
         <td className="px-3 py-1.5"><Tag tone="accent">{KIND_WORDS[item.kind]}</Tag></td>
-        <td className="px-2 py-1.5 text-text">{item.summary}</td>
+        <td className="px-2 py-1.5 text-text">
+          {param ? <ParameterSummary body={param} /> : item.summary}
+        </td>
         <td className="px-2 py-1.5 text-muted">{appliesToWords(item.applies_to)}</td>
         <td className="px-2 py-1.5 text-muted">{own ? 'Just me' : 'Workspace'}</td>
         <td className="px-2 py-1.5">
           <div className="flex flex-wrap gap-1">
-            {item.concept_keys.map(k => (
+            {/* A parameter row names its field and class in its summary (UX P5), so its
+                "<Class> setting" key is not shown again. */}
+            {item.concept_keys.filter(k => !(param && k.startsWith('param:'))).map(k => (
               <span key={k}
                 className="px-1 rounded bg-panel border border-border text-[9.5px] text-muted">
                 {conceptWords(k)}
