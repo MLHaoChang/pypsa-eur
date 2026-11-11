@@ -146,6 +146,19 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A grant freezes only what the card showed; a field the card did not show stays outside the grant (#1257 F1).
 - A 409 detail that changes from a string to an object is checked against every frontend consumer of that route (#1261 R1).
 
+- A directory close (`.closing`) covers every lock under `reports/`, including new report ids and side stores such as `_charts`; no writer under it uses `mkdir(parents=True)` (#1373 D1, #1378 K1, GK B (46)).
+- A test for a ticketed defect asserts only what holds under every fix the ticket allows, "refuse" included (#1372 L1, GK B (46)).
+- A card shows every value its approval digest binds; a list or series is never summarised as a count (#1379 F2, GK B (46)).
+- An apply-then-read with nothing moved reads fresh; stale compares against what was recorded at approval (#1375 D1, GK B (46)).
+- A linked quantity clashes with a ledger stream only when that stream prices the same quantity. A served load meets the bill (grid import) but not an EaaS fee (the same delivery). The bill must stay import-only, pinned by a test (BC-04 F1, GK B (47)).
+- A test's expected value is never built from the table under test. Expected units and labels come from the backend source of truth, or the mutant survives (#1379 PATH_WORDS units, GK B (47)).
+- A lease guard has a killing test for each of its parts: owner, an unexpired lease (a stalled holder writes nothing before settlement), and the claim's queued status (#1389 G1, G2, GK B (47)).
+- An access check that runs before a read is repeated at write time for every link the write records (#1389 G3, GK B (47)).
+- A persisted mark or record that readers branch on is normalised by one reader. A malformed shape reads as the fail-closed state, never a 500, a character split or a silent default (#1390 F2, GK B (47)).
+- An "is current" or no-op flag is an exact compare, with a server test at a value equal only after rounding. A mocked client flag pins nothing (#1386 A3, GK B (47)).
+- A solve-like check's revision and its network copy are read under one lock, with a test where an edit lands right after the lock is released (#1384 N1, GK B (47)).
+- A reader of saved settings it cannot parse (non-dict JSON, wrong-typed fields, [] or null) names them as unreadable, never as empty or "nothing on" (#1384 N2b, GK B (47)).
+
 ## Engineering rules
 
 - Grid source impedance derived from an entered S_k'' carries the IEC 60909 voltage factor c (Z = c·Un²/S_k''; S_sc2 = S_k''/c), in every screen: unbalance, the flicker note, the impedance scan.

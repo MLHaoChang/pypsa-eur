@@ -1,0 +1,39 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# LC-48 — The pending LC-D20 to LC-D23 gate rows
+
+Status: needs-triage
+Type: task
+
+Opened under owner decision LC43-ROWS-1. LC-43 (#1372) covered the five LC-D20 to LC-D23
+gate rows with behavioural fixtures and closed; the rows it left pending move here. The
+`r3-uncovered:LC-D20` to `LC-D23` blockers in `full_coverage`
+(`pypsa-gui/backend/smoke/assistant_control_matrix.py`, `R3_ISSUE`) point at this issue.
+
+## Pending rows (`pypsa-gui/backend/smoke/family_manifest.py`)
+
+No gate is built for these; each row points here:
+
+- `LC-D20.delivery_ttl`
+- `LC-D21.stale_report`
+- `LC-D21.report_resume`
+- `LC-D22.rebind`
+- `LC-D22.viewer_role`
+- `LC-D23.history_repair`
+- `LC-D23.approval_resume`
+- `LC-D23.profile_recovery`
+- `LC-D23.goal_switch`
+
+Defects LC-43 found, each a fix ticket of this issue; the row points at its ticket:
+
+- `LC-D20.malformed_import`: LC-43c, `43c-malformed-import-replaces-the-network.md`
+  (a failed netCDF import drops the open project and its unsaved edits; the most serious)
+- `LC-D21.edited_admitted_number`: LC-43a, `43a-edited-table-bypasses-number-check.md`
+- `LC-D23.timeout_outcome_text`: LC-43b, `43b-timeout-result-hides-unknown-outcome.md`
+
+## Done when
+
+Each row is covered by a behavioural fixture written the LC-43 way (a public seam, a hand
+oracle, the exact refusal kind, and `tests/lc43_gates.py::state` unchanged on every
+refusal), or the owner decides to drop it. Dropping a row is an owner decision (GK B C1).

@@ -315,7 +315,9 @@ def test_a_fork_that_will_not_go_away_does_not_sink_the_runs_record(
     def stuck(target):
         raise OSError(39, "Directory not empty", str(target))
 
-    monkeypatch.setattr(projects_router, "_force_rmtree", stuck)
+    # Since 07f-a a fork's tree is first moved aside, and only that move can
+    # keep the fork; the moved tree's own removal is logged, never raised.
+    monkeypatch.setattr(projects_router, "_retire_closed_dir", stuck)
     sid = _abort_after_the_first_solve(client, api_project, monkeypatch, registry_key_for,
                                        "rm-stuck")
     rec = wait_run(client, "rm-stuck", sid)

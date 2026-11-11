@@ -27,7 +27,7 @@ beforeEach(() => {
 })
 afterEach(cleanup)
 
-it.each([['expert', 's_nom'], ['guided', 'Rating']] as const)('shows old → new in %s mode', async (uiMode, field) => {
+it.each([['expert', 'Rating'], ['guided', 'Rating']] as const)('shows old → new in %s mode', async (uiMode, field) => {
   useUIStore.setState({ uiMode })
   render(<ConfirmationCard />)
   const rows = within(screen.getByRole('table', { name: 'Changes to apply' })).getAllByRole('row')

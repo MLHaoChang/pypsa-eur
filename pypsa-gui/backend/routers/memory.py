@@ -301,3 +301,96 @@ def item_versions(
     for r in rows:
         r["evidence"] = M.evidence_for(db, user, r["evidence"])
     return {"id": M.public_id(M.parse_id(item_id)), "versions": rows}
+
+
+# ── Slice 03: reusable parameter suggestions (services/memory_parameters.py) ──
+
+
+class ParameterTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project_id: str = Field(min_length=1)
+    component_class: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1)
+
+
+class SaveParameter(ParameterTarget):
+    """Save for reuse: which field only. The server reads the value, unit, carrier
+    and money stamp from the project (GK B P1)."""
+
+    field: str = Field(min_length=1, max_length=64)
+
+
+class SuggestionPreview(ParameterTarget):
+    version: int = Field(ge=1)
+
+
+@router.get("/suggestions")
+def list_suggestions(
+    project_id: str,
+    component_class: str,
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict:
+    """Saved values for each field of the asset `name` in the open project, scoped to
+    its org (§9 M1) and carrier (GK B P3), as chips, and the fields Save for reuse
+    accepts now (`saveable`). A read: nothing is applied (COPILOT-1)."""
+    from services import memory_parameters as P
+
+    try:
+        project = P.bound_project(db, user, project_id)
+        fields = P.suggestions(db, user, project, component_class, name)
+        # Save's own predicate per field (GK B 47 A1): the UI offers Save only there.
+        return {
+            "fields": fields,
+            "saveable": P.saveable(db, user, component_class, name),
+        }
+    except M.MemoryError as exc:
+        _raise(exc)
+
+
+@router.post("/parameters", status_code=201)
+def save_parameter(
+    payload: SaveParameter,
+    db: DBSession = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict:
+    """Save for reuse (§2.1): the click is the confirmation."""
+    from services import memory_parameters as P
+
+    try:
+        project = P.bound_project(db, user, payload.project_id)
+        v = P.save(
+            db, user, project, payload.component_class, payload.name, payload.field
+        )
+    except M.MemoryError as exc:
+        _raise(exc)
+    # A re-save is version n+1 of the same item (§2.1); only a new item may be undone
+    # by retiring it (GK B 47 A2). `edit_item` always writes a new version.
+    return {**_out(db, user, v), "created": v.version == 1}
+
+
+@router.post("/suggestions/{item_id}/preview")
+def preview_suggestion(
+    item_id: str,
+    payload: SuggestionPreview,
+    db: DBSession = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict:
+    """The old → new edit card for applying a saved value. A read: it plans on a
+    copy and writes nothing."""
+    from services import memory_parameters as P
+
+    try:
+        project = P.bound_project(db, user, payload.project_id)
+        return P.preview(
+            db,
+            user,
+            project,
+            item_id,
+            payload.version,
+            payload.component_class,
+            payload.name,
+        )
+    except M.MemoryError as exc:
+        _raise(exc)

@@ -20,3 +20,7 @@ The strip sits at the top of Results › Summary, in Guided and Expert. One PR p
 - S2 (UI): the strip on that route, with its source line, the "Out of date" mark, loading, failed and empty states; "per year" in place of "(annualised)"; the Results header says "solved" and "all periods".
 - S3 (UI): the delta against the base case, and a trend line over the investment periods of a multi-period run.
 - Time to power: no run computes it, so it has no card (owner decision TTP-1). The engine task is `.scratch/datacenter-grid-readiness/issues/27-time-to-power-fact.md`; the card follows in `03b-time-to-power-card.md`.
+
+## Comments
+
+- GK B (44), PR #1343 @88c90b13, condition C1 for slice 2: the `not_via_chat` entry for the strip must not attach to a goal that puts the figures elsewhere. Slice 2 adds excel, word, csv, pdf, workbook, document, bundle, exported, save, download and compared to `_STRIP_ELSEWHERE`, with GK B's five goals in `test_ordinary_goals_get_no_refusal`. Done in slice 2 (one goal per word as well).

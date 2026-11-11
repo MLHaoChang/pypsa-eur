@@ -8,6 +8,7 @@ import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/ass
 import { ProvenanceChip, staleNote } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
 import { ReferenceApplyDrawer } from '../../pages/results/investment/ReferenceApplyDrawer'
+import { SuggestionChips, useParameterSuggestions } from '../../components/memory/ParameterMemory'
 import { derivedStored, displayValue, isRevealed, tidy, unitLabel, visibleUnit } from '../../utils/assetForm'
 import type { SeriesField } from '../../components/series/useSeriesFields'
 import {
@@ -55,7 +56,8 @@ export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record
   const push = (f: AssetFieldSpec, item: ExpandedItem) => {
     const badge = chipOf(stamps, f.key)
     const note = staleNote(stamps?.[f.key], 'readout')
-    out.push(badge ? { ...item, badge, ...(note ? { note } : {}) } : item)
+    const withField = { ...item, field: f.key }
+    out.push(badge ? { ...withField, badge, ...(note ? { note } : {}) } : withField)
   }
   for (const f of schemaFields(schema)) {
     if (f.group === 'identity' || hidden.has(f.key) || !isRevealed(f, fs)) continue
@@ -275,7 +277,7 @@ export function focusFieldControl(key: string): boolean {
   return true
 }
 
-export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onCheck, after, hidden, provenance, series, focusField }: {
+export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onCheck, after, hidden, provenance, series, focusField, suggestions }: {
   schema: AssetSchema
   fs: FS
   set: SetFS
@@ -300,6 +302,11 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
   series?: Record<string, SeriesField>
   /** A fix link's field: scrolled to, focused and highlighted once the form is shown. */
   focusField?: string | null
+  /**
+   * Slice 03b: show saved values ("Used before" chips) under the asset's fields, in
+   * Expert only (`memoryShown`). The class is the schema's, the asset `current.name`.
+   */
+  suggestions?: boolean
 }) {
   useEffect(() => { if (focusField) focusFieldControl(focusField) }, [focusField])
   // The typed parts of a composite asset render together, as one table where
@@ -309,6 +316,15 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
   // Generators and Links can take a shipped cost reference (wind, PV, electrolysers).
   const referenceClass = schema.component === 'Generator' || schema.component === 'Link' ? schema.component : null
   const assetName = typeof current.name === 'string' ? current.name : null
+  const memory = useParameterSuggestions(suggestions ? schema.component : null, assetName, current)
+  const chipsFor = (f: AssetFieldSpec) => {
+    const chips = memory.data?.fields[f.key]
+    if (!chips?.length || !assetName || f.derived || series?.[f.key]?.set) return null
+    return (
+      <SuggestionChips chips={chips} spec={f} target={{ component_class: schema.component, name: assetName }}
+        onApplied={written => set(prev => ({ ...prev, ...appliedFields(schema, written) }))} />
+    )
+  }
   return (
     <>
       {schema.groups.map(g => {
@@ -352,6 +368,7 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                   <div className="col-span-2 -mt-0.5 text-[9px] text-muted" data-testid={`asset-stale-${f.key}`}>
                     {staleNote(provenance?.[f.key], 'card')}</div>
                 )}
+                {f.key !== firstPart && chipsFor(f)}
                 {f.key === 'lifetime' && <LifetimeInherit fs={fs} set={set} />}
                 {f.key === 'i_start_pu' && <StartMultipleDefault fs={fs} />}
                 {LIMIT_KEYS.has(f.key) && (fs[f.key] ?? '').trim() === '' && (

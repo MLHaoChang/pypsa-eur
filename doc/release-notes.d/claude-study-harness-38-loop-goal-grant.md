@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): the result gate no longer passes a converged LOLE loop that ran against a different target or goal source than the goal frozen on the granted envelope; it reads no evidence (`goal_mismatch`, or `goal_unreadable` for an unreadable input).

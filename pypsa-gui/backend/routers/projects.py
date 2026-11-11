@@ -297,6 +297,57 @@ def _force_rmtree(target: pathlib.Path) -> None:
         raise last
 
 
+# Dot-prefixed, so no project or snapshot listing and no legacy scan sees it.
+_RETIRED_PREFIX = ".pypsa-deleting-"
+
+
+def _retire_closed_dir(target: pathlib.Path) -> pathlib.Path | None:
+    """
+    Move a directory whose reports are closed (`project_registry.
+    reports_closed_or_409`, study harness 07f) to a hidden sibling and return
+    that, or None when `target` was already gone. A report writer still
+    holding the old path then finds no directory there and fails
+    (`ReportProjectGone`) instead of making `reports/<id>/` again under a
+    half-removed tree.
+
+    Only the move needs the caller's locks: `_remove_retired` runs after
+    them, so a large tree never keeps the network lock's 5 s waiters out
+    (GK B C4). The move is retried like `_force_rmtree` (a OneDrive or AV
+    handle) and raises its last `OSError`; nothing is moved then.
+    """
+    if target.is_symlink():
+        raise OSError(f"refusing to remove a symbolic link: {target}")
+    retired = target.parent / f"{_RETIRED_PREFIX}{os.urandom(6).hex()}"
+    for attempt in range(4):
+        try:
+            os.replace(target, retired)
+            return retired
+        except FileNotFoundError:
+            return None
+        except OSError:
+            if attempt == 3:
+                raise
+            time.sleep(0.4 * (attempt + 1))
+    return None
+
+
+def _remove_retired(retired: pathlib.Path | None) -> None:
+    """`_force_rmtree` a directory `_retire_closed_dir` moved aside. A failure
+    leaves only that hidden directory, which is logged."""
+    if retired is None:
+        return
+    try:
+        _force_rmtree(retired)
+    except OSError as exc:
+        logger.warning("could not remove %s: %s", retired, exc)
+
+
+def _remove_closed_dir(target: pathlib.Path) -> None:
+    """`_retire_closed_dir` then `_remove_retired`, for a caller whose lock
+    already spans the removal (snapshot prune, inside a snapshot create)."""
+    _remove_retired(_retire_closed_dir(target))
+
+
 @contextlib.contextmanager
 def _reports_copy_guard(src: pathlib.Path | None = None, dst: pathlib.Path | None = None,
                         *, incoming=()):
@@ -1240,6 +1291,8 @@ def import_unclaimed_project(
         )
     except (PermissionDenied, ConflictError, ValidationError) as exc:
         _raise_tenancy_http_error(exc)
+    except report_store.ReportBusy as exc:
+        raise project_registry.report_busy_http("imported") from exc
 
     return {
         "root": _serialize_registry_project(result.root),
@@ -4206,32 +4259,51 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
 
     deleted: list[str] = []
     failed: list[str] = []
+    dropped: list[tuple[str, Any]] = []
+    retired: list[pathlib.Path | None] = []
     # Leaves-first: reverse the BFS order so a child is always removed before
     # its parent, keeping the DB parent graph consistent at every step.
     targets = list(reversed(child_projects)) + [project]
-    for target in targets:
-        # Resolve, never ensure — creating a directory here and then rmtree-ing
-        # it would turn "already gone" into churn on the user's disk.
-        target_dir = project_registry.project_dir(target)
-        try:
-            if target_dir.exists():
-                _force_rmtree(target_dir)
-        except OSError as exc:  # noqa: BLE001
-            failed.append(target.name)
-            change_log_service.log(
-                "warn", "Project", target.name,
-                f"Could not fully delete '{target.name}': {exc}.",
-            )
-            continue
-        # Capture the registry key BEFORE the row is deleted — it is derived
-        # from `(org_id, id)`, which a deleted/expired row can no longer supply.
-        target_key = project_registry.registry_key(target)
-        project_registry.delete_project_row(db, target)
-        deleted.append(target.name)
+    # Resolve, never ensure — creating a directory here and then rmtree-ing
+    # it would turn "already gone" into churn on the user's disk.
+    target_dirs = {t.name: project_registry.project_dir(t) for t in targets}
+    # Study harness 07f: every target's reports are closed before the first is
+    # removed (busy → 409, nothing deleted), and a running report job refuses
+    # the delete (GK B Q1), asked once no new job can start (C2). The network
+    # lock first, then the report locks (07e, L1).
+    try:
+        with PyPSAService.get_lock(), contextlib.ExitStack() as closed:
+            for target_dir in target_dirs.values():
+                closed.enter_context(project_registry.reports_closed_or_409(target_dir, "deleted"))
+            project_registry.refuse_running_report(target_dirs, "delete it")
+            for target in targets:
+                target_dir = target_dirs[target.name]
+                try:
+                    if target_dir.exists():
+                        retired.append(_retire_closed_dir(target_dir))
+                except OSError as exc:  # noqa: BLE001
+                    failed.append(target.name)
+                    change_log_service.log(
+                        "warn", "Project", target.name,
+                        f"Could not fully delete '{target.name}': {exc}.",
+                    )
+                    continue
+                # Capture the registry key BEFORE the row is deleted — it is derived
+                # from `(org_id, id)`, which a deleted/expired row can no longer supply.
+                dropped.append((target.name, project_registry.registry_key(target)))
+                project_registry.delete_project_row(db, target)
+                deleted.append(target.name)
+    finally:
+        # Outside the network lock: removing a moved tree can take long (GK B
+        # C4). In a `finally`, so a failure after a move leaves no hidden tree.
+        for path in retired:
+            _remove_retired(path)
+    # Evicting a context takes its own locks.
+    for target_name, target_key in dropped:
         try:
             PyPSAService.drop(target_key)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("could not evict resident context for '%s': %s", target.name, exc)
+            logger.warning("could not evict resident context for '%s': %s", target_name, exc)
 
     change_log_service.log("delete_project", "Project", project.name, f"Deleted project '{project.name}'")
     if failed and not deleted:
