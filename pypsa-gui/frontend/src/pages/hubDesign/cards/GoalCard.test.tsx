@@ -228,7 +228,7 @@ describe('GoalCard voll line', () => {
 // A1-FE (deferred spec 2026-09-28 §2.4): the VOLL "Let the assistant set it"
 // button is disabled with one plain sentence while an FMEA sweep runs.
 describe('GoalCard while a risk check runs (A1-FE)', () => {
-  const LIVE = 'A risk check is running — wait for it to finish or abort it before changing the network.'
+  const LIVE = 'A risk check is running: wait for it to finish or abort it before changing the network.'
   it('the VOLL fix is disabled with the sentence while the sweep runs; enabled after', async () => {
     vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 0 } as never)
     vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({ per_mode: [], sweep_status: 'running' } as never)

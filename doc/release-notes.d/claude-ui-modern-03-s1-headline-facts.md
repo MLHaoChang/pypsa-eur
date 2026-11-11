@@ -1,1 +1,3 @@
 * Feat(pypsa-gui): `GET /api/results/headline_kpis` returns the headline figures for the open project's type (system cost, new-build capital cost, curtailed share, unserved energy, LCOE, peak line loading), each with its unit, its state and a plain reason when the run has no figure. The Results headline strip reads it (ui-modern 03).
+
+* Feat(pypsa-gui): The three checked headline figures (curtailment rate, levelised cost, peak line loading) show where checked chat answers are available: `PYPSA_GUI_ANSWER_ASSURANCE_MODE` is `pilot` or `strict` and the profile is on `PYPSA_GUI_ANSWER_ASSURANCE_PROFILES`; otherwise the card reads "Checked figures are switched off for this installation."

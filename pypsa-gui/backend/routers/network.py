@@ -204,6 +204,11 @@ from routers.network_library_reference import router as _library_reference_route
 
 router.include_router(_library_reference_router)
 
+# Apply a saved parameter from assistant memory (slice 03): an edit-card write.
+from routers.network_memory_parameter import router as _memory_parameter_router  # noqa: E402
+
+router.include_router(_memory_parameter_router)
+
 # Apply a mapped equipment table to several assets (data-to-model slice 1): an edit-card write.
 from routers.network_equipment_table import apply_equipment_mapping  # noqa: E402,F401
 from routers.network_equipment_table import router as _equipment_table_router
@@ -815,6 +820,20 @@ def get_asset_provenance(component: str, name: str) -> dict:
         raise HTTPException(404, f"{component} '{name}' not found")
     return {"component": component, "name": name,
             "fields": provenance_graph.stale_entries(n, component, name)}
+
+
+@router.get("/asset_schema/{component}/provenance/{name}/why/{field}")
+def get_asset_provenance_why(component: str, name: str, field: str) -> dict:
+    """Why one asset field has its value (provenance-graph 03): the provenance graph's walk from the field to
+    what priced it, outcome first, then each step's value, unit, stamp, the edge that reached it and whether it is
+    current. `field` = `capital_cost` is the Economics row's annualised cost. Reads only (COPILOT-1). A target
+    the graph cannot answer for is `why_target_unknown` (422 an unknown class, else 404)."""
+    from services.provenance_graph.explain import TargetUnknown, explain
+
+    try:
+        return explain(PyPSAService.get_network(), component, name, field)
+    except TargetUnknown as exc:
+        raise HTTPException(exc.status, {"error_kind": "why_target_unknown", "message": str(exc)}) from exc
 
 
 # ── Time Series ───────────────────────────────────────────────────────────────

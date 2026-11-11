@@ -8,7 +8,7 @@ Blocked by: 01
 Type: feature
 Model: Opus for the shared theme API, Sonnet for each chart. Reviewer: UX.
 
-The issue is cut into slices (PR-SIZE-1). Slices 1 to 4 are done in their PRs; the
+The issue is cut into slices (PR-SIZE-1). Slices 1 to 6 are done in their PRs; the
 rest are ready for an agent and build on their API.
 
 ## Slice 1: shared chart theme (this PR)
@@ -43,10 +43,26 @@ Full-year runs: see `06-full-year-charts-block-the-tab.md`.
 
 For slice 6 (UX, #1354): on a multi-period run with "Aggregated" selected the diagram shows the first period (title "Energy flow · 2027") while the source line says "all periods". Left as on master in slice 4.
 
-## Later slices
+## Slice 5: tornado (this PR)
 
-5. **Tornado / delta for sensitivities**, with shared axes, scales, colours and order across base and sensitivity cases (VISUALS-1).
-6. **The rest of Results on the theme**: Prices, Economics, AC power flow, Investment, Aggregated overview (they already get the tokens and ticks through the shared constants, not `ChartFrame`).
+`pypsa-gui/frontend/src/pages/results/TornadoChart.tsx`: `<TornadoChart>` on `ChartFrame`, one row per driver on one value axis. A bar runs between the results at the driver's low and high input and is split at the labelled base-case line: the danger token below it, the success token above, with a key under the plot saying so. `baseWord` is the page's word for the base case; the Robustness check passes "Centre", the word its verdict uses. Each end is written out ("Low 4.9 %: € 4.3 m (+€ 808 k)"), the lower result on the left; the header carries the largest swing and its driver; the axis names the unit once. A dashed zero line is drawn only when zero is in range, named by its "0" tick on the axis below (the base case is named above the plot, so the two never collide). Reference lines are drawn across the bars only, never through a row's text. A case with no result reads "High case: not established", draws no bar on that side and never a bar at 0. `domain` fixes the axis so two options side by side share one scale (no second chart is wired yet). SVG and CSV (driver, input low and high, unit, NPV low and high, swing). It is in `THEMED` in `chartStandard.test.tsx`.
+
+Used by Decision hub > Robustness check (`pages/decision/Robust.tsx`), which keeps the row order of `sortTornado` (largest swing first, an unknown swing last), the pending and skipped lists, the status and the per-driver notes. The chart has no source line there: the method sentence above the plot is the study's basis.
+
+## Slice 6: the rest of Results on the theme (this PR)
+
+`ChartFrame` headers with the source line, `CHART_HEIGHT` sizes and theme tokens instead of hex, each file added to `THEMED` in `chartStandard.test.tsx`:
+
+- `Prices.tsx` (hourly marginal price), `Economics.tsx` (profit and loss, LCOE / LCOS, and the group table card), `AggregatedOverview.tsx` (the five per-period charts), `ReserveCommitments.tsx`, `Curtailment.tsx` (curtailment over time; its empty states are `ChartZero`), `LoadFlow.tsx` ("Bus voltage over time") and `BranchLoading.tsx` ("Loading against effective limit · ranked branches").
+- Lines with no carrier (buses, branches) take `SERIES_COLOURS` from `chartTheme.tsx`; past the eighth they reuse the colours dashed (`seriesDash`).
+- `StorageHeatmap.tsx` (Dispatch) and the Load shape heatmaps (`LoadShapeTab.tsx`, `loadShape.ts`): frame, token colours through `color-mix`, and a key that writes both ends of the scale.
+- `investment/ValueFlowsView.tsx`: "Money flows · <period>" in a frame with the shared SVG action, token colours and a key for participant and external nodes.
+
+Follow-ups closed here: the `HourDayHeatmap` hover readout is no longer `role="status"` (#1349); on a multi-period run with all periods selected, Energy flow draws one period and its frames' source line now names that period (#1354); the tornado's all-not-established driver lines are 11 px (#1358).
+
+Not themed: the retired "Hourly marginal price" section in `LoadFlow.tsx` (behind `SHOW_RETIRED_SECTIONS`) keeps its own header.
+
+## Later slices
 7. **Reports reuse the exact chart specs** the user saw.
 
 Each new type has a unit test and shots in both modes.

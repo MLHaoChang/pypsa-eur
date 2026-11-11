@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The run plan card shows the project a chat intake creates and the inputs it was read from, with their sources, and both approve buttons send the intake digest so the grant covers exactly the rows shown.

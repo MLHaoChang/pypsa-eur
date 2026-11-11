@@ -48,6 +48,7 @@ from services.dispatch_status import (
 )
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.pypsa_service import PyPSAService
+from services.reports import store as report_store
 
 # Reuse the same path-validation pattern as projects.py — snapshots inherit the
 # project-name safety check by going through `_safe_project_dir`.
@@ -56,11 +57,15 @@ from services.atomic_io import (
     atomic_write_with as _atomic_write_with,
 )
 from routers.projects import (
+    _reports_copy_guard,
     _BUNDLE_DIRS,
     _BUNDLE_FILES,
     _enforce_project_lock,
     _force_rmtree,
     _read_meta,
+    _remove_closed_dir,
+    _remove_retired,
+    _retire_closed_dir,
     _restore_results_state,
     _safe_project_dir,
     _solver_config_from_dict,
@@ -361,7 +366,9 @@ def _list_snapshot_dirs(project_dir: pathlib.Path) -> list[pathlib.Path]:
     root = snaps.resolve()
     kept = []
     for d in snaps.iterdir():
-        if not d.is_dir():
+        # A dot name is never a snapshot: `_remove_closed_dir` parks one there
+        # while it removes it (study harness 07f).
+        if not d.is_dir() or d.name.startswith("."):
             continue
         try:
             resolved = d.resolve()
@@ -434,16 +441,39 @@ def _prune_oldest(
     if to_delete <= 0 or not oldest_first:
         return 0
     pruned = 0
-    for d in oldest_first[:to_delete]:
+    # Study harness 07f: a snapshot a restore is reading (its report locks
+    # held) is skipped, as one that cannot be removed is, and the next oldest
+    # goes instead, so a busy snapshot never lets the count grow (GK B C5).
+    for d in oldest_first:
+        if pruned >= to_delete:
+            break
         try:
-            _force_rmtree(d)
+            with report_store.reports_closed(d):
+                _remove_closed_dir(d)
             pruned += 1
-        except OSError:
+        except (OSError, report_store.ReportBusy):
             pass
     return pruned
 
 
 def _create_snapshot_internal(
+    name: str, label: str, message: str,
+    protect: frozenset[str] | None = None,
+    project_dir: pathlib.Path | None = None,
+) -> SnapshotInfo:
+    """
+    `_capture_snapshot` under the project's report locks (study harness 07e),
+    so no report is captured while one write to it is in progress. They are taken
+    after the network lock (`_reports_copy_guard`) and before the snapshot
+    directory exists: busy → 409 `report_busy` and no snapshot is left behind.
+    """
+    if project_dir is None:
+        project_dir = _safe_project_dir(name)
+    with PyPSAService.get_lock(), _reports_copy_guard(project_dir):
+        return _capture_snapshot(name, label, message, protect, project_dir)
+
+
+def _capture_snapshot(
     name: str, label: str, message: str,
     protect: frozenset[str] | None = None,
     project_dir: pathlib.Path | None = None,
@@ -521,6 +551,8 @@ def _create_snapshot_internal(
         try:
             from routers.projects import _copy_bundle_dirs
             _copy_bundle_dirs(project_dir, snap_dir)
+        except report_store.ReportBusy:
+            raise  # never a silent skip (07e); the caller holds the locks
         except Exception:  # noqa: BLE001 — best-effort
             pass
 
@@ -750,6 +782,12 @@ def restore_snapshot(
     absent = _absent_at_capture(snap_dir)
     absent_files, absent_dirs = absent if absent is not None else (set(), set())
 
+    # The early `report_busy` refusal (study harness 07e), before the save and
+    # the safety snapshot below write anything. The restore takes the locks
+    # again, and holds them, around its own writes.
+    with PyPSAService.get_lock(), _reports_copy_guard(snap_dir, project_dir):
+        pass
+
     # Outside the `get_lock()` block below: the save takes that lock itself.
     saved_revision = _save_unsaved_live_state(project, db, user)
 
@@ -769,6 +807,8 @@ def restore_snapshot(
             protect=frozenset({snapshot_id}),
         )
     except HTTPException as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("error_kind") == "report_busy":
+            raise  # 07e: retryable, and nothing was written
         # If the pre-restore snapshot fails, refuse the restore — losing work
         # is worse than a confusing error.
         raise HTTPException(
@@ -791,7 +831,10 @@ def restore_snapshot(
     # (e.g. autosave triggering during restore) could lose updates without
     # the lock.
     from services import dirty_state, undo_service
-    with PyPSAService.get_lock():
+    # The report locks too (study harness 07e), before the first file is
+    # overwritten: a restore never reads or replaces a report while one write
+    # to it is in progress.
+    with PyPSAService.get_lock(), _reports_copy_guard(snap_dir, project_dir):
         _refuse_if_changed_since(project, saved_revision)
         # Copy snapshot's files over the project's. Use atomic-write per file
         # so a crash mid-restore leaves either the pre-restore file or the
@@ -836,12 +879,18 @@ def restore_snapshot(
         try:
             from routers.projects import _copy_bundle_dirs
             _copy_bundle_dirs(snap_dir, project_dir)
+        except report_store.ReportBusy:
+            raise  # never a silent skip (07e); this block holds the locks
         except Exception:  # noqa: BLE001 — best-effort
             pass
         for dname in sorted(absent_dirs):
             live = project_dir / dname
             if live.exists() and not (snap_dir / dname).exists():
                 try:
+                    if dname == report_store.REPORTS_DIRNAME:
+                        # Report by report, and never the held lock files.
+                        report_store.clear_reports(project_dir)
+                        continue
                     _force_rmtree(live)
                 except OSError as exc:
                     logger.warning("restore: could not remove %s: %s", live, exc)
@@ -987,14 +1036,20 @@ def delete_snapshot(
     label = _read_snapshot_meta(snap_dir).get("label", snapshot_id)
     # `_force_rmtree` clears read-only attributes and retries with a backoff —
     # a plain `shutil.rmtree` raises WinError 5 on OneDrive-synced paths.
+    # Study harness 07f: not while a restore reads it. A restore holds the
+    # network lock and the snapshot's report locks; take them in that order,
+    # busy → 409 `report_busy` and the snapshot stays.
     try:
-        _force_rmtree(snap_dir)
+        with PyPSAService.get_lock(), \
+                project_registry.reports_closed_or_409(snap_dir, "deleted"):
+            retired = _retire_closed_dir(snap_dir)
     except OSError as exc:
         raise HTTPException(
             500,
             f"Could not delete snapshot '{label}': {exc}. The folder is "
             f"locked (OneDrive sync / AV scan?) — retry, or remove it manually.",
         ) from exc
+    _remove_retired(retired)  # outside the network lock (GK B C4)
     change_log_service.log(
         "delete_snapshot", "Project", name,
         f"Deleted snapshot '{label}' of '{name}'",

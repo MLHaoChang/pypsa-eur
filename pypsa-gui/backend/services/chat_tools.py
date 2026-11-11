@@ -1360,6 +1360,29 @@ def get_asset_reference(view: str, component: str | None = None) -> dict:
     return R.get_attribute_catalog(component)
 
 
+def why_this_number(component: str | None = None, name: str | None = None, field: str | None = None,
+                    project: str | None = None, study_id: str | None = None,
+                    ledger_key: str | None = None, option_id: str | None = None) -> dict:
+    """The provenance graph's walk for one number (provenance-graph 03): an asset field
+    (`GET /api/network/asset_schema/{component}/provenance/{name}/why/{field}`) or a Guided
+    ledger row on one option's fork (`GET .../studies/{study_id}/ledger/{key}/why`). Reads only
+    (COPILOT-1)."""
+    asset = (component, name, field)
+    ledger = (project, study_id, ledger_key, option_id)
+    if all(v is not None for v in asset) and all(v is None for v in ledger):
+        from routers.network import get_asset_provenance_why as _asset_why
+
+        return _asset_why(component, name, field)
+    if all(v is not None for v in ledger) and all(v is None for v in asset):
+        from routers.studies import get_ledger_row_why as _row_why
+
+        return _route(_row_why, study_id, ledger_key, option_id, project=_authorized_project(project))
+    raise HTTPException(status_code=422, detail={
+        "error_kind": "invalid_tool_args",
+        "message": "pass component, name and field (an asset field), or project, study_id, "
+                   "ledger_key and option_id (a Guided ledger row), and nothing else"})
+
+
 def geocode_place(query: str) -> list[dict]:
     """`GET /api/geocode`: the configured geocoder's matches (its own timeout)."""
     from routers.geocode import geocode_search as _h
@@ -1844,7 +1867,7 @@ _LIBRARY_ERROR_KINDS = (
     {"error_kind": "library_reference_unknown"},
     {"error_kind": "reference_target_unsupported"}, {"error_kind": "currency_mismatch"},
     {"error_kind": "reference_confirmation_needed"},
-    {"error_kind": "tariff_currency_required"},
+    {"error_kind": "tariff_currency_required"}, {"error_kind": "tariff_stamp_unreadable"},
 )
 _LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
 
@@ -4051,7 +4074,15 @@ def get_project_flow(name: str) -> dict:
     notes, through the same handler as ``GET /api/projects/{name}/flow``."""
     from routers.flow import get_project_flow as _h
 
-    return _route(_h, project=_authorized_project(name))
+    out = _route(_h, project=_authorized_project(name))
+    # The per-section component lists are for Guided's cards. They grow with the
+    # network, so the model's copy leaves them out (list_components has them).
+    if isinstance(out, dict):
+        for row in out.get("sections") or []:
+            if isinstance(row, dict):
+                row.pop("holds", None)
+                row.pop("holds_total", None)
+    return out
 
 
 def get_reliability_goal(name: str) -> dict:
@@ -4493,6 +4524,11 @@ def compare_profiles(project_id: str, a: str, b: str, component: str | None = No
     from routers.profiles import compare_profiles as _h
     return _profile_route(_h, a=a, b=b, component=component,
                           proj=_authorized_project(project_id))
+
+
+def get_profile_tuning_schema(technology: str, preset: str = "default") -> dict:
+    from routers.profiles import profile_tuning_schema as _h
+    return _profile_route(_h, technology=technology, preset=preset)
 
 
 # ── Time series and weather (live-voice 08 B3) (6) ──────────────────────────
@@ -9817,6 +9853,7 @@ DISPATCHERS: dict[str, Any] = {
     "list_pending_profiles": list_pending_profiles,
     "get_profile_readiness": get_profile_readiness,
     "compare_profiles": compare_profiles,
+    "get_profile_tuning_schema": get_profile_tuning_schema,
     "generate_renewable_profile": generate_renewable_profile,
     "apply_generated_profile": apply_generated_profile,
     "apply_generated_profiles": apply_generated_profiles,
@@ -9873,6 +9910,7 @@ DISPATCHERS: dict[str, Any] = {
     "attach_tariff": attach_tariff,
     "list_library_references": list_library_references,
     "get_library_reference": get_library_reference,
+    "why_this_number": why_this_number,
     "apply_library_reference": apply_library_reference,
     "preview_equipment_mapping": preview_equipment_mapping,
     "apply_equipment_mapping": apply_equipment_mapping,

@@ -23,7 +23,7 @@ vi.mock('../api/network', () => ({
     getTimeseries: async () => ({ index: [], columns: [], data: [] }),
   } as Record<string, unknown>, { get: (t, k: string) => t[k] ?? (async () => ({})) }),
 }))
-const prof = vi.hoisted(() => ({ readiness: vi.fn(), weather: vi.fn(), generate: vi.fn(), pending: vi.fn(), applyBatch: vi.fn() }))
+const prof = vi.hoisted(() => ({ readiness: vi.fn(), weather: vi.fn(), generate: vi.fn(), pending: vi.fn(), applyBatch: vi.fn(), presets: vi.fn(), schema: vi.fn() }))
 vi.mock('../api/profiles', async () => {
   const real = await vi.importActual<typeof import('../api/profiles')>('../api/profiles')
   return { ...real, profilesApi: { ...real.profilesApi, ...prof } }
@@ -61,6 +61,26 @@ describe('Renewables tab', () => {
   it('links to Profile Studio in Expert', async () => {
     await openRenewables()
     expect(screen.getByTestId('ts-open-profile-studio')).toBeTruthy()
+  })
+
+  it('offers Tune only in Expert and only for a row with a location', async () => {
+    await openRenewables()
+    expect(screen.getByTestId('tune-pv_ready')).toBeTruthy()
+    expect(screen.queryByTestId('tune-pv_noloc')).toBeNull()
+  })
+
+  it('offers no Tune in Guided', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    await openRenewables()
+    expect(screen.queryByTestId('tune-pv_ready')).toBeNull()
+  })
+
+  it('opens the Tune dialog for the row', async () => {
+    prof.presets.mockResolvedValue([{ name: 'pv', technology: 'solar', description: '', params: {} }])
+    prof.schema.mockResolvedValue({ technology: 'solar', preset: 'pv', fields: [] })
+    await openRenewables()
+    await userEvent.click(screen.getByTestId('tune-pv_ready'))
+    expect(await screen.findByRole('dialog', { name: 'Tune the profile of pv_ready' })).toBeTruthy()
   })
 
   it('has no Profile Studio link in Guided', async () => {

@@ -14,7 +14,7 @@ import { fmeaModesRefetchInterval } from './useStartFmeaSweep'
 
 /** The plain sentence on the disabled buttons (and the card's note). */
 export const LIVE_STUDY_EDIT =
-  'A risk check is running — wait for it to finish or abort it before changing the network.'
+  'A risk check is running: wait for it to finish or abort it before changing the network.'
 
 /** `enabled: false` reads nothing (cards that edit nothing). */
 export function useLiveStudyRunning(enabled = true): boolean {

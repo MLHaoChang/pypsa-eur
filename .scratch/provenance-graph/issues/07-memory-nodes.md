@@ -1,6 +1,6 @@
 # Memory items as graph nodes
 
-Status: needs-triage
+Status: ready-for-agent (blocked by assistant-memory 03; Sonnet; GK B)
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 
@@ -36,3 +36,12 @@ GK B relayed this from the assistant-memory plan (#1305, session_01G7qCumE33c6N9
   not make the value stale.
 - Under P1 the Verdict shows the value in its own state ("from memory v<n>, user-approved"), never fresh against a
   project input.
+
+### 2026-11-11: triage
+
+Checked on master: `memory_store.py` has no `node(id, version)` yet and `memory` / `recalled_from` are still reserved in `provenance_graph/types.py`. The contract from GK B (comment below) needs assistant-memory 03 (open as #1347). Verdict: ready-for-agent, waiting for it.
+
+- Blocked by: assistant-memory 03 (#1347).
+- Likely files: `services/provenance_graph/`, `services/memory_store.py`, tests. Reviewer: GK B.
+
+The acceptance in the body stands.

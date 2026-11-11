@@ -330,7 +330,7 @@ describe('ImproveCard sweep follow-up (A5)', () => {
 // this" (and the card's footer one) is disabled with one plain sentence while
 // an FMEA sweep re-solves the live network; the backend would refuse the edit.
 describe('ImproveCard while a risk check runs (A1-FE)', () => {
-  const LIVE = 'A risk check is running — wait for it to finish or abort it before changing the network.'
+  const LIVE = 'A risk check is running: wait for it to finish or abort it before changing the network.'
   it('buttons disabled with the sentence while the sweep runs; enabled after', async () => {
     vi.mocked(resultsApi.getFmeaModes).mockResolvedValue({ per_mode: [], sweep_status: 'running' } as never)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The status bar names the stage of a running solve (Checking inputs, Preparing model, Solving, Saving results) with its step number; map hover loading percentages round down like the labels (ui-modern 04 slice 3).

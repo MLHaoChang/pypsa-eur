@@ -68,6 +68,8 @@ export const TOOL_OUTCOME_DENIED_DETAIL_WORDS: Record<string, string> = {
   // SC-07 S5a (UX R4): no tool or kind words; the backend message stays for the model.
   // LC-14 (UX #1328): the backend message names section ids for the model; the user reads no ids.
   invalid_navigation: 'The assistant asked to open a screen or section that does not exist, so nothing changed on screen.',
+  // LC-47: the backend message tells the model not to propose the row again; the user reads why it was not made.
+  change_unticked: 'You left this change unticked, so it was not made.',
   scene_apply_outcome_unknown: 'The 3D site change may not have landed. Check before trying again.',
 }
 

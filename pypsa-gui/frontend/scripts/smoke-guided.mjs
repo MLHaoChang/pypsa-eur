@@ -2307,7 +2307,7 @@ async function phaseP27a(browser) {
 const MISMATCH_SENTENCE = (tab, backend) =>
   `This tab shows ${tab}, but the app is now on ${backend}. Changes from this tab are paused.`
 const STUDY_RUNNING_SWITCH =
-  'A study is still running — wait for it to finish or abort it before switching project.'
+  'A study is still running: wait for it to finish or abort it before switching project.'
 
 async function phaseP27b(browser) {
   const { project: p229 } = await phaseP229(browser)

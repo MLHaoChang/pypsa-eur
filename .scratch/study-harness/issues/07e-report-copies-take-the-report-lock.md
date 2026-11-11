@@ -3,7 +3,7 @@
 
 # 07e — Bundle copies of `reports/` take the per-report lock
 
-Status: needs-triage
+Status: done (#1345)
 Type: task
 Gated: yes (GK B)
 Split from: [07c](07c-report-comment-revisions.md), GK B (38)'s non-blocking finding on #1300
@@ -26,3 +26,37 @@ The gap predates 07c, which didn't widen it.
 1. A snapshot restore that starts while an address holds the report lock waits or refuses. It never interleaves with the address's files. Tested with a held lock.
 2. The same holds for bundle import and save-as/copy.
 3. Snapshot create copies a consistent set of report files for each report.
+
+## Comments
+
+10 Nov: built on `claude/sh-07e-report-copy-lock`. GK B (42) gave the plan GO with changes L1–L7; what was decided:
+
+- **Per-report locks, no second lock type.** `store.reports_copy_lock(src, dst, incoming=)` takes 07c's `report_lock` on every report a copy reads (`src`) or replaces (`dst`), in sorted `(reports dir, id)` order.
+- **L1, lock order.** Copies take `PyPSAService.get_lock()` first and the report locks second. No report writer takes the network lock, a project context or a solver lock inside a report lock: the holders are the five store writers, `revisions.add_comment` / `withdraw` / `address` and the job's generation meta, and inside it they only read and write files under `reports/<id>/` (the job also takes its own `job.lock`, which no copy takes). `test_a_writer_finishes_while_a_copy_holds_the_network_lock` times each writer against a copy holding the network lock.
+- **L2, bound.** All of a copy's report locks share one `COPY_LOCK_TIMEOUT_S` = 3 s deadline, because the network lock may be held meanwhile. The bound covers a thread of the same process too (a 07c writer still waits for a thread without one).
+- **L3, archive ids.** Bundle import validates every `reports/<x>/…` member with `validate_report_id` before the project row exists; anything else refuses 400 `invalid_report_id`. A bundled `.<id>.lock` is skipped.
+- **L4, one rule.** A copy touches only the reports whose locks it holds. A report created after the lock set was taken is neither copied nor removed: it serialises after the copy. Lock files and stray files in `reports/` are never copied, removed or exported. The set is re-read once the locks are held; a change releases them and starts over, at most 5 times, then `report_busy`.
+- **L5, re-entrancy.** `_copy_bundle_dirs` takes the locks itself as a backstop. Nested in the same thread it keeps the outer call's id set, and its release leaves the outer hold in place. A `ReportBusy` from it is re-raised by the snapshot, restore and save callers, which swallow every other copy error.
+- **L6, cleanup.** `reports/` is no longer removed and copied whole (that deleted the held lock files). Each report is built in a temp sibling and swapped in; a failure leaves that report as it was and no temp directory. So a copy that fails part-way leaves each report either old or new, never mixed, but not the whole folder as it was. A busy refusal happens before the copy's first write.
+
+What a refusal can still leave behind:
+
+- Restore checks the locks first, before it saves unsaved live edits and makes the "before-restore" snapshot, then takes them again around its own writes. A writer that arrives between the two gets the restore refused with that save and that snapshot already made; no project file is replaced.
+- Save-As and Save a Copy check the locks before the new project's row is made, then take them again around the save. A writer that arrives between the two leaves that row and an empty directory.
+- Bundle import writes into a new project directory, so its refusal can only be forced in a test, and the row made just before it stays.
+
+Side effects to know about:
+
+- A save to another name now holds the context's mutation lock for the whole save, and snapshot create holds it across the prune and the capture.
+- Export can now answer 409 `report_busy`, the chat export tool included.
+- Locking a snapshot's or an export source's reports leaves `.<id>.lock` files there.
+
+Not covered, filed as [07f](07f-report-lock-remaining-directory-operations.md): project delete and rename, snapshot delete and prune, the study option forks (`services/study/forks.py`, which also copy the lock files), `services/legacy_import.py` and `import_unclaimed_project`.
+
+10 Nov, GK B (43) review of #1345, asks F1–F6:
+
+- **F1.** The order is pinned at each site that holds the network lock: a second thread holds the request's own network lock while snapshot create, restore (early check and its writes) and Save-As wait, and a report writer still gets its lock. Red when the two locks are swapped, or when `_save_context` drops its hold of the context's lock.
+- **F2.** A report writer waiting for a thread of this process is now refused `report_busy` after `LOCK_TIMEOUT_S` (30 s), as it already was for another process. Before, it waited without a bound, which a copy holding the report for a whole save or restore would have turned into a hang.
+- **F4.** The chat export tool returns the typed `report_busy`; the manifest text and the 409 message say what is true for copies.
+- **F5.** "One consistent set of files" was too strong: a copy never reads or replaces a report while one write to it is in progress, but a writer that saves in several locked steps can have a copy land between them. Locking a snapshot's reports leaves `.<id>.lock` files in the snapshot; nothing else in it changes.
+- **F6.** The Save-As early check compares the project's own name, as the save does, so a save addressed by the bound project's id copies nothing and takes no report lock.

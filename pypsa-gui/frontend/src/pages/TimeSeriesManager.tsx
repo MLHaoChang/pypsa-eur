@@ -29,11 +29,12 @@ import { fieldLabel, fmt, sentence } from '../components/series/SeriesKit'
 import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
 import { WeatherBar } from '../components/series/WeatherBar'
+import RenewableTuner from '../components/series/RenewableTuner'
 import { generateAndApply, notReadyReason, readyRows } from '../components/series/renewableGeneration'
 import { MissingCoordinatesBanner, ReadinessBadge, UnrecordedSourceBanner } from '../components/series/RenewableReadiness'
 import { profilesApi, seriesApi, type ReadinessRow } from '../api/profiles'
 
-const EDITOR_TITLE = { load: 'Profile', availability: 'Availability', price: 'Price' } as const
+const EDITOR_TITLE = { load: 'Profile', availability: 'Availability', price: 'Price', tune: 'Tune the profile' } as const
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -797,7 +798,7 @@ function LoadItem({
   )
 }
 
-function GenItem({ gen, meta, readiness, onGenerate, generating, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel, uploadError }: {
+function GenItem({ gen, meta, readiness, onGenerate, onTune, generating, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel, uploadError }: {
   gen: Generator
   meta: GeneratorProfileMeta | undefined
   // The readiness row (RP-02) for a wind/solar generator on the Renewables tab.
@@ -805,6 +806,8 @@ function GenItem({ gen, meta, readiness, onGenerate, generating, hasActive, acti
   // One-click generate from the weather bar's year and source (RP-04b); set
   // only on a Renewables row that may be written.
   onGenerate?: () => void
+  // Expert only: opens the tuning dialog for a wind/solar row with a location.
+  onTune?: () => void
   generating?: boolean
   // Whether the generator has a profile for the CURRENTLY-ACTIVE sub-attribute
   // (p_max_pu / p_min_pu / marginal_cost). Drives the row's check icon, the
@@ -912,14 +915,22 @@ function GenItem({ gen, meta, readiness, onGenerate, generating, hasActive, acti
           }}
         />
       </div>
-      {onGenerate && (
-        <div className="px-3 pl-[34px] pb-1.5 -mt-0.5 border-b border-border/40">
+      {(onGenerate || onTune) && (
+        <div className="px-3 pl-[34px] pb-1.5 -mt-0.5 border-b border-border/40 flex gap-3">
+          {onGenerate && (
           <button type="button" data-testid={`generate-${gen.name}`} disabled={generating}
             onClick={e => { e.stopPropagation(); onGenerate() }}
             className="text-[10px] text-accent hover:underline disabled:opacity-50"
             title="Generate this generator's profile from the weather bar's source and year">
             {generating ? 'Generating…' : readiness?.profile === 'generated' ? 'Regenerate' : 'Generate'}
-          </button>
+          </button>)}
+          {onTune && (
+            <button type="button" data-testid={`tune-${gen.name}`} onClick={e => { e.stopPropagation(); onTune() }}
+              className="text-[10px] text-accent hover:underline"
+              title="Change this technology's settings and compare the result before applying">
+              Tune…
+            </button>
+          )}
         </div>
       )}
       {uploadError && (
@@ -1057,6 +1068,7 @@ export default function TimeSeriesManager() {
     | { family: 'load'; component: string; tab: 'archetype' | 'upload' }
     | { family: 'availability'; component: string; componentType: 'generators' | 'links' }
     | { family: 'price'; component: string; componentType: 'generators' | 'links' }
+    | { family: 'tune'; component: string }
     | null
   >(null)
 
@@ -1121,6 +1133,12 @@ export default function TimeSeriesManager() {
     enabled: !!currentProject && activeTab === 'renewable',
   })
   const readinessOf = (name: string) => readinessRows.find(r => r.generator === name)
+  // Tune… is Expert depth (never in Guided) and needs a location to generate from.
+  const tuneOf = (name: string) => {
+    const row = readinessOf(name)
+    return activeTab === 'renewable' && uiMode === 'expert' && row && row.coord_source !== 'missing'
+      ? () => setSeriesEditor({ family: 'tune', component: name }) : undefined
+  }
   // Per-row Generate (RP-04b): generate with the weather bar's choice, wait, apply.
   const [generating, setGenerating] = useState<ReadonlySet<string>>(new Set())
   const [genNotice, setGenNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
@@ -2021,6 +2039,7 @@ export default function TimeSeriesManager() {
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
                     readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
                     onGenerate={activeTab === 'renewable' && canGenerateRow(g.name) ? () => { void generateRow(g.name) } : undefined}
+                    onTune={tuneOf(g.name)}
                     generating={generating.has(g.name)}
                     hasActive={genHasProfileForActive(g.name)}
                     activeRows={genActiveRows(g.name)}
@@ -2045,6 +2064,7 @@ export default function TimeSeriesManager() {
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
                     readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
                     onGenerate={activeTab === 'renewable' && canGenerateRow(g.name) ? () => { void generateRow(g.name) } : undefined}
+                    onTune={tuneOf(g.name)}
                     generating={generating.has(g.name)}
                     hasActive={genHasProfileForActive(g.name)}
                     activeRows={genActiveRows(g.name)}
@@ -2435,6 +2455,19 @@ export default function TimeSeriesManager() {
               mode={uiMode}
               initialTab={seriesEditor.tab}
             />
+          ) : seriesEditor.family === 'tune' ? (
+            readinessOf(seriesEditor.component) ? (
+              <RenewableTuner
+                key={`tune:${seriesEditor.component}`}
+                project={currentProject}
+                row={readinessOf(seriesEditor.component)!}
+                onApplied={() => {
+                  setGenNotice({ tone: 'ok', text: `${seriesEditor.component}: profile applied. Undo (Ctrl+Z) reverts it.` })
+                  setSeriesEditor(null)
+                  void qc.invalidateQueries()
+                }}
+              />
+            ) : <p className="text-[11px] text-muted">This generator is no longer a wind or solar unit.</p>
           ) : seriesEditor.family === 'price' ? (
             <SeriesEditor
               key={`price:${seriesEditor.componentType}:${seriesEditor.component}`}

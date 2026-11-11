@@ -322,3 +322,11 @@ Eight sessions reached 300k context in 75–120 minutes. The causes were full-si
 - **An owner question card closed when a notification arrived or the worker restarted.**
   - Fix: after a dropped card the coordinator asks in the reply text only, recommended option first, and takes the owner's typed answer.
   - Lives in: coordinator "Deciding or asking".
+
+## 10 Nov 2026: session start size (owner decision RETRO-1110)
+
+- **Every session started at 82–89k tokens before any work, and 98–99 % of tokens are cache reads**, so cost is turns × context. About 67k of the start was tool schemas; the skill list was ~5k, AGENTS.md ~1k, the brief ~2k. The SessionStart hook adds nothing: its output never enters the context.
+  - Fix: `permissions.deny` in `.claude/settings.json` names the tools no procedure calls (cloud-environment, credential, computer-folder and webhook tools of `claude-code-remote`; `Workflow`, `ScheduleWakeup`, the plugin and skill suggestion tools, `SendUserFile`, `ListAgents`). A denied tool's schema is not sent at all. `skillOverrides: "user-invocable-only"` hides unused bundled and claude.ai skills from the model and keeps `/name` for the owner.
+  - Measured with one-turn Haiku probes (`create_session`, then `get_session` `context_usage.used_tokens` read from outside after the turn; inside its own turn a session reads 0): 82.6k on the base branch, 61.5k with the deny list, 58.1k with the skills hidden too.
+  - Before adding a deny entry, grep the steward, coordinator and reviewer procedures for the tool. The coordinator needs `Artifact` (~8k) and the session and trigger tools, and project settings cannot differ by role, so those stay loaded for builders.
+  - Lives in: `.claude/settings.json`, live and template copies.

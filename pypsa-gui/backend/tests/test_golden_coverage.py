@@ -214,6 +214,9 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_results_workbook"):            frozenset(),
     # RW-03: lists the views a workbook can hold, with availability; no figures.
     ("routers/results.py", "get_results_workbook_views"):      frozenset(),
+    # ui-modern 03: the headline strip re-reports cost_breakdown and the
+    # checked facts; it computes no figure of its own.
+    ("routers/results.py", "get_headline_kpis"):               frozenset(),
     # ── routers/simulation.py ───────────────────────────────────────────
     ("routers/simulation.py", "get_solver_config"):    frozenset(),
     ("routers/simulation.py", "update_solver_config"):  frozenset(),
@@ -277,6 +280,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/studies.py", "get_ledger"):            frozenset(),
     ("routers/studies.py", "put_ledger"):            frozenset(),
     ("routers/studies.py", "get_ledger_csv"):        frozenset(),
+    ("routers/studies.py", "get_ledger_row_why"):    frozenset(),
     ("routers/studies.py", "get_option_case"):       frozenset({"investment_case"}),
     ("routers/studies.py", "get_option_case_xlsx"):  frozenset({"investment_case_xlsx"}),
     # S6: the findings report the battery's value; the tornado routes start,

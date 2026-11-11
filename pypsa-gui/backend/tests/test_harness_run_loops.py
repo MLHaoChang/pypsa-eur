@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 from harness import run_loops, runner as harness_runner
 from harness.protocol import LLMEvent
-from services import run_envelope, run_profiles
+from services import run_envelope, run_gates, run_profiles
 from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import (  # noqa: F401
     baseline, dispatch, edit, helpers_state, session, wait_until,
@@ -757,3 +757,98 @@ def test_a_round_write_with_no_admission_read_refuses_with_no_write(granted, pro
     assert not record["run"].get("ledger")
     assert ("update_component", "fingerprint_unreadable") in refused(path)
 
+
+
+# ── Study-harness 38: the loop's goal is the granted goal ───────────────────
+
+FROZEN = {"value": 2.0, "unit": "h/yr", "source": "user"}
+
+
+def _loop(**over):
+    """A met loop on the FROZEN goal over a 3-year horizon: 2 h/yr x 3 = 6 h."""
+    return {"status": "met", "target_lole_h": 6.0, "horizon_years": 3.0,
+            "goal_sources": {"target_lole_h": "user", "mc_draws": "default"}, **over}
+
+
+def _read(tmp_path, monkeypatch, loop=None, goal=FROZEN, state="granted", file=True, envelope=None):
+    """`file`: the envelope file is on disk (its content is what `_load` is patched to return:
+    `envelope`, else a whole one with `state` and `goal`; None is a file `_load` rejects)."""
+    whole = {"state": state, **({"goal": goal} if goal is not None else {})}
+    monkeypatch.setattr(run_envelope, "_load", lambda path: (whole if envelope is None else (envelope or None)) if file else None)
+    if file:
+        (tmp_path / "assistant_tasks").mkdir(exist_ok=True)
+        (tmp_path / "assistant_tasks" / "t1.envelope.json").write_text("{}")
+    else:
+        (tmp_path / "assistant_tasks" / "t1.envelope.json").unlink(missing_ok=True)
+    task = {"task_id": "t1", "steps": [{"engine": "r1", "status": "done",
+                                        "result": {"loop": loop if loop is not None else _loop()}}]}
+    env = run_gates.Env(task=task, ctx=None, project=None, project_dir=tmp_path)
+    return run_gates._loop_converged(env, {"id": "r1"})
+
+
+def _no_evidence(reading, reason):
+    assert isinstance(reading, run_gates.NoEvidence) and reading.value == reason, reading
+
+
+def test_a_multi_year_loop_on_the_granted_goal_converges(tmp_path, monkeypatch):
+    reading = _read(tmp_path, monkeypatch)
+    assert isinstance(reading, run_gates.Looped) and reading.value is True
+
+
+def test_a_loop_with_another_target_is_a_goal_mismatch(tmp_path, monkeypatch):
+    _no_evidence(_read(tmp_path, monkeypatch, _loop(target_lole_h=9.0)), "goal_mismatch")
+
+
+def test_a_target_not_put_on_the_horizon_is_a_goal_mismatch(tmp_path, monkeypatch):
+    """The frozen 2 h/yr unscaled (2.0) is not the 3-year horizon's 6 h."""
+    _no_evidence(_read(tmp_path, monkeypatch, _loop(target_lole_h=2.0)), "goal_mismatch")
+
+
+def test_a_loop_with_another_goal_source_is_a_goal_mismatch(tmp_path, monkeypatch):
+    loop = _loop(goal_sources={"target_lole_h": "override", "mc_draws": "default"})
+    _no_evidence(_read(tmp_path, monkeypatch, loop), "goal_mismatch")
+
+
+def test_an_absent_goal_source_is_a_goal_mismatch_never_a_match(tmp_path, monkeypatch):
+    for loop in (_loop(goal_sources=None), _loop(goal_sources={})):
+        _no_evidence(_read(tmp_path, monkeypatch, loop), "goal_mismatch")
+
+
+@pytest.mark.parametrize("loop,goal", [
+    (_loop(horizon_years=None), FROZEN), (_loop(horizon_years=0), FROZEN), (_loop(horizon_years=-1.0), FROZEN),
+    (_loop(horizon_years=float("nan")), FROZEN), (_loop(target_lole_h=None), FROZEN),
+    (_loop(target_lole_h=float("inf")), FROZEN), (_loop(), {**FROZEN, "unit": "h"}),
+    (_loop(), {**FROZEN, "value": float("nan")}), (_loop(), {**FROZEN, "value": None}),
+])
+def test_an_unreadable_goal_input_is_goal_unreadable_and_never_defaults(tmp_path, monkeypatch, loop, goal):
+    _no_evidence(_read(tmp_path, monkeypatch, loop, goal=goal), "goal_unreadable")
+
+
+def test_a_run_with_no_frozen_goal_or_no_granted_envelope_keeps_its_verdicts(tmp_path, monkeypatch):
+    """Pinned: the reading is exactly what the loop alone gives, whatever the loop's goal says."""
+    for loop in (_loop(target_lole_h=9.0, goal_sources={}), _loop(status="exhausted"), _loop(horizon_years=None)):
+        alone = run_gates.Looped(run_gates.converged(loop), {k: loop[k] for k in run_gates.LOOP_FIELDS if k in loop})
+        assert _read(tmp_path, monkeypatch, loop, goal=None) == alone
+        assert _read(tmp_path, monkeypatch, loop, state="proposed") == alone
+        assert _read(tmp_path, monkeypatch, loop, file=False) == alone  # only a missing file is no goal
+
+
+@pytest.mark.parametrize("state", ["granted", "exhausted", "expired", "revoked"])
+def test_a_mismatched_loop_is_caught_in_every_state_past_proposed(tmp_path, monkeypatch, state):
+    """A spent, expired or revoked grant still froze its goal (GK B G1)."""
+    _no_evidence(_read(tmp_path, monkeypatch, _loop(target_lole_h=9.0), state=state), "goal_mismatch")
+
+
+def test_an_envelope_file_that_cannot_be_loaded_is_goal_unreadable(tmp_path, monkeypatch):
+    _no_evidence(_read(tmp_path, monkeypatch, envelope={}), "goal_unreadable")
+
+
+@pytest.mark.parametrize("bad", ["2.0", [2.0], 2.0, None])
+def test_a_malformed_frozen_goal_is_goal_unreadable(tmp_path, monkeypatch, bad):
+    _no_evidence(_read(tmp_path, monkeypatch, envelope={"state": "granted", "goal": bad}), "goal_unreadable")
+
+
+def test_a_settled_step_keeps_the_horizon_the_goal_check_reads():
+    """The step's copy of the loop record is `LOOP_FIELDS` only; without `horizon_years` every real
+    run with a frozen goal read goal_unreadable (found by CI on the first push)."""
+    assert "horizon_years" in run_gates.LOOP_FIELDS

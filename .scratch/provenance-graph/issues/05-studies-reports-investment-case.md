@@ -1,6 +1,6 @@
 # Studies, reports and the investment case on the graph
 
-Status: needs-triage
+Status: ready-for-agent (blocked by 04; Opus; GK B, UX for UI parts)
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 
@@ -22,3 +22,19 @@ stops parsing reason text with a regex (`ReportStep.tsx:26`): the verdict says w
 - One PR within PR-SIZE-1, or the slices the plan GO names.
 
 ## Comments
+
+### 2026-11-11: triage
+
+Checked on master: `provenance_graph` has no study or report `run` nodes yet. Verdict: ready-for-agent, waiting for 04.
+
+- Blocked by: 04.
+- Likely files: `study/report.py`, `routers/studies.py`, `finance/investment_case_runner.py`, `routers/results.py`, `participants.py`; client `financeModel`, `hubDesign/chapters.ts`, `ResultsCard.tsx`, `ReportStep.tsx`. Reviewers: GK B plan first, UX for the client part.
+
+The acceptance in the body stands. Add: [ ] `ReportStep.tsx` no longer parses reason text with a regex; a test feeds it a verdict with edges.
+
+### From issue 08 (GK B (45), 2026-11-11)
+
+A cost node built here that reads a tariff or PPA cell gets a `derived_from` edge to that cell's node,
+`input:commercial/<target>:<entity>/<path>` (`provenance_graph.commercial.cell_id`), so the cost reads the cell's
+verdict. Until then a cost whose commercial input has no such edge lists it as `uncompared`, never fresh (ruling (b)
+in issue 01).

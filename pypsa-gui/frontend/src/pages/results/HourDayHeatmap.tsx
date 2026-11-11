@@ -166,7 +166,7 @@ export default function HourDayHeatmap({
             no snapshot
           </span>
         )}
-        <span className="ml-auto font-mono tabular-nums text-text" data-heat-readout="" role="status">
+        <span className="ml-auto font-mono tabular-nums text-text" data-heat-readout="">
           {hover
             ? `${grid.days[hover.day]} ${pad2(hover.hour)}:00 · ${at == null ? 'no snapshot' : format(at, hover)}`
             : 'Hover a cell to read its value'}
