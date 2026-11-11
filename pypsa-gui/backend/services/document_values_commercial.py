@@ -582,24 +582,59 @@ def _new_errors(n, before: dict, after: dict) -> list[tuple]:
 
 def provenance(p: dict, *, approved_by: str | None) -> dict:
     """`commercial.provenance` entries for the written cells: `<target>:<entity>/<path>` →
-    `{source, value, unit, currency, currency_year, approved_by, approved_at}`."""
+    `{source, value, unit, currency, currency_year, approved_by, approved_at}`, and for a tariff cell the
+    `tariff_currency` the written tariff states or implies (None when neither), which later reads compare."""
     when = datetime.now(UTC).isoformat(timespec="seconds")
     out = {}
     for c in changed(p):
         if c["source"] is None:
             continue
-        out[f"{c['target']}:{c['entity']}/{c['path']}"] = {
+        entry = {
             "source": T.source_id(c["source"]), "value": c["value"], "unit": c["unit"], "currency": c["currency"],
             "currency_year": c["money_year"], "approved_by": approved_by, "approved_at": when}
+        if c["target"] == "tariff":
+            entry["tariff_currency"] = _tariff_currency(p["after"])
+        out[f"{c['target']}:{c['entity']}/{c['path']}"] = entry
     return out
 
 
-def _slot_of(commercial: dict, key: str):
-    """The value stored at a provenance key, or raises (KeyError, StopIteration, ...) when its
-    item, period, tier or contract no longer exists."""
+#: What reading a provenance key raises when its item, period, tier or contract no longer exists.
+CELL_GONE = (KeyError, StopIteration, IndexError, TypeError, AttributeError)
+
+
+def cell_value(commercial: dict, key: str):
+    """The value stored at a provenance key, or raises (`CELL_GONE`) when its item, period, tier or
+    contract no longer exists."""
     target, _, rest = key.partition(":")
     entity, _, path = rest.partition("/")
     return read(commercial, target, entity, _where({"target_kind": target, "field": path}))
+
+
+def _tariff_currency(commercial: dict) -> str | None:
+    """The currency the import tariff states or its jurisdiction implies; None when it does neither."""
+    from models.commercial import jurisdiction_currency
+
+    tariff = commercial["import_tariff"]
+    return tariff.get("currency") or jurisdiction_currency(tariff.get("jurisdiction"), tariff.get("valid_from"))
+
+
+def cell_now(commercial: dict, key: str) -> dict:
+    """What the config holds for a provenance key now: its `value` and `unit`, a tariff's `tariff_currency`
+    (see `_tariff_currency`), and a PPA price's `currency_year` (the contract's `base_year`, None when it
+    states none). Raises (`CELL_GONE`) like `cell_value`."""
+    target, _, rest = key.partition(":")
+    entity, _, path = rest.partition("/")
+    now = {"value": cell_value(commercial, key)}
+    owner = _owner(commercial, target, entity)
+    if target == "tariff":
+        now["unit"] = UNIT_LABELS[owner["unit"]]
+        now["tariff_currency"] = _tariff_currency(commercial)
+    else:
+        money = PPA_FIELDS[path][2]
+        now["unit"] = "/MWh" if money else PPA_UNIT_LABELS[path]
+        if money:
+            now["currency_year"] = owner.get("base_year")
+    return now
 
 
 def _live(commercial: dict, entries: dict) -> dict:
@@ -607,24 +642,23 @@ def _live(commercial: dict, entries: dict) -> dict:
     out = {}
     for key, entry in (entries or {}).items():
         try:
-            _slot_of(commercial, key)
-        except (KeyError, StopIteration, IndexError, TypeError, AttributeError):
+            cell_value(commercial, key)
+        except CELL_GONE:
             continue
         out[key] = entry
     return out
 
 
 def document_source(commercial: dict | None, key: str) -> dict | None:
-    """The provenance entry for `key` while the stored value still equals the one the
-    document gave; None after a later edit, or for an entry whose item is gone."""
+    """The provenance entry for `key` while the provenance graph reads its cell fresh (the stored value,
+    unit, currency and money year still are the ones the document gave); None after a later edit, or for
+    an entry whose item is gone."""
+    from services.provenance_graph import queries
+
     entry = ((commercial or {}).get("provenance") or {}).get(key)
     if not isinstance(entry, dict):
         return None
-    try:
-        now = _slot_of(commercial, key)
-    except (KeyError, StopIteration, IndexError, TypeError, AttributeError):
-        return None
-    return entry if _same(now, entry.get("value")) else None
+    return entry if queries.cell_verdict(commercial, key).state == "fresh" else None
 
 
 def apply(p: dict, card: dict, *, approved_by: str | None) -> dict:
