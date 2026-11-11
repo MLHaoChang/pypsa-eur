@@ -655,7 +655,7 @@ export default function AssistantModelSettings() {
           onChange={e => roleMutation.mutate(e.target.value || null)}
           className="h-[22px] text-[10.5px] bg-bg border border-border rounded px-1 text-text"
         >
-          <option value="">The active model</option>
+          <option value="">{`The active model (${profiles.find(p => p.id === active_profile_id)?.label ?? active_profile_id})`}</option>
           {profiles.map(p => <option key={p.id} value={p.id}>{`${p.label} · ${p.model}`}</option>)}
         </select>
       </label>

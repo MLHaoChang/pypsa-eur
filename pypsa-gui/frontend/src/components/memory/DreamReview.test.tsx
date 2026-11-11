@@ -108,5 +108,7 @@ describe('dreamStatusWords', () => {
     expect(dreamStatusWords(job({ status: 'queued', trigger: 'nightly' }))).toBe('Review queued (nightly)…')
     expect(dreamStatusWords(job({ status: 'failed', error_kind: 'dream_some_new_kind' })))
       .toBe('Last review failed because of an unexpected error.')
+    expect(dreamStatusWords(job({ status: 'failed', error_kind: 'dream_analyzer_unavailable' })))
+      .toBe('Last review failed because the model chosen for memory reviews is not set up.')
   })
 })

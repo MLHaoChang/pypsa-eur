@@ -717,6 +717,12 @@ def save_profiles(
     # whose profile is gone is dropped, so it falls back to the active one.
     # A role on an entry this build cannot load but keeps on disk (C-14) is
     # kept too; `resolve_role` falls back while that entry does not load.
+    if roles is not None:
+        for role, pid in roles.items():
+            if role not in PROFILE_ROLES:
+                raise ProfileValidationError(f"unknown profile role: {role}")
+            if not isinstance(pid, str):
+                raise ProfileValidationError(f"profile role {role} must name a profile id")
     roles = load_roles() if roles is None else dict(roles)
     kept_ids = {
         e["id"] for e in _entries_a_load_would_skip(seen_ids)
@@ -897,11 +903,22 @@ def set_role(role: str, profile_id: str | None) -> dict[str, str]:
 
 def resolve_role(role: str) -> LLMProfile:
     """The profile marked for `role`, or the active profile when none is
-    marked or the marked one no longer loads."""
+    marked or the marked one was deleted. A marked profile still on disk
+    that does not load raises `ProfileNotConfiguredError`: the task fails
+    by name rather than silently running on another provider (GK B T7)."""
     profiles, active_id = load_profiles()
     by_id = {p.id: p for p in profiles}
     pid = load_roles().get(role)
-    return by_id.get(pid) if pid in by_id else by_id[active_id]
+    if pid is None:
+        return by_id[active_id]
+    if pid in by_id:
+        return by_id[pid]
+    on_disk = (_read_file() or {}).get("profiles")
+    if isinstance(on_disk, list) and any(
+        isinstance(e, dict) and e.get("id") == pid for e in on_disk
+    ):
+        raise ProfileNotConfiguredError(f"the profile marked for {role} does not load: {pid}")
+    return by_id[active_id]
 
 
 def load_presets() -> list[dict]:

@@ -79,7 +79,7 @@ function AutomaticReviews() {
   return (
     <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px] text-muted">
       <legend className="sr-only">Automatic reviews</legend>
-      <span className="font-semibold text-text">Automatic reviews</span>
+      <span className="font-semibold text-text">Automatic reviews <span className="font-normal text-muted">(your own setting)</span></span>
       <label className="flex items-center gap-1">
         <input type="checkbox" checked={!!s?.nightly} disabled={busy}
           onChange={e => save.mutate({ nightly: e.target.checked })} />
@@ -93,6 +93,7 @@ function AutomaticReviews() {
       <span>
         Off unless you turn them on: a review sends your past chats to
         {s?.analyzer ? ` ${s.analyzer}` : ' the configured model'}.
+        {' '}The nightly review runs only while the app is running at {at}; a night it is off is skipped.
       </span>
       {(settingsQ.error || save.error) && (
         <span role="alert" className="text-danger">

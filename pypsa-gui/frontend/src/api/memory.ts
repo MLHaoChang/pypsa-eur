@@ -108,6 +108,8 @@ export interface DreamJob {
   created_at: string
   started_at: string | null
   finished_at: string | null
+  /** The model the review ran on, once it started. */
+  analyzer_model?: string | null
 }
 
 export interface DreamSettings {
@@ -143,6 +145,8 @@ const DREAM_FAILURE: Record<string, string> = {
   dream_restarts: 'it was interrupted too often',
   dream_user_inactive: 'your account is not active',
   dream_internal_error: 'of an internal error',
+  dream_analyzer_unavailable: 'the model chosen for memory reviews is not set up',
+  memory_no_org: 'you are no longer in the workspace it was set up in',
 }
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`

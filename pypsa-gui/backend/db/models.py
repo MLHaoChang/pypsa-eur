@@ -399,6 +399,16 @@ class MemoryDreamJob(Base):
         ),
         Index("ix_memory_dream_jobs_user_created", "user_id", "created_at"),
         Index("ix_memory_dream_jobs_status", "status"),
+        # One job per trigger occasion (GK B T1): a night or a run of ten new
+        # chats starts at most one job, whatever two scans race.
+        Index(
+            "ux_memory_dream_jobs_trigger_key",
+            "user_id",
+            "trigger_key",
+            unique=True,
+            sqlite_where=text("trigger_key IS NOT NULL"),
+            postgresql_where=text("trigger_key IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -418,6 +428,12 @@ class MemoryDreamJob(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set by a trigger (04b): `nightly:<Berlin date>` or `sessions:<mark>`.
+    trigger_key: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    # The org the job reads and writes for (GK B T3); NULL on 04a manual jobs.
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # The model the analyzer and organizer ran on (GK B T7).
+    analyzer_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class MemoryDreamSettings(Base):
@@ -434,11 +450,12 @@ class MemoryDreamSettings(Base):
         ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
     nightly: Mapped[bool] = mapped_column(Boolean, default=False)
-    # When `nightly` was last turned on: the first night is the next 03:00.
-    nightly_since: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
     after_sessions: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The org the opt-in was made in (GK B T3): a trigger runs only while the
+    # user is still a member of exactly this org, never another one.
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True
+    )
     # When `after_sessions` was last turned on: with no job yet, only chats
     # after it count, so turning it on never fires on old chats.
     after_sessions_since: Mapped[datetime | None] = mapped_column(

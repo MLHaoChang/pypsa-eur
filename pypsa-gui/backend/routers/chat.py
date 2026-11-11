@@ -654,7 +654,10 @@ def post_llm_active(
 
 
 class ProfileRoleRequest(BaseModel):
-    role: str
+    """An unknown role is a 422 (GK B T7); an unknown profile a 404."""
+
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["memory_analyzer"]
     profile_id: str | None = None
 
 

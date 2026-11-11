@@ -1185,4 +1185,15 @@ def test_a_role_on_a_kept_unloadable_entry_survives_other_saves(appdata):
     }), encoding="utf-8")
     llm_config.set_active("anthropic-opus")
     assert llm_config.load_roles() == {"memory_analyzer": "broken"}
-    assert llm_config.resolve_role("memory_analyzer").id == "anthropic-opus"
+    # Marked but not loadable: a named failure, never the active profile (GK B T7).
+    with pytest.raises(llm_config.ProfileNotConfiguredError):
+        llm_config.resolve_role("memory_analyzer")
+
+
+def test_save_profiles_refuses_an_unknown_role_or_a_non_id(appdata):
+    from services import llm_config
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config.save_profiles([], "anthropic-sonnet", {"voice": "anthropic-opus"})
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config.save_profiles([], "anthropic-sonnet", {"memory_analyzer": ["x"]})
+    assert not llm_config.profiles_path().exists()

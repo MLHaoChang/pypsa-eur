@@ -533,7 +533,8 @@ describe('A8 — unredactable key disclosure', () => {
     renderSection()
     const select = await screen.findByLabelText('Model for memory reviews') as HTMLSelectElement
     expect(select.value).toBe('')
-    expect(select.options[0].textContent).toBe('The active model')
+    const active = payload().profiles.find(p => p.id === payload().active_profile_id)!
+    expect(select.options[0].textContent).toBe(`The active model (${active.label})`)
     const other = payload().profiles[payload().profiles.length - 1].id
     fireEvent.change(select, { target: { value: other } })
     await waitFor(() => expect(postLLMRole).toHaveBeenCalledWith('memory_analyzer', other))

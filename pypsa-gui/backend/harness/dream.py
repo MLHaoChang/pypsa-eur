@@ -43,7 +43,7 @@ only create `proposed` items, never confirm one.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, UTC
 import json
 import logging
 import os
@@ -57,7 +57,14 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
-from db.models import MemoryDreamJob, MemoryDreamSettings, Project, SolveJobRow, User
+from db.models import (
+    MemoryDreamJob,
+    MemoryDreamSettings,
+    OrgMembership,
+    Project,
+    SolveJobRow,
+    User,
+)
 from harness import eventlog, fence
 from harness.protocol import LLMRequest
 from services import memory_store as M
@@ -87,6 +94,8 @@ FINAL = ("done", "failed", "capped", "cancelled")
 ERR_BUDGET = "dream_budget_exhausted"
 ERR_RESTARTS = "dream_restarts"
 ERR_LIVE = "dream_job_live"
+ERR_TRIGGER_TAKEN = "dream_trigger_taken"  # this night / run of chats has its job
+ERR_ANALYZER = "dream_analyzer_unavailable"  # the marked profile does not load
 ERR_PROVIDER = "dream_provider_error"
 ERR_USER = "dream_user_inactive"
 ERR_INTERNAL = "dream_internal_error"
@@ -135,6 +144,7 @@ def view(job: MemoryDreamJob | None) -> dict | None:
         "created_at": iso(job.created_at),
         "started_at": iso(job.started_at),
         "finished_at": iso(job.finished_at),
+        "analyzer_model": job.analyzer_model,
     }
 
 
@@ -149,14 +159,29 @@ def latest(db, user: User) -> MemoryDreamJob | None:
 
 
 def start(
-    db, user: User, trigger: str = "manual", *, now: datetime | None = None
+    db,
+    user: User,
+    trigger: str = "manual",
+    *,
+    now: datetime | None = None,
+    org_id: uuid.UUID | None = None,
+    trigger_key: str | None = None,
 ) -> MemoryDreamJob:
     """Queue a job, or DreamError `dream_job_live` (409) when one is queued or
-    running. The partial unique index decides a race (D4). `now` is the
-    worker's clock for a trigger, so its once-a-night check reads one clock."""
+    running. The partial unique index decides a race (D4).
+
+    A trigger passes the org its opt-in was made in, `org_id`: the user must
+    still be a member of exactly that org, never another (GK B T3). It also
+    passes `trigger_key`, unique per user, so one occasion (a night, a run of
+    new chats) starts one job however two scans race (T1). `now` is the
+    worker's clock, so a night's check and its job read one clock."""
     if trigger not in TRIGGERS:
         raise DreamError(f"trigger must be one of {', '.join(TRIGGERS)}")
-    if M.org_of(db, user) is None:
+    if org_id is None:
+        org_id = M.org_of(db, user)
+    elif not _member_of(db, user, org_id):
+        org_id = None
+    if org_id is None:
         raise DreamError(
             "memory needs an organisation membership", "memory_no_org", 403
         )
@@ -165,6 +190,8 @@ def start(
         id=uuid.uuid4(),
         user_id=user.id,
         trigger=trigger,
+        trigger_key=trigger_key,
+        org_id=org_id,
         status="queued",
         cursor_json=prev.cursor_json
         if prev is not None
@@ -186,10 +213,30 @@ def start(
         db.commit()
     except IntegrityError:
         db.rollback()
+        if trigger_key is not None and db.scalar(
+            select(MemoryDreamJob.id).where(
+                MemoryDreamJob.user_id == user.id,
+                MemoryDreamJob.trigger_key == trigger_key,
+            )
+        ):
+            raise DreamError(
+                "this occasion already has a review", ERR_TRIGGER_TAKEN, 409
+            )
         raise DreamError(
             "a review of your recent work is already running", ERR_LIVE, 409
         )
     return job
+
+
+def _member_of(db, user: User, org_id: uuid.UUID) -> bool:
+    return (
+        db.scalar(
+            select(OrgMembership.id).where(
+                OrgMembership.user_id == user.id, OrgMembership.org_id == org_id
+            )
+        )
+        is not None
+    )
 
 
 def _empty_cursor() -> dict:
@@ -631,17 +678,17 @@ def _checked_item(raw: Any) -> dict | None:
 
 
 # --------------------------------------------------------------------------
-# Automatic triggers (plan §6): opt-in, both off by default
+# Automatic triggers (plan §6): opt-in, both off by default (GK B 48)
 
 
 NIGHTLY_TZ = ZoneInfo("Europe/Berlin")
-NIGHTLY_HOUR = 3  # 03:00 local; due from then until the next 03:00, once
-SESSIONS_TRIGGER = 10  # new chats since the last job (or since the opt-in)
+NIGHTLY_HOUR = 3  # fires on the first scan in [03:00, 04:00) Berlin wall time
+SESSIONS_TRIGGER = 10  # new chats since the latest job (or since the opt-in)
 
 
 def settings_view(db, user: User) -> dict:
-    """The caller's opt-in; no row is both off. `analyzer` names the model a
-    review sends past chats to, so the opt-in can say where they go."""
+    """The caller's opt-in; no row is both off (fail closed). `analyzer` names
+    the model a review sends past chats to, so the opt-in can say where."""
     row = db.get(MemoryDreamSettings, user.id)
     return {
         "nightly": bool(row and row.nightly),
@@ -664,7 +711,8 @@ def _analyzer_label() -> str | None:
 def set_settings(
     db, user: User, *, nightly: bool | None = None, after_sessions: bool | None = None
 ) -> dict:
-    """Turn either trigger on or off for the caller only."""
+    """Turn either trigger on or off for the caller only. The row records the
+    caller's org at the time (T3): a trigger later runs only in that org."""
     row = db.get(MemoryDreamSettings, user.id)
     now = _now_dt()
     if row is None:
@@ -673,48 +721,47 @@ def set_settings(
         )
         db.add(row)
     if nightly is not None:
-        if nightly and not row.nightly:
-            row.nightly_since = now
         row.nightly = bool(nightly)
     if after_sessions is not None:
         if after_sessions and not row.after_sessions:
             row.after_sessions_since = now
         row.after_sessions = bool(after_sessions)
+    if nightly or after_sessions:
+        row.org_id = M.org_of(db, user)
     row.updated_at = now
     db.commit()
     return settings_view(db, user)
 
 
-def _nightly_due(db, row: MemoryDreamSettings, now: float) -> bool:
-    """The night's review is due from 03:00 Berlin time until the next 03:00,
-    once: no nightly job since the latest 03:00, which must also follow the
-    opt-in (turning it on in the afternoon waits for the next night). A night
-    whose 03:00 passed while the worker ran a job or the app was down fires on
-    the next scan that day."""
+def nightly_key(now: float) -> str | None:
+    """`nightly:<Berlin date>` inside [03:00, 04:00) Berlin wall time, else
+    None. zoneinfo keeps the hour right on both DST days: 03:00 exists once
+    on each (the spring gap and the autumn repeat are the 02:00 hour). A
+    night the worker is not running in that hour is skipped, not caught up."""
     local = datetime.fromtimestamp(now, NIGHTLY_TZ)
-    mark = local.replace(hour=NIGHTLY_HOUR, minute=0, second=0, microsecond=0)
-    if local < mark:
-        mark = mark - timedelta(days=1)  # wall-clock arithmetic: 03:00 local
-    mark_utc = mark.astimezone(UTC)
-    since = _aware(row.nightly_since)
-    if since is not None and since > mark_utc:
-        return False
-    last = db.scalar(
-        select(func.max(MemoryDreamJob.created_at)).where(
-            MemoryDreamJob.user_id == row.user_id, MemoryDreamJob.trigger == "nightly"
-        )
-    )
-    return last is None or _aware(last) < mark_utc
+    if local.hour != NIGHTLY_HOUR:
+        return None
+    return f"nightly:{local.date().isoformat()}"
 
 
-def new_sessions(db, user: User, row: MemoryDreamSettings) -> int:
-    """The user's own chats created after their latest job, or after the
-    opt-in when there is none yet (whichever is later). Headers only."""
-    marks = [_aware(row.after_sessions_since)]
+def _sessions_mark(db, user: User, row: MemoryDreamSettings):
+    """The user's latest job of any trigger or outcome (T5), else the opt-in.
+    A key names it, so one run of new chats starts at most one job: after a
+    triggered job fails, the next one waits for ten more chats."""
     prev = latest(db, user)
-    if prev is not None:
-        marks.append(_aware(prev.created_at))
-    mark = max((m for m in marks if m is not None), default=None)
+    since = _aware(row.after_sessions_since)
+    if prev is not None and (since is None or _aware(prev.created_at) >= since):
+        return _aware(prev.created_at), f"sessions:{prev.id}"
+    if since is not None:
+        return since, f"sessions:optin:{since.isoformat()}"
+    return None, "sessions:all"
+
+
+def new_sessions(db, user: User, mark: datetime | None) -> int:
+    """The user's own chats created after `mark` (T4). One `stat` per log;
+    a log last written before the mark was created before it too and is not
+    opened, so only logs written since the mark have their header read. A
+    torn or undated header is not counted."""
     directory = eventlog._owner_dir(str(user.id))
     if not directory.is_dir():
         return 0
@@ -722,8 +769,6 @@ def new_sessions(db, user: User, row: MemoryDreamSettings) -> int:
     count = 0
     for path in directory.glob("*.jsonl"):
         try:
-            # A log last written before the mark was created before it too:
-            # skipped unread, so a scan costs the new chats, not the history.
             if floor is not None and path.stat().st_mtime < floor:
                 continue
             header = eventlog.read_header(path) or {}
@@ -739,9 +784,9 @@ def new_sessions(db, user: User, row: MemoryDreamSettings) -> int:
 
 def fire_triggers(db, now: float) -> list[str]:
     """Start the due automatic jobs; the job ids started. Only users who
-    opted in are looked at. A trigger never makes a second live job: `start`
-    refuses with `dream_job_live` (D4) and the trigger is skipped until the
-    next scan; an inactive user or one without an org is skipped too."""
+    opted in are looked at. A trigger never makes a second live job (`start`
+    refuses with `dream_job_live`, D4) nor a second job for one occasion
+    (`trigger_key`, T1). One user's failure skips that user only (T4)."""
     started: list[str] = []
     rows = db.scalars(
         select(MemoryDreamSettings).where(
@@ -762,21 +807,47 @@ def fire_triggers(db, now: float) -> list[str]:
 
 def _fire_one(db, row: MemoryDreamSettings, now: float) -> str | None:
     user = db.get(User, row.user_id)
-    if user is None or user.status != "active":
+    if user is None or user.status != "active" or row.org_id is None:
         return None
-    trigger = None
-    if row.nightly and _nightly_due(db, row, now):
-        trigger = "nightly"
-    elif row.after_sessions and new_sessions(db, user, row) >= SESSIONS_TRIGGER:
-        trigger = "sessions"
+    trigger = key = None
+    if row.nightly:
+        key = nightly_key(now)
+        if key is not None and _key_used(db, user, key):
+            key = None
+        trigger = "nightly" if key is not None else None
+    if trigger is None and row.after_sessions:
+        mark, skey = _sessions_mark(db, user, row)
+        if (
+            not _key_used(db, user, skey)
+            and new_sessions(db, user, mark) >= SESSIONS_TRIGGER
+        ):
+            trigger, key = "sessions", skey
     if trigger is None:
         return None
     try:
-        job = start(db, user, trigger, now=datetime.fromtimestamp(now, UTC))
+        job = start(
+            db,
+            user,
+            trigger,
+            now=datetime.fromtimestamp(now, UTC),
+            org_id=row.org_id,
+            trigger_key=key,
+        )
     except DreamError as exc:
         log.info("dream trigger %s for %s skipped: %s", trigger, user.id, exc.kind)
         return None
     return str(job.id)
+
+
+def _key_used(db, user: User, key: str) -> bool:
+    return (
+        db.scalar(
+            select(MemoryDreamJob.id).where(
+                MemoryDreamJob.user_id == user.id, MemoryDreamJob.trigger_key == key
+            )
+        )
+        is not None
+    )
 
 
 # --------------------------------------------------------------------------
@@ -790,7 +861,12 @@ def _default_provider(db, user: User):
     from harness.providers import wiring
     from services import llm_config
 
-    profile = llm_config.resolve_role("memory_analyzer")
+    try:
+        profile = llm_config.resolve_role("memory_analyzer")
+    except llm_config.ProfileNotConfiguredError:
+        # The marked profile is on disk but does not load: a named failure,
+        # never a silent switch to the active profile (GK B T7).
+        return None, "", ERR_ANALYZER
     provider, err = wiring._provider_for_profile(profile)
     return provider, profile.model, err
 
@@ -950,10 +1026,16 @@ class Worker:
             if user is None or user.status != "active":
                 self._finish(db, job, "failed", ERR_USER)
                 return
+            if job.org_id is not None and M.org_of(db, user) != job.org_id:
+                # The job binds to its org (GK B T3): never read or write for
+                # another one the user may also belong to.
+                self._finish(db, job, "failed", "memory_no_org")
+                return
             provider, model, err = self.provider_for(db, user)
             if err is not None or provider is None:
                 self._finish(db, job, "failed", err or ERR_PROVIDER)
                 return
+            self._write(db, job.id, analyzer_model=str(model)[:200])  # T7
             cursor = json.loads(job.cursor_json)
             candidates = json.loads(job.candidates_json)
             spent = json.loads(job.spent_json)
@@ -977,7 +1059,8 @@ class Worker:
             for src in sources:
                 if self._stop.is_set():
                     return  # stop() releases the lease
-                if M.org_of(db, user) is None:
+                home = M.org_of(db, user)
+                if home is None or (job.org_id is not None and home != job.org_id):
                     self._finish(
                         db,
                         job,

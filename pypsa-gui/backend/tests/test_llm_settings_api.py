@@ -1054,7 +1054,7 @@ def test_super_admin_marks_and_clears_the_memory_analyzer_role(super_admin_clien
     assert c.post("/api/chat/settings/llm/roles",
                   json={"role": "memory_analyzer", "profile_id": "nope"}).status_code == 404
     assert c.post("/api/chat/settings/llm/roles",
-                  json={"role": "voice", "profile_id": mock_openai_profile}).status_code == 404
+                  json={"role": "voice", "profile_id": mock_openai_profile}).status_code == 422
     cleared = c.post("/api/chat/settings/llm/roles", json={"role": "memory_analyzer", "profile_id": None})
     assert cleared.json() == {"roles": {}}
 
