@@ -131,6 +131,9 @@ describe('the pick card (GK B 47 A4–A6, UX P3)', () => {
     ['price year', { currency: 'EUR', currency_year: 2019 }], ['carrier', { carrier: 'biogas' }],
     ['version', { version: 3 }], ['target field', { label: 'Maximum capacity' }],
     ['target asset', { target: { component_class: 'Generator', name: 'gas2', value: 100, source: null } }],
+    ['target value', { target: { component_class: 'Generator', name: 'gas', value: 120, source: null } }],
+    ['target source', { target: { component_class: 'Generator', name: 'gas', value: 100, source: 'pack:eu-dea' } }],
+    ['shown unit', { unit_display: 'GW' }],
   ])('a different %s in the preview changes the card text', async (_what, over) => {
     api.preview.mockResolvedValueOnce(preview({ currency: 'EUR', currency_year: 2024 }))
     await open()

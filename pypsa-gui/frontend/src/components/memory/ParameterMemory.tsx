@@ -73,6 +73,21 @@ export function sourceWords(chip: Pick<ParameterChip, 'source'>): string {
   return chip.source?.access && chip.source.label ? chip.source.label : 'another project'
 }
 
+/** The preview's own units, with the form's display scale: every unit on the card is one
+ *  the digest binds (GK B 47 A4). */
+function shownAs(spec: AssetFieldSpec, m: ParameterMemory) {
+  return { scale: spec.scale, unit_display: m.unit_display, unit_storage: m.unit }
+}
+
+/** "Applies to gas, replacing 100 MW (source: pack:eu-dea)": the target value and source
+ *  the apply replaces, both bound by the digest (GK B 47 A4). */
+export function targetWords(m: ParameterMemory, spec: AssetFieldSpec): string {
+  const t = m.target
+  if (t.value == null) return `Applies to ${t.name}, which has no value yet.`
+  return `Applies to ${t.name}, replacing ${valueWords(shownAs(spec, m), t.value, m.currency)} `
+    + `(source: ${t.source ?? 'typed'}).`
+}
+
 /** UX P1: "Used before: 7 % in Project A" / "Saved 2026-11-03 · 2024 EUR". */
 export function chipWords(chip: ParameterChip, spec: AssetFieldSpec): [string, string] {
   const stamp = moneyStamp(chip)
@@ -319,12 +334,12 @@ export function PickCard({ chip, spec, target, onClose, onApplied }: {
       {m && (
         <div data-testid="memory-pick-facts" className="space-y-0.5">
           <p className="font-semibold">
-            {m.label}: {valueWords(spec, m.value, m.currency)}
-            {m.unit !== spec.unit_display && (
+            {m.label}: {valueWords(shownAs(spec, m), m.value, m.currency)}
+            {m.unit !== m.unit_display && (
               <span className="font-normal text-muted"> (stored as {m.value} {m.unit})</span>)}
           </p>
           <p className="text-muted" data-testid="memory-line">{memoryLine(m, current)}</p>
-          <p className="text-muted">Applies to {m.target.name}{m.target.value == null ? ', which has no value yet' : ''}.</p>
+          <p className="text-muted" data-testid="memory-target">{targetWords(m, spec)}</p>
         </div>
       )}
       {card && <EditCardTable card={card} guided={false} labels={{ header: '', caption: 'Change to apply' }} />}

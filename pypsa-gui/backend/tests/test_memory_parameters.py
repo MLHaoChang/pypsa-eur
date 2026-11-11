@@ -1858,3 +1858,13 @@ def test_a_currency_refusal_is_one_sentence_that_opens_with_the_field_label(
         "Marginal cost: this value was saved in USD and this project uses EUR. "
         "Nothing is converted."
     )
+
+
+def test_a_value_equal_only_after_rounding_is_not_current(client, proj):
+    """GK B 47 A3: "current" is exact equality on the server, never a rounded one."""
+    saved = _save(client, proj, field="p_nom").json()  # p_nom as the fixture has it
+    _set_value(proj, saved["body"]["value"] + 0.00004, "p_nom")
+    chip = _chips(client, proj)["p_nom"][0]
+    assert chip["current"] is False
+    r = _preview(client, proj, chip)
+    assert r.status_code == 200, r.text  # not refused as memory_no_change
