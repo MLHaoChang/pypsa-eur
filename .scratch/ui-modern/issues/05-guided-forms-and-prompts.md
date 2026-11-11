@@ -48,8 +48,10 @@ Shots: `.scratch/ui-modern/shots-05b/`. Script: `pypsa-gui/frontend/scripts/ui-m
 - **"synthetic illustrative data — representative week…"** in section 1: template data (`project_templates/`), which the report prints too.
 - **Em dashes in backend refusals** outside the flow (`routers/results.py`, `routers/reports.py`, `services/study/runner.py`, `services/adequacy/eh_review.py`): other tests and the frontend match some of these by text.
 
-- **Helper generators in section 5** (`__lost_*`, `__buy_*`): they are counted and listed as assets with "Edit ›" (counted before slice 2 too; the 3D scene hides them). GK B (44) F8.
-- **Custom series outside section 6's list** (`eh_energization_mw`, `ic_export_price`, `ic_import_price` on Links, `ic_ref_price` on Buses): they are inputs of the energisation and commercial editors, and the Time Series drawer has no slot for them (it cannot open a Bus series at all), so section 6's list and count leave them out.
+- **Helper generators in section 5** (`__lost_*`, `__buy_*`): they are counted and listed as assets with "Edit ›" (counted before slice 2 too; the 3D scene hides them). Raised by GK B (44) in its first review of #1353.
+- **Custom series outside section 6's list** (`eh_energization_mw`, `ic_export_price`, `ic_import_price` on Links, `ic_ref_price` on Buses): they are inputs of the energisation and commercial editors, and the Time Series drawer has no slot for them (it cannot open a Bus series at all), so section 6's list and count leave them out (GK B (44) F8, declined with its agreement). Section 6 in Guided does not say so yet.
+- **The edit drawer's units on tonne buses**: `.scratch/ui-modern/issues/05c-edit-drawer-units-on-tonne-buses.md` (GK B (44) R6).
+- **UX (17)'s two notes on 101d4826**: a parity test of the group titles against the Expert tabs' own labels (`BottomPanel.tsx` `TABS`), and "unit not known" as visible text beside a figure with no unit.
 
 ## Done when
 
@@ -93,3 +95,12 @@ GK B (44): NOT OK on cd68f795, F1–F8, answered in one push.
 - F6. A row says whether its value is a series' peak (`series`); a peak is the value furthest from zero, sign kept.
 - F7. A text flag ("True", "1", "yes") counts as extendable; a carrier named "nan" is null, tested.
 - F8. The four custom series stay out (see "Left for a follow-up").
+
+UX (17): OK on 101d4826, with the two notes listed under "Left for a follow-up".
+
+GK B (44): NOT OK on 101d4826, R1–R7, answered in one push.
+- R1. The extendable flag goes through the engine's own rule, `gridspine.drivers.process_chain.truthy`: 1.0, "1.0" and a float column count.
+- R2. The cap is pinned for loads, for a frame wider than the cap and on the route (`holds_total` beside a cut list, the heading counting the total).
+- R3, R4, R7. A load's peak is tested through `_holds`; a +5 / -5 tie goes to the positive value; an unreadable bus gives no unit.
+- R5. A cut list shows no per-group count ("Generators", not "Generators (2)"); the sentence under the rows carries the numbers.
+- R6. A ticket, not this PR (see above).

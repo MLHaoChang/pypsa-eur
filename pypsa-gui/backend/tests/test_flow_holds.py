@@ -330,9 +330,42 @@ def test_a_long_list_stops_at_the_cap_and_carries_the_true_total(monkeypatch):
     }
     # The first rows, in the order the uncapped list has them.
     assert [(h["component"], h["entity"]) for h in holds["assets"]] == assets[:3]
+    # One frame wider than the cap, and more loads than the cap: the totals stay whole.
+    monkeypatch.setattr(S, "HOLDS_CAP", 1)
+    holds, totals = S._holds(n, carriers, assets)
+    assert totals == {"carriers": 4, "loads": 2, "assets": 7, "profiles": 3}
+    assert {k: len(v) for k, v in holds.items()} == {
+        "carriers": 1,
+        "loads": 1,
+        "assets": 1,
+        "profiles": 1,
+    }
+    assert [h["entity"] for h in holds["loads"]] == [str(n.loads.index[0])]
     monkeypatch.setattr(S, "HOLDS_CAP", 2)
     assert len(S._holds(n, carriers, assets)[0]["profiles"]) == 2
     assert S.HOLDS_CAP == 2 and S._holds(n, carriers, assets)[1]["profiles"] == 3
+
+
+def test_the_route_keeps_the_true_total_beside_a_cut_list(
+    client, tmp_projects_dir, monkeypatch
+):
+    name = _create(client, "eh_microgrid_staged", "cut")
+    url = f"/api/projects/{name}/flow"
+    whole = client.get(url).json()
+    monkeypatch.setattr(S, "HOLDS_CAP", 2)
+    S._readiness_cache.clear()
+    cut = client.get(url).json()
+    for sid in HOLDING:
+        full, row = _section(whole, sid), _section(cut, sid)
+        assert row["holds_total"] == full["holds_total"] == len(full["holds"])
+        assert row["holds"] == full["holds"][:2]
+    assets = _section(cut, "assets")
+    assert assets["holds_total"] > 2 and len(assets["holds"]) == 2
+    # The heading counts every asset, not the rows sent.
+    assert assets["summary"] == S._count(assets["holds_total"], "asset")
+    loads = _section(cut, "loads")
+    if loads["state"] != "not_needed":
+        assert loads["summary"] == S._count(loads["holds_total"], "load")
 
 
 def test_the_cap_as_shipped():
@@ -343,6 +376,38 @@ def test_a_peak_is_the_value_furthest_from_zero():
     assert S._peak([-5.0, -1.0, -2.0]) == -5.0
     assert S._peak([1.0, 7.5, float("nan")]) == 7.5
     assert S._peak([float("nan"), float("inf")]) is None and S._peak([]) is None
+    # A tie goes to the positive value, whichever comes first.
+    assert S._peak([-5.0, 5.0]) == 5.0 and S._peak([5.0, -5.0]) == 5.0
+
+
+def test_a_load_shows_the_peak_of_its_series():
+    n = _hand_built()
+    n.loads_t.p_set["shaped"] = [-5.0, -1.0, -2.0, -3.0]
+    loads = {h["entity"]: h["value"] for h in S._holds(n, [], [])[0]["loads"]}
+    assert loads["shaped"] == -5.0
+
+
+def test_an_unreadable_bus_gives_no_unit(monkeypatch):
+    from services import process_products
+
+    def broken(n, bus):
+        raise KeyError(bus)
+
+    monkeypatch.setattr(process_products, "bus_unit", broken)
+    n = _hand_built()
+    assert S._size_unit(n, "site", stock=False) is None
+    assert S._size_unit(n, "site", stock=True) is None
+    held = S._holds(n, [], [("Generator", "pv")])[0]["assets"]
+    assert {h["unit"] for h in held} == {None}
+
+
+def test_a_float_extendable_column_reads_as_the_engine_reads_it():
+    n = _hand_built()
+    n.generators["p_nom_extendable"] = n.generators["p_nom_extendable"].astype(float)
+    assert n.generators["p_nom_extendable"].dtype == float
+    assets = S._site_assets(n, ["grid_import"], {"grid_import", "export_tie"})
+    by = {h["entity"]: h["extendable"] for h in S._holds(n, [], assets)[0]["assets"]}
+    assert by["candidate"] is True and by["pv"] is False
 
 
 def test_an_unset_fixed_load_is_told_apart_from_an_empty_series():
@@ -363,6 +428,11 @@ def test_an_unset_fixed_load_is_told_apart_from_an_empty_series():
         ("1", True),
         ("yes", True),
         (np.True_, True),
+        ("1.0", True),
+        (1.0, True),
+        (np.float64(1.0), True),
+        (0.0, False),
+        (np.float64(0.0), False),
         ("False", False),
         ("", False),
         ("0", False),

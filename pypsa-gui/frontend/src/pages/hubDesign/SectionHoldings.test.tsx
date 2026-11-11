@@ -101,6 +101,17 @@ describe('SectionHoldings', () => {
     expect(screen.queryByTestId('section-held-rest')).toBeNull()
   })
 
+  it('a cut list gives no per-group count: the rows sent are not all of the class', () => {
+    const two = [...gens(2), held({ component: 'Store', entity: 'tank', field: 'e_nom', unit: 'MWh' })]
+    const titles = () => screen.getAllByTestId('section-held-group').map(g => g.querySelector('p')?.textContent)
+    const { rerender } = render(<SectionHoldings id="assets" pending={false} failed={false}
+      holds={two} total={100} />)
+    expect(titles()).toEqual(['Generators', 'Stores'])
+    expect(screen.getByTestId('section-held-rest').textContent).toContain('first 3 of 100')
+    rerender(<SectionHoldings id="assets" pending={false} failed={false} holds={two} total={3} />)
+    expect(titles()).toEqual(['Generators (2)', 'Stores (1)'])
+  })
+
   it('a deferred flow says the list comes back, and a failed refetch keeps the list', () => {
     const { rerender } = render(<SectionHoldings id="assets" pending={false} failed={false}
       holds={undefined} deferred />)

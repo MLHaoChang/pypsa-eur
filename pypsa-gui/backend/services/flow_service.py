@@ -429,22 +429,23 @@ def _size_unit(n, bus, *, stock: bool) -> str | None:
 
 def _held(component: str, entity: str, *, carrier=None, field_name: str | None = None,
           value=None, unit: str | None = None, extendable=False, series: bool = False) -> dict:
-    from services.adequacy.eh_stages import _truthy
+    from gridspine.drivers.process_chain import truthy
 
     carrier = str(carrier) if carrier is not None and str(carrier) not in ("", "nan") else None
     return {"component": component, "entity": entity, "carrier": carrier, "field": field_name,
             "value": _number(value), "unit": unit,
-            # A flag stored as text ("True", "1", "yes") counts; a blank (NaN) one does not.
-            "extendable": _truthy(extendable),
+            # The engine's own flag rule: 1.0 and "True" count, a blank (NaN) one does not.
+            "extendable": truthy(extendable),
             # Whether the value is read from a time series (a load's peak).
             "series": bool(series)}
 
 
 def _peak(column) -> float | None:
     """The value of a series furthest from zero, sign kept: the peak of
-    [-5, -1, -2] is -5. None for a series with no finite value."""
+    [-5, -1, -2] is -5. Where +5 and -5 tie, the positive one. None for a
+    series with no finite value."""
     values = [x for x in (_number(v) for v in column) if x is not None]
-    return max(values, key=abs) if values else None
+    return max(values, key=lambda x: (abs(x), x)) if values else None
 
 
 def _holds(n, carriers: list[str], site_assets: list[tuple[str, str]]

@@ -5,8 +5,9 @@ import { FOLD_AFTER, groupTitle, heldFigure, heldGroups, heldHome, heldKind, hel
 
 // What a Guided section holds (ui-modern 05, finding 7): one row per carrier,
 // load, asset or time series, with one "Edit ›" that opens the row's editor
-// over the card. Read-only: the list is the flow's `holds`, so its length is
-// the count in the section's heading.
+// over the card. Read-only: the list is the flow's `holds`. Its length is the
+// count in the section's heading unless the server cut it short; `holds_total`
+// is then the count, and the card says how many rows it shows.
 
 function edit(section: FlowSectionId, h: FlowHeld): void {
   const home = heldHome(section, h)
@@ -33,13 +34,17 @@ function Row({ section, h }: { section: FlowSectionId; h: FlowHeld }) {
   )
 }
 
-function Group({ section, title, rows }: { section: FlowSectionId; title: string | null; rows: FlowHeld[] }) {
+/** `counted` is false when the server cut the list short: a group's rows are
+ *  then not all of its class, so the title carries no number. */
+function Group({ section, title, rows, counted }: {
+  section: FlowSectionId; title: string | null; rows: FlowHeld[]; counted: boolean
+}) {
   const [all, setAll] = useState(false)
   const shown = all || rows.length <= FOLD_AFTER ? rows : rows.slice(0, FOLD_AFTER)
   const more = rows.length - shown.length
   return (
     <div data-testid="section-held-group">
-      {title && <p className="pb-0.5 text-[11px] font-medium text-muted">{title} ({rows.length})</p>}
+      {title && <p className="pb-0.5 text-[11px] font-medium text-muted">{counted ? `${title} (${rows.length})` : title}</p>}
       <ul className="flex flex-col divide-y divide-border">
         {shown.map(h => <Row key={`${h.component}:${h.entity}:${h.field ?? ''}`} section={section} h={h} />)}
       </ul>
@@ -93,7 +98,7 @@ export function SectionHoldings({ id, holds, total, pending, failed, deferred = 
   return (
     <div data-testid="section-held-list" className="flex flex-col gap-3">
       {groups.map(g => (
-        <Group key={g.component} section={id} rows={g.rows}
+        <Group key={g.component} section={id} rows={g.rows} counted={rest === null}
           title={groups.length > 1 ? groupTitle(g.component) : null} />
       ))}
       {rest && <p data-testid="section-held-rest" className="text-[11px] text-muted">{rest}</p>}
