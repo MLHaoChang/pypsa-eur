@@ -554,3 +554,29 @@ def test_the_card_binds_the_project(ctx, monkeypatch):
             TOOL, {"project_id": NAME, "items": _items(ctx, ["g_a"])}, card
         )
     assert exc.value.detail["error_kind"] == "edit_preview_stale"
+
+
+def test_a_foreground_switch_before_the_lock_refuses_and_stamps_nothing(
+    ctx, monkeypatch, pushes
+):
+    """GK B N1: the open project changes after the card and before `confirm`
+    takes the lock. The batch is refused `project_not_open`, nothing is stamped
+    on either project, and no undo snapshot is pushed."""
+    from types import SimpleNamespace
+
+    from services.pypsa_service import PyPSAService
+
+    items = _items(ctx, ["g_a"])
+    other = SimpleNamespace(
+        user_ts={KEY: ctx.user_ts[KEY].copy()},
+        user_ts_meta={},
+        loaded_project="Other Project",
+    )
+    monkeypatch.setattr(
+        PyPSAService, "get_active_context", classmethod(lambda cls: other)
+    )
+    with pytest.raises(unrecorded.UnrecordedRefused) as exc:
+        unrecorded.confirm(ctx, items)
+    assert exc.value.kind == "project_not_open"
+    assert ctx.user_ts_meta.get(KEY) is None and other.user_ts_meta == {}
+    assert not pushes
