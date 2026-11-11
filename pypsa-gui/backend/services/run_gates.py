@@ -750,6 +750,138 @@ def _dc_campus_contingency(env):
     return NoEvidence(out["state"], out["reason"])
 
 
+# ── Study harness 12b: the microgrid island facts ─────────────────────────────
+
+
+@dataclass(frozen=True)
+class Detailed:
+    """A reading with the named items it rests on (shortfalls, hours, units),
+    carried into the gate record as `detail`; the rule compares `value`."""
+
+    value: Any
+    detail: list
+
+
+MG_NO_FUEL = "the gensets draw no modelled fuel, so fuel autonomy is not checked"
+
+
+def _mg_island(env):
+    """The project's validated island settings, or NoEvidence by name (M10)."""
+    from services import run_actions
+    if env.project is None:
+        return NoEvidence("not_run", "the run has no project")
+    try:
+        return run_actions.island_settings(env.project)
+    except run_actions.FreezeError as exc:
+        return NoEvidence(exc.state, str(exc))
+
+
+def _mg_survival(env):
+    """The run's own island check (12b): `survives` or `fails` (each
+    shortfall named) while it is current on the live network and island
+    settings (B4); no evidence otherwise (B5, B7, M10)."""
+    from services import dirty_state, run_actions
+    island = _mg_island(env)
+    if isinstance(island, NoEvidence):
+        return island
+    if not hasattr(env.ctx, "network_revision"):
+        return NoEvidence("edited", "the network's edit counter cannot be read")
+    out = run_actions.mg_outcome(env.task, dirty_state.revision(env.ctx), run_actions.settings_digest(island))
+    if "no_evidence" in out:
+        return NoEvidence(out["no_evidence"], out["reason"])
+    return Detailed(out["state"], [f"{s['row']}: {s['sentence']}" for s in out["result"]["shortfalls"]])
+
+
+def _mg_fuel(env):
+    """GK A Q5: fuel autonomy is not modelled, so the rule never reads it."""
+    return NoEvidence("not_modelled", MG_NO_FUEL)
+
+
+def _mg_tie(env):
+    """M12: the island's tie on the live network: `open`, `closed` (each
+    tie carrying named) or `no_tie`; no evidence by name otherwise."""
+    from services.adequacy import island_survival
+    island = _mg_island(env)
+    if isinstance(island, NoEvidence):
+        return island
+    try:
+        out = island_survival.tie_state(env.ctx.network, island)
+    except Exception as exc:  # noqa: BLE001 — a network that cannot be read is no evidence, by name (M10)
+        return NoEvidence("unreadable", f"the island's tie cannot be read ({type(exc).__name__})")
+    state = out.get("state")
+    if state == "no_island":
+        return NoEvidence("no_island", "no bus of the network is in the island")
+    if state not in ("open", "closed", "no_tie"):
+        return NoEvidence("unreadable", "the island's tie cannot be read")
+    return Detailed(state, [str(t) for t in out.get("carrying") or []])
+
+
+def _mg_critical(env):
+    """M12: the island's critical loads on the live network: `tagged` when
+    the sidecar and the network name the same loads; `none` or `mismatch`
+    (each load named) otherwise."""
+    from services.adequacy import island_survival
+    island = _mg_island(env)
+    if isinstance(island, NoEvidence):
+        return island
+    try:
+        out = island_survival.critical_state(env.ctx.network, island)
+    except Exception as exc:  # noqa: BLE001 — M10
+        return NoEvidence("unreadable", f"the critical loads cannot be read ({type(exc).__name__})")
+    state = out.get("state")
+    if state not in ("tagged", "none", "mismatch"):
+        return NoEvidence("unreadable", "the critical loads cannot be read")
+    detail = [f"{name}: on the network only" for name in out.get("network_only") or []]
+    detail += [f"{name}: in the island settings only" for name in out.get("sidecar_only") or []]
+    return Detailed(state, detail)
+
+
+def _mg_critical_served(env):
+    """GK A Q4, B6: the critical load's unserved energy on island, MWh,
+    summed over the islanding contingencies of the reliability study's
+    off-grid stress (`dtc.run_dtc_stress`, weighted there by the snapshot
+    weightings), from the run's own EH study record while it is current;
+    each contingency named. A contingency left unsolved is no evidence."""
+    record = _eh_record(env)
+    if isinstance(record, NoEvidence):
+        return record
+    section = ((record.get("report") or {}).get("sections") or {}).get("dtc")
+    if not isinstance(section, dict):
+        return NoEvidence("unreadable", "the EH study record has no off-grid stress section")
+    status = section.get("status")
+    if status != "ok":
+        return NoEvidence(str(status or "unreadable"),
+                          str(section.get("note") or f"the off-grid stress reads {status}")[:240])
+    rows = (section.get("payload") or {}).get("contingencies")
+    if not isinstance(rows, list) or not rows:
+        return NoEvidence("unreadable", "the off-grid stress names no contingency")
+    total, detail = 0.0, []
+    for row in rows:
+        name = str((row or {}).get("contingency"))
+        value = (row or {}).get("critical_unserved_mwh")
+        if (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+                or (row or {}).get("status") not in ("ok", "optimal")):
+            return NoEvidence("not_solved", f"the off-grid stress did not solve the contingency {name}")
+        total += float(value)
+        detail.append(f"{name}: {float(value):.4g} MWh")
+    return Detailed(total, detail)
+
+
+def _mg_frequency(env):
+    """M11, B6: the island hours the run's own campus run fails the frequency
+    judge in, each (period, hour) once and named; a count of hours of the
+    campus run's year, not weighted (`run_actions.MG_FREQUENCY_BASIS`)."""
+    from services import dirty_state, run_actions
+    if env.project is None:
+        return NoEvidence("not_run", "the run has no project")
+    if not hasattr(env.ctx, "network_revision"):
+        return NoEvidence("edited", "the network's edit counter cannot be read")
+    out = run_actions.mg_frequency(env.project, env.task, dirty_state.revision(env.ctx))
+    if "hours" not in out:
+        return NoEvidence(out["state"], out["reason"])
+    return Detailed(len(out["hours"]), [f"period {p} hour {h}" for p, h in out["hours"]])
+
+
 FACTS: dict[str, Fact] = {
     # Harness facts: the run block itself, written only by harness code.
     "brief.valid": Fact("task.brief", "brief", None, lambda env: bool(env.task.get("brief"))),
@@ -801,6 +933,14 @@ FACTS: dict[str, Fact] = {
     "dc.gridcode.unchanged": Fact("services.campus_electrical_service.profile_fingerprint", "sha256", None,
                                   _dc_gridcode_unchanged),
     "dc.campus.study": Fact("services.run_actions.outcome", "outcome", None, _dc_campus_study),
+    # Study harness 12b: the microgrid island (GK A (21) Q1-Q5; GK B (45) M10-M12).
+    "mg.island.survival": Fact("services.run_actions.mg_outcome", "state", None, _mg_survival),
+    "mg.fuel.autonomy": Fact("services.adequacy.island_survival.survival", "fuel", None, _mg_fuel),
+    "mg.tie.open": Fact("services.adequacy.island_survival.tie_state", "state", None, _mg_tie),
+    "mg.critical.tagged": Fact("services.adequacy.island_survival.critical_state", "state", None, _mg_critical),
+    "mg.island.critical_served": Fact("services.adequacy.dtc.run_dtc_stress", "critical_unserved_mwh", "MWh",
+                                      _mg_critical_served),
+    "mg.island.frequency": Fact("services.run_actions.mg_frequency", "hours", "h", _mg_frequency),
 }
 
 
@@ -1013,6 +1153,9 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
             scored, value = value, value.value
         if isinstance(value, Looped):
             looped, value = value, value.value
+        detailed = None
+        if isinstance(value, Detailed):
+            detailed, value = value, value.value
         if isinstance(value, NoEvidence):
             shown, problem = value.value, value.reason
         elif problem is None and _missing(value):
@@ -1024,6 +1167,8 @@ def evaluate(rules: list[dict], env: Env) -> list[dict]:
             result["facts"][0]["rows"] = scored.rows
         if looped is not None:
             result["facts"][0]["loop"] = looped.record
+        if detailed is not None:
+            result["facts"][0]["detail"] = list(detailed.detail)
         if problem is None:
             try:
                 result["verdict"] = "pass" if _holds(rule["op"], value, rule.get("value")) else "fail"

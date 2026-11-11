@@ -813,7 +813,9 @@ def _advance_run(path, ctx=None):
                 from services import run_actions
                 if any(run_actions.is_action(s) for s in steps):
                     # Study harness 10a (GK B (36) D1): the grid-code profile, frozen now, shown on the stage card.
-                    run_actions.fill(steps, run_actions.stage_frozen(task))
+                    # Study harness 12b (M2): one record per kind, never crossed.
+                    for kind in run_actions.kinds(steps):
+                        run_actions.fill(steps, run_actions.stage_frozen(task, kind), kind)
                 stage.update(status="active", entered_at=_now())
                 task["steps"].extend(steps)
                 if any(_carded(s) for s in steps):

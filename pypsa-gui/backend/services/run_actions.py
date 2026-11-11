@@ -48,16 +48,26 @@ logger = logging.getLogger(__name__)
 KIND = "action"  # a step's `native` marker
 CAMPUS = "dc_campus_study"
 READINESS = "dc_grid_readiness"
+MG_SURVIVAL = "mg_island_survival"
 STAGE = "solve"
-# The registry: each action's stage and whether it only reads. Closed: a profile
-# naming anything else is refused at load (D7).
+# Study harness 12b (GK B (45) ruling): each registry row names its record kind.
+# A step is frozen, filled and dispatched only with a record of its own kind
+# (M2): the data-centre actions share the grid-code record, the microgrid
+# check has its own.
+DC_KIND = "dc_grid_code"
+MG_KIND = "mg_island"
+# The registry: each action's stage, whether it only reads, and its record
+# kind. Closed: a profile naming anything else is refused at load (D7).
 REGISTRY = {
-    CAMPUS: {"stage": STAGE, "reads_only": False},
-    READINESS: {"stage": STAGE, "reads_only": True},
+    CAMPUS: {"stage": STAGE, "reads_only": False, "kind": DC_KIND},
+    READINESS: {"stage": STAGE, "reads_only": True, "kind": DC_KIND},
+    MG_SURVIVAL: {"stage": STAGE, "reads_only": True, "kind": MG_KIND},
 }
 FROZEN = {
-    "frozen": "dc_grid_code"
+    "frozen": DC_KIND
 }  # an action's args until the harness freezes them; never a model's
+# Each kind's frozen marker: the only args a profile may give a step of that kind.
+MARKERS = {DC_KIND: FROZEN, MG_KIND: {"frozen": MG_KIND}}
 JOB_KIND = "dc_campus"
 EVENT = "dc_campus"  # the envelope ledger row of the campus run's reservation
 # D5: the campus job's row carries no solve count. One campus job, and it runs no
@@ -86,13 +96,15 @@ class FreezeError(ValueError):
 
 def check(action: dict, stage: str) -> None:
     """A profile's native action (`run_profiles.load`): one of the registry's,
-    in its own stage, with the frozen marker as its only args (D7)."""
+    in its own stage, with its kind's frozen marker as its only args (D7)."""
     tool = action.get("tool")
     if tool not in REGISTRY or action.get("native") != KIND:
         raise ValueError(
             f"{tool} is not one of the runner's native actions ({', '.join(sorted(REGISTRY))})."
         )
-    if action.get("args") != FROZEN:
+    if REGISTRY[tool]["kind"] not in MARKERS:
+        raise ValueError(f"{tool} has no record kind the runner knows.")
+    if action.get("args") != MARKERS[REGISTRY[tool]["kind"]]:
         raise ValueError(f"{tool} takes only the harness's frozen marker as its args.")
     if REGISTRY[tool]["stage"] != stage:
         raise ValueError(f"{tool} runs in the {REGISTRY[tool]['stage']} stage only.")
@@ -108,6 +120,33 @@ def is_action(step) -> bool:
 
 def reads_only(step) -> bool:
     return is_action(step) and REGISTRY[step["tool"]]["reads_only"]
+
+
+def kind_of(step) -> str | None:
+    """The record kind of a native action step; None for anything else, or
+    for a registry row whose kind the runner does not know (M2: refused)."""
+    if not is_action(step):
+        return None
+    kind = REGISTRY[step["tool"]].get("kind")
+    return kind if kind in MARKERS else None
+
+
+def marker(tool) -> dict:
+    """The args a profile gives the action `tool`: its kind's frozen marker."""
+    return dict(MARKERS[REGISTRY[tool]["kind"]])
+
+
+def kinds(steps) -> list[str]:
+    """The record kinds the native actions among `steps` need, in order."""
+    return sorted({k for k in map(kind_of, steps) if k is not None})
+
+
+def record_kind(frozen) -> str | None:
+    """The kind of a frozen record: the microgrid record names its own; the
+    data-centre record has no `kind` key (M1: it stays byte-equal)."""
+    if not isinstance(frozen, dict):
+        return None
+    return frozen.get("kind", DC_KIND)
 
 
 def digest(value) -> str:
@@ -220,6 +259,88 @@ def card(frozen) -> dict:
     }
 
 
+# ── the microgrid island check's record (study harness 12b) ─────────────────
+
+MG_VERSION = 1  # the mg record's and its step result's shape (GK B (46) C4)
+MG_EVENT = "mg_island"  # the envelope ledger row of the check's reservation
+# The check's solve stops here, well inside the runner's 90 s lease (C3, M5):
+# the step holds the runner's one worker thread while it solves.
+MG_TIME_LIMIT_S = 60
+
+
+def island_settings(project) -> dict:
+    """The project's validated island sidecar (never the raw file). Raises
+    FreezeError: `no_island` when the project has none, `island_unreadable`
+    when it cannot be read or does not validate."""
+    from services.adequacy.island_config import (
+        SIDECAR_NAME,
+        ContractError,
+        load_island_config,
+    )
+
+    try:
+        island = load_island_config(_project_dir(project) / SIDECAR_NAME)
+    except (OSError, ValueError, ContractError) as exc:
+        raise FreezeError(
+            "island_unreadable", f"the project's island settings cannot be read ({exc})"
+        ) from exc
+    if not isinstance(island, dict):
+        raise FreezeError(
+            "no_island",
+            "the project has no island settings: set them on the island card",
+        )
+    return island
+
+
+def settings_digest(island) -> str:
+    """M9: the canonical digest of the validated island settings."""
+    return digest(island)
+
+
+def mg_freeze(project) -> dict:
+    """The island check's frozen record: its kind and shape version, the
+    digest of the validated island settings it runs on, and the one solve it
+    reserves, with their digest. Raises FreezeError."""
+    frozen = {
+        "kind": MG_KIND,
+        "version": MG_VERSION,
+        "settings_digest": settings_digest(island_settings(project)),
+        "solves": SOLVES,
+    }
+    return {**frozen, "digest": digest(frozen)}
+
+
+def _mg_core(frozen) -> dict:
+    return {k: frozen.get(k) for k in ("kind", "version", "settings_digest", "solves")}
+
+
+def mg_card(frozen) -> dict:
+    """What the check's step names: the island settings it holds the plan
+    to, by short digest, and the one solve it reserves."""
+    return {
+        "island_settings": str(frozen["settings_digest"])[:12],
+        "solves": frozen["solves"],
+    }
+
+
+def _core_for(kind, frozen) -> dict:
+    return _mg_core(frozen) if kind == MG_KIND else _core(frozen)
+
+
+def _card_for(kind, frozen) -> dict:
+    return mg_card(frozen) if kind == MG_KIND else card(frozen)
+
+
+def _mg_valid(frozen) -> bool:
+    """M9: a microgrid record with its version and a settings digest."""
+    return (
+        frozen.get("version") == MG_VERSION
+        and isinstance(frozen.get("settings_digest"), str)
+        and len(frozen["settings_digest"]) == 64
+        and frozen.get("solves") == SOLVES
+    )
+
+
 def needs_card(step) -> bool:
     """GK B (36) F1: an action that writes (the campus run) runs only on its
     own Confirmation card, approved by the user; a read runs without one."""
@@ -264,6 +385,8 @@ def approval_card(step) -> dict | None:
     frozen = step.get("frozen") if isinstance(step, dict) else None
     if not isinstance(frozen, dict) or not isinstance(frozen.get("digest"), str):
         return None
+    if (REGISTRY.get(step.get("tool")) or {}).get("kind") != DC_KIND or record_kind(frozen) != DC_KIND:
+        return None  # M2: only the grid-code record has this card
     from services import campus_electrical_service as ce
 
     code, settings, solves = frozen["grid_code"], frozen["settings"], frozen["solves"]
@@ -310,26 +433,38 @@ def approval_card(step) -> dict | None:
     }
 
 
-def fill(steps, frozen) -> None:
-    """Put the frozen record, and the card it shows, on freshly materialised
-    actions (in place). A record that could not be fixed (`unfrozen`) is kept
-    with its reason, which `start` stops on for the user."""
+def fill(steps, frozen, kind=DC_KIND) -> None:
+    """Put the frozen record of `kind`, and the card it shows, on freshly
+    materialised actions of that kind (in place). A record that could not be
+    fixed (`unfrozen`) is kept with its reason, which `start` stops on for
+    the user. M2: a record of another kind is never put on a step; the step
+    stops for the user instead."""
     for step in steps:
-        if not is_action(step) or step["args"] != FROZEN or frozen is None:
+        if (
+            kind_of(step) != kind
+            or step["args"] != MARKERS[kind]
+            or frozen is None
+        ):
             continue
         if "unfrozen" in frozen:
             step["unfrozen"] = dict(frozen["unfrozen"])
+        elif record_kind(frozen) != kind:
+            step["unfrozen"] = {
+                "state": "kind_mismatch",
+                "message": "the frozen record is not this action's kind",
+            }
         else:
             step["frozen"] = copy.deepcopy(frozen)
-            step["card"] = card(frozen)
+            step["card"] = _card_for(kind, frozen)
 
 
-def stage_frozen(task) -> dict:
-    """At solve-stage entry, as the run's owner: the frozen record, or
-    `{"unfrozen": {state, message}}` when it cannot be fixed (the step then
+def stage_frozen(task, kind=DC_KIND) -> dict:
+    """At solve-stage entry, as the run's owner: the frozen record of `kind`,
+    or `{"unfrozen": {state, message}}` when it cannot be fixed (the step then
     stops for the user with that reason). A stage
-    entered again (L2's re-solve) keeps the run's first record, so a profile
-    republished meanwhile is caught at dispatch, never frozen anew (D1)."""
+    entered again (L2's re-solve) keeps the run's first record of that kind,
+    so a profile republished meanwhile is caught at dispatch, never frozen
+    anew (D1)."""
     from fastapi import HTTPException
 
     from services import chat_tools, project_registry
@@ -338,23 +473,32 @@ def stage_frozen(task) -> dict:
         (
             s["frozen"]
             for s in reversed(task.get("steps") or [])
-            if is_action(s) and isinstance(s.get("frozen"), dict)
+            if kind_of(s) == kind
+            and isinstance(s.get("frozen"), dict)
+            and record_kind(s["frozen"]) == kind
         ),
         None,
     )
     if prior is not None:
         return copy.deepcopy(prior)
+    if kind not in MARKERS:
+        return {
+            "unfrozen": {"state": "kind_unknown", "message": "the action's record kind is unknown"}
+        }
     from services import run_profiles
 
-    try:
-        study = run_profiles.resolve(task["run"]["profile"]).get("campus_study")
-    except (KeyError, TypeError, run_profiles.ProfileError):
-        study = None
+    study = None
+    if kind == DC_KIND:
+        try:
+            study = run_profiles.resolve(task["run"]["profile"]).get("campus_study")
+        except (KeyError, TypeError, run_profiles.ProfileError):
+            study = None
     try:
         with chat_tools._acting() as (db, user):
-            return freeze(
-                project_registry.resolve_project(db, user, task["project_id"]), study
-            )
+            project = project_registry.resolve_project(db, user, task["project_id"])
+            if kind == MG_KIND:
+                return mg_freeze(project)
+            return freeze(project, study)
     except FreezeError as exc:
         return {"unfrozen": {"state": exc.state, "message": str(exc)}}
     except HTTPException:
@@ -421,9 +565,10 @@ def _stop(path, step_id, reason, detail=None):
     return reason
 
 
-def _reserve(path, call_id):
+def _reserve(path, call_id, tool=CAMPUS, event=EVENT):
     """D5: reserve `SOLVES` on a granted envelope's ledger before the job
-    starts. False when the solves left do not cover it."""
+    starts (row `event`, for `tool`). False when the solves left do not
+    cover it."""
     from services import assistant_tasks, run_envelope
 
     with assistant_tasks._LOCK:
@@ -433,19 +578,24 @@ def _reserve(path, call_id):
         if envelope["budget"]["solves"] - run_envelope.solves_used(envelope) < SOLVES:
             return False
         run_envelope._audit(
-            envelope, EVENT, call_id=call_id, tool=CAMPUS, reserved=SOLVES
+            envelope, event, call_id=call_id, tool=tool, reserved=SOLVES
         )
         run_envelope._save(path, envelope)
         run_envelope._count_solves(path, envelope)
     return True
 
 
-def release(path, call_id, solves=SOLVES):
+def release(path, call_id, solves=SOLVES, event=EVENT):
     """Settle the reservation (once): `solves`, the stated bound once the job
     started, 0 when it never did. No-op without a row."""
     from services import run_envelope
 
-    return run_envelope.settle_engine_solves(path, call_id, solves, event=EVENT)
+    return run_envelope.settle_engine_solves(path, call_id, solves, event=event)
+
+
+def _event(step) -> str:
+    """The ledger row a step's reservation is on."""
+    return MG_EVENT if kind_of(step) == MG_KIND else EVENT
 
 
 def start(path, ctx, step, *, instance, approved=None) -> str:
@@ -471,39 +621,43 @@ def start(path, ctx, step, *, instance, approved=None) -> str:
         return "claimed_elsewhere"
     _LIVE.add(attempt)
     try:
-        return _dispatch(path, ctx, step["id"], attempt, approved)
+        return _dispatch(path, ctx, step["id"], attempt, approved, instance)
     finally:
         _LIVE.discard(attempt)
 
 
-def _dispatch(path, ctx, step_id, attempt, approved=None):
+def _dispatch(path, ctx, step_id, attempt, approved=None, instance=None):
     from fastapi import HTTPException
 
     from services import chat_tools, project_registry
 
     task = json.loads(path.read_text())
     step = next(s for s in task["steps"] if s["id"] == step_id)
+    kind = kind_of(step)  # M2: None for an unknown kind, which refuses below
+    prefix = "mg_" if kind == MG_KIND else "dc_"
     if isinstance(
         step.get("unfrozen"), dict
     ):  # the freeze's own reason, e.g. "publish the grid-code profile"
         return _stop(
             path,
             step["id"],
-            "dc_" + str(step["unfrozen"].get("state")),
+            prefix + str(step["unfrozen"].get("state")),
             step["unfrozen"].get("message"),
         )
     frozen = step.get("frozen")
     if (
-        not is_action(step)
-        or step.get("args") != FROZEN
+        kind is None
+        or step.get("args") != MARKERS[kind]
         or not isinstance(frozen, dict)
-        or digest(_core(frozen)) != frozen.get("digest")
-        or step.get("card") != card(frozen)
+        or record_kind(frozen) != kind
+        or (kind == MG_KIND and not _mg_valid(frozen))
+        or digest(_core_for(kind, frozen)) != frozen.get("digest")
+        or step.get("card") != _card_for(kind, frozen)
     ):
         return _stop(
             path,
             step["id"],
-            "dc_args",
+            prefix + "args",
             "the action runs only with the record its card showed",
         )
     if needs_card(step) and approved != frozen["digest"]:
@@ -520,6 +674,8 @@ def _dispatch(path, ctx, step_id, attempt, approved=None):
     try:
         with chat_tools._acting() as (db, user):
             project = project_registry.resolve_project(db, user, task["project_id"])
+            if kind == MG_KIND:
+                return _mg_island(path, step, project, frozen, attempt, ctx, instance)
             code = frozen["grid_code"]
             if not unchanged(project, code):
                 return _stop(
@@ -539,12 +695,12 @@ def _dispatch(path, ctx, step_id, attempt, approved=None):
         return _stop(
             path,
             step["id"],
-            str(detail.get("error_kind") or "dc_refused"),
+            str(detail.get("error_kind") or prefix + "refused"),
             str(detail.get("message") or "")[:240],
         )
     except Exception as exc:  # noqa: BLE001 — a launch that did not start fails the step, never strands it running
         logger.exception("native action %s failed for run %s", step["tool"], path.stem)
-        return _stop(path, step["id"], "dc_start_failed", type(exc).__name__)
+        return _stop(path, step["id"], prefix + "start_failed", type(exc).__name__)
 
 
 def rows_digest(card) -> str:
@@ -603,6 +759,180 @@ def _readiness(path, step, project, code):
 
     runner._update(path, done)
     return READINESS
+
+
+# The step result's keys, each with the type a reader may rely on (C4).
+MG_RESULT = {
+    "kind": str,
+    "version": int,
+    "settings_digest": str,
+    "network_revision": int,
+    "state": str,
+    "reason": (str, type(None)),
+    "shortfalls": list,
+    "binding": list,
+    "fixed": list,
+    "solves": int,
+    "solver": (dict, type(None)),
+    "sustained_h": (int, float),
+    "scenarios": list,
+    "periods": dict,
+    "critical_loads": list,
+    "missing": dict,
+}
+INPUTS_CHANGED = "inputs_changed"
+
+
+def _locked(ctx, read):
+    """`read()` under the bound context's mutation lock, the lock a network
+    edit takes (C2); None when the lock is busy past the runner's wait."""
+    from harness import runner
+
+    lock = ctx.mutation_lock
+    if not lock.acquire(timeout=runner.LOCK_TIMEOUT_SECONDS):
+        return None
+    try:
+        return read()
+    finally:
+        lock.release()
+
+
+def _mg_solve(calls):
+    """The check's one solve (C1): plain HiGHS, held to MG_TIME_LIMIT_S.
+    A second call raises, so the one reserved solve is the true count."""
+    from services.adequacy import island_survival
+
+    def solve(n, extra_functionality, **kw):
+        calls.append(1)
+        if len(calls) > SOLVES:
+            raise RuntimeError("the island check asked for a second solve")
+        return island_survival._solve(
+            n,
+            extra_functionality,
+            solver_options={"time_limit": MG_TIME_LIMIT_S},
+            **kw,
+        )
+
+    return solve
+
+
+def _mg_island(path, step, project, frozen, attempt, ctx, instance):
+    """Study harness 12b: the island survival of the plan as built
+    (`island_survival.survival`), synchronously in the runner step, on one
+    solve reserved from the run's granted budget (GK B (45) ruling; B1, B2,
+    M4-M8; GK B (46) C1-C3). The network and the island settings are read
+    together under the context's mutation lock, with the edit counter; the
+    check solves its own copy on a context of its own; both inputs are read
+    again after the solve, and any change makes the result no evidence. The
+    result is written only while this attempt still holds the run (C3); the
+    reservation settles once, on every exit (M7)."""
+    from services import dirty_state
+    from services.adequacy import island_survival
+    from services.project_context import ProjectContext
+    from services.pypsa_service import PyPSAService
+    from services.study.findings import copy_network
+
+    call_id = attempt
+    if not _reserve(path, call_id, tool=MG_SURVIVAL, event=MG_EVENT):
+        return _stop(
+            path,
+            step["id"],
+            "mg_no_solve",
+            "the run's granted solves do not cover the island check's one solve",
+        )
+    calls = []
+    try:
+
+        def read_inputs():
+            island = island_settings(project)
+            return (
+                dirty_state.revision(ctx),
+                island,
+                settings_digest(island),
+                copy_network(ctx.network),
+            )
+
+        try:
+            inputs = _locked(ctx, read_inputs)
+        except FreezeError as exc:
+            return _stop(path, step["id"], "mg_" + exc.state, str(exc))
+        if inputs is None:
+            return _stop(
+                path, step["id"], "mg_busy", "the project is busy; run the check again"
+            )
+        revision, island, settings, n = inputs
+        if settings != frozen["settings_digest"]:
+            return _stop(
+                path,
+                step["id"],
+                "mg_island_changed",
+                "the island settings changed since the step was frozen; review the run again",
+            )
+        with PyPSAService.solving_context(ProjectContext(network=n)):
+            out = island_survival.survival(n, island, solve=_mg_solve(calls))
+
+        def read_after():
+            try:
+                now = settings_digest(island_settings(project))
+            except FreezeError:
+                now = None
+            return dirty_state.revision(ctx), now
+
+        after = _locked(ctx, read_after)
+        result = json.loads(
+            json.dumps(
+                {
+                    **{k: out.get(k) for k in MG_RESULT if k in out},
+                    "kind": MG_KIND,
+                    "version": MG_VERSION,
+                    "settings_digest": settings,
+                    "network_revision": revision,
+                    "solves": len(calls),
+                },
+                default=str,
+            )
+        )
+        changed = []
+        if after is None or after[0] != revision:
+            changed.append("the network was edited")
+        if after is None or after[1] != settings:
+            changed.append("the island settings changed")
+        if changed:  # M6: the verdict is not about the project as it is now
+            result.update(
+                checked=result["state"],
+                state=INPUTS_CHANGED,
+                reason=" and ".join(changed) + " while the island check ran",
+            )
+        return _mg_publish(path, step["id"], attempt, instance, result)
+    finally:
+        release(path, call_id, len(calls), event=MG_EVENT)  # M7: once, what it spent
+
+
+def _mg_publish(path, step_id, attempt, instance, result):
+    """C3 (#1123): write the result only while this attempt still holds the
+    run: its step still running under this attempt, and the run's lease
+    still this instance's. A run taken over meanwhile keeps nothing."""
+    from harness import runner
+
+    wrote = {}
+
+    def done(t):
+        s = next(x for x in t["steps"] if x["id"] == step_id)
+        held = (t["run"].get("runner") or {}).get("lease_owner")
+        if (
+            s["status"] != "running"
+            or s.get("attempt_id") != attempt
+            or (instance is not None and held != instance)
+        ):
+            return False
+        s.update(status="completed", result=result)
+        wrote["ok"] = True
+
+    runner._update(path, done)
+    if not wrote:
+        logger.info("run %s: the island check's result was not kept (run taken over)", path.stem)
+        return "taken_over"
+    return MG_SURVIVAL
 
 
 def _campus(path, step, project, user, frozen, attempt, ctx=None):
@@ -730,7 +1060,7 @@ def _interrupted(path, task) -> bool:
     for step in task["steps"]:
         if step["id"] in stuck:
             release(
-                path, step.get("attempt_id")
+                path, step.get("attempt_id"), event=_event(step)
             )  # unverifiable: the whole stated bound
 
     def change(t):
@@ -1069,3 +1399,129 @@ def _num(v):
 def _int(v):
     f = _num(v)
     return int(f) if f is not None else None
+
+
+def mg_shape_ok(result) -> bool:
+    """C4: a step result of the microgrid kind, this version, every key with
+    its type (a bool is not an int)."""
+    if not isinstance(result, dict):
+        return False
+    if result.get("kind") != MG_KIND or result.get("version") != MG_VERSION:
+        return False
+    for key, typ in MG_RESULT.items():
+        value = result.get(key, ...)
+        if value is ... or isinstance(value, bool) and typ in (int, (int, float)):
+            return False
+        if not isinstance(value, typ):
+            return False
+    return True
+
+
+def mg_outcome(task, revision, settings) -> dict:
+    """The gate's read of the run's latest island check (study harness 12b):
+    `{"state", "result"}` for a current `survives` or `fails`, else
+    `{"no_evidence": state, "reason": words}`. Current means the result's
+    network revision is `revision` and its settings digest is `settings`,
+    the live ones (B4); a missing, unfinished, unreadable or stale record,
+    and a check that could not judge, are no evidence (B5, B7, M10)."""
+    from services.adequacy import island_survival
+
+    step = latest(task, MG_SURVIVAL)
+    if step is None or step.get("status") != "completed":
+        return {"no_evidence": "not_run", "reason": "the island check has not run"}
+    result = step.get("result")
+    if not mg_shape_ok(result):
+        return {
+            "no_evidence": "unreadable",
+            "reason": "the island check's record cannot be read",
+        }
+    state = result["state"]
+    if state == INPUTS_CHANGED:
+        return {"no_evidence": INPUTS_CHANGED, "reason": result["reason"] or state}
+    if (
+        isinstance(revision, bool)
+        or not isinstance(revision, int)
+        or result["network_revision"] != revision
+    ):
+        return {
+            "no_evidence": "edited",
+            "reason": "the network was edited after the island check ran",
+        }
+    if not isinstance(settings, str) or result["settings_digest"] != settings:
+        return {
+            "no_evidence": "island_changed",
+            "reason": "the island settings changed after the island check ran",
+        }
+    if state in (island_survival.SURVIVES, island_survival.FAILS):
+        return {"state": state, "result": result}
+    if state in (island_survival.NOT_SOLVED, island_survival.NOT_EVALUATED):
+        return {
+            "no_evidence": state,
+            "reason": result["reason"] or state.replace("_", " "),
+        }
+    return {
+        "no_evidence": "unreadable",
+        "reason": "the island check's record cannot be read",
+    }
+
+
+#: The campus run's frequency summary lists the island hours each judge fails
+#: (gridspine `drivers.campus_study.island_frequency_campus`).
+MG_FREQUENCY_LISTS = (
+    "failing_hours",
+    "e1_failing_hours",
+    "bridge_failing_hours",
+    "planned_infeasible_hours",
+)
+MG_FREQUENCY_BASIS = "hours of the campus run's year, each (period, hour) once, not weighted"
+
+
+def mg_frequency(project, task, revision) -> dict:
+    """M11: the island hours the run's own campus run fails the frequency
+    judge in, `{"hours": [(period, hour), ...]}`, each hour once whichever
+    judges fail it; else `{"state", "reason"}` for no evidence. Current as
+    the campus contingency read is (B6): the step completed, the published
+    run is the one it settled on, and the network is at its revision."""
+    from services import campus_electrical_service as ce
+
+    step = latest(task, CAMPUS)
+    if step is None or step.get("status") != "completed":
+        return {"state": "not_run", "reason": "the run's own campus study has not finished"}
+    result = step.get("result") or {}
+    run = _project_dir(project) / ce.SUBDIR / "run"
+    files = result.get("run_files")
+    try:
+        same = bool(files) and run_files(run) == files
+    except Exception:  # noqa: BLE001 — M10: a run that cannot be read is no evidence
+        same = False
+    if not same:
+        return {
+            "state": "campus_rerun",
+            "reason": "the published campus run is not the run's own campus study",
+        }
+    recorded = result.get("network_revision")
+    if isinstance(recorded, bool) or not isinstance(recorded, int) or recorded != revision:
+        return {
+            "state": "edited",
+            "reason": "the network was edited since the run's campus study read it",
+        }
+    try:
+        summary = json.loads((run / ce.cs.FREQ_SUMMARY_JSON).read_text())
+    except FileNotFoundError:
+        return {
+            "state": "not_judged",
+            "reason": "the campus run has no frequency judgement (no island hours were studied)",
+        }
+    except (OSError, ValueError):
+        return {"state": "unreadable", "reason": "the campus run's frequency summary cannot be read"}
+    try:
+        hours = sorted(
+            {
+                (int(p), int(h))
+                for key in MG_FREQUENCY_LISTS
+                for p, h in summary[key]
+            }
+        )
+    except (KeyError, TypeError, ValueError):
+        return {"state": "unreadable", "reason": "the campus run's frequency summary cannot be read"}
+    return {"hours": hours}
