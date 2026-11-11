@@ -1139,3 +1139,75 @@ def test_v11_a_report_made_with_a_chart_carries_the_png_under_its_figures(
         fid: store.figure_path(pdir, rid, fid).read_bytes() for fid in stored.figures
     }
     assert render_document_docx(stored, figure_bytes=figures)
+
+
+# ── mutant survivors: the guards each get a test of their own ────────────────
+
+
+def test_the_caps_are_the_documented_ones():
+    assert cs.MAX_SPEC_BYTES == 3 * 1024 * 1024
+    assert (
+        cs.MAX_CHARTS,
+        cs.MAX_CELLS,
+        cs.MAX_CELL_CHARS,
+        cs.MAX_SIDE,
+        cs.MAX_PIXELS,
+    ) == (12, 10_000, 200, 8000, 16_000_000)
+
+
+def test_a_full_size_table_is_accepted_by_the_route(client, project):
+    name, _ = project
+    spec = _spec(
+        columns=["a", "b"], rows=[["x" * 200, "y" * 200]] * 5000, rows_total=5000
+    )
+    assert len(json.dumps(spec)) > 2_000_000
+    r = _post(client, name, spec)
+    assert r.status_code == 201, r.text[:200]
+
+
+def test_a_one_pixel_png_is_valid():
+    cs.validate_png(_header(1, 1))
+    cs.validate_png(_header(1, 5))
+    cs.validate_png(_header(5, 1))
+
+
+def test_a_valid_header_behind_the_wrong_magic_is_invalid():
+    with pytest.raises(cs.ChartSnapshotInvalid):
+        cs.validate_png(b"GIF89a\r\n" + _header(10, 10)[8:])
+
+
+def test_an_id_outside_the_pattern_never_reaches_a_file_even_when_one_exists(tmp_path):
+    root = cs.charts_dir(tmp_path)
+    root.mkdir(parents=True)
+    (root / "evil.json").write_text("{}")
+    (root / "evil.png").write_bytes(_png())
+    (tmp_path / "secret.json").write_text("{}")
+    (tmp_path / "secret.png").write_bytes(_png())
+    for bad in ("evil", "../../secret", "chart-0123456789ABCDEF", 7):
+        with pytest.raises(cs.ChartNotFound):
+            cs.png_bytes(tmp_path, bad)
+        with pytest.raises(cs.ChartNotFound):
+            cs.delete(tmp_path, bad)
+        with pytest.raises(cs.ChartNotFound):
+            cs._load(tmp_path, bad)
+    assert (root / "evil.json").exists() and (tmp_path / "secret.png").exists()
+
+
+def test_a_symlinked_record_is_a_gap_and_not_listed(tmp_path):
+    snap = cs.add(tmp_path, _spec_model(), _png(), solve_fingerprint="fp")
+    record = cs.charts_dir(tmp_path) / f"{snap.id}.json"
+    elsewhere = tmp_path / "elsewhere.json"
+    elsewhere.write_text(record.read_text())
+    record.unlink()
+    record.symlink_to(elsewhere)
+    assert cs.list_snapshots(tmp_path) == []
+    with pytest.raises(cs.ChartNotFound):
+        cs._load(tmp_path, snap.id)
+    (figure,) = cs.report_figures(tmp_path, "fp")
+    assert figure.png is None and snap.id in figure.gap
+
+
+def test_deleting_from_a_project_with_no_charts_creates_nothing(tmp_path):
+    with pytest.raises(cs.ChartNotFound):
+        cs.delete(tmp_path, "chart-" + "0" * 16)
+    assert not (tmp_path / "reports").exists()
