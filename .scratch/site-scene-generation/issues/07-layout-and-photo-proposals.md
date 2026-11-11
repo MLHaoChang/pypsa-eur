@@ -3,7 +3,7 @@
 
 # SC-06 — layouts and photo-based campus reconstruction
 
-Status: ready-for-agent (layout half only, after site-scene 02; photo half parked, Q-SS-1)
+Status: ready-for-human (layout half implemented on claude/site-scene-06-layout, in review: record sc-06-layout/record.md; photo half parked, Q-SS-1)
 Type: research/prototype then bounded task
 Dependencies: SC-00 N and SC-01 native proposal lifecycle for layout; independently accepted SC-00 P for photo; no Blender prerequisite
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -47,3 +47,31 @@ Refine the optional coordinate-first campus workflow through the existing valid 
 Was: `needs-triage — specification proposed; not implemented`. Owner question Q-SS-1 (see issue 05). Under option (1) the layout half is buildable after SC-01 (02) lands; the photo half waits for an accepted SC-00 P. Splitting the file into 07a layout and 07b photo is advised when answered. Opus, reviewers GK B and UX; the type is research/prototype first, then a bounded task.
 
 2026-11-05, owner answer Q-SS-1 (coordinator card): "Park until an engine is chosen (Recommended)". The layout half builds after site-scene 02 lands; the photo half waits for an engine choice.
+
+### 2026-11-11: SC-06-layout plan GO (GK B 48), with conditions
+
+Plan sent to GK B on master 701328bd9. D05 and D08 were checked closed first. GO given on these conditions, recorded here as asked:
+
+- **Design.** Raster originals stay in the browser and the server decodes nothing; `POST .../scene/sources` stays deferred, with no D05 claim. The PR names that the image width/height (the 50 MP and side limits, "inside the image") are client-declared and bound only the declared frame.
+- **L1.** The GeoJSON document's body is bounded before parsing (the route's `_json_body` cap). Tested with a body just over the cap.
+- **L2.** The proposal stores only the used fields: foreign members and properties are stripped before storing. V55 asserts on the proposal record as well as on the building.
+- **L3.** Tests assert vertices, not only dimensions:
+  - raster with rotation, an anchor in pixels and a local anchor;
+  - mutants for a missing y-flip and swapped E/N;
+  - GeoJSON at 60°N with a known east offset, so a missing cos(lat) fails.
+- **L4.** The scale unit goes through `frames.to_metres`, and m/mm/ft agree. Each of these refuses with its own reason and test: zero, negative or non-finite distance; a_px == b_px; non-finite rotation.
+- **L5.** MultiPolygon parts, missing ids and an `f<index>` collision give unique ids or a named refusal, with a collision test.
+- **L6.** Heights come from the height in m, then levels × 3.0 m (D08), then the fallback. A unit string, a negative or non-finite height, and levels ≤ 0 each have a test.
+- **L7.** `native.generate` is byte-equal after the admission refactor, and master's native tests are unchanged. Each admission part has a killing test on `import_layout`, and a spy shows admission runs before geometry.
+- **L8.** List the readers of `OPTIONAL_ENGINE_ACTIONS`. Only `process_layout` changes; `reconstruct_photos` and `generate_blender` are tested unchanged.
+- **L9.** Lifecycle tests:
+  - preview leaves the revision unchanged;
+  - apply is explicit;
+  - a retry returns the receipt;
+  - stale → `revision_conflict`;
+  - read-only is refused;
+  - a foreign lock is refused;
+  - V38: the network stays byte-equal.
+- **L10.** New reasons ride on existing kinds, and the frontend consumers of 422/413 still read them (#1261).
+- **L11.** Line count at PR open; over about 1,500 non-test lines, split into the backend seam first, then the frontend (PR-SIZE-1).
+- **Mutants on layout.py:** flip, rotation sign, anchor, CRS refusals, the 10 km check, the hole refusal, pixel-in-image. Each killing test is listed in the PR body.

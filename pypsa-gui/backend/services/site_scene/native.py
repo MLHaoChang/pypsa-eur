@@ -125,7 +125,7 @@ def source_building(item: dict[str, Any], origin: tuple[float, float], i: int) -
     where = f"Mapped building {i + 1}"
     ns, sid = item.get("namespace"), item.get("source_id")
     if ns not in NAMESPACES or not isinstance(sid, str) or not sid:
-        raise SceneError("invalid_input", f"{where}: namespace must be osm or manual, with a source_id")
+        raise SceneError("invalid_input", f"{where}: namespace must be osm, manual or layout, with a source_id")
     ring = check_footprint([frames.lnglat_to_local(origin, tuple(p)) for p in item.get("ring") or []], where)
     if item.get("height_m") is not None:
         height, evidence = _height(item["height_m"], where), "tagged"
@@ -147,13 +147,23 @@ def generate(site: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
     """
     origin = (site["origin"]["lng"], site["origin"]["lat"])
     greenfield, sources = inputs.get("greenfield") or [], inputs.get("sources") or []
-    if len(greenfield) + len(sources) > MAX_BUILDINGS:
-        raise _limit("buildings", MAX_BUILDINGS, len(greenfield) + len(sources))
-    pairs = sum(segment_pairs(len(b.get("ring") or [])) for b in sources) + segment_pairs(4) * len(greenfield)
-    if pairs > MAX_SEGMENT_PAIRS:
-        raise _limit("segment_pairs", MAX_SEGMENT_PAIRS, pairs)
+    admit_inputs(len(greenfield) + len(sources),
+                 sum(segment_pairs(len(b.get("ring") or [])) for b in sources) + segment_pairs(4) * len(greenfield))
     buildings = [greenfield_building(b, i) for i, b in enumerate(greenfield)]
     buildings += [source_building(b, origin, i) for i, b in enumerate(sources)]
+    return {"buildings": buildings, "stats": admit_output(buildings)}
+
+
+def admit_inputs(n_buildings: int, pairs: int) -> None:
+    """The admission every generator runs BEFORE any geometry work (V40): count, then edge pairs."""
+    if n_buildings > MAX_BUILDINGS:
+        raise _limit("buildings", MAX_BUILDINGS, n_buildings)
+    if pairs > MAX_SEGMENT_PAIRS:
+        raise _limit("segment_pairs", MAX_SEGMENT_PAIRS, pairs)
+
+
+def admit_output(buildings: list[dict[str, Any]]) -> dict[str, Any]:
+    """Duplicate ids, triangles and preview bytes of the generated records; returns the preview stats."""
     seen: set[str] = set()
     for b in buildings:
         if b["id"] in seen:
@@ -165,7 +175,7 @@ def generate(site: dict[str, Any], inputs: dict[str, Any]) -> dict[str, Any]:
     size = len(json.dumps(buildings, separators=(",", ":")).encode("utf-8"))
     if size > MAX_PREVIEW_BYTES:
         raise _limit("preview_bytes", MAX_PREVIEW_BYTES, size)
-    return {"buildings": buildings, "stats": {"buildings": len(buildings), "triangles": triangles, "bytes": size}}
+    return {"buildings": len(buildings), "triangles": triangles, "bytes": size}
 
 
 def equipment_proxies(site: dict[str, Any], asset_footprints: dict[str, Any]) -> list[dict[str, Any]]:

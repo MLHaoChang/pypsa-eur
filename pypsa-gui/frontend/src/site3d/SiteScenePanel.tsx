@@ -16,7 +16,8 @@ import { useProjectFlow } from '../hooks/useProjectFlow'
 import SiteResume from './siteResume'
 import SiteCompanion, { BlockerAsk, whereWords, buildingLabel, SECTION_WORDS } from './SiteCompanion'
 import { openSectionInExpert, openSectionInGuided, openSiteAnchor, withReturnFromSite3D } from '../layout/flowNavigation'
-import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type GreenfieldInput, type SceneBuilding, type SourceInput } from '../api/siteScene'
+import { sceneErrorCopy, sceneErrorDetail, sceneErrorWantsReload, type GreenfieldInput, type LayoutInputs, type LayoutSummary, type SceneBuilding, type SourceInput } from '../api/siteScene'
+import LayoutImport from './LayoutImport'
 import type { SceneAction, SitePart } from '../api/flow'
 import { evaluateMutation } from '../utils/mutationGuard'
 import NumberField from './NumberField'
@@ -105,6 +106,45 @@ function GreenfieldRow({ g, onChange, onRemove, disabled }: {
   )
 }
 
+/** SC-06-layout: what the server read from the layout, so its size is checked before Apply. */
+function LayoutReadBack({ summary }: { summary: LayoutSummary }) {
+  const skipped = Object.values(summary.skipped).reduce((a, b) => a + b, 0)
+  return (
+    <span className="text-[11px] text-muted" data-testid="scene-layout-readback">
+      {summary.kind === 'raster' ? `Drawing at ${n(summary.metres_per_pixel ?? 0)} m per pixel` : 'GeoJSON in WGS84'}
+      {` · spans ${n(summary.extent_m[0])} × ${n(summary.extent_m[1])} m (east × north)`}
+      {skipped > 0 && ` · ${skipped} non-building ${skipped === 1 ? 'feature' : 'features'} skipped`}
+    </span>
+  )
+}
+
+/** SC-06-layout: a layout building's corners, east/north metres from the site origin. */
+function CornerTable({ ring, disabled, onChange }: { ring: [number, number][]; disabled: boolean; onChange: (ring: [number, number][]) => void }) {
+  const set = (i: number, k: 0 | 1, v: number) => onChange(ring.map((p, j) => (j === i ? (k === 0 ? [v, p[1]] : [p[0], v]) : p)))
+  return (
+    <table className="text-[11px]" data-testid="scene-corner-table">
+      <caption className="text-left text-muted">Corners, metres from the site origin</caption>
+      <thead><tr><th className="text-left font-normal text-muted">#</th><th className="font-normal text-muted">East</th><th className="font-normal text-muted">North</th></tr></thead>
+      <tbody>
+        {ring.map((p, i) => (
+          <tr key={i}>
+            <td className="pr-2 text-muted">{i + 1}</td>
+            {([0, 1] as const).map(k => (
+              <td key={k} className="pr-1">
+                <input type="number" step="any" disabled={disabled} aria-label={`Corner ${i + 1} ${k === 0 ? 'east' : 'north'} in metres`}
+                  data-testid={`scene-corner-${i}-${k === 0 ? 'e' : 'n'}`}
+                  className={`w-20 rounded border border-border bg-bg px-1 py-0.5 text-text ${FIELD_DISABLED}`}
+                  value={Number.isFinite(p[k]) ? Math.round(p[k] * 100) / 100 : ''}
+                  onChange={e => set(i, k, e.target.value === '' ? NaN : Number(e.target.value))} />
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 export const greenfieldValid = (g: GreenfieldInput) =>
   g.width > 0 && g.depth > 0 && g.height > 0 && g.height <= HEIGHT_MAX_M && [g.heading, ...g.center].every(Number.isFinite)
 
@@ -130,7 +170,8 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
     return `${name} · ${mode === 'guided' && cls in KIND_WORDS ? KIND_WORDS[cls as TargetClass] : cls}`
   }
   const [drafts, setDrafts] = useState<GreenfieldInput[]>([])
-  const [edit, setEdit] = useState<{ id: string; g: GreenfieldInput | null; height: number } | null>(null)
+  // `ring` (Site-local metres) only for a layout building: its corners are corrected by hand (SC-06-layout).
+  const [edit, setEdit] = useState<{ id: string; g: GreenfieldInput | null; height: number; ring?: [number, number][] } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<{ copy: string; reload: boolean; snapshots: boolean } | null>(null)
 
@@ -172,25 +213,39 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       if (sceneErrorDetail(e)?.error_kind !== 'proposal_expired') throw e
     } finally { setProposal(null) }
   })
+  /** SC-06-layout: an `import_layout` preview; the refusal copy is thrown so the trace dialog keeps it in view. */
+  const importLayout = async (inputs: LayoutInputs) => {
+    if (!project) return
+    setBusy(true); setError(null)
+    try {
+      setProposal(await propose(qc, project, site.id, 'import_layout', inputs))
+    } catch (e) {
+      const copy = e instanceof SitesNotSaved ? e.message : sceneErrorCopy(e)
+      setError({ copy, reload: sceneErrorWantsReload(e), snapshots: false })
+      throw new Error(copy)
+    } finally { setBusy(false) }
+  }
   const previewEdit = () => run(async () => {
     if (!selected || !edit) return
     const inputs = edit.g
       ? { greenfield: [edit.g] }
       : { sources: [{
-          namespace: selected.source.namespace as 'osm' | 'manual', source_id: selected.source.source_id,
-          ring: selected.footprint.map(([x, y]) => { const p = fromLocal(site.origin, { x, y }); return [p.lng, p.lat] as [number, number] }),
+          namespace: selected.source.namespace as SourceInput['namespace'], source_id: selected.source.source_id,
+          ring: (edit.ring ?? selected.footprint).map(([x, y]) => { const p = fromLocal(site.origin, { x, y }); return [p.lng, p.lat] as [number, number] }),
           height_m: edit.height,
         }] }
     setProposal(await propose(qc, project!, site.id, 'edit_buildings', inputs))
   })
   const reload = () => { setError(null); setProposal(null); void scene.refetch(); void qc.invalidateQueries({ queryKey: ['flow', project] }) }
-  const startEdit = (b: SceneBuilding) => setEdit({ id: b.id, g: greenfieldFromBuilding(b), height: b.height_m })
+  const startEdit = (b: SceneBuilding) => setEdit({ id: b.id, g: greenfieldFromBuilding(b), height: b.height_m,
+    ring: b.source.namespace === 'layout' ? b.footprint.map(([x, y]) => [x, y] as [number, number]) : undefined })
 
   const genAction = action('generate_native')
   const canWrite = !blocked && !busy && !!project
   const draftsOk = drafts.every(greenfieldValid)
   const editing = edit && selected && edit.id === selected.id ? edit : null
-  const editOk = editing ? (editing.g ? greenfieldValid(editing.g) : editing.height > 0 && editing.height <= HEIGHT_MAX_M) : false
+  const editOk = editing ? (editing.g ? greenfieldValid(editing.g) : editing.height > 0 && editing.height <= HEIGHT_MAX_M
+    && (editing.ring ?? []).every(p => p.every(Number.isFinite))) : false
 
   return (
     <div data-testid="site-scene-panel" className="w-[min(26rem,100%)] rounded-lg border border-border bg-bg/95 p-3 text-[12px] flex flex-col gap-2 shadow">
@@ -269,6 +324,7 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
               <span className="text-text">
                 Preview: {n(mine.preview.stats.buildings)} {mine.preview.stats.buildings === 1 ? 'building' : 'buildings'}
               </span>
+              {mine.preview.layout && <LayoutReadBack summary={mine.preview.layout} />}
               <span className="text-[11px] text-muted">Shown in red in the scene. Nothing is saved until Apply.</span>
               <div className="flex gap-2">
                 <button type="button" data-testid="scene-apply" onClick={() => void apply()} disabled={!canWrite}
@@ -298,6 +354,9 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
                     <NumberField label="Height" unit="m" value={editing.height} testId="scene-correct-height"
                       onChange={h => setEdit({ ...editing, height: h })} disabled={!canWrite}
                       error={editing.height > 0 && editing.height <= HEIGHT_MAX_M ? null : `Enter above 0 and at most ${n(HEIGHT_MAX_M)} m`} />
+                  )}
+                  {editing.ring && (
+                    <CornerTable ring={editing.ring} disabled={!canWrite} onChange={ring => setEdit({ ...editing, ring })} />
                   )}
                   <div className="flex gap-2">
                     <button type="button" data-testid="scene-preview-change" onClick={() => void previewEdit()} disabled={!canWrite || !editOk}
@@ -337,6 +396,9 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
               {!draftsOk && <span className="text-[11px] text-muted" data-testid="scene-generate-reason">{FIX_FIELDS}</span>}
               {accepted.length > 0 && <span className="text-[11px] text-muted">Generating again replaces the accepted buildings after you review it.</span>}
               <Blocker action={genAction} where={whereWords(site.name, part)} />
+              {enabled && action('process_layout')?.available && (
+                <LayoutImport disabled={!canWrite} onPropose={importLayout} />
+              )}
             </div>
           )}
         </div>

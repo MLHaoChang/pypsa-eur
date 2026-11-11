@@ -161,7 +161,7 @@ export interface GreenfieldInput {
 
 /** A mapped footprint (`native.source_building`): WGS84 ring, optional height or levels. */
 export interface SourceInput {
-  namespace: 'osm' | 'manual'
+  namespace: 'osm' | 'manual' | 'layout'
   source_id: string
   ring: [number, number][]
   height_m?: number
@@ -169,10 +169,33 @@ export interface SourceInput {
 }
 
 export interface BuildingInputs { greenfield?: GreenfieldInput[]; sources?: SourceInput[] }
-export type ProposalInputs = BuildingInputs | BindInputs | RebindInputs | PlaceInputs | DetachInputs | UndoDetachInputs
-export type ProposalAction = 'generate_native' | 'edit_buildings' | 'bind_targets' | 'rebind' | 'place_existing' | 'detach' | 'undo_detach'
 
-export interface BuildingsPreview { buildings: SceneBuilding[]; stats: { buildings: number; triangles: number; bytes: number } }
+/** SC-06-layout (`services/site_scene/layout.py`): the layout an `import_layout` proposal reads. */
+export interface RasterCalibration {
+  scale: { a_px: [number, number]; b_px: [number, number]; distance: number; unit: 'm' | 'mm' | 'ft' }
+  anchor_px: [number, number]
+  anchor_local: [number, number]
+  rotation_deg: number
+}
+export interface TracedFootprint { id: string; ring_px: [number, number][]; height_m?: number; levels?: number }
+export type LayoutInput =
+  | { kind: 'geojson'; document: Record<string, unknown> }
+  | { kind: 'raster'; image: { width_px: number; height_px: number; media_type: string };
+      calibration: RasterCalibration; footprints: TracedFootprint[] }
+export interface LayoutInputs { layout: LayoutInput }
+export interface LayoutSummary {
+  kind: 'geojson' | 'raster'; metres_per_pixel: number | null; crs: string | null
+  extent_m: [number, number]; footprints: number; skipped: Record<string, number>
+}
+
+export type ProposalInputs = BuildingInputs | LayoutInputs | BindInputs | RebindInputs | PlaceInputs | DetachInputs | UndoDetachInputs
+export type ProposalAction = 'generate_native' | 'edit_buildings' | 'import_layout' | 'bind_targets' | 'rebind' | 'place_existing' | 'detach' | 'undo_detach'
+
+export interface BuildingsPreview {
+  buildings: SceneBuilding[]; stats: { buildings: number; triangles: number; bytes: number }
+  /** import_layout only: the calibration read back, so dimensions are checked before Apply. */
+  layout?: LayoutSummary
+}
 
 /** A proposal under review; the preview's shape follows its action (buildings by default). */
 export interface Proposal<P = BuildingsPreview> {
@@ -273,6 +296,14 @@ function invalidInputCopy(d: SceneErrorDetail): string {
   return field ? `${field} is not valid: check it and try again` : 'The request was not valid: check the values and try again'
 }
 
+/** SC-06-layout route detail codes (`layout.py`) whose server message already names things in words. */
+export const LAYOUT_CODES = new Set([
+  'unsupported_format', 'scale_missing', 'scale_distance', 'scale_points_equal', 'placement_missing', 'rotation_invalid',
+  'crs_unsupported', 'crs_mismatch', 'far_from_site', 'remote_reference', 'layout_hole', 'layout_empty', 'outside_image',
+  'height_not_number', 'levels_invalid', 'layout_kind', 'layout_document', 'layout_coordinates', 'layout_image',
+  'layout_footprints', 'layout_too_deep',
+])
+
 /** SC-02a route detail codes whose server message already names things in words. */
 export const MODEL_CODES = new Set([
   'ambiguous_target', 'invalid_allocation', 'confirmation_required', 'unbound_target', 'not_roof_eligible', 'off_roof',
@@ -305,6 +336,9 @@ export function sceneErrorCopy(err: unknown): string {
     return 'Something went wrong: try again'
   }
   if (d.code && MODEL_CODES.has(d.code) && ['invalid_input', 'revision_conflict'].includes(d.error_kind)) return modelCodeCopy(d)
+  if (d.code && LAYOUT_CODES.has(d.code) && d.error_kind === 'invalid_input') {
+    return d.message ? plainMessage(d.message) : 'The layout could not be read: check the file and its scale'
+  }
   switch (d.error_kind) {
     case 'invalid_input': return invalidInputCopy(d)
     case 'invalid_geometry': return d.message || 'A building footprint is not valid'

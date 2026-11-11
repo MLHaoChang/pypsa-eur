@@ -28,13 +28,14 @@ import uuid
 from collections import OrderedDict
 from typing import Any
 
-from services.site_scene import associations, native, store
+from services.site_scene import associations, layout, native, store
 from services.site_scene.contract import SceneError
 from services.site_scene.verdicts import REASON_NO_BOUNDARY
 
-ACTIONS = ("generate_native", "edit_buildings", "bind_targets", "rebind", "place_existing", "detach", "undo_detach")
+ACTIONS = ("generate_native", "edit_buildings", "import_layout", "bind_targets", "rebind", "place_existing", "detach", "undo_detach")
 # SC-02a: the inputs each action takes. The model actions read the open network.
 INPUT_KEYS = {"generate_native": {"greenfield", "sources"}, "edit_buildings": {"greenfield", "sources"},
+              "import_layout": {"layout"},
               "bind_targets": {"associations", "groups"}, "rebind": {"association", "placement", "target", "confirmed"},
               "place_existing": {"placements"}, "detach": {"keys"}, "undo_detach": {"proposal"}}
 MODEL_ACTIONS = {"bind_targets": (associations.prepare_bind, associations.apply_bind),
@@ -93,14 +94,17 @@ def input_hash(site_id: str, action: str, base_revision: int, inputs: dict[str, 
 
 def _buildings(action: str, current: list[dict[str, Any]], site: dict[str, Any],
                inputs: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """The full building list the proposal would commit, and the preview stats."""
-    preview = native.generate(site, inputs)
+    """The full building list the proposal would commit, and the generator's preview (stats, layout)."""
+    if action == "import_layout":
+        preview = layout.generate(site, inputs["layout"])
+    else:
+        preview = native.generate(site, inputs)
     if action == "generate_native":
-        return preview["buildings"], preview["stats"]
-    # edit_buildings: the listed buildings replace those with the same id; the rest stay.
+        return preview["buildings"], preview
+    # edit_buildings / import_layout: the listed buildings replace those with the same id; the rest stay.
     edited = {b["id"]: b for b in preview["buildings"]}
     merged = [edited.pop(b["id"], b) for b in current] + list(edited.values())
-    return merged, preview["stats"]
+    return merged, preview
 
 
 def _parse(body: Any) -> tuple[str, int, dict[str, Any]]:
@@ -115,6 +119,12 @@ def _parse(body: Any) -> tuple[str, int, dict[str, Any]]:
     if not isinstance(inputs, dict) or set(inputs) - INPUT_KEYS[action]:
         raise SceneError("invalid_input", f"Proposal: {action} inputs may hold {', '.join(sorted(INPUT_KEYS[action]))}",
                          {"field": "inputs"})
+    if action == "import_layout":
+        if "layout" not in inputs:
+            raise SceneError("invalid_input", "Proposal: import_layout needs a layout", {"field": "inputs"})
+        # SC-06 L2: only the fields generation uses are kept, so the proposal never
+        # holds a document's properties, foreign members or names.
+        inputs = {"layout": layout.normalize(inputs["layout"])}
     return action, base, inputs
 
 
@@ -145,8 +155,10 @@ def create(project_dir, project_key: str, owner: str | None, site_id: str, body:
     else:
         if len(scene["site"].get("boundary") or []) < 3:
             raise SceneError("invalid_input", REASON_NO_BOUNDARY, {"field": "boundary"})
-        buildings, stats = _buildings(action, scene["buildings"], scene["site"], inputs)
-        preview, size = {"buildings": buildings, "stats": stats}, stats["bytes"]
+        buildings, generated = _buildings(action, scene["buildings"], scene["site"], inputs)
+        preview, size = {"buildings": buildings, "stats": generated["stats"]}, generated["stats"]["bytes"]
+        if "layout" in generated:
+            preview["layout"] = generated["layout"]
     pid = f"p-{uuid.uuid4().hex}"
     entry = {"id": pid, "site_id": site_id, "owner": owner, "action": action, "base_revision": base,
              "inputs": copy.deepcopy(inputs), "input_hash": input_hash(site_id, action, base, inputs),
