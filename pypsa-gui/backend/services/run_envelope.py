@@ -169,7 +169,7 @@ def _check_edit(entry):
         raise EnvelopeError(f"An edit names tool, target and bounds or enum: {entry!r}")
     # Study harness 12c (G4): a bound's unit and where it comes from, shown on the card.
     if not all(isinstance(entry.get(k, "x"), str) and entry.get(k, "x") for k in ("unit", "source")):
-        raise EnvelopeError(f"An edit's unit and source are words: {entry!r}")
+        raise EnvelopeError("An edit's unit and source are words, when it names them.")
     tool, target = entry["tool"], entry["target"]
     if not isinstance(tool, str) or tool in NEVER_ADMITTED or not edit_card.is_edit(tool) \
             or confirm._safety_tier_for(tool) != "write":
