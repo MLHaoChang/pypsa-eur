@@ -89,6 +89,27 @@ The frozen allowlist, plus one test outside it:
 | V77 / V90 | Needs an enabled Site with a boundary; native/manual paths unaffected | flow verdict test; existing `test_site_scene_routes.py` passes | passed |
 | V43 / V44 | No mesh in this unit | — | not applicable |
 
+## GK B (49) review round 1 (NOT OK @bd1923b8)
+
+Answered in one push. Each item has a test that turns red when its guard is mutated (hand mutants, all killed).
+
+| Item | Change | Test |
+|---|---|---|
+| F1 | — | `test_route_import_merges_by_id_*`: hall + annex re-proposed gives `kept_layout_ids == []` |
+| F2 | `chat.py`: the chat read, its preview list, apply (and so the card) and cancel treat an action outside `CHAT_ACTIONS` as not found | `test_route_only_import_layout_is_invisible_to_the_chat` |
+| F3 | — | `test_non_finite_coordinates_are_refused` asserts `layout_coordinates` for ring, pixel and `anchor_local` |
+| F4 | — | `test_a_feature_with_its_own_projected_crs_is_named` |
+| F5 | — | `test_a_document_nested_too_deeply_is_named` (65 refused, 64 accepted) |
+| F6 | — | `test_a_latitude_out_of_range_is_named`, `test_one_vertex_beyond_10_km_is_named`, `test_exactly_50_megapixels_is_admitted_and_one_pixel_more_is_413` |
+| F7 | `layout.py`: a GeoJSON id over 128 characters is refused (`layout_document`), never renamed | `test_a_geojson_id_over_128_characters_*`, `test_a_closed_ring_at_exactly_the_vertex_limit_is_admitted` |
+| F8 | — | `test_route_another_org_cannot_propose` asserts 404 |
+| F9 | `layout.py` `_echo`: a quoted crs name or media type is a string of at most 60 characters | `test_echoed_client_text_is_bounded` |
+
+Also in this push:
+- `chat.building_label` names layout buildings, matching `SiteCompanion.buildingLabel`. The parity test `test_sc07_receipts.py` now reads the whole arrow function and checks the layout branch; before, it failed on the PR head.
+- Tests for mutants.py survivors: input shapes, the building caps on both paths, a non-text kind, and an import with no layout.
+- `_json_body` RecursionError: filed as `.scratch/site-scene-generation/issues/09-json-body-recursion-error.md`.
+
 ## Next
 
 - Photo half: blocked on the engine choice (Q-SS-1) and on SC-00 P.

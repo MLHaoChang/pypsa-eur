@@ -278,11 +278,24 @@ def test_projected_coordinates_without_a_crs_member_are_named():
     assert code_of(refused(geojson(feature(ring)))) == "crs_mismatch"
 
 
+def test_a_latitude_out_of_range_is_named():
+    # GK B F6: the latitude half of the range check, with an in-range longitude.
+    ring = rect_lnglat()
+    ring[1] = [ring[1][0], 95.0]
+    assert code_of(refused(geojson(feature(ring)))) == "crs_mismatch"
+
+
 def test_a_layout_far_from_the_site_is_named():
     far = rect_lnglat(e0=10_500, n0=0)
     assert code_of(refused(geojson(feature(far)))) == "far_from_site"
     near = rect_lnglat(e0=9_900, n0=0, w=20)
     assert len(run(SITE, geojson(feature(near)))["buildings"]) == 1
+
+
+def test_one_vertex_beyond_10_km_is_named():
+    # GK B F6: any vertex, not every vertex, beyond 10 km refuses the building.
+    ring = rect_lnglat(e0=9_990, n0=0, w=20)
+    assert code_of(refused(geojson(feature(ring)))) == "far_from_site"
 
 
 @pytest.mark.parametrize("kind", ["dxf", "ifc", "pdf", "svg", "DXF"])
@@ -304,6 +317,38 @@ def test_raster_media_types_outside_png_jpeg_webp_are_not_accepted(media_type):
 @pytest.mark.parametrize("media_type", ["image/png", "image/jpeg", "image/webp"])
 def test_png_jpeg_webp_are_accepted(media_type):
     assert run(SITE, raster(image={**IMAGE, "media_type": media_type}))["buildings"]
+
+
+@pytest.mark.parametrize("kind", [5, None, ["dxf"]])
+def test_a_kind_that_is_not_text_is_refused(kind):
+    assert code_of(refused({"kind": kind})) == "layout_kind"
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        [],
+        "x",
+        {"type": "Polygon", "coordinates": []},
+        {"type": "FeatureCollection", "features": {}},
+        {"type": "FeatureCollection"},
+    ],
+)
+def test_a_document_that_is_not_a_feature_collection_is_named(document):
+    assert code_of(refused({"kind": "geojson", "document": document})) == (
+        "layout_document"
+    )
+
+
+@pytest.mark.parametrize(
+    "where,value", [("image", "x"), ("image", None), ("footprints", {})]
+)
+def test_a_drawing_with_an_unreadable_image_or_footprints_is_named(where, value):
+    raw = raster()
+    raw[where] = value
+    err = refused(raw)
+    assert code_of(err) == ("layout_image" if where == "image" else "layout_footprints")
+    assert err.detail["field"] == where
 
 
 def test_an_unknown_kind_is_refused():
@@ -383,6 +428,41 @@ def test_a_nested_remote_reference_is_refused():
     assert code_of(refused(geojson(f))) == "remote_reference"
 
 
+def test_a_feature_with_its_own_projected_crs_is_named():
+    # GK B F4: a crs member on a Feature is checked like the document's.
+    f = feature(rect_lnglat())
+    f["crs"] = {"type": "name", "properties": {"name": "EPSG:25832"}}
+    assert code_of(refused(geojson(f))) == "crs_unsupported"
+
+
+def _nested(depth):
+    node: list = []
+    for _ in range(depth - 1):
+        node = [node]
+    return node
+
+
+def test_a_document_nested_too_deeply_is_named():
+    # GK B F5: the document is depth 0, so a member holding 65 nested lists
+    # reaches depth 65; 64 is the deepest accepted.
+    assert (
+        code_of(refused(geojson(feature(rect_lnglat()), extra=_nested(65))))
+        == "layout_too_deep"
+    )
+    assert run(SITE, geojson(feature(rect_lnglat()), extra=_nested(64)))["buildings"]
+
+
+def test_echoed_client_text_is_bounded():
+    # GK B F9: a crs name or media type is quoted back short, whatever its size.
+    crs = {"type": "name", "properties": {"name": "E" * 10_000}}
+    err = refused(geojson(feature(rect_lnglat()), crs=crs))
+    assert code_of(err) == "crs_unsupported" and len(err.message) < 200
+    err = refused(raster(image={**IMAGE, "media_type": "x" * 10_000}))
+    assert code_of(err) == "unsupported_format" and len(err.message) < 200
+    err = refused(raster(image={**IMAGE, "media_type": ["image/png"] * 1_000}))
+    assert "unknown" in err.message and len(err.message) < 200
+
+
 def test_an_image_over_50_megapixels_is_413():
     err = refused(
         raster(image={**IMAGE, "width_px": 10_000, "height_px": 6_000}),
@@ -392,6 +472,21 @@ def test_an_image_over_50_megapixels_is_413():
         "decoded_pixels",
         50_000_000,
         60_000_000,
+    )
+
+
+def test_exactly_50_megapixels_is_admitted_and_one_pixel_more_is_413():
+    # GK B F6: 10,000 × 5,000 is the limit; 3,561 × 14,041 is 50,000,001 px.
+    assert run(SITE, raster(image={**IMAGE, "width_px": 10_000, "height_px": 5_000}))[
+        "buildings"
+    ]
+    err = refused(
+        raster(image={**IMAGE, "width_px": 3_561, "height_px": 14_041}),
+        kind="resource_limit",
+    )
+    assert (err.detail["limit"], err.detail["actual"]) == (
+        "decoded_pixels",
+        50_000_001,
     )
 
 
@@ -434,12 +529,14 @@ def test_pixel_on_the_image_edge_is_inside():
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), "1", None, True])
 def test_non_finite_coordinates_are_refused(bad):
+    # GK B F3: each finite check names its own code; nothing reaches geometry.
     ring = rect_lnglat()
     ring[1] = [bad, ring[1][1]]
-    refused(geojson(feature(ring)))
+    assert code_of(refused(geojson(feature(ring)))) == "layout_coordinates"
     raw = raster()
     raw["footprints"][0]["ring_px"] = [[100, 700], [bad, 700], [300, 600]]
-    refused(raw)
+    assert code_of(refused(raw)) == "layout_coordinates"
+    assert code_of(refused(raster(anchor_local=(0, bad)))) == "layout_coordinates"
 
 
 def _spy_geometry(monkeypatch):
@@ -477,6 +574,37 @@ def test_too_many_vertices_is_413_before_geometry(monkeypatch):
         raster(footprints=[{"id": "round", "ring_px": ring}]), kind="resource_limit"
     )
     assert err.detail["limit"] == "footprint_vertices" and calls == []
+
+
+def test_a_closed_ring_at_exactly_the_vertex_limit_is_admitted():
+    # GK B F7: the closing vertex repeats the first and is not counted.
+    n = native.MAX_FOOTPRINT_VERTICES
+    ring = [
+        [
+            500 + 100 * math.cos(2 * math.pi * k / n),
+            400 + 100 * math.sin(2 * math.pi * k / n),
+        ]
+        for k in range(n)
+    ]
+    out = layout.normalize(
+        raster(footprints=[{"id": "round", "ring_px": [*ring, ring[0]]}])
+    )
+    assert len(out["footprints"][0]["ring_px"]) == n + 1
+
+
+@pytest.mark.parametrize("kind", ["geojson", "raster"])
+def test_too_many_buildings_is_413_before_geometry(monkeypatch, kind):
+    # Survivors of mutants.py: each input path has its own building-count cap.
+    n = native.MAX_BUILDINGS + 1
+    raw = (
+        geojson(*[feature(rect_lnglat(), fid=f"b{i}") for i in range(n)])
+        if kind == "geojson"
+        else raster(footprints=[{"id": f"b{i}", "ring_px": RECT_PX} for i in range(n)])
+    )
+    calls = _spy_geometry(monkeypatch)
+    err = refused(raw, kind="resource_limit")
+    assert (err.detail["limit"], err.detail["actual"]) == ("buildings", n)
+    assert calls == []
 
 
 def test_too_many_segment_pairs_is_413_before_geometry(monkeypatch):
@@ -546,6 +674,20 @@ def test_missing_ids_fall_back_to_properties_then_the_index():
     f2 = feature(rect_lnglat(e0=40), fid=None, props={})
     out = run(SITE, geojson(f1, f2))
     assert [x["id"] for x in out["buildings"]] == ["layout:7", "layout:f2"]
+
+
+@pytest.mark.parametrize("where", ["member", "properties"])
+def test_a_geojson_id_over_128_characters_is_refused_not_renamed(where):
+    # GK B F7: like a traced name, a long id is refused by name, never replaced by f<i>.
+    long_id = "x" * 129
+    f = (
+        feature(rect_lnglat(), fid=long_id)
+        if where == "member"
+        else feature(rect_lnglat(), fid=None, props={"id": long_id})
+    )
+    err = refused(geojson(f))
+    assert code_of(err) == "layout_document" and "feature 1" in err.message
+    assert run(SITE, geojson(feature(rect_lnglat(), fid="x" * 128)))["buildings"]
 
 
 def test_an_index_fallback_colliding_with_a_real_id_is_refused_by_name():
@@ -793,6 +935,16 @@ def test_route_import_merges_by_id_and_keeps_other_buildings(client, geo):
     other = raster(footprints=[{"id": "annex", "ring_px": RECT_PX, "height_m": 4}])
     kept = _propose(client, 3, other).json()["preview"]["layout"]["kept_layout_ids"]
     assert kept == ["layout:hall"]  # V78: said before Apply
+    both = raster(
+        footprints=[
+            {"id": "hall", "ring_px": RECT_PX, "height_m": 8},
+            {"id": "annex", "ring_px": RECT_PX, "height_m": 4},
+        ]
+    )
+    # GK B F1: a re-imported id is replaced, so it is not listed as kept.
+    assert (
+        _propose(client, 3, both).json()["preview"]["layout"]["kept_layout_ids"] == []
+    )
     pid = _propose(client, 3, raster(anchor_local=(1, 1))).json()[
         "id"
     ]  # re-import replaces by id
@@ -936,7 +1088,7 @@ def test_route_another_org_cannot_propose(client, other_org_client, geo):
             "inputs": {"layout": raster()},
         },
     )
-    assert r.status_code in (403, 404)
+    assert r.status_code == 404  # require_project_access never answers 403
     assert client.get(URL).json()["revision"] == 1
 
 
@@ -962,3 +1114,48 @@ def test_route_v55_no_marked_input_reaches_the_proposal_or_the_project(client, g
         "height_evidence",
         "levels",
     }
+
+
+def test_route_only_import_layout_is_invisible_to_the_chat(
+    client, geo, project_row, monkeypatch
+):
+    # GK B F2: import_layout is route-only, so a route-made preview is neither
+    # listed by the chat read nor applied or cancelled through the chat tools.
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.pypsa_service import PyPSAService
+
+    foreground = SimpleNamespace(project_uuid=str(project_row("geo").id))
+    monkeypatch.setattr(
+        PyPSAService, "get_active_context", classmethod(lambda cls: foreground)
+    )
+    _adopted(client, geo)
+    prop = _propose(client, 1, raster()).json()
+    out = chat_tools.site_scene_read("campus", prop["id"])
+    assert "my_previews" not in out
+    assert out["proposal"] == {"id": prop["id"], "status": "not_found"}
+    assert prop["input_hash"] not in json.dumps(out)
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.site_scene_apply("campus", prop["id"], prop["input_hash"], 1)
+    assert exc.value.status_code == 404
+    assert chat_tools.site_scene_cancel("campus", prop["id"])["status"] == "not_found"
+    scene = client.get(URL).json()
+    assert scene["revision"] == 1 and scene["buildings"] == []
+    # The route still applies its own preview.
+    assert _apply(client, prop["id"], 1).status_code == 200
+
+
+def test_route_import_layout_without_a_layout_is_named(client, geo):
+    # Survivor of mutants.py on proposals.py: the missing input is refused by name.
+    _adopted(client, geo)
+    r = client.post(
+        f"{URL}/proposals",
+        json={"action": "import_layout", "base_revision": 1, "inputs": {}},
+    )
+    assert r.status_code == 422, r.text
+    assert _detail(r)["error_kind"] == "invalid_input"
+    assert _detail(r)["message"] == "Proposal: import_layout needs a layout"
+    assert client.get(URL).json()["revision"] == 1

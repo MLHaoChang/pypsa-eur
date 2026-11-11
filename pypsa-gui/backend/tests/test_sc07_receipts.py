@@ -331,10 +331,19 @@ def test_prepare_names_each_place_by_its_words(client, site):
 def test_the_backend_building_words_match_the_frontend_building_label():
     """Parity (UX condition 1): SiteCompanion.tsx `buildingLabel` and `chat.building_label` say the same."""
     source = FRONTEND.read_text(encoding="utf-8")
-    body = re.search(r"export const buildingLabel = [^\n]*\n([^\n]*)", source).group(0)
+    body = re.search(r"export const buildingLabel = .*?\n\n", source, re.S).group(0)
     assert "b.source.namespace === 'osm'" in body
     assert (
         "`OSM building ${b.source.source_id}`" in body and "'Proposed building'" in body
+    )
+    # SC-06-layout: a layout building is named by its id on both sides.
+    assert (
+        "b.source.namespace === 'layout'" in body
+        and "`Layout building ${b.source.source_id}`" in body
+    )
+    assert (
+        chat.building_label({"source": {"namespace": "layout", "source_id": "hall"}})
+        == "Layout building hall"
     )
     assert (
         chat.building_label({"source": {"namespace": "osm", "source_id": "42"}})

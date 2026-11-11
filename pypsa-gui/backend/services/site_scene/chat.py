@@ -261,6 +261,8 @@ def building_label(b: dict[str, Any]) -> str:
     src = b.get("source") or {}
     if src.get("namespace") == "osm":
         return f"OSM building {_text(src.get('source_id'))}"
+    if src.get("namespace") == "layout":
+        return f"Layout building {_text(src.get('source_id'))}"
     return "Proposed building"
 
 
@@ -539,6 +541,16 @@ def _receipt(receipt: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+def _chat_entry(project, owner: str | None, site_id: str, pid: str) -> dict[str, Any]:
+    """The caller's live preview when the chat may see it (GK B F2): a route-only action reads as not found."""
+    entry = proposals.get(project.registry_key, owner, site_id, pid)
+    if entry["action"] not in CHAT_ACTIONS:
+        raise SceneError(
+            "not_found", "This preview was made in the 3D site panel: review it there"
+        )
+    return entry
+
+
 def _proposal_status(
     project, owner: str | None, site_id: str, pid: Any
 ) -> dict[str, Any]:
@@ -547,6 +559,8 @@ def _proposal_status(
         return {"id": _text(pid), "status": "not_found"}
     try:
         entry = proposals.get(project.registry_key, owner, site_id, pid)
+        if entry["action"] not in CHAT_ACTIONS:
+            return {"id": pid, "status": "not_found"}  # GK B F2: route-only
         unknown = _is_unknown(_unknown_key(project, owner, site_id, pid))
         if unknown or entry["status"] == "cancelled":
             # H6: the chain first, so a commit that landed always reads applied.
@@ -586,6 +600,7 @@ def my_previews(project, owner: str | None, site_id: str) -> list[dict[str, Any]
             if key == project.registry_key
             and e["owner"] == owner
             and e["site_id"] == site_id
+            and e["action"] in CHAT_ACTIONS  # GK B F2: route-only actions stay out
         }
     with _UNKNOWN_LOCK:
         marked = [
@@ -984,7 +999,7 @@ def reviewed_entry(
     if _is_unknown(_unknown_key(project, owner, site_id, proposal_id)):
         # N6: no second card, no second apply for a preview whose outcome is unknown.
         raise _outcome_unknown(_read_back(project, site_id, proposal_id, input_hash)[1])
-    entry = proposals.get(project.registry_key, owner, site_id, proposal_id)
+    entry = _chat_entry(project, owner, site_id, proposal_id)
     if entry["input_hash"] != input_hash or entry["base_revision"] != expected_revision:
         raise SceneError(
             "revision_conflict",
@@ -1095,9 +1110,7 @@ def cancel(
                 "changed": False,
             }
         try:
-            before = proposals.get(project.registry_key, owner, site_id, proposal_id)[
-                "status"
-            ]
+            before = _chat_entry(project, owner, site_id, proposal_id)["status"]
         except SceneError:
             return {"proposal_id": proposal_id, "status": "not_found", "changed": False}
         after = proposals.cancel(project.registry_key, owner, site_id, proposal_id)[

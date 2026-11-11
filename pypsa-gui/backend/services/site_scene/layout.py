@@ -52,6 +52,7 @@ MAX_SITE_DISTANCE_M = 10_000.0
 MAX_ID_CHARS = 128
 _REMOTE_KEYS = ("$ref", "href")
 _MAX_DEPTH = 64
+_MAX_ECHO_CHARS = 60  # client text quoted back in a message (GK B F9)
 
 
 def _refuse(code: str, message: str, field: str = "layout") -> SceneError:
@@ -64,6 +65,14 @@ def _is_number(v: Any) -> bool:
 
 def _finite(v: Any) -> bool:
     return _is_number(v) and math.isfinite(v)
+
+
+def _echo(v: Any) -> str:
+    """Client text quoted back in a message: a bounded string, else "unknown"."""
+    if not isinstance(v, str) or not v.strip():
+        return "unknown"
+    v = v.strip()
+    return v if len(v) <= _MAX_ECHO_CHARS else v[: _MAX_ECHO_CHARS - 1] + "…"
 
 
 # ── normalize: shape, safety and limits, no geometry ────────────────────────
@@ -148,7 +157,7 @@ def _check_crs(doc: dict[str, Any]) -> None:
     if name not in CRS84_NAMES:
         raise _refuse(
             "crs_unsupported",
-            f"The layout uses coordinate system {name or 'unknown'}: "
+            f"The layout uses coordinate system {_echo(name)}: "
             "save it as WGS84 (longitude/latitude) GeoJSON",
         )
 
@@ -184,8 +193,14 @@ def _feature_id(f: dict[str, Any], index: int) -> str:
         isinstance(fid, str) and fid.strip()
     ):
         text = str(fid).strip()
-        if len(text) <= MAX_ID_CHARS:
-            return text
+        if len(text) > MAX_ID_CHARS:
+            # GK B F7: refused, like a traced name, never silently renamed.
+            raise _refuse(
+                "layout_document",
+                f"GeoJSON feature {index + 1} has an id longer than "
+                f"{MAX_ID_CHARS} characters: shorten it in the file",
+            )
+        return text
     return f"f{index + 1}"
 
 
@@ -304,7 +319,7 @@ def _image(image: Any) -> dict[str, Any]:
     if media not in RASTER_TYPES:
         raise _refuse(
             "unsupported_format",
-            f"Images of type {media or 'unknown'} are not accepted: "
+            f"Images of type {_echo(media)} are not accepted: "
             "use PNG, JPEG or WebP. GeoJSON layouts are accepted too",
             "image",
         )
