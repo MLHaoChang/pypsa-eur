@@ -3,7 +3,7 @@
 
 # 17 — Generate the hub-design, run-study and investment-decision workflow files from profiles
 
-Status: in-review
+Status: done (#1394)
 Type: task
 Blocked by: 07
 Gated: yes (GK B)
