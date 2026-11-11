@@ -1029,3 +1029,153 @@ def test_for_year_takes_the_latest_period_that_has_started():
         2.0,
         None,
     ]
+
+
+# ── guards the mutation run found untested ─────────────────────────────────────
+
+
+def test_a_bus_asset_or_export_link_the_source_pattern_cannot_carry_is_not_offered():
+    n = _plant()
+    n.add("Bus", "slag heap", carrier="concentrate", unit="t")
+    n.add("Load", "slag_out", bus="slag heap", p_set=1.0)
+    n.add("Generator", "wind farm", bus="hub", carrier="wind", p_nom=1.0)
+    n.add("Link", "grid export 2", bus0="hub", bus1="grid", p_nom=1.0, carrier="AC")
+    ids = [s.id for s in L.catalogue(n, _solve(n, export_link="grid export 2"))]
+    assert "shipped.slag_out" in ids
+    assert not [
+        i for i in ids if "slag heap" in i or "wind farm" in i or "grid export" in i
+    ]
+
+
+def test_a_product_bus_with_no_load_and_an_export_link_the_network_lacks_are_not_offered():
+    n = _plant()
+    n.add("Bus", "ore", carrier="concentrate", unit="t")
+    ids = {s.id for s in L.catalogue(n, _solve(n, export_link="no_such_link"))}
+    assert "served_product.ore" not in ids
+    assert not [i for i in ids if i.startswith("export.")]
+
+
+def test_a_link_into_a_bus_the_network_lacks_is_no_electrolyser():
+    n = _plant()
+    n.add(
+        "Link",
+        "electrolyser_b",
+        bus0="hub",
+        bus1="nowhere",
+        p_nom=1.0,
+        carrier="electrolysis",
+    )
+    ids = {s.id for s in L.catalogue(n)}
+    assert "derived_o2.electrolyser_b" not in ids
+    assert "capacity.Link.electrolyser_b" in ids
+
+
+def test_a_link_named_like_a_shortfall_slack_still_offers_its_capacity():
+    """The product-role rule hides Generators only."""
+    n = _plant()
+    n.add("Link", "__lost_bypass", bus0="hub", bus1="grid", p_nom=1.0, carrier="AC")
+    assert "capacity.Link.__lost_bypass" in {s.id for s in L.catalogue(n)}
+
+
+def test_a_capture_naming_every_load_and_bus_of_the_network_is_this_solves():
+    n = _plant()
+    names = [*map(str, n.loads.index), *map(str, n.buses.index)]
+    capture = _capture(n, **{k: np.zeros(8) for k in names})
+    got = L.read(n, _solve(n, capture), "served_load.site_a", "MWh")
+    assert _value(got) == _approx(_per_year(n, 10.0))
+
+
+def test_a_capture_column_of_another_bus_or_of_a_load_named_like_this_bus_is_not_its_slack():
+    n = _plant()
+    lost = np.full(8, 5.0)
+    got = L.read(n, _solve(n, _capture(n, grid=lost)), "served_load.site_a", "MWh")
+    assert _value(got) == _approx(_per_year(n, 10.0))
+    n.add(
+        "Load", "hub", bus="grid", p_set=6.0
+    )  # a Load on grid, named like the hub bus
+    got = L.read(n, _solve(n, _capture(n, hub=lost)), "served_load.site_a", "MWh")
+    assert _value(got) == _approx(_per_year(n, 10.0))
+
+
+def test_an_involuntary_slack_generator_with_no_dispatch_column_adds_nothing():
+    n = _plant()
+    n.add("Generator", "shed_late", bus="hub", carrier="load_shedding", p_nom=100.0)
+    assert "shed_late" not in n.generators_t.p.columns
+    got = L.read(n, _solve(n), "served_load.site_a", "MWh")
+    assert _value(got) == _approx(_per_year(n, 10.0))
+
+
+def test_a_shortfall_on_another_product_bus_does_not_lower_this_ones():
+    n = _plant()
+    n.generators_t.p["__lost_conc"] = 5.0
+    got = L.read(n, _solve(n), "served_product.nh3", "MWh")
+    assert _value(got) == _approx(_per_year(n, 20.0))
+
+
+def test_a_shortfall_generator_with_no_dispatch_is_not_evaluated():
+    n = _plant()
+    n.generators_t.p = n.generators_t.p.drop(columns="__lost_nh3")
+    got = L.read(n, _solve(n), "served_product.nh3", "MWh")
+    assert got == L.NotEvaluated("served_product.nh3", "lost_production_not_read")
+
+
+def test_a_non_finite_lhv_is_refused():
+    n = _plant()
+    n.links_t.p1["electrolyser"] = -30.0
+    for output_id in ("served_h2.h2_offtake", "derived_o2.electrolyser"):
+        unit = "kg" if output_id.startswith("served_h2") else "t"
+        got = L.read(n, _solve(n), output_id, unit, lhv_kwh_per_kg=float("inf"))
+        assert got == L.NotEvaluated(output_id, "lhv_not_positive")
+
+
+def test_a_built_asset_reads_its_p_nom_whatever_its_p_nom_opt():
+    n = _plant()
+    n.generators.at["old", "p_nom_opt"] = np.nan
+    got = L.read(n, _solve(n), "capacity.Generator.old", "MW_year")
+    assert _value(got) == {2030: 7.0, 2035: 0.0}
+
+
+@pytest.mark.parametrize(
+    ("output_id", "link"),
+    [
+        ("export.grid_export", "grid_export"),
+        ("derived_o2.electrolyser", "electrolyser"),
+    ],
+)
+def test_a_link_with_no_dispatch_column_is_not_evaluated(output_id, link):
+    n = _plant()
+    n.links_t.p1 = n.links_t.p1.drop(columns=link)
+    unit = "MWh" if output_id.startswith("export") else "t"
+    got = L.read(n, _solve(n, export_link="grid_export"), output_id, unit)
+    assert got == L.NotEvaluated(output_id, "link_not_dispatched")
+
+
+def test_it_energy_periods_that_differ_from_the_networks_are_not_evaluated(
+    monkeypatch,
+):
+    from services import dc_it_energy as E
+
+    spec, n, solve = _dc()
+    real = E.it_energy
+    monkeypatch.setattr(
+        E,
+        "it_energy",
+        lambda *a, **k: SimpleNamespace(periods=real(*a, **k).periods.iloc[:-1]),
+    )
+    for output_id, unit in (("it_energy", "MWh"), ("contracted_it_kw", "kW_month")):
+        got = L.read(n, solve, output_id, unit)
+        assert got == L.NotEvaluated(output_id, "it_energy_periods_mismatch")
+
+
+@pytest.mark.parametrize("kw", [float("inf"), float("nan"), 0.0, -1.3])
+def test_a_non_finite_zero_or_negative_kw_per_gpu_is_refused(kw):
+    spec, n, solve = _dc()
+    got = L.read(n, solve, "it_energy", "GPU_h", kw_per_gpu=kw)
+    assert got == L.NotEvaluated("it_energy", "kw_per_gpu_missing")
+
+
+def test_a_non_finite_quantity_is_not_evaluated_never_a_number():
+    n = _plant()
+    n.links_t.p1["grid_export"] = np.r_[-np.inf, np.zeros(7)]
+    got = L.read(n, _solve(n, export_link="grid_export"), "export.grid_export", "MWh")
+    assert got == L.NotEvaluated("export.grid_export", "not_finite")
