@@ -157,20 +157,40 @@ def _check_pending(pending: tuple[str, ...]) -> None:
         raise TypeError(f"not a pending meta field: {', '.join(unknown)}")
 
 
-def _moved_mark(mark: dict | None, pending: tuple[str, ...], version: int) -> dict | None:
+def read_mark(mark: object, fallback_version: int | None = None) -> dict | None:
+    """The `settings_unrecorded` mark as `{version: int, fields: [names]}`, or
+    None when nothing is unrecorded. A mark of any other shape (a hand-edited
+    or damaged meta.json) reads as every pending field unrecorded, at
+    `fallback_version` when its own version is not an int: readers then
+    refuse or say so, never a default in its place (07f-b, GK B F2)."""
+    if mark is None:
+        return None
+    if isinstance(mark, dict):
+        version, fields = mark.get("version"), mark.get("fields")
+        if (isinstance(version, int) and not isinstance(version, bool)
+                and isinstance(fields, list)
+                and all(isinstance(f, str) and f in _PENDING_FIELDS for f in fields)):
+            return {"version": version, "fields": sorted(set(fields))} if fields else None
+        if isinstance(version, int) and not isinstance(version, bool):
+            fallback_version = version
+    return {"version": fallback_version, "fields": sorted(_PENDING_FIELDS)}
+
+
+def _moved_mark(mark: object, pending: tuple[str, ...], version: int) -> dict | None:
     """The `settings_unrecorded` mark after a save of `version` (07f-b, GK B
     E1). Its fields are the carried fields left null by a write that never
     landed: the ones still unrecorded, which stay null in the new version
     too, plus this save's `pending`. None when there are none."""
-    fields = sorted({*((mark or {}).get("fields") or ()), *pending})
+    fields = sorted({*((read_mark(mark) or {}).get("fields") or ()), *pending})
     return {"version": version, "fields": fields} if fields else None
 
 
-def without_unrecorded(mark: dict | None, written) -> dict | None:
+def without_unrecorded(mark: object, written, fallback_version: int | None = None) -> dict | None:
     """The mark once `written` fields have landed; None when none is left."""
-    if not isinstance(mark, dict):
+    mark = read_mark(mark, fallback_version)
+    if mark is None:
         return None
-    fields = sorted(set(mark.get("fields") or ()) - set(written))
+    fields = sorted(set(mark["fields"]) - set(written))
     return {**mark, "fields": fields} if fields else None
 
 
@@ -196,10 +216,13 @@ def _meta_from_doc(doc: ReportDocument, *, latest_version: int,
 def _read_meta(path: pathlib.Path) -> ReportMeta | None:
     """None (with one warning) for a missing, unparsable or invalid meta.json."""
     try:
-        return ReportMeta.model_validate_json(path.read_text(encoding="utf-8"))
+        meta = ReportMeta.model_validate_json(path.read_text(encoding="utf-8"))
     except (OSError, ValueError, ValidationError) as exc:
         logger.warning("reports: unreadable meta.json at %s — skipping: %s", path, exc)
         return None
+    mark = read_mark(meta.settings_unrecorded, meta.latest_version)
+    return meta if mark == meta.settings_unrecorded else meta.model_copy(
+        update={"settings_unrecorded": mark})
 
 
 def _write_meta(rdir: pathlib.Path, meta: ReportMeta) -> None:

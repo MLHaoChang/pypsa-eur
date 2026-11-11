@@ -569,7 +569,8 @@ def _write_generation_meta(job: ReportJob, *, aborted: bool) -> None:
             raise store.ReportStoreError(
                 f"meta.json of report {job.report_id} unreadable after save") from exc
         # The receipt lands: it leaves the unrecorded mark (07f-b).
-        mark = store.without_unrecorded(raw.get("settings_unrecorded"), ("generation",))
+        mark = store.without_unrecorded(raw.get("settings_unrecorded"), ("generation",),
+                                        raw.get("latest_version"))
         if mark is None:
             raw.pop("settings_unrecorded", None)
         else:

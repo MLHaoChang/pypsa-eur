@@ -563,13 +563,15 @@ def export_report(report_id: str, body: ExportReportBody,
         template, _upload = _template_upload(project, doc.template_file_id)
         meta = store.load_meta(project.directory, report_id)
         mark = meta.settings_unrecorded or {}
-        if mark.get("version") == doc.version and "mapping_plan" in (mark.get("fields") or ()):
-            # 07f-b (GK B E2): never the code-only default in its place, unsaid.
+        if "mapping_plan" in mark.get("fields", ()):
+            # 07f-b (GK B E2, F1): the meta's one mapping is null while marked, and
+            # every version's export reads it (E5), so any version is refused:
+            # never the code-only default in its place, unsaid.
             raise HTTPException(409, {
                 "error_kind": "report_settings_unrecorded",
-                "message": f"The template mapping of version {doc.version} was not recorded "
-                           "(its write stayed busy). Map the template again or regenerate "
-                           "the report, then export.",
+                "message": f"The template mapping of version {mark.get('version')} was not "
+                           "recorded (its write stayed busy), and every export reads the "
+                           "report's latest mapping. Map the template again, then export.",
             })
         plan = meta.mapping_plan
     try:

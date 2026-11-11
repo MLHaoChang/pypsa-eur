@@ -220,5 +220,7 @@ class ReportMeta(_Model):
     # has saved version n but not yet written `fields` (its `generation` and
     # settings) for it. The save clears those fields in the same write and
     # the job's last write removes the mark, so a mark that stays says that
-    # version n has none of them, never version n-1's.
-    settings_unrecorded: dict | None = None
+    # version n has none of them, never version n-1's. Any JSON value loads:
+    # the store reads a malformed one as every field unrecorded (GK B F2),
+    # never as an unreadable meta that hides the report.
+    settings_unrecorded: dict | list | str | int | float | bool | None = None

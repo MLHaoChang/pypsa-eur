@@ -8,6 +8,8 @@ the job itself)."""
 
 from __future__ import annotations
 
+import pytest
+
 from services.llm_fake import FakeProvider
 from services.reports import store
 from services.reports.assemble import EXECUTIVE_SUMMARY_ID
@@ -114,6 +116,118 @@ def test_an_export_whose_mapping_was_not_recorded_is_refused(
     assert detail["error_kind"] == "report_settings_unrecorded"
     assert f"version {n}" in detail["message"]
     assert fake_untagged.rendered == []  # nothing rendered, nothing exported
+
+
+def test_an_export_of_an_older_version_is_refused_while_the_mapping_is_unrecorded(
+    client,
+    api_project,
+    session_state,
+    project_storage_dir,
+    fixtures,
+    fake_untagged,
+):
+    """GK B F1: every version's export reads the meta's one mapping (E5), null
+    while marked, so an older version is refused too, never rendered with
+    the default mapping unsaid."""
+    name, rid, _plan = _untagged_with_plan(
+        client,
+        api_project,
+        session_state,
+        project_storage_dir,
+        fixtures,
+        "unrec-export-old",
+    )
+    n = _unrecorded(project_storage_dir(name), rid, "mapping_plan")
+    r = client.post(
+        f"/api/projects/{name}/reports/{rid}/export", json={"version": n - 1}
+    )
+    assert r.status_code == 409, r.text[:300]
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "report_settings_unrecorded"
+    assert f"version {n}" in detail["message"]
+    assert fake_untagged.rendered == []
+
+
+@pytest.mark.parametrize(
+    "mark",
+    [
+        {"version": 2, "fields": 5},
+        {"version": 2, "fields": "generation"},
+        {"version": "2", "fields": ["mapping_plan"]},
+        {"version": 2, "fields": ["no_such_field"]},
+        {"fields": ["generation"]},
+        "unrecorded",
+    ],
+    ids=[
+        "fields-int",
+        "fields-str",
+        "version-str",
+        "unknown-field",
+        "no-version",
+        "not-a-dict",
+    ],
+)
+def test_a_malformed_mark_reads_as_everything_unrecorded_and_never_500s(
+    client,
+    api_project,
+    session_state,
+    project_storage_dir,
+    fixtures,
+    fake_untagged,
+    mark,
+):
+    """GK B F2: a hand-edited or damaged mark reads as every pending field
+    unrecorded: export refuses typed, the list shows it, and later writes
+    (update_meta, a save) still work and carry it on."""
+    import json
+
+    name, rid, plan = _untagged_with_plan(
+        client,
+        api_project,
+        session_state,
+        project_storage_dir,
+        fixtures,
+        "unrec-malformed",
+    )
+    pdir = project_storage_dir(name)
+    path = store.report_dir(pdir, rid) / "meta.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    latest = raw["latest_version"]
+    raw["settings_unrecorded"] = mark
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    everything = sorted(store._PENDING_FIELDS)
+
+    r = client.post(f"/api/projects/{name}/reports/{rid}/export", json={})
+    assert r.status_code == 409, r.text[:300]
+    assert r.json()["detail"]["error_kind"] == "report_settings_unrecorded"
+    assert fake_untagged.rendered == []
+
+    [listed] = [
+        m
+        for m in client.get(f"/api/projects/{name}/reports").json()
+        if m["report_id"] == rid
+    ]
+    want_version = 2 if isinstance(mark, dict) and mark.get("version") == 2 else latest
+    assert listed["settings_unrecorded"] == {
+        "version": want_version,
+        "fields": everything,
+    }
+
+    meta = store.update_meta(pdir, rid, generation=None)
+    assert meta.settings_unrecorded["fields"] == [
+        f for f in everything if f != "generation"
+    ]
+
+    n = store.save_version(pdir, store.load_report(pdir, rid))
+    assert store.load_meta(pdir, rid).settings_unrecorded == {
+        "version": n,
+        "fields": [f for f in everything if f != "generation"],
+    }
+
+    r = client.put(f"/api/projects/{name}/reports/{rid}/template/plan", json=plan)
+    assert r.status_code == 200, r.text[:300]
+    r = client.post(f"/api/projects/{name}/reports/{rid}/export", json={})
+    assert r.status_code == 200, r.text[:300]  # re-mapping lifts the refusal
 
 
 def test_an_export_with_only_the_receipt_unrecorded_uses_the_reports_own_mapping(
