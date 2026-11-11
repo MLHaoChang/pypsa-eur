@@ -986,6 +986,7 @@ def test_critical_served_sums_each_contingency_with_its_name(hub, monkeypatch):
         ("none_value", "not_solved"),
         ("nan_value", "not_solved"),
         ("bool_value", "not_solved"),
+        ("dict_rows", "unreadable"),
     ],
 )
 def test_critical_served_is_no_evidence_unless_every_contingency_solved(
@@ -1013,6 +1014,8 @@ def test_critical_served_is_no_evidence_unless_every_contingency_solved(
         row["critical_unserved_mwh"] = math.nan
     elif case == "bool_value":
         row["critical_unserved_mwh"] = False
+    elif case == "dict_rows":
+        section = _dtc({"subsea_tie": row})
     _eh(monkeypatch, section, edited=case == "edited")
     g = _gate(hub, "mg.island.critical_served", op="le", value=0.0)
     assert (
@@ -1188,6 +1191,109 @@ def test_each_mg_fact_is_registered_with_its_unit():
 
 
 # ── live: the real check on the shipped template ────────────────────────────
+
+
+def test_a_data_centre_record_relabelled_mg_is_refused_at_dispatch(hub, monkeypatch):
+    """Mutant 3: only the record-kind term refuses a valid DC record (same
+    core digest, its own DC card) that claims the microgrid kind."""
+    from tests.test_campus_scan_and_grid_code_since_run import _publish
+
+    _publish(hub, "sagc_dc")
+    dc = run_actions.freeze(hub)
+    path = _task_file(
+        hub, {**dc, "kind": run_actions.MG_KIND}, tool=run_actions.READINESS
+    )
+    task = _read(path)
+    task["steps"][0]["card"] = run_actions._card_for(run_actions.DC_KIND, dc)
+    path.write_text(json.dumps(task))
+    assert _start(path, _ctx(hub)) == "dc_args"
+
+
+def test_a_digest_tampered_past_the_card_is_refused(hub, monkeypatch):
+    """The card names only the first 12 characters; the record digest
+    covers the rest."""
+    _sidecar(hub)
+    frozen = run_actions.mg_freeze(hub)
+    tail = frozen["settings_digest"][12:]
+    frozen["settings_digest"] = frozen["settings_digest"][:12] + tail[::-1]
+    assert frozen["settings_digest"] != run_actions.mg_freeze(hub)["settings_digest"]
+    path = _task_file(hub, frozen)
+    _stub(monkeypatch, during=lambda: pytest.fail("never run"))
+    assert _start(path, _ctx(hub)) == "mg_args"
+
+
+def test_a_lock_busy_after_the_solve_makes_the_result_no_evidence(hub, monkeypatch):
+    _sidecar(hub)
+    path = _task_file(hub, run_actions.mg_freeze(hub))
+    real, calls = run_actions._locked, []
+
+    def locked(ctx, read):
+        calls.append(1)
+        return real(ctx, read) if len(calls) == 1 else None
+
+    monkeypatch.setattr(run_actions, "_locked", locked)
+    _stub(monkeypatch)
+    assert _start(path, _ctx(hub)) == MG
+    result = _read(path)["steps"][0]["result"]
+    assert result["state"] == run_actions.INPUTS_CHANGED
+    assert "the network was edited" in result["reason"]
+    assert "the island settings changed" in result["reason"]
+
+
+def _done_result():
+    out = {k: v for k, v in _out().items() if k in run_actions.MG_RESULT}
+    return {
+        **out,
+        "kind": run_actions.MG_KIND,
+        "version": run_actions.MG_VERSION,
+        "settings_digest": "0" * 64,
+        "network_revision": 7,
+    }
+
+
+def test_the_result_shape_needs_every_key_with_its_type():
+    """C4: each key of MG_RESULT, dropped or of the wrong type, is unreadable."""
+    good = _done_result()
+    assert run_actions.mg_shape_ok(good)
+    assert not run_actions.mg_shape_ok(None) and not run_actions.mg_shape_ok([good])
+    for key, typ in run_actions.MG_RESULT.items():
+        assert not run_actions.mg_shape_ok(
+            {k: v for k, v in good.items() if k != key}
+        ), key
+        wrong = object() if typ is not list else "x"
+        assert not run_actions.mg_shape_ok({**good, key: wrong}), key
+
+
+def test_a_result_that_is_not_a_record_is_unreadable(hub):
+    task = _done(hub)
+    task["steps"][0]["result"] = "survives"
+    g = _gate(hub, "mg.island.survival", value="survives", task=task)
+    assert g["facts"][0]["value"] == "unreadable"
+    task = _done(hub, {"shortfalls": "x"})
+    g = _gate(hub, "mg.island.survival", value="survives", task=task)
+    assert g["facts"][0]["value"] == "unreadable"
+
+
+@pytest.mark.parametrize(
+    "fact", ["mg.tie.open", "mg.critical.tagged", "mg.island.survival"]
+)
+def test_the_island_facts_name_a_missing_sidecar_or_project(hub, fact):
+    import dataclasses
+
+    _sidecar(hub)
+    (_project_dir(hub) / IC.SIDECAR_NAME).unlink()
+    g = _gate(hub, fact, value="x")
+    assert g["verdict"] == "not_evaluated" and g["facts"][0]["value"] == "no_island", g
+    env = dataclasses.replace(_env(hub), project=None)
+    g = run_gates.evaluate([_rule(fact, "eq", "x")], env)[0]
+    assert g["verdict"] == "not_evaluated" and g["facts"][0]["value"] == "not_run", g
+
+
+def test_an_unknown_critical_state_is_unreadable(hub, monkeypatch):
+    _sidecar(hub)
+    monkeypatch.setattr(S, "critical_state", lambda n, island: {"state": "weird"})
+    g = _gate(hub, "mg.critical.tagged", value="tagged")
+    assert g["verdict"] == "not_evaluated" and g["facts"][0]["value"] == "unreadable"
 
 
 @pytest.mark.live_solve
