@@ -14,6 +14,7 @@ the lock the other profile writers hold (`PyPSAService.get_lock()` then
 `user_timeseries._user_ts_lock`, as `apply.apply_profile` nests them), so no
 edit can land between the check and the stamp (C2).
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -32,7 +33,10 @@ class UnrecordedRefused(Exception):
         super().__init__(detail["message"])
         self.kind = detail["error_kind"]
         self.components = detail["components"]
-        self._detail = {**detail, "component": detail["components"][0] if detail["components"] else None}
+        self._detail = {
+            **detail,
+            "component": detail["components"][0] if detail["components"] else None,
+        }
 
     def detail(self) -> dict[str, Any]:
         return dict(self._detail)
@@ -44,7 +48,12 @@ def _pairs(items: Iterable[Any]) -> list[tuple[str, str]]:
         if isinstance(it, Mapping):
             out.append((str(it.get("component") or ""), str(it.get("digest") or "")))
         else:
-            out.append((str(getattr(it, "component", "") or ""), str(getattr(it, "digest", "") or "")))
+            out.append(
+                (
+                    str(getattr(it, "component", "") or ""),
+                    str(getattr(it, "digest", "") or ""),
+                )
+            )
     return out
 
 
@@ -58,26 +67,43 @@ def check(ctx, items: Iterable[Any]) -> list[tuple[str, str]]:
 
     pairs = _pairs(items)
     if not pairs:
-        raise UnrecordedRefused({"error_kind": "unrecorded_empty", "components": [],
-                                 "message": "name at least one series to confirm"})
+        raise UnrecordedRefused(
+            {
+                "error_kind": "unrecorded_empty",
+                "components": [],
+                "message": "name at least one series to confirm",
+            }
+        )
     names = [c for c, _ in pairs]
     dupes = sorted({c for c in names if names.count(c) > 1})
     if dupes:
-        raise UnrecordedRefused({
-            "error_kind": "unrecorded_duplicate", "components": dupes,
-            "message": f"each series may be listed once; listed more than once: {', '.join(dupes)}"})
+        raise UnrecordedRefused(
+            {
+                "error_kind": "unrecorded_duplicate",
+                "components": dupes,
+                "message": f"each series may be listed once; listed more than once: {', '.join(dupes)}",
+            }
+        )
     gone = [c for c in names if profile_kind(ctx, c) != "unrecorded"]
     if gone:
-        raise UnrecordedRefused({
-            "error_kind": "not_unrecorded", "components": gone,
-            "message": f"{', '.join(gone)} no longer {'has' if len(gone) == 1 else 'have'} "
-                       "a series with no record; reload the list"})
+        raise UnrecordedRefused(
+            {
+                "error_kind": "not_unrecorded",
+                "components": gone,
+                "message": f"{', '.join(gone)} no longer {'has' if len(gone) == 1 else 'have'} "
+                "a series with no record; reload the list",
+            }
+        )
     stale = [c for c, d in pairs if current_digest(ctx.user_ts[(*KEY, c)]) != d]
     if stale:
-        raise UnrecordedRefused({
-            "error_kind": "unrecorded_stale", "components": stale,
-            "message": f"{', '.join(stale)} changed since the list was shown; "
-                       "reload it and confirm again"})
+        raise UnrecordedRefused(
+            {
+                "error_kind": "unrecorded_stale",
+                "components": stale,
+                "message": f"{', '.join(stale)} changed since the list was shown; "
+                "reload it and confirm again",
+            }
+        )
     return pairs
 
 
@@ -92,9 +118,13 @@ def confirm(ctx, items: Iterable[Any]) -> dict[str, Any]:
         if PyPSAService.get_active_context() is not ctx:
             # The foreground changed since the caller resolved it: the snapshot
             # would capture another network than the one stamped.
-            raise UnrecordedRefused({"error_kind": "project_not_open", "components": [],
-                                     "message": "the open project changed; open it again, "
-                                                "then confirm"})
+            raise UnrecordedRefused(
+                {
+                    "error_kind": "project_not_open",
+                    "components": [],
+                    "message": "the open project changed; open it again, then confirm",
+                }
+            )
         pairs = check(ctx, items)
         push_undo_snapshot()
         for component, _ in pairs:

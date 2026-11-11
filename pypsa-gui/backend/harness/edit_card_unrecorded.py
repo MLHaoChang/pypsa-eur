@@ -8,6 +8,7 @@ of the card binds the exact (component, digest) set and the project
 (`require_current` re-previews at approval, C3); the write re-checks under
 its lock (C2).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -29,7 +30,9 @@ def _scope(args: dict):
     from services import chat_tools
 
     with chat_tools._acting() as (db, user):
-        proj = require_project_access(str(args.get("project_id") or ""), db=db, user=user)
+        proj = require_project_access(
+            str(args.get("project_id") or ""), db=db, user=user
+        )
         _check_lock(proj, db, user)
     return proj, _foreground_ctx(proj, _VERB)
 
@@ -42,10 +45,20 @@ def _preview(args: dict) -> list[dict]:
         pairs = unrecorded.check(ctx, args.get("items") or [])
     except unrecorded.UnrecordedRefused as exc:
         raise HTTPException(409, exc.detail()) from None
-    return [{"component_class": "Generator", "name": component, "field": "provenance",
-             "label": "Series record", "old": f"{OLD} (series {digest})", "new": NEW,
-             "unit": "", "role": "typed", "digest": digest}
-            for component, digest in pairs]
+    return [
+        {
+            "component_class": "Generator",
+            "name": component,
+            "field": "provenance",
+            "label": "Series record",
+            "old": f"{OLD} (series {digest})",
+            "new": NEW,
+            "unit": "",
+            "role": "typed",
+            "digest": digest,
+        }
+        for component, digest in pairs
+    ]
 
 
 def _binding(args: dict) -> dict:
@@ -54,7 +67,9 @@ def _binding(args: dict) -> dict:
     from services import chat_tools
 
     with chat_tools._acting() as (db, user):
-        proj = require_project_access(str(args.get("project_id") or ""), db=db, user=user)
+        proj = require_project_access(
+            str(args.get("project_id") or ""), db=db, user=user
+        )
     return {"project": proj.uuid or proj.name}
 
 
@@ -70,8 +85,17 @@ def _readback(args: dict, rows: list[dict]) -> list[Any]:
 
 def _says(args: dict, rows: list[dict]) -> str:
     n = len(rows)
-    return (f"Records {n} series as {NEW}; their values are unchanged")
+    return f"Records {n} series as {NEW}; their values are unchanged"
 
 
-register("confirm_unrecorded_series", Adapter("series_edit", _preview, _readback, section_id="profiles",
-                                              binding=_binding, says=_says))
+register(
+    "confirm_unrecorded_series",
+    Adapter(
+        "series_edit",
+        _preview,
+        _readback,
+        section_id="profiles",
+        binding=_binding,
+        says=_says,
+    ),
+)
