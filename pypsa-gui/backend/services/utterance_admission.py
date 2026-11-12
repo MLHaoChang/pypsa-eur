@@ -122,6 +122,10 @@ class TurnCoordinator:
                 lease_id = uuid.uuid4().hex
                 state.lease_id = lease_id
                 state.active = utterance
+                # A pending correction left without a lease (its turn's
+                # cleanup failed, so nothing drained it) is older than this
+                # utterance; it must never run after it (issue 02, GK B O5').
+                state.pending = None
                 state.seen_ids.add(utterance.utterance_id)
                 return AdmissionDecision(
                     status='admitted',

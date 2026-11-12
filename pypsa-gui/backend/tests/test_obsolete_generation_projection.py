@@ -220,8 +220,11 @@ def test_a_cleanup_step_that_raises_still_releases_the_lease(network, monkeypatc
         _live(session, client)
 
     assert ua._DEFAULT.active_lease(sid) is None
-    # Not promoted: no drain turn could start, so it waits for the next one.
-    assert ua._DEFAULT.pending_utterance_id(sid) == "u2"
+    # Not promoted: no drain turn could start. The next utterance is admitted
+    # on the free lease and the stale correction never runs after it.
+    nxt = ua.admit_utterance(ua.StableUtterance("u3", "the generators?", 1, sid))
+    assert nxt.status == "admitted"
+    assert ua._DEFAULT.pending_utterance_id(sid) is None
     assert session.turn_obsolete is None
 
 
@@ -495,3 +498,23 @@ def test_a_bump_in_a_checked_turn_publishes_nothing(
         "commit": {"review": 1, "commit": 1},
     }[where]
     assert calls == expected
+
+
+def test_a_stale_pending_correction_never_runs_after_a_newer_request():
+    """O5': u1's cleanup failed (released without promotion) with u2 pending;
+    u3 then takes the free lease. u3's release must not promote u2."""
+    coord = ua.TurnCoordinator()
+    u1 = coord.admit_utterance(ua.StableUtterance("u1", "a", 1, "s"))
+    assert coord.admit_utterance(ua.StableUtterance("u2", "b", 1, "s")).status == (
+        "queued"
+    )
+    coord.release_lease(
+        session_id="s", lease_id=u1.lease_id, generation=1, promote=False
+    )
+    u3 = coord.admit_utterance(ua.StableUtterance("u3", "c", 1, "s"))
+    assert u3.status == "admitted"
+    assert coord.pending_utterance_id("s") is None
+    assert (
+        coord.release_lease(session_id="s", lease_id=u3.lease_id, generation=1) is None
+    )
+    assert coord.active_lease("s") is None
