@@ -315,6 +315,10 @@ def test_a_correction_during_the_write_drains_once_without_a_second_write(world,
     assert [d.status for d in decisions] == ["queued"]
     assert len(writes) == 1 and _bus_names(n) == ["B1"]
     assert [e for e, _ in frames].count("turn_done") == 2
+    # The drained turn asked the model about the correction, not a replay.
+    last_user = [m for m in wire.calls[-1]["messages"] if m.get("role") == "user"][-1]
+    assert "actually keep it brief" in json.dumps(last_user)
+    assert "delete B2" not in json.dumps(last_user)
     assert [e for e, _ in frames].count("tool_pending_confirmation") == 1
     assert len(wire.calls) == len(SCRIPT) + 1
     assert ua._DEFAULT.active_lease(session.session_id) is None
