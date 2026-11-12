@@ -34,8 +34,9 @@ COMPARATORS: dict[str, Callable[[Graph, Edge], Broken | None]] = {
 class Builder:
     """Collects the nodes and edges producers declare; `build` freezes them. A node added twice must agree."""
 
-    def __init__(self, n) -> None:
+    def __init__(self, n, memory=None) -> None:
         self.n = n
+        self.memory = memory  # the viewer's read of a memory item (`memory.reader_for`); None reads none
         self._nodes: dict[str, Node] = {}
         self._edges: dict[tuple, Edge] = {}
 
@@ -54,9 +55,10 @@ class Builder:
         return Graph(dict(self._nodes), tuple(self._edges.values()), self.n)
 
 
-def money_graph(n, assets) -> Graph:
-    """The money path of `assets` (`(component_class, name)` pairs) on network `n`."""
-    b = Builder(n)
+def money_graph(n, assets, memory=None) -> Graph:
+    """The money path of `assets` (`(component_class, name)` pairs) on network `n`. `memory` is the viewer's
+    reader of memory items: a value accepted from one reads `from_memory` only when it confirms the item."""
+    b = Builder(n, memory)
     for cls, name in assets:
         money.add_asset(b, cls, name)
     return b.build()
@@ -109,6 +111,11 @@ def walked(g: Graph, node_id: str) -> list[Edge]:
 
 
 def _check(g: Graph, edge: Edge) -> tuple[State, Broken | None]:
+    if edge.kind == "recalled_from":
+        # Approved at an immutable version: nothing to compare. `from_memory` only when the store confirmed the
+        # item for this viewer; a stamp it did not confirm compared nothing.
+        ok = getattr(edge.recorded, "confirmed", False)
+        return ("from_memory" if ok else "uncompared"), None
     compare = COMPARATORS.get(edge.kind)
     if compare is None or edge.recorded is None:
         return "uncompared", None
@@ -124,10 +131,11 @@ def staleness(g: Graph, node_id: str) -> Verdict:
     broken: list[Broken] = []
     compared = 0
     uncompared: list[str] = []
+    remembered = False
     seen: set[str] = set()
 
     def visit(nid: str) -> None:
-        nonlocal compared
+        nonlocal compared, remembered
         if nid in seen:
             return
         seen.add(nid)
@@ -136,7 +144,8 @@ def staleness(g: Graph, node_id: str) -> Verdict:
             uncompared.append(nid)
         for e in edges:
             state, broke = _check(g, e)
-            compared += state != "uncompared"
+            remembered |= state == "from_memory"
+            compared += state not in ("uncompared", "from_memory")
             if broke is not None:
                 broken.append(broke)
             elif state == "uncompared" and e.kind != "derived_from":
@@ -146,9 +155,17 @@ def staleness(g: Graph, node_id: str) -> Verdict:
                 visit(e.dst)
 
     visit(node_id)
-    if not compared and not uncompared:
+    if not compared and not uncompared and not remembered:
         uncompared.append(node_id)
-    state: State = "stale" if broken else "uncompared" if uncompared else "fresh"
+    state: State = (
+        "stale"
+        if broken
+        else "uncompared"
+        if uncompared
+        else "from_memory"
+        if remembered
+        else "fresh"
+    )
     return Verdict(node_id, state, tuple(broken), tuple(uncompared))
 
 

@@ -4899,7 +4899,7 @@ TOOLS: list[dict[str, Any]] = [
         "Target either an asset field (component, name, field; field='capital_cost' is the "
         "Economics row's annualised cost) or a Guided ledger row (project, study_id, ledger_key, "
         "option_id: the row on that option's network). The result starts with `outcome` "
-        "(state fresh|stale|uncompared, complete, truncated), then each step: what the value "
+        "(state fresh|stale|uncompared|from_memory, complete, truncated), then each step: what the value "
         "was derived from or priced through (a pack price scaled by dc_ac_ratio or a Link's "
         "efficiency), its value and unit as stored now, its provenance stamp (status, source, "
         "source_year, currency_year, approver) and `stamp_missing` (name those, never assume "
@@ -4907,7 +4907,8 @@ TOOLS: list[dict[str, Any]] = [
         "`broken` lists what was compared (recorded vs current: say the input changed since "
         "pricing) and what was not. A scaled price carries `pack_price`: arithmetic (value ÷ "
         "the recorded scale), or not_established. uncompared means nothing was compared, never "
-        "that it is current; a truncated answer is not complete. Values are per MW of the "
+        "that it is current; from_memory means the user accepted the value from a memory item (a "
+        "`memory` step names it and says if it is not visible to the viewer): it is never fresh; a truncated answer is not complete. Values are per MW of the "
         "stored capacity, in the stamp's currency (EUR when it names none, listed in "
         "stamp_missing). Changes nothing. Safety: read.",
         {"component": {"type": "string", "enum": COMPONENT_CLASS_ENUM},

@@ -1372,7 +1372,11 @@ def why_this_number(component: str | None = None, name: str | None = None, field
     if all(v is not None for v in asset) and all(v is None for v in ledger):
         from routers.network import get_asset_provenance_why as _asset_why
 
-        return _asset_why(component, name, field)
+        if _ACTING_USER_ID.get() is None:
+            # No acting user (a harness or smoke run): nothing to read memory as, so a memory-sourced value
+            # reads `uncompared` ("not visible to you") rather than the 401 `_route` would raise.
+            return _asset_why(component, name, field, None, None)
+        return _route(_asset_why, component, name, field)  # the acting user's own memory read (P4)
     if all(v is not None for v in ledger) and all(v is None for v in asset):
         from routers.studies import get_ledger_row_why as _row_why
 

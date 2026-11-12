@@ -11,9 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-#: `memory` is reserved (MEMORY-1): the kind exists so adding it is not a schema change; nothing builds one yet.
+#: `memory` is built by `memory.py` (slice 07, MEMORY-1).
 NODE_KINDS = ("input", "derived", "run", "surface", "memory")
-#: `computed_in` is built by the runs slice (04); `recalled_from` is reserved (MEMORY-1).
+#: `computed_in` is built by the runs slice (04); `recalled_from` by `memory.py`.
 EDGE_KINDS = (
     "derived_from",
     "priced_through",
@@ -22,12 +22,14 @@ EDGE_KINDS = (
     "shown_in",
     "recalled_from",
 )
-RESERVED_NODE_KINDS = ("run", "memory")
-RESERVED_EDGE_KINDS = ("computed_in", "recalled_from")
+RESERVED_NODE_KINDS = ("run",)
+RESERVED_EDGE_KINDS = ("computed_in",)
 #: The edges `staleness` and `why` walk, from a value towards what it was made from.
-WALKED = ("derived_from", "priced_through", "computed_in")
+WALKED = ("derived_from", "priced_through", "computed_in", "recalled_from")
 
-State = Literal["fresh", "stale", "uncompared"]
+#: `from_memory`: a value the user accepted from a memory item. It has its own stamp and nothing to compare, so it
+#: is never `fresh` against a project input (P1); an edge that broke still makes it `stale`.
+State = Literal["fresh", "stale", "uncompared", "from_memory"]
 
 
 @dataclass(frozen=True)

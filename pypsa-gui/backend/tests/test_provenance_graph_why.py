@@ -681,7 +681,7 @@ def test_a_two_field_row_reads_stale_over_uncompared_over_fresh(
     """The round-trip efficiency row compiles to two fields: any stale is stale, else any uncompared is."""
     it = iter(states)
 
-    def fake(_n, component, name, field):
+    def fake(_n, component, name, field, memory=None):
         return {
             "outcome": {
                 "state": next(it),

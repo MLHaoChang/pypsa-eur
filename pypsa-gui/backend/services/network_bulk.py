@@ -556,11 +556,22 @@ def apply_bulk_update(body: dict) -> dict:
             # catalog metadata first — same auto-add behaviour as PUT.
             if component_class != "Carrier" and isinstance(coerced.get("carrier"), str):
                 ensure_carrier(n, coerced["carrier"])
+            from services.asset_schema import provenance as asset_provenance
+            from services.network_crud import _same_value, _typed_schema_fields
+
+            typed = _typed_schema_fields(component_class, coerced)
+            before = {(t, c): df.at[t, c] for t in _targets for c in typed}
             for col, value in coerced.items():
                 # pandas keeps an int64 column int64 when the written value is
                 # integral and upcasts only on NaN, so `build_year` cleared to
                 # its default 0 stays int64 with no help (measured, Phase 12g).
                 df.loc[_targets, col] = value
+            # Same as the single edit (S1a): a typed field whose value changed is the person's own now, so an
+            # approval stamp (an applied reference, a value accepted from memory) ends with the old value.
+            for t in _targets:
+                changed = [c for c in typed if not _same_value(before[(t, c)], df.at[t, c])]
+                if changed:
+                    asset_provenance.mark_customised(n, component_class, t, changed)
 
     # One audit entry per bulk op (not per component). The row form cannot
     # print every value, so it prints the shape instead.

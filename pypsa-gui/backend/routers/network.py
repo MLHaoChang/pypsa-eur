@@ -23,7 +23,7 @@ from models.schemas import (
 )
 from db.models import Session as SessionRow
 from db.session import get_db
-from deps import current_session
+from deps import current_session, optional_user
 from services import active_project, attribute_catalog, provenance_graph
 from services.asset_schema import fields as asset_fields
 from services.asset_schema.schema import CLASS_ATTR
@@ -823,15 +823,23 @@ def get_asset_provenance(component: str, name: str) -> dict:
 
 
 @router.get("/asset_schema/{component}/provenance/{name}/why/{field}")
-def get_asset_provenance_why(component: str, name: str, field: str) -> dict:
+def get_asset_provenance_why(
+    component: str,
+    name: str,
+    field: str,
+    db: DBSession = Depends(get_db),
+    user=Depends(optional_user),
+) -> dict:
     """Why one asset field has its value (provenance-graph 03): the provenance graph's walk from the field to
     what priced it, outcome first, then each step's value, unit, stamp, the edge that reached it and whether it is
     current. `field` = `capital_cost` is the Economics row's annualised cost. Reads only (COPILOT-1). A target
     the graph cannot answer for is `why_target_unknown` (422 an unknown class, else 404)."""
     from services.provenance_graph.explain import TargetUnknown, explain
 
+    from services.provenance_graph.memory import reader_for
+
     try:
-        return explain(PyPSAService.get_network(), component, name, field)
+        return explain(PyPSAService.get_network(), component, name, field, reader_for(db, user))
     except TargetUnknown as exc:
         raise HTTPException(exc.status, {"error_kind": "why_target_unknown", "message": str(exc)}) from exc
 

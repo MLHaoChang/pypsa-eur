@@ -23,6 +23,9 @@ from typing import Any
 from services.asset_schema import fields as asset_fields
 from services.asset_schema.schema import CLASS_ATTR
 from services.provenance_graph import money
+from services.provenance_graph.memory import (
+    MemoryRecall,
+)
 from services.provenance_graph.queries import _check, money_graph, staleness, why
 from services.provenance_graph.types import Edge, Graph, Step, Unrecorded
 
@@ -115,6 +118,16 @@ def _recorded(edge: Edge) -> Any:
         return None
     if isinstance(rec, Unrecorded):
         return {"unrecorded": rec.reason}
+    if isinstance(rec, MemoryRecall):
+        out = {"item": rec.item, "version": rec.version, "replaces": rec.replaces}
+        if not rec.confirmed:
+            # The stamp's approver is text a file can carry: not echoed as an approval until the store confirms it.
+            return {**out, "approval": UNCONFIRMED_APPROVAL}
+        return {
+            **out,
+            "approved_by": rec.approved_by,
+            "approved_at": rec.approved_at,
+        }
     if isinstance(rec, money.ScaleRecord):
         return (
             rec.scaled
@@ -124,10 +137,32 @@ def _recorded(edge: Edge) -> Any:
     return rec
 
 
-def _stamp(stamp: dict | None) -> dict | None:
+UNCONFIRMED_APPROVAL = (
+    "unconfirmed: the memory store did not confirm this approval for you"
+)
+_APPROVAL_KEYS = ("approved_by", "approved_at")
+
+
+def _stamp(stamp: dict | None, unconfirmed: bool = False) -> dict | None:
+    """The stamp keys a step carries. A stamp that claims a memory approval the store did not confirm for this
+    viewer drops the approver and time and says so (GK B A3)."""
     if not stamp:
         return None
-    return {k: stamp[k] for k in STAMP_KEYS if k in stamp}
+    out = {k: stamp[k] for k in STAMP_KEYS if k in stamp}
+    if unconfirmed:
+        out = {k: v for k, v in out.items() if k not in _APPROVAL_KEYS}
+        out["approval"] = UNCONFIRMED_APPROVAL
+    return out
+
+
+def _unconfirmed(g: Graph, node_id: str) -> bool:
+    return any(
+        e.kind == "recalled_from"
+        and e.src == node_id
+        and isinstance(e.recorded, MemoryRecall)
+        and not e.recorded.confirmed
+        for e in g.edges
+    )
 
 
 def _stamp_missing(stamp: dict | None, unit: str | None) -> list[str]:
@@ -193,6 +228,22 @@ def _pack_price(
     }
 
 
+def _memory(step: Step) -> dict | None:
+    """The memory step: its state wording and, when the viewer's own read of the item confirmed it, its summary,
+    kind, owner scope and source evidence. Never a silent omission (P4, P5): an item the viewer may not read says
+    "not visible to you"; any other failure, or no reader, says "memory item could not be read". The id and
+    version come from the stamp, which alone never reads "user-approved" (P2)."""
+    rec = step.via.recorded if step.via is not None else None
+    if step.node.kind != "memory" or not isinstance(rec, MemoryRecall):
+        return None
+    return {
+        "id": step.node.id,
+        "state": rec.state,
+        "item": rec.item_read,
+        "note": rec.note,
+    }
+
+
 def _step(g: Graph, step: Step) -> dict:
     parsed = _parse(step.node.id)
     cls, name, field = parsed if parsed else (None, None, None)
@@ -206,7 +257,7 @@ def _step(g: Graph, step: Step) -> dict:
         "field": field,
         "value": value,
         "unit": unit,
-        "stamp": _stamp(step.stamp),
+        "stamp": _stamp(step.stamp, _unconfirmed(g, step.node.id)),
         "stamp_missing": _stamp_missing(step.stamp, unit),
         "via": None
         if step.via is None
@@ -220,6 +271,9 @@ def _step(g: Graph, step: Step) -> dict:
     }
     if step.via is not None and step.via.kind != "derived_from":
         out["broken"] = _broken(step.via, g)
+    memory = _memory(step)
+    if memory is not None:
+        out["memory"] = memory
     pack = _pack_price(g, step, value, unit) if step.node.kind == "derived" else None
     if pack is not None:
         out["pack_price"] = pack
@@ -247,10 +301,12 @@ def check_target(n, component: str, name: str) -> None:
         raise TargetUnknown(f"{component} '{name}' not found")
 
 
-def explain(n, component: str, name: str, field: str) -> dict:
-    """Why one asset field has its value: the walk from the field to what priced it, outcome first."""
+def explain(n, component: str, name: str, field: str, memory=None) -> dict:
+    """Why one asset field has its value: the walk from the field to what priced it, outcome first.
+    `memory` is the viewer's reader of memory items (`memory.reader_for`, slice 07): a value accepted from one
+    reads `from_memory` only when the store confirms the item for this viewer."""
     check_target(n, component, name)
-    g = money_graph(n, [(component, name)])
+    g = money_graph(n, [(component, name)], memory)
     start = _start(g, component, name, field)
     steps = why(g, start).steps
     verdict = staleness(g, start)
@@ -286,7 +342,7 @@ def ledger_fields(key: str, pv_kind: str | None = None) -> list:
     return rows
 
 
-def explain_ledger_row(n, key: str) -> dict:
+def explain_ledger_row(n, key: str, memory=None) -> dict:
     """Why a Guided ledger row's value is what the network holds: `explain` for each asset field the row compiles
     to (the round-trip efficiency compiles to two). Outcome first: stale when any field is stale, else uncompared
     when any is, else fresh; complete only when every field's walk is."""
@@ -294,7 +350,7 @@ def explain_ledger_row(n, key: str) -> dict:
     fields = []
     for m in ledger_fields(key, meta.get("pv_kind")):
         try:
-            fields.append(explain(n, m.component, m.name, m.field))
+            fields.append(explain(n, m.component, m.name, m.field, memory))
         except TargetUnknown:
             continue  # the asset is not on this network, or the field was never recorded on it
     if not fields:
@@ -307,6 +363,8 @@ def explain_ledger_row(n, key: str) -> dict:
         if "stale" in states
         else "uncompared"
         if "uncompared" in states
+        else "from_memory"
+        if "from_memory" in states
         else "fresh"
     )
     return {

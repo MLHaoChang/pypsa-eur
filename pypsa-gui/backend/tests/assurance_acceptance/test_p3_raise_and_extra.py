@@ -138,6 +138,32 @@ def test_a_write_that_also_edits_n_meta_reads_partial_extra_edits(
     assert block["paths_extra"] == ["/meta/note"]
 
 
+def test_a_cell_write_that_also_edits_a_sibling_attribute_reads_extra_edits(
+    baseline, monkeypatch
+):
+    def sibling():
+        _net().generators.at["G1", "p_nom"] = 99.0
+
+    _wrap(monkeypatch, "bulk_update_components", after=sibling)
+    block = _result(_frames(monkeypatch, "bulk_update_components", UPDATE))["_outcome"]
+    assert (block["outcome"], block["reason"]) == ("partial", "extra_edits")
+    assert block["paths_extra"] == ["/Generator/G1/p_nom"]
+
+
+def test_a_cell_write_owns_its_provenance_entry_but_no_other_meta_store(
+    baseline, monkeypatch
+):
+    def other_store():
+        _net().meta.setdefault("some_store", {}).setdefault("Generator", {})["G1"] = {
+            "x": 1
+        }
+
+    _wrap(monkeypatch, "bulk_update_components", after=other_store)
+    block = _result(_frames(monkeypatch, "bulk_update_components", UPDATE))["_outcome"]
+    assert (block["outcome"], block["reason"]) == ("partial", "extra_edits")
+    assert block["paths_extra"] == ["/meta/some_store/Generator/G1"]
+
+
 def test_a_write_that_also_edits_the_weightings_reads_partial_extra_edits(
     baseline, monkeypatch
 ):
