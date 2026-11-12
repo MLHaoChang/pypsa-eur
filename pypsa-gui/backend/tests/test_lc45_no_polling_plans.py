@@ -376,3 +376,48 @@ def test_a_harness_run_step_keeps_its_own_judge_not_the_plan_follower():
         assert T._outcome(tool, started, None, run=True)[0] == "completed"
     # the sweep and the enqueue are unchanged in a run
     assert T._outcome("solve_queue_enqueue", started, None, run=True)[0] == "uncertain"
+
+
+def test_a_failing_run_lookup_never_loses_the_tool_result(
+    session, baseline, monkeypatch
+):
+    """GK B F2: the run check does IO after the tool ran; its failure leaves a
+    start receipt (uncertain), never an escaped error that drops the result."""
+    from services import assistant_tasks
+
+    _, _, root = baseline
+    task = _study(monkeypatch, "lc45-f2", {"options": [_rec()]})
+
+    def boom(ticket):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(assistant_tasks, "is_run_ticket", boom)
+    _, results = _run(session, monkeypatch, "options")
+    assert tool_result(results)["stage"] == "options"
+    assert stored(root, task["task_id"])["steps"][0]["status"] == "uncertain"
+
+
+def test_the_late_receipt_reads_the_run_flag_of_its_task(
+    session, baseline, monkeypatch
+):
+    """GK B F1: a timed-out study step records a late receipt on a run only;
+    on a chat plan a started run is not a completion."""
+    import json
+
+    from services import assistant_tasks as T
+
+    _, _, root = baseline
+    task = _study(monkeypatch, "lc45-f1", {"options": [_rec()]})
+    path = T._path(task["task_id"])[0]
+    ticket = T.begin_step(session, "run_decision_study", {**S1, "stage": "options"})
+    T.finish_step(ticket, error="timed out")
+    started = {"stage": "options", "run": {"status": "running"}}
+
+    T._late_receipt(path, ticket, started)
+    assert "late_receipt" not in stored(root, task["task_id"])["steps"][0]
+
+    record = json.loads(open(path).read())
+    record["run"] = {"profile": "eh_site@1", "mode": "stepwise"}
+    open(path, "w").write(json.dumps(record))
+    T._late_receipt(path, ticket, started)
+    assert "late_receipt" in stored(root, task["task_id"])["steps"][0]
