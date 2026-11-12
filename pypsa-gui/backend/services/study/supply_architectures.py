@@ -33,6 +33,7 @@ the data-centre power chain (`services/dc_architecture.py`).
   definition, so 01a reuses or replaces this function rather than adding a
   second one.
 """
+
 from __future__ import annotations
 
 import itertools
@@ -46,17 +47,30 @@ from services.adequacy.slack import LOST_SLACK_PREFIX, slack_generator_mask
 from services.study.runner import _opt_value
 
 __all__ = [
-    "GROUP_ORDER", "MAX_ARCHITECTURES", "STATUSES", "SupplyArchitecture",
-    "ArchitectureUnsolved", "architectures_for", "classify", "compare", "omit",
-    "renewable_fraction", "row_of",
+    "GROUP_ORDER",
+    "MAX_ARCHITECTURES",
+    "STATUSES",
+    "SupplyArchitecture",
+    "ArchitectureUnsolved",
+    "architectures_for",
+    "classify",
+    "compare",
+    "omit",
+    "renewable_fraction",
+    "row_of",
 ]
 
 # Canonical order: an architecture's id joins its groups in this order.
 GROUP_ORDER = ("pv", "wind", "battery", "genset", "grid")
 SOURCES = frozenset({"pv", "wind", "genset", "grid"})
 NON_RENEWABLE = ("genset", "grid")
-LABELS = {"pv": "PV", "wind": "Wind", "battery": "Battery", "genset": "Genset",
-          "grid": "Grid"}
+LABELS = {
+    "pv": "PV",
+    "wind": "Wind",
+    "battery": "Battery",
+    "genset": "Genset",
+    "grid": "Grid",
+}
 # Row statuses, in rank order after the solved rows (gate G6).
 STATUSES = ("ok", "infeasible", "failed", "not_reached")
 # One solve each; more than this needs an explicit selection.
@@ -64,8 +78,9 @@ MAX_ARCHITECTURES = 16
 
 _PV = ("solar",)
 _WIND = ("onwind", "offwind", "wind")
-_GENSET = frozenset({"diesel", "genset", "gas", "oil", "ocgt", "ccgt", "hfo", "lpg",
-                     "biodiesel", "chp"})
+_GENSET = frozenset(
+    {"diesel", "genset", "gas", "oil", "ocgt", "ccgt", "hfo", "lpg", "biodiesel", "chp"}
+)
 _GRID = frozenset({"grid", "grid_import", "grid_export", "grid_supply"})
 _GRID_ROLES = frozenset({"grid_supply", "grid_import", "grid_export"})
 
@@ -114,7 +129,9 @@ def slack_names(n) -> set[str]:
     if g.empty:
         return set()
     mask = slack_generator_mask(g)
-    mask |= pd.Series([str(x).startswith(LOST_SLACK_PREFIX) for x in g.index], index=g.index)
+    mask |= pd.Series(
+        [str(x).startswith(LOST_SLACK_PREFIX) for x in g.index], index=g.index
+    )
     if "process_role" in g.columns:
         mask |= g["process_role"].astype(str).str.lower().eq("shortfall")
     return {str(x) for x in g.index[mask]}
@@ -145,13 +162,16 @@ def classify(n) -> dict[str, list[tuple[str, str]]]:
         for name in df.index:
             if component == "Generator" and str(name) in slacks:
                 continue
-            group = _group_of(component, _col(df, name, "carrier"), _col(df, name, "eh_role"))
+            group = _group_of(
+                component, _col(df, name, "carrier"), _col(df, name, "eh_role")
+            )
             if group is not None:
                 out.setdefault(group, []).append((component, str(name)))
     return {g: out[g] for g in GROUP_ORDER if g in out}
 
 
 # ── what an architecture removes ──────────────────────────────────────────
+
 
 def _bus_of(n, component: str, name: str) -> list[str]:
     df = _static(n, component)
@@ -163,14 +183,19 @@ def _bus_of(n, component: str, name: str) -> list[str]:
 def _link_buses(n) -> dict[str, list[str]]:
     df = _static(n, "Link")
     ports = [c for c in df.columns if c.startswith("bus") and c[3:].isdigit()]
-    return {str(name): [str(df.at[name, c]) for c in ports
-                        if str(df.at[name, c]) not in ("", "nan")]
-            for name in df.index}
+    return {
+        str(name): [
+            str(df.at[name, c]) for c in ports if str(df.at[name, c]) not in ("", "nan")
+        ]
+        for name in df.index
+    }
 
 
-def removed_components(n, arch: SupplyArchitecture,
-                       groups: Mapping[str, list[tuple[str, str]]] | None = None
-                       ) -> list[tuple[str, str]]:
+def removed_components(
+    n,
+    arch: SupplyArchitecture,
+    groups: Mapping[str, list[tuple[str, str]]] | None = None,
+) -> list[tuple[str, str]]:
     """
     The members of every group ``arch`` leaves out, then their dependants
     (gate G3): a link or store left on a bus that a removed member vacated and
@@ -212,8 +237,11 @@ def removed_components(n, arch: SupplyArchitecture,
     return gone
 
 
-def omit(n, arch: SupplyArchitecture,
-         groups: Mapping[str, list[tuple[str, str]]] | None = None):
+def omit(
+    n,
+    arch: SupplyArchitecture,
+    groups: Mapping[str, list[tuple[str, str]]] | None = None,
+):
     """A copy of ``n`` without the components ``arch`` leaves out (removed,
     never sized to zero)."""
     m = n.copy()
@@ -247,8 +275,11 @@ def _supplied(n, removed: set[tuple[str, str]]) -> bool:
                 union(buses[0], b)
     slacks = slack_names(n)
     g = _static(n, "Generator")
-    fed = {find(str(g.at[x, "bus"])) for x in g.index
-           if str(x) not in slacks and ("Generator", str(x)) not in removed}
+    fed = {
+        find(str(g.at[x, "bus"]))
+        for x in g.index
+        if str(x) not in slacks and ("Generator", str(x)) not in removed
+    }
     loads = _static(n, "Load")
     return all(find(str(loads.at[x, "bus"])) in fed for x in loads.index)
 
@@ -270,6 +301,7 @@ def architectures_for(n) -> list[SupplyArchitecture]:
 
 
 # ── reading a solved architecture ─────────────────────────────────────────
+
 
 def _weights(n) -> pd.Series:
     """Hours each snapshot stands for (gate G5): the generators' snapshot
@@ -318,12 +350,18 @@ def renewable_fraction(n) -> float | None:
     if not served > 0:
         return None
     groups = classify(n)
-    non_ren = sum(_energy(gp, [name for comp, name in groups.get(g, ()) if comp == "Generator"], w)
-                  for g in NON_RENEWABLE)
+    non_ren = sum(
+        _energy(
+            gp, [name for comp, name in groups.get(g, ()) if comp == "Generator"], w
+        )
+        for g in NON_RENEWABLE
+    )
     return min(1.0, max(0.0, 1.0 - non_ren / served))
 
 
-def _sizes(n, members: list[tuple[str, str]]) -> tuple[list[dict], float | None, str | None]:
+def _sizes(
+    n, members: list[tuple[str, str]]
+) -> tuple[list[dict], float | None, str | None]:
     """The solved sizes of an architecture's assets and their capex (overnight
     cost x optimal size, summed over the extendable assets), or why capex is
     unknown: any extendable asset without an overnight cost (gate G4: never a
@@ -336,15 +374,26 @@ def _sizes(n, members: list[tuple[str, str]]) -> tuple[list[dict], float | None,
         attr = "e_nom" if component == "Store" else "p_nom"
         extendable = bool(df.at[name, f"{attr}_extendable"])
         size = _opt_value(df.at[name, f"{attr}_opt" if extendable else attr])
-        sizes.append({"asset": name, "component": component, "size": size,
-                      "unit": "MWh" if component == "Store" else "MW",
-                      "extendable": extendable})
+        sizes.append(
+            {
+                "asset": name,
+                "component": component,
+                "size": size,
+                "unit": "MWh" if component == "Store" else "MW",
+                "extendable": extendable,
+            }
+        )
         if not extendable:
             continue
-        cost = _opt_value(df.at[name, "overnight_cost"]) if "overnight_cost" in df.columns else None
+        cost = (
+            _opt_value(df.at[name, "overnight_cost"])
+            if "overnight_cost" in df.columns
+            else None
+        )
         if cost is None or cost <= 0 or size is None:
-            missing = missing or (f"no_overnight_cost:{name}" if size is not None
-                                  else f"not_sized:{name}")
+            missing = missing or (
+                f"no_overnight_cost:{name}" if size is not None else f"not_sized:{name}"
+            )
         else:
             capex += cost * size
     return sizes, (None if missing else capex), missing
@@ -368,22 +417,36 @@ def row_of(arch: SupplyArchitecture, n) -> dict:
     rf = renewable_fraction(n)
     if rf is None:
         unavailable["renewable_fraction"] = "no_served_load"
-    return {"architecture_id": arch.architecture_id, "label": arch.label,
-            "groups": list(arch.groups), "status": "ok",
-            "total_cost_eur_per_year": cost, "capex_eur": capex,
-            "renewable_fraction": rf, "sizes": sizes, "unavailable": unavailable}
+    return {
+        "architecture_id": arch.architecture_id,
+        "label": arch.label,
+        "groups": list(arch.groups),
+        "status": "ok",
+        "total_cost_eur_per_year": cost,
+        "capex_eur": capex,
+        "renewable_fraction": rf,
+        "sizes": sizes,
+        "unavailable": unavailable,
+    }
 
 
 _FIGURES = ("total_cost_eur_per_year", "capex_eur", "renewable_fraction")
 
 
-def unsolved_row(arch: SupplyArchitecture, status: str, error: str | None = None) -> dict:
+def unsolved_row(
+    arch: SupplyArchitecture, status: str, error: str | None = None
+) -> dict:
     """The row of an architecture with no best system (listed, never dropped)."""
     if status not in STATUSES[1:]:
-        raise ValueError(f"not an unsolved status: {status!r}")
-    row = {"architecture_id": arch.architecture_id, "label": arch.label,
-           "groups": list(arch.groups), "status": status, "sizes": [],
-           "unavailable": {k: status for k in _FIGURES}}
+        raise ValueError(f"not an unsolved status: {status}")
+    row = {
+        "architecture_id": arch.architecture_id,
+        "label": arch.label,
+        "groups": list(arch.groups),
+        "status": status,
+        "sizes": [],
+        "unavailable": {k: status for k in _FIGURES},
+    }
     row.update({k: None for k in _FIGURES})
     if error:
         row["error"] = error
@@ -394,20 +457,25 @@ def ranked(rows: list[dict]) -> list[dict]:
     """Solved rows by total cost (cheapest first, ties in list order), then
     infeasible, failed and not_reached rows in list order (gate G6). A solved
     row with no cost ranks after every costed one."""
+
     def key(item):
         i, r = item
         cost = r.get("total_cost_eur_per_year")
         if r["status"] == "ok":
             return (0, 0, cost, i) if cost is not None else (0, 1, 0.0, i)
         return (1 + STATUSES.index(r["status"]), 0, 0.0, i)
+
     return [r for _, r in sorted(enumerate(rows), key=key)]
 
 
 def best_of(rows: list[dict]) -> str | None:
     """The cheapest solved architecture, or None when none solved (ruling 1:
     no winner when nothing was compared)."""
-    solved = [r for r in rows
-              if r["status"] == "ok" and r["total_cost_eur_per_year"] is not None]
+    solved = [
+        r
+        for r in rows
+        if r["status"] == "ok" and r["total_cost_eur_per_year"] is not None
+    ]
     if not solved:
         return None
     return ranked(solved)[0]["architecture_id"]
@@ -419,7 +487,8 @@ def select(n, architecture_ids: list[str] | None = None) -> list[SupplyArchitect
     if not archs:
         raise ArchitectureUnsolved(
             "no_architectures",
-            "the network has no PV, wind, genset or grid supply that reaches its load")
+            "the network has no PV, wind, genset or grid supply that reaches its load",
+        )
     if architecture_ids:
         known = {a.architecture_id: a for a in archs}
         unknown = [a for a in architecture_ids if a not in known]
@@ -427,22 +496,29 @@ def select(n, architecture_ids: list[str] | None = None) -> list[SupplyArchitect
             raise ArchitectureUnsolved(
                 "unknown_architecture",
                 f"not a supply architecture of this network: {', '.join(unknown)}; "
-                f"choose from {', '.join(known)}")
+                f"choose from {', '.join(known)}",
+            )
         archs = [known[a] for a in dict.fromkeys(architecture_ids)]
     if len(archs) > MAX_ARCHITECTURES:
         raise ArchitectureUnsolved(
             "too_many_architectures",
             f"{len(archs)} supply architectures exceed {MAX_ARCHITECTURES}; "
-            "name the ones to compare")
+            "name the ones to compare",
+        )
     return archs
 
 
 SolveFn = Callable[[Any, SupplyArchitecture], Any]
 
 
-def compare(n, solve: SolveFn, architecture_ids: list[str] | None = None, *,
-            archs: list[SupplyArchitecture] | None = None,
-            progress: Callable[..., None] | None = None) -> dict:
+def compare(
+    n,
+    solve: SolveFn,
+    architecture_ids: list[str] | None = None,
+    *,
+    archs: list[SupplyArchitecture] | None = None,
+    progress: Callable[..., None] | None = None,
+) -> dict:
     """
     One row per architecture: ``solve(network, arch)`` returns the solved
     network, None when it was not reached (stopped, no budget, deadline), or
@@ -459,8 +535,14 @@ def compare(n, solve: SolveFn, architecture_ids: list[str] | None = None, *,
         except ArchitectureUnsolved as exc:
             rows.append(unsolved_row(arch, exc.code, str(exc)))
             continue
-        rows.append(unsolved_row(arch, "not_reached") if solved is None
-                    else row_of(arch, solved))
+        rows.append(
+            unsolved_row(arch, "not_reached")
+            if solved is None
+            else row_of(arch, solved)
+        )
     rows = ranked(rows)
-    return {"rows": rows, "best_architecture_id": best_of(rows),
-            "renewable_fraction_basis": "served_energy_genset_and_grid_import_non_renewable"}
+    return {
+        "rows": rows,
+        "best_architecture_id": best_of(rows),
+        "renewable_fraction_basis": "served_energy_genset_and_grid_import_non_renewable",
+    }

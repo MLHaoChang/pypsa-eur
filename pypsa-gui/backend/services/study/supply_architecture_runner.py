@@ -25,6 +25,7 @@ Built like the tornado (`tornado_runner`), and on its pieces:
 * **Versioned record (gate G9).** The saved record carries
   :data:`SCHEMA_VERSION`; another version reads ``not_evaluated``.
 """
+
 from __future__ import annotations
 
 import contextvars
@@ -53,20 +54,34 @@ def _saved_base(base_row):
     from services.workflow_tools import _load_context, _network_input_fingerprint
 
     saved = _load_context(base_row)
-    return (saved.network, saved.solver_state["solver_config"],
-            _network_input_fingerprint(saved))
+    return (
+        saved.network,
+        saved.solver_state["solver_config"],
+        _network_input_fingerprint(saved),
+    )
 
 
 def _refuse_unsaved(resident) -> None:
     if resident is not None and dirty_state.is_dirty(resident):
-        raise R.RunRefused(409, "baseline_not_saved", (
-            "the study's base project has unsaved edits; save it so the "
-            "comparison solves what is on disk"))
+        raise R.RunRefused(
+            409,
+            "baseline_not_saved",
+            (
+                "the study's base project has unsaved edits; save it so the "
+                "comparison solves what is on disk"
+            ),
+        )
 
 
-def start(study_id: str, *, base_row, db, user_id,
-          architecture_ids: list[str] | None = None,
-          budget_solves: int | None = None) -> dict:
+def start(
+    study_id: str,
+    *,
+    base_row,
+    db,
+    user_id,
+    architecture_ids: list[str] | None = None,
+    budget_solves: int | None = None,
+) -> dict:
     """
     Validate, check the budget, claim the study slot on the base context and
     start the worker. Raises ``runner.RunRefused`` before anything starts.
@@ -88,13 +103,17 @@ def start(study_id: str, *, base_row, db, user_id,
     try:
         archs = SA.select(network, architecture_ids)
     except SA.ArchitectureUnsolved as exc:
-        raise R.RunRefused(422 if exc.code == "unknown_architecture" else 409,
-                           exc.code, str(exc)) from None
+        raise R.RunRefused(
+            422 if exc.code == "unknown_architecture" else 409, exc.code, str(exc)
+        ) from None
     solves = len(archs)
     budget = solves if budget_solves is None else int(budget_solves)
     if not 1 <= budget <= campaign.MAX_BUDGET_SOLVES:
-        raise R.RunRefused(422, "campaign_budget_invalid",
-                           f"budget_solves must be 1..{campaign.MAX_BUDGET_SOLVES}")
+        raise R.RunRefused(
+            422,
+            "campaign_budget_invalid",
+            f"budget_solves must be 1..{campaign.MAX_BUDGET_SOLVES}",
+        )
 
     registered = resident is None
     if registered:
@@ -107,29 +126,56 @@ def start(study_id: str, *, base_row, db, user_id,
         raise
     stop_event = threading.Event()
     record: dict[str, Any] = {
-        "status": "running", "kind": KIND, "study": R.STUDY_KEY, "study_id": study_id,
-        "current": None, "architectures": [a.architecture_id for a in archs],
-        "solves_estimated": solves, "solves_charged": 0, "variants": [],
-        "campaign": None, "own_campaign": False, "registered_base": registered,
-        "error": None, "started_at": time.time(), "finished_at": None,
-        "thread": None, "stop_event": stop_event, "network_revision": None,
-        "base_project_id": str(base_row.id), "base_fingerprint": fingerprint,
+        "status": "running",
+        "kind": KIND,
+        "study": R.STUDY_KEY,
+        "study_id": study_id,
+        "current": None,
+        "architectures": [a.architecture_id for a in archs],
+        "solves_estimated": solves,
+        "solves_charged": 0,
+        "variants": [],
+        "campaign": None,
+        "own_campaign": False,
+        "registered_base": registered,
+        "error": None,
+        "started_at": time.time(),
+        "finished_at": None,
+        "thread": None,
+        "stop_event": stop_event,
+        "network_revision": None,
+        "base_project_id": str(base_row.id),
+        "base_fingerprint": fingerprint,
     }
     dirty_state.capture(record, ctx)
     run_ctx = contextvars.copy_context()
     thread = threading.Thread(
-        target=lambda: run_ctx.run(_worker, study_id=study_id, base_dir=base_dir,
-                                   base_row_id=str(base_row.id), user_id=user_id,
-                                   network=network, cfg=cfg, archs=archs,
-                                   record=record, stop_event=stop_event, ctx=ctx),
-        daemon=True, name=f"supply-architectures-{study_id[:8]}")
+        target=lambda: run_ctx.run(
+            _worker,
+            study_id=study_id,
+            base_dir=base_dir,
+            base_row_id=str(base_row.id),
+            user_id=user_id,
+            network=network,
+            cfg=cfg,
+            archs=archs,
+            record=record,
+            stop_event=stop_event,
+            ctx=ctx,
+        ),
+        daemon=True,
+        name=f"supply-architectures-{study_id[:8]}",
+    )
     record["thread"] = thread
 
     lock = ctx.mutation_lock
     if not lock.acquire(timeout=5.0):
         R._release_base(key, registered)
-        raise R.RunRefused(409, "solver_in_flight",
-                           "a solve holds the study's base project; wait for it to finish")
+        raise R.RunRefused(
+            409,
+            "solver_in_flight",
+            "a solve holds the study's base project; wait for it to finish",
+        )
     try:
         with ctx.solver_state_lock:
             try:
@@ -142,11 +188,17 @@ def start(study_id: str, *, base_row, db, user_id,
             own = not R._on_ctx(ctx, campaign.status)["active"]
             if own:
                 try:
-                    R._on_ctx(ctx, campaign.start,
-                              f"decision study {study.name!r}: supply architectures", budget)
+                    R._on_ctx(
+                        ctx,
+                        campaign.start,
+                        f'decision study "{study.name}": supply architectures',
+                        budget,
+                    )
                 except campaign.CampaignError as exc:
                     R._release_base(key, registered)
-                    raise R.RunRefused(422, "campaign_budget_invalid", str(exc)) from None
+                    raise R.RunRefused(
+                        422, "campaign_budget_invalid", str(exc)
+                    ) from None
             try:
                 R._on_ctx(ctx, campaign.check, R.STUDY_KEY, solves)
             except campaign.CampaignBudgetError as exc:
@@ -166,12 +218,18 @@ def start(study_id: str, *, base_row, db, user_id,
                 raise
     finally:
         lock.release()
-    return {"status": "running", "kind": KIND, "study_id": study_id,
-            "solves_estimated": solves, "architectures": record["architectures"]}
+    return {
+        "status": "running",
+        "kind": KIND,
+        "study_id": study_id,
+        "solves_estimated": solves,
+        "architectures": record["architectures"],
+    }
 
 
 def _solve_fn(solver: ForkSolver, cfg):
     """``compare``'s solve: a fork solve, its failure typed (gate G6)."""
+
     def solve(net, arch):
         try:
             return solver(net, cfg, arch.architecture_id)
@@ -179,11 +237,23 @@ def _solve_fn(solver: ForkSolver, cfg):
             condition = str(getattr(exc, "condition", "") or "").lower()
             code = "infeasible" if "infeasible" in condition else "failed"
             raise SA.ArchitectureUnsolved(code, str(exc)) from None
+
     return solve
 
 
-def _worker(*, study_id, base_dir, base_row_id, user_id, network, cfg, archs,
-            record, stop_event, ctx) -> None:
+def _worker(
+    *,
+    study_id,
+    base_dir,
+    base_row_id,
+    user_id,
+    network,
+    cfg,
+    archs,
+    record,
+    stop_event,
+    ctx,
+) -> None:
     from db.models import Project
     from db.session import SessionLocal
     from services.adequacy import campaign
@@ -196,10 +266,19 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, network, cfg, archs,
     try:
         base_row = db.get(Project, R._uuid(base_row_id))
         solver = ForkSolver(db, user_id, base_row, study_id, stop_event, record, ctx)
-        table = SA.compare(network, _solve_fn(solver, cfg), archs=archs,
-                           progress=lambda **kw: R._set(ctx, record, **kw))
-        status = ("aborted" if stop_event.is_set() or record.get("budget_exhausted")
-                  or record.get("deadline_exceeded") else "done")
+        table = SA.compare(
+            network,
+            _solve_fn(solver, cfg),
+            archs=archs,
+            progress=lambda **kw: R._set(ctx, record, **kw),
+        )
+        status = (
+            "aborted"
+            if stop_event.is_set()
+            or record.get("budget_exhausted")
+            or record.get("deadline_exceeded")
+            else "done"
+        )
         if record.get("deadline_exceeded"):
             error = record["deadline_exceeded"]
     except Exception as exc:  # noqa: BLE001 — recorded
@@ -210,37 +289,57 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, network, cfg, archs,
         left = [r.name for r in solver.left] if solver is not None else []
         if record.get("own_campaign"):
             try:
-                R._set(ctx, record, campaign=campaign.end(
-                    f"decision study supply architectures {status}"))
+                R._set(
+                    ctx,
+                    record,
+                    campaign=campaign.end(
+                        f"decision study supply architectures {status}"
+                    ),
+                )
             except campaign.CampaignError:
                 pass
         try:
             _save(base_dir, study_id, record, table, status, error, left)
         except Exception:  # noqa: BLE001
-            logger.exception("decision study %s: saving the supply architectures failed",
-                             study_id)
+            logger.exception(
+                "decision study %s: saving the supply architectures failed", study_id
+            )
             error = error or "saving the supply architectures failed"
             status = "failed"
         db.close()
         if record.get("registered_base"):
             R._release_base(ctx.registry_key, True)
-        R._set(ctx, record, status=status, error=error, finished_at=time.time(),
-               current=None, forks_left=left)
+        R._set(
+            ctx,
+            record,
+            status=status,
+            error=error,
+            finished_at=time.time(),
+            current=None,
+            forks_left=left,
+        )
 
 
 def _save(base_dir, study_id, record, table, status, error, left) -> None:
     data: dict[str, Any] = {
-        "schema_version": SCHEMA_VERSION, "status": status, "kind": KIND,
-        "error": error, "started_at": record.get("started_at"),
+        "schema_version": SCHEMA_VERSION,
+        "status": status,
+        "kind": KIND,
+        "error": error,
+        "started_at": record.get("started_at"),
         "finished_at": time.time(),
         "base_project_id": record.get("base_project_id"),
         "base_fingerprint": record.get("base_fingerprint"),
         "architectures": record.get("architectures"),
         "solves_estimated": record.get("solves_estimated"),
         "solves_charged": record.get("solves_charged"),
-        "campaign": record.get("campaign"), "variants": record.get("variants"),
-        "forks_left": left, "budget_exhausted": bool(record.get("budget_exhausted")),
-        "rows": None, "best_architecture_id": None, "renewable_fraction_basis": None,
+        "campaign": record.get("campaign"),
+        "variants": record.get("variants"),
+        "forks_left": left,
+        "budget_exhausted": bool(record.get("budget_exhausted")),
+        "rows": None,
+        "best_architecture_id": None,
+        "renewable_fraction_basis": None,
     }
     if table is not None:
         data.update(table)
@@ -268,16 +367,23 @@ def get(study_id: str, *, base_row, base_dir) -> dict | None:
     if ctx is not None:
         with ctx.solver_state_lock:
             rec = ctx.solver_state.get(R.STUDY_KEY)
-            if (rec and rec.get("kind") == KIND and rec.get("study_id") == study_id
-                    and rec.get("status") == "running"):
+            if (
+                rec
+                and rec.get("kind") == KIND
+                and rec.get("study_id") == study_id
+                and rec.get("status") == "running"
+            ):
                 return R._public(rec)
     saved = store.load_aux(base_dir, study_id, AUX)
     if saved is None:
         return None
     if saved.get("schema_version") != SCHEMA_VERSION:
-        return {"status": "not_evaluated", "kind": KIND,
-                "reason": "unknown_schema_version",
-                "schema_version": saved.get("schema_version")}
+        return {
+            "status": "not_evaluated",
+            "kind": KIND,
+            "reason": "unknown_schema_version",
+            "schema_version": saved.get("schema_version"),
+        }
     return {**saved, "stale": _stale(saved, base_row)}
 
 
@@ -296,6 +402,9 @@ def abort(study_id: str, *, base_row, base_dir) -> dict:
                 return {"status": status, "aborting": status == "running"}
     last = store.load_aux(base_dir, study_id, AUX)
     if last is None:
-        raise R.RunRefused(404, "supply_architectures_never_run",
-                           "the supply-architecture comparison has not been run")
+        raise R.RunRefused(
+            404,
+            "supply_architectures_never_run",
+            "the supply-architecture comparison has not been run",
+        )
     return {"status": last.get("status"), "aborting": False}

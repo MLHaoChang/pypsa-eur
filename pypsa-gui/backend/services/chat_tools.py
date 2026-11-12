@@ -3743,7 +3743,7 @@ def compare_supply_architectures(project: str, study_id: str, action: str = "sta
     if action not in ("start", "abort"):
         raise HTTPException(status_code=422, detail={
             "error_kind": "supply_architectures_action_invalid",
-            "message": f"action must be 'start' or 'abort', got {_cut(action, 40)!r}"})
+            "message": f"action must be 'start' or 'abort', got '{_cut(action, 40)}'"})
     ap = _authorized_project(project)
     if action == "abort":
         return {"action": action,
