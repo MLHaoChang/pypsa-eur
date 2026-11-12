@@ -286,6 +286,9 @@ def test_an_unverified_check_is_not_evaluated_with_its_reason(direct):
     assert result["verdict"] == "not_evaluated"
     assert result["facts"][0]["value"] == "check_unverified"
     assert "bin solve status warning" in result["reason"]
+    payload["message"] = None
+    result = direct("nh3.binary_check", network=_network(), check=payload)
+    assert result["reason"] == "the binary check is unverified"
 
 
 @pytest.mark.parametrize(
@@ -577,6 +580,61 @@ def test_a_period_with_no_delivery_reads_no_shortfall(direct):
         "not_evaluated",
         "no_target",
     )
+
+
+@pytest.mark.parametrize(
+    ("weights", "value"),
+    [
+        ({3: float("inf")}, "unreadable_weights"),
+        ("all", "unreadable_weights"),
+        ({3: 0.0}, None),
+    ],
+)
+def test_weights_must_be_finite_and_some_above_zero(direct, weights, value):
+    """Mutants at the weight guard: an infinite weight or a period weighing
+    nothing is unreadable; one snapshot weighing nothing is fine."""
+    n = _solved(_network(), lost={3: 5.0})
+    col = n.snapshot_weightings.columns.get_loc("generators")
+    rows = _period_slice(n, n.investment_periods[0]) if weights == "all" else weights
+    for i in rows:
+        n.snapshot_weightings.iloc[i, col] = 0.0 if weights == "all" else weights[i]
+    result = direct("nh3.delivery.shortfall", network=n)
+    if value is None:
+        assert result["verdict"] == "pass" and result["facts"][0]["value"] == 0.0
+    else:
+        assert (result["verdict"], result["facts"][0]["value"]) == (
+            "not_evaluated",
+            value,
+        )
+
+
+def _single_period(n):
+    """The network's first investment period as a network with no periods."""
+    import pypsa
+
+    first = n.investment_periods[0]
+    sns = n.snapshots[n.snapshots.get_level_values(0) == first]
+    flat = sns.get_level_values(1)
+    out = pypsa.Network()
+    out.set_snapshots(flat)
+    for c in ("Carrier", "Bus", "Generator", "Load", "Link", "Store", "StorageUnit"):
+        df = n.components[c].static
+        if len(df):
+            out.add(c, df.index, **df.to_dict("series"))
+    out.loads_t.p_set = n.loads_t.p_set.loc[sns].set_axis(flat)
+    out.snapshot_weightings.loc[:, :] = n.snapshot_weightings.loc[sns].values
+    return out
+
+
+def test_a_network_with_no_investment_periods_reads_its_one_period(direct):
+    """Mutants at the period mask: a single-period network reads every snapshot once."""
+    n = _single_period(_network())
+    assert len(n.investment_periods) == 0
+    result = direct("nh3.delivery.shortfall", network=_solved(n, lost={3: 5.0}))
+    multi = _solved(_network(), lost={3: 5.0})
+    expected = _expected_share(multi, multi.investment_periods[0], {3: 5.0})
+    assert result["verdict"] == "pass"
+    assert result["facts"][0]["value"] == pytest.approx(expected, rel=1e-9)
 
 
 def test_results_that_predate_the_inputs_read_no_shortfall(direct, monkeypatch):
