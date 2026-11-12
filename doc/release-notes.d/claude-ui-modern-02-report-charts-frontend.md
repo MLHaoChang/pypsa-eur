@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A Results chart can be added to the study report from its header ("Add to report" / "In report"), so the report carries the exact chart and table the user saw; the Generate report dialog lists the charts added and lets you remove each.

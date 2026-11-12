@@ -12,7 +12,7 @@ import { networkApi } from '../../api/network'
 import type { Bus } from '../../api/types'
 import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, Seg,
   CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
-  useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
+  useSeasonalViewMode, SeasonalLineCardGrid, seasonalReportTable, thinNoteText, WindowCapBanner,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, carrierColour, ChartFrame } from './shared'
 import { NOT_RECORDED_KPI, NotRecordedNote } from './NotRecorded'
 import { useResultsFilter, resolveRange } from './filterContext'
@@ -1076,7 +1076,26 @@ export default function LoadFlow() {
                         [r.snapshot, ...voltageChart.cols.map(c => r[c] ?? '')]))
                     toast.success('Exported')
                   }}
-                  filename="results_bus_voltage" />
+                  filename="results_bus_voltage"
+                  report={(() => {
+                    const busNote = voltageChart.busTotal > voltageChart.cols.length
+                      ? `top ${voltageChart.cols.length} of ${voltageChart.busTotal} buses by deviation from 1.0 p.u.` : undefined
+                    if (lfMode !== 'timeframe') {
+                      const t = seasonalReportTable(voltageChart.rows, voltageChart.cols, lfMode)
+                      return {
+                        view: 'load-flow', figure: `bus_voltage_${lfMode}`, unit: 'p.u.',
+                        columns: t.columns, rows: t.rows, panels: true,
+                        note: [busNote, `averaged ${lfMode === 'weekly' ? 'week' : 'month'} per season`].filter(Boolean).join(' · '),
+                      }
+                    }
+                    return {
+                      view: 'load-flow', figure: 'bus_voltage_hourly', unit: 'p.u.',
+                      columns: ['snapshot', ...voltageChart.cols],
+                      rows: thinRows(voltageChart.rows).map(r => [r.snapshot, ...voltageChart.cols.map(c => r[c] ?? null)]),
+                      rowsTotal: voltageChart.rows.length,
+                      note: [busNote, thinNoteText(voltageChart.rows)].filter(Boolean).join(' · ') || undefined,
+                    }
+                  })()} />
               }>
               <div ref={voltageChartRef}>
                 {lfMode !== 'timeframe' ? (

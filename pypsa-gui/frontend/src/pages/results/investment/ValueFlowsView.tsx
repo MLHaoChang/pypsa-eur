@@ -191,7 +191,11 @@ export default function ValueFlowsView({ payload, sankeyWidth }: {
       <ParticipantTable payload={payload} periodKey={periodKey} />
       <ChartFrame testId="vf-flow" title={`Money flows · ${periodLabel(periodKey)}`} hint="payer → payee · per year, in the tariff's currency"
         right={state.status === 'ok' && period
-          ? <ChartActions chartRef={chart} filename={`value_flows_${periodKey}`} /> : undefined}>
+          ? <ChartActions chartRef={chart} filename={`value_flows_${periodKey}`}
+            report={{
+              view: 'value-flows', figure: `value_flows_${periodKey}`, unit: null,
+              columns: CSV_HEADER, rows: csvRows(periodKey, participantRows(payload, period)),
+            }} /> : undefined}>
         {state.status === 'ok' && period ? (
           <><div ref={chart} data-testid="vf-sankey">
             <ValueFlowSankey period={period} width={sankeyWidth} />

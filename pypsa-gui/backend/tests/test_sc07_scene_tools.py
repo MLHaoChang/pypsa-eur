@@ -321,7 +321,9 @@ def test_prepare_writes_nothing_and_returns_the_exact_apply_args(geo):
 
 def test_prepare_admits_the_route_actions_and_refuses_any_other(geo):
     # S4 admits the model actions (tests/test_sc07_bindings.py); adopt stays not_via_chat.
-    assert set(chat.CHAT_ACTIONS) == set(proposals.ACTIONS)
+    # SC-06-layout: import_layout is route-only (a user-chosen file, traced in the browser);
+    # it is not a chat action until a harness unit admits it.
+    assert set(chat.CHAT_ACTIONS) == set(proposals.ACTIONS) - {"import_layout"}
     with pytest.raises(HTTPException) as exc:
         chat_tools.site_scene_prepare("campus", "adopt", 1, {})
     assert _kind(exc) == "invalid_input" and exc.value.detail["field"] == "action"

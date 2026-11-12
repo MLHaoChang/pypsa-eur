@@ -88,7 +88,7 @@ from services.validation_service import STAGE2_CODES
 logger = logging.getLogger(__name__)
 
 ACKS_FILE = "flow_acks.json"
-TEMPLATE_FILE = "eh_template.json"
+from services.template_marker import MARKER_FILE as TEMPLATE_FILE  # noqa: E402, F401 - the name callers use
 
 # The study pipeline's order and the stages a user may toggle
 # (`EhReferenceDesignPanel.tsx` PIPELINE_ORDER / OPTIONAL_STAGES).
@@ -251,14 +251,10 @@ def _item(code: str, severity: str, message: str, source: str, section: str, *,
 # ── Template metadata and the Site / Goal card's request ────────────────────
 
 def read_template(project_dir: pathlib.Path) -> dict | None:
-    path = project_dir / TEMPLATE_FILE
-    if not path.is_file():
-        return None
-    try:
-        raw = json.loads(path.read_text("utf-8"))
-    except (OSError, ValueError):
-        return None
-    return raw if isinstance(raw, dict) else None
+    """The project's template metadata; a sensitivity case's is its base's
+    (`services.template_marker`, UM07-KIND-1)."""
+    from services.template_marker import read_marker
+    return read_marker(project_dir)
 
 
 def site_card_study_body(meta: dict, cfg: Any = None) -> dict | None:

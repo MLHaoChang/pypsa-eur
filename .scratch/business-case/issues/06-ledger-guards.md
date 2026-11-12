@@ -3,7 +3,7 @@
 
 # 06 — Ledger guards: double count, lost production, reference purchases
 
-Status: ready-for-agent (blocked by 05; Opus; GK B and GK A)
+Status: done (#1411 merged 2026-11-12; GK B (50) + GK A OK @646568da)
 Type: task
 Blocked by: 05
 Gated: yes (GK B, GK A)
@@ -74,3 +74,46 @@ Ruling (a): a linked `served_load.<load>` meets no bill stream. Against a valued
 
 04's `ledger_clash` (PR #1383) returns None for `served_load` against every stream;
 06 adds the `eaas_fee` branch, the C1 pin and the C2 tests.
+
+### 2026-11-12: plan GO, GK B (49) and GK A (23)
+
+Plan (session `session_01G7qCunDETRQUJtDttZqHHz`): `build_business_case(ic, inputs,
+outputs, lost_production)`; `linked_outputs.lost_production(n, solve, ic)` builds the
+map (slack → bus from `finance_case._lost_production_slacks`, dispatch from
+`process_products.shortfalls`, each Load's share through `_split`, the LO-3 split
+refactored out of `_unserved`); `ledger_clash` gains the `eaas_fee` branch;
+`BusinessCase.locked` lists the ledger rows.
+
+GK B answers: Q1 (a), C3 is carried to the presets: recorded in issue 12, the slice that owns the microgrid preset; 06 meets C1 and C2. Q2 (a), the drop
+is per BC year (GK A has the last word on G3-3).
+GK A answer, G3-4: (a), the slack's own hourly split by p_set(t), weighted by Σ w,
+through the same `_split` `_unserved` uses, so the drop is what L2 subtracts.
+
+GK B conditions:
+- D1 Shares finite in [0, 1]: a Load that never draws, a bus with no draw, a year with
+  no snapshots never give NaN; a scaled amount goes through `_finite`; amounts and
+  locked shares pass `json.dumps(allow_nan=False)`.
+- D2 The map enters `business_case_hash` only when non-empty (a no-drop case keeps its
+  master digest, pinned); deterministic serialisation; insertion order permuted, same hash.
+- D3 Fail closed with no map (`linked_output_missing`), a "no drop" mutant killed; the
+  PR body lists the callers of `build_business_case` and which passes the map.
+- D4 `locked` in the BC1 pin; a year with no drop is absent; a €0 sale line still has
+  its row.
+- D5 `mutants.py` on the changed lines of both modules, survivors listed; hand mutants
+  of the eaas_fee branch, the cap at 1, the full-drop removal, the opex/share_of
+  non-trigger and the per-year activity check, each with its killing test.
+
+GK A conditions:
+- A1 `_split` byte-equal; 04's tests unchanged; the F3 trio re-run against `_split`.
+- A2 One slack set: the ledger's slacks and `shortfalls` name the same ones, else the
+  bus is not evaluated; a captured slack with no Generator (G3-1).
+- A3 Zero shortfall in a period gives share 0; (a) ≠ (b) when the Loads' shapes differ,
+  and G3-5 holds.
+- A4 A Load read by two lines drops once; `served_product` with `served_h2` on the same
+  bus drops the bus once, never above 100 %.
+- A5 A line over part of a multi-year period drops only those years' share.
+- A6 A not-evaluated bus refuses only a triggering line on it; a mutant that refuses
+  every such bus killed.
+- A7 C1/C2 tests, the eaas_fee mutant, the C1 pin; `served_load` never drops.
+- A8 G-A1 with the F7 identity (served + ProductShortfall + the Load's VoLL = contracted).
+- A9 LO-9/BC1: the IC byte-equal pin covers a case with a drop.

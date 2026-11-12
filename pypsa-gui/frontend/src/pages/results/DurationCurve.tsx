@@ -106,7 +106,13 @@ export default function DurationCurve({
               rows.map(r => [r.pct, ...series.map(s => r[s.key])]))
             toast.success('Exported')
           }}
-          filename={filename} />
+          filename={filename}
+          report={{
+            view: 'duration-curve', figure: filename, unit,
+            columns: ['pct_of_hours', ...series.map(s => s.csv)],
+            rows: rows.map(r => [r.pct, ...series.map(s => r[s.key])]),
+            note: typeof note === 'string' ? note : undefined,
+          }} />
       }
       bodyClassName="p-3"
     >

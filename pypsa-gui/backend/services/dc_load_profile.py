@@ -25,8 +25,6 @@ from. Nothing here is a measured or vendor figure.
 """
 from __future__ import annotations
 
-import json
-import pathlib
 
 import numpy as np
 import pandas as pd
@@ -254,11 +252,8 @@ AMBIENT_FIELDS = ("ambient_annual_mean_c", "ambient_seasonal_amplitude_k",
 def read_ambient(project_dir) -> dict | None:
     """The ambient fields of a project's stored data-centre spec (the ones
     `ambient_c` draws), or None (no opt-in, no file)."""
-    path = pathlib.Path(project_dir) / "eh_template.json"
-    try:
-        meta = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
+    from services.template_marker import read_marker
+    meta = read_marker(project_dir)
     block = meta.get(META_KEY) if isinstance(meta, dict) else None
     spec = block.get("spec") if isinstance(block, dict) else None
     if not isinstance(spec, dict) or not all(k in spec for k in AMBIENT_FIELDS):
@@ -268,10 +263,7 @@ def read_ambient(project_dir) -> dict | None:
 
 def read_envelope(project_dir) -> dict | None:
     """A project's stored dynamic envelope, or None (no opt-in, no file)."""
-    path = pathlib.Path(project_dir) / "eh_template.json"
-    try:
-        meta = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
+    from services.template_marker import read_marker
+    meta = read_marker(project_dir)
     block = meta.get(META_KEY) if isinstance(meta, dict) else None
     return block.get("envelope") if isinstance(block, dict) else None

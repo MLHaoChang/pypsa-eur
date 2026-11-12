@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, within } from '@testing-library/react'
+import { render, screen, cleanup, within, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { ChartSpec } from '../../api/reports'
+import { resetReportCharts } from './reportCharts'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -48,6 +51,16 @@ vi.mock('../../api/network', async (importOriginal) => {
     },
   }
 })
+
+vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('../../utils/chartPng', () => ({
+  svgToPngBlob: vi.fn().mockResolvedValue(new Blob(['png'], { type: 'image/png' })),
+}))
+const reportApi = vi.hoisted(() => ({ listReportCharts: vi.fn(), addReportChart: vi.fn(), removeReportChart: vi.fn() }))
+vi.mock('../../api/reports', async () => ({
+  ...(await vi.importActual<typeof import('../../api/reports')>('../../api/reports')),
+  ...reportApi,
+}))
 
 afterEach(() => cleanup())
 
@@ -385,5 +398,75 @@ describe('AggregatedOverview curtailment penalty tile', () => {
     expect(t.dataset.state).toBe('ready')
     expect(within(t).getByLabelText('Not recorded by this solve')).toBeTruthy()
     expect((await screen.findAllByTestId('not-recorded-note')).length).toBe(1)
+  })
+})
+
+// ── "Add to report" on the five per-period charts ───────────────────────────
+describe('AggregatedOverview charts · report', () => {
+  const idx = ['2026-01-01T00:00:00', '2026-01-01T01:00:00']
+  beforeEach(() => {
+    resetReportCharts()
+    reportApi.listReportCharts.mockReset().mockResolvedValue({ charts: [], limit: 12 })
+    reportApi.addReportChart.mockReset().mockImplementation(async (_p: string, spec: ChartSpec) => ({
+      id: 'chart-0123456789abcdef', created_at: 't', earlier_solve: false, ...spec,
+    }))
+    useUIStore.setState({ currentProject: 'demo' })
+    vi.mocked(resultsApi.getGeneratorResults).mockResolvedValue({
+      index: idx, columns: ['ThermalGen', 'WindGen'], data: [[10, 5], [20, 15]],
+    })
+    vi.mocked(networkApi.getGenerators).mockResolvedValue([
+      { name: 'ThermalGen', carrier: 'gas' }, { name: 'WindGen', carrier: 'wind' },
+    ] as never)
+    vi.mocked(resultsApi.getCurtailment).mockResolvedValue({ index: idx, columns: ['WindGen'], data: [[1], [2]] })
+    vi.mocked(networkApi.getStorageUnits).mockResolvedValue([{ name: 'Bat', carrier: 'battery' }] as never)
+    vi.mocked(resultsApi.getStorageDispatchResults).mockResolvedValue({ index: idx, columns: ['Bat'], data: [[3], [-2]] })
+    vi.mocked(networkApi.getLoads).mockResolvedValue([{ name: 'L', carrier: 'AC' }] as never)
+    vi.mocked(resultsApi.getLoadResults).mockResolvedValue({ index: idx, columns: ['L'], data: [[25], [35]] })
+    vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue({
+      capex: 1000, capex_lifetime: 0, capex_expansion: 0, capex_expansion_lifetime: 0,
+      opex: 500, total: 1500, curtailment_cost: 0,
+      storage_capex_expansion: 0, storage_capex_expansion_lifetime: 0,
+      by_component: [], by_carrier: [], by_period: [],
+    })
+    vi.mocked(resultsApi.getLostLoad).mockResolvedValue({
+      index: [], columns: [], data: [], total_mwh: 0, total_cost_eur: 0, voll_eur_per_mwh: 100,
+    })
+  })
+
+  /** Press "Add to report" in the frame headed `title` and return the saved spec. */
+  async function save(title: string, before?: (frame: HTMLElement) => Promise<void>) {
+    renderOverview()
+    const frame = (await screen.findByRole('heading', { name: title })).closest('[data-chart-frame]') as HTMLElement
+    await before?.(frame)
+    await userEvent.click(await within(frame).findByRole('button', { name: 'Add to report' }))
+    await waitFor(() => expect(reportApi.addReportChart).toHaveBeenCalled())
+    const spec = reportApi.addReportChart.mock.calls.at(-1)![1] as ChartSpec
+    cleanup()
+    reportApi.addReportChart.mockClear()
+    return spec
+  }
+
+  it.each([
+    ['Economics · system cost per period', 'economics'],
+    ['Generation · energy mix per period', 'generation_abs'],
+    ['Storage · energy charged & discharged per period', 'storage'],
+    ['Renewables · curtailment per period', 'curtailment'],
+    ['Load · energy demand per period by carrier', 'load_by_carrier'],
+  ])('%s saves with its figure id and a table', async (title, figure) => {
+    const spec = await save(title)
+    expect(spec.view).toBe('aggregated-overview')
+    expect(spec.figure).toBe(figure)
+    expect(spec.columns!.length).toBeGreaterThan(1)
+    expect(spec.columns![0]).toBe('period')
+    expect(spec.rows!.length).toBeGreaterThan(0)
+  })
+
+  it('absolute and percent generation are two figures', async () => {
+    const title = 'Generation · energy mix per period'
+    const abs = await save(title)
+    const pct = await save(title, async f => { await userEvent.click(within(f).getByRole('button', { name: '% of total' })) })
+    expect(pct.figure).toBe('generation_pct')
+    expect(pct.unit).toBe('%')
+    expect(abs.figure).not.toBe(pct.figure)
   })
 })

@@ -117,10 +117,8 @@ def validate(item: str, value, source, note) -> tuple[float | None, str, str]:
 
 def _template_default(project_dir: pathlib.Path, item: str) -> dict | None:
     """The template's own ledger row for ``item`` as ``{value, source}``, or None."""
-    try:
-        meta = json.loads((project_dir / "eh_template.json").read_text("utf-8"))
-    except (OSError, ValueError):
-        return None
+    from services.template_marker import read_marker
+    meta = read_marker(project_dir)
     for row in (meta.get("ledger") or []) if isinstance(meta, dict) else []:
         if isinstance(row, dict) and row.get("item") == item:
             return {"value": row.get("value"), "source": row.get("source")}

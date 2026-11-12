@@ -5,6 +5,7 @@ import type { ReactElement } from 'react'
 import { ChartSourceProvider } from '../../components/charts/chartTheme'
 import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
 import * as shared from './shared'
+import { useUIStore } from '../../store/uiStore'
 
 // jsdom has no layout: give the responsive container a size so the plot draws.
 vi.mock('recharts', async (importOriginal) => {
@@ -165,5 +166,19 @@ describe('<DurationCurve>', () => {
         filename="load_duration_curve" note="Total system load sorted high-to-low." />,
     )
     expect(screen.getByText('Total system load sorted high-to-low.')).toBeTruthy()
+  })
+})
+
+describe('<DurationCurve> · report', () => {
+  it('offers "Add to report" in a project, and not without one', () => {
+    const rows = durationRows({ load: [10, 30, 20] })
+    const draw = () => <DurationCurve title="Load duration curve" rows={rows} series={[LOAD]} unit="MW" format={mw} filename="a" />
+    useUIStore.setState({ currentProject: 'demo' })
+    const first = render(draw())
+    expect(screen.getByRole('button', { name: 'Add to report' })).toBeTruthy()
+    first.unmount()
+    useUIStore.setState({ currentProject: null })
+    render(draw())
+    expect(screen.queryByRole('button', { name: /report/i })).toBeNull()
   })
 })

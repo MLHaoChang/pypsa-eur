@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The study harness's microgrid and datacenter profiles (each template, single and staged) now ship the agent's instructions for their input and result gates, so a datacenter run no longer stops on its first round for want of them; a test checks every agent stage of every profile has its instruction file.
