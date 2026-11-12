@@ -59,6 +59,10 @@ RUN_TOOLS = frozenset({"run_simulation", "run_ac_pf_stage", "solve_queue_enqueue
 # only to cover `restore: "final"` (a solver-config write, LC-40); its solves
 # are its own audit row's (`reserve_engine`), never one admitted solve.
 ENGINE_TOOLS = frozenset({"run_margin_loop", "run_coupling_loop"})
+# Study harness 14 (GK B (52) I2): a run the grant lists that solves no LP: the
+# single-owner investment case values the solved dispatch. It is admitted like
+# a run but never counts as a solve, so it never spends the solves budget.
+CASE_TOOLS = frozenset({"run_investment_case"})
 # Study harness 07 (GK B B1-b): a grant that lists the run's report covers only
 # the stage-7 card (`cross`); the runner starts that job itself, so a chat
 # `generate_report` is never admitted on it, and it never counts as a solve.
@@ -205,11 +209,11 @@ def _check_edit(entry):
 
 def _check_run(entry):
     if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind", "restore"} \
-            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS \
+            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS \
             or not isinstance(entry.get("kind", ""), str) \
             or ("kind" in entry and entry["tool"] in REPORT_TOOLS) \
             or ("restore" in entry and (entry["tool"] not in ENGINE_TOOLS or entry["restore"] != "final")):
-        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS)} and an optional "
+        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS)} and an optional "
                             "kind (none for the report); a "
                             f"loop-driving tool may carry restore \"final\": {entry!r}")
     if entry["tool"] in NEVER_LISTED:
@@ -1449,7 +1453,7 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
     if _research(args):
         return "research_value"
     is_run = any(r["tool"] == tool for r in envelope["runs"])
-    reason = _standing(session, envelope, task, ctx, solve=is_run)
+    reason = _standing(session, envelope, task, ctx, solve=is_run and tool in RUN_TOOLS)
     if reason is not None:
         return reason
     if _names_another_project(args, ctx):

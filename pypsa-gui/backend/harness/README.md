@@ -1730,6 +1730,44 @@ C1-C7). The scope is the template's; there is no EH study and no LOLE loop.
   report, g2p 13); a run whose `grid_risk` section is not established lists
   it as a gap.
 
+### The IPP hybrid profile (study harness 14)
+
+`eh_ipp_hybrid@1` (`run_profiles._eh_ipp_hybrid`; GK B (52) GO, I1-I10). A
+renewables IPP with a battery behind one export connection: commercial-led,
+no EH study, no LOLE loop. `run_profiles.scope_for` adds `skipped`: each card
+the preset turns off (grid, control, reliability), with its reason, read from
+`flow_scope.preset_for`.
+
+- **Solve stage.** The queued solve, then `run_investment_case` (a
+  `BOUND_CONTEXT_TOOLS` member with `solve_ppa_price`, which joins for the next
+  slice). The case runs in a worker thread, so the step waits on its own job and
+  `harness/run_ic.py` settles it from the case's record, the one whose
+  `started_at` the start receipt names (the shape of `run_eh`; nothing
+  polls, LC-45). A refused, failed or aborted case fails the step; a replaced
+  or lost record is uncertain. It solves no LP: `run_envelope.CASE_TOOLS` lets a
+  grant list it, and it never counts against the solves budget.
+- **Result gate.** The core rules and:
+  - `ipp.export.over_limit_mw` (block, at most 0): the peak export through the
+    link the commercial config names (`export_link`) over every snapshot of
+    every period, minus that link's rating. The flow is `p0` when the point
+    of connection (`eh_poc`) is bus1 and `-p0` when it is bus0, so an import
+    never counts. No named link, no rating, no tag or a non-finite flow is no
+    evidence; no limit is assumed;
+  - `ic.min_dscr` (warn, at least `IPP_DSCR_MIN`, an assumed 1.2): the least
+    DSCR over the years with debt service. No debt, or a year with service
+    and no finite DSCR, is not established (the shipped template has no debt,
+    so the rule is then not evaluated);
+  - `ic.project_pre_tax_irr` (warn, present): the case's pre-tax IRR, or not
+    established when it has no sign change. Both read the stored case only
+    when it is current, its counterfactual established and the report read
+    the one judged (`ic_counterfactual._current_report`).
+- **Levers.** The battery (`bess` power up to 100 MW, duration 1-4 h, twice
+  the template's). The plants are forced-size, and the connection and its
+  prices are the user's. The PPA share is a commercial value no chat edit
+  reaches (`missing_tools`).
+- **Explore.** Skipped, with its reason, until the shipped `cases.json` run as
+  explore cases (the next slice).
+
 ### The approval envelope (study harness issue 03)
 
 `services/run_envelope.py` (design §7; SH-ENVELOPE-1). "Approve once, run

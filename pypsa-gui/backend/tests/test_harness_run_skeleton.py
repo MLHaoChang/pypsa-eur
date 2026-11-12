@@ -446,6 +446,39 @@ def _eh_study_reads_the_run_project(run_ctx, project_id, monkeypatch):
     return seen == [str(project_id)]
 
 
+def _case_tools_read_the_run_project(run_ctx, monkeypatch):
+    """Study harness 14 (GK B (52) I1, #875): the investment case starts on the run's project, not the
+    foreground's, and `solve_ppa_price` reads the run's own network; neither takes a project argument.
+    The start and the dispatch check are stopped (nothing runs)."""
+    import inspect
+
+    from routers import results
+    from services.pypsa_service import PyPSAService
+    from services.study.runner import _on_ctx
+    seen = {}
+
+    def start(body=None):
+        seen["start"] = str(PyPSAService.get_active_context().project_uuid)
+        return {"status": "running"}
+
+    def not_solved(n):
+        seen["ppa"] = str(PyPSAService.get_active_context().project_uuid)
+        return False
+
+    monkeypatch.setattr(results, "post_investment_case", start)  # the tool imports it at call time
+    monkeypatch.setattr(results, "_dispatch_ready", not_solved)
+    monkeypatch.setattr(results, "_study_mesh_blocker", lambda tool: None)
+    _on_ctx(run_ctx, chat_tools.run_investment_case)
+    with pytest.raises(Exception):  # the unsolved network is refused after it was read
+        _on_ctx(run_ctx, chat_tools.solve_ppa_price, 0.08, 25)
+    names = {p for tool in (chat_tools.run_investment_case, chat_tools.solve_ppa_price)
+             for p in inspect.signature(tool).parameters}
+    uuid = str(run_ctx.project_uuid)
+    no_project_arg = not any("project" in p for p in names)
+    return {"run_investment_case": seen.get("start") == uuid and no_project_arg,
+            "solve_ppa_price": seen.get("ppa") == uuid and no_project_arg}
+
+
 def _scene_apply_on_the_run_project(run_ctx, root):
     """SC-07 S3 (GK B G7, N7): a 3D site apply on the run's bound context
     commits the run's project's scene; the foreground project has none. The
@@ -497,6 +530,7 @@ def test_each_stage_tool_resolves_the_project_through_the_bound_context(session,
                                        and ('loads', 'p_set', 'L1') in run_ctx.user_ts,
             'generate_report': _report_reads_the_run_project(run_ctx, project_id, monkeypatch),
             'run_eh_study': _eh_study_reads_the_run_project(run_ctx, project_id, monkeypatch),
+            **_case_tools_read_the_run_project(run_ctx, monkeypatch),
             'site_scene_apply': _scene_apply_on_the_run_project(run_ctx, site[1]),
         }
         assert PyPSAService.get_network() is front.network  # the foreground is untouched

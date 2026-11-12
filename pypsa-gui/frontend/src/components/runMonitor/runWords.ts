@@ -69,6 +69,10 @@ export const FACT_WORDS: Record<string, string> = {
   'process.units': 'The process units are filled in, with their capacity and efficiency',
   'process.binary_check': 'The plan holds when the process units start and stop for real (no period flagged)',
   'process.delivery.shortfall': 'The product delivery is met within its tolerance in every period',
+  // Study harness 14: the renewables IPP's export and investment-case figures.
+  'ipp.export.over_limit_mw': 'The power exported never passes the export connection\'s rating',
+  'ic.min_dscr': 'The investment case\'s lowest debt cover is at or above the floor',
+  'ic.project_pre_tax_irr': 'The investment case reports the project\'s pre-tax IRR',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,
@@ -104,6 +108,8 @@ export const NAME_WORDS: Record<string, string> = {
   electrolyser: 'The electrolyser', 'electrolyser_new_*': 'New electrolysers', h2_storage: 'The hydrogen store',
   // Study harness 12c: the single-year microgrid's battery candidate.
   bess_new: 'The new battery',
+  // Study harness 14: the IPP's battery candidate.
+  bess: 'The battery',
   // Study harness 13: the ammonia hub's levers.
   'wind_new_*': 'New wind', 'solar_new_*': 'New solar', nh3_tank: 'The ammonia tank',
 }
@@ -122,7 +128,7 @@ export const FIELD_WORDS: Record<string, { words: string; unit: string }> = {
 /** The runs an envelope can cover. */
 export const RUN_WORDS: Record<string, string> = {
   solve_queue_enqueue: 'Queued solves', run_simulation: 'Solves', run_ac_pf_stage: 'Load-flow checks',
-  generate_report: 'Study reports',
+  generate_report: 'Study reports', run_investment_case: 'Investment case',
 }
 
 const number = (x: number) => (Number.isInteger(x) ? String(x) : x.toFixed(2).replace(/\.?0+$/, ''))

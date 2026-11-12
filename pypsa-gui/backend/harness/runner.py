@@ -517,6 +517,8 @@ class Runner:
             # Issue 07 B3a: a waiting EH study lost with the restart settles uncertain, its
             # reservation kept whole; one with a live lease elsewhere is left to its holder.
             swept += run_eh.recover(path, None, instance=self.instance, now=self.clock(), lapsed_ok=True)
+            from harness import run_ic
+            swept += run_ic.recover(path, None, instance=self.instance, now=self.clock(), lapsed_ok=True)
         return swept
 
     # one tick
@@ -694,6 +696,8 @@ class Runner:
                     from harness import run_eh, run_loops
                     run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
                     run_eh.recover(path, ctx, instance=self.instance, now=self.clock())  # issue 07 B3a
+                    from harness import run_ic
+                    run_ic.recover(path, ctx, instance=self.instance, now=self.clock())  # study harness 14
                 from harness import run_report
                 run_report.settle(path, ctx)  # issue 07: the run's report job, once it ended
                 from services import run_actions
@@ -1190,6 +1194,8 @@ class Runner:
             from harness import run_eh, run_loops
             run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
             run_eh.recover(path, ctx, instance=self.instance, now=self.clock())  # issue 07 B3a
+            from harness import run_ic
+            run_ic.recover(path, ctx, instance=self.instance, now=self.clock())  # study harness 14
         with tasks._LOCK:
             task = _read(path)
             tasks._reconcile_lost(path, task)
