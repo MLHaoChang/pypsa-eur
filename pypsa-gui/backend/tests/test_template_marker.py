@@ -645,7 +645,10 @@ def _direct_uses(source: str, exempt: frozenset | set = frozenset()) -> list[int
     tree = ast.parse(source)
     skip = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name in exempt:
+        if (
+            isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name in exempt
+        ):
             skip.update(range(node.lineno, node.end_lineno + 1))
     names = set(NAMES)
     for node in ast.walk(tree):
