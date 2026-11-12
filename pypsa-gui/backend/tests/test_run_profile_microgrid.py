@@ -23,7 +23,7 @@ from pathlib import Path
 import pypsa
 import pytest
 
-from harness import run_eh, run_loops
+from harness import run_eh, run_handoff, run_loops
 from harness import runner as harness_runner
 from services import (
     assistant_tasks,
@@ -1312,6 +1312,14 @@ def test_a_lole_loop_the_cap_cut_short_is_not_evaluated_and_ends_on_the_cap(tmp_
         is False
     )
     assert task["run"]["stages"]["result_gate"]["reason"] == "budget_spent"
+    # G8 on the hand-off: the capped rule is counted not evaluated, with its words, never met.
+    task["run"]["stages"]["result_gate"]["gate"] = gate
+    held = run_handoff.checks(task["run"])
+    assert held["counts"] == {"pass": 0, "fail": 0, "not_evaluated": 1}
+    [named] = held["not_evaluated"]
+    assert (
+        named["rule"] == "eh.adequacy.lole" and "1 of its 3 solves" in named["reason"]
+    )
 
 
 def test_a_loop_that_had_all_its_solves_and_did_not_converge_still_fails(tmp_path):

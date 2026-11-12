@@ -145,6 +145,13 @@ def test_a_run_reports_strictly_on_its_own_lease_then_hands_off(
     assert not any(s["tool"] == "apply_project_changes" for s in record["steps"])
     handoff = record["run"]["handoff"]
     assert handoff["resume"]["report_id"] == step["job"]["report_id"]
+    # SH-12c G8: the hand-off stores the result gate's counts, read by the
+    # hand-off step itself; eh_site has no warn rule, so nothing is unevaluated.
+    rules = record["run"]["stages"]["result_gate"]["gate"]["rules"]
+    assert handoff["checks"] == {
+        "counts": {"pass": len(rules), "fail": 0, "not_evaluated": 0},
+        "not_evaluated": [],
+    }
 
 
 def test_c8_a_run_stored_before_the_change_goes_on_to_the_new_stages(
@@ -504,7 +511,17 @@ def coverage_task(case_status=None, gate_passed=True):
         "stages": {
             "result_gate": {
                 "status": "passed" if gate_passed else "failed",
-                "gate": {"passed": gate_passed},
+                # A gate that evaluated a rule (GK B (49) F1: one with none is a gap).
+                "gate": {
+                    "passed": gate_passed,
+                    "rules": [
+                        {
+                            "rule": "res.solve.status",
+                            "severity": "block",
+                            "verdict": "pass" if gate_passed else "fail",
+                        }
+                    ],
+                },
             }
         },
     }
