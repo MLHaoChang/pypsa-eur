@@ -103,6 +103,11 @@ def _assistant_text(session):
     ]
 
 
+def _released_cleanly(caplog):
+    """The lease release raised nothing it had to swallow and log."""
+    return "admission lease could not be released" not in caplog.text
+
+
 def _live(session, client, text="list the buses", uid="u1", gen=1):
     return list(
         chat_service.run_turn(
@@ -275,7 +280,7 @@ def test_an_unreadable_generation_fails_closed(network, monkeypatch):
     assert not any(ev == "turn_done" for ev, _ in events)
 
 
-def test_same_generation_live_turn_is_unchanged(network, monkeypatch):
+def test_same_generation_live_turn_is_unchanged(network, monkeypatch, caplog):
     session = chat_service.ChatSession()
     reader = _Reader()
     monkeypatch.setitem(chat_tools.DISPATCHERS, "list_components", reader)
@@ -288,9 +293,10 @@ def test_same_generation_live_turn_is_unchanged(network, monkeypatch):
     assert any(ev == "turn_done" for ev, _ in events)
     assert ("token", {"delta": "one bus."}) in events  # deltas still stream
     assert "one bus." in _assistant_text(session)
+    assert _released_cleanly(caplog)
 
 
-def test_typed_turn_ignores_a_bump(network, monkeypatch):
+def test_typed_turn_ignores_a_bump(network, monkeypatch, caplog):
     session = chat_service.ChatSession()
     reader = _Reader(during=_bump(session))
     monkeypatch.setitem(chat_tools.DISPATCHERS, "list_components", reader)
@@ -301,11 +307,11 @@ def test_typed_turn_ignores_a_bump(network, monkeypatch):
     assert reader.calls == 1 and len(client.calls) == 2
     assert not _kinds(events)
     assert any(ev == "turn_done" for ev, _ in events)
+    assert _released_cleanly(caplog)
 
 
 def test_new_generation_utterance_drains_once_after_the_obsolete_turn(
-    network,
-    monkeypatch,
+    network, monkeypatch, caplog
 ):
     session = chat_service.ChatSession()
     sid = session.session_id
@@ -339,6 +345,7 @@ def test_new_generation_utterance_drains_once_after_the_obsolete_turn(
     assert _assistant_text(session).count("no lines.") == 1
     assert ua._DEFAULT.active_lease(sid) is None
     assert ua._DEFAULT.pending_utterance_id(sid) is None
+    assert _released_cleanly(caplog)
 
 
 def test_bump_keeps_a_running_lease_and_drops_old_pending():
