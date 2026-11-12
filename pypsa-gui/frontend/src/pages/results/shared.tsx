@@ -1,6 +1,7 @@
 // Shared helpers used by every Results sub-tab. Includes a tiny KPI card
 // component used at the top of each tab's overview row, hence the .tsx ext.
 
+import { createPortal } from 'react-dom'
 import { useMemo, useState, type RefObject, type ReactNode, type CSSProperties } from 'react'
 import {
   ResponsiveContainer, LineChart, Line,
@@ -18,7 +19,7 @@ import { useUIStore } from '../../store/uiStore'
 import { displayName } from '../../utils/displayName'
 import { nk } from '../../utils/queryKeys'
 import { networkApi } from '../../api/network'
-import { CHART_TICK, carrierColour, seriesDash, useChartFrame, useChartSource } from '../../components/charts/chartTheme'
+import { CHART_TICK, carrierColour, seriesDash, useChartFrame, useChartNoteSlot, useChartSource } from '../../components/charts/chartTheme'
 import { REPORT_CHART_LIMIT_TEXT, reportChartErrorMessage } from '../../api/reports'
 import { svgToPngBlob } from '../../utils/chartPng'
 import {
@@ -823,10 +824,18 @@ export function downloadJSON(filename: string, data: unknown): void {
 // console warning if no svg is found (e.g. user clicked before the chart
 // mounted, or the container is an HTML heatmap).
 export interface SerializedSVG { source: string; width: number; height: number }
-export function serializeSVG(container: HTMLElement | null, background = '#ffffff'): SerializedSVG | null {
+export function serializeSVG(container: HTMLElement | null, background = '#ffffff', panels = false): SerializedSVG | null {
   if (!container) return null
+  if (panels) {
+    const grid = serializePanels(container, background)
+    if (grid) return grid
+  }
   const svg = container.querySelector('svg')
   if (!svg) return null
+  return serializeOne(svg, background)
+}
+
+function serializeOne(svg: SVGSVGElement, background: string): SerializedSVG {
   const clone = svg.cloneNode(true) as SVGSVGElement
   // Recharts omits the namespace on the inner SVG when the parent <div> is
   // mounted — re-add so the file opens standalone in browsers / Illustrator.
@@ -855,6 +864,47 @@ export function serializeSVG(container: HTMLElement | null, background = '#fffff
   const w = Number(clone.getAttribute('width')) || 0
   const h = Number(clone.getAttribute('height')) || 0
   return { source, width: w, height: h }
+}
+
+/** Every `[data-report-panel]` (its value is the panel's title) drawn into one picture, two to a row. */
+function serializePanels(container: HTMLElement, background: string): SerializedSVG | null {
+  const NS = 'http://www.w3.org/2000/svg'
+  const cells = Array.from(container.querySelectorAll<HTMLElement>('[data-report-panel]'))
+    .map(el => ({ title: el.getAttribute('data-report-panel') ?? '', svg: el.querySelector('svg') }))
+    .filter((c): c is { title: string; svg: SVGSVGElement } => !!c.svg)
+  if (!cells.length) return null
+  const GAP = 12, HEAD = 18
+  const parts = cells.map(c => ({ ...c, one: serializeOne(c.svg, background) }))
+  const cw = Math.max(...parts.map(p => p.one.width), 1)
+  const ch = Math.max(...parts.map(p => p.one.height), 1)
+  const cols = Math.min(2, parts.length)
+  const rows = Math.ceil(parts.length / cols)
+  const W = cols * cw + (cols - 1) * GAP
+  const H = rows * (ch + HEAD) + (rows - 1) * GAP
+  const out = document.createElementNS(NS, 'svg')
+  out.setAttribute('xmlns', NS)
+  out.setAttribute('width', String(W))
+  out.setAttribute('height', String(H))
+  const bg = document.createElementNS(NS, 'rect')
+  bg.setAttribute('width', '100%'); bg.setAttribute('height', '100%'); bg.setAttribute('fill', background)
+  out.appendChild(bg)
+  const text = getComputedStyle(document.documentElement).getPropertyValue('--color-text').trim() || '#111'
+  parts.forEach((p, i) => {
+    const x = (i % cols) * (cw + GAP)
+    const y = Math.floor(i / cols) * (ch + HEAD + GAP)
+    const t = document.createElementNS(NS, 'text')
+    t.setAttribute('x', String(x + 4)); t.setAttribute('y', String(y + 13))
+    t.setAttribute('font-size', '12'); t.setAttribute('font-weight', '600'); t.setAttribute('fill', text)
+    t.textContent = p.title
+    out.appendChild(t)
+    const inner = p.svg.cloneNode(true) as SVGSVGElement
+    inner.setAttribute('x', String(x)); inner.setAttribute('y', String(y + HEAD))
+    inner.setAttribute('width', String(p.one.width || cw)); inner.setAttribute('height', String(p.one.height || ch))
+    out.appendChild(inner)
+  })
+  resolveCssVars(out)
+  const source = '<?xml version="1.0" standalone="no"?>\r\n' + new XMLSerializer().serializeToString(out)
+  return { source, width: W, height: H }
 }
 export function downloadSVG(container: HTMLElement | null, filename: string): boolean {
   const out = serializeSVG(container)
@@ -906,6 +956,10 @@ export interface ChartReportSpec {
   rowsTotal?: number
   /** A thinning or demo-data note: kept in the saved source line. */
   note?: string
+  /** Draws the picture itself, for a chart that is not one <svg> (an HTML grid). */
+  picture?: () => SerializedSVG | null
+  /** The chart is several framed <svg> panels (`data-report-panel`): one picture of all. */
+  panels?: boolean
 }
 export interface ChartActionsProps {
   chartRef?: RefObject<HTMLDivElement | null>
@@ -919,7 +973,8 @@ export function ChartActions({ chartRef, onExportCSV, filename, className, repor
   const project = useUIStore(s => s.currentProject)
   const frame = useChartFrame()
   const source = useChartSource()
-  const offered = !!(report && chartRef && frame.title && project)
+  const noteSlot = useChartNoteSlot()
+  const offered = !!(report && (chartRef || report.picture) && frame.title && project)
   const { charts, limit } = useReportCharts(project, offered)
   const [busy, setBusy] = useState(false)
   const saved = offered && report
@@ -937,7 +992,9 @@ export function ChartActions({ chartRef, onExportCSV, filename, className, repor
       }
       // The picture keeps the theme's own background: a dark chart's pale text and
       // dark gridlines are unreadable on the white the standalone SVG export adds.
-      const out = serializeSVG(chartRef!.current, getComputedStyle(document.documentElement).getPropertyValue('--color-bg').trim() || undefined)
+      const out = report.picture
+        ? report.picture()
+        : serializeSVG(chartRef!.current, getComputedStyle(document.documentElement).getPropertyValue('--color-bg').trim() || undefined, report.panels)
       if (!out) { toast.error('Chart not ready — try again after it renders'); return }
       const png = await svgToPngBlob(out.source, out.width || 600, out.height || 300)
       const columns = report.columns.map(c => String(c).slice(0, MAX_CELL_CHARS))
@@ -1000,11 +1057,15 @@ export function ChartActions({ chartRef, onExportCSV, filename, className, repor
           {saved ? <Check size={11} /> : <FilePlus size={11} />} {saved ? 'In report' : 'Add to report'}
         </button>
       )}
-      {offered && full && (
-        <span className="ml-auto max-w-[15rem] basis-full text-right text-[10.5px]" data-testid="report-chart-cap">
-          {REPORT_CHART_LIMIT_TEXT(limit)}
-        </span>
-      )}
+      {offered && full && (() => {
+        // Under the header, full width: beside the actions it squeezed the title and hint.
+        const note = (
+          <span className={noteSlot ? '' : 'ml-auto max-w-[15rem] basis-full text-right text-[10.5px]'} data-testid="report-chart-cap">
+            {REPORT_CHART_LIMIT_TEXT(limit)}
+          </span>
+        )
+        return noteSlot ? createPortal(note, noteSlot) : note
+      })()}
     </span>
   )
 }
@@ -1198,6 +1259,19 @@ export function stepWord(rows: readonly object[]): 'hour' | 'time step' {
 }
 
 /** ThinNote's sentence as plain text for a saved chart's source line; undefined when nothing was thinned. */
+/** The seasonal grid's table for the report: the averaged week / month of each season. */
+export function seasonalReportTable(
+  rows: ReadonlyArray<Record<string, unknown>>, cols: readonly string[], mode: 'weekly' | 'monthly',
+): { columns: string[]; rows: (string | number | null)[][] } {
+  const data = aggregateSeasonalRows(rows, cols, mode)
+  return {
+    columns: ['season', mode === 'weekly' ? 'hour_of_week' : 'hour_of_month', ...cols],
+    rows: SEASONS.flatMap(season => (data[season] ?? []).map(r => [
+      season, r.bucket, ...cols.map(c => (typeof r[c] === 'number' ? r[c] : null)),
+    ])),
+  }
+}
+
 export function thinNoteText(rows: readonly object[]): string | undefined {
   if (rows.length <= MAX_CHART_POINTS) return undefined
   const drawn = thinRows(rows).length
@@ -1576,7 +1650,7 @@ export function SeasonalLineCardGrid({
         const seasonRows = data[season] ?? []
         const present = cols.filter(c => seasonRows.some(r => r[c] != null))
         return (
-          <div key={season}
+          <div key={season} data-report-panel={season}
             className="rounded-[10px] border border-border bg-bg overflow-hidden shadow-[0_1px_0_rgba(10,14,20,0.04)]">
             <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-bg-2">
               <span className="w-2 h-2 rounded-full shrink-0"

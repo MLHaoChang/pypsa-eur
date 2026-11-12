@@ -209,7 +209,13 @@ export default function TornadoChart({
               rows.map(r => [r.label, r.low_value, r.high_value, r.unit ?? '', r.npv_low ?? '', r.npv_high ?? '', r.swing ?? '']))
             toast.success('Exported')
           }}
-          filename={filename} />
+          filename={filename}
+          report={{
+            view: 'tornado', figure: filename, unit: currency,
+            columns: ['driver', 'input_low', 'input_high', 'unit', `npv_low_${currency}`, `npv_high_${currency}`, `swing_${currency}`],
+            rows: rows.map(r => [r.label, r.low_value, r.high_value, r.unit ?? null, r.npv_low, r.npv_high, r.swing]),
+            note: `red: below the ${baseLower} · green: above the ${baseLower}`,
+          }} />
       }
       bodyClassName="p-3"
     >

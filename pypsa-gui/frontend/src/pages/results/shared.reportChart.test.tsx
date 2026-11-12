@@ -104,6 +104,9 @@ describe('ChartActions · Add to report', () => {
     await waitFor(() => expect((add as HTMLButtonElement).disabled).toBe(true))
     expect(screen.getByTestId('report-chart-cap').textContent)
       .toBe('The report holds 12 charts: remove one on the Reports page')
+    // Under the header, full width: beside the actions it squeezed the title and hint.
+    const header = screen.getByRole('heading', { name: 'Dispatch stack · electricity' }).closest('header')!
+    expect(header.contains(screen.getByTestId('report-chart-cap'))).toBe(false)
   })
 
   it('a 409 chart_limit_reached toasts plain words and keeps the button state', async () => {

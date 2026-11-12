@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import userEvent from '@testing-library/user-event'
+import type { ChartSpec } from '../../api/reports'
+import { resetReportCharts } from './reportCharts'
 import { useUIStore } from '../../store/uiStore'
 import { energyFlowsApi, type EnergyFlowsPayload } from '../../api/energyFlows'
 import EnergyFlowsTab, { FlowSankeyChart, seriesName } from './EnergyFlowsTab'
@@ -13,6 +16,16 @@ vi.mock('../../api/energyFlows', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/energyFlows')>()
   return { ...actual, energyFlowsApi: { get: vi.fn(), csv: vi.fn() } }
 })
+
+vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('../../utils/chartPng', () => ({
+  svgToPngBlob: vi.fn().mockResolvedValue(new Blob(['png'], { type: 'image/png' })),
+}))
+const reportApi = vi.hoisted(() => ({ listReportCharts: vi.fn(), addReportChart: vi.fn(), removeReportChart: vi.fn() }))
+vi.mock('../../api/reports', async () => ({
+  ...(await vi.importActual<typeof import('../../api/reports')>('../../api/reports')),
+  ...reportApi,
+}))
 
 const OK: EnergyFlowsPayload = {
   status: 'ok', unit: 'MWh', period: null, periods: [null],
@@ -197,5 +210,52 @@ describe('seriesName', () => {
     expect(seriesName('bess_new_2027 charge')).toBe('BESS new 2027 charge')
     expect(seriesName('solar')).toBe('Solar')
     expect(seriesName('Grid import')).toBe('Grid import')
+  })
+})
+
+describe('energy flow · report', () => {
+  beforeEach(() => {
+    resetReportCharts()
+    reportApi.listReportCharts.mockReset().mockResolvedValue({ charts: [], limit: 12 })
+    reportApi.addReportChart.mockReset().mockImplementation(async (_p: string, spec: ChartSpec) => ({
+      id: 'chart-0123456789abcdef', created_at: 't', earlier_solve: false, ...spec,
+    }))
+    useUIStore.setState({ currentProject: 'demo' })
+  })
+
+  async function save(endHour?: string) {
+    // The server answers with the window it was asked for.
+    vi.mocked(energyFlowsApi.get).mockImplementation(async (q) =>
+      ({ ...OK, window: { ...OK.window!, from: q?.from ?? 0, to: q?.to ?? 167 } }))
+    mount()
+    if (endHour) {
+      fireEvent.change(await screen.findByLabelText('Window end'), { target: { value: endHour } })
+      await waitFor(() => expect(energyFlowsApi.get).toHaveBeenLastCalledWith(
+        expect.objectContaining({ to: Number(endHour) })), { timeout: 2000 })
+      await waitFor(() => expect(screen.getByTestId('ef-flow')).toBeTruthy())
+    }
+    const frame = await screen.findByTestId('ef-flow')
+    await userEvent.click(await within(frame).findByRole('button', { name: 'Add to report' }))
+    await waitFor(() => expect(reportApi.addReportChart).toHaveBeenCalled())
+    const spec = reportApi.addReportChart.mock.calls.at(-1)![1] as ChartSpec
+    cleanup()
+    reportApi.addReportChart.mockClear()
+    return spec
+  }
+
+  it('saves the flow table with its figure id', async () => {
+    const spec = await save()
+    expect(spec.view).toBe('energy-flows')
+    expect(spec.figure).toBe('energy_flows_year_0-167')
+    expect(spec.unit).toBe('MWh')
+    expect(spec.columns).toEqual(['Source', 'Via', 'Destination', 'MWh'])
+    expect(spec.rows).toHaveLength(ROWS.length)
+  })
+
+  it('two windows are two figures', async () => {
+    const a = await save()
+    const b = await save('23')
+    expect(b.figure).toBe('energy_flows_year_0-23')
+    expect(a.figure).not.toBe(b.figure)
   })
 })

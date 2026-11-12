@@ -1,5 +1,8 @@
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { ChartSpec } from '../../api/reports'
+import { resetReportCharts } from './reportCharts'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -36,6 +39,16 @@ vi.mock('../../api/network', async (importOriginal) => {
     networkApi: { ...actual.networkApi, getBuses: vi.fn(), getSnapshots: vi.fn() },
   }
 })
+
+vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('../../utils/chartPng', () => ({
+  svgToPngBlob: vi.fn().mockResolvedValue(new Blob(['png'], { type: 'image/png' })),
+}))
+const reportApi = vi.hoisted(() => ({ listReportCharts: vi.fn(), addReportChart: vi.fn(), removeReportChart: vi.fn() }))
+vi.mock('../../api/reports', async () => ({
+  ...(await vi.importActual<typeof import('../../api/reports')>('../../api/reports')),
+  ...reportApi,
+}))
 
 afterEach(() => cleanup())
 
@@ -121,4 +134,75 @@ it('marks the mean on the price chart and the duration curve, rounded like the t
   const labels = Array.from(container.querySelectorAll('.recharts-reference-line text'))
     .map(t => t.textContent)
   expect(labels).toEqual(['mean 424.2 €/MWh', 'mean 424.2 €/MWh'])
+})
+
+// ── "Add to report" on the hourly price chart ───────────────────────────────
+describe('hourly price chart · report', () => {
+  // 28 days (one 12:00 stamp each) in every season: weekly and monthly both become available.
+  const stamps = [1, 4, 7, 10].flatMap(m => Array.from({ length: 28 }, (_, d) =>
+    `2026-${String(m).padStart(2, '0')}-${String(d + 1).padStart(2, '0')}T12:00:00`))
+  beforeEach(() => {
+    try { localStorage.clear() } catch { /* ignore */ }
+    resetReportCharts()
+    reportApi.listReportCharts.mockReset().mockResolvedValue({ charts: [], limit: 12 })
+    reportApi.addReportChart.mockReset().mockImplementation(async (_p: string, spec: ChartSpec) => ({
+      id: 'chart-0123456789abcdef', created_at: 't', earlier_solve: false, ...spec,
+    }))
+    useUIStore.setState({ currentProject: 'demo' })
+    vi.mocked(resultsApi.getPrices).mockResolvedValue({
+      index: stamps, columns: ['Bus 0', 'Bus 1'],
+      data: stamps.map((_, i) => [40 + (i % 7), 50 + (i % 5)]),
+      data_adjusted: stamps.map((_, i) => [30 + (i % 7), 35 + (i % 5)]),
+    } as never)
+    vi.mocked(networkApi.getBuses).mockResolvedValue([
+      { name: 'Bus 0', v_nom: 380, carrier: 'AC', x: 0, y: 0, country: '', unit: '', control: 'PQ', sub_network: '' },
+      { name: 'Bus 1', v_nom: 380, carrier: 'AC', x: 0, y: 0, country: '', unit: '', control: 'PQ', sub_network: '' },
+    ])
+    vi.mocked(networkApi.getSnapshots).mockResolvedValue({
+      count: stamps.length, snapshots: stamps, weightings: [], ts_start: null, ts_end: null,
+      can_sample_weeks: false,
+    })
+  })
+
+  async function pick(mode: string, view: string, source: string) {
+    renderPage()
+    const frame = (await screen.findByRole('heading', { name: 'Hourly marginal price' })).closest('[data-chart-frame]') as HTMLElement
+    await waitFor(() => expect((within(frame).getByRole('button', { name: 'Merit order' }) as HTMLButtonElement).disabled).toBe(false))
+    await userEvent.click(within(frame).getByRole('button', { name: mode }))
+    await userEvent.click(within(frame).getByRole('button', { name: view }))
+    await userEvent.click(within(frame).getByRole('button', { name: source }))
+    await userEvent.click(within(frame).getByRole('button', { name: 'Add to report' }))
+    await waitFor(() => expect(reportApi.addReportChart).toHaveBeenCalled())
+    const spec = reportApi.addReportChart.mock.calls.at(-1)![1] as ChartSpec
+    cleanup()
+    reportApi.addReportChart.mockClear()
+    return spec
+  }
+
+  it('saves the seasonal weekly chart with a season column', async () => {
+    const spec = await pick('Weekly', 'Average', 'LP dual')
+    expect(spec.view).toBe('prices')
+    expect(spec.figure).toBe('weekly_avg_lp')
+    expect(spec.columns![0]).toBe('season')
+    expect(spec.rows!.length).toBeGreaterThan(0)
+  })
+  it('saves the monthly and full-timeframe charts', async () => {
+    const m = await pick('Monthly', 'Per bus', 'LP dual')
+    expect(m.figure).toBe('monthly_per_bus_lp')
+    expect(m.columns![0]).toBe('season')
+    expect(m.columns).toContain('Bus 1')
+    const t = await pick('Full timeframe', 'Average', 'LP dual')
+    expect(t.figure).toBe('hourly_avg_lp')
+    expect(t.columns).toEqual(['snapshot', 'avg'])
+    expect(t.rows!.length).toBeGreaterThan(0)
+  })
+  it('mode, view and source each change the figure id', async () => {
+    const ids = new Set([
+      (await pick('Weekly', 'Average', 'LP dual')).figure,
+      (await pick('Monthly', 'Average', 'LP dual')).figure,
+      (await pick('Weekly', 'Per bus', 'LP dual')).figure,
+      (await pick('Weekly', 'Average', 'Merit order')).figure,
+    ])
+    expect(ids.size).toBe(4)
+  })
 })

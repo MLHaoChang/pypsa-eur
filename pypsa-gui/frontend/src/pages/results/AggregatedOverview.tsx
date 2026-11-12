@@ -624,7 +624,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                   economicsBars.map(r => [r.period, r.CAPEX, r.OPEX, r.VOLL]))
                 toast.success('Exported')
               }}
-              filename="aggregated_economics" />
+              filename="aggregated_economics"
+              report={{
+                view: 'aggregated-overview', figure: 'economics', unit: 'EUR',
+                columns: ['period', 'CAPEX_EUR', 'OPEX_EUR', 'VOLL_EUR'],
+                rows: economicsBars.map(r => [r.period, r.CAPEX, r.OPEX, r.VOLL]),
+              }} />
           }
           bodyClassName="p-3"
         >
@@ -685,7 +690,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                     generationRows.map(r => [r.period, ...generationMix.carriers.map(c => r[c] ?? 0)]))
                   toast.success('Exported')
                 }}
-                filename={`aggregated_generation_${genMode}`} />
+                filename={`aggregated_generation_${genMode}`}
+                report={{
+                  view: 'aggregated-overview', figure: `generation_${genMode}`, unit: genMode === 'abs' ? 'MWh' : '%',
+                  columns: ['period', ...generationMix.carriers],
+                  rows: generationRows.map(r => [r.period, ...generationMix.carriers.map(c => r[c] ?? 0)]),
+                }} />
             </>
           }
           bodyClassName="p-3"
@@ -729,7 +739,13 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                     ...storageBars.carriers.flatMap(c => [Number(r[`${c}_d`] ?? 0), Number(r[`${c}_c`] ?? 0)])]))
                 toast.success('Exported')
               }}
-              filename="aggregated_storage" />
+              filename="aggregated_storage"
+              report={{
+                view: 'aggregated-overview', figure: 'storage', unit: 'MWh',
+                columns: ['period', ...storageBars.carriers.flatMap(c => [`${c}_discharged_MWh`, `${c}_charged_MWh`])],
+                rows: storageBars.rows.map(r => [r.period,
+                  ...storageBars.carriers.flatMap(c => [Number(r[`${c}_d`] ?? 0), Number(r[`${c}_c`] ?? 0)])]),
+              }} />
           }
           bodyClassName="p-3"
         >
@@ -788,7 +804,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                     ...curtailmentBars.carriers.map(c => Number(r[c] ?? 0))]))
                 toast.success('Exported')
               }}
-              filename="aggregated_curtailment" />
+              filename="aggregated_curtailment"
+              report={{
+                view: 'aggregated-overview', figure: 'curtailment', unit: 'MWh',
+                columns: ['period', ...curtailmentBars.carriers],
+                rows: curtailmentBars.rows.map(r => [r.period, ...curtailmentBars.carriers.map(c => Number(r[c] ?? 0))]),
+              }} />
           }
           bodyClassName="p-3"
         >
@@ -824,7 +845,12 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
                   loadByCarrier.rows.map(r => [r.period, ...loadByCarrier.carriers.map(c => r[c] ?? 0)]))
                 toast.success('Exported')
               }}
-              filename="aggregated_load_by_carrier" />
+              filename="aggregated_load_by_carrier"
+              report={{
+                view: 'aggregated-overview', figure: 'load_by_carrier', unit: 'MWh',
+                columns: ['period', ...loadByCarrier.carriers],
+                rows: loadByCarrier.rows.map(r => [r.period, ...loadByCarrier.carriers.map(c => r[c] ?? 0)]),
+              }} />
           }
           bodyClassName="p-3"
         >
