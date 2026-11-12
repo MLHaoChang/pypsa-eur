@@ -637,6 +637,34 @@ def test_a_multi_port_output_into_the_site_fails_closed():
     assert kpi["fraction"] is None and "tank" in kpi["reason"], kpi
 
 
+def test_a_two_link_chain_into_the_site_fails_closed():
+    """GK B F1'' (#1423): gas Gen → Link → mid → Link "xyz" (η 0.4) → site.
+    One hop from the fuel bus never touches electricity; the walk must
+    follow the chain, or the KPI reads 1.0."""
+    n = _dispatched()
+    n.add("Bus", "mid", carrier="gas")
+    n = _with_fuel(n, ("pipe", "fuel", "mid", {}), ("xyz", "mid", "ac", {}))
+    assert classify(n)["unattributed_generators"] == ["tank"]
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "tank" in kpi["reason"], kpi
+
+
+def test_gas_through_smr_and_a_fuel_cell_fails_closed():
+    """GK B F1'' (#1423): gas → SMR → H2 bus (with an H2 tank) → fuel cell →
+    site. The H2 Store does not launder the gas into renewable electricity."""
+    n = _dispatched()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Store", "h2tank", bus="h2", carrier="H2", e_nom=200.0)
+    n = _with_fuel(
+        n,
+        ("SMR", "fuel", "h2", {}),
+        ("fuel cell", "h2", "ac", {}),
+    )
+    assert classify(n)["unattributed_generators"] == ["tank"]
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "tank" in kpi["reason"], kpi
+
+
 def test_fuel_that_only_reaches_heat_is_not_electricity():
     n = _dispatched()
     n.add("Bus", "heat", carrier="heat")
