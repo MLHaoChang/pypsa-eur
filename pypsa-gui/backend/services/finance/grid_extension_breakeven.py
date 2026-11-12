@@ -98,6 +98,10 @@ def grid_extension_break_even(
         )
 
     gap0 = grid_supply_npc + fixed_eur - offgrid_npc  # grid cost at 0 km less off-grid
+    if not math.isfinite(gap0):
+        return refuse(
+            "result_not_finite", ["grid_supply_npc", "fixed_eur", "offgrid_npc"]
+        )
     if gap0 > 0.0:
         out["status"] = OFFGRID_CHEAPER_EVERYWHERE
     elif gap0 == 0.0:
@@ -106,6 +110,8 @@ def grid_extension_break_even(
         out["status"] = GRID_CHEAPER_EVERYWHERE
     else:
         km = -gap0 / eur_per_km
+        if not math.isfinite(km):
+            return refuse("result_not_finite", ["eur_per_km"])
         out["km"] = km
         out["status"] = BREAK_EVEN if km <= max_km else BEYOND_MAX_KM
     out["message"] = _MESSAGES[out["status"]]

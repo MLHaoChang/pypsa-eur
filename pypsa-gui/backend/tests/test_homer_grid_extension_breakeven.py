@@ -118,3 +118,23 @@ def test_c4_basis_mismatch_or_missing_refuses(grid_basis, reason):
 def test_c5_bad_numbers_are_not_established_never_zero(kw):
     r = run(**kw)
     assert r["status"] == NOT_ESTABLISHED and r["km"] is None and r["invalid"]
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        {"eur_per_km": 1e-320},
+        {"offgrid_npc": 1.7e308, "grid_supply_npc": -1.7e308},
+        {"offgrid_npc": -1.7e308, "grid_supply_npc": 1.7e308},
+    ],
+)
+def test_result_must_be_finite_never_inf_or_nan(kw):
+    r = run(**kw)
+    assert r["status"] == NOT_ESTABLISHED and r["km"] is None
+    assert r["reason"] == "result_not_finite"
+
+
+@pytest.mark.parametrize("key", ["currency", "currency_year"])
+def test_offgrid_basis_missing_a_key_is_basis_missing(key):
+    r = run(offgrid_basis={k: v for k, v in B.items() if k != key})
+    assert r["status"] == NOT_ESTABLISHED and r["reason"] == "basis_missing"
