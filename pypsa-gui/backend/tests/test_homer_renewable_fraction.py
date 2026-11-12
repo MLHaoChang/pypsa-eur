@@ -587,3 +587,74 @@ def test_no_load_dispatch_is_unavailable_even_with_generator_dispatch():
     n.loads_t.p = pd.DataFrame(index=n.snapshots)
     kpi = renewable_fraction(n)
     assert kpi["fraction"] is None and "not been solved" in kpi["reason"]
+
+
+# ── fail closed (GK B addition to R2/R3) ─────────────────────────────────
+
+
+def _with_fuel(n, *links):
+    n.add("Bus", "fuel", carrier="diesel")
+    n.add("Generator", "tank", bus="fuel", carrier="diesel", p_nom=100.0)
+    for name, b0, b1, extra in links:
+        n.add("Link", name, bus0=b0, bus1=b1, p_nom=25.0, efficiency=0.4, **extra)
+    n.generators_t.p["tank"] = 0.0
+    n.generators_t.p.iloc[7, n.generators_t.p.columns.get_loc("tank")] = 15.0
+    return n
+
+
+def test_an_import_whose_upstream_bus_feeds_another_link_fails_closed():
+    """The fuel bus feeds the genset Link into the site AND a Link into a
+    second non-electrical bus that reaches the site again: not attributable."""
+    n = _dispatched()
+    n.add("Bus", "dayTank", carrier="diesel")
+    n = _with_fuel(
+        n,
+        ("genset2", "fuel", "ac", {}),
+        ("transfer", "fuel", "dayTank", {}),
+        ("genset3", "dayTank", "ac", {}),
+    )
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "tank" in kpi["reason"], kpi
+
+
+def test_a_link_genset_with_an_unlisted_carrier_is_counted():
+    n = _dispatched()
+    n = _with_fuel(n, ("unit-7", "fuel", "ac", {"carrier": "xyz-machine"}))
+    n.links_t.p0 = pd.DataFrame({"unit-7": 0.0}, index=n.snapshots)
+    n.links_t.p0.iloc[7, 0] = 15.0
+    n.generators_t.p.iloc[7, n.generators_t.p.columns.get_loc("diesel")] -= 6.0
+    kpi = renewable_fraction(n)
+    assert kpi["nonrenewable_mwh"] == pytest.approx(90.0) and kpi[
+        "fraction"
+    ] == pytest.approx(0.625)
+
+
+def test_a_multi_port_output_into_the_site_fails_closed():
+    n = _dispatched()
+    n.add("Bus", "heat", carrier="heat")
+    n = _with_fuel(n, ("chp", "fuel", "heat", {"bus2": "ac", "efficiency2": 0.3}))
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "tank" in kpi["reason"], kpi
+
+
+def test_fuel_that_only_reaches_heat_is_not_electricity():
+    n = _dispatched()
+    n.add("Bus", "heat", carrier="heat")
+    n = _with_fuel(n, ("boiler", "fuel", "heat", {}))
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_the_row_warns_about_unattributed_generators():
+    n = _network()
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Bus", "fuel", carrier="diesel")
+    n.add("Generator", "tank", bus="fuel", carrier="diesel", p_nom=100.0)
+    n.add(
+        "Link", "chp", bus0="fuel", bus1="heat", bus2="ac", efficiency2=0.3, p_nom=5.0
+    )
+    n.optimize.create_model()
+    q: queue.SimpleQueue = queue.SimpleQueue()
+    _wrap_with_min_renewable_fraction(
+        n, None, SolverConfig(min_renewable_fraction=0.5), q
+    )(n, n.snapshots)
+    assert any("WARNING" in l and "tank" in l for l in _drain(q))

@@ -26,6 +26,13 @@ HOMER Pro's renewable fraction, on the electrical side:
   fuel-cell loops, and elec→elec converters are not sources: what they put
   out was generated upstream. Heat and hydrogen loads are out of scope.
 
+  Fail closed: a dispatched non-renewable Generator off the served network
+  whose energy can reach an electrical bus by a path not counted above (a
+  chain through another non-electrical bus, a multi-port Link output, a
+  second Link out of a supply bus) makes the KPI None with a reason, and the
+  LP row logs a warning naming it. Fuel that only reaches heat or hydrogen
+  is not electricity and passes.
+
 Energy is MW × ``snapshot_weightings.generators`` per year of each period;
 the horizon totals weight each period by its ``years``.
 
@@ -157,7 +164,52 @@ def classify(n) -> dict[str, list[str]]:
             for g in gens.index
             if not slack[g] and gbus[g] in elec and g not in nonren
         ],
+        "unattributed_generators": _unattributed(
+            n,
+            [g for g in nonren if gbus[g] not in elec or gbus[g] in supply],
+            gbus,
+            elec,
+            set(src_links),
+        ),
     }
+
+
+def _link_outputs(links: pd.DataFrame, link: str) -> list[str]:
+    """Every output bus of a Link: bus1 and any bus2, bus3, … that is set."""
+    cols = [c for c in links.columns if c.startswith("bus") and c not in ("bus0",)]
+    return [
+        str(links.at[link, c]) for c in cols if str(links.at[link, c] or "").strip()
+    ]
+
+
+def _unattributed(n, gens, gbus, elec, counted) -> list[str]:
+    """The non-renewable Generators off the served network whose energy can
+    reach an electrical bus by a path the fraction does not count: through a
+    Link that is not a counted source Link (a chain through another
+    non-electrical bus, a multi-port output, a second Link out of a supply
+    bus). Fail closed (GK B): the KPI then reads None, never a value. A fuel
+    that only reaches heat or hydrogen loads is not electricity and passes."""
+    links = n.links
+    if not len(links) or not gens:
+        return []
+    out_of: dict[str, list[str]] = {}
+    for l in links.index:
+        out_of.setdefault(str(links.at[l, "bus0"]), []).append(l)
+    leaks = []
+    for g in gens:
+        seen, stack, leak = {gbus[g]}, [gbus[g]], False
+        while stack and not leak:
+            for l in out_of.get(stack.pop(), []):
+                for b in _link_outputs(links, l):
+                    if b in elec:
+                        if not (l in counted and b == str(links.at[l, "bus1"])):
+                            leak = True
+                    elif b not in seen:
+                        seen.add(b)
+                        stack.append(b)
+        if leak:
+            leaks.append(g)
+    return leaks
 
 
 # ── weights and periods ───────────────────────────────────────────────────
@@ -249,6 +301,15 @@ def renewable_fraction(
         if frame is None or name not in getattr(frame, "columns", []):
             return pd.Series(0.0, index=sns)
         return frame[name].reindex(sns).astype(float).fillna(0.0)
+
+    leaked = [g for g in cls["unattributed_generators"] if (_col(gp, g) > 0).any()]
+    if leaked:
+        out["reason"] = (
+            "cannot attribute the electricity of non-renewable generator(s) "
+            + ", ".join(map(str, leaked))
+            + ": it reaches the site through a path the fraction does not count"
+        )
+        return out
 
     nonren = pd.Series(0.0, index=sns)
     for g in cls["nonren_generators"]:
@@ -376,6 +437,15 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
     def rows(n, snapshots):
         m = n.model
         cls = classify(n)
+        if cls["unattributed_generators"]:
+            _safe_log(
+                log_queue,
+                f"{LABEL}: WARNING the row cannot see the electricity of "
+                + ", ".join(map(str, cls["unattributed_generators"]))
+                + " (it reaches the site through a path the fraction does not count), so "
+                "the row is looser than the target; the result's fraction reads unavailable "
+                "if they run.",
+            )
         w = _weights(n, snapshots)
         per_of, periods = _periods(snapshots)
         load = _load_mw(n, cls["loads"], snapshots)
