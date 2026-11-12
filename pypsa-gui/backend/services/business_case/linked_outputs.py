@@ -52,6 +52,18 @@ _CAPACITY_COMPONENTS = {
     "StorageUnit": "storage_units",
 }
 _PRODUCT_KINDS = ("served_product", "served_h2", "shipped")
+#: The bill streams, each of which prices the site's grid import (never a served load): the premise of
+#: `ledger_clash`'s served-load verdict (GK B ruling (a), C1). A test pins it to the finance report's
+#: `ENERGY_BILL_STREAMS`.
+GRID_IMPORT_BILL_STREAMS = (
+    "certificates",
+    "demand_charge",
+    "energy_import",
+    "network_capacity",
+    "network_energy",
+    "retail_fixed",
+    "tax",
+)
 
 
 @dataclass(frozen=True, eq=False)
@@ -252,31 +264,34 @@ def _unserved(n, solve: LinkedSolve, bus: str) -> pd.DataFrame:
         if s.p is None or (s.flag or "").startswith("lost_production_capture"):
             raise _Unread(s.flag or "lost_production_not_read")
         shared += s.p.reindex(n.snapshots).fillna(0.0)
-    if loads:
-        # A share is of what the Loads draw: a negative (feeding) or missing p_set takes none.
-        p_set = (
-            n.get_switchable_as_dense("Load", "p_set")[loads]
-            .fillna(0.0)
-            .clip(lower=0.0)
+    return out + _split(n, loads, shared) if loads else out
+
+
+def _split(n, loads: list[str], shared: pd.Series) -> pd.DataFrame:
+    """A bus slack `shared` (MW per snapshot) split across the bus's `loads` pro rata by p_set(t) (LO-3, the
+    DC Q4 rule). In an hour where the Loads sum to zero (a slack filling a store), by each Load's share of the
+    period's Σ p_set · w, so none is lost; with no Load drawing in the whole period it is not evaluated."""
+    # A share is of what the Loads draw: a negative (feeding) or missing p_set takes none.
+    p_set = (
+        n.get_switchable_as_dense("Load", "p_set")[loads].fillna(0.0).clip(lower=0.0)
+    )
+    total = p_set.sum(axis=1)
+    share = p_set.div(total.where(total != 0), axis=0)
+    idle = total == 0
+    if idle.any():
+        period = (
+            n.snapshots.get_level_values(0)
+            if isinstance(n.snapshots, pd.MultiIndex)
+            else pd.Index([0] * len(n.snapshots))
         )
-        total = p_set.sum(axis=1)
-        share = p_set.div(total.where(total != 0), axis=0)
-        idle = total == 0
-        if idle.any():
-            period = (
-                n.snapshots.get_level_values(0)
-                if isinstance(n.snapshots, pd.MultiIndex)
-                else pd.Index([0] * len(n.snapshots))
-            )
-            weighted = p_set.mul(n.snapshot_weightings.generators, axis=0)
-            annual = weighted.groupby(period.to_numpy()).transform("sum")
-            annual_total = annual.sum(axis=1)
-            by_period = annual.div(annual_total.where(annual_total != 0), axis=0)
-            share.loc[idle] = by_period.loc[idle]
-            if share[shared != 0].isna().any().any():
-                raise _Unread("unserved_no_load_to_split")
-        out += share.fillna(0.0).mul(shared, axis=0)
-    return out
+        weighted = p_set.mul(n.snapshot_weightings.generators, axis=0)
+        annual = weighted.groupby(period.to_numpy()).transform("sum")
+        annual_total = annual.sum(axis=1)
+        by_period = annual.div(annual_total.where(annual_total != 0), axis=0)
+        share.loc[idle] = by_period.loc[idle]
+        if share[shared != 0].isna().any().any():
+            raise _Unread("unserved_no_load_to_split")
+    return share.fillna(0.0).mul(shared, axis=0)
 
 
 def _served(n, solve: LinkedSolve, loads: list[str], bus: str) -> dict:
@@ -603,16 +618,92 @@ def ledger_clash(output_id: str, valued_streams) -> tuple[str, str] | None:
     export price or a PPA/CfD settlement). `("drop", "lost_production")`: the line stands and the business
     case drops that bus's `lost_production` (G3), so a shortfall counts once, as lower served revenue.
 
-    The bill streams price the site's grid import, which is no catalogue output: a served electric load is
-    what the plant sells to its customers (a microgrid's tariff revenue), so it meets no ledger stream.
-    Slice 06 applies the verdict."""
+    A served electric load (L4) meets no bill stream: every bill stream prices the site's grid import
+    (`GRID_IMPORT_BILL_STREAMS`, pinned against the finance report's bill streams), which is no catalogue
+    output, and a served load is what the plant sells to its customers (a microgrid's tariff revenue). It
+    meets a valued `eaas_fee`, which prices the energy delivered to the customer: refused (GK B ruling (a),
+    fail closed). The ruling holds only while every bill stream prices grid import: a future bill item that
+    prices the load joins `served_load`'s clash set here, and the pin fails until it does."""
     valued = set(valued_streams)
     kind = output_id.split(".", 1)[0]
     if kind == "export":
         streams: tuple[str, ...] = ("energy_export", "ppa_settlement", "cfd_settlement")
+    elif kind == "served_load":
+        streams = ("eaas_fee",)
     elif kind in _PRODUCT_KINDS:
         return ("drop", "lost_production") if "lost_production" in valued else None
     else:
         return None
     hit = next((s for s in streams if s in valued), None)
     return None if hit is None else ("refuse", hit)
+
+
+# ── the lost-production map (slice 06, G3) ───────────────────────────────────
+
+
+@dataclass(frozen=True)
+class LostProductionMap:
+    """What the business case needs to drop a product bus's `lost_production` (G3) when a revenue line reads its
+    served quantity.
+
+    - `slack_bus`: each `lost_production` line's slack and its bus.
+    - `load_bus`: each Load on those buses.
+    - `share[slack][load]`: the part of the slack's lost product the LO-3 split gives `load` (the split L1 and L2
+      subtract from p_set, so the drop is exactly what the line no longer earns): Σ w · split(p)[load] ÷ Σ w · p
+      within each period, 0 in a period with no shortfall (nothing to drop).
+    - `unread`: each bus the solve cannot give a share for, with the reason: a slack the ledger and
+      `process_products.shortfalls` do not both name, an unreadable capture, a shortfall no Load draws in a
+      period, or a stale solve. Never 0 (LO-7): a revenue line on such a bus is refused."""
+
+    slack_bus: dict
+    load_bus: dict
+    share: dict
+    unread: dict
+
+
+def lost_production(n, solve: LinkedSolve, ic_case) -> LostProductionMap:
+    """The `LostProductionMap` of the IC case's `lost_production` lines on the run's own solve. A slack maps to
+    its bus through `finance_case._lost_production_slacks` (GK A G3-1: the one helper, a captured slack with no
+    Generator too), fed the case's template lines as its ledger; its dispatch is `process_products.shortfalls`'s
+    (A2: one slack set). Post-solve only: it reads the network and changes nothing (LO-9)."""
+    from services.period_utils import period_years_map
+    from services.process_products import shortfalls
+    from services.results.finance_case import _lost_production_slacks
+
+    ledger = {"": {ln.key: ln for t in ic_case.templates for ln in t.lines}}
+    slack_bus = dict(sorted(_lost_production_slacks(n, None, ledger).items()))
+    own = solve.network is n and solve.fresh
+    found = {s.name: s for s in shortfalls(n, solve.lost_load)} if own else {}
+    unread: dict = {}
+    for s in found.values():
+        if s.name not in slack_bus:
+            unread.setdefault(s.bus, "lost_production_not_in_ledger")
+    years = dict(period_years_map(n))
+    share: dict = {}
+    load_bus: dict = {}
+    for slack, bus in slack_bus.items():
+        loads = _loads_on(n, bus)
+        load_bus.update({ld: bus for ld in loads})
+        s = found.get(slack)
+        try:
+            if not own:
+                raise _Unread("not_own_solve")
+            if s is None or s.bus != bus:
+                raise _Unread("lost_production_not_read")
+            if s.p is None or (s.flag or "").startswith("lost_production_capture"):
+                raise _Unread(s.flag or "lost_production_not_read")
+            p = s.p.reindex(n.snapshots).fillna(0.0)
+            split = _split(n, loads, p)
+            total = _per_period(n, p)
+            share[slack] = {}
+            for ld in loads:
+                part = _per_period(n, split[ld])
+                ratio = {k: (part[k] / v if v else 0.0) for k, v in total.items()}
+                share[slack][ld] = Series(
+                    f"lost_production.{slack}", "share", ratio, years
+                )
+        except _Unread as exc:
+            unread.setdefault(bus, str(exc))
+    return LostProductionMap(
+        slack_bus=slack_bus, load_bus=load_bus, share=share, unread=unread
+    )
