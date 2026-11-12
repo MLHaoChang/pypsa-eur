@@ -543,3 +543,47 @@ def test_the_infeasibility_hint_names_need_and_reach():
     assert len(lines) == 1 and lines[0].startswith("Minimum renewable fraction:")
     assert row_name(None) in lines[0]
     assert "216.0 MWh" in lines[0] and "40.0 MWh" in lines[0], lines[0]
+
+
+# ── horizon totals and partial dispatch (mutant killers) ─────────────────
+
+
+def _dispatched_two_period() -> pypsa.Network:
+    """The hand dispatch in 2030 and 2035; 2035 lasts 10 years, 2030 5."""
+    one = _dispatched()
+    n = _network()
+    n.set_investment_periods([2030, 2035])
+    n.investment_period_weightings.loc[:, "years"] = [5.0, 10.0]
+    # The objective weighting differs: the KPI must read `generators`.
+    n.snapshot_weightings.loc[:, "objective"] = 7.0
+    sns = n.snapshots
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    gp = pd.concat([one.generators_t.p, one.generators_t.p])
+    gp.index = sns
+    gp.loc[2035, "diesel"] = 0.0  # 2035 runs on renewables only
+    n.generators_t.p = gp
+    return n
+
+
+def test_horizon_totals_weight_each_period_by_its_years():
+    kpi = renewable_fraction(_dispatched_two_period())
+    by = {p["period"]: p for p in kpi["per_period"]}
+    assert by[2030]["fraction"] == pytest.approx(0.625)
+    assert by[2035]["fraction"] == pytest.approx(1.0)
+    assert kpi["served_mwh"] == pytest.approx(240.0 * 5 + 240.0 * 10)
+    assert kpi["nonrenewable_mwh"] == pytest.approx(90.0 * 5)
+    assert kpi["fraction"] == pytest.approx(1 - 450.0 / 3600.0)
+
+
+def test_a_generator_added_after_the_solve_reads_as_zero():
+    n = _dispatched()
+    n.add("Generator", "late", bus="ac", carrier="diesel", p_nom=5.0)
+    n.generators_t.p = n.generators_t.p.drop(columns=["late"], errors="ignore")
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_no_load_dispatch_is_unavailable_even_with_generator_dispatch():
+    n = _dispatched()
+    n.loads_t.p = pd.DataFrame(index=n.snapshots)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "not been solved" in kpi["reason"]
