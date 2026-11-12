@@ -127,13 +127,17 @@ free.
 
 ## Step: generate
 
-Call `generate_renewable_profile` with the same arguments. It answers a
-queued job — generation runs in the one solve queue, behind any running
-solve, and does NOT complete inline. Poll `solve_queue_list`, and when the
-job is completed call `list_pending_profiles` and confirm the artifact is
-there (technology, weather year, resolution, points). A failed job carries
-its refusal — read it to the user and fix the cause (an ERA5 job without
-CDS credentials fails exactly the way the weather step describes).
+Put the generation in a plan (`start_task`, one step
+`generate_renewable_profile` with the same arguments, titled with the user's
+words). Generation runs in the one solve queue, behind any running solve, and
+does NOT complete inline: the plan waits on the queued job, so the
+conversation continues once, by itself, when it ends. Say that the profile was
+queued and that you will report when it is ready; do not poll. On completion
+the continuation carries the step's result, which holds the pending artifact:
+confirm it (technology, weather year, resolution, points). A failed job fails
+the step with the job's own refusal — read it to the user and fix the cause (an
+ERA5 job without CDS credentials fails exactly the way the weather step
+describes). Never report a profile for a failed job.
 
 ## Step: apply
 

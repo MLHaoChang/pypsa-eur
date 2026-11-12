@@ -4171,7 +4171,12 @@ def _dispatch_real_tool_call(
         try:
             from harness import continuation
 
-            jobs = continuation.queue_jobs(result)
+            # LC-45: a harness run's step keeps its own judge, never the follower.
+            run_step = (
+                tool_name in assistant_tasks.PLAN_ONLY_WAIT_TOOLS
+                and assistant_tasks.is_run_ticket(task_ticket)
+            )
+            jobs = [] if run_step else continuation.plan_jobs(tool_name, args, result)
             if jobs:  # an all-reused sweep has no job: its receipt settles the step
                 assistant_tasks.track_queue_follower(
                     task_ticket

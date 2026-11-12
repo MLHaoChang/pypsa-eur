@@ -36,3 +36,20 @@ Polling costs wasted turns and tokens, and the user must return and ask "is it d
 ## Likely files
 
 `pypsa-gui/backend/harness/workflows/renewable-profile.md`, `investment-decision.md`, `harness/job_adapters.py`, `harness/continuation.py`, `harness/skills/sensitivity/SKILL.md` (the pattern), tests under `pypsa-gui/backend/tests/`.
+
+## GK B conditions (plan GO, session 50) and where each is met
+
+PR #1427. Tests are in `pypsa-gui/backend/tests/test_lc45_no_polling_plans.py` (follower) and `test_lc45_real_records.py` (records the runners really save).
+
+- L1 profile artifact tied to the job, source and technology: `test_a_completed_profile_job_without_its_own_artifact_is_uncertain`, `test_an_unreadable_artifact_listing_is_uncertain`.
+- L2 unknown kind never completed; solve-queue jobs keep `_queue_run`: `test_an_unknown_job_kind_is_never_completed`.
+- L3 study follower bound to its own run's `started_at`: `test_a_newer_run_never_settles_this_step`.
+- L4 terminal states: budget or deadline stop is partial with the reason, user abort fails with "aborted", failed run fails with its error, done with an unsolved option or a not-established tornado is partial; a skipped tornado is completed (the study's answer): `test_lc45_real_records.py` (real runs and `tornado_runner._save`).
+- L5 vanished record, unreadable study and the follow cap settle uncertain: `test_a_vanished_record_settles_uncertain`, `test_a_study_that_never_ends_settles_uncertain_at_the_cap`; malformed records (N1): `test_a_malformed_record_*`.
+- L6 read under the caller's identity and ACL: `test_a_study_the_caller_cannot_read_is_refused_not_followed`.
+- L7 restart: `Runner._recover` settles a waiting study step uncertain: `test_a_restart_settles_a_waiting_study_step_uncertain`.
+- L8 admission unchanged: only `QUEUE_WAIT_TOOLS` grew; run-monitor, runner and loop suites pass.
+- L9 workflow texts have no poll wording; the generated `investment-decision.md` comes from `workflows/sources/`; inventory and control-matrix `--check` pass.
+- L10 the real follower runs (short poll and cap); only the native reads are faked.
+- L11 hand mutants are all killed; the two defensive layers against malformed records are equivalent to each other.
+
