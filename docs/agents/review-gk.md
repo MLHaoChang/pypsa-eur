@@ -243,3 +243,5 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A test that names a physical feature (a "store-bearing bus") has that feature read by the code under test; a decorative component proves nothing (#1411, GK B (49)).
 - A new module-level gridspine import in `pypsa-gui/backend` is guarded with the existing pinned fallback (`process_uc._fallback_truthy`), never a new copy; run `tests/test_packaging_requirements.py` on the PR head too (#1388).
 - A variable term on the relaxing side of a ≤ row (a draw that raises the allowance) needs an upper bound; the gross-aux z ≥ p trick tightens itself only on the binding side (#1424).
+- A metric that classifies sources fails closed: any non-renewable energy it can neither count nor rule out makes the value None with a reason, never a clean number (#1423 F1′/F1″, #1424 F1/R13).
+- Test fixtures for a follower or reader use the record shape the real writer saves, never a hand-made shape (#1427 F1/F3).
