@@ -2171,11 +2171,7 @@ def test_the_row_weighs_a_sign_minus_two_injection_by_two():
     con = m.constraints[row_name(None)]
     labels = np.ravel(con.vars.values)
     coeffs = np.ravel(con.coeffs.values)
-    inj = {
-        int(lab)
-        for lab in np.ravel(m.variables[aux].labels.values)
-        if lab >= 0
-    }
+    inj = {int(lab) for lab in np.ravel(m.variables[aux].labels.values) if lab >= 0}
     diesel = {
         int(lab)
         for lab in np.ravel(m.variables["Generator-p"].sel(name="diesel").labels.values)

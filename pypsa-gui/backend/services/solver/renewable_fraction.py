@@ -793,7 +793,9 @@ def renewable_fraction(
         nonren += _col(gp, g).clip(lower=0.0)
     for g in cls["injecting_generators"]:
         # GK A G4: the bus receives sign·p = |sign|·(−p) at p < 0.
-        nonren += (-_col(gp, g)).clip(lower=0.0) * abs(float(n.generators.at[g, "sign"]))
+        nonren += (-_col(gp, g)).clip(lower=0.0) * abs(
+            float(n.generators.at[g, "sign"])
+        )
     blind = []
     for l in cls["source_links"]:
         delivered = _source_delivery(n, l, sns)
