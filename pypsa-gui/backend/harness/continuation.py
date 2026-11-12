@@ -195,18 +195,56 @@ def _study_state(job) -> tuple[str, str | None]:
     `tornado_runner._save`): a run is `completed` only when every option (and
     every tornado variant) solved. A stop by the solve budget or the solve
     deadline is `partial` with the reason; a user's abort is `aborted`; a run
-    that raised is `failed` with its error (L4). A record that is gone,
-    unreadable or no longer the one this step started is `unknown` (L3, L5)."""
-    from services.study.tornado_runner import DEADLINE_NOTE
+    that raised is `failed` with its error (L4). A tornado that ran to its end
+    and found nothing to test (`skipped`: no battery candidate, or its NPV is
+    not positive at the centre) is `completed`: that is the study's answer, and
+    the verdict reads it. A record that is gone, unreadable, malformed or no
+    longer the one this step started is `unknown` (L3, L5, N1)."""
     rec = _study_record(job)
+    try:
+        return _study_state_of(rec, job)
+    except (TypeError, ValueError, AttributeError, KeyError):
+        return (
+            "unknown",
+            None,
+        )  # a malformed record proves nothing, and never raises into the follower
+
+
+def _study_state_of(rec, job) -> tuple[str, str | None]:
+    from services.study.tornado_runner import DEADLINE_NOTE
+
     status = rec.get("status")
-    if not status or rec.get("started_at") is None or rec.get("started_at") != job.get("attempt"):
+    if (
+        not isinstance(status, str)
+        or rec.get("started_at") is None
+        or rec.get("started_at") != job.get("attempt")
+    ):
+        return "unknown", None
+    options, solved, pending = (
+        rec.get("options") or [],
+        rec.get("solved") or [],
+        rec.get("pending") or [],
+    )
+    robustness = rec.get("robustness") or {}
+    if not (
+        isinstance(options, list)
+        and isinstance(solved, list)
+        and isinstance(pending, list)
+        and isinstance(robustness, dict)
+        and all(isinstance(x, str) for x in options + solved + pending)
+    ):
         return "unknown", None
     error = str(rec["error"])[:200] if rec.get("error") else None
     tornado = job.get("kind") == "study_tornado"
-    deadline = ((rec.get("robustness") or {}).get("note") == DEADLINE_NOTE or rec.get("deadline_exceeded")
-                or "deadline" in (error or "").lower())
-    if status == "running" or status == "aborting":  # the runners keep `running` while a stop is pending
+    deadline = (
+        robustness.get("note") == DEADLINE_NOTE
+        or bool(rec.get("deadline_exceeded"))
+        or "solve_deadline_exceeded" in (error or "")
+    )
+    if status in (
+        "running",
+        "aborting",
+    ):  # the runners keep `running` while a stop is pending
         return "running", None
     if status in ("failed", "aborted") and deadline:
         return "partial", error or "the run stopped at the solve deadline"
@@ -217,15 +255,21 @@ def _study_state(job) -> tuple[str, str | None]:
     if status != "done":
         return status, error
     if tornado:
-        robustness = rec.get("robustness") or {}
-        if robustness.get("status") != "ok":
-            return "partial", f"tornado not established: {robustness.get('note') or 'no robustness result'}"[:200]
-        return "completed", None
-    options, solved = rec.get("options") or [], set(rec.get("solved") or [])
-    unreached = [o for o in options if o not in solved]
-    if unreached or rec.get("pending") or error:
-        return "partial", (f"{len(unreached)} of {len(options)} options did not solve" if unreached
-                           else error or "options not reached")
+        if robustness.get("status") in ("ok", "skipped"):
+            return "completed", None
+        return (
+            "partial",
+            f"tornado not established: {robustness.get('note') or 'no robustness result'}"[
+                :200
+            ],
+        )
+    unreached = [o for o in options if o not in set(solved)]
+    if unreached or pending or error:
+        return "partial", (
+            f"{len(unreached)} of {len(options)} options did not solve"
+            if unreached
+            else error or "options not reached"
+        )
     return "completed", None
 
 

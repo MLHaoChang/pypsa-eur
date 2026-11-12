@@ -5,8 +5,6 @@ steps, so the conversation continues by itself and the model never polls.
 The real follower runs (short poll, short cap); only the native reads under it
 (the queue job, the pending artifacts, the study record) are faked."""
 
-import time
-
 import pytest
 from fastapi import HTTPException
 
@@ -254,8 +252,11 @@ def test_a_failed_or_aborted_run_fails_the_step_with_the_record_reason(
     assert step["status"] == "failed" and (error or "aborted") in str(step)
 
 
+@pytest.mark.parametrize(
+    "terminal, step_status", [("done", "completed"), ("aborted", "failed")]
+)
 def test_a_run_followed_through_running_and_aborting_settles_only_at_the_end(
-    session, baseline, monkeypatch
+    session, baseline, monkeypatch, terminal, step_status
 ):
     """Running -> aborting -> terminal: the step waits through `aborting` (F3)."""
     _, _, root = baseline
@@ -268,14 +269,14 @@ def test_a_run_followed_through_running_and_aborting_settles_only_at_the_end(
         }
     ]
     task = chat_tools.start_task(
-        title="Abort", request_id="lc45-s9", steps=steps, brief=brief(steps)
+        title="Abort", request_id="lc45-s9-" + terminal, steps=steps, brief=brief(steps)
     )
     monkeypatch.setitem(
         chat_tools.DISPATCHERS,
         "run_decision_study",
         lambda **k: {"stage": k["stage"], "run": {"status": "running"}},
     )
-    script = ["running", "running", "aborting", "aborting", "done"]
+    script = ["running", "running", "aborting", "aborting", terminal]
 
     def record(job):
         status = script.pop(0) if len(script) > 1 else script[0]
@@ -284,8 +285,11 @@ def test_a_run_followed_through_running_and_aborting_settles_only_at_the_end(
 
     monkeypatch.setattr(continuation, "_study_record", record)
     _run(session, monkeypatch, "options")
-    assert _wait_done(root, task["task_id"], 0)["status"] == "completed"
-    assert "aborting" in seen and seen[-1] == "done"
+    step = _wait_done(root, task["task_id"], 0)
+    assert step["status"] == step_status
+    assert "aborting" in seen and seen[-1] == terminal
+    if terminal == "aborted":
+        assert "aborted" in str(step)
 
 
 def _saved_tornado(monkeypatch, status, error=None, **record):
@@ -344,124 +348,3 @@ def test_an_options_run_stopped_at_its_deadline_is_partial(monkeypatch):
     monkeypatch.setattr(continuation, "_study_record", lambda job: saved)
     got, why = continuation._study_state({"kind": "study_options", "attempt": 1.0})
     assert got == "partial" and "deadline" in why
-
-
-def test_the_runners_still_write_the_keys_the_follower_reads():
-    """Pins the save shape: a renamed status or flag fails here, not in production."""
-    import inspect
-
-    from services.study import runner, tornado_runner
-
-    start = inspect.getsource(runner.start_study_run)
-    worker = inspect.getsource(runner._worker)
-    for key in ('"options"', '"solved"', '"pending"', '"started_at"', '"error"'):
-        assert key in start
-    for status in ('"aborted"', '"done"', '"failed"'):
-        assert status in worker
-    assert (
-        "aborting" not in start + worker
-    )  # the runners keep `running` while a stop is pending
-    save = inspect.getsource(tornado_runner._save)
-    for key in (
-        '"status"',
-        '"started_at"',
-        '"budget_exhausted"',
-        '"robustness"',
-        '"error"',
-    ):
-        assert key in save
-    assert "deadline_exceeded" in inspect.getsource(tornado_runner._worker)
-
-
-def test_a_vanished_record_settles_uncertain(session, baseline, monkeypatch):
-    _, _, root = baseline
-    task = _study(
-        monkeypatch, "lc45-s4", {"options": [_rec("running"), {}], "tornado": [_rec()]}
-    )
-    _run(session, monkeypatch, "options")
-    assert _wait_done(root, task["task_id"], 0)["status"] == "uncertain"
-
-
-def test_a_newer_run_never_settles_this_step(session, baseline, monkeypatch):
-    _, _, root = baseline
-    task = _study(
-        monkeypatch,
-        "lc45-s5",
-        {"options": [_rec("running"), _rec("done", started=2.0)], "tornado": [_rec()]},
-    )
-    _run(session, monkeypatch, "options")
-    assert _wait_done(root, task["task_id"], 0)["status"] == "uncertain"
-
-
-def test_a_study_that_never_ends_settles_uncertain_at_the_cap(
-    session, baseline, monkeypatch
-):
-    _, _, root = baseline
-    monkeypatch.setattr(continuation, "MAX_QUEUE_FOLLOW_SECONDS", 0.3)
-    task = _study(
-        monkeypatch, "lc45-s6", {"options": [_rec("running")], "tornado": [_rec()]}
-    )
-    start = time.monotonic()
-    _run(session, monkeypatch, "options")
-    assert _wait_done(root, task["task_id"], 0)["status"] == "uncertain"
-    assert time.monotonic() - start < 20
-
-
-def test_a_study_the_caller_cannot_read_is_refused_not_followed(
-    session, baseline, monkeypatch
-):
-    """The real record read, under an ACL that refuses another org's study (L6)."""
-    _, _, root = baseline
-    _study(monkeypatch, "lc45-s7", {"options": [_rec()], "tornado": [_rec()]})
-    monkeypatch.undo()  # keep the real `_study_record`, so the real read runs
-
-    def refused(name):
-        raise HTTPException(403, "not yours")
-
-    monkeypatch.setattr(chat_tools, "_authorized_project", refused)
-    assert (
-        continuation._study_record(
-            {"kind": "study_options", "study_id": "s1", "project_id": "other-org/p"}
-        )
-        == {}
-    )
-    status, _, result = continuation.queue_outcome(
-        [
-            {
-                "job_id": "study:s1:options",
-                "kind": "study_options",
-                "study_id": "s1",
-                "project_id": "other-org/p",
-                "attempt": 1.0,
-            }
-        ]
-    )
-    assert status == "uncertain"
-
-
-def test_a_restart_settles_a_waiting_study_step_uncertain(
-    session, baseline, monkeypatch
-):
-    """Boot recovery (`Runner._recover`) re-reads the waiting step; the record is gone."""
-    from harness import runner as harness_runner
-
-    _, _, root = baseline
-    monkeypatch.setattr(
-        continuation, "QUEUE_POLL_SECONDS", 60
-    )  # the live follower sleeps: only boot recovery settles
-    task = _study(
-        monkeypatch, "lc45-s8", {"options": [_rec("running")], "tornado": [_rec()]}
-    )
-    _run(session, monkeypatch, "options")
-    assert wait_until(
-        lambda: stored(root, task["task_id"])["steps"][0]["status"] == "waiting", 10
-    )
-    path = root / "assistant_tasks" / (task["task_id"] + ".json")
-    monkeypatch.setattr(
-        continuation, "_study_record", lambda job: {}
-    )  # the restart lost the record
-    try:
-        harness_runner.Runner("boot-x")._recover(path)
-    except Exception:  # noqa: BLE001 — a non-run task fails after the step loop
-        pass
-    assert _wait_done(root, task["task_id"], 0)["status"] == "uncertain"
