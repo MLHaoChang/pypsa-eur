@@ -41,7 +41,8 @@ ARGS_CHARS = 1800
 RESULT_CHARS = 4000  # the model-facing result cap, harness.results._RESULT_CONTENT_CAP
 _WAIT_TOOLS = frozenset({"run_simulation", "run_ac_pf_stage"})
 # Queued runs wait on their solve-queue job(s) (`harness/continuation.py`).
-QUEUE_WAIT_TOOLS = frozenset({"run_sensitivity_sweep", "solve_queue_enqueue"})
+QUEUE_WAIT_TOOLS = frozenset({"run_sensitivity_sweep", "solve_queue_enqueue",
+                              "generate_renewable_profile", "run_decision_study"})  # LC-45: no polling
 _QUEUE_FOLLOWERS = set()  # (task_id, step_id, attempt_id) of steps this process follows
 # Study harness 02 (GK B, B1 option b): the harness runner binds its run's own
 # project context here; `_authority` and `_advance_run` prefer it to the

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The renewable-profile and investment-decision workflows run as one `start_task` plan, so the chat continues by itself when the profile job or the decision study (options, then tornado) ends and no longer polls; a failed job or run is read to the user.

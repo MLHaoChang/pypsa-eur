@@ -4171,7 +4171,7 @@ def _dispatch_real_tool_call(
         try:
             from harness import continuation
 
-            jobs = continuation.queue_jobs(result)
+            jobs = continuation.plan_jobs(tool_name, args, result)
             if jobs:  # an all-reused sweep has no job: its receipt settles the step
                 assistant_tasks.track_queue_follower(
                     task_ticket

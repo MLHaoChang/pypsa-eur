@@ -3568,8 +3568,9 @@ def run_decision_study(project: str, study_id: str, stage: str = "options",
     """
     Start a run: `options` solves every option (`POST .../run`); `tornado`
     tests the best option against each key assumption's range
-    (`POST .../findings/tornado`). Both return at once; poll
-    `get_study_findings`.
+    (`POST .../findings/tornado`). Both return at once. Run each as a
+    `start_task` plan step: the plan waits on the run and the conversation
+    continues when it ends, so do not poll.
     """
     from routers import studies as R
     from services.study import chat_view
