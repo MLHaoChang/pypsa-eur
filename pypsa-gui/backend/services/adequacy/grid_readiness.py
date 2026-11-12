@@ -44,6 +44,10 @@ import json
 import math
 import pathlib
 from typing import Any
+try:
+    from gridspine.drivers.process_chain import truthy as _truthy
+except ImportError:  # a build without gridspine: the one pinned fallback, not a new copy
+    from services.solver.process_uc import _fallback_truthy as _truthy
 
 SCHEMA = 1
 VERDICTS = ("pass", "warn", "fail", "unknown")
@@ -220,7 +224,7 @@ class _Inputs:
         return self.links[0] if self.links else None
 
 
-def _profile_title(inp: "_Inputs") -> str:
+def _profile_title(inp: _Inputs) -> str:
     """The grid code by its title (a project profile may have none: then its id)."""
     return str((inp.profile or {}).get("title") or (inp.profile or {}).get("name") or "the grid code")
 
@@ -1058,10 +1062,6 @@ def _poc_sk_min(inp: _Inputs):
     except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError):
         # No, or no readable, campus description: the entered S_k'' is used, and the row says so.
         return None, None
-
-
-def _truthy(v) -> bool:
-    return v is True or str(v).lower() in ("true", "1")
 
 
 def _process_units(links) -> list[str]:

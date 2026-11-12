@@ -485,6 +485,7 @@ def get_llm_settings(
     return {
         "profiles": [_profile_out(p) for p in profiles],
         "active_profile_id": active_id,
+        "roles": llm_config.load_roles(),
         "presets": llm_config.load_presets(),
     }
 
@@ -650,6 +651,30 @@ def post_llm_active(
     except llm_config.ProfileValidationError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"active_profile_id": body.profile_id}
+
+
+class ProfileRoleRequest(BaseModel):
+    """An unknown role is a 422 (GK B T7); an unknown profile a 404."""
+
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["memory_analyzer"]
+    profile_id: str | None = None
+
+
+@router.post("/settings/llm/roles")
+def post_llm_role(
+    body: ProfileRoleRequest,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Mark a profile for an optional role (`memory_analyzer`), or clear it
+    with `profile_id: null` so the task uses the active profile. 404s on an
+    unknown role or profile."""
+    _require_super_admin(user)
+    try:
+        roles = llm_config.set_role(body.role, body.profile_id)
+    except llm_config.ProfileValidationError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"roles": roles}
 
 
 # Provider errors from `_provider_for_profile` that mean "there is no live

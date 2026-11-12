@@ -204,6 +204,7 @@ ROUTE_SURFACES = {
     "PUT /settings/llm/profiles/{profile_id}/key": NO_ASSISTANT_TEXT,
     "DELETE /settings/llm/profiles/{profile_id}/key": NO_ASSISTANT_TEXT,
     "POST /settings/llm/active": NO_ASSISTANT_TEXT,
+    "POST /settings/llm/roles": NO_ASSISTANT_TEXT,
     "POST /settings/llm/profiles/{profile_id}/test": NO_ASSISTANT_TEXT,
     "GET /settings/mcp/servers": NO_ASSISTANT_TEXT,
     "PUT /settings/mcp/servers/{server_id}": NO_ASSISTANT_TEXT,

@@ -145,6 +145,13 @@ def test_a_run_reports_strictly_on_its_own_lease_then_hands_off(
     assert not any(s["tool"] == "apply_project_changes" for s in record["steps"])
     handoff = record["run"]["handoff"]
     assert handoff["resume"]["report_id"] == step["job"]["report_id"]
+    # SH-12c G8: the hand-off stores the result gate's counts, read by the
+    # hand-off step itself; eh_site has no warn rule, so nothing is unevaluated.
+    rules = record["run"]["stages"]["result_gate"]["gate"]["rules"]
+    assert handoff["checks"] == {
+        "counts": {"pass": len(rules), "fail": 0, "not_evaluated": 0},
+        "not_evaluated": [],
+    }
 
 
 def test_c8_a_run_stored_before_the_change_goes_on_to_the_new_stages(
@@ -504,7 +511,17 @@ def coverage_task(case_status=None, gate_passed=True):
         "stages": {
             "result_gate": {
                 "status": "passed" if gate_passed else "failed",
-                "gate": {"passed": gate_passed},
+                # A gate that evaluated a rule (GK B (49) F1: one with none is a gap).
+                "gate": {
+                    "passed": gate_passed,
+                    "rules": [
+                        {
+                            "rule": "res.solve.status",
+                            "severity": "block",
+                            "verdict": "pass" if gate_passed else "fail",
+                        }
+                    ],
+                },
             }
         },
     }
@@ -1133,3 +1150,23 @@ def test_b1a_explore_stays_as_the_run_started_it(stored):
     run["stages"]["explore"] = dict(stored)
     assert tasks._sync_stages(run, profile) is False
     assert run["stages"]["explore"] == stored
+
+
+def test_a_run_report_carries_no_saved_charts(detached, site, fake_report, monkeypatch):
+    """ui-modern 02 slice 7a (V1): the harness's stage-7 launch never reads the saved Results charts."""
+    from routers import report_jobs
+
+    mail(monkeypatch)
+    seen = []
+    real = report_jobs._render_figures
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("charts"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(report_jobs, "_render_figures", spy)
+    path, record = completed_run(detached, site)
+    assert record["run"]["status"] == "completed", record["run"]
+    assert seen and set(seen) == {False}
+    doc = run_report.saved(record, path.parent.parent)
+    assert "charts_from_results" not in {s.section_id for s in doc.sections}

@@ -1053,7 +1053,7 @@ export const CHART_AXIS = {
  *  k-th tick by index and never measures a label, where its default measures
  *  every one of a full year's 8760 (77 % of a Curtailment draw, ui-modern 06).
  *  Spread after CHART_AXIS: `<XAxis dataKey="snapshot" {...CHART_AXIS} {...timeAxis(rows.length)} />`. */
-export const FULL_YEAR_TICKS = 8
+export const FULL_YEAR_TICKS = 6
 export function timeAxis(n: number): { interval?: number } {
   return n > 200 ? { interval: Math.ceil(n / FULL_YEAR_TICKS) - 1 } : {}
 }
@@ -1086,14 +1086,31 @@ export function thinRows<T extends object>(rows: readonly T[], max = MAX_CHART_P
   return out
 }
 
+/** "hour" when the first two rows of `rows` are exactly an hour apart (the
+ *  usual stamp key is `snapshot` or `t`), else "time step": a 3-hourly or
+ *  15-minute project has no "hours" to count (ui-modern 06b). */
+export function stepWord(rows: readonly object[]): 'hour' | 'time step' {
+  const stamp = (r: object | undefined): number => {
+    const o = (r ?? {}) as Record<string, unknown>
+    const v = o.snapshot ?? o.t
+    if (typeof v !== 'string') return NaN
+    const iso = v.replace(' ', 'T')
+    // ReserveCommitments and Energy flows key rows by shortStamp (`MM-DD HH:MM`).
+    return Date.parse(/^\d{2}-/.test(iso) ? `2001-${iso}` : iso)
+  }
+  const d = stamp(rows[1]) - stamp(rows[0])
+  return d === 3_600_000 ? 'hour' : 'time step'
+}
+
 /** The muted line under a chart whose rows were thinned by `thinRows`; renders
- *  nothing when the chart shows every row. */
+ *  nothing when the chart shows every row. Says "hours" only on hourly rows. */
 export function ThinNote({ rows }: { rows: readonly object[] }) {
   const drawn = rows.length > MAX_CHART_POINTS ? thinRows(rows).length : rows.length
   if (drawn >= rows.length) return null
+  const w = stepWord(rows)
   return (
     <p data-testid="thin-note" className="px-1 pt-1 text-[10px] text-muted">
-      Drawn: {drawn.toLocaleString('en-US')} of {rows.length.toLocaleString('en-US')} hours · the largest hour of each stretch is kept · totals use every hour
+      Drawn: {drawn.toLocaleString('en-US')} of {rows.length.toLocaleString('en-US')} {w}s · the largest {w} of each stretch is kept · totals use every {w}
     </p>
   )
 }

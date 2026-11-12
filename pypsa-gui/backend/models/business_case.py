@@ -583,6 +583,20 @@ class PassThroughPriceIncludesEnergy(BusinessCaseRefused):
     kind = "pass_through_price_includes_energy"
 
 
+class LinkedOutputMissing(BusinessCaseRefused):
+    """A `linked:<id>@<version>` this project's catalogue does not offer
+    (`services.business_case.linked_outputs`); `field` is the output id."""
+
+    kind = "linked_output_missing"
+
+
+class DoubleCount(BusinessCaseRefused):
+    """A linked quantity on a stream the IC ledger already prices (spec G2);
+    `field` is the ledger stream."""
+
+    kind = "double_count"
+
+
 # The DC spec names these two; every other required category is `capex_missing` (GK B Q2).
 _CAPEX_MISSING: dict[str, type[BusinessCaseRefused]] = {
     "it_hardware": ItCapexMissing,
@@ -611,6 +625,8 @@ REFUSAL_KINDS: tuple[str, ...] = (
     "facility_capex_missing",
     "capex_not_owned",
     "pass_through_price_includes_energy",
+    "linked_output_missing",
+    "double_count",
 )
 
 # ------------------------------------------------------------------ helpers

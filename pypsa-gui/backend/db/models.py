@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import text, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from db.base import Base
@@ -372,3 +372,93 @@ class MemoryRevision(Base):
 
     scope_key: Mapped[str] = mapped_column(String(48), primary_key=True)
     revision: Mapped[int] = mapped_column(Integer, default=0)
+
+
+# The one-live-job-per-user guarantee (GK B D4): a partial unique index, so two
+# concurrent starts cannot both insert a queued/running row.
+_DREAM_LIVE = text("status IN ('queued', 'running')")
+
+
+class MemoryDreamJob(Base):
+    """One dream job (assistant-memory plan §6, issue 04; `harness/dream.py`).
+
+    Reviews the user's past chats and runs and writes `proposed` memory items
+    only. `lease_owner`/`lease_until` (wall time) guard every write after a
+    take-over (§9 M7, GK B D1). `cursor_json` is where the next job starts;
+    `candidates_json` holds the analyzer output awaiting the organizer.
+    """
+
+    __tablename__ = "memory_dream_jobs"
+    __table_args__ = (
+        Index(
+            "ux_memory_dream_jobs_live_user",
+            "user_id",
+            unique=True,
+            sqlite_where=_DREAM_LIVE,
+            postgresql_where=_DREAM_LIVE,
+        ),
+        Index("ix_memory_dream_jobs_user_created", "user_id", "created_at"),
+        Index("ix_memory_dream_jobs_status", "status"),
+        # One job per trigger occasion (GK B T1): a night or a run of ten new
+        # chats starts at most one job, whatever two scans race.
+        Index(
+            "ux_memory_dream_jobs_trigger_key",
+            "user_id",
+            "trigger_key",
+            unique=True,
+            sqlite_where=text("trigger_key IS NOT NULL"),
+            postgresql_where=text("trigger_key IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    trigger: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16))
+    cursor_json: Mapped[str] = mapped_column(Text)
+    candidates_json: Mapped[str] = mapped_column(Text)
+    budget_json: Mapped[str] = mapped_column(Text)
+    spent_json: Mapped[str] = mapped_column(Text)
+    counts_json: Mapped[str] = mapped_column(Text)
+    lease_owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+    restarts: Mapped[int] = mapped_column(Integer, default=0)
+    restart_times_json: Mapped[str] = mapped_column(Text)
+    error_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Set by a trigger (04b): `nightly:<Berlin date>` or `sessions:<mark>`.
+    trigger_key: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    # The org the job reads and writes for (GK B T3); NULL on 04a manual jobs.
+    org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # The model the analyzer and organizer ran on (GK B T7).
+    analyzer: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
+class MemoryDreamSettings(Base):
+    """A user's opt-in for automatic dream jobs (assistant-memory plan §6).
+
+    Both triggers are off until the user turns them on in Memory settings: a
+    job sends past transcripts to the configured provider. No row means both
+    off.
+    """
+
+    __tablename__ = "memory_dream_settings"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    nightly: Mapped[bool] = mapped_column(Boolean, default=False)
+    after_sessions: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The org the opt-in was made in (GK B T3): a trigger runs only while the
+    # user is still a member of exactly this org, never another one.
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True
+    )
+    # When `after_sessions` was last turned on: with no job yet, only chats
+    # after it count, so turning it on never fires on old chats.
+    after_sessions_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

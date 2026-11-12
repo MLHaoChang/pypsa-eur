@@ -158,6 +158,16 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - An "is current" or no-op flag is an exact compare, with a server test at a value equal only after rounding. A mocked client flag pins nothing (#1386 A3, GK B (47)).
 - A solve-like check's revision and its network copy are read under one lock, with a test where an edit lands right after the lock is released (#1384 N1, GK B (47)).
 - A reader of saved settings it cannot parse (non-dict JSON, wrong-typed fields, [] or null) names them as unreadable, never as empty or "nothing on" (#1384 N2b, GK B (47)).
+- A check that must run under a lock (no check-then-act window) has a test that sets the condition at lock entry (wrap the lock). The test is shown red with the check moved above the lock: a test that sets the condition beforehand passes either way (#1378 K1b, GK B (48)).
+- A difference or ratio of two finite figures is checked for a finite RESULT too (a tiny divisor, opposite extremes), not only for finite inputs. Under allow_nan=False an inf is a 500 (#1392 T2, GK B (48)).
+- A survivor called "equivalent" because two quantities "never equal" is checked against what the guard actually compares (e.g. a clamped min(), not the raw value). A card sentence behind such a guard is pinned both absent and present (#1398 A1, GK B (48)).
+- A scheduled trigger that checks "not yet fired" and then creates a job carries a unique fire key, or takes the check and create under one cross-process lock. A one-live-job index does not stop a second job once the first settles. Test the race (#1401 T1, GK B (48)).
+- A PR that adds or renames run-profile levers runs `test_harness_run_monitor` at the trial merge. Its envelope-words test catches a lever name with no NAME_WORDS entry (#1398, GK B (48)).
+- A check whose total compared nothing (zero rules, no site named) never reads covered or pass; it reads gap or not_evaluated (#1409 F1, SH-33, GK B (49)).
+- "Stated targets" coverage means evaluated, not met: a failed warn rule stays covered (#1409, GK B (49)).
+- A digest gate enters a map or flag only when it changes an outcome, never on non-empty input (#1411 F1, GK B (49)).
+- A per-file exemption in an AST guard is keyed on the function or node, never the whole file (#1410 F4, GK B (49)).
+- A no-map or fallback selection by stream refuses whenever an asset-sourced slack line could be the same quantity (#1411 R, GK B (49)).
 
 ## Engineering rules
 

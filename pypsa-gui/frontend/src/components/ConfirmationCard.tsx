@@ -8,7 +8,7 @@ import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { mismatchSentence } from '../utils/projectMismatch'
 import { CHANGE_SET_NONE_TICKED, ChangeSetRows, changeSetApplyLabel, changeSetOf, settledChangeSet } from './ChangeSetCard'
-import { EditCardTable, editCardOf, editCardWords } from './EditCard'
+import { SAYS_HEADLINE, EditCardTable, editCardOf, editCardWords } from './EditCard'
 import { SweepCardTable, sweepCardOf } from './SweepCard'
 
 // Tools that require an EXTRA typed-confirmation step (Phase 4 polish).
@@ -490,7 +490,8 @@ export function ConfirmationCard() {
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
             data-testid="chat-confirmation-summary">
             {(changeSet && `${changeSet.items.length} changes proposed for this step`)
-              || (edit && (editCardWords(edit) || edit.says)) || sweep?.says || (pending.external
+              || (edit && ((SAYS_HEADLINE.has(edit.tool) && edit.says) || editCardWords(edit) || edit.says))
+              || sweep?.says || (pending.external
               ? shortMcpToolName(pending.tool_name)
               : guidedCardSummary(pending.tool_name, pending.args))}
           </div>

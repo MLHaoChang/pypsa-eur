@@ -5,7 +5,7 @@ import { resultsEvidenceApi } from '../../api/resultsEvidence'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { downloadCSV, KPI, fmtPower, shortStamp, CHART_HEIGHT, seriesDash, carrierColour,
-  ChartFrame, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel } from './shared'
+  ChartFrame, CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel } from './shared'
 import ResultState, { type NonValueState } from '../../components/ResultState'
 
 const number = (value: number | null | undefined, unit = '') =>
@@ -92,7 +92,7 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
     {!!chartRows.length && <ChartFrame className="mt-4" testId="branch-loading-chart" title="Loading against effective limit · ranked branches">
       {data.series_truncated && <p className="text-[11px] text-muted mb-2">Chart bounded to ten branches and the first 800 selected snapshots. Table statistics cover the entire selected window.</p>}
       <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}><LineChart data={chartRows} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
-        <CartesianGrid {...CHART_GRID} /><XAxis dataKey="snapshot" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} />
+        <CartesianGrid {...CHART_GRID} /><XAxis dataKey="snapshot" {...CHART_AXIS} tickFormatter={shortStamp} minTickGap={40} {...timeAxis(chartRows.length)} />
         <YAxis {...CHART_AXIS} domain={[0, 'auto']} label={yAxisLabel('%')} />
         {/* A wide swatch, so the key shows each line's dash as well as its colour. */}
         <Tooltip {...CHART_TOOLTIP} /><Legend {...CHART_LEGEND} iconType="plainline" iconSize={24} />

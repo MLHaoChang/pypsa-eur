@@ -186,12 +186,13 @@ def _ic_returns(env):
 def _ic_baseline_keeps(env):
     """The owned existing assets the case's baseline keeps (study harness
     20): the names, else no evidence with the state and the reasons (an
-    asset of the template's declared set the baseline drops)."""
+    asset of the template's declared set the baseline drops). Study harness
+    12c (B12): the typed state stays in the value, the reason is words."""
     from services import ic_counterfactual as ic
     fact = ic.read_baseline_keeps(env.ctx, lambda fn: _on(env.ctx, fn), _template(env))
     if fact["state"] == ic.ESTABLISHED:
         return fact["kept"]
-    return NoEvidence(fact["state"], f"{fact['state']}: {', '.join(fact['reasons'])}")
+    return NoEvidence(fact["state"], ic.reason_words(fact))
 
 
 def _loads_without_series(env):
@@ -219,6 +220,20 @@ LOOP_NOTHING_TO_SAMPLE = "loop_nothing_to_sample"
 NOTHING_TO_SAMPLE_DETAIL = ("the loop found no outage to sample: no electrical generator has outage data "
                             "(unavailability or repair time). Outages carried on Links, as on the H2 hubs, "
                             "cannot be sampled yet.")
+# Study harness 12c (GK B (47) Q4): a loop the envelope's cap cut short. It is
+# the engine's own refusal kind (`run_envelope.reserve_engine`), read as not
+# evaluated with words: never met, and its last unconverged value is no result.
+LOOP_BUDGET_SPENT = "budget_spent"
+LOOP_REFUSED_WORDS = ("no solve was left in the envelope for the engine loop, so the rule is not evaluated; "
+                      "it never counts as met")
+
+
+def _capped_words(granted, wanted):
+    return (f"the envelope's solves left the engine loop {granted} of its {wanted} solves and it ran out "
+            "before it converged, so the rule is not evaluated; it never counts as met, and the loop's "
+            "last value is not a result")
+
+
 # The fields of a finished loop's record a settled engine step keeps, and the
 # gate shows: the verdict, what it cost, how the network was left, and the
 # goal it was judged against with where each part came from.
@@ -260,12 +275,21 @@ def _loop_converged(env, rule):
         if NOTHING_TO_SAMPLE in str(reason):
             # GK A (19) SH11-L1: the runner's own refusal, typed (F1: cause-neutral).
             return NoEvidence(LOOP_NOTHING_TO_SAMPLE, NOTHING_TO_SAMPLE_DETAIL)
+        if reason == LOOP_BUDGET_SPENT:  # the reservation found no solve left: the loop never started
+            return NoEvidence(LOOP_BUDGET_SPENT, LOOP_REFUSED_WORDS)
         return NoEvidence((step.get("job") or {}).get("outcome") or step["status"], str(reason)[:240])
     if loop.get("applied") is False:  # a user edit landed while the loop ran (H3): not this project's
         return NoEvidence("inputs_changed", "the inputs changed while the engine loop ran")
     problem = _goal_problem(env, loop)
     if problem:
         return NoEvidence(*problem)
+    granted = (step.get("job") or {}).get("max_solves")
+    wanted = (rule.get("engine") or {}).get("max_solves")
+    if loop.get("status") == "budget_exhausted" and isinstance(granted, int) and isinstance(wanted, int):
+        from services.adequacy.coupling import MAX_LOOP_SOLVES
+        wanted = min(wanted, MAX_LOOP_SOLVES)
+        if granted < wanted:  # GK B (47) Q4: the cap, not the loop's own budget, ended it
+            return NoEvidence(LOOP_BUDGET_SPENT, _capped_words(granted, wanted))
     return Looped(converged(loop), {k: loop[k] for k in LOOP_FIELDS if k in loop})
 
 
@@ -917,9 +941,17 @@ def _mg_critical_served(env):
     if status != "ok":
         return NoEvidence(str(status or "unreadable"),
                           str(section.get("note") or f"the off-grid stress reads {status}")[:240])
-    rows = (section.get("payload") or {}).get("contingencies")
+    payload = section.get("payload") or {}
+    rows = payload.get("contingencies")
     if not isinstance(rows, list) or not rows:
         return NoEvidence("unreadable", "the off-grid stress names no contingency")
+    # Study harness 12c (Q1-i): a stress that covered only some of the K
+    # contingencies the run's study was frozen with is never read.
+    held = _eh_contingencies(env.task)
+    names = [str((row or {}).get("contingency")) for row in rows]
+    if payload.get("budget_exhausted") or payload.get("aborted") or (held is not None and names != held):
+        return NoEvidence("partial", f"the off-grid stress covered {', '.join(names)} of "
+                                     f"{', '.join(held) if held is not None else 'its contingencies'}")
     total, detail = 0.0, []
     for row in rows:
         name = str((row or {}).get("contingency"))
@@ -930,6 +962,16 @@ def _mg_critical_served(env):
         total += float(value)
         detail.append(f"{name}: {float(value):.4g} MWh")
     return Detailed(total, detail)
+
+
+def _eh_contingencies(task):
+    """The islanding contingencies the run's latest EH step was frozen with
+    (study harness 12c G1), or None when it counted none."""
+    from harness import run_eh
+    step = next((s for s in reversed(task.get("steps") or []) if run_eh.is_eh_step(s) and not s.get("superseded")),
+                None)
+    held = ((step or {}).get("frozen") or {}).get("contingencies")
+    return list(held["links"]) if isinstance(held, dict) and isinstance(held.get("links"), list) else None
 
 
 def _mg_frequency(env):

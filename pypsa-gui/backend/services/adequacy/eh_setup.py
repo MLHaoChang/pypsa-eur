@@ -22,6 +22,11 @@ from typing import Any
 
 from models.energy_hub import EH_CONVERSION_ROLES, EH_INTERNAL_ROLES
 
+try:
+    from gridspine.drivers.process_chain import truthy as _truthy
+except ImportError:  # a build without gridspine: the one pinned fallback, not a new copy
+    from services.solver.process_uc import _fallback_truthy as _truthy
+
 _IMPORT_KW = re.compile(r"(grid|import|utility|mainland|tie|poc)", re.I)
 _CRITICAL_KW = re.compile(
     r"(crit|hospital|clinic|it[_-]|data|process|essential|emerg)", re.I)
@@ -49,9 +54,8 @@ def _f(v) -> float:
 def _flag(df, name: str, col: str) -> bool:
     if col not in df.columns:
         return False
-    v = df.at[name, col]
     try:
-        return bool(v) and not (isinstance(v, float) and math.isnan(v))
+        return _truthy(df.at[name, col])
     except (TypeError, ValueError):
         return False
 

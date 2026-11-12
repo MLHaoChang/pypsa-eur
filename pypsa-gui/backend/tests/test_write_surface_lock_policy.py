@@ -277,6 +277,7 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/chat/settings/llm/profiles/{profile_id}/key"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
     ("DELETE", "/api/chat/settings/llm/profiles/{profile_id}/key"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
     ("POST", "/api/chat/settings/llm/active"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
+    ("POST", "/api/chat/settings/llm/roles"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
     ("POST", "/api/chat/settings/llm/profiles/{profile_id}/test"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
     ("PUT", "/api/chat/settings/mcp/servers/{server_id}"): (NOT_PROJECT_DATA, _R_MCP_SETTINGS),
     ("DELETE", "/api/chat/settings/mcp/servers/{server_id}"): (NOT_PROJECT_DATA, _R_MCP_SETTINGS),
@@ -286,6 +287,10 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("PUT", "/api/local-settings/anthropic-key"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/memory/items"): (NOT_PROJECT_DATA, _R_MEMORY),
     ("POST", "/api/memory/dismissals"): (NOT_PROJECT_DATA, _R_MEMORY),
+    ("POST", "/api/memory/dream"): (NOT_PROJECT_DATA, _R_MEMORY + " It queues a dream job row; "
+        "the worker reads chats and runs and writes only proposed memory rows."),
+    ("PUT", "/api/memory/dream/settings"): (NOT_PROJECT_DATA, _R_MEMORY + " It writes the "
+        "caller's own automatic-review opt-in row."),
     ("PATCH", "/api/memory/items/{item_id}"): (NOT_PROJECT_DATA, _R_MEMORY),
     ("POST", "/api/memory/items/{item_id}/{action}"): (NOT_PROJECT_DATA, _R_MEMORY),
     ("POST", "/api/memory/parameters"): (NOT_PROJECT_DATA, _R_MEMORY + " Save for reuse reads "

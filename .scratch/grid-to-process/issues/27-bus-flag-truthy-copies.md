@@ -3,7 +3,7 @@
 
 # Bus-flag `_truthy` copies still differ from `process_chain.truthy`
 
-Status: ready-for-agent (Sonnet; reviewer GK A)
+Status: done
 Type: task
 Found by: GK A review of #1242 (issue 26).
 
@@ -26,7 +26,7 @@ Checked on master: four copies remain (`services/adequacy/eh_stages.py:287` `_tr
 - Reviewer: GK A (found by GK A on #1242).
 
 Acceptance:
-- [ ] Each of the four readers calls `process_chain.truthy` (or a shared import of it); no private bus-flag copy remains.
-- [ ] A table test feeds the same values ("yes", " Yes ", "TRUE", 1, "0", "", None, "no") to the shared rule and to each reader and asserts equal answers.
-- [ ] A bus flag that read True before and reads False now (or the reverse) is listed in the PR body with the reason.
-- [ ] A hand mutant that restores one private copy fails the table test.
+- [x] Each of the four readers calls `process_chain.truthy` (or a shared import of it); no private bus-flag copy remains.
+- [x] A table test feeds the same values ("yes", " Yes ", "TRUE", 1, "0", "", None, "no") to the shared rule and to each reader and asserts equal answers.
+- [x] A bus flag that read True before and reads False now (or the reverse) is listed in the PR body with the reason.
+- [x] A hand mutant that restores one private copy fails the table test.

@@ -20,7 +20,7 @@ import { nk } from '../../utils/queryKeys'
 import { useResultsFilter } from './filterContext'
 import WindowSlider, { useWindowRange } from './WindowSlider'
 import {
-  CHART_AXIS, CHART_GRID, CHART_TOOLTIP, downloadCSV, shortStamp, yAxisLabel,
+  CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_GRID, CHART_TOOLTIP, downloadCSV, shortStamp, yAxisLabel,
   ChartFrame, ChartSourceProvider, useChartSource, type ChartSource, ChartActions, ChartZero, chartFigure, LABEL_PASS, CHART_LEGEND, CHART_HEIGHT, carrierColour, directLabel, bandLabelIndices, legendName, fmtPower,
 } from './shared'
 import {
@@ -139,7 +139,8 @@ function SeriesChart({ title, series, index }: {
 }) {
   const keys = Object.keys(series)
   if (!keys.length || !index.length) return null
-  const data = index.map((t, i) => ({ t: shortStamp(t), ...Object.fromEntries(keys.map(k => [k, series[k][i]])) }))
+  const full = index.map((t, i) => ({ t: shortStamp(t), ...Object.fromEntries(keys.map(k => [k, series[k][i]])) }))
+  const data = thinRows(full)
   const peak = data.reduce((a, r) => Math.max(a, keys.reduce((b, k) => b + Math.max(Number(r[k as keyof typeof r]) || 0, 0), 0)), 0)
   // A band is named on itself (not hue alone); the legend alone when names could collide.
   const labelAt = bandLabelIndices(data, keys, peak)
@@ -153,7 +154,7 @@ function SeriesChart({ title, series, index }: {
       <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
         <AreaChart data={data} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
           <CartesianGrid {...CHART_GRID} />
-          <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} />
+          <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} {...timeAxis(data.length)} />
           <YAxis {...CHART_AXIS} label={yAxisLabel('MW (average)')} />
           <Tooltip {...CHART_TOOLTIP} />
           <Legend {...CHART_LEGEND} />
@@ -166,6 +167,7 @@ function SeriesChart({ title, series, index }: {
           ))}
         </AreaChart>
       </ResponsiveContainer>
+      <ThinNote rows={full} />
     </ChartFrame>
   )
 }

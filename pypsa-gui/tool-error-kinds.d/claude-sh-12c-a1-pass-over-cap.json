@@ -1,0 +1,3 @@
+{"kinds": {
+  "eh_pass_over_cap": {"surface": "inline", "why": "A microgrid run's plan card counted so many islanding contingencies that one solve pass (the solve, the Energy Hub study with one stress solve per contingency, and the island check) needs more than the envelope's hard cap of solves; the unattended grant is refused with the arithmetic and the user runs it step by step."}
+}}

@@ -48,7 +48,13 @@ def profile_kind(ctx, name: str) -> str:
     key = (*KEY, name)
     if ctx.user_ts.get(key) is None:
         return "network_native" if name in ctx.network.generators_t.p_max_pu.columns else "none"
-    meta = ctx.user_ts_meta.get(key) or {}
+    meta = ctx.user_ts_meta.get(key)
+    if meta is None:
+        meta = {}
+    elif not isinstance(meta, dict):
+        # A malformed record (RP-20, GK B C1): read as measured, so it is
+        # never replaced and never offered for confirming, and never a 500.
+        return "uploaded"
     if is_network_native(meta):
         return "network_native"   # seeded from the network's own column (RP-14)
     if not meta:

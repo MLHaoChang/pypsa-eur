@@ -1,0 +1,3 @@
+{"acknowledged_shadows": [
+  {"method": "POST", "url": "/api/projects/from_template/{}", "shadows": ["/api/projects/{name}/intent-comparison", "/api/projects/{name}/report-charts", "/api/projects/{name}/reports", "/api/projects/{name}/studies/"], "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"}
+]}

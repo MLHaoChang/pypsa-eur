@@ -316,3 +316,20 @@ it('shows no — note when the VOLL is recorded', async () => {
   expect(await findKpiValue('424 MWh')).toBeTruthy()
   expect(screen.queryByTestId('not-recorded-note')).toBeNull()
 })
+
+it('draws a full year of lost load thinned, with the note, not 8,760 points', async () => {
+  const N = 8760
+  const index = Array.from({ length: N }, (_, i) => new Date(Date.UTC(2025, 0, 1) + i * 3_600_000).toISOString().slice(0, 19))
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index, columns: ['Bus 0'], data: index.map((_, i) => [i % 97 === 0 ? 5 : 0]),
+    total_mwh: 0, total_cost_eur: 0, voll_eur_per_mwh: 0,
+  })
+  vi.mocked(networkApi.getSnapshots).mockReset().mockResolvedValue({
+    count: N, snapshots: index, weightings: [], ts_start: null, ts_end: null, can_sample_weeks: false,
+  })
+  const { container } = renderPage()
+  const note = await screen.findByTestId('thin-note')
+  expect(note.textContent).toMatch(/Drawn: 1,[45]\d\d of 8,760 hours/)
+  // Recharts never measures the 8,760 labels: at most ~a dozen x ticks.
+  expect(container.querySelectorAll('.recharts-xAxis .recharts-cartesian-axis-tick').length).toBeLessThan(20)
+})

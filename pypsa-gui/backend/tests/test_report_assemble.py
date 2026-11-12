@@ -421,3 +421,21 @@ def test_a_list_of_like_records_is_a_table_not_json():
     assert not any("[{" in getattr(b, "value", "") for b in blocks)
     # without a collector the old compact JSON stays (callers that cannot register tables)
     assert any("[{" in getattr(b, "value", "") for b in _fields({"x": [{"a": 1}]}))
+
+
+# ── saved Results charts (ui-modern 02 slice 7a) ─────────────────────────
+
+
+def test_no_saved_charts_leaves_the_document_byte_equal_to_masters():
+    """sha256 of the document JSON (created_at blanked) as master's assemble.py built it for this
+    evidence (ui-modern 02 slice 7a, V12); an empty `ReportFigures` must not change one byte."""
+    import hashlib
+
+    from services.reports.chart_snapshots import ReportFigures
+
+    golden = "515d84d2559604f226a68826688c2166c185385b5329c9bd31e100ad3e8abe97"
+    ev = collect_evidence(study_report=None, eh_report=_populated(), worksheet=_worksheet())
+    for pngs in ({}, ReportFigures({}, [])):
+        doc = evidence_only_document(ev, title="Client report", report_id="0123456789abcdef", figure_pngs=pngs)
+        text = doc.model_copy(update={"created_at": ""}).model_dump_json()
+        assert hashlib.sha256(text.encode()).hexdigest() == golden

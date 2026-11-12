@@ -97,6 +97,8 @@ export const NAME_WORDS: Record<string, string> = {
   // Study harness 11: the hydrogen hubs' levers.
   'wind_new*': 'New wind', 'solar_new*': 'New solar', 'bess_new*': 'New batteries',
   electrolyser: 'The electrolyser', 'electrolyser_new_*': 'New electrolysers', h2_storage: 'The hydrogen store',
+  // Study harness 12c: the single-year microgrid's battery candidate.
+  bess_new: 'The new battery',
 }
 
 /** An envelope edit's field: the panels' own word (`FIELD_LABELS`) and its unit. */
