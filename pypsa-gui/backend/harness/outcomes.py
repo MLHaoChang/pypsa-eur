@@ -720,13 +720,13 @@ def _allowed(note: dict, path: str, carriers: set[str] = frozenset()) -> bool:
         if path.startswith(head) and "/" not in path[len(head) :]:
             return True
     for item in note["items"]:
+        if path.startswith("/meta/") and path.split("/", 3)[3:] == [
+            f"{cls}/{item['name']}"
+        ]:
+            return True  # its own entry in a per-asset meta store (a cell write too: provenance)
         if item["kind"] == "cell":
             if path == f"/{cls}/{item['name']}/{item['attr']}":
                 return True
-        elif path.startswith("/meta/") and path.split("/", 3)[3:] == [
-            f"{cls}/{item['name']}"
-        ]:
-            return True  # its own entry in a per-asset meta store
         elif path.startswith("/user_ts/") and _own_series(note, item, path):
             return True
         elif path.startswith(f"/{cls}/{item['name']}/"):
