@@ -363,3 +363,16 @@ def test_a_malformed_record_settles_the_followed_step_uncertain(
     )
     _run(session, monkeypatch, "options")
     assert _wait_done(root, task["task_id"], 0)["status"] == "uncertain"
+
+
+def test_a_harness_run_step_keeps_its_own_judge_not_the_plan_follower():
+    """LC-45: the two new wait tools wait on their job in a plan only; a run's
+    step settles from the run's own judge (`run_explore`), as before."""
+    from services import assistant_tasks as T
+
+    started = {"stage": "options", "run": {"status": "running"}}
+    for tool in sorted(T.PLAN_ONLY_WAIT_TOOLS):
+        assert T._outcome(tool, started, None)[0] == "uncertain"
+        assert T._outcome(tool, started, None, run=True)[0] == "completed"
+    # the sweep and the enqueue are unchanged in a run
+    assert T._outcome("solve_queue_enqueue", started, None, run=True)[0] == "uncertain"

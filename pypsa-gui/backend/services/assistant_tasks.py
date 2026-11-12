@@ -43,6 +43,9 @@ _WAIT_TOOLS = frozenset({"run_simulation", "run_ac_pf_stage"})
 # Queued runs wait on their solve-queue job(s) (`harness/continuation.py`).
 QUEUE_WAIT_TOOLS = frozenset({"run_sensitivity_sweep", "solve_queue_enqueue",
                               "generate_renewable_profile", "run_decision_study"})  # LC-45: no polling
+# LC-45: these two wait on their own job only in a plan; a harness run's step
+# keeps its own judge (`run_explore`), so a run never takes the follower.
+PLAN_ONLY_WAIT_TOOLS = frozenset({"generate_renewable_profile", "run_decision_study"})
 _QUEUE_FOLLOWERS = set()  # (task_id, step_id, attempt_id) of steps this process follows
 # Study harness 02 (GK B, B1 option b): the harness runner binds its run's own
 # project context here; `_authority` and `_advance_run` prefer it to the
@@ -1667,7 +1670,15 @@ def begin_step(session, tool, args):
         return (task_id, step["id"], step["attempt_id"])
 
 
-def _outcome(tool, result, error):
+def is_run_ticket(ticket):
+    """True when the ticket's task is a harness run (not a plan)."""
+    try:
+        return bool(_read(ticket[0])[1].get("run"))
+    except HTTPException:
+        return False
+
+
+def _outcome(tool, result, error, run=False):
     """(status, error) of one finished call, from its own result only."""
     receipt = result.get("_edit_receipt") if isinstance(result, dict) else None
     if error:
@@ -1694,7 +1705,7 @@ def _outcome(tool, result, error):
         or result.get("status") == "started" and result.get("final_status") != "completed"
     ):
         return "uncertain", "Solver start is not completion; inspect its outcome before advancing or retrying."
-    if tool in QUEUE_WAIT_TOOLS and isinstance(result, dict) and (
+    if tool in QUEUE_WAIT_TOOLS and not (run and tool in PLAN_ONLY_WAIT_TOOLS) and isinstance(result, dict) and (
         any(isinstance(c, dict) and c.get("status") != "completed" for c in result.get("cases") or [])
         if "cases" in result else True
     ):
@@ -1724,7 +1735,7 @@ def finish_step(ticket, result=None, error=None, error_kind=None):
             return None
         if step.get("job"):
             return _view(task)  # waiting on its job, or already settled by it
-        step["status"], message = _outcome(step["tool"], result, error)
+        step["status"], message = _outcome(step["tool"], result, error, bool(task.get("run")))
         from harness import run_eh
         if task.get("run") and run_eh.is_eh_step(step):
             # Issue 07 B2: the run's EH study is settled from its own record only (`run_eh.wait`).
@@ -1827,7 +1838,7 @@ def _late_receipt(path, ticket, result):
         return
     step = next((s for s in task["steps"] if s["id"] == ticket[1]), None)
     if step is None or step.get("attempt_id") != ticket[2] or step["status"] not in ("failed", "uncertain") \
-            or step.get("job") or _outcome(step["tool"], result, None)[0] != "completed":
+            or step.get("job") or _outcome(step["tool"], result, None, bool(task.get("run")))[0] != "completed":
         return
     try:
         step["late_receipt"] = {"result": _stored(result)}

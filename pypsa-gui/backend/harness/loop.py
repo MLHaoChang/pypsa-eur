@@ -4165,6 +4165,10 @@ def _dispatch_real_tool_call(
     if (
         task_ticket is not None
         and tool_name in assistant_tasks.QUEUE_WAIT_TOOLS
+        and not (
+            tool_name in assistant_tasks.PLAN_ONLY_WAIT_TOOLS
+            and assistant_tasks.is_run_ticket(task_ticket)
+        )
         and isinstance(result, dict)
         and result.get("status") not in ("partial", "cancelled")
     ):
