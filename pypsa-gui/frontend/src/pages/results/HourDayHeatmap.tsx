@@ -9,6 +9,7 @@ import toast from 'react-hot-toast'
 import {
   downloadCSV, ChartActions, ChartFrame, CHART_HEIGHT, CHART_TICK, ChartZero,
 } from './shared'
+import { MAX_CELLS } from './reportCharts'
 import { heatStrength, type HeatScale, type HourDayGrid } from './hourDay'
 
 // Room for the hour ticks (left), the axis caption (top) and the date ticks (bottom).
@@ -103,6 +104,12 @@ const Cells = memo(function Cells({
   )
 })
 
+/** The unit in a CSV column name: `price_EUR_per_MWh` → "EUR/MWh"; none when it carries none. */
+function unitOf(csv: string): string | null {
+  const m = /_(EUR_per_\w+|MW|MWh|pct)$/.exec(csv)
+  return m ? m[1].replace('_per_', '/').replace('pct', '%') : null
+}
+
 export default function HourDayHeatmap({
   title, figure, hint, grid, scale, scaleNote, colour, format, csv, filename, unavailable, testId,
 }: HourDayHeatmapProps) {
@@ -138,7 +145,16 @@ export default function HourDayHeatmap({
               grid.days.flatMap((day, d) => grid.cells[d].map((v, hr) => [day, hr, v ?? ''])))
             toast.success('Exported')
           }}
-          filename={filename} />
+          filename={filename}
+          report={(() => {
+            const rows = grid.days.flatMap((day, d) => grid.cells[d].map((v, hr) => [day, hr, v]))
+            const kept = Math.floor(MAX_CELLS / 3)
+            return {
+              view: 'hour-day-heatmap', figure: `${filename}_${grid.days[0]}_${grid.days[grid.days.length - 1]}`, unit: unitOf(csv),
+              columns: ['date', 'hour', csv], rows, rowsTotal: rows.length,
+              note: rows.length > kept ? `table holds the first ${kept.toLocaleString('en')} of ${rows.length.toLocaleString('en')} hours; the picture shows all` : undefined,
+            }
+          })()} />
       }
       bodyClassName="p-3"
     >

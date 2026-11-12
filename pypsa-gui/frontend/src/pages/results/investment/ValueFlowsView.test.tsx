@@ -1,10 +1,23 @@
-import { describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen, fireEvent, within, waitFor, cleanup } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { ChartSpec } from '../../../api/reports'
+import { resetReportCharts } from '../reportCharts'
 import ValueFlowsView from './ValueFlowsView'
 import { TWO_WAY } from './valueFlows.test'
 import { expectAllButtonsNamed } from '../../../test-utils/accessibleName'
 import * as shared from '../shared'
 import { useUIStore } from '../../../store/uiStore'
+
+vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('../../../utils/chartPng', () => ({
+  svgToPngBlob: vi.fn().mockResolvedValue(new Blob(['png'], { type: 'image/png' })),
+}))
+const reportApi = vi.hoisted(() => ({ listReportCharts: vi.fn(), addReportChart: vi.fn(), removeReportChart: vi.fn() }))
+vi.mock('../../../api/reports', async () => ({
+  ...(await vi.importActual<typeof import('../../../api/reports')>('../../../api/reports')),
+  ...reportApi,
+}))
 
 describe('ValueFlowsView', () => {
   it('links to the physical energy-flow view', () => {
@@ -76,5 +89,41 @@ describe('ValueFlowsView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Export CSV' }))
     expect(spy).toHaveBeenCalledWith('value_flows_2040.csv', expect.any(Array), expect.any(Array))
     spy.mockRestore()
+  })
+})
+
+describe('ValueFlowsView · report', () => {
+  beforeEach(() => {
+    resetReportCharts()
+    reportApi.listReportCharts.mockReset().mockResolvedValue({ charts: [], limit: 12 })
+    reportApi.addReportChart.mockReset().mockImplementation(async (_p: string, spec: ChartSpec) => ({
+      id: 'chart-0123456789abcdef', created_at: 't', earlier_solve: false, ...spec,
+    }))
+    useUIStore.setState({ currentProject: 'demo' })
+  })
+
+  async function save(period?: string) {
+    const payload = structuredClone(TWO_WAY)
+    payload.periods = { 2030: TWO_WAY.periods!._, 2040: structuredClone(TWO_WAY.periods!._) }
+    render(<ValueFlowsView payload={payload} sankeyWidth={600} />)
+    if (period) fireEvent.change(screen.getByLabelText(/Period/), { target: { value: period } })
+    const frame = screen.getByTestId('vf-flow')
+    await userEvent.click(await within(frame).findByRole('button', { name: 'Add to report' }))
+    await waitFor(() => expect(reportApi.addReportChart).toHaveBeenCalled())
+    const spec = reportApi.addReportChart.mock.calls.at(-1)![1] as ChartSpec
+    cleanup()
+    reportApi.addReportChart.mockClear()
+    return spec
+  }
+
+  it('saves the flow table, and each period is its own figure', async () => {
+    const a = await save('2030')
+    expect(a.view).toBe('value-flows')
+    expect(a.figure).toBe('value_flows_2030')
+    expect(a.columns!.length).toBeGreaterThan(0)
+    expect(a.rows!.length).toBeGreaterThan(0)
+    const b = await save('2040')
+    expect(b.figure).toBe('value_flows_2040')
+    expect(a.figure).not.toBe(b.figure)
   })
 })

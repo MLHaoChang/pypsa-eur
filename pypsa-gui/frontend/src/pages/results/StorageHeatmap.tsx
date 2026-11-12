@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { type TSPayload, downloadCSV, ChartFrame, ChartActions } from './shared'
+import { type TSPayload, downloadCSV, ChartFrame, ChartActions, type SerializedSVG } from './shared'
 
 // ── Storage charge/discharge daily heatmap ─────────────────────────────────
 // Each cell = aggregate storage power at (day d, hour h):
@@ -52,6 +52,38 @@ function colourForValue(
   if (mode === 'unsigned-red')  return shade(RED, share)
   // Diverging (storage default).
   return shade(v < 0 ? BLUE : RED, share)  // charge → blue, discharge → red
+}
+
+const xmlEsc = (t: string) => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string))
+
+/** The grid as one <svg>, for the report: opacity (not color-mix) so every renderer agrees. */
+function gridPicture(
+  grid: { days: number[][]; dayLabels: string[] }, maxAbs: number, mode: 'diverging' | 'unsigned-blue' | 'unsigned-red',
+  cellW: number, cellH: number,
+): SerializedSVG {
+  const css = getComputedStyle(document.documentElement)
+  const tok = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback
+  const blue = tok('--color-info', '#2563eb'), red = tok('--color-danger', '#dc2626')
+  const bg = tok('--color-bg', '#ffffff'), text = tok('--color-muted', '#64748b')
+  const left = 56, top = 16
+  const width = left + 24 * cellW, height = top + grid.days.length * (cellH + 2)
+  const parts = [`<?xml version="1.0" standalone="no"?>\r\n<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`,
+    `<rect width="100%" height="100%" fill="${bg}"/>`]
+  for (const h of [0, 4, 8, 12, 16, 20, 23]) {
+    parts.push(`<text x="${left + h * cellW}" y="11" font-size="9" fill="${text}">${h}h</text>`)
+  }
+  grid.days.forEach((row, d) => {
+    const y = top + d * (cellH + 2)
+    parts.push(`<text x="${left - 4}" y="${y + cellH * 0.7}" font-size="9" text-anchor="end" fill="${text}">${xmlEsc(grid.dayLabels[d])}</text>`)
+    row.forEach((mw, h) => {
+      if (!Number.isFinite(mw) || maxAbs <= 0) return
+      const share = 0.05 + 0.75 * Math.min(1, Math.abs(mw) / maxAbs)
+      const colour = mode === 'unsigned-blue' ? blue : mode === 'unsigned-red' ? red : (mw < 0 ? blue : red)
+      parts.push(`<rect x="${left + h * cellW}" y="${y}" width="${cellW - 1}" height="${cellH}" fill="${colour}" fill-opacity="${share.toFixed(3)}"/>`)
+    })
+  })
+  parts.push('</svg>')
+  return { source: parts.join(''), width, height }
 }
 
 export default function StorageHeatmap({
@@ -156,7 +188,21 @@ export default function StorageHeatmap({
       figure={`${grid.maxAbs.toFixed(1)} MW highest`}
       hint={headerSubtitle}
       // An HTML grid, not an <svg>: CSV only.
-      right={<ChartActions onExportCSV={exportCSV} filename={(csvName ?? 'storage_heatmap.csv').replace(/\.csv$/, '')} />}
+      right={(() => {
+        const filename = (csvName ?? 'storage_heatmap.csv').replace(/\.csv$/, '')
+        const rows = grid.days.flatMap((dayRow, d) => dayRow.map((mw, h) => [grid.dayDates[d], h, Number.isFinite(mw) ? mw : null]))
+        return (
+          <ChartActions onExportCSV={exportCSV} filename={filename}
+            report={{
+              // The carrier is in the title and file name, the window in the days.
+              view: 'storage-heatmap', figure: `${filename}_${grid.dayDates[0]}_${grid.dayDates[grid.dayDates.length - 1]}`, unit: 'MW',
+              columns: ['date', 'hour', 'power_MW'], rows,
+              rowsTotal: rows.length,
+              note: grid.truncated ? `first ${MAX_DAYS} of ${grid.totalDays} days` : undefined,
+              picture: () => gridPicture(grid, grid.maxAbs, effMode, cellW, cellH),
+            }} />
+        )
+      })()}
       bodyClassName="p-0"
     >
       {grid.truncated && (

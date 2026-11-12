@@ -1,6 +1,9 @@
 import { resultsEvidenceApi } from '../../api/resultsEvidence'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, cleanup, waitFor, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, cleanup, waitFor, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { ChartSpec } from '../../api/reports'
+import { resetReportCharts } from './reportCharts'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -35,6 +38,16 @@ vi.mock('../../api/network', async (importOriginal) => {
     },
   }
 })
+
+vi.mock('react-hot-toast', () => ({ default: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('../../utils/chartPng', () => ({
+  svgToPngBlob: vi.fn().mockResolvedValue(new Blob(['png'], { type: 'image/png' })),
+}))
+const reportApi = vi.hoisted(() => ({ listReportCharts: vi.fn(), addReportChart: vi.fn(), removeReportChart: vi.fn() }))
+vi.mock('../../api/reports', async () => ({
+  ...(await vi.importActual<typeof import('../../api/reports')>('../../api/reports')),
+  ...reportApi,
+}))
 
 afterEach(() => cleanup())
 
@@ -264,4 +277,65 @@ it.each([
   expect(queryByText('All snapshots converged.')).toBeNull()
   if (counts.unknown_count === 4) expect(queryByText(/non-converged snapshot/)).toBeNull()
   else expect(await findByText('1 non-converged snapshot')).toBeTruthy()
+})
+
+// ── "Add to report" on the bus-voltage chart ────────────────────────────────
+describe('bus voltage chart · report', () => {
+  // 28 days (one 12:00 stamp each) in every season: weekly and monthly are both available.
+  const stamps = [1, 4, 7, 10].flatMap(m => Array.from({ length: 28 }, (_, d) =>
+    `2026-${String(m).padStart(2, '0')}-${String(d + 1).padStart(2, '0')}T12:00:00`))
+  beforeEach(() => {
+    try { localStorage.clear() } catch { /* ignore */ }
+    resetReportCharts()
+    reportApi.listReportCharts.mockReset().mockResolvedValue({ charts: [], limit: 12 })
+    reportApi.addReportChart.mockReset().mockImplementation(async (_p: string, spec: ChartSpec) => ({
+      id: 'chart-0123456789abcdef', created_at: 't', earlier_solve: false, ...spec,
+    }))
+    useUIStore.setState({ currentProject: 'demo' })
+    vi.mocked(resultsApi.getAcPfStatus).mockResolvedValue({
+      available: true, slack_bus_used: 'Bus 0', stripped_voll_slacks: [],
+      converged_list: [], converged_per_snapshot: {}, converged_count: stamps.length,
+      total_snapshots: stamps.length, known_converged_count: stamps.length, unknown_count: 0,
+    } as never)
+    vi.mocked(resultsApi.getLineResults).mockResolvedValue({
+      index: stamps, columns: ['Line 1'], data: stamps.map(() => [100]),
+    })
+    vi.mocked(resultsApi.getVoltages).mockResolvedValue({
+      index: stamps, columns: ['Bus 0'], data: stamps.map((_, i) => [1 + 0.01 * (i % 5)]),
+    })
+    vi.mocked(networkApi.getSnapshots).mockResolvedValue({
+      count: stamps.length, snapshots: stamps, weightings: [], ts_start: null, ts_end: null,
+      can_sample_weeks: false,
+    })
+  })
+
+  async function pick(mode: string) {
+    renderPage()
+    const frame = (await screen.findByRole('heading', { name: 'Bus voltage over time' })).closest('[data-chart-frame]') as HTMLElement
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Monthly' }) as HTMLButtonElement).disabled).toBe(false))
+    await userEvent.click(screen.getByRole('button', { name: mode }))
+    await userEvent.click(within(frame).getByRole('button', { name: 'Add to report' }))
+    await waitFor(() => expect(reportApi.addReportChart).toHaveBeenCalled())
+    const spec = reportApi.addReportChart.mock.calls.at(-1)![1] as ChartSpec
+    cleanup()
+    reportApi.addReportChart.mockClear()
+    return spec
+  }
+
+  it('saves the seasonal chart with a season column', async () => {
+    const spec = await pick('Weekly')
+    expect(spec.view).toBe('load-flow')
+    expect(spec.figure).toBe('bus_voltage_weekly')
+    expect(spec.columns![0]).toBe('season')
+    expect(spec.rows!.length).toBeGreaterThan(0)
+  })
+  it('weekly, monthly and full timeframe are three figures', async () => {
+    const w = await pick('Weekly')
+    const m = await pick('Monthly')
+    const t = await pick('Full timeframe')
+    expect(t.figure).toBe('bus_voltage_hourly')
+    expect(t.columns).toEqual(['snapshot', 'Bus 0'])
+    expect(t.rows!.length).toBeGreaterThan(0)
+    expect(new Set([w.figure, m.figure, t.figure]).size).toBe(3)
+  })
 })

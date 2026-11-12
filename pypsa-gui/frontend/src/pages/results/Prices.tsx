@@ -13,7 +13,7 @@ import { nk } from '../../utils/queryKeys'
 import type { Bus } from '../../api/types'
 import { type TSPayload, shortStamp, downloadCSV, KPI, ChartActions,
   ChartFrame, CHART_HEIGHT, SERIES_TOKENS, SERIES_COLOURS, seriesDash, Seg, CHART_GRID, CHART_AXIS, timeAxis, thinRows, ThinNote, thinNoteText, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
-  useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
+  useSeasonalViewMode, SeasonalLineCardGrid, seasonalReportTable, WindowCapBanner,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, refLine, chartFigure, carrierColour } from './shared'
 import DurationCurve, { durationRows, type DurationSeries } from './DurationCurve'
 import HourDayHeatmap from './HourDayHeatmap'
@@ -361,11 +361,19 @@ export default function Prices() {
                   toast.success('Exported')
                 }}
                 filename={`prices_hourly_${priceView}_${priceSource}`}
-                report={effectiveMode !== 'timeframe' ? undefined : (() => {
+                report={(() => {
                   const all = priceView === 'avg' ? priceChart.avgRows : priceChart.perBusRows
                   const cols = priceView === 'avg' ? ['avg'] : priceChart.cols
                   const busNote = priceView === 'per_bus' && priceChart.busTotal > priceChart.cols.length
                     ? `top ${priceChart.cols.length} of ${priceChart.busTotal} buses by mean` : undefined
+                  if (effectiveMode !== 'timeframe') {
+                    const t = seasonalReportTable(all, cols, effectiveMode)
+                    return {
+                      view: 'prices', figure: `${effectiveMode}_${priceView}_${priceSource}`, unit: 'EUR/MWh',
+                      columns: t.columns, rows: t.rows, panels: true,
+                      note: [busNote, `averaged ${effectiveMode === 'weekly' ? 'week' : 'month'} per season`].filter(Boolean).join(' · '),
+                    }
+                  }
                   return {
                     view: 'prices', figure: `hourly_${priceView}_${priceSource}`, unit: 'EUR/MWh',
                     columns: ['snapshot', ...cols],
