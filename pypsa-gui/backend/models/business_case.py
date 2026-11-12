@@ -26,7 +26,7 @@ Nothing here imports ``services``: the pack is passed in.
 
 from __future__ import annotations
 
-from typing import Any, Literal, NamedTuple, Protocol, get_args
+from typing import Annotated, Any, Literal, NamedTuple, Protocol, get_args
 
 from pydantic import (
     BaseModel,
@@ -83,6 +83,7 @@ Unit = Literal[
     "GPU_h",
     "kW_month",
     "kW_year",
+    "MW",  # capex only, typed: a capacity priced per MW (GK B BC 07 Q2, P5)
     "MW_year",
     "unit",
     "unit_month",
@@ -143,6 +144,30 @@ class CostDefault(BaseModel):
     money_year: int | None = None
     pack: str = Field(min_length=1)  # the pack's stamp: id, version and hash
     status: Literal["assumed"] = "assumed"
+    # The pack row's range, shown beside the value; never in the digest (GK B BC 07 P1).
+    range_low: Finite | None = None
+    range_high: Finite | None = None
+
+
+class Hint(BaseModel):
+    """A public reference range for a revenue price, shown beside the empty cell and never
+    a value (BCA-SCOPE-1 Q1). Display only: its currency is shown as it is, never
+    converted, and it is in no digest (GK B BC 07 P1, P2)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+    low: Finite
+    high: Finite
+    unit: str = Field(min_length=1)  # e.g. "USD/GPU_h"
+    source: str = Field(min_length=1)
+    year: int
+    note: str = ""
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Hint:
+        if self.low > self.high:
+            raise ValueError("hint low above high")
+        return self
 
 
 class PresetRule(BaseModel):
@@ -200,7 +225,24 @@ class LineItem(BaseModel):
     assumed: dict[DefaultColumn, CostDefault] = Field(default_factory=dict)
     # Column -> its defaults-pack key, written by the preset (07).
     default_keys: dict[DefaultColumn, str] = Field(default_factory=dict)
+    # Column -> the pack row's unit the preset expects; same columns as `default_keys`. A
+    # pack row in another unit is refused `default_unit_mismatch`, never filled (GK B BC 07 Q1).
+    default_units: dict[DefaultColumn, str] = Field(default_factory=dict)
     preset_rule: PresetRule | None = None
+    # A linked line's sold share of its series: a commercial share only, never a
+    # volume factor such as lease-up (that scales costs too: ruling 6, GK B on #1430).
+    # A year's cell wins over the scalar; None reads 1.0 (GK B BC 07 P3).
+    linked_share: Finite | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="sold share: the share of the linked series sold under this line",
+    )
+    linked_share_by_year: dict[int, Annotated[Finite, Field(ge=0.0, le=1.0)]] = Field(
+        default_factory=dict,
+        description="sold share by year; a year's cell wins over `linked_share`",
+    )
+    hint: Hint | None = None
 
     # -- shape faults (GK B Q3): a column the line does not take is a parse error
 
@@ -243,7 +285,7 @@ class LineItem(BaseModel):
             raise ValueError(f"a share_of line takes no {info.field_name}")
         return v
 
-    @field_validator("assumed", "default_keys")
+    @field_validator("assumed", "default_keys", "default_units")
     @classmethod
     def _costs_only(cls, v: Any, info: ValidationInfo) -> Any:
         if v and info.data.get("kind") == "revenue":
@@ -264,11 +306,20 @@ class LineItem(BaseModel):
                 raise ValueError(f"{info.field_name}[{col}]: the line takes no {col}")
         return v
 
-    @field_validator("preset_rule")
+    @field_validator("preset_rule", "hint")
     @classmethod
     def _revenue_only(cls, v: Any, info: ValidationInfo) -> Any:
         if v is not None and info.data.get("kind") != "revenue":
-            raise ValueError("preset_rule applies to revenue lines only")
+            raise ValueError(f"{info.field_name} applies to revenue lines only")
+        return v
+
+    @field_validator("linked_share", "linked_share_by_year")
+    @classmethod
+    def _linked_only(cls, v: Any, info: ValidationInfo) -> Any:
+        if v not in (None, {}) and not str(info.data.get("quantity_source")).startswith(
+            "linked:"
+        ):
+            raise ValueError(f"{info.field_name} applies to linked lines only")
         return v
 
     @model_validator(mode="after")
@@ -278,6 +329,8 @@ class LineItem(BaseModel):
                 raise ValueError(
                     f"assumed[{col}] holds {d.value} but the column is {getattr(self, col)}"
                 )
+        if set(self.default_units) != set(self.default_keys):
+            raise ValueError("default_units must name exactly the default_keys columns")
         if self.kind == "capex" and self.depreciation is None:
             self.depreciation = "straight_line"
         return self
@@ -300,6 +353,12 @@ class LineItem(BaseModel):
         if year in grid:
             return Cell(grid[year], self.money_year, False)
         return Cell(getattr(self, column), self.money_year, True)
+
+    def linked_share_at(self, year: int) -> float:
+        """`year`'s share of the linked series: the grid cell, else the scalar, else 1.0."""
+        if year in self.linked_share_by_year:
+            return self.linked_share_by_year[year]
+        return 1.0 if self.linked_share is None else self.linked_share
 
 
 class BusinessCaseInputs(BaseModel):
@@ -366,7 +425,11 @@ class BusinessCaseInputs(BaseModel):
         if energy_in_price and ln.kind == "revenue" and ln.category == "cost_recovery":
             out.append(PassThroughPriceIncludesEnergy(f"{at}.category"))
         share = ln.source == "share_of"
-        if (ln.unit == "share") != share or (ln.unit == "lump" and ln.kind != "capex"):
+        if (
+            (ln.unit == "share") != share
+            or (ln.unit == "lump" and ln.kind != "capex")
+            or (ln.unit == "MW" and (ln.kind != "capex" or ln.source != "typed"))
+        ):
             out.append(UnitNotAllowed(f"{at}.unit"))
         if share:
             out += self._share_refusals(i, ln)
@@ -388,6 +451,9 @@ class BusinessCaseInputs(BaseModel):
         for y in sorted(ln.price_by_year):
             if y not in years:
                 out.append(YearOutOfRange(f"{at}.price_by_year[{y}]"))
+        for y in sorted(ln.linked_share_by_year):
+            if y not in years:
+                out.append(YearOutOfRange(f"{at}.linked_share_by_year[{y}]"))
         if ln.money_year is not None and not (
             MONEY_YEAR_MIN <= ln.money_year <= base_year + MONEY_YEAR_AFTER_BASE
         ):
@@ -442,9 +508,12 @@ class BusinessCaseInputs(BaseModel):
         default carries its row's money year into the line (G-C1); a line whose stated
         money year differs, or whose typed price cells are in base-year money (no stated
         money year), is skipped, never converted or relabelled (GK B Q4, F1). A skipped price stays None
-        and the run refuses it `cost_not_established` (GK B P1)."""
+        and the run refuses it `cost_not_established` (GK B P1). A pack row in the case's
+        currency but another unit than the line's `default_units` names raises
+        `default_unit_mismatch`, never fills (GK B BC 07 Q1, P6); the currency skip comes
+        first, so a row skipped for its currency never raises."""
         lines = []
-        for ln in self.lines:
+        for i, ln in enumerate(self.lines):
             data = ln.model_dump()
             assumed = dict(ln.assumed)
             for col, key in ln.default_keys.items():
@@ -455,6 +524,8 @@ class BusinessCaseInputs(BaseModel):
                     continue
                 if row.currency is not None and row.currency != currency:
                     continue
+                if row.unit != ln.default_units[col]:
+                    raise DefaultUnitMismatch(f"lines[{i}].default_keys[{col}]")
                 if col == "price" and row.money_year is not None:
                     if data["money_year"] is None:
                         # Typed cells are in base-year money; the row's year would relabel
@@ -474,6 +545,8 @@ class BusinessCaseInputs(BaseModel):
                     currency=row.currency,
                     money_year=row.money_year,
                     pack=pack.stamp,
+                    range_low=row.range.low if row.range else None,
+                    range_high=row.range.high if row.range else None,
                 )
             lines.append({**data, "assumed": assumed})
         # Re-validate: a pack value outside a column's range is refused, never stored.
@@ -583,6 +656,10 @@ class PassThroughPriceIncludesEnergy(BusinessCaseRefused):
     kind = "pass_through_price_includes_energy"
 
 
+class DefaultUnitMismatch(BusinessCaseRefused):
+    kind = "default_unit_mismatch"
+
+
 class LinkedOutputMissing(BusinessCaseRefused):
     """A `linked:<id>@<version>` this project's catalogue does not offer
     (`services.business_case.linked_outputs`); `field` is the output id."""
@@ -627,6 +704,7 @@ REFUSAL_KINDS: tuple[str, ...] = (
     "pass_through_price_includes_energy",
     "linked_output_missing",
     "double_count",
+    "default_unit_mismatch",
 )
 
 # ------------------------------------------------------------------ helpers
@@ -639,6 +717,7 @@ class _PackRow(Protocol):
     source_year: int
     currency: str | None
     money_year: int | None
+    range: Any  # `.low`, `.high`, or None
 
 
 class _Pack(Protocol):

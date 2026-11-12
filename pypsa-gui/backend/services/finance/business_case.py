@@ -145,7 +145,9 @@ def _linked_q(out: Series | NotEvaluated | None, year: int) -> float | None:
 
 def _quantity(ln: LineItem, year: int, outputs: dict) -> float | None:
     if ln.source == "linked":
-        return _linked_q(outputs.get(ln.name), year)
+        q = _linked_q(outputs.get(ln.name), year)
+        # The line's sold share of the series (GK B BC 07 P3).
+        return None if q is None else q * ln.linked_share_at(year)
     return ln.cell("quantity", year).value
 
 
@@ -239,6 +241,11 @@ def _drops(
     year outside every period of the solve has no share: None (not established, as
     the line's own quantity there). A year with nothing dropped is absent (D4).
 
+    A line selling the share s of what it reads (`linked_share_at`) drops s of that
+    shortfall, since a shortfall counts once: the drop is f × s, the shares of lines
+    reading the same bus or Load summed and capped at 1. A share of 0 drops nothing
+    (GK B ruling on #1430).
+
     A part drop scales the line's amount by (1 − share): it assumes the shortfall is
     valued at one constant price per unit within the period, as the ledger books it
     (GK A N3).
@@ -276,31 +283,37 @@ def _drops(
             bus = lp.slack_bus.get(_slack_of(ln))
             if bus is None:
                 raise LinkedOutputMissing(f"{LOST_PRODUCTION}.{ln.key}")
-            names = tuple(
-                dict.fromkeys(
-                    b.name
-                    for b, kind, target in active
-                    if (
-                        target == bus
-                        if kind == "served_product"
-                        else lp.load_bus.get(target) == bus
-                    )
+            on_bus = [
+                (b, kind, target)
+                for b, kind, target in active
+                if b.linked_share_at(y) > 0.0
+                and (
+                    target == bus
+                    if kind == "served_product"
+                    else lp.load_bus.get(target) == bus
                 )
-            )
+            ]
+            names = tuple(dict.fromkeys(b.name for b, _, _ in on_bus))
             if not names:
                 continue
-            f: float | None = 0.0
-            if bus in whole:
-                f = 1.0
-            else:
-                by_load = lp.share.get(_slack_of(ln), {})
-                for ld in sorted(x for x in loads if lp.load_bus.get(x) == bus):
-                    sh = by_load.get(ld)
-                    v = sh.for_year(y) if isinstance(sh, Series) else None
-                    if v is None or not math.isfinite(v):
-                        f = None
-                        break
-                    f += v
+            # A shortfall counts once (G3): a line selling the share s of what it reads
+            # drops s of that shortfall; shares on one read sum, capped at the whole.
+            sold: dict[tuple[str, str], float] = {}
+            for b, kind, target in on_bus:
+                k = ("bus" if kind == "served_product" else "load", target)
+                sold[k] = min(1.0, sold.get(k, 0.0) + b.linked_share_at(y))
+            f: float | None = sum(s for (k, _), s in sold.items() if k == "bus")
+            by_load = lp.share.get(_slack_of(ln), {})
+            for (k, ld), s in sorted(sold.items()):
+                # The whole bus sold whole drops whole: no Load share is read.
+                if k != "load" or f >= 1.0:
+                    continue
+                sh = by_load.get(ld)
+                v = sh.for_year(y) if isinstance(sh, Series) else None
+                if v is None or not math.isfinite(v):
+                    f = None
+                    break
+                f += v * s
             if f is not None:
                 f = min(f, 1.0)
                 if f <= 0.0:
@@ -584,6 +597,26 @@ def _bound(out) -> dict | None:
     return None
 
 
+def _line_blob(ln: LineItem, horizon: tuple[int, int]) -> dict:
+    """A line as the digest reads it (GK B BC 07 P1): a field enters only when it can
+    change an outcome and is set, so a digest from before the field stays byte-equal. The
+    hint and a default's range are display only and never enter."""
+    d = ln.model_dump(mode="json", exclude={"hint"})
+    # A scalar share of 1.0 reads as None does (`linked_share_at`), and a scalar a year
+    # cell shadows in every year of the line is never read: no outcome, no entry (F3).
+    first, last = _span(ln, horizon)
+    shadowed = all(y in ln.linked_share_by_year for y in range(first, last + 1))
+    if d["linked_share"] in (None, 1.0) or shadowed:
+        del d["linked_share"]
+    if not d["linked_share_by_year"]:
+        del d["linked_share_by_year"]
+    if not ln.default_keys:
+        del d["default_units"]
+    for a in d["assumed"].values():
+        del a["range_low"], a["range_high"]
+    return d
+
+
 def business_case_hash(
     ic_case: FinanceCase,
     inputs: BusinessCaseInputs,
@@ -597,12 +630,14 @@ def business_case_hash(
     The IC case enters as its inputs and owner, never its counterfactual: a reference
     purchase (G4) changes no business-case value, so it stays out (GK A G4-2)."""
     outputs = outputs or {}
+    ops = build_timeline(ic_case).operating_years
+    horizon = (int(ops[0]), int(ops[-1]))
     blob = {
         "domain": HASH_DOMAIN,
         "ic": _fallback_hash(ic_case),
         "preset": inputs.preset,
         "receivable_days": inputs.receivable_days,
-        "lines": [ln.model_dump(mode="json") for ln in inputs.lines],
+        "lines": [_line_blob(ln, horizon) for ln in inputs.lines],
         "bound": {
             ln.name: _bound(outputs.get(ln.name))
             for ln in inputs.lines
