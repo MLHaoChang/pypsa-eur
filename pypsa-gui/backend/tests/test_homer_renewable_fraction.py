@@ -927,6 +927,23 @@ def test_a_nan_in_an_import_link_dispatch_reads_none():
     assert renewable_fraction(n)["fraction"] is None
 
 
+def test_a_slack_generator_added_after_the_solve_reads_as_unavailable():
+    """GK B: a slack missing from the dispatch is unknown, as in A5."""
+    n = _dispatched()
+    n.add("Generator", "voll", bus="ac", carrier="load_shedding", p_nom=100.0)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "not been solved" in kpi["reason"], kpi
+
+
+def test_a_nan_in_an_injecting_generator_reads_none():
+    n = _two_way_sign_export(_dispatched())
+    n.generators_t.p["export"] = np.where(PV_PU > 0, 0.0, -5.0)
+    assert renewable_fraction(n)["fraction"] is not None
+    n.generators_t.p.iloc[3, n.generators_t.p.columns.get_loc("export")] = float("nan")
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "NaN" in kpi["reason"], kpi
+
+
 def test_a_nan_in_a_slack_generator_reads_none():
     n = _dispatched()
     n.add("Generator", "voll", bus="ac", carrier="load_shedding", p_nom=100.0)

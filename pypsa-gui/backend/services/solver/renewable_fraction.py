@@ -741,9 +741,11 @@ def renewable_fraction(
     ):
         out["reason"] = NO_DISPATCH_REASON
         return out
-    # GK B A5: a counted non-renewable Generator missing from the dispatch
-    # (added after the solve) is unknown, never 0.
-    counted_gens = cls["nonren_generators"] + cls["injecting_generators"]
+    # GK B A5: a counted non-renewable or slack Generator missing from the
+    # dispatch (added after the solve) is unknown, never 0.
+    counted_gens = (
+        cls["nonren_generators"] + cls["injecting_generators"] + cls["slack_generators"]
+    )
     if counted_gens and not set(counted_gens) <= set(gp.columns):
         out["reason"] = NO_DISPATCH_REASON
         return out
