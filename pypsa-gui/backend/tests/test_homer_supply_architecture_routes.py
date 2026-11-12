@@ -528,3 +528,16 @@ def test_the_tornado_and_the_comparison_refuse_each_other_at_the_routes(
         if client.get(tornado).json().get("status") != "running":
             break
         time.sleep(0.1)
+
+
+@pytest.mark.parametrize("bad", ["../x", "..", "a/b", "x\\y", "", "x.json"])
+def test_an_aux_record_path_never_leaves_the_study_directory(tmp_path, bad):
+    """CodeQL py/path-injection: an id that is not a bare study token is
+    refused before any path is touched, for reads and writes alike."""
+    from services.study import store
+
+    with pytest.raises(store.StudyNotFound):
+        store.load_aux(tmp_path, bad, "supply_architectures")
+    with pytest.raises(store.StudyNotFound):
+        store.save_aux(tmp_path, bad, "supply_architectures", {})
+    assert not any(tmp_path.parent.rglob("*.supply_architectures.json"))
