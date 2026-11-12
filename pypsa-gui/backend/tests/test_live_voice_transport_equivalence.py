@@ -225,7 +225,7 @@ def test_typed_and_live_input_take_the_same_path(world, kind, request):
     n, writes = world
     runs = {}
     for transport in ("typed", "live"):
-        # A fresh network per transport, so each starts from the same state.
+        # Restore B2, so each transport starts from the same network.
         if transport == "live":
             n.add("Bus", "B2")
             writes.clear()
@@ -237,6 +237,12 @@ def test_typed_and_live_input_take_the_same_path(world, kind, request):
         finally:
             wire.close()
         runs[transport] = (_observed(frames, writes), len(wire.calls))
+        if transport == "live":
+            # The live run went through admission: its id is now spent.
+            again = ua.admit_utterance(
+                ua.StableUtterance("u1", "again", 1, session.session_id)
+            )
+            assert again.status == "duplicate"
         assert _bus_names(n) == ["B1"]
         ua._reset_for_tests()
 
@@ -318,7 +324,8 @@ def test_a_correction_during_the_write_drains_once_without_a_second_write(world,
 def test_a_duplicate_utterance_id_repeats_nothing(world, kind):
     n, writes = world
     session = _session(kind)
-    wire = _Wire(kind, SCRIPT)
+    # The second stream is scripted to delete again: only admission stops it.
+    wire = _Wire(kind, [*SCRIPT, WRITE, None])
     try:
         _drive(
             session,
@@ -349,7 +356,8 @@ def test_a_duplicate_utterance_id_repeats_nothing(world, kind):
 def test_a_late_utterance_from_an_older_generation_repeats_nothing(world, kind):
     n, writes = world
     session = _session(kind)
-    wire = _Wire(kind, SCRIPT)
+    # The second stream is scripted to delete again: only admission stops it.
+    wire = _Wire(kind, [*SCRIPT, WRITE, None])
     try:
         _drive(
             session,
