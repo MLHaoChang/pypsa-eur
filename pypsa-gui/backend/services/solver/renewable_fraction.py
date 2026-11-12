@@ -146,6 +146,8 @@ CONVERSION_NOTE = (
     "converter whose output nothing uses raises the renewable fraction."
 )
 
+NO_DISPATCH_REASON = "no dispatch: the network has not been solved"
+NO_SERVED_REASON = "no electricity served: the fraction is undefined"
 NONREN_EXCEEDS_REASON = (
     "non-renewable supply ({nonren:,.1f} MWh) exceeds the electricity used on "
     "site ({used:,.1f} MWh), for example because it was exported: the fraction "
@@ -607,6 +609,55 @@ def _efficiency(n, link: str, snapshots, attr: str = "efficiency") -> pd.Series:
     return pd.Series(float(n.links.at[link, attr]), index=snapshots)
 
 
+def _has_nan(n, cls, gp, lp, snapshots) -> bool:
+    """A NaN in a dispatch the fraction reads: unknown, never 0 (03a F3)."""
+    reads = [
+        (gp, cls["nonren_generators"] + cls["slack_generators"]),
+        (lp, cls["loads"]),
+        (n.links_t.p0, cls["source_links"] + cls["conversion_links"]),
+    ]
+    for frame, names in reads:
+        cols = [c for c in names if c in getattr(frame, "columns", [])]
+        if cols and frame[cols].reindex(snapshots).isna().to_numpy().any():
+            return True
+    return False
+
+
+def _source_delivery(n, link: str, snapshots, gp, source_links) -> pd.Series | None:
+    """A source Link's delivery into the site, η(t)·p0 (positive part). A
+    dispatch without its p0 falls back to ``-p1``, then to η(t) times the
+    non-renewable Generators on its supply bus when it is the bus's only
+    source Link (their output is what it carries); None, so the KPI fails
+    closed, when another source Link shares the bus: never 0 for a missing
+    column (03a's import fixtures, G13)."""
+    p0 = n.links_t.p0
+    if p0 is not None and link in getattr(p0, "columns", []):
+        sent = p0[link].reindex(snapshots).astype(float).fillna(0.0)
+        return sent.clip(lower=0.0) * _efficiency(n, link, snapshots)
+    p1 = n.links_t.p1
+    if p1 is not None and link in getattr(p1, "columns", []):
+        got = -p1[link].reindex(snapshots).astype(float).fillna(0.0)
+        return got.clip(lower=0.0)
+    bus0 = str(n.links.at[link, "bus0"])
+    if sum(str(n.links.at[x, "bus0"]) == bus0 for x in source_links) > 1:
+        return None
+    gens = [
+        g
+        for g in n.generators.index
+        if str(n.generators.at[g, "bus"]) == bus0
+        and g in getattr(gp, "columns", [])
+        and not _is_renewable_carrier(str(n.generators.at[g, "carrier"]))
+    ]
+    fed = sum(
+        (
+            gp[g].reindex(snapshots).astype(float).fillna(0.0).clip(lower=0.0)
+            for g in gens
+        ),
+        pd.Series(0.0, index=snapshots),
+    )
+    return fed * _efficiency(n, link, snapshots)
+
+
 def _draw_coef(n, cls, link: str, snapshots) -> pd.Series:
     """MW of electricity a conversion Link draws per MW of p0: 1 for bus0,
     −efficiencyN(t) for each electrical second input busN."""
@@ -692,15 +743,16 @@ def renewable_fraction(
     }
     gp = n.generators_t.p
     if len(n.generators) and (gp is None or gp.empty):
-        out["reason"] = "no dispatch: the network has not been solved"
+        out["reason"] = NO_DISPATCH_REASON
         return out
     lp = n.loads_t.p
     cls = classify(n)
     if cls["loads"] and (
         lp is None or lp.empty or not set(cls["loads"]) <= set(lp.columns)
     ):
-        out["reason"] = "no dispatch: the network has not been solved"
-        return out
+        # A Load is fixed, so what it was served is its p_set (03a's G5
+        # fallback for a dispatch that does not carry the loads).
+        lp = n.get_switchable_as_dense("Load", "p_set", sns)
 
     def _col(frame, name):
         if frame is None or name not in getattr(frame, "columns", []):
@@ -744,11 +796,26 @@ def renewable_fraction(
         )
         return out
 
+    if _has_nan(n, cls, gp, lp, sns):
+        out["reason"] = "the dispatch has missing values (NaN)"
+        return out
     nonren = pd.Series(0.0, index=sns)
     for g in cls["nonren_generators"]:
         nonren += _col(gp, g).clip(lower=0.0)
+    blind = []
     for l in cls["source_links"]:
-        nonren += _col(n.links_t.p0, l).clip(lower=0.0) * _efficiency(n, l, sns)
+        delivered = _source_delivery(n, l, sns, gp, cls["source_links"])
+        if delivered is None:
+            blind.append(l)
+        else:
+            nonren += delivered
+    if blind:
+        out["reason"] = (
+            "cannot attribute the electricity of source(s) "
+            + ", ".join(map(str, blind))
+            + ": the dispatch does not say what each delivered"
+        )
+        return out
     slack = pd.Series(0.0, index=sns)
     for g in cls["slack_generators"]:
         slack += _col(gp, g).clip(lower=0.0)
@@ -792,7 +859,7 @@ def renewable_fraction(
     if cls["conversion_links"]:
         out["note"] = CONVERSION_NOTE
     if tot_served <= 0:
-        out["reason"] = "no electricity served: the fraction is undefined"
+        out["reason"] = NO_SERVED_REASON
     elif tot_nonren > tot_served:
         # GK B N2: non-renewable output counts as used on site (conservative),
         # so the fraction stays in [0, 1]; when it exceeds what was used (it

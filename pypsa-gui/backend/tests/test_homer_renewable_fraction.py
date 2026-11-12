@@ -590,9 +590,9 @@ def test_a_generator_added_after_the_solve_reads_as_zero():
     assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
 
 
-def test_no_load_dispatch_is_unavailable_even_with_generator_dispatch():
+def test_no_generator_dispatch_is_unavailable():
     n = _dispatched()
-    n.loads_t.p = pd.DataFrame(index=n.snapshots)
+    n.generators_t.p = pd.DataFrame(index=n.snapshots)
     kpi = renewable_fraction(n)
     assert kpi["fraction"] is None and "not been solved" in kpi["reason"]
 
@@ -848,6 +848,73 @@ def test_the_kpi_counts_a_dispatched_grid_import_link():
     assert kpi["fraction"] == pytest.approx(0.625)
 
 
+# ── G13: dispatch fallbacks 03a's study rows rely on ────────────────────
+
+
+def test_an_import_link_without_p0_reads_its_delivery_from_p1():
+    n = _grid_supply(_dispatched())
+    n.links_t.p1 = pd.DataFrame({"poc": 0.0}, index=n.snapshots)
+    n.links_t.p1.iloc[7, 0] = -9.8
+    kpi = renewable_fraction(n)
+    assert kpi["nonrenewable_mwh"] == pytest.approx(90.0), kpi
+
+
+def test_an_import_link_without_p0_or_p1_reads_its_supply_bus_generator():
+    n = _grid_supply(_dispatched())  # supply 10 MW at 07:00, η 0.98
+    kpi = renewable_fraction(n)
+    assert kpi["nonrenewable_mwh"] == pytest.approx(90.0), kpi
+    assert kpi["fraction"] == pytest.approx(0.625)
+
+
+def test_two_import_links_off_one_bus_without_p0_fail_closed():
+    n = _grid_supply(_dispatched())
+    n.add("Bus", "ac2", carrier="AC")
+    n.add("Link", "poc2", bus0="grid", bus1="ac2", p_nom=50.0)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None, kpi
+    assert "the dispatch does not say what each delivered" in kpi["reason"], kpi
+
+
+def test_a_renewable_generator_on_the_supply_bus_is_not_its_import():
+    n = _grid_supply(_dispatched())
+    n.add("Generator", "pv_far", bus="grid", carrier="solar", p_nom=50.0)
+    n.generators_t.p["pv_far"] = 5.0
+    assert renewable_fraction(n)["nonrenewable_mwh"] == pytest.approx(90.0)
+
+
+def test_loads_missing_from_the_dispatch_read_their_p_set():
+    n = _dispatched()
+    n.loads.loc["site", "p_set"] = LOAD_MW
+    n.loads_t.p = pd.DataFrame({"other": 99.0}, index=n.snapshots)
+    kpi = renewable_fraction(n)
+    assert kpi["served_mwh"] == pytest.approx(240.0), kpi
+    assert kpi["fraction"] == pytest.approx(0.625)
+    n.loads_t.p = pd.DataFrame(index=n.snapshots)
+    assert renewable_fraction(n)["served_mwh"] == pytest.approx(240.0)
+
+
+@pytest.mark.parametrize("frame,col", [("gen", "diesel"), ("load", "site")])
+def test_a_nan_in_the_dispatch_reads_none(frame, col):
+    n = _dispatched()
+    target = n.generators_t.p if frame == "gen" else n.loads_t.p
+    target.iloc[3, target.columns.get_loc(col)] = float("nan")
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "NaN" in kpi["reason"], kpi
+
+
+def test_a_nan_in_an_import_link_dispatch_reads_none():
+    n = _grid_supply(_dispatched())
+    n.links_t.p0 = pd.DataFrame({"poc": 0.0}, index=n.snapshots)
+    n.links_t.p0.iloc[5, 0] = float("nan")
+    assert renewable_fraction(n)["fraction"] is None
+
+
+def test_a_nan_in_an_unread_column_is_ignored():
+    n = _dispatched()
+    n.generators_t.p.iloc[3, n.generators_t.p.columns.get_loc("pv")] = float("nan")
+    assert renewable_fraction(n)["fraction"] is not None
+
+
 def test_a_grid_bus_with_a_second_path_through_a_fuel_bus_fails_closed():
     n = _grid_supply(_dispatched())
     n.add("Bus", "mid", carrier="gas")
@@ -942,11 +1009,13 @@ def test_no_electrical_load_is_nothing_served_not_unsolved():
     assert kpi["fraction"] is None and "no electricity served" in kpi["reason"], kpi
 
 
-def test_a_load_missing_from_the_dispatch_reads_as_not_solved():
+def test_a_load_missing_from_the_dispatch_reads_its_p_set():
+    """G13 (03a's G5 fallback): a Load is fixed, so a dispatch that does not
+    carry it was served its p_set; all loads then come from p_set."""
     n = _dispatched()
     n.add("Load", "site2", bus="ac", p_set=1.0)
     kpi = renewable_fraction(n)
-    assert kpi["fraction"] is None and "not been solved" in kpi["reason"], kpi
+    assert kpi["served_mwh"] == pytest.approx(264.0), kpi
 
 
 def test_the_kpi_applies_the_generator_weightings():

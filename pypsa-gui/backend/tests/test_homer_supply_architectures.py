@@ -308,11 +308,15 @@ def test_renewable_fraction_is_none_without_dispatch_or_served_load():
     assert A.renewable_fraction(n) is None  # 0/0 is not 1.0 or NaN
 
 
-def test_renewable_fraction_clips_to_unit_interval():
+def test_renewable_fraction_stays_in_unit_interval():
     n = _solved(_net(), pv=[3.0] * 4, genset=[0.0] * 4, grid=[0.0] * 4)
     assert A.renewable_fraction(n) == 1.0
+    # G13 with 01a's GK B N2: a genset putting out more than the site used
+    # reads None (unknown), no longer clipped to 0.0.
     n = _solved(_net(), pv=[0.0] * 4, genset=[2.0] * 4, grid=[0.0] * 4)
-    assert A.renewable_fraction(n) == 0.0
+    assert A.renewable_fraction(n) is None
+    row = A.row_of(_arch(_net(), "pv+battery+genset+grid"), n)
+    assert row["unavailable"]["renewable_fraction"] == "uncounted_non_renewable"
 
 
 # ── rows (G4) ─────────────────────────────────────────────────────────────
