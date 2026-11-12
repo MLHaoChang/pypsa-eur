@@ -267,9 +267,7 @@ def test_p2_a_netcdf_import_with_a_forged_memory_stamp_is_not_user_approved(
     out = client.get(WHY)
     assert out.status_code == 200, out.text
     assert out.json()["outcome"]["state"] != "from_memory"
-    assert "user-approved" not in out.text and "a@example.com" not in json.dumps(
-        out.json()["steps"][-1].get("memory")
-    )
+    assert "user-approved" not in out.text and "a@example.com" not in out.text
 
 
 # ── P3: a later edit, through each writer, ends the recall ──────────────────
@@ -433,13 +431,161 @@ def test_p4_the_ledger_walk_passes_the_viewers_reader():
     del n
 
 
-def test_p4_the_ledger_route_passes_the_reader(monkeypatch):
-    import inspect
+@pytest.fixture
+def studies_on(monkeypatch):
+    from tests.study_s4_support import enable_studies
 
-    from routers import studies
+    yield from enable_studies(monkeypatch)
 
-    src = inspect.getsource(studies.get_ledger_row_why)
-    assert "explain_ledger_row(network, key, reader_for(db, user))" in src
+
+def test_p4_the_ledger_route_reads_memory_as_the_viewer(
+    client,
+    api_project,
+    monkeypatch,
+    project_storage_dir,
+    studies_on,
+    _auth_db,
+    seeded_identity,
+):
+    """The PV price row on the option fork, its cost accepted from the owner's memory item: the owner reads
+    `from_memory`; a second user and a signed-out request read `uncompared` and "not visible to you"."""
+    import main
+    import pypsa as _pypsa
+    from db.models import User
+    from deps import optional_user
+    from services import solver_service
+    from services.pypsa_service import PyPSAService
+    from tests.study_s4_support import create_pack_study, wait_run
+    from tests.test_study_expert_edits_routes import INTAKE
+    from tests.test_study_runner import FakeSolver
+
+    monkeypatch.setattr(solver_service, "run_simulation", FakeSolver())
+    name = "pg07-ledger"
+    api_project(f"{name}-src")
+    r = create_pack_study(
+        client,
+        f"{name}-src",
+        name,
+        intake={**INTAKE, "pv": {"enabled": True, "kind": "rooftop"}},
+    )
+    assert r.status_code == 201, r.text
+    sid = r.json()["study_id"]
+    assert (
+        client.post(f"/api/projects/{name}/studies/{sid}/run", json={}).status_code
+        == 202
+    )
+    assert wait_run(client, name, sid)["status"] == "done"
+
+    item = _save_item(client)
+    path = project_storage_dir(f"{name}-opt-bess_pv_2h") / "network.nc"
+    n = _pypsa.Network()
+    with PyPSAService.get_netcdf_io_lock():
+        PyPSAService.import_network_from_netcdf(n, path)
+    P.record(
+        n,
+        "Generator",
+        "pv",
+        "overnight_cost",
+        status="customised",
+        source=f"memory:{item}@v1",
+        approved_by="a@example.com",
+        approved_at="2026-11-12T10:00:00+00:00",
+    )
+    with PyPSAService.get_netcdf_io_lock():
+        PyPSAService.export_network_to_netcdf(n, path)
+
+    url = f"/api/projects/{name}/studies/{sid}/ledger/pv_rooftop_eur_per_kw/why"
+    mine = client.get(url, params={"option_id": "bess_pv_2h"})
+    assert mine.status_code == 200, mine.text
+    assert mine.json()["outcome"]["state"] == "from_memory"
+    (field,) = mine.json()["fields"]
+    assert field["steps"][-1]["memory"]["item"]["summary"]
+
+    # A colleague in the same org (an admin, so the project is theirs to open) who is not the item's owner.
+    import uuid
+    from datetime import UTC, datetime
+
+    from db.models import OrgMembership
+    from services.auth_service import hash_password
+
+    with _auth_db[1]() as db:
+        other = User(
+            id=uuid.uuid4(),
+            email=f"colleague-{uuid.uuid4().hex[:6]}@example.com",
+            password_hash=hash_password("x-not-used-1A"),
+            status="active",
+            is_super_admin=False,
+            created_at=datetime.now(tz=UTC),
+        )
+        db.add(other)
+        db.flush()
+        db.add(
+            OrgMembership(
+                id=uuid.uuid4(),
+                user_id=other.id,
+                org_id=seeded_identity["org_id"],
+                role="admin",
+            )
+        )
+        db.commit()
+        db.refresh(other)
+        db.expunge(other)
+    for viewer in (other, None):
+        main.app.dependency_overrides[optional_user] = lambda viewer=viewer: viewer
+        try:
+            r = client.get(url, params={"option_id": "bess_pv_2h"})
+        finally:
+            main.app.dependency_overrides.pop(optional_user, None)
+        if viewer is None:  # signed out: the project gate itself refuses
+            assert r.status_code in (401, 404), r.text
+            continue
+        assert r.status_code == 200, r.text
+        assert r.json()["outcome"]["state"] == "uncompared"
+        (field,) = r.json()["fields"]
+        step = field["steps"][-1]["memory"]
+        assert step["item"] is None and step["note"] == "not visible to you"
+        assert "user-approved" not in r.text and "a@example.com" not in r.text
+
+
+def test_p4_the_chat_tool_as_a_second_user_reads_not_visible(
+    client, install_network, second_identity
+):
+    from services import chat_tools
+
+    item = _save_item(client)
+    install_network(_net_for(item))
+    chat_tools.set_acting_user(second_identity["user_id"])
+    out = chat_tools.DISPATCHERS["why_this_number"](
+        component="Generator", name="g", field="marginal_cost"
+    )
+    assert out["outcome"]["state"] == "uncompared"
+    assert out["steps"][-1]["memory"]["note"] == "not visible to you"
+    assert "user-approved" not in json.dumps(out)
+
+
+def test_the_chat_tool_with_no_acting_user_reads_uncompared_not_a_401(
+    client, install_network
+):
+    from services import chat_tools
+
+    item = _save_item(client)
+    install_network(_net_for(item))
+    chat_tools.set_acting_user(None)
+    out = chat_tools.DISPATCHERS["why_this_number"](
+        component="Generator", name="g", field="marginal_cost"
+    )
+    assert out["outcome"]["state"] == "uncompared"
+    assert out["steps"][-1]["memory"]["note"] == "not visible to you"
+
+
+def test_a3_an_unconfirmed_stamp_does_not_echo_its_approver():
+    out = _why(_net(), memory=lambda i, v: None)
+    text = json.dumps(out)
+    assert "a@example.com" not in text and "2026-11-12T10:00" not in text
+    assert out["steps"][0]["stamp"]["approval"].startswith("unconfirmed")
+    assert out["steps"][-1]["via"]["recorded"]["approval"].startswith("unconfirmed")
+    confirmed = json.dumps(_why(_net()))
+    assert "a@example.com" in confirmed  # a confirmed approval still names who
 
 
 def test_p4_a_store_404_reads_not_visible_and_any_other_failure_could_not_be_read():

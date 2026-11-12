@@ -119,12 +119,14 @@ def _recorded(edge: Edge) -> Any:
     if isinstance(rec, Unrecorded):
         return {"unrecorded": rec.reason}
     if isinstance(rec, MemoryRecall):
+        out = {"item": rec.item, "version": rec.version, "replaces": rec.replaces}
+        if not rec.confirmed:
+            # The stamp's approver is text a file can carry: not echoed as an approval until the store confirms it.
+            return {**out, "approval": UNCONFIRMED_APPROVAL}
         return {
-            "item": rec.item,
-            "version": rec.version,
+            **out,
             "approved_by": rec.approved_by,
             "approved_at": rec.approved_at,
-            "replaces": rec.replaces,
         }
     if isinstance(rec, money.ScaleRecord):
         return (
@@ -135,10 +137,32 @@ def _recorded(edge: Edge) -> Any:
     return rec
 
 
-def _stamp(stamp: dict | None) -> dict | None:
+UNCONFIRMED_APPROVAL = (
+    "unconfirmed: the memory store did not confirm this approval for you"
+)
+_APPROVAL_KEYS = ("approved_by", "approved_at")
+
+
+def _stamp(stamp: dict | None, unconfirmed: bool = False) -> dict | None:
+    """The stamp keys a step carries. A stamp that claims a memory approval the store did not confirm for this
+    viewer drops the approver and time and says so (GK B A3)."""
     if not stamp:
         return None
-    return {k: stamp[k] for k in STAMP_KEYS if k in stamp}
+    out = {k: stamp[k] for k in STAMP_KEYS if k in stamp}
+    if unconfirmed:
+        out = {k: v for k, v in out.items() if k not in _APPROVAL_KEYS}
+        out["approval"] = UNCONFIRMED_APPROVAL
+    return out
+
+
+def _unconfirmed(g: Graph, node_id: str) -> bool:
+    return any(
+        e.kind == "recalled_from"
+        and e.src == node_id
+        and isinstance(e.recorded, MemoryRecall)
+        and not e.recorded.confirmed
+        for e in g.edges
+    )
 
 
 def _stamp_missing(stamp: dict | None, unit: str | None) -> list[str]:
@@ -233,7 +257,7 @@ def _step(g: Graph, step: Step) -> dict:
         "field": field,
         "value": value,
         "unit": unit,
-        "stamp": _stamp(step.stamp),
+        "stamp": _stamp(step.stamp, _unconfirmed(g, step.node.id)),
         "stamp_missing": _stamp_missing(step.stamp, unit),
         "via": None
         if step.via is None
