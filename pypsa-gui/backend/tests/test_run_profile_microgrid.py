@@ -1779,8 +1779,9 @@ def test_the_hand_off_run_on_each_template(
     - G2: solves used 6 = the queued solve 1 + the EH study 2 + the island
       check 1 + the loop's (solves_used 1 + probe 0 + closing 1), within the
       pass's mg_pass_solves(1) = 5 reserved and mg_budget(1) = 19, the budget.
-    The hand-off's "Stated targets" row reads only whether the result gate
-    passed; the not-evaluated count on it is G8's (A2), not pinned here."""
+    G8 (A2, #1409): the four warn rules not evaluated are their own state on
+    the hand-off (`handoff.checks`) and "Stated targets" reads partly with
+    their count, never covered."""
     from harness import run_eh
     from tests.test_harness_envelope import envelope_of
     from tests.test_harness_run_loops import go
@@ -1865,7 +1866,26 @@ def test_the_hand_off_run_on_each_template(
     assert [
         (r["rule"], r["verdict"]) for r in run["stages"]["handoff"]["gate"]["rules"]
     ] == [("ho.kpis_read", "pass")]
-    assert "Stated targets" in {p["part"] for p in run["handoff"]["coverage"]}
+    [targets] = [p for p in run["handoff"]["coverage"] if p["part"] == "Stated targets"]
+    assert (targets["status"], targets["basis"]) == (
+        "partly",
+        "the result gate passed; 4 checks not evaluated (see the gates table)",
+    )
+    unevaluated = {
+        "mg.island.frequency",
+        "mg.fuel.autonomy",
+        "mg.ic.counterfactual",
+        "mg.ic.baseline_keeps",
+    }
+    checks = run["handoff"]["checks"]
+    assert {c["rule"] for c in checks["not_evaluated"]} == unevaluated
+    assert {c["severity"] for c in checks["not_evaluated"]} == {"warn"}
+    rules = run["stages"]["result_gate"]["gate"]["rules"]
+    assert checks["counts"] == {
+        "pass": len(rules) - len(unevaluated),
+        "fail": 0,
+        "not_evaluated": len(unevaluated),
+    }
 
     # G2: the envelope audit against mg_pass_solves / mg_budget.
     envelope = envelope_of(path)
