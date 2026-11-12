@@ -764,7 +764,7 @@ def site(baseline, template):
 def _l2_only(monkeypatch):
     """eh_microgrid@1 without its EH study, the facts that read it and the
     LOLE loop (the EH study and the loop run in `tests/test_harness_run_eh*`):
-    the solve, the island check and L2 only. The stage file is PR B's."""
+    the solve, the island check and L2 only, on the shipped stage file."""
     profile = copy.deepcopy(run_profiles.PROFILES["eh_microgrid@1"])
     solve = profile["stages"]["solve"]
     solve["actions"] = [a for a in solve["actions"] if a["tool"] != "run_eh_study"]
@@ -779,9 +779,6 @@ def _l2_only(monkeypatch):
         run_profiles.PROFILES,
         "eh_microgrid@1",
         {k: v for k, v in profile.items() if k != "eh_study"},
-    )
-    monkeypatch.setattr(
-        run_loops, "instruction", lambda *a: "Resize the battery within its bounds."
     )
 
 
@@ -1897,7 +1894,7 @@ def test_the_hand_off_run_on_each_template(
         for a in envelope["audit"]
         if a["event"] in ("eh_study", "mg_island", "engine")
     }
-    closing = 1 if loop["restore"] == "base" else 0
+    closing = 1
     looped = loop["solves_used"] + int(loop.get("probe_solves") or 0) + closing
     assert rows == {
         "eh_study": (2 + run_profiles.MG_CONTINGENCY_SOLVES * k, run_eh.charged(study)),
