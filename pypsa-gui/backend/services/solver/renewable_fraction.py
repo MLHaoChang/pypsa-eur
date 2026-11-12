@@ -442,7 +442,7 @@ def _gross(m, var, names: list[str], lower) -> Any:
     aux_name = f"{_AUX}-{var.name}"
     z = m.add_variables(
         lower=0.0,
-        coords=[v.coords["snapshot"], pd.Index(neg, name="name")],
+        coords=[v.indexes["snapshot"], pd.Index(neg, name="name")],
         name=aux_name,
     )
     m.add_constraints(z - var.sel(name=neg) >= 0, name=f"{aux_name}-def")

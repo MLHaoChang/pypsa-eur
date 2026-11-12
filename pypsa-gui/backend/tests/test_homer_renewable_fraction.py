@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -25,12 +26,15 @@ import json
 
 from services.reliability_goal import goal_free_config
 from services.solver.renewable_fraction import (
+    _AUX,
     _wrap_with_min_renewable_fraction,
     classify,
     infeasibility_lines,
+    max_renewable_mwh,
     renewable_fraction,
     renewable_fraction_result,
     row_name,
+    target_of,
 )
 from services.solver_service import SolverConfig, run_simulation
 
@@ -542,7 +546,8 @@ def test_the_infeasibility_hint_names_need_and_reach():
     )
     assert len(lines) == 1 and lines[0].startswith("Minimum renewable fraction:")
     assert row_name(None) in lines[0]
-    assert "216.0 MWh" in lines[0] and "40.0 MWh" in lines[0], lines[0]
+    assert "216.0 MWh" in lines[0] and "at most 40.0 MWh" in lines[0], lines[0]
+    assert "None" not in lines[0]
 
 
 # ── horizon totals and partial dispatch (mutant killers) ─────────────────
@@ -739,3 +744,361 @@ def test_the_row_warns_about_a_fuel_store_genset():
         n, None, SolverConfig(min_renewable_fraction=0.5), q
     )(n, n.snapshots)
     assert any("WARNING" in l and "genset_s" in l for l in _drain(q))
+
+
+# ── mutation-gap closers (01a survivors) ─────────────────────────────────
+
+
+def test_a_target_given_as_text_is_read_as_a_number():
+    assert target_of(SimpleNamespace(min_renewable_fraction="0.5")) == 0.5
+
+
+def test_a_bus_with_a_none_carrier_is_electrical():
+    n = _network()
+    n.buses["carrier"] = n.buses["carrier"].astype(object)
+    n.buses.loc["ac", "carrier"] = None
+    c = classify(n)
+    assert c["nonren_generators"] == ["diesel"] and c["loads"] == ["site"]
+
+
+def test_a_lost_production_slack_is_neither_non_renewable_nor_unattributed():
+    n = _network()
+    n.add("Generator", "__lost_ac", bus="ac", carrier="process", p_nom=5.0)
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Generator", "__lost_h2", bus="h2", carrier="process", p_nom=5.0)
+    n.add("Link", "fuel cell", bus0="h2", bus1="ac", p_nom=5.0, efficiency=0.5)
+    c = classify(n)
+    assert c["nonren_generators"] == ["diesel"]
+    assert c["unattributed_generators"] == []
+
+
+def test_a_genset_bus_reached_only_by_a_link_from_the_site_is_not_a_supply_bus():
+    n = _network()
+    n.add("Bus", "genbus", carrier="AC")
+    n.add("Generator", "genset_b", bus="genbus", carrier="diesel", p_nom=10.0)
+    n.add("Link", "feeder", bus0="ac", bus1="genbus", p_nom=10.0)
+    c = classify(n)
+    assert "genset_b" in c["nonren_generators"]
+    assert c["source_links"] == []
+
+
+def test_a_boiler_beside_a_genset_on_the_fuel_bus_is_not_counted():
+    n = _dispatched()
+    n.add("Bus", "heat", carrier="heat")
+    n = _with_fuel(n, ("genset2", "fuel", "ac", {}), ("boiler", "fuel", "heat", {}))
+    n.links_t.p0 = pd.DataFrame({"genset2": 0.0, "boiler": 0.0}, index=n.snapshots)
+    n.links_t.p0.loc[n.snapshots[7], "genset2"] = 15.0
+    n.links_t.p0.loc[n.snapshots[9], "boiler"] = 10.0
+    n.generators_t.p.iloc[7, n.generators_t.p.columns.get_loc("diesel")] -= 6.0
+    assert classify(n)["source_links"] == ["genset2"]
+    kpi = renewable_fraction(n)
+    assert kpi["nonrenewable_mwh"] == pytest.approx(90.0), kpi
+
+
+def test_chained_grid_supply_buses_count_the_import_once():
+    n = _network()
+    n.add("Bus", "gridA", carrier="AC")
+    n.add("Bus", "gridB", carrier="AC")
+    n.add("Generator", "supplyA", bus="gridA", carrier="grid", p_nom=50.0)
+    n.add("Generator", "supplyB", bus="gridB", carrier="grid", p_nom=50.0)
+    n.add("Link", "a_to_b", bus0="gridA", bus1="gridB", p_nom=50.0)
+    n.add("Link", "b_to_site", bus0="gridB", bus1="ac", p_nom=50.0)
+    assert classify(n)["source_links"] == ["b_to_site"]
+
+
+def test_a_slack_on_a_heat_bus_does_not_change_what_is_served():
+    n = _dispatched()
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Generator", "__voll_heatload", bus="heat", carrier="heat", p_nom=50.0)
+    n.generators_t.p["__voll_heatload"] = 5.0
+    kpi = renewable_fraction(n)
+    assert kpi["served_mwh"] == pytest.approx(240.0)
+    assert kpi["fraction"] == pytest.approx(0.625)
+
+
+def test_the_reach_counts_only_renewables_on_electrical_buses():
+    n = _network(pv_max=5.0)
+    n.add("Generator", "__voll_site", bus="ac", carrier="load", p_nom=1000.0)
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Generator", "solar_thermal", bus="heat", carrier="solar", p_nom=50.0)
+    assert max_renewable_mwh(n) == {None: pytest.approx(40.0)}
+
+
+def _grid_supply(n):
+    """An electrical grid bus with a grid Generator and an import Link `poc`
+    into the site; the grid runs 10 MW at 07:00 and replaces 9.8 MW of diesel."""
+    n.add("Bus", "grid", carrier="AC")
+    n.add("Generator", "supply", bus="grid", carrier="grid", p_nom=50.0)
+    n.add("Link", "poc", bus0="grid", bus1="ac", p_nom=50.0, efficiency=0.98)
+    n.generators_t.p["supply"] = 0.0
+    n.generators_t.p.iloc[7, n.generators_t.p.columns.get_loc("supply")] = 10.0
+    n.generators_t.p.iloc[7, n.generators_t.p.columns.get_loc("diesel")] -= 9.8
+    return n
+
+
+def test_the_kpi_counts_a_dispatched_grid_import_link():
+    n = _grid_supply(_dispatched())
+    n.links_t.p0 = pd.DataFrame({"poc": 0.0}, index=n.snapshots)
+    n.links_t.p0.iloc[7, 0] = 10.0
+    kpi = renewable_fraction(n)
+    assert kpi["nonrenewable_mwh"] == pytest.approx(90.0), kpi
+    assert kpi["fraction"] == pytest.approx(0.625)
+
+
+def test_a_grid_bus_with_a_second_path_through_a_fuel_bus_fails_closed():
+    n = _grid_supply(_dispatched())
+    n.add("Bus", "mid", carrier="gas")
+    n.add("Link", "to_mid", bus0="grid", bus1="mid", p_nom=10.0)
+    n.add("Link", "mid_genset", bus0="mid", bus1="ac", p_nom=10.0)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "supply" in kpi["reason"], kpi
+
+
+def test_a_counted_source_link_with_an_electrical_bus2_fails_closed():
+    n = _dispatched()
+    n.add("Bus", "aux", carrier="AC")
+    n = _with_fuel(n, ("genset2", "fuel", "ac", {"bus2": "aux", "efficiency2": 0.1}))
+    assert classify(n)["source_links"] == ["genset2"]
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "tank" in kpi["reason"], kpi
+
+
+def _store_genset(n, bus_carrier, store_carrier, *, p0=15.0, out="ac"):
+    n.add("Bus", "tankbus", carrier=bus_carrier)
+    n.add(
+        "Store",
+        "daytank",
+        bus="tankbus",
+        carrier=store_carrier,
+        e_nom=500.0,
+        e_initial=500.0,
+    )
+    n.add("Link", "genset_s", bus0="tankbus", bus1=out, p_nom=25.0, efficiency=0.4)
+    n.links_t.p0 = pd.DataFrame({"genset_s": 0.0}, index=n.snapshots)
+    n.links_t.p0.iloc[7, 0] = p0
+    return n
+
+
+def test_a_biogas_store_on_a_gas_bus_does_not_fail_closed():
+    kpi = renewable_fraction(_store_genset(_dispatched(), "gas", "biogas"))
+    assert kpi["fraction"] == pytest.approx(0.625), kpi
+
+
+def test_a_store_without_a_carrier_on_a_biogas_bus_does_not_fail_closed():
+    kpi = renewable_fraction(_store_genset(_dispatched(), "biogas", ""))
+    assert kpi["fraction"] == pytest.approx(0.625), kpi
+
+
+def test_a_diesel_store_feeding_only_a_boiler_does_not_fail_closed():
+    n = _dispatched()
+    n.add("Bus", "heat", carrier="heat")
+    kpi = renewable_fraction(_store_genset(n, "diesel", "diesel", out="heat"))
+    assert kpi["fraction"] == pytest.approx(0.625), kpi
+
+
+def test_an_idle_fuel_store_genset_does_not_fail_closed():
+    kpi = renewable_fraction(_store_genset(_dispatched(), "diesel", "diesel", p0=0.0))
+    assert kpi["fraction"] == pytest.approx(0.625), kpi
+
+
+def test_an_idle_unattributed_generator_does_not_fail_closed():
+    n = _dispatched()
+    n.add("Bus", "heat", carrier="heat")
+    n = _with_fuel(n, ("chp", "fuel", "heat", {"bus2": "ac", "efficiency2": 0.3}))
+    n.generators_t.p["tank"] = 0.0
+    assert classify(n)["unattributed_generators"] == ["tank"]
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+# ── which dispatch is missing ────────────────────────────────────────────
+
+
+def test_generators_without_dispatch_read_as_not_solved():
+    n = _network()
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=n.snapshots)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "not been solved" in kpi["reason"], kpi
+
+
+def test_a_network_without_generators_reads_its_served_load():
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=HOURS, freq="h"))
+    n.add("Bus", "ac", carrier="AC")
+    n.add("Load", "site", bus="ac", p_set=LOAD_MW)
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=n.snapshots)
+    kpi = renewable_fraction(n)
+    assert kpi["served_mwh"] == pytest.approx(240.0)
+    assert kpi["fraction"] == pytest.approx(1.0), kpi
+
+
+def test_no_electrical_load_is_nothing_served_not_unsolved():
+    n = _dispatched()
+    n.remove("Load", "site")
+    n.loads_t.p = pd.DataFrame(index=n.snapshots)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "no electricity served" in kpi["reason"], kpi
+
+
+def test_a_load_missing_from_the_dispatch_reads_as_not_solved():
+    n = _dispatched()
+    n.add("Load", "site2", bus="ac", p_set=1.0)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "not been solved" in kpi["reason"], kpi
+
+
+def test_the_kpi_applies_the_generator_weightings():
+    n = _dispatched()
+    n.snapshot_weightings.loc[:, "generators"] = 2.0
+    kpi = renewable_fraction(n)
+    assert kpi["served_mwh"] == pytest.approx(480.0)
+    assert kpi["nonrenewable_mwh"] == pytest.approx(180.0)
+    assert kpi["fraction"] == pytest.approx(0.625)
+
+
+# ── the result payload ───────────────────────────────────────────────────
+
+
+def test_the_result_without_a_capture_is_the_kpi():
+    kpi = renewable_fraction_result(_dispatched(), None, 0.5)
+    assert kpi["fraction"] == pytest.approx(0.625) and kpi["target"] == 0.5
+
+
+def test_a_capture_without_lost_load_is_the_kpi():
+    kpi = renewable_fraction_result(_dispatched(), {"other": 1}, None)
+    assert kpi["fraction"] == pytest.approx(0.625), kpi
+
+
+def test_a_capture_that_is_not_a_frame_is_refused():
+    kpi = renewable_fraction_result(_dispatched(), {"lost_load_t": [0.0] * HOURS}, None)
+    assert kpi["fraction"] is None and "another solve" in kpi["reason"], kpi
+
+
+# ── the LP row: gross import and inactive assets ─────────────────────────
+
+
+def _row_terms(n, name) -> set[tuple[str, str]]:
+    """The (variable, asset) pairs of one LP row."""
+    m = n.model
+    labels = np.ravel(m.constraints[name].vars.values)
+    out = set()
+    for lab in labels[labels >= 0]:
+        var, coord = m.variables.get_label_position(int(lab))
+        out.add((var, str(coord["name"])))
+    return out
+
+
+def _with_row(n, f=0.5):
+    n.optimize.create_model()
+    q: queue.SimpleQueue = queue.SimpleQueue()
+    _wrap_with_min_renewable_fraction(
+        n, None, SolverConfig(min_renewable_fraction=f), q
+    )(n, n.snapshots)
+    return _drain(q)
+
+
+def _bidirectional_grid(n):
+    n.add(
+        "Generator",
+        "grid",
+        bus="ac",
+        carrier="grid",
+        p_nom=50.0,
+        p_min_pu=-1.0,
+        marginal_cost=100.0,
+    )
+    return n
+
+
+def test_a_bidirectional_grid_generator_is_counted_gross():
+    n = _bidirectional_grid(_network())
+    _with_row(n)
+    aux = f"{_AUX}-Generator-p"
+    defn = n.model.constraints[f"{aux}-def"]
+    assert set(np.ravel(defn.sign.values)) == {">="}
+    assert (aux, "grid") in _row_terms(n, row_name(None))
+    assert ("Generator-p", "grid") not in _row_terms(n, row_name(None))
+
+
+def test_a_mixed_fleet_keeps_the_grid_and_the_diesel_in_the_row():
+    n = _bidirectional_grid(_network())
+    _with_row(n)
+    terms = _row_terms(n, row_name(None))
+    assert {(f"{_AUX}-Generator-p", "grid"), ("Generator-p", "diesel")} <= terms
+
+
+def test_a_fleet_whose_only_non_renewable_is_a_bidirectional_grid_builds():
+    n = _bidirectional_grid(_network())
+    n.remove("Generator", "diesel")
+    _with_row(n)
+    assert _row_terms(n, row_name(None)) == {(f"{_AUX}-Generator-p", "grid")}
+
+
+def test_inactive_assets_are_left_out_of_the_row():
+    n = _network()
+    n.generators.loc["diesel", "active"] = False
+    n.add("Bus", "grid", carrier="AC")
+    n.add("Generator", "supply", bus="grid", carrier="grid", p_nom=50.0)
+    n.add("Link", "poc", bus0="grid", bus1="ac", p_nom=50.0, active=False)
+    n.add("Generator", "__voll_site", bus="ac", carrier="load", p_nom=1e3, active=False)
+    n.add("Generator", "diesel2", bus="ac", carrier="diesel", p_nom=LOAD_MW)
+    _with_row(n)
+    assert _row_terms(n, row_name(None)) == {("Generator-p", "diesel2")}
+
+
+# ── the period in the log and the hint ───────────────────────────────────
+
+
+def _no_load_in_2035(n):
+    n.loads_t.p_set = pd.DataFrame(
+        {
+            "site": [
+                LOAD_MW if p == 2030 else 0.0 for p in n.snapshots.get_level_values(0)
+            ]
+        },
+        index=n.snapshots,
+    )
+    return n
+
+
+def test_the_log_names_the_period_without_load():
+    n = _no_load_in_2035(_two_period())
+    n.optimize.create_model(multi_investment_periods=True)
+    q: queue.SimpleQueue = queue.SimpleQueue()
+    _wrap_with_min_renewable_fraction(
+        n,
+        None,
+        SolverConfig(min_renewable_fraction=0.5, multi_investment_periods=True),
+        q,
+    )(n, n.snapshots)
+    log = _drain(q)
+    assert any("period 2035 has no electrical load" in l for l in log), log
+    assert not any("None" in l for l in log), log
+
+
+def test_the_log_names_a_single_period_without_load_all():
+    n = _network()
+    n.loads.loc["site", "p_set"] = 0.0
+    log = _with_row(n)
+    assert any("period all has no electrical load" in l for l in log), log
+    assert not any("None" in l for l in log), log
+
+
+def test_the_hint_names_each_period_with_its_own_need_and_reach():
+    n = _two_period(weights=(1.0, 2.0))
+    n.generators.loc["pv", "p_nom_max"] = 5.0
+    assert max_renewable_mwh(n) == {
+        2030: pytest.approx(40.0),
+        2035: pytest.approx(80.0),
+    }
+    lines = infeasibility_lines(n, SolverConfig(min_renewable_fraction=0.9))
+    assert len(lines) == 2, lines
+    assert " in 2030" in lines[0] and "216.0 MWh" in lines[0], lines[0]
+    assert "at most 40.0 MWh" in lines[0], lines[0]
+    assert " in 2035" in lines[1] and "432.0 MWh" in lines[1], lines[1]
+    assert "at most 80.0 MWh" in lines[1], lines[1]
+
+
+def test_a_period_without_load_gets_no_hint():
+    n = _no_load_in_2035(_two_period())
+    lines = infeasibility_lines(n, SolverConfig(min_renewable_fraction=0.9))
+    assert len(lines) == 1 and " in 2030" in lines[0], lines
