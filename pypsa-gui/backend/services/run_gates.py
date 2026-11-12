@@ -823,9 +823,10 @@ def _binary_check(env):
     from services.solver import process_uc
 
     def read(ctx):
-        payload = getattr(ctx, "last_process_uc_check", None)
+        state = ctx.solver_state or {}
+        payload = state.get("last_process_uc_check")
         if payload is None:
-            cfg = (ctx.solver_state or {}).get("solver_config")
+            cfg = state.get("solver_config")
             if process_uc.planning_uc_mode(ctx.network, cfg) == "binary":
                 return Detailed("ok", [], BINARY_EXACT_BASIS)
             return NoEvidence("no_check", "the run's solve left no binary check (no committable process unit, "
