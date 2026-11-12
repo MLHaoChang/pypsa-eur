@@ -886,6 +886,21 @@ def test_g3_a_grid_side_slack_booked_as_energy_import_drops_once():
     assert rows[buy.key].dropped == ()
 
 
+def test_g3_with_no_map_any_generator_opex_line_refuses_a_triggering_line():
+    """GK B R: without the map a grid-side slack's opex (`energy_import`) can't be
+    told from a purchase, so a triggering line beside any Generator opex line is
+    refused, never built with the penalty beside the sale."""
+    grid_lost = _asset("__lost_nh3", -150.0, stream="energy_import")
+    inputs = _inputs(_linked("nh3", "served_product.nh3"))
+    out = {"nh3": _flat("served_product.nh3")}
+    with pytest.raises(LinkedOutputMissing):
+        build_business_case(_case(grid_lost, FOM), inputs, out)
+    # No Generator opex line and no lost production: nothing to drop, it builds.
+    build_business_case(_case(FOM), inputs, out)
+    # No triggering line: the Generator opex line never refuses.
+    build_business_case(_case(grid_lost, FOM), _inputs(), {})
+
+
 def test_d2_a_map_with_nothing_to_drop_keeps_the_digest():
     """GK B F1: on a case that values no shortfall, a slack-only or unread-only map
     hashes as no map."""

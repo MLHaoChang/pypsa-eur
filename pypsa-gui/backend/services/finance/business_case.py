@@ -188,6 +188,13 @@ def _slack_of(ln: TemplateLine) -> str | None:
     return parts[2] if ln.source == "asset" and len(parts) == 3 else None
 
 
+def _generator_opex(ln: TemplateLine) -> bool:
+    """An `asset:opex:Generator:<name>` ledger line: the shape a slack's opex takes."""
+    return (ln.source_id or "").startswith("opex:Generator:") and (
+        _slack_of(ln) is not None
+    )
+
+
 def _is_lost(ln: TemplateLine, lp: LostProductionMap | None) -> bool:
     """A line that values a product shortfall: the `lost_production` stream, or the
     opex of a slack the map names whatever stream it is booked in. A grid-side slack's
@@ -249,11 +256,17 @@ def _drops(
         active = [
             x for x in trig if _span(x[0], horizon)[0] <= y <= _span(x[0], horizon)[1]
         ]
-        lost = [ln for ln in t.lines if _is_lost(ln, lp)]
-        if not active or not lost:
+        if not active:
             continue
+        lost = [ln for ln in t.lines if _is_lost(ln, lp)]
         if lp is None:
-            raise LinkedOutputMissing(LOST_PRODUCTION)
+            # Without the map a grid-side slack's opex, booked `energy_import`, can't
+            # be told from a purchase: any Generator opex line refuses (GK B R).
+            if lost or any(_generator_opex(ln) for ln in t.lines):
+                raise LinkedOutputMissing(LOST_PRODUCTION)
+            continue
+        if not lost:
+            continue
         whole = {target for _, kind, target in active if kind == "served_product"}
         loads = {target for _, kind, target in active if kind != "served_product"}
         read = whole | {lp.load_bus[ld] for ld in loads if ld in lp.load_bus}
