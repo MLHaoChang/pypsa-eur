@@ -17,8 +17,20 @@ hash domain. The IC case is never changed (BC1, C1) and the two are never added.
   `op_incremental` (BC4). Its tax is the engine's (BC5).
 - `kpis` and `break_even` read the engine's cash series.
 
-Not here: the ledger guards (06: lost production, reference purchases, the
-`eaas_fee` branch), presets (07) and the route and tools (08)."""
+The ledger guards (06, spec §3 G2–G4):
+
+- G2: a linked line whose output a ledger stream already prices is refused
+  `double_count:<stream>` (`linked_outputs.ledger_clash`), never warned.
+- G3: a revenue line on a product bus's served quantity drops that bus's
+  `lost_production` lines in the years it is active (the whole bus for
+  `served_product`, the read Load's LO-3 share for `served_h2` and `shipped`), so a
+  shortfall counts once, as lower served revenue. The line is never refused.
+- G4: no reference-purchase value reaches the business case: it lives on the
+  counterfactual side, which `counterfactual=()` removes, and the hash reads none.
+- `BusinessCase.locked` lists the ledger lines the case carries, each dropped one
+  with the line that superseded it (G3-6), for the view's locked rows.
+
+Not here: presets (07) and the route and tools (08)."""
 
 from __future__ import annotations
 
@@ -40,7 +52,12 @@ from models.business_case import (
     LinkedOutputMissing,
     NameDuplicate,
 )
-from services.business_case.linked_outputs import NotEvaluated, Series, ledger_clash
+from services.business_case.linked_outputs import (
+    LostProductionMap,
+    NotEvaluated,
+    Series,
+    ledger_clash,
+)
 from services.finance.case import (
     AssetFinance,
     FinanceCase,
@@ -79,6 +96,23 @@ def _finite(v: float | None) -> float | None:
 class BusinessCase:
     case: FinanceCase
     hash: str
+    #: The ledger lines "from the energy model" the case carries (item 4), read-only.
+    locked: tuple[LockedRow, ...] = ()
+
+
+@dataclass(frozen=True)
+class LockedRow:
+    """One IC ledger line the business case carries, keyed as the ledger keys it.
+
+    `dropped` holds (year, share) for each year a revenue line supersedes part or all
+    of it (G3: share 1.0 is the whole line, None not established), and
+    `superseded_by` names those lines, so a €0 sale line can't remove a penalty
+    silently (G3-6)."""
+
+    stream: str
+    key: str
+    dropped: tuple[tuple[int, float | None], ...] = ()
+    superseded_by: tuple[str, ...] = ()
 
 
 # ── compile (G1) ─────────────────────────────────────────────────────────────
@@ -142,6 +176,165 @@ def _refuse_clashes(ic: FinanceCase, inputs: BusinessCaseInputs, outputs: dict) 
             raise e
 
 
+# ── lost production (G3) ─────────────────────────────────────────────────────
+
+#: The stream a product bus's shortfall is valued in (G3).
+LOST_PRODUCTION = "lost_production"
+
+
+def _slack_of(ln: TemplateLine) -> str | None:
+    """The slack of an `asset:<stream>:<Component>:<name>` ledger line."""
+    parts = (ln.source_id or "").split(":", 2)
+    return parts[2] if ln.source == "asset" and len(parts) == 3 else None
+
+
+def _generator_opex(ln: TemplateLine) -> bool:
+    """An `asset:opex:Generator:<name>` ledger line: the shape a slack's opex takes."""
+    return (ln.source_id or "").startswith("opex:Generator:") and (
+        _slack_of(ln) is not None
+    )
+
+
+def _is_lost(ln: TemplateLine, lp: LostProductionMap | None) -> bool:
+    """A line that values a product shortfall: the `lost_production` stream, or the
+    opex of a slack the map names whatever stream it is booked in. A grid-side slack's
+    captured opex is booked `energy_import` (`participants`, `grid_side_asset_cost`),
+    so the stream alone would miss it and the sale line would count it twice."""
+    if ln.stream == LOST_PRODUCTION:
+        return True
+    return lp is not None and _slack_of(ln) in lp.slack_bus
+
+
+def _triggers(lines) -> list[tuple[LineItem, str, str]]:
+    """(line, output kind, bus or load) of each line that drops `lost_production`:
+    a revenue line linked to served product (L1, L2, L2b). An opex line on the same
+    quantity (a royalty per t), a typed line and a share never do (GK A G3-2)."""
+    out = []
+    for ln in lines:
+        if ln.kind != "revenue" or ln.source != "linked":
+            continue
+        oid = _output_id(ln)
+        if ledger_clash(oid, (LOST_PRODUCTION,)) != ("drop", LOST_PRODUCTION):
+            continue
+        kind, _, target = oid.partition(".")
+        out.append((ln, kind, target))
+    return out
+
+
+def _drops(
+    ic: FinanceCase,
+    tl: Timeline,
+    lines,
+    horizon: tuple[int, int],
+    lp: LostProductionMap | None,
+) -> dict[int, dict[str, tuple[float | None, tuple[str, ...]]]]:
+    """{year: {ledger key: (share dropped, superseding lines)}} of each
+    `lost_production` line a revenue line supersedes that year (G3, GK A G3-1..G3-4).
+
+    Per BC year: a line drops its bus's lost production only in the years it runs,
+    so a line covering part of a multi-year period drops only those years' share
+    (G3-3, A5). `served_product.<bus>` reads the whole bus: its slacks' lines drop
+    whole. `served_h2.<load>` and `shipped.<load>` read one Load: each read Load's
+    LO-3 share drops once however many lines read it, capped at the whole (A4). A
+    year outside every period of the solve has no share: None (not established, as
+    the line's own quantity there). A year with nothing dropped is absent (D4).
+
+    A part drop scales the line's amount by (1 − share): it assumes the shortfall is
+    valued at one constant price per unit within the period, as the ledger books it
+    (GK A N3).
+
+    Fail closed (D3, A6): a triggering line with valued lost production and no map,
+    a line on a bus the map could not read, or a `lost_production` line the map
+    cannot place on a bus while a line triggers, is refused `linked_output_missing`.
+    A bus with no triggering line keeps its lines and is never refused."""
+    trig = _triggers(lines)
+    out: dict[int, dict] = {}
+    if not trig:
+        return out
+    for t, y in zip(_templates_by_year(ic, tl), tl.years):
+        y = int(y)
+        active = [
+            x for x in trig if _span(x[0], horizon)[0] <= y <= _span(x[0], horizon)[1]
+        ]
+        if not active:
+            continue
+        lost = [ln for ln in t.lines if _is_lost(ln, lp)]
+        if lp is None:
+            # Without the map a grid-side slack's opex, booked `energy_import`, can't
+            # be told from a purchase: any Generator opex line refuses (GK B R).
+            if lost or any(_generator_opex(ln) for ln in t.lines):
+                raise LinkedOutputMissing(LOST_PRODUCTION)
+            continue
+        if not lost:
+            continue
+        whole = {target for _, kind, target in active if kind == "served_product"}
+        loads = {target for _, kind, target in active if kind != "served_product"}
+        read = whole | {lp.load_bus[ld] for ld in loads if ld in lp.load_bus}
+        for bus in sorted(read & set(lp.unread)):
+            raise LinkedOutputMissing(f"{LOST_PRODUCTION}.{bus}")
+        for ln in lost:
+            bus = lp.slack_bus.get(_slack_of(ln))
+            if bus is None:
+                raise LinkedOutputMissing(f"{LOST_PRODUCTION}.{ln.key}")
+            names = tuple(
+                dict.fromkeys(
+                    b.name
+                    for b, kind, target in active
+                    if (
+                        target == bus
+                        if kind == "served_product"
+                        else lp.load_bus.get(target) == bus
+                    )
+                )
+            )
+            if not names:
+                continue
+            f: float | None = 0.0
+            if bus in whole:
+                f = 1.0
+            else:
+                by_load = lp.share.get(_slack_of(ln), {})
+                for ld in sorted(x for x in loads if lp.load_bus.get(x) == bus):
+                    sh = by_load.get(ld)
+                    v = sh.for_year(y) if isinstance(sh, Series) else None
+                    if v is None or not math.isfinite(v):
+                        f = None
+                        break
+                    f += v
+            if f is not None:
+                f = min(f, 1.0)
+                if f <= 0.0:
+                    continue
+            out.setdefault(y, {})[ln.key] = (f, names)
+    return out
+
+
+def _dropped(ln: TemplateLine, f: float | None) -> TemplateLine | None:
+    """`ln` less the dropped share `f`: gone at 1, not established at None."""
+    if f is None:
+        return dataclasses.replace(ln, amount=None)
+    if f >= 1.0:
+        return None
+    if ln.amount is None:
+        return ln
+    return dataclasses.replace(ln, amount=_finite(ln.amount * (1.0 - f)))
+
+
+def _locked(ic: FinanceCase, tl: Timeline, drops: dict) -> tuple[LockedRow, ...]:
+    rows: dict[str, list] = {}
+    for t, y in zip(_templates_by_year(ic, tl), tl.years):
+        for ln in t.lines:
+            row = rows.setdefault(ln.key, [ln.stream, [], []])
+            hit = drops.get(int(y), {}).get(ln.key)
+            if hit is not None:
+                row[1].append((int(y), hit[0]))
+                row[2].extend(hit[1])
+    return tuple(
+        LockedRow(stream, key, tuple(d), tuple(dict.fromkeys(names)))
+        for key, (stream, d, names) in rows.items()
+    )
+
+
 def _depreciation_class(ln: LineItem) -> str:
     """The pack class string of a capex line. A life that is not a whole number of years
     is passed as written. The engine then refuses the class by name and leaves tax not
@@ -186,12 +379,24 @@ def _templates(
     by_year: dict[int, list[TemplateLine]],
     *,
     with_ic: bool = True,
+    drops: dict | None = None,
 ) -> tuple:
     """One template per timeline year: the IC template in force that year, so its
-    energy, storage and money year stay, plus that year's business-case lines."""
+    energy, storage and money year stay, less the `lost_production` a line supersedes
+    that year (G3), plus that year's business-case lines."""
     out = []
     for t, y in zip(_templates_by_year(ic, tl), tl.years):
-        own = t.lines if with_ic else ()
+        own: tuple = ()
+        if with_ic:
+            hit = (drops or {}).get(int(y), {})
+            own = tuple(
+                x
+                for x in (
+                    _dropped(ln, hit[ln.key][0]) if ln.key in hit else ln
+                    for ln in t.lines
+                )
+                if x is not None
+            )
         out.append(
             dataclasses.replace(
                 t, first_year=int(y), lines=tuple(own) + tuple(by_year.get(int(y), ()))
@@ -201,13 +406,17 @@ def _templates(
 
 
 def build_business_case(
-    ic_case: FinanceCase, inputs: BusinessCaseInputs, outputs: dict | None = None
+    ic_case: FinanceCase,
+    inputs: BusinessCaseInputs,
+    outputs: dict | None = None,
+    lost_production: LostProductionMap | None = None,
 ) -> BusinessCase:
-    """The business-case `FinanceCase` (G1) and its hash (G-C6).
+    """The business-case `FinanceCase` (G1), its hash (G-C6) and its locked rows.
 
     `outputs` maps a linked line's name to its `Series` or `NotEvaluated`. The caller
-    resolves them with `linked_outputs.resolve` on the run's own solve. A refusal is
-    raised typed, naming the line and column (G9)."""
+    resolves them with `linked_outputs.resolve` on the run's own solve, and
+    `lost_production` with `linked_outputs.lost_production` on the same solve (G3).
+    A refusal is raised typed, naming the line and column (G9)."""
     outputs = outputs or {}
     tl = build_timeline(ic_case)
     ops = tl.operating_years
@@ -215,6 +424,7 @@ def build_business_case(
     base = ic_case.base_year
     inputs.require_runnable(horizon=horizon, base_year=base)
     _refuse_clashes(ic_case, inputs, outputs)
+    drops = _drops(ic_case, tl, inputs.lines, horizon, lost_production)
     fin = ic_case.inputs
     r_capex = fin.escalation.get("capex")
     lines = inputs.lines
@@ -337,13 +547,17 @@ def build_business_case(
         inputs=fin.model_copy(
             update={"depreciation_class_by_asset": dep, "replacement_capex": rep}
         ),
-        templates=_templates(ic_case, tl, by_year),
+        templates=_templates(ic_case, tl, by_year, drops=drops),
         assets=tuple(assets),
         asset_cod=cod,
         counterfactual=(),
         counterfactual_hash=None,
     )
-    return BusinessCase(case=case, hash=business_case_hash(ic_case, inputs, outputs))
+    return BusinessCase(
+        case=case,
+        hash=business_case_hash(ic_case, inputs, outputs, lost_production),
+        locked=_locked(ic_case, tl, drops),
+    )
 
 
 def _cod_in(cod: date, year: int) -> date:
@@ -371,11 +585,17 @@ def _bound(out) -> dict | None:
 
 
 def business_case_hash(
-    ic_case: FinanceCase, inputs: BusinessCaseInputs, outputs: dict | None = None
+    ic_case: FinanceCase,
+    inputs: BusinessCaseInputs,
+    outputs: dict | None = None,
+    lost_production: LostProductionMap | None = None,
 ) -> str:
     """The business case's own digest (G-C6). It covers `preset_id@version`, the lines,
-    `receivable_days`, each linked line's bound solve, and the IC case it runs on. No IC
-    digest reads it."""
+    `receivable_days`, each linked line's bound solve, the lost-production map the G3
+    drop reads, and the IC case it runs on. No IC digest reads it.
+
+    The IC case enters as its inputs and owner, never its counterfactual: a reference
+    purchase (G4) changes no business-case value, so it stays out (GK A G4-2)."""
     outputs = outputs or {}
     blob = {
         "domain": HASH_DOMAIN,
@@ -389,6 +609,36 @@ def business_case_hash(
             if ln.source == "linked"
         },
     }
+    lp = lost_production
+    if (
+        lp is not None
+        and _triggers(inputs.lines)
+        and (lp.slack_bus or lp.unread)
+        and any(_is_lost(ln, lp) for t in ic_case.templates for ln in t.lines)
+    ):
+        # Only when a line can drop and the IC case values a shortfall, so a case
+        # with no drop keeps its digest (D2, GK B F1). Sorted, periods as int (None on a flat network), shares as
+        # repr floats.
+        blob["lost_production"] = {
+            "slack_bus": sorted([str(k), str(v)] for k, v in lp.slack_bus.items()),
+            "load_bus": sorted([str(k), str(v)] for k, v in lp.load_bus.items()),
+            "unread": sorted([str(k), str(v)] for k, v in lp.unread.items()),
+            "share": sorted(
+                [
+                    str(slack),
+                    str(ld),
+                    sorted(
+                        (
+                            [None if k is None else int(k), float(v)]
+                            for k, v in s.per_period.items()
+                        ),
+                        key=lambda kv: (kv[0] is not None, kv[0] or 0),
+                    ),
+                ]
+                for slack, by_load in lp.share.items()
+                for ld, s in by_load.items()
+            ),
+        }
     raw = json.dumps(blob, sort_keys=True, default=str)
     return hashlib.sha256(raw.encode()).hexdigest()[:32]
 
@@ -701,8 +951,8 @@ def _scaled(inputs: BusinessCaseInputs, i: int, s: float) -> BusinessCaseInputs:
     return inputs.model_copy(update={"lines": lines})
 
 
-def _result_at(ic_case, inputs, outputs, i, pack, layers, s):
-    bc = build_business_case(ic_case, _scaled(inputs, i, s), outputs)
+def _result_at(ic_case, inputs, bound, i, pack, layers, s):
+    bc = build_business_case(ic_case, _scaled(inputs, i, s), *bound)
     return run_case(bc.case, pack, layers=layers, _solve=False)
 
 
@@ -736,6 +986,7 @@ def break_even(
     pack=None,
     *,
     layers=None,
+    lost_production: LostProductionMap | None = None,
 ) -> dict:
     """The price of revenue line `line` at which the project's post-tax NPV is 0 (G8).
 
@@ -744,7 +995,9 @@ def break_even(
     `break_even_not_bracketed`, never an extrapolation (BC8). Any trial not established
     is `break_even_not_established`. A line priced only by grid cells has no single price:
     `price` is None and `price_scale` is the factor on every cell. A share line that
-    reads this line moves with it; every other line is the same in every trial (C7)."""
+    reads this line moves with it; every other line is the same in every trial (C7).
+    `lost_production` is `build_business_case`'s (G3)."""
+    bound = (outputs, lost_production)
     out = {
         "status": None,
         "price_scale": None,
@@ -767,7 +1020,7 @@ def break_even(
         scales.append(scales[-1] * 1.5)
     prev_s, prev_f = None, None
     for s in scales:
-        f = _npv_at(ic_case, inputs, outputs, i, pack, layers, s)
+        f = _npv_at(ic_case, inputs, bound, i, pack, layers, s)
         if f is None:
             out["status"] = "break_even_not_established"
             return out
@@ -779,9 +1032,7 @@ def break_even(
                 # `disp=False`: non-convergence is the result's flag, never an exception,
                 # so any RuntimeError the engine raises still propagates (GK B #1404 B).
                 root, info = brentq(
-                    lambda x: _npv_or_raise(
-                        ic_case, inputs, outputs, i, pack, layers, x
-                    ),
+                    lambda x: _npv_or_raise(ic_case, inputs, bound, i, pack, layers, x),
                     prev_s,
                     s,
                     xtol=BREAK_EVEN_XTOL,
@@ -803,11 +1054,11 @@ def break_even(
         return out
     # The re-run (C7): |NPV| at the solved scale within the tolerance of the line's revenue.
     try:
-        r = _result_at(ic_case, inputs, outputs, i, pack, layers, root)
+        r = _result_at(ic_case, inputs, bound, i, pack, layers, root)
     except FinanceRefused:
         out["status"] = "break_even_not_established"
         return out
-    v = _npv_at(ic_case, inputs, outputs, i, pack, layers, root)
+    v = _npv_at(ic_case, inputs, bound, i, pack, layers, root)
     series = r.op.lines.get(line)
     if v is None or series is None:
         out["status"] = "break_even_not_established"
