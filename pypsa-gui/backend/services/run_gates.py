@@ -836,7 +836,7 @@ def _binary_check(env):
         if flagged is False:
             return "ok"
         if flagged is not True:
-            return NoEvidence("flagged_unreadable", f"the binary check's flag is {flagged!r}, not a bool")
+            return NoEvidence("flagged_unreadable", f"the binary check's flag is {flagged}, not true or false")
         rows = [{k: r.get(k) for k in ("period", "window", "delta", "pct", "extra_shortfall")}
                 for r in payload.get("periods") or [] if r.get("flagged") is not False]
         return Detailed("flagged", rows, str(payload.get("message") or BINARY_FLAGGED_BASIS))
@@ -1358,9 +1358,9 @@ def check_rule(rule: dict) -> dict:
     known = {"id", "fact", "op", "value", "severity", "basis", "explain", "tunable", "unit", "engine", "unevaluated"}
     if not isinstance(rule, dict) or not {"id", "fact", "op", "severity", "basis"} <= set(rule) <= known:
         raise RuleError(f"A rule has id, fact, op, severity, basis and optional value, explain, tunable, unit, "
-                        f"engine, unevaluated: {rule!r}")
+                        f"engine, unevaluated: {rule!r}")  # repr-ok: a profile author's error, not a user's
     if rule.get("unevaluated", UNEVALUATED_TO_USER) != UNEVALUATED_TO_USER:
-        raise RuleError(f"Rule {rule['id']}: unevaluated is {UNEVALUATED_TO_USER!r} or absent.")
+        raise RuleError(f"Rule {rule['id']}: unevaluated is {UNEVALUATED_TO_USER} or absent.")
     fact = rule["fact"]
     if not isinstance(fact, str) or "*" in fact:
         raise RuleError(f"Rule {rule['id']}: name one fact, never a wildcard ({fact!r}).")

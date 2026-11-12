@@ -3,7 +3,7 @@
 
 # 13 — Harness profile: eh_ammonia_staged
 
-Status: ready-for-agent (the ammonia-specific result gate is pending g2p 10–13, per GK A; build the profile with those rules marked pending)
+Status: done (GK A (24) GO: g2p 06 and 10–13 had landed, so the result rules are live; see Comments)
 Type: task
 Blocked by: 07
 Gated: yes (GK A; g2p engine facts)
