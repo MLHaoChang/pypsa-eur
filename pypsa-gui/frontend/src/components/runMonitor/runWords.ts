@@ -37,6 +37,7 @@ export const FACT_WORDS: Record<string, string> = {
   'ic.baseline_keeps': 'The comparison keeps the baseline',
   'adequacy.loop.converged': 'The plan meets the reliability goal',
   'eh.readiness.ready': 'The Energy Hub study can run every stage it asks for',
+  'eh.site.context': 'The map context of the site was fetched in full',
   'eh.energization.min_mw': 'Each growth stage has a grid connection size',
   'eh.study.status': 'The Energy Hub study finished every stage',
   'eh.review.blockers': 'The Energy Hub review found no serious problem',

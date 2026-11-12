@@ -45,6 +45,7 @@ from tests.test_assistant_tasks_study_brief import helpers_state, session  # noq
 from tests.test_campus_electrical_service import hub, user_and_db  # noqa: F401 - fixtures
 from tests.test_harness_envelope import granted, profile  # noqa: F401
 from tests.test_harness_run_loops import rated  # noqa: F401
+from tests.test_harness_run_report_handoff import fake_report  # noqa: F401
 from tests.test_harness_runner import detached, fake_report_provider  # noqa: F401
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -703,16 +704,30 @@ def ties(request):
 
 
 @pytest.fixture
-def baseline(client, session_ctx, install_network, tmp_path, ties):
-    """The shipped eh_microgrid network as the run's project, its battery
-    candidate capped at 5 MW (the seeded undersized battery), with the
-    template's card and island settings (as `test_run_profile_h2_hub`)."""
+def template(request):
+    """The shipped template the run's project is built from."""
+    return getattr(request, "param", "eh_microgrid")
+
+
+@pytest.fixture
+def seeded(request):
+    """The battery candidate's seeded cap (MW), or None for the template as shipped."""
+    return getattr(request, "param", 5.0)
+
+
+@pytest.fixture
+def baseline(client, session_ctx, install_network, tmp_path, ties, template, seeded):
+    """The shipped template's network as the run's project (eh_microgrid
+    unless parametrized), its battery candidate capped at `seeded` MW (5 MW
+    by default: the seeded undersized battery; None ships it as built), with
+    the template's card and island settings (as `test_run_profile_h2_hub`)."""
     from services import chat_tools, project_registry
     from services.pypsa_service import PyPSAService
     from services.solver_service import SolverConfig
 
-    n = T.build_eh_microgrid()
-    n.storage_units.at["bess_new", "p_nom_max"] = 5.0
+    n = T.BUILDERS[template]()
+    if seeded is not None:
+        n.storage_units.at["bess_new", "p_nom_max"] = seeded
     for i in range(ties):
         _second_tie(n, f"tie_{i + 2}")
     n.export_to_netcdf(tmp_path / "template.nc")
@@ -722,7 +737,7 @@ def baseline(client, session_ctx, install_network, tmp_path, ties):
     assert response.status_code == 200, response.text
     ctx = session_ctx(client)
     ctx.solver_state["solver_config"] = SolverConfig(
-        **{**T.solver_config("eh_microgrid"), "target_lole_h": 2.0}
+        **{**T.solver_config(template), "target_lole_h": 2.0}
     )
     binding = PyPSAService.bind_request_context(ctx)
     cell = PyPSAService.bind_turn_cell()
@@ -737,19 +752,19 @@ def baseline(client, session_ctx, install_network, tmp_path, ties):
 
 
 @pytest.fixture
-def site(baseline):
+def site(baseline, template):
     _, project_id, root = baseline
     (root / flow_service.TEMPLATE_FILE).write_text(
-        json.dumps(T.TEMPLATE_META["eh_microgrid"])
+        json.dumps(T.TEMPLATE_META[template])
     )
-    (root / IC.SIDECAR_NAME).write_text(json.dumps(T.ISLAND_CONFIG["eh_microgrid"]))
+    (root / IC.SIDECAR_NAME).write_text(json.dumps(T.ISLAND_CONFIG[template]))
     return project_id, root
 
 
 def _l2_only(monkeypatch):
     """eh_microgrid@1 without its EH study, the facts that read it and the
     LOLE loop (the EH study and the loop run in `tests/test_harness_run_eh*`):
-    the solve, the island check and L2 only. The stage file is PR B's."""
+    the solve, the island check and L2 only, on the shipped stage file."""
     profile = copy.deepcopy(run_profiles.PROFILES["eh_microgrid@1"])
     solve = profile["stages"]["solve"]
     solve["actions"] = [a for a in solve["actions"] if a["tool"] != "run_eh_study"]
@@ -764,9 +779,6 @@ def _l2_only(monkeypatch):
         run_profiles.PROFILES,
         "eh_microgrid@1",
         {k: v for k, v in profile.items() if k != "eh_study"},
-    )
-    monkeypatch.setattr(
-        run_loops, "instruction", lambda *a: "Resize the battery within its bounds."
     )
 
 
@@ -1715,3 +1727,187 @@ def test_a_capped_loop_that_ran_against_another_goal_reads_the_goal_reason(
     [result] = run_gates.evaluate([lole], run_gates.Env(task, None, None, None))
     assert result["verdict"] == "not_evaluated"
     assert result["facts"][0]["value"] == "goal_mismatch"
+
+
+# ── the hand-off run on each template (live) ─────────────────────────────────
+
+
+@pytest.fixture
+def goal_granted(session, site, detached):
+    """`tests.test_harness_envelope.granted`, the card's reliability goal echoed (P5a)."""
+    from services import chat_tools
+    from tests.test_harness_run_skeleton import start
+    from tests.test_harness_runner import task_path
+
+    def go_(ref):
+        task = start(run={"profile": ref, "mode": "stepwise"})
+        run_envelope.decide(
+            session, task["task_id"], "unattended", goal=task["envelope"]["goal"]
+        )
+        chat_tools.set_chat_session(None)
+        chat_tools.set_acting_user(None)
+        return task, task_path(site[1], task)
+
+    return go_
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("seeded", [None], indirect=True)
+@pytest.mark.parametrize("template", list(REFS), indirect=True)
+def test_the_hand_off_run_on_each_template(
+    goal_granted, rated, fake_report, template, seeded
+):
+    """The shipped profile on its shipped template (no seeded battery), the
+    EH study with its off-grid stress, the island check and the LOLE coupling
+    loop all real, to the run's terminal state. Both templates end the same:
+    - handoff/completed, every stage passed but explore (skipped); the EH
+      study is carded (the envelope lists no run_eh_study: one `unlisted_tool`
+      refusal, then the click), so the only click is solve.2;
+    - the EH study charges 2 of its 2 + K = 3 reserved solves: ens_solve 1,
+      dtc_stress 1 (K = 1, the subsea tie), frontier skipped;
+    - the island check survives on its one solve, no L2 round, an empty ledger;
+    - the coupling loop meets the goal on its first solve: 2 h/yr on the
+      network's horizon (1 year, h/yr; the staged 18 years, 36 h per horizon),
+      and its closing re-solve restores the base: 2 solves of 4 reserved;
+    - mg.island.frequency (not_run, 12c runs no campus study),
+      mg.fuel.autonomy (not_modelled) and both mg.ic.* rules (not_run, no
+      investment case) are warns that read not_evaluated with their own value
+      and words, never pass;
+    - G2: solves used 6 = the queued solve 1 + the EH study 2 + the island
+      check 1 + the loop's (solves_used 1 + probe 0 + closing 1), within the
+      pass's mg_pass_solves(1) = 5 reserved and mg_budget(1) = 19, the budget.
+    G8 (A2, #1409): the four warn rules not evaluated are their own state on
+    the hand-off (`handoff.checks`) and "Stated targets" reads partly with
+    their count, never covered."""
+    from harness import run_eh
+    from tests.test_harness_envelope import envelope_of
+    from tests.test_harness_run_loops import go
+    from tests.test_harness_run_report_handoff import runner as run_runner
+    from tests.test_harness_runner import Clicks
+
+    k = run_profiles.MG_CONTINGENCIES
+    task, path = goal_granted(REFS[template])
+    clicks = Clicks(refs={"solve.2"})
+    record = go(run_runner(clicks), path, task)
+    run = record["run"]
+    assert (run["stage"], run["status"]) == ("handoff", "completed"), run.get("reason")
+    assert {name: st["status"] for name, st in run["stages"].items()} == {
+        **{name: "passed" for name in run_profiles.STAGES},
+        "explore": "skipped",
+    }
+    assert clicks.used == ["solve.2"]
+    assert [(s["tool"], s["status"]) for s in record["steps"] if s.get("error")] == []
+    assert "loop" not in run and not run.get("ledger")
+
+    # The EH study, its off-grid stress real.
+    study = _live().solver_state["eh_study"]
+    stages = {s["stage"]: s for s in study["report"]["pipeline"]["stages"]}
+    assert (stages["dtc_stress"]["status"], stages["dtc_stress"]["solves_charged"]) == (
+        "run",
+        run_profiles.MG_CONTINGENCY_SOLVES * k,
+    )
+    assert (stages["ens_solve"]["status"], stages["ens_solve"]["solves_charged"]) == (
+        "run",
+        1,
+    )
+    assert stages["frontier"]["status"] == "skipped"
+    assert run_eh.charged(study) == 2
+
+    # The result gate, rule by rule.
+    verdicts = {r["rule"]: r for r in run["stages"]["result_gate"]["gate"]["rules"]}
+    assert run["stages"]["result_gate"]["gate"]["passed"] is True
+    assert {
+        rule: (r["verdict"], r["severity"], r["facts"][0]["value"])
+        for rule, r in verdicts.items()
+        if rule != "eh.adequacy.lole"
+    } == {
+        "res.solve.status": ("pass", "block", "optimal"),
+        "res.fresh": ("pass", "block", True),
+        "mg.island.survival": ("pass", "block", "survives"),
+        "mg.tie.open": ("pass", "block", "open"),
+        "mg.critical.tagged": ("pass", "block", "tagged"),
+        "mg.island.critical_served": ("pass", "block", 0.0),
+        "mg.island.frequency": ("not_evaluated", "warn", "not_run"),
+        "mg.fuel.autonomy": ("not_evaluated", "warn", "not_modelled"),
+        "mg.ic.counterfactual": ("not_evaluated", "warn", "not_run"),
+        "mg.ic.baseline_keeps": ("not_evaluated", "warn", "not_run"),
+    }
+    assert {
+        rule: r["reason"]
+        for rule, r in verdicts.items()
+        if r["verdict"] == "not_evaluated"
+    } == {
+        "mg.island.frequency": "the run's own campus study has not finished",
+        "mg.fuel.autonomy": "the gensets draw no modelled fuel, so fuel autonomy is not checked",
+        "mg.ic.counterfactual": "No investment case has been run",
+        "mg.ic.baseline_keeps": "No investment case has been run",
+    }
+    lole = verdicts["eh.adequacy.lole"]
+    assert (lole["verdict"], lole["severity"], lole["facts"][0]["value"]) == (
+        "pass",
+        "block",
+        True,
+    )
+    loop = lole["facts"][0]["loop"]
+    years = float(horizon_years(_live().network))
+    assert years == pytest.approx(1.0 if template == "eh_microgrid" else 18.0)
+    assert (loop["status"], loop["error"], loop["solves_used"]) == ("met", None, 1)
+    assert loop["target_lole_h"] == pytest.approx(2.0 * years)
+    assert loop["basis"] == (
+        "hours_per_year" if template == "eh_microgrid" else "hours_per_horizon"
+    )
+    assert (loop["restore"], loop["base_restored"]) == ("base", True)
+
+    # The hand-off: its own gate; its targets row reads only the result gate's
+    # pass, so its status is left to G8 (A2), which adds the not-evaluated count.
+    assert [
+        (r["rule"], r["verdict"]) for r in run["stages"]["handoff"]["gate"]["rules"]
+    ] == [("ho.kpis_read", "pass")]
+    [targets] = [p for p in run["handoff"]["coverage"] if p["part"] == "Stated targets"]
+    assert (targets["status"], targets["basis"]) == (
+        "partly",
+        "the result gate passed; 4 checks not evaluated (see the gates table)",
+    )
+    unevaluated = {
+        "mg.island.frequency",
+        "mg.fuel.autonomy",
+        "mg.ic.counterfactual",
+        "mg.ic.baseline_keeps",
+    }
+    checks = run["handoff"]["checks"]
+    assert {c["rule"] for c in checks["not_evaluated"]} == unevaluated
+    assert {c["severity"] for c in checks["not_evaluated"]} == {"warn"}
+    rules = run["stages"]["result_gate"]["gate"]["rules"]
+    assert checks["counts"] == {
+        "pass": len(rules) - len(unevaluated),
+        "fail": 0,
+        "not_evaluated": len(unevaluated),
+    }
+
+    # G2: the envelope audit against mg_pass_solves / mg_budget.
+    envelope = envelope_of(path)
+    assert [
+        (a["tool"], a["reason"]) for a in envelope["audit"] if a["event"] == "refused"
+    ] == [("run_eh_study", "unlisted_tool")]
+    rows = {
+        a["event"]: (a["reserved"], a["solves"])
+        for a in envelope["audit"]
+        if a["event"] in ("eh_study", "mg_island", "engine")
+    }
+    closing = 1
+    looped = loop["solves_used"] + int(loop.get("probe_solves") or 0) + closing
+    assert rows == {
+        "eh_study": (2 + run_profiles.MG_CONTINGENCY_SOLVES * k, run_eh.charged(study)),
+        "mg_island": (run_actions.SOLVES, 1),
+        "engine": (run_profiles.MG_LOOP_SOLVES + 1, looped),
+    }
+    queued = [
+        a
+        for a in envelope["audit"]
+        if a["event"] == "used" and a.get("tool") == "solve_queue_enqueue"
+    ]
+    assert len(queued) == 1
+    passed = 1 + rows["eh_study"][1] + rows["mg_island"][1]
+    assert passed <= run_profiles.mg_pass_solves(k) == 5
+    assert run_envelope.solves_used(envelope) == passed + looped == 6
+    assert envelope["budget"]["solves"] == run_profiles.mg_budget(k) == 19

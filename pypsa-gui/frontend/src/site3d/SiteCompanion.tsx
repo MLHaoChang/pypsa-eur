@@ -20,7 +20,8 @@ export const SECTION_WORDS: Record<string, string> = { project: 'Site coordinate
 
 /** A building as the correction panel names it. */
 export const buildingLabel = (b: SceneBuilding): string =>
-  b.source.namespace === 'osm' ? `OSM building ${b.source.source_id}` : 'Proposed building'
+  b.source.namespace === 'osm' ? `OSM building ${b.source.source_id}`
+    : b.source.namespace === 'layout' ? `Layout building ${b.source.source_id}` : 'Proposed building'
 
 const sentence = (s: string) => s.replace(/[.\s]+$/, '') + '.'
 

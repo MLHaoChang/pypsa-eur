@@ -5249,6 +5249,38 @@ TOOLS.extend([
         "run_id": {"type": "string", "maxLength": 64}},
        []),
 ])
+TOOLS.extend([
+    # homer-parity 03a: HOMER's categorized results, the best system per supply
+    # architecture ("supply architecture", not the DC power architecture).
+    _t("compare_supply_architectures",
+       "Compare a decision study's supply architectures in the background (HOMER's categorized results): one solve "
+       "per combination of the base project's PV, wind, battery, genset and grid supply that can serve the load, the "
+       "other assets OMITTED (removed, never sized to zero), each sized by the optimiser, so each row is that "
+       "architecture's best system. action='start' (default) starts it, all architectures or the ids in "
+       "`architectures` (e.g. 'pv+battery', 'genset', 'grid'); action='abort' stops it before its next solve. "
+       "It solves the base project's SAVED network, one throw-away fork each, charged to the campaign "
+       "(budget_solves caps a new one). `project` is the study's base project. Returns {status, solves_estimated, "
+       "architectures} at once; poll get_supply_architectures. Refusals: study_running, solver_in_flight, "
+       "baseline_not_saved, no_architectures, too_many_architectures (name them), unknown_architecture, "
+       "campaign_budget_exhausted, supply_architectures_never_run (abort). Safety: execution_long_running.",
+       {"project": {"type": "string"},
+        "study_id": {"type": "string"},
+        "action": {"type": "string", "enum": ["start", "abort"]},
+        "architectures": {"type": "array", "items": {"type": "string", "maxLength": 64},
+                          "minItems": 1, "maxItems": 16},
+        "budget_solves": {"type": "integer", "minimum": 1, "maximum": 120}},
+       ["project", "study_id"]),
+    _t("get_supply_architectures",
+       "Read a decision study's supply-architecture comparison. While it runs: {running: {status, current, "
+       "solves_charged}}. Afterwards: {status, stale (the base project changed since: compare again), "
+       "best_architecture_id, rows: [{architecture_id, label, status: ok|infeasible|failed|not_reached, "
+       "total_cost_eur_per_year, capex_eur, renewable_fraction (0-1, served energy; genset and grid import count "
+       "as non-renewable), sizes, unavailable}]}, cheapest first. An infeasible architecture is listed, not "
+       "dropped. A null figure was not computed: NEVER report it as 0. 404 supply_architectures_never_run. "
+       "Safety: read.",
+       {"project": {"type": "string"}, "study_id": {"type": "string"}},
+       ["project", "study_id"]),
+])
 
 TOOL_COUNT: int = len(TOOLS)
 
@@ -5796,6 +5828,12 @@ TOOL_ROUTES: dict[str, list] = {
     "abort_decision_study": [("POST", "/api/projects/{name}/studies/{study_id}/run/abort"),
                              ("POST", "/api/projects/{name}/studies/{study_id}/findings/tornado/abort")],
     "delete_decision_study": [("DELETE", "/api/projects/{name}/studies/{study_id}")],
+    # supply architectures (2) — homer-parity 03a, in process through `_route`.
+    "compare_supply_architectures": [
+        ("POST", "/api/projects/{name}/studies/{study_id}/supply-architectures"),
+        ("POST", "/api/projects/{name}/studies/{study_id}/supply-architectures/abort")],
+    "get_supply_architectures": [
+        ("GET", "/api/projects/{name}/studies/{study_id}/supply-architectures")],
     # project settings and scope (5) — LV08 B1
     "get_site_template_form": [("GET", "/api/projects/from_template/eh_site/form")],
     "get_project_flow_scope": [("GET", "/api/projects/{name}/flow/scope")],

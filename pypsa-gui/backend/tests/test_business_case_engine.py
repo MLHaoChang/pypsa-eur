@@ -1280,17 +1280,34 @@ def test_item7_a_zero_export_line_that_is_no_difference_line_prices_nothing():
 
 
 def test_item7_a_served_product_line_beside_lost_production_builds():
-    """G3's drop verdict is slice 06's, never a refusal here."""
-    ic = _ic(
-        lines=(
-            TemplateLine("lp", "lost_production", -50.0, "fuel"),
-            TemplateLine("fom", "fom", -20.0, "opex"),
-        )
+    """G3 (slice 06): the line builds and drops the bus's lost_production; never a
+    double_count refusal. With no lost-production map to place the slack, it fails
+    closed (`linked_output_missing`)."""
+    from services.business_case.linked_outputs import LostProductionMap
+
+    lp = TemplateLine(
+        "asset:opex:Generator:__lost_nh3",
+        "lost_production",
+        -50.0,
+        "fuel",
+        source="asset",
+        source_id="opex:Generator:__lost_nh3",
     )
+    ic = _ic(lines=(lp, TemplateLine("fom", "fom", -20.0, "opex")))
     ln = _line(name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1")
     s = Series("served_product.nh3", "t", {None: 100.0}, {})
-    bc = build_business_case(ic, _inputs(ln), {"nh3": s})
-    assert any(ln.key == "nh3" for t in bc.case.templates for ln in t.lines)
+    with pytest.raises(LinkedOutputMissing):
+        build_business_case(ic, _inputs(ln), {"nh3": s})
+    lpm = LostProductionMap(
+        slack_bus={"__lost_nh3": "nh3"},
+        load_bus={},
+        share={"__lost_nh3": {}},
+        unread={},
+    )
+    bc = build_business_case(ic, _inputs(ln), {"nh3": s}, lpm)
+    # Every operating year (the construction year carries no line).
+    keys = {ln.key for t in bc.case.templates if t.first_year >= 2031 for ln in t.lines}
+    assert "nh3" in keys and lp.key not in keys
 
 
 def test_item8_a_revenue_line_named_like_an_ic_asset_builds():

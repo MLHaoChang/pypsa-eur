@@ -789,7 +789,13 @@ export default function Economics() {
         <ChartFrame
           title="Top profitable & loss-making assets"
           hint="Bar height is net profit. Green is above 0, red is below."
-          right={<ChartActions chartRef={profitChartRef} onExportCSV={onExportCSV} filename={`asset_economics_profit${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} />}
+          right={<ChartActions chartRef={profitChartRef} onExportCSV={onExportCSV} filename={`asset_economics_profit${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} 
+            report={{
+              view: 'economics', unit: 'EUR',
+              figure: `profit${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`.slice(0, 64),
+              period: filter.selectedPeriod != null ? String(filter.selectedPeriod) : null,
+              columns: ['asset','net_profit_eur','carrier','group'], rows: profitChartData.map(r => [r.name, r.value, r.carrier, r.group]),
+            }} />}
         >
           <div ref={profitChartRef}>
             <ResponsiveContainer width="100%" height={CHART_HEIGHT.lg}>
@@ -816,7 +822,13 @@ export default function Economics() {
         <ChartFrame
           title="Per-asset LCOE / LCOS"
           hint="Ranked low → high. Storage shows LCOS (includes charging electricity cost). Electrolysers are Link components and their LCOH is in the Hydrogen panel below, so an H₂ storage bar here is a different asset, not the electrolyser."
-          right={<ChartActions chartRef={lcoeChartRef} onExportCSV={onExportCSV} filename={`asset_lcoe_lcos${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} />}
+          right={<ChartActions chartRef={lcoeChartRef} onExportCSV={onExportCSV} filename={`asset_lcoe_lcos${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} 
+            report={{
+              view: 'economics', unit: 'EUR/MWh',
+              figure: `lcoe${filter.selectedPeriod != null ? `_${filter.selectedPeriod}` : ''}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`.slice(0, 64),
+              period: filter.selectedPeriod != null ? String(filter.selectedPeriod) : null,
+              columns: ['asset','eur_per_mwh','measure','carrier','group'], rows: lcoeChartData.map(r => [r.name, r.value, r.kind, r.carrier, r.group]),
+            }} />}
         >
           <div ref={lcoeChartRef}>
             <ResponsiveContainer width="100%" height={Math.max(CHART_HEIGHT.lg, lcoeChartData.length * 22)}>

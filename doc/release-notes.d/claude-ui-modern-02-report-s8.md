@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): "Add to report" now also on the energy-flow and money-flow diagrams, the tornado, the aggregated overview charts, the bus-voltage chart, the hour-by-day and storage heatmaps and the weekly / monthly price views; a full report's reason now sits under the chart header instead of squeezing its title.

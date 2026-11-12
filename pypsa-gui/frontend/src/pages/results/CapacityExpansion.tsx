@@ -1050,7 +1050,12 @@ export default function CapacityExpansion() {
                   costWaterfall.map(d => [d.name, d.abs]))
                 toast.success('Exported')
               }}
-              filename="system_cost_waterfall" />
+              filename="system_cost_waterfall"
+              report={{
+                view: 'capacity-expansion', figure: 'cost-buildup', unit: 'EUR/year',
+                columns: ['component', 'EUR_per_year'],
+                rows: costWaterfall.map(d => [d.name, d.abs]),
+              }} />
           }
           bodyClassName="p-3"
         >
@@ -1110,7 +1115,12 @@ export default function CapacityExpansion() {
                 capexByClass.map(d => [d.name, d.capex]))
               toast.success('Exported')
             }}
-            filename={`expansion_capex_${costMode}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} />
+            filename={`expansion_capex_${costMode}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`}
+            report={{
+              view: 'capacity-expansion', figure: `capex-by-class_${costMode}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`.slice(0, 64),
+              unit: 'EUR', columns: ['component', 'capex_EUR'],
+              rows: capexByClass.map(d => [d.name, d.capex]),
+            }} />
         )}
         bodyClassName="p-3"
       >
@@ -1166,7 +1176,12 @@ export default function CapacityExpansion() {
                     perPeriod.map(p => [p.period, p.capacityAdded, p.capex]))
                   toast.success('Exported')
                 }}
-                filename={`capacity_expansion_by_period${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} />
+                filename={`capacity_expansion_by_period${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`}
+                report={{
+                  view: 'capacity-expansion', figure: `added-per-build-year_${costMode}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`.slice(0, 64),
+                  columns: ['period', 'capacity_added', 'capex_EUR'],
+                  rows: perPeriod.map(p => [p.period, p.capacityAdded, p.capex]),
+                }} />
             }
             bodyClassName="p-3"
           >
@@ -1217,7 +1232,12 @@ export default function CapacityExpansion() {
                     ]))
                   toast.success('Exported')
                 }}
-                filename={`investment_by_class_per_period${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`} />
+                filename={`investment_by_class_per_period${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`}
+                report={{
+                  view: 'capacity-expansion', figure: `investment-by-class_${costMode}${carrierFilter.isFiltered ? `_${carrierFilter.selectedCarrier}` : ''}`.slice(0, 64),
+                  unit: 'EUR', columns: ['period', ...perPeriodClasses, 'total_EUR'],
+                  rows: perPeriod.map(p => [p.period, ...perPeriodClasses.map(c => p[c] ?? 0), p.capex]),
+                }} />
             }
             bodyClassName="p-3"
           >

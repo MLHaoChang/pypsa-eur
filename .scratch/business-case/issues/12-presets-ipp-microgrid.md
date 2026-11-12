@@ -30,3 +30,12 @@ no VoLL appears (B4).
 ### 2026-11-11: triage
 
 Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.
+
+### 2026-11-12: carried from BC 06, GK B ruling C3 (served_load against the bill streams)
+
+GK B (49) placed C3 with the presets (06 plan answer Q1 (a); its message named 07, the
+preset slice, and this is the slice that owns the microgrid preset). Condition: the
+microgrid preset's typed "Availability / EaaS fee" row's help says the locked rows
+"from the energy model" and the help are what stop duplication. A linked
+`served_load.<load>` against a valued `eaas_fee` is refused `double_count:eaas_fee`
+since 06 (`linked_outputs.ledger_clash`).

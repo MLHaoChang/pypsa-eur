@@ -74,6 +74,7 @@ _KIND_TEXT = {
     "ambiguous_number": "the number reads two ways",
     "conflict": "two sources give different values",
     "site_params": "the template refuses the value",
+    "site_invalid": "the site is named by a finite latitude and longitude, both in range",
     "turn_not_citable": "only text you typed in this chat can be cited",
     "not_in_enum": "it is not one of the choices",
     "source_not_accepted": "this kind of source cannot give it",
@@ -671,6 +672,8 @@ def params(rows: list) -> dict:
             continue  # a planned write runs on the created network, never a creation param
         if top(r["param"]) == GOAL:
             continue  # the user's goal goes to the solver config (`goal`), never the template
+        if top(r["param"]) == SITE:
+            continue  # issue 33: the site is the inputs stage's fetch (`site`), never the template
         if r["status"] in USABLE and r["param"] not in seen:
             seen.add(r["param"])
             _put(out, r["param"], r["value"])
@@ -699,6 +702,95 @@ def goal(rows: list) -> float | None:
             ):
                 return float(v)
     return None
+
+
+SITE = "site"  # `run_profiles.SITE_LAT_PARAM`'s top: the point the inputs stage fetches the map context of
+_HEMISPHERE = {"lat": "N", "lon": "E"}  # the one letter a positive value may carry
+
+
+def _site_axes():
+    from services import run_profiles  # one source for the bounds: the profile's fields
+
+    return (
+        ("lat", "Site latitude", run_profiles.SITE_LAT_MAX),
+        ("lon", "Site longitude", run_profiles.SITE_LON_MAX),
+    )
+
+
+def site_point_ok(point) -> bool:
+    """A frozen site point: exactly lat and lon, finite floats within bounds."""
+    return (
+        isinstance(point, dict)
+        and set(point) == {"lat", "lon"}
+        and all(
+            isinstance(point[axis], float)
+            and math.isfinite(point[axis])
+            and -limit <= point[axis] <= limit
+            for axis, _label, limit in _site_axes()
+        )
+    )
+
+
+def _hemisphere(row) -> str | None:
+    """The compass letter the cited quote writes right after the number, if any."""
+    src = row.get("source") or {}
+    raw, quote = src.get("raw"), src.get("quote")
+    if not isinstance(raw, str) or not isinstance(quote, str):
+        return None
+    m = re.search(re.escape(raw) + r"\s*(?:°|deg)?\s*([NSEWnsew])\b", quote)
+    return m.group(1).upper() if m else None
+
+
+def site(rows: list) -> tuple[dict | None, dict | None]:
+    """Issue 33 (GK B (49) S1): `(site, None)` with the point
+    `{"lat", "lon"}` (degrees) the usable rows give, `(None, None)` when they
+    name no site, or `(None, gap)` when they name half a site or a value
+    that is not a finite number within its bounds. Never clamped, never a
+    default."""
+    found: dict = {}
+    for r in rows:
+        if (
+            r.get("write")
+            or r.get("status") not in USABLE
+            or top(r.get("param") or "") != SITE
+        ):
+            continue
+        axis = r["param"].split(".", 1)[1] if "." in r["param"] else ""
+        found.setdefault(axis, r)
+    if not found:
+        return None, None
+    point = {}
+    for axis, label, limit in _site_axes():
+        r = found.get(axis)
+        if r is None:
+            return None, _gap(
+                f"{SITE}.{axis}",
+                "site_invalid",
+                f"{label} is missing: a site is named by both its latitude and its longitude.",
+            )
+        v = r.get("value")
+        if (
+            not isinstance(v, (int, float))
+            or isinstance(v, bool)
+            or not math.isfinite(v)
+            or not -limit <= v <= limit
+            or r.get("unit") != "°"
+        ):
+            return None, _gap(
+                f"{SITE}.{axis}",
+                "site_invalid",
+                f"{label} is a number of degrees from {-limit:g} to {limit:g}.",
+            )
+        letter = _hemisphere(r)
+        if letter is not None and (letter != _HEMISPHERE[axis] or v < 0):
+            # "0.12° W" reads as +0.12: never guess the sign a letter means (S1).
+            return None, _gap(
+                f"{SITE}.{axis}",
+                "site_invalid",
+                f"{label}: write south latitudes and west longitudes as negative numbers, without a letter.",
+            )
+        point[axis] = float(v)
+    return point, None
 
 
 def check(rows: list, template_check) -> dict | None:
@@ -735,7 +827,7 @@ def missing(profile: dict, rows: list, gaps: list) -> list[dict]:
         items.append({"param": param, "kind": kind, **(extra or {})})
 
     for gap in gaps:
-        if gap["kind"] in ("conflict", "site_params"):
+        if gap["kind"] in ("conflict", "site_params", "site_invalid"):
             add(
                 gap["param"],
                 gap["kind"],
@@ -752,7 +844,7 @@ def missing(profile: dict, rows: list, gaps: list) -> list[dict]:
                 for g in gaps
                 if g.get("param")
                 and top(g["param"]) == param
-                and g["kind"] not in ("conflict", "site_params")
+                and g["kind"] not in ("conflict", "site_params", "site_invalid")
             ]
             add(param, "missing", {"tried": sorted(set(reasons))} if reasons else None)
     for item in items:
@@ -793,6 +885,8 @@ def request_lines(items: list) -> list[str]:
         why = _KIND_TEXT.get(item["kind"], "it could not be read")
         if item["kind"] == "site_params":
             why = f"the template refuses it: {item['message']}"
+        elif item["kind"] == "site_invalid":
+            why = item["message"].rstrip(".")
         elif item["kind"] == "conflict":
             why += " (" + "; ".join(item.get("conflicting", [])) + ")"
         elif item.get("tried"):
@@ -990,6 +1084,9 @@ def take(request, profile: dict, ctx, owner_id: str, project_id: str) -> dict:
     refused = check(rows, eh_site.site_params)
     if refused is not None:
         gaps.append(refused)
+    _, bad_site = site(rows)
+    if bad_site is not None:
+        gaps.append(bad_site)  # issue 33 (S1): asked again, never clamped
     items = missing(profile, rows, gaps)
     return {
         "project_name": request["project_name"].strip()[:120],

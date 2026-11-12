@@ -171,7 +171,11 @@ class ForkSolver:
             if job.status != "completed":
                 if job.status == "aborted" or self.stop_event.is_set():
                     return None
-                raise F.VariantFailed("variant_solve_failed", str(job.error or job.status))
+                failed = F.VariantFailed("variant_solve_failed", str(job.error or job.status))
+                # The solver's termination condition (e.g. "infeasible"), which
+                # the supply-architecture table reports (homer-parity 03a).
+                failed.condition = getattr(job, "condition", None)
+                raise failed
             solved, _hash = R.fork_network_from_disk(row)
             return solved
         finally:

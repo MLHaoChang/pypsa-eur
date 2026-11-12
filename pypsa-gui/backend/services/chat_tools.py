@@ -3731,6 +3731,56 @@ def delete_decision_study(project: str, study_id: str) -> dict:
     return {"deleted": study_id}
 
 
+def compare_supply_architectures(project: str, study_id: str, action: str = "start",
+                                 architectures: list[str] | None = None,
+                                 budget_solves: int | None = None) -> dict:
+    """
+    homer-parity 03a: start (`POST .../supply-architectures`) or stop
+    (`.../abort`) the comparison of the study base project's supply
+    architectures; poll `get_supply_architectures`.
+    """
+    from routers import studies as R
+
+    if action not in ("start", "abort"):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "supply_architectures_action_invalid",
+            "message": f"action must be 'start' or 'abort', got '{_cut(action, 40)}'"})
+    ap = _authorized_project(project)
+    if action == "abort":
+        return {"action": action,
+                **_route(R.abort_supply_architectures, study_id, project=ap)}
+    body = R.SupplyArchitecturesRequest(architectures=architectures,
+                                        budget_solves=budget_solves)
+    out = _route(R.start_supply_architectures, study_id, body, project=ap)
+    return {"action": action, **out,
+            "next_step": ("get_supply_architectures says how far it is, and reads the "
+                          "table once it has finished.")}
+
+
+def get_supply_architectures(project: str, study_id: str) -> dict:
+    """`GET .../supply-architectures`: progress while it runs, else the table
+    cut to each architecture's status, cost, capex, renewable fraction and sizes."""
+    from routers import studies as R
+
+    rec = _route(R.get_supply_architectures, study_id, project=_authorized_project(project))
+    if rec.get("status") == "running":
+        return {"running": {k: rec.get(k) for k in (
+            "status", "current", "architectures", "solves_estimated", "solves_charged")}}
+    keep = ("architecture_id", "label", "status", "total_cost_eur_per_year", "capex_eur",
+            "renewable_fraction", "unavailable", "error")
+    rows = [{**{k: r.get(k) for k in keep if k in r},
+             "sizes": {s["asset"]: {"size": s.get("size"), "unit": s.get("unit")}
+                       for s in r.get("sizes") or []}}
+            for r in rec.get("rows") or []]
+    return {"status": rec.get("status"), "stale": rec.get("stale"),
+            "best_architecture_id": rec.get("best_architecture_id"),
+            "renewable_fraction_basis": rec.get("renewable_fraction_basis"),
+            "rows": rows, "error": rec.get("error"), "reason": rec.get("reason"),
+            "note": ("A null figure was not computed (its reason is in unavailable): "
+                     "never report it as 0. An infeasible, failed or not_reached row "
+                     "has no best system.")}
+
+
 # ── Project settings and scope (5) — LV08 B1 ────────────────────────────────
 
 
@@ -9951,6 +10001,9 @@ DISPATCHERS: dict[str, Any] = {
     "update_decision_study": update_decision_study,
     "abort_decision_study": abort_decision_study,
     "delete_decision_study": delete_decision_study,
+    # supply architectures (2) — homer-parity 03a
+    "compare_supply_architectures": compare_supply_architectures,
+    "get_supply_architectures": get_supply_architectures,
     # project settings and scope (5) — LV08 B1
     "get_site_template_form": get_site_template_form,
     "get_project_flow_scope": get_project_flow_scope,

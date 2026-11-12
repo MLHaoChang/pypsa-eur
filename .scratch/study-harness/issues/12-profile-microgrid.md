@@ -3,7 +3,7 @@
 
 # 12 — Harness profile: eh_microgrid and eh_microgrid_staged
 
-Status: ready-for-agent
+Status: done (#1398, #1409, #1412; the native campus draft moved to 12d under B9)
 Type: task
 Blocked by: 07
 Gated: yes (GK A for the island rules; GK B for the harness parts)
@@ -133,3 +133,12 @@ B14 holds. If the change adds error kinds, also run `tests/test_tool_error_kind_
 - 12b (GK B): the native action `mg_island_survival`, the `mg.*` gate facts and their words.
 - 12c (GK B): the two profiles, their stage instructions, the `ic.baseline_keeps` reason words and the profile tests.
 
+
+### 12c landed (2026-11-12)
+
+- A1 #1398 (053362cd), A2 #1409 (203d95c7), B #1412 (68a44f4e).
+- GK B (49) follow-ups from its OK on #1412, non-blocking:
+  - `test_stage_instruction_files.py` checks only that each file is non-empty, not its loop or counts.
+  - The enumeration guard pins only the microgrid refs.
+  - Issue 10's ValueError note should say "once an envelope is added"; nothing asserts the L2 message carries the shipped file's text.
+- UX (19) follow-up: rule words for the gates table, which prints raw rule ids.

@@ -264,6 +264,10 @@ export default function EnergyFlowsTab({ sankeyWidth }: { sankeyWidth?: number }
         hint="source → via → destination"
         right={
           <ChartActions chartRef={graph.links.length ? chartRef : undefined} filename={exportName}
+            report={{
+              view: 'energy-flows', figure: `${exportName}_${win.from}-${win.to}`, unit: 'MWh',
+              columns: CSV_HEADER, rows: csvRows(data.rows),
+            }}
             onExportCSV={() => {
               downloadCSV(`${exportName}.csv`, CSV_HEADER, csvRows(data.rows))
               toast.success('Exported')

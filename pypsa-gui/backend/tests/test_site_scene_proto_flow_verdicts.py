@@ -117,6 +117,19 @@ def test_optional_engines_never_enable_and_never_block_native(engines):
     for name in fv.OPTIONAL_ENGINE_ACTIONS:
         assert not v[name]["available"] and v[name]["blocker"]["code"] == "worker_unavailable"
     assert v["generate_native"]["available"]
+    # SC-06-layout (GK B L8): only process_layout left the engine list; the others are named here.
+    assert set(fv.OPTIONAL_ENGINE_ACTIONS) == {"reconstruct_photos", "generate_blender"}
+    assert v["process_layout"]["available"]
+
+
+def test_process_layout_is_native_and_gated_like_generate():
+    # SC-06-layout: a layout needs a saved, editable Site with a boundary, and no engine.
+    v = _by(fv.actions(**{**BASE, "boundary": False, "site": "unfinished"}))
+    assert v["process_layout"]["blocker"]["code"] == "boundary_missing"
+    v = _by(fv.actions(**{**BASE, "can_edit": False, "boundary": True, "site": "unfinished"}))
+    assert v["process_layout"]["blocker"]["code"] == "read_only"
+    v = _by(fv.actions(**{**BASE, "boundary": True, "site": "none"}))
+    assert not v["process_layout"]["available"]
 
 
 # ── the real /flow is unchanged (V53, V56: electrical run_ready keeps its value) ──

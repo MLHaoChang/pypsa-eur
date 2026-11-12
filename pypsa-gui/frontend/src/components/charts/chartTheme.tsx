@@ -29,7 +29,7 @@
 // The axis unit caption stays `yAxisLabel` in pages/results/shared.tsx, and
 // grid / legend / tooltip stay CHART_GRID / CHART_LEGEND / CHART_TOOLTIP
 // there: those already were the shared standard (UX overhaul S4).
-import { createContext, useContext, type CSSProperties, type ReactNode } from 'react'
+import { createContext, useContext, useState, type CSSProperties, type ReactNode } from 'react'
 import { Area, Bar, Line, Pie, Scatter, Tooltip } from 'recharts'
 import { StatePill } from '../ResultState'
 import { kpiFigure, splitValueUnit } from '../../utils/format'
@@ -213,6 +213,15 @@ export function ChartSourceProvider({ value, children }: { value: ChartSource; c
   return <SourceCtx.Provider value={value}>{children}</SourceCtx.Provider>
 }
 
+// ── The frame's own words, for the actions in its header ─────────────────────
+/** The chart's title (when it is plain text) and the basis its source line adds. */
+export interface ChartFrameInfo { title: string | null; basis?: string }
+const FrameCtx = createContext<ChartFrameInfo>({ title: null })
+export const useChartFrame = () => useContext(FrameCtx)
+/** A line under the header, full width, for a note that would squeeze the title beside the actions. */
+const NoteCtx = createContext<HTMLElement | null>(null)
+export const useChartNoteSlot = () => useContext(NoteCtx)
+
 // ── The header's number ──────────────────────────────────────────────────────
 /**
  * A chart's number for its header, rounded exactly as the KPI tile rounds it
@@ -248,7 +257,11 @@ export function ChartFrame({
   testId?: string
 }) {
   const { stale } = useChartSource()
+  const info: ChartFrameInfo = { title: typeof title === 'string' ? title : null, basis }
+  const [noteEl, setNoteEl] = useState<HTMLElement | null>(null)
   return (
+    <FrameCtx.Provider value={info}>
+    <NoteCtx.Provider value={noteEl}>
     <section
       data-testid={testId}
       data-chart-frame=""
@@ -266,11 +279,14 @@ export function ChartFrame({
           {count != null && <span className="font-mono text-[11px] text-muted shrink-0">{count}</span>}
           {hint && <span className="text-[11px] text-muted [overflow-wrap:anywhere]">{hint}</span>}
         </div>
-        {right && <div className="flex items-center gap-2 shrink-0">{right}</div>}
+        {right && <div className="flex max-w-[calc(100%-9.75rem)] shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">{right}</div>}
       </header>
+      <div ref={setNoteEl} className="empty:hidden border-b border-border px-4 py-1.5 text-right text-[10.5px] text-muted" />
       <div className={`${bodyClassName ?? 'p-3'} ${stale ? 'opacity-60' : ''}`}>{children}</div>
       <ChartSourceLine basis={basis} />
     </section>
+    </NoteCtx.Provider>
+    </FrameCtx.Provider>
   )
 }
 

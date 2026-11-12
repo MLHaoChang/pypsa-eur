@@ -3,7 +3,7 @@
 
 # Energy chart kit
 
-Status: ready-for-agent
+Status: done (slices 1–7; slice 7 as 7a, 7b #1406, S8 #1421 merged 2026-11-12)
 Blocked by: 01
 Type: feature
 Model: Opus for the shared theme API, Sonnet for each chart. Reviewer: UX.
@@ -94,3 +94,7 @@ W7 State here and in the PR text how fork (store.copy_reports), snapshot, restor
 W8 Key the trajectory_evaluation exclusion and the report_job draftable exclusion on the exact path or section id, never on a prefix (#1340). Mutate each exclusion.
 
 How `reports/_charts` is treated (W7): `store.copy_reports`, `clear_reports` and `reports_copy_lock` only touch names that are report ids (16 hex) or their `.<id>.lock` files, so fork, save-as, snapshot create and restore neither copy nor clear `_charts`; they are the live session's notes, tied to its solve. Rename moves the project folder, so `_charts` goes with it; delete removes it with the folder. A chart that is already in a report travels with that report (its PNG is copied under `reports/<id>/figures/`). The chart lock is `_charts/.lock` inside the folder, closed after each hold, so it is never copied by the report copy and an rmtree can remove it. Lock order: the chart lock is taken alone and nothing else is taken inside it (no report lock, no network lock).
+
+### S8 landed (2026-11-12, #1421)
+
+"Add to report" now covers every Results chart. Left open, not ticketed: the date window is not in the figure id for Prices, LoadFlow and AggregatedOverview; the SVG download exports only the first season panel; the shots used a mocked component harness, not a solved project; DOCX caption rendering not viewed (UX).

@@ -238,3 +238,10 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A check that needs "the mainland" or "the island" defines the island from its own buses, never from a tag on one external bus (#1361 F3).
 - Review through a subagent: it reads the diff, runs the trial merge, tests and mutants, and returns file:line findings; the gatekeeper reads only the hunks those point at (GK B (42) and (43) each reached 300k in about 80 minutes).
 - One subagent per PR with a 30–40 line report costs about 10–15k of the gatekeeper's context per review. Re-review rounds are what add up, so ask the builder for one push and give the property plus the test, not the fix (GK B (44)).
+- A share or ratio over weighted snapshots needs a fixture with uneven weightings inside one period: uniform per-period weights cancel in a ratio, so a dropped-w mutant survives (#1411 B2, #1424 B1).
+- A per-hour clip mutant on a slack is killed on a multi-load bus; on a one-load bus the share is 1 whatever the clip (#1411 B1).
+- A test that names a physical feature (a "store-bearing bus") has that feature read by the code under test; a decorative component proves nothing (#1411, GK B (49)).
+- A new module-level gridspine import in `pypsa-gui/backend` is guarded with the existing pinned fallback (`process_uc._fallback_truthy`), never a new copy; run `tests/test_packaging_requirements.py` on the PR head too (#1388).
+- A variable term on the relaxing side of a ≤ row (a draw that raises the allowance) needs an upper bound; the gross-aux z ≥ p trick tightens itself only on the binding side (#1424).
+- A metric that classifies sources fails closed: any non-renewable energy it can neither count nor rule out makes the value None with a reason, never a clean number (#1423 F1′/F1″, #1424 F1/R13).
+- Test fixtures for a follower or reader use the record shape the real writer saves, never a hand-made shape (#1427 F1/F3).

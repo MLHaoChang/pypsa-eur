@@ -3,7 +3,7 @@
 
 # 10 — Harness profile: eh_datacenter and eh_datacenter_staged
 
-Status: done (10a: #1283 and its test follow-up; 10b: #1333)
+Status: done (10a: #1283 and its test follow-up; 10b: #1333; the stage instruction files: SH-12c PR B)
 Type: task
 Blocked by: 07
 Gated: yes (GK A for the engine gates and the grid-readiness actions; GK B for the harness parts)
@@ -155,3 +155,9 @@ Option A, with conditions. transformer_loading's "assumed" is 100 % of the unit'
 
 - E3 finding: the engine solves a transformer N-1 case only for a group with a parallel unit (`gridspine/static/campus_flow.py` `solve_cases`). The shipped DC campus has none, so its `campus_lf_pcc.csv` holds intact cases only. 10b reads that as not_evaluated ("no transformer group has a parallel unit to lose"), never a pass.
 - CT-5d: the investment case takes the campus study's purchases as extra owner assets (IC G3, `routers/results.py` "the campus study's equipment as extra owner assets"), and its report goes stale when the campus study changes. So on the staged profile a current `ic.returns` costs the measures.
+
+### The stage instruction files (SH-12c PR B, owner decision SH12C-G6-DC-1)
+
+- `harness/workflows/profiles/eh_datacenter{,_staged}/` never landed, although "Likely files" above lists it. Both profiles run an agent on `input_gate` and `result_gate`, so a datacenter run's first L1 or L2 round raised ValueError in `run_loops.instruction()`.
+- SH-12c PR B adds the four files. G6 (`tests/test_stage_instruction_files.py`) enumerates every agent stage from `run_profiles.PROFILES`, with no exemptions.
+- The datacenter profiles list no lever and no envelope edit, so the L2 file tells the agent to make no change when none is listed.

@@ -421,6 +421,19 @@ def _granted_eh_study(env):
     return envelope.get("eh_study") or None
 
 
+def _eh_site_context(env):
+    """Issue 33 (GK B (49)): `fetched` when the run's own fetch kept the
+    site's whole map context; otherwise no evidence, with the reason (a site
+    not named, the service unavailable, truncated or short of terrain, or no fetch yet)."""
+    from harness import run_site
+    state, reason, result = run_site.outcome(env.task)
+    if state != "fetched":
+        return NoEvidence(state, reason)
+    found = result["found"]
+    return Detailed(state, [f"{found.get(k, 0)} {k.replace('_', ' ')}" for k in
+                            ("buildings", "power_lines", "power_substations")])
+
+
 def _eh_readiness_ready(env):
     """Issue 07 B2: the EH readiness preflight for the args the study would
     run with, on the run's ctx. Ready only when the pack applies and every
@@ -1021,6 +1034,7 @@ FACTS: dict[str, Fact] = {
                                       _report_unsupported_listed),
     "handoff.kpis_read": Fact("harness.run_handoff.kpis_read", "read", None, _handoff_kpis_read),
     # Issue 07 B2 (GK B C3, GK B (31) F2-F8): the eh_site input and result facts.
+    "eh.site.context": Fact("harness.run_site.outcome", "state", None, _eh_site_context),
     "eh.readiness.ready": Fact("services.chat_tools.get_eh_readiness", "stages", None, _eh_readiness_ready),
     "eh.energization.min_mw": Fact("services.flow_service.read_template", "energization", "MW",
                                    _eh_energization_min_mw),
