@@ -10,6 +10,7 @@ period; `renewable_fraction(n)` is the KPI, shown whether the row is on or not.
 from __future__ import annotations
 
 import queue
+import signal
 import threading
 from types import SimpleNamespace
 
@@ -2101,6 +2102,52 @@ def test_a_grey_h2_store_behind_a_reversible_electrolyser_fails_closed():
     m.add("Store", "grey_tank", bus="h2", carrier="grey H2", e_nom=100.0)
     log = _with_row(m)
     assert any("WARNING" in l and "grey_tank" in l for l in log), log
+
+
+def test_a_grey_h2_generator_behind_a_time_varying_reversible_link_fails_closed():
+    """A3: a Link whose static p_min_pu is 0 but whose series dips below 0
+    at one snapshot can still run backward, so grey H2 behind it leaks."""
+    n = _reversible_electrolyser(_dispatched())
+    n.links.loc["electrolyser", "p_min_pu"] = 0.0
+    n.links_t.p_min_pu = pd.DataFrame({"electrolyser": 0.0}, index=n.snapshots)
+    n.links_t.p_min_pu.iloc[20, 0] = -1.0
+    n.add("Generator", "grey", bus="h2", carrier="gas", p_nom=10.0)
+    n.generators_t.p["grey"] = 0.0
+    n.generators_t.p.iloc[20, n.generators_t.p.columns.get_loc("grey")] = 7.0
+    assert renewable_fraction(n)["fraction"] is None
+
+
+class _Timeout(Exception):
+    pass
+
+
+def _alarm(_signum, _frame):
+    raise _Timeout("the leak walk did not terminate")
+
+
+def test_a_link_cycle_behind_a_grey_source_terminates_and_fails_closed():
+    """A Link cycle (g → h2b → g) beside the leaking path (g → mid, then
+    backward through a reversible Link into the site) must not loop the
+    walk forever; it ends and fails closed."""
+    n = _dispatched()
+    n.add("Bus", "g", carrier="gas")
+    n.add("Bus", "mid", carrier="H2")
+    n.add("Bus", "h2b", carrier="H2")
+    n.add("Link", "cell", bus0="ac", bus1="mid", p_nom=10.0, p_min_pu=-1.0)
+    n.add("Link", "g_mid", bus0="g", bus1="mid", p_nom=10.0)
+    n.add("Link", "g_h2b", bus0="g", bus1="h2b", p_nom=10.0)
+    n.add("Link", "h2b_g", bus0="h2b", bus1="g", p_nom=10.0)
+    n.add("Generator", "grey", bus="g", carrier="gas", p_nom=10.0)
+    n.generators_t.p["grey"] = 0.0
+    n.generators_t.p.iloc[20, n.generators_t.p.columns.get_loc("grey")] = 7.0
+    previous = signal.signal(signal.SIGALRM, _alarm)
+    signal.alarm(30)
+    try:
+        kpi = renewable_fraction(n)
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+    assert kpi["fraction"] is None, kpi
 
 
 def test_a_battery_fed_only_by_electricity_is_not_refused():
