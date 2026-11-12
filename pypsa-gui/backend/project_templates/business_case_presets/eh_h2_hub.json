@@ -1,0 +1,108 @@
+{
+  "id": "eh_h2_hub",
+  "version": "1",
+  "pack": "generic_defaults@2026-11-10:sha256:e228b001de2d80f1d1e01e8488b271a9de0bc12cb89bac2247a4592b6e0ce67e",
+  "templates": [
+    "eh_h2_hub"
+  ],
+  "variants": {
+    "h2_offtake": {
+      "label": "H2 hub (offtake and production premium)",
+      "lines": [
+        {
+          "name": "H2 offtake",
+          "kind": "revenue",
+          "category": "product_sale",
+          "unit": "kg",
+          "quantity_source": "linked:served_h2.h2_offtake@1",
+          "escalation": "contract",
+          "note": "Served H2 offtake in kg (LHV); linked_share is the sold share. Price per kg is yours: no public offtake benchmark, the premium is paid on top."
+        },
+        {
+          "name": "Production premium",
+          "kind": "revenue",
+          "category": "incentive",
+          "unit": "kg",
+          "escalation": "contract",
+          "note": "Fixed premium per kg of verified output, typed: the verified kg a year you expect, never above the served H2 the results show (the award is a cap, not a volume). Typed, not linked, because a second line on the served H2 would add its sold share to the offtake's and could drop the whole lost-production penalty (G3 counts a shortfall once).",
+          "hint": {
+            "low": 0.37,
+            "high": 0.48,
+            "unit": "EUR/kg",
+            "source": "European Hydrogen Bank pilot auction, premiums requested by the 7 winners",
+            "year": 2024,
+            "note": "Fixed premium per kg verified output, up to 10 years: set start_year and end_year for the tenor. Ceiling 4.50 EUR/kg."
+          }
+        },
+        {
+          "name": "Balance of plant",
+          "kind": "capex",
+          "category": "equipment",
+          "unit": "lump",
+          "escalation": "capex",
+          "note": "Plant capex not in the energy model's asset capex (balance of plant, installation, buildings): the base of non-energy O&M and insurance. Capex is priced once: do not re-enter the electrolyser. No sourced default: enter the price and life."
+        },
+        {
+          "name": "Stack replacement",
+          "kind": "capex",
+          "category": "equipment",
+          "unit": "lump",
+          "escalation": "capex",
+          "note": "Quantity: one lump per replacement event; set refresh_years to the stack life in years (operating hours \u00f7 hours per year). Reference: 15 % of direct electrolyser capex per replacement at a 40,000 h interval (DOE/NREL 2022, PEM; alkaline 80,000 h, IRENA 2021). No default: the price depends on your electrolyser capex."
+        },
+        {
+          "name": "Non-energy O&M",
+          "kind": "opex",
+          "category": "maintenance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of the capex lines above per year. The electrolyser's own fixed O&M is already in the energy model's ledger (locked rows); this covers the plant capex you enter here. Default is the pack's electrolyser fixed O&M share (DEA, assumed).",
+          "default_keys": {
+            "quantity": "electrolysis.investment.fom_share"
+          },
+          "default_units": {
+            "quantity": "share/year"
+          }
+        },
+        {
+          "name": "Staff",
+          "kind": "opex",
+          "category": "staff",
+          "unit": "unit",
+          "escalation": "opex",
+          "note": "FTE count per year. No sourced default: enter the quantity and the price."
+        },
+        {
+          "name": "Insurance",
+          "kind": "opex",
+          "category": "insurance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of capex per year. No sourced default for hydrogen plant: enter the share."
+        }
+      ]
+    }
+  },
+  "offered": [
+    {
+      "label": "Oxygen sales (electrolyser)",
+      "units": [
+        "t"
+      ],
+      "sources": [
+        "linked:derived_o2.electrolyser@1"
+      ],
+      "line": {
+        "name": "Oxygen sales (electrolyser)",
+        "kind": "revenue",
+        "category": "by_product",
+        "unit": "t",
+        "quantity_source": "linked:derived_o2.electrolyser@1",
+        "escalation": "contract",
+        "note": "Electrolyser O2 at 7.94 kg per kg H2. Rarely sold: needs an on-site offtaker. Off until you add it."
+      }
+    }
+  ]
+}
