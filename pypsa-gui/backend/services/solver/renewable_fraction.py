@@ -792,7 +792,8 @@ def renewable_fraction(
     for g in cls["nonren_generators"]:
         nonren += _col(gp, g).clip(lower=0.0)
     for g in cls["injecting_generators"]:
-        nonren += (-_col(gp, g)).clip(lower=0.0)
+        # GK A G4: the bus receives sign·p = |sign|·(−p) at p < 0.
+        nonren += (-_col(gp, g)).clip(lower=0.0) * abs(float(n.generators.at[g, "sign"]))
     blind = []
     for l in cls["source_links"]:
         delivered = _source_delivery(n, l, sns)
@@ -1043,6 +1044,7 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
         inj_src = None
         if inj:
             # GK A R1: a sign < 0 Generator injects −p at p < 0; y ≥ −p, y ≥ 0.
+            # GK A G4: the row weighs y by |sign|, the bus injection sign·p.
             inj_name = f"{_AUX}-inject-Generator-p"
             inj_src = m.add_variables(
                 lower=0.0,
@@ -1072,7 +1074,16 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
                 terms.append(_weighted_sum(l_src, eff.mul(w_p, axis=0), coord))
             if inj:
                 terms.append(
-                    _weighted_sum(inj_src, pd.DataFrame({g: w_p for g in inj}), coord)
+                    _weighted_sum(
+                        inj_src,
+                        pd.DataFrame(
+                            {
+                                g: w_p * abs(float(n.generators.at[g, "sign"]))
+                                for g in inj
+                            }
+                        ),
+                        coord,
+                    )
                 )
             if slacks:
                 terms.append(

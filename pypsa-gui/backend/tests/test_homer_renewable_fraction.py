@@ -2151,7 +2151,39 @@ def test_a_binding_row_holds_against_a_cheap_sign_negative_injection(series):
     status, _, log = _solve(n, min_renewable_fraction=0.8)
     assert status == "ok", log
     assert float((-n.generators_t.p["export"]).clip(lower=0).sum()) > 1.0
-    assert renewable_fraction(n)["fraction"] >= 0.8 - 1e-6
+    # GK A G2: the row binds, so the fraction sits on the target.
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.8, abs=1e-6)
+
+
+def test_a_sign_minus_two_injection_counts_twice_its_p():
+    """GK A G4: at sign = −2 and p = −5 the bus receives sign·p = 10 MW."""
+    n = _ac_export(_dispatched(), sign=-2.0, p_min_pu=-1.0, p_max_pu=1.0)
+    n.generators_t.p["export"] = np.where(PV_PU > 0, 0.0, -5.0)  # 16 h at night
+    kpi = renewable_fraction(n)
+    assert kpi["nonrenewable_mwh"] == pytest.approx(90.0 + 160.0), kpi
+
+
+def test_the_row_weighs_a_sign_minus_two_injection_by_two():
+    n = _ac_export(_network(), sign=-2.0, p_min_pu=-1.0, p_max_pu=1.0)
+    _with_row(n)
+    aux = f"{_AUX}-inject-Generator-p"
+    m = n.model
+    con = m.constraints[row_name(None)]
+    labels = np.ravel(con.vars.values)
+    coeffs = np.ravel(con.coeffs.values)
+    inj = {
+        int(lab)
+        for lab in np.ravel(m.variables[aux].labels.values)
+        if lab >= 0
+    }
+    diesel = {
+        int(lab)
+        for lab in np.ravel(m.variables["Generator-p"].sel(name="diesel").labels.values)
+    }
+    c_inj = {float(c) for lab, c in zip(labels, coeffs) if int(lab) in inj}
+    c_diesel = {float(c) for lab, c in zip(labels, coeffs) if int(lab) in diesel}
+    assert c_inj and c_diesel, (c_inj, c_diesel)
+    assert {round(c, 9) for c in c_inj} == {round(2.0 * c, 9) for c in c_diesel}
 
 
 def test_a_sign_negative_generator_that_cannot_inject_is_not_unattributed():
