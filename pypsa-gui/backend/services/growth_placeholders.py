@@ -61,7 +61,7 @@ def _value_of(kind: str, peak: float, old_peak: float | None, old_value: float) 
     return old_value * peak / old_peak
 
 
-def _project_dir(project_dir=None):
+def _dir_or_active(project_dir=None):
     if project_dir is None:
         from services.network_lengths import active_project_dir
         project_dir = active_project_dir()
@@ -72,7 +72,7 @@ def _meta_path(project_dir=None) -> pathlib.Path | None:
     """The ``eh_template.json`` ``project_dir`` reads (default: the active
     project's): its own, or its base's for a sensitivity case (UM07-KIND-1)."""
     from services.template_marker import source_path
-    project_dir = _project_dir(project_dir)
+    project_dir = _dir_or_active(project_dir)
     return source_path(project_dir) if project_dir is not None else None
 
 
@@ -80,7 +80,7 @@ def _own_meta_path(project_dir=None) -> pathlib.Path | None:
     """Where an edit's write goes: the project's own ``eh_template.json``, so
     an edit on a case writes the case's copy and never its base's."""
     from services.template_marker import own_path
-    project_dir = _project_dir(project_dir)
+    project_dir = _dir_or_active(project_dir)
     return own_path(project_dir) if project_dir is not None else None
 
 
@@ -259,12 +259,17 @@ def _write(path: pathlib.Path, meta: dict) -> None:
 def snapshot_meta() -> bytes | None:
     """The active project's own ``eh_template.json`` bytes for the undo stack
     (None when it has none: a sensitivity case reads its base's)."""
+    from services.template_marker import is_case
     path = _own_meta_path()
     if path is None or not path.is_file():
         return None
     try:
         return path.read_bytes()
     except OSError:
+        if is_case(path.parent):
+            # None would read "no copy" and an undo would remove it: the
+            # caller skips this snapshot instead.
+            raise
         return None
 
 
@@ -274,12 +279,12 @@ def restore_meta(data: bytes | None) -> None:
     sensitivity case: the undone edit made the case's own copy, which goes,
     so the case reads its base's again. A project that is not a case keeps
     its file (a marker never goes because a snapshot could not read it)."""
-    from services.template_marker import CASE_FILE
+    from services.template_marker import is_case
     path = _own_meta_path()
     if path is None:
         return
     if data is None:
-        if path.is_file() and (path.parent / CASE_FILE).is_file():
+        if path.is_file() and is_case(path.parent):
             try:
                 path.unlink()
             except OSError as exc:

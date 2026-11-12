@@ -1,0 +1,25 @@
+{
+  "cookies": [
+    {
+      "name": "pypsa_gui_session",
+      "value": "txHUeCqysOojk0WYYXWd9j0jDzQUxyIc6eUlNN3vHOc",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "expires": 1794704243.726,
+      "httpOnly": true,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "pypsa_gui_csrf",
+      "value": "8k-PeznFMax5IPz__zQWqC4hSp5vdkj9x4SYyna3tHY",
+      "domain": "127.0.0.1",
+      "path": "/",
+      "expires": 1794704243.726,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    }
+  ],
+  "origins": []
+}

@@ -64,6 +64,11 @@ class _Unreadable(Exception):
     pass
 
 
+def is_case(project_dir) -> bool:
+    """Whether the folder holds a sensitivity case's record."""
+    return (pathlib.Path(project_dir) / CASE_FILE).is_file()
+
+
 def own_path(project_dir) -> pathlib.Path:
     """Where the project's own marker is, and where a write to it goes."""
     return pathlib.Path(project_dir) / MARKER_FILE
@@ -87,9 +92,9 @@ def _base_dir(here: pathlib.Path) -> pathlib.Path | None:
     """The folder of the base ``here``'s case record names; None when
     ``here`` is not a case or its base cannot be reached (see the module
     docstring). Raises _Unreadable for a record that cannot be read."""
-    record_path = here / CASE_FILE
-    if not record_path.is_file():
+    if not is_case(here):
         return None
+    record_path = here / CASE_FILE
     record = _read_json(record_path)
     baseline_id = record.get("baseline_id") if isinstance(record, dict) else None
     try:

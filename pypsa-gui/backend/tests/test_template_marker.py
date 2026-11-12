@@ -251,6 +251,12 @@ def test_a_chain_is_followed_up_to_the_depth_cap(tmp_path, monkeypatch, hops, st
     assert tm.resolve(dirs[0]).state == state
 
 
+def test_the_case_record_is_the_one_the_sweep_writes():
+    from services import workflow_tools as wt
+
+    assert tm.CASE_FILE == wt.SENSITIVITY_CASE_FILE
+
+
 def test_writes_go_to_the_projects_own_folder(eh_case):
     assert tm.own_path(eh_case) == eh_case / tm.MARKER_FILE
 
@@ -433,6 +439,24 @@ def test_undo_keeps_a_copy_the_case_had_before_the_edit(eh_base, active_case):
     assert own.read_bytes() == snapshot
 
 
+def test_a_case_copy_that_cannot_be_read_skips_the_snapshot(
+    eh_base, active_case, monkeypatch
+):
+    """A snapshot of None would make the undo remove the copy."""
+    from services import growth_placeholders as gp
+
+    own = write_marker(active_case, eh_base.meta)
+
+    def unreadable(self):
+        raise OSError("io")
+
+    monkeypatch.setattr(pathlib.Path, "read_bytes", unreadable)
+    with pytest.raises(OSError):
+        gp.snapshot_meta()
+    monkeypatch.undo()
+    assert own.is_file()
+
+
 def test_undo_never_removes_the_marker_of_a_project_that_is_not_a_case(
     eh_base, monkeypatch
 ):
@@ -527,19 +551,20 @@ def _constant_text(node) -> str | None:
     return None
 
 
+def _name_of(node) -> str | None:
+    return node.id if isinstance(node, ast.Name) else getattr(node, "attr", None)
+
+
 def _direct_uses(source: str) -> list[int]:
     lines = set()
     for node in ast.walk(ast.parse(source)):
         if _constant_text(node) == tm.MARKER_FILE:
             lines.add(node.lineno)
         elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            right = node.right
-            name = (
-                right.id
-                if isinstance(right, ast.Name)
-                else getattr(right, "attr", None)
-            )
-            if name in NAMES:
+            if _name_of(node.right) in NAMES:
+                lines.add(node.lineno)
+        elif isinstance(node, ast.Call) and _name_of(node.func) in ("joinpath", "join"):
+            if any(_name_of(a) in NAMES for a in node.args):
                 lines.add(node.lineno)
     return sorted(lines)
 
@@ -565,6 +590,8 @@ def test_no_module_reads_the_marker_file_but_through_the_helper():
         "p = d / META_FILE",
         "p = d / flow_service.TEMPLATE_FILE",
         "p = d / template_marker.MARKER_FILE",
+        "p = d.joinpath(META_FILE)",
+        "p = os.path.join(d, flow_service.TEMPLATE_FILE)",
     ],
 )
 def test_the_guard_sees_a_direct_reader(source):
