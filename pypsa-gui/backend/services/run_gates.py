@@ -817,10 +817,14 @@ def _binary_check(env):
     is the bool False; a flagged check is `flagged` with its flagged period
     rows. An `unverified` check, a `flagged` that is not a bool and a missing
     check are no evidence, except a missing check after a solve that committed
-    the process units with binaries: that plan is exact."""
+    the process units with binaries: that plan is exact. Results that predate
+    the inputs are no evidence whatever the payload."""
+    from harness.calculations import solve_matches_inputs
     from services.solver import process_uc
 
     def read(ctx):
+        if not solve_matches_inputs(ctx):
+            return STALE_SOLVE  # GK A (24) B2: an input edited since the solve (process_uc too) is not its check
         state = ctx.solver_state or {}
         payload = state.get("last_process_uc_check")
         if payload is None:

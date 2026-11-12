@@ -41,6 +41,12 @@ LEVERS = {
     ("Store", "h2_storage", "e_nom_max"): 20000.0,
     ("Store", "nh3_tank", "e_nom_max"): 12000.0,
 }
+# The envelope names each candidate class by its wildcard, whatever the planning years.
+EDITS = {
+    **{(c, f"{name}_*", a): 2 * cap for (c, name, a), cap in CAPS.items()},
+    ("Store", "h2_storage", "e_nom_max"): 20000.0,
+    ("Store", "nh3_tank", "e_nom_max"): 12000.0,
+}
 NEVER = [
     ("Link", "haber_bosch"),
     ("Load", "process_load"),
@@ -115,7 +121,7 @@ def test_the_check_and_the_shortfall_block_and_the_investment_case_only_warns():
     assert {"res.solve.status", "res.fresh", "kpi.unserved_mwh"} <= set(rules)
 
 
-def test_the_envelope_is_the_per_year_candidates_and_the_tanks_at_twice_their_cap():
+def test_the_envelope_is_the_candidate_classes_and_the_tanks_at_twice_their_cap():
     """C5: each bound is twice the cap the template itself gives."""
     n = _network()
     edits = {
@@ -124,8 +130,12 @@ def test_the_envelope_is_the_per_year_candidates_and_the_tanks_at_twice_their_ca
         ]
         for e in run_profiles.resolve(REF)["envelope"]["edits"]
     }
-    assert edits == {k: {"min": 0.0, "max": v} for k, v in LEVERS.items()}
-    for (component, name, attr), bound in LEVERS.items():
+    assert edits == {k: {"min": 0.0, "max": v} for k, v in EDITS.items()}
+    for (
+        component,
+        name,
+        attr,
+    ), bound in LEVERS.items():  # each instance the wildcards reach
         assert bound == 2 * float(n.c[component].static.at[name, attr]), name
 
 
@@ -520,3 +530,32 @@ def test_the_profile_lists_what_blocks_an_unattended_run():
     missing = run_profiles.resolve(REF)["missing_tools"]
     assert any("binary operational check" in m for m in missing)
     assert any("process-unit form" in m for m in missing)
+
+
+@pytest.mark.parametrize(
+    "solver_state",
+    [
+        {
+            "last_process_uc_check": {
+                "status": "ok",
+                "flagged": False,
+                "message": "",
+                "periods": [],
+                "worst": None,
+            }
+        },
+        {"solver_config": SimpleNamespace(process_uc="binary")},
+    ],
+    ids=["ok_check", "binary_plan_without_check"],
+)
+def test_a_stale_solve_reads_no_binary_check(direct, monkeypatch, solver_state):
+    """GK A (24) B2: inputs edited since the solve (e.g. `process_uc`) leave
+    neither the check nor the binary-plan pass standing."""
+    import harness.calculations as calculations
+
+    monkeypatch.setattr(calculations, "solve_matches_inputs", lambda ctx: False)
+    result = direct("nh3.binary_check", network=_network(), solver_state=solver_state)
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "stale_solve",
+    )

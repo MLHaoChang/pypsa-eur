@@ -799,16 +799,18 @@ EH_H2_HUB_STAGED = _eh_h2_hub(staged=True)
 # levers (§6.0): the envelope names the per-year candidates and the two tanks,
 # each up to twice its template cap.
 NH3_SHORTFALL_MAX = 0.01  # Q3 = A: a delivery tolerance, 1 % of a period's target (t/d)
-NH3_YEARS = (2027, 2030, 2035)
 
 
 def _nh3_levers():
-    """The envelope's edits: each per-year candidate and each tank, up to
-    twice its template cap (`eh_ammonia.py`: wind 150, PV 80, BESS 80,
-    electrolyser 40 MW; H2 store 10,000 and NH3 tank 6,000 MWh)."""
-    caps = (("Generator", "wind_new", "p_nom_max", 150.0), ("Generator", "solar_new", "p_nom_max", 80.0),
-            ("StorageUnit", "bess_new", "p_nom_max", 80.0), ("Link", "electrolyser_new", "p_nom_max", 40.0))
-    return [*[_h2_edit(c, f"{name}_{y}", attr, 2 * cap) for c, name, attr, cap in caps for y in NH3_YEARS],
+    """The envelope's edits: the candidates of every period by their class's
+    name (the template's `<class>_new_<year>`, whatever planning years the
+    project has) and each tank, up to twice its template cap (`eh_ammonia.py`:
+    wind 150, PV 80, BESS 80, electrolyser 40 MW; H2 store 10,000 and NH3
+    tank 6,000 MWh)."""
+    return [_h2_edit("Generator", "wind_new_*", "p_nom_max", 300.0),
+            _h2_edit("Generator", "solar_new_*", "p_nom_max", 160.0),
+            _h2_edit("StorageUnit", "bess_new_*", "p_nom_max", 160.0),
+            _h2_edit("Link", "electrolyser_new_*", "p_nom_max", 80.0),
             _h2_edit("Store", "h2_storage", "e_nom_max", 20000.0),
             _h2_edit("Store", "nh3_tank", "e_nom_max", 12000.0)]
 

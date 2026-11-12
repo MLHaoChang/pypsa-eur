@@ -65,6 +65,10 @@ export const FACT_WORDS: Record<string, string> = {
   'mg.tie.open': 'The grid tie is open when the site runs as an island',
   'mg.critical.tagged': 'The critical load is marked in the model',
   'mg.fuel.autonomy': 'The genset fuel lasts as long as the island must run alone',
+  // Study harness 13: the ammonia hub's process facts.
+  'process.units': 'The process units are filled in, with their capacity and efficiency',
+  'process.binary_check': 'The plan holds when the process units start and stop for real (no period flagged)',
+  'process.delivery.shortfall': 'The product delivery is met within its tolerance in every period',
 }
 
 /** The unit a counted gate fact is read in, when the rule sends none,
@@ -100,6 +104,8 @@ export const NAME_WORDS: Record<string, string> = {
   electrolyser: 'The electrolyser', 'electrolyser_new_*': 'New electrolysers', h2_storage: 'The hydrogen store',
   // Study harness 12c: the single-year microgrid's battery candidate.
   bess_new: 'The new battery',
+  // Study harness 13: the ammonia hub's levers.
+  'wind_new_*': 'New wind', 'solar_new_*': 'New solar', nh3_tank: 'The ammonia tank',
 }
 
 /** An envelope edit's field: the panels' own word (`FIELD_LABELS`) and its unit. */
@@ -109,6 +115,7 @@ export const FIELD_WORDS: Record<string, { words: string; unit: string }> = {
   p_nom_min: { words: FIELD_LABELS.p_nom_min, unit: 'MW' },
   max_hours: { words: FIELD_LABELS.max_hours, unit: 'h' },
   e_nom: { words: FIELD_LABELS.e_nom, unit: 'MWh' },
+  e_nom_max: { words: FIELD_LABELS.e_nom_max, unit: 'MWh' },
   marginal_cost: { words: FIELD_LABELS.marginal_cost, unit: '€/MWh' },
 }
 
