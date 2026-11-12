@@ -667,11 +667,63 @@ def test_p4_a_whole_bus_drop_is_scaled_by_the_share():
     assert _lost(bc(), lp.key) == []
 
 
+def test_p4_the_drop_reads_each_years_share():
+    lp, ic = _lost_ic()
+    s = {"h2": Series("served_h2.offtake", "kg", {None: 1000.0}, {})}
+    ln = _h2(linked_share=0.2, linked_share_by_year={2031: 0.5})
+    bc = build_business_case(ic, _inputs(ln), s, LostProductionMap(**_LPM_LOAD))
+    by_year = {
+        t.first_year: tl.amount
+        for t in bc.case.templates
+        if t.first_year >= 2031
+        for tl in t.lines
+        if tl.key == lp.key
+    }
+    assert sorted(by_year) == list(range(2031, 2036))
+    for y, a in by_year.items():
+        assert a == pytest.approx(-50.0 * (1 - 0.4 * (0.5 if y == 2031 else 0.2))), y
+
+
+def _bus_and_load(bus_share):
+    """A whole-bus line beside a Load line whose Load has no share series."""
+    lp, ic = _lost_ic()
+    lpm = LostProductionMap(
+        slack_bus={"__lost_h2": "h2"},
+        load_bus={"offtake": "h2"},
+        share={"__lost_h2": {}},
+        unread={},
+    )
+    bus = _line(
+        name="bus",
+        quantity=None,
+        quantity_source="linked:served_product.h2@1",
+        linked_share=bus_share,
+    )
+    out = {
+        "bus": Series("served_product.h2", "t", {None: 10.0}, {}),
+        "h2": Series("served_h2.offtake", "kg", {None: 1000.0}, {}),
+    }
+    return lp, build_business_case(ic, _inputs(bus, _h2()), out, lpm)
+
+
+def test_p4_a_whole_bus_sold_whole_drops_whole_without_a_load_share():
+    lp, bc = _bus_and_load(1.0)
+    assert _lost(bc, lp.key) == []
+
+
+def test_p4_a_part_bus_with_a_missing_load_share_is_not_established():
+    lp, bc = _bus_and_load(0.5)
+    lost = _lost(bc, lp.key)
+    assert lost and all(a is None for a in lost)
+
+
 # ── F1, F2: what the picker and the share may say (GK B on #1430) ────────────
 
 
 def test_f1_every_offered_unit_runs_on_its_row():
-    for t in ("eh_site", *DC):
+    templates = {t for f in P.PRESETS_DIR.glob("*.json") for t in P.load(f).templates}
+    assert {"eh_site", *DC} <= templates
+    for t in sorted(templates):
         for o in P.offered_rows(t):
             for u in o.units:
                 ln = o.line.model_copy(update={"unit": u})
@@ -924,15 +976,25 @@ def test_p8_unpinned_load_defaults_pack_callers_are_listed():
 # ── P11: the templates themselves are untouched ──────────────────────────────
 
 
+_SOURCES = {"eh_ipp_hybrid": "sources/"}
+
+
 @pytest.mark.parametrize("template_id", sorted(TEMPLATE_META))
 def test_p11_each_template_writes_its_committed_sidecars(template_id, tmp_path):
     write_sidecars(tmp_path, template_id)
     files = [str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*") if p.is_file()]
     assert files
-    _, mismatch, errors = filecmp.cmpfiles(
-        tmp_path, P.PRESETS_DIR.parent / template_id, files, shallow=False
-    )
+    committed = P.PRESETS_DIR.parent / template_id
+    _, mismatch, errors = filecmp.cmpfiles(tmp_path, committed, files, shallow=False)
     assert (mismatch, errors) == ([], [])
+    # Nothing committed beside them that the writer no longer writes, but the
+    # IPP template's raw price sources.
+    extra = {
+        str(p.relative_to(committed)) for p in committed.rglob("*") if p.is_file()
+    } - set(files)
+    assert {
+        x for x in extra if not x.startswith(_SOURCES.get(template_id, "\0"))
+    } == set()
 
 
 def test_p11_the_presets_ship_with_project_templates():

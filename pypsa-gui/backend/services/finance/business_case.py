@@ -305,7 +305,8 @@ def _drops(
             f: float | None = sum(s for (k, _), s in sold.items() if k == "bus")
             by_load = lp.share.get(_slack_of(ln), {})
             for (k, ld), s in sorted(sold.items()):
-                if k != "load":
+                # The whole bus sold whole drops whole: no Load share is read.
+                if k != "load" or f >= 1.0:
                     continue
                 sh = by_load.get(ld)
                 v = sh.for_year(y) if isinstance(sh, Series) else None
