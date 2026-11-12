@@ -626,7 +626,10 @@ def test_p4_two_lines_on_one_load_drop_their_shares_once_capped():
     lp, ic = _lost_ic()
     one = Series("served_h2.offtake", "kg", {None: 1000.0}, {})
     s = {"h2": one, "h2b": one}
-    lines = [_h2(linked_share=0.7), {**_h2(linked_share=0.6).model_dump(), "name": "h2b"}]
+    lines = [
+        _h2(linked_share=0.7),
+        {**_h2(linked_share=0.6).model_dump(), "name": "h2b"},
+    ]
     bc = build_business_case(ic, _inputs(*lines), s, LostProductionMap(**_LPM_LOAD))
     lost = _lost(bc, lp.key)
     assert lost and all(a == pytest.approx(-50.0 * (1 - 0.4)) for a in lost)
@@ -635,7 +638,10 @@ def test_p4_two_lines_on_one_load_drop_their_shares_once_capped():
 def test_p4_a_line_selling_none_supersedes_nothing():
     lp, ic = _lost_ic()
     one = Series("served_h2.offtake", "kg", {None: 1000.0}, {})
-    lines = [_h2(linked_share=0.5), {**_h2(linked_share=0.0).model_dump(), "name": "h2b"}]
+    lines = [
+        _h2(linked_share=0.5),
+        {**_h2(linked_share=0.0).model_dump(), "name": "h2b"},
+    ]
     bc = build_business_case(
         ic, _inputs(*lines), {"h2": one, "h2b": one}, LostProductionMap(**_LPM_LOAD)
     )
