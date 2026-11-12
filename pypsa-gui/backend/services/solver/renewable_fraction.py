@@ -51,6 +51,9 @@ network):
     Σ_t∈P w_t·nonren_t + (1−f)·Σ_t∈P w_t·slack_t ≤ (1−f)·Σ_t∈P w_t·load_t
 
 A period with no load gets no row (0 ≤ 0 is harmless but says nothing).
+Rolling and myopic solves are refused at preflight
+(`validation_service._check_min_renewable_fraction`): they would build one
+row per LP window, not one per period.
 With a slack present the LP may meet the target by shedding or curtailing at
 the slack's price: a target above what renewables can reach is then met by
 shedding, not reported infeasible. Without a slack it is infeasible, and
@@ -66,6 +69,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from services.adequacy.archetypes import min_p_min_pu
 from services.adequacy.slack import slack_generator_mask
 from services.profile_shapes import _ELEC_CARRIERS
 from services.results.carrier_kpis import _is_renewable_carrier
@@ -78,6 +82,12 @@ _AUX = "RenewableFraction-gross"
 def row_name(period: Any) -> str:
     """The LP row of one investment period (None: the single-period row)."""
     return ROW if period is None else f"{ROW}_{period}"
+
+
+def _pct(f: float) -> str:
+    """The target as a percent with the user's precision (up to 4 decimals,
+    trailing zeros trimmed): 0.825 → "82.5%", 0.9 → "90%"."""
+    return f"{f * 100:.4f}".rstrip("0").rstrip(".") + "%"
 
 
 def target_of(cfg: Any) -> float | None:
@@ -181,8 +191,11 @@ def classify(n) -> dict[str, list[str]]:
 def _fuel_store_links(n, elec, gbus) -> list[str]:
     """R13: Links delivering into an electrical bus from a non-electrical bus
     that holds a Store with a non-renewable carrier, no Generator and no
-    inflow from an electrical bus (a fuel stock, not a battery). Not counted
-    yet (follow-up: count η·p0); the KPI fails closed on them."""
+    inflow from an electrical bus (a fuel stock, not a battery). A Link that
+    can run backwards (p_min_pu < 0, static or in time) with an electrical
+    output feeds its bus0 from electricity too: a battery behind one
+    bidirectional inverter. Not counted yet (follow-up: count η·p0); the KPI
+    fails closed on them."""
     links, stores = n.links, n.stores
     if not len(links) or not len(stores):
         return []
@@ -192,6 +205,10 @@ def _fuel_store_links(n, elec, gbus) -> list[str]:
         for l in links.index
         if str(links.at[l, "bus0"]) in elec
         for b in _link_outputs(links, l)
+    } | {
+        str(links.at[l, "bus0"])
+        for l in links.index
+        if any(b in elec for b in _link_outputs(links, l)) and min_p_min_pu(n, l) < 0
     }
     fuel = (
         {
@@ -297,20 +314,52 @@ def _load_mw(n, loads, snapshots) -> pd.Series:
 # ── the KPI ───────────────────────────────────────────────────────────────
 
 
-def _unserved_mw(unserved_t, snapshots) -> pd.Series:
-    if unserved_t is None:
-        return pd.Series(0.0, index=snapshots)
-    s = unserved_t.sum(axis=1) if isinstance(unserved_t, pd.DataFrame) else unserved_t
-    return pd.Series(s, dtype=float).reindex(snapshots).fillna(0.0)
+def _electrical_slack_columns(n, cls, columns) -> list:
+    """The columns of a slack capture that are electrical: a Load the fraction
+    serves, or an electrical bus (legacy and DSR captures are bus-keyed). A
+    non-electrical Load or bus is dropped; a column that is neither is kept,
+    so shed energy that cannot be classified is never dropped silently."""
+    elec, loads = _electrical_buses(n), set(cls["loads"])
+    keep = []
+    for c in columns:
+        if c in n.loads.index:
+            if c in loads:
+                keep.append(c)
+        elif c in n.buses.index:
+            if str(c) in elec:
+                keep.append(c)
+        else:
+            keep.append(c)
+    return keep
+
+
+def _unserved_mw(n, cls, unserved_t, snapshots) -> pd.Series:
+    """The electrical slack MW per snapshot: ``unserved_t`` is a frame (its
+    columns Loads or buses, filtered to the electrical ones), a series
+    (already electrical), or a list of them."""
+    out = pd.Series(0.0, index=snapshots)
+    frames = unserved_t if isinstance(unserved_t, list) else [unserved_t]
+    for f in frames:
+        if f is None:
+            continue
+        if isinstance(f, pd.DataFrame):
+            f = f[_electrical_slack_columns(n, cls, f.columns)].sum(axis=1)
+        out += pd.Series(f, dtype=float).reindex(snapshots).fillna(0.0)
+    return out
 
 
 def renewable_fraction(
-    n, *, unserved_t: pd.DataFrame | pd.Series | None = None, snapshots=None
+    n,
+    *,
+    unserved_t: pd.DataFrame | pd.Series | list | None = None,
+    snapshots=None,
 ) -> dict[str, Any]:
     """The renewable fraction of a solved network (HOMER's definition, see
-    the module docstring). ``unserved_t`` is the shed MW per snapshot of the
-    solve's lost-load capture (the VOLL slacks are removed after a solve);
-    slack Generators still on the network count as well.
+    the module docstring). ``unserved_t`` is the slack MW per snapshot of the
+    solve's capture (the VOLL, DSR and curtailment slacks are removed after
+    a solve): a frame keyed by Load or bus, of which only the electrical
+    columns count, a series, or a list of them. Slack Generators still on
+    the network count as well.
 
     Returns ``fraction`` (None, with ``reason``, when nothing was served or
     no dispatch is present; not clipped: like HOMER's, it is negative when
@@ -365,7 +414,7 @@ def renewable_fraction(
     for g in cls["slack_generators"]:
         slack += _col(gp, g).clip(lower=0.0)
     load = sum((_col(lp, l) for l in cls["loads"]), pd.Series(0.0, index=sns))
-    served_t = load - slack - _unserved_mw(unserved_t, sns)
+    served_t = load - slack - _unserved_mw(n, cls, unserved_t, sns)
 
     w = _weights(n, sns)
     per_of, periods = _periods(sns)
@@ -402,21 +451,45 @@ def renewable_fraction(
 def renewable_fraction_result(
     n, capture: dict | None, target: float | None
 ) -> dict[str, Any]:
-    """The /results/renewable_fraction payload: the KPI with the solve's
-    lost-load capture as the shed (a capture keyed to other snapshots is
-    another solve's and is refused, with a reason, rather than dropped), and
-    the target the solve enforced (None when off)."""
-    shed = (capture or {}).get("lost_load_t")
-    if shed is not None and (
-        not isinstance(shed, (pd.DataFrame, pd.Series))
-        or not shed.index.equals(n.snapshots)
-    ):
-        kpi = renewable_fraction(n)
-        kpi.update(
-            fraction=None, reason="the lost-load capture belongs to another solve"
+    """The /results/renewable_fraction payload: the KPI with every slack the
+    solve removed as not served (R5, as the LP row counts them): the
+    capture's VOLL shed (``lost_load_t``), demand response (``dsr_t``) and
+    data-centre curtailment (``dc_curtailment``). Demand response and
+    curtailment fall back to the network's committed records when the
+    capture lacks them (the capture is kept only when a VOLL slack ran).
+    A capture keyed to other snapshots is another solve's and is refused,
+    with a reason, rather than dropped; so is a curtailment whose capture
+    failed. ``target`` is the target the solve enforced (None when off)."""
+    from services.commercial.settlement_inputs import dsr_activation
+    from services.solver import dc_curtailment as dcc
+
+    cap = capture or {}
+    dsr = cap.get("dsr_t")
+    if dsr is None:
+        dsr = dsr_activation(n)[0]
+    curt = None
+    if dcc.META_KEY in cap:
+        p_t = (cap[dcc.META_KEY] or {}).get("p_t")
+        curt = "failed" if p_t is None else pd.DataFrame({dcc.COOLING_BUS: p_t})
+    elif (getattr(n, "meta", None) or {}).get(dcc.META_KEY):
+        series = dcc.curtailment_series(n)[0]
+        curt = "failed" if series is None else pd.DataFrame({dcc.COOLING_BUS: series})
+    slacks = [cap.get("lost_load_t"), dsr, curt]
+    if isinstance(curt, str):
+        reason = "the data-centre curtailment of the solve could not be read"
+    elif any(
+        s is not None
+        and (
+            not isinstance(s, (pd.DataFrame, pd.Series))
+            or not s.index.equals(n.snapshots)
         )
+        for s in slacks
+    ):
+        reason = "the lost-load capture belongs to another solve"
     else:
-        kpi = renewable_fraction(n, unserved_t=shed)
+        return {**renewable_fraction(n, unserved_t=slacks), "target": target}
+    kpi = renewable_fraction(n)
+    kpi.update(fraction=None, reason=reason)
     return {**kpi, "target": target}
 
 
@@ -571,7 +644,7 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
             m.add_constraints(expr <= rhs, name=name)
             _safe_log(
                 log_queue,
-                f"{LABEL} {f:.1%} (row {name}): non-renewable supply ≤ "
+                f"{LABEL} {_pct(f)} (row {name}): non-renewable supply ≤ "
                 f"{rhs:,.1f} MWh of {demand:,.1f} MWh electrical load"
                 + (
                     f"; {len(slacks)} slack(s) may shed at their price instead"
@@ -638,7 +711,7 @@ def infeasibility_lines(n, cfg) -> list[str]:
         can = reach.get(P, 0.0)
         where = "" if P is None else f" in {P}"
         lines.append(
-            f"{LABEL}: the target of {f:.0%}{where} (row {row_name(P)}) needs "
+            f"{LABEL}: the target of {_pct(f)}{where} (row {row_name(P)}) needs "
             f"{need:,.1f} MWh of renewable electricity served; the renewable "
             f"generators can produce at most "
             + ("an unbounded amount" if math.isinf(can) else f"{can:,.1f} MWh")

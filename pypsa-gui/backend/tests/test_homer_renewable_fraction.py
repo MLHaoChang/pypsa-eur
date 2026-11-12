@@ -1102,3 +1102,132 @@ def test_a_period_without_load_gets_no_hint():
     n = _no_load_in_2035(_two_period())
     lines = infeasibility_lines(n, SolverConfig(min_renewable_fraction=0.9))
     assert len(lines) == 1 and " in 2030" in lines[0], lines
+
+
+# ── review: served = electrical load − every electrical slack ───────────
+
+
+def _with_heat_load(n):
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Load", "hotwater", bus="heat", p_set=5.0)
+    return n
+
+
+def test_shed_heat_in_the_capture_does_not_reduce_electricity_served():
+    n = _with_heat_load(_dispatched())
+    shed = pd.DataFrame({"site": 0.0, "hotwater": 5.0}, index=n.snapshots)
+    shed.iloc[:10, 0] = 4.0  # 40 MWh of electricity shed, 120 MWh of heat
+    kpi = renewable_fraction_result(n, {"lost_load_t": shed}, None)
+    assert kpi["served_mwh"] == pytest.approx(200.0), kpi
+    assert kpi["fraction"] == pytest.approx((200.0 - 90.0) / 200.0), kpi
+
+
+def test_electrical_demand_response_in_the_capture_is_not_served():
+    n = _with_heat_load(_dispatched())
+    dsr = pd.DataFrame({"ac": 0.0, "heat": 3.0}, index=n.snapshots)
+    dsr.iloc[:10, 0] = 2.0  # 20 MWh responded on the site bus
+    kpi = renewable_fraction_result(n, {"dsr_t": dsr}, None)
+    assert kpi["served_mwh"] == pytest.approx(220.0), kpi
+
+
+def _with_cooling(n):
+    n.add("Bus", "dc_mv", carrier="AC")
+    n.add("Load", "cooling", bus="dc_mv", p_set=2.0)
+    n.loads_t.p["cooling"] = 2.0  # 48 MWh: 288 MWh in all
+    return n
+
+
+def test_dc_curtailment_in_the_capture_is_not_served():
+    n = _with_cooling(_dispatched())
+    curt = pd.Series(0.0, index=n.snapshots)
+    curt.iloc[:10] = 1.0  # 10 MWh curtailed
+    cap = {"dc_curtailment": {"p_t": curt, "capture_failed": False}}
+    kpi = renewable_fraction_result(n, cap, None)
+    assert kpi["served_mwh"] == pytest.approx(278.0), kpi
+
+
+def test_a_failed_dc_curtailment_capture_makes_the_fraction_unavailable():
+    n = _with_cooling(_dispatched())
+    cap = {"dc_curtailment": {"p_t": None, "capture_failed": True}}
+    kpi = renewable_fraction_result(n, cap, None)
+    assert kpi["fraction"] is None and "curtailment" in kpi["reason"], kpi
+
+
+def test_committed_demand_response_counts_without_a_capture():
+    from services.commercial.settlement_inputs import commit_dsr
+
+    n = _dispatched()
+    dsr = pd.DataFrame({"ac": 0.0}, index=n.snapshots)
+    dsr.iloc[:10, 0] = 2.0
+    commit_dsr(n, dsr, 20.0)
+    kpi = renewable_fraction_result(n, None, None)
+    assert kpi["served_mwh"] == pytest.approx(220.0), kpi
+
+
+def test_a_demand_response_capture_from_another_solve_is_refused():
+    n = _dispatched()
+    other = pd.DataFrame(
+        {"ac": [1.0]}, index=pd.date_range("2031-01-01", periods=1, freq="h")
+    )
+    kpi = renewable_fraction_result(n, {"dsr_t": other}, None)
+    assert kpi["fraction"] is None and "another solve" in kpi["reason"], kpi
+
+
+# ── review: rolling and myopic are refused at preflight ──────────────────
+
+
+@pytest.mark.parametrize("strategy", ["rolling", "myopic"])
+def test_rolling_and_myopic_are_preflight_errors(strategy):
+    from services.validation_service import validate_for_run
+
+    cfg = SolverConfig(min_renewable_fraction=0.5, solve_strategy=strategy)
+    codes = {i.code for i in validate_for_run(_network(), cfg) if i.severity == "error"}
+    assert "min_renewable_fraction_unsupported_strategy" in codes
+    cfg.min_renewable_fraction = None
+    codes = {i.code for i in validate_for_run(_network(), cfg) if i.severity == "error"}
+    assert "min_renewable_fraction_unsupported_strategy" not in codes
+
+
+# ── review: a battery behind one bidirectional Link is storage ───────────
+
+
+@pytest.mark.parametrize("series", [False, True])
+def test_a_battery_behind_one_bidirectional_link_reads_as_storage(series):
+    n = _dispatched()
+    n.add("Bus", "batt", carrier="battery")
+    n.add("Store", "cells", bus="batt", carrier="battery", e_nom=100.0)
+    n.add(
+        "Link",
+        "inverter",
+        bus0="batt",
+        bus1="ac",
+        p_nom=10.0,
+        efficiency=0.95,
+        p_min_pu=0.0 if series else -1.0,
+    )
+    if series:
+        n.links_t.p_min_pu = pd.DataFrame({"inverter": -1.0}, index=n.snapshots)
+    n.links_t.p0 = pd.DataFrame({"inverter": 0.0}, index=n.snapshots)
+    n.links_t.p0.iloc[20, 0] = 5.0
+    n.links_t.p0.iloc[10, 0] = -5.0
+    assert classify(n)["unattributed_links"] == []
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+# ── review: the target keeps its precision in the text ───────────────────
+
+
+def test_the_hint_prints_the_target_without_rounding():
+    lines = infeasibility_lines(
+        _network(pv_max=5.0), SolverConfig(min_renewable_fraction=0.825)
+    )
+    assert "target of 82.5%" in lines[0], lines[0]
+    lines = infeasibility_lines(
+        _network(pv_max=5.0), SolverConfig(min_renewable_fraction=0.9)
+    )
+    assert "target of 90%" in lines[0], lines[0]
+
+
+def test_the_row_log_prints_the_target_without_rounding():
+    log = _with_row(_network(), f=0.82555)
+    assert any("Minimum renewable fraction 82.555% (row" in l for l in log), log
