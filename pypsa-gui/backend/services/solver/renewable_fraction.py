@@ -73,6 +73,15 @@ the electricity used on site (owner decision RENFRAC-ALL-1):
   no electrical inflow, whatever the bus's carrier) into an electrical bus,
   and a fuel stock on an electrical bus that discharges into it (R13);
   counting them is a follow-up. Batteries and the like stay storage.
+  So is a non-renewable withdrawing Generator with ``sign`` < 0 on an
+  electrical bus that can also inject (p_min_pu < 0): at p < 0 it supplies
+  the bus (GK B N3).
+
+* Bounded (GK B N2): all non-renewable output counts as used on site
+  (conservative). When it exceeds the electricity used, e.g. diesel exported
+  through a withdrawing Generator, the KPI is None with a reason, never a
+  negative number; the fraction is always in [0, 1]. The LP row keeps its
+  gross numerator.
 
 Energy is MW × ``snapshot_weightings.generators`` per year of each period;
 the horizon totals weight each period by its ``years``.
@@ -135,6 +144,12 @@ CONVERSION_NOTE = (
     "output is used. So grid or diesel electricity drawn into a converter "
     "counts as served electricity, and renewable electricity run into a "
     "converter whose output nothing uses raises the renewable fraction."
+)
+
+NONREN_EXCEEDS_REASON = (
+    "non-renewable supply ({nonren:,.1f} MWh) exceeds the electricity used on "
+    "site ({used:,.1f} MWh), for example because it was exported: the fraction "
+    "counts all non-renewable output as used on site, so it is undefined here"
 )
 
 
@@ -256,7 +271,12 @@ def classify(n) -> dict[str, list[str]]:
             gbus,
             elec,
             set(src_links),
-        ),
+        )
+        + [
+            g
+            for g in _two_way_withdrawers(n, withdraw)
+            if g in nonren and gbus[g] in elec
+        ],
         "unattributed_links": _fuel_store_links(n, elec, gbus),
         "unattributed_stores": _fuel_stocks_on_elec(n, elec)
         + _fuel_stocks_run_backward(n, elec, set(src_links)),
@@ -410,6 +430,22 @@ def _withdrawing_generators(n) -> list[str]:
         for g in names
         if sign[g] < 0 or ((pmax[g] <= 0).all() and (pmin[g] < 0).any())
     ]
+
+
+def _two_way_withdrawers(n, withdraw) -> list[str]:
+    """GK B N3: the withdrawing Generators with ``sign`` < 0 that can also
+    inject (p_min_pu < 0 somewhere, static or in time): their bus injection
+    is ``sign``·p > 0 when p < 0. The fraction does not count that injection,
+    so a non-renewable one on an electrical bus fails closed when it injects
+    (KPI None with a reason, the row warns)."""
+    gens = n.generators
+    names = [
+        g for g in withdraw if "sign" in gens.columns and float(gens.at[g, "sign"]) < 0
+    ]
+    if not names:
+        return []
+    pmin = n.get_switchable_as_dense("Generator", "p_min_pu")[names]
+    return [g for g in names if (pmin[g] < 0).any()]
 
 
 def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
@@ -638,9 +674,10 @@ def renewable_fraction(
     the network count as well.
 
     Returns ``fraction`` (None, with ``reason``, when nothing was served or
-    no dispatch is present; not clipped: like HOMER's, it is negative when
-    non-renewable output exceeds what was served, e.g. a genset charging a
-    battery), ``renewable_mwh``, ``nonrenewable_mwh``,
+    no dispatch is present, or when non-renewable output exceeds the
+    electricity used on site, e.g. diesel exported or charging a battery that
+    is not discharged: GK B N2, the fraction is always in [0, 1]),
+    ``renewable_mwh``, ``nonrenewable_mwh``,
     ``served_mwh`` (horizon totals, period years applied) and ``per_period``.
     """
     sns = n.snapshots if snapshots is None else snapshots
@@ -670,7 +707,14 @@ def renewable_fraction(
             return pd.Series(0.0, index=sns)
         return frame[name].reindex(sns).astype(float).fillna(0.0)
 
-    leaked = [g for g in cls["unattributed_generators"] if (_col(gp, g) > 0).any()]
+    def _sign(g):
+        cols = n.generators.columns
+        return float(n.generators.at[g, "sign"]) if "sign" in cols else 1.0
+
+    # A Generator injects when sign·p > 0 (GK B N3: a sign < 0 one at p < 0).
+    leaked = [
+        g for g in cls["unattributed_generators"] if (_col(gp, g) * _sign(g) > 0).any()
+    ]
     leaked += [
         l for l in cls["unattributed_links"] if (_col(n.links_t.p0, l) > 0).any()
     ]
@@ -681,7 +725,7 @@ def renewable_fraction(
     ]
     if leaked:
         out["reason"] = (
-            "cannot attribute the electricity of non-renewable source(s) "
+            "cannot attribute the electricity of source(s) "
             + ", ".join(map(str, leaked))
             + ": it reaches the site through a path the fraction does not count"
         )
@@ -730,7 +774,9 @@ def renewable_fraction(
                 "conversion_mwh": drawn,
                 "nonrenewable_mwh": nr,
                 "renewable_mwh": served - nr,
-                "fraction": (served - nr) / served if served > 0 else None,
+                "fraction": (served - nr) / served
+                if served >= nr and served > 0
+                else None,
             }
         )
         y = float(years.get(P, 1.0)) if years is not None else 1.0
@@ -745,10 +791,15 @@ def renewable_fraction(
     )
     if cls["conversion_links"]:
         out["note"] = CONVERSION_NOTE
-    if tot_served > 0:
-        out["fraction"] = (tot_served - tot_nonren) / tot_served
-    else:
+    if tot_served <= 0:
         out["reason"] = "no electricity served: the fraction is undefined"
+    elif tot_nonren > tot_served:
+        # GK B N2: non-renewable output counts as used on site (conservative),
+        # so the fraction stays in [0, 1]; when it exceeds what was used (it
+        # was exported, or charged storage that was not used back), read None.
+        out["reason"] = NONREN_EXCEEDS_REASON.format(nonren=tot_nonren, used=tot_served)
+    else:
+        out["fraction"] = (tot_served - tot_nonren) / tot_served
     return out
 
 

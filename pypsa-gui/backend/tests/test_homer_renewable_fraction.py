@@ -1896,6 +1896,87 @@ def test_a_withdrawing_generator_on_the_site_bus_is_not_in_the_row(withdraw):
     assert terms == {("Generator-p", "diesel")}, terms
 
 
+def test_a_two_way_grid_generator_counts_only_its_import_in_the_kpi():
+    """GK B N1: a grid Generator that imports at night and exports by day
+    counts only its import as non-renewable; the export is not served."""
+    n = _bidirectional_grid(_dispatched())
+    day = PV_PU > 0
+    n.storage_units_t.p["bess"] = 0.0
+    n.generators_t.p["diesel"] = 0.0
+    n.generators_t.p["pv"] = np.where(day, 2 * LOAD_MW, 0.0)
+    # Import the load at night (16 h, 160 MWh); export the PV surplus by day.
+    n.generators_t.p["grid"] = np.where(day, -LOAD_MW, LOAD_MW)
+    kpi = renewable_fraction(n)
+    assert kpi["served_mwh"] == pytest.approx(240.0), kpi
+    assert kpi["nonrenewable_mwh"] == pytest.approx(160.0), kpi
+    assert kpi["fraction"] == pytest.approx(80.0 / 240.0), kpi
+
+
+def _diesel_through_export(diesel_mw: float, export_mw: float):
+    n = _ac_export(_dispatched(), sign=-1.0)
+    n.storage_units_t.p["bess"] = 0.0
+    n.generators_t.p["pv"] = 0.0
+    n.generators_t.p["diesel"] = diesel_mw
+    n.generators_t.p["export"] = export_mw
+    return n
+
+
+def test_diesel_exported_beyond_the_site_use_reads_none_not_negative():
+    """GK B N2: non-renewable output counts as used on site; when it exceeds
+    what was used, the KPI is None with a reason, never a negative number."""
+    n = _diesel_through_export(LOAD_MW + 20.0, 20.0)
+    kpi = renewable_fraction(n)
+    assert kpi["nonrenewable_mwh"] == pytest.approx(720.0), kpi
+    assert kpi["served_mwh"] == pytest.approx(240.0), kpi
+    assert kpi["fraction"] is None, kpi
+    assert "exceeds the electricity used on site" in kpi["reason"], kpi
+    assert kpi["per_period"][0]["fraction"] is None, kpi
+
+
+@pytest.mark.parametrize("diesel_mw", [LOAD_MW, LOAD_MW - 0.1, 0.0])
+def test_the_fraction_stays_within_0_and_1_up_to_the_bound(diesel_mw):
+    n = _diesel_through_export(diesel_mw, 0.0)
+    n.generators_t.p["pv"] = LOAD_MW - diesel_mw
+    kpi = renewable_fraction(n)
+    assert kpi["reason"] is None, kpi
+    assert 0.0 <= kpi["fraction"] <= 1.0, kpi
+    assert kpi["fraction"] == pytest.approx(1.0 - diesel_mw / LOAD_MW), kpi
+    assert kpi["per_period"][0]["fraction"] == pytest.approx(kpi["fraction"])
+
+
+def _two_way_sign_export(n):
+    return _ac_export(n, sign=-1.0, p_min_pu=-1.0, p_max_pu=1.0)
+
+
+def test_a_sign_negative_generator_that_can_inject_is_unattributed():
+    """GK B N3: sign < 0 with p_min_pu < 0 < p_max_pu injects sign·p > 0 at
+    p < 0; the fraction cannot count that, so it fails closed."""
+    n = _two_way_sign_export(_dispatched())
+    assert "export" in classify(n)["unattributed_generators"]
+    assert "export" not in classify(n)["nonren_generators"]
+    n.generators_t.p["export"] = np.where(PV_PU > 0, 0.0, -5.0)  # injects at night
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None, kpi
+    assert "cannot attribute the electricity of source(s) export" in kpi["reason"]
+
+
+def test_a_sign_negative_two_way_generator_that_only_withdraws_reads_a_value():
+    n = _two_way_sign_export(_dispatched())
+    n.generators_t.p["export"] = np.where(PV_PU > 0, 5.0, 0.0)  # withdraws only
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_the_row_warns_about_a_sign_negative_generator_that_can_inject():
+    n = _two_way_sign_export(_network())
+    log = _with_row(n)
+    assert any("WARNING" in line and "export" in line for line in log), log
+
+
+def test_a_sign_negative_generator_that_cannot_inject_is_not_unattributed():
+    n = _ac_export(_dispatched(), sign=-1.0)
+    assert "export" not in classify(n)["unattributed_generators"]
+
+
 def test_a_full_target_still_lets_renewables_export():
     """D1: at f = 1 the row is diesel ≤ 0; the export is not in it, so PV
     still sells its surplus and the fraction is 1."""
