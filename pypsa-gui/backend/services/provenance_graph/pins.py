@@ -10,6 +10,8 @@ A check with nothing recorded builds no pin and stays what it was (no run, nothi
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -29,8 +31,30 @@ class Pin:
     read: Callable[[], Any]
 
 
+def shown(value: Any) -> Any:
+    """A recorded or current value as JSON (`allow_nan=False`): bytes as their sha256, anything the encoder
+    refuses (a NaN, an object) as its repr. A `Pin`'s callable never reaches a wire."""
+    if isinstance(value, bytes):
+        return "sha256:" + hashlib.sha256(value).hexdigest()
+    try:
+        json.dumps(value, allow_nan=False)
+    except (TypeError, ValueError):
+        return repr(value)
+    return value
+
+
+def wire(pin: "Pin") -> dict:
+    """What a pin shows anywhere it is serialised: its label and the recorded value, never `read`."""
+    return {"label": pin.label, "recorded": shown(pin.recorded)}
+
+
 def compare_pin(g, edge: Edge) -> Broken | None:
     pin: Pin = edge.recorded
+    # The record exists but lacks this field: stale, never fresh (P3).
+    if pin.recorded is None:
+        return Broken(
+            edge.kind, edge.src, edge.dst, pin.label, None, None, None, "not recorded"
+        )
     try:
         current = pin.read()
     except Exception as exc:  # noqa: BLE001 - an unreadable input is stale, never fresh
@@ -39,7 +63,7 @@ def compare_pin(g, edge: Edge) -> Broken | None:
             edge.src,
             edge.dst,
             pin.label,
-            pin.recorded,
+            shown(pin.recorded),
             None,
             None,
             f"cannot be read now: {exc}",
@@ -50,7 +74,7 @@ def compare_pin(g, edge: Edge) -> Broken | None:
             edge.src,
             edge.dst,
             pin.label,
-            pin.recorded,
+            shown(pin.recorded),
             None,
             None,
             "cannot be read now",
@@ -62,8 +86,8 @@ def compare_pin(g, edge: Edge) -> Broken | None:
         edge.src,
         edge.dst,
         pin.label,
-        pin.recorded,
+        shown(pin.recorded),
         pin.label,
-        current,
+        shown(current),
         "changed",
     )

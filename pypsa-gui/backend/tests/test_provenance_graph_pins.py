@@ -46,12 +46,77 @@ def test_an_unreadable_current_value_is_stale_never_fresh():
         )
 
 
-def test_a_none_current_is_a_value_not_unreadable():
-    assert G.pin_verdict("x", [G.Pin("a", None, lambda: None)]).state == "fresh"
+def test_a_pin_with_no_recorded_value_is_stale_never_fresh():
+    """P3: the record exists but lacks the field (sha or fingerprint None)."""
+    for read in (lambda: None, lambda: "x"):
+        v = G.pin_verdict("x", [G.Pin("a", None, read)])
+        assert v.state == "stale" and v.broken[0].reason == "not recorded"
+
+
+def test_a_pin_edge_is_json_safe_on_the_wire_and_never_shows_its_callable():
+    """P5: `why` and a broken edge emit the label and the recorded value only."""
+    from services.provenance_graph import pins
+    from services.provenance_graph.explain import _recorded
+    from services.provenance_graph.types import Edge
+
+    pin = G.Pin("lib", b"bytes", lambda: float("nan"))
+    wire = _recorded(Edge("derived_from", "derived:x", "input:x/lib", pin))
+    assert set(wire) == {"label", "recorded"} and wire["recorded"].startswith("sha256:")
+    json.dumps(wire, allow_nan=False)
+    broke = G.pin_verdict("x", [pin]).broken[0]
+    json.dumps(broke.wire(), allow_nan=False)
+    assert pins.shown(float("nan")) == "nan"
+    w = G.why(_graph_with(pin), "derived:x")
+    assert [type(s.via.recorded) for s in w.steps[1:]] == [G.Pin]
+
+
+def _graph_with(pin):
+    from services.provenance_graph.queries import Builder
+    from services.provenance_graph.types import Edge, Node
+
+    b = Builder(None)
+    b.node(Node("derived", "derived:x"))
+    b.node(Node("input", "input:x/lib"))
+    b.edge(Edge("derived_from", "derived:x", "input:x/lib", pin))
+    return b.build()
+
+
+def test_a_compared_derived_from_edge_does_not_walk_into_its_dst():
+    """P4: a pin is the comparison itself; the dst's own staleness is not asked. A derived_from edge with no
+    record still walks (money's)."""
+    from services.provenance_graph.queries import Builder, staleness
+    from services.provenance_graph.types import Edge, Node, Unrecorded
+
+    b = Builder(None)
+    for nid, kind in (("top", "derived"), ("mid", "derived")):
+        b.node(Node(kind, nid))
+    b.edge(Edge("derived_from", "top", "mid", G.Pin("m", 1, lambda: 1)))
+    b.edge(
+        Edge("priced_through", "mid", "scale", Unrecorded("scale input not recorded"))
+    )
+    g = b.build()
+    assert staleness(g, "mid").state == "stale"  # the dst is itself stale
+    assert staleness(g, "top").state == "fresh"  # and the pin alone decides
+    b.edge(Edge("derived_from", "top2", "mid"))
+    assert (
+        staleness(b.build(), "top2").state == "stale"
+    )  # an unrecorded derived_from walks on
+
+
+def test_a_derived_from_edge_with_another_record_compares_nothing():
+    from services.provenance_graph.queries import Builder, staleness
+    from services.provenance_graph.types import Edge, Node
+
+    b = Builder(None)
+    b.node(Node("derived", "t"))
+    b.edge(Edge("derived_from", "t", "i", "not a pin"))
+    assert staleness(b.build(), "t").state == "uncompared"
 
 
 def test_no_pin_compares_nothing_and_reads_uncompared():
+    """P1: never fresh; each caller maps it to today's answer."""
     assert G.pin_verdict("x", []).state == "uncompared"
+    assert G.pin_stale("x", []) is False and G.pin_broken("x", []) == set()
 
 
 # ── site bindings (oracle: master's stale_keys and associations._stale) ───────
@@ -138,6 +203,52 @@ def test_dips_out_of_date_lists_the_changed_gone_and_new_units(tmp_path, monkeyp
     )
 
 
+def test_dips_with_no_units_is_an_empty_list(tmp_path, monkeypatch):
+    nc = tmp_path / ce.NETWORK_FILE
+    nc.write_bytes(b"net")
+    monkeypatch.setattr(project_registry, "project_dir", lambda project: tmp_path)
+    monkeypatch.setattr(ce, "_DIPS_INPUTS_CACHE", {(str(nc), ce._file_digest(nc)): {}})
+    assert ce._dips_out_of_date("p", tmp_path, {}) == []
+
+
+def test_a_manifest_that_lacks_a_hash_is_stale(tmp_path, monkeypatch):
+    """P3: the record exists but has no `campus_sha256` / `network_sha256`."""
+    d = _campus(tmp_path, monkeypatch)
+    manifest = d / "run" / ce.cs.CAMPUS_MANIFEST
+    for key in ("campus_sha256", "network_sha256"):
+        full = json.loads(manifest.read_text())
+        manifest.write_text(json.dumps({k: v for k, v in full.items() if k != key}))
+        assert ce._stale("p", d) is True
+        manifest.write_text(json.dumps(full))
+    assert ce._stale("p", d) is False
+
+
+def test_a_task_with_no_recorded_fingerprint_is_stale_and_one_with_no_brief_is_not(
+    monkeypatch,
+):
+    monkeypatch.setattr(assistant_tasks, "_fingerprint", lambda: "fp")
+    monkeypatch.setattr(assistant_tasks, "_requirements_moved", lambda t: False)
+    assert (
+        assistant_tasks._stale({"id": "t", "brief": {"x": 1}, "status": "planned"})
+        is True
+    )
+    assert assistant_tasks._stale({"id": "t", "status": "planned"}) is False
+
+
+def test_a_milp_basis_without_settings_or_inputs_is_stale(tmp_path, monkeypatch):
+    d = _campus(tmp_path, monkeypatch)
+    (d / ce.MILP_SUBDIR).mkdir()
+    (d / ce.SETTINGS_FILE).write_text("{}")
+    for basis in (
+        {},
+        {"settings": {}},
+        {"settings": {}, "inputs": []},
+        {"settings": None, "inputs": {}},
+    ):
+        (d / ce.MILP_SUBDIR / ce.MILP_BASIS_FILE).write_text(json.dumps(basis))
+        assert ce._milp_stale("p", d) is True
+
+
 def _campus(tmp_path, monkeypatch, *, campus_sha="c", network_sha="n"):
     """A run directory whose manifest records `campus_sha` and `network_sha`."""
     d = tmp_path / "campus"
@@ -204,6 +315,19 @@ def test_a_library_side_file_that_cannot_be_read_is_stale(tmp_path, monkeypatch)
 
     monkeypatch.setattr(ce, "_engine_library", boom)
     assert ce._library_stale("p", d) is True
+
+
+@pytest.mark.parametrize(
+    "now, changed", [("sha", False), ("other", True), (None, True)]
+)
+def test_the_grid_code_check_matches_the_old_one(tmp_path, monkeypatch, now, changed):
+    monkeypatch.setattr(
+        ce, "_profile_used", lambda run: {"profile": "p1", "sha256": "sha"}
+    )
+    monkeypatch.setattr(ce, "profile_fingerprint", lambda project, profile: now)
+    assert ce._grid_code_changed("p", tmp_path) is changed
+    monkeypatch.setattr(ce, "_profile_used", lambda run: None)
+    assert ce._grid_code_changed("p", tmp_path) is False
 
 
 def test_a_run_that_did_not_invest_does_not_depend_on_the_library(

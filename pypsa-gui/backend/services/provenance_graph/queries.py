@@ -120,6 +120,8 @@ def _check(g: Graph, edge: Edge) -> tuple[State, Broken | None]:
     compare = COMPARATORS.get(edge.kind)
     if compare is None or edge.recorded is None:
         return "uncompared", None
+    if edge.kind == "derived_from" and not isinstance(edge.recorded, pins.Pin):
+        return "uncompared", None
     broke = compare(g, edge)
     return ("fresh", None) if broke is None else ("stale", broke)
 
@@ -152,7 +154,7 @@ def staleness(g: Graph, node_id: str) -> Verdict:
             elif state == "uncompared" and e.kind != "derived_from":
                 uncompared.append(e.dst)
             # A compared edge's input is the comparison itself; only derived_from walks on.
-            if e.kind == "derived_from" and e.recorded is None:
+            if e.kind == "derived_from" and not isinstance(e.recorded, pins.Pin):
                 visit(e.dst)
 
     visit(node_id)

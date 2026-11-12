@@ -749,7 +749,7 @@ def _library_pins(project, d: Path) -> list[Pin]:
 def _grid_code_changed(project, d: Path) -> bool:
     used = _profile_used(d / "run")
     return used is not None and pin_stale(f"campus_grid_code:{d}", [
-        Pin("grid_code", used["sha256"], lambda: profile_fingerprint(project, used["profile"]))])
+        Pin("grid_code", used.get("sha256"), lambda: profile_fingerprint(project, used["profile"]))])
 
 
 def _stale(project, d: Path) -> bool:
