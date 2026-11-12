@@ -176,7 +176,11 @@ def test_a_case_in_another_organisation_than_its_base_reads_none(eh_base, sweep)
     assert tm.resolve(d) == tm.Marker(tm.NONE)
 
 
-def test_a_folder_that_is_not_the_bases_child_does_not_reach_it(eh_base, tmp_path):
+def test_a_folder_that_is_not_the_bases_child_does_not_reach_it(
+    eh_base, eh_case, tmp_path
+):
+    # The base has a real child (`eh_case`); a record elsewhere naming it is not one.
+    assert tm.resolve(eh_case).state == tm.BASE
     (tmp_path / tm.CASE_FILE).write_text(json.dumps({"baseline_id": eh_base.id}))
     assert tm.resolve(tmp_path) == tm.Marker(tm.NONE)
 
@@ -205,8 +209,34 @@ def test_a_looping_chain_ends(tmp_path, monkeypatch):
     a, b = tmp_path / "a", tmp_path / "b"
     a.mkdir()
     b.mkdir()
-    monkeypatch.setattr(tm, "_base_dir", lambda here: b if here == a else a)
+    calls = []
+
+    def base_of(here):
+        calls.append(here)
+        return b if here == a else a
+
+    monkeypatch.setattr(tm, "_base_dir", base_of)
     assert tm.resolve(a) == tm.Marker(tm.NONE)
+    assert calls == [a, b]  # stopped at the first folder seen again
+
+
+def test_a_base_that_cannot_be_looked_up_is_unreadable(eh_case, monkeypatch):
+    from db import session as _db
+
+    def broken():
+        raise RuntimeError("database gone")
+
+    with monkeypatch.context() as m:  # the sweep's teardown needs the database
+        m.setattr(_db, "SessionLocal", broken)
+        assert tm.resolve(eh_case) == tm.Marker(tm.UNREADABLE)
+
+
+def test_a_folder_that_cannot_be_resolved_is_not_the_same(tmp_path, monkeypatch):
+    def broken(self, *args, **kwargs):
+        raise OSError("loop")
+
+    monkeypatch.setattr(pathlib.Path, "resolve", broken)
+    assert tm._same_dir(tmp_path, tmp_path) is False
 
 
 @pytest.mark.parametrize(
