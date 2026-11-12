@@ -47,9 +47,9 @@
           "kind": "opex",
           "category": "maintenance",
           "unit": "share",
-          "quantity_source": "share_of:capex",
+          "quantity_source": "share_of:capex/equipment",
           "escalation": "opex",
-          "note": "Share of the capex lines above per year. The electrolyser's own fixed O&M is already in the energy model's ledger (locked rows); this covers the plant capex you enter here. Default is the pack's electrolyser fixed O&M share (DEA, assumed).",
+          "note": "Share of the equipment capex lines above (the ASU and synthesis loop has its own O&M row) per year. The electrolyser's own fixed O&M is already in the energy model's ledger (locked rows); this covers the plant capex you enter here. Default is the pack's electrolyser fixed O&M share (DEA, assumed).",
           "default_keys": {
             "quantity": "electrolysis.investment.fom_share"
           },

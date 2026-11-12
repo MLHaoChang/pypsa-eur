@@ -43,7 +43,7 @@ def _fill(template: str) -> P.BusinessCaseInputs:
         if ln.kind == "revenue":
             d.update(price=PRICES[ln.name], indexation=0.0)
             if ln.name == "Production premium":
-                d.update(quantity=100.0)  # typed: the kg a year awarded
+                d.update(quantity=100.0)  # typed: the verified kg a year expected
         elif ln.kind == "capex":
             d.update(quantity=1.0, price=1000.0, life_years=LIFE)
         elif ln.name == "Staff":
@@ -296,3 +296,21 @@ def test_f3_plant_shares_have_a_plant_capex_base_not_only_the_stack_lump(templat
         assert [b.name for b in capex if b.category == "other"] == [
             "ASU and synthesis loop"
         ]
+
+
+# ── G2: a plant's capex is maintained once per template (insurance is exempt) ───
+
+
+@pytest.mark.parametrize("template", CASES)
+def test_g2_each_capex_line_is_in_at_most_one_maintenance_share_base(template):
+    lines = _fill(template).lines
+    shares = [
+        ln for ln in lines if ln.source == "share_of" and ln.category == "maintenance"
+    ]
+    for cap in (ln for ln in lines if ln.kind == "capex"):
+        bases = []
+        for sh in shares:
+            kind, _, cat = sh.quantity_source.split(":", 1)[1].partition("/")
+            if kind == "capex" and (not cat or cap.category == cat):
+                bases.append(sh.name)
+        assert len(bases) <= 1, (cap.name, bases)

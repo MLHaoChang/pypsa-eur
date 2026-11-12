@@ -24,7 +24,7 @@
           "category": "incentive",
           "unit": "kg",
           "escalation": "contract",
-          "note": "Fixed premium per kg of verified output, typed: the kg a year you are awarded (the contract caps it). Typed, not linked, because a second line on the served H2 would add its sold share to the offtake's and could drop the whole lost-production penalty (G3 counts a shortfall once).",
+          "note": "Fixed premium per kg of verified output, typed: the verified kg a year you expect, never above the served H2 the results show (the award is a cap, not a volume). Typed, not linked, because a second line on the served H2 would add its sold share to the offtake's and could drop the whole lost-production penalty (G3 counts a shortfall once).",
           "hint": {
             "low": 0.37,
             "high": 0.48,
