@@ -3,7 +3,7 @@
 
 # 33 — eh_site: fetch_site_context in the inputs stage
 
-Status: ready-for-agent (Opus; GK B plan first)
+Status: done (#1417)
 Type: task
 Gated: yes (GK B)
 Model tier: opus
