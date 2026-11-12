@@ -71,3 +71,10 @@ GK B plan GO (2026-11-12), conditions:
 - U8 mutants on `template_marker.py` against all the new tests; hand
   mutants of the recursion, visited set, depth cap, org check and own-wins
   order, each with its killing test.
+
+GK B U3 ruling (2026-11-12): option A, accept as is. On undo a case behaves
+as a template project does; the loss of a non-undoable marker write
+(`save_dc_backup`) is pre-existing and is filed as issue 10
+(`10-undo-drops-a-non-undoable-marker-write.md`). The unreadable-snapshot
+fix (a case snapshot that cannot be read raises; the undo snapshot is
+skipped) stays.

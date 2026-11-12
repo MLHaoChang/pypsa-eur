@@ -1,0 +1,32 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
+# Undo drops a template-marker write that is not on the undo stack
+
+Status: needs-triage
+Type: bug (found in the UM07 review, PR #1410; GK B ruled it out of that PR)
+Reviewer: GK B.
+
+## What is wrong
+
+Every network edit records the project's `eh_template.json` for undo
+(`network_undo.push_undo_snapshot` → `growth_placeholders.snapshot_meta`),
+and an undo puts that snapshot back (`restore_meta`). A write to the marker
+that is not itself on the undo stack — the data-centre backup setting,
+`dc_backup.save_backup` via `PUT /api/campus-electrical/{name}/dc-backup` —
+is lost when an older edit is undone:
+
+1. make any network edit (the marker is snapshotted);
+2. save the DC backup setting (the marker changes; no undo entry);
+3. undo the edit from step 1: the marker goes back to its step-1 bytes and
+   the backup setting is gone.
+
+On a template project the old bytes are written back. On a sensitivity case
+that had no copy of its own at step 1 (UM07-KIND-1), the case's copy is
+removed and the case reads its base's marker again; same loss.
+
+## To decide
+
+Whether undo should restore only the marker keys the undone edit wrote
+(the growth rows), record which edit wrote the marker, or put the backup
+setting on the undo stack.
