@@ -46,8 +46,8 @@ Built: `project_templates/business_case_presets/eh_ipp_hybrid.json` and `eh_micr
 
 Choices to review:
 - `eh_ipp` is not a registered template (only `eh_ipp_hybrid`), so there is no `eh_ipp` preset.
-- The IPP de-rating is the capacity row's `linked_share`; left empty (means 1) with a note, never a default.
-- Capacity hint is the GB [S] range (20-60 GBP/kW-yr); the Italian [U] figure is left out.
+- The IPP de-rating is typed in the capacity row's price (EUR per nameplate kW at the cleared de-rating); `linked_share` stays the contracted share only (GK B H1).
+- Capacity hint (flagged GBP) is the GB [S] range (20-60 GBP/kW-yr); the Italian [U] figure is left out.
 - No pack default for insurance, maintenance or land: the pack's only insurance share is data-centre specific (BC 11 precedent). Each preset adds a typed "Plant capex" lump as the base of the insurance (and microgrid maintenance) share, since `share_of:capex` reads only the case's own capex lines.
 - The EaaS fee is an offered row (off by default); its help carries the C3 wording.
 - BC 13 (concentrator) is untouched.

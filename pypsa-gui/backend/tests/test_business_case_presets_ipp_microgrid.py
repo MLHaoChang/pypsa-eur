@@ -51,9 +51,13 @@ def test_the_ipp_rows_are_spec_6_6():
         "kW_year",
     )
     assert cap.quantity_source == "linked:capacity.StorageUnit.bess@1"
-    assert cap.linked_share is None  # the de-rating is typed, never a default
+    # linked_share is the contracted share only; the de-rating lives in the typed price (#1430 F2).
+    assert (
+        cap.linked_share is None and "de-rating" in cap.note and "nameplate" in cap.note
+    )
     goo = by["Guarantees of origin"]
     assert goo.quantity_source == "typed" and goo.unit == "MWh"
+    assert "never above the renewable generation" in goo.note
     assert (goo.hint.low, goo.hint.high, goo.hint.unit) == (0.3, 2.0, "EUR/MWh")
     assert (cap.hint.low, cap.hint.high, cap.hint.unit) == (20.0, 60.0, "GBP/kW_year")
     leases = [ln for ln in case.lines if ln.category == "land"]
@@ -229,3 +233,51 @@ def test_c3_a_served_load_line_against_a_valued_eaas_fee_is_refused():
     with pytest.raises(DoubleCount) as e:
         build_business_case(ic, _inputs(ln), {ln.name: s})
     assert e.value.stream == "eaas_fee"
+
+
+def _filled(template: str) -> list[LineItem]:
+    if template == IPP:
+        return _ipp_filled()
+    rows = []
+    for ln in P.preset(template, "microgrid", currency="USD").lines:
+        d = ln.model_dump()
+        if ln.kind == "revenue":
+            d.update(price=100.0, indexation=0.0)
+        elif ln.kind == "capex":
+            d.update(quantity=1.0, price=1000.0, life_years=10.0)
+        elif ln.category in ("insurance", "maintenance"):
+            d.update(quantity=0.01)
+        elif ln.category == "staff":
+            d.update(quantity=2.0, price=50.0)
+        rows.append(LineItem.model_validate(d))
+    return rows
+
+
+@pytest.mark.parametrize("template", CASES)
+def test_f3_every_share_has_a_plant_capex_base_that_is_not_a_replacement_lump(template):
+    lines = _filled(template)
+    shares = [ln for ln in lines if ln.source == "share_of"]
+    assert shares
+    for ln in shares:
+        kind, _, cat = ln.quantity_source.split(":", 1)[1].partition("/")
+        base = [b for b in lines if b.kind == kind and (not cat or b.category == cat)]
+        assert [
+            b
+            for b in base
+            if b.refresh_years is None and "replacement" not in b.name.lower()
+        ], ln.name
+
+
+@pytest.mark.parametrize("template", CASES)
+def test_g2_each_capex_line_is_in_at_most_one_maintenance_share_base(template):
+    lines = _filled(template)
+    shares = [
+        ln for ln in lines if ln.source == "share_of" and ln.category == "maintenance"
+    ]
+    for cap in (ln for ln in lines if ln.kind == "capex"):
+        bases = []
+        for sh in shares:
+            kind, _, cat = sh.quantity_source.split(":", 1)[1].partition("/")
+            if kind == "capex" and (not cat or cap.category == cat):
+                bases.append(sh.name)
+        assert len(bases) <= 1, (cap.name, bases)

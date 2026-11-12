@@ -81,7 +81,7 @@
         "unit": "unit_month",
         "quantity_source": "typed",
         "escalation": "contract",
-        "note": "Off until you add it. Typed: a fee per contracted service-month for a provider that builds, owns and operates. The locked rows from the energy model and this row's help are what stop duplication: do not also bill a tariff on the same energy. A linked served-load row against a valued EaaS fee is refused double_count:eaas_fee."
+        "note": "Off until you add it. Typed: a fee per contracted service-month for a provider that builds, owns and operates. The locked rows from the energy model and this row's help are what stop duplication: do not also bill a tariff on the same energy. The double_count:eaas_fee refusal applies only to an EaaS fee priced in the energy model, not to this typed row."
       }
     }
   ]

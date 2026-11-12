@@ -16,14 +16,14 @@
           "unit": "kW_year",
           "quantity_source": "linked:capacity.StorageUnit.bess@1",
           "escalation": "contract",
-          "note": "Battery capacity in service, in kW a year. Set linked_share to the typed de-rating factor of the market (the share of nameplate that clears; empty means 1, no de-rating). The PPAs, merchant export and CfD are the energy model's locked rows, never lines here.",
+          "note": "Battery capacity in service, in kW a year. Price per nameplate kW a year: the market's clearing price times the de-rating factor you expect, typed in the price. linked_share is only the contracted (sold) share of the capacity, never the de-rating. The PPAs, merchant export and CfD are the energy model's locked rows, never lines here.",
           "hint": {
             "low": 20.0,
             "high": 60.0,
             "unit": "GBP/kW_year",
-            "source": "GB capacity market auctions, per de-rated kW-year (T-1 2025/26 and T-4 2028/29 clearing prices)",
+            "source": "Ofgem, annual report on capacity market operations 2024/25: GB clearing prices per de-rated kW-year, in GBP (T-1 2025/26 and T-4 2028/29)",
             "year": 2025,
-            "note": "Per de-rated kW: apply the technology's de-rating factor through linked_share."
+            "note": "GBP, not converted. Per de-rated kW: multiply by the de-rating factor to get the price per nameplate kW."
           }
         },
         {
@@ -32,12 +32,12 @@
           "category": "other",
           "unit": "MWh",
           "escalation": "contract",
-          "note": "Typed: the certified MWh a year you expect to sell. Typed, not linked: a line linked to the grid export is refused double_count (the export is priced by the energy model's locked rows).",
+          "note": "Typed: the certified MWh a year you expect to sell, never above the renewable generation the results show. Typed, not linked: a line linked to the grid export is refused double_count (the export is priced by the energy model's locked rows).",
           "hint": {
             "low": 0.3,
             "high": 2.0,
             "unit": "EUR/MWh",
-            "source": "European guarantee-of-origin market prices",
+            "source": "EEX, GO futures FAQ (2026): guarantee-of-origin prices in EUR",
             "year": 2025,
             "note": "2024-25 range, after EUR 7-10/MWh in 2023."
           }
