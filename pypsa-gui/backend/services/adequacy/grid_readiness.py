@@ -170,7 +170,8 @@ class _Inputs:
         self.n = n
         self.profile = profile
         self.profile_error = profile_error
-        meta = _read_json(self.dir / "eh_template.json")
+        from services.template_marker import read_marker
+        meta = read_marker(self.dir)
         self.meta = meta if isinstance(meta, dict) else {}
         self.ledger = {r["item"]: r for r in self.meta.get("ledger") or []
                        if isinstance(r, dict) and isinstance(r.get("item"), str)}

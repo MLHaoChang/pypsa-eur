@@ -366,6 +366,14 @@ def _base_figures(eh_report: dict | None, project_dir: pathlib.Path | None) -> d
     return out
 
 
+def _is_hub_project(d: pathlib.Path) -> bool:
+    """A hub project: a template marker (its base's, for a sensitivity case,
+    UM07-KIND-1) beside a saved network."""
+    from services.template_marker import source_path
+
+    return source_path(d) is not None and (d / "network.nc").is_file()
+
+
 def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
     """
     The investment-case and island chapters' sources (`services/reports/
@@ -418,7 +426,7 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
             except Exception as exc:                        # noqa: BLE001 - stated as not established
                 logger.info("reports: island %s not read: %s", key, exc)
         out["island"] = island
-    if (d / "eh_template.json").is_file() and (d / "network.nc").is_file():
+    if _is_hub_project(d):
         from services.adequacy.grid_readiness import grid_readiness_for
 
         row = SimpleNamespace(name=project.name, storage_path=str(d), project_kind=None,

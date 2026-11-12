@@ -155,18 +155,12 @@ def get_eh_template(project: AuthorizedProject = ProjectAccessDep):
     """The Energy Hub template metadata a project was created from (P19):
     recommended archetype, pack overrides, stages, DtC attribution and study
     notes. 204 for a project not made from an EH template."""
-    import json
-
     from fastapi import Response
 
-    path = project.directory / "eh_template.json"
-    if not path.is_file():
-        return Response(status_code=204)
-    try:
-        raw = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return Response(status_code=204)
-    return raw if isinstance(raw, dict) else Response(status_code=204)
+    from services.template_marker import read_marker
+
+    raw = read_marker(project.directory)
+    return raw if raw is not None else Response(status_code=204)
 
 
 class AssetHealthPut(BaseModel):

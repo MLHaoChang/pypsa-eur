@@ -1349,15 +1349,15 @@ def assess(
 # ── The project: stored setting and assessment ──────────────────────────
 
 
-META_FILE = "eh_template.json"
+from services.template_marker import MARKER_FILE as META_FILE  # noqa: E402, F401 - the name callers use
 DC_TEMPLATES = ("eh_datacenter", "eh_datacenter_staged")
 
 
 def _meta(project_dir) -> dict:
-    try:
-        meta = json.loads((pathlib.Path(project_dir) / META_FILE).read_text())
-    except (OSError, ValueError):
-        meta = None
+    """The project's template metadata; a sensitivity case's is its base's
+    (UM07-KIND-1)."""
+    from services.template_marker import read_marker
+    meta = read_marker(project_dir)
     if not isinstance(meta, dict):
         raise DcBackupError(
             "backup: the project has no Energy Hub template metadata", "project"
@@ -1395,7 +1395,6 @@ def save_backup(project_dir, tpl, backup: dict) -> dict:
     the site-peak refusal in the new mode). Writes ``eh_template.json``
     only; the saved network is never touched (the setting is read by
     ``assess`` and nothing at solve time). Returns the stored backup."""
-    from services.atomic_io import atomic_write_text
     from services.dc_load_profile import DcLoadError
 
     tid, spec, planning = project_spec(project_dir, tpl)
@@ -1411,11 +1410,17 @@ def save_backup(project_dir, tpl, backup: dict) -> dict:
     meta["dc_load"]["spec"]["backup"] = checked.backup.model_dump(
         mode="json", exclude_unset=True
     )
-    atomic_write_text(
-        pathlib.Path(project_dir) / META_FILE,
-        json.dumps(meta, indent=2, sort_keys=True) + "\n",
-    )
+    _write_meta(project_dir, meta)
     return meta["dc_load"]["spec"]["backup"]
+
+
+def _write_meta(project_dir, meta: dict) -> None:
+    """Write the project's own marker: on a sensitivity case, its own copy,
+    never its base's."""
+    from services.atomic_io import atomic_write_text
+    from services.template_marker import own_path
+
+    atomic_write_text(own_path(project_dir), json.dumps(meta, indent=2, sort_keys=True) + "\n")
 
 
 #: The refusal for a project whose saved network already has the backup
