@@ -604,9 +604,7 @@ def _line_blob(ln: LineItem, horizon: tuple[int, int]) -> dict:
     # A scalar share of 1.0 reads as None does (`linked_share_at`), and a scalar a year
     # cell shadows in every year of the line is never read: no outcome, no entry (F3).
     first, last = _span(ln, horizon)
-    shadowed = bool(ln.linked_share_by_year) and all(
-        y in ln.linked_share_by_year for y in range(first, last + 1)
-    )
+    shadowed = all(y in ln.linked_share_by_year for y in range(first, last + 1))
     if d["linked_share"] in (None, 1.0) or shadowed:
         del d["linked_share"]
     if not d["linked_share_by_year"]:
