@@ -16,7 +16,6 @@ from services.business_case import presets as P
 from services.finance.business_case import build_business_case, pnl
 from services.finance.case import TemplateLine
 from services.finance.engine import run_case
-from services.process_products import t_per_unit
 from tests.test_business_case_engine import PACK, _ic
 from tests.test_business_case_guards import OPS, _by_year
 from tests.test_business_case_linked_outputs import (
@@ -141,7 +140,8 @@ def test_identity_the_billed_series_is_the_built_networks_offtake(template):
     mwh = _offtake_mwh(n, load)
     assert got.keys() == mwh.keys()
     for p, v in mwh.items():
-        factor = 1000.0 / L._lhv(None) if unit == "kg" else t_per_unit(n, "nh3")
+        # Literals, not the resolver's helpers (GK A L1): H2 at 33.33 kWh/kg LHV, NH3 at 5.166 MWh/t.
+        factor = 1000.0 / 33.33 if unit == "kg" else 1.0 / 5.166
         assert got[p] == pytest.approx(v * factor)
 
 

@@ -16,7 +16,7 @@
           "unit": "t",
           "quantity_source": "linked:served_product.nh3@1",
           "escalation": "contract",
-          "note": "Served NH3 in tonnes (MWh \u00f7 5.166); linked_share is the sold share. Say whether your price is ex-works or delivered.",
+          "note": "Served NH3 in tonnes (MWh \u00f7 5.166); linked_share is the sold share. Grey NH3 bought in to cover a shortfall counts as served; its purchase cost stays in the investment case. Say whether your price is ex-works or delivered.",
           "hint": {
             "low": 811.0,
             "high": 1000.0,
