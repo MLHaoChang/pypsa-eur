@@ -9,6 +9,10 @@ Source: a keyword pass over master on 2026-11-12 and `docs/superpowers/research/
 
 GridSpine already co-optimises sizing and dispatch (HOMER enumerates a search space), models the network and power flow (HOMER has an active-power balance only), and has sensitivity sweeps, tornado, outage Monte Carlo, multi-period investment, hydrogen, CHP, a tariff pack with demand charges, and a finance engine with replacements, salvage, escalation and per-asset degradation.
 
+## Owner addition
+
+Load growth (issue 04): the owner, 2026-11-12, "Load growth is also very important to be considered for multi year optimization. The older module already considered a load growth factor per year."
+
 ## Later (not ticketed)
 
 - Battery capacity fade and augmentation inside the dispatch over the project life (HOMER Advanced Storage and Multi-Year; HOMER Front). Today degradation scales the finance cash flow only (`services/finance/cashflow.py` `degradation_factor`).
