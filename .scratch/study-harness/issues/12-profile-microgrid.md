@@ -81,6 +81,52 @@ GK B (46) GO for slice 12b, standing on its own: B1–B14 as recorded above, plu
 
 12c needs from 12b: the EH study's `dtc_stress` stage listed in the profile, with its solves budgeted, for `mg.island.critical_served`. A campus run of the run's own for `mg.island.frequency`; its draft is a native write with its own card (B9).
 
+### 12c plan verdicts (2026-11-11)
+
+GK B (47) GO for slice 12c, conditions G1–G9.
+
+- **Q1: (a).** 12c has no campus step. The native campus draft moves to 12d under B9. `mg.island.frequency` reads not_evaluated "not_run" with its words. It is a warn and never counts toward a pass or an "all checks met" line.
+- **Q2: (a).** `experiment_source_unavailable` for a missing solver_config stays as it is. The unused `_completed_child` goes in the GK A follow-up PR.
+
+Conditions:
+
+- **G1 (budget).** The number of islanding contingencies, K, is counted at freeze, shown on the card and bound in the grant digest. A different K at the solve refuses by a typed kind before any solve, and never stress-tests only the first K. Test: add a contingency after the grant, then expect a refusal and no solve.
+- **G2 (solve count).** Count solves_used + probe_solves + any closing re-solve + the 12b island solve, on every path (an L2 round, needs_user). Test: in a run with one L2 round, the recorded count equals the profile comment's arithmetic.
+- **G3 (survival fails closed).** `mg.island.survival` blocks on every state but survives: not_evaluated, a time limit, infeasible, interrupted, and a stale revision. Test each by state, at least one under a real HiGHS time limit.
+- **G4 (L2 resize).** The L2 resize is a write the card bounded:
+  - The bess_new p_nom/e_nom bounds come from template data, are shown on the card with value, unit and source, and are frozen by the grant.
+  - A resize outside the bounds, or with no bound shown, ends needs_user.
+  - After a resize, the island check and every gate that reads the resized asset run again on the new revision.
+  - Tests: a resize at the bound passes; one just over it ends needs_user.
+- **G5 (B12 words).** Before rewording a reason, git grep every substring of the old reason. List each reader in the PR body, with a test per reader.
+- **G6 (instruction files).** The instruction-file test enumerates profiles and stages from PROFILES itself. Show it red by deleting one microgrid file.
+- **G7 (off-grid rows).** The excluded S_k'' rows carry 12a's reason. "No scr rule" is asserted for both profiles. LOLE goes through `loop_goal(horizon_years(n))` with the h/yr basis.
+- **G8 (not evaluated is never met).** `mg.fuel.autonomy` and every not_evaluated warn appear as their own state on the hand-off and in the receipt counts, never as "met".
+- **G9 (PR size).** If the change goes over about 1,500 lines (excluding generated files, fixtures and shots), split it: profiles and gate first, then instructions and live tests. Tell GK B the split before opening.
+
+B14 holds. If the change adds error kinds, also run `tests/test_tool_error_kind_manifest.py` at the trial merge, with each kind in its own `tool-error-kinds.d` fragment.
+
+12c build answers, from GK B (47), 2026-11-11:
+
+- **Split.** A1 (about 1,430 lines) opens first: the profiles, K, the envelope, G1–G4, G7 and B13. A2 (about 290 lines) follows A1: G5 words and G8 counts. PR B (instruction files, G6, the live runs) comes later.
+- **Envelope cap.** The 20-solve cap stays; raising it is a design change for the owner. Conditions:
+  - **Q1-i.** A pass that the remaining solves cannot finish never starts. A whole pass (the EH stages, the K DTC solves and the island solve) is reserved before it begins; if fewer solves remain, the run ends `eh_budget`, nothing runs half way, and no partial DTC result is recorded.
+  - **Q1-ii.** If one full pass is over the cap, the card refuses at proposal with a typed kind and the arithmetic.
+  - **Q1-iii.** Whenever the cap applies, the card shows both the arithmetic and the capped figure.
+- **"Not evaluated" is never "met", on every profile.** A2 pins `partly` and the not-evaluated count:
+  - for eh_datacenter@1 and its staged variant, on a scorecard warn row;
+  - for eh_h2_hub@1 and its staged variant, on utilisation and the counterfactual.
+  - An eh_site test shows its output unchanged.
+  - A2 goes to UX too, if UX reads the "Stated targets" wording as theirs.
+
+12c answers on A1 as built, from GK B (47), 2026-11-11:
+
+- **Q1-i: accepted as built.** `pass_short` holds because a run's steps dispatch one at a time and only the run spends its envelope; a stress short of K reads `partial`, never a pass. The A1 PR body states the assumption "nothing spends between a run's steps" and names the test that would catch a parallel dispatch, or says none exists.
+- **Q1-ii, Q1-iii: accepted** (`eh_pass_over_cap` at K = 17; the capped arithmetic on the card for K = 2 and K = 3).
+- **Q3: (a).** A1 stays whole (about 1,800 lines: about 540 of code, docs and notes, the rest tests); the PR body lists the split.
+- **Q4: (a), one pass, with a condition.** When the cap cuts the LOLE loop, the LOLE rule reads its own not-evaluated state with words: never met, never the loop's last unconverged value (G8). Built in A1: the gate reads a coupling loop that ended `budget_exhausted` on fewer solves than its own `max_solves` (the envelope clamped it), or one refused for no solve left, as `not_evaluated`, value `budget_spent` (the engine's existing refusal kind), with words; the result stage ends `budget_spent`, not `not_converged`. Test: K = 3, 11 solves spent, one pass (7) fits in the 9 left, the loop gets 1 of its 3. A loop that had all its solves still fails as before. The hand-off's not-evaluated count is asserted in A2, where G8 adds the count.
+- **A2 (G8 on every profile, Q2 (a)): accepted as described.**
+
 ### Slices
 
 - 12a (GK A): the off-grid exclusion on the scorecard, the island survival check and the tie and critical-load predicates. Engine only.

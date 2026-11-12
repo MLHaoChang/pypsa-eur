@@ -230,7 +230,10 @@ def test_every_ledger_kind_has_an_escalation_class():
 
     from models.commercial import ValueStreamKind
     kinds = set(typing.get_args(ValueStreamKind))
-    assert set(STREAM_CLASS) == kinds - {"incentive", "debt_service"}
+    # The business-case line streams (BC 05) are rows of their own, never a ledger kind.
+    from services.finance.cashflow import BC_STREAM_CLASS
+    assert not set(BC_STREAM_CLASS) & kinds
+    assert set(STREAM_CLASS) - set(BC_STREAM_CLASS) == kinds - {"incentive", "debt_service"}
     want = {"energy_import": "tariff", "network_capacity": "tariff", "network_energy": "tariff",
             "demand_charge": "tariff", "retail_fixed": "tariff", "certificates": "tariff",
             "tax": "tariff", "energy_export": "export", "ancillary": "export",

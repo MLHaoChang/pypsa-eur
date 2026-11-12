@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { EditCardTable, editCardWords, HEADLINE_CAP, type EditCard } from './EditCard'
+import { EditCardTable, editCardHeader, editCardWords, HEADLINE_CAP, type EditCard } from './EditCard'
 import { ConfirmationCard } from './ConfirmationCard'
 import AssistantResultCard from './AssistantResultCard'
 import { useChatStore } from '../store/chatStore'
@@ -412,4 +412,60 @@ it('heads the columns of a card with typed rows, and not of one with note rows o
   render(<EditCardTable card={{ ...card, rows: [note] } as unknown as EditCard} guided={false} />)
   expect(screen.queryByRole('columnheader')).toBeNull()
   expect(screen.getByTestId('chat-edit-card-note').textContent).toBe('Grid-code profile: SAGC data centre')
+})
+
+it.each([true, false])('RP-20 (UX #1396): a digest ending the old value is set in the mono id style (guided %s)', guided => {
+  const code = '1a2b3c4d5e6f7a8b'
+  const row = { component_class: 'Generator', name: 'wind_1', field: 'provenance', label: 'Series record',
+    old: `no record · values ${code}`, old_code: code, new: "the network's own", unit: '', role: 'typed' }
+  const plain = { ...row, name: 'wind_2', old: 'no record', old_code: code }
+  render(<EditCardTable card={{ ...card, says: 'Records 2 series', rows: [row, plain] } as unknown as EditCard} guided={guided} />)
+  const [first, second] = screen.getAllByTestId('chat-edit-row-typed').map(r => within(r).getAllByRole('cell')[2])
+  expect(first.textContent).toBe(`no record · values ${code}`)
+  expect(within(first).getByTestId('chat-edit-code').textContent).toBe(code)
+  expect(within(first).getByTestId('chat-edit-code').className).toContain('font-mono')
+  // A code the old value does not end with is never set apart.
+  expect(second.textContent).toBe('no record')
+  expect(within(second).queryByTestId('chat-edit-code')).toBeNull()
+})
+
+it('RP-20 (UX #1396): Guided heads the unrecorded-series card with its own sentence, not a line per row', () => {
+  useUIStore.setState({ uiMode: 'guided' })
+  const code = '1a2b3c4d5e6f7a8b'
+  const row = { component_class: 'Generator', name: 'wind_1', field: 'provenance', label: 'Series record',
+    old: `no record · values ${code}`, old_code: code, new: "the network's own", unit: '', role: 'typed' }
+  const says = "Records 1 series as the network's own. Their values are unchanged"
+  const pending = useChatStore.getState().pending!
+  useChatStore.setState({ pending: { ...pending, tool_name: 'confirm_unrecorded_series',
+    edit_card: { ...card, tool: 'confirm_unrecorded_series', says, rows: [row] } as unknown as EditCard } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-confirmation-summary').textContent).toBe(says)
+})
+
+it('RP-20 (UX #1396): the unrecorded-series card names 5 series then "(N more)"; other cards name all', () => {
+  const rows = Array.from({ length: 24 }, (_, i) => ({ component_class: 'Generator', name: `wind_${i + 1}`,
+    field: 'provenance', label: 'Series record', old: 'no record', new: "the network's own", unit: '', role: 'typed',
+    target: { section: 'profiles', panel: 'timeseries', component: 'Generator', entity: `wind_${i + 1}`, field: 'provenance' } }))
+  const base = { ...card, section: { id: 'profiles', label: 'Profiles' }, rows }
+  const names = (n: number) => Array.from({ length: n }, (_, i) => `Generator “wind_${i + 1}”`).join(', ')
+  expect(editCardHeader({ ...base, tool: 'confirm_unrecorded_series' } as unknown as EditCard))
+    .toBe(`Profiles › ${names(5)} (19 more)`)
+  expect(editCardHeader({ ...base, tool: 'update_component' } as unknown as EditCard)).toBe(`Profiles › ${names(24)}`)
+  // At the cap, no "(0 more)".
+  expect(editCardHeader({ ...base, tool: 'confirm_unrecorded_series', rows: rows.slice(0, 5) } as unknown as EditCard))
+    .toBe(`Profiles › ${names(5)}`)
+})
+
+it('RP-20 (GK B #1396): a 250-series card caps only its scope line; the table shows all 250 rows and digests', () => {
+  const code = (i: number) => i.toString(16).padStart(16, '0')
+  const rows = Array.from({ length: 250 }, (_, i) => ({ component_class: 'Generator', name: `wind_${i + 1}`,
+    field: 'provenance', label: 'Series record', old: `no record · values ${code(i)}`, old_code: code(i),
+    new: "the network's own", unit: '', role: 'typed',
+    target: { section: 'profiles', panel: 'timeseries', component: 'Generator', entity: `wind_${i + 1}`, field: 'provenance' } }))
+  const big = { ...card, tool: 'confirm_unrecorded_series', section: { id: 'profiles', label: 'Profiles' }, rows }
+  render(<EditCardTable card={big as unknown as EditCard} guided />)
+  expect(screen.getByTestId('chat-edit-header').textContent).toMatch(/ \(245 more\)$/)
+  const shown = screen.getAllByTestId('chat-edit-row-typed')
+  expect(shown).toHaveLength(250)
+  expect(shown.map(r => within(r).getByTestId('chat-edit-code').textContent)).toEqual(rows.map((_, i) => code(i)))
 })

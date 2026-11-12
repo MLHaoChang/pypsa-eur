@@ -10,6 +10,7 @@ partial unique index (GK B D4); GET returns only the caller's own latest job
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, StrictBool
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import User
@@ -42,3 +43,35 @@ def start_dream_job(
         raise HTTPException(exc.status, {"error_kind": exc.kind, "message": str(exc)})
     dream.wake_default()
     return {"job": dream.view(job)}
+
+
+class DreamSettingsBody(BaseModel):
+    """Either trigger; an omitted one is left as it is."""
+
+    model_config = ConfigDict(extra="forbid")
+    nightly: StrictBool | None = None
+    after_sessions: StrictBool | None = None
+
+
+@router.get("/dream/settings")
+def dream_settings(
+    db: DBSession = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict:
+    """The caller's automatic-review opt-in. Both triggers are off until the
+    user turns them on: a review sends past chats to the configured model."""
+    return {"settings": dream.settings_view(db, user)}
+
+
+@router.put("/dream/settings")
+def put_dream_settings(
+    body: DreamSettingsBody,
+    db: DBSession = Depends(get_db),
+    user: User = Depends(require_user),
+) -> dict:
+    """Turn the nightly or after-10-chats review on or off, for the caller only."""
+    return {
+        "settings": dream.set_settings(
+            db, user, nightly=body.nightly, after_sessions=body.after_sessions
+        )
+    }

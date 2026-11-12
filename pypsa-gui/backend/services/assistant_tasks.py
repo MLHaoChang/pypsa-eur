@@ -618,6 +618,8 @@ def _start_run(session, title, request_id, run, profile, brief, *, origin=None, 
             _refuse("invalid_intake", str(exc), 422)
     task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{project}:{owner}:{request_id}"))
     path = root / "assistant_tasks" / (task_id + ".json")
+    from services import run_envelope
+    held = run_envelope.counted_live(project, profile)  # study harness 12c (G1): K, before the lock (#1345)
     with _LOCK:
         if path.exists():
             _, task = _read(task_id)
@@ -641,8 +643,7 @@ def _start_run(session, title, request_id, run, profile, brief, *, origin=None, 
             if record:
                 task["requirements"] = record  # issue 23: a run inherits the confirmed requirements
             _save(path, task)
-            from services import run_envelope
-            run_envelope.propose(path, task, profile)  # issue 03: the plan-review card's envelope
+            run_envelope.propose(path, task, profile, held)  # issue 03: the plan-review card's envelope
             if intake_request is not None:
                 run_envelope.set_setup(path, profile["templates"][0], intake["project_name"], intake["digest"])
             if grant is not None:
@@ -816,6 +817,19 @@ def _advance_run(path, ctx=None):
                     # Study harness 12b (M2): one record per kind, never crossed.
                     for kind in run_actions.kinds(steps):
                         run_actions.fill(steps, run_actions.stage_frozen(task, kind), kind)
+                short = run_eh.pass_short(path, steps)
+                if short is not None:
+                    # Study harness 12c (Q1-i): a pass the solves left cannot finish never
+                    # starts; nothing of it is materialised and the stage stays pending.
+                    loop = run.get("loop")
+                    if loop and not loop.get("ended"):
+                        loop.pop("due", None)
+                        run_loops._end_cycle(loop, None, run_eh.BUDGET_KIND)
+                        loop["ended"] = run_eh.BUDGET_KIND
+                    stage["refused"] = {"kind": run_eh.BUDGET_KIND, "need": short[0], "left": short[1]}
+                    run["status"], run["reason"], task["status"] = "needs_user", run_eh.BUDGET_KIND, "needs_review"
+                    _save(path, task)
+                    return
                 stage.update(status="active", entered_at=_now())
                 task["steps"].extend(steps)
                 if any(_carded(s) for s in steps):
@@ -1640,6 +1654,8 @@ def begin_step(session, tool, args):
                 _save(path, task)  # the run, stopped for the user
                 if refused[0] == run_eh.BUDGET_KIND:
                     _refuse("eh_budget", refused[1])
+                if refused[0] == run_eh.CONTINGENCY_KIND:  # study harness 12c (G1)
+                    _refuse("eh_contingencies", refused[1])
                 _refuse("eh_args", refused[1])
         step.pop("claim", None)
         _clear_waiting(task, step["id"])

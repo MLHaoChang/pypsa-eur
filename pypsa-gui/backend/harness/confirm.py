@@ -84,7 +84,8 @@ def _is_guided(ui_context: Any) -> bool:
 
 
 # Tools no policy, task, brief or run envelope ever approves: the user's card only.
-CARD_ONLY_TOOLS: frozenset[str] = frozenset({"site_scene_apply"})
+# RP-20 (RP20-CHAT-1): only the user says a series with no record is the network's own.
+CARD_ONLY_TOOLS: frozenset[str] = frozenset({"site_scene_apply", "confirm_unrecorded_series"})
 
 # Assistant memory §2.2, §9 M4: a memory proposal is only ever the user's own
 # card, in Guided and Expert. A write-tier tool Expert would run uncarded, so

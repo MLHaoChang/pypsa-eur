@@ -94,8 +94,13 @@ export interface PresetOut {
 export interface LLMSettingsPayload {
   profiles: LLMProfileOut[]
   active_profile_id: string
+  /** Optional roles (`memory_analyzer`): the profile a task runs on instead of
+   * the active one. Absent or unset means the active profile. */
+  roles?: Partial<Record<ProfileRole, string>>
   presets: PresetOut[]
 }
+
+export type ProfileRole = 'memory_analyzer'
 
 /** Key status only — the shape `app_secrets.status` returns, minus the value. */
 export interface KeyStatus {
@@ -199,6 +204,14 @@ export async function postLLMActive(
   const r = await client.post('/chat/settings/llm/active', {
     profile_id: profileId,
   })
+  return r.data
+}
+
+export async function postLLMRole(
+  role: ProfileRole,
+  profileId: string | null,
+): Promise<{ roles: Partial<Record<ProfileRole, string>> }> {
+  const r = await client.post('/chat/settings/llm/roles', { role, profile_id: profileId })
   return r.data
 }
 

@@ -143,10 +143,52 @@ def _case(run, name):
     return GAP, "its case did not settle"
 
 
+NOT_EVALUATED = "not_evaluated"
+VERDICTS = ("pass", "fail", NOT_EVALUATED)
+
+
+def checks(run: dict) -> dict:
+    """Study harness 12c (G8): the result gate's rules counted by verdict,
+    and each rule not evaluated (a `warn` one included) named with its
+    reason. A not-evaluated rule is its own state, never counted as met; an
+    unknown verdict counts as not evaluated."""
+    gate = (((run.get("stages") or {}).get("result_gate") or {}).get("gate")) or {}
+    counts = dict.fromkeys(VERDICTS, 0)
+    unevaluated = []
+    for r in gate.get("rules") or []:
+        verdict = r.get("verdict") if r.get("verdict") in VERDICTS else NOT_EVALUATED
+        counts[verdict] += 1
+        if verdict == NOT_EVALUATED:
+            unevaluated.append(
+                {
+                    "rule": r.get("rule"),
+                    "severity": r.get("severity"),
+                    "reason": r.get("reason"),
+                }
+            )
+    return {"counts": counts, NOT_EVALUATED: unevaluated}
+
+
+def _checks_not_evaluated(n: int) -> str:
+    return f"{n} check{'' if n == 1 else 's'} not evaluated"
+
+
 def _targets(run):
     stage = (run.get("stages") or {}).get("result_gate") or {}
     gate = stage.get("gate") or {}
     if stage.get("status") == "passed" and gate.get("passed") is True:
+        # G8: a gate that passed with rules not evaluated is never all met. The
+        # basis counts them; the report's gates table beside it names each (UX (19)).
+        counted = checks(run)
+        if not sum(counted["counts"].values()):
+            # GK B (49) F1: a gate that compared nothing never reads covered (#1140).
+            return GAP, "the result gate checked nothing"
+        n = len(counted[NOT_EVALUATED])
+        if n:
+            return (
+                PARTLY,
+                f"the result gate passed; {_checks_not_evaluated(n)} (see the gates table)",
+            )
         return COVERED, "the result gate passed"
     return GAP, "the result gate did not pass"
 
@@ -286,6 +328,7 @@ def run_step(path, ctx, step) -> str:
     handoff = {
         "kpis": read_kpis(profile),
         "coverage": coverage(task, profile, project_dir),
+        "checks": checks(task["run"]),
         "revert": revert_preview(task["run"]),
         "resume": {
             "task_id": task["task_id"],

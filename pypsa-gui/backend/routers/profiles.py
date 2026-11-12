@@ -1479,32 +1479,15 @@ def confirm_unrecorded_series(
     one undo step. All or nothing: a series that is not unrecorded now, or
     whose values changed since the card showed its digest, refuses the whole
     batch, so nothing is stamped unseen."""
-    from services.network_undo import push_undo_snapshot
-    from services.profile_gen.apply import current_digest
-    from services.user_timeseries import NETWORK_NATIVE_META
+    from services.profile_gen import unrecorded
 
     _check_lock(proj, db, user)
     ctx = _foreground_ctx(proj, "confirm unrecorded series")
-    keys = []
-    for item in body.items:
-        key = ("generators", "p_max_pu", item.component)
-        series = ctx.user_ts.get(key)
-        if series is None or ctx.user_ts_meta.get(key):
-            raise HTTPException(status_code=409, detail={
-                "error_kind": "not_unrecorded", "component": item.component,
-                "message": f"{item.component} no longer has a series with no "
-                           "record; reload the list"})
-        if current_digest(series) != item.digest:
-            raise HTTPException(status_code=409, detail={
-                "error_kind": "unrecorded_stale", "component": item.component,
-                "message": f"{item.component} changed since the list was shown; "
-                           "reload it and confirm again"})
-        keys.append(key)
-    push_undo_snapshot()
-    for key in keys:
-        ctx.user_ts_meta[key] = dict(NETWORK_NATIVE_META)
-    return {"confirmed": [k[2] for k in keys],
-            "undo": "one undo restores the series to having no record"}
+    try:
+        result = unrecorded.confirm(ctx, body.items)
+    except unrecorded.UnrecordedRefused as exc:
+        raise HTTPException(status_code=409, detail=exc.detail()) from None
+    return {"confirmed": result["confirmed"], "undo": result["undo"]}
 
 
 def _pending_frame(nc: Path, meta: dict) -> pd.DataFrame:

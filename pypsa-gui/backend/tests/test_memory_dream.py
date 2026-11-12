@@ -22,6 +22,7 @@ from sqlalchemy.orm import sessionmaker
 from db.base import Base
 from db.models import (
     MemoryDreamJob,
+    MemoryDreamSettings,
     MemoryItem,
     Organization,
     OrgMembership,
@@ -474,7 +475,7 @@ def test_the_same_code_path_runs_on_any_profile(factory, world, monkeypatch, wir
 
     seen = []
     profile = SimpleNamespace(id=f"p-{wire}", wire=wire, model=f"{wire}-model")
-    monkeypatch.setattr(llm_config, "resolve_profile", lambda pid: profile)
+    monkeypatch.setattr(llm_config, "resolve_role", lambda role: profile)
 
     def provider_for(p, client=None):
         seen.append(p)
@@ -1108,3 +1109,463 @@ def test_access_revoked_before_the_organizer_leaves_no_proposal(factory, world):
     assert counts["skipped_no_evidence"] == 1
     with factory() as db:
         assert db.scalars(select(MemoryItem)).all() == []
+
+
+# -- automatic triggers (04b, GK B 48 T1-T7): opt-in, both off by default -------
+
+from zoneinfo import ZoneInfo  # noqa: E402
+
+BERLIN = ZoneInfo("Europe/Berlin")
+
+
+def _berlin(days_ahead, hour, minute=0):
+    """A Berlin wall-clock time `days_ahead` days after today."""
+    day = datetime.now(BERLIN).date() + timedelta(days=days_ahead)
+    return datetime(
+        day.year, day.month, day.day, hour, minute, tzinfo=BERLIN
+    ).timestamp()
+
+
+def _fire(factory, now):
+    with factory() as db:
+        return dream.fire_triggers(db, now)
+
+
+def _opt_in(factory, w, **kw):
+    with factory() as db:
+        return dream.set_settings(db, db.get(User, w.user_id), **kw)
+
+
+def _live(factory, w):
+    with factory() as db:
+        return db.scalars(
+            select(MemoryDreamJob).where(
+                MemoryDreamJob.user_id == w.user_id,
+                MemoryDreamJob.status.in_(dream.LIVE),
+            )
+        ).all()
+
+
+def _jobs(factory, w):
+    with factory() as db:
+        return db.scalars(
+            select(MemoryDreamJob).where(MemoryDreamJob.user_id == w.user_id)
+        ).all()
+
+
+def _settle(factory, job_id, status="done"):
+    with factory() as db:
+        db.get(MemoryDreamJob, uuid.UUID(str(job_id))).status = status
+        db.commit()
+
+
+def _settle_all(factory, w):
+    for j in _live(factory, w):
+        _settle(factory, j.id)
+
+
+def test_automatic_reviews_are_off_by_default_and_never_fire_off(factory, world):
+    with factory() as db:
+        view = dream.settings_view(db, db.get(User, world.user_id))
+    assert (view["nightly"], view["after_sessions"]) == (False, False)
+    for _ in range(dream.SESSIONS_TRIGGER + 2):
+        _chat(world.user_id, "hello")
+    assert _fire(factory, _berlin(1, 3, 30)) == []
+    _opt_in(factory, world, nightly=True, after_sessions=True)
+    _opt_in(factory, world, nightly=False, after_sessions=False)
+    assert _fire(factory, _berlin(2, 3, 30)) == []
+    assert _jobs(factory, world) == []
+
+
+def test_nightly_fires_once_inside_the_0300_berlin_hour_only(factory, world):
+    _opt_in(factory, world, nightly=True)
+    assert _fire(factory, _berlin(1, 2, 59)) == []
+    assert _fire(factory, _berlin(1, 4, 0)) == []  # missed hour: no catch-up
+    [job] = _fire(factory, _berlin(1, 3, 5))
+    j = _job(factory, uuid.UUID(job))
+    assert (j.trigger, j.trigger_key, j.org_id) == (
+        "nightly",
+        f"nightly:{datetime.fromtimestamp(_berlin(1, 3, 5), BERLIN).date()}",
+        world.org_id,
+    )
+    _settle(factory, job)
+    assert _fire(factory, _berlin(1, 3, 50)) == []  # once a night
+    [nxt] = _fire(factory, _berlin(2, 3, 1))
+    assert nxt != job
+
+
+@pytest.mark.parametrize(
+    "day", [(2026, 3, 29), (2026, 10, 25), (2027, 3, 28), (2027, 10, 31)]
+)
+def test_nightly_fires_exactly_once_on_both_dst_days(factory, world, day):
+    _opt_in(factory, world, nightly=True)
+    start = datetime(*day, 0, 0, tzinfo=BERLIN).astimezone(UTC)
+    fired = []
+    for step in range(0, 25 * 6):  # every 10 min over the whole (23/25 h) day
+        t = (start + timedelta(minutes=10 * step)).timestamp()
+        if datetime.fromtimestamp(t, BERLIN).date() != datetime(*day).date():
+            continue
+        got = _fire(factory, t)
+        fired += [(t, g) for g in got]
+        _settle_all(factory, world)
+    assert len(fired) == 1
+    assert datetime.fromtimestamp(fired[0][0], BERLIN).hour == 3
+
+
+def test_a_night_whose_first_job_settled_before_a_second_scan_gets_no_second(
+    factory, world
+):
+    # T1: the "no nightly job yet" read and the create are not one step; the
+    # occasion key is unique, so a racing scan that read before the first job
+    # existed still creates nothing.
+    _opt_in(factory, world, nightly=True)
+    t = _berlin(1, 3, 10)
+    with factory() as db:
+        user = db.get(User, world.user_id)
+        key = dream.nightly_key(t)
+        assert not dream._key_used(db, user, key)  # scan B reads: free
+        [job] = _fire(factory, t)  # scan A creates and its job finishes fast
+        _settle(factory, job)
+        with pytest.raises(dream.DreamError) as exc:  # scan B creates late
+            dream.start(db, user, "nightly", org_id=world.org_id, trigger_key=key)
+        assert exc.value.kind == dream.ERR_TRIGGER_TAKEN
+    assert len(_jobs(factory, world)) == 1
+
+
+def test_two_scans_racing_on_threads_create_one_job(factory, world):
+    _opt_in(factory, world, nightly=True)
+    t = _berlin(1, 3, 10)
+    barrier = threading.Barrier(2)
+    out = []
+
+    def scan():
+        with factory() as db:
+            barrier.wait()
+            out.extend(dream.fire_triggers(db, t))
+
+    threads = [threading.Thread(target=scan) for _ in range(2)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert len(out) == 1
+    assert len(_jobs(factory, world)) == 1
+
+
+def test_after_sessions_fires_at_ten_new_chats_not_nine(factory, world):
+    for _ in range(dream.SESSIONS_TRIGGER):  # chats before the opt-in do not count
+        _chat(world.user_id, "old")
+    _opt_in(factory, world, after_sessions=True)
+    now = datetime.now(UTC).timestamp() + 60
+    assert _fire(factory, now) == []
+    for _ in range(dream.SESSIONS_TRIGGER - 1):
+        _chat(world.user_id, "new")
+    assert _fire(factory, now) == []
+    _chat(world.user_id, "tenth")
+    [job] = _fire(factory, now)
+    assert _job(factory, uuid.UUID(job)).trigger == "sessions"
+    _settle(factory, job, "failed")
+    # A failed triggered job is not retried until ten more chats (T5).
+    assert _fire(factory, now + 1) == []
+
+
+def test_a_manual_job_also_resets_the_sessions_count(factory, world):
+    _opt_in(factory, world, after_sessions=True)
+    for _ in range(dream.SESSIONS_TRIGGER - 1):
+        _chat(world.user_id, "new")
+    manual = _start(factory, world)  # created after these nine chats
+    _settle(factory, manual)
+    _chat(world.user_id, "one more")
+    assert _fire(factory, datetime.now(UTC).timestamp() + 60) == []
+
+
+def test_a_malformed_log_header_is_skipped_and_the_rest_counted(factory, world):
+    _opt_in(factory, world, after_sessions=True)
+    for _ in range(dream.SESSIONS_TRIGGER):
+        _chat(world.user_id, "new")
+    d = eventlog._owner_dir(str(world.user_id))
+    (d / "torn.jsonl").write_text("{not json\n", encoding="utf-8")
+    (d / "undated.jsonl").write_text(
+        json.dumps({"owner_user_id": str(world.user_id), "created_at": "soon"}) + "\n",
+        encoding="utf-8",
+    )
+    with factory() as db:
+        user = db.get(User, world.user_id)
+        row = db.get(MemoryDreamSettings, world.user_id)
+        mark, _ = dream._sessions_mark(db, user, row)
+        assert dream.new_sessions(db, user, mark) == dream.SESSIONS_TRIGGER
+    assert len(_fire(factory, datetime.now(UTC).timestamp() + 60)) == 1
+
+
+def test_each_opt_in_consents_only_to_its_own_trigger(factory, world):
+    # GK B M17b: nightly-only plus ten new chats never starts a sessions job.
+    _opt_in(factory, world, nightly=True)
+    for _ in range(dream.SESSIONS_TRIGGER + 2):
+        _chat(world.user_id, "new")
+    assert _fire(factory, _berlin(1, 12, 0)) == []
+    [job] = _fire(factory, _berlin(1, 3, 30))
+    assert _job(factory, uuid.UUID(job)).trigger == "nightly"
+    _settle(factory, job)
+    assert _fire(factory, _berlin(1, 3, 40)) == []
+    assert [j.trigger for j in _jobs(factory, world)] == ["nightly"]
+
+
+def test_sessions_only_never_starts_a_nightly_job(factory, world):
+    _opt_in(factory, world, after_sessions=True)
+    for _ in range(dream.SESSIONS_TRIGGER - 1):
+        _chat(world.user_id, "new")
+    assert _fire(factory, _berlin(1, 3, 30)) == []
+    assert _jobs(factory, world) == []
+
+
+def test_a_manual_job_done_before_0300_does_not_suppress_the_nightly(factory, world):
+    _opt_in(factory, world, nightly=True)
+    _settle(factory, _start(factory, world))  # today, before tomorrow's 03:00
+    [job] = _fire(factory, _berlin(1, 3, 5))
+    assert _job(factory, uuid.UUID(job)).trigger == "nightly"
+
+
+def test_a_live_manual_job_at_0300_defers_the_nightly_inside_the_hour(factory, world):
+    _opt_in(factory, world, nightly=True)
+    manual = _start(factory, world)
+    assert _fire(factory, _berlin(1, 3, 0)) == []  # skipped, the key unused
+    _settle(factory, manual)
+    [job] = _fire(factory, _berlin(1, 3, 40))  # retried inside the hour
+    assert _job(factory, uuid.UUID(job)).trigger == "nightly"
+    _settle(factory, job)
+    assert _fire(factory, _berlin(1, 3, 50)) == []
+
+
+def test_a_trigger_never_starts_a_second_live_job(factory, world):
+    manual = _start(factory, world)
+    _opt_in(factory, world, nightly=True, after_sessions=True)
+    for _ in range(dream.SESSIONS_TRIGGER + 1):
+        _chat(world.user_id, "hello")
+    assert _fire(factory, _berlin(1, 3, 30)) == []
+    assert [j.id for j in _live(factory, world)] == [manual]
+
+
+def test_an_inactive_user_is_skipped(factory, world):
+    _opt_in(factory, world, nightly=True)
+    with factory() as db:
+        db.get(User, world.user_id).status = "disabled"
+        db.commit()
+    assert _fire(factory, _berlin(1, 3, 30)) == []
+
+
+def test_a_trigger_runs_only_in_the_org_of_its_opt_in(factory, world):
+    # T3: the opt-in recorded org A. Moved to org B, the user's trigger is
+    # skipped, never run in B; and a job bound to A refuses to run in B.
+    _opt_in(factory, world, nightly=True)
+    with factory() as db:
+        assert db.get(MemoryDreamSettings, world.user_id).org_id == world.org_id
+        other = db.scalar(select(Organization).where(Organization.name == "other"))
+        for m in db.scalars(
+            select(OrgMembership).where(OrgMembership.user_id == world.user_id)
+        ):
+            db.delete(m)
+        db.flush()  # one membership per user (unique user_id): the move is delete + add
+        db.add(
+            OrgMembership(
+                id=uuid.uuid4(), user_id=world.user_id, org_id=other.id, role="admin"
+            )
+        )
+        db.commit()
+        user = db.get(User, world.user_id)
+        job = MemoryDreamJob(
+            id=uuid.uuid4(),
+            user_id=world.user_id,
+            trigger="nightly",
+            status="queued",
+            org_id=world.org_id,
+            cursor_json=json.dumps(dream._empty_cursor()),
+            candidates_json="[]",
+            budget_json=json.dumps({"tokens": 1000, "daily_tokens": 0}),
+            spent_json=json.dumps(dream._empty_spent()),
+            counts_json="{}",
+            restarts=0,
+            restart_times_json="[]",
+            created_at=datetime.now(UTC),
+        )
+        assert user is not None
+    assert _fire(factory, _berlin(1, 3, 30)) == []
+    with factory() as db:
+        db.add(job)
+        db.commit()
+    _worker(factory, FakeProvider([])).run_once()
+    j = _job(factory, job.id)
+    assert (j.status, j.error_kind) == ("failed", "memory_no_org")
+
+
+def test_one_failing_user_does_not_stop_the_others(factory, world, monkeypatch):
+    _opt_in(factory, world, nightly=True)
+    with factory() as db:
+        ghost = User(
+            id=uuid.uuid4(),
+            email="g@x.test",
+            status="active",
+            is_super_admin=False,
+            created_at=datetime.now(UTC),
+        )
+        db.add(ghost)
+        db.flush()
+        db.add(
+            MemoryDreamSettings(
+                user_id=ghost.id,
+                nightly=True,
+                after_sessions=False,
+                org_id=world.org_id,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        db.commit()
+    real = dream._key_used
+
+    def boom(db, user, key):
+        if user.id == ghost.id:
+            raise OSError("disk")
+        return real(db, user, key)
+
+    monkeypatch.setattr(dream, "_key_used", boom)
+    assert len(_fire(factory, _berlin(1, 3, 30))) == 1
+
+
+def test_the_worker_scan_fires_due_triggers(factory, world):
+    _opt_in(factory, world, nightly=True)
+    clock = Clock()
+    clock.t = _berlin(1, 3, 30)
+    provider = FakeProvider([_organized()] * 3)
+    ran = _worker(factory, provider, clock=clock).run_once()
+    j = _job(factory, uuid.UUID(ran))
+    assert j.trigger == "nightly"
+    assert j.analyzer == "model-x"  # the job states what it ran on (T7)
+
+
+def test_dream_settings_routes_are_the_callers_own_both_ways(
+    client, other_org_client, anon_client
+):
+    off = client.get("/api/memory/dream/settings").json()["settings"]
+    assert (off["nightly"], off["after_sessions"]) == (False, False)
+    assert off["sessions_needed"] == dream.SESSIONS_TRIGGER
+    r = client.put("/api/memory/dream/settings", json={"nightly": True})
+    assert r.status_code == 200, r.text
+    assert (
+        r.json()["settings"]["nightly"],
+        r.json()["settings"]["after_sessions"],
+    ) == (True, False)
+    assert (
+        other_org_client.get("/api/memory/dream/settings").json()["settings"]["nightly"]
+        is False
+    )
+    o = other_org_client.put(
+        "/api/memory/dream/settings", json={"after_sessions": True}
+    )
+    assert o.json()["settings"] == {
+        **o.json()["settings"],
+        "nightly": False,
+        "after_sessions": True,
+    }
+    mine = client.get("/api/memory/dream/settings").json()["settings"]
+    assert (mine["nightly"], mine["after_sessions"]) == (True, False)
+    for bad in (
+        {"nightly": "yes"},
+        {"nightly": 1},
+        {"user_id": "x"},
+        {"nightly": None, "x": 1},
+    ):
+        assert client.put("/api/memory/dream/settings", json=bad).status_code == 422, (
+            bad
+        )
+    assert anon_client.get("/api/memory/dream/settings").status_code == 401
+    assert anon_client.put(
+        "/api/memory/dream/settings", json={"nightly": True}
+    ).status_code in (401, 403)
+
+
+def test_the_opt_in_names_the_model_reviews_go_to(factory, world, monkeypatch):
+    from services import llm_config
+
+    monkeypatch.setattr(
+        llm_config, "resolve_role", lambda role: SimpleNamespace(label="Local Ollama")
+    )
+    with factory() as db:
+        assert (
+            dream.settings_view(db, db.get(User, world.user_id))["analyzer"]
+            == "Local Ollama"
+        )
+
+
+def test_the_analyzer_runs_on_the_profile_marked_for_it(monkeypatch):
+    from harness.providers import wiring
+    from services import llm_config
+
+    marked = SimpleNamespace(id="local-qwen", wire="openai", model="analyzer-model")
+    asked = []
+    monkeypatch.setattr(
+        llm_config, "resolve_role", lambda role: asked.append(role) or marked
+    )
+    monkeypatch.setattr(wiring, "_provider_for_profile", lambda p: ("prov", None))
+    assert dream._default_provider(None, None) == (
+        "prov",
+        "analyzer-model",
+        None,
+        "local-qwen · openai · analyzer-model",
+    )
+    assert asked == ["memory_analyzer"]
+
+
+def test_the_job_records_the_profile_wire_and_model_it_ran_on(factory, world):
+    # GK B T7e: the record names the profile and the provider, not only the model.
+    job_id = _start(factory, world)
+    provider = FakeProvider([_organized()] * 3)
+    dream.Worker(
+        factory,
+        provider_for=lambda db, u: (provider, "m", None, "local-qwen · openai · m"),
+        clock=Clock(),
+    ).run_once()
+    assert _job(factory, job_id).analyzer == "local-qwen · openai · m"
+
+
+@pytest.mark.parametrize(
+    "roles",
+    [
+        ["memory_analyzer"],
+        "anthropic-sonnet",
+        7,
+        {"memory_analyzer": 5},
+    ],
+)
+def test_a_malformed_roles_map_on_disk_fails_the_job_by_name(factory, world, roles):
+    # GK B D1 (T7d): never the active profile, one test per shape.
+    from services import llm_config
+
+    llm_config.profiles_path().write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "active_profile_id": "anthropic-sonnet",
+                "profiles": [],
+                "roles": roles,
+            }
+        ),
+        encoding="utf-8",
+    )
+    job_id = _start(factory, world)
+    dream.Worker(factory, clock=Clock()).run_once()
+    j = _job(factory, job_id)
+    assert (j.status, j.error_kind, j.analyzer) == ("failed", dream.ERR_ANALYZER, None)
+
+
+def test_a_marked_profile_that_does_not_load_fails_the_job_by_name(
+    factory, world, monkeypatch
+):
+    from services import llm_config
+
+    def unloadable(role):
+        raise llm_config.ProfileNotConfiguredError("marked profile does not load")
+
+    monkeypatch.setattr(llm_config, "resolve_role", unloadable)
+    job_id = _start(factory, world)
+    dream.Worker(factory, clock=Clock()).run_once()
+    j = _job(factory, job_id)
+    assert (j.status, j.error_kind) == ("failed", dream.ERR_ANALYZER)

@@ -38,6 +38,9 @@ UNFROZEN = {"frozen": STUDY}
 ARGS_KIND = "eh_args"
 BUDGET_KIND = "eh_budget"
 REFUSED_KIND = "eh_refused"
+# Study harness 12c (G1): the project's islanding contingencies are not the K
+# the study's card showed; refused before any solve.
+CONTINGENCY_KIND = "eh_contingencies"
 # The tool's own parameters: what a frozen record may carry.
 PARAMS = (
     "archetype",
@@ -135,8 +138,121 @@ def freeze(ctx, profile, solves_left) -> dict:
     )
     body, _ = reliability_goal.eh_request_with_goal(body, goal)
     dumped = body.model_dump(mode="json")
+    held = None
+    if block.get("contingency_solves") is not None:
+        # Study harness 12c (G1): K counted now, on the project's network; the
+        # study's budget is 2 + K and is never capped down, so it never
+        # stress-tests only the first K.
+        links, dtc = islanding(getattr(ctx, "network", None), dumped)
+        need = int(block["budget_solves"]) + int(block["contingency_solves"]) * len(
+            links
+        )
+        if need > int(solves_left):
+            raise FreezeError(
+                f"The study needs {need} solves for its {len(links)} islanding "
+                f"contingencies and the run has {max(int(solves_left), 0)} left."
+            )
+        dumped = EhStudyRequest.model_validate(
+            {**dumped, "budget_solves": need, "dtc_config": dtc}
+        ).model_dump(mode="json")
+        held = {"count": len(links), "links": links}
     args = {k: dumped[k] for k in PARAMS if dumped.get(k) not in (None, {}, [])}
-    return {"args": args, "goal": _goal_snapshot(goal), "digest": digest(args)}
+    return {
+        "args": args,
+        "goal": _goal_snapshot(goal),
+        "digest": digest(args),
+        **({"contingencies": held} if held is not None else {}),
+    }
+
+
+def islanding(network, args):
+    """Study harness 12c (G1): `(links, dtc_config)`, the islanding
+    contingencies the study's off-grid stress would stress on `network`
+    with `args`, derived as the study derives them (`eh_study.derive_dtc_config`
+    on a private copy with the pack applied). FreezeError when none."""
+    from services import flow_service
+    from services.adequacy import archetypes as arch
+    from services.adequacy import eh_study as S
+
+    if network is None:
+        raise FreezeError("The project's network cannot be read.")
+    try:
+        pack = flow_service._pack_for(
+            {
+                "archetype": args["archetype"],
+                "pack_overrides": args.get("pack_overrides"),
+            }
+        )
+        net = S._private_copy(network)
+        try:
+            arch.apply_archetype_pack_detailed(net, pack)
+        except arch.ArchetypePackError:
+            pass  # the study's own apply_pack stage reports it; the links are read as they stand
+        dtc = S.derive_dtc_config(
+            net,
+            pack,
+            attribution=args.get("dtc_attribution") or "bus_aggregate_not_per_load",
+        )
+    except Exception as exc:  # noqa: BLE001 — an unreadable network counts no contingency
+        raise FreezeError(
+            "The project's islanding contingencies cannot be read."
+        ) from exc
+    if dtc is None:
+        raise FreezeError(
+            "The project has no islanding contingency the off-grid stress can run "
+            "(an import Link and a bus tagged eh_critical)."
+        )
+    links = [str(x) for x in dtc.islanding_contingencies]
+    return links, {
+        "critical_bus_ids": list(dtc.critical_bus_ids),
+        "islanding_contingencies": links,
+    }
+
+
+def card(frozen):
+    """What a frozen EH step with counted contingencies shows on its card
+    (G1): K, the links, and the solves it reserves. None otherwise."""
+    held = (frozen or {}).get("contingencies")
+    if not isinstance(held, dict):
+        return None
+    return {
+        "tool": TOOL,
+        "contingencies": held.get("count"),
+        "links": list(held.get("links") or []),
+        "budget_solves": (frozen.get("args") or {}).get("budget_solves"),
+    }
+
+
+def pass_short(path, steps):
+    """Study harness 12c (GK B (47) Q1-i): a granted run's solve pass whose EH
+    study counted its islanding contingencies starts only when the solves
+    left cover all of it: the queued solve, the study's frozen `budget_solves`
+    (its stages and the K stress solves) and each native action's solves.
+    `(need, left)` when they do not, else None. The first pass and each L2
+    round enter the solve stage through the one place that calls this
+    (`assistant_tasks._advance_run`), and the run's steps dispatch one at a
+    time, so nothing else spends between the check and the pass's own
+    reservations."""
+    from services import run_actions, run_envelope
+
+    if not any(
+        is_eh_step(s) and isinstance((s.get("frozen") or {}).get("contingencies"), dict)
+        for s in steps
+    ):
+        return None
+    envelope = run_envelope._load(path)
+    if envelope is None or envelope.get("state") != "granted":
+        return None  # step by step: each step's own card and check
+    need = 0
+    for s in steps:
+        if is_eh_step(s):  # before RUN_TOOLS, which lists it too
+            need += int((s.get("args") or {}).get("budget_solves") or 0)
+        elif s["tool"] in run_envelope.RUN_TOOLS:
+            need += 1
+        elif run_actions.is_action(s):
+            need += int((s.get("frozen") or {}).get("solves") or run_actions.SOLVES)
+    left = envelope["budget"]["solves"] - run_envelope.solves_used(envelope)
+    return (need, left) if need > left else None
 
 
 def fill(steps, frozen) -> None:
@@ -146,6 +262,8 @@ def fill(steps, frozen) -> None:
         if is_eh_step(step) and step["args"] == UNFROZEN and frozen is not None:
             step["args"] = json.loads(json.dumps(frozen["args"]))
             step["frozen"] = json.loads(json.dumps(frozen))
+            if card(frozen) is not None:
+                step["card"] = card(frozen)
 
 
 def stage_frozen(path, task, profile, ctx):
@@ -222,6 +340,37 @@ def admit(path, task, step, args, ctx):
             "The project's reliability goal changed since the study's card was drawn; "
             "review the run again."
         )
+    held = frozen.get("contingencies")
+    if held is not None:
+        # Study harness 12c (G1): the K the card showed is the args' own, and
+        # still the project's; else nothing is reserved and nothing solves.
+        if (
+            not isinstance(held, dict)
+            or held.get("links")
+            != ((args.get("dtc_config") or {}).get("islanding_contingencies"))
+            or held.get("count") != len(held.get("links") or [])
+        ):
+            _stop(task, ARGS_KIND)
+            return (
+                ARGS_KIND,
+                "The Energy Hub study runs only with the arguments its card showed.",
+            )
+        try:
+            now = islanding(getattr(ctx, "network", None), args)[0]
+        except FreezeError:
+            now = None
+        if now != held["links"]:
+            _stop(task, CONTINGENCY_KIND)
+            return CONTINGENCY_KIND, (
+                f"The study's card showed {held['count']} islanding contingencies "
+                f"({', '.join(held['links'])}); the project now has "
+                + (
+                    f"{len(now)} ({', '.join(now)})"
+                    if now is not None
+                    else "none readable"
+                )
+                + ". Review the run again."
+            )
     budget = args.get("budget_solves")
     envelope = run_envelope._load(path)
     if envelope is not None and envelope.get("state") == "granted":
