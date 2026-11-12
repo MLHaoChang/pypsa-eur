@@ -152,7 +152,9 @@ export default function HourDayHeatmap({
             return {
               view: 'hour-day-heatmap', figure: `${filename}_${grid.days[0]}_${grid.days[grid.days.length - 1]}`, unit: unitOf(csv),
               columns: ['date', 'hour', csv], rows, rowsTotal: rows.length,
-              note: rows.length > kept ? `table holds the first ${kept.toLocaleString('en')} of ${rows.length.toLocaleString('en')} hours; the picture shows all` : undefined,
+              note: [`${format(scale.min)} → ${format(scale.max)}, stronger colour is higher`, scaleNote,
+                rows.length > kept ? `table holds the first ${kept.toLocaleString('en')} of ${rows.length.toLocaleString('en')} hours; the picture shows all` : undefined,
+              ].filter(Boolean).join(' · ') || undefined,
             }
           })()} />
       }

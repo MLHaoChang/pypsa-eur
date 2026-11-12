@@ -70,6 +70,7 @@ describe('hour-by-day heatmap · report', () => {
     expect(a.unit).toBe('EUR/MWh')
     expect(a.columns).toEqual(['date', 'hour', 'price_EUR_per_MWh'])
     expect(a.rows_total).toBe(48)
+    expect(a.source_line).toContain('stronger colour is higher') // the key travels with the picture
   })
   it('two windows, and two carriers, give three ids', async () => {
     const ids = new Set([
@@ -95,6 +96,12 @@ describe('storage heatmap · report', () => {
     expect(spec.view).toBe('storage-heatmap')
     expect(spec.columns).toEqual(['date', 'hour', 'power_MW'])
     expect(spec.rows_total).toBe(48)
+    expect(spec.source_line).toContain('Charge (blue) · Discharge (red)')
+  })
+  it('says in the caption when only the first days are drawn', async () => {
+    const days = Array.from({ length: 33 }, (_, i) => `2030-07-${String(i + 1).padStart(2, '0')}`.replace('2030-07-3', '2030-08-0'))
+    const spec = await saved(draw(days))
+    expect(spec.source_line).toContain('Showing the first 31 of 33 days')
   })
   it('a different window or file name is a different chart', async () => {
     const ids = new Set([
@@ -116,6 +123,7 @@ describe('tornado · report', () => {
     expect(spec.view).toBe('tornado')
     expect(spec.figure).toBe('battery-npv-drivers')
     expect(spec.rows).toHaveLength(2)
+    expect(spec.source_line).toContain('red: below the base case · green: above the base case')
   })
 })
 

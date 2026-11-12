@@ -59,14 +59,15 @@ const xmlEsc = (t: string) => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&
 /** The grid as one <svg>, for the report: opacity (not color-mix) so every renderer agrees. */
 function gridPicture(
   grid: { days: number[][]; dayLabels: string[] }, maxAbs: number, mode: 'diverging' | 'unsigned-blue' | 'unsigned-red',
-  cellW: number, cellH: number,
+  cellW: number, cellH: number, key: { negative: string; positive: string; note?: string },
 ): SerializedSVG {
   const css = getComputedStyle(document.documentElement)
   const tok = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback
   const blue = tok('--color-info', '#2563eb'), red = tok('--color-danger', '#dc2626')
   const bg = tok('--color-bg', '#ffffff'), text = tok('--color-muted', '#64748b')
   const left = 56, top = 16
-  const width = left + 24 * cellW, height = top + grid.days.length * (cellH + 2)
+  const keyH = key.note ? 34 : 20
+  const width = left + 24 * cellW, height = top + grid.days.length * (cellH + 2) + keyH
   const parts = [`<?xml version="1.0" standalone="no"?>\r\n<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">`,
     `<rect width="100%" height="100%" fill="${bg}"/>`]
   for (const h of [0, 4, 8, 12, 16, 20, 23]) {
@@ -82,6 +83,14 @@ function gridPicture(
       parts.push(`<rect x="${left + h * cellW}" y="${y}" width="${cellW - 1}" height="${cellH}" fill="${colour}" fill-opacity="${share.toFixed(3)}"/>`)
     })
   })
+  const ky = top + grid.days.length * (cellH + 2) + 12
+  const swatch = (x: number, colour: string, label: string) => {
+    parts.push(`<rect x="${x}" y="${ky - 9}" width="12" height="10" fill="${colour}" fill-opacity="0.8"/>`,
+      `<text x="${x + 16}" y="${ky}" font-size="9" fill="${text}">${xmlEsc(label)}</text>`)
+  }
+  if (mode === 'diverging') swatch(left, blue, `${key.negative}, up to ${maxAbs.toFixed(1)} MW`)
+  swatch(mode === 'diverging' ? left + 190 : left, mode === 'unsigned-blue' ? blue : red, `${key.positive}, up to ${maxAbs.toFixed(1)} MW · stronger colour is higher`)
+  if (key.note) parts.push(`<text x="${left}" y="${ky + 14}" font-size="9" fill="${text}">${xmlEsc(key.note)}</text>`)
   parts.push('</svg>')
   return { source: parts.join(''), width, height }
 }
@@ -198,8 +207,12 @@ export default function StorageHeatmap({
               view: 'storage-heatmap', figure: `${filename}_${grid.dayDates[0]}_${grid.dayDates[grid.dayDates.length - 1]}`, unit: 'MW',
               columns: ['date', 'hour', 'power_MW'], rows,
               rowsTotal: rows.length,
-              note: grid.truncated ? `first ${MAX_DAYS} of ${grid.totalDays} days` : undefined,
-              picture: () => gridPicture(grid, grid.maxAbs, effMode, cellW, cellH),
+              note: [grid.truncated ? `Showing the first ${MAX_DAYS} of ${grid.totalDays} days` : '',
+                `${negLabel} (blue) · ${posLabel} (red) · stronger colour is higher`].filter(Boolean).join(' · '),
+              picture: () => gridPicture(grid, grid.maxAbs, effMode, cellW, cellH, {
+                negative: negLabel, positive: posLabel,
+                note: grid.truncated ? `Showing the first ${MAX_DAYS} of ${grid.totalDays} days` : undefined,
+              }),
             }} />
         )
       })()}
