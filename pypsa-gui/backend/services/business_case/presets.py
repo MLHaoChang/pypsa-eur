@@ -75,7 +75,8 @@ class OfferedRow(BaseModel):
     units: list[Unit] = Field(min_length=1)
     # `linked:capacity` is a picker token (a capacity to choose); a full linked id is valid too.
     sources: list[
-        Literal["linked:capacity"] | Annotated[str, Field(pattern=QUANTITY_SOURCE_PATTERN)]
+        Literal["linked:capacity"]
+        | Annotated[str, Field(pattern=QUANTITY_SOURCE_PATTERN)]
     ]
     line: LineItem
 

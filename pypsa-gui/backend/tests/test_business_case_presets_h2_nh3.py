@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 
-import numpy as np
 import pytest
 
 from models.business_case import LineItem
@@ -21,7 +20,6 @@ from services.process_products import t_per_unit
 from tests.test_business_case_engine import PACK, _ic
 from tests.test_business_case_guards import OPS, _by_year
 from tests.test_business_case_linked_outputs import (
-    T,
     _built,
     _value,
 )
@@ -63,11 +61,16 @@ def _offtake_mwh(n, load) -> dict:
         years_for_period,
     )
 
-    x = n.get_switchable_as_dense("Load", "p_set")[load] * snapshot_weights(n, "generators")
+    x = n.get_switchable_as_dense("Load", "p_set")[load] * snapshot_weights(
+        n, "generators"
+    )
     if not hasattr(x.index, "levels"):
         return {None: float(x.sum()) / years_for_period(period_years_map(n), None)}
     years = period_years_map(n)
-    return {int(p): float(v) / years_for_period(years, p) for p, v in x.groupby(level=0).sum().items()}
+    return {
+        int(p): float(v) / years_for_period(years, p)
+        for p, v in x.groupby(level=0).sum().items()
+    }
 
 
 def _ids(template: str) -> set[str]:
@@ -99,7 +102,9 @@ def test_the_preset_rows_are_spec_6_3_and_6_4(template):
 
 
 def test_the_h2_premium_hint_is_the_hydrogen_bank_range_and_ammonia_the_h2global_lot():
-    h2 = {ln.name: ln for ln in P.preset("eh_h2_hub", "h2_offtake", currency="EUR").lines}
+    h2 = {
+        ln.name: ln for ln in P.preset("eh_h2_hub", "h2_offtake", currency="EUR").lines
+    }
     assert h2["H2 offtake"].hint is None  # no public offtake benchmark (research §1)
     p = h2["Production premium"].hint
     assert (p.low, p.high, p.unit, p.year) == (0.37, 0.48, "EUR/kg", 2024)
@@ -116,7 +121,11 @@ def test_every_linked_id_exists_on_the_built_template(template):
     rows = P.preset(template, CASES[template][0], currency="EUR").lines + [
         o.line for o in P.offered_rows(template)
     ]
-    linked = [ln.quantity_source[7:-2] for ln in rows if ln.quantity_source.startswith("linked:")]
+    linked = [
+        ln.quantity_source[7:-2]
+        for ln in rows
+        if ln.quantity_source.startswith("linked:")
+    ]
     assert linked and set(linked) <= ids
     o2 = [o for o in P.offered_rows(template) if o.line.category == "by_product"]
     assert len(o2) == n_o2 and all(o.line.unit == "t" for o in o2)
@@ -153,9 +162,7 @@ def _run(template, served, lost_share):
     lpm = L.LostProductionMap(
         slack_bus={f"__lost_{bus}": bus},
         load_bus={load: bus},
-        share={
-            f"__lost_{bus}": {load: L.Series("x", "share", {None: lost_share}, {})}
-        },
+        share={f"__lost_{bus}": {load: L.Series("x", "share", {None: lost_share}, {})}},
         unread={},
     )
     inputs = _fill(template)
@@ -195,4 +202,3 @@ def test_g3_a_shortfall_lowers_revenue_once(template):
 def test_g4_the_reference_purchase_is_absent(template):
     bc, _r = _run(template, 1000.0, 1.0)
     assert bc.case.counterfactual == ()
-
