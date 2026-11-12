@@ -245,3 +245,5 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A variable term on the relaxing side of a ≤ row (a draw that raises the allowance) needs an upper bound; the gross-aux z ≥ p trick tightens itself only on the binding side (#1424).
 - A metric that classifies sources fails closed: any non-renewable energy it can neither count nor rule out makes the value None with a reason, never a clean number (#1423 F1′/F1″, #1424 F1/R13).
 - Test fixtures for a follower or reader use the record shape the real writer saves, never a hand-made shape (#1427 F1/F3).
+- A share s that scales a linked revenue line scales that bus's lost-production drop by the same s (f × s, capped at 1, summed per bus): a shortfall counts once, and s = 0 means no link (#1430 P4, GK B (51)).
+- `linked_share` is a commercial sold share only. A year-varying share used as physical lease-up is a volume factor under ruling 6: it is refused, or never offered, until the dispatched-volume cost lines scale with it (#1430 F2, GK B (51)).
