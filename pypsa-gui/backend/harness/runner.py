@@ -1180,7 +1180,10 @@ class Runner:
             states = [continuation._queue_job_status(job) for job in step["job"]["jobs"]]
             if states and all(s in ("queued", "running") for s in states):
                 continuation.follow_queue_job(path, ticket)
-            elif states and all(s not in ("queued", "running", "unknown") for s in states):
+            elif states and (all(s not in ("queued", "running", "unknown") for s in states)
+                             or all(j.get("kind") in continuation.STUDY_STAGE_KINDS.values() for j in step["job"]["jobs"])):
+                # LC-45 (L7): a study run's record does not survive a restart; it reads
+                # `unknown` and settles uncertain, never left waiting.
                 continuation.settle_queue_from_record(path, ticket)
         if ctx is not None:
             from harness import run_eh, run_loops

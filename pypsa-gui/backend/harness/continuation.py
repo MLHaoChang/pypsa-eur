@@ -145,19 +145,27 @@ STUDY_STAGE_KINDS = {"options": "study_options", "tornado": "study_tornado"}
 
 def plan_jobs(tool, args, result) -> list[dict]:
     """The jobs a plan step waits on (LC-45): a sweep or enqueue's queue jobs, a
-    profile generation's queued job, or a decision study's run record. The
-    study's job_id is `study:<study_id>:<stage>`; the record is read by its
-    project and study."""
+    profile generation's queued job, or a decision study's run record.
+
+    A profile job carries the project and the source and technology it was
+    asked for, so its artifact is matched to that request (L1). A study job's
+    `job_id` is `study:<study_id>:<stage>` and its `attempt` is the
+    `started_at` of the record the step's own call started, so a later re-run's
+    record never settles this step (L3)."""
+    args = args if isinstance(args, dict) else {}
+    if tool == "generate_renewable_profile":
+        return [{**job, "kind": "profile_gen", "project_ref": str(args.get("project_id", "")),
+                 "source": str(args.get("source") or "synthetic"), "technology": str(args.get("technology", ""))}
+                for job in queue_jobs(result)]
     if tool != "run_decision_study":
-        jobs = queue_jobs(result)
-        if tool == "generate_renewable_profile":
-            jobs = [{**job, "kind": "profile_gen"} for job in jobs]
-        return jobs
-    if not isinstance(result, dict) or not isinstance(args, dict) or not args.get("study_id"):
+        return queue_jobs(result)
+    if not isinstance(result, dict) or not args.get("study_id"):
         return []
     stage = result.get("stage") if result.get("stage") in STUDY_STAGE_KINDS else "options"
-    return [{"job_id": f"study:{args['study_id']}:{stage}", "kind": STUDY_STAGE_KINDS[stage],
-             "project_id": str(args.get("project", "")), "study_id": str(args["study_id"])}]
+    job = {"job_id": f"study:{args['study_id']}:{stage}", "kind": STUDY_STAGE_KINDS[stage],
+           "project_id": str(args.get("project", "")), "study_id": str(args["study_id"])}
+    job["attempt"] = _study_record(job).get("started_at")
+    return [job]
 
 
 def queue_jobs(result) -> list[dict]:
@@ -177,13 +185,38 @@ def queue_jobs(result) -> list[dict]:
             for job, name in found if isinstance(job, dict) and job.get("id")]
 
 
+KNOWN_KINDS = frozenset({None, "profile_gen", *STUDY_STAGE_KINDS.values()})
+
+
+def _study_state(job) -> tuple[str, str | None]:
+    """(native status, reason) of a decision-study step's own run record.
+
+    `done` is completed only when nothing was left unreached; otherwise it is
+    `partial` with the reason (L4). A record that is gone, unreadable or no
+    longer the one this step started is `unknown` (L3, L5)."""
+    rec = _study_record(job)
+    status = rec.get("status")
+    if not status or rec.get("started_at") is None or rec.get("started_at") != job.get("attempt"):
+        return "unknown", None
+    if status == "done":
+        left = (rec.get("pending") and "options not reached: " + ", ".join(map(str, rec["pending"]))
+                or rec.get("budget_exhausted") and "the solve budget ran out"
+                or rec.get("deadline_exceeded") and str(rec["deadline_exceeded"])
+                or rec.get("error"))
+        return ("partial", str(left)[:200]) if left else ("completed", None)
+    if status == "aborting":
+        return "running", None
+    return status, (str(rec["error"])[:200] if rec.get("error") else None)
+
+
 def _queue_job_status(job) -> str:
     """The job's own status from the solve queue, as the acting user sees it."""
     from routers.solve_queue import _visible_job_or_404
     from services import chat_tools
+    if job.get("kind") not in KNOWN_KINDS:
+        return "unknown"  # L2: a kind this code does not know is never completed
     if job.get("kind") in STUDY_STAGE_KINDS.values():
-        status = _study_record(job).get("status") or "unknown"
-        return "completed" if status == "done" else "running" if status == "aborting" else status
+        return _study_state(job)[0]
     try:
         with chat_tools._acting() as (db, user):
             return _visible_job_or_404(db, user, job["job_id"]).get("status") or "unknown"
@@ -205,23 +238,28 @@ def _study_record(job) -> dict:
 
 
 def _profile_artifact(job) -> dict | None:
-    """The pending profile a completed `profile_gen` job wrote, or None."""
+    """The pending profile THIS `profile_gen` job wrote, or None (L1).
+
+    The artifact must name the job's id and carry the source and technology the
+    call asked for; it is read from the project the call named, so an earlier
+    job's artifact or another project's never counts."""
     from services import chat_tools
     try:
-        pending = chat_tools.list_pending_profiles(job["project_id"]).get("pending") or []
+        pending = chat_tools.list_pending_profiles(job["project_ref"]).get("pending") or []
     except Exception:  # noqa: BLE001 — unreadable evidence is no evidence
         return None
-    found = next((r for r in pending if r.get("job_id") == job["job_id"]), None)
-    if found is None:
+    found = next((r for r in pending if isinstance(r, dict) and r.get("job_id") == job["job_id"]), None)
+    if found is None or found.get("source") != job.get("source"):
         return None
-    return {"job_id": job["job_id"], "project_id": job["project_id"], "profile_job_id": job["job_id"]}
+    if job.get("technology") and found.get("technology") != job["technology"]:
+        return None
+    return {"job_id": job["job_id"], "project_id": job["project_ref"], "source": found.get("source")}
 
 
 def _queue_job_error(job) -> str | None:
     """A failed job's own error line, bounded; None when unreadable."""
     if job.get("kind") in STUDY_STAGE_KINDS.values():
-        error = _study_record(job).get("error")
-        return str(error)[:200] if error else None
+        return _study_state(job)[1]
     from routers.solve_queue import _visible_job_or_404
     from services import chat_tools
     try:
@@ -327,7 +365,7 @@ def queue_outcome(jobs) -> tuple[str, str, dict]:
             case["status"] = ("not_applied" if run and "capture" in run else "completed") if run else "unverified"
         else:
             case["status"] = native
-            if native == "failed":
+            if native == "failed" or job.get("kind") in STUDY_STAGE_KINDS.values():
                 case["error"] = _queue_job_error(job)
         cases.append(case)
     if natives and all(n == "completed" for n in natives) and all(runs):
