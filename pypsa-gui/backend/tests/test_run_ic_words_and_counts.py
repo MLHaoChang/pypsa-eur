@@ -225,7 +225,9 @@ def test_an_unknown_verdict_counts_as_not_evaluated():
     }
 
 
-@pytest.mark.parametrize("run", [{}, {"stages": None}, {"stages": {"result_gate": None}}])
+@pytest.mark.parametrize(
+    "run", [{}, {"stages": None}, {"stages": {"result_gate": None}}]
+)
 def test_a_run_with_no_result_gate_yet_counts_nothing(run):
     assert run_handoff.checks(run) == {
         "counts": {"pass": 0, "fail": 0, "not_evaluated": 0},
