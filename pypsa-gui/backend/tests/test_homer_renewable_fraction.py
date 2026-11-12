@@ -27,6 +27,7 @@ import json
 from services.reliability_goal import goal_free_config
 from services.solver.renewable_fraction import (
     _AUX,
+    _BUILT,
     _wrap_with_min_renewable_fraction,
     classify,
     infeasibility_lines,
@@ -1449,6 +1450,25 @@ def test_the_infeasibility_hint_names_the_scaled_need():
     assert any(" in 2030" in l and "needs 144.0 MWh" in l for l in hints), hints
 
 
+def test_a_solve_with_the_target_off_clears_the_previous_solves_need():
+    """F2′: the stash of the need the rows were built on is another solve's
+    after a solve with the target off; the hint must not read it."""
+    n = _network()
+    _with_row(n, f=0.5)  # first solve: the stash holds 0.5 × 24 × LOAD_MW
+    assert getattr(n, _BUILT)["demand"], getattr(n, _BUILT)
+    n.loads.loc["site", "p_set"] = 2 * LOAD_MW
+    off = _wrap_with_min_renewable_fraction(
+        n, None, SolverConfig(min_renewable_fraction=None)
+    )
+    assert off is None  # second solve, target off: the LP is untouched
+    assert getattr(n, _BUILT, None) is None
+    assert infeasibility_lines(n, SolverConfig(min_renewable_fraction=None)) == []
+    # Read with the old target, the hint uses the network's load, not the
+    # stale need of the first solve.
+    lines = infeasibility_lines(n, SolverConfig(min_renewable_fraction=0.5))
+    assert lines and f"needs {0.5 * 2 * LOAD_MW * HOURS:,.1f} MWh" in lines[0], lines
+
+
 def test_the_row_uses_the_load_scaled_by_carrier():
     n = _two_period()
     status, _, log = _solve(
@@ -1701,8 +1721,94 @@ def test_an_h2_bus_with_an_offtake_and_a_fuel_cell_fails_closed():
     )
     kpi = renewable_fraction(n)
     assert kpi["fraction"] is None and "electrolyser" in kpi["reason"], kpi
+    # R15: the reason says why in plain words, not a generic "not solved".
+    for got in (kpi, renewable_fraction_result(n, None, 0.5)):
+        reason = got["reason"]
+        assert got["fraction"] is None, got
+        assert (
+            "electrolyser feeds a bus with both a load and a path back to "
+            "electricity (ambiguous conversion)" in reason
+        ), reason
+        assert "cannot be attributed" in reason, reason
+        assert "not evaluated" not in reason and "not been solved" not in reason
     log = _with_row(_ambiguous_h2(_network()))
     assert any("WARNING" in l and "electrolyser" in l for l in log), log
+
+
+def _h2_with_negative_offtake(n, *, fuel_cell: bool, **offtake):
+    """An electrolyser into an H2 bus whose offtake is a Generator that
+    withdraws (``offtake`` sets sign or p_min_pu/p_max_pu), with or without a
+    fuel cell back to electricity."""
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Generator", "offtake", bus="h2", carrier="H2", p_nom=5.0, **offtake)
+    n.add("Link", "electrolyser", bus0="ac", bus1="h2", p_nom=10.0, efficiency=0.7)
+    if fuel_cell:
+        n.add("Link", "fuel cell", bus0="h2", bus1="ac", p_nom=5.0, efficiency=0.5)
+    return n
+
+
+_WITHDRAWS = [
+    pytest.param({"sign": -1.0}, id="sign"),
+    pytest.param({"p_min_pu": -1.0, "p_max_pu": 0.0}, id="p_min_pu"),
+]
+
+
+@pytest.mark.parametrize("offtake", _WITHDRAWS)
+def test_a_negative_generator_offtake_with_a_fuel_cell_fails_closed(offtake):
+    """R16: a Generator that withdraws is a sink, like an active Load."""
+    n = _h2_with_negative_offtake(_dispatched(), fuel_cell=True, **offtake)
+    c = classify(n)
+    assert c["ambiguous_links"] == ["electrolyser"], c
+    assert c["conversion_links"] == [] and c["storage_links"] == []
+    n.links_t.p0 = pd.DataFrame(
+        {"electrolyser": 4.0, "fuel cell": 0.0}, index=n.snapshots
+    )
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "ambiguous conversion" in kpi["reason"], kpi
+
+
+def test_a_negative_generator_offtake_given_in_time_is_a_sink():
+    n = _h2_with_negative_offtake(_network(), fuel_cell=True)
+    n.generators_t.p_min_pu["offtake"] = -1.0
+    n.generators_t.p_max_pu["offtake"] = 0.0
+    assert classify(n)["ambiguous_links"] == ["electrolyser"]
+
+
+@pytest.mark.parametrize("offtake", _WITHDRAWS)
+def test_a_negative_generator_offtake_without_a_fuel_cell_is_use(offtake):
+    n = _h2_with_negative_offtake(_dispatched(), fuel_cell=False, **offtake)
+    c = classify(n)
+    assert c["conversion_links"] == ["electrolyser"], c
+    assert c["ambiguous_links"] == [] and c["storage_links"] == []
+
+
+@pytest.mark.parametrize(
+    "gen",
+    [
+        pytest.param(
+            {"name": "__voll_h2", "carrier": "load_shedding", "p_nom": 1e3},
+            id="slack",
+        ),
+        pytest.param(
+            {"name": "__voll_h2", "carrier": "load_shedding", "sign": -1.0},
+            id="slack-withdrawing",
+        ),
+        pytest.param(
+            {"name": "h2_import", "carrier": "H2", "p_nom": 5.0}, id="positive"
+        ),
+    ],
+)
+def test_a_slack_or_positive_generator_on_the_h2_bus_is_not_a_sink(gen):
+    n = _dispatched()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Link", "electrolyser", bus0="ac", bus1="h2", p_nom=10.0, efficiency=0.7)
+    n.add("Link", "fuel cell", bus0="h2", bus1="ac", p_nom=5.0, efficiency=0.5)
+    gen = dict(gen)
+    n.add("Generator", gen.pop("name"), bus="h2", **gen)
+    c = classify(n)
+    # Storage; or, with a positive non-renewable H2 Generator, the H2 bus is
+    # a supply bus and the electrolyser exports into it. Never ambiguous.
+    assert c["ambiguous_links"] == [], c
 
 
 def test_a_reversible_converter_is_storage_or_ambiguous_never_use():

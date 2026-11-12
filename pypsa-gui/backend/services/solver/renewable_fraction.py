@@ -23,9 +23,12 @@ the electricity used on site (owner decision RENFRAC-ALL-1):
     whose H2 bus feeds a fuel cell) is not counted, or it would count twice.
     A Link that can run negative is a path back by itself, so a counted
     conversion Link never runs negative and its draw is p0 directly.
-  - Ambiguous: a path back AND an active Load on a non-electrical bus it
-    reaches (an H2 bus with both an offtake and a fuel cell). Fail closed:
-    the KPI is None when it draws, and the row logs a warning; it is not
+  - Ambiguous: a path back AND a sink on a non-electrical bus it reaches
+    (an H2 bus with both an offtake and a fuel cell). A sink is an active
+    Load, or an active non-slack Generator that withdraws (R16: sign < 0, or
+    p_max_pu ≤ 0 throughout with p_min_pu < 0 somewhere). Fail closed: the
+    KPI is None when it draws, with a reason naming the Link(s) as an
+    ambiguous conversion (R15), and the row logs a warning; it is not
     counted in the row.
   - Export is not use: elec→elec Links are not conversion, nor is a Link
     into a supply bus or a bus whose carrier names the grid or export.
@@ -189,7 +192,10 @@ def classify(n) -> dict[str, list[str]]:
                 comp["bus1"].astype(str)
             )
     links = n.links
-    candidates = {gbus[g] for g in nonren} - load_buses - branch_buses
+    # R16: a Generator that withdraws is a sink, not a supply.
+    withdraw = set(_withdrawing_generators(n))
+    candidates = {gbus[g] for g in nonren if g not in withdraw}
+    candidates -= load_buses | branch_buses
     supply = {
         b
         for b in candidates
@@ -229,7 +235,11 @@ def classify(n) -> dict[str, list[str]]:
         ],
         "unattributed_generators": _unattributed(
             n,
-            [g for g in nonren if gbus[g] not in elec or gbus[g] in supply],
+            [
+                g
+                for g in nonren
+                if g not in withdraw and (gbus[g] not in elec or gbus[g] in supply)
+            ],
             gbus,
             elec,
             set(src_links),
@@ -358,12 +368,43 @@ def _is_export_bus(n, bus: str, supply: set[str]) -> bool:
     return bus in supply or "grid" in c or "export" in c
 
 
+def _withdrawing_generators(n) -> list[str]:
+    """R16: the active, non-slack Generators that withdraw (an offtake
+    modelled as a negative Generator): ``sign`` < 0, or p_max_pu ≤ 0 at every
+    snapshot with p_min_pu < 0 at some (static or in time). A sink, like an
+    active Load, and never a supply."""
+    gens = n.generators
+    if not len(gens):
+        return []
+    slack = slack_generator_mask(gens).reindex(gens.index, fill_value=False)
+    names = [
+        g
+        for g in gens.index
+        if _active(gens, g) and not slack[g] and not str(g).startswith("__lost_")
+    ]
+    if not names:
+        return []
+    pmax = n.get_switchable_as_dense("Generator", "p_max_pu")[names]
+    pmin = n.get_switchable_as_dense("Generator", "p_min_pu")[names]
+    sign = (
+        gens["sign"].astype(float)
+        if "sign" in gens.columns
+        else pd.Series(1.0, index=gens.index)
+    )
+    return [
+        g
+        for g in names
+        if sign[g] < 0 or ((pmax[g] <= 0).all() and (pmin[g] < 0).any())
+    ]
+
+
 def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
     """R14: which active Links use electricity on site (see the module
     docstring). Returns ``conversion_links`` (counted as use),
     ``conversion_inputs`` ({link: [k of each electrical input port]}),
     ``storage_links`` (their energy comes back to electricity) and
-    ``ambiguous_links`` (a path back AND a non-electrical sink: fail closed)."""
+    ``ambiguous_links`` (a path back AND a non-electrical sink, a Load or a
+    withdrawing Generator: fail closed)."""
     out: dict[str, Any] = {
         "conversion_links": [],
         "conversion_inputs": {},
@@ -377,9 +418,10 @@ def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
     ports = {l: _ports(n, l) for l in active}
     reversible = {l for l in active if min_p_min_pu(n, l) < 0}
     loads = n.loads
-    sink_buses = {
-        str(loads.at[l, "bus"]) for l in loads.index if _active(loads, l)
-    } - elec
+    sink_buses = (
+        {str(loads.at[l, "bus"]) for l in loads.index if _active(loads, l)}
+        | {str(n.generators.at[g, "bus"]) for g in _withdrawing_generators(n)}
+    ) - elec
     for l in active:
         ins, outs = ports[l]
         e_in = [k for k, b in ins if b in elec]
@@ -599,11 +641,15 @@ def renewable_fraction(
         return out
     ambiguous = [l for l in cls["ambiguous_links"] if (_col(n.links_t.p0, l) > 0).any()]
     if ambiguous:
+        names = ", ".join(map(str, ambiguous))
         out["reason"] = (
-            "cannot tell whether the electricity drawn by "
-            + ", ".join(map(str, ambiguous))
-            + " is used on site or stored: its output both feeds a load and "
-            "comes back to electricity"
+            "the electricity drawn by "
+            + names
+            + " cannot be attributed: "
+            + names
+            + " feeds a bus with both a load and a path back to electricity "
+            "(ambiguous conversion), so it is neither counted as used on site "
+            "nor as stored"
         )
         return out
 
