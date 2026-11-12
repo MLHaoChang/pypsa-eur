@@ -768,6 +768,150 @@ def _electrolyser_utilisation(env, rule):
     return _own_solve(env, read, typed=True)
 
 
+# Study harness 13 (design §9.3 "eh_ammonia_staged"; GK A (24) C1-C7): the
+# process facts of a grid-to-process run. The binary operational check is the
+# payload the solve job leaves on the context (`process_uc.binary_check`,
+# wiped at every solve start); the delivery shortfall is read from the product
+# role Generators by their `process_role` column, never by a name.
+BINARY_EXACT_BASIS = "exact MILP: the plan committed the process units with binaries, so no relaxation to check"
+BINARY_FLAGGED_BASIS = "the periods whose binary operational check is flagged, from the solve's own check"
+SHORTFALL_BASIS = ("per period, the product short of delivery (the shortfall role Generator) over the delivery "
+                   "target, both in t/d over the period's weighted days; a grey buy-in meets delivery and is "
+                   "shown, never counted as short")
+
+
+def _process_units(env):
+    """G2P-07: the committable process units the user's form filled (a
+    throughput unit, a specific energy above 0 and a product bus that counts
+    in tonnes). None filled leaves the run waiting at stage 2: the units are
+    the user's inputs, never the agent's."""
+    from services.process_products import bus_unit
+    from services.carrier_catalog import bus_tonne_factor
+    from services.solver.process_uc import process_committable
+
+    def read(ctx):
+        n = ctx.network
+        filled = []
+        for unit in process_committable(n):
+            row = n.links.loc[unit]
+            energy = row.get("specific_energy_kwh_per_t")
+            bus = str(row.get("bus1") or "")
+            tf = bus_tonne_factor(n, bus) if bus in n.buses.index else None
+            if tf is None and bus in n.buses.index and bus_unit(n, bus) == "t":
+                tf = 1.0
+            throughput = row.get("throughput_unit")
+            if (isinstance(throughput, str) and throughput.strip() and _number(energy) and energy > 0
+                    and tf is not None and math.isfinite(tf) and tf > 0):
+                filled.append(str(unit))
+        return sorted(filled)
+    from harness.durable import network_guard
+
+    def guarded():
+        with network_guard():
+            return read(env.ctx)
+    if env.ctx is None:
+        return None
+    return _on(env.ctx, guarded)
+
+
+def _binary_check(env):
+    """C1, C2: `ok` only on a check whose status is `ok` and whose `flagged`
+    is the bool False; a flagged check is `flagged` with its flagged period
+    rows. An `unverified` check, a `flagged` that is not a bool and a missing
+    check are no evidence, except a missing check after a solve that committed
+    the process units with binaries: that plan is exact."""
+    from services.solver import process_uc
+
+    def read(ctx):
+        payload = getattr(ctx, "last_process_uc_check", None)
+        if payload is None:
+            cfg = (ctx.solver_state or {}).get("solver_config")
+            if process_uc.planning_uc_mode(ctx.network, cfg) == "binary":
+                return Detailed("ok", [], BINARY_EXACT_BASIS)
+            return NoEvidence("no_check", "the run's solve left no binary check (no committable process unit, "
+                                          "or a solve that did not finish optimal)")
+        status = payload.get("status")
+        if status != "ok":
+            return NoEvidence(f"check_{status}", str(payload.get("message") or f"the binary check is {status}"))
+        flagged = payload.get("flagged")
+        if flagged is False:
+            return "ok"
+        if flagged is not True:
+            return NoEvidence("flagged_unreadable", f"the binary check's flag is {flagged!r}, not a bool")
+        rows = [{k: r.get(k) for k in ("period", "window", "delta", "pct", "extra_shortfall")}
+                for r in payload.get("periods") or [] if r.get("flagged") is not False]
+        return Detailed("flagged", rows, str(payload.get("message") or BINARY_FLAGGED_BASIS))
+    return _own_solve(env, read, typed=True)
+
+
+def _weighted_tpd(frame, names, mask, w, tf):
+    """Σ w·p of `names` in t per day over the rows `mask`; None when a column
+    is missing or a value is not finite."""
+    total = 0.0
+    for name in names:
+        if name not in frame.columns:
+            return None
+        p = [float(v) for v in frame.loc[mask, name]]
+        if not all(math.isfinite(v) for v in p):
+            return None
+        total += math.fsum(a * b for a, b in zip(w, p))
+    return total * tf / (math.fsum(w) / 24.0)
+
+
+def _delivery_shortfall(env):
+    """C3, C4: per product bus with a shortfall role Generator and per
+    investment period, the delivery target, the grey buy-in and the
+    shortfall in t/d (generator weightings), and the shortfall's share of
+    the target; the value the worst row's share."""
+    from harness.calculations import solve_matches_inputs
+    from models.process_unit import product_role_generators
+    from services.carrier_catalog import bus_tonne_factor
+    from services.process_products import bus_unit
+
+    def read(ctx):
+        n = ctx.network
+        lost = product_role_generators(n, "shortfall")
+        buses = sorted({str(n.generators.at[g, "bus"]) for g in lost})
+        if not buses:
+            return NoEvidence("no_shortfall_role", "no Generator has the process_role shortfall")
+        if not solve_matches_inputs(ctx):
+            return STALE_SOLVE
+        buy = product_role_generators(n, "buy_in")
+        index = n.snapshots
+        weights = n.snapshot_weightings["generators"].reindex(index)
+        periods = list(index.get_level_values(0).unique()) if len(n.investment_periods) else [None]
+        rows = []
+        for bus in buses:
+            tf = bus_tonne_factor(n, bus)
+            if tf is None and bus_unit(n, bus) == "t":
+                tf = 1.0
+            if tf is None or not math.isfinite(tf) or tf <= 0:
+                return NoEvidence("no_tonne_factor", f"the product bus {bus} has no tonne factor")
+            loads = [str(x) for x in n.loads.index[n.loads["bus"] == bus]]
+            if not loads:
+                return NoEvidence("no_delivery", f"the product bus {bus} has no delivery load")
+            for period in periods:
+                mask = (index.get_level_values(0) == period) if period is not None else [True] * len(index)
+                w = [float(v) for v in weights[mask]]
+                if not w or not all(math.isfinite(v) and v >= 0 for v in w) or math.fsum(w) <= 0:
+                    return None
+                values = [_weighted_tpd(n.loads_t.p, loads, mask, w, tf),
+                          _weighted_tpd(n.generators_t.p, [str(g) for g in buy if n.generators.at[g, "bus"] == bus],
+                                        mask, w, tf),
+                          _weighted_tpd(n.generators_t.p, [str(g) for g in lost if n.generators.at[g, "bus"] == bus],
+                                        mask, w, tf)]
+                if any(v is None for v in values):
+                    return None
+                target, bought, short = values
+                if target <= 0:
+                    return NoEvidence("no_target", f"the product bus {bus} has no delivery in period {period}")
+                rows.append({"product": bus, "period": None if period is None else int(period),
+                             "target_tpd": target, "buy_in_tpd": bought, "shortfall_tpd": short,
+                             "shortfall_share": short / target, "assumed": False})
+        return _worst(rows, "shortfall_share")
+    return _own_solve(env, read, typed=True)
+
+
 def _handoff_kpis_read(env):
     """Issue 07 (C14): every headline KPI read back natively, on the run's context."""
     from harness import run_handoff
@@ -1047,6 +1191,11 @@ FACTS: dict[str, Fact] = {
                                   _offtake_shed_hours),
     "h2.electrolyser.utilisation": Fact("services.run_gates._electrolyser_utilisation", "utilisation", "p.u.",
                                         _electrolyser_utilisation, per_rule=True),
+    # Study harness 13: the grid-to-process run (GK A (24)).
+    "process.units": Fact("services.solver.process_uc.process_committable", "units", None, _process_units),
+    "process.binary_check": Fact("services.solver.process_uc.binary_check", "status", None, _binary_check),
+    "process.delivery.shortfall": Fact("services.run_gates._delivery_shortfall", "shortfall_share", "p.u.",
+                                       _delivery_shortfall),
     # Study harness 10a: the data-centre run (GK B (36) D1, Q1, Q2).
     "dc.campus.contingency": Fact("services.run_actions.contingency", "failing", None, _dc_campus_contingency),
     "dc.gridcode.published": Fact("services.run_actions.choose", "id", None, _dc_gridcode_published),
