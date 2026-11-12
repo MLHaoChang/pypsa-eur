@@ -84,15 +84,15 @@ def load(path: pathlib.Path) -> PresetFile:
     except (ValidationError, json.JSONDecodeError) as exc:
         raise PresetInvalid(f"{path.name}: {exc}") from exc
     if f.id != path.stem:
-        raise PresetInvalid(f"{path.name}: id {f.id!r} is not the file name")
+        raise PresetInvalid(f"{path.name}: id '{f.id}' is not the file name")
     if VERSIONS.get(f.id) != f.version:
         raise PresetInvalid(
-            f"{path.name}: version {f.version!r} is not {VERSIONS.get(f.id)!r}"
+            f"{path.name}: version '{f.version}' is not '{VERSIONS.get(f.id)}'"
         )
     for off in f.offered:
         if off.line.unit not in off.units:
             raise PresetInvalid(
-                f"{path.name}: {off.label!r} line unit not in its units"
+                f"{path.name}: '{off.label}' line unit not in its units"
             )
     return f
 
@@ -101,7 +101,7 @@ def _for_template(template_id: str, directory: pathlib.Path) -> PresetFile:
     found = [f for f in map(load, _files(directory)) if template_id in f.templates]
     if len(found) != 1:
         raise LookupError(
-            f"business-case preset for {template_id!r}: {len(found)} files"
+            f"business-case preset for '{template_id}': {len(found)} files"
         )
     return found[0]
 
@@ -113,7 +113,7 @@ def _pack(f: PresetFile):
     version = f.pack.split("@", 1)[1].split(":", 1)[0]
     pack = load_defaults_pack(version)
     if pack.stamp != f.pack:
-        raise PresetInvalid(f"{f.id}: pack {f.pack!r} is now {pack.stamp!r}")
+        raise PresetInvalid(f"{f.id}: pack '{f.pack}' is now '{pack.stamp}'")
     return pack
 
 
@@ -141,7 +141,7 @@ def preset(
     if variant is None and not f.variants:
         return BusinessCaseInputs()
     if variant not in f.variants:
-        raise LookupError(f"{template_id!r} has no business-case preset {variant!r}")
+        raise LookupError(f"'{template_id}' has no business-case preset '{variant}'")
     case = BusinessCaseInputs(
         preset=f"{f.id}.{variant}@{f.version}",
         lines=[ln.model_copy(deep=True) for ln in f.variants[variant].lines],
