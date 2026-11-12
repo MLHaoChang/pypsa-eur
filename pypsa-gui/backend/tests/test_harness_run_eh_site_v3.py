@@ -695,3 +695,121 @@ def test_a_run_record_without_the_fetch_reads_not_evaluated_and_lists_no_gap():
     )
     payload, _ = harness_chapter.build(task, None, [])
     assert payload["gaps"] == []  # @1/@2 reports are unchanged
+
+
+# ── mutant survivors (S8 follow-up) ─────────────────────────────────────────
+
+
+def test_only_usable_rows_that_are_not_writes_name_the_site():
+    lat, lon = _site_rows()
+    for row in ({**lat, "write": True}, {**lat, "status": "rejected"}):
+        assert run_intake.site([row, lon])[1]["param"] == "site.lat"
+    assert run_intake.site([{"param": None, "value": 1.0}, lat, lon]) == (SITE, None)
+
+
+def test_a_zero_with_its_own_letter_is_a_site():
+    rows = [_quoted("site.lat", 0.0, "0° N", "0"), _row("site.lon", 6.8)]
+    assert run_intake.site(rows) == ({"lat": 0.0, "lon": 6.8}, None)
+
+
+def test_the_bad_site_is_asked_for_in_its_own_words_and_other_reasons_are_kept():
+    _, gap = run_intake.site([_row("site.lat", 53.4)])
+    profile = run_profiles.resolve("eh_site@3")
+    required = profile["params"]["required"][0]
+    other = {"param": required, "kind": "not_found", "message": "x"}
+    items = run_intake.missing(profile, [], [gap, other])
+    (asked,) = [i for i in items if i["param"] == required]
+    assert asked["tried"] == ["not_found"]
+    (site_item,) = [i for i in items if i["kind"] == "site_invalid"]
+    (line,) = run_intake.request_lines([site_item])
+    assert gap["message"].rstrip(".") in line
+
+
+@pytest.mark.parametrize(
+    "point",
+    [
+        {"lat": 53, "lon": 6.8},
+        {"lat": 85.06, "lon": 6.8},
+        {"lat": 53.4, "lon": -180.01},
+        {"lat": 53.4},
+        None,
+    ],
+)
+def test_a_frozen_point_is_two_floats_within_bounds(point):
+    assert not run_intake.site_point_ok(point)
+
+
+def test_a_frozen_point_on_the_bounds_is_valid():
+    assert run_intake.site_point_ok({"lat": -85.05, "lon": 180.0})
+    assert run_intake.site_point_ok({"lat": 85.05, "lon": -180.0})
+
+
+def test_a_badly_named_site_settles_not_named_with_its_reason(offline, tmp_path):
+    _, task = _dispatched(tmp_path, [_row("site.lat", 53.4)])
+    result = task["steps"][1]["result"]
+    assert (
+        result["state"] == "not_named"
+        and "Site longitude is missing" in result["reason"]
+    )
+    assert offline == []
+
+
+def test_a_run_without_its_record_freezes_no_site():
+    assert run_site.freeze({"run": None})["site"] is None
+    assert run_site.gap_line(None) is None
+
+
+def test_the_square_is_as_wide_as_it_is_tall_in_metres():
+    (lon0, lat1), (lon1, _), _, (_, lat0) = run_site.boundary({"lat": 60.0, "lon": 6.0})
+    assert lon1 - lon0 == pytest.approx(2 * (lat1 - lat0), rel=1e-6)
+
+
+def test_an_unavailable_fetch_always_has_a_reason():
+    assert run_site._unavailable("")["reason"]
+
+
+def test_terrain_without_a_missing_count_lacks_no_tile(tmp_path, monkeypatch):
+    doc = {"found": {"buildings": 0}, "truncated": False, "terrain": {}}
+    monkeypatch.setattr(site_context, "fetch_context", lambda *a, **k: doc)
+    assert run_site.fetch(tmp_path / "t-1.json", SITE, "a1")["terrain_missing"] == 0
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {**FETCHED, "state": "done"},
+        {**FETCHED, "truncated": "no"},
+        {**FETCHED, "found": []},
+        {**FETCHED, "terrain_missing": "3"},
+    ],
+)
+def test_a_record_of_the_wrong_shape_reads_unreadable(bad):
+    assert run_site.outcome(_with(bad))[0] == "unreadable"
+
+
+def test_a_fetch_step_that_has_not_completed_reads_not_run():
+    task = _with(FETCHED)
+    task["steps"][0]["status"] = "running"
+    assert run_site.outcome(task)[0] == "not_run"
+
+
+def test_a_step_takes_its_stage_from_its_registry_row():
+    assert run_actions.stage_of({"tool": run_actions.SITE_FETCH}) == "inputs"
+    assert run_actions.stage_of({"tool": "unknown"}) == run_actions.STAGE
+    assert run_actions.stage_of(None) == run_actions.STAGE
+
+
+def test_found_counts_substations_only():
+    ring = [
+        {"lat": 0, "lon": 0},
+        {"lat": 0, "lon": 1},
+        {"lat": 1, "lon": 1},
+        {"lat": 0, "lon": 0},
+    ]
+    way = lambda i, tags: {"type": "way", "id": i, "tags": tags, "geometry": ring}  # noqa: E731
+    elements = [
+        way(1, {"power": "substation"}),
+        way(2, {"landuse": "industrial"}),
+        way(3, {"natural": "water"}),
+    ]
+    assert site_context.elements_to_context(elements)["found"]["power_substations"] == 1
