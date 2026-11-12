@@ -28,6 +28,7 @@ from services.reliability_goal import goal_free_config
 from services.solver.renewable_fraction import (
     _AUX,
     _BUILT,
+    CONVERSION_NOTE,
     _wrap_with_min_renewable_fraction,
     classify,
     infeasibility_lines,
@@ -1875,6 +1876,174 @@ def test_dumping_renewables_into_an_unused_converter_buys_allowance():
     n.generators_t.p.iloc[10, n.generators_t.p.columns.get_loc("pv")] += 8.0
     kpi = renewable_fraction(n)
     assert kpi["fraction"] > before and kpi["note"], kpi
+
+
+# ── gatekeeper: the row guard, effN(t), reversible links, the note ───────
+
+
+def test_a_period_with_no_load_but_a_converter_gets_a_row():
+    """A1: what a converter draws is served, so a period with no electrical
+    Load but an active conversion Link still gets its row."""
+    n = _site_with_conversion()
+    n.loads.loc["site", "p_set"] = 0.0
+    _with_row(n, f=0.6)
+    assert row_name(None) in n.model.constraints
+    assert _rhs(n, row_name(None)) == pytest.approx(0.0)
+    co = _row_coeffs(n, row_name(None))
+    assert co[("Link-p", "electrolyser")] == {-0.4}
+    assert co[("Generator-p", "grid")] == {1.0}
+
+
+def test_a_period_with_neither_load_nor_converter_gets_no_row():
+    n = _site_with_conversion()
+    n.loads["p_set"] = 0.0  # the H2 and heat loads too: nothing feeds them
+    n.links.loc[["electrolyser", "heat_pump"], "active"] = False
+    log = _with_row(n, f=0.6)
+    assert row_name(None) not in n.model.constraints
+    assert any("period all has no electrical load" in l for l in log), log
+
+
+def _dac_in_time(n):
+    """A DAC-like Link drawing electricity on bus2 at −0.5 MW per MW of p0
+    until 11:00 and −0.25 from 12:00 (static efficiency2 −0.5)."""
+    n.add("Bus", "co2", carrier="co2")
+    n.add(
+        "Link", "dac", bus0="heat", bus1="co2", bus2="ac", efficiency2=-0.5, p_nom=4.0
+    )
+    n.links_t.efficiency2 = pd.DataFrame(
+        {"dac": [-0.5 if h < 12 else -0.25 for h in range(HOURS)]}, index=n.snapshots
+    )
+    return n
+
+
+def test_a_second_electrical_input_given_in_time_reaches_the_row():
+    """A2: the row reads efficiencyN(t), snapshot by snapshot."""
+    n = _dac_in_time(_site_with_conversion())
+    _with_row(n, f=0.6)
+    m = n.model
+    con = m.constraints[row_name(None)]
+    by_hour: dict[int, float] = {}
+    for lab, co in zip(np.ravel(con.vars.values), np.ravel(con.coeffs.values)):
+        if lab < 0:
+            continue
+        var, coord = m.variables.get_label_position(int(lab))
+        if var == "Link-p" and str(coord["name"]) == "dac":
+            by_hour[pd.Timestamp(coord["snapshot"]).hour] = round(float(co), 6)
+    assert len(by_hour) == HOURS, by_hour
+    assert {by_hour[h] for h in range(12)} == {-0.2}  # −0.4 × 0.5
+    assert {by_hour[h] for h in range(12, HOURS)} == {-0.1}  # −0.4 × 0.25
+
+
+def test_a_second_electrical_input_given_in_time_reaches_the_kpi():
+    n = _dac_in_time(_dispatch_conversion(_site_with_conversion()))
+    n.add("Load", "co2_sink", bus="co2", p_set=0.0)
+    n.links_t.p0["dac"] = 0.0
+    col = n.links_t.p0.columns.get_loc("dac")
+    n.links_t.p0.iloc[3, col] = 4.0  # 2 MWh drawn at −0.5
+    n.links_t.p0.iloc[15, col] = 4.0  # 1 MWh drawn at −0.25
+    kpi = renewable_fraction(n)
+    assert kpi["conversion_mwh"] == pytest.approx(195.0), kpi
+
+
+def _reversible_electrolyser(n):
+    """A3: a storage-classified electrolyser that can run backwards (a
+    reversible cell) between the site and an H2 bus; it runs as a fuel cell
+    at 20:00."""
+    n.add("Bus", "h2", carrier="H2")
+    n.add(
+        "Link",
+        "electrolyser",
+        bus0="ac",
+        bus1="h2",
+        p_nom=10.0,
+        efficiency=0.7,
+        p_min_pu=-1.0,
+    )
+    n.links_t.p0 = pd.DataFrame({"electrolyser": 0.0}, index=n.snapshots)
+    n.links_t.p0.iloc[20, 0] = -5.0
+    return n
+
+
+def _assert_fails_closed(n, name):
+    assert classify(n)["storage_links"] == ["electrolyser"]
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None, kpi
+    assert name in kpi["reason"] and "does not count" in kpi["reason"], kpi
+
+
+@pytest.mark.parametrize("carrier", ["gas", "grey H2"])
+def test_a_grey_h2_generator_behind_a_reversible_electrolyser_fails_closed(carrier):
+    n = _reversible_electrolyser(_dispatched())
+    n.add("Generator", "grey", bus="h2", carrier=carrier, p_nom=10.0)
+    n.generators_t.p["grey"] = 0.0
+    n.generators_t.p.iloc[20, n.generators_t.p.columns.get_loc("grey")] = 7.0
+    assert classify(n)["unattributed_generators"] == ["grey"]
+    _assert_fails_closed(n, "grey")
+    m = _reversible_electrolyser(_network())
+    m.add("Generator", "grey", bus="h2", carrier=carrier, p_nom=10.0)
+    log = _with_row(m)
+    assert any("WARNING" in l and "grey" in l for l in log), log
+
+
+def test_gas_through_an_smr_behind_a_reversible_electrolyser_fails_closed():
+    n = _reversible_electrolyser(_dispatched())
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=20.0)
+    n.add("Link", "smr", bus0="gas", bus1="h2", p_nom=10.0, efficiency=0.75)
+    n.generators_t.p["gas_supply"] = 0.0
+    n.generators_t.p.iloc[20, n.generators_t.p.columns.get_loc("gas_supply")] = 9.0
+    assert classify(n)["unattributed_generators"] == ["gas_supply"]
+    _assert_fails_closed(n, "gas_supply")
+
+
+def test_a_grey_h2_store_behind_a_reversible_electrolyser_fails_closed():
+    n = _reversible_electrolyser(_dispatched())
+    n.add("Store", "grey_tank", bus="h2", carrier="grey H2", e_nom=100.0)
+    n.stores_t.p = pd.DataFrame({"grey_tank": 0.0}, index=n.snapshots)
+    n.stores_t.p.iloc[20, 0] = 7.0
+    assert classify(n)["unattributed_stores"] == ["grey_tank"]
+    _assert_fails_closed(n, "grey_tank")
+    m = _reversible_electrolyser(_network())
+    m.add("Store", "grey_tank", bus="h2", carrier="grey H2", e_nom=100.0)
+    log = _with_row(m)
+    assert any("WARNING" in l and "grey_tank" in l for l in log), log
+
+
+def test_a_battery_fed_only_by_electricity_is_not_refused():
+    n = _dispatched()
+    n.add("Bus", "batt", carrier="battery")
+    n.add("Store", "cells", bus="batt", carrier="battery", e_nom=100.0)
+    n.add("Link", "bidir", bus0="ac", bus1="batt", p_nom=10.0, p_min_pu=-1.0)
+    n.stores_t.p = pd.DataFrame({"cells": 0.0}, index=n.snapshots)
+    n.stores_t.p.iloc[20, 0] = 5.0
+    n.links_t.p0 = pd.DataFrame({"bidir": 0.0}, index=n.snapshots)
+    n.links_t.p0.iloc[20, 0] = -5.0
+    c = classify(n)
+    assert c["storage_links"] == ["bidir"]
+    assert c["unattributed_generators"] == [] and c["unattributed_stores"] == []
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_a_reversible_h2_loop_without_a_non_renewable_source_is_not_refused():
+    n = _reversible_electrolyser(_dispatched())
+    n.add("Generator", "h2_pv", bus="h2", carrier="solar", p_nom=5.0)
+    n.generators_t.p["h2_pv"] = 0.0
+    c = classify(n)
+    assert c["unattributed_generators"] == [] and c["unattributed_stores"] == []
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_the_conversion_note_names_both_loopholes():
+    """A4: the payload discloses both accepted loopholes in plain words."""
+    assert CONVERSION_NOTE == (
+        "Electricity drawn by conversion units (electrolysers, heat pumps, …) "
+        "counts as used on site, whatever its source and whether or not their "
+        "output is used. So grid or diesel electricity drawn into a converter "
+        "counts as served electricity, and renewable electricity run into a "
+        "converter whose output nothing uses raises the renewable fraction."
+    )
+    kpi = renewable_fraction(_dispatch_conversion(_site_with_conversion()))
+    assert kpi["note"] == CONVERSION_NOTE
 
 
 def _templates():

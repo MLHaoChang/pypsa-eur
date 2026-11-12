@@ -35,7 +35,9 @@ the electricity used on site (owner decision RENFRAC-ALL-1):
   - Not guarded (R14j): renewable electricity dumped into a converter whose
     output nothing uses (an electrolyser into an unbounded Store) still
     counts as use, so it raises the denominator and with it the
-    non-renewable allowance. The KPI payload carries ``note`` saying so.
+    non-renewable allowance. Likewise grid or diesel electricity drawn into
+    a converter counts as served (accepted by the owner). The KPI payload
+    carries ``note`` (`CONVERSION_NOTE`) disclosing both.
 * ``E_nonren`` — the electricity that non-renewable sources put into the
   served network:
 
@@ -57,9 +59,11 @@ the electricity used on site (owner decision RENFRAC-ALL-1):
   Fail closed: a dispatched non-renewable Generator off the served network
   whose energy can reach an electrical bus by a path not counted above (a
   chain through another non-electrical bus, a multi-port Link output, a
-  second Link out of a supply bus) makes the KPI None with a reason, and the
-  LP row logs a warning naming it. Fuel that only reaches heat or hydrogen
-  is not electricity and passes.
+  second Link out of a supply bus, or a Link that can run negative run
+  backward into its bus0, e.g. a reversible electrolyser beside a grey-H2
+  Generator, an SMR or a grey-H2 Store) makes the KPI None with a reason,
+  and the LP row logs a warning naming it. Fuel that only reaches heat or
+  hydrogen is not electricity and passes.
   So is a Link from a fuel stock (a Store or StorageUnit whose own carrier is
   neither renewable nor electricity storage, on a bus with no Generator and
   no electrical inflow, whatever the bus's carrier) into an electrical bus,
@@ -122,8 +126,11 @@ _AUX = "RenewableFraction-gross"
 
 
 CONVERSION_NOTE = (
-    "Electricity drawn by conversion units (electrolysers, heat pumps, …) counts "
-    "as used on site whether or not their output is used."
+    "Electricity drawn by conversion units (electrolysers, heat pumps, …) "
+    "counts as used on site, whatever its source and whether or not their "
+    "output is used. So grid or diesel electricity drawn into a converter "
+    "counts as served electricity, and renewable electricity run into a "
+    "converter whose output nothing uses raises the renewable fraction."
 )
 
 
@@ -245,7 +252,8 @@ def classify(n) -> dict[str, list[str]]:
             set(src_links),
         ),
         "unattributed_links": _fuel_store_links(n, elec, gbus),
-        "unattributed_stores": _fuel_stocks_on_elec(n, elec),
+        "unattributed_stores": _fuel_stocks_on_elec(n, elec)
+        + _fuel_stocks_run_backward(n, elec, set(src_links)),
         **_conversion(n, elec, supply, set(src_links)),
     }
 
@@ -461,34 +469,67 @@ def _link_outputs(links: pd.DataFrame, link: str) -> list[str]:
     ]
 
 
-def _unattributed(n, gens, gbus, elec, counted) -> list[str]:
-    """The non-renewable Generators off the served network whose energy can
-    reach an electrical bus by a path the fraction does not count: through a
-    Link that is not a counted source Link (a chain through another
-    non-electrical bus, a multi-port output, a second Link out of a supply
-    bus). Fail closed (GK B): the KPI then reads None, never a value. A fuel
-    that only reaches heat or hydrogen loads is not electricity and passes."""
+def _leaks(n, bus: str, elec, counted, *, backward_only: bool = False) -> bool:
+    """Whether energy put into ``bus`` can reach an electrical bus by a path
+    the fraction does not count: forward through a Link out of a bus (but not
+    a counted source Link's bus1), or backward through a Link that can run
+    negative (p_min_pu < 0, static or in time), which delivers from its
+    output side into its bus0 (A3). ``backward_only``: only a path that runs
+    some Link backward counts (a forward path out of a fuel stock is R13's)."""
     links = n.links
-    if not len(links) or not gens:
-        return []
     out_of: dict[str, list[str]] = {}
+    into: dict[str, list[str]] = {}
     for l in links.index:
         out_of.setdefault(str(links.at[l, "bus0"]), []).append(l)
-    leaks = []
-    for g in gens:
-        seen, stack, leak = {gbus[g]}, [gbus[g]], False
-        while stack and not leak:
-            for l in out_of.get(stack.pop(), []):
-                for b in _link_outputs(links, l):
-                    if b in elec:
-                        if not (l in counted and b == str(links.at[l, "bus1"])):
-                            leak = True
-                    elif b not in seen:
-                        seen.add(b)
-                        stack.append(b)
-        if leak:
-            leaks.append(g)
-    return leaks
+        if min_p_min_pu(n, l) < 0:
+            for b in _link_outputs(links, l):
+                into.setdefault(b, []).append(l)
+    start = (bus, False)
+    seen, stack = {start}, [start]
+    while stack:
+        cur, back = stack.pop()
+        steps = [
+            (l, b, back)
+            for l in out_of.get(cur, [])
+            for b in _link_outputs(links, l)
+            if not (l in counted and b == str(links.at[l, "bus1"])) or b not in elec
+        ] + [(l, str(links.at[l, "bus0"]), True) for l in into.get(cur, [])]
+        for _l, b, b_back in steps:
+            if b in elec:
+                if b_back or not backward_only:
+                    return True
+            elif (b, b_back) not in seen:
+                seen.add((b, b_back))
+                stack.append((b, b_back))
+    return False
+
+
+def _unattributed(n, gens, gbus, elec, counted) -> list[str]:
+    """The non-renewable Generators off the served network whose energy can
+    reach an electrical bus by a path the fraction does not count (`_leaks`):
+    through a Link that is not a counted source Link (a chain through another
+    non-electrical bus, a multi-port output, a second Link out of a supply
+    bus), or backward through a Link that can run negative (a reversible
+    electrolyser run as a fuel cell off a grey-H2 bus). Fail closed (GK B):
+    the KPI then reads None, never a value. A fuel that only reaches heat or
+    hydrogen loads is not electricity and passes."""
+    if not len(n.links) or not gens:
+        return []
+    return [g for g in gens if _leaks(n, gbus[g], elec, counted)]
+
+
+def _fuel_stocks_run_backward(n, elec, counted) -> list[str]:
+    """A3: fuel stocks off the electrical buses whose energy reaches one only
+    by running a Link backward (a grey-H2 Store behind a reversible
+    electrolyser). Forward paths out of a fuel stock are R13's
+    (`_fuel_store_links`). Fail closed when they discharge."""
+    if not len(n.links):
+        return []
+    return [
+        s
+        for _c, s, bus in _fuel_stocks(n, elec)
+        if bus not in elec and _leaks(n, bus, elec, counted, backward_only=True)
+    ]
 
 
 # ── weights and periods ───────────────────────────────────────────────────
