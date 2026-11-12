@@ -37,6 +37,7 @@ the data-centre power chain (`services/dc_architecture.py`).
 from __future__ import annotations
 
 import itertools
+import re
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -45,6 +46,7 @@ import pandas as pd
 
 from services.adequacy.slack import LOST_SLACK_PREFIX, slack_generator_mask
 from services.commercial.participants import _ELECTRIC
+from services.results.carrier_kpis import _is_renewable_carrier
 from services.study import runner as _runner
 from services.study.runner import _opt_value
 
@@ -83,6 +85,9 @@ _WIND = ("onwind", "offwind", "wind")
 _GENSET = frozenset(
     {"diesel", "genset", "gas", "oil", "ocgt", "ccgt", "hfo", "lpg", "biodiesel", "chp"}
 )
+# A carrier naming a fuel-to-heat or transport asset is no genset, whatever
+# fuel it names ("gas boiler", "gas pipeline").
+_NOT_GENSET = frozenset({"boiler", "pipeline"})
 _GRID = frozenset({"grid", "grid_import", "grid_export", "grid_supply"})
 _GRID_ROLES = frozenset({"grid_supply", "grid_import", "grid_export"})
 
@@ -142,12 +147,20 @@ def slack_names(n) -> set[str]:
     return {str(x) for x in g.index[mask]}
 
 
+def _is_genset(carrier: str) -> bool:
+    """A genset carrier: one of :data:`_GENSET`'s fuel or technology tokens
+    anywhere in it, case-insensitive ("gas turbine", "Diesel genset", "urban
+    central gas CHP"), unless a :data:`_NOT_GENSET` token names it."""
+    tokens = set(re.split(r"[^a-z0-9]+", carrier.lower()))
+    return bool(tokens & _GENSET) and not tokens & _NOT_GENSET
+
+
 def _group_of(component: str, carrier: str, role: str) -> str | None:
     if role in _GRID_ROLES or carrier in _GRID:
         return "grid" if component in ("Generator", "Link") else None
     if "battery" in carrier:
         return "battery"
-    if component == "Link" and carrier in _GENSET:
+    if component == "Link" and _is_genset(carrier):
         return "genset"  # a genset modelled as a fuel-to-power Link (OCGT, CHP)
     if component != "Generator":
         return None
@@ -155,7 +168,7 @@ def _group_of(component: str, carrier: str, role: str) -> str | None:
         return "pv"
     if carrier.startswith(_WIND):
         return "wind"
-    if carrier in _GENSET:
+    if _is_genset(carrier):
         return "genset"
     return None
 
@@ -175,8 +188,10 @@ def _stranded(n, out: dict[str, list[tuple[str, str]]], slacks: set[str]) -> Non
     for comp in _BRANCHES:
         df = _static(n, comp)
         held.update(str(b) for c in ("bus0", "bus1") for b in df[c])
+    electric = _electrical_buses(n)
+    link_buses = _link_buses(n)
     touching: dict[str, set[str]] = {}
-    for name, buses in _link_buses(n).items():
+    for name, buses in link_buses.items():
         for b in buses:
             touching.setdefault(b, set()).add(name)
     grouped = {m for ms in out.values() for m in ms}
@@ -194,6 +209,7 @@ def _stranded(n, out: dict[str, list[tuple[str, str]]], slacks: set[str]) -> Non
 def classify(n) -> dict[str, list[tuple[str, str]]]:
     """``group -> [(component, name), ...]`` for the groups present."""
     slacks = slack_names(n)
+    electric = _electrical_buses(n)
     out: dict[str, list[tuple[str, str]]] = {}
     for component in _COMPONENTS:
         df = _static(n, component)
@@ -203,6 +219,12 @@ def classify(n) -> dict[str, list[tuple[str, str]]]:
             group = _group_of(
                 component, _col(df, name, "carrier"), _col(df, name, "eh_role")
             )
+            # A genset makes electricity: a Generator on a fuel bus, or a Link
+            # into a heat bus, is not one (a fuel Generator behind a genset
+            # Link joins it through `_stranded`).
+            port = {"Generator": "bus", "Link": "bus1"}.get(component)
+            if group == "genset" and port and str(df.at[name, port]) not in electric:
+                group = None
             if group is not None:
                 out.setdefault(group, []).append((component, str(name)))
     _stranded(n, out, slacks)
@@ -295,7 +317,7 @@ def _supplied(n, removed: set[tuple[str, str]]) -> bool:
     """Every load bus is reached from a non-slack generator through the
     branches and links left (gate G3). A Line or Transformer runs both ways;
     a Link runs from ``bus0`` to its other ports, and back only when its
-    ``p_min_pu`` is negative."""
+    ``p_min_pu`` is negative, static or in any snapshot of ``links_t``."""
     edges: dict[str, set[str]] = {}
 
     def edge(a: str, b: str) -> None:
@@ -308,10 +330,12 @@ def _supplied(n, removed: set[tuple[str, str]]) -> bool:
             edge(a, b)
             edge(b, a)
     links = _static(n, "Link")
+    varying = n.links_t.p_min_pu
+    back = {str(x) for x in varying.columns[(varying < 0).any()]}
     for name, buses in _link_buses(n).items():
         if ("Link", name) in removed:
             continue
-        both = float(links.at[name, "p_min_pu"]) < 0
+        both = float(links.at[name, "p_min_pu"]) < 0 or name in back
         for b in buses[1:]:
             edge(buses[0], b)
             if both:
@@ -443,6 +467,45 @@ def _non_renewable_energy(n, members, w: pd.Series, electric: set[str]) -> float
     )
 
 
+def _uncounted(n, groups, w: pd.Series) -> bool:
+    """A dispatched non-slack Generator with a non-renewable carrier
+    (``carrier_kpis._is_renewable_carrier``, the shared definition) that no
+    non-renewable path counts: not a member of :data:`NON_RENEWABLE`, nor
+    on a bus (no Load, Line or Transformer) whose every Link is such a
+    member, which then counts its delivery."""
+    members = {m for g in NON_RENEWABLE for m in groups.get(g, ())}
+    member_links = {x for comp, x in members if comp == "Link"}
+    held = {str(b) for b in _static(n, "Load")["bus"]}
+    for comp in _BRANCHES:
+        df = _static(n, comp)
+        held.update(str(b) for c in ("bus0", "bus1") for b in df[c])
+    electric = _electrical_buses(n)
+    link_buses = _link_buses(n)
+    touching: dict[str, set[str]] = {}
+    for name, buses in link_buses.items():
+        for b in buses:
+            touching.setdefault(b, set()).add(name)
+    slacks = slack_names(n)
+    g = n.generators
+    for x in g.index:
+        x = str(x)
+        if x in slacks or ("Generator", x) in members:
+            continue
+        if _is_renewable_carrier(str(g.at[x, "carrier"])):
+            continue
+        bus = str(g.at[x, "bus"])
+        links = touching.get(bus, set())
+        if bus not in electric and not any(
+            b in electric for lk in links for b in link_buses[lk]
+        ):
+            continue  # its output never reaches electricity (e.g. a boiler's fuel)
+        if bus not in held and links and links <= member_links:
+            continue  # covered: its output leaves only through counted links
+        if _energy(n.generators_t.p, [x], w) > 0:
+            return True
+    return False
+
+
 def renewable_fraction(n) -> float | None:
     """
     The share of served load not met by a genset or the grid, HOMER's
@@ -451,8 +514,9 @@ def renewable_fraction(n) -> float | None:
     gross (export does not net against it) and as non-renewable; an import
     Link counts once, by its delivery (:func:`_non_renewable_energy`). Served load
     is the load less the slacks' shortfall. Energy is weighted by
-    :func:`_weights`. None when the network has no dispatch or serves no load
-    (never 1.0 or NaN).
+    :func:`_weights`. None when the network has no dispatch or serves no load,
+    or when a dispatched non-renewable Generator is neither counted nor a
+    slack (:func:`_uncounted`: fail closed, never 1.0 or NaN).
 
     The ONE definition: homer-parity 01a's ``renewable_fraction`` KPI reuses
     or replaces this function.
@@ -467,6 +531,8 @@ def renewable_fraction(n) -> float | None:
     if not served > 0:
         return None
     groups = classify(n)
+    if _uncounted(n, groups, w):
+        return None
     non_ren = sum(
         _non_renewable_energy(n, groups.get(g, ()), w, electric) for g in NON_RENEWABLE
     )
@@ -530,7 +596,11 @@ def row_of(arch: SupplyArchitecture, n) -> dict:
         unavailable["capex_eur"] = why
     rf = renewable_fraction(n)
     if rf is None:
-        unavailable["renewable_fraction"] = "no_served_load"
+        unavailable["renewable_fraction"] = (
+            "uncounted_non_renewable"
+            if not n.generators_t.p.empty and _uncounted(n, groups, _weights(n))
+            else "no_served_load"
+        )
     return {
         "architecture_id": arch.architecture_id,
         "label": arch.label,

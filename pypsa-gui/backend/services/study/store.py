@@ -140,8 +140,8 @@ def _aux_path(project_dir: pathlib.Path, study_id: str, kind: str) -> pathlib.Pa
     # be a bare token and the resolved path must stay in the study directory.
     if not isinstance(study_id, str) or not STUDY_ID_RE.fullmatch(study_id):
         raise StudyNotFound(study_id)
-    root = os.path.realpath(os.fspath(studies_dir(project_dir)))
-    full = os.path.realpath(os.path.join(root, f"{study_id}.{kind}.json"))
+    root = os.path.normpath(os.fspath(studies_dir(project_dir)))  # as `_path`
+    full = os.path.normpath(os.path.join(root, f"{study_id}.{kind}.json"))
     if not full.startswith(root + os.sep):
         raise StudyNotFound(study_id)
     return pathlib.Path(full)

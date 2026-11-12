@@ -588,7 +588,7 @@ def _ocgt_net() -> pypsa.Network:
 def test_a_link_genset_counts_its_electricity_not_its_fuel():
     """F2: 2.5 MWh of gas through an OCGT at 0.4 delivers 1 MWh of 2 served."""
     n = _ocgt_net()
-    assert A.classify(n)["genset"] == [("Generator", "fuel"), ("Link", "ocgt")]
+    assert set(A.classify(n)["genset"]) == {("Generator", "fuel"), ("Link", "ocgt")}
     m = A.omit(n, _arch(n, "pv"))
     assert not {"fuel", "ocgt"} & _names(m)
     n.snapshot_weightings.loc[:, "generators"] = [1.0, 1.0, 0.0, 0.0]
@@ -686,3 +686,79 @@ def test_row_cost_is_the_runners_system_cost(monkeypatch):
     m = _solved(A.omit(n, arch), pv=[1.0] * 4, genset=[0.0] * 4, objective=1.0)
     monkeypatch.setattr(R, "system_cost", lambda net: 42.0)
     assert A.row_of(arch, m)["total_cost_eur_per_year"] == 42.0
+
+
+# ── GK B round 3 (F1', F6') ───────────────────────────────────────────────
+
+
+def test_an_uncounted_non_renewable_generator_makes_the_fraction_none():
+    """F1'(a): a grid Generator that also feeds a non-member Link is neither
+    counted nor a slack, so the fraction is unknown, never 1.0."""
+    n = _eh_setup_net()
+    n.add("Bus", "aux", carrier="AC")
+    n.add("Link", "aux_link", bus0="grid", bus1="aux", carrier="AC", p_nom=1.0)
+    n = _solved(n, pv=[1.0] * 4, genset=[0.0] * 4, grid=[0.0, 0.0, 2.0, 0.0])
+    assert A.renewable_fraction(n) is None
+    row = A.row_of(_arch(_eh_setup_net(), "pv+genset"), n)
+    assert row["unavailable"]["renewable_fraction"] == "uncounted_non_renewable"
+
+
+@pytest.mark.parametrize(
+    "carrier", ["gas turbine", "Diesel genset", "urban central gas CHP"]
+)
+def test_a_link_genset_is_recognised_by_its_fuel_or_technology_token(carrier):
+    """F1'(b): 1.5 MWh delivered by the genset Link of 4 MWh served."""
+    n = _ocgt_net()
+    n.links.loc["ocgt", "carrier"] = carrier
+    assert set(A.classify(n)["genset"]) == {("Generator", "fuel"), ("Link", "ocgt")}
+    n.generators_t.p = pd.DataFrame(
+        {"pv": [1.0, 1.0, 0.0, 0.5], "fuel": [0.0, 0.0, 2.5, 1.25]},
+        index=n.snapshots,
+    )
+    n.links_t.p1 = pd.DataFrame({"ocgt": [0.0, 0.0, -1.0, -0.5]}, index=n.snapshots)
+    assert A.renewable_fraction(n) == pytest.approx(1 - 1.5 / 4)
+
+
+def test_a_fuel_generator_behind_a_counted_genset_link_is_covered():
+    """F1': the Link's delivery stands for its fuel Generator (a non-renewable
+    carrier no genset token names), so the fraction stays a number."""
+    n = _ocgt_net()
+    n.generators.loc["fuel", "carrier"] = "methane"
+    assert A._group_of("Generator", "methane", "") is None
+    n.generators_t.p = pd.DataFrame(
+        {"pv": [1.0, 1.0, 1.0, 0.0], "fuel": [0.0, 0.0, 0.0, 2.5]}, index=n.snapshots
+    )
+    n.links_t.p1 = pd.DataFrame({"ocgt": [0.0, 0.0, 0.0, -1.0]}, index=n.snapshots)
+    assert A.renewable_fraction(n) == pytest.approx(0.75)
+
+
+def test_a_link_that_runs_back_in_some_snapshot_supplies_the_load():
+    """F6': a static p_min_pu of 0 with a time-varying -1 runs both ways."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=2, freq="h"))
+    n.add("Bus", "site")
+    n.add("Bus", "g")
+    n.add("Load", "l", bus="site", p_set=1.0)
+    n.add("Generator", "pv", bus="site", carrier="solar", p_nom_extendable=True)
+    n.add("Generator", "grid", bus="g", carrier="grid", p_nom=5.0)
+    n.add("Link", "out", bus0="site", bus1="g", p_nom=5.0, p_min_pu=0.0)
+    n.links_t.p_min_pu = pd.DataFrame({"out": [0.0, -1.0]}, index=n.snapshots)
+    assert "grid" in [a.architecture_id for a in A.architectures_for(n)]
+
+
+def test_a_fuel_generator_feeding_only_heat_does_not_blank_the_fraction():
+    """F1' bound: a gas Generator whose only Link runs to a heat bus never
+    reaches electricity, so it is outside the (electrical) fraction."""
+    n = _solved(
+        _net(), pv=[1.0, 1.0, 0.0, 1.0], genset=[0.0, 0.0, 1.0, 0.0], grid=[0.0] * 4
+    )
+    for b, c in (("gas", "gas"), ("heat", "heat")):
+        n.add("Carrier", c)
+        n.add("Bus", b, carrier=c)
+    n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=5.0)
+    n.add("Link", "boiler", bus0="gas", bus1="heat", carrier="gas boiler", p_nom=5.0)
+    n.add("Load", "heat_load", bus="heat", p_set=1.0)
+    n.generators_t.p["gas_supply"] = [1.0] * 4
+    genset = set(A.classify(n)["genset"])
+    assert not {("Generator", "gas_supply"), ("Link", "boiler")} & genset
+    assert A.renewable_fraction(n) == pytest.approx(0.75)
