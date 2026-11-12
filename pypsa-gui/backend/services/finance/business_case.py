@@ -188,6 +188,16 @@ def _slack_of(ln: TemplateLine) -> str | None:
     return parts[2] if ln.source == "asset" and len(parts) == 3 else None
 
 
+def _is_lost(ln: TemplateLine, lp: LostProductionMap | None) -> bool:
+    """A line that values a product shortfall: the `lost_production` stream, or the
+    opex of a slack the map names whatever stream it is booked in. A grid-side slack's
+    captured opex is booked `energy_import` (`participants`, `grid_side_asset_cost`),
+    so the stream alone would miss it and the sale line would count it twice."""
+    if ln.stream == LOST_PRODUCTION:
+        return True
+    return lp is not None and _slack_of(ln) in lp.slack_bus
+
+
 def _triggers(lines) -> list[tuple[LineItem, str, str]]:
     """(line, output kind, bus or load) of each line that drops `lost_production`:
     a revenue line linked to served product (L1, L2, L2b). An opex line on the same
@@ -235,7 +245,7 @@ def _drops(
         active = [
             x for x in trig if _span(x[0], horizon)[0] <= y <= _span(x[0], horizon)[1]
         ]
-        lost = [ln for ln in t.lines if ln.stream == LOST_PRODUCTION]
+        lost = [ln for ln in t.lines if _is_lost(ln, lp)]
         if not active or not lost:
             continue
         if lp is None:
@@ -270,7 +280,7 @@ def _drops(
                 for ld in sorted(x for x in loads if lp.load_bus.get(x) == bus):
                     sh = by_load.get(ld)
                     v = sh.for_year(y) if isinstance(sh, Series) else None
-                    if v is None:
+                    if v is None or not math.isfinite(v):
                         f = None
                         break
                     f += v
@@ -583,9 +593,14 @@ def business_case_hash(
         },
     }
     lp = lost_production
-    if lp is not None and _triggers(inputs.lines) and (lp.slack_bus or lp.unread):
-        # Only when a line can drop lost production, so a case with no drop keeps its
-        # digest (D2). Sorted, periods as int (None on a flat network), shares as
+    if (
+        lp is not None
+        and _triggers(inputs.lines)
+        and (lp.slack_bus or lp.unread)
+        and any(_is_lost(ln, lp) for t in ic_case.templates for ln in t.lines)
+    ):
+        # Only when a line can drop and the IC case values a shortfall, so a case
+        # with no drop keeps its digest (D2, GK B F1). Sorted, periods as int (None on a flat network), shares as
         # repr floats.
         blob["lost_production"] = {
             "slack_bus": sorted([str(k), str(v)] for k, v in lp.slack_bus.items()),

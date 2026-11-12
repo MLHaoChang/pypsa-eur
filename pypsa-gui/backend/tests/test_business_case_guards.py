@@ -833,6 +833,84 @@ def test_a2_a_shortfall_on_another_bus_or_unreadable_is_not_evaluated(
     assert "__lost_conc" not in lpm.share and "__lost_nh3" in lpm.share
 
 
+def test_g3_a_grid_side_slack_booked_as_energy_import_drops_once():
+    """GK B (#1411): a product bus the meter search puts on the grid side books its
+    captured shortfall `energy_import` (`participants`, `grid_side_asset_cost`). The
+    map names the slack, so its line drops however it is booked; a real grid purchase
+    on the same stream stays."""
+    grid_lost = _asset("__lost_nh3", -150.0, stream="energy_import")
+    buy = _asset("grid_buy", -60.0, stream="energy_import")
+    ic = _case(grid_lost, buy, FOM)
+    bc = build_business_case(
+        ic,
+        _inputs(_linked("nh3", "served_product.nh3")),
+        {"nh3": _flat("served_product.nh3")},
+        _map(__lost_nh3="nh3"),
+    )
+    for y in OPS:
+        assert grid_lost.key not in _by_year(bc)[y]
+        assert _by_year(bc)[y][buy.key] == buy
+    rows = {r.key: r for r in bc.locked}
+    assert rows[grid_lost.key].stream == "energy_import"
+    assert rows[grid_lost.key].dropped == tuple((y, 1.0) for y in OPS)
+    assert rows[buy.key].dropped == ()
+
+
+def test_d2_a_map_with_nothing_to_drop_keeps_the_digest():
+    """GK B F1: on a case that values no shortfall, a slack-only or unread-only map
+    hashes as no map."""
+    ic = _case(FOM)
+    inputs = _inputs(_linked("nh3", "served_product.nh3"))
+    out = {"nh3": _flat("served_product.nh3")}
+    none = business_case_hash(ic, inputs, out)
+    slack = _map(__lost_nh3="nh3")
+    unread = L.LostProductionMap({}, {}, {}, {"nh3": "not_own_solve"})
+    assert business_case_hash(ic, inputs, out, slack) == none
+    assert business_case_hash(ic, inputs, out, unread) == none
+    assert build_business_case(ic, inputs, out, slack).hash == none
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_d1_a_nan_or_inf_share_is_not_established_never_a_number(bad):
+    """GK B F3: a share that is not finite gives None, in the line and in `locked`."""
+    import json
+
+    ic = _case(LOST_CONC, FOM)
+    inputs, out = _ships("a")
+    bc = build_business_case(ic, inputs, out, _shares(a={2031: bad, 2035: 0.5}))
+    for y in range(2031, 2035):
+        assert _by_year(bc)[y][LOST_CONC.key].amount is None
+    row = {r.key: r for r in bc.locked}[LOST_CONC.key]
+    assert row.dropped[:4] == tuple((y, None) for y in range(2031, 2035))
+    json.dumps(
+        [ln.amount for t in bc.case.templates for ln in t.lines]
+        + [list(r.dropped) for r in bc.locked],
+        allow_nan=False,
+    )
+
+
+def test_break_even_forwards_the_map_to_every_trial():
+    """GK B F4: break-even builds each trial with the map, so the dropped penalty is
+    out of the root; with no map a triggering line is refused, never priced with it."""
+    from services.finance.business_case import break_even
+
+    ln = _linked("nh3", "served_product.nh3", price=500.0)
+    out = {"nh3": _flat("served_product.nh3")}
+    got = break_even(
+        _case(LOST_NH3, FOM),
+        _inputs(ln),
+        out,
+        "nh3",
+        PACK,
+        lost_production=_map(__lost_nh3="nh3"),
+    )
+    want = break_even(_case(FOM), _inputs(ln), out, "nh3", PACK)
+    assert want["status"] == "ok"
+    assert got["status"] == "ok" and got["price"] == pytest.approx(want["price"])
+    with pytest.raises(LinkedOutputMissing):
+        break_even(_case(LOST_NH3, FOM), _inputs(ln), out, "nh3", PACK)
+
+
 def test_bc1_the_ic_case_is_unchanged_by_every_guard():
     """BC1, A9, D4: a build that drops lost production and fills `locked` leaves the
     IC case, its digest and the network the map read byte-equal."""
