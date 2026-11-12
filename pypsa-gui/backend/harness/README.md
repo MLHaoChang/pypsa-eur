@@ -1698,8 +1698,9 @@ archetype `off_grid` the template card's.
 C1-C7). The scope is the template's; there is no EH study and no LOLE loop.
 
 - **Inputs stage.** `process.units` lists the committable process units the
-  user's form filled (a throughput unit, a specific energy above 0 and a
-  product bus counted in tonnes). None filled holds the run at stage 2: the
+  user's form filled (a capacity, or one the solve sizes, and an efficiency
+  above 0 to a product bus counted in tonnes; the display-only throughput
+  unit and specific energy are never read). None filled holds the run at stage 2: the
   units are the user's (G2P-07), never a lever.
 - **Result gate.** The core rules, `kpi.unserved_mwh`, and:
   - `process.binary_check` (`services.solver.process_uc.binary_check`, left
@@ -1707,7 +1708,10 @@ C1-C7). The scope is the template's; there is no EH study and no LOLE loop.
     and `flagged` is the bool False; `flagged` fails with the flagged period
     rows; `unverified`, a non-bool flag or a missing check is no evidence,
     except a missing check after a plan with binaries (exact MILP), which
-    passes;
+    passes. The rule carries `unevaluated: needs_user` (`run_gates.check_rule`
+    takes no other value): read as not evaluated, it ends the result stage
+    with reason `not_evaluated` and no L2 round (`run_loops.after_failed_result`;
+    GK A (24) Q2), since no lever supplies the evidence;
   - `process.delivery.shortfall`: per product bus with a `shortfall` role
     Generator and per period, the shortfall over the delivery target, both in
     t/d over the period's generator-weighted days; the worst row is the value,
@@ -1717,7 +1721,9 @@ C1-C7). The scope is the template's; there is no EH study and no LOLE loop.
 - **Levers.** The per-year candidates (wind, PV, BESS, electrolyser caps)
   and the H2 and NH3 tanks' caps, each up to twice the template's cap. The
   process units, the process and delivery loads, the role Generators, the
-  grid connection and the built assets are never levers.
+  grid connection and the built assets are never levers. A second edit in
+  one agent turn is sent to the preview card, which L2 does not offer, so in
+  practice a round lands one change.
 - **Chapters.** `sizing`, `investment_case` and `grid_risk` (the coupling
   report, g2p 13); a run whose `grid_risk` section is not established lists
   it as a gap.

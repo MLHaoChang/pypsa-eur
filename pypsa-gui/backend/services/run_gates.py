@@ -35,6 +35,10 @@ from collections.abc import Callable
 
 
 FACTS_VERSION = 1
+# Study harness 13 (GK A (24) Q2): a result rule marked `unevaluated:
+# needs_user` that reads no evidence ends the result stage for the user; no
+# L2 round runs, since no lever can supply the evidence.
+UNEVALUATED_TO_USER = "needs_user"
 OPS = ("eq", "ne", "lt", "le", "gt", "ge", "in", "not_in", "empty", "nonempty", "within")
 SEVERITIES = ("block", "warn")
 
@@ -781,34 +785,28 @@ SHORTFALL_BASIS = ("per period, the product short of delivery (the shortfall rol
 
 
 def _process_units(env):
-    """G2P-07: the committable process units the user's form filled (a
-    throughput unit, a specific energy above 0 and a product bus that counts
-    in tonnes). None filled leaves the run waiting at stage 2: the units are
-    the user's inputs, never the agent's."""
-    from services.process_products import bus_unit
-    from services.carrier_catalog import bus_tonne_factor
+    """G2P-07: the committable process units the user's form filled: a
+    capacity (or one the solve sizes), an efficiency above 0 to a product bus
+    counted in tonnes (`process_products.t_per_unit`); the form writes the
+    efficiencies, the solve reads them. None filled holds the run at stage 2:
+    the units are the user's inputs, never the agent's."""
+    from harness.durable import network_guard
+    from services.process_products import t_per_unit
     from services.solver.process_uc import process_committable
 
-    def read(ctx):
-        n = ctx.network
+    def read(n):
         filled = []
         for unit in process_committable(n):
             row = n.links.loc[unit]
-            energy = row.get("specific_energy_kwh_per_t")
-            bus = str(row.get("bus1") or "")
-            tf = bus_tonne_factor(n, bus) if bus in n.buses.index else None
-            if tf is None and bus in n.buses.index and bus_unit(n, bus) == "t":
-                tf = 1.0
-            throughput = row.get("throughput_unit")
-            if (isinstance(throughput, str) and throughput.strip() and _number(energy) and energy > 0
-                    and tf is not None and math.isfinite(tf) and tf > 0):
+            efficiency, p_nom = row.get("efficiency"), row.get("p_nom")
+            sized = bool(row.get("p_nom_extendable")) or (_number(p_nom) and p_nom > 0)
+            if sized and _number(efficiency) and efficiency > 0 and t_per_unit(n, str(row.get("bus1") or "")):
                 filled.append(str(unit))
         return sorted(filled)
-    from harness.durable import network_guard
 
     def guarded():
         with network_guard():
-            return read(env.ctx)
+            return read(env.ctx.network)
     if env.ctx is None:
         return None
     return _on(env.ctx, guarded)
@@ -859,56 +857,60 @@ def _weighted_tpd(frame, names, mask, w, tf):
     return total * tf / (math.fsum(w) / 24.0)
 
 
+UNREADABLE_WEIGHTS = NoEvidence("unreadable_weights", "a snapshot weighting is missing, negative or not finite")
+UNREADABLE_DISPATCH = NoEvidence("unreadable_dispatch", "a delivery, buy-in or shortfall flow is missing or not "
+                                                        "finite")
+
+
 def _delivery_shortfall(env):
     """C3, C4: per product bus with a shortfall role Generator and per
     investment period, the delivery target, the grey buy-in and the
     shortfall in t/d (generator weightings), and the shortfall's share of
-    the target; the value the worst row's share."""
+    the target; the value the worst row's share. The role Generators come
+    from the `process_role` column alone (GK A (24) C3), never from
+    `process_products.shortfalls`, whose name fallback and solve capture a
+    gate does not rest on."""
     from harness.calculations import solve_matches_inputs
     from models.process_unit import product_role_generators
-    from services.carrier_catalog import bus_tonne_factor
-    from services.process_products import bus_unit
+    from services.process_products import t_per_unit
 
     def read(ctx):
         n = ctx.network
-        lost = product_role_generators(n, "shortfall")
-        buses = sorted({str(n.generators.at[g, "bus"]) for g in lost})
+        short_gens = product_role_generators(n, "shortfall")
+        buses = sorted({str(n.generators.at[g, "bus"]) for g in short_gens})
         if not buses:
             return NoEvidence("no_shortfall_role", "no Generator has the process_role shortfall")
         if not solve_matches_inputs(ctx):
             return STALE_SOLVE
-        buy = product_role_generators(n, "buy_in")
+        buy_gens = product_role_generators(n, "buy_in")
         index = n.snapshots
         weights = n.snapshot_weightings["generators"].reindex(index)
         periods = list(index.get_level_values(0).unique()) if len(n.investment_periods) else [None]
         rows = []
         for bus in buses:
-            tf = bus_tonne_factor(n, bus)
-            if tf is None and bus_unit(n, bus) == "t":
-                tf = 1.0
-            if tf is None or not math.isfinite(tf) or tf <= 0:
+            tf = t_per_unit(n, bus)
+            if tf is None:
                 return NoEvidence("no_tonne_factor", f"the product bus {bus} has no tonne factor")
             loads = [str(x) for x in n.loads.index[n.loads["bus"] == bus]]
             if not loads:
                 return NoEvidence("no_delivery", f"the product bus {bus} has no delivery load")
+            buy, short = ([str(g) for g in gens if n.generators.at[g, "bus"] == bus] for gens in (buy_gens, short_gens))
             for period in periods:
                 mask = (index.get_level_values(0) == period) if period is not None else [True] * len(index)
                 w = [float(v) for v in weights[mask]]
                 if not w or not all(math.isfinite(v) and v >= 0 for v in w) or math.fsum(w) <= 0:
-                    return None
+                    return UNREADABLE_WEIGHTS
                 values = [_weighted_tpd(n.loads_t.p, loads, mask, w, tf),
-                          _weighted_tpd(n.generators_t.p, [str(g) for g in buy if n.generators.at[g, "bus"] == bus],
-                                        mask, w, tf),
-                          _weighted_tpd(n.generators_t.p, [str(g) for g in lost if n.generators.at[g, "bus"] == bus],
-                                        mask, w, tf)]
+                          _weighted_tpd(n.generators_t.p, buy, mask, w, tf),
+                          _weighted_tpd(n.generators_t.p, short, mask, w, tf)]
                 if any(v is None for v in values):
-                    return None
-                target, bought, short = values
+                    return UNREADABLE_DISPATCH
+                target, bought, shortfall = values
                 if target <= 0:
                     return NoEvidence("no_target", f"the product bus {bus} has no delivery in period {period}")
                 rows.append({"product": bus, "period": None if period is None else int(period),
-                             "target_tpd": target, "buy_in_tpd": bought, "shortfall_tpd": short,
-                             "shortfall_share": short / target, "assumed": False})
+                             "target_tpd": target, "buy_in_tpd": bought, "shortfall_tpd": shortfall,
+                             "shortfall_share": shortfall / target, "assumed": False})
         return _worst(rows, "shortfall_share")
     return _own_solve(env, read, typed=True)
 
@@ -1353,10 +1355,12 @@ class RuleError(ValueError):
 
 def check_rule(rule: dict) -> dict:
     """The rule, with the reader it reads named from the registry."""
-    known = {"id", "fact", "op", "value", "severity", "basis", "explain", "tunable", "unit", "engine"}
+    known = {"id", "fact", "op", "value", "severity", "basis", "explain", "tunable", "unit", "engine", "unevaluated"}
     if not isinstance(rule, dict) or not {"id", "fact", "op", "severity", "basis"} <= set(rule) <= known:
         raise RuleError(f"A rule has id, fact, op, severity, basis and optional value, explain, tunable, unit, "
-                        f"engine: {rule!r}")
+                        f"engine, unevaluated: {rule!r}")
+    if rule.get("unevaluated", UNEVALUATED_TO_USER) != UNEVALUATED_TO_USER:
+        raise RuleError(f"Rule {rule['id']}: unevaluated is {UNEVALUATED_TO_USER!r} or absent.")
     fact = rule["fact"]
     if not isinstance(fact, str) or "*" in fact:
         raise RuleError(f"Rule {rule['id']}: name one fact, never a wildcard ({fact!r}).")

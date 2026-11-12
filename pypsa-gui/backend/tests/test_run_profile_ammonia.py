@@ -274,7 +274,7 @@ def test_auto_resolving_to_binary_passes_without_a_check(direct):
 def test_the_shipped_process_unit_is_filled_and_an_unfilled_one_waits(direct):
     n = _network()
     assert direct("nh3.process.units", network=n)["verdict"] == "pass"
-    n.links.at["haber_bosch", "specific_energy_kwh_per_t"] = float("nan")
+    n.links.at["haber_bosch", "efficiency"] = float("nan")
     result = direct("nh3.process.units", network=n)
     assert result["verdict"] == "fail" and result["facts"][0]["value"] == []
 
@@ -282,16 +282,41 @@ def test_the_shipped_process_unit_is_filled_and_an_unfilled_one_waits(direct):
 @pytest.mark.parametrize(
     "column, value",
     [
-        ("throughput_unit", ""),
-        ("throughput_unit", float("nan")),
-        ("specific_energy_kwh_per_t", 0.0),
+        ("efficiency", 0.0),
+        ("efficiency", float("nan")),
+        ("p_nom", 0.0),
         ("committable", False),
+        ("eh_process", False),
     ],
 )
 def test_each_missing_form_input_leaves_no_process_unit(direct, column, value):
+    """The form writes the capacity and the efficiencies (the display-only
+    throughput unit and specific energy are derived, never read)."""
     n = _network()
     n.links.at["haber_bosch", column] = value
     assert direct("nh3.process.units", network=n)["facts"][0]["value"] == []
+
+
+def test_a_capacity_the_solve_sizes_counts_and_a_product_without_tonnes_does_not(
+    direct,
+):
+    n = _network()
+    n.links.at["haber_bosch", "p_nom"] = 0.0
+    n.links.at["haber_bosch", "p_nom_extendable"] = True
+    assert direct("nh3.process.units", network=n)["facts"][0]["value"] == [
+        "haber_bosch"
+    ]
+    n.buses.at["nh3", "mwh_per_t"] = float("nan")
+    assert direct("nh3.process.units", network=n)["facts"][0]["value"] == []
+
+
+def test_the_display_only_form_fields_are_never_read(direct):
+    n = _network()
+    n.links.at["haber_bosch", "throughput_unit"] = ""
+    n.links.at["haber_bosch", "specific_energy_kwh_per_t"] = float("nan")
+    assert direct("nh3.process.units", network=n)["facts"][0]["value"] == [
+        "haber_bosch"
+    ]
 
 
 def _solved(n, lost=None, buy=None):
@@ -439,9 +464,59 @@ def test_an_unreadable_weight_or_dispatch_reads_no_shortfall(direct):
     n.snapshot_weightings.iloc[
         3, n.snapshot_weightings.columns.get_loc("generators")
     ] = -1.0
-    assert direct("nh3.delivery.shortfall", network=n)["verdict"] == "not_evaluated"
+    result = direct("nh3.delivery.shortfall", network=n)
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "unreadable_weights",
+    )
     n = _solved(_network())
     n.generators_t.p.iloc[2, n.generators_t.p.columns.get_loc("__lost_nh3")] = float(
         "nan"
     )
-    assert direct("nh3.delivery.shortfall", network=n)["verdict"] == "not_evaluated"
+    result = direct("nh3.delivery.shortfall", network=n)
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "unreadable_dispatch",
+    )
+
+
+def test_results_that_predate_the_inputs_read_no_shortfall(direct, monkeypatch):
+    """The freshness guard: a stale solve is no evidence with its own reason."""
+    import harness.calculations as calculations
+
+    monkeypatch.setattr(calculations, "solve_matches_inputs", lambda ctx: False)
+    result = direct("nh3.delivery.shortfall", network=_solved(_network()))
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "stale_solve",
+    )
+
+
+@pytest.mark.parametrize("rule_id", ["nh3.binary_check", "nh3.delivery.shortfall"])
+def test_without_the_runs_own_solve_neither_reader_has_evidence(rule_id):
+    """Through the real `_own_solve`: a run with no solve step reads nothing,
+    whatever check or dispatch the context holds."""
+    ctx = SimpleNamespace(
+        network=_solved(_network()), solver_state={"last_process_uc_check": _check()}
+    )
+    env = run_gates.Env(task={"steps": []}, ctx=ctx, project=None, project_dir=None)
+    result = run_gates.evaluate([_rules()[rule_id]], env)[0]
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "not_solved",
+    )
+
+
+def test_the_check_rule_goes_to_the_user_when_unevaluated_and_the_key_takes_one_value():
+    assert _rules()["nh3.binary_check"]["unevaluated"] == run_gates.UNEVALUATED_TO_USER
+    assert "unevaluated" not in _rules()["nh3.delivery.shortfall"]
+    rule = {k: v for k, v in _rules()["nh3.binary_check"].items() if k != "reads"}
+    with pytest.raises(run_gates.RuleError):
+        run_gates.check_rule({**rule, "unevaluated": "agent"})
+
+
+def test_the_profile_lists_what_blocks_an_unattended_run():
+    """Design §9.3 "Missing": the binary check has no chat read; the form is the user's."""
+    missing = run_profiles.resolve(REF)["missing_tools"]
+    assert any("binary operational check" in m for m in missing)
+    assert any("process-unit form" in m for m in missing)

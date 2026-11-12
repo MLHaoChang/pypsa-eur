@@ -835,15 +835,15 @@ def _eh_ammonia_staged() -> dict:
             "inputs": {"actions": list(GENERIC["inputs"]["actions"]), "rules": [
                 _rule("nh3.process.units", "process.units", "nonempty",
                       basis="The process units are the user's inputs (the process-unit form): a committable unit "
-                            "with its throughput unit, specific energy and a product counted in tonnes."),
+                            "with a capacity and an efficiency to a product counted in tonnes."),
             ]},
             "result_gate": {**GENERIC["result_gate"], "rules": [
                 *CORE_RESULT_RULES,
                 unserved,
                 {**_rule("nh3.binary_check", "process.binary_check", "eq", "ok",
                          basis="The linearised plan holds under the binary operational check in every period "
-                               "(no period flagged); an unverified check is not evaluated."),
-                 "tunable": levers},
+                               "(no period flagged); an unverified check is not evaluated and goes to the user."),
+                 "tunable": levers, "unevaluated": run_gates.UNEVALUATED_TO_USER},
                 {**_rule("nh3.delivery.shortfall", "process.delivery.shortfall", "le", NH3_SHORTFALL_MAX,
                          basis=f"A delivery tolerance: in every period the NH3 short of delivery is at most "
                                f"{NH3_SHORTFALL_MAX:.0%} of the target (t/d). Grey NH3 bought in meets delivery "
@@ -868,7 +868,10 @@ def _eh_ammonia_staged() -> dict:
         # g2p 13: the coupling report is the `grid_risk` chapter; a run whose
         # section is not established lists it as a gap (`run_report.unsupported_listed`).
         "chapters": ["sizing", "investment_case", "grid_risk"],
-        "missing_tools": [],
+        # Design §9.3: no chat tool reads the binary check (the runner reads
+        # it from the solve), and the process-unit form is the user's alone.
+        "missing_tools": ["a chat read of the binary operational check",
+                          "a chat path to the process-unit form (G2P-07; the user fills it)"],
     }
 
 

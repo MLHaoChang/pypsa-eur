@@ -128,7 +128,7 @@ def _flag_below(monkeypatch, store, threshold, seen):
 
 
 def test_a_flagged_check_fails_and_l2_clears_it_on_the_new_solves_check(
-    granted, rated, monkeypatch
+    granted, rated, monkeypatch, site
 ):
     """Acceptance 1 and C6: round 1's check is flagged (period 2035); one L2
     change within bounds; the result gate reads the re-solve's own check."""
@@ -177,6 +177,16 @@ def test_a_flagged_check_fails_and_l2_clears_it_on_the_new_solves_check(
     # Acceptance 3: the coupling report is a chapter; not established, it is a listed gap.
     report = {r["rule"]: r for r in run["stages"]["report"]["gate"]["rules"]}
     assert report["rp.report.unsupported_listed"]["verdict"] == "pass"
+    from harness import run_report
+    from services.reports.evidence import SECTION_TITLES
+
+    doc = run_report.saved(record, site[1])
+    sections = {sec.section_id: sec for sec in doc.sections}
+    gaps = [str(row[0]) for row in doc.tables["harness_gaps"].rows if row]
+    assert sections.get("grid_risk") is None or sections["grid_risk"].status != "ok"
+    assert any(
+        g.startswith(run_report.CHAPTER_GAP + SECTION_TITLES["grid_risk"]) for g in gaps
+    ), gaps
     assert run["stage"] == "handoff"
 
 
@@ -252,3 +262,33 @@ def test_a_delivery_shortfall_fails_and_l2_changes_only_levers(
         (r["target"]["component"], r["target"]["attr"]) in tunable
         for r in run["ledger"]
     )
+
+
+def test_an_unverified_check_goes_to_the_user_and_l2_changes_nothing(
+    granted, rated, monkeypatch
+):
+    """GK A (24) Q2 = A: an unverified check is no evidence; the result stage
+    ends for the user with no L2 round, no change and no further solve."""
+    from services import solver_service
+
+    real = solver_service._process_uc
+    seen = []
+
+    def check(n, cfg, *, solver_options=None, solve=None):
+        seen.append(1)
+        return real.unverified_payload(n, "2035: bin solve status warning", 0.0)
+
+    monkeypatch.setattr(real, "binary_check", check)
+    task, path, _ = granted(run={**RUN, "profile": REF})
+    script = (
+        Script()
+    )  # never consulted: a turn would fail the run with "Script: exhausted"
+    record = go(harness_runner.Runner("a", agent_provider=script), path, task)
+    run = record["run"]
+    assert run["status"] == "needs_user" and run["stage"] == "result_gate"
+    assert run["stages"]["result_gate"]["reason"] == "not_evaluated"
+    verdicts = {r["rule"]: r for r in run["stages"]["result_gate"]["gate"]["rules"]}
+    assert verdicts["nh3.binary_check"]["verdict"] == "not_evaluated"
+    assert verdicts["nh3.binary_check"]["facts"][0]["value"] == "check_unverified"
+    assert run["ledger"] == [] and script.requests == [] and seen == [1]
+    assert "loop" not in run or run["loop"]["rounds"] == 0
