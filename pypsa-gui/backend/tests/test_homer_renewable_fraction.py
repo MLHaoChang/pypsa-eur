@@ -2826,6 +2826,9 @@ def test_a_port_without_its_efficiency_column_is_an_output():
     n = _dispatched()
     n.add("Bus", "heat", carrier="heat")
     n = _with_fuel(n, ("chp", "fuel", "heat", {"bus3": "ac"}))
+    # An earlier test in the process can register efficiency3; drop it here
+    # so the precondition holds in any test order.
+    n.links.drop(columns="efficiency3", errors="ignore", inplace=True)
     assert "efficiency3" not in n.links.columns
     kpi = renewable_fraction(n)
     assert kpi["fraction"] is None and "tank" in kpi["reason"], kpi
