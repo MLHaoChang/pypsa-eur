@@ -8,7 +8,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { ReportsError } from '../../api/reports'
+import { ReportsError, type ChartSnapshot } from '../../api/reports'
+import { resetReportCharts } from '../results/reportCharts'
 import { DEFAULT_SECTION_CHOICES, GenerateReportDialog } from './GenerateReportDialog'
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
@@ -18,6 +19,18 @@ const uploads = vi.hoisted(() => ({ listUploads: vi.fn() }))
 vi.mock('../../api/uploads', async () => {
   const real = await vi.importActual<typeof import('../../api/uploads')>('../../api/uploads')
   return { ...real, ...uploads }
+})
+
+const charts = vi.hoisted(() => ({ listReportCharts: vi.fn(), removeReportChart: vi.fn() }))
+vi.mock('../../api/reports', async () => {
+  const real = await vi.importActual<typeof import('../../api/reports')>('../../api/reports')
+  return { ...real, ...charts }
+})
+
+const SNAP = (over: Partial<ChartSnapshot>): ChartSnapshot => ({
+  id: 'chart-0123456789abcdef', view: 'v', title: 'Dispatch stack', figure: 'f', unit: null,
+  source_line: 'Latest solve · solved', period: null, out_of_date_when_added: false, created_at: 't',
+  earlier_solve: false, rows_total: 1, ...over,
 })
 
 const TEMPLATE_UPLOAD = {
@@ -37,6 +50,9 @@ function renderDialog(over: Partial<React.ComponentProps<typeof GenerateReportDi
 beforeEach(() => {
   toast.success.mockReset()
   toast.error.mockReset()
+  resetReportCharts()
+  charts.listReportCharts.mockReset().mockResolvedValue({ charts: [], limit: 12 })
+  charts.removeReportChart.mockReset().mockResolvedValue(undefined)
   uploads.listUploads.mockReset().mockResolvedValue([TEMPLATE_UPLOAD])
 })
 
@@ -177,5 +193,27 @@ describe('GenerateReportDialog — template (WP11)', () => {
     expect(select.options).toHaveLength(1)
     await user.click(screen.getByTestId('generate-submit'))
     await waitFor(() => expect(onGenerate).toHaveBeenCalledWith({ language: 'en' }))
+  })
+
+  it('lists the charts added from results with notes and removes one', async () => {
+    charts.listReportCharts.mockResolvedValue({
+      charts: [SNAP({ out_of_date_when_added: true }), SNAP({ id: 'chart-1123456789abcdef', title: 'Prices', earlier_solve: true })],
+      limit: 12,
+    })
+    const user = userEvent.setup()
+    renderDialog({ project: 'demo' })
+    const list = await screen.findByTestId('report-charts-list')
+    await within(list).findByText('Dispatch stack')
+    expect(within(list).getByText('Out of date when added')).toBeTruthy()
+    expect(within(list).getByText('From an earlier solve')).toBeTruthy()
+    expect(list.textContent).not.toMatch(/stale/i)
+    await user.click(within(list).getByRole('button', { name: 'Remove Dispatch stack from report' }))
+    await waitFor(() => expect(charts.removeReportChart).toHaveBeenCalledWith('demo', 'chart-0123456789abcdef'))
+    await waitFor(() => expect(within(list).queryByText('Dispatch stack')).toBeNull())
+  })
+
+  it('says in words that no chart was added yet', async () => {
+    renderDialog({ project: 'demo' })
+    expect((await screen.findByTestId('report-charts-list')).textContent).toMatch(/No charts added yet/)
   })
 })

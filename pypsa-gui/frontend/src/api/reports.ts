@@ -355,6 +355,7 @@ export type ReportErrorKind =
   | 'project_locked'
   | 'tool_error'
   | 'unknown'
+  | 'chart_limit_reached'
   // the job routes (`routers/report_jobs.py`)
   | 'report_job_in_flight'
   | 'report_job_not_found'
@@ -802,4 +803,95 @@ export async function getReportCapabilities(projectName: string): Promise<Report
 /** `GET /{name}/reports/evidence_hash` — the live evidence's hash for the staleness badge. */
 export async function getEvidenceHash(projectName: string): Promise<EvidenceHashStatus> {
   return _json<EvidenceHashStatus>(await fetch(`${base(projectName)}/evidence_hash`))
+}
+
+// ── saved Results charts (ui-modern 02, slice 7) ────────────────────────────
+// Backend `routers/report_charts.py`, `/api/projects/{name}/report-charts`.
+// A chart the user added from Results: the spec the browser built (what the
+// chart showed) plus a PNG of it. Errors share `_parseError`'s `{detail:
+// {error_kind, message}}` shape (409 `chart_limit_reached` carries `total` /
+// `limit`).
+
+/** A cell of a chart's table: text (<= 200 chars), a finite number, or empty. */
+export type ChartCell = string | number | null
+
+/** What the browser sends: the backend's `ChartSpec`, field for field. */
+export interface ChartSpec {
+  view: string
+  title: string
+  figure: string
+  unit: string | null
+  source_line: string
+  period: string | null
+  out_of_date_when_added: boolean
+  columns: string[]
+  rows: ChartCell[][]
+  rows_total: number
+}
+
+/** One row of the list: the spec minus its table, plus what the server knows. */
+export interface ChartSnapshot {
+  id: string
+  view: string
+  title: string
+  figure: string
+  unit: string | null
+  source_line: string
+  period: string | null
+  out_of_date_when_added: boolean
+  created_at: string
+  /** The saved chart was made from a solve other than the current one. */
+  earlier_solve: boolean
+  rows_total: number
+}
+
+export interface ChartSnapshotList { charts: ChartSnapshot[]; limit: number }
+
+function chartsBase(projectName: string): string {
+  return `/api/projects/${encodeURIComponent(projectName)}/report-charts`
+}
+
+/** `GET /{name}/report-charts` */
+export async function listReportCharts(projectName: string): Promise<ChartSnapshotList> {
+  return _json<ChartSnapshotList>(await fetch(chartsBase(projectName)))
+}
+
+/** `POST /{name}/report-charts` — multipart `spec` (JSON text) + `png`. */
+export async function addReportChart(
+  projectName: string,
+  spec: ChartSpec,
+  png: Blob,
+): Promise<ChartSnapshot> {
+  const form = new FormData()
+  form.append('spec', JSON.stringify(spec))
+  form.append('png', png, 'chart.png')
+  return _json<ChartSnapshot>(await fetch(chartsBase(projectName), {
+    method: 'POST',
+    headers: { ...rawFetchHeaders('POST') },
+    body: form,
+  }))
+}
+
+/** `DELETE /{name}/report-charts/{id}` */
+export async function removeReportChart(projectName: string, chartId: string): Promise<void> {
+  const resp = await fetch(`${chartsBase(projectName)}/${encodeURIComponent(chartId)}`, {
+    method: 'DELETE',
+    headers: { ...rawFetchHeaders('DELETE') },
+  })
+  if (!resp.ok) throw await _parseError(resp)
+}
+
+/** `GET /{name}/report-charts/{id}.png` */
+export function reportChartPngUrl(projectName: string, chartId: string): string {
+  return `${chartsBase(projectName)}/${encodeURIComponent(chartId)}.png`
+}
+
+/** The words the limit gives, in the UI's own voice (no code, no key). */
+export const REPORT_CHART_LIMIT_TEXT = (limit: number) =>
+  `The report holds ${limit} charts: remove one on the Reports page`
+
+/** The toast copy for a refused add / remove of a saved chart. */
+export function reportChartErrorMessage(e: unknown, limit = 12): string {
+  if (isReportError(e, 'chart_limit_reached')) return REPORT_CHART_LIMIT_TEXT(limit)
+  return reportErrorMessage(e, 'Could not update the report')
 }

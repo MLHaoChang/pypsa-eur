@@ -1,0 +1,22 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/report-charts",
+   "reason": "ui-pointer",
+   "decision": "DASHBOARD-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/report-charts",
+   "reason": "ui-pointer",
+   "decision": "DASHBOARD-1"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/projects/{name}/report-charts/{chart_id}",
+   "reason": "ui-pointer",
+   "decision": "DASHBOARD-1"
+  }
+ ]
+}
