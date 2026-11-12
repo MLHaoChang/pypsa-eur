@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# 45 — Island tie reads no_tie when a sidecar unit sits on a mainland bus
+# 46 — Island tie reads no_tie when a sidecar unit sits on a mainland bus
 
 Status: needs-triage
 Type: bug
