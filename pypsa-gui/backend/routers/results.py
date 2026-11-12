@@ -788,7 +788,8 @@ def get_carrier_kpis():
 def get_renewable_fraction():
     """
     HOMER's renewable fraction of the last solve (homer-parity 01a):
-    1 − non-renewable electricity / electricity served, with the definition
+    1 − non-renewable electricity / electricity used on site (served load
+    plus what conversion Links draw), with the definition
     in `services/solver/renewable_fraction.py`. Shown whether or not the
     minimum-renewable-fraction constraint was on: `target` is the fraction
     the solve enforced, None when it was off. Shed load (the solve's

@@ -57,12 +57,21 @@ def valid_archetype(v: Any) -> bool:
     return v in ARCHETYPES
 
 
+def valid_fraction(v: Any) -> bool:
+    """A minimum renewable fraction PUT accepts: a finite number in 0–1."""
+    n = _number(v)
+    return n is not None and 0 <= n <= 1
+
+
 def invalid_goal_fields(data: dict) -> dict[str, Any]:
     """The goal fields in a stored config that ``PUT /solver_config`` would
-    refuse, with their values. A load or bundle import drops them to None
-    (the resolver then falls back) and names them, never refuses the file."""
+    refuse, with their values, and likewise the minimum renewable fraction
+    (homer-parity 01a: 1.5 is an always-infeasible LP). A load or bundle
+    import drops them to None (the resolver then falls back; the fraction is
+    then off) and names them, never refuses the file."""
     checks = (("target_lole_h", valid_lole), ("mc_draws", valid_draws),
-              ("site_archetype", valid_archetype))
+              ("site_archetype", valid_archetype),
+              ("min_renewable_fraction", valid_fraction))
     return {k: data[k] for k, ok in checks
             if (data or {}).get(k) is not None and not ok(data[k])}
 
@@ -127,7 +136,13 @@ def goal_free_config(cfg: Any) -> dict:
     and digest of the config."""
     d = cfg if isinstance(cfg, dict) else asdict(cfg)
     return {k: v for k, v in d.items()
-            if k not in GOAL_FIELDS and not (k in OFF_WHEN_FALSY and not v)}
+            if k not in GOAL_FIELDS and not (k in OFF_WHEN_FALSY and _off(v))}
+
+
+def _off(v: Any) -> bool:
+    """An opt-in field that changes no outcome: None, 0, or a non-finite
+    float (NaN / inf, which the LP reads as off too)."""
+    return not v or (isinstance(v, float) and not math.isfinite(v))
 
 
 def eh_request_with_goal(body: Any, goal: dict) -> tuple[Any, dict[str, str]]:

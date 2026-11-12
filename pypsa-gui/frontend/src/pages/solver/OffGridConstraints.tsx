@@ -81,9 +81,10 @@ export function OffGridConstraints({ draft, patch, onError }: {
           </p>
         )}
         <p className="text-[10px] text-muted mt-1">
-          Share of the electricity served that comes from renewable sources. It counts what
-          diesel, gas, grid import and other non-renewable sources supply against the load
-          served; storage passes on what charged it. 0 means no minimum. A solve that cannot
+          Share of the electricity used on site (load served plus what electrolysers, heat
+          pumps and other converters draw) that comes from renewable sources. It counts what
+          diesel, gas, grid import and other non-renewable sources supply against that use;
+          storage passes on what charged it. 0 means no minimum. A solve that cannot
           reach the minimum fails, and its log names this constraint as the cause; with a
           lost-load price (VOLL) set, it sheds load at that price instead.
         </p>

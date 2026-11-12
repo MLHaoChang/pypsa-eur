@@ -242,7 +242,7 @@ export interface SolverConfig {
   // (0.15 = 15%) of each active period's peak that derated firm capacity must
   // cover; null = off. Schema bounds are ge=0, le=5.
   reserve_margin?: number | null
-  /** homer-parity 01a: share of electricity served from renewables, 0–1; null = off. */
+  /** homer-parity 01a: share of the electricity used on site (load plus converter draw) from renewables, 0–1; null = off. */
   min_renewable_fraction?: number | null
   // Demand-response tier (spec §4.4): voluntary, volume-capped, opt-in.
   dsr_price_eur_per_mwh?: number

@@ -1,13 +1,38 @@
 """Minimum renewable fraction (homer-parity 01a, owner decision HOMER-GAPS-1).
 
-HOMER Pro's renewable fraction, on the electrical side:
+HOMER Pro's renewable fraction, on the electrical side, as a share of all
+the electricity used on site (owner decision RENFRAC-ALL-1):
 
     f_ren = 1 − E_nonren / E_served
 
-* ``E_served`` — the Loads on electrical buses (the p_set the LP solves, so
-  after the solve-time load scalers) less every slack's supply on those buses
-  (VOLL shed, demand response, data-centre curtailment): shed or curtailed
-  energy is not served.
+* ``E_served`` — the active Loads on electrical buses (the p_set the LP
+  solves, so after the solve-time load scalers), plus the electricity that
+  conversion Links draw (below), less every slack's supply on electrical
+  buses (VOLL shed, demand response, data-centre curtailment): shed or
+  curtailed energy is not served.
+* Conversion (R14): an active Link that draws electricity — bus0 on an
+  electrical bus, or a second input busN (efficiencyN < 0) on one — and whose
+  outputs are all non-electrical is *use* when no output has a path back to
+  an electrical bus (forward through Links, backward through a Link that can
+  run negative, but not through a counted source Link). Its draw is
+  p0·(1 for bus0, −efficiencyN(t) for each electrical second input), p0 ≥ 0.
+  Electrolyser into an H2 offtake, heat pump, e-boiler, DAC and process
+  Links are use.
+  - Storage is not use: a charger whose energy comes back to electricity
+    (a battery charger, a battery's own bidirectional Link, an electrolyser
+    whose H2 bus feeds a fuel cell) is not counted, or it would count twice.
+    A Link that can run negative is a path back by itself, so a counted
+    conversion Link never runs negative and its draw is p0 directly.
+  - Ambiguous: a path back AND an active Load on a non-electrical bus it
+    reaches (an H2 bus with both an offtake and a fuel cell). Fail closed:
+    the KPI is None when it draws, and the row logs a warning; it is not
+    counted in the row.
+  - Export is not use: elec→elec Links are not conversion, nor is a Link
+    into a supply bus or a bus whose carrier names the grid or export.
+  - Not guarded (R14j): renewable electricity dumped into a converter whose
+    output nothing uses (an electrolyser into an unbounded Store) still
+    counts as use, so it raises the denominator and with it the
+    non-renewable allowance. The KPI payload carries ``note`` saying so.
 * ``E_nonren`` — the electricity that non-renewable sources put into the
   served network:
 
@@ -32,9 +57,11 @@ HOMER Pro's renewable fraction, on the electrical side:
   second Link out of a supply bus) makes the KPI None with a reason, and the
   LP row logs a warning naming it. Fuel that only reaches heat or hydrogen
   is not electricity and passes.
-  So is a Link from a fuel stock (a non-renewable Store, no Generator, no
-  electrical inflow) into an electrical bus (R13); counting its η·p0 is a
-  follow-up.
+  So is a Link from a fuel stock (a Store or StorageUnit whose own carrier is
+  neither renewable nor electricity storage, on a bus with no Generator and
+  no electrical inflow, whatever the bus's carrier) into an electrical bus,
+  and a fuel stock on an electrical bus that discharges into it (R13);
+  counting them is a follow-up. Batteries and the like stay storage.
 
 Energy is MW × ``snapshot_weightings.generators`` per year of each period;
 the horizon totals weight each period by its ``years``.
@@ -48,17 +75,20 @@ with it; there is one implementation, here.
 ``min_renewable_fraction_<P>`` (``min_renewable_fraction`` on a single-period
 network):
 
-    Σ_t∈P w_t·nonren_t + (1−f)·Σ_t∈P w_t·slack_t ≤ (1−f)·Σ_t∈P w_t·load_t
+    Σ_t∈P w_t·nonren_t + (1−f)·Σ_t∈P w_t·slack_t − (1−f)·Σ_t∈P w_t·draw_t
+        ≤ (1−f)·Σ_t∈P w_t·load_t
 
-A period with no load gets no row (0 ≤ 0 is harmless but says nothing).
+A period with no load and no conversion Link gets no row (0 ≤ 0 is
+harmless but says nothing).
 Rolling and myopic solves are refused at preflight
 (`validation_service._check_min_renewable_fraction`): they would build one
 row per LP window, not one per period.
 With a slack present the LP may meet the target by shedding or curtailing at
 the slack's price: a target above what renewables can reach is then met by
 shedding, not reported infeasible. Without a slack it is infeasible, and
-`infeasibility_lines` names the row and the most renewable energy the plan
-could produce.
+`infeasibility_lines` names the row, the renewable energy it needs (from the
+load the row was built on, so after the load scalers) and the most the plan
+could produce. Inactive Loads are not served and not in the row.
 """
 
 from __future__ import annotations
@@ -73,10 +103,25 @@ from services.adequacy.archetypes import min_p_min_pu
 from services.adequacy.slack import slack_generator_mask
 from services.profile_shapes import _ELEC_CARRIERS
 from services.results.carrier_kpis import _is_renewable_carrier
+from services.results.load_shape import BATTERY
+
+# Electricity-storage carriers (`load_shape.BATTERY` and pumped hydro): a
+# Store or StorageUnit carrying one is storage, never a fuel stock.
+_ELEC_STORAGE = BATTERY | {"phs", "pumped hydro"}
 
 ROW = "min_renewable_fraction"
+# The facts the rows were built from (the target and each period's load, so
+# after the solve-time load scalers), kept on the network for the
+# infeasibility hint: the scalers are reverted before the diagnosis runs.
+_BUILT = "_min_renewable_fraction_rows"
 LABEL = "Minimum renewable fraction"
 _AUX = "RenewableFraction-gross"
+
+
+CONVERSION_NOTE = (
+    "Electricity drawn by conversion units (electrolysers, heat pumps, …) counts "
+    "as used on site whether or not their output is used."
+)
 
 
 def row_name(period: Any) -> str:
@@ -171,7 +216,12 @@ def classify(n) -> dict[str, list[str]]:
         ],
         "source_links": src_links,
         "slack_generators": [g for g in gens.index if slack[g] and gbus[g] in elec],
-        "loads": [l for l in n.loads.index if str(n.loads.at[l, "bus"]) in elec],
+        "loads": [
+            l
+            for l in n.loads.index
+            if str(n.loads.at[l, "bus"]) in elec
+            and ("active" not in n.loads.columns or bool(n.loads.at[l, "active"]))
+        ],
         "renewable_generators": [
             g
             for g in gens.index
@@ -185,21 +235,57 @@ def classify(n) -> dict[str, list[str]]:
             set(src_links),
         ),
         "unattributed_links": _fuel_store_links(n, elec, gbus),
+        "unattributed_stores": _fuel_stocks_on_elec(n, elec),
+        **_conversion(n, elec, supply, set(src_links)),
     }
 
 
+def _is_elec_storage(carrier: str) -> bool:
+    """An electricity-storage carrier (battery and the like): its output was
+    generated upstream, so it is storage, never a fuel."""
+    c = carrier.lower().strip()
+    return c in _ELEC_STORAGE or "battery" in c
+
+
+def _fuel_stocks(n, elec) -> list[tuple[str, str, str]]:
+    """(component, name, bus) of every Store and StorageUnit that holds a
+    fuel. Its own carrier decides when set: a fuel is neither renewable nor
+    an electricity-storage carrier, whatever its bus's carrier (a bus with no
+    carrier reads as AC, F1). Without its own carrier the bus's carrier
+    decides, on a non-electrical bus only."""
+    out = []
+    for comp, df in (("Store", n.stores), ("StorageUnit", n.storage_units)):
+        if not len(df):
+            continue
+        carriers = (
+            df["carrier"] if "carrier" in df.columns else pd.Series("", index=df.index)
+        )
+        for s in df.index:
+            bus = str(df.at[s, "bus"])
+            own = str(carriers.get(s) or "").strip()
+            if own:
+                fuel = not _is_renewable_carrier(own) and not _is_elec_storage(own)
+            else:
+                fuel = bus not in elec and not _is_renewable_carrier(
+                    str(n.buses.at[bus, "carrier"] or "")
+                )
+            if fuel:
+                out.append((comp, str(s), bus))
+    return out
+
+
 def _fuel_store_links(n, elec, gbus) -> list[str]:
-    """R13: Links delivering into an electrical bus from a non-electrical bus
-    that holds a Store with a non-renewable carrier, no Generator and no
-    inflow from an electrical bus (a fuel stock, not a battery). A Link that
-    can run backwards (p_min_pu < 0, static or in time) with an electrical
-    output feeds its bus0 from electricity too: a battery behind one
-    bidirectional inverter. Not counted yet (follow-up: count η·p0); the KPI
-    fails closed on them."""
-    links, stores = n.links, n.stores
-    if not len(links) or not len(stores):
+    """R13: Links delivering into an electrical bus from a bus that holds a
+    fuel stock (`_fuel_stocks`), no Generator and no inflow from an
+    electrical bus (a fuel tank, not a battery). A Link that can run
+    backwards (p_min_pu < 0, static or in time) with an electrical output
+    feeds its bus0 from electricity too: a battery behind one bidirectional
+    inverter. Not counted yet (follow-up: count η·p0); the KPI fails closed
+    on them."""
+    links = n.links
+    stocks = _fuel_stocks(n, elec)
+    if not len(links) or not stocks:
         return []
-    gen_buses = set(gbus)
     fed_from_elec = {
         b
         for l in links.index
@@ -210,27 +296,119 @@ def _fuel_store_links(n, elec, gbus) -> list[str]:
         for l in links.index
         if any(b in elec for b in _link_outputs(links, l)) and min_p_min_pu(n, l) < 0
     }
-    fuel = (
-        {
-            str(stores.at[s, "bus"])
-            for s in stores.index
-            if not _is_renewable_carrier(
-                str(
-                    stores.at[s, "carrier"]
-                    or n.buses.at[stores.at[s, "bus"], "carrier"]
-                )
-            )
-        }
-        - elec
-        - gen_buses
-        - fed_from_elec
-    )
+    fuel = {bus for _c, _s, bus in stocks} - set(gbus) - fed_from_elec
     return [
         l
         for l in links.index
         if str(links.at[l, "bus0"]) in fuel
         and any(b in elec for b in _link_outputs(links, l))
     ]
+
+
+def _fuel_stocks_on_elec(n, elec) -> list[str]:
+    """F1: a fuel Store or StorageUnit on an electrical bus discharges
+    non-renewable electricity straight into it, which the fraction does not
+    count; the KPI fails closed when it discharges."""
+    return [s for _c, s, bus in _fuel_stocks(n, elec) if bus in elec]
+
+
+def _active(df: pd.DataFrame, name) -> bool:
+    return "active" not in df.columns or bool(df.at[name, "active"])
+
+
+def _eff_attr(k: int) -> str:
+    return "efficiency" if k == 1 else f"efficiency{k}"
+
+
+def _ports(n, link) -> tuple[list[tuple[int, str]], list[str]]:
+    """A Link's input ports ``[(k, bus)]`` (bus0, and any bus2, bus3, … whose
+    efficiency is negative, static or in time: a second input) and its
+    output buses (bus1 and the other set ports)."""
+    links = n.links
+    ins: list[tuple[int, str]] = [(0, str(links.at[link, "bus0"]))]
+    outs: list[str] = []
+    for c in links.columns:
+        if not c.startswith("bus") or c == "bus0" or not c[3:].isdigit():
+            continue
+        bus = str(links.at[link, c] or "").strip()
+        if not bus:
+            continue
+        k = int(c[3:])
+        attr = _eff_attr(k)
+        neg = False
+        if k >= 2 and attr in links.columns:
+            try:
+                neg = float(links.at[link, attr]) < 0
+            except (TypeError, ValueError):
+                neg = False
+            series = getattr(n.links_t, attr, None)
+            if series is not None and link in getattr(series, "columns", []):
+                neg = neg or bool((series[link].astype(float) < 0).any())
+        if neg:
+            ins.append((k, bus))
+        else:
+            outs.append(bus)
+    return ins, outs
+
+
+def _is_export_bus(n, bus: str, supply: set[str]) -> bool:
+    """The grid side of the meter: a supply bus (it feeds a counted import),
+    or a bus whose carrier names the grid or export."""
+    c = str(n.buses.at[bus, "carrier"] or "").lower() if bus in n.buses.index else ""
+    return bus in supply or "grid" in c or "export" in c
+
+
+def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
+    """R14: which active Links use electricity on site (see the module
+    docstring). Returns ``conversion_links`` (counted as use),
+    ``conversion_inputs`` ({link: [k of each electrical input port]}),
+    ``storage_links`` (their energy comes back to electricity) and
+    ``ambiguous_links`` (a path back AND a non-electrical sink: fail closed)."""
+    out: dict[str, Any] = {
+        "conversion_links": [],
+        "conversion_inputs": {},
+        "storage_links": [],
+        "ambiguous_links": [],
+    }
+    links = n.links
+    if not len(links):
+        return out
+    active = [l for l in links.index if _active(links, l)]
+    ports = {l: _ports(n, l) for l in active}
+    reversible = {l for l in active if min_p_min_pu(n, l) < 0}
+    loads = n.loads
+    sink_buses = {
+        str(loads.at[l, "bus"]) for l in loads.index if _active(loads, l)
+    } - elec
+    for l in active:
+        ins, outs = ports[l]
+        e_in = [k for k, b in ins if b in elec]
+        if not e_in or not outs or any(b in elec for b in outs):
+            continue  # draws no electricity, or an elec→elec converter
+        if any(_is_export_bus(n, b, supply) for b in outs):
+            continue  # export (R14c)
+        seen, stack, back = set(outs), list(outs), False
+        while stack:
+            cur = stack.pop()
+            for m in active:
+                m_ins, m_outs = ports[m]
+                nxt = list(m_outs) if any(b == cur for _k, b in m_ins) else []
+                if cur in m_outs and m in reversible:
+                    nxt += [b for _k, b in m_ins]  # runs backwards
+                for b in nxt:
+                    if b in elec:
+                        back = back or m not in src_links
+                    elif b not in seen:
+                        seen.add(b)
+                        stack.append(b)
+        if not back:
+            out["conversion_links"].append(l)
+            out["conversion_inputs"][l] = e_in
+        elif seen & sink_buses:
+            out["ambiguous_links"].append(l)
+        else:
+            out["storage_links"].append(l)
+    return out
 
 
 def _link_outputs(links: pd.DataFrame, link: str) -> list[str]:
@@ -297,11 +475,20 @@ def _period_mask(per_of: pd.Series, period) -> pd.Series:
     )
 
 
-def _efficiency(n, link: str, snapshots) -> pd.Series:
-    eff_t = getattr(n.links_t, "efficiency", None)
+def _efficiency(n, link: str, snapshots, attr: str = "efficiency") -> pd.Series:
+    eff_t = getattr(n.links_t, attr, None)
     if eff_t is not None and link in getattr(eff_t, "columns", []):
         return eff_t[link].reindex(snapshots).astype(float)
-    return pd.Series(float(n.links.at[link, "efficiency"]), index=snapshots)
+    return pd.Series(float(n.links.at[link, attr]), index=snapshots)
+
+
+def _draw_coef(n, cls, link: str, snapshots) -> pd.Series:
+    """MW of electricity a conversion Link draws per MW of p0: 1 for bus0,
+    −efficiencyN(t) for each electrical second input busN."""
+    out = pd.Series(0.0, index=snapshots)
+    for k in cls["conversion_inputs"][link]:
+        out += 1.0 if k == 0 else -_efficiency(n, link, snapshots, _eff_attr(k))
+    return out
 
 
 def _load_mw(n, loads, snapshots) -> pd.Series:
@@ -373,6 +560,7 @@ def renewable_fraction(
         "renewable_mwh": None,
         "nonrenewable_mwh": None,
         "served_mwh": None,
+        "conversion_mwh": None,
         "per_period": [],
         "reason": None,
     }
@@ -397,11 +585,25 @@ def renewable_fraction(
     leaked += [
         l for l in cls["unattributed_links"] if (_col(n.links_t.p0, l) > 0).any()
     ]
+    leaked += [
+        s
+        for s in cls["unattributed_stores"]
+        if (_col(n.stores_t.p, s) > 0).any() or (_col(n.storage_units_t.p, s) > 0).any()
+    ]
     if leaked:
         out["reason"] = (
             "cannot attribute the electricity of non-renewable source(s) "
             + ", ".join(map(str, leaked))
             + ": it reaches the site through a path the fraction does not count"
+        )
+        return out
+    ambiguous = [l for l in cls["ambiguous_links"] if (_col(n.links_t.p0, l) > 0).any()]
+    if ambiguous:
+        out["reason"] = (
+            "cannot tell whether the electricity drawn by "
+            + ", ".join(map(str, ambiguous))
+            + " is used on site or stored: its output both feeds a load and "
+            "comes back to electricity"
         )
         return out
 
@@ -414,20 +616,25 @@ def renewable_fraction(
     for g in cls["slack_generators"]:
         slack += _col(gp, g).clip(lower=0.0)
     load = sum((_col(lp, l) for l in cls["loads"]), pd.Series(0.0, index=sns))
-    served_t = load - slack - _unserved_mw(n, cls, unserved_t, sns)
+    draw = pd.Series(0.0, index=sns)
+    for l in cls["conversion_links"]:
+        draw += _col(n.links_t.p0, l).clip(lower=0.0) * _draw_coef(n, cls, l, sns)
+    served_t = load + draw - slack - _unserved_mw(n, cls, unserved_t, sns)
 
     w = _weights(n, sns)
     per_of, periods = _periods(sns)
     years = n.investment_period_weightings["years"] if periods != [None] else None
-    tot_served = tot_nonren = 0.0
+    tot_served = tot_nonren = tot_draw = 0.0
     for P in periods:
         mask = _period_mask(per_of, P)
         served = float((w * served_t)[mask].sum())
         nr = float((w * nonren)[mask].sum())
+        drawn = float((w * draw)[mask].sum())
         out["per_period"].append(
             {
                 "period": P,
                 "served_mwh": served,
+                "conversion_mwh": drawn,
                 "nonrenewable_mwh": nr,
                 "renewable_mwh": served - nr,
                 "fraction": (served - nr) / served if served > 0 else None,
@@ -436,11 +643,15 @@ def renewable_fraction(
         y = float(years.get(P, 1.0)) if years is not None else 1.0
         tot_served += y * served
         tot_nonren += y * nr
+        tot_draw += y * drawn
     out.update(
         served_mwh=tot_served,
+        conversion_mwh=tot_draw,
         nonrenewable_mwh=tot_nonren,
         renewable_mwh=tot_served - tot_nonren,
     )
+    if cls["conversion_links"]:
+        out["note"] = CONVERSION_NOTE
     if tot_served > 0:
         out["fraction"] = (tot_served - tot_nonren) / tot_served
     else:
@@ -549,13 +760,24 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
     (one per investment period; see the module docstring). Off (None, 0,
     non-finite) returns ``user_fn`` unchanged, so the LP is untouched."""
     f = target_of(cfg)
+    try:
+        setattr(network, _BUILT, None)  # never another solve's facts
+    except Exception:  # noqa: BLE001
+        pass
     if f is None:
         return user_fn
 
     def rows(n, snapshots):
         m = n.model
         cls = classify(n)
-        unseen = cls["unattributed_generators"] + cls["unattributed_links"]
+        built: dict[Any, float] = {}
+        setattr(n, _BUILT, {"target": f, "demand": built})
+        unseen = (
+            cls["unattributed_generators"]
+            + cls["unattributed_links"]
+            + cls["unattributed_stores"]
+            + cls["ambiguous_links"]
+        )
         if unseen:
             _safe_log(
                 log_queue,
@@ -588,6 +810,14 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
             for g in cls["slack_generators"]
             if gvar is not None and g in gvar.indexes["name"]
         ]
+        convs = [
+            l
+            for l in cls["conversion_links"]
+            if lvar is not None and l in lvar.indexes["name"]
+        ]
+        draw = pd.DataFrame(
+            {l: _draw_coef(n, cls, l, snapshots) for l in convs}, index=snapshots
+        )
         pmin_g = n.get_switchable_as_dense("Generator", "p_min_pu", snapshots)
         pmin_l = n.get_switchable_as_dense("Link", "p_min_pu", snapshots)
         g_src = (
@@ -607,8 +837,9 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
             in_p = _period_mask(per_of, P)
             w_p = w.where(in_p, 0.0)
             demand = float((w_p * load).sum())
+            built[P] = demand
             name = row_name(P)
-            if demand <= 0.0:
+            if demand <= 0.0 and not convs:
                 _safe_log(
                     log_queue,
                     f"{LABEL}: period {P if P is not None else 'all'} has no "
@@ -637,6 +868,16 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
                     f"buses; {name} is met trivially and not added.",
                 )
                 continue
+            if convs:
+                # R14: what conversion Links draw is used on site, so it
+                # raises the allowance: −(1−f)·Σ w·draw on the left.
+                terms.append(
+                    _weighted_sum(
+                        lvar.sel(name=convs),
+                        draw.mul(-(1.0 - f) * w_p, axis=0),
+                        coord,
+                    )
+                )
             expr = terms[0]
             for t in terms[1:]:
                 expr = expr + t
@@ -646,6 +887,12 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
                 log_queue,
                 f"{LABEL} {_pct(f)} (row {name}): non-renewable supply ≤ "
                 f"{rhs:,.1f} MWh of {demand:,.1f} MWh electrical load"
+                + (
+                    f" plus {_pct(1.0 - f)} of what {len(convs)} conversion "
+                    "unit(s) draw"
+                    if convs
+                    else ""
+                )
                 + (
                     f"; {len(slacks)} slack(s) may shed at their price instead"
                     if slacks
@@ -701,18 +948,27 @@ def infeasibility_lines(n, cfg) -> list[str]:
     w = _weights(n, n.snapshots)
     load = _load_mw(n, cls["loads"], n.snapshots)
     reach = max_renewable_mwh(n)
+    # The load the rows were built from (scaled), when they were built for
+    # this target; else the network's load.
+    built = getattr(n, _BUILT, None) or {}
+    built = built.get("demand", {}) if built.get("target") == f else {}
     lines = []
     for P in periods:
         in_p = _period_mask(per_of, P)
-        demand = float((w.where(in_p, 0.0) * load).sum())
+        demand = built.get(P, float((w.where(in_p, 0.0) * load).sum()))
         if demand <= 0:
             continue
         need = f * demand
         can = reach.get(P, 0.0)
         where = "" if P is None else f" in {P}"
+        conv = (
+            f", plus {_pct(f)} of what the conversion units draw"
+            if cls["conversion_links"]
+            else ""
+        )
         lines.append(
             f"{LABEL}: the target of {_pct(f)}{where} (row {row_name(P)}) needs "
-            f"{need:,.1f} MWh of renewable electricity served; the renewable "
+            f"{need:,.1f} MWh of renewable electricity served{conv}; the renewable "
             f"generators can produce at most "
             + ("an unbounded amount" if math.isinf(can) else f"{can:,.1f} MWh")
             + ". Lower the target, raise a renewable p_nom_max or add a VOLL slack to "

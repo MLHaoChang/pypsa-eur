@@ -225,7 +225,8 @@ class SolverConfig:
     # Bounds live on `SolverConfigSchema` — this dataclass validates nothing.
     reserve_margin: float | None = None
     # ── Minimum renewable fraction (homer-parity 01a) ─────────────────────
-    # A FRACTION of electricity served; None/0 = off. One row per period by
+    # A FRACTION of the electricity used on site (load plus conversion draw);
+    # None/0 = off. One row per period by
     # `renewable_fraction._wrap_with_min_renewable_fraction`. Bounds live on
     # `SolverConfigSchema`. Dropped from fingerprints while off
     # (`reliability_goal.goal_free_config`), so old identities hold.
