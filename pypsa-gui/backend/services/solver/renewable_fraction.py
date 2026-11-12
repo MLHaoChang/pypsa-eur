@@ -623,13 +623,11 @@ def _has_nan(n, cls, gp, lp, snapshots) -> bool:
     return False
 
 
-def _source_delivery(n, link: str, snapshots, gp, source_links) -> pd.Series | None:
-    """A source Link's delivery into the site, η(t)·p0 (positive part). A
-    dispatch without its p0 falls back to ``-p1``, then to η(t) times the
-    non-renewable Generators on its supply bus when it is the bus's only
-    source Link (their output is what it carries); None, so the KPI fails
-    closed, when another source Link shares the bus: never 0 for a missing
-    column (03a's import fixtures, G13)."""
+def _source_delivery(n, link: str, snapshots) -> pd.Series | None:
+    """A source Link's delivery into the site, η(t)·p0 (positive part), or
+    ``-p1`` (positive part) when the dispatch carries p1 and not p0. None,
+    so the KPI fails closed, when it carries neither: never inferred from
+    the supply bus (GK B A2)."""
     p0 = n.links_t.p0
     if p0 is not None and link in getattr(p0, "columns", []):
         sent = p0[link].reindex(snapshots).astype(float).fillna(0.0)
@@ -638,24 +636,7 @@ def _source_delivery(n, link: str, snapshots, gp, source_links) -> pd.Series | N
     if p1 is not None and link in getattr(p1, "columns", []):
         got = -p1[link].reindex(snapshots).astype(float).fillna(0.0)
         return got.clip(lower=0.0)
-    bus0 = str(n.links.at[link, "bus0"])
-    if sum(str(n.links.at[x, "bus0"]) == bus0 for x in source_links) > 1:
-        return None
-    gens = [
-        g
-        for g in n.generators.index
-        if str(n.generators.at[g, "bus"]) == bus0
-        and g in getattr(gp, "columns", [])
-        and not _is_renewable_carrier(str(n.generators.at[g, "carrier"]))
-    ]
-    fed = sum(
-        (
-            gp[g].reindex(snapshots).astype(float).fillna(0.0).clip(lower=0.0)
-            for g in gens
-        ),
-        pd.Series(0.0, index=snapshots),
-    )
-    return fed * _efficiency(n, link, snapshots)
+    return None
 
 
 def _draw_coef(n, cls, link: str, snapshots) -> pd.Series:
@@ -725,7 +706,9 @@ def renewable_fraction(
     the network count as well.
 
     Returns ``fraction`` (None, with ``reason``, when nothing was served or
-    no dispatch is present, or when non-renewable output exceeds the
+    no dispatch is present (GK B A1/A2/A5: a counted Load or non-renewable
+    Generator missing from the dispatch, a source Link with neither p0 nor
+    p1, or a NaN in what the KPI reads; never inferred), or when non-renewable output exceeds the
     electricity used on site, e.g. diesel exported or charging a battery that
     is not discharged: GK B N2, the fraction is always in [0, 1]),
     ``renewable_mwh``, ``nonrenewable_mwh``,
@@ -750,9 +733,15 @@ def renewable_fraction(
     if cls["loads"] and (
         lp is None or lp.empty or not set(cls["loads"]) <= set(lp.columns)
     ):
-        # A Load is fixed, so what it was served is its p_set (03a's G5
-        # fallback for a dispatch that does not carry the loads).
-        lp = n.get_switchable_as_dense("Load", "p_set", sns)
+        out["reason"] = NO_DISPATCH_REASON
+        return out
+    # GK B A5: a counted non-renewable Generator missing from the dispatch
+    # (added after the solve) is unknown, never 0.
+    if cls["nonren_generators"] and not set(cls["nonren_generators"]) <= set(
+        gp.columns
+    ):
+        out["reason"] = NO_DISPATCH_REASON
+        return out
 
     def _col(frame, name):
         if frame is None or name not in getattr(frame, "columns", []):
@@ -804,7 +793,7 @@ def renewable_fraction(
         nonren += _col(gp, g).clip(lower=0.0)
     blind = []
     for l in cls["source_links"]:
-        delivered = _source_delivery(n, l, sns, gp, cls["source_links"])
+        delivered = _source_delivery(n, l, sns)
         if delivered is None:
             blind.append(l)
         else:
@@ -813,7 +802,7 @@ def renewable_fraction(
         out["reason"] = (
             "cannot attribute the electricity of source(s) "
             + ", ".join(map(str, blind))
-            + ": the dispatch does not say what each delivered"
+            + ": the dispatch carries neither its p0 nor its p1"
         )
         return out
     slack = pd.Series(0.0, index=sns)

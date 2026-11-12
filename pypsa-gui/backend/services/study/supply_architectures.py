@@ -488,7 +488,8 @@ def row_of(arch: SupplyArchitecture, n) -> dict:
     rf = kpi["fraction"]
     if rf is None:
         # Otherwise the fraction could not attribute a source or a conversion,
-        # or non-renewable output exceeded what was used on site.
+        # a counted dispatch was NaN, or non-renewable output exceeded what
+        # was used on site.
         unavailable["renewable_fraction"] = (
             "no_served_load"
             if kpi["reason"] in (_RF.NO_DISPATCH_REASON, _RF.NO_SERVED_REASON)

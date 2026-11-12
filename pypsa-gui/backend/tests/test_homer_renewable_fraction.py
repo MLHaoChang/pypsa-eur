@@ -583,11 +583,27 @@ def test_horizon_totals_weight_each_period_by_its_years():
     assert kpi["fraction"] == pytest.approx(1 - 450.0 / 3600.0)
 
 
-def test_a_generator_added_after_the_solve_reads_as_zero():
+def test_a_generator_added_after_the_solve_reads_as_unavailable():
+    """GK B A5: a non-renewable Generator missing from the dispatch is
+    unknown, never 0, the same rule as a Load."""
     n = _dispatched()
     n.add("Generator", "late", bus="ac", carrier="diesel", p_nom=5.0)
     n.generators_t.p = n.generators_t.p.drop(columns=["late"], errors="ignore")
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "not been solved" in kpi["reason"], kpi
+
+
+def test_a_renewable_generator_added_after_the_solve_is_not_read():
+    n = _dispatched()
+    n.add("Generator", "late_pv", bus="ac", carrier="solar", p_nom=5.0)
     assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_no_load_dispatch_is_unavailable_even_with_generator_dispatch():
+    n = _dispatched()
+    n.loads_t.p = pd.DataFrame(index=n.snapshots)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "not been solved" in kpi["reason"]
 
 
 def test_no_generator_dispatch_is_unavailable():
@@ -848,7 +864,7 @@ def test_the_kpi_counts_a_dispatched_grid_import_link():
     assert kpi["fraction"] == pytest.approx(0.625)
 
 
-# ── G13: dispatch fallbacks 03a's study rows rely on ────────────────────
+# ── G13 / GK B A2-A3: what a source Link delivered ──────────────────────
 
 
 def test_an_import_link_without_p0_reads_its_delivery_from_p1():
@@ -859,38 +875,33 @@ def test_an_import_link_without_p0_reads_its_delivery_from_p1():
     assert kpi["nonrenewable_mwh"] == pytest.approx(90.0), kpi
 
 
-def test_an_import_link_without_p0_or_p1_reads_its_supply_bus_generator():
-    n = _grid_supply(_dispatched())  # supply 10 MW at 07:00, η 0.98
+def test_a_positive_p1_delivers_nothing():
+    """GK B A3: p1 > 0 is the Link running backward (taking from the
+    site), not a delivery: its positive part only."""
+    n = _grid_supply(_dispatched())
+    n.links_t.p1 = pd.DataFrame({"poc": 0.0}, index=n.snapshots)
+    n.links_t.p1.iloc[7, 0] = -9.8
+    n.links_t.p1.iloc[12, 0] = 5.0
     kpi = renewable_fraction(n)
     assert kpi["nonrenewable_mwh"] == pytest.approx(90.0), kpi
-    assert kpi["fraction"] == pytest.approx(0.625)
 
 
-def test_two_import_links_off_one_bus_without_p0_fail_closed():
+def test_an_import_link_without_p0_or_p1_reads_unavailable():
     n = _grid_supply(_dispatched())
-    n.add("Bus", "ac2", carrier="AC")
-    n.add("Link", "poc2", bus0="grid", bus1="ac2", p_nom=50.0)
     kpi = renewable_fraction(n)
     assert kpi["fraction"] is None, kpi
-    assert "the dispatch does not say what each delivered" in kpi["reason"], kpi
+    assert "carries neither its p0 nor its p1" in kpi["reason"], kpi
 
 
-def test_a_renewable_generator_on_the_supply_bus_is_not_its_import():
+def test_a_second_consumer_on_the_supply_bus_without_p0_reads_unavailable():
+    """GK B A2: the supply bus's Generator also feeds an electrolyser, so
+    its output is not what the import Link delivered."""
     n = _grid_supply(_dispatched())
-    n.add("Generator", "pv_far", bus="grid", carrier="solar", p_nom=50.0)
-    n.generators_t.p["pv_far"] = 5.0
-    assert renewable_fraction(n)["nonrenewable_mwh"] == pytest.approx(90.0)
-
-
-def test_loads_missing_from_the_dispatch_read_their_p_set():
-    n = _dispatched()
-    n.loads.loc["site", "p_set"] = LOAD_MW
-    n.loads_t.p = pd.DataFrame({"other": 99.0}, index=n.snapshots)
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Load", "h2_offtake", bus="h2", p_set=1.0)
+    n.add("Link", "electrolyser", bus0="grid", bus1="h2", p_nom=10.0)
     kpi = renewable_fraction(n)
-    assert kpi["served_mwh"] == pytest.approx(240.0), kpi
-    assert kpi["fraction"] == pytest.approx(0.625)
-    n.loads_t.p = pd.DataFrame(index=n.snapshots)
-    assert renewable_fraction(n)["served_mwh"] == pytest.approx(240.0)
+    assert kpi["fraction"] is None, kpi
 
 
 @pytest.mark.parametrize("frame,col", [("gen", "diesel"), ("load", "site")])
@@ -1009,13 +1020,22 @@ def test_no_electrical_load_is_nothing_served_not_unsolved():
     assert kpi["fraction"] is None and "no electricity served" in kpi["reason"], kpi
 
 
-def test_a_load_missing_from_the_dispatch_reads_its_p_set():
-    """G13 (03a's G5 fallback): a Load is fixed, so a dispatch that does not
-    carry it was served its p_set; all loads then come from p_set."""
+def test_a_load_missing_from_the_dispatch_reads_as_not_solved():
     n = _dispatched()
     n.add("Load", "site2", bus="ac", p_set=1.0)
     kpi = renewable_fraction(n)
-    assert kpi["served_mwh"] == pytest.approx(264.0), kpi
+    assert kpi["fraction"] is None and "not been solved" in kpi["reason"], kpi
+
+
+def test_a_load_added_after_a_solve_reads_as_not_solved():
+    """GK B A1: solve, then add a Load: unknown, never a value."""
+    n = _network()
+    status, _, log = _solve(n)
+    assert status == "ok", log
+    assert renewable_fraction(n)["fraction"] is not None
+    n.add("Load", "late", bus="ac", p_set=1.0)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "not been solved" in kpi["reason"], kpi
 
 
 def test_the_kpi_applies_the_generator_weightings():
