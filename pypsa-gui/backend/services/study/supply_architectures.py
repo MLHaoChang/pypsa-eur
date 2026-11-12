@@ -188,7 +188,6 @@ def _stranded(n, out: dict[str, list[tuple[str, str]]], slacks: set[str]) -> Non
     for comp in _BRANCHES:
         df = _static(n, comp)
         held.update(str(b) for c in ("bus0", "bus1") for b in df[c])
-    electric = _electrical_buses(n)
     link_buses = _link_buses(n)
     touching: dict[str, set[str]] = {}
     for name, buses in link_buses.items():
