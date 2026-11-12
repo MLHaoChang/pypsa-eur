@@ -1,0 +1,9 @@
+$ git rev-parse HEAD; 701328bd9f8ac443f2c53647976cf2ce3d0b398d
+$ python -m pytest tests/test_site_scene_layout.py -q
+_______________ ERROR collecting tests/test_site_scene_layout.py _______________
+ImportError while importing test module '/home/user/pypsa-eur/pypsa-gui/backend/tests/test_site_scene_layout.py'.
+tests/test_site_scene_layout.py:24: in <module>
+    from services.site_scene import layout, native, proposals
+E   ImportError: cannot import name 'layout' from 'services.site_scene' (/home/user/pypsa-eur/pypsa-gui/backend/services/site_scene/__init__.py)
+ERROR tests/test_site_scene_layout.py
+exit: 2 (collection: services.site_scene.layout does not exist)

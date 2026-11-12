@@ -46,7 +46,9 @@ HOME_RESULTS = {"guided": {"section": "results", "drawer": None, "open": "reques
                 "expert": {"panel": "results"}}
 HOME_SITE_MAP = {"site_part": "map"}
 
-OPTIONAL_ENGINE_ACTIONS = ("process_layout", "reconstruct_photos", "generate_blender")
+# SC-06-layout made `process_layout` native (a calibrated GeoJSON/raster layout through
+# an `import_layout` proposal, no engine); photos and Blender still need one.
+OPTIONAL_ENGINE_ACTIONS = ("reconstruct_photos", "generate_blender")
 
 
 def _blocker(code: str, reason: str, home: dict[str, Any]) -> dict[str, Any]:
@@ -114,6 +116,10 @@ def actions(*, saved: bool, can_edit: bool, anchor_confirmed: bool, site: str, b
                 _blocker("not_in_this_slice", REASON_NOT_IN_N, HOME_SITE_MAP)),
         _action("apply_proposal", writable and pending_proposal, "commits the reviewed proposal as a new revision",
                 no_write if not writable else _blocker("no_proposal", REASON_NO_PROPOSAL, HOME_SITE_MAP)),
+        _action("process_layout", writable and site != "none" and boundary,
+                "previews buildings traced on a calibrated drawing or read from GeoJSON; writes nothing until Apply",
+                no_write if not writable else _blocker("boundary_missing", REASON_NO_BOUNDARY, HOME_SITE_MAP),
+                ["saved Site with a boundary", "a GeoJSON layout or a drawing with a scale"]),
     ]
     for name in OPTIONAL_ENGINE_ACTIONS:
         # No engine is wired in N; installed or not, the action stays unavailable (no silent enablement).

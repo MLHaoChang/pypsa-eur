@@ -1,0 +1,18 @@
+Hand mutation of services/site_scene/layout.py, each run from pypsa-gui/backend: timeout 500 python -m pytest tests/test_site_scene_layout.py -q -p no:cacheprovider -W ignore -x -rf
+# | result | first failing test
+1 | killed (re-run with the edit on the combined `dx, dy = ...` line) | test_raster_north_up_yields_the_drawn_rectangle
+2 | killed | test_raster_rotation_anchor_and_local_anchor_place_every_vertex
+3 | killed | test_raster_north_up_yields_the_drawn_rectangle
+4 | killed | test_raster_north_up_yields_the_drawn_rectangle
+5 | killed | test_raster_rotation_anchor_and_local_anchor_place_every_vertex
+6 | killed | test_a_projected_crs_is_named[EPSG:25832-crs0]
+7 | killed after adding a link-CRS case with no href (it survived before: `_no_remote` caught the href first) | test_remote_references_are_refused[member2]
+8 | killed | test_remote_references_are_refused[member1]
+9 | killed | test_a_layout_far_from_the_site_is_named
+10 | killed | test_polygon_holes_are_refused_by_name
+11 | killed | test_pixels_outside_the_declared_image_are_named[ring]
+12 | killed | test_pixel_on_the_image_edge_is_inside
+13 | killed | test_projected_coordinates_without_a_crs_member_are_named
+14 | killed | test_zero_or_negative_scale_distance_is_named[0-scale_distance]
+15 | killed | test_too_many_vertices_is_413_before_geometry
+16 | killed | test_an_image_over_50_megapixels_is_413
