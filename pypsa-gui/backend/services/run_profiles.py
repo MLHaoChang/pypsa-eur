@@ -523,6 +523,45 @@ def _eh_site_v2() -> dict:
 
 EH_SITE_V2 = _eh_site_v2()
 
+# Study harness issue 33 (GK B (49) plan GO, Q1-Q3): eh_site@3. The intake may
+# name the site by a point (lat/lon, never a creation param); the inputs stage
+# then fetches its map context (`harness/run_site.py`, the service
+# `fetch_site_context` calls) into the run's own record, and the input gate's
+# `eh.site.context` (warn) reads it. eh_site@1 and @2 stay byte-equal (L8).
+SITE_LAT_PARAM = "site.lat"
+SITE_LON_PARAM = "site.lon"
+SITE_LAT_MAX = 85.05  # `site_context.MAX_MERCATOR_LAT`: the terrain tiles end there
+SITE_LON_MAX = 180.0
+SITE_CONTEXT_RULE = _rule(
+    "eh.site.context", "eh.site.context", "eq", "fetched", severity="warn",
+    basis="The map context (buildings, power lines, substations, terrain) of the site the intake names "
+          "was fetched in full for the run.")
+
+
+def _degrees(label, limit):
+    return {"label": label, "kind": "number", "sources": ["text"], "editable": True,
+            "native_type": "float", "unit_storage": "°", "unit_display": "deg", "display_scale": 1.0,
+            "validation_schema": {"minimum": -limit, "maximum": limit}}
+
+
+def _eh_site_v3() -> dict:
+    profile = copy.deepcopy(EH_SITE_V2)
+    profile["version"] = 3
+    profile["params"]["ask"] += [SITE_LAT_PARAM, SITE_LON_PARAM]
+    profile["params"]["fields"][SITE_LAT_PARAM] = _degrees("Site latitude", SITE_LAT_MAX)
+    profile["params"]["fields"][SITE_LON_PARAM] = _degrees("Site longitude", SITE_LON_MAX)
+    profile["stages"]["inputs"] = {
+        "actions": [*copy.deepcopy(GENERIC["inputs"]["actions"]),
+                    {"tool": run_actions.SITE_FETCH, "args": dict(run_actions.MARKERS[run_actions.SITE_KIND]),
+                     "native": run_actions.KIND}],
+        "rules": []}
+    gate = profile["stages"]["input_gate"]
+    gate["rules"] = [*gate["rules"], copy.deepcopy(SITE_CONTEXT_RULE)]
+    return profile
+
+
+EH_SITE_V3 = _eh_site_v3()
+
 # Study harness 10a (GK B (36) D1-D8, Q1-Q5): eh_datacenter@1. The solve stage
 # runs the solve, the EH study (LOLE as eh_site@2, Q5), the campus run held to
 # the run's frozen grid-code profile and the scorecard read with it
@@ -898,7 +937,8 @@ def _eh_microgrid(staged: bool) -> dict:
 EH_MICROGRID = _eh_microgrid(staged=False)
 EH_MICROGRID_STAGED = _eh_microgrid(staged=True)
 
-PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_datacenter@1": EH_DATACENTER,
+PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_site@3": EH_SITE_V3,
+                              "eh_datacenter@1": EH_DATACENTER,
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
                               "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED}

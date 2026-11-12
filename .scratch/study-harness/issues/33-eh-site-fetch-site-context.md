@@ -29,3 +29,17 @@ Acceptance:
 - [ ] The offline smoke runs it from a fixture, with no network (L7).
 - [ ] The plan names which gate rule reads the fetched context, and a test shows that rule firing on it.
 - [ ] A site that cannot be fetched leaves the gap visible in the report, never a silent default.
+
+### 2026-11-12: plan GO (GK B (49))
+
+Plan: `eh_site@3` (copy of @2) adds optional intake params `site.lat`/`site.lon` (never a creation param), and an inputs-stage harness action (`run_actions` kind `site_context`) that fetches the context for a ±250 m square around the frozen point and keeps it in the run's own record (no project write, no new card). The step always settles: `fetched` | `unavailable` (reason) | `not_named`. Gate rule: input-gate `eh.site.context` (warn) reads that record; it passes only on `fetched` with `truncated` False, else not_evaluated with its reason (`not_named` → "no site named in the intake"), and the report's harness gaps list it. Q1 warn, Q2 run record only, Q3 lat/lon point.
+
+Conditions:
+- S1 frozen input: the site is frozen from the granted intake rows; a model's other coordinates cannot change the fetch (#1072). NaN, inf, out-of-range lat/lon refused at intake, never clamped.
+- S2 model turns: the action never becomes admissible on a model turn (#1123); probe `_refusal`; run test_harness_run_monitor.
+- S3 bounded step: an explicit fetch timeout below the step's lease bound; an outage settles `unavailable` inside it; every fetch exception settles unavailable, a programming error is not swallowed.
+- S4 egress: obey every switch gating the chat tool's outbound call; say so if none exists.
+- S5 the transport seam is test-only.
+- S6 the record is new: every older reader handles its absence; counts from the full response, truncated said.
+- S7 @1/@2 digests pinned; a granted @2 run resolves @2; `run_intake.params` drops `site`; @2 intake rows unchanged.
+- S8 hand mutants: frozen-site read, not_named mapping, truncated check, timeout, unavailable settle, gaps row.
