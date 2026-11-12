@@ -18,11 +18,13 @@ cannot answer for is refused (`TargetUnknown`), never guessed.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from typing import Any
 
 from services.asset_schema import fields as asset_fields
 from services.asset_schema.schema import CLASS_ATTR
 from services.provenance_graph import money
+from services.provenance_graph.memory import MemoryRecall
 from services.provenance_graph.queries import _check, money_graph, staleness, why
 from services.provenance_graph.types import Edge, Graph, Step, Unrecorded
 
@@ -115,6 +117,14 @@ def _recorded(edge: Edge) -> Any:
         return None
     if isinstance(rec, Unrecorded):
         return {"unrecorded": rec.reason}
+    if isinstance(rec, MemoryRecall):
+        return {
+            "item": rec.item,
+            "version": rec.version,
+            "approved_by": rec.approved_by,
+            "approved_at": rec.approved_at,
+            "replaces": rec.replaces,
+        }
     if isinstance(rec, money.ScaleRecord):
         return (
             rec.scaled
@@ -193,7 +203,25 @@ def _pack_price(
     }
 
 
-def _step(g: Graph, step: Step) -> dict:
+def _memory(step: Step, resolve: Callable[[str, int], dict | None] | None) -> dict | None:
+    """The memory step's own state wording and, when the caller can read the item (`resolve`: memory_store.node
+    for the signed-in user), its summary, kind, owner scope and source evidence. An item the reader may not see,
+    or cannot resolve, still names its id and version: the stamp alone says what was approved."""
+    rec = step.via.recorded if step.via is not None else None
+    if step.node.kind != "memory" or not isinstance(rec, MemoryRecall):
+        return None
+    out = {"id": step.node.id, "state": rec.state, "item": None}
+    if resolve is not None:
+        try:
+            out["item"] = resolve(rec.item, rec.version)
+        except Exception:  # noqa: BLE001 - an unreadable item must not fail the walk
+            out["item"] = None
+    return out
+
+
+def _step(
+    g: Graph, step: Step, resolve: Callable[[str, int], dict | None] | None = None
+) -> dict:
     parsed = _parse(step.node.id)
     cls, name, field = parsed if parsed else (None, None, None)
     value = _value(g.ctx, cls, name, field) if parsed else None
@@ -220,6 +248,9 @@ def _step(g: Graph, step: Step) -> dict:
     }
     if step.via is not None and step.via.kind != "derived_from":
         out["broken"] = _broken(step.via, g)
+    memory = _memory(step, resolve)
+    if memory is not None:
+        out["memory"] = memory
     pack = _pack_price(g, step, value, unit) if step.node.kind == "derived" else None
     if pack is not None:
         out["pack_price"] = pack
@@ -247,8 +278,16 @@ def check_target(n, component: str, name: str) -> None:
         raise TargetUnknown(f"{component} '{name}' not found")
 
 
-def explain(n, component: str, name: str, field: str) -> dict:
-    """Why one asset field has its value: the walk from the field to what priced it, outcome first."""
+def explain(
+    n,
+    component: str,
+    name: str,
+    field: str,
+    resolve_memory: Callable[[str, int], dict | None] | None = None,
+) -> dict:
+    """Why one asset field has its value: the walk from the field to what priced it, outcome first.
+    `resolve_memory(item, version)` reads a memory item for the caller (slice 07); without it a memory step names
+    only the id and version from the stamp."""
     check_target(n, component, name)
     g = money_graph(n, [(component, name)])
     start = _start(g, component, name, field)
@@ -265,7 +304,7 @@ def explain(n, component: str, name: str, field: str) -> dict:
         },
         "target": {"component": component, "name": name, "field": field},
         "node": start,
-        "steps": [_step(g, s) for s in steps[:MAX_STEPS]],
+        "steps": [_step(g, s, resolve_memory) for s in steps[:MAX_STEPS]],
     }
 
 
@@ -307,6 +346,8 @@ def explain_ledger_row(n, key: str) -> dict:
         if "stale" in states
         else "uncompared"
         if "uncompared" in states
+        else "from_memory"
+        if "from_memory" in states
         else "fresh"
     )
     return {

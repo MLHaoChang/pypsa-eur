@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The provenance graph links a value accepted from a memory item to that item (`recalled_from`); "why" names it and the verdict reads "from memory v<n>, user-approved" instead of fresh.

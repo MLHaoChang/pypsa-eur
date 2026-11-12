@@ -23,6 +23,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from services.asset_schema import provenance
+from services.provenance_graph import memory
 from services.provenance_graph.types import Broken, Edge, Node, Unrecorded
 
 #: The money fields a scaled price writes (pricing: overnight × scale, FOM = overnight × share).
@@ -164,6 +165,7 @@ def add_asset(
                 recorded=dict(entry),
             )
         )
+        memory.add_recall(b, nid, entry)
     money = []
     for field in SCALED_FIELDS:
         if field not in entries:

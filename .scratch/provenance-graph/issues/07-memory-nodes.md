@@ -1,6 +1,6 @@
 # Memory items as graph nodes
 
-Status: ready-for-agent (blocked by assistant-memory 03; Sonnet; GK B)
+Status: done (PR: provenance-graph 07)
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 

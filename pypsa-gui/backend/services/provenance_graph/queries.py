@@ -109,6 +109,9 @@ def walked(g: Graph, node_id: str) -> list[Edge]:
 
 
 def _check(g: Graph, edge: Edge) -> tuple[State, Broken | None]:
+    if edge.kind == "recalled_from":
+        # Approved by the user at that version, immutable: nothing to compare, and not `uncompared` either.
+        return "from_memory", None
     compare = COMPARATORS.get(edge.kind)
     if compare is None or edge.recorded is None:
         return "uncompared", None
@@ -124,10 +127,11 @@ def staleness(g: Graph, node_id: str) -> Verdict:
     broken: list[Broken] = []
     compared = 0
     uncompared: list[str] = []
+    remembered = False
     seen: set[str] = set()
 
     def visit(nid: str) -> None:
-        nonlocal compared
+        nonlocal compared, remembered
         if nid in seen:
             return
         seen.add(nid)
@@ -136,7 +140,8 @@ def staleness(g: Graph, node_id: str) -> Verdict:
             uncompared.append(nid)
         for e in edges:
             state, broke = _check(g, e)
-            compared += state != "uncompared"
+            remembered |= state == "from_memory"
+            compared += state not in ("uncompared", "from_memory")
             if broke is not None:
                 broken.append(broke)
             elif state == "uncompared" and e.kind != "derived_from":
@@ -146,9 +151,17 @@ def staleness(g: Graph, node_id: str) -> Verdict:
                 visit(e.dst)
 
     visit(node_id)
-    if not compared and not uncompared:
+    if not compared and not uncompared and not remembered:
         uncompared.append(node_id)
-    state: State = "stale" if broken else "uncompared" if uncompared else "fresh"
+    state: State = (
+        "stale"
+        if broken
+        else "uncompared"
+        if uncompared
+        else "from_memory"
+        if remembered
+        else "fresh"
+    )
     return Verdict(node_id, state, tuple(broken), tuple(uncompared))
 
 
