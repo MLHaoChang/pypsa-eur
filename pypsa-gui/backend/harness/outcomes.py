@@ -711,6 +711,9 @@ def _new_carriers(note: dict, read: dict) -> set[str]:
     return named - set(note.get("carriers_before") or ())
 
 
+_PROVENANCE_STORE = "asset_params"  # services.asset_schema.provenance._KEY
+
+
 def _allowed(note: dict, path: str, carriers: set[str] = frozenset()) -> bool:
     """A path the call named: a cell write its cell, a create/delete its rows,
     and a create's new carriers (`_new_carriers`)."""
@@ -720,10 +723,15 @@ def _allowed(note: dict, path: str, carriers: set[str] = frozenset()) -> bool:
         if path.startswith(head) and "/" not in path[len(head) :]:
             return True
     for item in note["items"]:
-        if path.startswith("/meta/") and path.split("/", 3)[3:] == [
-            f"{cls}/{item['name']}"
-        ]:
-            return True  # its own entry in a per-asset meta store (a cell write too: provenance)
+        store, _, entry = path.removeprefix("/meta/").partition("/")
+        if (
+            path.startswith("/meta/")
+            and entry == f"{cls}/{item['name']}"
+            # A create or delete may own its entry in any per-asset store; a cell
+            # write only the provenance store (what `mark_customised` writes).
+            and (item["kind"] != "cell" or store == _PROVENANCE_STORE)
+        ):
+            return True
         if item["kind"] == "cell":
             if path == f"/{cls}/{item['name']}/{item['attr']}":
                 return True
