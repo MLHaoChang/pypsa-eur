@@ -289,6 +289,12 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/studies.py", "start_findings_tornado"): frozenset(),
     ("routers/studies.py", "get_findings_tornado"):   frozenset(),
     ("routers/studies.py", "abort_findings_tornado"): frozenset(),
+    # homer-parity 03a: the supply-architecture table reads each fork's LP
+    # objective and overnight capex, not an investment-case figure, so it
+    # reports no economics surface.
+    ("routers/studies.py", "start_supply_architectures"): frozenset(),
+    ("routers/studies.py", "get_supply_architectures"):   frozenset(),
+    ("routers/studies.py", "abort_supply_architectures"): frozenset(),
     # S7: the decision report — assembled once, then rendered; every
     # rendering shows the same verdict facts and case KPIs.
     ("routers/studies.py", "assemble_report"):        frozenset({"decision_report"}),

@@ -139,7 +139,8 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         list_decision_studies list_library_items list_library_references list_library_series preview_billing
         preview_decision_study_intake put_library_item run_decision_study run_investment_case
         set_finance_inputs solve_ppa_price start_decision_study update_decision_study set_study_parameter
-        get_study_findings get_poc_state get_value_flow_designer""",
+        get_study_findings get_poc_state get_value_flow_designer
+        get_supply_architectures compare_supply_architectures""",
     'experiments': """
         advance_experiment cancel_experiment compare_experiments compare_sensitivities get_experiment
         list_experiments prepare_experiment reconcile_experiment refresh_experiment run_sensitivity_sweep

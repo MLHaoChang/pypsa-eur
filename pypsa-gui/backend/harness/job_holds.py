@@ -161,6 +161,8 @@ JOB_KINDS: dict[str, str] = {
     "run_investment_case": INPROC,  # values a solved dispatch; no LP
     "run_mc_study": INPROC,  # solves nothing
     "campus_start_milp": INPROC_SOLVER,
+    # homer-parity 03a: one queued fork solve per supply architecture.
+    "compare_supply_architectures": INPROC_SOLVER,
     "run_ac_pf_stage": INPROC_SOLVER,
     "run_coupling_loop": INPROC_SOLVER,
     "run_decision_study": INPROC_SOLVER,

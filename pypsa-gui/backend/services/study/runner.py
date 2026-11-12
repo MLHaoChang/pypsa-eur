@@ -246,6 +246,15 @@ def _opt_value(value) -> float | None:
     return v if v == v and abs(v) != float("inf") else None
 
 
+def system_cost(n) -> float | None:
+    """A solved network's system cost: the LP objective plus its constant
+    (None without an objective). The one reading the run and the
+    supply-architecture comparison share."""
+    objective = _opt_value(getattr(n, "objective", None))
+    const = _opt_value(getattr(n, "objective_constant", 0.0)) or 0.0
+    return None if objective is None else objective + const
+
+
 def _read_option(n, cfg, opt, fidelity: Fidelity, currency_year, *, compiled) -> dict:
     """
     One option's outcome, from the fork's live frames and its own config.
@@ -335,18 +344,16 @@ def _read_option(n, cfg, opt, fidelity: Fidelity, currency_year, *, compiled) ->
                                             **({} if p is not None else {"p_nom_opt": "not_solved"})}))
         _classify(g, packs.PV_NAME)
 
-    objective = _opt_value(getattr(n, "objective", None))
-    const = _opt_value(getattr(n, "objective_constant", 0.0)) or 0.0
-    system_cost = None if objective is None else objective + const
+    cost = system_cost(n)
     annual = bill.annual_bill
     flags = {}
-    if system_cost is None:
+    if cost is None:
         flags["system_cost"] = "no_objective"
     if annual is None:
         flags["bill"] = (bill.unavailable.get("annual_bill") or "not_computed")
     result = OptionResult(
         option_id=opt.option_id, label=opt.label, solve_status="ok",
-        sizes=sizes, system_cost=system_cost, bill=annual,
+        sizes=sizes, system_cost=cost, bill=annual,
         delta_vs_baseline=_delta_not_yet(), fidelity=fidelity,
         currency_year=currency_year, unavailable=flags,
     )

@@ -1,0 +1,12 @@
+{
+  "kinds": {
+    "supply_architectures_action_invalid": {
+      "surface": "inline",
+      "why": "homer-parity 03a: compare_supply_architectures was asked for an action other than start or abort. The model's slip; it reads the message and retries with a valid action."
+    },
+    "supply_architectures_never_run": {
+      "surface": "inline",
+      "why": "homer-parity 03a: reading or aborting a study's supply-architecture comparison before it was ever run. A sequencing slip; the assistant starts it with compare_supply_architectures first."
+    }
+  }
+}

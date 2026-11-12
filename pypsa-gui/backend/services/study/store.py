@@ -43,10 +43,11 @@ WRITE_LOCK = threading.RLock()
 # S4: auxiliary records beside the study, `studies/<study_id>.<kind>.json` —
 # the option results (`findings`, a `models.study.Findings`) and the last
 # run's record (`run`); S6 adds the last fixed-size tornado (`tornado`), S7
-# the last assembled decision report (`report`). Their
+# the last assembled decision report (`report`), homer-parity 03a the last
+# supply-architecture comparison (`supply_architectures`). Their
 # stems are not bare ids, so `list_studies` skips them; they are deleted with
 # the study.
-AUX_KINDS = ("findings", "run", "tornado", "report")
+AUX_KINDS = ("findings", "run", "tornado", "report", "supply_architectures")
 
 
 class StudyNotFound(LookupError):
@@ -135,7 +136,15 @@ def save_study(project_dir: pathlib.Path, study: DecisionStudy) -> DecisionStudy
 def _aux_path(project_dir: pathlib.Path, study_id: str, kind: str) -> pathlib.Path:
     if kind not in AUX_KINDS:
         raise ValueError(f"unknown study record kind {kind!r}")
-    return _path(project_dir, study_id).with_name(f"{study_id}.{kind}.json")
+    # Checked here, where the name is built (not only in `_path`): the id must
+    # be a bare token and the resolved path must stay in the study directory.
+    if not isinstance(study_id, str) or not STUDY_ID_RE.fullmatch(study_id):
+        raise StudyNotFound(study_id)
+    root = os.path.normpath(os.fspath(studies_dir(project_dir)))  # as `_path`
+    full = os.path.normpath(os.path.join(root, f"{study_id}.{kind}.json"))
+    if not full.startswith(root + os.sep):
+        raise StudyNotFound(study_id)
+    return pathlib.Path(full)
 
 
 def aux_ref(study_id: str, kind: str) -> str:
