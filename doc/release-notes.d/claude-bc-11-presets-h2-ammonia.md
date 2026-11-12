@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Business-case presets for the H2 hub (`eh_h2_hub`, `eh_h2_hub_staged`) and ammonia (`eh_ammonia_staged`) templates: H2 offtake, production premium and NH3 sales on the served quantity, O2 sales as an offered row, stack replacement and O&M lines.

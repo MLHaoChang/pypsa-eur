@@ -1,0 +1,173 @@
+{
+  "id": "eh_ammonia_staged",
+  "version": "1",
+  "pack": "generic_defaults@2026-11-10:sha256:e228b001de2d80f1d1e01e8488b271a9de0bc12cb89bac2247a4592b6e0ce67e",
+  "templates": [
+    "eh_ammonia_staged"
+  ],
+  "variants": {
+    "nh3_sales": {
+      "label": "Ammonia (NH3 sales)",
+      "lines": [
+        {
+          "name": "NH3 sales",
+          "kind": "revenue",
+          "category": "product_sale",
+          "unit": "t",
+          "quantity_source": "linked:served_product.nh3@1",
+          "escalation": "contract",
+          "note": "Served NH3 in tonnes (MWh \u00f7 5.166); linked_share is the sold share. Say whether your price is ex-works or delivered.",
+          "hint": {
+            "low": 811.0,
+            "high": 1000.0,
+            "unit": "EUR/t",
+            "source": "H2Global pilot lot, BMWK press release 2024-07-11",
+            "year": 2024,
+            "note": "811 EUR/t net of delivery, 1,000 EUR/t delivered Rotterdam; auction ceiling 1,282 EUR/t."
+          }
+        },
+        {
+          "name": "Stack replacement",
+          "kind": "capex",
+          "category": "equipment",
+          "unit": "lump",
+          "escalation": "capex",
+          "note": "Quantity: one lump per replacement event; set refresh_years to the stack life in years (operating hours \u00f7 hours per year). Reference: 15 % of direct electrolyser capex per replacement at a 40,000 h interval (DOE/NREL 2022, PEM; alkaline 80,000 h, IRENA 2021). No default: the price depends on your electrolyser capex."
+        },
+        {
+          "name": "Non-energy O&M",
+          "kind": "opex",
+          "category": "maintenance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of the capex lines above per year. The electrolyser's own fixed O&M is already in the energy model's ledger (locked rows); this covers the plant capex you enter here. Default is the pack's electrolyser fixed O&M share (DEA, assumed).",
+          "default_keys": {
+            "quantity": "electrolysis.investment.fom_share"
+          },
+          "default_units": {
+            "quantity": "share/year"
+          }
+        },
+        {
+          "name": "Staff",
+          "kind": "opex",
+          "category": "staff",
+          "unit": "unit",
+          "escalation": "opex",
+          "note": "FTE count per year. No sourced default: enter the quantity and the price."
+        },
+        {
+          "name": "Insurance",
+          "kind": "opex",
+          "category": "insurance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of capex per year. No sourced default for hydrogen plant: enter the share."
+        },
+        {
+          "name": "ASU and synthesis-loop O&M",
+          "kind": "opex",
+          "category": "maintenance",
+          "unit": "share",
+          "quantity_source": "share_of:capex/equipment",
+          "escalation": "opex",
+          "note": "Share of equipment capex per year. No primary source: enter the share."
+        }
+      ]
+    }
+  },
+  "offered": [
+    {
+      "label": "Oxygen sales (electrolyser)",
+      "units": [
+        "t"
+      ],
+      "sources": [
+        "linked:derived_o2.electrolyser@1"
+      ],
+      "line": {
+        "name": "Oxygen sales (electrolyser)",
+        "kind": "revenue",
+        "category": "by_product",
+        "unit": "t",
+        "quantity_source": "linked:derived_o2.electrolyser@1",
+        "escalation": "contract",
+        "note": "Electrolyser O2 at 7.94 kg per kg H2. Rarely sold: needs an on-site offtaker. Off until you add it."
+      }
+    },
+    {
+      "label": "Oxygen sales (electrolyser_new_2027)",
+      "units": [
+        "t"
+      ],
+      "sources": [
+        "linked:derived_o2.electrolyser_new_2027@1"
+      ],
+      "line": {
+        "name": "Oxygen sales (electrolyser_new_2027)",
+        "kind": "revenue",
+        "category": "by_product",
+        "unit": "t",
+        "quantity_source": "linked:derived_o2.electrolyser_new_2027@1",
+        "escalation": "contract",
+        "note": "Electrolyser O2 at 7.94 kg per kg H2. Rarely sold: needs an on-site offtaker. Off until you add it."
+      }
+    },
+    {
+      "label": "Oxygen sales (electrolyser_new_2030)",
+      "units": [
+        "t"
+      ],
+      "sources": [
+        "linked:derived_o2.electrolyser_new_2030@1"
+      ],
+      "line": {
+        "name": "Oxygen sales (electrolyser_new_2030)",
+        "kind": "revenue",
+        "category": "by_product",
+        "unit": "t",
+        "quantity_source": "linked:derived_o2.electrolyser_new_2030@1",
+        "escalation": "contract",
+        "note": "Electrolyser O2 at 7.94 kg per kg H2. Rarely sold: needs an on-site offtaker. Off until you add it."
+      }
+    },
+    {
+      "label": "Oxygen sales (electrolyser_new_2035)",
+      "units": [
+        "t"
+      ],
+      "sources": [
+        "linked:derived_o2.electrolyser_new_2035@1"
+      ],
+      "line": {
+        "name": "Oxygen sales (electrolyser_new_2035)",
+        "kind": "revenue",
+        "category": "by_product",
+        "unit": "t",
+        "quantity_source": "linked:derived_o2.electrolyser_new_2035@1",
+        "escalation": "contract",
+        "note": "Electrolyser O2 at 7.94 kg per kg H2. Rarely sold: needs an on-site offtaker. Off until you add it."
+      }
+    },
+    {
+      "label": "Storage and shipping",
+      "units": [
+        "t"
+      ],
+      "sources": [
+        "linked:served_product.nh3@1"
+      ],
+      "line": {
+        "name": "Storage and shipping",
+        "kind": "opex",
+        "category": "other",
+        "unit": "t",
+        "quantity_source": "linked:served_product.nh3@1",
+        "escalation": "opex",
+        "note": "Only if your NH3 price is delivered. Per tonne served; no sourced price."
+      }
+    }
+  ]
+}

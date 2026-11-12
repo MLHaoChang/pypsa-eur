@@ -20,11 +20,16 @@ from __future__ import annotations
 import json
 import pathlib
 import re
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from models.business_case import BusinessCaseInputs, LineItem, Unit
+from models.business_case import (
+    QUANTITY_SOURCE_PATTERN,
+    BusinessCaseInputs,
+    LineItem,
+    Unit,
+)
 
 if TYPE_CHECKING:
     from services.library.defaults_pack.loader import DefaultsPack
@@ -36,7 +41,13 @@ PRESETS_DIR = (
 )
 #: The version each preset file must carry; a bump is a new file version (G-C6 hashes
 #: `preset_id@version`).
-VERSIONS: dict[str, str] = {"eh_datacenter": "1", "eh_site": "1"}
+VERSIONS: dict[str, str] = {
+    "eh_ammonia_staged": "1",
+    "eh_datacenter": "1",
+    "eh_h2_hub": "1",
+    "eh_h2_hub_staged": "1",
+    "eh_site": "1",
+}
 
 _FORBID = ConfigDict(extra="forbid", allow_inf_nan=False)
 #: `<pack id>@<version>:sha256:<hex>`, the defaults pack's stamp.
@@ -62,8 +73,9 @@ class OfferedRow(BaseModel):
 
     label: str = Field(min_length=1)
     units: list[Unit] = Field(min_length=1)
+    # `linked:capacity` is a picker token (a capacity to choose); a full linked id is valid too.
     sources: list[
-        Literal["typed", "linked:capacity", "share_of:capex", "share_of:revenue"]
+        Literal["linked:capacity"] | Annotated[str, Field(pattern=QUANTITY_SOURCE_PATTERN)]
     ]
     line: LineItem
 
