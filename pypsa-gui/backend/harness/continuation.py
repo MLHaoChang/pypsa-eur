@@ -191,22 +191,42 @@ KNOWN_KINDS = frozenset({None, "profile_gen", *STUDY_STAGE_KINDS.values()})
 def _study_state(job) -> tuple[str, str | None]:
     """(native status, reason) of a decision-study step's own run record.
 
-    `done` is completed only when nothing was left unreached; otherwise it is
-    `partial` with the reason (L4). A record that is gone, unreadable or no
-    longer the one this step started is `unknown` (L3, L5)."""
+    The mapping follows what the runners save (`runner._worker`,
+    `tornado_runner._save`): a run is `completed` only when every option (and
+    every tornado variant) solved. A stop by the solve budget or the solve
+    deadline is `partial` with the reason; a user's abort is `aborted`; a run
+    that raised is `failed` with its error (L4). A record that is gone,
+    unreadable or no longer the one this step started is `unknown` (L3, L5)."""
+    from services.study.tornado_runner import DEADLINE_NOTE
     rec = _study_record(job)
     status = rec.get("status")
     if not status or rec.get("started_at") is None or rec.get("started_at") != job.get("attempt"):
         return "unknown", None
-    if status == "done":
-        left = (rec.get("pending") and "options not reached: " + ", ".join(map(str, rec["pending"]))
-                or rec.get("budget_exhausted") and "the solve budget ran out"
-                or rec.get("deadline_exceeded") and str(rec["deadline_exceeded"])
-                or rec.get("error"))
-        return ("partial", str(left)[:200]) if left else ("completed", None)
-    if status == "aborting":
+    error = str(rec["error"])[:200] if rec.get("error") else None
+    tornado = job.get("kind") == "study_tornado"
+    deadline = ((rec.get("robustness") or {}).get("note") == DEADLINE_NOTE or rec.get("deadline_exceeded")
+                or "deadline" in (error or "").lower())
+    if status == "running" or status == "aborting":  # the runners keep `running` while a stop is pending
         return "running", None
-    return status, (str(rec["error"])[:200] if rec.get("error") else None)
+    if status in ("failed", "aborted") and deadline:
+        return "partial", error or "the run stopped at the solve deadline"
+    if status in ("failed", "aborted") and rec.get("budget_exhausted"):
+        return "partial", "the solve budget ran out"
+    if status == "aborted":
+        return "aborted", error or "aborted"
+    if status != "done":
+        return status, error
+    if tornado:
+        robustness = rec.get("robustness") or {}
+        if robustness.get("status") != "ok":
+            return "partial", f"tornado not established: {robustness.get('note') or 'no robustness result'}"[:200]
+        return "completed", None
+    options, solved = rec.get("options") or [], set(rec.get("solved") or [])
+    unreached = [o for o in options if o not in solved]
+    if unreached or rec.get("pending") or error:
+        return "partial", (f"{len(unreached)} of {len(options)} options did not solve" if unreached
+                           else error or "options not reached")
+    return "completed", None
 
 
 def _queue_job_status(job) -> str:

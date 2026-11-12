@@ -193,7 +193,16 @@ def _run(session, monkeypatch, stage):
 
 
 def _rec(status="done", started=1.0, **kw):
-    return {"status": status, "started_at": started, **kw}
+    """A record in the shape the runners save: one option that solved, a tornado that is ok."""
+    return {
+        "status": status,
+        "started_at": started,
+        "options": ["a"],
+        "solved": ["a"],
+        "pending": [],
+        "robustness": {"status": "ok"},
+        **kw,
+    }
 
 
 def test_both_stages_continue_without_a_poll(session, baseline, monkeypatch):
@@ -212,12 +221,11 @@ def test_both_stages_continue_without_a_poll(session, baseline, monkeypatch):
 @pytest.mark.parametrize(
     "extra",
     [
-        {"pending": ["opt-b"]},
-        {"budget_exhausted": True},
-        {"deadline_exceeded": "solve_deadline_exceeded"},
+        {"pending": ["b"]},  # an option the run did not reach
+        {"options": ["a", "b"]},  # an option row that failed: not in `solved`
     ],
 )
-def test_a_run_that_left_something_unreached_is_not_plain_completed(
+def test_a_done_run_with_unsolved_options_is_partial_not_completed(
     session, baseline, monkeypatch, extra
 ):
     _, _, root = baseline
@@ -229,19 +237,140 @@ def test_a_run_that_left_something_unreached_is_not_plain_completed(
     assert step["status"] == "uncertain"
 
 
-@pytest.mark.parametrize("status", ["failed", "aborted"])
-def test_a_failed_or_aborted_run_fails_the_step_with_the_record_error(
-    session, baseline, monkeypatch, status
+@pytest.mark.parametrize(
+    "status, error", [("failed", "solver died"), ("aborted", None)]
+)
+def test_a_failed_or_aborted_run_fails_the_step_with_the_record_reason(
+    session, baseline, monkeypatch, status, error
 ):
     _, _, root = baseline
     task = _study(
         monkeypatch,
         "lc45-s3-" + status,
-        {"options": [_rec(status, error="solver died")], "tornado": [_rec()]},
+        {"options": [_rec(status, error=error)], "tornado": [_rec()]},
     )
     _run(session, monkeypatch, "options")
     step = _wait_done(root, task["task_id"], 0)
-    assert step["status"] == "failed" and "solver died" in str(step)
+    assert step["status"] == "failed" and (error or "aborted") in str(step)
+
+
+def test_a_run_followed_through_running_and_aborting_settles_only_at_the_end(
+    session, baseline, monkeypatch
+):
+    """Running -> aborting -> terminal: the step waits through `aborting` (F3)."""
+    _, _, root = baseline
+    seen = []
+    steps = [
+        {
+            "id": "options",
+            "tool": "run_decision_study",
+            "args": {**S1, "stage": "options"},
+        }
+    ]
+    task = chat_tools.start_task(
+        title="Abort", request_id="lc45-s9", steps=steps, brief=brief(steps)
+    )
+    monkeypatch.setitem(
+        chat_tools.DISPATCHERS,
+        "run_decision_study",
+        lambda **k: {"stage": k["stage"], "run": {"status": "running"}},
+    )
+    script = ["running", "running", "aborting", "aborting", "done"]
+
+    def record(job):
+        status = script.pop(0) if len(script) > 1 else script[0]
+        seen.append(status)
+        return _rec(status)
+
+    monkeypatch.setattr(continuation, "_study_record", record)
+    _run(session, monkeypatch, "options")
+    assert _wait_done(root, task["task_id"], 0)["status"] == "completed"
+    assert "aborting" in seen and seen[-1] == "done"
+
+
+def _saved_tornado(monkeypatch, status, error=None, **record):
+    """A tornado record as the runner saves it: the dict `tornado_runner._save` hands the store."""
+    from types import SimpleNamespace
+
+    from services.study import tornado_runner as T
+
+    saved = {}
+    monkeypatch.setattr(
+        T.store, "save_aux", lambda base_dir, study_id, name, data: saved.update(data)
+    )
+    base = {"started_at": 1.0, "variants": []}
+    T._save(
+        None,
+        "s1",
+        SimpleNamespace(findings={}),
+        {**base, **record},
+        None,
+        status,
+        error,
+        [],
+    )
+    return saved
+
+
+@pytest.mark.parametrize(
+    "status, error, record, native, reason",
+    [
+        ("aborted", None, {"budget_exhausted": True}, "partial", "budget"),
+        ("aborted", "solve_deadline_exceeded: too slow", {}, "partial", "deadline"),
+        ("aborted", None, {}, "aborted", "aborted"),  # a user's abort
+        ("failed", "RuntimeError: boom", {}, "failed", "boom"),
+        (
+            "done",
+            None,
+            {},
+            "partial",
+            "tornado not established",
+        ),  # no robustness result
+    ],
+)
+def test_a_saved_tornado_maps_to_the_step_state_the_user_needs(
+    monkeypatch, status, error, record, native, reason
+):
+    saved = _saved_tornado(monkeypatch, status, error, **record)
+    monkeypatch.setattr(continuation, "_study_record", lambda job: saved)
+    got, why = continuation._study_state({"kind": "study_tornado", "attempt": 1.0})
+    assert got == native and reason in (why or "")
+
+
+def test_an_options_run_stopped_at_its_deadline_is_partial(monkeypatch):
+    saved = _rec(
+        "failed", error="solve_deadline_exceeded: wait ran out (option a)", solved=[]
+    )
+    monkeypatch.setattr(continuation, "_study_record", lambda job: saved)
+    got, why = continuation._study_state({"kind": "study_options", "attempt": 1.0})
+    assert got == "partial" and "deadline" in why
+
+
+def test_the_runners_still_write_the_keys_the_follower_reads():
+    """Pins the save shape: a renamed status or flag fails here, not in production."""
+    import inspect
+
+    from services.study import runner, tornado_runner
+
+    start = inspect.getsource(runner.start_study_run)
+    worker = inspect.getsource(runner._worker)
+    for key in ('"options"', '"solved"', '"pending"', '"started_at"', '"error"'):
+        assert key in start
+    for status in ('"aborted"', '"done"', '"failed"'):
+        assert status in worker
+    assert (
+        "aborting" not in start + worker
+    )  # the runners keep `running` while a stop is pending
+    save = inspect.getsource(tornado_runner._save)
+    for key in (
+        '"status"',
+        '"started_at"',
+        '"budget_exhausted"',
+        '"robustness"',
+        '"error"',
+    ):
+        assert key in save
+    assert "deadline_exceeded" in inspect.getsource(tornado_runner._worker)
 
 
 def test_a_vanished_record_settles_uncertain(session, baseline, monkeypatch):
