@@ -517,18 +517,18 @@ def test_the_transport_is_only_the_modules():
 # ── the step, end to end in the runner's dispatch ───────────────────────────
 
 
-def _dispatched(tmp_path, rows, instance=None, lease_owner=None):
+def _dispatched(tmp_path, rows, instance=None, lease_owner=None, prior=()):
     steps = run_profiles.materialise(run_profiles.resolve("eh_site@3"), "inputs", "p-1")
     run_actions.fill(
         steps,
-        run_actions.stage_frozen(_task(rows), run_actions.SITE_KIND),
+        run_actions.stage_frozen(_task(rows, prior), run_actions.SITE_KIND),
         run_actions.SITE_KIND,
     )
     task = {
         "task_id": "t-1",
         "project_id": "p-1",
         "status": "running",
-        "steps": [dict(steps[0], status="completed"), steps[1]],
+        "steps": [*prior, dict(steps[0], status="completed"), steps[1]],
         "run": {
             "intake": rows,
             "status": "running",
@@ -577,7 +577,7 @@ def test_a_named_site_is_fetched_by_the_step(offline, tmp_path):
 def test_no_site_named_settles_not_named_without_a_request(offline, tmp_path):
     out, task = _dispatched(tmp_path, [])
     assert out == run_actions.SITE_FETCH and offline == []
-    assert task["steps"][1]["result"] == {
+    assert task["steps"][-1]["result"] == {
         "kind": run_actions.SITE_KIND,
         "version": 1,
         "state": "not_named",
@@ -843,3 +843,61 @@ def test_the_context_file_sits_beside_a_task_named_by_a_string():
 def test_a_row_without_a_whole_citation_has_no_compass_letter(source):
     lat, lon = _site_rows()
     assert run_intake.site([{**lat, "source": source}, lon]) == (SITE, None)
+
+
+# ── GK B (50) F1 and F2 ─────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "elements",
+    [
+        [1],
+        [{"type": "way", "id": 1, "geometry": "x"}],
+        [{"type": "way", "tags": {"building": "yes"}}],
+        [{"type": "way", "id": 1, "tags": {"height": 3}}],
+        [{"type": "way", "id": 1, "geometry": [{"lat": "53", "lon": 6.8}]}],
+        [{"type": "way", "id": 1, "geometry": [1, 2]}],
+        [{"type": "way", "id": 1, "nodes": 5}],
+    ],
+)
+def test_elements_of_the_wrong_shape_settle_unavailable_before_parsing(
+    elements, tmp_path, monkeypatch
+):
+    body = json.dumps({"elements": elements}).encode()
+    monkeypatch.setattr(run_site, "_TRANSPORT", overpass(body=body))
+    parsed = []
+    monkeypatch.setattr(site_context, "elements_to_context", parsed.append)
+    result = run_site.fetch(tmp_path / "t-1.json", SITE, "a1")
+    assert result["state"] == "unavailable" and "cannot read" in result["reason"]
+    assert parsed == []
+
+
+def test_the_fixture_has_the_shape_the_parser_reads():
+    elements = json.loads(FIXTURE.read_bytes())["elements"]
+    assert site_context.elements_shape_problem(elements) is None
+
+
+def test_an_error_inside_our_parser_on_a_good_answer_propagates(
+    offline, tmp_path, monkeypatch
+):
+    def broken(elements):
+        raise TypeError("a parser bug")
+
+    monkeypatch.setattr(site_context, "elements_to_context", broken)
+    with pytest.raises(TypeError, match="a parser bug"):
+        run_site.fetch(tmp_path / "t-1.json", SITE, "a1")
+
+
+def test_a_frozen_site_is_never_rebuilt_from_later_intake_rows(offline, tmp_path):
+    first = run_actions.stage_frozen(_task(_site_rows()), run_actions.SITE_KIND)
+    steps = run_profiles.materialise(run_profiles.resolve("eh_site@3"), "inputs", "p-1")
+    run_actions.fill(steps, first, run_actions.SITE_KIND)
+    prior = [dict(steps[1], id="inputs.prior", status="completed")]
+    moved = _site_rows(52.0, 5.0)
+    # inputs entered again after the intake rows changed: the first record is kept
+    again = run_actions.stage_frozen(_task(moved, prior), run_actions.SITE_KIND)
+    assert again == first and again["digest"] == first["digest"]
+    out, task = _dispatched(tmp_path, moved, prior=prior)
+    step = task["steps"][-1]
+    assert out == run_actions.SITE_FETCH and step["frozen"] == first
+    assert step["result"]["state"] == "fetched" and step["result"]["site"] == SITE

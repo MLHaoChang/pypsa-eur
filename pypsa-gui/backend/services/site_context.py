@@ -202,6 +202,42 @@ def _area_kind(tags: dict[str, str]) -> str | None:
     return None
 
 
+def _number(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def elements_shape_problem(elements: Any) -> str | None:
+    """
+    Issue 33 (S3): what is wrong with an Overpass ``elements`` value for
+    ``elements_to_context``, or None when it has the shapes the parser reads:
+    a list of objects, and on each way an integer ``id``, text ``tags``, a
+    ``geometry`` list of points whose ``lat``/``lon`` are finite numbers, and
+    a ``nodes`` list.
+    """
+    if not isinstance(elements, list):
+        return "elements is not a list"
+    for el in elements:
+        if not isinstance(el, dict):
+            return "an element is not an object"
+        if el.get("type") != "way":
+            continue
+        if not isinstance(el.get("id"), int) or isinstance(el.get("id"), bool):
+            return "a way has no integer id"
+        tags = el.get("tags")
+        if tags is not None and not (
+            isinstance(tags, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in tags.items())
+        ):
+            return "a way's tags are not text"
+        geometry = el.get("geometry", [])
+        if not isinstance(geometry, list) or not all(isinstance(p, dict) for p in geometry):
+            return "a way's geometry is not a list of points"
+        if any(axis in p and not _number(p[axis]) for p in geometry for axis in ("lat", "lon")):
+            return "a point's coordinate is not a number"
+        if "nodes" in el and not isinstance(el["nodes"], list):
+            return "a way's nodes are not a list"
+    return None
+
+
 def elements_to_context(elements: list[dict]) -> dict:
     """
     Overpass ``out geom`` elements → the §4.2 ``buildings`` / ``lines`` /
@@ -444,13 +480,12 @@ def fetch_context(
             raise SiteContextUnavailable(f"Overpass at {url} returned something that is not JSON.") from exc
         except AttributeError as exc:  # JSON, but not an object
             raise SiteContextUnavailable(f"Overpass at {url} returned JSON that is not an Overpass answer.") from exc
-        try:
-            features = elements_to_context(elements)
-        except (KeyError, TypeError, AttributeError, ValueError) as exc:
-            # Issue 33 (S3): an answer of the wrong shape is the upstream's failure, never a 500.
-            raise SiteContextUnavailable(
-                f"Overpass at {url} returned elements this app cannot read ({exc.__class__.__name__})."
-            ) from exc
+        # Issue 33 (S3): an answer of the wrong shape is the upstream's failure, refused
+        # before parsing; an error inside the parser on an answer that passed is ours.
+        problem = elements_shape_problem(elements)
+        if problem is not None:
+            raise SiteContextUnavailable(f"Overpass at {url} returned elements this app cannot read ({problem}).")
+        features = elements_to_context(elements)
 
         tiles: dict[tuple[int, int, int], list[list[float]] | None] = {}
         for key in terrain_tiles_for(bbox):
