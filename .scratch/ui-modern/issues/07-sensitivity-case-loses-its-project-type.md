@@ -3,7 +3,7 @@
 
 # A sensitivity case shows the plain-network headline cards, not its base's
 
-Status: ready-for-agent (UM07-KIND-1)
+Status: done (UM07-KIND-1; #1410 merged 2026-11-12)
 Type: bug (found while taking the 03 S3 shots)
 Reviewer: GK B.
 
