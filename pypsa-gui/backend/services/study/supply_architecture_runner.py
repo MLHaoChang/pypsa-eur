@@ -236,7 +236,10 @@ def _solve_fn(solver: ForkSolver, cfg):
         except F.VariantFailed as exc:
             condition = str(getattr(exc, "condition", "") or "").lower()
             code = "infeasible" if "infeasible" in condition else "failed"
-            raise SA.ArchitectureUnsolved(code, str(exc)) from None
+            # The row carries the typed code only; the text stays in the log
+            # (an exception's text never reaches the client).
+            logger.warning("supply architecture %s: %s", arch.architecture_id, exc)
+            raise SA.ArchitectureUnsolved(code, exc.code) from None
 
     return solve
 
@@ -283,7 +286,7 @@ def _worker(
             error = record["deadline_exceeded"]
     except Exception as exc:  # noqa: BLE001 — recorded
         logger.exception("decision study %s supply architectures failed", study_id)
-        error = f"{type(exc).__name__}: {exc}"
+        error = type(exc).__name__  # the text is in the log above, not the record
         status = "failed"
     finally:
         left = [r.name for r in solver.left] if solver is not None else []

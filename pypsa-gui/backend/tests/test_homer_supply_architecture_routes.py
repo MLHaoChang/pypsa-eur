@@ -279,6 +279,7 @@ def test_a_solver_exception_fails_its_row_and_leaves_no_fork(
     assert rec["status"] == "done"
     by = {r["architecture_id"]: r for r in rec["rows"]}
     assert by["grid"]["status"] == "failed" and by["pv"]["status"] == "ok"
+    assert by["grid"]["error"] == "variant_solve_failed"  # the code, no text
     assert _var_rows(session_local, "sa-crash") == []
 
 
@@ -303,7 +304,8 @@ def test_a_worker_exception_leaves_no_fork(
         _url("sa-boom", sid), json={"architectures": ["grid", "pv", "genset+grid"]}
     )
     rec = _wait(client, "sa-boom", sid)
-    assert rec["status"] == "failed" and "mid-run" in rec["error"]
+    assert rec["status"] == "failed"
+    assert rec["error"] == "RuntimeError"  # the class only: no exception text out
     assert _var_rows(session_local, "sa-boom") == []
 
 

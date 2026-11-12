@@ -100,6 +100,9 @@ class ArchitectureUnsolved(RuntimeError):
     def __init__(self, code: str, message: str = "") -> None:
         super().__init__(message or code)
         self.code = code
+        #: The text a row or a refusal may show (built by this module or the
+        #: runner, never an underlying exception's text).
+        self.detail = message or code
 
 
 @dataclass(frozen=True)
@@ -542,7 +545,7 @@ def compare(
         try:
             solved = solve(omit(n, arch, groups), arch)
         except ArchitectureUnsolved as exc:
-            rows.append(unsolved_row(arch, exc.code, str(exc)))
+            rows.append(unsolved_row(arch, exc.code, exc.detail))
             continue
         rows.append(
             unsolved_row(arch, "not_reached")
