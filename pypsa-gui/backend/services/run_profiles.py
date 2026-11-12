@@ -291,6 +291,9 @@ def load(profile: dict) -> dict:
             raise ProfileError(f"Stage {name}: {exc}") from exc
         if name != "result_gate" and any("engine" in r for r in rules):
             raise ProfileError(f"Stage {name}: an engine rule runs only in the result gate.")
+        if name != "result_gate" and any("unevaluated" in r for r in rules):
+            # GK B (51) F2: only the result gate's stop reads the key.
+            raise ProfileError(f"Stage {name}: an unevaluated rule key is read only in the result gate.")
         # §9.2, §5: a stage inherits its generic rules; a profile adds rules
         # (a tighter threshold is one more rule), never drops or loosens one.
         own = {r["id"]: r for r in stage.get("rules", [])}
@@ -789,6 +792,96 @@ def _eh_h2_hub(staged: bool) -> dict:
 EH_H2_HUB = _eh_h2_hub(staged=False)
 EH_H2_HUB_STAGED = _eh_h2_hub(staged=True)
 
+# Study harness 13 (design §9.3 "eh_ammonia_staged"; GK A (24) GO, C1-C7):
+# eh_ammonia_staged@1. Stage 2 waits for the process units the user's form
+# fills (G2P-07); the solve job runs the binary operational check itself. The
+# result gate blocks on a flagged check and on a delivery shortfall above the
+# tolerance; the grey-NH3 investment case warns only. No EH study and no LOLE
+# loop (§9.3 lists none). The process units, the process and delivery loads,
+# the role Generators, the grid connection and the built assets are never
+# levers (§6.0): the envelope names the per-year candidates and the two tanks,
+# each up to twice its template cap.
+NH3_SHORTFALL_MAX = 0.01  # Q3 = A: a delivery tolerance, 1 % of a period's target (t/d)
+
+
+def _nh3_levers():
+    """The envelope's edits: the candidates of every period by their class's
+    name (the template's `<class>_new_<year>`, whatever planning years the
+    project has) and each tank, up to twice its template cap (`eh_ammonia.py`:
+    wind 150, PV 80, BESS 80, electrolyser 40 MW; H2 store 10,000 and NH3
+    tank 6,000 MWh)."""
+    return [_h2_edit("Generator", "wind_new_*", "p_nom_max", 300.0),
+            _h2_edit("Generator", "solar_new_*", "p_nom_max", 160.0),
+            _h2_edit("StorageUnit", "bess_new_*", "p_nom_max", 160.0),
+            _h2_edit("Link", "electrolyser_new_*", "p_nom_max", 80.0),
+            _h2_edit("Store", "h2_storage", "e_nom_max", 20000.0),
+            _h2_edit("Store", "nh3_tank", "e_nom_max", 12000.0)]
+
+
+def _eh_ammonia_staged() -> dict:
+    template = "eh_ammonia_staged"
+    unserved = next(r for r in EH_RESULT_RULES if r["id"] == "kpi.unserved_mwh")
+    edits = _nh3_levers()
+    tunable = sorted({(e["target"]["component"], e["target"]["attr"]) for e in edits})
+    levers = [f"{c}.{a}" for c, a in tunable]
+    return {
+        "id": template, "version": 1,
+        "templates": [template],
+        "scope": "flow_scope.preset_for",
+        "params": {"required": [], "ask": []},
+        "inputs": {"required": []},
+        "stages": {
+            "setup": {"actions": [], "rules": [
+                *GENERIC["setup"]["rules"],
+                _rule("set.project.template", "project.template", "eq", template,
+                      basis=f"The profile serves the {template} template only."),
+            ]},
+            # G2P-07: stage 2 waits for the user until the process-unit form is filled.
+            "inputs": {"actions": list(GENERIC["inputs"]["actions"]), "rules": [
+                _rule("nh3.process.units", "process.units", "nonempty",
+                      basis="The process units are the user's inputs (the process-unit form): a committable unit "
+                            "with a capacity and an efficiency to a product counted in tonnes."),
+            ]},
+            "result_gate": {**GENERIC["result_gate"], "rules": [
+                *CORE_RESULT_RULES,
+                unserved,
+                {**_rule("nh3.binary_check", "process.binary_check", "eq", "ok",
+                         basis="The linearised plan holds under the binary operational check in every period "
+                               "(no period flagged); an unverified check is not evaluated and goes to the user."),
+                 "tunable": levers, "unevaluated": run_gates.UNEVALUATED_TO_USER},
+                {**_rule("nh3.delivery.shortfall", "process.delivery.shortfall", "le", NH3_SHORTFALL_MAX,
+                         basis=f"A delivery tolerance: in every period the NH3 short of delivery is at most "
+                               f"{NH3_SHORTFALL_MAX:.0%} of the target (t/d). Grey NH3 bought in meets delivery "
+                               "and is shown, never counted as short."),
+                 "tunable": levers},
+                _rule("nh3.ic.counterfactual", "ic.counterfactual", "eq", "established", severity="warn",
+                      basis="The investment case compares against an established counterfactual (the grey-NH3 "
+                            "purchase); until then it is not evaluated and never blocks the run."),
+            ]},
+            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
+        },
+        "tunable": [{"component": c, "attr": a} for c, a in tunable],
+        "envelope": {
+            "edits": edits,
+            "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "generate_report"}],
+            # The solve (its binary check runs inside the job) and each L2
+            # round's re-solve (L2_ROUNDS = 2): 1 + 2 = 3.
+            "budget": {"solves": 3, "rounds": 2, "wall_time_h": 8.0},
+        },
+        "kpis": copy.deepcopy(EH_SITE["kpis"]),
+        # g2p 13: the coupling report is the `grid_risk` chapter; a run whose
+        # section is not established lists it as a gap (`run_report.unsupported_listed`).
+        "chapters": ["sizing", "investment_case", "grid_risk"],
+        # Design §9.3: no chat tool reads the binary check (the runner reads
+        # it from the solve), and the process-unit form is the user's alone.
+        "missing_tools": ["a chat read of the binary operational check",
+                          "a chat path to the process-unit form (G2P-07; the user fills it)"],
+    }
+
+
+EH_AMMONIA_STAGED = _eh_ammonia_staged()
+
 # Study harness 12c (design §9.3 "eh_microgrid"; GK B (47) G1-G9): eh_microgrid@1
 # and eh_microgrid_staged@1. The solve, the EH study with the off-grid stress
 # (`dtc_stress`, one solve per islanding contingency) and the island check of
@@ -941,6 +1034,7 @@ PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_
                               "eh_datacenter@1": EH_DATACENTER,
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
+                              "eh_ammonia_staged@1": EH_AMMONIA_STAGED,
                               "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED}
 
 

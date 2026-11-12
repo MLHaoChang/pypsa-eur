@@ -313,6 +313,11 @@ def after_failed_result(path, task, gate, profile):
                                     "outcome": "inputs_changed"})
         loop["history"][-1]["capture_reason"] = capture
         return stop("inputs_changed")
+    held = {r["id"] for r in profile["stages"][RESULT_STAGE].get("rules", [])
+            if r.get("unevaluated") == run_gates.UNEVALUATED_TO_USER}
+    if name == RESULT_STAGE and any(r["rule"] in held and r["rule"] in failing and r["verdict"] == "not_evaluated"
+                                    for r in gate["rules"]):  # GK B (51) F2: a failing (block) rule only
+        return stop("not_evaluated")  # GK A (24) Q2: no lever supplies the evidence; the user's
     if name == "solve" and not any(r["rule"] == "sv.solve.state" and r["verdict"] == "fail"
                                    and r["facts"][0].get("value") == "failed" for r in gate["rules"]):
         return stop("no_result")  # no solve to fix (aborted, missing): the user's

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Study harness profile `eh_ammonia_staged@1`: the run waits for the user's process units, and its result gate blocks on a flagged binary operational check and on an NH3 delivery shortfall above a 1 % tolerance. The grey-NH3 investment case warns only. The coupling report is a chapter, listed as a gap when it is not established.

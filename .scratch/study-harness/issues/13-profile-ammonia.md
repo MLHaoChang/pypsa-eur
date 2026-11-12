@@ -3,7 +3,7 @@
 
 # 13 — Harness profile: eh_ammonia_staged
 
-Status: ready-for-agent (the ammonia-specific result gate is pending g2p 10–13, per GK A; build the profile with those rules marked pending)
+Status: done (GK A (24) GO: g2p 06 and 10–13 had landed, so the result rules are live; see Comments)
 Type: task
 Blocked by: 07
 Gated: yes (GK A; g2p engine facts)
@@ -30,3 +30,14 @@ Design: [design.md](../design.md) §9.3 "eh_ammonia_staged"; `.scratch/grid-to-p
 `pypsa-gui/backend/services/run_profiles.py`, `pypsa-gui/backend/services/run_gates.py`, `pypsa-gui/backend/harness/workflows/profiles/eh_ammonia_staged/`, `pypsa-gui/backend/tests/test_run_profile_ammonia.py` (new)
 
 ## Comments
+
+- 2026-11-12, GK A (24) plan verdict: GO. g2p 06 and 10–13 have landed, so the ammonia result rules are live, not pending (Q1 = A). Corrections: the check's `status` is only `ok` or `unverified`, and `flagged` is a separate bool. The payload has no solve id; the binding is the wipe at solve start plus `_own_solve`. Shortfall and buy-in generators are found by `process_role`, not by name. Conditions:
+  - Q2 = A: `unverified` is no evidence, with its reason. The run goes to needs_user and L2 changes nothing.
+  - C1: `nh3.binary_check` passes only when `status == "ok"` and `flagged is False` exactly. A truthy non-bool `flagged` does not pass. A flagged check fails with the payload's per-period rows.
+  - C2: a check payload of None reads as a pass ("exact MILP, nothing to check") when the solve's resolved `process_uc` mode is binary. Any other None is no evidence.
+  - C3: shortfall and buy-in are read by `process_role` on the product bus. Each is in t/d per period: Σw·p / mwh_per_t ÷ (Σw / 24), the target the same way from the delivery load. Tested with uneven weights and two periods, only one of which fails.
+  - C4: buy-in alone passes and is shown. Only the shortfall counts against the threshold.
+  - C5: the levers are the per-year candidates and the two tanks, each bounded at 2× its template cap and pinned by an over-bound refusal. Never levers: the process units, the process and delivery loads, the role generators, grid_import, the built electrolyser, wind_farm/solar_park.
+  - C6: after an L2 re-solve the gate reads the new check, never round 1's.
+  - C7: mutants on each guard (the flagged compare, unverified, the None split, role selection, weighting, the threshold compare, the lever bound). Survivors are listed in the PR body.
+  - Q3: the threshold is a 1 % delivery tolerance, shown on the card. Q4: the NH3 tank is a lever.

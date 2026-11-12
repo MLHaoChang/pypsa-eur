@@ -35,6 +35,10 @@ from collections.abc import Callable
 
 
 FACTS_VERSION = 1
+# Study harness 13 (GK A (24) Q2): a result rule marked `unevaluated:
+# needs_user` that reads no evidence ends the result stage for the user; no
+# L2 round runs, since no lever can supply the evidence.
+UNEVALUATED_TO_USER = "needs_user"
 OPS = ("eq", "ne", "lt", "le", "gt", "ge", "in", "not_in", "empty", "nonempty", "within")
 SEVERITIES = ("block", "warn")
 
@@ -768,6 +772,166 @@ def _electrolyser_utilisation(env, rule):
     return _own_solve(env, read, typed=True)
 
 
+# Study harness 13 (design §9.3 "eh_ammonia_staged"; GK A (24) C1-C7): the
+# process facts of a grid-to-process run. The binary operational check is the
+# payload the solve job leaves on the context (`process_uc.binary_check`,
+# wiped at every solve start); the delivery shortfall is read from the product
+# role Generators by their `process_role` column, never by a name.
+BINARY_EXACT_BASIS = "exact MILP: the plan committed the process units with binaries, so no relaxation to check"
+BINARY_FLAGGED_BASIS = "the periods whose binary operational check is flagged, from the solve's own check"
+SHORTFALL_BASIS = ("per period, the product short of delivery (the shortfall role Generator) over the delivery "
+                   "target, both in t/d over the period's weighted days; a grey buy-in meets delivery and is "
+                   "shown, never counted as short")
+
+
+def _process_units(env):
+    """G2P-07: the committable process units the user's form filled: a
+    capacity (or one the solve sizes), an efficiency above 0 to a product bus
+    counted in tonnes (`process_products.t_per_unit`); the form writes the
+    efficiencies, the solve reads them. None filled holds the run at stage 2:
+    the units are the user's inputs, never the agent's."""
+    from harness.durable import network_guard
+    from services.process_products import t_per_unit
+    from services.solver.process_uc import process_committable
+
+    def read(n):
+        filled = []
+        for unit in process_committable(n):
+            row = n.links.loc[unit]
+            efficiency, p_nom = row.get("efficiency"), row.get("p_nom")
+            sized = bool(row.get("p_nom_extendable")) or (_number(p_nom) and p_nom > 0)
+            if sized and _number(efficiency) and efficiency > 0 and t_per_unit(n, str(row.get("bus1") or "")):
+                filled.append(str(unit))
+        return sorted(filled)
+
+    def guarded():
+        with network_guard():
+            return read(env.ctx.network)
+    if env.ctx is None:
+        return None
+    return _on(env.ctx, guarded)
+
+
+def _binary_check(env):
+    """C1, C2: `ok` only on a check whose status is `ok` and whose `flagged`
+    is the bool False; a flagged check is `flagged` with its flagged period
+    rows. An `unverified` check, a `flagged` that is not a bool and a missing
+    check are no evidence, except a missing check after a solve that committed
+    the process units with binaries: that plan is exact. Results that predate
+    the inputs are no evidence whatever the payload."""
+    from harness.calculations import solve_matches_inputs
+    from services.solver import process_uc
+
+    def read(ctx):
+        if not solve_matches_inputs(ctx):
+            return STALE_SOLVE  # GK A (24) B2: an input edited since the solve (process_uc too) is not its check
+        state = ctx.solver_state or {}
+        payload = state.get("last_process_uc_check")
+        if payload is None:
+            cfg = state.get("solver_config")
+            if process_uc.planning_uc_mode(ctx.network, cfg) == "binary":
+                return Detailed("ok", [], BINARY_EXACT_BASIS)
+            return NoEvidence("no_check", "the run's solve left no binary check (no committable process unit, "
+                                          "or a solve that did not finish optimal)")
+        status = payload.get("status")
+        if status != "ok":
+            return NoEvidence(f"check_{status}", str(payload.get("message") or f"the binary check is {status}"))
+        flagged = payload.get("flagged")
+        if flagged is False:
+            return "ok"
+        if flagged is not True:
+            return NoEvidence("flagged_unreadable", f"the binary check's flag is {flagged}, not true or false")
+        rows = [{k: r.get(k) for k in ("period", "window", "delta", "pct", "extra_shortfall")}
+                for r in payload.get("periods") or [] if r.get("flagged") is not False]
+        return Detailed("flagged", rows, str(payload.get("message") or BINARY_FLAGGED_BASIS))
+    return _own_solve(env, read, typed=True)
+
+
+def _weighted_tpd(frame, names, mask, w, tf):
+    """Σ w·p of `names` in t per day over the rows `mask`; None when a column
+    is missing or a value is not finite."""
+    total = 0.0
+    for name in names:
+        if name not in frame.columns:
+            return None
+        p = [float(v) for v in frame.loc[mask, name]]
+        if not all(math.isfinite(v) for v in p):
+            return None
+        total += math.fsum(a * b for a, b in zip(w, p))
+    return total * tf / (math.fsum(w) / 24.0)
+
+
+UNREADABLE_WEIGHTS = NoEvidence("unreadable_weights", "a snapshot weighting is missing, negative or not finite")
+UNREADABLE_DISPATCH = NoEvidence("unreadable_dispatch", "a delivery, buy-in or shortfall flow is missing or not "
+                                                        "finite")
+
+
+def _delivery_shortfall(env):
+    """C3, C4: per product bus with a shortfall role Generator and per
+    investment period, the delivery target, the grey buy-in and the
+    shortfall in t/d (generator weightings), and the shortfall's share of
+    the target; the value the worst row's share. The shortfall comes from
+    the answer path's own accessor, `process_products.shortfalls`, on the
+    run's own solve's `last_lost_load` capture (GK A (24) C3): a role
+    Generator's dispatch, or a solve-time slack's capture. An entry with no
+    dispatch, or flagged (a name-fallback role, a stale or missing capture),
+    is no evidence, never 0. The buy-in is the `buy_in` role Generators."""
+    import pandas as pd
+
+    from harness.calculations import solve_matches_inputs
+    from models.process_unit import product_role_generators
+    from services.process_products import shortfalls, t_per_unit
+
+    def read(ctx):
+        n = ctx.network
+        lost_load = (getattr(ctx, "solver_state", None) or {}).get("last_lost_load")
+        entries = shortfalls(n, lost_load, gen_p=n.generators_t.p)
+        buses = sorted({s.bus for s in entries})
+        if not buses:
+            return NoEvidence("no_shortfall_role", "no Generator has the process_role shortfall and no product "
+                                                   "bus has a lost-production value")
+        if not solve_matches_inputs(ctx):
+            return STALE_SOLVE
+        for s in entries:
+            if s.flag is not None:  # GK A (24): a name fallback, a stale or a missing capture is no evidence
+                return NoEvidence(s.flag, f"the shortfall {s.name} on {s.bus} is not readable ({s.flag})")
+            if s.p is None:
+                return UNREADABLE_DISPATCH
+        short_p = pd.DataFrame({s.name: s.p for s in entries}, index=n.snapshots)
+        buy_gens = product_role_generators(n, "buy_in")
+        index = n.snapshots
+        weights = n.snapshot_weightings["generators"].reindex(index)
+        periods = list(index.get_level_values(0).unique()) if len(n.investment_periods) else [None]
+        rows = []
+        for bus in buses:
+            tf = t_per_unit(n, bus)
+            if tf is None:
+                return NoEvidence("no_tonne_factor", f"the product bus {bus} has no tonne factor")
+            loads = [str(x) for x in n.loads.index[n.loads["bus"] == bus]]
+            if not loads:
+                return NoEvidence("no_delivery", f"the product bus {bus} has no delivery load")
+            buy = [str(g) for g in buy_gens if n.generators.at[g, "bus"] == bus]
+            short = [s.name for s in entries if s.bus == bus]
+            for period in periods:
+                mask = (index.get_level_values(0) == period) if period is not None else [True] * len(index)
+                w = [float(v) for v in weights[mask]]
+                if not w or not all(math.isfinite(v) and v >= 0 for v in w) or math.fsum(w) <= 0:
+                    return UNREADABLE_WEIGHTS
+                values = [_weighted_tpd(n.loads_t.p, loads, mask, w, tf),
+                          _weighted_tpd(n.generators_t.p, buy, mask, w, tf),
+                          _weighted_tpd(short_p, short, mask, w, tf)]
+                if any(v is None for v in values):
+                    return UNREADABLE_DISPATCH
+                target, bought, shortfall = values
+                if target <= 0:
+                    return NoEvidence("no_target", f"the product bus {bus} has no delivery in period {period}")
+                rows.append({"product": bus, "period": None if period is None else int(period),
+                             "target_tpd": target, "buy_in_tpd": bought, "shortfall_tpd": shortfall,
+                             "shortfall_share": shortfall / target, "assumed": False})
+        return _worst(rows, "shortfall_share")
+    return _own_solve(env, read, typed=True)
+
+
 def _handoff_kpis_read(env):
     """Issue 07 (C14): every headline KPI read back natively, on the run's context."""
     from harness import run_handoff
@@ -1047,6 +1211,11 @@ FACTS: dict[str, Fact] = {
                                   _offtake_shed_hours),
     "h2.electrolyser.utilisation": Fact("services.run_gates._electrolyser_utilisation", "utilisation", "p.u.",
                                         _electrolyser_utilisation, per_rule=True),
+    # Study harness 13: the grid-to-process run (GK A (24)).
+    "process.units": Fact("services.solver.process_uc.process_committable", "units", None, _process_units),
+    "process.binary_check": Fact("services.solver.process_uc.binary_check", "status", None, _binary_check),
+    "process.delivery.shortfall": Fact("services.run_gates._delivery_shortfall", "shortfall_share", "p.u.",
+                                       _delivery_shortfall),
     # Study harness 10a: the data-centre run (GK B (36) D1, Q1, Q2).
     "dc.campus.contingency": Fact("services.run_actions.contingency", "failing", None, _dc_campus_contingency),
     "dc.gridcode.published": Fact("services.run_actions.choose", "id", None, _dc_gridcode_published),
@@ -1203,10 +1372,15 @@ class RuleError(ValueError):
 
 def check_rule(rule: dict) -> dict:
     """The rule, with the reader it reads named from the registry."""
-    known = {"id", "fact", "op", "value", "severity", "basis", "explain", "tunable", "unit", "engine"}
+    known = {"id", "fact", "op", "value", "severity", "basis", "explain", "tunable", "unit", "engine", "unevaluated"}
     if not isinstance(rule, dict) or not {"id", "fact", "op", "severity", "basis"} <= set(rule) <= known:
         raise RuleError(f"A rule has id, fact, op, severity, basis and optional value, explain, tunable, unit, "
-                        f"engine: {rule!r}")
+                        f"engine, unevaluated: {rule!r}")  # repr-ok: a profile author's error, not a user's
+    if rule.get("unevaluated", UNEVALUATED_TO_USER) != UNEVALUATED_TO_USER:
+        raise RuleError(f"Rule {rule['id']}: unevaluated is {UNEVALUATED_TO_USER} or absent.")
+    if "unevaluated" in rule and rule["severity"] != "block":
+        # GK B (51) F2: only a failing rule ends the stage; a warn rule never fails one.
+        raise RuleError(f"Rule {rule['id']}: unevaluated is for a block rule only.")
     fact = rule["fact"]
     if not isinstance(fact, str) or "*" in fact:
         raise RuleError(f"Rule {rule['id']}: name one fact, never a wildcard ({fact!r}).")
