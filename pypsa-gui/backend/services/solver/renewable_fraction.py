@@ -47,6 +47,7 @@ shedding, not reported infeasible. Without a slack it is infeasible, and
 `infeasibility_lines` names the row and the most renewable energy the plan
 could produce.
 """
+
 from __future__ import annotations
 
 import math
@@ -85,14 +86,18 @@ def target_of(cfg: Any) -> float | None:
 
 # ── classification ────────────────────────────────────────────────────────
 
+
 def _is_electrical(carrier: object) -> bool:
     c = str(carrier or "").lower().strip()
     return c == "" or c in _ELEC_CARRIERS
 
 
 def _electrical_buses(n) -> set[str]:
-    return {str(b) for b, c in n.buses["carrier"].items() if _is_electrical(c)} \
-        if "carrier" in n.buses.columns else {str(b) for b in n.buses.index}
+    return (
+        {str(b) for b, c in n.buses["carrier"].items() if _is_electrical(c)}
+        if "carrier" in n.buses.columns
+        else {str(b) for b in n.buses.index}
+    )
 
 
 def classify(n) -> dict[str, list[str]]:
@@ -104,34 +109,59 @@ def classify(n) -> dict[str, list[str]]:
     slack = slack_generator_mask(gens) if len(gens) else pd.Series(dtype=bool)
     slack = slack.reindex(gens.index, fill_value=False)
     gbus = gens["bus"].astype(str) if len(gens) else pd.Series(dtype=str)
-    nonren = [g for g in gens.index
-              if not slack[g] and not _is_renewable_carrier(str(gens.at[g, "carrier"]))
-              and not str(g).startswith("__lost_")]
+    nonren = [
+        g
+        for g in gens.index
+        if not slack[g]
+        and not _is_renewable_carrier(str(gens.at[g, "carrier"]))
+        and not str(g).startswith("__lost_")
+    ]
     load_buses = set(n.loads["bus"].astype(str)) if len(n.loads) else set()
     branch_buses: set[str] = set()
     for comp in (n.lines, n.transformers):
         if len(comp):
-            branch_buses |= set(comp["bus0"].astype(str)) | set(comp["bus1"].astype(str))
+            branch_buses |= set(comp["bus0"].astype(str)) | set(
+                comp["bus1"].astype(str)
+            )
     links = n.links
     candidates = {gbus[g] for g in nonren} - load_buses - branch_buses
-    supply = {b for b in candidates
-              if len(links) and ((links["bus0"].astype(str) == b)
-                                 & links["bus1"].astype(str).isin(elec - {b})).any()}
-    src_links = [l for l in links.index
-                 if str(links.at[l, "bus0"]) in supply
-                 and str(links.at[l, "bus1"]) in elec
-                 and str(links.at[l, "bus1"]) not in supply] if len(links) else []
+    supply = {
+        b
+        for b in candidates
+        if len(links)
+        and (
+            (links["bus0"].astype(str) == b)
+            & links["bus1"].astype(str).isin(elec - {b})
+        ).any()
+    }
+    src_links = (
+        [
+            l
+            for l in links.index
+            if str(links.at[l, "bus0"]) in supply
+            and str(links.at[l, "bus1"]) in elec
+            and str(links.at[l, "bus1"]) not in supply
+        ]
+        if len(links)
+        else []
+    )
     return {
-        "nonren_generators": [g for g in nonren if gbus[g] in elec and gbus[g] not in supply],
+        "nonren_generators": [
+            g for g in nonren if gbus[g] in elec and gbus[g] not in supply
+        ],
         "source_links": src_links,
         "slack_generators": [g for g in gens.index if slack[g] and gbus[g] in elec],
         "loads": [l for l in n.loads.index if str(n.loads.at[l, "bus"]) in elec],
-        "renewable_generators": [g for g in gens.index
-                                 if not slack[g] and gbus[g] in elec and g not in nonren],
+        "renewable_generators": [
+            g
+            for g in gens.index
+            if not slack[g] and gbus[g] in elec and g not in nonren
+        ],
     }
 
 
 # ── weights and periods ───────────────────────────────────────────────────
+
 
 def _weights(n, snapshots) -> pd.Series:
     sw = n.snapshot_weightings
@@ -149,7 +179,11 @@ def _periods(snapshots) -> tuple[pd.Series, list]:
 
 def _period_mask(per_of: pd.Series, period) -> pd.Series:
     """The snapshots of one period (all of them on a single-period network)."""
-    return (per_of == period) if period is not None else pd.Series(True, index=per_of.index)
+    return (
+        (per_of == period)
+        if period is not None
+        else pd.Series(True, index=per_of.index)
+    )
 
 
 def _efficiency(n, link: str, snapshots) -> pd.Series:
@@ -168,6 +202,7 @@ def _load_mw(n, loads, snapshots) -> pd.Series:
 
 # ── the KPI ───────────────────────────────────────────────────────────────
 
+
 def _unserved_mw(unserved_t, snapshots) -> pd.Series:
     if unserved_t is None:
         return pd.Series(0.0, index=snapshots)
@@ -175,8 +210,9 @@ def _unserved_mw(unserved_t, snapshots) -> pd.Series:
     return pd.Series(s, dtype=float).reindex(snapshots).fillna(0.0)
 
 
-def renewable_fraction(n, *, unserved_t: pd.DataFrame | pd.Series | None = None,
-                       snapshots=None) -> dict[str, Any]:
+def renewable_fraction(
+    n, *, unserved_t: pd.DataFrame | pd.Series | None = None, snapshots=None
+) -> dict[str, Any]:
     """The renewable fraction of a solved network (HOMER's definition, see
     the module docstring). ``unserved_t`` is the shed MW per snapshot of the
     solve's lost-load capture (the VOLL slacks are removed after a solve);
@@ -189,16 +225,23 @@ def renewable_fraction(n, *, unserved_t: pd.DataFrame | pd.Series | None = None,
     ``served_mwh`` (horizon totals, period years applied) and ``per_period``.
     """
     sns = n.snapshots if snapshots is None else snapshots
-    out: dict[str, Any] = {"fraction": None, "renewable_mwh": None,
-                           "nonrenewable_mwh": None, "served_mwh": None,
-                           "per_period": [], "reason": None}
+    out: dict[str, Any] = {
+        "fraction": None,
+        "renewable_mwh": None,
+        "nonrenewable_mwh": None,
+        "served_mwh": None,
+        "per_period": [],
+        "reason": None,
+    }
     gp = n.generators_t.p
     if len(n.generators) and (gp is None or gp.empty):
         out["reason"] = "no dispatch: the network has not been solved"
         return out
     lp = n.loads_t.p
     cls = classify(n)
-    if cls["loads"] and (lp is None or lp.empty or not set(cls["loads"]) <= set(lp.columns)):
+    if cls["loads"] and (
+        lp is None or lp.empty or not set(cls["loads"]) <= set(lp.columns)
+    ):
         out["reason"] = "no dispatch: the network has not been solved"
         return out
 
@@ -211,7 +254,7 @@ def renewable_fraction(n, *, unserved_t: pd.DataFrame | pd.Series | None = None,
     for g in cls["nonren_generators"]:
         nonren += _col(gp, g).clip(lower=0.0)
     for l in cls["source_links"]:
-        nonren += (_col(n.links_t.p0, l).clip(lower=0.0) * _efficiency(n, l, sns))
+        nonren += _col(n.links_t.p0, l).clip(lower=0.0) * _efficiency(n, l, sns)
     slack = pd.Series(0.0, index=sns)
     for g in cls["slack_generators"]:
         slack += _col(gp, g).clip(lower=0.0)
@@ -226,16 +269,23 @@ def renewable_fraction(n, *, unserved_t: pd.DataFrame | pd.Series | None = None,
         mask = _period_mask(per_of, P)
         served = float((w * served_t)[mask].sum())
         nr = float((w * nonren)[mask].sum())
-        out["per_period"].append({
-            "period": P, "served_mwh": served, "nonrenewable_mwh": nr,
-            "renewable_mwh": served - nr,
-            "fraction": (served - nr) / served if served > 0 else None,
-        })
+        out["per_period"].append(
+            {
+                "period": P,
+                "served_mwh": served,
+                "nonrenewable_mwh": nr,
+                "renewable_mwh": served - nr,
+                "fraction": (served - nr) / served if served > 0 else None,
+            }
+        )
         y = float(years.get(P, 1.0)) if years is not None else 1.0
         tot_served += y * served
         tot_nonren += y * nr
-    out.update(served_mwh=tot_served, nonrenewable_mwh=tot_nonren,
-               renewable_mwh=tot_served - tot_nonren)
+    out.update(
+        served_mwh=tot_served,
+        nonrenewable_mwh=tot_nonren,
+        renewable_mwh=tot_served - tot_nonren,
+    )
     if tot_served > 0:
         out["fraction"] = (tot_served - tot_nonren) / tot_served
     else:
@@ -243,16 +293,22 @@ def renewable_fraction(n, *, unserved_t: pd.DataFrame | pd.Series | None = None,
     return out
 
 
-def renewable_fraction_result(n, capture: dict | None, target: float | None) -> dict[str, Any]:
+def renewable_fraction_result(
+    n, capture: dict | None, target: float | None
+) -> dict[str, Any]:
     """The /results/renewable_fraction payload: the KPI with the solve's
     lost-load capture as the shed (a capture keyed to other snapshots is
     another solve's and is refused, with a reason, rather than dropped), and
     the target the solve enforced (None when off)."""
     shed = (capture or {}).get("lost_load_t")
-    if shed is not None and (not isinstance(shed, (pd.DataFrame, pd.Series))
-                             or not shed.index.equals(n.snapshots)):
+    if shed is not None and (
+        not isinstance(shed, (pd.DataFrame, pd.Series))
+        or not shed.index.equals(n.snapshots)
+    ):
         kpi = renewable_fraction(n)
-        kpi.update(fraction=None, reason="the lost-load capture belongs to another solve")
+        kpi.update(
+            fraction=None, reason="the lost-load capture belongs to another solve"
+        )
     else:
         kpi = renewable_fraction(n, unserved_t=shed)
     return {**kpi, "target": target}
@@ -260,12 +316,13 @@ def renewable_fraction_result(n, capture: dict | None, target: float | None) -> 
 
 # ── the LP row ────────────────────────────────────────────────────────────
 
+
 def _safe_log(log_queue, msg: str) -> None:
     if log_queue is None:
         return
     try:
         log_queue.put(f"[RENEWABLE] {msg}")
-    except Exception:                                         # noqa: BLE001
+    except Exception:  # noqa: BLE001
         pass
 
 
@@ -277,8 +334,11 @@ def _gross(m, var, names: list[str], lower) -> Any:
     if not neg:
         return v
     aux_name = f"{_AUX}-{var.name}"
-    z = m.add_variables(lower=0.0, coords=[v.coords["snapshot"], pd.Index(neg, name="name")],
-                        name=aux_name)
+    z = m.add_variables(
+        lower=0.0,
+        coords=[v.coords["snapshot"], pd.Index(neg, name="name")],
+        name=aux_name,
+    )
     m.add_constraints(z - var.sel(name=neg) >= 0, name=f"{aux_name}-def")
     pos = [nm for nm in names if nm not in neg]
     return (z, var.sel(name=pos) if pos else None)
@@ -292,8 +352,11 @@ def _weighted_sum(var_or_pair, coef: pd.DataFrame, snap_coord):
         if v is None:
             return None
         names = list(v.indexes["name"])
-        da = xr.DataArray(coef[names].values, dims=["snapshot", "name"],
-                          coords={"snapshot": snap_coord, "name": names})
+        da = xr.DataArray(
+            coef[names].values,
+            dims=["snapshot", "name"],
+            coords={"snapshot": snap_coord, "name": names},
+        )
         return (v * da).sum()
 
     if isinstance(var_or_pair, tuple):
@@ -318,45 +381,89 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
         load = _load_mw(n, cls["loads"], snapshots)
         gvar = m.variables["Generator-p"] if "Generator-p" in m.variables else None
         lvar = m.variables["Link-p"] if "Link-p" in m.variables else None
-        coord = next((v.coords["snapshot"] for v in (gvar, lvar) if v is not None), None)
-        gens = [g for g in cls["nonren_generators"] if gvar is not None and g in gvar.indexes["name"]]
-        links = [l for l in cls["source_links"] if lvar is not None and l in lvar.indexes["name"]]
-        slacks = [g for g in cls["slack_generators"] if gvar is not None and g in gvar.indexes["name"]]
+        coord = next(
+            (v.coords["snapshot"] for v in (gvar, lvar) if v is not None), None
+        )
+        gens = [
+            g
+            for g in cls["nonren_generators"]
+            if gvar is not None and g in gvar.indexes["name"]
+        ]
+        links = [
+            l
+            for l in cls["source_links"]
+            if lvar is not None and l in lvar.indexes["name"]
+        ]
+        slacks = [
+            g
+            for g in cls["slack_generators"]
+            if gvar is not None and g in gvar.indexes["name"]
+        ]
         pmin_g = n.get_switchable_as_dense("Generator", "p_min_pu", snapshots)
         pmin_l = n.get_switchable_as_dense("Link", "p_min_pu", snapshots)
-        g_src = _gross(m, gvar, gens, [float(pmin_g[g].min()) for g in gens]) if gens else None
-        l_src = _gross(m, lvar, links, [float(pmin_l[l].min()) for l in links]) if links else None
-        eff = pd.DataFrame({l: _efficiency(n, l, snapshots) for l in links}, index=snapshots)
+        g_src = (
+            _gross(m, gvar, gens, [float(pmin_g[g].min()) for g in gens])
+            if gens
+            else None
+        )
+        l_src = (
+            _gross(m, lvar, links, [float(pmin_l[l].min()) for l in links])
+            if links
+            else None
+        )
+        eff = pd.DataFrame(
+            {l: _efficiency(n, l, snapshots) for l in links}, index=snapshots
+        )
         for P in periods:
             in_p = _period_mask(per_of, P)
             w_p = w.where(in_p, 0.0)
             demand = float((w_p * load).sum())
             name = row_name(P)
             if demand <= 0.0:
-                _safe_log(log_queue, f"{LABEL}: period {P if P is not None else 'all'} has no "
-                          f"electrical load; no row ({name}) added.")
+                _safe_log(
+                    log_queue,
+                    f"{LABEL}: period {P if P is not None else 'all'} has no "
+                    f"electrical load; no row ({name}) added.",
+                )
                 continue
             terms = []
             if gens:
-                terms.append(_weighted_sum(g_src, pd.DataFrame({g: w_p for g in gens}), coord))
+                terms.append(
+                    _weighted_sum(g_src, pd.DataFrame({g: w_p for g in gens}), coord)
+                )
             if links:
                 terms.append(_weighted_sum(l_src, eff.mul(w_p, axis=0), coord))
             if slacks:
-                terms.append(_weighted_sum(gvar.sel(name=slacks),
-                                           pd.DataFrame({g: w_p * (1.0 - f) for g in slacks}), coord))
+                terms.append(
+                    _weighted_sum(
+                        gvar.sel(name=slacks),
+                        pd.DataFrame({g: w_p * (1.0 - f) for g in slacks}),
+                        coord,
+                    )
+                )
             if not terms:
-                _safe_log(log_queue, f"{LABEL}: no non-renewable source or slack on the electrical "
-                          f"buses; {name} is met trivially and not added.")
+                _safe_log(
+                    log_queue,
+                    f"{LABEL}: no non-renewable source or slack on the electrical "
+                    f"buses; {name} is met trivially and not added.",
+                )
                 continue
             expr = terms[0]
             for t in terms[1:]:
                 expr = expr + t
             rhs = (1.0 - f) * demand
             m.add_constraints(expr <= rhs, name=name)
-            _safe_log(log_queue, f"{LABEL} {f:.1%} (row {name}): non-renewable supply ≤ "
-                      f"{rhs:,.1f} MWh of {demand:,.1f} MWh electrical load"
-                      + (f"; {len(slacks)} slack(s) may shed at their price instead" if slacks else "")
-                      + ".")
+            _safe_log(
+                log_queue,
+                f"{LABEL} {f:.1%} (row {name}): non-renewable supply ≤ "
+                f"{rhs:,.1f} MWh of {demand:,.1f} MWh electrical load"
+                + (
+                    f"; {len(slacks)} slack(s) may shed at their price instead"
+                    if slacks
+                    else ""
+                )
+                + ".",
+            )
 
     def wrapper(n, snapshots):
         if user_fn is not None:
@@ -367,6 +474,7 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
 
 
 # ── infeasibility ─────────────────────────────────────────────────────────
+
 
 def max_renewable_mwh(n, snapshots=None) -> dict[Any, float]:
     """Per period, the most renewable electricity the plan could produce:
@@ -384,7 +492,9 @@ def max_renewable_mwh(n, snapshots=None) -> dict[Any, float]:
         tot = 0.0
         for g in gens:
             ext = bool(n.generators.at[g, "p_nom_extendable"])
-            cap = float(n.generators.at[g, "p_nom_max"] if ext else n.generators.at[g, "p_nom"])
+            cap = float(
+                n.generators.at[g, "p_nom_max"] if ext else n.generators.at[g, "p_nom"]
+            )
             tot += float((w.where(in_p, 0.0) * pmax[g].clip(lower=0.0)).sum()) * cap
         out[P] = tot if np.isfinite(tot) else math.inf
     return out
@@ -417,5 +527,6 @@ def infeasibility_lines(n, cfg) -> list[str]:
             f"generators can produce at most "
             + ("an unbounded amount" if math.isinf(can) else f"{can:,.1f} MWh")
             + ". Lower the target, raise a renewable p_nom_max or add a VOLL slack to "
-            "allow shedding instead.")
+            "allow shedding instead."
+        )
     return lines
