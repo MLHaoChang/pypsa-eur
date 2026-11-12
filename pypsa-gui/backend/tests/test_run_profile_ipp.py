@@ -224,38 +224,54 @@ def test_the_peak_is_taken_over_every_investment_period(direct):
     assert result["verdict"] == "fail" and result["facts"][0]["value"] == pytest.approx(20.0)
 
 
-@pytest.mark.parametrize("config", [None, {}, {"commercial": {}}, {"commercial": {"export_link": ""}},
-                                    {"commercial": {"export_link": "nowhere"}}, {"commercial": {"export_link": 7}}])
-def test_an_unreadable_export_link_is_not_evaluated_never_a_pass(direct, config):
-    result = _export(direct, _site(), config={} if config is None else config)
-    assert result["verdict"] == "not_evaluated"
+@pytest.mark.parametrize("config,code", [
+    ({}, "no_export_link"), ({"commercial": {}}, "no_export_link"),
+    ({"commercial": {"export_link": ""}}, "no_export_link"), ({"commercial": {"export_link": 7}}, "no_export_link"),
+    ({"commercial": {"export_link": "nowhere"}}, "export_link_missing")])
+def test_an_unreadable_export_link_is_not_evaluated_never_a_pass(direct, config, code):
+    result = _export(direct, _site(), config=config)
+    assert result["verdict"] == "not_evaluated" and code in str(result)
+
+
+def test_a_context_with_no_solver_state_names_no_export_link(direct):
+    result = direct("ipp.export.limit", network=_site(), solver_state=None)
+    assert result["verdict"] == "not_evaluated" and "no_export_link" in str(result)
 
 
 @pytest.mark.parametrize("rating", [0.0, -5.0, float("nan")])
 def test_a_link_with_no_rating_has_no_limit_to_hold_the_export_to(direct, rating):
     result = _export(direct, _site(rating=rating))
-    assert result["verdict"] == "not_evaluated" and "rating" in str(result)
+    assert result["verdict"] == "not_evaluated" and "export_link_unrated" in str(result)
 
 
 def test_a_non_finite_or_missing_flow_is_not_evaluated(direct):
     n = _site()
     n.links_t.p0.loc[1, "grid_export"] = float("nan")
-    assert _export(direct, n)["verdict"] == "not_evaluated"
+    result = _export(direct, n)
+    assert result["verdict"] == "not_evaluated" and "unreadable_dispatch" in str(result)
     n = _site()
     n.links_t.p0.drop(columns="grid_export", inplace=True)
-    assert _export(direct, n)["verdict"] == "not_evaluated"
+    result = _export(direct, n)
+    assert result["verdict"] == "not_evaluated" and "no_dispatch" in str(result)
+    n = _site()
+    n.links_t.p0 = n.links_t.p0.iloc[0:0]  # a flow frame with no row: nothing to judge
+    result = _export(direct, n)
+    assert result["verdict"] == "not_evaluated" and "unreadable_dispatch" in str(result)
+    n = _site(export=(0.0, 5.0), imp=(0.0, 0.0))
+    n.links_t.p0.loc[0, "grid_export"] = float("inf")  # an infinite peak is not a number of MW
+    assert "unreadable_dispatch" in str(_export(direct, n))
 
 
 def test_an_untagged_or_two_sided_point_of_connection_is_not_evaluated(direct):
     n = _site()
     n.buses.drop(columns="eh_poc", inplace=True)
-    assert _export(direct, n)["verdict"] == "not_evaluated"
+    assert "no_poc_tag" in str(_export(direct, n))
     n = _site()
     n.buses["eh_poc"] = True  # both sides: the direction is unknown
-    assert _export(direct, n)["verdict"] == "not_evaluated"
+    assert "poc_unreadable" in str(_export(direct, n))
     n = _site()
     n.buses["eh_poc"] = False
-    assert _export(direct, n)["verdict"] == "not_evaluated"
+    assert "poc_unreadable" in str(_export(direct, n))
 
 
 def test_a_stale_solve_is_not_evaluated(direct, monkeypatch):
@@ -354,6 +370,20 @@ def test_no_debt_or_a_non_finite_cover_is_not_established_never_zero_or_a_pass(m
     assert fact["min_dscr"] is None and fact["state"] == ic.NOT_ESTABLISHED and fact["reasons"] == [reason]
 
 
+def test_a_debt_section_with_no_service_or_cover_list_is_not_established(monkeypatch):
+    for key, reason in (("service", "no_debt_service"), ("dscr", "dscr_unreadable")):
+        report = _report()
+        report["sections"]["debt"]["payload"][key] = None
+        fact = _read(monkeypatch, ic.read_min_dscr, report=report)
+        assert fact["min_dscr"] is None and fact["reasons"] == [reason], key
+    report = _report()
+    report["sections"]["debt"]["payload"]["service"] = "10"  # not a list
+    assert _read(monkeypatch, ic.read_min_dscr, report=report)["reasons"] == ["no_debt_service"]
+    report = _report()
+    report["sections"]["debt"]["payload"]["dscr"] = "1.3"
+    assert _read(monkeypatch, ic.read_min_dscr, report=report)["reasons"] == ["dscr_unreadable"]
+
+
 def _ic_gate(monkeypatch, rule_id, report, body=DONE):
     from routers import results
     from services import workflow_tools
@@ -383,9 +413,11 @@ def test_the_cover_and_the_irr_rules_are_not_evaluated_on_the_shipped_no_debt_ca
 
 
 def test_the_reason_words_name_the_new_states_in_plain_words():
-    for key in ("irr_not_established", "no_debt_service", "dscr_not_finite", "dscr_unreadable"):
+    expected = {"irr_not_established": "pre-tax IRR", "no_debt_service": "no debt service",
+                "dscr_not_finite": "no finite DSCR", "dscr_unreadable": "debt section cannot be read"}
+    for key, phrase in expected.items():
         words = ic.reason_words({"reasons": [key]})
-        assert "_" not in words and words[0].isupper()
+        assert phrase in words and "_" not in words and words[0].isupper()
 
 
 # ── the run's investment-case step (I2) ──────────────────────────────────────
