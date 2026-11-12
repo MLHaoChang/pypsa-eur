@@ -439,3 +439,72 @@ def test_too_many_architectures_needs_a_selection(monkeypatch):
 def test_unsolved_row_refuses_an_unknown_status():
     with pytest.raises(ValueError):
         A.unsolved_row(A.SupplyArchitecture("grid", ("grid",)), "ok")
+
+
+# ── gaps the mutation run found ───────────────────────────────────────────
+
+
+def test_classify_reads_wind_and_a_grid_asset_by_its_eh_role():
+    n = _net()
+    n.add("Carrier", "onwind")
+    n.add("Generator", "wt", bus="site", carrier="onwind")
+    n.add("Generator", "utility", bus="grid", carrier="AC", eh_role="grid_supply")
+    groups = A.classify(n)
+    assert groups["wind"] == [("Generator", "wt")]
+    assert ("Generator", "utility") in groups["grid"]
+
+
+def test_capex_is_unavailable_for_a_zero_cost_or_unsized_member_and_skips_fixed():
+    n = _net()
+    n.generators.loc["genset", "overnight_cost"] = 0.0
+    arch = _arch(n, "pv+genset")
+    m = _solved(A.omit(n, arch), pv=[1.0] * 4, genset=[0.0] * 4)
+    assert A.row_of(arch, m)["unavailable"]["capex_eur"] == "no_overnight_cost:genset"
+
+    n = _net()
+    arch = _arch(n, "pv+genset")
+    m = _solved(A.omit(n, arch), pv=[1.0] * 4, genset=[0.0] * 4)
+    m.generators.loc["pv", "p_nom_opt"] = float("nan")
+    assert A.row_of(arch, m)["unavailable"]["capex_eur"] == "not_sized:pv"
+
+    n = _net()
+    n.generators.loc["genset", ["p_nom_extendable", "p_nom"]] = [False, 1.0]
+    n.generators.loc["genset", "overnight_cost"] = float("nan")  # fixed: ignored
+    arch = _arch(n, "pv+genset")
+    m = _solved(A.omit(n, arch), pv=[1.0] * 4, genset=[0.0] * 4)
+    row = A.row_of(arch, m)
+    assert row["capex_eur"] == pytest.approx(800_000 * 2.0)
+    assert {s["asset"]: s["extendable"] for s in row["sizes"]}["genset"] is False
+
+
+def test_renewable_fraction_falls_back_to_p_set_when_load_dispatch_is_missing():
+    n = _solved(
+        _net(), pv=[1.0, 1.0, 0.0, 1.0], genset=[0.0, 0.0, 1.0, 0.0], grid=[0.0] * 4
+    )
+    n.loads_t.p = pd.DataFrame({"other": [9.0] * 4}, index=n.snapshots)
+    assert A.renewable_fraction(n) == pytest.approx(0.75)
+
+
+def test_unsolved_row_shape_and_best_of_skips_unsolved_and_uncosted():
+    n = _net()
+    a, b, c = (_arch(n, x) for x in ("pv+battery", "genset", "pv+genset"))
+    row = A.unsolved_row(b, "failed", "boom")
+    assert row == {
+        "architecture_id": "genset",
+        "label": b.label,
+        "groups": ["genset"],
+        "status": "failed",
+        "sizes": [],
+        "unavailable": {k: "failed" for k in A._FIGURES},
+        **{k: None for k in A._FIGURES},
+        "error": "boom",
+    }
+    uncosted = {**A.unsolved_row(a, "infeasible"), "status": "ok"}
+    cheap_failed = {**row, "total_cost_eur_per_year": 1.0}
+    costed = {
+        **A.unsolved_row(c, "infeasible"),
+        "status": "ok",
+        "total_cost_eur_per_year": 50.0,
+    }
+    assert A.best_of([uncosted, cheap_failed, costed]) == "pv+genset"
+    assert A.best_of([uncosted, cheap_failed]) is None
