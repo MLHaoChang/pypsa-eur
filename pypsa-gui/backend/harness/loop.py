@@ -687,6 +687,7 @@ class _ToolDispatchOutcome:
     tool_call_count: int
     stop_turn: bool = False
     switched_mid_turn: bool = False
+    obsolete: bool = False
 
 
 def _dispatch_tool_uses(
@@ -701,6 +702,7 @@ def _dispatch_tool_uses(
     char_budget: dict[str, int],
     offered_tool_names: set[str | None],
     guided: bool = False,
+    obsolete: Callable[[], bool] = lambda: False,
 ) -> Generator[tuple[str, dict[str, Any]], None, "_ToolDispatchOutcome"]:
     """
     Dispatch one assistant step's tool calls, sequentially.
@@ -755,6 +757,23 @@ def _dispatch_tool_uses(
     # requires each tool_use_id have a matching tool_result, so this keeps
     # the in-memory history valid for a resumed turn — then end the turn.
     for idx, tu in enumerate(tool_uses):
+        if obsolete():
+            # Issue 02: a rebind superseded this live turn. Nothing more runs;
+            # each call left gets its paired error result, as on a switch.
+            for rem in tool_uses[idx:]:
+                tool_results_for_next_turn.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": rem.get("id"),
+                        "is_error": True,
+                        "content": OBSOLETE_GENERATION["error_kind"],
+                    }
+                )
+            return _ToolDispatchOutcome(
+                tool_call_count=tool_call_count,
+                stop_turn=True,
+                obsolete=True,
+            )
         if project_switched():
             switched = True
             for rem in tool_uses[idx:]:
@@ -1062,6 +1081,42 @@ def _build_user_content(
 
 
 # Literal error_kind values so tool-error-kinds.json's AST scan sees them.
+# Issue 02: a live turn whose generation a rebind superseded ends with this.
+OBSOLETE_GENERATION: dict[str, str] = {
+    "error_kind": "obsolete_generation",
+    "message": (
+        "the conversation moved on while this request ran; its answer was "
+        "dropped. Finished steps are kept."
+    ),
+}
+
+
+def _generation_reader(session_id: str, lease_id: str | None, generation: int | None):
+    """Issue 02: True once an admitted turn's lease+generation is obsolete.
+
+    A typed turn (no lease) is never obsolete. Fails closed: a reader that
+    raises counts as obsolete (GK B V2).
+    """
+    if lease_id is None or generation is None:
+        return lambda: False
+
+    def obsolete() -> bool:
+        from services import utterance_admission as _ua
+
+        try:
+            return (
+                _ua._DEFAULT.project_result(
+                    session_id=session_id, lease_id=lease_id, generation=generation
+                )
+                != "apply"
+            )
+        except Exception:  # noqa: BLE001 — unreadable generation stops the turn
+            logger.exception("chat: turn generation unreadable; stopping the turn")
+            return True
+
+    return obsolete
+
+
 _ADMISSION_ERRORS: dict[str, dict[str, str]] = {
     "duplicate": {
         "error_kind": "duplicate",
@@ -1541,9 +1596,13 @@ def run_turn(
         from services import live_speech as _live_speech
 
         _speech_answer = _live_speech.capture_for(session, utterance_id)
+        _obsolete = _generation_reader(
+            session.session_id, _admission_lease, _admission_generation
+        )
         body = _run_turn_body(
             session,
             message,
+            obsolete=_obsolete,
             client=client,
             provider=provider,
             message_history=message_history,
@@ -1556,6 +1615,9 @@ def run_turn(
         )
         try:
             for event, payload in body:
+                if event == "token" and _obsolete():
+                    # Issue 02: no text delta of a superseded turn goes out.
+                    continue
                 if session.assurance_turn is not None:
                     payload = session.assurance_turn.project_frame(event, payload)
                     if payload is None:
@@ -1846,6 +1908,7 @@ def _run_turn_body(
     attachment_file_ids: list[str] | None = None,
     ui_context: dict[str, Any] | None = None,
     typed_by_user: bool = False,
+    obsolete: Callable[[], bool] = lambda: False,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     The run_turn turn loop. Split out from `run_turn` so the in-flight-flag
@@ -2293,6 +2356,11 @@ def _run_turn_body(
         if session.abort_event.is_set():
             yield "session_done", {"reason": "aborted"}
             return
+        if obsolete():
+            # Issue 02: no model call for a superseded live turn.
+            yield "error", dict(OBSOLETE_GENERATION)
+            yield "session_done", {"reason": OBSOLETE_GENERATION["error_kind"]}
+            return
         if session.assurance_turn is not None and session.assurance_turn.effect_pending:
             yield "session_done", {"reason": "assurance_context_changed"}
             return
@@ -2374,6 +2442,12 @@ def _run_turn_body(
         # blocks we replay — already serialised by the provider. Add the
         # assistant turn to both the outbound array and the session history
         # for the next iteration.
+        if obsolete():
+            # Issue 02: superseded while the model answered. Its text and tool
+            # calls are neither persisted nor run; the usage above still counts.
+            yield "error", dict(OBSOLETE_GENERATION)
+            yield "session_done", {"reason": OBSOLETE_GENERATION["error_kind"]}
+            return
         assistant_blocks = final_blocks
         if session.shadow_turn is not None and not any(
             b.get("type") == "tool_use" for b in assistant_blocks
@@ -2741,6 +2815,7 @@ def _run_turn_body(
             char_budget=tool_result_char_budget,
             offered_tool_names=offered_tool_names,
             guided=_is_guided(ui_context),
+            obsolete=obsolete,
         ))
         set_receipt = change_set.receipt_frame(session)
         session.change_set = None
@@ -2760,6 +2835,9 @@ def _run_turn_body(
                     session.append_history_message(
                         {"role": "user", "content": tool_results_for_next_turn}
                     )
+            if dispatch.obsolete:
+                yield "error", dict(OBSOLETE_GENERATION)
+                yield "session_done", {"reason": OBSOLETE_GENERATION["error_kind"]}
             return
         switched_mid_turn = dispatch.switched_mid_turn
         messages.append({"role": "user", "content": tool_results_for_next_turn})

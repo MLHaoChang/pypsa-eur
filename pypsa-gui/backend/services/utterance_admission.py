@@ -153,7 +153,10 @@ class TurnCoordinator:
         """
         with self._lock:
             state = self._state(session_id)
-            if state.lease_id != lease_id or state.generation != generation:
+            # The lease id alone names the turn. A lease a rebind made obsolete
+            # (generation < current) is still released here, so the pending
+            # utterance queued behind it under the new generation can drain.
+            if state.lease_id != lease_id or generation > state.generation:
                 return None
             state.lease_id = None
             state.active = None
@@ -181,8 +184,11 @@ class TurnCoordinator:
         with self._lock:
             state = self._state(session_id)
             state.generation += 1
-            state.lease_id = None
-            state.active = None
+            # A turn running under the old generation keeps its lease until it
+            # ends: it stops projecting results (`project_result` says
+            # 'obsolete'), and a new-generation utterance queues behind it
+            # instead of starting a second turn beside it. The old pending
+            # correction belongs to the old generation, so it goes.
             state.pending = None
             return state.generation
 
