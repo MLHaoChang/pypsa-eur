@@ -541,6 +541,17 @@ def test_a_shortfall_bus_without_tonnes_or_delivery_reads_no_shortfall(direct):
     )
 
 
+def test_a_period_with_no_delivery_reads_no_shortfall(direct):
+    """Mutant at the shortfall reader: a zero target is no evidence, never a division by zero."""
+    n = _solved(_network())
+    n.loads_t.p["nh3_delivery"] = 0.0
+    result = direct("nh3.delivery.shortfall", network=n)
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "no_target",
+    )
+
+
 def test_results_that_predate_the_inputs_read_no_shortfall(direct, monkeypatch):
     """The freshness guard: a stale solve is no evidence with its own reason."""
     import harness.calculations as calculations
