@@ -179,7 +179,11 @@ def _targets(run):
     if stage.get("status") == "passed" and gate.get("passed") is True:
         # G8: a gate that passed with rules not evaluated is never all met. The
         # basis counts them; the report's gates table beside it names each (UX (19)).
-        n = len(checks(run)[NOT_EVALUATED])
+        counted = checks(run)
+        if not sum(counted["counts"].values()):
+            # GK B (49) F1: a gate that compared nothing never reads covered (#1140).
+            return GAP, "the result gate checked nothing"
+        n = len(counted[NOT_EVALUATED])
         if n:
             return (
                 PARTLY,

@@ -129,9 +129,14 @@ def test_the_words_reach_the_reports_harness_chapter(monkeypatch):
 
 
 def test_a_warn_rule_never_reaches_the_l2_message(monkeypatch):
-    """Reader 4, by construction: L2 carries the failing block rules only."""
+    """Readers 4-6, by construction: L1 (`_message`) and L2 (`_l2_message`)
+    carry the failing block rules (`_failing`) only, and explore's `_why` names
+    failing block rules only; both investment rules warn."""
+    from harness import run_explore
+
     gate = _dropped_gate(monkeypatch)
     assert run_loops._failing(gate) == []
+    assert run_explore._why(gate) == ""
 
 
 def test_the_readers_are_listed():
@@ -143,6 +148,8 @@ def test_the_readers_are_listed():
         "assistant_tasks._run_view",
         "harness_chapter.gates_rows",
         "run_loops._l2_message",
+        "run_loops._message",
+        "run_explore._why",
         "run_handoff.checks",
     ):
         assert reader in listed
@@ -185,6 +192,7 @@ def test_fuel_autonomy_and_frequency_are_their_own_state_on_the_hand_off(hub):
         "mg.island.frequency",
     ]
     assert checks["not_evaluated"][0]["reason"] == run_gates.MG_NO_FUEL
+    assert {c["severity"] for c in checks["not_evaluated"]} == {"warn"}
     # The stated targets are never "covered" while a rule is not evaluated.
     [targets] = [
         p
@@ -327,3 +335,46 @@ def test_the_stated_targets_count_reads_singular_and_plural():
     """UX (19): the basis counts the checks, never lists their ids."""
     assert run_handoff._checks_not_evaluated(1) == "1 check not evaluated"
     assert run_handoff._checks_not_evaluated(3) == "3 checks not evaluated"
+
+
+@pytest.mark.parametrize("gate", [{"passed": True}, {"passed": True, "rules": []}])
+def test_a_passed_gate_that_checked_nothing_is_never_covered(gate):
+    """GK B (49) F1: a gate with no rules compared nothing, so it is a gap."""
+    [targets] = [
+        p
+        for p in run_handoff.coverage({"run": _run_with(gate)}, {}, None)
+        if p["part"] == "Stated targets"
+    ]
+    assert (targets["status"], targets["basis"]) == (
+        run_handoff.GAP,
+        "the result gate checked nothing",
+    )
+
+
+def test_each_verdict_counts_into_its_own_bucket():
+    """GK B (49) F2: a failed warn rule counts as a fail, never a pass; the
+    gate passed, so its targets stay covered (coverage means evaluated)."""
+    run = _run_with(
+        {
+            "rules": [
+                {"rule": "a", "severity": "block", "verdict": "pass"},
+                {"rule": "dc.ramp_rate", "severity": "warn", "verdict": "fail"},
+                {"rule": "b", "severity": "warn", "verdict": "not_evaluated"},
+            ],
+            "passed": True,
+        }
+    )
+    assert run_handoff.checks(run)["counts"] == {
+        "pass": 1,
+        "fail": 1,
+        "not_evaluated": 1,
+    }
+    payload, _ = harness_chapter.build(
+        {"run": run}, None, [], run_handoff.coverage({"run": run}, {}, None)
+    )
+    counts = payload["counts"]
+    assert (
+        counts["result_checks_pass"],
+        counts["result_checks_fail"],
+        counts["result_checks_not_evaluated"],
+    ) == (1, 1, 1)

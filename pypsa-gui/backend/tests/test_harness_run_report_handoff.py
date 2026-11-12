@@ -511,7 +511,17 @@ def coverage_task(case_status=None, gate_passed=True):
         "stages": {
             "result_gate": {
                 "status": "passed" if gate_passed else "failed",
-                "gate": {"passed": gate_passed},
+                # A gate that evaluated a rule (GK B (49) F1: one with none is a gap).
+                "gate": {
+                    "passed": gate_passed,
+                    "rules": [
+                        {
+                            "rule": "res.solve.status",
+                            "severity": "block",
+                            "verdict": "pass" if gate_passed else "fail",
+                        }
+                    ],
+                },
             }
         },
     }
