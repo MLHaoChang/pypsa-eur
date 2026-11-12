@@ -322,13 +322,57 @@ def test_dc_backup_reads_the_base_spec(eh_base, eh_case):
     assert dc_backup.project_spec(eh_case, t)[0] == "eh_datacenter"
 
 
-def test_the_solver_terms_of_a_case_read_the_base_spec(eh_base, eh_case):
-    """The DC curtailment terms the fingerprint and the LP read (U4 c)."""
+def curtailing(meta: dict) -> dict:
+    """``meta`` with curtailment on in its spec (a price and a share > 0)."""
+    spec = {
+        **meta["dc_load"]["spec"],
+        "critical_share": 0.6,
+        "curtailable_share": 0.2,
+        "curtailment_price_eur_per_mwh": 150.0,
+        "curtail_max_duration_h": 4.0,
+    }
+    return {**meta, "dc_load": {**meta["dc_load"], "spec": spec}}
+
+
+def fingerprint_text(ctx, storage, monkeypatch) -> str:
+    """The text `_network_input_fingerprint` hashes, with `storage` as the
+    project folder."""
+    import hashlib
+
+    from services import workflow_tools as wt
+
+    seen = []
+
+    class Capture:
+        def __init__(self, data):
+            seen.append(data.decode())
+
+        def hexdigest(self):
+            return hashlib.sha256(seen[-1].encode()).hexdigest()
+
+    monkeypatch.setattr(wt, "hashlib", SimpleNamespace(sha256=Capture))
+    saved, ctx.storage_dir = ctx.storage_dir, str(storage)
+    try:
+        wt._network_input_fingerprint(ctx)
+    finally:
+        ctx.storage_dir = saved
+        monkeypatch.undo()
+    return seen[-1]
+
+
+def test_the_solver_terms_of_a_case_read_the_base_spec(
+    eh_base, eh_case, monkeypatch, tmp_path
+):
+    """U4 c, F2: the base spec's curtailment terms reach the case's LP terms
+    and its input fingerprint; the solver config does not switch them."""
     from services.solver import dc_curtailment
 
-    assert dc_curtailment.terms_for(str(eh_case)) == dc_curtailment.terms_for(
-        str(eh_base.dir)
-    )
+    write_marker(eh_base.dir, curtailing(eh_base.meta))
+    terms = dc_curtailment.terms_for(str(eh_case))
+    assert terms == dc_curtailment.Terms(150.0, 0.2, 4.0)
+    part = "dc-curtailment/1\n" + json.dumps([150.0, 0.2, 4.0])
+    assert part in fingerprint_text(eh_base.ctx, eh_case, monkeypatch)
+    assert part not in fingerprint_text(eh_base.ctx, tmp_path, monkeypatch)
 
 
 def test_dc_load_profile_reads_the_base_spec(eh_base, eh_case):
@@ -373,6 +417,28 @@ def test_growth_rows_of_a_case_are_its_base(eh_base, eh_case):
 
     assert gp._meta_path(eh_case) == eh_base.dir / tm.MARKER_FILE
     assert gp._own_meta_path(eh_case) == eh_case / tm.MARKER_FILE
+
+
+def test_a_growth_edit_on_a_case_sets_the_row_in_the_case_copy(eh_base, eh_case):
+    """F1: the real `mark_set` on a swept case writes the case's own copy
+    from the base's content; the base's bytes and mtime never change."""
+    import pandas as pd
+
+    from services import growth_placeholders as gp
+
+    row = {"kind": "load_scale", "year": 2030, "set": False, "value": {"L1": 1.0}}
+    write_marker(eh_base.dir, {**eh_base.meta, "growth_inputs": [row]})
+    before = stamp(eh_base.dir / tm.MARKER_FILE)
+    n = eh_base.ctx.network
+    prior = gp.before(n, "loads", "p_set", ["L1"], project_dir=eh_case)
+    assert prior is not None
+    series = pd.Series(10.0, index=n.snapshots)
+    now = gp.mark_set(n, "loads", "p_set", {"L1": series}, prior, project_dir=eh_case)
+    assert now == ["load_scale_2030"]
+    own = json.loads((eh_case / tm.MARKER_FILE).read_text())
+    assert own["growth_inputs"][0]["set"] is True
+    assert own["id"] == eh_base.meta["id"] and own["ledger"] == eh_base.meta["ledger"]
+    assert stamp(eh_base.dir / tm.MARKER_FILE) == before
 
 
 # ── Copy-on-write (U7) and undo (U3) ────────────────────────────────────────
@@ -525,7 +591,13 @@ def test_a_capture_of_an_own_marker_is_byte_for_byte_as_before(eh_base, eh_case,
 #: Files that may name the marker file directly: the helper, the template
 #: builders that write it into a template folder, and project creation, which
 #: writes it into a project folder it has just made (no case exists there).
-ALLOWED = {"services/template_marker.py", "routers/projects.py"}
+ALLOWED = {
+    "services/template_marker.py",
+    "routers/projects.py",
+    # Its sidecar tuple names the marker; `_source` reads that entry through
+    # the helper (pinned by the capture tests above).
+    "services/solve_capture.py",
+}
 ALLOWED_DIRS = ("project_templates/", "tests/", "smoke/")
 #: The names the marker file goes by.
 NAMES = {"MARKER_FILE", "TEMPLATE_FILE", "META_FILE"}
@@ -556,15 +628,31 @@ def _name_of(node) -> str | None:
 
 
 def _direct_uses(source: str) -> list[int]:
+    """Lines that name the marker file outside the helper: the file name
+    built from constants anywhere, or one of its names (``NAMES`` and any
+    name an import binds them to) used as a path part: the right of ``/``,
+    an argument of any call (``joinpath``, ``os.path.join``, ``Path(d,
+    NAME)``, ``open``) or a member of a tuple, list or set literal."""
+    tree = ast.parse(source)
+    names = set(NAMES)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom | ast.Import):
+            for alias in node.names:
+                if alias.name.rsplit(".", 1)[-1] in NAMES and alias.asname:
+                    names.add(alias.asname)
     lines = set()
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
         if _constant_text(node) == tm.MARKER_FILE:
             lines.add(node.lineno)
         elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
-            if _name_of(node.right) in NAMES:
+            if _name_of(node.right) in names:
                 lines.add(node.lineno)
-        elif isinstance(node, ast.Call) and _name_of(node.func) in ("joinpath", "join"):
-            if any(_name_of(a) in NAMES for a in node.args):
+        elif isinstance(node, ast.Call):
+            args = [*node.args, *(k.value for k in node.keywords)]
+            if any(_name_of(n) in names for a in args for n in ast.walk(a)):
+                lines.add(node.lineno)
+        elif isinstance(node, ast.Tuple | ast.List | ast.Set):
+            if any(_name_of(e) in names for e in node.elts):
                 lines.add(node.lineno)
     return sorted(lines)
 
@@ -592,10 +680,19 @@ def test_no_module_reads_the_marker_file_but_through_the_helper():
         "p = d / template_marker.MARKER_FILE",
         "p = d.joinpath(META_FILE)",
         "p = os.path.join(d, flow_service.TEMPLATE_FILE)",
+        "p = Path(d, META_FILE)",
+        "SIDECARS = (OTHER, TEMPLATE_FILE)",
+        "files = [flow_service.TEMPLATE_FILE]",
+        "p = open(d + MARKER_FILE)",
     ],
 )
 def test_the_guard_sees_a_direct_reader(source):
     assert _direct_uses(source) == [1]
+
+
+def test_the_guard_follows_a_renamed_import():
+    source = "from services.template_marker import MARKER_FILE as X\np = d / X\n"
+    assert _direct_uses(source) == [2]
 
 
 def test_the_guard_passes_the_helper():
