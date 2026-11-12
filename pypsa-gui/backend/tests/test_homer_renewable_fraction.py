@@ -26,6 +26,7 @@ from services.reliability_goal import goal_free_config
 from services.solver.renewable_fraction import (
     _wrap_with_min_renewable_fraction,
     classify,
+    infeasibility_lines,
     renewable_fraction,
     renewable_fraction_result,
     row_name,
@@ -165,7 +166,7 @@ def test_the_kpi_is_unavailable_without_a_dispatch():
 
 # ── the LP row ────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("f", [None, 0.0])
+@pytest.mark.parametrize("f", [None, 0.0, float("inf"), float("nan")])
 def test_off_leaves_the_lp_untouched(f):
     sentinel = object()
     assert _wrap_with_min_renewable_fraction(
@@ -404,3 +405,34 @@ def test_the_solver_config_put_stores_a_fraction(client):
     r = client.put("/api/simulation/solver_config", json={"min_renewable_fraction": 0.8})
     assert r.status_code == 200, r.text
     assert client.get("/api/simulation/solver_config").json()["min_renewable_fraction"] == 0.8
+
+
+# ── classification edges (mutant killers) ────────────────────────────────
+
+def test_a_bus_with_no_carrier_is_electrical():
+    n = _network()
+    n.buses.loc["ac", "carrier"] = ""
+    c = classify(n)
+    assert c["nonren_generators"] == ["diesel"] and c["loads"] == ["site"]
+
+
+def test_a_genset_behind_a_line_counts_at_the_generator():
+    """A bus tied by a Line is part of the served network, not a supply bus."""
+    n = _network()
+    n.add("Bus", "yard", carrier="AC")
+    n.add("Line", "tie", bus0="yard", bus1="ac", x=0.1, s_nom=50.0)
+    n.add("Generator", "genset_yard", bus="yard", carrier="diesel", p_nom=10.0)
+    n.add("Link", "aux", bus0="yard", bus1="ac", p_nom=1.0)
+    c = classify(n)
+    assert "genset_yard" in c["nonren_generators"] and c["source_links"] == []
+
+
+def test_no_infeasibility_hint_when_off():
+    assert infeasibility_lines(_network(pv_max=5.0), SolverConfig()) == []
+
+
+def test_the_infeasibility_hint_names_need_and_reach():
+    lines = infeasibility_lines(_network(pv_max=5.0), SolverConfig(min_renewable_fraction=0.9))
+    assert len(lines) == 1 and lines[0].startswith("Minimum renewable fraction:")
+    assert row_name(None) in lines[0]
+    assert "216.0 MWh" in lines[0] and "40.0 MWh" in lines[0], lines[0]
