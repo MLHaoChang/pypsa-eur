@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A sensitivity case made from an Energy Hub project now takes its base's project type: the headline strip shows the base's cards (LCOE, unserved energy) instead of the plain-network set, and every reader of the template metadata (`eh_template.json`) follows a case to its base through one helper. An edit on a case writes the case's own copy, never the base's.

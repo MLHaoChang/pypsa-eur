@@ -28,8 +28,8 @@ import pandas as pd
 
 _log = logging.getLogger(__name__)
 
-#: The template metadata file (``project_templates.eh_templates.META_FILE``).
-META_FILE = "eh_template.json"
+#: The template metadata file (``services.template_marker.MARKER_FILE``).
+from services.template_marker import MARKER_FILE as META_FILE  # noqa: E402, F401 - the name callers use
 
 #: ``kind`` → (component list, entity, field) of the series a growth row names
 #: (``eh_templates._GROWTH_KINDS``; a test pins the two equal). ``load_scale``
@@ -61,12 +61,27 @@ def _value_of(kind: str, peak: float, old_peak: float | None, old_value: float) 
     return old_value * peak / old_peak
 
 
-def _meta_path(project_dir=None) -> pathlib.Path | None:
-    """``project_dir``'s ``eh_template.json`` (default: the active project's)."""
+def _dir_or_active(project_dir=None):
     if project_dir is None:
         from services.network_lengths import active_project_dir
         project_dir = active_project_dir()
-    return pathlib.Path(project_dir) / META_FILE if project_dir is not None else None
+    return project_dir
+
+
+def _meta_path(project_dir=None) -> pathlib.Path | None:
+    """The ``eh_template.json`` ``project_dir`` reads (default: the active
+    project's): its own, or its base's for a sensitivity case (UM07-KIND-1)."""
+    from services.template_marker import source_path
+    project_dir = _dir_or_active(project_dir)
+    return source_path(project_dir) if project_dir is not None else None
+
+
+def _own_meta_path(project_dir=None) -> pathlib.Path | None:
+    """Where an edit's write goes: the project's own ``eh_template.json``, so
+    an edit on a case writes the case's copy and never its base's."""
+    from services.template_marker import own_path
+    project_dir = _dir_or_active(project_dir)
+    return own_path(project_dir) if project_dir is not None else None
 
 
 def _read(path: pathlib.Path | None) -> dict | None:
@@ -181,8 +196,7 @@ def mark_set(n, component: str, attribute: str, written: dict, prior: dict | Non
     (Q1 a); until then the loads written are kept on the row."""
     if not prior:
         return []
-    path = _meta_path(project_dir)
-    meta = _read(path)
+    meta = _read(_meta_path(project_dir))
     rows = _open_rows(meta, component, attribute)
     if not rows:
         return []
@@ -228,7 +242,7 @@ def mark_set(n, component: str, attribute: str, written: dict, prior: dict | Non
                 if e is not None:
                     e["value"] = row["value"]
     if changed:
-        _write(path, meta)
+        _write(_own_meta_path(project_dir), meta)
     return now_set
 
 
@@ -243,22 +257,38 @@ def _write(path: pathlib.Path, meta: dict) -> None:
 
 
 def snapshot_meta() -> bytes | None:
-    """The active project's ``eh_template.json`` bytes for the undo stack
-    (None when it has none)."""
-    path = _meta_path()
+    """The active project's own ``eh_template.json`` bytes for the undo stack
+    (None when it has none: a sensitivity case reads its base's)."""
+    from services.template_marker import is_case
+    path = _own_meta_path()
     if path is None or not path.is_file():
         return None
     try:
         return path.read_bytes()
     except OSError:
+        if is_case(path.parent):
+            # None would read "no copy" and an undo would remove it: the
+            # caller skips this snapshot instead.
+            raise
         return None
 
 
 def restore_meta(data: bytes | None) -> None:
     """Undo (C3): put back the ``eh_template.json`` the undone edit started
-    from, so an undone edit does not stay entered."""
-    path = _meta_path()
-    if data is None or path is None:
+    from, so an undone edit does not stay entered. ``data`` None on a
+    sensitivity case: the undone edit made the case's own copy, which goes,
+    so the case reads its base's again. A project that is not a case keeps
+    its file (a marker never goes because a snapshot could not read it)."""
+    from services.template_marker import is_case
+    path = _own_meta_path()
+    if path is None:
+        return
+    if data is None:
+        if path.is_file() and is_case(path.parent):
+            try:
+                path.unlink()
+            except OSError as exc:
+                _log.warning("undo: %s not removed: %s", path, exc)
         return
     try:
         if path.is_file() and path.read_bytes() == data:
