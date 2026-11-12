@@ -48,7 +48,7 @@ Master check (`23aa3bc8`): none of the three views exist; the building blocks do
 - [ ] 03a: results list one row per architecture with its best system; an architecture that is infeasible is listed as such, not dropped.
 - [ ] 03a: assets are omitted, not zeroed (test).
 - [ ] 03b: for a 3x3 grid, each cell shows the winning architecture; the legend names architectures; tooltip shows the cost gap to the runner-up.
-- [ ] 03c: break-even km equals the closed-form value on a linear-cost fixture; reports "no break-even" when grid is cheaper at any distance.
+- [x] 03c: break-even km equals the closed-form value on a linear-cost fixture; reports "no break-even" when grid is cheaper at any distance.
 - [ ] Release-note fragment per PR.
 
 ### Likely files
