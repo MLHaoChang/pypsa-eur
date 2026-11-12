@@ -3,7 +3,7 @@
 
 # 12 — IPP, IPP hybrid and microgrid presets
 
-Status: ready-for-agent (blocked by 06, 07; Sonnet; GK B, GK A for linked outputs)
+Status: done (PR pending; GK B, GK A for linked outputs)
 Type: task
 Blocked by: 06, 07
 Gated: yes (GK B; GK A for the linked outputs)
@@ -39,3 +39,15 @@ microgrid preset's typed "Availability / EaaS fee" row's help says the locked ro
 "from the energy model" and the help are what stop duplication. A linked
 `served_load.<load>` against a valued `eaas_fee` is refused `double_count:eaas_fee`
 since 06 (`linked_outputs.ledger_clash`).
+
+### 2026-11-12: hand-off (builder)
+
+Built: `project_templates/business_case_presets/eh_ipp_hybrid.json` and `eh_microgrid.json` (covers `eh_microgrid_staged`), both in `presets.py` VERSIONS; tests in `tests/test_business_case_presets_ipp_microgrid.py` (G2 export refusal, PPA once, B4 unserved, C3 refusal and help text).
+
+Choices to review:
+- `eh_ipp` is not a registered template (only `eh_ipp_hybrid`), so there is no `eh_ipp` preset.
+- The IPP de-rating is the capacity row's `linked_share`; left empty (means 1) with a note, never a default.
+- Capacity hint is the GB [S] range (20-60 GBP/kW-yr); the Italian [U] figure is left out.
+- No pack default for insurance, maintenance or land: the pack's only insurance share is data-centre specific (BC 11 precedent). Each preset adds a typed "Plant capex" lump as the base of the insurance (and microgrid maintenance) share, since `share_of:capex` reads only the case's own capex lines.
+- The EaaS fee is an offered row (off by default); its help carries the C3 wording.
+- BC 13 (concentrator) is untouched.

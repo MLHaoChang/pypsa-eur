@@ -1,0 +1,84 @@
+{
+  "id": "eh_ipp_hybrid",
+  "version": "1",
+  "pack": "generic_defaults@2026-11-10:sha256:e228b001de2d80f1d1e01e8488b271a9de0bc12cb89bac2247a4592b6e0ce67e",
+  "templates": [
+    "eh_ipp_hybrid"
+  ],
+  "variants": {
+    "ipp_hybrid": {
+      "label": "IPP hybrid (capacity payment, guarantees of origin, land, insurance)",
+      "lines": [
+        {
+          "name": "Capacity payment (BESS, firm capacity)",
+          "kind": "revenue",
+          "category": "capacity_payment",
+          "unit": "kW_year",
+          "quantity_source": "linked:capacity.StorageUnit.bess@1",
+          "escalation": "contract",
+          "note": "Battery capacity in service, in kW a year. Set linked_share to the typed de-rating factor of the market (the share of nameplate that clears; empty means 1, no de-rating). The PPAs, merchant export and CfD are the energy model's locked rows, never lines here.",
+          "hint": {
+            "low": 20.0,
+            "high": 60.0,
+            "unit": "GBP/kW_year",
+            "source": "GB capacity market auctions, per de-rated kW-year (T-1 2025/26 and T-4 2028/29 clearing prices)",
+            "year": 2025,
+            "note": "Per de-rated kW: apply the technology's de-rating factor through linked_share."
+          }
+        },
+        {
+          "name": "Guarantees of origin",
+          "kind": "revenue",
+          "category": "other",
+          "unit": "MWh",
+          "escalation": "contract",
+          "note": "Typed: the certified MWh a year you expect to sell. Typed, not linked: a line linked to the grid export is refused double_count (the export is priced by the energy model's locked rows).",
+          "hint": {
+            "low": 0.3,
+            "high": 2.0,
+            "unit": "EUR/MWh",
+            "source": "European guarantee-of-origin market prices",
+            "year": 2025,
+            "note": "2024-25 range, after EUR 7-10/MWh in 2023."
+          }
+        },
+        {
+          "name": "Land lease, wind farm",
+          "kind": "opex",
+          "category": "land",
+          "unit": "MW_year",
+          "quantity_source": "linked:capacity.Generator.wind_farm@1",
+          "escalation": "opex",
+          "note": "Lease per MW of wind capacity in service per year. No sourced default: enter the price, or delete the row on owned land."
+        },
+        {
+          "name": "Land lease, PV plant",
+          "kind": "opex",
+          "category": "land",
+          "unit": "MW_year",
+          "quantity_source": "linked:capacity.Generator.pv_plant@1",
+          "escalation": "opex",
+          "note": "Lease per MW of PV capacity in service per year. No sourced default: enter the price, or delete the row on owned land."
+        },
+        {
+          "name": "Plant capex",
+          "kind": "capex",
+          "category": "equipment",
+          "unit": "lump",
+          "escalation": "capex",
+          "note": "Plant capex not in the energy model's asset capex (grid connection, balance of plant, installation): the base of the insurance share. Capex is priced once: do not re-enter the generators or the battery. No sourced default: enter the price and life."
+        },
+        {
+          "name": "Insurance",
+          "kind": "opex",
+          "category": "insurance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of the plant capex above per year. No sourced default for generation plant: enter the share."
+        }
+      ]
+    }
+  },
+  "offered": []
+}
