@@ -492,13 +492,73 @@ def test_a_renamed_shortfall_generator_is_read_by_its_role(direct):
 
 
 def test_a_shortfall_named_but_without_its_role_is_no_evidence(direct):
+    """GK A (24): the accessor's name fallback is flagged, so the gate reads no evidence."""
     n = _solved(_network())
     n.generators["process_role"] = ""
     result = direct("nh3.delivery.shortfall", network=n)
     assert (
         result["verdict"] == "not_evaluated"
-        and result["facts"][0]["value"] == "no_shortfall_role"
+        and result["facts"][0]["value"] == "role_from_name"
     )
+
+
+def test_no_shortfall_generator_and_no_lost_production_value_is_no_evidence(direct):
+    n = _solved(_network())
+    n.remove("Generator", "__lost_nh3")
+    result = direct("nh3.delivery.shortfall", network=n)
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "no_shortfall_role",
+    )
+
+
+def _captured(n, value=500.0):
+    """The shortfall as a solve-time slack: no `__lost_nh3` Generator, a
+    `lost_production_value` on the nh3 bus and the solve's capture of its
+    dispatch, keyed to the network as solved."""
+    from services.solver import lost_production as LP
+
+    p_t = n.generators_t.p[["__lost_nh3"]].rename(columns={"__lost_nh3": "nh3"})
+    n.remove("Generator", "__lost_nh3")
+    n.generators_t.p = n.generators_t.p.drop(columns="__lost_nh3", errors="ignore")
+    n.buses["lost_production_value"] = float("nan")
+    n.buses.at["nh3", "lost_production_value"] = value
+    record = {"lost_production": {"p_t": p_t, "value": {"nh3": value}, "key": {}}}
+    LP.stamp(n, record)
+    return {"last_lost_load": record}
+
+
+def test_a_shortfall_from_the_solves_capture_is_read_and_fails(direct):
+    """GK A (24): a bus whose shortfall is the solve-time slack is read from
+    the capture through the accessor, never missed (fail-open)."""
+    n = _uneven(_network())
+    idx = _period_slice(n, 2030)
+    delivery = float(n.loads_t.p_set["nh3_delivery"].iloc[idx[0]])
+    lost = {i: 0.2 * delivery for i in idx if (idx.index(i) % 2) == 1}
+    _solved(n, lost=lost)
+    state = _captured(n)
+    result = direct("nh3.delivery.shortfall", network=n, solver_state=state)
+    assert result["verdict"] == "fail"
+    assert result["facts"][0]["value"] == pytest.approx(
+        _expected_share(n, 2030, lost), rel=1e-9
+    )
+
+
+def test_a_stale_or_missing_capture_reads_no_shortfall(direct):
+    n = _solved(_network(), lost={0: 50.0})
+    state = _captured(n)
+    n.buses.at["nh3", "lost_production_value"] = 600.0  # an input edit since the solve
+    result = direct("nh3.delivery.shortfall", network=n, solver_state=state)
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "lost_production_capture_stale",
+    )
+    for missing in ({}, {"last_lost_load": None}):
+        result = direct("nh3.delivery.shortfall", network=n, solver_state=missing)
+        assert (result["verdict"], result["facts"][0]["value"]) == (
+            "not_evaluated",
+            "lost_production_capture_missing",
+        )
 
 
 def test_a_shortfall_at_exactly_the_tolerance_passes(direct, monkeypatch):

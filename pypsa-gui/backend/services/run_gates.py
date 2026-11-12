@@ -870,22 +870,34 @@ def _delivery_shortfall(env):
     """C3, C4: per product bus with a shortfall role Generator and per
     investment period, the delivery target, the grey buy-in and the
     shortfall in t/d (generator weightings), and the shortfall's share of
-    the target; the value the worst row's share. The role Generators come
-    from the `process_role` column alone (GK A (24) C3), never from
-    `process_products.shortfalls`, whose name fallback and solve capture a
-    gate does not rest on."""
+    the target; the value the worst row's share. The shortfall comes from
+    the answer path's own accessor, `process_products.shortfalls`, on the
+    run's own solve's `last_lost_load` capture (GK A (24) C3): a role
+    Generator's dispatch, or a solve-time slack's capture. An entry with no
+    dispatch, or flagged (a name-fallback role, a stale or missing capture),
+    is no evidence, never 0. The buy-in is the `buy_in` role Generators."""
+    import pandas as pd
+
     from harness.calculations import solve_matches_inputs
     from models.process_unit import product_role_generators
-    from services.process_products import t_per_unit
+    from services.process_products import shortfalls, t_per_unit
 
     def read(ctx):
         n = ctx.network
-        short_gens = product_role_generators(n, "shortfall")
-        buses = sorted({str(n.generators.at[g, "bus"]) for g in short_gens})
+        lost_load = (getattr(ctx, "solver_state", None) or {}).get("last_lost_load")
+        entries = shortfalls(n, lost_load, gen_p=n.generators_t.p)
+        buses = sorted({s.bus for s in entries})
         if not buses:
-            return NoEvidence("no_shortfall_role", "no Generator has the process_role shortfall")
+            return NoEvidence("no_shortfall_role", "no Generator has the process_role shortfall and no product "
+                                                   "bus has a lost-production value")
         if not solve_matches_inputs(ctx):
             return STALE_SOLVE
+        for s in entries:
+            if s.flag is not None:  # GK A (24): a name fallback, a stale or a missing capture is no evidence
+                return NoEvidence(s.flag, f"the shortfall {s.name} on {s.bus} is not readable ({s.flag})")
+            if s.p is None:
+                return UNREADABLE_DISPATCH
+        short_p = pd.DataFrame({s.name: s.p for s in entries}, index=n.snapshots)
         buy_gens = product_role_generators(n, "buy_in")
         index = n.snapshots
         weights = n.snapshot_weightings["generators"].reindex(index)
@@ -898,7 +910,8 @@ def _delivery_shortfall(env):
             loads = [str(x) for x in n.loads.index[n.loads["bus"] == bus]]
             if not loads:
                 return NoEvidence("no_delivery", f"the product bus {bus} has no delivery load")
-            buy, short = ([str(g) for g in gens if n.generators.at[g, "bus"] == bus] for gens in (buy_gens, short_gens))
+            buy = [str(g) for g in buy_gens if n.generators.at[g, "bus"] == bus]
+            short = [s.name for s in entries if s.bus == bus]
             for period in periods:
                 mask = (index.get_level_values(0) == period) if period is not None else [True] * len(index)
                 w = [float(v) for v in weights[mask]]
@@ -906,7 +919,7 @@ def _delivery_shortfall(env):
                     return UNREADABLE_WEIGHTS
                 values = [_weighted_tpd(n.loads_t.p, loads, mask, w, tf),
                           _weighted_tpd(n.generators_t.p, buy, mask, w, tf),
-                          _weighted_tpd(n.generators_t.p, short, mask, w, tf)]
+                          _weighted_tpd(short_p, short, mask, w, tf)]
                 if any(v is None for v in values):
                     return UNREADABLE_DISPATCH
                 target, bought, shortfall = values
