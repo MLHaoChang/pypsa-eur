@@ -545,6 +545,14 @@ def test_g3_5_a_shortfall_counts_exactly_once_as_lower_served_revenue():
 
     n = _plant()
     n.generators_t.p["__lost_conc"] = np.tile([20.0, 0.0, 3.0, 0.0], 2)
+    # LO-8: a stockpile on the bus fills in the hour the shortfall exceeds the load
+    # and empties after it, so the slack's dispatch is above what the Load draws.
+    n.add("Store", "conc_pile", bus="conc", e_nom=100.0, e_cyclic=True)
+    n.stores_t.p["conc_pile"] = np.tile([-12.0, 0.0, 12.0, 0.0], 2)
+    n.stores_t.e["conc_pile"] = np.tile([12.0, 12.0, 0.0, 0.0], 2)
+    assert (
+        n.generators_t.p["__lost_conc"] > n.loads_t.p_set.get("shipments", 8.0)
+    ).any()
     solve = _solve(n)
     value, price = 90.0, 120.0
     by_period = {
