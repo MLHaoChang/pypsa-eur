@@ -304,6 +304,7 @@ def test_the_shipped_process_unit_is_filled_and_an_unfilled_one_waits(direct):
     [
         ("efficiency", 0.0),
         ("efficiency", float("nan")),
+        ("efficiency", float("inf")),
         ("p_nom", 0.0),
         ("committable", False),
         ("eh_process", False),
@@ -519,6 +520,24 @@ def test_no_context_reads_no_process_units():
         "not_evaluated",
         None,
         "the fact reads as none",
+    )
+
+
+def test_a_shortfall_bus_without_tonnes_or_delivery_reads_no_shortfall(direct):
+    """Mutants at the shortfall reader: each missing input has its own reason."""
+    n = _solved(_network())
+    n.buses.at["nh3", "mwh_per_t"] = float("nan")
+    result = direct("nh3.delivery.shortfall", network=n)
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "no_tonne_factor",
+    )
+    n = _solved(_network())
+    n.loads.loc[n.loads["bus"] == "nh3", "bus"] = "hub"
+    result = direct("nh3.delivery.shortfall", network=n)
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "no_delivery",
     )
 
 
