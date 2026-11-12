@@ -32,6 +32,9 @@ HOMER Pro's renewable fraction, on the electrical side:
   second Link out of a supply bus) makes the KPI None with a reason, and the
   LP row logs a warning naming it. Fuel that only reaches heat or hydrogen
   is not electricity and passes.
+  So is a Link from a fuel stock (a non-renewable Store, no Generator, no
+  electrical inflow) into an electrical bus (R13); counting its η·p0 is a
+  follow-up.
 
 Energy is MW × ``snapshot_weightings.generators`` per year of each period;
 the horizon totals weight each period by its ``years``.
@@ -171,7 +174,46 @@ def classify(n) -> dict[str, list[str]]:
             elec,
             set(src_links),
         ),
+        "unattributed_links": _fuel_store_links(n, elec, gbus),
     }
+
+
+def _fuel_store_links(n, elec, gbus) -> list[str]:
+    """R13: Links delivering into an electrical bus from a non-electrical bus
+    that holds a Store with a non-renewable carrier, no Generator and no
+    inflow from an electrical bus (a fuel stock, not a battery). Not counted
+    yet (follow-up: count η·p0); the KPI fails closed on them."""
+    links, stores = n.links, n.stores
+    if not len(links) or not len(stores):
+        return []
+    gen_buses = set(gbus)
+    fed_from_elec = {
+        b
+        for l in links.index
+        if str(links.at[l, "bus0"]) in elec
+        for b in _link_outputs(links, l)
+    }
+    fuel = (
+        {
+            str(stores.at[s, "bus"])
+            for s in stores.index
+            if not _is_renewable_carrier(
+                str(
+                    stores.at[s, "carrier"]
+                    or n.buses.at[stores.at[s, "bus"], "carrier"]
+                )
+            )
+        }
+        - elec
+        - gen_buses
+        - fed_from_elec
+    )
+    return [
+        l
+        for l in links.index
+        if str(links.at[l, "bus0"]) in fuel
+        and any(b in elec for b in _link_outputs(links, l))
+    ]
 
 
 def _link_outputs(links: pd.DataFrame, link: str) -> list[str]:
@@ -303,9 +345,12 @@ def renewable_fraction(
         return frame[name].reindex(sns).astype(float).fillna(0.0)
 
     leaked = [g for g in cls["unattributed_generators"] if (_col(gp, g) > 0).any()]
+    leaked += [
+        l for l in cls["unattributed_links"] if (_col(n.links_t.p0, l) > 0).any()
+    ]
     if leaked:
         out["reason"] = (
-            "cannot attribute the electricity of non-renewable generator(s) "
+            "cannot attribute the electricity of non-renewable source(s) "
             + ", ".join(map(str, leaked))
             + ": it reaches the site through a path the fraction does not count"
         )
@@ -437,11 +482,12 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
     def rows(n, snapshots):
         m = n.model
         cls = classify(n)
-        if cls["unattributed_generators"]:
+        unseen = cls["unattributed_generators"] + cls["unattributed_links"]
+        if unseen:
             _safe_log(
                 log_queue,
                 f"{LABEL}: WARNING the row cannot see the electricity of "
-                + ", ".join(map(str, cls["unattributed_generators"]))
+                + ", ".join(map(str, unseen))
                 + " (it reaches the site through a path the fraction does not count), so "
                 "the row is looser than the target; the result's fraction reads unavailable "
                 "if they run.",

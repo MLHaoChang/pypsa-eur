@@ -74,3 +74,4 @@ UX (no objection to placement), conditions:
 - U4 Block heading "Off-grid constraints" with a muted line saying when it applies.
 - U5 Shots: idle, value set, out-of-range, infeasible message; Expert (Guided only if reachable); light and dark.
 - U6 The chat edit card shows the same label, with a drift test.
+- R13 (GK B, later): fail closed now, count later. A dispatched Link from a fuel stock (a non-renewable Store, no Generator, no electrical inflow) into an electrical bus makes the KPI None with a reason, and the LP row warns. **Follow-up:** count its η·p0 as non-renewable. The same fail-closed rule covers non-renewable Generators that reach the site through an uncounted path (a chain, a multi-port Link, a second Link).

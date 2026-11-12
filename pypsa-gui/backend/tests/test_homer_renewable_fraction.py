@@ -658,3 +658,56 @@ def test_the_row_warns_about_unattributed_generators():
         n, None, SolverConfig(min_renewable_fraction=0.5), q
     )(n, n.snapshots)
     assert any("WARNING" in l and "tank" in l for l in _drain(q))
+
+
+# ── R13: a fuel Store feeding a genset fails closed; a battery does not ──
+
+
+def test_a_diesel_store_feeding_a_genset_fails_closed():
+    n = _dispatched()
+    n.add("Bus", "tankbus", carrier="diesel")
+    n.add(
+        "Store",
+        "daytank",
+        bus="tankbus",
+        carrier="diesel",
+        e_nom=500.0,
+        e_initial=500.0,
+    )
+    n.add("Link", "genset_s", bus0="tankbus", bus1="ac", p_nom=25.0, efficiency=0.4)
+    n.links_t.p0 = pd.DataFrame({"genset_s": 0.0}, index=n.snapshots)
+    n.links_t.p0.iloc[7, 0] = 15.0
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "genset_s" in kpi["reason"], kpi
+
+
+def test_a_battery_store_with_electrical_inflow_reads_as_storage():
+    n = _dispatched()
+    n.add("Bus", "batt", carrier="battery")
+    n.add("Store", "cells", bus="batt", carrier="battery", e_nom=100.0)
+    n.add("Link", "charger", bus0="ac", bus1="batt", p_nom=10.0, efficiency=0.95)
+    n.add("Link", "discharger", bus0="batt", bus1="ac", p_nom=10.0, efficiency=0.95)
+    n.links_t.p0 = pd.DataFrame({"charger": 0.0, "discharger": 0.0}, index=n.snapshots)
+    n.links_t.p0.iloc[20, 1] = 5.0
+    assert classify(n)["unattributed_links"] == []
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_the_row_warns_about_a_fuel_store_genset():
+    n = _network()
+    n.add("Bus", "tankbus", carrier="diesel")
+    n.add(
+        "Store",
+        "daytank",
+        bus="tankbus",
+        carrier="diesel",
+        e_nom=500.0,
+        e_initial=500.0,
+    )
+    n.add("Link", "genset_s", bus0="tankbus", bus1="ac", p_nom=25.0, efficiency=0.4)
+    n.optimize.create_model()
+    q: queue.SimpleQueue = queue.SimpleQueue()
+    _wrap_with_min_renewable_fraction(
+        n, None, SolverConfig(min_renewable_fraction=0.5), q
+    )(n, n.snapshots)
+    assert any("WARNING" in l and "genset_s" in l for l in _drain(q))
