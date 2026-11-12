@@ -3,7 +3,7 @@
 
 # SC-06 — layouts and photo-based campus reconstruction
 
-Status: ready-for-human (layout half implemented on claude/site-scene-06-layout, in review: record sc-06-layout/record.md; photo half parked, Q-SS-1)
+Status: ready-for-human (layout half done: #1405 merged 2026-11-12, record sc-06-layout/record.md; photo half parked, Q-SS-1)
 Type: research/prototype then bounded task
 Dependencies: SC-00 N and SC-01 native proposal lifecycle for layout; independently accepted SC-00 P for photo; no Blender prerequisite
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c

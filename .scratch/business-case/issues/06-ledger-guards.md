@@ -3,7 +3,7 @@
 
 # 06 — Ledger guards: double count, lost production, reference purchases
 
-Status: ready-for-agent (blocked by 05; Opus; GK B and GK A)
+Status: done (#1411 merged 2026-11-12; GK B (50) + GK A OK @646568da)
 Type: task
 Blocked by: 05
 Gated: yes (GK B, GK A)
