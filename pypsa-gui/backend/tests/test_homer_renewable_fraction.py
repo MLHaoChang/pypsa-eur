@@ -2547,3 +2547,330 @@ def test_the_concentrator_process_links_are_use():
     process = {l for l in n.links.index if flag[l] is True or flag[l] == 1}
     assert process and process <= set(c["conversion_links"]), c
     assert c["ambiguous_links"] == []
+
+
+# ── R12: mutant survivors ────────────────────────────────────────────────
+
+
+def test_a_conversion_draw_is_weighted_by_each_periods_years():
+    """Pins `y * drawn`: the horizon conversion total applies period years."""
+    n = _site_with_conversion()
+    n.set_investment_periods([2030, 2035])
+    n.investment_period_weightings.loc[:, "years"] = [5.0, 10.0]
+    kpi = renewable_fraction(_dispatch_conversion(n))
+    # 192 MWh drawn per period (8 MW × 24 h): 192 × 5 + 192 × 10.
+    assert kpi["conversion_mwh"] == pytest.approx(2880.0), kpi
+    assert kpi["served_mwh"] == pytest.approx(3600.0), kpi  # 240 × 15
+
+
+def test_a_period_with_nothing_served_reads_none_and_the_horizon_a_value():
+    """Pins `served > 0` in the per-period fraction: 0 served, 0 non-renewable
+    is None for that period, not a division by zero."""
+    n = _dispatched_two_period()
+    n.loads_t.p.loc[2035, :] = 0.0
+    n.generators_t.p.loc[2035, :] = 0.0
+    kpi = renewable_fraction(n)
+    by = {p["period"]: p for p in kpi["per_period"]}
+    assert by[2035]["served_mwh"] == 0.0 and by[2035]["fraction"] is None, by
+    # 2030 only: (240 − 90) / 240.
+    assert kpi["fraction"] == pytest.approx(0.625), kpi
+
+
+def test_an_idle_or_charging_fuel_store_behind_a_reversible_link_is_not_refused():
+    """Pins `> 0` on the Store and StorageUnit dispatch of an unattributed
+    stock: only a discharge fails closed."""
+    n = _reversible_electrolyser(_dispatched())
+    n.add("Store", "grey_tank", bus="h2", carrier="grey H2", e_nom=100.0)
+    n.stores_t.p = pd.DataFrame({"grey_tank": 0.0}, index=n.snapshots)
+    n.stores_t.p.iloc[3, 0] = -2.0  # charges at 03:00, never discharges
+    assert classify(n)["unattributed_stores"] == ["grey_tank"]
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_an_idle_ambiguous_conversion_is_not_refused():
+    """Pins `> 0` on the ambiguous Link's p0: it fails closed only when it
+    draws."""
+    n = _ambiguous_h2(_dispatched())
+    n.links_t.p0 = pd.DataFrame(
+        {"electrolyser": 0.0, "fuel cell": 0.0}, index=n.snapshots
+    )
+    assert classify(n)["ambiguous_links"] == ["electrolyser"]
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_a_dispatch_of_exactly_the_counted_generators_reads_a_value():
+    """Pins `<=` (subset, not proper subset): a dispatch whose columns are
+    exactly the counted Generators is complete."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=HOURS, freq="h"))
+    n.add("Bus", "ac", carrier="AC")
+    n.add("Load", "site", bus="ac", p_set=LOAD_MW)
+    n.add("Generator", "diesel", bus="ac", carrier="diesel", p_nom=LOAD_MW)
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=n.snapshots)
+    n.generators_t.p = pd.DataFrame({"diesel": LOAD_MW}, index=n.snapshots)
+    kpi = renewable_fraction(n)
+    assert kpi["reason"] is None and kpi["fraction"] == 0.0, kpi  # all diesel
+
+
+def test_renewables_without_a_dispatch_read_as_not_solved():
+    """Pins `gp.empty`: Generators with no dispatch at all are unsolved even
+    when none of them is counted (a PV-only site), never a fraction of 1."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=HOURS, freq="h"))
+    n.add("Bus", "ac", carrier="AC")
+    n.add("Load", "site", bus="ac", p_set=LOAD_MW)
+    n.add("Generator", "pv", bus="ac", carrier="solar", p_nom=20.0)
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=n.snapshots)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "not been solved" in kpi["reason"], kpi
+
+
+def _commit_curtailment(n):
+    from services.solver import dc_curtailment as dcc
+
+    curt = pd.Series(0.0, index=n.snapshots)
+    curt.iloc[:10] = 1.0  # 10 MWh curtailed
+    dcc.commit(
+        n,
+        {
+            dcc.META_KEY: {
+                "p_t": curt,
+                "capture_failed": False,
+                "total_mwh": 10.0,
+                "price_eur_per_mwh": 0.0,
+                "share": 0.5,
+                "max_duration_h": None,
+            }
+        },
+    )
+    return n
+
+
+def test_committed_dc_curtailment_counts_without_a_capture():
+    """Pins the committed-record branch (`n.meta`, `series is None`)."""
+    n = _commit_curtailment(_with_cooling(_dispatched()))
+    kpi = renewable_fraction_result(n, None, None)
+    assert kpi["reason"] is None, kpi
+    assert kpi["served_mwh"] == pytest.approx(278.0), kpi  # 288 − 10
+
+
+def test_a_capture_with_an_empty_dc_curtailment_record_is_unavailable():
+    """Pins `cap[META_KEY] or {}`: a None record reads as a failed capture."""
+    kpi = renewable_fraction_result(
+        _with_cooling(_dispatched()), {"dc_curtailment": None}, None
+    )
+    assert kpi["fraction"] is None and "curtailment" in kpi["reason"], kpi
+
+
+def test_only_an_electrical_injection_by_a_non_renewable_counts():
+    """Pins `g in nonren and gbus[g] in elec` for the injecting Generators: a
+    renewable two-way export and a fuel one off the site are not counted."""
+    n = _dispatched()
+    n.add("Bus", "h2", carrier="H2")
+    two_way = {"sign": -1.0, "p_min_pu": -1.0, "p_nom": 5.0}
+    n.add("Generator", "pv_export", bus="ac", carrier="solar", **two_way)
+    n.add("Generator", "h2_swap", bus="h2", carrier="H2", **two_way)
+    assert classify(n)["injecting_generators"] == []
+
+
+def test_a_store_whose_carrier_names_a_battery_is_storage():
+    """Pins `'battery' in c`: "home battery" is not in the storage set but
+    names one, so it is never a fuel stock on the site bus."""
+    n = _dispatched()
+    n.add("Store", "homebatt", bus="ac", carrier="home battery", e_nom=50.0)
+    n.stores_t.p = pd.DataFrame({"homebatt": 0.0}, index=n.snapshots)
+    n.stores_t.p.iloc[20, 0] = 5.0
+    assert classify(n)["unattributed_stores"] == []
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_a_store_without_a_carrier_on_the_site_bus_is_not_a_fuel():
+    """Pins `bus not in elec` for a Store without its own carrier."""
+    n = _dispatched()
+    n.add("Store", "plain", bus="ac", e_nom=50.0)
+    n.stores_t.p = pd.DataFrame({"plain": 0.0}, index=n.snapshots)
+    n.stores_t.p.iloc[20, 0] = 5.0
+    assert classify(n)["unattributed_stores"] == []
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_a_store_with_a_none_carrier_reads_its_bus_carrier():
+    """Pins `carriers.get(s) or ''`: a None carrier is no carrier, so the
+    biogas bus decides (renewable), not the text "None"."""
+    n = _store_genset(_dispatched(), "biogas", "")
+    n.stores.loc["daytank", "carrier"] = None
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_a_running_fuel_cell_off_an_electrolysed_h2_store_is_not_refused():
+    """Pins `bus0 in elec` (the H2 bus is fed from electricity) and
+    `bus0 in fuel` (only a Link out of a fuel bus is unattributed)."""
+    n = _dispatched()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Store", "h2tank", bus="h2", carrier="H2", e_nom=200.0)
+    n.add("Link", "electrolyser", bus0="ac", bus1="h2", p_nom=10.0, efficiency=0.7)
+    n.add("Link", "fuel cell", bus0="h2", bus1="ac", p_nom=5.0, efficiency=0.5)
+    n.links_t.p0 = pd.DataFrame(
+        {"electrolyser": 0.0, "fuel cell": 0.0}, index=n.snapshots
+    )
+    n.links_t.p0.iloc[20, 1] = 4.0
+    assert classify(n)["unattributed_links"] == []
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_a_reversible_transfer_pump_between_fuel_tanks_does_not_hide_the_fuel():
+    """Pins `any(b in elec …) and p_min_pu < 0`: only a reversible Link with
+    an electrical output feeds its bus0 from electricity."""
+    n = _store_genset(_dispatched(), "diesel", "diesel")
+    n.add("Bus", "reserve", carrier="diesel")
+    n.add("Link", "pump", bus0="tankbus", bus1="reserve", p_nom=5.0, p_min_pu=-1.0)
+    assert classify(n)["unattributed_links"] == ["genset_s"]
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "genset_s" in kpi["reason"], kpi
+
+
+def test_a_generator_held_at_zero_is_supply_not_a_withdrawal():
+    """Pins `p_min_pu < 0` (strict) in R16: p_max_pu = p_min_pu = 0 is a
+    stand-by unit, still non-renewable supply."""
+    n = _dispatched()
+    n.add("Generator", "standby", bus="ac", carrier="diesel", p_nom=5.0, p_max_pu=0.0)
+    assert "standby" in classify(n)["nonren_generators"]
+
+
+def test_an_electrolyser_into_an_h2_grid_is_export_not_use():
+    """Pins `'grid' in c` in `_is_export_bus`."""
+    n = _network()
+    n.add("Bus", "h2net", carrier="H2 grid")
+    n.add("Link", "electrolyser", bus0="ac", bus1="h2net", p_nom=10.0)
+    c = classify(n)
+    assert c["conversion_links"] == [] and c["storage_links"] == [], c
+
+
+def test_an_unrelated_reversible_link_is_no_path_back():
+    """Pins `cur in m_outs and m in reversible`: a battery's bidirectional
+    Link elsewhere does not turn the electrolyser into storage."""
+    n = _site_with_conversion()
+    n.add("Bus", "batt", carrier="battery")
+    n.add("Link", "bidir", bus0="ac", bus1="batt", p_nom=5.0, p_min_pu=-1.0)
+    assert classify(n)["conversion_links"] == ["electrolyser", "heat_pump"]
+
+
+def test_a_path_back_is_not_undone_by_a_later_counted_source_link():
+    """Pins `back or m not in src_links`: electrolyser → H2 → fuel cell is a
+    path back; a methanation → gas supply bus → genset (a counted source
+    Link) found later does not clear it."""
+    n = _network()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=20.0)
+    n.add("Link", "electrolyser", bus0="ac", bus1="h2", p_nom=10.0)
+    n.add("Link", "fuel cell", bus0="h2", bus1="ac", p_nom=5.0)
+    n.add("Link", "methanation", bus0="h2", bus1="gas", p_nom=5.0)
+    n.add("Link", "gas_genset", bus0="gas", bus1="ac", p_nom=5.0)
+    c = classify(n)
+    assert c["source_links"] == ["gas_genset"], c
+    assert c["storage_links"] == ["electrolyser"] and c["conversion_links"] == [], c
+
+
+def test_a_two_hop_path_back_makes_storage():
+    """Pins `b not in seen`: the walk follows H2 → mid → fuel cell → site."""
+    n = _network()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Bus", "mid", carrier="H2")
+    n.add("Link", "electrolyser", bus0="ac", bus1="h2", p_nom=10.0)
+    n.add("Link", "pipe", bus0="h2", bus1="mid", p_nom=10.0)
+    n.add("Link", "fuel cell", bus0="mid", bus1="ac", p_nom=5.0)
+    c = classify(n)
+    assert c["storage_links"] == ["electrolyser"] and c["conversion_links"] == [], c
+
+
+def test_a_link_carrier_that_names_a_bus_is_not_a_port():
+    """Pins `c.startswith('bus')` in `_link_outputs`: only bus columns are
+    ports, even when another attribute's text names the site bus."""
+    n = _dispatched()
+    n.add("Bus", "heat", carrier="heat")
+    n = _with_fuel(n, ("boiler", "fuel", "heat", {"carrier": "ac"}))
+    assert classify(n)["unattributed_generators"] == []
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
+
+
+def test_a_forward_only_converter_is_no_backward_path_for_grey_h2():
+    """Pins `p_min_pu < 0` (strict) in `_leaks`: an electrolyser at
+    p_min_pu = 0 cannot run as a fuel cell, so grey H2 beside it only meets
+    the H2 offtake."""
+    n = _dispatch_conversion(_site_with_conversion())
+    n.add("Generator", "grey", bus="h2", carrier="grey H2", p_nom=5.0)
+    n.generators_t.p["grey"] = 1.0
+    assert classify(n)["unattributed_generators"] == []
+    assert renewable_fraction(n)["fraction"] == pytest.approx(0.5)
+
+
+def test_a_diesel_store_on_the_site_is_listed_once_beside_a_bidirectional_battery():
+    """Pins `bus not in elec and _leaks(…)` in `_fuel_stocks_run_backward`: a
+    stock on the site bus is F1's, never also A3's."""
+    n = _site_diesel_store(_dispatched())
+    n.add("Bus", "batt", carrier="battery")
+    n.add("Link", "bidir", bus0="ac", bus1="batt", p_nom=10.0, p_min_pu=-1.0)
+    stores = classify(n)["unattributed_stores"]
+    assert len(stores) == len(set(stores)) == 1, stores
+
+
+def test_a_diesel_store_feeding_only_a_boiler_is_not_listed():
+    """Pins `_leaks(…, backward_only=True)`: a fuel stock off the site with
+    no path to electricity is not an unattributed stock."""
+    n = _dispatched()
+    n.add("Bus", "heat", carrier="heat")
+    n = _store_genset(n, "diesel", "diesel", out="heat")
+    assert classify(n)["unattributed_stores"] == []
+
+
+def test_a_port_without_its_efficiency_column_is_an_output():
+    """Pins `attr in links.columns`: pypsa adds bus3 without an efficiency3
+    column; the port is an output, so diesel through it fails closed."""
+    n = _dispatched()
+    n.add("Bus", "heat", carrier="heat")
+    n = _with_fuel(n, ("chp", "fuel", "heat", {"bus3": "ac"}))
+    assert "efficiency3" not in n.links.columns
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "tank" in kpi["reason"], kpi
+
+
+def _dac_port2(n, *, efficiency2, series=None):
+    """A Link heat → co2 with bus2 on the site, as a second input or not."""
+    n.add("Bus", "co2", carrier="co2")
+    n.add(
+        "Link",
+        "dac",
+        bus0="heat",
+        bus1="co2",
+        bus2="ac",
+        efficiency2=efficiency2,
+        p_nom=4.0,
+    )
+    if series is not None:
+        n.links_t.efficiency2 = pd.DataFrame({"dac": series}, index=n.snapshots)
+    return n
+
+
+def test_a_zero_static_efficiency_is_not_an_input():
+    """Pins `efficiency2 < 0` (strict): a port at 0 draws nothing."""
+    n = _dac_port2(_site_with_conversion(), efficiency2=0.0)
+    assert "dac" not in classify(n)["conversion_links"]
+
+
+@pytest.mark.parametrize(
+    "series, is_input",
+    [
+        pytest.param(-0.5, True, id="negative-in-time"),
+        pytest.param(0.0, False, id="zero-in-time"),
+    ],
+)
+def test_a_port_is_an_input_only_where_its_efficiency_in_time_is_negative(
+    series, is_input
+):
+    """Pins the time-varying test `(series < 0).any()` with a static 1."""
+    n = _dac_port2(_site_with_conversion(), efficiency2=1.0, series=series)
+    c = classify(n)
+    assert ("dac" in c["conversion_links"]) is is_input, c
+    if is_input:
+        assert c["conversion_inputs"]["dac"] == [2]
