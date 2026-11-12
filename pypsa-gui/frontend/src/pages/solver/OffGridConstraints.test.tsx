@@ -59,6 +59,31 @@ describe('Off-grid constraints — minimum renewable fraction', () => {
     expect(renewableFractionFromText(' 100 ')).toEqual({ value: 1 })
   })
 
+  it('reports a refusal up so the page disables Save, and clears it on a valid entry', () => {
+    // Typing 150 patches 0.01 and 0.15 on the way; Save must not then send 0.15.
+    const patch = vi.fn()
+    const onError = vi.fn()
+    render(<OffGridConstraints draft={DRAFT} patch={patch} onError={onError} />)
+    for (const v of ['1', '15', '150']) fireEvent.change(input(), { target: { value: v } })
+    expect(onError).toHaveBeenLastCalledWith(expect.stringMatching(/outside 0 to 100/))
+    fireEvent.change(input(), { target: { value: '80' } })
+    expect(onError).toHaveBeenLastCalledWith(null)
+    expect(patch).toHaveBeenLastCalledWith({ min_renewable_fraction: 0.8 })
+  })
+
+  it('refuses typed text that is not a number instead of turning the target off', () => {
+    const patch = vi.fn()
+    const onError = vi.fn()
+    render(<OffGridConstraints draft={{ min_renewable_fraction: 0.8 } as unknown as SolverConfig}
+      patch={patch} onError={onError} />)
+    fireEvent.change(input(), { target: { value: '80e' } })
+    expect(patch).not.toHaveBeenCalled()
+    expect(input().value).toBe('80e')
+    expect(screen.getByTestId('min-renewable-fraction-error').textContent)
+      .toBe('Minimum renewable fraction: enter a number from 0 to 100.')
+    expect(onError).toHaveBeenLastCalledWith(expect.stringMatching(/enter a number/))
+  })
+
   it('never shows the engine key, and says 0 means no minimum', () => {
     renderBlock()
     const block = screen.getByTestId('offgrid-constraints')

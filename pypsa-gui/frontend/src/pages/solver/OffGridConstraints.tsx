@@ -6,7 +6,7 @@
 // when 0 or empty (off), matching the backend's
 // `min_renewable_fraction: float | None` (ge=0, le=1). An entry outside
 // 0–100 or one that is not a number is refused with an inline sentence and
-// never patched into the draft, so Save cannot send it.
+// never patched into the draft, and Save stays disabled while it shows.
 import { useEffect, useState } from 'react'
 import type { SolverConfig } from '../../api/types'
 
@@ -27,16 +27,24 @@ function toText(v: number | null | undefined): string {
   return v ? String(Math.round(v * 100 * 1e6) / 1e6) : ''
 }
 
-export function OffGridConstraints({ draft, patch }: {
+export function OffGridConstraints({ draft, patch, onError }: {
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
+  /** The current refusal sentence, or null; the page disables Save while it is set. */
+  onError?: (error: string | null) => void
 }) {
   const [text, setText] = useState(toText(draft.min_renewable_fraction))
-  const [error, setError] = useState<string | null>(null)
+  const [error, setErrorState] = useState<string | null>(null)
+  const setError = (e: string | null) => {
+    setErrorState(e)
+    onError?.(e)
+  }
   // A draft changed elsewhere (a load, the chat) shows here.
   useEffect(() => {
     setText(toText(draft.min_renewable_fraction))
-    setError(null)
+    setErrorState(null)
+    onError?.(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.min_renewable_fraction])
   return (
     <section className="border border-border rounded" data-testid="offgrid-constraints">
@@ -50,11 +58,8 @@ export function OffGridConstraints({ draft, patch }: {
         <label className="flex flex-col gap-1">
           <span className="text-[10px] text-muted">{MIN_RENEWABLE_FRACTION_LABEL}</span>
           <input
-            type="number"
+            type="text"
             inputMode="decimal"
-            min={0}
-            max={100}
-            step={5}
             value={text}
             aria-invalid={error ? true : undefined}
             onChange={e => {
@@ -79,7 +84,8 @@ export function OffGridConstraints({ draft, patch }: {
           Share of the electricity served that comes from renewable sources. It counts what
           diesel, gas, grid import and other non-renewable sources supply against the load
           served; storage passes on what charged it. 0 means no minimum. A solve that cannot
-          reach the minimum fails, and its log names this constraint as the cause.
+          reach the minimum fails, and its log names this constraint as the cause; with a
+          lost-load price (VOLL) set, it sheds load at that price instead.
         </p>
       </div>
     </section>
