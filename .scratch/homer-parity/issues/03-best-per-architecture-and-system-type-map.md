@@ -72,3 +72,11 @@ The source is the base project's saved network. Named "supply architecture" (G11
 - G10: `compare_supply_architectures` (execution_long_running, INPROC_SOLVER job) and `get_supply_architectures` (read) (`test_chat_tools_*`).
 - G11: the name is "supply architecture" in code, the tools and `pypsa-gui/CONTEXT.md`.
 - G12: mutants are listed in the PR body.
+
+### 03c plan GO, GK B, 2026-11-12
+- C1: closed form `km* = (offgrid_npc - grid_supply_npc - fixed_eur) / eur_per_km`; no solver, `business_case.py` untouched (`test_c1_closed_form_by_hand`).
+- C2: `offgrid_cheaper_everywhere` (grid cost at 0 km above off-grid), `grid_cheaper_everywhere` (0 EUR/km, grid cheaper at 0 km), `beyond_max_km` (km reported), and grid cost == off-grid is `break_even` at 0 km (`test_c2_*`).
+- C3: `grid_supply_npc` is required, no default (`test_c3_grid_supply_npc_is_required`).
+- C4: off-grid basis (currency, currency year, discount rate, horizon) is echoed; a different currency or year, or a missing basis, refuses (`test_c4_*`).
+- C5: every float finite, `eur_per_km >= 0`, `max_km > 0` (`test_c5_bad_numbers_are_not_established_never_zero`).
+- C6: service plus tests only. The tool and route are a follow-up slice, after the harness PRs land; `offgrid_npc` and its basis are then read from the stored 03a result by id, never typed by the model. Filed as [03d-grid-extension-break-even-tool.md](03d-grid-extension-break-even-tool.md).
