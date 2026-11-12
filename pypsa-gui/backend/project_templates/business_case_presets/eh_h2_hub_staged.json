@@ -23,9 +23,8 @@
           "kind": "revenue",
           "category": "incentive",
           "unit": "kg",
-          "quantity_source": "linked:served_h2.h2_offtake@1",
           "escalation": "contract",
-          "note": "Fixed premium per kg of verified output.",
+          "note": "Fixed premium per kg of verified output, typed: the kg a year you are awarded (the contract caps it). Typed, not linked, because a second line on the served H2 would add its sold share to the offtake's and could drop the whole lost-production penalty (G3 counts a shortfall once).",
           "hint": {
             "low": 0.37,
             "high": 0.48,
@@ -34,6 +33,14 @@
             "year": 2024,
             "note": "Fixed premium per kg verified output, up to 10 years: set start_year and end_year for the tenor. Ceiling 4.50 EUR/kg."
           }
+        },
+        {
+          "name": "Balance of plant",
+          "kind": "capex",
+          "category": "equipment",
+          "unit": "lump",
+          "escalation": "capex",
+          "note": "Plant capex not in the energy model's asset capex (balance of plant, installation, buildings): the base of non-energy O&M and insurance. Capex is priced once: do not re-enter the electrolyser. No sourced default: enter the price and life."
         },
         {
           "name": "Stack replacement",

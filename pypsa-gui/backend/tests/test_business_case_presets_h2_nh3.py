@@ -42,7 +42,9 @@ def _fill(template: str) -> P.BusinessCaseInputs:
         d = ln.model_dump()
         if ln.kind == "revenue":
             d.update(price=PRICES[ln.name], indexation=0.0)
-        elif ln.name == "Stack replacement":
+            if ln.name == "Production premium":
+                d.update(quantity=100.0)  # typed: the kg a year awarded
+        elif ln.kind == "capex":
             d.update(quantity=1.0, price=1000.0, life_years=LIFE)
         elif ln.name == "Staff":
             d.update(quantity=2.0, price=50.0)
@@ -85,7 +87,13 @@ def test_the_preset_rows_are_spec_6_3_and_6_4(template):
     assert case.preset == f"{template}.{variant}@1"
     rev = [ln for ln in case.lines if ln.kind == "revenue"]
     assert all(ln.price is None and not ln.price_by_year for ln in rev)
-    assert all(ln.quantity_source == f"linked:{source}@1" for ln in rev)
+    # The premium is typed (F1: a second linked line would add its share to the offtake's in G3).
+    assert {ln.name for ln in rev if ln.source == "typed"} <= {"Production premium"}
+    assert all(
+        ln.quantity_source == f"linked:{source}@1"
+        for ln in rev
+        if ln.name != "Production premium"
+    )
     first = {"eh_ammonia_staged": "NH3 sales"}.get(template, "H2 offtake")
     assert by[first].category == "product_sale"
     assert by["Stack replacement"].kind == "capex"
@@ -121,11 +129,17 @@ def test_every_linked_id_exists_on_the_built_template(template):
         o.line for o in P.offered_rows(template)
     ]
     linked = [
-        ln.quantity_source[7:-2]
+        ln.quantity_source.removeprefix("linked:").rpartition("@")[0]
         for ln in rows
         if ln.quantity_source.startswith("linked:")
     ]
-    assert linked and set(linked) <= ids
+    picker = [
+        src.removeprefix("linked:").rpartition("@")[0]
+        for o in P.offered_rows(template)
+        for src in o.sources
+        if src.startswith("linked:")
+    ]
+    assert linked and picker and set(linked) | set(picker) <= ids
     o2 = [o for o in P.offered_rows(template) if o.line.category == "by_product"]
     assert len(o2) == n_o2 and all(o.line.unit == "t" for o in o2)
 
@@ -202,3 +216,83 @@ def test_g3_a_shortfall_lowers_revenue_once(template):
 def test_g4_the_reference_purchase_is_absent(template):
     bc, _r = _run(template, 1000.0, 1.0)
     assert bc.case.counterfactual == ()
+
+
+# ── F1: the premium never changes the lost-production drop (GK B) ────────────────
+
+
+def _lost_kept(template, *, half, premium):
+    """The lost-production line left in an operating year, with the offtake selling `half` of its served
+    H2 and the premium row kept or removed."""
+    real = P.preset
+
+    def shaped(*a, **kw):
+        case = real(*a, **kw)
+        keep = [ln for ln in case.lines if premium or ln.name != "Production premium"]
+        return case.model_copy(
+            update={
+                "lines": [
+                    ln.model_copy(update={"linked_share": half})
+                    if ln.source == "linked"
+                    else ln
+                    for ln in keep
+                ]
+            }
+        )
+
+    P.preset = shaped
+    try:
+        bc, _ = _run(template, 1000.0, 1.0)
+    finally:
+        P.preset = real
+    return _by_year(bc)[OPS[0]]
+
+
+@pytest.mark.parametrize("template", ["eh_h2_hub", "eh_h2_hub_staged"])
+def test_f1_the_premium_does_not_change_the_drop_and_f_times_s_holds(template):
+    with_p = _lost_kept(template, half=0.5, premium=True)
+    without = _lost_kept(template, half=0.5, premium=False)
+    key = next(k for k in with_p if "__lost_" in k)
+    assert with_p[key].amount == pytest.approx(without[key].amount)
+    assert with_p[key].amount == pytest.approx(-50.0 * 0.5)  # f × s: half kept
+
+
+# ── F2: the picker's sources are guarded ─────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "bad", ["linked:no version", "typed ", "anything", "linked:x@"]
+)
+def test_f2_an_offered_source_outside_the_pattern_is_refused(bad):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        P.OfferedRow(
+            label="x",
+            units=["t"],
+            sources=[bad],
+            line=P.preset("eh_h2_hub", "h2_offtake", currency="EUR").lines[0],
+        )
+
+
+# ── F3: each share's base holds a capex line for the plant it describes ─────────
+
+
+@pytest.mark.parametrize("template", CASES)
+def test_f3_plant_shares_have_a_plant_capex_base_not_only_the_stack_lump(template):
+    lines = _fill(template).lines
+    capex = [ln for ln in lines if ln.kind == "capex"]
+    for ln in lines:
+        if ln.source != "share_of":
+            continue
+        base_kind, _, cat = ln.quantity_source.split(":", 1)[1].partition("/")
+        base = [
+            b for b in lines if b.kind == base_kind and (not cat or b.category == cat)
+        ]
+        assert [b for b in base if b.name != "Stack replacement"], ln.name
+    if template == "eh_ammonia_staged":
+        asu = next(ln for ln in lines if ln.name == "ASU and synthesis-loop O&M")
+        assert asu.quantity_source == "share_of:capex/other"
+        assert [b.name for b in capex if b.category == "other"] == [
+            "ASU and synthesis loop"
+        ]
