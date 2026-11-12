@@ -205,6 +205,7 @@ def test_same_generation_live_turn_is_unchanged(network, monkeypatch):
     assert reader.calls == 1 and len(client.calls) == 2
     assert not _kinds(events)
     assert any(ev == 'turn_done' for ev, _ in events)
+    assert ('token', {'delta': 'one bus.'}) in events  # deltas still stream
     assert 'one bus.' in _assistant_text(session)
 
 
@@ -280,4 +281,19 @@ def test_releasing_an_obsolete_lease_without_promotion_keeps_pending():
         session_id='s', lease_id=first.lease_id, generation=1, promote=False,
     ) is None
     assert coord.active_lease('s') is None
+    assert coord.pending_utterance_id('s') == 'u2'
+
+
+def test_release_refuses_a_wrong_lease_or_a_future_generation():
+    coord = ua.TurnCoordinator()
+    first = coord.admit_utterance(ua.StableUtterance('u1', 'a', 1, 's'))
+    coord.admit_utterance(ua.StableUtterance('u2', 'b', 1, 's'))
+    assert coord.release_lease(
+        session_id='s', lease_id='not-the-lease', generation=1,
+    ) is None
+    assert coord.release_lease(
+        session_id='s', lease_id=first.lease_id, generation=2,
+    ) is None
+    # Neither call freed the lease or touched the pending correction.
+    assert coord.active_lease('s') == first.lease_id
     assert coord.pending_utterance_id('s') == 'u2'
