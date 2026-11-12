@@ -208,34 +208,23 @@ def _pack_price(
     }
 
 
-def _memory(
-    step: Step, resolve: Callable[[str, int], dict | None] | None
-) -> dict | None:
-    """The memory step's own state wording and, when the caller can read the item (`resolve`: memory_store.node
-    for the signed-in viewer), its summary, kind, owner scope and source evidence. Never a silent omission (P4,
-    P5): an item the viewer may not read says "not visible to you"; any other failure, or no reader, says "memory
-    item could not be read". The id and version always come from the approval stamp, and so does the state."""
+def _memory(step: Step) -> dict | None:
+    """The memory step: its state wording and, when the viewer's own read of the item confirmed it, its summary,
+    kind, owner scope and source evidence. Never a silent omission (P4, P5): an item the viewer may not read says
+    "not visible to you"; any other failure, or no reader, says "memory item could not be read". The id and
+    version come from the stamp, which alone never reads "user-approved" (P2)."""
     rec = step.via.recorded if step.via is not None else None
     if step.node.kind != "memory" or not isinstance(rec, MemoryRecall):
         return None
-    out = {"id": step.node.id, "state": rec.state, "item": None, "note": NOT_READ}
-    if resolve is None:
-        return out
-    try:
-        item = resolve(rec.item, rec.version)
-    except ItemNotVisible:
-        out["note"] = NOT_VISIBLE
-    except Exception:  # noqa: BLE001 - an unreadable item must not fail the walk
-        pass
-    else:
-        if item is not None:
-            out["item"], out["note"] = item, None
-    return out
+    return {
+        "id": step.node.id,
+        "state": rec.state,
+        "item": rec.item_read,
+        "note": rec.note,
+    }
 
 
-def _step(
-    g: Graph, step: Step, resolve: Callable[[str, int], dict | None] | None = None
-) -> dict:
+def _step(g: Graph, step: Step) -> dict:
     parsed = _parse(step.node.id)
     cls, name, field = parsed if parsed else (None, None, None)
     value = _value(g.ctx, cls, name, field) if parsed else None
@@ -262,7 +251,7 @@ def _step(
     }
     if step.via is not None and step.via.kind != "derived_from":
         out["broken"] = _broken(step.via, g)
-    memory = _memory(step, resolve)
+    memory = _memory(step)
     if memory is not None:
         out["memory"] = memory
     pack = _pack_price(g, step, value, unit) if step.node.kind == "derived" else None
@@ -292,18 +281,12 @@ def check_target(n, component: str, name: str) -> None:
         raise TargetUnknown(f"{component} '{name}' not found")
 
 
-def explain(
-    n,
-    component: str,
-    name: str,
-    field: str,
-    resolve_memory: Callable[[str, int], dict | None] | None = None,
-) -> dict:
+def explain(n, component: str, name: str, field: str, memory=None) -> dict:
     """Why one asset field has its value: the walk from the field to what priced it, outcome first.
-    `resolve_memory(item, version)` reads a memory item for the caller (slice 07); without it a memory step names
-    only the id and version from the stamp."""
+    `memory` is the viewer's reader of memory items (`memory.reader_for`, slice 07): a value accepted from one
+    reads `from_memory` only when the store confirms the item for this viewer."""
     check_target(n, component, name)
-    g = money_graph(n, [(component, name)])
+    g = money_graph(n, [(component, name)], memory)
     start = _start(g, component, name, field)
     steps = why(g, start).steps
     verdict = staleness(g, start)
@@ -318,7 +301,7 @@ def explain(
         },
         "target": {"component": component, "name": name, "field": field},
         "node": start,
-        "steps": [_step(g, s, resolve_memory) for s in steps[:MAX_STEPS]],
+        "steps": [_step(g, s) for s in steps[:MAX_STEPS]],
     }
 
 
@@ -339,7 +322,7 @@ def ledger_fields(key: str, pv_kind: str | None = None) -> list:
     return rows
 
 
-def explain_ledger_row(n, key: str) -> dict:
+def explain_ledger_row(n, key: str, memory=None) -> dict:
     """Why a Guided ledger row's value is what the network holds: `explain` for each asset field the row compiles
     to (the round-trip efficiency compiles to two). Outcome first: stale when any field is stale, else uncompared
     when any is, else fresh; complete only when every field's walk is."""
@@ -347,7 +330,7 @@ def explain_ledger_row(n, key: str) -> dict:
     fields = []
     for m in ledger_fields(key, meta.get("pv_kind")):
         try:
-            fields.append(explain(n, m.component, m.name, m.field))
+            fields.append(explain(n, m.component, m.name, m.field, memory))
         except TargetUnknown:
             continue  # the asset is not on this network, or the field was never recorded on it
     if not fields:

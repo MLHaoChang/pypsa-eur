@@ -34,8 +34,9 @@ COMPARATORS: dict[str, Callable[[Graph, Edge], Broken | None]] = {
 class Builder:
     """Collects the nodes and edges producers declare; `build` freezes them. A node added twice must agree."""
 
-    def __init__(self, n) -> None:
+    def __init__(self, n, memory=None) -> None:
         self.n = n
+        self.memory = memory  # the viewer's read of a memory item (`memory.reader_for`); None reads none
         self._nodes: dict[str, Node] = {}
         self._edges: dict[tuple, Edge] = {}
 
@@ -54,9 +55,10 @@ class Builder:
         return Graph(dict(self._nodes), tuple(self._edges.values()), self.n)
 
 
-def money_graph(n, assets) -> Graph:
-    """The money path of `assets` (`(component_class, name)` pairs) on network `n`."""
-    b = Builder(n)
+def money_graph(n, assets, memory=None) -> Graph:
+    """The money path of `assets` (`(component_class, name)` pairs) on network `n`. `memory` is the viewer's
+    reader of memory items: a value accepted from one reads `from_memory` only when it confirms the item."""
+    b = Builder(n, memory)
     for cls, name in assets:
         money.add_asset(b, cls, name)
     return b.build()
@@ -110,8 +112,10 @@ def walked(g: Graph, node_id: str) -> list[Edge]:
 
 def _check(g: Graph, edge: Edge) -> tuple[State, Broken | None]:
     if edge.kind == "recalled_from":
-        # Approved by the user at that version, immutable: nothing to compare, and not `uncompared` either.
-        return "from_memory", None
+        # Approved at an immutable version: nothing to compare. `from_memory` only when the store confirmed the
+        # item for this viewer; a stamp it did not confirm compared nothing.
+        ok = getattr(edge.recorded, "confirmed", False)
+        return ("from_memory" if ok else "uncompared"), None
     compare = COMPARATORS.get(edge.kind)
     if compare is None or edge.recorded is None:
         return "uncompared", None

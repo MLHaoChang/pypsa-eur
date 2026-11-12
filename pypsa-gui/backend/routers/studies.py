@@ -1141,6 +1141,7 @@ def get_ledger_row_why(study_id: str, key: str, option_id: str,
     network the ledger's out-of-date note reads). Reads only (COPILOT-1). `why_target_unknown` (404) for a
     row the ledger does not hold, an option with no fork this study owns, or a row with no recorded field."""
     from services.provenance_graph.explain import TargetUnknown, explain_ledger_row, ledger_fields
+    from services.provenance_graph.memory import reader_for
 
     _refuse_unless_enabled()
     study = _load(project, study_id)
@@ -1158,7 +1159,7 @@ def get_ledger_row_why(study_id: str, key: str, option_id: str,
         raise unknown(f"option {option_id} has no fork this study owns")
     network, _hash = study_runner.fork_network_from_disk(fork)
     try:
-        out = explain_ledger_row(network, key)
+        out = explain_ledger_row(network, key, reader_for(db, user))
     except TargetUnknown as exc:
         raise unknown(str(exc), exc.status) from exc
     return {**out, "target": {**out["target"], "study_id": study_id, "option_id": option_id}}

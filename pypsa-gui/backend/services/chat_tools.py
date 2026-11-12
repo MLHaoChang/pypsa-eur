@@ -1372,7 +1372,7 @@ def why_this_number(component: str | None = None, name: str | None = None, field
     if all(v is not None for v in asset) and all(v is None for v in ledger):
         from routers.network import get_asset_provenance_why as _asset_why
 
-        return _asset_why(component, name, field)
+        return _route(_asset_why, component, name, field)  # the acting user's own memory read (P4)
     if all(v is not None for v in ledger) and all(v is None for v in asset):
         from routers.studies import get_ledger_row_why as _row_why
 
