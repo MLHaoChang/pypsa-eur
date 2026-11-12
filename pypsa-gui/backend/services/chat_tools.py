@@ -4671,6 +4671,15 @@ def apply_default_series(project_id: str, job_ids: list) -> dict:
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
+def confirm_unrecorded_series(project_id: str, items: list) -> dict:
+    """RP-20: the route's own handler (its edit lock, open-project gate, one
+    undo step and all-or-nothing checks), reached only through the user's
+    card (`harness.confirm.CARD_ONLY_TOOLS`)."""
+    from routers.profiles import UnrecordedConfirmRequest, confirm_unrecorded_series as _h
+    body = UnrecordedConfirmRequest(items=list(items))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
 # Load profiles (time-series generators ticket 01): the archetype catalogue and
 # synchronous generation into the same pending store; apply is the tool above.
 
@@ -9326,7 +9335,8 @@ def create_evidence_report(title: str | None = None) -> dict:
     """The Reports panel's evidence-only report (`POST …/reports`); the route checks the lock."""
     from routers.reports import CreateReportBody, create_report as _h
 
-    out = _route(_h, CreateReportBody(title=title), project=_report_project())
+    with _assistant_strict():  # the assistant's report is strict: it carries no saved charts
+        out = _route(_h, CreateReportBody(title=title), project=_report_project())
     document = out.pop("document", None) or {}
     rid = out.get("report_id")
     return _b2b_fit({
@@ -9859,6 +9869,7 @@ DISPATCHERS: dict[str, Any] = {
     "apply_generated_profiles": apply_generated_profiles,
     "preview_default_series": preview_default_series,
     "apply_default_series": apply_default_series,
+    "confirm_unrecorded_series": confirm_unrecorded_series,
     "list_load_profile_archetypes": list_load_profile_archetypes,
     "generate_load_profile": generate_load_profile,
     "generate_availability_profile": generate_availability_profile,

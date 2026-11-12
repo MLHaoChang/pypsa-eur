@@ -876,7 +876,7 @@ def critical_buses(network) -> list[str]:
             network.buses, "columns", []):
         return []
     return [str(b) for b in network.buses.index
-            if arch._flag(network.buses.at[b, "eh_critical"])]
+            if arch._truthy(network.buses.at[b, "eh_critical"])]
 
 
 def derive_dtc_config(network, pack: ArchetypePack, *,

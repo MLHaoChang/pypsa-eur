@@ -682,7 +682,9 @@ def _entries_a_load_would_skip(written_ids: set[str]) -> list:
     return preserved
 
 
-def save_profiles(profiles: list[LLMProfile], active_id: str) -> None:
+def save_profiles(
+    profiles: list[LLMProfile], active_id: str, roles: dict[str, str] | None = None
+) -> None:
     """
     Validate every profile, then write `llm-profiles.json` at 0600.
 
@@ -711,12 +713,34 @@ def save_profiles(profiles: list[LLMProfile], active_id: str) -> None:
     if active_id not in seen_ids and active_id not in _BUILTIN_IDS:
         raise ProfileValidationError(f"active_profile_id {active_id!r} is not a known profile")
 
+    # Profile roles (assistant-memory 04b) are kept across every save; a role
+    # whose profile is gone is dropped, so it falls back to the active one.
+    # A role on an entry this build cannot load but keeps on disk (C-14) is
+    # kept too; `resolve_role` falls back while that entry does not load.
+    if roles is not None:
+        for role, pid in roles.items():
+            if role not in PROFILE_ROLES:
+                raise ProfileValidationError(f"unknown profile role: {role}")
+            if not isinstance(pid, str):
+                raise ProfileValidationError(f"profile role {role} must name a profile id")
+    roles = load_roles() if roles is None else dict(roles)
+    kept_ids = {
+        e["id"] for e in _entries_a_load_would_skip(seen_ids)
+        if isinstance(e, dict) and isinstance(e.get("id"), str)
+    }
+    roles = {
+        role: pid for role, pid in roles.items()
+        if role in PROFILE_ROLES
+        and (pid in seen_ids or pid in _BUILTIN_IDS or pid in kept_ids)
+    }
+
     # C-14 — re-emit the entries this build cannot load, so a write does not
     # silently delete them. Appended after the known-good ones; `load_profiles`
     # will skip them again on the next read, exactly as before.
     payload = {
         "version": _FILE_VERSION,
         "active_profile_id": active_id,
+        "roles": roles,
         "profiles": (
             [_profile_to_dict(p) for p in profiles]
             + _entries_a_load_would_skip({p.id for p in profiles})
@@ -839,6 +863,68 @@ def set_active(profile_id: str) -> None:
         raise ProfileValidationError(f"unknown profile id {profile_id!r}")
     file_profiles = [p for p in profiles if p.id not in _BUILTIN_IDS]
     save_profiles(file_profiles, profile_id)
+
+
+# Optional profile roles: a task that may run on a profile other than the
+# active one (assistant-memory plan §6). Unset means the active profile.
+PROFILE_ROLES = ("memory_analyzer",)
+
+
+def load_roles() -> dict[str, str]:
+    """`{role: profile_id}` as stored; unknown roles and non-string ids are
+    ignored. Never raises, like `_read_file`."""
+    data = _read_file() or {}
+    raw = data.get("roles")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        role: pid for role, pid in raw.items()
+        if role in PROFILE_ROLES and isinstance(pid, str)
+    }
+
+
+def set_role(role: str, profile_id: str | None) -> dict[str, str]:
+    """Mark `profile_id` for `role`, or clear the role with None. Raises
+    `ProfileValidationError` for an unknown role or profile id."""
+    if role not in PROFILE_ROLES:
+        raise ProfileValidationError(f"unknown profile role: {role}")
+    profiles, current_active = load_profiles()
+    roles = load_roles()
+    if profile_id is None:
+        roles.pop(role, None)
+    else:
+        if profile_id not in {p.id for p in profiles}:
+            raise ProfileValidationError(f"no profile with the id {profile_id}")
+        roles[role] = profile_id
+    file_profiles = [p for p in profiles if p.id not in _BUILTIN_IDS]
+    save_profiles(file_profiles, current_active, roles)
+    return load_roles()
+
+
+def resolve_role(role: str) -> LLMProfile:
+    """The profile marked for `role`, or the active profile when none is
+    marked or the marked one was deleted. A marked profile still on disk
+    that does not load raises `ProfileNotConfiguredError`: the task fails
+    by name rather than silently running on another provider (GK B T7)."""
+    profiles, active_id = load_profiles()
+    by_id = {p.id: p for p in profiles}
+    data = _read_file() or {}
+    if "roles" in data and not isinstance(data["roles"], dict):
+        # A malformed roles map is not "no role set" (GK B T7d).
+        raise ProfileNotConfiguredError(f"the profile roles are malformed; {role} cannot be resolved")
+    pid = (data.get("roles") or {}).get(role)
+    if pid is not None and not isinstance(pid, str):
+        raise ProfileNotConfiguredError(f"the profile marked for {role} is not a profile id ({type(pid).__name__})")
+    if pid is None:
+        return by_id[active_id]
+    if pid in by_id:
+        return by_id[pid]
+    on_disk = data.get("profiles")
+    if isinstance(on_disk, list) and any(
+        isinstance(e, dict) and e.get("id") == pid for e in on_disk
+    ):
+        raise ProfileNotConfiguredError(f"the profile marked for {role} does not load: {pid}")
+    return by_id[active_id]
 
 
 def load_presets() -> list[dict]:

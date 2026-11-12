@@ -1,0 +1,3 @@
+{"kinds": {
+  "report_settings_unrecorded": {"surface": "inline", "why": "The report export refuses a template export while the report's template mapping is marked unrecorded: a report job saved a version but could not record its mapping (its write stayed busy, study harness 07f-b), and every version's export reads that one mapping. Nothing was exported. The user maps the template again, then exports."}
+}}

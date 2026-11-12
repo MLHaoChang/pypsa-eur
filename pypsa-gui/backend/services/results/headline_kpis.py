@@ -140,6 +140,10 @@ def _card(card_id, value=None, unit=None, *, state="ready", reason=None, **extra
         "reason": reason,
         "formula_id": None,
         "detail": None,
+        # S3: `headline_delta.add_deltas` fills the delta; the trend is the
+        # figure per investment period, where the run has one.
+        "delta": None,
+        "trend": None,
         **extra,
     }
 
@@ -276,10 +280,43 @@ def _checked(ctx, card_id):
         return _card(card_id, state=_UNAVAILABLE[0], reason=_UNAVAILABLE[1])
 
 
-def _cost(card_id, cost, field, per_year):
+def _cost(card_id, cost, field, per_year, trend=None):
     if not cost or cost.get(field) is None:
         return _card(card_id, state="unavailable", reason=NO_COST)
-    return _card(card_id, float(cost[field]), "currency/yr" if per_year else "currency")
+    return _card(
+        card_id,
+        float(cost[field]),
+        "currency/yr" if per_year else "currency",
+        trend=trend,
+    )
+
+
+#: What the trend's points are (`compute_cost_breakdown` `by_period`).
+TREND_BASIS = (
+    "Each investment period's annualised fixed cost and operating cost over "
+    "its years, undiscounted, in the money of the input costs."
+)
+
+
+def _period_totals(cost, investment_periods):
+    """The cost breakdown's total per investment period: the trend of a run
+    with two or more periods, else None. A series that misses a period, or
+    whose points do not add up to the card's total (a cost with no period),
+    would read complete when it is not, so it is None too."""
+    rows = (cost or {}).get("by_period") or []
+    points = [{"period": p["period"], "value": float(p["total"])} for p in rows]
+    if len(points) < 2 or not all(math.isfinite(p["value"]) for p in points):
+        return None
+    if [p["period"] for p in points] != list(investment_periods):
+        return None
+    if not math.isclose(
+        sum(p["value"] for p in points),
+        float(cost["total"]),
+        rel_tol=1e-9,
+        abs_tol=1e-6,
+    ):
+        return None
+    return {"basis": TREND_BASIS, "points": points}
 
 
 def _unserved(lost_load):
@@ -304,7 +341,13 @@ def headline_kpis(
         # Annualised fixed cost plus the opex of the modelled snapshots: a
         # year's cost only when they cover a year, so it carries no "/yr" (the
         # Capacity expansion tab's "Total system cost" has none either).
-        "system_cost": lambda: _cost("system_cost", cost, "total", False),
+        "system_cost": lambda: _cost(
+            "system_cost",
+            cost,
+            "total",
+            False,
+            _period_totals(cost, ctx.network.investment_periods),
+        ),
         # Annualised: a year's in a single-period run, the horizon's otherwise.
         "new_build_capital": lambda: _cost(
             "new_build_capital", cost, "capex_expansion", not multi

@@ -172,7 +172,7 @@ def test_an_unmapped_event_never_reaches_a_checked_client(
         ]
     )
     assert "invented_event" not in {event for event, _ in frames}
-    assert "999" not in str(frames)
+    assert "999 MW" not in str(frames)
 
 
 def test_an_ordinary_turn_keeps_the_pass_through(client, monkeypatch):

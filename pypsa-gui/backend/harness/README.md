@@ -300,7 +300,9 @@ component (`frontend/src/components/EditCard.tsx`).
 - **Receipt.** The tool result gains `_edit_receipt`: each row read back
   natively, `outcome: verified` only when every value equals the card's `new`
   (otherwise `uncertain`), `results_stale` (the last solve's input fingerprint
-  differs from now) and `undo: {tool: 'undo_last', available}`. A card with
+  differs from now) and `undo: {tool: 'undo_last', available}` (`available`
+  for a turn-captured tool, or one in `edit_card.SELF_UNDO_TOOLS` whose route
+  pushes its own one step, such as `confirm_unrecorded_series`). A card with
   `sets` passes them on, so Guided words the receipt as the card did; each set
   also lists `inactive_names`, which the table marks "(inactive)".
 - **Adding an edit kind** (TS-04's series refinement, a new settings tool):
@@ -1115,6 +1117,14 @@ and pointing to the "Numbers to check" appendix. The appendix (docx, the PDF's
 docx, the tagged template's `unverified`, `get_report`'s `audit.withheld`)
 lists the values marked withheld.
 
+A strict report carries no charts. The charts a person saved from Results
+(`reports/_charts/`, `services/reports/chart_snapshots.py`) are added only to
+a human report; `create_evidence_report` and `generate_report` run strict, so
+their reports leave the "Charts from Results" section out, and a saved chart's
+text never reaches an admitted fact or a draft prompt. The saving routes
+(`POST` and `DELETE .../report-charts`) are human-only (`not_via_chat`), and
+`reports/_charts` is not a "report" effect in the trajectory evaluation.
+
 A strict job and the assistant's `export_report_docx` and `export_report_pdf`
 check that every required disclosure of the version they start from is still
 there. A lost one fails the job, or refuses the export, with
@@ -1645,6 +1655,12 @@ archetype `off_grid` the template card's.
   the plan card is proposed or read; the card shows K and the budget, held to
   the hard cap of 20 (K >= 2 then covers the first pass and one L2 round).
   The grant counts again and refuses `eh_contingencies` when K moved.
+- **K and the task lock (#1345).** The card paths count K before
+  `assistant_tasks._LOCK` (`run_envelope.counted_live` at propose,
+  `read_for_card` and the grant in `decide`). `run_eh.islanding` still runs
+  under the lock at three sites: `run_eh.admit` from `begin_step`, the
+  `_eh_frozen` freeze in `decide`, and the `stage_frozen` freeze in
+  `_advance_run`; each costs about 5 to 12 ms (GK B (48) A2).
 - **The cap (GK B (47) Q1).** The card shows the arithmetic and, when the
   cap applies, the capped budget (Q1-iii). A K whose one pass, `1 + (2 + K)
   + 1`, is above the cap is refused on the card and at the grant,
