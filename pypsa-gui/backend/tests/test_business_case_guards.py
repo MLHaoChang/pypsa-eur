@@ -560,21 +560,13 @@ def test_a7_a_served_load_line_never_drops_lost_production():
 
 
 def test_g3_5_a_shortfall_counts_exactly_once_as_lower_served_revenue():
-    """GK A G3-5 on a store-bearing bus whose shortfall exceeds the hour's load (LO-8):
+    """GK A G3-5 on a one-Load bus whose shortfall exceeds the hour's load (LO-8):
     the case with the sale line = the case with neither the line nor lost_production,
     plus served × price; served = contracted − shortfall."""
     from services.results.finance_case import _per_year as shortfall_per_year
 
     n = _plant()
     n.generators_t.p["__lost_conc"] = np.tile([20.0, 0.0, 3.0, 0.0], 2)
-    # LO-8: a stockpile on the bus fills in the hour the shortfall exceeds the load
-    # and empties after it, so the slack's dispatch is above what the Load draws.
-    n.add("Store", "conc_pile", bus="conc", e_nom=100.0, e_cyclic=True)
-    n.stores_t.p["conc_pile"] = np.tile([-12.0, 0.0, 12.0, 0.0], 2)
-    n.stores_t.e["conc_pile"] = np.tile([12.0, 12.0, 0.0, 0.0], 2)
-    assert (
-        n.generators_t.p["__lost_conc"] > n.loads_t.p_set.get("shipments", 8.0)
-    ).any()
     solve = _solve(n)
     value, price = 90.0, 120.0
     by_period = {
@@ -629,6 +621,51 @@ def test_g3_5_a_shortfall_counts_exactly_once_as_lower_served_revenue():
     # Without the line the penalty stays: the shortfall is charged by it, once.
     no_line = run_case(build_business_case(ic, _inputs(), {}, lpm).case, PACK)
     assert np.any(no_line.op.lines[LOST_CONC.key])
+
+
+def test_g3_5_on_a_two_load_bus_the_drop_is_the_read_loads_unserved_value():
+    """GK A B1 (LO-8): on a two-Load bus with hours whose shortfall exceeds the load
+    and different hourly load shapes, one line reading one Load: the case with the
+    line = the case with neither, with the penalty less the read Load's unserved ×
+    value, plus the sale. A shortfall clipped per hour breaks it."""
+    from services.results.finance_case import _per_year
+
+    n = _two_loads()
+    p = n.generators_t.p["__lost_conc"]
+    dense = n.get_switchable_as_dense("Load", "p_set")
+    assert (p > dense[["shipments", "shipments_b"]].sum(axis=1)).any()
+    solve = _solve(n)
+    value, price = 90.0, 120.0
+    short = {per: _per_year(n, p, per) for per in PERIODS}
+    by_period = {
+        y: (_asset("__lost_conc", -value * short[per]), FOM)
+        for y, per in ((2031, 2030), (2035, 2035))
+    }
+    ic = _case(by_period=by_period)
+    lpm = L.lost_production(n, solve, ic)
+    served = L.read(n, solve, "shipped.shipments", "t")
+    unserved = {
+        per: _per_year(n, dense["shipments"], per) - served.per_period[per]
+        for per in PERIODS
+    }
+    assert all(0.0 < unserved[k] < short[k] for k in PERIODS)
+    ln = _linked("ship", "shipped.shipments", price=price)
+    with_line = run_case(
+        build_business_case(ic, _inputs(ln), {"ship": served}, lpm).case, PACK
+    )
+    kept = {
+        y: (_asset("__lost_conc", -value * (short[per] - unserved[per])), FOM)
+        for y, per in ((2031, 2030), (2035, 2035))
+    }
+    bare = run_case(
+        build_business_case(_case(by_period=kept), _inputs(), {}).case, PACK
+    )
+    np.testing.assert_allclose(
+        with_line.cash["project_pre_tax"],
+        bare.cash["project_pre_tax"] + with_line.op.lines["ship"],
+        rtol=1e-12,
+        atol=1e-9,
+    )
 
 
 def test_g3_6_the_locked_rows_show_the_drop_and_its_line_at_any_price():
