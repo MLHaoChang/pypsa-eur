@@ -762,3 +762,87 @@ def test_a_fuel_generator_feeding_only_heat_does_not_blank_the_fraction():
     genset = set(A.classify(n)["genset"])
     assert not {("Generator", "gas_supply"), ("Link", "boiler")} & genset
     assert A.renewable_fraction(n) == pytest.approx(0.75)
+
+
+# ── GK B round 4 (F1″) ────────────────────────────────────────────────────
+
+
+def _two_hop_net(chain: str, *, store: bool = False) -> pypsa.Network:
+    """`_net`, solved at a 0.75 fraction, plus a gas Generator two Links away
+    from the site: (a) gas → "gas" Link → `mid` → "xyz" Link (η 0.4) → site,
+    or (b) gas → SMR → H2 → fuel cell → site. ``store`` puts a Store on the
+    middle bus."""
+    n = _solved(
+        _net(), pv=[1.0, 1.0, 0.0, 1.0], genset=[0.0, 0.0, 1.0, 0.0], grid=[0.0] * 4
+    )
+    mid, first, second = {
+        "a": ("mid", ("gas", "gas"), ("xyz", "xyz")),
+        "b": ("H2", ("SMR", "SMR"), ("fuel cell", "fuel cell")),
+    }[chain]
+    for b, c in (("gas", "gas"), (mid, mid)):
+        n.add("Carrier", c)
+        n.add("Bus", b, carrier=c)
+    n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=5.0)
+    n.add("Link", first[0], bus0="gas", bus1=mid, carrier=first[1], p_nom=5.0)
+    n.add(
+        "Link",
+        second[0],
+        bus0=mid,
+        bus1="site",
+        carrier=second[1],
+        efficiency=0.4,
+        p_nom=5.0,
+    )
+    if store:
+        n.add("Store", "mid_store", bus=mid, carrier=mid, e_nom=10.0)
+    n.generators_t.p["gas_supply"] = [0.0, 0.0, 0.0, 2.5]
+    return n
+
+
+@pytest.mark.parametrize("chain", ["a", "b"])
+def test_a_fuel_generator_two_links_from_the_site_makes_the_fraction_none(chain):
+    """F1″: the gas reaches the site's electricity through a chain of
+    non-member Links, so its energy is uncounted: None, never 1.0 or 0.75."""
+    n = _two_hop_net(chain)
+    genset = set(A.classify(n).get("genset", ()))
+    assert ("Generator", "gas_supply") not in genset
+    assert A.renewable_fraction(n) is None
+
+
+def test_storage_on_the_chain_does_not_launder_the_gas():
+    """F1″: an H2 Store on the H2 bus does not end the walk; the gas still
+    reaches the site's electricity, so the fraction stays None."""
+    n = _two_hop_net("b", store=True)
+    assert A.renewable_fraction(n) is None
+
+
+def test_the_reach_walk_follows_link_direction():
+    """F1″ bound: a one-way Link from the site into the gas bus carries no gas
+    to electricity, so the gas Generator is outside the fraction."""
+    n = _solved(
+        _net(), pv=[1.0, 1.0, 0.0, 1.0], genset=[0.0, 0.0, 1.0, 0.0], grid=[0.0] * 4
+    )
+    n.add("Carrier", "gas")
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=5.0)
+    n.add("Link", "p2g", bus0="site", bus1="gas", carrier="methanation", p_nom=5.0)
+    n.generators_t.p["gas_supply"] = [1.0] * 4
+    assert A.renewable_fraction(n) == pytest.approx(0.75)
+    n.links_t.p_min_pu = pd.DataFrame({"p2g": [0.0, -1.0, 0.0, 0.0]}, index=n.snapshots)
+    assert A.renewable_fraction(n) is None
+
+
+def test_a_time_varying_p_min_pu_overrides_a_negative_static_value():
+    """A static p_min_pu of -1 with a time-varying column of all 0 runs one
+    way: the column, when present, is the Link's p_min_pu."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=2, freq="h"))
+    n.add("Bus", "site")
+    n.add("Bus", "g")
+    n.add("Load", "l", bus="site", p_set=1.0)
+    n.add("Generator", "pv", bus="site", carrier="solar", p_nom_extendable=True)
+    n.add("Generator", "grid", bus="g", carrier="grid", p_nom=5.0)
+    n.add("Link", "out", bus0="site", bus1="g", p_nom=5.0, p_min_pu=-1.0)
+    assert "grid" in [a.architecture_id for a in A.architectures_for(n)]
+    n.links_t.p_min_pu = pd.DataFrame({"out": [0.0, 0.0]}, index=n.snapshots)
+    assert "grid" not in [a.architecture_id for a in A.architectures_for(n)]

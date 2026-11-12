@@ -312,12 +312,37 @@ def omit(
     return m
 
 
+def _link_edges(n, removed: Iterable[tuple[str, str]] = ()) -> dict[str, set[str]]:
+    """``bus -> buses`` the Links not in ``removed`` carry energy to: a Link
+    runs from ``bus0`` to its other ports, and back only when its
+    ``p_min_pu`` is negative. A ``links_t.p_min_pu`` column, when present, is
+    that ``p_min_pu`` (negative in any snapshot); the static value is read
+    only for a Link without one."""
+    removed = set(removed)
+    edges: dict[str, set[str]] = {}
+    links = _static(n, "Link")
+    varying = n.links_t.p_min_pu
+    back = {str(x) for x in varying.columns[(varying < 0).any()]}
+    timed = {str(x) for x in varying.columns}
+    for name, buses in _link_buses(n).items():
+        if ("Link", name) in removed:
+            continue
+        if name in timed:
+            both = name in back
+        else:
+            both = float(links.at[name, "p_min_pu"]) < 0
+        for b in buses[1:]:
+            edges.setdefault(buses[0], set()).add(b)
+            if both:
+                edges.setdefault(b, set()).add(buses[0])
+    return edges
+
+
 def _supplied(n, removed: set[tuple[str, str]]) -> bool:
     """Every load bus is reached from a non-slack generator through the
     branches and links left (gate G3). A Line or Transformer runs both ways;
-    a Link runs from ``bus0`` to its other ports, and back only when its
-    ``p_min_pu`` is negative, static or in any snapshot of ``links_t``."""
-    edges: dict[str, set[str]] = {}
+    a Link runs as :func:`_link_edges` says."""
+    edges = _link_edges(n, removed)
 
     def edge(a: str, b: str) -> None:
         edges.setdefault(a, set()).add(b)
@@ -328,17 +353,6 @@ def _supplied(n, removed: set[tuple[str, str]]) -> bool:
             a, b = str(df.at[name, "bus0"]), str(df.at[name, "bus1"])
             edge(a, b)
             edge(b, a)
-    links = _static(n, "Link")
-    varying = n.links_t.p_min_pu
-    back = {str(x) for x in varying.columns[(varying < 0).any()]}
-    for name, buses in _link_buses(n).items():
-        if ("Link", name) in removed:
-            continue
-        both = float(links.at[name, "p_min_pu"]) < 0 or name in back
-        for b in buses[1:]:
-            edge(buses[0], b)
-            if both:
-                edge(b, buses[0])
     slacks = slack_names(n)
     g = _static(n, "Generator")
     reached = {
@@ -466,12 +480,32 @@ def _non_renewable_energy(n, members, w: pd.Series, electric: set[str]) -> float
     )
 
 
+def _reaches(start: str, edges: Mapping[str, set[str]], electric: set[str]) -> bool:
+    """``start`` is electrical or reaches an electrical bus through
+    ``edges`` (:func:`_link_edges`, each Link in the directions it runs, any
+    number of hops through non-electrical buses, storage or not: an H2 tank
+    does not launder gas). The walk ends at the first electrical bus."""
+    seen = {start}
+    todo = [start]
+    while todo:
+        bus = todo.pop()
+        if bus in electric:
+            return True
+        for b in edges.get(bus, ()):
+            if b not in seen:
+                seen.add(b)
+                todo.append(b)
+    return False
+
+
 def _uncounted(n, groups, w: pd.Series) -> bool:
     """A dispatched non-slack Generator with a non-renewable carrier
     (``carrier_kpis._is_renewable_carrier``, the shared definition) that no
     non-renewable path counts: not a member of :data:`NON_RENEWABLE`, nor
     on a bus (no Load, Line or Transformer) whose every Link is such a
-    member, which then counts its delivery."""
+    member, which then counts its delivery. A Generator whose output reaches
+    no electrical bus but through such members (:func:`_reaches`) is outside
+    the fraction or counted by them."""
     members = {m for g in NON_RENEWABLE for m in groups.get(g, ())}
     member_links = {x for comp, x in members if comp == "Link"}
     held = {str(b) for b in _static(n, "Load")["bus"]}
@@ -484,6 +518,8 @@ def _uncounted(n, groups, w: pd.Series) -> bool:
     for name, buses in link_buses.items():
         for b in buses:
             touching.setdefault(b, set()).add(name)
+    # Counted Links are left out: their delivery into electricity is counted.
+    edges = _link_edges(n, {("Link", x) for x in member_links})
     slacks = slack_names(n)
     g = n.generators
     for x in g.index:
@@ -494,10 +530,8 @@ def _uncounted(n, groups, w: pd.Series) -> bool:
             continue
         bus = str(g.at[x, "bus"])
         links = touching.get(bus, set())
-        if bus not in electric and not any(
-            b in electric for lk in links for b in link_buses[lk]
-        ):
-            continue  # its output never reaches electricity (e.g. a boiler's fuel)
+        if not _reaches(bus, edges, electric):
+            continue  # no uncounted way to electricity (e.g. a boiler's fuel)
         if bus not in held and links and links <= member_links:
             continue  # covered: its output leaves only through counted links
         if _energy(n.generators_t.p, [x], w) > 0:
