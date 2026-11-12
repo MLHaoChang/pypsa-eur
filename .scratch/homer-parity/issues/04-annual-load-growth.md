@@ -3,7 +3,11 @@
 
 # 04 — Load growth as a rate per year across the multi-year optimisation and the finance years
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Sonnet for 04a; Opus for 04b
+Reviewer: GK B (GK A only if adequacy/demand.py changes); UX for 04a
+Blocked by: 04b blocked by 04a
+Size: 04a + 04b, two PRs
 Type: task
 Gated: yes (GK B; GK A for the IC/adequacy engine path)
 Spec: [spec.md](../spec.md) (HOMER-GAPS-1, owner addition)
@@ -28,3 +32,39 @@ A typed "load growth, % per year" per carrier in Model Horizon (and the generic-
 ## Triage
 
 Confirm each "missing" item on master, find the older module's factor, decide the finance-year rule with GK B, name the files and the reviewers, and set the model tier.
+
+## Comments
+
+### Triage 2026-11-12
+
+Master check (`23aa3bc8`):
+- Confirmed present: `load_scalers` (legacy, all carriers) and `load_scalers_by_carrier`, one multiplier per period year (`models/schemas.py:712-721`, `solver_service.py:255-275`, `adequacy/demand.py`, `services/results/finance_case.py:755-770`, UI `pages/modelHorizon/StepPeriodEconomics.tsx:98,247-248`). Typed per period; no "% per year" input anywhere.
+- Confirmed missing: a rate input; any per-year load multiplier in finance. `finance/cashflow.py:112-123` `_templates_by_year` holds the period template flat (nominal, price escalation only) between periods and after the last; `cashflow.py:249` multiplies only price escalation and degradation. No test has a single-period project whose volumes grow over its life.
+- **"The older module":** not in this repo. `git log -S` for load_growth, growth_factor, growth_rate, load_growth_pct finds nothing; no code in `gui_streamlit/`, `gridspine/`, `templates/`, `config/` carries one. The only per-period factor is `load_scalers`, whose empty keys already sit in `backend/tests/fixtures/pre_u2_fork/*/solver_config.json:25-26`, so it predates U2 and is the likely older factor. It was not dropped: `services/legacy_import.py` copies the project tree and reads only `metadata.json`, so a legacy `solver_config.json` keeps its `load_scalers`, which today's `SolverConfig` reads as the all-carrier fallback. If the owner means another module (an earlier GridSpine or Streamlit version outside this checkout), ask for its name or path: this does not block 04a.
+
+### Finance-year rule (GK B ruling 2026-11-12: option B with R1-R6; supersedes the proposal)
+GK B rejected growth after the last period: it books volume the LP never served or sized while supply costs stay flat, which biases NPV upward.
+- **R1** After the last LP period volumes stay flat; no year books volume beyond what a solved period served.
+- **R2** Between periods p and p+1, interpolate geometrically, anchored on both solved volumes (not on the typed rate): m(y) = (V_{p+1}/V_p)^((y-Y_p)/(Y_{p+1}-Y_p)). The year before Y_{p+1} never exceeds period p+1's LP volume. A single-period project therefore stays flat.
+- **R3** The factor scales every dispatch-proportional line on that carrier's load: bill, served energy, load-tied sales, and also energy_import, variable opex, fuel and lost_production. Fixed lines (FOM, capex, fees) are never scaled. A line whose volume class cannot be determined refuses growth (fail closed); never scale revenue alone.
+- **R4** No rate and no typed scalers: byte-identical output (cashflows, IC digest, `_network_input_fingerprint`). Derived scalers enter the fingerprint and digest only when they change an LP input or a cashflow. A typed scaler wins over the rate.
+- **R5** The rate is finite and > -100 %. The base year y0 is required and at or before the first period. NaN, inf and out-of-range are refused, one test each.
+- **R6** 04b is TDD: a hand-computed 2-period case (an interpolated year plus a flat after-last year), with hand mutants on the anchor, the after-last flat, the revenue-only scale and the no-rate identity.
+- **Process:** 04b sends its plan to GK B before code; 04a's rate-to-scaler slice also goes to GK B for the digest and fingerprint gate.
+- Consequence for the owner's "per year": the rate drives the derived period multipliers; finance years between periods follow the solved volumes. Years after the last period do not grow, by design (R1).
+
+### Slices
+- **04a** typed "load growth, % per year" per carrier in Model Horizon and the generic-site form; derived `load_scalers_by_carrier` stored and shown next to the rate. Sonnet.
+- **04b** finance per-year load multiplier between periods per R1-R6 (plug-in at `cashflow.py:249` and `:245-247`, selected by line volume class). Opus. Blocked by: 04a (the GK B ruling is in).
+
+### Acceptance
+- [ ] 04a: g=2 % with y0=2030 and periods 2030/2035 derives 1.0/1.104 (hand-checked); a typed scaler overrides its period; validation per R5; no-rate identity per R4 (digest and fingerprint unchanged).
+- [ ] 04a: Model Horizon shows rate and derived multipliers together; Guided and Expert agree.
+- [ ] 04b: the R6 two-period case (interpolated year, flat after last) with the four hand mutants; fixed lines unchanged; undeterminable line refuses growth; no rate = byte-identical.
+- [ ] Release-note fragment per PR.
+
+### Likely files
+`models/schemas.py:712`, `services/solver_service.py:255`, `adequacy/demand.py`, `services/finance/cashflow.py`, `finance_case.py:755`, `frontend/src/pages/modelHorizon/StepPeriodEconomics.tsx`, `ModelHorizon.tsx`, `api/types.ts`.
+
+### Tests
+Extend `test_fca_load_scalers.py`; `test_finance_cashflow.py:157` pattern; `modelHorizonModel.test.ts`; mutants on `cashflow.py`.

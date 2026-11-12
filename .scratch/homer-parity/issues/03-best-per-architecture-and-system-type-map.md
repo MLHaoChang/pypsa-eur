@@ -3,7 +3,11 @@
 
 # 03 — Results: best system per architecture, winning-system-type map, grid-extension break-even
 
-Status: needs-triage
+Status: ready-for-agent
+Model: Sonnet for 03b and 03c; Opus for 03a
+Reviewer: GK B; UX for 03b (and 03c if it adds a UI input)
+Blocked by: 03b blocked by 03a; 03c independent
+Size: 03a, 03b, 03c, three PRs
 Type: task
 Gated: yes (GK B, UX)
 Spec: [spec.md](../spec.md) (HOMER-GAPS-1)
@@ -24,3 +28,31 @@ Built on the existing sweep and compare: one sweep per architecture (assets swit
 ## Triage
 
 Confirm on master, split frontend and backend slices if needed, name the files and reviewers, and set the model tier.
+
+## Comments
+
+### Triage 2026-11-12
+
+Master check (`23aa3bc8`): none of the three views exist; the building blocks do.
+- Architecture comparison: not found. `services/dc_architecture.py:525` compares data-centre power chains only. Study options in `services/study/questions.py:79-90` (none, bess_1h/2h/4h, bess_pv_2h) have no genset-only or PV+genset option; the only "best" is the battery NPV in `services/study/findings.py:836`. Study options drop assets by omission (`questions.py:79-80`, "omitted, not zeroed"), which is the right way to switch an architecture off; `run_sensitivity_sweep` (`services/workflow_tools.py:603`) only sets attribute values.
+- 2-D type map: not found. Sweep results render as a table (`frontend/src/components/SweepCard.tsx`); the only heatmaps are hour x day (`pages/results/HourDayHeatmap.tsx`); `chart_spec.py` has no frontend consumer.
+- Grid-extension break-even: not found. `services/finance/business_case.py:731 break_even()` is a revenue-price break-even; `services/finance/breakeven.py:32` is island capability; cable per-km exists only as a capex basis (`campus_electrical_service.py:927`).
+- Overlap: ui-modern 02 (energy chart kit) for the map chart; business-case break-even (G8) for the solver.
+
+### Slices
+- **03a** (backend) one study per architecture by omission, a categorized-results table of best per architecture (cost, capex, renewable fraction); a tool and route. Opus.
+- **03b** (frontend + small backend) 2-D winner map over two sweep variables. Blocked by: 03a and ui-modern 02's chart kit landing, or a plain SVG grid if not.
+- **03c** grid-extension break-even: typed EUR/km input, distance at which grid extension equals the off-grid NPV, reusing the `break_even()` bracketing. Independent.
+
+### Acceptance
+- [ ] 03a: results list one row per architecture with its best system; an architecture that is infeasible is listed as such, not dropped.
+- [ ] 03a: assets are omitted, not zeroed (test).
+- [ ] 03b: for a 3x3 grid, each cell shows the winning architecture; the legend names architectures; tooltip shows the cost gap to the runner-up.
+- [ ] 03c: break-even km equals the closed-form value on a linear-cost fixture; reports "no break-even" when grid is cheaper at any distance.
+- [ ] Release-note fragment per PR.
+
+### Likely files
+`services/study/questions.py`, `services/study/findings.py`, `routers/studies.py`, `services/finance/business_case.py`, `frontend/src/pages/decision/*`, `components/SweepCard.tsx`.
+
+### Tests
+`backend/tests/test_study_tornado_routes.py` pattern; new `test_homer_architectures.py`, `test_homer_grid_extension_breakeven.py`; vitest beside `SweepCard.test.tsx`.
