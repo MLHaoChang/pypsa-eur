@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from models.process_unit import HARMONIC_SOURCES, START_METHODS
-from services.asset_schema.schema import part_columns
+from services.asset_schema.schema import CLASS_ATTR, part_columns
 
 GROUPS = ("identity", "size", "investment", "fom", "variable", "performance", "replacement", "provenance")
 
@@ -678,3 +678,27 @@ def schema_payload(component: str) -> dict[str, Any]:
         if rows:
             groups.append({"id": gid, "label": GROUP_LABELS[gid], "fields": rows})
     return {"component": component, "groups": groups}
+
+
+#: The bus each class's size is counted on (a Link's size is its input side, bus0).
+_SIZE_BUS = {"Generator": "bus", "StorageUnit": "bus", "Store": "bus", "Load": "bus", "Link": "bus0"}
+
+
+def size_units(n, component: str, name: str) -> dict[str, str]:
+    """Per-asset display units for the size fields that differ from the class-level MW / MWh: t/h (t for a
+    stock) on a tonne bus, as `flow_service._size_unit` reads the bus. Empty on an energy bus, an unreadable
+    bus or a class with no bus size."""
+    from services.flow_service import _size_unit
+
+    col = _SIZE_BUS.get(component)
+    table = getattr(n, CLASS_ATTR.get(component, ""), None)
+    if col is None or table is None or name not in table.index:
+        return {}
+    out: dict[str, str] = {}
+    for f in fields_for(component):
+        if f.group != "size" or f.unit_display not in ("MW", "MWh"):
+            continue
+        unit = _size_unit(n, table.at[name, col], stock=f.unit_display == "MWh")
+        if unit in ("t", "t/h"):
+            out[f.key] = unit
+    return out

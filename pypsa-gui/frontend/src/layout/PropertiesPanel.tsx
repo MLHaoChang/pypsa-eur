@@ -147,7 +147,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost; the annualised capital cost is
   // derived (overnight × annuity + fixed O&M) and shown read-only.
-  const { data: schema } = useAssetSchema('Generator')
+  const { data: schema } = useAssetSchema('Generator', gen.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Generator', gen.name)
   const editors = generatorSeriesEditors(profilesRead ? genMeta?.category ?? 'other' : undefined)
@@ -331,7 +331,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
   // A battery is typed as its two overnight parts; capital cost, lifetime and
   // fixed O&M are derived from them and shown read-only.
-  const { data: schema } = useAssetSchema('StorageUnit')
+  const { data: schema } = useAssetSchema('StorageUnit', su.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('StorageUnit', su.name)
   // Same query as the panel's Inflow section: a battery has no inflow editor, so no "Constant inflow" row.
@@ -504,7 +504,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kWh; the annualised capital
   // cost is derived and shown read-only.
-  const { data: schema } = useAssetSchema('Store')
+  const { data: schema } = useAssetSchema('Store', store.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Store', store.name)
   const specs = schemaFields(schema)
@@ -667,7 +667,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   })
 
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
-  const { data: schema } = useAssetSchema('Load')
+  const { data: schema } = useAssetSchema('Load', load.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Load', load.name)
   const series = useSeriesFields(currentProject, 'loads', load.name, { p_set: 'Profile' })
@@ -867,7 +867,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kW of input; the annualised
   // capital cost is derived and shown read-only.
-  const { data: schema } = useAssetSchema('Link')
+  const { data: schema } = useAssetSchema('Link', link.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Link', link.name)
   const series = useSeriesFields(currentProject, 'links', link.name, {
