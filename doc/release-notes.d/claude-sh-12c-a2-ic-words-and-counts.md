@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The study harness's `ic.baseline_keeps` reason is now in words (the owned asset the case's baseline drops), and the run hand-off and report count result rules that were not evaluated on their own, never as met: "Stated targets" reads partly while one is.
