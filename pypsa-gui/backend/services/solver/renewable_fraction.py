@@ -47,7 +47,10 @@ the electricity used on site (owner decision RENFRAC-ALL-1):
     below): a withdrawing Generator on an electrical bus (an export or an
     offtake, ``sign`` < 0 or p_max_pu ≤ 0 throughout) is neither supply nor
     use, so it is in neither ``E_nonren`` nor ``E_served`` (export is not
-    use, R14c);
+    use, R14c). One with ``sign`` < 0 that can also inject (p_min_pu < 0)
+    supplies the bus at p < 0: that injection, −p (positive part), is
+    counted gross as non-renewable (GK B N3, GK A R1; an auxiliary
+    ``y ≥ −p, y ≥ 0`` in the row);
   - a Link out of a *supply bus* into an electrical bus that is not one,
     counted as η(t)·p0 (positive part). A supply bus has a non-renewable,
     non-slack Generator, no Load, no Line or Transformer, and a Link into an
@@ -73,9 +76,6 @@ the electricity used on site (owner decision RENFRAC-ALL-1):
   no electrical inflow, whatever the bus's carrier) into an electrical bus,
   and a fuel stock on an electrical bus that discharges into it (R13);
   counting them is a follow-up. Batteries and the like stay storage.
-  So is a non-renewable withdrawing Generator with ``sign`` < 0 on an
-  electrical bus that can also inject (p_min_pu < 0): at p < 0 it supplies
-  the bus (GK B N3).
 
 * Bounded (GK B N2): all non-renewable output counts as used on site
   (conservative). When it exceeds the electricity used, e.g. diesel exported
@@ -273,8 +273,8 @@ def classify(n) -> dict[str, list[str]]:
             gbus,
             elec,
             set(src_links),
-        )
-        + [
+        ),
+        "injecting_generators": [
             g
             for g in _two_way_withdrawers(n, withdraw)
             if g in nonren and gbus[g] in elec
@@ -437,9 +437,9 @@ def _withdrawing_generators(n) -> list[str]:
 def _two_way_withdrawers(n, withdraw) -> list[str]:
     """GK B N3: the withdrawing Generators with ``sign`` < 0 that can also
     inject (p_min_pu < 0 somewhere, static or in time): their bus injection
-    is ``sign``·p > 0 when p < 0. The fraction does not count that injection,
-    so a non-renewable one on an electrical bus fails closed when it injects
-    (KPI None with a reason, the row warns)."""
+    is ``sign``·p > 0 when p < 0. A non-renewable one on an electrical bus
+    counts that injection, −p (positive part), gross as non-renewable supply,
+    in the KPI and the row (GK A ruling R1 on N3)."""
     gens = n.generators
     names = [
         g for g in withdraw if "sign" in gens.columns and float(gens.at[g, "sign"]) < 0
@@ -612,7 +612,13 @@ def _efficiency(n, link: str, snapshots, attr: str = "efficiency") -> pd.Series:
 def _has_nan(n, cls, gp, lp, snapshots) -> bool:
     """A NaN in a dispatch the fraction reads: unknown, never 0 (03a F3)."""
     reads = [
-        (gp, cls["nonren_generators"] + cls["slack_generators"]),
+        (
+            gp,
+            cls["nonren_generators"]
+            + cls["injecting_generators"]
+            + cls["slack_generators"],
+        ),
+        (n.links_t.p1, cls["source_links"]),
         (lp, cls["loads"]),
         (n.links_t.p0, cls["source_links"] + cls["conversion_links"]),
     ]
@@ -737,9 +743,8 @@ def renewable_fraction(
         return out
     # GK B A5: a counted non-renewable Generator missing from the dispatch
     # (added after the solve) is unknown, never 0.
-    if cls["nonren_generators"] and not set(cls["nonren_generators"]) <= set(
-        gp.columns
-    ):
+    counted_gens = cls["nonren_generators"] + cls["injecting_generators"]
+    if counted_gens and not set(counted_gens) <= set(gp.columns):
         out["reason"] = NO_DISPATCH_REASON
         return out
 
@@ -748,14 +753,7 @@ def renewable_fraction(
             return pd.Series(0.0, index=sns)
         return frame[name].reindex(sns).astype(float).fillna(0.0)
 
-    def _sign(g):
-        cols = n.generators.columns
-        return float(n.generators.at[g, "sign"]) if "sign" in cols else 1.0
-
-    # A Generator injects when sign·p > 0 (GK B N3: a sign < 0 one at p < 0).
-    leaked = [
-        g for g in cls["unattributed_generators"] if (_col(gp, g) * _sign(g) > 0).any()
-    ]
+    leaked = [g for g in cls["unattributed_generators"] if (_col(gp, g) > 0).any()]
     leaked += [
         l for l in cls["unattributed_links"] if (_col(n.links_t.p0, l) > 0).any()
     ]
@@ -791,6 +789,8 @@ def renewable_fraction(
     nonren = pd.Series(0.0, index=sns)
     for g in cls["nonren_generators"]:
         nonren += _col(gp, g).clip(lower=0.0)
+    for g in cls["injecting_generators"]:
+        nonren += (-_col(gp, g)).clip(lower=0.0)
     blind = []
     for l in cls["source_links"]:
         delivered = _source_delivery(n, l, sns)
@@ -1010,6 +1010,11 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
             for g in cls["slack_generators"]
             if gvar is not None and g in gvar.indexes["name"]
         ]
+        inj = [
+            g
+            for g in cls["injecting_generators"]
+            if gvar is not None and g in gvar.indexes["name"]
+        ]
         convs = [
             l
             for l in cls["conversion_links"]
@@ -1033,6 +1038,16 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
         eff = pd.DataFrame(
             {l: _efficiency(n, l, snapshots) for l in links}, index=snapshots
         )
+        inj_src = None
+        if inj:
+            # GK A R1: a sign < 0 Generator injects −p at p < 0; y ≥ −p, y ≥ 0.
+            inj_name = f"{_AUX}-inject-Generator-p"
+            inj_src = m.add_variables(
+                lower=0.0,
+                coords=[gvar.indexes["snapshot"], pd.Index(inj, name="name")],
+                name=inj_name,
+            )
+            m.add_constraints(inj_src + gvar.sel(name=inj) >= 0, name=f"{inj_name}-def")
         for P in periods:
             in_p = _period_mask(per_of, P)
             w_p = w.where(in_p, 0.0)
@@ -1053,6 +1068,10 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
                 )
             if links:
                 terms.append(_weighted_sum(l_src, eff.mul(w_p, axis=0), coord))
+            if inj:
+                terms.append(
+                    _weighted_sum(inj_src, pd.DataFrame({g: w_p for g in inj}), coord)
+                )
             if slacks:
                 terms.append(
                     _weighted_sum(

@@ -886,6 +886,13 @@ def test_a_positive_p1_delivers_nothing():
     assert kpi["nonrenewable_mwh"] == pytest.approx(90.0), kpi
 
 
+def test_a_nan_in_an_import_link_p1_reads_none():
+    n = _grid_supply(_dispatched())
+    n.links_t.p1 = pd.DataFrame({"poc": 0.0}, index=n.snapshots)
+    n.links_t.p1.iloc[7, 0] = float("nan")
+    assert renewable_fraction(n)["fraction"] is None
+
+
 def test_an_import_link_without_p0_or_p1_reads_unavailable():
     n = _grid_supply(_dispatched())
     kpi = renewable_fraction(n)
@@ -918,6 +925,38 @@ def test_a_nan_in_an_import_link_dispatch_reads_none():
     n.links_t.p0 = pd.DataFrame({"poc": 0.0}, index=n.snapshots)
     n.links_t.p0.iloc[5, 0] = float("nan")
     assert renewable_fraction(n)["fraction"] is None
+
+
+def test_a_nan_in_a_slack_generator_reads_none():
+    n = _dispatched()
+    n.add("Generator", "voll", bus="ac", carrier="load_shedding", p_nom=100.0)
+    n.generators_t.p["voll"] = 0.0
+    assert "voll" in classify(n)["slack_generators"]
+    assert renewable_fraction(n)["fraction"] is not None
+    n.generators_t.p.iloc[3, n.generators_t.p.columns.get_loc("voll")] = float("nan")
+    assert renewable_fraction(n)["fraction"] is None
+
+
+def test_a_nan_in_a_conversion_link_reads_none():
+    n = _dispatched()
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Load", "heat_load", bus="heat", p_set=1.0)
+    n.add("Link", "heat_pump", bus0="ac", bus1="heat", p_nom=5.0, efficiency=3.0)
+    assert classify(n)["conversion_links"] == ["heat_pump"]
+    n.links_t.p0 = pd.DataFrame({"heat_pump": 0.5}, index=n.snapshots)
+    assert renewable_fraction(n)["fraction"] is not None
+    n.links_t.p0.iloc[3, 0] = float("nan")
+    assert renewable_fraction(n)["fraction"] is None
+
+
+def test_an_unsolved_network_without_generators_reads_none():
+    """GK A B1: no Generators and no load dispatch is unsolved, never 1.0."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.add("Bus", "ac", carrier="AC")
+    n.add("Load", "site", bus="ac", p_set=1.0)
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "not been solved" in kpi["reason"], kpi
 
 
 def test_a_nan_in_an_unread_column_is_ignored():
@@ -2037,16 +2076,17 @@ def _two_way_sign_export(n):
     return _ac_export(n, sign=-1.0, p_min_pu=-1.0, p_max_pu=1.0)
 
 
-def test_a_sign_negative_generator_that_can_inject_is_unattributed():
-    """GK B N3: sign < 0 with p_min_pu < 0 < p_max_pu injects sign·p > 0 at
-    p < 0; the fraction cannot count that, so it fails closed."""
+def test_a_sign_negative_generator_that_can_inject_is_counted_gross():
+    """GK B N3, GK A R1: sign < 0 with p_min_pu < 0 injects sign·p > 0 at
+    p < 0; that injection counts gross as non-renewable supply."""
     n = _two_way_sign_export(_dispatched())
-    assert "export" in classify(n)["unattributed_generators"]
-    assert "export" not in classify(n)["nonren_generators"]
-    n.generators_t.p["export"] = np.where(PV_PU > 0, 0.0, -5.0)  # injects at night
+    c = classify(n)
+    assert c["injecting_generators"] == ["export"], c
+    assert "export" not in c["nonren_generators"] + c["unattributed_generators"]
+    n.generators_t.p["export"] = np.where(PV_PU > 0, 0.0, -5.0)  # 16 h at night
     kpi = renewable_fraction(n)
-    assert kpi["fraction"] is None, kpi
-    assert "cannot attribute the electricity of source(s) export" in kpi["reason"]
+    assert kpi["nonrenewable_mwh"] == pytest.approx(90.0 + 80.0), kpi
+    assert kpi["fraction"] == pytest.approx((240.0 - 170.0) / 240.0), kpi
 
 
 def test_a_sign_negative_two_way_generator_that_only_withdraws_reads_a_value():
@@ -2055,10 +2095,46 @@ def test_a_sign_negative_two_way_generator_that_only_withdraws_reads_a_value():
     assert renewable_fraction(n)["fraction"] == pytest.approx(0.625)
 
 
-def test_the_row_warns_about_a_sign_negative_generator_that_can_inject():
+def test_a_sign_negative_injecting_generator_missing_from_the_dispatch_is_none():
+    n = _two_way_sign_export(_dispatched())
+    assert renewable_fraction(n)["fraction"] is None
+
+
+def test_the_row_counts_a_sign_negative_injection_gross():
     n = _two_way_sign_export(_network())
     log = _with_row(n)
-    assert any("WARNING" in line and "export" in line for line in log), log
+    aux = f"{_AUX}-inject-Generator-p"
+    assert (aux, "export") in _row_terms(n, row_name(None))
+    assert ("Generator-p", "export") not in _row_terms(n, row_name(None))
+    assert set(np.ravel(n.model.constraints[f"{aux}-def"].sign.values)) == {">="}
+    assert not any("WARNING" in line and "export" in line for line in log), log
+
+
+@pytest.mark.parametrize("series", [False, True], ids=["static", "time-series"])
+def test_a_binding_row_holds_against_a_cheap_sign_negative_injection(series):
+    """GK A R1: at w = 2, a cheap sign < 0 grid injection would carry the
+    load; the row must count it and hold the target (drop the term and the
+    fraction falls below it)."""
+    n = _network()
+    n.snapshot_weightings.loc[:, "generators"] = 2.0
+    kw = {} if series else {"p_min_pu": -1.0}
+    n.add(
+        "Generator",
+        "export",
+        bus="ac",
+        carrier="grid",
+        p_nom=50.0,
+        sign=-1.0,
+        p_max_pu=0.0,
+        marginal_cost=-1.0,  # cost = −1·p: 1 €/MWh injected at p < 0
+        **kw,
+    )
+    if series:
+        n.generators_t.p_min_pu["export"] = -1.0
+    status, _, log = _solve(n, min_renewable_fraction=0.8)
+    assert status == "ok", log
+    assert float((-n.generators_t.p["export"]).clip(lower=0).sum()) > 1.0
+    assert renewable_fraction(n)["fraction"] >= 0.8 - 1e-6
 
 
 def test_a_sign_negative_generator_that_cannot_inject_is_not_unattributed():
