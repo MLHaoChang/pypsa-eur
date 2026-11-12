@@ -3768,7 +3768,8 @@ def get_supply_architectures(project: str, study_id: str) -> dict:
     keep = ("architecture_id", "label", "status", "total_cost_eur_per_year", "capex_eur",
             "renewable_fraction", "unavailable", "error")
     rows = [{**{k: r.get(k) for k in keep if k in r},
-             "sizes": {s["asset"]: s.get("size") for s in r.get("sizes") or []}}
+             "sizes": {s["asset"]: {"size": s.get("size"), "unit": s.get("unit")}
+                       for s in r.get("sizes") or []}}
             for r in rec.get("rows") or []]
     return {"status": rec.get("status"), "stale": rec.get("stale"),
             "best_architecture_id": rec.get("best_architecture_id"),

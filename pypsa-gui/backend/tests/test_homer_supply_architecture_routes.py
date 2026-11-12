@@ -419,7 +419,10 @@ def test_chat_tools_start_and_read_the_table(
         ("pv+battery", "ok"),
         ("genset", "infeasible"),
     ]
-    assert got["rows"][0]["sizes"] == {"pv": 1.0, "battery": 0.5}
+    assert got["rows"][0]["sizes"] == {
+        "pv": {"size": 1.0, "unit": "MW"},
+        "battery": {"size": 0.5, "unit": "MW"},
+    }
     assert got["rows"][1]["total_cost_eur_per_year"] is None
     assert got["best_architecture_id"] == "pv+battery"
     assert chat_tools.compare_supply_architectures("sa-chat", sid, action="abort") == {

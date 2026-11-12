@@ -508,3 +508,19 @@ def test_unsolved_row_shape_and_best_of_skips_unsolved_and_uncosted():
     }
     assert A.best_of([uncosted, cheap_failed, costed]) == "pv+genset"
     assert A.best_of([uncosted, cheap_failed]) is None
+
+
+def test_renewable_fraction_counts_a_grid_import_link_once_by_its_delivery():
+    # eh_setup's shape: the import is a Link (eh_role=grid_import) and the
+    # upstream generator has an ordinary carrier; count the Link's delivery
+    # into the site, never the upstream generator as well.
+    n = _net()
+    n.generators.loc["grid", "carrier"] = "AC"
+    n.links.loc["grid_import", ["carrier", "eh_role"]] = ["AC", "grid_import"]
+    assert A.classify(n)["grid"] == [("Link", "grid_import")]
+    n = _solved(n, pv=[1.0, 1.0, 0.0, 1.0], genset=[0.0] * 4, grid=[0.0, 0.0, 2.0, 0.0])
+    n.links_t.p1 = pd.DataFrame(
+        {"grid_import": [0.0, 0.0, -1.0, 0.0]}, index=n.snapshots
+    )
+    # served 4 MWh; 1 MWh delivered by the import link (2 MWh upstream ignored)
+    assert A.renewable_fraction(n) == pytest.approx(0.75)

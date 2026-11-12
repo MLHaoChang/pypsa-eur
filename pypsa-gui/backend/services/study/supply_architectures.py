@@ -329,12 +329,26 @@ def _demand(n, w: pd.Series) -> float:
     return float(p[list(n.loads.index)].mul(w, axis=0).to_numpy().sum())
 
 
+def _non_renewable_energy(n, members, w: pd.Series) -> float:
+    """A non-renewable group's energy into the site. A dispatched Link member
+    (eh_setup's grid import, ``eh_role = grid_import``) counts by its delivery
+    at ``bus1`` and stands for the group, so the generator upstream of it is
+    not counted twice; otherwise the group's Generators count by output."""
+    links = [name for comp, name in members if comp == "Link"]
+    delivered = n.links_t.p1
+    if any(name in delivered.columns for name in links):
+        return _energy(-delivered, links, w)
+    gens = [name for comp, name in members if comp == "Generator"]
+    return _energy(n.generators_t.p, gens, w)
+
+
 def renewable_fraction(n) -> float | None:
     """
     The share of served load not met by a genset or the grid, HOMER's
     definition: ``1 - (genset energy + grid import) / served load``, clipped
     to [0, 1] (exported surplus does not lift it above 1). Grid import counts
-    gross (export does not net against it) and as non-renewable. Served load
+    gross (export does not net against it) and as non-renewable; an import
+    Link counts once, by its delivery (:func:`_non_renewable_energy`). Served load
     is the load less the slacks' shortfall. Energy is weighted by
     :func:`_weights`. None when the network has no dispatch or serves no load
     (never 1.0 or NaN).
@@ -350,12 +364,7 @@ def renewable_fraction(n) -> float | None:
     if not served > 0:
         return None
     groups = classify(n)
-    non_ren = sum(
-        _energy(
-            gp, [name for comp, name in groups.get(g, ()) if comp == "Generator"], w
-        )
-        for g in NON_RENEWABLE
-    )
+    non_ren = sum(_non_renewable_energy(n, groups.get(g, ()), w) for g in NON_RENEWABLE)
     return min(1.0, max(0.0, 1.0 - non_ren / served))
 
 
