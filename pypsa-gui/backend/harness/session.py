@@ -252,6 +252,9 @@ class ChatSession:
     # LC-10 — the UI context of the turn in flight, for resolve_reference.
     # An untrusted hint, replaced every turn; the resolver re-reads it.
     turn_ui_context: dict[str, Any] | None = None
+    # Issue 02 — the turn in flight's "superseded by a rebind" check (a
+    # callable), read again after a confirmation wait; None outside a turn.
+    turn_obsolete: Any = None
     # W10 H2a — the task cap of the turn in flight (budget.task_cap), decided
     # once at its start; None outside a bounded task.
     turn_task_cap: Any = None

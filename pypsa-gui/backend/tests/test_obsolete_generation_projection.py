@@ -133,21 +133,91 @@ def test_bump_while_a_tool_runs_keeps_its_result_and_stops(network, monkeypatch)
     assert "one bus." not in _assistant_text(session)
 
 
-def test_a_later_tool_in_the_same_step_is_not_dispatched(network, monkeypatch):
+def test_every_later_tool_in_the_same_step_is_paired_not_dispatched(
+    network, monkeypatch
+):
     session = chat_service.ChatSession()
     reader = _Reader(during=_bump(session))
     monkeypatch.setitem(chat_tools.DISPATCHERS, "list_components", reader)
-    client = FakeAnthropicClient([_tool_turn("tu-1", "tu-2")])
+    client = FakeAnthropicClient([_tool_turn("tu-1", "tu-2", "tu-3")])
 
     events = _live(session, client)
 
     assert reader.calls == 1
     results = _tool_results(session)
     assert not results["tu-1"].get("is_error")
-    # Pairing kept: the undispatched call gets an error result.
-    assert results["tu-2"]["is_error"] is True
-    assert results["tu-2"]["content"] == "obsolete_generation"
+    # Pairing kept: each undispatched call gets an error result and a frame.
+    for skipped in ("tu-2", "tu-3"):
+        assert results[skipped]["is_error"] is True
+        assert results[skipped]["content"] == "obsolete_generation"
+    assert [
+        (p["tool_use_id"], p["error_kind"]) for ev, p in events if ev == "tool_error"
+    ] == [("tu-2", "obsolete_generation"), ("tu-3", "obsolete_generation")]
     assert _kinds(events) == ["obsolete_generation"]
+
+
+def test_an_approved_card_does_not_run_after_a_bump(network, monkeypatch):
+    """O4: the card was approved, then the rebind landed before the effect."""
+    import harness.session as harness_session
+
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 5.0)
+    network.add("Bus", "B2")
+    session = chat_service.ChatSession()
+    args = {"component_class": "Bus", "name": "B2"}
+    client = FakeAnthropicClient(
+        [
+            (
+                [_tool_use_event("tu-d", "delete_component", args)],
+                _FakeFinalMessage(
+                    content=[_tool_use_block("tu-d", "delete_component", args)],
+                    usage=_FakeUsage(),
+                ),
+            ),
+            _text_turn("deleted."),
+        ]
+    )
+    events = []
+    for ev, payload in chat_service.run_turn(
+        session, "delete B2", client=client, utterance_id="u1", generation=1
+    ):
+        events.append((ev, payload))
+        if ev == "tool_pending_confirmation":
+            session.record_decision(payload["confirmation_token"], "approve")
+            ua._DEFAULT.bump_generation(session_id=session.session_id)
+
+    assert "B2" in network.buses.index  # the effect never ran
+    assert ("tool_error", "obsolete_generation") in [
+        (ev, p.get("error_kind")) for ev, p in events
+    ]
+    assert len(client.calls) == 1 and _kinds(events) == ["obsolete_generation"]
+
+
+def test_a_cleanup_step_that_raises_still_releases_the_lease(network, monkeypatch):
+    """O5: a raising cleanup step frees the lease and promotes no pending."""
+    from harness import loop
+
+    session = chat_service.ChatSession()
+    sid = session.session_id
+
+    def queue_correction():
+        ua.admit_utterance(ua.StableUtterance("u2", "and the lines?", 1, sid))
+
+    reader = _Reader(during=queue_correction)
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "list_components", reader)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("interrupted-turn record failed")
+
+    monkeypatch.setattr(loop, "_persist_interrupted_turn", broken)
+    client = FakeAnthropicClient([_tool_turn("tu-1"), _text_turn("one bus.")])
+
+    with pytest.raises(RuntimeError, match="interrupted-turn record failed"):
+        _live(session, client)
+
+    assert ua._DEFAULT.active_lease(sid) is None
+    # Not promoted: no drain turn could start, so it waits for the next one.
+    assert ua._DEFAULT.pending_utterance_id(sid) == "u2"
+    assert session.turn_obsolete is None
 
 
 class _BumpingClient(FakeAnthropicClient):
@@ -340,11 +410,13 @@ def test_release_refuses_a_wrong_lease_or_a_future_generation():
     assert coord.pending_utterance_id("s") == "u2"
 
 
-def test_bump_during_the_checked_answer_review_publishes_nothing(
-    tmp_path, monkeypatch, solved, checked
+@pytest.mark.parametrize("where", ["stream", "review", "commit"])
+def test_a_bump_in_a_checked_turn_publishes_nothing(
+    tmp_path, monkeypatch, solved, checked, where
 ):
-    """V1: the checked-answer commit (its review is a model call) can land a
-    rebind after the stream; the answer is then neither persisted nor shown."""
+    """V1/O2/O3: a rebind during the checked turn's stream, its claim review
+    (a model call) or its commit: nothing is reviewed, committed or shown
+    after it, and no assistant message is kept."""
     import uuid
 
     from harness import assurance
@@ -354,15 +426,37 @@ def test_bump_during_the_checked_answer_review_publishes_nothing(
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
     sid = "checked-obsolete-" + uuid.uuid4().hex
     checked.session_ids.append(sid)
-    original = assurance.Turn.commit
+    calls = {"review": 0, "commit": 0}
 
-    def commit_then_rebind(self, *args, **kwargs):
-        out = original(self, *args, **kwargs)
+    def rebind():
         ua._DEFAULT.bump_generation(session_id=sid)
-        return out
 
-    monkeypatch.setattr(assurance.Turn, "commit", commit_then_rebind)
-    checked.install(NumericalProvider({"dispatch_energy": 17}))
+    def spy(name, attr):
+        original = getattr(assurance.Turn, attr)
+
+        def wrapped(self, *args, **kwargs):
+            calls[name] += 1
+            out = original(self, *args, **kwargs)
+            if where == name:
+                rebind()
+            return out
+
+        return wrapped
+
+    monkeypatch.setattr(
+        assurance.Turn,
+        "review_interpretations",
+        spy("review", "review_interpretations"),
+    )
+    monkeypatch.setattr(assurance.Turn, "commit", spy("commit", "commit"))
+
+    class RebindingProvider(NumericalProvider):
+        def stream(self, request):
+            if where == "stream" and not self.requests:
+                rebind()
+            yield from super().stream(request)
+
+    checked.install(RebindingProvider({"dispatch_energy": 17}))
     exact = scope(
         solved,
         metrics=["dispatch_energy"],
@@ -388,3 +482,9 @@ def test_bump_during_the_checked_answer_review_publishes_nothing(
         "obsolete_generation"
     ]
     assert not _assistant_text(chat_service.get_session(sid))
+    expected = {
+        "stream": {"review": 0, "commit": 0},
+        "review": {"review": 1, "commit": 0},
+        "commit": {"review": 1, "commit": 1},
+    }[where]
+    assert calls == expected

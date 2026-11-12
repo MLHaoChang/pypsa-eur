@@ -761,6 +761,14 @@ def _dispatch_tool_uses(
             # Issue 02: a rebind superseded this live turn. Nothing more runs;
             # each call left gets its paired error result, as on a switch.
             for rem in tool_uses[idx:]:
+                yield (
+                    "tool_error",
+                    {
+                        "tool_use_id": rem.get("id"),
+                        "tool_name": rem.get("name"),
+                        **OBSOLETE_GENERATION,
+                    },
+                )
                 tool_results_for_next_turn.append(
                     {
                         "type": "tool_result",
@@ -1089,6 +1097,51 @@ OBSOLETE_GENERATION: dict[str, str] = {
         "dropped. Finished steps are kept."
     ),
 }
+
+
+def _release_admission(
+    session_id: str,
+    lease_id: str | None,
+    generation: int | None,
+    *,
+    promote: bool,
+) -> tuple[Any, str | None]:
+    """Release a turn's admission lease; return the pending correction to
+    drain next (utterance, its new lease), or (None, None).
+
+    Guarded: a coordinator failure is logged, never raised out of the turn's
+    cleanup. A promoted lease with no utterance to run is released again, so
+    admission never hangs on a turn that will not start.
+    """
+    if lease_id is None or generation is None:
+        return None, None
+    from services import utterance_admission as _ua
+
+    try:
+        promoted = _ua._DEFAULT.release_lease(
+            session_id=session_id,
+            lease_id=lease_id,
+            generation=generation,
+            promote=promote,
+        )
+        if (
+            promoted is None
+            or promoted.status != "admitted"
+            or promoted.lease_id is None
+        ):
+            return None, None
+        active = _ua._DEFAULT.active_utterance(session_id)
+        if active is not None:
+            return active, promoted.lease_id
+        _ua._DEFAULT.release_lease(
+            session_id=session_id,
+            lease_id=promoted.lease_id,
+            generation=promoted.generation,
+            promote=False,
+        )
+    except Exception:  # noqa: BLE001 — cleanup must finish
+        logger.exception("chat: admission lease could not be released")
+    return None, None
 
 
 def _end_obsolete() -> Generator[tuple[str, dict[str, Any]], None, None]:
@@ -1604,6 +1657,7 @@ def run_turn(
         _obsolete = _generation_reader(
             session.session_id, _admission_lease, _admission_generation
         )
+        session.turn_obsolete = _obsolete
         body = _run_turn_body(
             session,
             message,
@@ -1655,84 +1709,71 @@ def run_turn(
             _ended_by = "internal_error"
             raise
     finally:
-        # A plain `for` does not close the body when this generator is closed
-        # (a client disconnect); `yield from` used to. Close it here so its
-        # own `finally` blocks run now, not at garbage collection.
-        if body is not None:
-            body.close()
-        _persist_interrupted_turn(
-            _wal_ctx,
-            session,
-            message,
-            trace,
-            ended_by=_ended_by,
-            usage_at_start=_usage_at_start,
-            attachment_file_ids=attachment_file_ids,
-            display_record=getattr(type(provider), "display_record", True),
-        )
-        # Issue 13 (shadow): close the turn on the event log, one fsync.
-        from harness import eventlog as _eventlog
-
-        _eventlog.turn_end(
-            session,
-            _turn_end_reason(trace, _ended_by),
-            usage_since(dict(session.usage_acc), _usage_at_start),
-        )
-        if _ended_by == "disconnected":
-            # Nobody is watching: no round may start on a stream that is gone.
-            _goals.pause(session, "disconnected", by="harness")
-        _metric_record_duration(time.monotonic() - _t_start)
-        with session._lock:
-            session._turn_in_flight = False
-            session._undo_snapshotted = []
-            if session.assurance_turn is not None and session.assurance_context:
-                approved = session.assurance_turn.approved
-                if (
-                    not approved
-                    or session.assurance_context["anchor"] != approved["answer_id"]
-                ):
-                    session.assurance_context = None
-            session.assurance_turn = None
-            session.shadow_turn = None
-            session.navigation_turn = None
-        if _admission_lease is not None and _admission_generation is not None:
-            from services import utterance_admission as _ua
-
-            # Promote pending into a new lease, then start that follow-up turn
-            # on this same stream (auto-drain). Leaving a promoted lease
-            # without a turn would hang admission.
-            promoted = _ua._DEFAULT.release_lease(
-                session_id=session.session_id,
-                lease_id=_admission_lease,
-                generation=_admission_generation,
-                promote=True,
+        # Issue 02 (GK B O5): the admission lease is released whatever the
+        # steps below do. A step that raises must not leave the lease held
+        # (every later utterance would queue behind it forever), and then no
+        # pending correction is promoted, since no drain turn would start.
+        _cleanup_done = False
+        try:
+            # A plain `for` does not close the body when this generator is closed
+            # (a client disconnect); `yield from` used to. Close it here so its
+            # own `finally` blocks run now, not at garbage collection.
+            if body is not None:
+                body.close()
+            _persist_interrupted_turn(
+                _wal_ctx,
+                session,
+                message,
+                trace,
+                ended_by=_ended_by,
+                usage_at_start=_usage_at_start,
+                attachment_file_ids=attachment_file_ids,
+                display_record=getattr(type(provider), "display_record", True),
             )
-            if (
-                promoted is not None
-                and promoted.status == "admitted"
-                and promoted.lease_id is not None
-            ):
-                active = _ua._DEFAULT.active_utterance(session.session_id)
-                if active is not None:
-                    _drain_utt = active
-                    _drain_lease = promoted.lease_id
-                else:
-                    _ua._DEFAULT.release_lease(
-                        session_id=session.session_id,
-                        lease_id=promoted.lease_id,
-                        generation=promoted.generation,
-                        promote=False,
-                    )
-        # C-3 — the turn's profile must not outlive the turn. A tool invoked
-        # OUTSIDE a turn (a direct call, a test) has no profile to honour and
-        # must take the pre-profile path; leaving a stale value bound would
-        # make that depend on whatever ran in this context before it. Pure
-        # side-effect, so the yielded frame ORDER several tests pin
-        # byte-exactly is unchanged on every exit.
-        from services import chat_tools as _chat_tools  # noqa: PLC0415
+            # Issue 13 (shadow): close the turn on the event log, one fsync.
+            from harness import eventlog as _eventlog
 
-        _chat_tools.set_turn_profile(None)
-        _chat_tools.set_chat_session(None)
+            _eventlog.turn_end(
+                session,
+                _turn_end_reason(trace, _ended_by),
+                usage_since(dict(session.usage_acc), _usage_at_start),
+            )
+            if _ended_by == "disconnected":
+                # Nobody is watching: no round may start on a stream that is gone.
+                _goals.pause(session, "disconnected", by="harness")
+            _metric_record_duration(time.monotonic() - _t_start)
+            with session._lock:
+                session._turn_in_flight = False
+                session._undo_snapshotted = []
+                if session.assurance_turn is not None and session.assurance_context:
+                    approved = session.assurance_turn.approved
+                    if (
+                        not approved
+                        or session.assurance_context["anchor"] != approved["answer_id"]
+                    ):
+                        session.assurance_context = None
+                session.assurance_turn = None
+                session.shadow_turn = None
+                session.navigation_turn = None
+            # C-3 — the turn's profile must not outlive the turn. A tool invoked
+            # OUTSIDE a turn (a direct call, a test) has no profile to honour and
+            # must take the pre-profile path; leaving a stale value bound would
+            # make that depend on whatever ran in this context before it. Pure
+            # side-effect, so the yielded frame ORDER several tests pin
+            # byte-exactly is unchanged on every exit.
+            from services import chat_tools as _chat_tools  # noqa: PLC0415
+
+            _chat_tools.set_turn_profile(None)
+            _chat_tools.set_chat_session(None)
+            _cleanup_done = True
+        finally:
+            session.turn_obsolete = None
+            _drain_utt, _drain_lease = _release_admission(
+                session.session_id,
+                _admission_lease,
+                _admission_generation,
+                promote=_cleanup_done,
+            )
 
     if _drain_utt is not None and _drain_lease is not None:
         yield from run_turn(
@@ -2484,6 +2525,11 @@ def _run_turn_body(
                         session.assurance_turn.review_interpretations(
                             assistant_blocks, provider, session.model, turn_ctx
                         )
+                    if obsolete():
+                        # Issue 02 (GK B O3): superseded during the review (a
+                        # model call); nothing is committed or saved.
+                        yield from _end_obsolete()
+                        return
                     assistant_blocks = session.assurance_turn.commit(
                         assistant_blocks, turn_ctx, truncated=final_truncated
                     )
@@ -3598,6 +3644,12 @@ def _dispatch_real_tool_call(
 
         def require_current_confirmation():
             restrictions.require_current(restriction, session)
+            # Issue 02 (GK B O4): a rebind while the card waited supersedes
+            # the turn; its approved effect does not run.
+            if callable(session.turn_obsolete) and session.turn_obsolete():
+                from fastapi import HTTPException
+
+                raise HTTPException(409, detail=dict(OBSOLETE_GENERATION))
             if (
                 confirmation_gate.confirmation_revision() != policy_revision
                 or _tool_tier(session, tool_name) != tier
