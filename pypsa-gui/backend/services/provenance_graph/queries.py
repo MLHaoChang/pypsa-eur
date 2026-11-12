@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from services.provenance_graph import commercial, money
+from services.provenance_graph import commercial, money, pins
 from services.provenance_graph.types import (
     WALKED,
     Broken,
@@ -27,6 +27,7 @@ from services.provenance_graph.types import (
 #: The one comparison per edge kind. `computed_in` joins with the runs slice (04).
 COMPARATORS: dict[str, Callable[[Graph, Edge], Broken | None]] = {
     "priced_through": money.compare_priced_through,
+    "derived_from": pins.compare_pin,
     "stamped_with": commercial.compare_stamp,
 }
 
@@ -151,7 +152,7 @@ def staleness(g: Graph, node_id: str) -> Verdict:
             elif state == "uncompared" and e.kind != "derived_from":
                 uncompared.append(e.dst)
             # A compared edge's input is the comparison itself; only derived_from walks on.
-            if e.kind == "derived_from":
+            if e.kind == "derived_from" and e.recorded is None:
                 visit(e.dst)
 
     visit(node_id)
@@ -167,6 +168,27 @@ def staleness(g: Graph, node_id: str) -> Verdict:
         else "fresh"
     )
     return Verdict(node_id, state, tuple(broken), tuple(uncompared))
+
+
+def pin_verdict(subject: str, pin_list: list[pins.Pin]) -> Verdict:
+    """The verdict of `subject` made from the pinned inputs `pin_list` (slice 06). No pins compare nothing:
+    uncompared, never fresh."""
+    b = Builder(None)
+    b.node(Node("derived", subject))
+    for pin in pin_list:
+        dst = f"input:{subject}/{pin.label}"
+        b.node(Node("input", dst))
+        b.edge(Edge("derived_from", subject, dst, pin))
+    return staleness(b.build(), subject)
+
+
+def pin_stale(subject: str, pin_list: list[pins.Pin]) -> bool:
+    return pin_verdict(subject, pin_list).state == "stale"
+
+
+def pin_broken(subject: str, pin_list: list[pins.Pin]) -> set[str]:
+    """The labels of the pins that broke."""
+    return {x.field for x in pin_verdict(subject, pin_list).broken}
 
 
 def surface_verdicts(g: Graph, surface_id: str) -> list[Verdict]:

@@ -1,6 +1,6 @@
 # Campus and site-scene checks on the graph
 
-Status: ready-for-agent (Sonnet; GK B, UX for UI parts)
+Status: done
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 
@@ -31,3 +31,7 @@ Checked on master: #1295 is merged (the P7 condition) and 02 is done; the checks
 - Likely files: `campus_electrical_service.py`, `site_bindings.py`, `site_scene/associations.py`, `assistant_tasks.py`; client `CampusDipsRestartSection`, `DcArchitectureSection`. Reviewers: GK B plan first, UX for the client part.
 
 The acceptance in the body stands. Add: [ ] a test per moved check asserts the same wording before and after.
+
+### 2026-11-12: built
+
+Moved onto `provenance_graph.pins` (a `Pin(label, recorded, read)` on a `derived_from` edge; a read that raises or returns `UNREADABLE` is stale): `campus_electrical_service` `_stale`, `_library_stale`, `_milp_stale` (so `_least_cost_fresh`), `_grid_code_changed`, `_dips_out_of_date`; `site_bindings.stale_keys`; `site_scene/associations._stale`; `assistant_tasks._stale`. Left alone: the hash functions that produce the recorded values, the cache keys (time aggregation, adequacy, previews), the "leave alone" rows. `CampusDipsRestartSection` renders the backend's `out_of_date` list, so it has no client change. `DcArchitectureSection`'s key is in-memory UI state with nothing recorded on the server: left alone (no UI part, so no UX plan). Tests: `tests/test_provenance_graph_pins.py`.
