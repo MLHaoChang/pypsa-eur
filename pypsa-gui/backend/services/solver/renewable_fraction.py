@@ -43,7 +43,11 @@ the electricity used on site (owner decision RENFRAC-ALL-1):
 
   - a Generator on an electrical bus whose carrier is not renewable
     (`carrier_kpis._is_renewable_carrier`; grid import, diesel, gas, …),
-    counted gross (its positive output only);
+    counted gross (its positive output only), unless it withdraws (R16,
+    below): a withdrawing Generator on an electrical bus (an export or an
+    offtake, ``sign`` < 0 or p_max_pu ≤ 0 throughout) is neither supply nor
+    use, so it is in neither ``E_nonren`` nor ``E_served`` (export is not
+    use, R14c);
   - a Link out of a *supply bus* into an electrical bus that is not one,
     counted as η(t)·p0 (positive part). A supply bus has a non-renewable,
     non-slack Generator, no Load, no Line or Transformer, and a Link into an
@@ -225,7 +229,9 @@ def classify(n) -> dict[str, list[str]]:
     )
     return {
         "nonren_generators": [
-            g for g in nonren if gbus[g] in elec and gbus[g] not in supply
+            g
+            for g in nonren
+            if gbus[g] in elec and gbus[g] not in supply and g not in withdraw
         ],
         "source_links": src_links,
         "slack_generators": [g for g in gens.index if slack[g] and gbus[g] in elec],

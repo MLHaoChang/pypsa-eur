@@ -1812,6 +1812,100 @@ def test_a_slack_or_positive_generator_on_the_h2_bus_is_not_a_sink(gen):
     assert c["ambiguous_links"] == [], c
 
 
+@pytest.mark.parametrize(
+    "offtake, p",
+    [
+        pytest.param({"sign": -1.0}, 2.0, id="sign"),
+        pytest.param({"p_min_pu": -1.0, "p_max_pu": 0.0}, -2.0, id="p_min_pu"),
+    ],
+)
+def test_a_dispatched_negative_offtake_with_a_fuel_cell_is_ambiguous_not_unattributed(
+    offtake, p
+):
+    """M12: the offtake withdraws (its dispatch column is set), so it is a
+    sink, never a non-renewable source leaking through the fuel cell."""
+    n = _h2_with_negative_offtake(_dispatched(), fuel_cell=True, **offtake)
+    n.generators_t.p["offtake"] = p
+    n.links_t.p0 = pd.DataFrame(
+        {"electrolyser": 4.0, "fuel cell": 0.0}, index=n.snapshots
+    )
+    assert classify(n)["unattributed_generators"] == []
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None, kpi
+    assert "ambiguous conversion" in kpi["reason"], kpi
+    assert "cannot attribute the electricity" not in kpi["reason"], kpi
+
+
+def test_a_two_way_generator_on_the_h2_bus_is_not_a_sink():
+    """M10: p_min_pu < 0 with p_max_pu > 0 supplies as well as withdraws, so
+    it is not a sink (R16 needs p_max_pu ≤ 0 throughout): a non-renewable one
+    makes the H2 bus a supply bus, the fuel cell its source Link and the
+    electrolyser an export, never ambiguous."""
+    n = _h2_with_negative_offtake(
+        _network(), fuel_cell=True, p_min_pu=-1.0, p_max_pu=1.0
+    )
+    c = classify(n)
+    assert c["ambiguous_links"] == [] and c["conversion_links"] == [], c
+    assert c["source_links"] == ["fuel cell"], c
+
+
+def test_a_withdrawing_lost_production_slack_on_the_h2_bus_is_not_a_sink():
+    """M9: a ``__lost_`` Generator is a slack, never a sink, even when it
+    withdraws: the electrolyser beside a fuel cell stays storage."""
+    n = _h2_with_negative_offtake(_network(), fuel_cell=False)
+    n.remove("Generator", "offtake")
+    n.add("Generator", "__lost_h2", bus="h2", carrier="process", sign=-1.0, p_nom=5)
+    n.add("Link", "fuel cell", bus0="h2", bus1="ac", p_nom=5.0, efficiency=0.5)
+    c = classify(n)
+    assert c["ambiguous_links"] == [], c
+    assert c["storage_links"] == ["electrolyser"], c
+
+
+# ── D1: a Generator withdrawing on an electrical bus is not supply ───────
+
+
+def _ac_export(n, **withdraw):
+    n.add("Generator", "export", bus="ac", carrier="grid", p_nom=10.0, **withdraw)
+    return n
+
+
+@pytest.mark.parametrize("withdraw", _WITHDRAWS)
+def test_a_withdrawing_generator_on_the_site_bus_is_not_non_renewable_supply(
+    withdraw,
+):
+    n = _ac_export(_dispatched(), **withdraw)
+    assert "export" not in classify(n)["nonren_generators"]
+    # All-renewable supply: PV carries the load and the export; no diesel.
+    day = PV_PU > 0
+    n.generators_t.p["diesel"] = 0.0
+    n.generators_t.p["export"] = np.where(day, 10.0, 0.0) * (
+        1.0 if "sign" in withdraw else -1.0
+    )
+    kpi = renewable_fraction(n)
+    assert kpi["served_mwh"] == pytest.approx(240.0), kpi
+    assert kpi["nonrenewable_mwh"] == pytest.approx(0.0), kpi
+    assert kpi["fraction"] == pytest.approx(1.0), kpi
+
+
+@pytest.mark.parametrize("withdraw", _WITHDRAWS)
+def test_a_withdrawing_generator_on_the_site_bus_is_not_in_the_row(withdraw):
+    n = _ac_export(_network(), **withdraw)
+    _with_row(n)
+    terms = _row_terms(n, row_name(None))
+    assert terms == {("Generator-p", "diesel")}, terms
+
+
+def test_a_full_target_still_lets_renewables_export():
+    """D1: at f = 1 the row is diesel ≤ 0; the export is not in it, so PV
+    still sells its surplus and the fraction is 1."""
+    n = _ac_export(_network(), sign=-1.0, marginal_cost=-50.0)
+    status, _, log = _solve(n, min_renewable_fraction=1.0)
+    assert status == "ok", log
+    assert float(n.generators_t.p["export"].sum()) > 1.0
+    assert float(n.generators_t.p["diesel"].sum()) == pytest.approx(0.0, abs=1e-6)
+    assert renewable_fraction(n)["fraction"] == pytest.approx(1.0)
+
+
 def test_a_reversible_converter_is_storage_or_ambiguous_never_use():
     """R14g: a Link that can run negative is its own path back, so a counted
     conversion Link always has p0 ≥ 0 and no gross auxiliary is needed."""
