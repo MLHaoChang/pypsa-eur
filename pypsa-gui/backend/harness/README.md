@@ -1709,9 +1709,11 @@ C1-C7). The scope is the template's; there is no EH study and no LOLE loop.
     rows; `unverified`, a non-bool flag or a missing check is no evidence,
     except a missing check after a plan with binaries (exact MILP), which
     passes. The rule carries `unevaluated: needs_user` (`run_gates.check_rule`
-    takes no other value): read as not evaluated, it ends the result stage
-    with reason `not_evaluated` and no L2 round (`run_loops.after_failed_result`;
-    GK A (24) Q2), since no lever supplies the evidence;
+    takes no other value, and only on a `block` rule; the loader refuses it
+    outside the result gate): read as not evaluated, it ends the result stage
+    with reason `not_evaluated` and no L2 round, before any loop or envelope
+    check, even when another block rule fails too (`run_loops.after_failed_result`;
+    GK A (24) Q2, GK B (51) F1–F3), since no lever supplies the evidence;
   - `process.delivery.shortfall`: per product bus with a `shortfall` role
     Generator and per period, the shortfall over the delivery target, both in
     t/d over the period's generator-weighted days; the worst row is the value,

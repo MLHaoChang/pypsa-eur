@@ -1365,6 +1365,9 @@ def check_rule(rule: dict) -> dict:
                         f"engine, unevaluated: {rule!r}")  # repr-ok: a profile author's error, not a user's
     if rule.get("unevaluated", UNEVALUATED_TO_USER) != UNEVALUATED_TO_USER:
         raise RuleError(f"Rule {rule['id']}: unevaluated is {UNEVALUATED_TO_USER} or absent.")
+    if "unevaluated" in rule and rule["severity"] != "block":
+        # GK B (51) F2: only a failing rule ends the stage; a warn rule never fails one.
+        raise RuleError(f"Rule {rule['id']}: unevaluated is for a block rule only.")
     fact = rule["fact"]
     if not isinstance(fact, str) or "*" in fact:
         raise RuleError(f"Rule {rule['id']}: name one fact, never a wildcard ({fact!r}).")

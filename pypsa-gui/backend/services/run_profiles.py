@@ -291,6 +291,9 @@ def load(profile: dict) -> dict:
             raise ProfileError(f"Stage {name}: {exc}") from exc
         if name != "result_gate" and any("engine" in r for r in rules):
             raise ProfileError(f"Stage {name}: an engine rule runs only in the result gate.")
+        if name != "result_gate" and any("unevaluated" in r for r in rules):
+            # GK B (51) F2: only the result gate's stop reads the key.
+            raise ProfileError(f"Stage {name}: an unevaluated rule key is read only in the result gate.")
         # §9.2, §5: a stage inherits its generic rules; a profile adds rules
         # (a tighter threshold is one more rule), never drops or loosens one.
         own = {r["id"]: r for r in stage.get("rules", [])}

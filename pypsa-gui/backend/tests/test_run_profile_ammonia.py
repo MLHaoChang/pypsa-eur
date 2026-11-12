@@ -9,6 +9,7 @@ report (`grid_risk`) is a chapter, listed as a gap when not established."""
 
 from __future__ import annotations
 
+import copy
 import fnmatch
 import sys
 from pathlib import Path
@@ -523,6 +524,68 @@ def test_the_check_rule_goes_to_the_user_when_unevaluated_and_the_key_takes_one_
     rule = {k: v for k, v in _rules()["nh3.binary_check"].items() if k != "reads"}
     with pytest.raises(run_gates.RuleError):
         run_gates.check_rule({**rule, "unevaluated": "agent"})
+
+
+@pytest.mark.parametrize("severity", ["warn"])
+def test_the_key_is_refused_on_a_rule_that_never_fails_the_stage(severity):
+    """GK B (51) F2: only a failing (block) rule ends the stage on the key."""
+    rule = {k: v for k, v in _rules()["nh3.binary_check"].items() if k != "reads"}
+    with pytest.raises(run_gates.RuleError, match="block rule only"):
+        run_gates.check_rule({**rule, "severity": severity})
+
+
+def test_the_key_is_refused_outside_the_result_gate():
+    """GK B (51) F2: no other stage reads the key, so none may carry it."""
+    profile = copy.deepcopy(run_profiles.PROFILES[REF])
+    rule = {k: v for k, v in _rules()["nh3.binary_check"].items() if k != "reads"}
+    profile["stages"].setdefault("input_gate", {}).setdefault("rules", []).append(
+        {**rule, "id": "nh3.binary_check.early"})
+    with pytest.raises(run_profiles.ProfileError, match="only in the result gate"):
+        run_profiles.load(profile)
+
+
+def _gate_row(rule, severity, verdict):
+    return {"rule": rule, "severity": severity, "verdict": verdict,
+            "facts": [{"value": "check_unverified" if verdict == "not_evaluated" else 0.2}]}
+
+
+def _at_result_gate():
+    return {"steps": [], "run": {"stage": "result_gate",
+                                 "stages": {"result_gate": {"status": "active", "attempts": 1}}}}
+
+
+@pytest.mark.parametrize("agent", [True, False])
+def test_a_keyed_rule_not_evaluated_stops_before_any_loop_or_envelope(tmp_path, agent):
+    """GK B (51) F1, F3: with another block rule failing too, the stage ends on
+    `not_evaluated` before the envelope check (none is live here) and before a
+    loop exists, with or without an agent; the gate keeps the other fail."""
+    from harness import run_loops
+    profile = copy.deepcopy(run_profiles.resolve(REF))
+    if not agent:
+        profile["stages"]["result_gate"].pop("agent", None)
+    task = _at_result_gate()
+    gate = {"verdict": "fail", "rules": [_gate_row("nh3.binary_check", "block", "not_evaluated"),
+                                         _gate_row("nh3.delivery.shortfall", "block", "fail")]}
+    before = copy.deepcopy(gate)
+    assert run_loops.after_failed_result(tmp_path / "task.json", task, gate, profile) is False
+    assert task["run"]["stages"]["result_gate"]["reason"] == "not_evaluated"
+    assert "loop" not in task["run"] and "loops" not in task["run"]
+    assert gate == before
+
+
+def test_a_keyed_rule_that_does_not_fail_the_gate_never_stops_it(tmp_path):
+    """GK B (51) F2: a keyed rule outside `failing` (a warn, which the profile
+    loader refuses, built here by hand) does not end the stage on not_evaluated."""
+    from harness import run_loops
+    profile = copy.deepcopy(run_profiles.resolve(REF))
+    warn = {**profile["stages"]["result_gate"]["rules"][0], "id": "x.warn", "severity": "warn",
+            "unevaluated": run_gates.UNEVALUATED_TO_USER}
+    profile["stages"]["result_gate"]["rules"].append(warn)
+    task = _at_result_gate()
+    gate = {"verdict": "fail", "rules": [_gate_row("x.warn", "warn", "not_evaluated"),
+                                         _gate_row("nh3.delivery.shortfall", "block", "fail")]}
+    assert run_loops.after_failed_result(tmp_path / "task.json", task, gate, profile) is False
+    assert task["run"]["stages"]["result_gate"]["reason"] == "no_envelope"
 
 
 def test_the_profile_lists_what_blocks_an_unattended_run():
