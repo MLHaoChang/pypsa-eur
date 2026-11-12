@@ -228,6 +228,32 @@ def test_a_flagged_check_fails_with_its_flagged_periods(direct):
     assert result["facts"][0]["detail"][0]["delta"] == 12.0
 
 
+@pytest.mark.parametrize(
+    ("message", "periods", "basis", "rows"),
+    [
+        ("check says 2030", [_row(2030, True)], "check says 2030", [2030]),
+        (None, None, run_gates.BINARY_FLAGGED_BASIS, []),
+        ("", [], run_gates.BINARY_FLAGGED_BASIS, []),
+    ],
+)
+def test_a_flagged_check_keeps_its_words_or_the_basis(
+    direct, message, periods, basis, rows
+):
+    """Mutants at `_binary_check`: the check's own message is the basis, the
+    fixed basis stands in for none; a check with no period list fails with none."""
+    check = {**_check(flagged=True), "message": message, "periods": periods}
+    result = direct(
+        "nh3.binary_check", network=_network(), solver_state={}, check=check
+    )
+    fact = result["facts"][0]
+    assert (result["verdict"], fact["value"], fact["basis"]) == (
+        "fail",
+        "flagged",
+        basis,
+    )
+    assert [r["period"] for r in fact["detail"]] == rows
+
+
 @pytest.mark.parametrize("flagged", [1, "true", 0, "false", None])
 def test_a_flag_that_is_not_a_bool_never_passes(direct, flagged):
     """C1: only `flagged is False` exactly passes."""
@@ -306,6 +332,7 @@ def test_the_shipped_process_unit_is_filled_and_an_unfilled_one_waits(direct):
         ("efficiency", float("nan")),
         ("efficiency", float("inf")),
         ("p_nom", 0.0),
+        ("p_nom", float("inf")),
         ("committable", False),
         ("eh_process", False),
     ],
