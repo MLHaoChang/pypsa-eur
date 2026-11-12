@@ -145,7 +145,9 @@ def _linked_q(out: Series | NotEvaluated | None, year: int) -> float | None:
 
 def _quantity(ln: LineItem, year: int, outputs: dict) -> float | None:
     if ln.source == "linked":
-        return _linked_q(outputs.get(ln.name), year)
+        q = _linked_q(outputs.get(ln.name), year)
+        # The line's share of the series (R1 sold share, R2 lease-up; GK B BC 07 P3).
+        return None if q is None else q * ln.linked_share_at(year)
     return ln.cell("quantity", year).value
 
 
@@ -584,6 +586,21 @@ def _bound(out) -> dict | None:
     return None
 
 
+def _line_blob(ln: LineItem) -> dict:
+    """A line as the digest reads it (GK B BC 07 P1): a field enters only when it can
+    change an outcome and is set, so a digest from before the field stays byte-equal. The
+    hint and a default's range are display only and never enter."""
+    d = ln.model_dump(mode="json", exclude={"hint"})
+    for k in ("linked_share", "linked_share_by_year"):
+        if d[k] in (None, {}):
+            del d[k]
+    if not ln.default_keys:
+        del d["default_units"]
+    for a in d["assumed"].values():
+        del a["range_low"], a["range_high"]
+    return d
+
+
 def business_case_hash(
     ic_case: FinanceCase,
     inputs: BusinessCaseInputs,
@@ -602,7 +619,7 @@ def business_case_hash(
         "ic": _fallback_hash(ic_case),
         "preset": inputs.preset,
         "receivable_days": inputs.receivable_days,
-        "lines": [ln.model_dump(mode="json") for ln in inputs.lines],
+        "lines": [_line_blob(ln) for ln in inputs.lines],
         "bound": {
             ln.name: _bound(outputs.get(ln.name))
             for ln in inputs.lines

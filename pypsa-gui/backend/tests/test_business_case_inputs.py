@@ -36,6 +36,28 @@ DC_KEYS = {
     "sga": "dc-business-case.sga_share",
 }
 
+#: Each DC key's pack unit; a test key ("k") reads "x" (GK B BC 07 Q1: a default names its unit).
+KEY_UNITS = {
+    DC_KEYS["facility_capex"]: "EUR/MW",
+    DC_KEYS["facility_life"]: "years",
+    DC_KEYS["it_life"]: "years",
+    DC_KEYS["maintenance"]: "share/year",
+    DC_KEYS["insurance"]: "share/year",
+    DC_KEYS["property_tax"]: "share/year",
+    DC_KEYS["sga"]: "per unit",
+}
+
+
+def _units(kw: dict) -> dict:
+    """`kw` with `default_units` beside its `default_keys`, unless stated."""
+    if "default_keys" in kw and "default_units" not in kw:
+        keys = kw["default_keys"]
+        kw = {
+            **kw,
+            "default_units": {c: KEY_UNITS.get(k, "x") for c, k in keys.items()},
+        }
+    return kw
+
 
 def _rev(name: str = "compute", **kw: Any) -> dict:
     return {
@@ -47,7 +69,7 @@ def _rev(name: str = "compute", **kw: Any) -> dict:
         "price": 2.5,
         "escalation": "contract",
         "indexation": -0.05,
-        **kw,
+        **_units(kw),
     }
 
 
@@ -60,7 +82,7 @@ def _opex(name: str = "staff", **kw: Any) -> dict:
         "quantity": 10.0,
         "price": 40_000.0,
         "escalation": "opex",
-        **kw,
+        **_units(kw),
     }
 
 
@@ -74,7 +96,7 @@ def _capex(name: str = "facility", **kw: Any) -> dict:
         "price": 9.0e7,
         "escalation": "capex",
         "life_years": 20,
-        **kw,
+        **_units(kw),
     }
 
 
@@ -87,7 +109,7 @@ def _share(name: str = "maintenance", base: str = "capex/facility", **kw: Any) -
         "quantity_source": f"share_of:{base}",
         "quantity": 0.015,
         "escalation": "opex",
-        **kw,
+        **_units(kw),
     }
 
 
@@ -119,6 +141,13 @@ def _full() -> B.BusinessCaseInputs:
             start_year=2027,
             end_year=2046,
             note="term sheet",
+            hint={
+                "low": 2.0,
+                "high": 6.0,
+                "unit": "USD/GPU_h",
+                "source": "research [16]",
+                "year": 2026,
+            },
             preset_rule={
                 "requires": ["facility"],
                 "excludes": ["it_hardware"],
@@ -140,6 +169,8 @@ def _full() -> B.BusinessCaseInputs:
             quantity=None,
             unit="kg",
             price=4.0,
+            linked_share=0.8,
+            linked_share_by_year={2027: 0.5},
         ),
         preset="eh_datacenter@1",
         receivable_days=45,
@@ -208,6 +239,7 @@ def test_closed_lists_match_the_spec():
         "GPU_h",
         "kW_month",
         "kW_year",
+        "MW",
         "MW_year",
         "unit",
         "unit_month",
@@ -218,7 +250,7 @@ def test_closed_lists_match_the_spec():
     assert "land" not in B.CATEGORIES["capex"]
     for bad in (
         {"kind": "asset"},
-        {"unit": "MW"},
+        {"unit": "kW"},  # MW is a unit since BC 07; kW is not
         {"escalation": "cpi"},
         {"category": "compute_revenue"},
     ):
@@ -280,6 +312,11 @@ FLOAT_COLUMNS = [
     (_capex, "life_years"),
     (lambda: _capex(depreciation="declining_balance"), "rate"),
     (_capex, "refresh_years"),
+    (lambda: _rev(quantity_source="linked:x@1", quantity=None), "linked_share"),
+    (
+        lambda: _rev(quantity_source="linked:x@1", quantity=None),
+        "linked_share_by_year[]",
+    ),
 ]
 
 
@@ -294,7 +331,8 @@ def _float_fields(model) -> set[str]:
 def test_float_column_list_is_complete():
     assert {c.removesuffix("[]") for _, c in FLOAT_COLUMNS} == _float_fields(B.LineItem)
     assert _float_fields(B.BusinessCaseInputs) == {"receivable_days"}
-    assert _float_fields(B.CostDefault) == {"value"}
+    assert _float_fields(B.CostDefault) == {"value", "range_low", "range_high"}
+    assert _float_fields(B.Hint) == {"low", "high"}
 
 
 @pytest.mark.parametrize("bad", [math.inf, -math.inf, math.nan])

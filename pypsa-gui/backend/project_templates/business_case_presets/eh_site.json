@@ -1,0 +1,185 @@
+{
+  "id": "eh_site",
+  "version": "1",
+  "pack": "generic_defaults@2026-11-10:sha256:e228b001de2d80f1d1e01e8488b271a9de0bc12cb89bac2247a4592b6e0ce67e",
+  "templates": [
+    "eh_site"
+  ],
+  "variants": {},
+  "offered": [
+    {
+      "label": "Product sales",
+      "units": [
+        "t",
+        "unit"
+      ],
+      "sources": [
+        "typed"
+      ],
+      "line": {
+        "name": "Product sales",
+        "kind": "revenue",
+        "category": "product_sale",
+        "unit": "t",
+        "escalation": "contract"
+      }
+    },
+    {
+      "label": "Service or tolling fee",
+      "units": [
+        "unit_month",
+        "lump"
+      ],
+      "sources": [
+        "typed"
+      ],
+      "line": {
+        "name": "Service or tolling fee",
+        "kind": "revenue",
+        "category": "service_fee",
+        "unit": "unit_month",
+        "escalation": "contract"
+      }
+    },
+    {
+      "label": "Flexibility / DR availability",
+      "units": [
+        "MW_year"
+      ],
+      "sources": [
+        "typed",
+        "linked:capacity"
+      ],
+      "line": {
+        "name": "Flexibility availability",
+        "kind": "revenue",
+        "category": "capacity_payment",
+        "unit": "MW_year",
+        "escalation": "contract",
+        "note": "DR settlement already in the energy model is a locked row; do not type it again."
+      }
+    },
+    {
+      "label": "Staff",
+      "units": [
+        "unit"
+      ],
+      "sources": [
+        "typed"
+      ],
+      "line": {
+        "name": "Staff",
+        "kind": "opex",
+        "category": "staff",
+        "unit": "unit",
+        "escalation": "opex",
+        "note": "Quantity in FTE, price per FTE-year."
+      }
+    },
+    {
+      "label": "Maintenance (non-energy)",
+      "units": [
+        "share"
+      ],
+      "sources": [
+        "share_of:capex"
+      ],
+      "line": {
+        "name": "Maintenance (non-energy)",
+        "kind": "opex",
+        "category": "maintenance",
+        "unit": "share",
+        "quantity_source": "share_of:capex",
+        "escalation": "opex",
+        "note": "Share of capex per year. No sourced default: enter it (GK B P9)."
+      }
+    },
+    {
+      "label": "Insurance",
+      "units": [
+        "share"
+      ],
+      "sources": [
+        "share_of:capex"
+      ],
+      "line": {
+        "name": "Insurance",
+        "kind": "opex",
+        "category": "insurance",
+        "unit": "share",
+        "quantity_source": "share_of:capex",
+        "escalation": "opex",
+        "note": "Share of capex per year. No sourced default: enter it (GK B P9)."
+      }
+    },
+    {
+      "label": "Property tax",
+      "units": [
+        "share"
+      ],
+      "sources": [
+        "share_of:capex"
+      ],
+      "line": {
+        "name": "Property tax",
+        "kind": "opex",
+        "category": "property_tax",
+        "unit": "share",
+        "quantity_source": "share_of:capex",
+        "escalation": "opex",
+        "note": "Share of asset value per year. No sourced default: enter it (GK B P9)."
+      }
+    },
+    {
+      "label": "SG&A",
+      "units": [
+        "share"
+      ],
+      "sources": [
+        "share_of:revenue"
+      ],
+      "line": {
+        "name": "SG&A",
+        "kind": "opex",
+        "category": "sga",
+        "unit": "share",
+        "quantity_source": "share_of:revenue",
+        "escalation": "opex",
+        "note": "Share of revenue."
+      }
+    },
+    {
+      "label": "Building or process plant",
+      "units": [
+        "lump"
+      ],
+      "sources": [
+        "typed"
+      ],
+      "line": {
+        "name": "Building or process plant",
+        "kind": "capex",
+        "category": "facility",
+        "unit": "lump",
+        "escalation": "capex"
+      }
+    },
+    {
+      "label": "Land lease",
+      "units": [
+        "unit_month",
+        "lump"
+      ],
+      "sources": [
+        "typed"
+      ],
+      "line": {
+        "name": "Land lease",
+        "kind": "opex",
+        "category": "land",
+        "unit": "unit_month",
+        "escalation": "opex"
+      }
+    }
+  ]
+}

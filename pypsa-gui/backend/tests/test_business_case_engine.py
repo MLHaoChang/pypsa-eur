@@ -1482,7 +1482,19 @@ def test_the_hash_is_the_domain_the_ic_and_the_inputs_exactly():
         "ic": _fallback_hash(ic),
         "preset": "eh_site@1",
         "receivable_days": 30.0,
-        "lines": [ln.model_dump(mode="json") for ln in inputs.lines],
+        # Unset fields from BC 07 stay out, so older digests are byte-equal (GK B P1).
+        "lines": [
+            ln.model_dump(
+                mode="json",
+                exclude={
+                    "hint",
+                    "linked_share",
+                    "linked_share_by_year",
+                    "default_units",
+                },
+            )
+            for ln in inputs.lines
+        ],
         "bound": {},
     }
 

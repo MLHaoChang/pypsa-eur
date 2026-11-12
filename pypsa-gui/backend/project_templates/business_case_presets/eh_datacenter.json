@@ -1,0 +1,281 @@
+{
+  "id": "eh_datacenter",
+  "version": "1",
+  "pack": "generic_defaults@2026-11-10:sha256:e228b001de2d80f1d1e01e8488b271a9de0bc12cb89bac2247a4592b6e0ce67e",
+  "templates": [
+    "eh_datacenter",
+    "eh_datacenter_staged"
+  ],
+  "variants": {
+    "gpu_cloud": {
+      "label": "GPU cloud (owned IT, sold per GPU-hour)",
+      "lines": [
+        {
+          "name": "GPU-hours",
+          "kind": "revenue",
+          "category": "service_fee",
+          "unit": "GPU_h",
+          "quantity_source": "linked:it_energy@1",
+          "escalation": "contract",
+          "note": "Served IT energy in GPU-hours; linked_share is the sold share of utilised capacity. Reserved and on-demand at your price; GPU-hour prices fall over time (research 1a).",
+          "preset_rule": {
+            "requires": [
+              "it_hardware",
+              "facility"
+            ],
+            "price_includes_energy": true
+          },
+          "hint": {
+            "low": 2.0,
+            "high": 6.16,
+            "unit": "USD/GPU_h",
+            "source": "H100 list prices: Lambda, CoreWeave, AWS (.scratch/dc-business-case/research.md [16][17][18])",
+            "year": 2026,
+            "note": "On-demand list prices; committed contracts sit well below."
+          }
+        },
+        {
+          "name": "Facility, shell and M&E",
+          "kind": "capex",
+          "category": "facility",
+          "unit": "MW",
+          "escalation": "capex",
+          "note": "Quantity: MW of IT per COD phase. Price per MW of IT, excluding IT hardware (pack default, assumed).",
+          "default_keys": {
+            "price": "dc-business-case.facility.overnight",
+            "life_years": "dc-business-case.facility.lifetime"
+          },
+          "default_units": {
+            "price": "EUR/MW",
+            "life_years": "years"
+          }
+        },
+        {
+          "name": "IT hardware",
+          "kind": "capex",
+          "category": "it_hardware",
+          "unit": "unit",
+          "escalation": "capex",
+          "note": "A lump per GPU or per MW IT (DCBC-SCOPE-1 Q1). Set refresh_years to replace at end of life.",
+          "default_keys": {
+            "life_years": "dc-business-case.it_hardware.lifetime"
+          },
+          "default_units": {
+            "life_years": "years"
+          }
+        },
+        {
+          "name": "Staff",
+          "kind": "opex",
+          "category": "staff",
+          "unit": "kW_month",
+          "quantity_source": "linked:contracted_it_kw@1",
+          "escalation": "opex",
+          "note": "Per kW of contracted IT per month. No sourced default: enter the price (GK B P9)."
+        },
+        {
+          "name": "Network and bandwidth",
+          "kind": "opex",
+          "category": "network",
+          "unit": "kW_month",
+          "quantity_source": "linked:contracted_it_kw@1",
+          "escalation": "opex",
+          "note": "Per kW of contracted IT per month. No sourced default: enter the price (GK B P9)."
+        },
+        {
+          "name": "Maintenance (non-energy)",
+          "kind": "opex",
+          "category": "maintenance",
+          "unit": "share",
+          "quantity_source": "share_of:capex/facility",
+          "escalation": "opex",
+          "note": "Share of facility capex per year.",
+          "default_keys": {
+            "quantity": "dc-business-case.facility.maintenance_share"
+          },
+          "default_units": {
+            "quantity": "share/year"
+          }
+        },
+        {
+          "name": "Insurance",
+          "kind": "opex",
+          "category": "insurance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of capex per year.",
+          "default_keys": {
+            "quantity": "dc-business-case.insurance_share"
+          },
+          "default_units": {
+            "quantity": "share/year"
+          }
+        },
+        {
+          "name": "Property tax",
+          "kind": "opex",
+          "category": "property_tax",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of asset value per year; jurisdiction-specific.",
+          "default_keys": {
+            "quantity": "dc-business-case.property_tax_share"
+          },
+          "default_units": {
+            "quantity": "share/year"
+          }
+        },
+        {
+          "name": "SG&A",
+          "kind": "opex",
+          "category": "sga",
+          "unit": "share",
+          "quantity_source": "share_of:revenue",
+          "escalation": "opex",
+          "note": "Share of revenue.",
+          "default_keys": {
+            "quantity": "dc-business-case.sga_share"
+          },
+          "default_units": {
+            "quantity": "per unit"
+          }
+        }
+      ]
+    },
+    "colocation": {
+      "label": "Colocation (tenant owns IT, leased per kW-month)",
+      "lines": [
+        {
+          "name": "Colocation lease",
+          "kind": "revenue",
+          "category": "lease",
+          "unit": "kW_month",
+          "quantity_source": "linked:contracted_it_kw@1",
+          "escalation": "contract",
+          "note": "Contracted IT kW, take-or-pay; linked_share_by_year is the lease-up ramp.",
+          "preset_rule": {
+            "requires": [
+              "facility"
+            ],
+            "excludes": [
+              "it_hardware"
+            ]
+          },
+          "hint": {
+            "low": 154.0,
+            "high": 205.0,
+            "unit": "USD/kW_month",
+            "source": "Digital Realty Q4 2025 >1 MW leases, cash to GAAP rent (.scratch/dc-business-case/research.md [12])",
+            "year": 2025,
+            "note": "Wholesale; retail colocation runs about 270-290 USD/kW_month."
+          }
+        },
+        {
+          "name": "Power pass-through",
+          "kind": "revenue",
+          "category": "cost_recovery",
+          "unit": "MWh",
+          "escalation": "tariff",
+          "note": "Metered IT MWh x contract PUE; price = tariff + adder. Not allowed beside GPU-hours (price includes energy)."
+        },
+        {
+          "name": "Facility, shell and M&E",
+          "kind": "capex",
+          "category": "facility",
+          "unit": "MW",
+          "escalation": "capex",
+          "note": "Quantity: MW of IT per COD phase. Price per MW of IT, excluding IT hardware (pack default, assumed).",
+          "default_keys": {
+            "price": "dc-business-case.facility.overnight",
+            "life_years": "dc-business-case.facility.lifetime"
+          },
+          "default_units": {
+            "price": "EUR/MW",
+            "life_years": "years"
+          }
+        },
+        {
+          "name": "Staff",
+          "kind": "opex",
+          "category": "staff",
+          "unit": "kW_month",
+          "quantity_source": "linked:contracted_it_kw@1",
+          "escalation": "opex",
+          "note": "Per kW of contracted IT per month. No sourced default: enter the price (GK B P9)."
+        },
+        {
+          "name": "Network and bandwidth",
+          "kind": "opex",
+          "category": "network",
+          "unit": "kW_month",
+          "quantity_source": "linked:contracted_it_kw@1",
+          "escalation": "opex",
+          "note": "Per kW of contracted IT per month. No sourced default: enter the price (GK B P9)."
+        },
+        {
+          "name": "Maintenance (non-energy)",
+          "kind": "opex",
+          "category": "maintenance",
+          "unit": "share",
+          "quantity_source": "share_of:capex/facility",
+          "escalation": "opex",
+          "note": "Share of facility capex per year.",
+          "default_keys": {
+            "quantity": "dc-business-case.facility.maintenance_share"
+          },
+          "default_units": {
+            "quantity": "share/year"
+          }
+        },
+        {
+          "name": "Insurance",
+          "kind": "opex",
+          "category": "insurance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of capex per year.",
+          "default_keys": {
+            "quantity": "dc-business-case.insurance_share"
+          },
+          "default_units": {
+            "quantity": "share/year"
+          }
+        },
+        {
+          "name": "Property tax",
+          "kind": "opex",
+          "category": "property_tax",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of asset value per year; jurisdiction-specific.",
+          "default_keys": {
+            "quantity": "dc-business-case.property_tax_share"
+          },
+          "default_units": {
+            "quantity": "share/year"
+          }
+        },
+        {
+          "name": "SG&A",
+          "kind": "opex",
+          "category": "sga",
+          "unit": "share",
+          "quantity_source": "share_of:revenue",
+          "escalation": "opex",
+          "note": "Share of revenue.",
+          "default_keys": {
+            "quantity": "dc-business-case.sga_share"
+          },
+          "default_units": {
+            "quantity": "per unit"
+          }
+        }
+      ]
+    }
+  },
+  "offered": []
+}

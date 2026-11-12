@@ -42,3 +42,24 @@ first. Send the TDD plan to GK B before building.
 ### 2026-11-11: triage
 
 Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.
+
+### 2026-11-12: GK B plan GO (50), conditions P1–P12
+
+Answers: Q1 `default_units` required, key set = `default_keys`', `default_unit_mismatch` at
+`lines[i].default_keys[<col>]`, never fills. Q2 add `MW`, typed only. Q3 `linked_share` +
+`linked_share_by_year` here; `kw_per_gpu` deferred to BC 08. Q4 variants
+`eh_datacenter.gpu_cloud@1`, `eh_datacenter.colocation@1`; R3 a typed MWh cost_recovery line.
+
+- P1 hash: hint, range_low/high never in the digest; linked_share(_by_year) only when set;
+  default_units only beside non-empty default_keys. Pinned digests byte-equal.
+- P2 hint display only, revenue only, currency never converted; equal cashflows/pnl/kpis.
+- P3 linked_share finite in [0,1], linked lines only, by_year inside horizon, cell wins, None = 1.
+- P4 composes with G3 drop: series × share × (1 − lost share), by hand; mutants fail.
+- P5 MW only on capex typed lines; else `unit_not_allowed`; update every Unit enumeration.
+- P6 run-time unit mismatch on a fixture pack refuses, never fills; currency/money-year skips unchanged.
+- P7 JSON loaded on call; broken file raises at preset(), models import; unknown key/template/variant refused; version and pack pin checked.
+- P8 pinned pack 2026-11-10 byte-equal by manifest hash; unpinned `load_defaults_pack()` callers listed.
+- P9 no unsourced default (eh_site maintenance/insurance/property tax; DC staff/network); each default has source, range, assumed, pack stamp.
+- P10 `default_unit_mismatch` must not trip the error-kind manifest tests.
+- P11 every TEMPLATE_META id's sidecars byte-equal; business_case_presets/ shipped by pypsa-gui.spec:65.
+- P12 mutants on presets.py and touched model/engine lines, plus the named hand mutants.
