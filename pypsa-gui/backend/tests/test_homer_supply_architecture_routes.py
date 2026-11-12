@@ -266,6 +266,27 @@ def test_unknown_schema_version_reads_not_evaluated(
     )
 
 
+def test_an_unreadable_record_reads_not_evaluated(
+    client, studies_on, install_network, project_storage_dir
+):
+    """G9 (F8): a record that is not a JSON object, or not JSON, never 500s."""
+    from services.study import store
+
+    sid = _project(client, install_network, "sa-junk")
+    base_dir = project_storage_dir("sa-junk")
+    store.save_aux(base_dir, sid, "supply_architectures", [])
+    for _ in range(2):
+        r = client.get(_url("sa-junk", sid))
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["status"] == "not_evaluated", got
+        assert got["reason"] == "unreadable_record"
+        a = client.post(_url("sa-junk", sid) + "/abort")
+        assert a.status_code == 200, a.text
+        assert a.json() == {"status": "not_evaluated", "aborting": False}
+        store._aux_path(base_dir, sid, "supply_architectures").write_text("{not json")
+
+
 def test_a_solver_exception_fails_its_row_and_leaves_no_fork(
     client, studies_on, install_network, monkeypatch, session_local
 ):
@@ -337,7 +358,9 @@ def test_abort_marks_the_rest_not_reached_and_one_slot_at_a_time(
     with pytest.raises(R.RunRefused) as busy:  # what the run and the tornado call
         R._refuse_busy(ctx)
     assert busy.value.code == "study_running"
-    assert client.delete(f"/api/projects/sa-abort/studies/{sid}").status_code == 409
+    gone = client.delete(f"/api/projects/sa-abort/studies/{sid}")
+    assert gone.status_code == 409  # refused by the study guard, not a fork's
+    assert gone.json()["detail"]["error_kind"] == "study_running"
     live = client.get(_url("sa-abort", sid)).json()
     assert live["status"] == "running" and live["kind"] == "supply_architectures"
     ab = client.post(_url("sa-abort", sid, "/abort"))
@@ -442,3 +465,66 @@ def test_chat_tool_bad_action_is_typed(client, studies_on):
     with pytest.raises(HTTPException) as exc:
         chat_tools.compare_supply_architectures("p", "s", action="everything")
     assert exc.value.detail["error_kind"] == "supply_architectures_action_invalid"
+
+
+# ── one study slot, at the routes (G8, F7) ────────────────────────────────
+
+
+def test_the_tornado_and_the_comparison_refuse_each_other_at_the_routes(
+    client, api_project, studies_on, monkeypatch
+):
+    """G8: a tornado POST while a comparison runs is 409 study_running, and
+    a comparison POST while a tornado runs is too."""
+    from services import solver_service
+    from tests.study_s4_support import INTAKE, create_pack_study, wait_run
+    from tests.test_study_runner import FakeSolver
+
+    release = threading.Event()
+    solver = FakeSolver()
+    monkeypatch.setattr(solver_service, "run_simulation", solver)
+    api_project("sa-tor-src")
+    no_pv = {**INTAKE, "pv": {"enabled": False}}
+    r = create_pack_study(client, "sa-tor-src", "sa-tor", intake=no_pv)
+    assert r.status_code == 201, r.text
+    sid = r.json()["study_id"]
+    run = client.post(f"/api/projects/sa-tor/studies/{sid}/run", json={})
+    assert run.status_code == 202
+    assert wait_run(client, "sa-tor", sid)["status"] == "done"
+    tornado = f"/api/projects/sa-tor/studies/{sid}/findings/tornado"
+
+    def wait_calls(k):
+        deadline = time.time() + 30
+        while len(solver.calls) < k and time.time() < deadline:
+            time.sleep(0.05)
+        assert len(solver.calls) >= k
+
+    solver.on_call = lambda k: release.wait(30)
+    try:
+        n = len(solver.calls)
+        started = client.post(_url("sa-tor", sid), json={})
+        assert started.status_code == 202, started.text
+        wait_calls(n + 1)
+        r = client.post(tornado, json={})
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "study_running"
+    finally:
+        client.post(_url("sa-tor", sid, "/abort"))
+        release.set()
+    assert _wait(client, "sa-tor", sid)["status"] == "aborted"
+
+    release.clear()
+    try:
+        n = len(solver.calls)
+        assert client.post(tornado, json={}).status_code == 202
+        wait_calls(n + 1)
+        r = client.post(_url("sa-tor", sid), json={})
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["error_kind"] == "study_running"
+    finally:
+        client.post(f"{tornado}/abort")
+        release.set()
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        if client.get(tornado).json().get("status") != "running":
+            break
+        time.sleep(0.1)

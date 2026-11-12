@@ -44,6 +44,8 @@ from typing import Any
 import pandas as pd
 
 from services.adequacy.slack import LOST_SLACK_PREFIX, slack_generator_mask
+from services.commercial.participants import _ELECTRIC
+from services.study import runner as _runner
 from services.study.runner import _opt_value
 
 __all__ = [
@@ -145,6 +147,8 @@ def _group_of(component: str, carrier: str, role: str) -> str | None:
         return "grid" if component in ("Generator", "Link") else None
     if "battery" in carrier:
         return "battery"
+    if component == "Link" and carrier in _GENSET:
+        return "genset"  # a genset modelled as a fuel-to-power Link (OCGT, CHP)
     if component != "Generator":
         return None
     if carrier.startswith(_PV):
@@ -154,6 +158,37 @@ def _group_of(component: str, carrier: str, role: str) -> str | None:
     if carrier in _GENSET:
         return "genset"
     return None
+
+
+def _stranded(n, out: dict[str, list[tuple[str, str]]], slacks: set[str]) -> None:
+    """Add to its group a Generator whose only way to the site is that
+    group's member Links (eh_setup's grid Generator, carrier AC, behind its
+    ``eh_role = grid_import`` Link): no Load and no Line or Transformer on
+    its bus, and every Link touching the bus a member of one group (gate G3:
+    removed with them, never left stranded in a fork)."""
+    member_links = {
+        name: g for g, ms in out.items() for comp, name in ms if comp == "Link"
+    }
+    if not member_links:
+        return
+    held = {str(b) for b in _static(n, "Load")["bus"]}
+    for comp in _BRANCHES:
+        df = _static(n, comp)
+        held.update(str(b) for c in ("bus0", "bus1") for b in df[c])
+    touching: dict[str, set[str]] = {}
+    for name, buses in _link_buses(n).items():
+        for b in buses:
+            touching.setdefault(b, set()).add(name)
+    grouped = {m for ms in out.values() for m in ms}
+    g = _static(n, "Generator")
+    for name in g.index:
+        name = str(name)
+        bus = str(g.at[name, "bus"])
+        if name in slacks or ("Generator", name) in grouped or bus in held:
+            continue
+        groups = {member_links.get(k) for k in touching.get(bus, ())}
+        if len(groups) == 1 and None not in groups:
+            out[groups.pop()].append(("Generator", name))
 
 
 def classify(n) -> dict[str, list[tuple[str, str]]]:
@@ -170,6 +205,7 @@ def classify(n) -> dict[str, list[tuple[str, str]]]:
             )
             if group is not None:
                 out.setdefault(group, []).append((component, str(name)))
+    _stranded(n, out, slacks)
     return {g: out[g] for g in GROUP_ORDER if g in out}
 
 
@@ -178,7 +214,9 @@ def classify(n) -> dict[str, list[tuple[str, str]]]:
 
 def _bus_of(n, component: str, name: str) -> list[str]:
     df = _static(n, component)
-    if component in ("Link", "Line", "Transformer"):
+    if component == "Link":
+        return _link_buses(n)[name]
+    if component in ("Line", "Transformer"):
         return [str(df.at[name, c]) for c in ("bus0", "bus1") if c in df.columns]
     return [str(df.at[name, "bus"])]
 
@@ -254,37 +292,45 @@ def omit(
 
 
 def _supplied(n, removed: set[tuple[str, str]]) -> bool:
-    """Every load bus reaches a non-slack generator through the branches and
-    links left (gate G3)."""
-    parent: dict[str, str] = {}
+    """Every load bus is reached from a non-slack generator through the
+    branches and links left (gate G3). A Line or Transformer runs both ways;
+    a Link runs from ``bus0`` to its other ports, and back only when its
+    ``p_min_pu`` is negative."""
+    edges: dict[str, set[str]] = {}
 
-    def find(b: str) -> str:
-        parent.setdefault(b, b)
-        while parent[b] != b:
-            parent[b] = parent[parent[b]]
-            b = parent[b]
-        return b
-
-    def union(a: str, b: str) -> None:
-        parent[find(a)] = find(b)
+    def edge(a: str, b: str) -> None:
+        edges.setdefault(a, set()).add(b)
 
     for comp in _BRANCHES:
         df = _static(n, comp)
         for name in df.index:
-            union(str(df.at[name, "bus0"]), str(df.at[name, "bus1"]))
+            a, b = str(df.at[name, "bus0"]), str(df.at[name, "bus1"])
+            edge(a, b)
+            edge(b, a)
+    links = _static(n, "Link")
     for name, buses in _link_buses(n).items():
-        if ("Link", name) not in removed:
-            for b in buses[1:]:
-                union(buses[0], b)
+        if ("Link", name) in removed:
+            continue
+        both = float(links.at[name, "p_min_pu"]) < 0
+        for b in buses[1:]:
+            edge(buses[0], b)
+            if both:
+                edge(b, buses[0])
     slacks = slack_names(n)
     g = _static(n, "Generator")
-    fed = {
-        find(str(g.at[x, "bus"]))
+    reached = {
+        str(g.at[x, "bus"])
         for x in g.index
         if str(x) not in slacks and ("Generator", str(x)) not in removed
     }
+    todo = list(reached)
+    while todo:
+        for b in edges.get(todo.pop(), ()):
+            if b not in reached:
+                reached.add(b)
+                todo.append(b)
     loads = _static(n, "Load")
-    return all(find(str(loads.at[x, "bus"])) in fed for x in loads.index)
+    return all(str(loads.at[x, "bus"]) in reached for x in loads.index)
 
 
 def architectures_for(n) -> list[SupplyArchitecture]:
@@ -323,26 +369,78 @@ def _energy(df: pd.DataFrame, names: Iterable[str], w: pd.Series) -> float:
     return float(df[cols].clip(lower=0.0).mul(w, axis=0).to_numpy().sum())
 
 
-def _demand(n, w: pd.Series) -> float:
-    if n.loads.empty:
+def _electrical_buses(n) -> set[str]:
+    """Buses whose carrier is electric (AC, DC, a voltage level or none; the
+    commercial engine's ``participants._ELECTRIC``)."""
+    buses = n.buses
+    if "carrier" not in buses.columns:
+        return {str(b) for b in buses.index}
+    return {
+        str(b)
+        for b, c in buses["carrier"].items()
+        if str(c if c == c else "").strip().casefold() in _ELECTRIC
+    }
+
+
+def _demand(n, w: pd.Series, electric: set[str]) -> float:
+    names = [x for x in n.loads.index if str(n.loads.at[x, "bus"]) in electric]
+    if not names:
         return 0.0
     p = n.loads_t.p
-    if p.empty or not set(n.loads.index).issubset(p.columns):
+    if p.empty or not set(names).issubset(p.columns):
         p = n.get_switchable_as_dense("Load", "p_set")
-    return float(p[list(n.loads.index)].mul(w, axis=0).to_numpy().sum())
+    return float(p[names].mul(w, axis=0).to_numpy().sum())
 
 
-def _non_renewable_energy(n, members, w: pd.Series) -> float:
-    """A non-renewable group's energy into the site. A dispatched Link member
-    (eh_setup's grid import, ``eh_role = grid_import``) counts by its delivery
-    at ``bus1`` and stands for the group, so the generator upstream of it is
-    not counted twice; otherwise the group's Generators count by output."""
-    links = [name for comp, name in members if comp == "Link"]
-    delivered = n.links_t.p1
-    if any(name in delivered.columns for name in links):
-        return _energy(-delivered, links, w)
-    gens = [name for comp, name in members if comp == "Generator"]
-    return _energy(n.generators_t.p, gens, w)
+def _delivery(n, links: list[str]) -> pd.DataFrame:
+    """Each dispatched Link's delivery into its ``bus1``: ``-p1``, else
+    ``efficiency * p0`` (time-varying efficiency included). A Link with no
+    dispatch is left out."""
+    p1, p0 = n.links_t.p1, n.links_t.p0
+    out = {}
+    eff = None
+    for name in links:
+        if name in p1.columns:
+            out[name] = -p1[name]
+        elif name in p0.columns:
+            if eff is None:
+                eff = n.get_switchable_as_dense("Link", "efficiency")
+            out[name] = p0[name] * eff[name]
+    return pd.DataFrame(out, index=n.snapshots)
+
+
+def _non_renewable_energy(n, members, w: pd.Series, electric: set[str]) -> float:
+    """A non-renewable group's energy delivered into the site's electrical
+    buses, each import path once:
+
+    * an import Link (bus1 electrical, bus0 a fuel bus or a supply bus: one
+      holding a member Generator and no Load) counts by its delivery
+      (:func:`_delivery`) and stands for the Generators on its bus0;
+    * a member Generator on an electrical bus counts by output unless such a
+      dispatched Link stands for it; one on a fuel bus never counts (its
+      fuel is not electricity);
+    * any other member Link (an export from the site) never counts."""
+    links = _static(n, "Link")
+    gens = [x for comp, x in members if comp == "Generator"]
+    g_bus = {x: str(n.generators.at[x, "bus"]) for x in gens}
+    load_buses = {str(b) for b in n.loads["bus"]}
+    supply = set(g_bus.values()) - load_buses
+    imports = [
+        x
+        for comp, x in members
+        if comp == "Link"
+        and str(links.at[x, "bus1"]) in electric
+        and (
+            str(links.at[x, "bus0"]) in supply
+            or str(links.at[x, "bus0"]) not in electric
+        )
+    ]
+    delivered = _delivery(n, imports)
+    covered = {str(links.at[x, "bus0"]) for x in delivered.columns}
+    counted = [x for x, b in g_bus.items() if b in electric and b not in covered]
+    return _energy(delivered, delivered.columns, w) + _energy(
+        n.generators_t.p, counted, w
+    )
 
 
 def renewable_fraction(n) -> float | None:
@@ -363,12 +461,19 @@ def renewable_fraction(n) -> float | None:
     if gp.empty:
         return None
     w = _weights(n)
-    served = _demand(n, w) - _energy(gp, slack_names(n), w)
+    electric = _electrical_buses(n)
+    slacks = [x for x in slack_names(n) if str(n.generators.at[x, "bus"]) in electric]
+    served = _demand(n, w, electric) - _energy(gp, slacks, w)
     if not served > 0:
         return None
     groups = classify(n)
-    non_ren = sum(_non_renewable_energy(n, groups.get(g, ()), w) for g in NON_RENEWABLE)
-    return min(1.0, max(0.0, 1.0 - non_ren / served))
+    non_ren = sum(
+        _non_renewable_energy(n, groups.get(g, ()), w, electric) for g in NON_RENEWABLE
+    )
+    rf = 1.0 - non_ren / served
+    if rf != rf:
+        return None  # a NaN in the dispatch is unknown, never 0.0
+    return min(1.0, max(0.0, rf))
 
 
 def _sizes(
@@ -414,11 +519,8 @@ def _sizes(
 def row_of(arch: SupplyArchitecture, n) -> dict:
     """The solved best system of ``arch`` (``n`` is its solved network)."""
     unavailable: dict[str, str] = {}
-    # The runner's system-cost reading (`runner._read_option`): the LP
-    # objective plus its constant.
-    objective = _opt_value(getattr(n, "objective", None))
-    const = _opt_value(getattr(n, "objective_constant", 0.0)) or 0.0
-    cost = None if objective is None else objective + const
+    # The runner's system-cost reading, shared with `runner._read_option`.
+    cost = _runner.system_cost(n)
     if cost is None:
         unavailable["total_cost_eur_per_year"] = "no_objective"
     groups = classify(n)

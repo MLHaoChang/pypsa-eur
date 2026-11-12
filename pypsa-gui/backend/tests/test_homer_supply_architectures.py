@@ -225,8 +225,9 @@ def test_omit_keeps_a_hub_that_still_joins_two_buses():
     n.add("Load", "lb", bus="b", p_set=1.0)
     n.add("Generator", "genset", bus="hub", carrier="diesel", p_nom_extendable=True)
     n.add("Generator", "pv", bus="a", carrier="solar", p_nom_extendable=True)
-    n.add("Link", "ha", bus0="hub", bus1="a", p_nom=5.0)
-    n.add("Link", "hb", bus0="hub", bus1="b", p_nom=5.0)
+    # both ways (F6): pv on `a` reaches `lb` only back through the hub
+    n.add("Link", "ha", bus0="hub", bus1="a", p_nom=5.0, p_min_pu=-1.0)
+    n.add("Link", "hb", bus0="hub", bus1="b", p_nom=5.0, p_min_pu=-1.0)
     m = A.omit(n, _arch(n, "pv"))
     assert {"ha", "hb"} <= set(m.links.index)
 
@@ -517,10 +518,171 @@ def test_renewable_fraction_counts_a_grid_import_link_once_by_its_delivery():
     n = _net()
     n.generators.loc["grid", "carrier"] = "AC"
     n.links.loc["grid_import", ["carrier", "eh_role"]] = ["AC", "grid_import"]
-    assert A.classify(n)["grid"] == [("Link", "grid_import")]
+    assert A.classify(n)["grid"] == [("Link", "grid_import"), ("Generator", "grid")]
     n = _solved(n, pv=[1.0, 1.0, 0.0, 1.0], genset=[0.0] * 4, grid=[0.0, 0.0, 2.0, 0.0])
     n.links_t.p1 = pd.DataFrame(
         {"grid_import": [0.0, 0.0, -1.0, 0.0]}, index=n.snapshots
     )
     # served 4 MWh; 1 MWh delivered by the import link (2 MWh upstream ignored)
     assert A.renewable_fraction(n) == pytest.approx(0.75)
+
+
+# ── GK B round 2 (F1-F6) ──────────────────────────────────────────────────
+
+
+def _with_export(n: pypsa.Network) -> pypsa.Network:
+    n.add("Carrier", "grid_export")
+    n.add("Bus", "sink", carrier="AC")
+    n.add(
+        "Link", "grid_export", bus0="site", bus1="sink", carrier="grid_export", p_nom=5
+    )
+    return n
+
+
+def test_renewable_fraction_never_counts_export_and_counts_each_import_once():
+    """F1: only energy delivered into the site counts; export never does."""
+    # _net() plus an export link: 2 MWh imported, 4 MWh exported, 4 MWh served
+    n = _solved(
+        _with_export(_net()),
+        pv=[2.0] * 4,
+        genset=[0.0] * 4,
+        grid=[0.0, 0.0, 1.0, 1.0],
+    )
+    n.links_t.p1 = pd.DataFrame({"grid_export": [-1.0] * 4}, index=n.snapshots)
+    assert A.renewable_fraction(n) == pytest.approx(0.5)  # 1 - 2/4
+    # the import link's delivery stands for the generator behind it
+    n.links_t.p1["grid_import"] = [0.0, 0.0, -1.0, -1.0]
+    assert A.renewable_fraction(n) == pytest.approx(0.5)
+
+    # a grid Generator on the site bus with only an export link
+    n = _with_export(_net())
+    n.remove("Link", "grid_import")
+    n.generators.loc["grid", "bus"] = "site"
+    n = _solved(n, pv=[2.0] * 4, genset=[0.0] * 4, grid=[0.0, 0.0, 1.0, 1.0])
+    n.links_t.p1 = pd.DataFrame({"grid_export": [-1.0] * 4}, index=n.snapshots)
+    assert A.renewable_fraction(n) == pytest.approx(0.5)  # the 2 MWh generated
+
+
+def _ocgt_net() -> pypsa.Network:
+    """PV on the site and a genset modelled as a gas Generator feeding an
+    OCGT Link at efficiency 0.4."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=4, freq="h"))
+    n.add("Bus", "site", carrier="AC")
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Load", "l", bus="site", p_set=1.0)
+    n.add("Generator", "pv", bus="site", carrier="solar", p_nom_extendable=True)
+    n.add("Generator", "fuel", bus="gas", carrier="gas", p_nom=10.0)
+    n.add(
+        "Link",
+        "ocgt",
+        bus0="gas",
+        bus1="site",
+        carrier="OCGT",
+        efficiency=0.4,
+        p_nom_extendable=True,
+    )
+    return n
+
+
+def test_a_link_genset_counts_its_electricity_not_its_fuel():
+    """F2: 2.5 MWh of gas through an OCGT at 0.4 delivers 1 MWh of 2 served."""
+    n = _ocgt_net()
+    assert A.classify(n)["genset"] == [("Generator", "fuel"), ("Link", "ocgt")]
+    m = A.omit(n, _arch(n, "pv"))
+    assert not {"fuel", "ocgt"} & _names(m)
+    n.snapshot_weightings.loc[:, "generators"] = [1.0, 1.0, 0.0, 0.0]
+    n.generators_t.p = pd.DataFrame(
+        {"pv": [1.0, 0.0, 1.0, 1.0], "fuel": [0.0, 2.5, 0.0, 0.0]}, index=n.snapshots
+    )
+    n.links_t.p0 = pd.DataFrame({"ocgt": [0.0, 2.5, 0.0, 0.0]}, index=n.snapshots)
+    n.links_t.p1 = pd.DataFrame({"ocgt": [0.0, -1.0, 0.0, 0.0]}, index=n.snapshots)
+    assert A.renewable_fraction(n) == pytest.approx(0.5)
+
+
+def test_a_link_genset_reads_a_time_varying_efficiency():
+    n = _ocgt_net()
+    n.links_t.efficiency = pd.DataFrame(
+        {"ocgt": [0.4, 0.4, 0.4, 0.5]}, index=n.snapshots
+    )
+    n.generators_t.p = pd.DataFrame(
+        {"pv": [1.0, 1.0, 0.0, 0.0], "fuel": [0.0, 0.0, 2.5, 2.0]}, index=n.snapshots
+    )
+    n.links_t.p0 = pd.DataFrame({"ocgt": [0.0, 0.0, 2.5, 2.0]}, index=n.snapshots)
+    # delivered 0.4 * 2.5 + 0.5 * 2.0 = 2 MWh of 4 served (1.8 at a fixed 0.4)
+    assert A.renewable_fraction(n) == pytest.approx(0.5)
+
+
+def test_served_load_is_electrical_only_and_nan_reads_none():
+    """F3: a heat Load does not dilute the fraction; NaN dispatch is None."""
+    n = _solved(_net(), pv=[1.0, 1.0, 0.0, 1.0], genset=[0.0, 0.0, 1.0, 0.0])
+    before = A.renewable_fraction(n)
+    assert before == pytest.approx(0.75)
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Load", "heat_load", bus="heat", p_set=5.0)
+    assert A.renewable_fraction(n) == pytest.approx(before)
+    n = _solved(_net(), pv=[1.0, 1.0, 0.0, 1.0], genset=[0.0, 0.0, float("nan"), 0.0])
+    assert A.renewable_fraction(n) is None
+
+
+def _eh_setup_net() -> pypsa.Network:
+    """eh_setup's shape: a fixed grid Generator with an ordinary carrier
+    behind an `eh_role = grid_import` Link."""
+    n = _net()
+    n.generators.loc["grid", ["carrier", "capital_cost"]] = ["AC", 5_000.0]
+    n.links.loc["grid_import", ["carrier", "eh_role"]] = ["AC", "grid_import"]
+    return n
+
+
+def test_a_generator_reached_only_through_a_member_link_goes_with_it():
+    """F5: the no-grid fork does not keep a stranded grid Generator (and its
+    fixed capital cost)."""
+    n = _eh_setup_net()
+    assert A.classify(n)["grid"] == [("Link", "grid_import"), ("Generator", "grid")]
+    arch = _arch(n, "pv+genset")
+    assert ("Generator", "grid") in A.removed_components(n, arch)
+    m = A.omit(n, arch)
+    assert "grid" not in m.generators.index and "grid_import" not in m.links.index
+    # a generator that also feeds a non-member link is not stranded
+    n.add("Link", "other", bus0="grid", bus1="site", carrier="AC", p_nom=1.0)
+    assert ("Generator", "grid") not in A.classify(n)["grid"]
+
+
+def test_a_one_way_link_away_from_the_load_supplies_nothing():
+    """F6: a grid behind a site->g one-way link is no grid architecture."""
+    n = pypsa.Network()
+    n.add("Bus", "site")
+    n.add("Bus", "g")
+    n.add("Load", "l", bus="site", p_set=1.0)
+    n.add("Generator", "pv", bus="site", carrier="solar", p_nom_extendable=True)
+    n.add("Generator", "grid", bus="g", carrier="grid", p_nom=5.0)
+    n.add("Link", "out", bus0="site", bus1="g", p_nom=5.0, p_min_pu=0.0)
+    ids = [a.architecture_id for a in A.architectures_for(n)]
+    assert "grid" not in ids and "pv" in ids
+    n.links.loc["out", "p_min_pu"] = -1.0  # runs both ways: the grid supplies
+    assert "grid" in [a.architecture_id for a in A.architectures_for(n)]
+
+
+def test_a_member_link_vacates_its_bus2_too():
+    n = _ocgt_net()
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Store", "tank", bus="heat", carrier="heat", e_nom=1.0)
+    n.links.loc["ocgt", "bus2"] = "heat"
+    assert "tank" not in A.omit(n, _arch(n, "pv")).stores.index
+
+
+def test_unsolved_rows_of_one_status_keep_list_order():
+    archs = [A.SupplyArchitecture(a, (a,)) for a in ("pv", "wind", "grid")]
+    rows = [A.unsolved_row(a, "failed") for a in archs]
+    assert [r["architecture_id"] for r in A.ranked(rows)] == ["pv", "wind", "grid"]
+
+
+def test_row_cost_is_the_runners_system_cost(monkeypatch):
+    """F4: one system-cost reading, the runner's."""
+    from services.study import runner as R
+
+    n = _net()
+    arch = _arch(n, "pv+battery+genset")
+    m = _solved(A.omit(n, arch), pv=[1.0] * 4, genset=[0.0] * 4, objective=1.0)
+    monkeypatch.setattr(R, "system_cost", lambda net: 42.0)
+    assert A.row_of(arch, m)["total_cost_eur_per_year"] == 42.0

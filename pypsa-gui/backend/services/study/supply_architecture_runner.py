@@ -104,7 +104,7 @@ def start(
         archs = SA.select(network, architecture_ids)
     except SA.ArchitectureUnsolved as exc:
         raise R.RunRefused(
-            422 if exc.code == "unknown_architecture" else 409, exc.code, str(exc)
+            422 if exc.code == "unknown_architecture" else 409, exc.code, exc.detail
         ) from None
     solves = len(archs)
     budget = solves if budget_solves is None else int(budget_solves)
@@ -196,8 +196,13 @@ def start(
                     )
                 except campaign.CampaignError as exc:
                     R._release_base(key, registered)
+                    # A fixed message: an exception's text never reaches the
+                    # client (CodeQL, information exposure).
+                    logger.info("supply architectures budget refused: %s", exc)
                     raise R.RunRefused(
-                        422, "campaign_budget_invalid", str(exc)
+                        422,
+                        "campaign_budget_invalid",
+                        "budget_solves is not a valid campaign budget",
                     ) from None
             try:
                 R._on_ctx(ctx, campaign.check, R.STUDY_KEY, solves)
@@ -205,7 +210,9 @@ def start(
                 if own:
                     R._on_ctx(ctx, campaign.end, "refused before the first solve")
                 R._release_base(key, registered)
-                raise R.RunRefused(409, "campaign_budget_exhausted", str(exc)) from None
+                raise R.RunRefused(
+                    409, "campaign_budget_exhausted", exc.detail["message"]
+                ) from None
             record["own_campaign"] = own
             ctx.solver_state[R.STUDY_KEY] = record
             try:
@@ -361,6 +368,18 @@ def _stale(saved: dict, base_row) -> bool:
     return now != saved.get("base_fingerprint")
 
 
+def _load_saved(base_dir, study_id: str):
+    """The saved record as stored (None when never run); an unreadable file
+    reads as ``[]``, which callers treat as not evaluated (gate G9)."""
+    try:
+        return store.load_aux(base_dir, study_id, AUX)
+    except store.StudyUnreadable:
+        logger.warning(
+            "study %s: the supply architectures record is unreadable", study_id
+        )
+        return []
+
+
 def get(study_id: str, *, base_row, base_dir) -> dict | None:
     """The live comparison on the base context, else the last one on disk
     (with ``stale``), else None."""
@@ -377,9 +396,12 @@ def get(study_id: str, *, base_row, base_dir) -> dict | None:
                 and rec.get("status") == "running"
             ):
                 return R._public(rec)
-    saved = store.load_aux(base_dir, study_id, AUX)
+    saved = _load_saved(base_dir, study_id)
     if saved is None:
         return None
+    if not isinstance(saved, dict):
+        # Gate G9: a record that can't be read is not evaluated, never a crash.
+        return {"status": "not_evaluated", "kind": KIND, "reason": "unreadable_record"}
     if saved.get("schema_version") != SCHEMA_VERSION:
         return {
             "status": "not_evaluated",
@@ -403,7 +425,9 @@ def abort(study_id: str, *, base_row, base_dir) -> dict:
                 if ev is not None:
                     ev.set()
                 return {"status": status, "aborting": status == "running"}
-    last = store.load_aux(base_dir, study_id, AUX)
+    last = _load_saved(base_dir, study_id)
+    if last is not None and not isinstance(last, dict):
+        return {"status": "not_evaluated", "aborting": False}
     if last is None:
         raise R.RunRefused(
             404,
