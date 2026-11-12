@@ -30,6 +30,7 @@ of the gate record; these are the places it is read:
 | `run_gates.evaluate` (the gate record, `run.stages.result_gate.gate.rules[].reason`) | stores it beside the typed state | `test_the_gate_keeps_the_typed_state_and_gives_the_reason_in_words` |
 | `assistant_tasks._run_view` (the chat tool `get_task` and the run monitor's view) | copies it to the stage's `gate` entry | `test_the_words_reach_the_task_view_the_chat_tool_and_the_monitor_read` |
 | `services/reports/harness_chapter.gates_rows` (the run report's gates table) | prints it in the Note column | `test_the_words_reach_the_reports_harness_chapter` |
+| `run_handoff.checks` (the hand-off's `checks` and the report's `result_checks_*` counts) | copies it beside each not-evaluated rule | `test_fuel_autonomy_and_frequency_are_their_own_state_on_the_hand_off` |
 | `run_loops._l2_message` (the L2 turn's failed rules) | never reached: L2 carries failing `block` rules only, and both investment rules warn | `test_a_warn_rule_never_reaches_the_l2_message` |
 
 The frontend's run monitor shows a rule's verdict and value, not its reason.

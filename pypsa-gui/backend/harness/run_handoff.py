@@ -173,10 +173,9 @@ def _targets(run):
     stage = (run.get("stages") or {}).get("result_gate") or {}
     gate = stage.get("gate") or {}
     if stage.get("status") == "passed" and gate.get("passed") is True:
+        # G8: a gate that passed with rules not evaluated is never all met.
         unevaluated = [r["rule"] for r in checks(run)[NOT_EVALUATED]]
-        if (
-            unevaluated
-        ):  # G8: a gate that passed with rules not evaluated is never all met
+        if unevaluated:
             return PARTLY, "the result gate passed; not evaluated: " + ", ".join(
                 map(str, unevaluated)
             )

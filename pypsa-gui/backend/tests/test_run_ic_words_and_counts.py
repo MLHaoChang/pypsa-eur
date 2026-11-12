@@ -142,6 +142,7 @@ def test_the_readers_are_listed():
         "assistant_tasks._run_view",
         "harness_chapter.gates_rows",
         "run_loops._l2_message",
+        "run_handoff.checks",
     ):
         assert reader in listed
 
