@@ -592,6 +592,7 @@ def test_a_programming_error_stops_the_step_for_the_user(tmp_path, monkeypatch):
     assert task["steps"][1]["status"] == "failed"
     assert task["run"]["stages"]["inputs"]["status"] == "failed"
     assert task["run"]["status"] == "needs_user"
+    assert "ZeroDivisionError" in task["steps"][1]["error"]
 
 
 def test_the_fetch_holds_no_solve():
@@ -704,7 +705,9 @@ def test_only_usable_rows_that_are_not_writes_name_the_site():
     lat, lon = _site_rows()
     for row in ({**lat, "write": True}, {**lat, "status": "rejected"}):
         assert run_intake.site([row, lon])[1]["param"] == "site.lat"
-    assert run_intake.site([{"param": None, "value": 1.0}, lat, lon]) == (SITE, None)
+    assert run_intake.site(
+        [{"param": None, "value": 1.0, "status": "proposed"}, lat, lon]
+    ) == (SITE, None)
 
 
 def test_a_zero_with_its_own_letter_is_a_site():
@@ -781,6 +784,9 @@ def test_terrain_without_a_missing_count_lacks_no_tile(tmp_path, monkeypatch):
         {**FETCHED, "truncated": "no"},
         {**FETCHED, "found": []},
         {**FETCHED, "terrain_missing": "3"},
+        {"version": 1, "state": "done", "reason": "x"},
+        {"version": 9, "state": "not_named", "reason": "x"},
+        "fetched",
     ],
 )
 def test_a_record_of_the_wrong_shape_reads_unreadable(bad):
@@ -813,3 +819,27 @@ def test_found_counts_substations_only():
         way(3, {"natural": "water"}),
     ]
     assert site_context.elements_to_context(elements)["found"]["power_substations"] == 1
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"version": 9}, {"solves": 1}, {"site": {"lat": 91.0, "lon": 6.8}}],
+)
+def test_a_frozen_record_of_another_version_solve_or_site_is_invalid(change):
+    frozen = run_site.freeze(_task(_site_rows()))
+    assert run_site.valid(frozen) and not run_site.valid({**frozen, **change})
+
+
+def test_the_context_file_sits_beside_a_task_named_by_a_string():
+    assert run_site.context_path("runs/t-1.json") == pathlib.Path(
+        "runs/t-1" + run_site.SUFFIX
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [None, {"quote": "53.4° S"}, {"raw": "53.4"}],
+)
+def test_a_row_without_a_whole_citation_has_no_compass_letter(source):
+    lat, lon = _site_rows()
+    assert run_intake.site([{**lat, "source": source}, lon]) == (SITE, None)
