@@ -49,6 +49,8 @@ KIND = "action"  # a step's `native` marker
 CAMPUS = "dc_campus_study"
 READINESS = "dc_grid_readiness"
 MG_SURVIVAL = "mg_island_survival"
+# Study harness issue 33: the inputs stage's site-context fetch (`harness/run_site.py`).
+SITE_FETCH = "site_context_fetch"
 STAGE = "solve"
 # Study harness 12b (GK B (46) ruling): each registry row names its record kind.
 # A step is frozen, filled and dispatched only with a record of its own kind
@@ -56,18 +58,21 @@ STAGE = "solve"
 # check has its own.
 DC_KIND = "dc_grid_code"
 MG_KIND = "mg_island"
+SITE_KIND = "site_context"
 # The registry: each action's stage, whether it only reads, and its record
 # kind. Closed: a profile naming anything else is refused at load (D7).
 REGISTRY = {
     CAMPUS: {"stage": STAGE, "reads_only": False, "kind": DC_KIND},
     READINESS: {"stage": STAGE, "reads_only": True, "kind": DC_KIND},
     MG_SURVIVAL: {"stage": STAGE, "reads_only": True, "kind": MG_KIND},
+    # Reads only: it writes the run's own record, never the project (GK B (49) Q2).
+    SITE_FETCH: {"stage": "inputs", "reads_only": True, "kind": SITE_KIND},
 }
 FROZEN = {
     "frozen": DC_KIND
 }  # an action's args until the harness freezes them; never a model's
 # Each kind's frozen marker: the only args a profile may give a step of that kind.
-MARKERS = {DC_KIND: FROZEN, MG_KIND: {"frozen": MG_KIND}}
+MARKERS = {DC_KIND: FROZEN, MG_KIND: {"frozen": MG_KIND}, SITE_KIND: {"frozen": SITE_KIND}}
 JOB_KIND = "dc_campus"
 EVENT = "dc_campus"  # the envelope ledger row of the campus run's reservation
 # D5: the campus job's row carries no solve count. One campus job, and it runs no
@@ -353,7 +358,26 @@ KINDS = {
         "prefix": "mg_",
         "valid": _mg_valid,
     },
+    SITE_KIND: {
+        "core": lambda frozen: _site("core")(frozen),
+        "card": lambda frozen: _site("card")(frozen),
+        "event": "site_context",  # no reservation: the fetch runs no solve
+        "prefix": "site_",
+        "valid": lambda frozen: _site("valid")(frozen),
+    },
 }
+
+
+def _site(name):
+    """`harness.run_site`'s `name` (imported late: it imports this module)."""
+    from harness import run_site
+
+    return getattr(run_site, name)
+
+
+def stage_of(step) -> str:
+    """The stage a native action runs in (its registry row)."""
+    return (REGISTRY.get((step or {}).get("tool")) or {}).get("stage", STAGE)
 
 
 def needs_card(step) -> bool:
@@ -494,6 +518,9 @@ def stage_frozen(task, kind=DC_KIND) -> dict:
     )
     if prior is not None:
         return copy.deepcopy(prior)
+    if kind == SITE_KIND:
+        # Issue 33 (GK B (49) S1): the site from the run's granted intake rows, never a model's.
+        return _site("freeze")(task)
     if kind not in MARKERS:
         return {
             "unfrozen": {
@@ -590,7 +617,7 @@ def _stop(path, step_id, reason, detail=None, held=None):
         step["status"] = "failed"
         step["error"] = (f"{reason}: {detail}" if detail else reason)[:480]
         run = task["run"]
-        run["stages"][STAGE].update(status="failed", reason=reason)
+        run["stages"][stage_of(step)].update(status="failed", reason=reason)
         if run["status"] in ("running", "waiting_job"):
             run["status"], task["status"] = "needs_user", "needs_review"
 
@@ -707,6 +734,12 @@ def _dispatch(path, ctx, step_id, attempt, approved=None, instance=None):
         )
     if kind == MG_KIND:
         return _mg_dispatch(path, step, task, frozen, attempt, ctx, instance)
+    if kind == SITE_KIND:
+        try:
+            return _site("dispatch")(path, step, frozen, attempt, instance)
+        except Exception as exc:  # noqa: BLE001 — a programming error stops for the user, never "unavailable" (S3)
+            logger.exception("the site-context fetch failed for run %s", path.stem)
+            return _stop(path, step["id"], "site_start_failed", type(exc).__name__, held=(attempt, instance))
     try:
         with chat_tools._acting() as (db, user):
             project = project_registry.resolve_project(db, user, task["project_id"])
@@ -1194,10 +1227,10 @@ def _interrupted(path, task) -> bool:
                 and s.get("attempt_id") not in _LIVE
             ):
                 s.update(status="uncertain", error=UNCERTAIN)
-                hit = True
+                hit = stage_of(s)
         if not hit:
             return False
-        t["run"]["stages"][STAGE].update(status="failed", reason="uncertain")
+        t["run"]["stages"][hit].update(status="failed", reason="uncertain")
         if t["run"]["status"] in ("running", "waiting_job"):
             t["run"]["status"], t["status"] = "needs_user", "needs_review"
 

@@ -1,0 +1,512 @@
+# ruff: noqa: F811  (pytest fixtures imported from sibling test modules)
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+# SPDX-License-Identifier: MIT
+"""Study harness issue 33 (GK B (49) plan GO, S1-S8): eh_site@3 fetches the
+site's map context in the inputs stage when the intake names a site, and the
+input gate's `eh.site.context` (warn) reads it.
+
+Offline (L7): every fetch goes through an `httpx.MockTransport` serving the
+synthetic Overpass fixture (`tests/fixtures/overpass_eemshaven.json`); the
+terrain tiles answer 404, which the service tolerates.
+"""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import pathlib
+import time
+import uuid
+
+import httpx
+import pytest
+
+from harness import run_site
+from harness.session import TURN_AUTHOR_KEY
+from services import (
+    run_actions,
+    run_envelope,
+    run_gates,
+    run_handover,
+    run_intake,
+    run_profiles,
+    site_context,
+)
+from services import assistant_tasks as tasks
+from services.pypsa_service import PyPSAService
+from services.reports import harness_chapter
+from tests.test_assistant_tasks_study_brief import (  # noqa: F401
+    baseline,
+    dispatch,
+    edit,
+    helpers_state,
+    session,
+    wait_until,
+)
+from tests.test_harness_envelope import granted, on_run, profile  # noqa: F401
+from tests.test_harness_run_eh_site_v2 import _start_v2, _tick_to, goal_host  # noqa: F401
+from tests.test_harness_run_report_handoff import fake_report  # noqa: F401
+from tests.test_harness_run_skeleton import RUN, site, start  # noqa: F401
+from tests.test_harness_runner import detached, task_path  # noqa: F401
+from tests.test_run_intake_grant import _new_task
+
+# sha256 of json.dumps(PROFILES[ref], sort_keys=True) on master 203d95c71 (L8).
+PINNED = {
+    "eh_site@1": "8d8f09dec396579ec12bd9344959ac6ecd5cef1eaa0a47de737bd83bca51cf46",
+    "eh_site@2": "2eefcb14bc7d5f05a465be591bf54238d9e4f1c7bf7948cff935c461b381f9f8",
+}
+FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "overpass_eemshaven.json"
+SITE = {"lat": 53.4396, "lon": 6.8321}
+SITE_TEXT = "The site is at 53.4396° N and 6.8321° E."
+
+
+def overpass(calls=None, status=200, delay=0.0, body=None):
+    """The offline map services: Overpass answers the fixture, every terrain tile 404."""
+    def handle(request):
+        if calls is not None:
+            calls.append(str(request.url))
+        if "terrarium" in str(request.url) or request.method == "GET":
+            return httpx.Response(404)
+        if delay:
+            time.sleep(delay)
+        return httpx.Response(status, content=body if body is not None else FIXTURE.read_bytes())
+    return httpx.MockTransport(handle)
+
+
+@pytest.fixture
+def offline(monkeypatch):
+    calls = []
+    monkeypatch.setattr(run_site, "_TRANSPORT", overpass(calls))
+    return calls
+
+
+# ── L8: versions (S7) ───────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("ref", sorted(PINNED))
+def test_older_eh_site_versions_are_byte_equal_to_master(ref):
+    blob = json.dumps(run_profiles.PROFILES[ref], sort_keys=True).encode()
+    assert hashlib.sha256(blob).hexdigest() == PINNED[ref]
+
+
+def test_v3_differs_from_v2_only_by_the_site_params_its_fetch_and_its_rule():
+    v2, v3 = (json.loads(json.dumps(run_profiles.PROFILES[r])) for r in ("eh_site@2", "eh_site@3"))
+    assert (v2.pop("version"), v3.pop("version")) == (2, 3)
+    assert v3["params"]["ask"][-2:] == [run_profiles.SITE_LAT_PARAM, run_profiles.SITE_LON_PARAM]
+    del v3["params"]["ask"][-2:]
+    for p in (run_profiles.SITE_LAT_PARAM, run_profiles.SITE_LON_PARAM):
+        assert v3["params"]["fields"].pop(p)["unit_storage"] == "°"
+    assert v3["stages"].pop("inputs")["actions"] == [
+        {"tool": "get_weather_choice", "args": {"project_id": run_profiles.PROJECT}},
+        {"tool": run_actions.SITE_FETCH, "args": {"frozen": run_actions.SITE_KIND}, "native": run_actions.KIND}]
+    assert v3["stages"]["input_gate"]["rules"].pop() == run_profiles.SITE_CONTEXT_RULE
+    assert run_profiles.SITE_CONTEXT_RULE["severity"] == "warn"  # Q1
+    assert v2 == v3
+
+
+def test_a_run_granted_on_v2_keeps_v2_and_never_fetches():
+    v2 = run_profiles.resolve("eh_site@2")
+    assert v2["version"] == 2
+    steps = run_profiles.materialise(v2, "inputs", "p-1")
+    assert [s["tool"] for s in steps] == ["get_weather_choice"]
+    assert "eh.site.context" not in {r["id"] for r in v2["stages"]["input_gate"]["rules"]}
+    v3 = run_profiles.resolve("eh_site@3")
+    assert [s["tool"] for s in run_profiles.materialise(v3, "inputs", "p-1")] == [
+        "get_weather_choice", run_actions.SITE_FETCH]
+
+
+def test_a_profile_cannot_give_the_fetch_args_or_move_it_out_of_the_inputs_stage():
+    bad_args = copy.deepcopy(run_profiles.EH_SITE_V3)
+    bad_args["stages"]["inputs"]["actions"][1]["args"] = {"frozen": run_actions.SITE_KIND, "site": SITE}
+    with pytest.raises(run_profiles.ProfileError, match="frozen marker"):
+        run_profiles.load(bad_args)
+    moved = copy.deepcopy(run_profiles.EH_SITE_V3)
+    moved["stages"]["setup"]["actions"] = [moved["stages"]["inputs"]["actions"].pop()]
+    with pytest.raises(run_profiles.ProfileError, match="inputs stage only"):
+        run_profiles.load(moved)
+
+
+# ── S1, S7: the intake ──────────────────────────────────────────────────────
+
+
+def _row(param, value, unit="°", status="proposed"):
+    return {"param": param, "value": value, "unit": unit, "status": status, "source": {"kind": "text"}}
+
+
+def _site_rows(lat=SITE["lat"], lon=SITE["lon"]):
+    return [_row("site.lat", lat), _row("site.lon", lon)]
+
+
+def test_the_site_is_never_a_creation_param():
+    rows = [_row("connection_mw", 12.0, "MW"), *_site_rows()]
+    assert run_intake.params(rows) == {"connection_mw": 12.0}
+    assert run_intake.site(rows) == (SITE, None)
+    assert run_intake.site([_row("connection_mw", 12.0, "MW")]) == (None, None)
+
+
+@pytest.mark.parametrize("lat, lon", [
+    (float("nan"), 6.8), (float("inf"), 6.8), (53.4, float("-inf")),
+    (85.06, 6.8), (-85.06, 6.8), (53.4, 180.01), (53.4, -180.01), (True, 6.8), ("53.4", 6.8),
+])
+def test_a_bad_site_value_is_refused_never_clamped(lat, lon):
+    point, gap = run_intake.site(_site_rows(lat, lon))
+    assert point is None and gap["kind"] == "site_invalid"
+    items = run_intake.missing(run_profiles.resolve("eh_site@3"), [], [gap])
+    assert [i["kind"] for i in items if i["param"].startswith("site.")] == ["site_invalid"]
+
+
+def test_the_bounds_themselves_are_a_site():
+    assert run_intake.site(_site_rows(-85.05, 180.0)) == ({"lat": -85.05, "lon": 180.0}, None)
+
+
+def test_half_a_site_or_a_wrong_unit_is_asked_for():
+    _, gap = run_intake.site([_row("site.lat", 53.4)])
+    assert gap["param"] == "site.lon" and gap["kind"] == "site_invalid"
+    _, gap = run_intake.site([_row("site.lat", 53.4, "rad"), _row("site.lon", 6.8)])
+    assert gap["param"] == "site.lat"
+
+
+@pytest.fixture
+def site_host(goal_host, site, monkeypatch):
+    """`goal_host`, whose typed turn also names the site."""
+    real = run_intake.host_for  # goal_host's: the host with its one typed turn
+    owner = tasks._authority()[2]
+    (turn,) = real(PyPSAService.get_active_context(), owner, site[0]).turns
+    turn = {**turn, "user": turn["user"] + " " + SITE_TEXT}
+    tid = run_intake.turn_id(turn)
+
+    def host_for(ctx, owner_id, project_id):
+        found = real(ctx, owner_id, project_id)
+        return run_intake.Host(found.name, found.dir, found.owner_id, (turn,))
+
+    monkeypatch.setattr(run_intake, "host_for", host_for)
+    for c in [*goal_host["citations"], goal_host["goal"]]:
+        if "turn_id" in c:
+            c["turn_id"] = tid
+    goal_host["site"] = [
+        {"param": "site.lat", "turn_id": tid, "quote": "53.4396° N", "unit": "°"},
+        {"param": "site.lon", "turn_id": tid, "quote": "6.8321° E", "unit": "°"},
+    ]
+    return goal_host
+
+
+def _start(citations, name, ref="eh_site@3"):
+    return start(request_id=f"v3-{uuid.uuid4().hex[:6]}",
+                 run={**RUN, "profile": ref, "intake": {"project_name": name, "citations": citations}})
+
+
+def _intake(view, site):
+    return json.loads(task_path(site[1], view).read_text())["run"]["intake"]
+
+
+def test_a_typed_site_reads_into_two_rows_and_v2_rows_are_unchanged(site_host, site):
+    base = [*site_host["citations"], site_host["goal"]]
+    v3 = _intake(_start([*base, *site_host["site"]], f"Site {uuid.uuid4().hex[:6]}"), site)
+    rows = {r["param"]: r for r in v3["rows"]}
+    assert (rows["site.lat"]["value"], rows["site.lon"]["value"]) == (SITE["lat"], SITE["lon"])
+    assert not [g for g in v3["gaps"] if g["param"].startswith("site.")]
+    v2 = _intake(_start(base, f"Site {uuid.uuid4().hex[:6]}", ref="eh_site@2"), site)
+    assert v2["rows"] == [r for r in v3["rows"] if not r["param"].startswith("site.")]
+    assert "site" not in run_intake.params(v3["rows"])
+
+
+# ── S1: the frozen site ─────────────────────────────────────────────────────
+
+
+def _task(rows, steps=()):
+    return {"task_id": "t-1", "steps": list(steps), "run": {"intake": rows}}
+
+
+def test_the_site_is_frozen_from_the_granted_rows_only():
+    frozen = run_actions.stage_frozen(_task(_site_rows()), run_actions.SITE_KIND)
+    assert frozen["site"] == SITE and frozen["solves"] == 0 and run_site.valid(frozen)
+    assert frozen["digest"] == run_site._digest(run_site.core(frozen))
+    # A host run keeps its intake as a dict with rows.
+    assert run_site.freeze({"run": {"intake": {"rows": _site_rows()}}})["site"] == SITE
+    assert run_site.freeze(_task([]))["site"] is None
+
+
+def test_a_model_cannot_move_the_fetched_site(offline, tmp_path):
+    """#1072: the step's args are the marker, and the fetch reads the frozen
+    record; coordinates offered elsewhere (args, a turn) change nothing, and
+    a record edited after its card was shown stops the step."""
+    profile = run_profiles.resolve("eh_site@3")
+    steps = run_profiles.materialise(profile, "inputs", "p-1")
+    run_actions.fill(steps, run_actions.stage_frozen(_task(_site_rows()), run_actions.SITE_KIND),
+                     run_actions.SITE_KIND)
+    step = steps[1]
+    step["args"]["site"] = {"lat": 0.0, "lon": 0.0}  # what a model might pass
+    task = _task(_site_rows(), [dict(steps[0], status="completed"), step])
+    task["project_id"] = "p-1"
+    task["run"].update(status="running", stages={"inputs": {"status": "active"}})
+    path = tmp_path / "t-1.json"
+    path.write_text(json.dumps(task))
+    ctx = type("Ctx", (), {"project_uuid": "p-1"})()
+    assert run_actions.start(path, ctx, step, instance=None) == "site_args"
+    assert offline == []  # nothing fetched
+    step["args"] = {"frozen": run_actions.SITE_KIND}
+    step["frozen"]["site"] = {"lat": 0.0, "lon": 0.0}  # the record moved after the card
+    path.write_text(json.dumps(dict(task, steps=[task["steps"][0], dict(step, status="pending")])))
+    assert run_actions.start(path, ctx, step, instance=None) == "site_args"
+    assert offline == []
+
+
+# ── S2: model turns ─────────────────────────────────────────────────────────
+
+
+def test_a_model_turn_is_refused_the_fetch_under_a_v3_grant():
+    envelope = {**copy.deepcopy(run_profiles.PROFILES["eh_site@3"]["envelope"]), "state": "granted"}
+    assert run_envelope._refusal(None, envelope, {}, run_actions.SITE_FETCH, {}, "read", False, None,
+                                 None, {}) == "unknown_tool"
+    assert not any(e["tool"] == "fetch_site_context" for e in envelope["edits"] + envelope["runs"])
+    assert "fetch_site_context" not in run_profiles.L1_TOOLS + run_profiles.L2_TOOLS + run_profiles.EXPLORE_TOOLS
+
+
+# ── S3, S5, S6: the fetch ───────────────────────────────────────────────────
+
+
+def test_the_fetch_keeps_the_whole_context_in_the_runs_own_record(offline, tmp_path):
+    path = tmp_path / "t-1.json"
+    result = run_site.fetch(path, SITE)
+    assert result["state"] == "fetched" and result["truncated"] is False
+    doc = json.loads(run_site.context_path(path).read_text())
+    assert result["digest"] == hashlib.sha256(json.dumps(doc, sort_keys=True).encode()).hexdigest()
+    assert result["found"]["buildings"] == len(doc["buildings"]) > 0
+    assert result["found"]["power_lines"] == sum(1 for x in doc["lines"] if x["kind"] == "power_line")
+    assert not run_site.context_path(path).name.endswith(".json")  # never read as a task
+    (posted,) = [c for c in offline if "interpreter" in c]
+    assert posted == site_context.DEFAULT_OVERPASS_URL
+
+
+def test_counts_come_from_the_whole_answer_when_the_service_truncates(offline, tmp_path, monkeypatch):
+    monkeypatch.setattr(site_context, "MAX_FEATURES", 1)
+    result = run_site.fetch(tmp_path / "t-1.json", SITE)
+    assert result["truncated"] is True and result["found"]["buildings"] > 1
+
+
+def test_an_upstream_refusal_settles_unavailable_with_its_message(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_site, "_TRANSPORT", overpass(status=502))
+    result = run_site.fetch(tmp_path / "t-1.json", SITE)
+    assert result["state"] == "unavailable" and "HTTP 502" in result["reason"]
+    assert not run_site.context_path(tmp_path / "t-1.json").exists()
+
+
+def test_a_hung_upstream_settles_unavailable_inside_the_bound(tmp_path, monkeypatch):
+    from harness import runner
+    assert run_site.FETCH_TIMEOUT_S < runner.LEASE_SECONDS
+    monkeypatch.setattr(run_site, "FETCH_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(run_site, "_TRANSPORT", overpass(delay=2.0))
+    begun = time.monotonic()
+    result = run_site.fetch(tmp_path / "t-1.json", SITE)
+    assert time.monotonic() - begun < 1.5
+    assert result["state"] == "unavailable" and "did not answer within" in result["reason"]
+
+
+@pytest.mark.parametrize("error", [
+    site_context.SiteContextUnavailable("Overpass refused"),
+    site_context.SiteContextTooLarge("too large"),
+    httpx.ReadError("reset"),
+    OSError("network refused"),
+])
+def test_every_fetch_failure_settles_unavailable(error, tmp_path, monkeypatch):
+    def fail(*a, **k):
+        raise error
+    monkeypatch.setattr(site_context, "fetch_context", fail)
+    result = run_site.fetch(tmp_path / "t-1.json", SITE)
+    assert result == {"kind": run_actions.SITE_KIND, "version": run_site.VERSION, "state": "unavailable",
+                      "reason": str(error)}
+
+
+def test_a_programming_error_is_not_swallowed(tmp_path, monkeypatch):
+    def broken(*a, **k):
+        raise TypeError("bug")
+    monkeypatch.setattr(site_context, "fetch_context", broken)
+    with pytest.raises(TypeError):
+        run_site.fetch(tmp_path / "t-1.json", SITE)
+
+
+def test_the_transport_is_only_the_modules():
+    import inspect
+    assert run_site._TRANSPORT is None
+    assert "transport" not in json.dumps(run_profiles.PROFILES["eh_site@3"])
+    assert "_TRANSPORT" not in inspect.getsource(run_intake) + inspect.getsource(run_actions)
+
+
+# ── the step, end to end in the runner's dispatch ───────────────────────────
+
+
+def _dispatched(tmp_path, rows):
+    steps = run_profiles.materialise(run_profiles.resolve("eh_site@3"), "inputs", "p-1")
+    run_actions.fill(steps, run_actions.stage_frozen(_task(rows), run_actions.SITE_KIND), run_actions.SITE_KIND)
+    task = {"task_id": "t-1", "project_id": "p-1", "status": "running",
+            "steps": [dict(steps[0], status="completed"), steps[1]],
+            "run": {"intake": rows, "status": "running", "stages": {"inputs": {"status": "active"}}}}
+    path = tmp_path / "t-1.json"
+    path.write_text(json.dumps(task))
+    out = run_actions.start(path, type("Ctx", (), {"project_uuid": "p-1"})(), steps[1], instance=None)
+    return out, json.loads(path.read_text())
+
+
+def test_a_named_site_is_fetched_by_the_step(offline, tmp_path):
+    out, task = _dispatched(tmp_path, _site_rows())
+    assert out == run_actions.SITE_FETCH
+    step = task["steps"][1]
+    assert step["status"] == "completed" and step["result"]["state"] == "fetched"
+    assert step["result"]["site"] == SITE
+
+
+def test_no_site_named_settles_not_named_without_a_request(offline, tmp_path):
+    out, task = _dispatched(tmp_path, [])
+    assert out == run_actions.SITE_FETCH and offline == []
+    assert task["steps"][1]["result"] == {"kind": run_actions.SITE_KIND, "version": 1, "state": "not_named",
+                                          "reason": run_site.NOT_NAMED}
+
+
+def test_a_programming_error_stops_the_step_for_the_user(tmp_path, monkeypatch):
+    monkeypatch.setattr(site_context, "fetch_context", lambda *a, **k: 1 / 0)
+    out, task = _dispatched(tmp_path, _site_rows())
+    assert out == "site_start_failed"
+    assert task["steps"][1]["status"] == "failed"
+    assert task["run"]["stages"]["inputs"]["status"] == "failed"
+    assert task["run"]["status"] == "needs_user"
+
+
+def test_the_fetch_holds_no_solve():
+    from harness import run_eh
+    profile = run_profiles.resolve("eh_site@3")
+    steps = run_profiles.materialise(profile, "inputs", "p-1")
+    run_actions.fill(steps, run_site.freeze(_task(_site_rows())), run_actions.SITE_KIND)
+    need = 0
+    for s in steps:
+        if run_actions.is_action(s):
+            need += s["frozen"]["solves"]
+    assert need == 0
+    assert run_eh.pass_short.__doc__  # the pass counts a frozen 0 as 0 (see test below)
+
+
+def test_a_pass_counts_the_fetch_as_no_solve(monkeypatch, tmp_path):
+    from harness import run_eh
+    steps = run_profiles.materialise(run_profiles.resolve("eh_site@3"), "inputs", "p-1")
+    run_actions.fill(steps, run_site.freeze(_task(_site_rows())), run_actions.SITE_KIND)
+    monkeypatch.setattr(run_envelope, "_load", lambda path: {
+        "state": "granted", "budget": {"solves": 0}, "ledger": []})
+    monkeypatch.setattr(run_envelope, "solves_used", lambda envelope: 0)
+    assert run_eh.pass_short(tmp_path / "t.json", [s for s in steps if run_actions.is_action(s)]) is None
+
+
+# ── the rule and the report (item 4, S6) ────────────────────────────────────
+
+
+def _env(task):
+    return run_gates.Env(task=task, ctx=None, project=None, project_dir=None)
+
+
+def _verdict(task):
+    (result,) = run_gates.evaluate([run_profiles.SITE_CONTEXT_RULE], _env(task))
+    return result
+
+
+def _with(result):
+    step = {"id": "inputs.2", "tool": run_actions.SITE_FETCH, "native": run_actions.KIND,
+            "status": "completed", "result": result}
+    return {"steps": [step], "run": {}}
+
+
+FETCHED = {"kind": run_actions.SITE_KIND, "version": 1, "state": "fetched", "truncated": False,
+           "found": {"buildings": 7, "power_lines": 1, "power_substations": 1}}
+
+
+def test_the_rule_passes_on_a_whole_fetch():
+    result = _verdict(_with(FETCHED))
+    assert result["verdict"] == "pass"
+    assert result["facts"][0]["detail"] == ["7 buildings", "1 power lines", "1 power substations"]
+    assert run_site.gap_line(_with(FETCHED)) is None
+
+
+@pytest.mark.parametrize("record, reason", [
+    ({**FETCHED, "truncated": True}, "cut to the nearest features"),
+    ({"kind": run_actions.SITE_KIND, "version": 1, "state": "not_named", "reason": run_site.NOT_NAMED},
+     run_site.NOT_NAMED),
+    ({"kind": run_actions.SITE_KIND, "version": 1, "state": "unavailable", "reason": "Overpass answered HTTP 502"},
+     "HTTP 502"),
+    ({"version": 9, "state": "fetched"}, "cannot be read"),
+])
+def test_the_rule_is_not_evaluated_with_its_reason_and_the_report_lists_the_gap(record, reason):
+    task = _with(record)
+    result = _verdict(task)
+    assert result["verdict"] == "not_evaluated" and reason in result["reason"]
+    assert result["severity"] == "warn"
+    assert run_gates.passed([result])  # warn: an outage never stops the study (Q1)
+    payload, tables = harness_chapter.build(task, None, [])
+    gap = f"Site context not established: {result['reason']}"
+    assert gap in payload["gaps"] and [gap] in tables["harness_gaps"][1]
+
+
+def test_a_run_record_without_the_fetch_reads_not_evaluated_and_lists_no_gap():
+    task = {"steps": [], "run": {"stages": {}}}
+    result = _verdict(task)
+    assert result["verdict"] == "not_evaluated" and "has not fetched" in result["reason"]
+    payload, _ = harness_chapter.build(task, None, [])
+    assert payload["gaps"] == []  # @1/@2 reports are unchanged
+
+
+# ── The offline smoke (L7): an eh_site@3 pilot that names its site ───────────
+
+
+def _pilot(site_host, session, site, citations, monkeypatch):
+    from tests.test_harness_run_report_handoff import runner as run_runner
+    from tests.test_harness_runner import Clicks, mail
+
+    mail(monkeypatch)
+    name = f"Pilot {uuid.uuid4().hex[:6]}"
+    view = _start(citations, name)
+    run_envelope.decide(session, view["task_id"], "unattended", intake_digest=view["run"]["intake"]["digest"])
+    intent = run_handover.read_intent(task_path(site[1], view))
+    path, task = _new_task(intent)
+    record = _tick_to(run_runner(Clicks(refs={"solve.2"})), path, task["task_id"],
+                      lambda r: r["run"]["status"] in ("completed", "needs_user", "failed"))
+    assert record["run"]["status"] == "completed", record["run"]
+    fetch = next(s for s in record["steps"] if s["tool"] == run_actions.SITE_FETCH)
+    assert fetch["status"] == "completed"
+    rules = {r["rule"]: r for r in record["run"]["stages"]["input_gate"]["gate"]["rules"]}
+    return path, record, fetch, rules["eh.site.context"]
+
+
+def _saved_gaps(record, path):
+    from harness import run_report
+    doc = run_report.saved(record, path.parent.parent)
+    return [row[0] for row in doc.tables["harness_gaps"].rows]
+
+
+def test_pilot_v3_fetches_the_named_site_offline_and_the_rule_passes(
+    site_host, session, site, fake_report, offline, monkeypatch
+):
+    """Issue 33 acceptance (L7): the eh_site@2 pilot on @3, with the site
+    named in the intake. The inputs stage fetches it from the fixture (no
+    network), the input gate's `eh.site.context` passes on it, and the run
+    goes on to the hand-off with no site gap in its report."""
+    path, record, fetch, rule = _pilot(
+        site_host, session, site, [*site_host["citations"], site_host["goal"], *site_host["site"]], monkeypatch)
+    assert fetch["result"]["state"] == "fetched" and fetch["frozen"]["site"] == SITE
+    assert [c for c in offline if "interpreter" in c] == [site_context.DEFAULT_OVERPASS_URL]
+    assert rule["verdict"] == "pass"
+    assert run_site.context_path(path).is_file()
+    assert not [g for g in _saved_gaps(record, path) if g.startswith("Site context")]
+
+
+@pytest.mark.parametrize("named", [True, False])
+def test_pilot_v3_lists_a_site_it_could_not_fetch_or_was_not_given_in_the_saved_report(
+    named, site_host, session, site, fake_report, monkeypatch
+):
+    """GK B (49) item 4: an unavailable fetch and a site not named each read
+    not_evaluated (warn: the run still completes) and the saved report's
+    harness_gaps table, which `report.unsupported_listed` reads, names it."""
+    calls = []
+    monkeypatch.setattr(run_site, "_TRANSPORT", overpass(calls, status=502))
+    citations = [*site_host["citations"], site_host["goal"], *(site_host["site"] if named else [])]
+    path, record, fetch, rule = _pilot(site_host, session, site, citations, monkeypatch)
+    assert fetch["result"]["state"] == ("unavailable" if named else "not_named")
+    assert bool(calls) is named
+    assert rule["verdict"] == "not_evaluated"
+    assert ("HTTP 502" in rule["reason"]) if named else rule["reason"] == run_site.NOT_NAMED
+    assert f"Site context not established: {rule['reason']}" in _saved_gaps(record, path)

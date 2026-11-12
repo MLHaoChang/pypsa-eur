@@ -257,6 +257,10 @@ def elements_to_context(elements: list[dict]) -> dict:
             if len(pts) >= 2:
                 lines.append({"id": el["id"], "kind": kind, "points": pts, "tags": tags})
 
+    # Issue 33 (GK B (49) S6): what the response held, counted before any cap.
+    found = {"buildings": len(buildings), "lines": len(lines), "areas": len(areas),
+             "power_lines": sum(1 for l in lines if l["kind"] == "power_line"),
+             "power_substations": sum(1 for a in areas if a["kind"] == "power_substation")}
     if len(buildings) > MAX_FEATURES or len(lines) > MAX_FEATURES:
         # Keep what is nearest the centre of what was asked for.
         truncated = True
@@ -267,7 +271,7 @@ def elements_to_context(elements: list[dict]) -> dict:
         lines.sort(key=lambda l: (l["points"][0][0] - cx) ** 2 + (l["points"][0][1] - cy) ** 2)
         del buildings[MAX_FEATURES:]
         del lines[MAX_FEATURES:]
-    return {"buildings": buildings, "lines": lines, "areas": areas, "truncated": truncated}
+    return {"buildings": buildings, "lines": lines, "areas": areas, "truncated": truncated, "found": found}
 
 
 # ── terrain ────────────────────────────────────────────────────────────────
@@ -349,6 +353,7 @@ def context_document(bbox: tuple[float, float, float, float], features: dict, te
         "lines": features["lines"],
         "areas": features["areas"],
         "truncated": bool(features.get("truncated", False)),
+        **({"found": dict(features["found"])} if isinstance(features.get("found"), dict) else {}),
         "terrain": terrain,
         "attribution": list(ATTRIBUTION),
     }

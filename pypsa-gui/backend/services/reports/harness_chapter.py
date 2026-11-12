@@ -136,6 +136,11 @@ def build(
     run = task.get("run") or {}
     coverage = coverage or []
     gap_lines = gaps(missing_chapters, coverage)
+    from harness import run_site
+
+    site_gap = run_site.gap_line(task)
+    if site_gap:
+        gap_lines.append(site_gap)  # issue 33 (GK B (49)): never a silent default
     refusals = refusal_rows(envelope)
     payload = {
         "mode": run.get("mode"),
