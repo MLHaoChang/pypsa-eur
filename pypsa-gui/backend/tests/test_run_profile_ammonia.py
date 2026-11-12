@@ -539,19 +539,29 @@ def test_the_key_is_refused_outside_the_result_gate():
     profile = copy.deepcopy(run_profiles.PROFILES[REF])
     rule = {k: v for k, v in _rules()["nh3.binary_check"].items() if k != "reads"}
     profile["stages"].setdefault("input_gate", {}).setdefault("rules", []).append(
-        {**rule, "id": "nh3.binary_check.early"})
+        {**rule, "id": "nh3.binary_check.early"}
+    )
     with pytest.raises(run_profiles.ProfileError, match="only in the result gate"):
         run_profiles.load(profile)
 
 
 def _gate_row(rule, severity, verdict):
-    return {"rule": rule, "severity": severity, "verdict": verdict,
-            "facts": [{"value": "check_unverified" if verdict == "not_evaluated" else 0.2}]}
+    return {
+        "rule": rule,
+        "severity": severity,
+        "verdict": verdict,
+        "facts": [{"value": "check_unverified" if verdict == "not_evaluated" else 0.2}],
+    }
 
 
 def _at_result_gate():
-    return {"steps": [], "run": {"stage": "result_gate",
-                                 "stages": {"result_gate": {"status": "active", "attempts": 1}}}}
+    return {
+        "steps": [],
+        "run": {
+            "stage": "result_gate",
+            "stages": {"result_gate": {"status": "active", "attempts": 1}},
+        },
+    }
 
 
 @pytest.mark.parametrize("agent", [True, False])
@@ -560,14 +570,23 @@ def test_a_keyed_rule_not_evaluated_stops_before_any_loop_or_envelope(tmp_path, 
     `not_evaluated` before the envelope check (none is live here) and before a
     loop exists, with or without an agent; the gate keeps the other fail."""
     from harness import run_loops
+
     profile = copy.deepcopy(run_profiles.resolve(REF))
     if not agent:
         profile["stages"]["result_gate"].pop("agent", None)
     task = _at_result_gate()
-    gate = {"verdict": "fail", "rules": [_gate_row("nh3.binary_check", "block", "not_evaluated"),
-                                         _gate_row("nh3.delivery.shortfall", "block", "fail")]}
+    gate = {
+        "verdict": "fail",
+        "rules": [
+            _gate_row("nh3.binary_check", "block", "not_evaluated"),
+            _gate_row("nh3.delivery.shortfall", "block", "fail"),
+        ],
+    }
     before = copy.deepcopy(gate)
-    assert run_loops.after_failed_result(tmp_path / "task.json", task, gate, profile) is False
+    assert (
+        run_loops.after_failed_result(tmp_path / "task.json", task, gate, profile)
+        is False
+    )
     assert task["run"]["stages"]["result_gate"]["reason"] == "not_evaluated"
     assert "loop" not in task["run"] and "loops" not in task["run"]
     assert gate == before
@@ -577,14 +596,27 @@ def test_a_keyed_rule_that_does_not_fail_the_gate_never_stops_it(tmp_path):
     """GK B (51) F2: a keyed rule outside `failing` (a warn, which the profile
     loader refuses, built here by hand) does not end the stage on not_evaluated."""
     from harness import run_loops
+
     profile = copy.deepcopy(run_profiles.resolve(REF))
-    warn = {**profile["stages"]["result_gate"]["rules"][0], "id": "x.warn", "severity": "warn",
-            "unevaluated": run_gates.UNEVALUATED_TO_USER}
+    warn = {
+        **profile["stages"]["result_gate"]["rules"][0],
+        "id": "x.warn",
+        "severity": "warn",
+        "unevaluated": run_gates.UNEVALUATED_TO_USER,
+    }
     profile["stages"]["result_gate"]["rules"].append(warn)
     task = _at_result_gate()
-    gate = {"verdict": "fail", "rules": [_gate_row("x.warn", "warn", "not_evaluated"),
-                                         _gate_row("nh3.delivery.shortfall", "block", "fail")]}
-    assert run_loops.after_failed_result(tmp_path / "task.json", task, gate, profile) is False
+    gate = {
+        "verdict": "fail",
+        "rules": [
+            _gate_row("x.warn", "warn", "not_evaluated"),
+            _gate_row("nh3.delivery.shortfall", "block", "fail"),
+        ],
+    }
+    assert (
+        run_loops.after_failed_result(tmp_path / "task.json", task, gate, profile)
+        is False
+    )
     assert task["run"]["stages"]["result_gate"]["reason"] == "no_envelope"
 
 
