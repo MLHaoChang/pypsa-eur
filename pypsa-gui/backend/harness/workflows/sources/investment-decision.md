@@ -53,9 +53,15 @@ above and never get a default or a "Keep all defaults".
 
 ## Step: verdict
 
-`run_decision_study` runs the options; poll `get_study_findings` until it
-has finished. Then `run_decision_study` with stage `tornado`, and poll
-again: the verdict needs the tornado. Read the verdict with
+Put both runs in one plan (`start_task`, two steps, titled with the user's
+words): `run_decision_study` (options), then `run_decision_study` with stage
+`tornado`. Each step keeps its own run card, which the user approves as ever.
+The plan waits on each run, so the conversation continues once, by itself,
+when the last one ends and the user is not asked to come back between them.
+Say that the runs were started and that you will report when they finish; do
+not poll. A run that fails or is aborted fails its step with the run's own
+error: read it to the user, name the stage that failed, and give no verdict
+for it. When the tornado has finished (the verdict needs it), read the verdict with
 `get_study_findings` and `explain_verdict`: say whether it is recommended,
 marginal or not recommended, at what size, and which driver could flip it.
 A figure that is not established is said so, never read as zero.
