@@ -160,7 +160,7 @@ def test_a_dropped_existing_asset_leaves_the_rule_unevaluated_with_its_name(ic, 
     _cf, keeps = gate()
     assert keeps["verdict"] == "not_evaluated"
     assert keeps["facts"][0]["value"] == F.NOT_ESTABLISHED
-    assert keeps["reason"] == "The case's baseline drops the owned asset diesel_1"
+    assert keeps["reason"] == "The case's baseline drops the owned asset “diesel_1”"
 
 
 def test_no_case_is_not_run(ic):

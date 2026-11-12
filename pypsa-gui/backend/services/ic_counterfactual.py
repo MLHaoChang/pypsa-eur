@@ -112,7 +112,7 @@ def reason_words(fact: dict) -> str:
         if r in _REASON_WORDS:
             out.append(_REASON_WORDS[r])
         elif r.startswith(_DROPS):
-            out.append(f"the case's baseline drops the owned asset {r[len(_DROPS):]}")
+            out.append(f"the case's baseline drops the owned asset \u201c{r[len(_DROPS):]}\u201d")
         elif r.startswith("changed:"):
             out.append(f"{_plain(r[len('changed:'):])} changed since the case")
         elif r.startswith(_BLOCKER):

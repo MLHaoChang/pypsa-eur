@@ -31,7 +31,7 @@ def _rules(ref, stage="result_gate"):
 # ── G5 (B12): the `ic.baseline_keeps` words reach each reader ────────────────
 
 KEEPS = "mg.ic.baseline_keeps"
-DROPS_WORDS = "The case's baseline drops the owned asset diesel_1"
+DROPS_WORDS = "The case's baseline drops the owned asset “diesel_1”"
 
 
 @pytest.mark.parametrize(
@@ -55,7 +55,8 @@ DROPS_WORDS = "The case's baseline drops the owned asset diesel_1"
                 "kept": [],
                 "reasons": ["baseline_drops:diesel_1", "baseline_drops:island_battery"],
             },
-            DROPS_WORDS + " · the case's baseline drops the owned asset island_battery",
+            DROPS_WORDS
+            + " · the case's baseline drops the owned asset “island_battery”",
         ),
         (
             {"state": ic.NOT_RUN, "kept": [], "reasons": ["no_case"]},
