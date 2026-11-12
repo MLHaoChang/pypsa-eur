@@ -656,6 +656,155 @@ def test_d2_the_map_digest_does_not_depend_on_insertion_order():
     )
 
 
+# ── Mutant gaps: the share arithmetic, the digest gate, the map's refusals ───
+
+
+def _shares(**per_load) -> L.LostProductionMap:
+    """A hand map: `__lost_conc` on conc, each Load's share per period (4-year
+    periods from 2031 and 2035)."""
+    return L.LostProductionMap(
+        slack_bus={"__lost_conc": "conc"},
+        load_bus={ld: "conc" for ld in per_load},
+        share={
+            "__lost_conc": {
+                ld: L.Series(f"share.{ld}", "", pp, {p: 4.0 for p in pp})
+                for ld, pp in per_load.items()
+            }
+        },
+        unread={},
+    )
+
+
+def _ships(*loads):
+    return (
+        _inputs(*(_linked(ld, f"shipped.{ld}") for ld in loads)),
+        {ld: _flat(f"shipped.{ld}") for ld in loads},
+    )
+
+
+def test_a4_shares_that_sum_past_one_drop_the_line_whole_and_show_one():
+    """A4, D5 (b): the read Loads' shares are capped at the whole."""
+    ic = _case(LOST_CONC, FOM)
+    inputs, out = _ships("a", "b")
+    lpm = _shares(a={2031: 0.7, 2035: 0.7}, b={2031: 0.6, 2035: 0.6})
+    bc = build_business_case(ic, inputs, out, lpm)
+    for y in OPS:
+        assert LOST_CONC.key not in _by_year(bc)[y]
+    row = {r.key: r for r in bc.locked}[LOST_CONC.key]
+    assert row.dropped == tuple((y, 1.0) for y in OPS)
+
+
+def test_d4_a_zero_share_drops_nothing_and_its_years_are_absent():
+    ic = _case(LOST_CONC, FOM)
+    inputs, out = _ships("a")
+    bc = build_business_case(ic, inputs, out, _shares(a={2031: 0.0, 2035: 0.25}))
+    row = {r.key: r for r in bc.locked}[LOST_CONC.key]
+    assert row.dropped == tuple((y, 0.25) for y in range(2035, 2039))
+    for y in range(2031, 2035):
+        assert _by_year(bc)[y][LOST_CONC.key] == LOST_CONC
+
+
+def test_d1_a_year_outside_every_period_has_no_share_and_no_amount():
+    """A year the solve has no period for drops a share that is not established:
+    the line's amount is None there (never the full penalty, never 0)."""
+    ic = _case(LOST_CONC, FOM)
+    inputs, out = _ships("a")
+    bc = build_business_case(ic, inputs, out, _shares(a={2035: 0.5}))
+    for y in range(2031, 2035):
+        assert _by_year(bc)[y][LOST_CONC.key].amount is None
+    for y in range(2035, 2039):
+        assert _by_year(bc)[y][LOST_CONC.key].amount == pytest.approx(
+            LOST_CONC.amount * 0.5
+        )
+    row = {r.key: r for r in bc.locked}[LOST_CONC.key]
+    assert row.dropped[:4] == tuple((y, None) for y in range(2031, 2035))
+
+
+def test_d1_a_not_established_penalty_stays_not_established_under_a_part_drop():
+    lost = dataclasses.replace(LOST_CONC, amount=None)
+    ic = _case(lost, FOM)
+    inputs, out = _ships("a")
+    bc = build_business_case(ic, inputs, out, _shares(a={2031: 0.5, 2035: 0.5}))
+    for y in OPS:
+        assert _by_year(bc)[y][LOST_CONC.key].amount is None
+
+
+def test_g3_1_only_an_asset_line_names_a_slack():
+    from services.finance.business_case import _slack_of
+
+    assert _slack_of(LOST_CONC) == "__lost_conc"
+    assert _slack_of(dataclasses.replace(LOST_CONC, source="template")) is None
+    assert _slack_of(dataclasses.replace(LOST_CONC, source_id="opex")) is None
+
+
+def test_d2_an_empty_map_keeps_the_digest_and_an_unread_one_changes_it():
+    ic = _case(LOST_NH3, FOM)
+    inputs = _inputs(_linked("nh3", "served_product.nh3"))
+    out = {"nh3": _flat("served_product.nh3")}
+    none = business_case_hash(ic, inputs, out)
+    empty = L.LostProductionMap({}, {}, {}, {})
+    assert business_case_hash(ic, inputs, out, empty) == none
+    unread = L.LostProductionMap({}, {}, {}, {"nh3": "not_own_solve"})
+    assert business_case_hash(ic, inputs, out, unread) != none
+
+
+def test_d2_the_digest_reads_each_share_period():
+    ic = _case(LOST_CONC, FOM)
+    inputs, out = _ships("a")
+    early = _shares(a={2031: 0.5})
+    late = _shares(a={2035: 0.5})
+    assert business_case_hash(ic, inputs, out, early) != business_case_hash(
+        ic, inputs, out, late
+    )
+
+
+def test_a2_a_stale_solve_or_another_network_reads_no_share():
+    """LO-9: the map reads only the run's own fresh solve; otherwise each slack's bus
+    is not evaluated (never 0)."""
+    n = _plant()
+    n.generators_t.p["__lost_conc"] = 2.0
+    ic = _case(LOST_NH3, LOST_CONC, FOM)
+    want = {"conc": "not_own_solve", "nh3": "not_own_solve"}
+    stale = dataclasses.replace(_solve(n), fresh=False)
+    assert L.lost_production(n, stale, ic).unread == want
+    other = dataclasses.replace(_solve(n), network=n.copy())
+    assert L.lost_production(n, other, ic).unread == want
+    assert L.lost_production(n, _solve(n), ic).unread == {}
+
+
+@pytest.mark.parametrize(
+    "bus, p, flag, reason",
+    [
+        ("nh3", "p", None, "lost_production_not_read"),
+        ("conc", None, None, "lost_production_not_read"),
+        ("conc", None, "role_from_name", "role_from_name"),
+        ("conc", "p", "lost_production_capture_stale", "lost_production_capture_stale"),
+    ],
+)
+def test_a2_a_shortfall_on_another_bus_or_unreadable_is_not_evaluated(
+    monkeypatch, bus, p, flag, reason
+):
+    import pandas as pd
+
+    from services import process_products
+
+    n = _plant()
+    real = {s.name: s for s in process_products.shortfalls(n, _solve(n).lost_load)}
+
+    def fake(n, lost_load):
+        s = real["__lost_conc"]
+        p_ = pd.Series(1.0, index=n.snapshots) if p else None
+        return [
+            real["__lost_nh3"],
+            dataclasses.replace(s, bus=bus, p=p_, flag=flag),
+        ]
+
+    monkeypatch.setattr(process_products, "shortfalls", fake)
+    lpm = L.lost_production(n, _solve(n), _case(LOST_NH3, LOST_CONC, FOM))
+    assert lpm.unread == {"conc": reason}
+    assert "__lost_conc" not in lpm.share and "__lost_nh3" in lpm.share
+
+
 def test_bc1_the_ic_case_is_unchanged_by_every_guard():
     """BC1, A9, D4: a build that drops lost production and fills `locked` leaves the
     IC case, its digest and the network the map read byte-equal."""
