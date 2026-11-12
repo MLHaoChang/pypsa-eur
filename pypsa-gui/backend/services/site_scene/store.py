@@ -299,6 +299,8 @@ def apply(project_dir: pathlib.Path, site_id: str, proposal: dict[str, Any], exp
         if proposal.get("detached"):
             # SC-02d: key -> the uid it was bound to, so an undo finds the same instances.
             receipt["detached"] = copy.deepcopy(proposal["detached"])
+        if proposal.get("route_only"):
+            receipt["route_only"] = True  # GK B G1: never read back through the chat
         gen.update(parent=pointer["generation"], receipt=receipt)
         _commit(project_dir, site_id, gen, revision, receipt, crash)
         return receipt
