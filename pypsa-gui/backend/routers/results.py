@@ -103,6 +103,7 @@ from services.results.asset_economics import compute_asset_economics
 from services.results.emissions import compute_emissions
 from services.results.lcoh import compute_lcoh
 from services.results.carrier_kpis import compute_carrier_kpis
+from services.solver.renewable_fraction import renewable_fraction_result
 from services.results.prices import compute_prices
 from services.results.prices import compute_price_drivers
 from services.results.line_duals import compute_line_duals
@@ -781,6 +782,25 @@ def get_carrier_kpis():
         return _not_solved()
     payload = compute_carrier_kpis(n, result_df=_result_df)
     return _not_solved() if payload is None else payload
+
+
+@results_router.get("/renewable_fraction")
+def get_renewable_fraction():
+    """
+    HOMER's renewable fraction of the last solve (homer-parity 01a):
+    1 − non-renewable electricity / electricity served, with the definition
+    in `services/solver/renewable_fraction.py`. Shown whether or not the
+    minimum-renewable-fraction constraint was on: `target` is the fraction
+    the solve enforced, None when it was off. Shed load (the solve's
+    lost-load capture) is not served. `fraction` is None, with `reason`,
+    when nothing was served.
+    """
+    n = PyPSAService.get_network()
+    if not _dispatch_ready(n):
+        return _not_solved()
+    settings = _solved_settings() or {}
+    return renewable_fraction_result(n, _state.get("last_lost_load"),
+                                     settings.get("min_renewable_fraction"))
 
 
 @results_router.get("/emissions")

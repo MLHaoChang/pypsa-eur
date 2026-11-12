@@ -115,11 +115,19 @@ def goal_sources(goal: dict, overridden: set[str] | frozenset[str] = frozenset()
     return {k: (OVERRIDE if k in overridden else v["source"]) for k, v in goal.items()}
 
 
+# Opt-in LP fields added after fingerprints existed: left out while off
+# (None or 0, which change no outcome), so every fingerprint and digest
+# computed before the field existed still matches (homer-parity 01a R1).
+OFF_WHEN_FALSY = frozenset({"min_renewable_fraction"})
+
+
 def goal_free_config(cfg: Any) -> dict:
     """The solver config as a dict without the goal fields the LP never
-    reads: the input to every fingerprint and digest of the config."""
+    reads, nor an opt-in field that is off: the input to every fingerprint
+    and digest of the config."""
     d = cfg if isinstance(cfg, dict) else asdict(cfg)
-    return {k: v for k, v in d.items() if k not in GOAL_FIELDS}
+    return {k: v for k, v in d.items()
+            if k not in GOAL_FIELDS and not (k in OFF_WHEN_FALSY and not v)}
 
 
 def eh_request_with_goal(body: Any, goal: dict) -> tuple[Any, dict[str, str]]:

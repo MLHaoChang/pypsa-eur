@@ -22,6 +22,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import CarrierSelect from '../components/CarrierSelect'
 import { ROLLING_WORDS } from './solver/rollingWords'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
+import { OffGridConstraints } from './solver/OffGridConstraints'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
 import { useLoadFlowOn, useN1On } from '../components/flowScope/useFlowScope'
 import { ScopeGate } from '../components/flowScope/ScopeGate'
@@ -933,6 +934,9 @@ export default function SolverSettings() {
           const { patch: p, error } = goalPatchFromEdits(e)
           if (!error) patch(p)
         }} />
+
+      {/* ── Off-grid constraints (homer-parity 01a; 01b joins it) ── */}
+      <OffGridConstraints draft={draft} patch={patch} />
 
       {/* ── Stress scenarios (the registry the B/C sweep reads) ─── */}
       <StressConditionsSection project={currentProject} />

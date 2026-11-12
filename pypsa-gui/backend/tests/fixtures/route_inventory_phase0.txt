@@ -459,6 +459,7 @@ GET     /api/results/price_drivers                                              
 GET     /api/results/prices                                                        -> get_prices_api_results_prices_get
 GET     /api/results/process_uc_check                                              -> get_process_uc_check_api_results_process_uc_check_get
 GET     /api/results/process_view                                                  -> get_process_view_api_results_process_view_get
+GET     /api/results/renewable_fraction                                            -> get_renewable_fraction_api_results_renewable_fraction_get
 GET     /api/results/reserve_margin                                                -> get_reserve_margin_api_results_reserve_margin_get
 GET     /api/results/run-view                                                      -> get_run_view_api_results_run_view_get
 GET     /api/results/statistics                                                    -> get_statistics_api_results_statistics_get

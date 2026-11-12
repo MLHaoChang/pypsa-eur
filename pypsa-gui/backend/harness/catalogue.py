@@ -137,7 +137,7 @@ RESULTS_ENUM = [
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics", "billing", "cfe_score", "value_flows",
+    "asset_economics", "billing", "cfe_score", "value_flows", "renewable_fraction",
 ]
 RESULTS_SOURCE_ENUM = ["lopf", "ac_pf"]
 # Task 14 — per-asset results chat tools (get_asset_results /
@@ -486,6 +486,10 @@ TOOLS: list[dict[str, Any]] = [
         "flags}], flags}, gap: {periods, gates, ...}, provenance}; "
         "(cfe_score): {per_period: {'_'|period: {score, load_mwh, clean_mwh, "
         "matched_mwh, ...}}, flags, notes}; "
+        "(renewable_fraction): {fraction (share of electricity served from renewables, "
+        "0-1, null with reason when nothing served), renewable_mwh, nonrenewable_mwh, "
+        "served_mwh, per_period: [{period, fraction, ...}], target (the minimum the solve "
+        "enforced, null when off), reason}; "
         "(value_flows): {status: 'ok'|'not_established'|'value_flows_invalid', "
         "participants, externals, template, periods: {'_'|period: {lines: [{payer, payee, "
         "value_stream, source, amount, ...}], by_participant: {id: {paid, received, net, "

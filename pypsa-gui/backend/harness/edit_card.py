@@ -1006,8 +1006,11 @@ _SOLVER_WORDS: dict[str, tuple[str, str, dict | None]] = {
     "site_archetype": ("Site type", "", {
         "strong_grid": "Strong \u2014 import whenever needed", "weak_flexible": "Weak or limited",
         "off_grid": "None \u2014 the site runs as an island"}),
+    # homer-parity 01a. Shown in % (a share, below), as the Solver Settings field
+    # `MIN_RENEWABLE_FRACTION_LABEL` (pages/solver/OffGridConstraints.tsx) says it.
+    "min_renewable_fraction": ("Minimum renewable fraction", "", None),
 }
-_SHARES = frozenset({"discount_rate", "inflation_rate"})
+_SHARES = frozenset({"discount_rate", "inflation_rate", "min_renewable_fraction"})
 _ROLLING = frozenset({"rolling_horizon", "rolling_overlap"})
 # Settings with their own route (validation and If-Match): never through this card. The
 # commercial config stays: chat_tools steers the model here for its poc_link and contracts.

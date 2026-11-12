@@ -19,9 +19,15 @@ from pydantic import ValidationError
 
 from models.schemas import SolverConfigSchema
 from services.pypsa_service import PyPSAService
+import hashlib
+import json
+
+from services.reliability_goal import goal_free_config
 from services.solver.renewable_fraction import (
     _wrap_with_min_renewable_fraction,
+    classify,
     renewable_fraction,
+    renewable_fraction_result,
     row_name,
 )
 from services.solver_service import SolverConfig, run_simulation
@@ -33,7 +39,9 @@ PV_PU = np.array([1.0 if 8 <= h < 16 else 0.0 for h in range(HOURS)])
 
 
 def _network(*, pv_max: float = 100.0) -> pypsa.Network:
-    """PV (extendable), a diesel genset, a battery: the 3-asset fixture."""
+    """PV (extendable), a diesel genset, a battery: the 3-asset fixture. One
+    day, so the LP periodizes the per-year capital costs by 24/8760. Storage is dear enough that the
+    free optimum runs diesel all night (fraction 8/24 ≈ 0.33)."""
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=HOURS, freq="h"))
     for c in ("solar", "diesel", "battery"):
@@ -41,11 +49,11 @@ def _network(*, pv_max: float = 100.0) -> pypsa.Network:
     n.add("Bus", "ac", carrier="AC")
     n.add("Load", "site", bus="ac", p_set=LOAD_MW)
     n.add("Generator", "pv", bus="ac", carrier="solar", p_nom_extendable=True,
-          p_nom_max=pv_max, capital_cost=40.0, p_max_pu=pd.Series(PV_PU, index=n.snapshots))
+          p_nom_max=pv_max, capital_cost=60_000.0, p_max_pu=pd.Series(PV_PU, index=n.snapshots))
     n.add("Generator", "diesel", bus="ac", carrier="diesel", p_nom=LOAD_MW,
-          marginal_cost=5.0)
+          marginal_cost=250.0)
     n.add("StorageUnit", "bess", bus="ac", carrier="battery", p_nom_extendable=True,
-          max_hours=4.0, capital_cost=60.0, efficiency_store=0.95,
+          max_hours=4.0, capital_cost=400_000.0, p_nom_max=100.0, efficiency_store=0.95,
           efficiency_dispatch=0.95, cyclic_state_of_charge=True)
     return n
 
@@ -62,16 +70,22 @@ def _drain(q: queue.SimpleQueue) -> list[str]:
 def _solve(n: pypsa.Network, **cfg_kw):
     PyPSAService.set_network(n)
     q: queue.SimpleQueue = queue.SimpleQueue()
+    sink: dict = {}
     status, condition = run_simulation(
         SolverConfig(**cfg_kw), n, PyPSAService.get_lock(), threading.Event(),
-        q, state_update=lambda **kw: None,
+        q, state_update=lambda **kw: sink.update(kw),
     )
+    _SINK.clear()
+    _SINK.update(sink)
     return status, condition, _drain(q)
+
+
+_SINK: dict = {}
 
 
 # ── the input ─────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("bad", [-0.1, 1.5, float("nan")])
+@pytest.mark.parametrize("bad", [-0.1, 1.5, float("nan"), float("inf"), "x"])
 def test_the_input_rejects_values_outside_0_to_1(bad):
     with pytest.raises(ValidationError):
         SolverConfigSchema(min_renewable_fraction=bad)
@@ -137,7 +151,9 @@ def test_the_kpi_counts_a_link_genset_from_a_fuel_bus_and_not_the_battery():
 
 def test_shed_load_is_not_served():
     n = _dispatched()
-    kpi = renewable_fraction(n, unserved_mwh=40.0)
+    shed = pd.Series(0.0, index=n.snapshots)
+    shed.iloc[:10] = 4.0                                         # 40 MWh shed
+    kpi = renewable_fraction(n, unserved_t=shed)
     assert kpi["served_mwh"] == pytest.approx(200.0)
     assert kpi["fraction"] == pytest.approx((200.0 - 90.0) / 200.0)
 
@@ -195,3 +211,161 @@ def test_one_row_per_investment_period():
     names = set(n.model.constraints)
     assert {row_name(2030), row_name(2035)} <= names
     assert row_name(None) not in names
+
+
+# ── R1: off is byte-identical ─────────────────────────────────────────────
+
+# sha256 of master's (1dffd76c) `goal_free_config(SolverConfig())`, the input
+# to the network fingerprint and the investment-case digest.
+MASTER_DEFAULT_CONFIG_SHA = "9b89ba730791f6d73b395db5f74240d82204cc3c58ba5109b8212cd5385fb281"
+
+
+def _cfg_sha(cfg) -> str:
+    return hashlib.sha256(json.dumps(goal_free_config(cfg), sort_keys=True,
+                                     default=str).encode()).hexdigest()
+
+
+@pytest.mark.parametrize("f", [None, 0.0])
+def test_off_keeps_master_fingerprint_input(f):
+    assert _cfg_sha(SolverConfig(min_renewable_fraction=f)) == MASTER_DEFAULT_CONFIG_SHA
+
+
+def test_a_target_changes_the_fingerprint_input():
+    assert _cfg_sha(SolverConfig(min_renewable_fraction=0.6)) != MASTER_DEFAULT_CONFIG_SHA
+
+
+def test_off_solve_settings_carry_no_new_key():
+    assert _solve(_network())[0] == "ok"
+    assert "min_renewable_fraction" not in _SINK["last_solve_settings"]
+    assert _solve(_network(), min_renewable_fraction=0.5)[0] == "ok"
+    assert _SINK["last_solve_settings"]["min_renewable_fraction"] == 0.5
+
+
+# ── R3: grid import, however modelled; storage is not a source ───────────
+
+def test_grid_import_generator_is_non_renewable():
+    n = _network()
+    n.add("Generator", "grid", bus="ac", carrier="grid", p_nom=50.0, p_min_pu=-1.0)
+    assert "grid" in classify(n)["nonren_generators"]
+
+
+def test_grid_import_link_from_an_electrical_grid_bus_is_counted_once():
+    n = _network()
+    n.add("Bus", "grid", carrier="AC")
+    n.add("Generator", "supply", bus="grid", carrier="grid", p_nom=50.0)
+    n.add("Link", "poc", bus0="grid", bus1="ac", p_nom=50.0, efficiency=0.98)
+    c = classify(n)
+    assert c["source_links"] == ["poc"]
+    assert "supply" not in c["nonren_generators"]
+
+
+def test_a_link_fed_through_storage_is_not_a_source():
+    n = _network()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Store", "tank", bus="h2", e_nom=100.0)
+    n.add("Link", "fuelcell", bus0="h2", bus1="ac", p_nom=5.0, efficiency=0.5)
+    n.add("Link", "electrolyser", bus0="ac", bus1="h2", p_nom=5.0, efficiency=0.7)
+    assert classify(n)["source_links"] == []
+
+
+# ── R4: the row reads what the LP sees ───────────────────────────────────
+
+def _two_period(weights=(1.0, 1.0)) -> pypsa.Network:
+    n = _network()
+    n.set_investment_periods([2030, 2035])
+    for P, w in zip((2030, 2035), weights):
+        n.snapshot_weightings.loc[P, :] = w
+    # A time-series load: the solve's load scalers act on `loads_t.p_set` only.
+    n.loads_t.p_set = pd.DataFrame({"site": LOAD_MW}, index=n.snapshots)
+    return n
+
+
+def _rhs(n, name) -> float:
+    return float(np.ravel(n.model.constraints[name].rhs.values)[0])
+
+
+def test_the_row_uses_the_scaled_load():
+    n = _two_period()
+    status, _, log = _solve(n, min_renewable_fraction=0.5, multi_investment_periods=True,
+                            investment_periods=[2030, 2035], load_scalers={"2035": 1.5})
+    rows = [l for l in log if l.startswith("[RENEWABLE]")]
+    assert any(row_name(2030) in l and "240.0 MWh electrical load" in l for l in rows), rows
+    assert any(row_name(2035) in l and "360.0 MWh electrical load" in l for l in rows), rows
+
+
+def test_a_time_varying_efficiency_reaches_the_row():
+    n = _network()
+    n.add("Bus", "fuel", carrier="diesel")
+    n.add("Generator", "tank", bus="fuel", carrier="diesel", p_nom=100.0)
+    n.add("Link", "genset2", bus0="fuel", bus1="ac", p_nom=25.0,
+          efficiency=pd.Series(np.linspace(0.3, 0.5, HOURS), index=n.snapshots))
+    n.optimize.create_model()
+    _wrap_with_min_renewable_fraction(n, None, SolverConfig(min_renewable_fraction=0.5))(n, n.snapshots)
+    coeffs = set(np.round(np.ravel(n.model.constraints[row_name(None)].coeffs.values), 6))
+    assert {0.3, 0.5} <= coeffs
+
+
+# ── R5: a slack lets the LP shed instead ─────────────────────────────────
+
+def test_with_a_voll_slack_the_target_is_met_by_shedding():
+    n = _network(pv_max=5.0)
+    status, _, log = _solve(n, min_renewable_fraction=0.9, voll=10_000.0)
+    assert status == "ok", log
+    kpi = renewable_fraction_result(n, _SINK.get("last_lost_load"), 0.9)
+    assert kpi["served_mwh"] < LOAD_MW * HOURS - 1.0, kpi
+    assert kpi["fraction"] >= 0.9 - 1e-6, kpi
+
+
+# ── R6: nothing served ───────────────────────────────────────────────────
+
+def test_nothing_served_is_none_with_a_reason():
+    n = _dispatched()
+    n.loads_t.p.loc[:, :] = 0.0
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "served" in kpi["reason"]
+
+
+def test_a_capture_from_another_solve_is_refused():
+    n = _dispatched()
+    other = pd.DataFrame({"site": [1.0]}, index=pd.date_range("2031-01-01", periods=1, freq="h"))
+    kpi = renewable_fraction_result(n, {"lost_load_t": other}, None)
+    assert kpi["fraction"] is None and "another solve" in kpi["reason"]
+
+
+# ── R10: each period on its own weightings ───────────────────────────────
+
+def test_each_period_row_uses_only_its_own_weightings():
+    n = _two_period(weights=(1.0, 2.0))
+    n.optimize.create_model(multi_investment_periods=True)
+    _wrap_with_min_renewable_fraction(
+        n, None, SolverConfig(min_renewable_fraction=0.5, multi_investment_periods=True))(n, n.snapshots)
+    assert _rhs(n, row_name(2030)) == pytest.approx(0.5 * 240.0)
+    assert _rhs(n, row_name(2035)) == pytest.approx(0.5 * 480.0)
+
+
+def test_a_period_without_load_gets_no_row():
+    n = _two_period()
+    n.loads_t.p_set = pd.DataFrame({"site": [LOAD_MW if p == 2030 else 0.0
+                                             for p in n.snapshots.get_level_values(0)]},
+                                   index=n.snapshots)
+    n.optimize.create_model(multi_investment_periods=True)
+    _wrap_with_min_renewable_fraction(
+        n, None, SolverConfig(min_renewable_fraction=0.5, multi_investment_periods=True))(n, n.snapshots)
+    assert row_name(2030) in n.model.constraints
+    assert row_name(2035) not in n.model.constraints
+
+
+# ── U6: the chat edit card and the panel use one label ───────────────────
+
+def test_the_chat_edit_card_label_matches_the_panel():
+    import re
+    from pathlib import Path
+
+    from harness.edit_card import _SHARES, _SOLVER_WORDS
+
+    tsx = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages" / "solver"
+           / "OffGridConstraints.tsx").read_text()
+    panel = re.search(r"MIN_RENEWABLE_FRACTION_LABEL = '([^']+)'", tsx).group(1)
+    label, _unit, _words = _SOLVER_WORDS["min_renewable_fraction"]
+    assert "min_renewable_fraction" in _SHARES          # the card shows it in %
+    assert panel == f"{label} (%)"

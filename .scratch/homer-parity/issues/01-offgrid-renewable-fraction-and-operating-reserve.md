@@ -50,3 +50,27 @@ Master check (2026-11-12, triage keyword + synonym pass, `23aa3bc8`): both const
 
 ### Tests
 New `backend/tests/test_homer_renewable_fraction.py`, `test_homer_operating_reserve.py` (LP fixtures; follow `test_fca_load_scalers.py`); a `SolverSettings` vitest; `scripts/coord/mutants.py` on the changed solver module.
+
+### 01a plan verdicts (2026-11-12)
+
+GK B GO (per-period rows), with conditions; the PR body maps each to its test:
+- R1 Off is byte-identical: `goal_free_config` (fingerprint, IC digest) equals master's for None and 0; 0.6 changes both.
+- R2 One implementation: `services/solver/renewable_fraction.renewable_fraction(n)`; 03a imports it (or 01a imports 03a's if that lands first). Weighted energy, served = load − slack, served 0 → None, grid import gross.
+- R3 Grid import is non-renewable as a Generator or as a Link from a bus fed by a non-renewable Generator, even an electrical bus; a Link fed through a Store/StorageUnit is not a source.
+- R4 The row uses the scaled p_set and time-varying η (`links_t.efficiency`).
+- R5 Slacks (VOLL, DSR, dc_curtailment) let the LP meet the target by shedding at the slack's price; documented, tested with and without a VOLL slack.
+- R6 Served 0 → None with a reason; NaN/inf/out-of-range refused by the schema.
+- R7 Every solver-settings path runs the same validator; chat inventory checks if the tool enumerates fields.
+- R8 New route GET /results/renewable_fraction: route policy tests and route-parity check at the trial merge.
+- R9 Infeasibility names the row per period and the max renewable supply; no row on an empty period.
+- R10 One row per period on that period's weightings; a sum-over-all mutant fails.
+- R11 Vitest: 80 → 0.8, empty → null, −5/150/text refused with no request.
+- R12 mutants.py plus hand mutants (slack term, weighting, period filter, off-gate, import-link classification, 0/0 guard), each with its killing test.
+
+UX (no objection to placement), conditions:
+- U1 The hint never names `min_renewable_fraction`; the infeasible message opens with the label.
+- U2 Label "Minimum renewable fraction (%)"; visible "0 means no minimum"; out-of-range gets an inline sentence, no silent clamp.
+- U3 Plain-words definition.
+- U4 Block heading "Off-grid constraints" with a muted line saying when it applies.
+- U5 Shots: idle, value set, out-of-range, infeasible message; Expert (Guided only if reachable); light and dark.
+- U6 The chat edit card shows the same label, with a drift test.

@@ -163,6 +163,16 @@ def _diagnose_infeasibility(network, config, log_queue,
     except Exception:
         pass
 
+    # 2b) The minimum renewable fraction (homer-parity 01a): its row per
+    #     period, what it needs and the most the renewables can produce.
+    try:
+        from services.solver.renewable_fraction import infeasibility_lines
+        for line in infeasibility_lines(n, config):
+            emit(f"[INFEASIBLE]   • {line}")
+            hints += 1
+    except Exception:
+        pass
+
     # 3) Active global constraints (CO2 caps etc.) that may be binding too tight.
     try:
         gc = getattr(n, "global_constraints", None)
