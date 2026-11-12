@@ -45,7 +45,6 @@ from typing import Any
 import pandas as pd
 
 from services.adequacy.slack import LOST_SLACK_PREFIX, slack_generator_mask
-from services.commercial.participants import _ELECTRIC
 from services.results.carrier_kpis import _is_renewable_carrier
 from services.study import runner as _runner
 from services.study.runner import _opt_value
@@ -399,6 +398,13 @@ def _weights(n) -> pd.Series:
     return w
 
 
+#: Bus carriers that count as electric: AC, DC, a voltage level or none. A copy
+#: of the commercial engine's ``participants._ELECTRIC``: the study reaches the
+#: engine only through its two seams (``tests/test_study_one_engine.py``), and
+#: ``tests/test_homer_supply_architectures.py`` pins the two sets equal.
+_ELECTRIC = frozenset({"ac", "dc", "low voltage", "lv", "mv", "hv", "electricity", ""})
+
+
 def _energy(df: pd.DataFrame, names: Iterable[str], w: pd.Series) -> float:
     cols = [c for c in names if c in df.columns]
     if not cols:
@@ -407,8 +413,8 @@ def _energy(df: pd.DataFrame, names: Iterable[str], w: pd.Series) -> float:
 
 
 def _electrical_buses(n) -> set[str]:
-    """Buses whose carrier is electric (AC, DC, a voltage level or none; the
-    commercial engine's ``participants._ELECTRIC``)."""
+    """Buses whose carrier is electric (AC, DC, a voltage level or none; see
+    ``_ELECTRIC``)."""
     buses = n.buses
     if "carrier" not in buses.columns:
         return {str(b) for b in buses.index}

@@ -846,3 +846,9 @@ def test_a_time_varying_p_min_pu_overrides_a_negative_static_value():
     assert "grid" in [a.architecture_id for a in A.architectures_for(n)]
     n.links_t.p_min_pu = pd.DataFrame({"out": [0.0, 0.0]}, index=n.snapshots)
     assert "grid" not in [a.architecture_id for a in A.architectures_for(n)]
+
+
+def test_electric_carriers_match_the_commercial_engine():
+    from services.commercial.participants import _ELECTRIC
+
+    assert A._ELECTRIC == _ELECTRIC
