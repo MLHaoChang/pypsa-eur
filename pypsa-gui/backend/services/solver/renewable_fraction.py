@@ -78,7 +78,9 @@ def target_of(cfg: Any) -> float | None:
         return None
     if f is None or not math.isfinite(f) or f <= 0.0:
         return None
-    return min(f, 1.0)
+    # Not clamped: the schema refuses > 1 at entry; a path around it gets the
+    # LP it asked for (a negative right-hand side, reported infeasible).
+    return f
 
 
 # ── classification ────────────────────────────────────────────────────────
@@ -145,6 +147,11 @@ def _periods(snapshots) -> tuple[pd.Series, list]:
     return pd.Series([None] * len(snapshots), index=snapshots, dtype=object), [None]
 
 
+def _period_mask(per_of: pd.Series, period) -> pd.Series:
+    """The snapshots of one period (all of them on a single-period network)."""
+    return (per_of == period) if period is not None else pd.Series(True, index=per_of.index)
+
+
 def _efficiency(n, link: str, snapshots) -> pd.Series:
     eff_t = getattr(n.links_t, "efficiency", None)
     if eff_t is not None and link in getattr(eff_t, "columns", []):
@@ -176,7 +183,9 @@ def renewable_fraction(n, *, unserved_t: pd.DataFrame | pd.Series | None = None,
     slack Generators still on the network count as well.
 
     Returns ``fraction`` (None, with ``reason``, when nothing was served or
-    no dispatch is present), ``renewable_mwh``, ``nonrenewable_mwh``,
+    no dispatch is present; not clipped: like HOMER's, it is negative when
+    non-renewable output exceeds what was served, e.g. a genset charging a
+    battery), ``renewable_mwh``, ``nonrenewable_mwh``,
     ``served_mwh`` (horizon totals, period years applied) and ``per_period``.
     """
     sns = n.snapshots if snapshots is None else snapshots
@@ -214,7 +223,7 @@ def renewable_fraction(n, *, unserved_t: pd.DataFrame | pd.Series | None = None,
     years = n.investment_period_weightings["years"] if periods != [None] else None
     tot_served = tot_nonren = 0.0
     for P in periods:
-        mask = (per_of == P) if P is not None else pd.Series(True, index=sns)
+        mask = _period_mask(per_of, P)
         served = float((w * served_t)[mask].sum())
         nr = float((w * nonren)[mask].sum())
         out["per_period"].append({
@@ -309,7 +318,7 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
         load = _load_mw(n, cls["loads"], snapshots)
         gvar = m.variables["Generator-p"] if "Generator-p" in m.variables else None
         lvar = m.variables["Link-p"] if "Link-p" in m.variables else None
-        coord = (gvar if gvar is not None else lvar).coords["snapshot"] if (gvar is not None or lvar is not None) else None
+        coord = next((v.coords["snapshot"] for v in (gvar, lvar) if v is not None), None)
         gens = [g for g in cls["nonren_generators"] if gvar is not None and g in gvar.indexes["name"]]
         links = [l for l in cls["source_links"] if lvar is not None and l in lvar.indexes["name"]]
         slacks = [g for g in cls["slack_generators"] if gvar is not None and g in gvar.indexes["name"]]
@@ -319,7 +328,7 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
         l_src = _gross(m, lvar, links, [float(pmin_l[l].min()) for l in links]) if links else None
         eff = pd.DataFrame({l: _efficiency(n, l, snapshots) for l in links}, index=snapshots)
         for P in periods:
-            in_p = (per_of == P) if P is not None else pd.Series(True, index=snapshots)
+            in_p = _period_mask(per_of, P)
             w_p = w.where(in_p, 0.0)
             demand = float((w_p * load).sum())
             name = row_name(P)
@@ -371,7 +380,7 @@ def max_renewable_mwh(n, snapshots=None) -> dict[Any, float]:
     pmax = n.get_switchable_as_dense("Generator", "p_max_pu", sns)
     out: dict[Any, float] = {}
     for P in periods:
-        in_p = (per_of == P) if P is not None else pd.Series(True, index=sns)
+        in_p = _period_mask(per_of, P)
         tot = 0.0
         for g in gens:
             ext = bool(n.generators.at[g, "p_nom_extendable"])
@@ -395,7 +404,7 @@ def infeasibility_lines(n, cfg) -> list[str]:
     reach = max_renewable_mwh(n)
     lines = []
     for P in periods:
-        in_p = (per_of == P) if P is not None else pd.Series(True, index=n.snapshots)
+        in_p = _period_mask(per_of, P)
         demand = float((w.where(in_p, 0.0) * load).sum())
         if demand <= 0:
             continue

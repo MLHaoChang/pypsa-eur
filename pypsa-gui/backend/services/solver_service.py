@@ -99,8 +99,10 @@ from services.solver.adequacy import (  # noqa: F401
     _wrap_with_reserve_margin,
     reserve_margin_facts,
 )
-from services.solver.renewable_fraction import _wrap_with_min_renewable_fraction
-from services.solver.renewable_fraction import target_of as _rf_target_of
+from services.solver.renewable_fraction import (
+    _wrap_with_min_renewable_fraction,
+    target_of as _rf_target_of,
+)
 from services.solver.island import (  # noqa: F401  (re-exported)
     IslandRefusal,
     _wrap_with_island,

@@ -369,3 +369,38 @@ def test_the_chat_edit_card_label_matches_the_panel():
     label, _unit, _words = _SOLVER_WORDS["min_renewable_fraction"]
     assert "min_renewable_fraction" in _SHARES          # the card shows it in %
     assert panel == f"{label} (%)"
+
+
+# ── R7: every settings path refuses an out-of-range value ────────────────
+
+@pytest.mark.parametrize("bad", [-0.1, 1.5])
+def test_the_chat_settings_tool_refuses_out_of_range(bad):
+    from services import chat_tools
+
+    with pytest.raises(ValidationError):
+        chat_tools.update_solver_config({"min_renewable_fraction": bad})
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.5])
+def test_the_chat_edit_card_preview_refuses_out_of_range(bad):
+    from harness.edit_card import _solver_preview
+
+    with pytest.raises(Exception) as exc:
+        _solver_preview({"partial": {"min_renewable_fraction": bad}})
+    assert "min_renewable_fraction" in str(exc.value) or "refuse" in str(exc.value).lower()
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.5])
+def test_the_solver_config_put_refuses_out_of_range(client, bad):
+    before = client.get("/api/simulation/solver_config").json().get("min_renewable_fraction")
+    r = client.put("/api/simulation/solver_config", json={"min_renewable_fraction": bad})
+    assert r.status_code == 422, r.text
+    assert "min_renewable_fraction" in r.text
+    after = client.get("/api/simulation/solver_config").json().get("min_renewable_fraction")
+    assert after == before
+
+
+def test_the_solver_config_put_stores_a_fraction(client):
+    r = client.put("/api/simulation/solver_config", json={"min_renewable_fraction": 0.8})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/simulation/solver_config").json()["min_renewable_fraction"] == 0.8
