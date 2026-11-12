@@ -716,7 +716,11 @@ def site(rows: list) -> tuple[dict | None, dict | None]:
     default."""
     found: dict = {}
     for r in rows:
-        if r.get("write") or r.get("status") not in USABLE or top(r.get("param") or "") != SITE:
+        if (
+            r.get("write")
+            or r.get("status") not in USABLE
+            or top(r.get("param") or "") != SITE
+        ):
             continue
         axis = r["param"].split(".", 1)[1] if "." in r["param"] else ""
         found.setdefault(axis, r)
@@ -726,8 +730,11 @@ def site(rows: list) -> tuple[dict | None, dict | None]:
     for axis, label, limit in _SITE_AXES:
         r = found.get(axis)
         if r is None:
-            return None, _gap(f"{SITE}.{axis}", "site_invalid",
-                              f"{label} is missing: a site is named by both its latitude and its longitude.")
+            return None, _gap(
+                f"{SITE}.{axis}",
+                "site_invalid",
+                f"{label} is missing: a site is named by both its latitude and its longitude.",
+            )
         v = r.get("value")
         if (
             not isinstance(v, (int, float))
@@ -736,8 +743,11 @@ def site(rows: list) -> tuple[dict | None, dict | None]:
             or not -limit <= v <= limit
             or r.get("unit") != "°"
         ):
-            return None, _gap(f"{SITE}.{axis}", "site_invalid",
-                              f"{label} is a number of degrees from {-limit:g} to {limit:g}.")
+            return None, _gap(
+                f"{SITE}.{axis}",
+                "site_invalid",
+                f"{label} is a number of degrees from {-limit:g} to {limit:g}.",
+            )
         point[axis] = float(v)
     return point, None
 

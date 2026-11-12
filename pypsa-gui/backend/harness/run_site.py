@@ -30,6 +30,7 @@ today; the endpoints are the operator's (`PYPSAGUI_OVERPASS_URL`,
 attribute only tests set (S5): no route, intake field or profile value
 reaches it.
 """
+
 from __future__ import annotations
 
 import concurrent.futures
@@ -43,7 +44,9 @@ logger = logging.getLogger(__name__)
 
 VERSION = 1  # the frozen record's and the step result's shape
 HALF_SIDE_M = 250.0  # the fetched square's half side; the service pads it (`site_context.padded_bbox`)
-FETCH_TIMEOUT_S = 40.0  # the step's wall bound; `runner.LEASE_SECONDS` (90 s) is above it (S3)
+FETCH_TIMEOUT_S = (
+    40.0  # the step's wall bound; `runner.LEASE_SECONDS` (90 s) is above it (S3)
+)
 NOT_NAMED = "no site named in the intake"
 STATES = ("fetched", "unavailable", "not_named")
 SUFFIX = ".site_context"  # never `.json`: the task folder's globs read every `*.json` as a task
@@ -65,7 +68,9 @@ def _rows(task) -> list:
 
 
 def _digest(value) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, default=str).encode()
+    ).hexdigest()
 
 
 def freeze(task) -> dict:
@@ -74,8 +79,13 @@ def freeze(task) -> dict:
     from services import run_intake
 
     point, gap = run_intake.site(_rows(task))
-    frozen = {"kind": _run_actions().SITE_KIND, "version": VERSION, "site": point,
-              "invalid": gap["message"] if gap else None, "solves": 0}
+    frozen = {
+        "kind": _run_actions().SITE_KIND,
+        "version": VERSION,
+        "site": point,
+        "invalid": gap["message"] if gap else None,
+        "solves": 0,
+    }
     return {**frozen, "digest": _digest(core(frozen))}
 
 
@@ -85,8 +95,10 @@ def core(frozen) -> dict:
 
 def card(frozen) -> dict:
     site = frozen.get("site")
-    return {"site": f"{site['lat']:.5f}, {site['lon']:.5f}" if site else "none named",
-            "solves": frozen.get("solves")}
+    return {
+        "site": f"{site['lat']:.5f}, {site['lon']:.5f}" if site else "none named",
+        "solves": frozen.get("solves"),
+    }
 
 
 def _point_ok(site) -> bool:
@@ -95,13 +107,20 @@ def _point_ok(site) -> bool:
     if not isinstance(site, dict) or set(site) != {"lat", "lon"}:
         return False
     limits = {"lat": run_profiles.SITE_LAT_MAX, "lon": run_profiles.SITE_LON_MAX}
-    return all(isinstance(site[k], float) and math.isfinite(site[k]) and abs(site[k]) <= limits[k]
-               for k in limits)
+    return all(
+        isinstance(site[k], float)
+        and math.isfinite(site[k])
+        and abs(site[k]) <= limits[k]
+        for k in limits
+    )
 
 
 def valid(frozen) -> bool:
-    return (frozen.get("version") == VERSION and frozen.get("solves") == 0
-            and (frozen.get("site") is None or _point_ok(frozen["site"])))
+    return (
+        frozen.get("version") == VERSION
+        and frozen.get("solves") == 0
+        and (frozen.get("site") is None or _point_ok(frozen["site"]))
+    )
 
 
 def boundary(site) -> list[list[float]]:
@@ -119,8 +138,12 @@ def context_path(path) -> Path:
 
 
 def _unavailable(reason) -> dict:
-    return {"kind": _run_actions().SITE_KIND, "version": VERSION, "state": "unavailable",
-            "reason": str(reason)[:240] or "the site context could not be fetched"}
+    return {
+        "kind": _run_actions().SITE_KIND,
+        "version": VERSION,
+        "state": "unavailable",
+        "reason": str(reason)[:240] or "the site context could not be fetched",
+    }
 
 
 def fetch(path, site) -> dict:
@@ -133,15 +156,23 @@ def fetch(path, site) -> dict:
     from services.atomic_io import atomic_write_text
 
     shape = boundary(site)
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="site-context")
+    pool = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="site-context"
+    )
     try:
-        future = pool.submit(site_context.fetch_context, shape, transport=_TRANSPORT,
-                             budget_s=min(site_context.TOTAL_BUDGET_S, FETCH_TIMEOUT_S))
+        future = pool.submit(
+            site_context.fetch_context,
+            shape,
+            transport=_TRANSPORT,
+            budget_s=min(site_context.TOTAL_BUDGET_S, FETCH_TIMEOUT_S),
+        )
         try:
             doc = future.result(timeout=FETCH_TIMEOUT_S)
         except concurrent.futures.TimeoutError:
             # The fetch's own thread ends on its client's timeouts; its answer is never read.
-            return _unavailable(f"the map services did not answer within {FETCH_TIMEOUT_S:.0f} s")
+            return _unavailable(
+                f"the map services did not answer within {FETCH_TIMEOUT_S:.0f} s"
+            )
         except (site_context.SiteContextUnavailable, httpx.HTTPError, OSError) as exc:
             return _unavailable(exc)
     finally:
@@ -150,13 +181,30 @@ def fetch(path, site) -> dict:
     try:
         atomic_write_text(context_path(path), text)
     except OSError as exc:
-        return _unavailable(f"the fetched context could not be kept ({type(exc).__name__})")
-    found = doc.get("found") if isinstance(doc.get("found"), dict) else {
-        "buildings": len(doc.get("buildings") or []), "lines": len(doc.get("lines") or [])}
-    return {"kind": _run_actions().SITE_KIND, "version": VERSION, "state": "fetched",
-            "site": dict(site), "boundary": shape, "truncated": bool(doc.get("truncated")),
-            "found": dict(found), "source": doc.get("source"), "fetched_at": doc.get("fetched_at"),
-            "file": context_path(path).name, "digest": hashlib.sha256(text.encode()).hexdigest()}
+        return _unavailable(
+            f"the fetched context could not be kept ({type(exc).__name__})"
+        )
+    found = (
+        doc.get("found")
+        if isinstance(doc.get("found"), dict)
+        else {
+            "buildings": len(doc.get("buildings") or []),
+            "lines": len(doc.get("lines") or []),
+        }
+    )
+    return {
+        "kind": _run_actions().SITE_KIND,
+        "version": VERSION,
+        "state": "fetched",
+        "site": dict(site),
+        "boundary": shape,
+        "truncated": bool(doc.get("truncated")),
+        "found": dict(found),
+        "source": doc.get("source"),
+        "fetched_at": doc.get("fetched_at"),
+        "file": context_path(path).name,
+        "digest": hashlib.sha256(text.encode()).hexdigest(),
+    }
 
 
 def dispatch(path, step, frozen, attempt, instance) -> str:
@@ -165,8 +213,12 @@ def dispatch(path, step, frozen, attempt, instance) -> str:
     run_actions = _run_actions()
     site = frozen.get("site")
     if site is None:
-        result = {"kind": run_actions.SITE_KIND, "version": VERSION, "state": "not_named",
-                  "reason": frozen.get("invalid") or NOT_NAMED}
+        result = {
+            "kind": run_actions.SITE_KIND,
+            "version": VERSION,
+            "state": "not_named",
+            "reason": frozen.get("invalid") or NOT_NAMED,
+        }
     else:
         result = fetch(path, site)
     return _publish(Path(path), step["id"], attempt, instance, result)
@@ -187,16 +239,24 @@ def _publish(path, step_id, attempt, instance, result) -> str:
 
     runner._update(path, done)
     if not wrote:
-        logger.info("run %s: the site context's result was not kept (run taken over)", path.stem)
+        logger.info(
+            "run %s: the site context's result was not kept (run taken over)", path.stem
+        )
         return "taken_over"
     return run_actions.SITE_FETCH
 
 
 def shape_ok(result) -> bool:
-    if not isinstance(result, dict) or result.get("version") != VERSION or result.get("state") not in STATES:
+    if (
+        not isinstance(result, dict)
+        or result.get("version") != VERSION
+        or result.get("state") not in STATES
+    ):
         return False
     if result["state"] == "fetched":
-        return isinstance(result.get("truncated"), bool) and isinstance(result.get("found"), dict)
+        return isinstance(result.get("truncated"), bool) and isinstance(
+            result.get("found"), dict
+        )
     return isinstance(result.get("reason"), str)
 
 
@@ -214,8 +274,14 @@ def outcome(task) -> tuple[str, str | None, dict | None]:
     if result["state"] != "fetched":
         return result["state"], result["reason"], result
     if result["truncated"]:
-        return "truncated", (f"the map service's answer was cut to the nearest features "
-                             f"({result['found'].get('buildings', '?')} buildings found)"), result
+        return (
+            "truncated",
+            (
+                f"the map service's answer was cut to the nearest features "
+                f"({result['found'].get('buildings', '?')} buildings found)"
+            ),
+            result,
+        )
     return "fetched", None, result
 
 

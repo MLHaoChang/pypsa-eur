@@ -72,7 +72,11 @@ FROZEN = {
     "frozen": DC_KIND
 }  # an action's args until the harness freezes them; never a model's
 # Each kind's frozen marker: the only args a profile may give a step of that kind.
-MARKERS = {DC_KIND: FROZEN, MG_KIND: {"frozen": MG_KIND}, SITE_KIND: {"frozen": SITE_KIND}}
+MARKERS = {
+    DC_KIND: FROZEN,
+    MG_KIND: {"frozen": MG_KIND},
+    SITE_KIND: {"frozen": SITE_KIND},
+}
 JOB_KIND = "dc_campus"
 EVENT = "dc_campus"  # the envelope ledger row of the campus run's reservation
 # D5: the campus job's row carries no solve count. One campus job, and it runs no
@@ -739,7 +743,13 @@ def _dispatch(path, ctx, step_id, attempt, approved=None, instance=None):
             return _site("dispatch")(path, step, frozen, attempt, instance)
         except Exception as exc:  # noqa: BLE001 — a programming error stops for the user, never "unavailable" (S3)
             logger.exception("the site-context fetch failed for run %s", path.stem)
-            return _stop(path, step["id"], "site_start_failed", type(exc).__name__, held=(attempt, instance))
+            return _stop(
+                path,
+                step["id"],
+                "site_start_failed",
+                type(exc).__name__,
+                held=(attempt, instance),
+            )
     try:
         with chat_tools._acting() as (db, user):
             project = project_registry.resolve_project(db, user, task["project_id"])
