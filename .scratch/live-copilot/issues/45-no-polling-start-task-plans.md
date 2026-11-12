@@ -3,7 +3,7 @@
 
 # LC-45 — No polling: renewable-profile and investment-decision use a `start_task` plan
 
-Status: ready-for-agent
+Status: done (#1427 merged 2026-11-12; GK B (52) OK @767e831e)
 Type: task
 Model: Sonnet
 Reviewers: GK B
@@ -53,3 +53,7 @@ PR #1427. Tests are in `pypsa-gui/backend/tests/test_lc45_no_polling_plans.py` (
 - L10 the real follower runs (short poll and cap); only the native reads are faked.
 - L11 hand mutants are all killed; the two defensive layers against malformed records are equivalent to each other.
 
+
+### 2026-11-12: hand-off (LC-45 builder)
+
+Follow-ups, not done: take the study `attempt` from the start call's result instead of re-reading after it returns (GK B, non-blocking); the `aborting` status mapping has no test; test_workflow_provider_parity was not compared against master (sandbox connection error); no live chat walk (no API key). By design a harness run's own profile/study steps stay on run_explore's judge (plan-only gating); the profile step trusts list_pending_profiles.
