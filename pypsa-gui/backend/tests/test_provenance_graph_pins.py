@@ -397,3 +397,74 @@ def test_no_cache_key_reads_a_graph_node(module):
 
 def test_the_outcomes_store_name_is_the_provenance_key():
     assert outcomes._PROVENANCE_STORE == provenance._KEY
+
+
+# ── GK B's review of #1443 (K1–K5) ────────────────────────────────────────────
+
+
+def _boom(*args, **kwargs):
+    raise OSError("unreadable")
+
+
+def test_an_unreadable_network_digest_reads_stale_where_it_used_to_raise(
+    tmp_path, monkeypatch
+):
+    """K1 (fail-closed change): `_file_digest` of the saved network raising was an error, and is stale now."""
+    d = _campus(tmp_path, monkeypatch)
+    assert ce._stale("p", d) is False
+    monkeypatch.setattr(ce, "_file_digest", _boom)
+    assert ce._stale("p", d) is True
+
+
+def test_an_unreadable_grid_code_reads_changed_where_it_used_to_raise(
+    tmp_path, monkeypatch
+):
+    """K2 (fail-closed change): an OSError or YAML error while loading the profile was a 500; now it reads True."""
+    monkeypatch.setattr(
+        ce, "_profile_used", lambda run: {"profile": "p1", "sha256": "sha"}
+    )
+    monkeypatch.setattr(ce, "profile_fingerprint", _boom)
+    assert ce._grid_code_changed("p", tmp_path) is True
+
+
+def test_an_unreadable_binding_reads_stale_where_it_used_to_raise(monkeypatch):
+    """K2: `site_bindings.stale_keys` and the association check, when the identity read raises."""
+    monkeypatch.setattr(site_bindings, "_resolved_key", _boom)
+    assert site_bindings.stale_keys(None, ["Generator:a"], {"Generator:a": "u"}) == {
+        "Generator:a"
+    }
+    monkeypatch.setattr(component_identity, "get", _boom)
+    assert associations._stale(None, "Generator", "g", "u1") is True
+
+
+def test_the_requirements_thread_is_not_read_once_the_fingerprint_is_broken(
+    monkeypatch,
+):
+    """K3 (P6): the first broken pin stops the check, so the thread is read only while the inputs still match."""
+    calls = []
+    monkeypatch.setattr(
+        assistant_tasks, "_requirements_moved", lambda t: calls.append(1) or False
+    )
+    task = {"id": "t", "brief": {"x": 1}, "status": "planned", "fingerprint": "fp"}
+    for current in ("other", None):
+        monkeypatch.setattr(
+            assistant_tasks, "_fingerprint", lambda current=current: current
+        )
+        assert assistant_tasks._stale(task) is True
+    assert calls == []
+    monkeypatch.setattr(assistant_tasks, "_fingerprint", lambda: "fp")
+    assert assistant_tasks._stale(task) is False and calls == [1]
+
+
+def test_duplicate_pin_labels_are_refused():
+    """K5: `Builder.edge` keeps the first edge of a (kind, src, dst); a second label would be dropped."""
+    with pytest.raises(ValueError, match="duplicate pin labels"):
+        G.pin_verdict("x", [G.Pin("a", 1, lambda: 1), G.Pin("a", 2, lambda: 3)])
+
+
+def test_why_reports_the_pin_edge_state_not_the_dst_state():
+    """Non-blocking note: a compared edge's step reads what the pin said."""
+    stale = _graph_with(G.Pin("lib", 1, lambda: 2))
+    fresh = _graph_with(G.Pin("lib", 1, lambda: 1))
+    assert [s.state for s in G.why(stale, "derived:x").steps] == ["stale", "stale"]
+    assert [s.state for s in G.why(fresh, "derived:x").steps] == ["fresh", "fresh"]

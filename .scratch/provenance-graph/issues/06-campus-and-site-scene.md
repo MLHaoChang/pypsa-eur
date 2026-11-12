@@ -48,3 +48,7 @@ GK B (session_01G7qCukZouPBT6iQi3vk3jy) gave GO. The DC compare stays alone (cli
 - **P6** `read()` runs where today's compare ran; no new IO under a lock.
 - **P7** Mutants of `compare_pin`, the dst walk and one pin per moved check; each killed by a test named in the PR body. The `_PROVENANCE_STORE` pin test is in.
 - **P8** The dips and MILP moves change only the stale compare: no note to GK A needed.
+
+### 2026-11-12: GK B NOT OK @198107cc, K1–K5 addressed
+
+K1 network-digest raise → stale tested; K2 grid-code, site-binding and association raises → stale tested and listed in the PR body; K3 `assistant_tasks._stale` stops at the first broken pin (requirements thread not read once the fingerprint is broken), tested; K4 `tests/test_provenance_graph_sweep.py` compares money and commercial verdicts and walks with a dump written on master `432655af` (byte-equal); K5 `pin_verdict` refuses duplicate labels; `why` reports a pin edge's own state.

@@ -175,6 +175,9 @@ def staleness(g: Graph, node_id: str) -> Verdict:
 def pin_verdict(subject: str, pin_list: list[pins.Pin]) -> Verdict:
     """The verdict of `subject` made from the pinned inputs `pin_list` (slice 06). No pins compare nothing:
     uncompared, never fresh."""
+    labels = [pin.label for pin in pin_list]
+    if len(set(labels)) != len(labels):  # `Builder.edge` would drop the second silently
+        raise ValueError(f"duplicate pin labels for {subject}: {sorted(labels)}")
     b = Builder(None)
     b.node(Node("derived", subject))
     for pin in pin_list:
@@ -228,7 +231,7 @@ def why(g: Graph, node_id: str) -> Walk:
                 e.dst,
                 e,
                 staleness(g, e.dst).state
-                if e.kind == "derived_from"
+                if e.kind == "derived_from" and not isinstance(e.recorded, pins.Pin)
                 else _check(g, e)[0],
             )
 

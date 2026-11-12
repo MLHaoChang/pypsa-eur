@@ -281,10 +281,12 @@ def _stale(task, current=None):
             raise ValueError("the inputs cannot be read")
         return current
 
-    return pin_stale(f"assistant_task:{task.get('id')}", [
-        Pin("inputs", task.get("fingerprint"), read),
-        Pin("requirements", False, lambda: bool(_requirements_moved(task))),
-    ])
+    # The first broken pin stops the check: the requirements thread is read (under the caller's lock) only when
+    # the fingerprint still matches, as before.
+    subject = f"assistant_task:{task.get('id')}"
+    if pin_stale(subject, [Pin("inputs", task.get("fingerprint"), read)]):
+        return True
+    return pin_stale(subject, [Pin("requirements", False, lambda: bool(_requirements_moved(task)))])
 
 
 def _requirements_moved(task):
