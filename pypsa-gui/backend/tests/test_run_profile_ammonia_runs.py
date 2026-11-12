@@ -132,8 +132,13 @@ def test_a_flagged_check_fails_and_l2_clears_it_on_the_new_solves_check(
 ):
     """Acceptance 1 and C6: round 1's check is flagged (period 2035); one L2
     change within bounds; the result gate reads the re-solve's own check."""
+    from services.reports import chapters
+
     seen = []
     _flag_below(monkeypatch, "nh3_tank", 7000.0, seen)
+    # Acceptance 3: the coupling report not established (the shipped
+    # template establishes it; here its payload is unreadable).
+    monkeypatch.setattr(chapters, "grid_risk_payload", lambda source: None)
     task, path, _ = granted(run={**RUN, "profile": REF})
     script = Script(
         call(
@@ -183,7 +188,7 @@ def test_a_flagged_check_fails_and_l2_clears_it_on_the_new_solves_check(
     doc = run_report.saved(record, site[1])
     sections = {sec.section_id: sec for sec in doc.sections}
     gaps = [str(row[0]) for row in doc.tables["harness_gaps"].rows if row]
-    assert sections.get("grid_risk") is None or sections["grid_risk"].status != "ok"
+    assert sections["grid_risk"].status != "ok"
     assert any(
         g.startswith(run_report.CHAPTER_GAP + SECTION_TITLES["grid_risk"]) for g in gaps
     ), gaps
@@ -290,5 +295,5 @@ def test_an_unverified_check_goes_to_the_user_and_l2_changes_nothing(
     verdicts = {r["rule"]: r for r in run["stages"]["result_gate"]["gate"]["rules"]}
     assert verdicts["nh3.binary_check"]["verdict"] == "not_evaluated"
     assert verdicts["nh3.binary_check"]["facts"][0]["value"] == "check_unverified"
-    assert run["ledger"] == [] and script.requests == [] and seen == [1]
+    assert run.get("ledger", []) == [] and script.requests == [] and seen == [1]
     assert "loop" not in run or run["loop"]["rounds"] == 0
