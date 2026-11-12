@@ -1350,6 +1350,7 @@ def assess(
 
 
 from services.template_marker import MARKER_FILE as META_FILE  # noqa: E402, F401 - the name callers use
+
 DC_TEMPLATES = ("eh_datacenter", "eh_datacenter_staged")
 
 
@@ -1357,6 +1358,7 @@ def _meta(project_dir) -> dict:
     """The project's template metadata; a sensitivity case's is its base's
     (UM07-KIND-1)."""
     from services.template_marker import read_marker
+
     meta = read_marker(project_dir)
     if not isinstance(meta, dict):
         raise DcBackupError(
@@ -1420,7 +1422,9 @@ def _write_meta(project_dir, meta: dict) -> None:
     from services.atomic_io import atomic_write_text
     from services.template_marker import own_path
 
-    atomic_write_text(own_path(project_dir), json.dumps(meta, indent=2, sort_keys=True) + "\n")
+    atomic_write_text(
+        own_path(project_dir), json.dumps(meta, indent=2, sort_keys=True) + "\n"
+    )
 
 
 #: The refusal for a project whose saved network already has the backup

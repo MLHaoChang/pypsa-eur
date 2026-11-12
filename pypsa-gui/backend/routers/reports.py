@@ -369,9 +369,9 @@ def _base_figures(eh_report: dict | None, project_dir: pathlib.Path | None) -> d
 def _is_hub_project(d: pathlib.Path) -> bool:
     """A hub project: a template marker (its base's, for a sensitivity case,
     UM07-KIND-1) beside a saved network."""
-    from services.template_marker import source_path
+    from services.template_marker import present
 
-    return source_path(d) is not None and (d / "network.nc").is_file()
+    return present(d) and (d / "network.nc").is_file()
 
 
 def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:

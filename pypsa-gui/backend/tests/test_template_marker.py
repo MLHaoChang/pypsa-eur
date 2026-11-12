@@ -1,21 +1,24 @@
 """A project's template marker (``eh_template.json``) and the sensitivity case
-that has none (ui-modern issue 07, owner decision UM07-KIND-1).
+that has none (ui-modern issue 07, owner decision UM07-KIND-1, GK B plan
+conditions U1-U8).
 
 A case made by ``run_sensitivity_sweep`` takes its base's project type,
 read-side: ``services.template_marker`` follows the case's
 ``sensitivity_case.json`` to its base, and every reader of the marker goes
 through it. The sweep does not copy the marker.
 """
+
 import ast
 import json
 import pathlib
 import uuid
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
 
-from services import chat_tools, flow_service, project_registry, template_marker as tm
-from services import workflow_tools as wt
+from services import chat_tools, flow_service, project_registry
+from services import template_marker as tm
 from services.pypsa_service import PyPSAService
 from services.results import headline_kpis as hk
 from tests.test_headline_kpis import cards, checked_profiles_on  # noqa: F401
@@ -27,271 +30,443 @@ FIXTURES = (baseline, windy, checked_profiles_on)
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
 
-#: An energy-hub marker as a template writes it: an id, a ledger row, a
-#: growth input left unset and the data-centre opt-in's block.
-MARKER = {
-    "id": "eh_datacenter",
-    "ledger": [{"item": "scr_min", "value": 3.0, "source": "template"}],
-    "growth_inputs": [{"kind": "dc_load", "year": 2030, "set": False}],
-    "dc_load": {
-        "spec": {"ambient_annual_mean_c": 10.0, "ambient_seasonal_amplitude_k": 8.0,
-                 "ambient_diurnal_amplitude_k": 4.0, "backup": {}},
-        "envelope": {"peak_mw": 12.0},
-    },
-}
+
+def dc_marker() -> dict:
+    """A data-centre marker as the template writes it: its id, the dc_load
+    spec and envelope, a ledger row and a growth input left unset."""
+    from project_templates import eh_templates as t
+
+    return {
+        "id": "eh_datacenter",
+        "ledger": [{"item": "scr_min", "value": 3.0, "source": "template"}],
+        "growth_inputs": [{"kind": "dc_load", "year": 2030, "set": False}],
+        "dc_load": {
+            "spec": t.dc_load_preset("eh_datacenter"),
+            "envelope": {"peak_mw": 12.0},
+        },
+    }
 
 
-def write_marker(directory: pathlib.Path, meta=MARKER) -> pathlib.Path:
+def write_marker(directory: pathlib.Path, meta) -> pathlib.Path:
     path = directory / tm.MARKER_FILE
-    path.write_text(json.dumps(meta))
+    path.write_text(json.dumps(meta) if isinstance(meta, dict) else meta)
     return path
-
-
-def case_dir(tmp_path, baseline_id, name="case") -> pathlib.Path:
-    """A case folder as the sweep leaves it: its record, no marker."""
-    d = tmp_path / name
-    d.mkdir()
-    (d / wt.SENSITIVITY_CASE_FILE).write_text(json.dumps({"baseline_id": str(baseline_id)}))
-    return d
 
 
 @pytest.fixture
 def eh_base(baseline):
-    """The baseline project carrying an energy-hub marker."""
+    """The baseline project carrying a data-centre marker."""
     ctx, project_id, path = baseline
-    write_marker(path)
-    return ctx, project_id, path
+    meta = dc_marker()
+    write_marker(path, meta)
+    return SimpleNamespace(ctx=ctx, id=project_id, dir=path, meta=meta)
+
+
+@pytest.fixture
+def sweep():
+    """``sweep(project_id, name)``: a real ``run_sensitivity_sweep`` case,
+    ``(id, dir)``; every queued job is waited for at teardown."""
+    jobs = []
+
+    def run(project_id, name="Tool Sensitivity"):
+        out = chat_tools.run_sensitivity_sweep(project_id, [case(name)])
+        assert out["status"] == "submitted", out
+        child = out["cases"][0]
+        jobs.append(child["job"]["id"])
+        with chat_tools._acting() as (db, user):
+            row = project_registry.resolve_project(db, user, child["project_id"])
+            return child["project_id"], project_registry.project_dir(row)
+
+    def wait():
+        while jobs:
+            chat_tools.wait_for_job(jobs.pop(), 25)
+
+    run.wait = wait
+    yield run
+    run.wait()
+
+
+@pytest.fixture
+def eh_case(eh_base, sweep):
+    return sweep(eh_base.id)[1]
+
+
+def edit_row(project_id, **values):
+    from db import session as _db
+    from db.models import Project
+
+    with _db.SessionLocal() as db:
+        row = db.get(Project, uuid.UUID(project_id))
+        for key, value in values.items():
+            setattr(row, key, value)
+        db.commit()
 
 
 # ── The helper ───────────────────────────────────────────────────────────────
 
-def test_a_swept_case_reads_its_base_template_and_the_sweep_copies_nothing(eh_base):
-    _, project_id, _ = eh_base
-    out = chat_tools.run_sensitivity_sweep(project_id, [case()])
-    assert out["status"] == "submitted", out
-    child = out["cases"][0]
-    with chat_tools._acting() as (db, user):
-        row = project_registry.resolve_project(db, user, child["project_id"])
-        d = project_registry.project_dir(row)
-    try:
-        assert not (d / tm.MARKER_FILE).exists()
-        assert tm.read_marker(d) == MARKER
-        assert flow_service.read_template(d) == MARKER
-        assert hk.project_kind(flow_service.read_template(d)) == "energy_hub"
-    finally:
-        chat_tools.wait_for_job(child["job"]["id"], 25)
+
+def test_a_swept_case_reads_its_base_template_and_the_sweep_copies_nothing(
+    eh_base, eh_case
+):
+    assert not (eh_case / tm.MARKER_FILE).exists()
+    assert tm.resolve(eh_case) == tm.Marker(tm.BASE, eh_base.dir / tm.MARKER_FILE)
+    assert tm.read_marker(eh_case) == eh_base.meta
+    assert flow_service.read_template(eh_case) == eh_base.meta
+    assert hk.project_kind(flow_service.read_template(eh_case)) == "energy_hub"
+    assert tm.resolve(eh_base.dir).state == tm.OWN
 
 
-def test_a_plain_project_and_a_case_of_a_plain_base_have_no_template(baseline, tmp_path):
+def test_a_plain_project_and_a_case_of_a_plain_base_have_no_template(baseline, sweep):
     _, project_id, path = baseline
-    assert tm.read_marker(path) is None and tm.source_path(path) is None
-    d = case_dir(tmp_path, project_id)
-    assert tm.read_marker(d) is None and tm.source_path(d) is None
+    assert tm.resolve(path) == tm.Marker(tm.NONE) and tm.read_marker(path) is None
+    _, d = sweep(project_id)
+    assert tm.resolve(d) == tm.Marker(tm.NONE) and not tm.present(d)
     assert hk.project_kind(flow_service.read_template(d)) == "network"
 
 
-def test_a_case_that_has_its_own_marker_reads_its_own(eh_base, tmp_path):
-    _, project_id, path = eh_base
-    d = case_dir(tmp_path, project_id)
-    own = write_marker(d, {"id": "eh_microgrid"})
-    assert tm.source_path(d) == own and tm.read_marker(d) == {"id": "eh_microgrid"}
-    assert tm.source_path(path) == path / tm.MARKER_FILE
+def test_a_case_with_its_own_copy_reads_it_and_the_base_no_longer_reaches_it(
+    eh_base, eh_case
+):
+    own = write_marker(eh_case, {**eh_base.meta, "id": "eh_microgrid"})
+    assert tm.resolve(eh_case) == tm.Marker(tm.OWN, own)
+    write_marker(eh_base.dir, {**eh_base.meta, "id": "eh_datacenter_staged"})
+    assert tm.read_marker(eh_case)["id"] == "eh_microgrid"
 
 
-def test_a_case_of_a_case_follows_the_chain(eh_base, tmp_path):
-    _, project_id, path = eh_base
-    first = case_dir(tmp_path, project_id, "first")
-    second = case_dir(tmp_path, project_id, "second")
-    # `second`'s record names a project row whose folder is `first`.
-    with chat_tools._acting() as (db, user):
-        row = project_registry.resolve_project(db, user, project_id)
-        base_dir = project_registry.project_dir(row)
-    calls = []
-
-    def dir_of(row):
-        calls.append(row.id)
-        return first if len(calls) == 1 else base_dir
-
-    import services.template_marker as module
-    original = module.project_registry.project_dir
-    module.project_registry.project_dir = dir_of
-    try:
-        assert tm.read_marker(second) == MARKER
-    finally:
-        module.project_registry.project_dir = original
-    assert len(calls) == 2
+def test_a_case_of_a_case_follows_the_chain(eh_base, sweep):
+    first_id, first = sweep(eh_base.id)
+    sweep.wait()  # the first case is the next sweep's baseline: no queued job
+    _, second = sweep(first_id, "Tool Sensitivity Second")
+    assert tm.resolve(second) == tm.Marker(tm.BASE, eh_base.dir / tm.MARKER_FILE)
+    assert tm.read_marker(second) == eh_base.meta
 
 
-def test_a_case_whose_base_row_is_gone_reads_as_a_plain_network(tmp_path):
-    d = case_dir(tmp_path, uuid.uuid4())
-    assert tm.read_marker(d) is None and tm.source_path(d) is None
+def test_a_case_whose_base_has_lost_its_marker_reads_as_a_plain_network(
+    eh_base, eh_case
+):
+    (eh_base.dir / tm.MARKER_FILE).unlink()
+    assert tm.resolve(eh_case) == tm.Marker(tm.NONE)
 
 
-def test_a_case_whose_base_has_lost_its_marker_reads_as_a_plain_network(eh_base, tmp_path):
-    _, project_id, path = eh_base
-    d = case_dir(tmp_path, project_id)
-    (path / tm.MARKER_FILE).unlink()
-    assert tm.read_marker(d) is None
+def test_a_case_whose_base_row_is_gone_reads_as_a_plain_network(eh_case):
+    record = json.dumps({"baseline_id": str(uuid.uuid4())})
+    (eh_case / tm.CASE_FILE).write_text(record)
+    assert tm.resolve(eh_case) == tm.Marker(tm.NONE)
 
 
-@pytest.mark.parametrize("record", ["not json", "[]", '{"baseline_id": 7}',
-                                    '{"baseline_id": "not-a-uuid"}', "{}"])
-def test_an_unreadable_case_record_reads_as_a_plain_network(tmp_path, record):
-    d = tmp_path / "case"
-    d.mkdir()
-    (d / wt.SENSITIVITY_CASE_FILE).write_text(record)
-    assert tm.read_marker(d) is None
+def test_a_case_moved_out_from_under_its_base_reads_as_a_plain_network(eh_base, sweep):
+    case_id, d = sweep(eh_base.id)
+    edit_row(case_id, parent_project_id=None)
+    assert tm.resolve(d) == tm.Marker(tm.NONE)
 
 
-def test_a_case_record_that_names_its_own_row_ends(baseline, monkeypatch, tmp_path):
-    _, project_id, _ = baseline
-    d = case_dir(tmp_path, project_id)
-    import services.template_marker as module
-    monkeypatch.setattr(module.project_registry, "project_dir", lambda row: d)
-    assert tm.read_marker(d) is None
+def test_a_case_in_another_organisation_than_its_base_reads_none(eh_base, sweep):
+    """U1: a case never surfaces a base its reader could not open."""
+    from db import session as _db
+    from db.models import Organization
+
+    case_id, d = sweep(eh_base.id)
+    sweep.wait()  # the job is the user's to wait for only while the case is
+    with _db.SessionLocal() as db:
+        other = Organization(name=f"other-{uuid.uuid4()}", created_at=datetime.now(UTC))
+        db.add(other)
+        db.commit()
+        other_id = other.id
+    edit_row(case_id, org_id=other_id)
+    assert tm.resolve(d) == tm.Marker(tm.NONE)
 
 
-def test_a_marker_that_is_not_an_object_is_none(tmp_path):
-    (tmp_path / tm.MARKER_FILE).write_text("[1, 2]")
-    assert tm.read_marker(tmp_path) is None
-    (tmp_path / tm.MARKER_FILE).write_text("{broken")
-    assert tm.read_marker(tmp_path) is None
+def test_a_folder_that_is_not_the_bases_child_does_not_reach_it(eh_base, tmp_path):
+    (tmp_path / tm.CASE_FILE).write_text(json.dumps({"baseline_id": eh_base.id}))
+    assert tm.resolve(tmp_path) == tm.Marker(tm.NONE)
 
 
-def test_writes_go_to_the_projects_own_folder(tmp_path):
-    assert tm.own_path(tmp_path) == tmp_path / tm.MARKER_FILE
+@pytest.mark.parametrize(
+    "record",
+    ["not json", "[]", '{"baseline_id": 7}', '{"baseline_id": "not-a-uuid"}', "{}"],
+)
+def test_an_unreadable_case_record_is_unreadable_not_plain(eh_case, record, caplog):
+    """U2: as an own marker that cannot be parsed: no template, but there."""
+    (eh_case / tm.CASE_FILE).write_text(record)
+    assert tm.resolve(eh_case) == tm.Marker(tm.UNREADABLE)
+    assert tm.read_marker(eh_case) is None and tm.present(eh_case)
+    assert "cannot be read" in caplog.text
+
+
+def test_a_torn_base_marker_parses_as_an_own_torn_marker_does(eh_base, eh_case):
+    write_marker(eh_base.dir, "{broken")
+    assert tm.resolve(eh_case).state == tm.BASE
+    assert tm.read_marker(eh_case) is None and tm.present(eh_case)
+    write_marker(eh_case, "[1, 2]")
+    assert tm.resolve(eh_case).state == tm.OWN and tm.read_marker(eh_case) is None
+
+
+def test_a_looping_chain_ends(tmp_path, monkeypatch):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    monkeypatch.setattr(tm, "_base_dir", lambda here: b if here == a else a)
+    assert tm.resolve(a) == tm.Marker(tm.NONE)
+
+
+@pytest.mark.parametrize(
+    "hops, state", [(tm.MAX_DEPTH, tm.BASE), (tm.MAX_DEPTH + 1, tm.NONE)]
+)
+def test_a_chain_is_followed_up_to_the_depth_cap(tmp_path, monkeypatch, hops, state):
+    dirs = [tmp_path / str(i) for i in range(hops + 1)]
+    for d in dirs:
+        d.mkdir()
+    write_marker(dirs[-1], {"id": "eh_microgrid"})
+    monkeypatch.setattr(tm, "_base_dir", lambda here: dirs[dirs.index(here) + 1])
+    assert tm.resolve(dirs[0]).state == state
+
+
+def test_writes_go_to_the_projects_own_folder(eh_case):
+    assert tm.own_path(eh_case) == eh_case / tm.MARKER_FILE
 
 
 # ── The headline strip ──────────────────────────────────────────────────────
 
-def test_the_strip_of_an_energy_hub_case_shows_its_base_cards(eh_base, windy, client, tmp_path):
-    _, project_id, _ = eh_base
-    windy.storage_dir = str(case_dir(tmp_path, project_id))
+
+def strip_of(ctx, client, project_dir):
+    ctx.storage_dir = str(project_dir)
+    return cards(client)
+
+
+def test_the_strip_of_an_energy_hub_case_shows_its_base_cards(
+    eh_base, eh_case, windy, client
+):
     solve(windy)
-    kind, by_id, order = cards(client)
+    kind, by_id, order = strip_of(windy, client, eh_case)
     assert (kind, tuple(order)) == ("energy_hub", hk.ORDER["energy_hub"])
-    assert {"lcoe", "unserved_energy"} <= set(by_id) and "peak_line_loading" not in by_id
+    assert {"lcoe", "unserved_energy"} <= set(by_id)
+    assert "peak_line_loading" not in by_id
 
 
-# ── Each reader, given a case of an energy-hub base ─────────────────────────
+@pytest.mark.parametrize("torn", ["base_marker", "case_record"])
+def test_an_unreadable_case_shows_what_an_unreadable_own_marker_shows(
+    eh_base, eh_case, windy, client, torn
+):
+    """U2, both ways: the strip of the case equals the strip of a project
+    whose own marker cannot be parsed (and is no 500)."""
+    solve(windy)
+    write_marker(eh_base.dir, "{broken")
+    own_torn = strip_of(windy, client, eh_base.dir)
+    if torn == "case_record":
+        write_marker(eh_base.dir, eh_base.meta)
+        (eh_case / tm.CASE_FILE).write_text("{broken")
+    assert strip_of(windy, client, eh_case) == own_torn
+    assert own_torn[0] == "network"
 
-@pytest.fixture
-def eh_case(eh_base, tmp_path):
-    return case_dir(tmp_path, eh_base[1])
+
+# ── Each reader, given a real swept case of an energy-hub base (U5) ─────────
 
 
 def test_grid_limits_reads_the_base_ledger(eh_case):
     from services.adequacy import grid_limits
-    assert grid_limits._template_default(eh_case, "scr_min") == {"value": 3.0, "source": "template"}
+
+    assert grid_limits._template_default(eh_case, "scr_min") == {
+        "value": 3.0,
+        "source": "template",
+    }
 
 
-def test_grid_readiness_reads_the_base_ledger(eh_case):
+def test_grid_readiness_reads_the_base_ledger(eh_base, eh_case):
     from services.adequacy.grid_readiness import _Inputs
+
     inp = _Inputs(eh_case, None, None, None, None, False)
-    assert inp.meta == MARKER and "scr_min" in inp.ledger
+    assert inp.meta == eh_base.meta and "scr_min" in inp.ledger
 
 
-def test_dc_backup_reads_the_base_meta(eh_case):
+def test_dc_backup_reads_the_base_spec(eh_base, eh_case):
+    from project_templates import eh_templates as t
     from services.adequacy import dc_backup
-    assert dc_backup._meta(eh_case) == MARKER
+
+    assert dc_backup._meta(eh_case) == eh_base.meta
+    assert dc_backup.project_spec(eh_case, t)[0] == "eh_datacenter"
 
 
-def test_dc_load_profile_reads_the_base_spec(eh_case):
+def test_the_solver_terms_of_a_case_read_the_base_spec(eh_base, eh_case):
+    """The DC curtailment terms the fingerprint and the LP read (U4 c)."""
+    from services.solver import dc_curtailment
+
+    assert dc_curtailment.terms_for(str(eh_case)) == dc_curtailment.terms_for(
+        str(eh_base.dir)
+    )
+
+
+def test_dc_load_profile_reads_the_base_spec(eh_base, eh_case):
     from services import dc_load_profile
-    assert dc_load_profile.read_ambient(eh_case) == {
-        "ambient_annual_mean_c": 10.0, "ambient_seasonal_amplitude_k": 8.0,
-        "ambient_diurnal_amplitude_k": 4.0}
+
+    spec = eh_base.meta["dc_load"]["spec"]
+    fields = dc_load_profile.AMBIENT_FIELDS
+    expected = (
+        {k: float(spec[k]) for k in fields} if all(k in spec for k in fields) else None
+    )
+    assert dc_load_profile.read_ambient(eh_case) == expected
     assert dc_load_profile.read_envelope(eh_case) == {"peak_mw": 12.0}
 
 
-def test_the_eh_template_route_serves_the_base_template(eh_case):
+def test_the_eh_template_route_serves_the_base_template(eh_base, eh_case):
     from routers.adequacy_worksheet import get_eh_template
-    assert get_eh_template(project=SimpleNamespace(directory=eh_case)) == MARKER
+
+    project = SimpleNamespace(directory=eh_case)
+    assert get_eh_template(project=project) == eh_base.meta
 
 
-def test_the_growth_flags_of_a_case_are_its_base(eh_base, monkeypatch):
-    _, project_id, _ = eh_base
-    out = chat_tools.run_sensitivity_sweep(project_id, [case()])
-    child = out["cases"][0]
-    try:
-        from routers import results
-        monkeypatch.setattr(PyPSAService, "get_active_context",
-                            staticmethod(lambda: SimpleNamespace(project_uuid=child["project_id"])))
-        assert results._ic_growth_flags() == ("growth_placeholder:dc_load_2030",)
-    finally:
-        chat_tools.wait_for_job(child["job"]["id"], 25)
+def test_the_growth_flags_of_a_case_are_its_base(eh_base, sweep, monkeypatch):
+    from routers import results
+
+    case_id, _ = sweep(eh_base.id)
+    active = SimpleNamespace(project_uuid=case_id)
+    monkeypatch.setattr(
+        PyPSAService, "get_active_context", staticmethod(lambda: active)
+    )
+    assert results._ic_growth_flags() == ("growth_placeholder:dc_load_2030",)
 
 
-def test_a_report_of_a_case_counts_it_a_hub(eh_case, monkeypatch):
+def test_a_report_of_a_saved_case_counts_it_a_hub(eh_case):
     from routers import reports
-    assert reports._is_hub_project(eh_case) is False  # no network.nc beside it
-    (eh_case / "network.nc").write_bytes(b"")
+
+    assert (eh_case / "network.nc").is_file()
     assert reports._is_hub_project(eh_case) is True
 
 
-def test_a_growth_edit_on_a_case_copies_the_marker_before_writing(eh_base, eh_case):
+def test_growth_rows_of_a_case_are_its_base(eh_base, eh_case):
     from services import growth_placeholders as gp
-    base_bytes = (eh_base[2] / tm.MARKER_FILE).read_bytes()
-    assert gp._read(gp._meta_path(eh_case)) == MARKER
-    gp._write(gp._own_meta_path(eh_case), {**MARKER, "growth_inputs": []})
-    assert json.loads((eh_case / tm.MARKER_FILE).read_text())["growth_inputs"] == []
-    assert (eh_base[2] / tm.MARKER_FILE).read_bytes() == base_bytes
+
+    assert gp._meta_path(eh_case) == eh_base.dir / tm.MARKER_FILE
+    assert gp._own_meta_path(eh_case) == eh_case / tm.MARKER_FILE
 
 
-def test_undoing_the_edit_that_made_a_case_marker_removes_it(eh_case, monkeypatch):
-    from services import growth_placeholders as gp
-    monkeypatch.setattr(gp, "_meta_path", lambda project_dir=None: tm.source_path(eh_case))
-    monkeypatch.setattr(gp, "_own_meta_path", lambda project_dir=None: tm.own_path(eh_case))
-    before = gp.snapshot_meta()
-    assert before is None  # the case has no marker of its own
-    write_marker(eh_case, {**MARKER, "growth_inputs": []})
-    gp.restore_meta(before)
-    assert not (eh_case / tm.MARKER_FILE).exists()
-    assert tm.read_marker(eh_case) == MARKER
+# ── Copy-on-write (U7) and undo (U3) ────────────────────────────────────────
 
 
-def test_undo_leaves_a_project_without_a_marker_alone(tmp_path, monkeypatch):
-    from services import growth_placeholders as gp
-    monkeypatch.setattr(gp, "_own_meta_path", lambda project_dir=None: tm.own_path(tmp_path))
-    gp.restore_meta(None)
-    assert not (tmp_path / tm.MARKER_FILE).exists()
+def stamp(path: pathlib.Path):
+    return path.read_bytes(), path.stat().st_mtime_ns
 
 
 def test_a_dc_backup_set_on_a_case_writes_the_case_not_the_base(eh_base, eh_case):
+    from project_templates import eh_templates as t
     from services.adequacy import dc_backup
-    base_bytes = (eh_base[2] / tm.MARKER_FILE).read_bytes()
-    meta = dc_backup._meta(eh_case)
-    meta["dc_load"]["spec"]["backup"] = {"hours": 4}
-    dc_backup._write_meta(eh_case, meta)
-    assert json.loads((eh_case / tm.MARKER_FILE).read_text())["dc_load"]["spec"]["backup"] == {"hours": 4}
-    assert (eh_base[2] / tm.MARKER_FILE).read_bytes() == base_bytes
+
+    before = stamp(eh_base.dir / tm.MARKER_FILE)
+    stored = dc_backup.save_backup(eh_case, t, {"mode": "hybrid", "autonomy_h": 8.0})
+    own = json.loads((eh_case / tm.MARKER_FILE).read_text())
+    assert own["dc_load"]["spec"]["backup"] == stored
+    assert own["id"] == eh_base.meta["id"]
+    assert own["ledger"] == eh_base.meta["ledger"]
+    assert stamp(eh_base.dir / tm.MARKER_FILE) == before
 
 
-# ── A queued solve of a case ────────────────────────────────────────────────
+def test_the_dc_backup_route_on_a_case_writes_the_case(eh_base, sweep, client):
+    """The write runs through the case's own route and project lock."""
+    case_id, d = sweep(eh_base.id)
+    before = stamp(eh_base.dir / tm.MARKER_FILE)
+    with chat_tools._acting() as (db, user):
+        name = project_registry.resolve_project(db, user, case_id).name
+    r = client.put(f"/api/campus-electrical/{name}/dc-backup", json={"mode": "hybrid"})
+    assert r.status_code == 200, r.text
+    assert (d / tm.MARKER_FILE).is_file()
+    assert stamp(eh_base.dir / tm.MARKER_FILE) == before
+
+
+@pytest.fixture
+def active_case(eh_case, monkeypatch):
+    from services import network_lengths
+
+    monkeypatch.setattr(network_lengths, "active_project_dir", lambda: eh_case)
+    return eh_case
+
+
+def test_undoing_the_edit_that_made_a_case_copy_removes_it(eh_base, active_case):
+    from services import growth_placeholders as gp
+
+    before = stamp(eh_base.dir / tm.MARKER_FILE)
+    snapshot = gp.snapshot_meta()
+    assert snapshot is None  # the case has no marker of its own
+    gp._write(gp._own_meta_path(), {**eh_base.meta, "growth_inputs": []})
+    gp.restore_meta(snapshot)
+    assert not (active_case / tm.MARKER_FILE).exists()
+    assert tm.read_marker(active_case) == eh_base.meta
+    assert stamp(eh_base.dir / tm.MARKER_FILE) == before
+
+
+def test_undo_keeps_a_copy_the_case_had_before_the_edit(eh_base, active_case):
+    from services import growth_placeholders as gp
+
+    own = write_marker(active_case, {**eh_base.meta, "id": "eh_microgrid"})
+    snapshot = gp.snapshot_meta()
+    assert snapshot == own.read_bytes()
+    gp._write(gp._own_meta_path(), {**eh_base.meta, "growth_inputs": []})
+    gp.restore_meta(snapshot)
+    assert own.read_bytes() == snapshot
+
+
+def test_undo_never_removes_the_marker_of_a_project_that_is_not_a_case(
+    eh_base, monkeypatch
+):
+    from services import growth_placeholders as gp
+    from services import network_lengths
+
+    monkeypatch.setattr(network_lengths, "active_project_dir", lambda: eh_base.dir)
+    before = stamp(eh_base.dir / tm.MARKER_FILE)
+    gp.restore_meta(None)
+    assert stamp(eh_base.dir / tm.MARKER_FILE) == before
+
+
+# ── A queued solve of a case (U4) ───────────────────────────────────────────
+
 
 def test_a_case_capture_holds_the_base_marker_and_its_hash(eh_base, eh_case):
     from services import solve_capture
-    base_marker = eh_base[2] / tm.MARKER_FILE
+
+    base_marker = eh_base.dir / tm.MARKER_FILE
     hashes = solve_capture.sidecar_hashes(eh_case)
     assert hashes[tm.MARKER_FILE] == solve_capture._sha256(base_marker)
-    write_marker(eh_base[2], {**MARKER, "id": "eh_microgrid"})
-    assert solve_capture.sidecar_hashes(eh_case)[tm.MARKER_FILE] != hashes[tm.MARKER_FILE]
+    write_marker(eh_base.dir, {**eh_base.meta, "id": "eh_microgrid"})
+    after = solve_capture.sidecar_hashes(eh_case)
+    assert after[tm.MARKER_FILE] != hashes[tm.MARKER_FILE]
 
 
-def test_a_case_capture_copies_the_base_marker(eh_base, eh_case):
+def test_a_queued_job_reads_only_its_captured_copy(eh_base, eh_case):
+    """U4 a: the capture holds the base's bytes as its own marker and no case
+    record, so a job never resolves the live base again."""
     from services import solve_capture
-    ctx = eh_base[0]
-    record = solve_capture.capture(ctx, eh_case, None)
+
+    record = solve_capture.capture(eh_base.ctx, eh_case, None)
     try:
-        captured = pathlib.Path(record["dir"]) / tm.MARKER_FILE
-        assert captured.read_bytes() == (eh_base[2] / tm.MARKER_FILE).read_bytes()
-        assert tm.read_marker(pathlib.Path(record["dir"])) == MARKER
-        assert solve_capture.verify(record).get("ok", True)
+        captured = pathlib.Path(record["dir"])
+        base_bytes = (eh_base.dir / tm.MARKER_FILE).read_bytes()
+        assert (captured / tm.MARKER_FILE).read_bytes() == base_bytes
+        assert not (captured / tm.CASE_FILE).exists()
+        write_marker(eh_base.dir, {**eh_base.meta, "id": "eh_microgrid"})
+        assert tm.resolve(captured).state == tm.OWN
+        assert tm.read_marker(captured) == eh_base.meta
     finally:
         solve_capture.remove(record)
 
 
-# ── No new direct reader ────────────────────────────────────────────────────
+@pytest.mark.parametrize("who", ["template_project", "case_with_own_copy"])
+def test_a_capture_of_an_own_marker_is_byte_for_byte_as_before(eh_base, eh_case, who):
+    """U4 b: a project that has its own marker captures and hashes it."""
+    from services import solve_capture
+
+    if who == "template_project":
+        d, own = eh_base.dir, eh_base.dir / tm.MARKER_FILE
+    else:
+        d = eh_case
+        own = write_marker(d, {**eh_base.meta, "id": "eh_microgrid"})
+    assert solve_capture.sidecar_hashes(d)[tm.MARKER_FILE] == solve_capture._sha256(own)
+    record = solve_capture.capture(eh_base.ctx, d, None)
+    try:
+        captured = pathlib.Path(record["dir"]) / tm.MARKER_FILE
+        assert captured.read_bytes() == own.read_bytes()
+    finally:
+        solve_capture.remove(record)
+
+
+# ── No new direct reader (U6) ───────────────────────────────────────────────
 
 #: Files that may name the marker file directly: the helper, the template
 #: builders that write it into a template folder, and project creation, which
@@ -302,17 +477,41 @@ ALLOWED_DIRS = ("project_templates/", "tests/", "smoke/")
 NAMES = {"MARKER_FILE", "TEMPLATE_FILE", "META_FILE"}
 
 
+def _constant_text(node) -> str | None:
+    """The text of a string built from constants only: a literal, a
+    concatenation of literals, or an f-string's literal parts."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _constant_text(node.left), _constant_text(node.right)
+        return left + right if left is not None and right is not None else None
+    if isinstance(node, ast.JoinedStr):
+        parts = []
+        for value in node.values:
+            inner = value.value if isinstance(value, ast.FormattedValue) else value
+            text = _constant_text(inner)
+            if text is None:
+                return None
+            parts.append(text)
+        return "".join(parts)
+    return None
+
+
 def _direct_uses(source: str) -> list[int]:
-    lines = []
+    lines = set()
     for node in ast.walk(ast.parse(source)):
-        if isinstance(node, ast.Constant) and node.value == tm.MARKER_FILE:
-            lines.append(node.lineno)
+        if _constant_text(node) == tm.MARKER_FILE:
+            lines.add(node.lineno)
         elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
             right = node.right
-            name = right.id if isinstance(right, ast.Name) else getattr(right, "attr", None)
+            name = (
+                right.id
+                if isinstance(right, ast.Name)
+                else getattr(right, "attr", None)
+            )
             if name in NAMES:
-                lines.append(node.lineno)
-    return lines
+                lines.add(node.lineno)
+    return sorted(lines)
 
 
 def test_no_module_reads_the_marker_file_but_through_the_helper():
@@ -327,11 +526,17 @@ def test_no_module_reads_the_marker_file_but_through_the_helper():
     assert found == {}
 
 
-@pytest.mark.parametrize("source", [
-    'p = d / "eh_template.json"',
-    'p = d / META_FILE',
-    'p = d / flow_service.TEMPLATE_FILE',
-])
+@pytest.mark.parametrize(
+    "source",
+    [
+        'p = d / "eh_template.json"',
+        'p = d / ("eh_" + "template.json")',
+        "p = d / f\"eh_{'template'}.json\"",
+        "p = d / META_FILE",
+        "p = d / flow_service.TEMPLATE_FILE",
+        "p = d / template_marker.MARKER_FILE",
+    ],
+)
 def test_the_guard_sees_a_direct_reader(source):
     assert _direct_uses(source) == [1]
 

@@ -44,3 +44,30 @@ use it. Existing cases are fixed with no migration; the sweep does not copy
 - In a multi-period run the source line shows the snapshot window
   ("2030-07-01 → 2030-07-07 · all periods") while the trend spans the
   investment periods (2027 to 2035).
+
+## Comments
+
+GK B plan GO (2026-11-12), conditions:
+
+- U1 access: a case resolves to its base only when the case row is a direct
+  child of the base row and in its organisation; otherwise none.
+- U2 unreadable is not absent: a case record or base marker that exists but
+  cannot be read behaves, for each reader, as a malformed own marker does
+  (no silent plain, no 500); typed outcome; marker writers replace atomically.
+- U3 undo: `restore_meta(None)` removes only a case copy the undone edit
+  made; a copy the case had before stays byte-equal.
+- U4 solve capture stays in this PR: a job reads only its captured copy;
+  pin byte-equality for a non-case project and a case with its own copy; the
+  PR lists the LP/result inputs the marker changes for a case solve and
+  whether the input fingerprint or the investment-case digest reads it;
+  existing cases' capture identities go stale after deploy.
+- U5 per-reader tests use a real `run_sensitivity_sweep` case and the real
+  helper and reader.
+- U6 the guard also catches concatenation / f-string names, or the PR says
+  where it cannot; shown red with one reintroduced literal reader.
+- U7 copy-on-write under the case's own project lock; the base's bytes and
+  mtime never change from a case; a later base change no longer reaches a
+  case with its own copy.
+- U8 mutants on `template_marker.py` against all the new tests; hand
+  mutants of the recursion, visited set, depth cap, org check and own-wins
+  order, each with its killing test.
