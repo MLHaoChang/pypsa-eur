@@ -3,7 +3,7 @@
 
 # 07 — Preset mechanism, generic offered rows and the DC presets
 
-Status: ready-for-agent (blocked by 05; Opus; GK B TDD plan first)
+Status: done (#1430 merged 2026-11-12; GK B (51) OK @a8c0884c)
 Type: task
 Blocked by: 05
 Gated: yes (GK B)
@@ -63,3 +63,8 @@ Answers: Q1 `default_units` required, key set = `default_keys`', `default_unit_m
 - P10 `default_unit_mismatch` must not trip the error-kind manifest tests.
 - P11 every TEMPLATE_META id's sidecars byte-equal; business_case_presets/ shipped by pypsa-gui.spec:65.
 - P12 mutants on presets.py and touched model/engine lines, plus the named hand mutants.
+
+### 2026-11-12: hand-off (BC 07 builder)
+
+Left for BC 08: the route, chat tools, workbook and kw_per_gpu; a catching site for DefaultUnitMismatch; the approval card must show linked_share, linked_share_by_year and default_units (the digest binds them); the BC 06 follow-ups (register the break_even_* kinds, wire the outputs and ebitda_margin); lease-up or occupancy needs a volume factor that also scales costs (ruling 6), since 07 offers only a sold share.
+Skipped: mutants.py on services/finance/business_case.py stopped at the 2-hour tool limit after 311 of 478 mutants; the unreached changed lines are covered only by hand mutants, and mutants.py was not re-run on the review-round code.
