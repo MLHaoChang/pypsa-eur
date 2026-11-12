@@ -453,6 +453,12 @@ def test_p2_a_hint_is_revenue_only_ordered_and_sourced(kw, loc):
     assert e.value.errors()[0]["loc"][:3] == ("lines", 0, loc)
 
 
+def test_p2_a_hint_may_be_one_value_wide():
+    hint = {"low": 2.0, "high": 2.0, "unit": "u", "source": "s", "year": 2025}
+    case = BusinessCaseInputs(lines=[{**_line().model_dump(), "hint": hint}])
+    assert case.lines[0].hint.low == case.lines[0].hint.high == 2.0
+
+
 # ── P3: linked_share ─────────────────────────────────────────────────────────
 
 _LINKED = dict(name="nh3", quantity=None, quantity_source="linked:served_product.nh3@1")
