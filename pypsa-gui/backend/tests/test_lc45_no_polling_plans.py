@@ -421,3 +421,22 @@ def test_the_late_receipt_reads_the_run_flag_of_its_task(
     open(path, "w").write(json.dumps(record))
     T._late_receipt(path, ticket, started)
     assert "late_receipt" in stored(root, task["task_id"])["steps"][0]
+
+
+@pytest.mark.parametrize("on_run", [True, False])
+def test_a_run_step_gets_no_follower_and_a_plan_step_does(
+    session, baseline, monkeypatch, on_run
+):
+    """GK B F3: the skip itself. `plan_jobs` yields a job either way; only a
+    harness run's step is left to its own judge (no `waiting`, no follower)."""
+    from services import assistant_tasks
+
+    _, _, root = baseline
+    task = _study(monkeypatch, f"lc45-f3-{on_run}", {"options": [_rec()]})
+    monkeypatch.setattr(assistant_tasks, "is_run_ticket", lambda ticket: on_run)
+    _, results = _run(session, monkeypatch, "options")
+    assert bool(tool_result(results).get("waiting")) is (not on_run)
+    step = stored(root, task["task_id"])["steps"][0]
+    assert (step.get("job") is not None) is (not on_run)
+    if not on_run:
+        assert _wait_done(root, task["task_id"], 0)["status"] == "completed"
