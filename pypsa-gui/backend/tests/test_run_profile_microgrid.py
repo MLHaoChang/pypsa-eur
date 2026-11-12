@@ -1843,7 +1843,7 @@ def test_the_hand_off_run_on_each_template(
         "mg.island.frequency": "the run's own campus study has not finished",
         "mg.fuel.autonomy": "the gensets draw no modelled fuel, so fuel autonomy is not checked",
         "mg.ic.counterfactual": "No investment case has been run",
-        "mg.ic.baseline_keeps": "not_run: no_case",
+        "mg.ic.baseline_keeps": "No investment case has been run",
     }
     lole = verdicts["eh.adequacy.lole"]
     assert (lole["verdict"], lole["severity"], lole["facts"][0]["value"]) == (
