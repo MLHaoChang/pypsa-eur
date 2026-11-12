@@ -194,7 +194,7 @@ def test_fuel_autonomy_and_frequency_are_their_own_state_on_the_hand_off(hub):
     assert targets["status"] == run_handoff.PARTLY
     assert (
         targets["basis"]
-        == "the result gate passed; not evaluated: mg.fuel.autonomy, mg.island.frequency"
+        == "the result gate passed; 2 checks not evaluated (see the gates table)"
     )
 
 
@@ -291,9 +291,12 @@ def test_a_passed_gate_with_a_warn_not_evaluated_states_its_targets_partly(
     run, total = _verdicts(ref, unevaluated)
     targets = _targets(run)
     assert targets["status"] == run_handoff.PARTLY
-    assert targets["basis"] == "the result gate passed; not evaluated: " + ", ".join(
-        unevaluated
+    n = len(unevaluated)
+    assert targets["basis"] == (
+        f"the result gate passed; {n} check{'' if n == 1 else 's'} not evaluated"
+        " (see the gates table)"
     )
+    assert not any(rule in targets["basis"] for rule in unevaluated)  # UX (19): no ids
     counts = run_handoff.checks(run)["counts"]
     assert counts == {
         "pass": total - len(unevaluated),
@@ -318,3 +321,9 @@ def test_eh_site_has_no_warn_rule_so_its_targets_stay_covered(ref):
         "fail": 0,
         "not_evaluated": 0,
     }
+
+
+def test_the_stated_targets_count_reads_singular_and_plural():
+    """UX (19): the basis counts the checks, never lists their ids."""
+    assert run_handoff._checks_not_evaluated(1) == "1 check not evaluated"
+    assert run_handoff._checks_not_evaluated(3) == "3 checks not evaluated"

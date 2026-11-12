@@ -169,15 +169,21 @@ def checks(run: dict) -> dict:
     return {"counts": counts, NOT_EVALUATED: unevaluated}
 
 
+def _checks_not_evaluated(n: int) -> str:
+    return f"{n} check{'' if n == 1 else 's'} not evaluated"
+
+
 def _targets(run):
     stage = (run.get("stages") or {}).get("result_gate") or {}
     gate = stage.get("gate") or {}
     if stage.get("status") == "passed" and gate.get("passed") is True:
-        # G8: a gate that passed with rules not evaluated is never all met.
-        unevaluated = [r["rule"] for r in checks(run)[NOT_EVALUATED]]
-        if unevaluated:
-            return PARTLY, "the result gate passed; not evaluated: " + ", ".join(
-                map(str, unevaluated)
+        # G8: a gate that passed with rules not evaluated is never all met. The
+        # basis counts them; the report's gates table beside it names each (UX (19)).
+        n = len(checks(run)[NOT_EVALUATED])
+        if n:
+            return (
+                PARTLY,
+                f"the result gate passed; {_checks_not_evaluated(n)} (see the gates table)",
             )
         return COVERED, "the result gate passed"
     return GAP, "the result gate did not pass"
