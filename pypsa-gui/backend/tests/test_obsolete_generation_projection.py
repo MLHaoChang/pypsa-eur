@@ -5,12 +5,16 @@ bumps the session to G+1: no further tool dispatch, no next model call, no
 text deltas and no persisted assistant answer. Tool results already produced
 stay in history as facts. A typed turn (no utterance ids) is untouched.
 """
+# ruff: noqa: F811 -- imported shared fixtures.
 
 from __future__ import annotations
 
 import pytest
 
 from services import chat_service, chat_tools, utterance_admission as ua
+from tests.test_answer_assurance import checked  # noqa: F401
+from tests.test_assurance_metrics import NumericalProvider, solved  # noqa: F401
+from tests.test_workflow_tools import baseline  # noqa: F401
 from tests.test_chat_e2e import (
     FakeAnthropicClient,
     _FakeFinalMessage,
@@ -334,3 +338,53 @@ def test_release_refuses_a_wrong_lease_or_a_future_generation():
     # Neither call freed the lease or touched the pending correction.
     assert coord.active_lease("s") == first.lease_id
     assert coord.pending_utterance_id("s") == "u2"
+
+
+def test_bump_during_the_checked_answer_review_publishes_nothing(
+    tmp_path, monkeypatch, solved, checked
+):
+    """V1: the checked-answer commit (its review is a model call) can land a
+    rebind after the stream; the answer is then neither persisted nor shown."""
+    import uuid
+
+    from harness import assurance
+    from tests.assurance_acceptance.support import parse_sse
+    from tests.test_harness_reliability import scope
+
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
+    sid = "checked-obsolete-" + uuid.uuid4().hex
+    checked.session_ids.append(sid)
+    original = assurance.Turn.commit
+
+    def commit_then_rebind(self, *args, **kwargs):
+        out = original(self, *args, **kwargs)
+        ua._DEFAULT.bump_generation(session_id=sid)
+        return out
+
+    monkeypatch.setattr(assurance.Turn, "commit", commit_then_rebind)
+    checked.install(NumericalProvider({"dispatch_energy": 17}))
+    exact = scope(
+        solved,
+        metrics=["dispatch_energy"],
+        start="2026-01-01T00:00:00",
+        end="2026-01-01T01:00:00",
+    )
+    response = checked.client.post(
+        "/api/chat/stream",
+        json={
+            "session_id": sid,
+            "message": "Check this exact run.",
+            "utterance_id": "initial",
+            "generation": 1,
+            "binding_generation": 3,
+            "checked_scope": exact,
+        },
+    )
+    assert response.status_code == 200, response.text
+    frames = parse_sse(response.text)
+    events = [event for event, _ in frames]
+    assert "answer_approved" not in events and "turn_done" not in events
+    assert [p.get("error_kind") for e, p in frames if e == "error"] == [
+        "obsolete_generation"
+    ]
+    assert not _assistant_text(chat_service.get_session(sid))

@@ -1091,6 +1091,11 @@ OBSOLETE_GENERATION: dict[str, str] = {
 }
 
 
+def _end_obsolete() -> Generator[tuple[str, dict[str, Any]], None, None]:
+    yield "error", dict(OBSOLETE_GENERATION)
+    yield "session_done", {"reason": OBSOLETE_GENERATION["error_kind"]}
+
+
 def _generation_reader(session_id: str, lease_id: str | None, generation: int | None):
     """Issue 02: True once an admitted turn's lease+generation is obsolete.
 
@@ -2358,8 +2363,7 @@ def _run_turn_body(
             return
         if obsolete():
             # Issue 02: no model call for a superseded live turn.
-            yield "error", dict(OBSOLETE_GENERATION)
-            yield "session_done", {"reason": OBSOLETE_GENERATION["error_kind"]}
+            yield from _end_obsolete()
             return
         if session.assurance_turn is not None and session.assurance_turn.effect_pending:
             yield "session_done", {"reason": "assurance_context_changed"}
@@ -2445,8 +2449,7 @@ def _run_turn_body(
         if obsolete():
             # Issue 02: superseded while the model answered. Its text and tool
             # calls are neither persisted nor run; the usage above still counts.
-            yield "error", dict(OBSOLETE_GENERATION)
-            yield "session_done", {"reason": OBSOLETE_GENERATION["error_kind"]}
+            yield from _end_obsolete()
             return
         assistant_blocks = final_blocks
         if session.shadow_turn is not None and not any(
@@ -2527,6 +2530,11 @@ def _run_turn_body(
         # tool_use blocks are never dropped by the sanitiser, so a turn that
         # is empty here had no tool_use, and `tool_uses` below is therefore
         # empty too — the turn ends without any tool_result being appended.
+        if obsolete():
+            # Issue 02: superseded during the checked-answer review (itself a
+            # model call): nothing is persisted or published.
+            yield from _end_obsolete()
+            return
         assistant_msg = _sanitise_history_message(
             {"role": "assistant", "content": assistant_blocks}
         )
@@ -2836,8 +2844,7 @@ def _run_turn_body(
                         {"role": "user", "content": tool_results_for_next_turn}
                     )
             if dispatch.obsolete:
-                yield "error", dict(OBSOLETE_GENERATION)
-                yield "session_done", {"reason": OBSOLETE_GENERATION["error_kind"]}
+                yield from _end_obsolete()
             return
         switched_mid_turn = dispatch.switched_mid_turn
         messages.append({"role": "user", "content": tool_results_for_next_turn})
