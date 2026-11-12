@@ -2062,12 +2062,12 @@ def _ic_growth_flags() -> tuple[str, ...]:
     project's template metadata marks not set (an example built for entered
     planning years, E1): the case lists them by name (gatekeeper E1
     condition 3). () without a project or metadata."""
-    import json
     import uuid
 
     from db import session as _db
     from db.models import Project
     from services import project_registry
+    from services.template_marker import read_marker
 
     pid = getattr(PyPSAService.get_active_context(), "project_uuid", None)
     if not pid:
@@ -2075,11 +2075,10 @@ def _ic_growth_flags() -> tuple[str, ...]:
     try:
         with _db.SessionLocal() as db:
             row = db.get(Project, uuid.UUID(str(pid)))
-            path = project_registry.project_dir(row) / "eh_template.json" if row else None
-        meta = json.loads(path.read_text()) if path is not None and path.is_file() else None
+            project_dir = project_registry.project_dir(row) if row else None
     except (OSError, ValueError):
         return ()
-    return _growth_flags_of(meta if isinstance(meta, dict) else None)
+    return _growth_flags_of(read_marker(project_dir) if project_dir is not None else None)
 
 
 def _growth_flags_of(meta: dict | None) -> tuple[str, ...]:

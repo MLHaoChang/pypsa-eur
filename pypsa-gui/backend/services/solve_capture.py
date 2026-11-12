@@ -96,10 +96,22 @@ def root(project_dir) -> pathlib.Path:
     return pathlib.Path(project_dir) / CAPTURES
 
 
+def _source(project_dir: pathlib.Path, name: str) -> pathlib.Path | None:
+    """The file a sidecar is read from: the project's own, except the
+    template marker, which a sensitivity case reads from its base
+    (`services.template_marker`, UM07-KIND-1). None when absent."""
+    from services import template_marker
+    if name == template_marker.MARKER_FILE:
+        return template_marker.source_path(project_dir)
+    path = project_dir / name
+    return path if path.is_file() else None
+
+
 def sidecar_hashes(project_dir) -> dict:
-    """sha256 of each sidecar present in `project_dir` (absent ones omitted)."""
+    """sha256 of each sidecar present for `project_dir` (absent ones omitted)."""
     base = pathlib.Path(project_dir)
-    return {name: _sha256(base / name) for name in sidecars() if (base / name).is_file()}
+    found = {name: _source(base, name) for name in sidecars()}
+    return {name: _sha256(path) for name, path in found.items() if path is not None}
 
 
 def current(ctx, project_dir) -> dict:
@@ -134,9 +146,10 @@ def capture(ctx, project_dir, solver_config_json: str | None) -> dict:
         (tmp / "metadata.json").write_text(json.dumps({"network_revision": identity["network_revision"]}))
         src = pathlib.Path(project_dir)
         for name in sidecars():
-            if (src / name).is_file():
+            path = _source(src, name)
+            if path is not None:
                 (tmp / name).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(src / name, tmp / name)  # byte for byte
+                shutil.copyfile(path, tmp / name)  # byte for byte
         files = {name: _sha256(tmp / name) for name in solve_inputs() if (tmp / name).is_file()}
         manifest = {"version": VERSION, "files": files, "exact": identity["exact"],
                     "network_revision": identity["network_revision"]}
