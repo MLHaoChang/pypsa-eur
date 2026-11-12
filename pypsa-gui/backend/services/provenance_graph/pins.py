@@ -43,7 +43,7 @@ def shown(value: Any) -> Any:
     return value
 
 
-def wire(pin: "Pin") -> dict:
+def wire(pin: Pin) -> dict:
     """What a pin shows anywhere it is serialised: its label and the recorded value, never `read`."""
     return {"label": pin.label, "recorded": shown(pin.recorded)}
 
