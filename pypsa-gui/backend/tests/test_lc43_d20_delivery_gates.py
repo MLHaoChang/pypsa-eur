@@ -21,9 +21,9 @@ and the blob count) is exactly as before:
   two-snapshot network crosses it);
 - an import with an unnamed format is 422 invalid_import_format; an upload whose bytes
   no longer match their hash is 409 import_file_changed;
-- a malformed CSV bundle or workbook is refused (the dispatcher's tool_error) with the
-  open project and its unsaved G1 edit (33 MW) kept; a malformed netCDF or MATPOWER file
-  is LC-43c and pending;
+- a malformed netCDF file, CSV bundle, workbook or MATPOWER case is 422
+  import_unreadable, with the open project and its unsaved G1 edit (33 MW) kept
+  (LC-43c: each file is parsed into a candidate network before it replaces the open one);
 - a chart of an unknown component, no names, a repeated name or nine names is 422
   invalid_chart;
 - ``export_run_evidence`` with no run named and none discussed is 409
@@ -192,9 +192,14 @@ def test_run_evidence_is_never_exported_for_a_run_nobody_named(baseline):
 
 @pytest.mark.parametrize(
     "name, data, fmt",
-    [("bad.zip", b"PK\x03\x04junk", "csv_bundle"), ("bad.xlsx", b"junk", "excel")],
+    [
+        ("bad.nc", b"not a netcdf", "netcdf"),
+        ("bad.zip", b"PK\x03\x04junk", "csv_bundle"),
+        ("bad.xlsx", b"junk", "excel"),
+        ("bad.m", b"function x", "matpower"),
+    ],
 )
-def test_a_malformed_bundle_or_workbook_is_refused_and_keeps_the_open_network(
+def test_a_malformed_import_is_refused_and_keeps_the_open_network(
     baseline, session, name, data, fmt
 ):
     _ctx, project_id, project_dir = baseline
@@ -206,7 +211,9 @@ def test_a_malformed_bundle_or_workbook_is_refused_and_keeps_the_open_network(
     frames = dispatch(
         session, "import_uploaded_network", {"file_id": upload.file_id, "format": fmt}
     )
-    assert [d["error_kind"] for e, d in frames if e == "tool_error"] == ["tool_error"]
+    assert [d["error_kind"] for e, d in frames if e == "tool_error"] == [
+        "import_unreadable"
+    ]
     assert not [d for e, d in frames if e == "tool_result"]
     assert str(PyPSAService.get_active_context().project_uuid) == project_id
     assert state(project_dir) == before

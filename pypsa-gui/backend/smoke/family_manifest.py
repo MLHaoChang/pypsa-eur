@@ -687,7 +687,7 @@ VARIANTS: list[dict] = [
     _covered('LC-D20.delivery_gates', 'the open network fingerprint, report version counts, upload directories and blob count (tests/lc43_gates.py state) unchanged after each refusal: another project\'s id and malformed ids are 404 upload_not_found; another organisation\'s download is 404 Project not found; '
              'an unfinished blob (blob_ready false) is 404 upload_not_found to the tools and the download; each of the network, CSV, Excel and MATPOWER exports over the cap is 413 '
              'file_too_large, a delivery over the cap less 100 kB 413 delivery_too_large; an unnamed import format is 422 invalid_import_format, changed bytes 409 import_file_changed, '
-             'a malformed CSV bundle or workbook is refused with the open project and its unsaved edit kept; a chart outside 1-8 unique names of a known component '
+             'a malformed import is 422 import_unreadable (row LC-D20.malformed_import); a chart outside 1-8 unique names of a known component '
              'is 422 invalid_chart; export_run_evidence with no run named or discussed is 409 discussed_run_required',
              'build_delivery get_file_delivery export_network_nc export_csv_bundle import_uploaded_network create_chart export_run_evidence',
              B + 'test_lc43_d20_delivery_gates.py::test_an_id_from_another_project_or_a_malformed_id_reaches_no_file',
@@ -698,9 +698,11 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d20_delivery_gates.py::test_an_import_needs_a_named_format_and_unchanged_bytes',
              B + 'test_lc43_d20_delivery_gates.py::test_a_chart_outside_its_shape_is_refused_and_draws_nothing',
              B + 'test_lc43_d20_delivery_gates.py::test_run_evidence_is_never_exported_for_a_run_nobody_named',
-             B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_bundle_or_workbook_is_refused_and_keeps_the_open_network'),
-    _pending('LC-D20.malformed_import', 'a malformed netCDF import fails after dropping the open project and its unsaved edits, and a malformed MATPOWER file imports as an empty network '
-             '(LC-43c, .scratch/live-copilot/issues/43c-malformed-import-replaces-the-network.md)'),
+             B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_import_is_refused_and_keeps_the_open_network'),
+    _covered('LC-D20.malformed_import', 'a malformed netCDF file, CSV bundle, workbook and MATPOWER case (no mpc.bus rows) are each 422 import_unreadable through the dispatcher, no tool_result, '
+             'with the open project (project_uuid), its unsaved G1 edit (20 to 33 MW) and the lc43_gates state kept: each file is parsed into a candidate network before it replaces the open one (LC-43c)',
+             'import_uploaded_network',
+             B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_import_is_refused_and_keeps_the_open_network'),
     _pending('LC-D20.delivery_ttl', 'a delivery and its download never expire: no expiry gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D21.reports', 'exported DOCX read with python-docx: headline table MC LOLE 3.21 h/yr, ENS cap 10.00, unrun sections say not established; scripted 3.2 h/yr audited verified; '
              'regenerated 9.9 h/yr is version 2, unverified and listed in Numbers to check, tables and other sections unchanged, version 1 intact (one stored study report, scripted model)',

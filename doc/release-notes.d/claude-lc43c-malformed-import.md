@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A malformed netCDF, CSV bundle, Excel or MATPOWER import is now refused as `import_unreadable` and leaves the open project and its unsaved edits as they were; each file is parsed into a candidate network before it replaces the open one, and a MATPOWER file with no bus table is no longer imported as an empty network.
