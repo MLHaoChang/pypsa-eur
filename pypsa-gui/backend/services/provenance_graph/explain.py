@@ -18,16 +18,12 @@ cannot answer for is refused (`TargetUnknown`), never guessed.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
 from typing import Any
 
 from services.asset_schema import fields as asset_fields
 from services.asset_schema.schema import CLASS_ATTR
 from services.provenance_graph import money
 from services.provenance_graph.memory import (
-    NOT_READ,
-    NOT_VISIBLE,
-    ItemNotVisible,
     MemoryRecall,
 )
 from services.provenance_graph.queries import _check, money_graph, staleness, why
