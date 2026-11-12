@@ -74,7 +74,7 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - An Expert-only tab needs no Guided shot; the PR says which `Results.tsx` flag makes it so (#1342).
 - A heatmap scale runs from the data's lowest value where values can be negative, and its key gives both ends with the unit (#1349).
 - A snapshot or picture carries what the user sees: a truncation note ("Showing the first 31 of 49 days") and the colour key appear in the image or its saved caption; a heatmap or tornado caption states its key (#1421).
-- A cap or disabled reason is visible text, not a tooltip. "›"/">" marks only a link that goes somewhere; a plain-text pointer uses words ("on the Reports page") (#1406).
+- A cap or disabled reason is visible text, not a tooltip. ">" marks only a link that goes somewhere; a plain-text pointer uses words ("on the Reports page") (#1406).
 - A privacy or opt-in line is true in every state: "Off unless you turn them on" shows only while both boxes are off (#1401).
 - A gate's status wording gives counts, not raw rule ids, in the Stated targets basis ("N checks not evaluated (see the gates table)") (#1409).
 - A field refusal opens with the field label, never the engine key; a hint says "its log names this constraint", not the key (#1424).
