@@ -1632,6 +1632,58 @@ kind refuses (GK B (46) M2). The data-centre record is unchanged (M1).
   - `mg.fuel.autonomy`: always no evidence: the gensets draw no modelled
     fuel (GK A Q5).
 
+### The microgrid profiles (study harness 12c)
+
+`eh_microgrid@1` and `eh_microgrid_staged@1` (`run_profiles._eh_microgrid`,
+GK B (47) G1-G9). The scope is the template's (`flow_scope._MICROGRID`), the
+archetype `off_grid` the template card's.
+
+- **Solve stage.** The queued solve, the EH study with `dtc_stress` listed
+  (the off_grid pack does not run it by default), then `mg_island_survival`.
+- **K (G1).** The EH block's `contingency_solves` makes `run_eh.freeze`
+  count the islanding contingencies K on the project's network
+  (`run_eh.islanding`, as the study derives them), freeze them as the args'
+  `dtc_config` (so the digest binds them) and set `budget_solves = 2 + K`,
+  never capped down: too few solves left refuses the freeze. The step's
+  `card` and the granted envelope's text show K and the links. `admit`
+  derives them again before any reservation; a different set stops the run
+  with `eh_contingencies`.
+- **Budget (G1, G2).** `run_profiles.mg_budget(K)`: one pass is the solve,
+  the study and the island check, `1 + (2 + K) + 1`, for the first pass and
+  each L2 round, plus the coupling loop's 3 and its closing re-solve: 19 with
+  the shipped K = 1. `run_envelope.counted` counts K on the open project when
+  the plan card is proposed or read; the card shows K and the budget, held to
+  the hard cap of 20 (K >= 2 then covers the first pass and one L2 round).
+  The grant counts again and refuses `eh_contingencies` when K moved.
+- **K and the task lock (#1345).** The card paths count K before
+  `assistant_tasks._LOCK` (`run_envelope.counted_live` at propose,
+  `read_for_card` and the grant in `decide`). `run_eh.islanding` still runs
+  under the lock at three sites: `run_eh.admit` from `begin_step`, the
+  `_eh_frozen` freeze in `decide`, and the `stage_frozen` freeze in
+  `_advance_run`; each costs about 5 to 12 ms (GK B (48) A2).
+- **The cap (GK B (47) Q1).** The card shows the arithmetic and, when the
+  cap applies, the capped budget (Q1-iii). A K whose one pass, `1 + (2 + K)
+  + 1`, is above the cap is refused on the card and at the grant,
+  `eh_pass_over_cap` (Q1-ii). Every entry to the solve stage (the first pass
+  and each L2 round's) checks `run_eh.pass_short`: a granted pass the solves
+  left cannot finish never starts; the stage stays pending, any L2 loop ends
+  and the run stops `eh_budget` (Q1-i). `mg.island.critical_served` reads a
+  stress only when it covered all K contingencies the study was frozen with.
+- **Result gate.** `mg.island.survival` (block; its levers are the
+  `StorageUnit` `p_nom_max` and `max_hours` of the battery candidate),
+  `mg.tie.open`, `mg.critical.tagged`, `mg.island.critical_served` (MWh),
+  `mg.island.frequency` (h, warn; 12c runs no campus study, so it reads
+  `not_run`), `mg.fuel.autonomy` (warn), LOLE on the coupling loop, and
+  the investment rules `ic.counterfactual` and `ic.baseline_keeps` (warn).
+  No scorecard and no SCR rule.
+- **Envelope (G4).** The battery's cap up to twice the template's (MW) and its
+  duration from 1 h up to twice the template's (h). An edit entry may carry
+  `unit` and `source`; the card text shows them, and a narrowed envelope
+  keeps the profile's.
+- **Stage files.** The `harness/workflows/profiles/eh_microgrid*` stage
+  instructions come with 12c's second PR. Until then an agent turn on these
+  profiles has no instruction and does not run.
+
 ### The approval envelope (study harness issue 03)
 
 `services/run_envelope.py` (design §7; SH-ENVELOPE-1). "Approve once, run

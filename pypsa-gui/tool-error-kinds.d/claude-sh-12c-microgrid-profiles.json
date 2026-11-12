@@ -1,0 +1,3 @@
+{"kinds": {
+  "eh_contingencies": {"surface": "inline", "why": "A run's run_eh_study step on a microgrid profile counted K islanding contingencies when its args were frozen and shown on its card; the project now has a different set, so nothing is reserved or solved and the run stops for the user to review it again."}
+}}

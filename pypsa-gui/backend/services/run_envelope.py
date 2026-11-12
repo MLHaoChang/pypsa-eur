@@ -164,8 +164,12 @@ def _number(value):
 def _check_edit(entry):
     from harness import confirm, edit_card
     from services import run_profiles
-    if not isinstance(entry, dict) or not {"tool", "target"} <= set(entry) <= {"tool", "target", "bounds", "enum"}:
+    if not isinstance(entry, dict) or not {"tool", "target"} <= set(entry) <= {"tool", "target", "bounds", "enum",
+                                                                             "unit", "source"}:
         raise EnvelopeError(f"An edit names tool, target and bounds or enum: {entry!r}")
+    # Study harness 12c (G4): a bound's unit and where it comes from, shown on the card.
+    if not all(isinstance(entry.get(k, "x"), str) and entry.get(k, "x") for k in ("unit", "source")):
+        raise EnvelopeError("An edit's unit and source are words, when it names them.")
     tool, target = entry["tool"], entry["target"]
     if not isinstance(tool, str) or tool in NEVER_ADMITTED or not edit_card.is_edit(tool) \
             or confirm._safety_tier_for(tool) != "write":
@@ -195,7 +199,8 @@ def _check_edit(entry):
         if not isinstance(enum, list) or not 0 < len(enum) <= 20 \
                 or not all(isinstance(v, str) or _number(v) for v in enum):
             raise EnvelopeError(f"{component}.{attr}: an enum lists 1-20 allowed values.")
-    return {"tool": tool, "target": dict(target), **{k: copy.deepcopy(entry[k]) for k in ("bounds", "enum") if k in entry}}
+    return {"tool": tool, "target": dict(target),
+            **{k: copy.deepcopy(entry[k]) for k in ("bounds", "enum", "unit", "source") if k in entry}}
 
 
 def _check_run(entry):
@@ -316,8 +321,13 @@ def narrow(block, candidate):
     except EnvelopeError as exc:
         _invalid(str(exc)[:300])
     for edit in mine["edits"]:
-        if not any(_within(edit, wide) for wide in block["edits"]):
+        wide = next((w for w in block["edits"] if _within(edit, w)), None)
+        if wide is None:
             _invalid(f"{edit['tool']} on {edit['target']} is wider than the profile's envelope.")
+        for key in ("unit", "source"):  # the profile's own words, never a caller's
+            edit.pop(key, None)
+            if key in wide:
+                edit[key] = wide[key]
     for gap in mine["gaps"]:
         if not any(gap["tool"] == wide["tool"] and gap["target"]["component"] == wide["target"]["component"]
                    and gap["target"]["attr"] == wide["target"]["attr"]
@@ -547,8 +557,9 @@ def _audit(envelope, event, **fields):
     envelope["audit"].append({"at": _iso(_now()), "event": event, **{k: v for k, v in fields.items() if v is not None}})
 
 
-def propose(task_path, task, profile):
-    """The profile's envelope block as a `proposed` envelope (intake)."""
+def propose(task_path, task, profile, held=None):
+    """The profile's envelope block as a `proposed` envelope (intake), with
+    `held`, the K its caller counted before the lock (`counted_live`)."""
     block = profile.get("envelope")
     if block is None:
         return None
@@ -563,8 +574,74 @@ def propose(task_path, task, profile):
                 # template with the confirmed intake inputs), set by `set_setup`.
                 "setup": None,
                 "state": "proposed", "audit": []}
+    _count_on_card(envelope, held)
     _save(task_path, envelope)
     return envelope
+
+
+def counted(profile, ctx):
+    """Study harness 12c (G1): for a profile whose EH study counts its
+    islanding contingencies, K counted on `ctx`'s network as the freeze
+    counts them (`run_eh.islanding`) and the solve budget that follows
+    (`run_profiles.mg_budget`), held to the hard cap: `{count, links, needed,
+    solves}`, `count` None when they cannot be counted. None for any other
+    profile."""
+    if (profile.get("eh_study") or {}).get("contingency_solves") is None:
+        return None
+    from harness import run_eh
+    from services import flow_service, run_profiles
+    try:
+        card = flow_service._request_for(run_eh._template(ctx), ctx.solver_state.get("solver_config"))
+        links, _ = run_eh.islanding(ctx.network, {"archetype": card["archetype"],
+                                                  "pack_overrides": card.get("pack_overrides"),
+                                                  "dtc_attribution": card.get("dtc_attribution")})
+    except Exception:  # noqa: BLE001 — not counted is never a K
+        return {"count": None, "links": [], "needed": None, "solves": None}
+    needed = run_profiles.mg_budget(len(links))
+    held = {"count": len(links), "links": links, "needed": needed, "solves": min(needed, CAPS["solves"])}
+    one_pass = run_profiles.mg_pass_solves(len(links))
+    if one_pass > CAPS["solves"]:
+        # GK B (47) Q1-ii: a budget that cannot finish one pass is never offered.
+        held.update(refused=PASS_OVER_CAP, one_pass=one_pass)
+    return held
+
+
+# Study harness 12c (GK B (47) Q1-ii): one solve pass alone is above the hard cap.
+PASS_OVER_CAP = "eh_pass_over_cap"
+
+
+def _over_cap_words(shown):
+    from services.run_profiles import mg_pass_words
+    k = shown["count"]
+    return (f"- K = {k} islanding contingencies on this project: one solve pass needs {mg_pass_words(k)} = "
+            f"{shown['one_pass']} solves, above the hard cap of {CAPS['solves']}, so this run cannot be "
+            "granted; run it step by step")
+
+
+def counted_live(project_id, profile):
+    """G1: `counted` on the open project when it is the run's own, else None.
+    It copies the network and derives the DTC config, so the card paths take
+    it before `assistant_tasks._LOCK` (#1345); the freeze and admit sites
+    still derive K under the lock (README, "K and the task lock")."""
+    from services.pypsa_service import PyPSAService
+    ctx = PyPSAService.get_active_context()
+    if str(getattr(ctx, "project_uuid", None)) != str(project_id):
+        return None
+    return counted(profile, ctx)
+
+
+def _count_on_card(envelope, held):
+    """G1: a proposed plain run's card carries `held` (K, counted on the run's
+    own open project by `counted_live`) and the solve budget it sets. True
+    when it changed."""
+    if envelope.get("setup") or envelope["state"] != "proposed":
+        return False
+    if held is None or held == envelope.get("contingencies"):
+        return False
+    envelope["contingencies"] = held
+    if held["solves"] is not None:
+        envelope["budget"] = {**envelope["budget"], "solves": held["solves"]}
+    return True
 
 
 SETUP_TOOL = "create_project_from_template"
@@ -597,7 +674,30 @@ def _rows(envelope):
         t = e["target"]
         allowed = ", ".join(map(str, e["enum"])) if "enum" in e else ", ".join(
             f"{k} {v:g}" if k != "rel" else f"±{v:.0%} of the value at grant" for k, v in e["bounds"].items())
-        lines.append(f"- Edit {t['component']} `{t['name']}` {t['attr']} ({allowed}) with {e['tool']}")
+        unit = f" {e['unit']}" if e.get("unit") else ""
+        source = f"; source: {e['source']}" if e.get("source") else ""
+        lines.append(f"- Edit {t['component']} `{t['name']}` {t['attr']} ({allowed}{unit}{source}) with {e['tool']}")
+    shown = envelope.get("contingencies")
+    if isinstance(shown, dict):  # study harness 12c (G1): K and the budget it sets
+        k = shown.get("count")
+        links = ", ".join(map(str, shown.get("links") or []))
+        if k is None:
+            lines.append("- The islanding contingencies cannot be counted now, so the run cannot be granted")
+        elif shown.get("refused"):
+            lines.append(_over_cap_words(shown))
+        else:
+            # Q1-iii: the arithmetic, and the capped figure whenever the cap applies.
+            from services import run_profiles
+            lines.append(f"- K = {k} islanding contingenc{'y' if k == 1 else 'ies'} on this project ({links}): "
+                         f"{run_profiles.mg_budget_words(k)} = {shown['needed']} solves"
+                         + (f"; the budget is the hard cap of {CAPS['solves']} solves, so the last round "
+                            "may stop for you" if shown["needed"] > shown["solves"] else ""))
+    held = (envelope.get("eh_study") or {}).get("contingencies")
+    if isinstance(held, dict):  # study harness 12c (G1): K, frozen at the grant
+        k = held.get("count")
+        lines.append(f"- The Energy Hub study stress-tests {k} islanding contingenc{'y' if k == 1 else 'ies'} "
+                     f"({', '.join(map(str, held.get('links') or []))}) on "
+                     f"{(envelope['eh_study'].get('args') or {}).get('budget_solves')} solves")
     lines += [_gap_row(g) for g in envelope.get("gaps", [])]
     lines += [f"- Run {r['tool']}" + (f" ({r['kind']})" if r.get("kind") else "") for r in envelope["runs"]]
     b = envelope["budget"]
@@ -693,6 +793,7 @@ def describe(envelope, goal=None):
                      for g in envelope.get("gaps", [])],
             "runs": envelope["runs"], "budget": envelope["budget"], "research": envelope["research"],
             "notify": envelope["notify"], "setup": envelope.get("setup"),
+            **({"contingencies": envelope["contingencies"]} if envelope.get("contingencies") else {}),
             "used": sum(1 for a in audit if a["event"] == "used"),
             "refused": sum(1 for a in audit if a["event"] == "refused"),
             "detail": _rows(envelope) + ("\n" + _goal_row(goal) if goal is not None else ""),
@@ -713,6 +814,12 @@ def read_for_card(task_path, task):
     ctx = PyPSAService.get_active_context()
     if str(getattr(ctx, "project_uuid", None)) != task.get("project_id"):
         return describe(envelope)
+    from services import assistant_tasks, run_profiles
+    held = counted(run_profiles.resolve(task["run"]["profile"]), ctx)  # before the lock (#1345)
+    with assistant_tasks._LOCK:  # G1: the card shows the K the grant then holds it to
+        envelope = _load(task_path)
+        if envelope is not None and envelope["state"] == "proposed" and _count_on_card(envelope, held):
+            _save(task_path, envelope)
     return describe(envelope, goal=card_goal(task, ctx))
 
 
@@ -863,6 +970,11 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
     if verdict not in ("unattended", "stepwise", "revoke"):
         _invalid("Choose unattended, stepwise or revoke.")
     setup = None
+    live_k = None
+    if verdict == "unattended":  # G1: K counted before the lock (#1345); the run's project and profile never change
+        _, early = assistant_tasks._read(task_id)
+        if early.get("run"):
+            live_k = counted_live(early.get("project_id"), run_profiles.resolve(early["run"]["profile"]))
     with assistant_tasks._LOCK:
         path, task = assistant_tasks._read(task_id)
         current = _load(path)
@@ -892,6 +1004,16 @@ def decide(session, task_id, verdict, envelope=None, notify_email=False, intake_
             if block is None:  # study harness 10a (GK B (36) F3): a stepwise-only profile has none to grant
                 _refuse("envelope_not_grantable", "This run's profile runs step by step only: it has no envelope.")
             block = check_block(block)
+            if not current.get("setup"):
+                held = live_k
+                if held is not None:
+                    # Study harness 12c (G1): the K the card showed, and the budget it set.
+                    if held["count"] is None or held != current.get("contingencies"):
+                        _refuse("eh_contingencies", "The project's islanding contingencies changed since the "
+                                "card was shown, or cannot be counted; review the card again.")
+                    if held.get("refused") == PASS_OVER_CAP:
+                        _refuse("eh_pass_over_cap", _over_cap_words(held)[2:])
+                    block = {**block, "budget": {**block["budget"], "solves": held["solves"]}}
             chosen = narrow(block, envelope if envelope is not None else block)
             if current.get("setup"):
                 setup = (path, task, current, chosen)

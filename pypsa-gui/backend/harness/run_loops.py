@@ -276,7 +276,7 @@ def after_failed_result(path, task, gate, profile):
     """The solve stage's or the result gate's gate failed (L2, §6.2). True
     when a round is now due (the stage stays active); False when the stage
     fails, the loop's ending (if one ran) on `run.loop` and the stage."""
-    from services import run_envelope
+    from services import run_envelope, run_gates
     run = task["run"]
     name = run["stage"]
     agent = profile["stages"][RESULT_STAGE].get("agent")
@@ -298,7 +298,11 @@ def after_failed_result(path, task, gate, profile):
         # engine's closing re-solve replaced the solve L2 would triage), never the engine again.
         engines = {rule["id"] for rule in engine_rules(profile)}
         moved = any(r["rule"] in engines and r["facts"][0].get("value") == "inputs_changed" for r in gate["rules"])
-        return stop("inputs_changed" if moved else "not_converged" if engines & set(failing) else "result_failed")
+        # Study harness 12c (GK B (47) Q4): a loop the cap cut short ends on the cap, not as unconverged.
+        capped = any(r["rule"] in engines and r["facts"][0].get("value") == run_gates.LOOP_BUDGET_SPENT
+                     for r in gate["rules"])
+        return stop("inputs_changed" if moved else run_gates.LOOP_BUDGET_SPENT if capped
+                    else "not_converged" if engines & set(failing) else "result_failed")
     capture = _not_applied(gate)
     if capture is not None:
         # C6f: the solve is spent and its result is not the project's; the user decides.
