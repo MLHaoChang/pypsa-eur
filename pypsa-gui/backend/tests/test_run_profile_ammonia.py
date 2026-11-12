@@ -241,6 +241,15 @@ def test_a_flag_that_is_not_a_bool_never_passes(direct, flagged):
     assert result["facts"][0]["value"] == "flagged_unreadable"
 
 
+def test_a_solve_with_no_solver_state_reads_no_check(direct):
+    """Mutant at `_binary_check`: no solver state is no check, never an error."""
+    result = direct("nh3.binary_check", network=_network(), solver_state=None)
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "no_check",
+    )
+
+
 def test_an_unverified_check_is_not_evaluated_with_its_reason(direct):
     """Q2 = A: the run goes to needs_user; a lever cannot fix a timeout."""
     payload = {
@@ -640,6 +649,39 @@ def test_a_keyed_rule_that_does_not_fail_the_gate_never_stops_it(tmp_path):
         is False
     )
     assert task["run"]["stages"]["result_gate"]["reason"] == "no_envelope"
+
+
+@pytest.mark.parametrize(
+    ("stage", "rows", "reason"),
+    [
+        # a keyed rule read at the solve stage: only the result gate stops on it
+        ("solve", [("nh3.binary_check", "block", "not_evaluated")], "no_result"),
+        # an unkeyed block rule not evaluated goes to the agent, not the user
+        (
+            "result_gate",
+            [("nh3.delivery.shortfall", "block", "not_evaluated")],
+            "no_envelope",
+        ),
+        # a keyed rule that read evidence and failed goes to the agent too
+        ("result_gate", [("nh3.binary_check", "block", "fail")], "no_envelope"),
+    ],
+)
+def test_only_a_keyed_rule_not_evaluated_at_the_result_gate_stops_it(
+    tmp_path, stage, rows, reason
+):
+    """Mutants at the stop: each of its three conditions is needed."""
+    from harness import run_loops
+
+    task = _at_result_gate()
+    task["run"]["stage"] = stage
+    task["run"]["stages"][stage] = {"status": "active", "attempts": 1}
+    gate = {"verdict": "fail", "rules": [_gate_row(*row) for row in rows]}
+    profile = run_profiles.resolve(REF)
+    assert (
+        run_loops.after_failed_result(tmp_path / "task.json", task, gate, profile)
+        is False
+    )
+    assert task["run"]["stages"][stage]["reason"] == reason
 
 
 def test_the_profile_lists_what_blocks_an_unattended_run():
