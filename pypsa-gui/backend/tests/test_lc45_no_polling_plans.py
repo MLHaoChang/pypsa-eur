@@ -208,7 +208,7 @@ def test_both_stages_continue_without_a_poll(session, baseline, monkeypatch):
     task = _study(
         monkeypatch,
         "lc45-s1",
-        {"options": [_rec("running"), _rec()], "tornado": [_rec("aborting"), _rec()]},
+        {"options": [_rec("running"), _rec()], "tornado": [_rec("running"), _rec()]},
     )
     _run(session, monkeypatch, "options")
     assert _wait_done(root, task["task_id"], 0)["status"] == "completed"
@@ -255,10 +255,10 @@ def test_a_failed_or_aborted_run_fails_the_step_with_the_record_reason(
 @pytest.mark.parametrize(
     "terminal, step_status", [("done", "completed"), ("aborted", "failed")]
 )
-def test_a_run_followed_through_running_and_aborting_settles_only_at_the_end(
+def test_a_run_followed_while_running_settles_only_at_its_terminal_state(
     session, baseline, monkeypatch, terminal, step_status
 ):
-    """Running -> aborting -> terminal: the step waits through `aborting` (F3)."""
+    """Running (a stop may be pending: the runners keep `running`) -> terminal: settles only then."""
     _, _, root = baseline
     seen = []
     steps = [
@@ -276,7 +276,7 @@ def test_a_run_followed_through_running_and_aborting_settles_only_at_the_end(
         "run_decision_study",
         lambda **k: {"stage": k["stage"], "run": {"status": "running"}},
     )
-    script = ["running", "running", "aborting", "aborting", terminal]
+    script = ["running", "running", "running", terminal]
 
     def record(job):
         status = script.pop(0) if len(script) > 1 else script[0]
@@ -287,7 +287,7 @@ def test_a_run_followed_through_running_and_aborting_settles_only_at_the_end(
     _run(session, monkeypatch, "options")
     step = _wait_done(root, task["task_id"], 0)
     assert step["status"] == step_status
-    assert "aborting" in seen and seen[-1] == terminal
+    assert seen.count("running") >= 3 and seen[-1] == terminal
     if terminal == "aborted":
         assert "aborted" in str(step)
 
@@ -348,3 +348,18 @@ def test_an_options_run_stopped_at_its_deadline_is_partial(monkeypatch):
     monkeypatch.setattr(continuation, "_study_record", lambda job: saved)
     got, why = continuation._study_state({"kind": "study_options", "attempt": 1.0})
     assert got == "partial" and "deadline" in why
+
+
+def test_a_malformed_record_settles_the_followed_step_uncertain(
+    session, baseline, monkeypatch
+):
+    """N1b: the real follower, one malformed record: uncertain, never left waiting."""
+    _, _, root = baseline
+    bad = {**_rec("running"), "robustness": "ok"}
+    task = _study(
+        monkeypatch,
+        "lc45-s10",
+        {"options": [bad, {**bad, "status": "done"}], "tornado": [_rec()]},
+    )
+    _run(session, monkeypatch, "options")
+    assert _wait_done(root, task["task_id"], 0)["status"] == "uncertain"
