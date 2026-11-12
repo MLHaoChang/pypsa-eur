@@ -591,9 +591,11 @@ def _line_blob(ln: LineItem) -> dict:
     change an outcome and is set, so a digest from before the field stays byte-equal. The
     hint and a default's range are display only and never enter."""
     d = ln.model_dump(mode="json", exclude={"hint"})
-    for k in ("linked_share", "linked_share_by_year"):
-        if d[k] in (None, {}):
-            del d[k]
+    # A scalar share of 1.0 reads as None does (`linked_share_at`): no outcome, no entry.
+    if d["linked_share"] in (None, 1.0):
+        del d["linked_share"]
+    if not d["linked_share_by_year"]:
+        del d["linked_share_by_year"]
     if not ln.default_keys:
         del d["default_units"]
     for a in d["assumed"].values():

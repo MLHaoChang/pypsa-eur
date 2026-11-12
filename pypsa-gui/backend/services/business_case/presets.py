@@ -19,11 +19,15 @@ from __future__ import annotations
 
 import json
 import pathlib
-from typing import Literal
+import re
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from models.business_case import BusinessCaseInputs, LineItem
+
+if TYPE_CHECKING:
+    from services.library.defaults_pack.loader import DefaultsPack
 
 PRESETS_DIR = (
     pathlib.Path(__file__).resolve().parents[2]
@@ -35,6 +39,8 @@ PRESETS_DIR = (
 VERSIONS: dict[str, str] = {"eh_datacenter": "1", "eh_site": "1"}
 
 _FORBID = ConfigDict(extra="forbid", allow_inf_nan=False)
+#: `<pack id>@<version>:sha256:<hex>`, the defaults pack's stamp.
+_STAMP = re.compile(r"^[a-z_]+@(?P<version>[0-9A-Za-z_.+\-]+):sha256:[0-9a-f]{64}$")
 
 
 class PresetInvalid(ValueError):
@@ -94,6 +100,10 @@ def load(path: pathlib.Path) -> PresetFile:
             raise PresetInvalid(
                 f"{path.name}: '{off.label}' line unit not in its units"
             )
+        if off.line.quantity_source not in off.sources:
+            raise PresetInvalid(
+                f"{path.name}: '{off.label}' line source not in its sources"
+            )
     return f
 
 
@@ -106,12 +116,15 @@ def _for_template(template_id: str, directory: pathlib.Path) -> PresetFile:
     return found[0]
 
 
-def _pack(f: PresetFile):
+def _pack(preset_file: PresetFile) -> DefaultsPack:
     """The pack the file pins, byte-equal by its stamp (P8)."""
     from services.library.defaults_pack.loader import load_defaults_pack
 
-    version = f.pack.split("@", 1)[1].split(":", 1)[0]
-    pack = load_defaults_pack(version)
+    f = preset_file
+    m = _STAMP.match(f.pack)
+    if m is None:
+        raise PresetInvalid(f"{f.id}: pack '{f.pack}' is not a pack stamp")
+    pack = load_defaults_pack(m["version"])
     if pack.stamp != f.pack:
         raise PresetInvalid(f"{f.id}: pack '{f.pack}' is now '{pack.stamp}'")
     return pack
@@ -135,8 +148,9 @@ def preset(
     """The template's pre-filled lines, cost defaults from the pinned pack as `assumed`.
 
     A template without variants (`eh_site`) is the blank table: no preset, no lines. A
-    default in another currency or unit than the row names is never filled (the run then
-    refuses `cost_not_established` or `default_unit_mismatch`)."""
+    default in another currency is never filled (the run then refuses
+    `cost_not_established`). A pack row in another unit than the row names raises
+    `DefaultUnitMismatch` here; the pinned stamp check makes that a changed pack file."""
     f = _for_template(template_id, directory)
     if variant is None and not f.variants:
         return BusinessCaseInputs()

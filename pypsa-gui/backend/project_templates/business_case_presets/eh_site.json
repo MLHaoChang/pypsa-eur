@@ -91,7 +91,7 @@
         "unit": "share",
         "quantity_source": "share_of:capex",
         "escalation": "opex",
-        "note": "Share of capex per year. No sourced default: enter it (GK B P9)."
+        "note": "Share of capex per year. No sourced default: enter it."
       }
     },
     {
@@ -109,7 +109,7 @@
         "unit": "share",
         "quantity_source": "share_of:capex",
         "escalation": "opex",
-        "note": "Share of capex per year. No sourced default: enter it (GK B P9)."
+        "note": "Share of capex per year. No sourced default: enter it."
       }
     },
     {
@@ -127,7 +127,7 @@
         "unit": "share",
         "quantity_source": "share_of:capex",
         "escalation": "opex",
-        "note": "Share of asset value per year. No sourced default: enter it (GK B P9)."
+        "note": "Share of asset value per year. No sourced default: enter it."
       }
     },
     {

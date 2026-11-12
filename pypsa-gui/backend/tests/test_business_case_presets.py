@@ -388,6 +388,13 @@ def test_p1_a_linked_share_moves_the_digest(nh3):
     assert business_case_hash(_ic(), _pin_case(nh3=nh3), _NH3) != PINNED
 
 
+def test_p1_a_share_of_one_hashes_as_none():
+    """`linked_share_at` reads None as 1.0: no outcome, so no digest entry."""
+    assert (
+        business_case_hash(_ic(), _pin_case(nh3={"linked_share": 1.0}), _NH3) == PINNED
+    )
+
+
 def test_p1_default_units_enter_beside_their_keys():
     key = {"default_keys": {"life_years": "dc-business-case.facility.lifetime"}}
     a = _pin_case(capex={**key, "default_units": {"life_years": "years"}})
@@ -650,6 +657,32 @@ def test_p6_a_pack_row_in_another_unit_is_refused_and_never_filled():
     assert ok.lines[1].price == 9.469e6
 
 
+def test_p6_a_row_in_another_currency_is_skipped_before_its_unit_is_read():
+    """The currency skip is unchanged: a USD case never raises on a EUR row's unit."""
+    c = P.preset("eh_datacenter", "gpu_cloud", currency="EUR")
+    blank = c.model_copy(deep=True)
+    blank.lines[1] = blank.lines[1].model_copy(
+        update={"price": None, "money_year": None, "assumed": {}}
+    )
+    pack = _UnitPack("dc-business-case.facility.overnight", "EUR/kW")
+    out = blank.with_cost_defaults(pack, currency="USD")
+    assert out.lines[1].price is None and "price" not in out.lines[1].assumed
+    assert ("cost_not_established", "lines[1].price") in _kinds(_filled_with(out))
+
+
+def _filled_with(case: BusinessCaseInputs) -> BusinessCaseInputs:
+    """`case` with the quantities typed, so only price faults remain on the facility."""
+    lines = [
+        ln.model_copy(update={"quantity": 10.0})
+        if ln.name == "Facility, shell and M&E"
+        else ln
+        for ln in case.lines
+    ]
+    return BusinessCaseInputs.model_validate(
+        {**case.model_dump(), "lines": [ln.model_dump() for ln in lines]}
+    )
+
+
 def test_p6_default_units_must_name_the_default_keys_columns():
     for units in ({}, {"life_years": "years", "price": "EUR/MW"}):
         with pytest.raises(ValidationError, match="default_units"):
@@ -690,11 +723,12 @@ def _edit(d: pathlib.Path, name: str, fn) -> None:
     [
         lambda d: d.update(extra=1),
         lambda d: d.update(version="2"),
-        lambda d: d.update(id="eh_other"),
+        lambda d: d.update(id="eh_site"),  # a known id, so only the name check fires
         lambda d: d["variants"]["gpu_cloud"]["lines"][0].update(price_typo=1.0),
         lambda d: d["variants"]["gpu_cloud"]["lines"][1]["default_units"].pop("price"),
         lambda d: d["variants"]["gpu_cloud"]["lines"][0].update(price=float("nan")),
         lambda d: d.update(pack=d["pack"][:-1] + "0"),
+        lambda d: d.update(pack="generic_defaults-2026-11-10"),
     ],
 )
 def test_p7_a_broken_file_is_refused_at_call(presets_dir, fn):
@@ -715,10 +749,16 @@ def test_p7_an_offered_line_outside_its_units_is_refused(presets_dir):
         P.offered_rows("eh_site", directory=presets_dir)
 
 
+def test_p7_an_offered_line_outside_its_sources_is_refused(presets_dir):
+    _edit(presets_dir, "eh_site", lambda d: d["offered"][4].update(sources=["typed"]))
+    with pytest.raises(P.PresetInvalid, match="source"):
+        P.offered_rows("eh_site", directory=presets_dir)
+
+
 def test_p7_unknown_template_or_variant_is_a_lookup_error():
     with pytest.raises(LookupError):
         P.preset("eh_unknown", currency="EUR")
-    with pytest.raises(LookupError):
+    with pytest.raises(LookupError, match="has no business-case preset 'retail'"):
         P.preset("eh_datacenter", "retail", currency="EUR")
     with pytest.raises(LookupError):
         P.preset("eh_datacenter", currency="EUR")  # a DC preset names its variant

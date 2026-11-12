@@ -17,7 +17,7 @@
           "unit": "GPU_h",
           "quantity_source": "linked:it_energy@1",
           "escalation": "contract",
-          "note": "Served IT energy in GPU-hours; linked_share is the sold share of utilised capacity. Reserved and on-demand at your price; GPU-hour prices fall over time (research 1a).",
+          "note": "Served IT energy in GPU-hours; linked_share is the sold share of utilised capacity. Reserved and on-demand at your price; GPU-hour prices fall over time.",
           "preset_rule": {
             "requires": [
               "it_hardware",
@@ -29,7 +29,7 @@
             "low": 2.0,
             "high": 6.16,
             "unit": "USD/GPU_h",
-            "source": "H100 list prices: Lambda, CoreWeave, AWS (.scratch/dc-business-case/research.md [16][17][18])",
+            "source": "H100 list prices: Lambda, CoreWeave, AWS",
             "year": 2026,
             "note": "On-demand list prices; committed contracts sit well below."
           }
@@ -56,7 +56,7 @@
           "category": "it_hardware",
           "unit": "unit",
           "escalation": "capex",
-          "note": "A lump per GPU or per MW IT (DCBC-SCOPE-1 Q1). Set refresh_years to replace at end of life.",
+          "note": "A lump per GPU or per MW IT. Set refresh_years to replace at end of life.",
           "default_keys": {
             "life_years": "dc-business-case.it_hardware.lifetime"
           },
@@ -71,7 +71,7 @@
           "unit": "kW_month",
           "quantity_source": "linked:contracted_it_kw@1",
           "escalation": "opex",
-          "note": "Per kW of contracted IT per month. No sourced default: enter the price (GK B P9)."
+          "note": "Per kW of contracted IT per month. No sourced default: enter the price."
         },
         {
           "name": "Network and bandwidth",
@@ -80,7 +80,7 @@
           "unit": "kW_month",
           "quantity_source": "linked:contracted_it_kw@1",
           "escalation": "opex",
-          "note": "Per kW of contracted IT per month. No sourced default: enter the price (GK B P9)."
+          "note": "Per kW of contracted IT per month. No sourced default: enter the price."
         },
         {
           "name": "Maintenance (non-energy)",
@@ -167,7 +167,7 @@
             "low": 154.0,
             "high": 205.0,
             "unit": "USD/kW_month",
-            "source": "Digital Realty Q4 2025 >1 MW leases, cash to GAAP rent (.scratch/dc-business-case/research.md [12])",
+            "source": "Digital Realty Q4 2025 >1 MW leases, cash to GAAP rent",
             "year": 2025,
             "note": "Wholesale; retail colocation runs about 270-290 USD/kW_month."
           }
@@ -203,7 +203,7 @@
           "unit": "kW_month",
           "quantity_source": "linked:contracted_it_kw@1",
           "escalation": "opex",
-          "note": "Per kW of contracted IT per month. No sourced default: enter the price (GK B P9)."
+          "note": "Per kW of contracted IT per month. No sourced default: enter the price."
         },
         {
           "name": "Network and bandwidth",
@@ -212,7 +212,7 @@
           "unit": "kW_month",
           "quantity_source": "linked:contracted_it_kw@1",
           "escalation": "opex",
-          "note": "Per kW of contracted IT per month. No sourced default: enter the price (GK B P9)."
+          "note": "Per kW of contracted IT per month. No sourced default: enter the price."
         },
         {
           "name": "Maintenance (non-energy)",

@@ -501,9 +501,10 @@ class BusinessCaseInputs(BaseModel):
         default carries its row's money year into the line (G-C1); a line whose stated
         money year differs, or whose typed price cells are in base-year money (no stated
         money year), is skipped, never converted or relabelled (GK B Q4, F1). A skipped price stays None
-        and the run refuses it `cost_not_established` (GK B P1). A pack row in another unit
-        than the line's `default_units` names is refused `default_unit_mismatch`, never
-        filled (GK B BC 07 Q1, P6)."""
+        and the run refuses it `cost_not_established` (GK B P1). A pack row in the case's
+        currency but another unit than the line's `default_units` names raises
+        `default_unit_mismatch`, never fills (GK B BC 07 Q1, P6); the currency skip comes
+        first, so a row skipped for its currency never raises."""
         lines = []
         for i, ln in enumerate(self.lines):
             data = ln.model_dump()
@@ -514,10 +515,10 @@ class BusinessCaseInputs(BaseModel):
                 row = _pack_row(pack, key)
                 if row is None or row.value is None:
                     continue
-                if row.unit != ln.default_units[col]:
-                    raise DefaultUnitMismatch(f"lines[{i}].default_keys[{col}]")
                 if row.currency is not None and row.currency != currency:
                     continue
+                if row.unit != ln.default_units[col]:
+                    raise DefaultUnitMismatch(f"lines[{i}].default_keys[{col}]")
                 if col == "price" and row.money_year is not None:
                     if data["money_year"] is None:
                         # Typed cells are in base-year money; the row's year would relabel
