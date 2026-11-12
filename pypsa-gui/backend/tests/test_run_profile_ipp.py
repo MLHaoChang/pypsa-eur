@@ -448,3 +448,94 @@ def test_the_start_receipt_carries_the_started_at_the_step_binds():
     src = open(runner_mod.__file__).read()
     assert '"started_at": record["started_at"]' in src
     assert math.isfinite(1.0)
+
+
+# ── mutant pins: the envelope, the export rating and the reason words ────────
+
+
+def test_a_run_entry_naming_the_case_is_checked_like_any_other_run():
+    assert run_envelope._check_run({"tool": "run_investment_case", "kind": "x"}) == {
+        "tool": "run_investment_case", "kind": "x"}
+    for bad in ({"tool": "no_such_tool"}, {"tool": "run_investment_case", "restore": "final"},
+                {"tool": "run_investment_case", "kind": 3}, {"tool": "run_investment_case", "extra": 1}):
+        with pytest.raises(run_envelope.EnvelopeError) as err:
+            run_envelope._check_run(bad)
+        assert "run_investment_case" in str(err.value) and "A run names one of" in str(err.value)
+    with pytest.raises(run_envelope.EnvelopeError):
+        run_envelope._check_run("run_investment_case")
+
+
+def test_only_a_listed_solving_run_is_held_to_the_solve_budget(monkeypatch):
+    seen = []
+
+    def standing(session, envelope, task, ctx, solve=False):
+        seen.append(solve)
+        return "probe"
+    monkeypatch.setattr(run_envelope, "_standing", standing)
+    envelope = {"runs": [{"tool": "run_investment_case"}, {"tool": "solve_queue_enqueue"}], "edits": []}
+
+    def refusal(tool):
+        return run_envelope._refusal(None, envelope, {}, tool, {}, "write", False, None, None, {})
+
+    assert refusal("run_investment_case") == "probe" and seen == [False]  # a case spends no solve
+    assert refusal("solve_queue_enqueue") == "probe" and seen == [False, True]
+    envelope["runs"] = [{"tool": "run_investment_case"}]
+    refusal("solve_queue_enqueue")
+    assert seen[-1] is False  # unlisted: never held as a solve
+
+
+def test_a_case_is_admitted_with_the_solve_budget_used_up_but_a_solve_is_not(monkeypatch):
+    from harness import runner as harness_runner
+
+    monkeypatch.setattr(harness_runner, "budget_spent", lambda task: False)
+    monkeypatch.setattr(run_envelope, "_now", lambda: 0.0)
+    monkeypatch.setattr(run_envelope, "_epoch", lambda value: 1e9)
+    monkeypatch.setattr(run_envelope, "_handover_unbound", lambda *a: False)
+    envelope = {"state": "granted", "task_id": "t", "project_id": "p", "owner_id": "u", "expires_at": "x",
+                "budget": {"solves": 1}, "chain": [], "fingerprint": "f",
+                "audit": [{"event": "used", "call_id": "x", "tool": "solve_queue_enqueue"}]}
+    task = {"task_id": "t", "project_id": "p", "owner_id": "u"}
+    session = SimpleNamespace(owner_user_id="u")
+    ctx = SimpleNamespace(project_uuid="p")
+    monkeypatch.setattr(run_envelope, "_fingerprint", lambda c: "f")
+    from services import assistant_tasks
+    monkeypatch.setattr(assistant_tasks, "_stale", lambda t, current: False)
+    assert run_envelope._standing(session, envelope, task, ctx, solve=False) is None
+    assert run_envelope._standing(session, envelope, task, ctx, solve=True) == "exhausted"
+
+
+@pytest.mark.parametrize("rating", ["70", None, float("inf")])
+def test_a_rating_that_is_not_a_finite_number_has_no_limit_to_hold_the_export_to(direct, rating):
+    n = _site()
+    n.links["p_nom"] = n.links["p_nom"].astype(object)
+    n.links.at["grid_export", "p_nom"] = rating
+    result = _export(direct, n)
+    assert result["verdict"] == "not_evaluated" and "export_link_unrated" in str(result)
+
+
+def test_each_new_reason_key_has_its_exact_words():
+    expected = {
+        "irr_not_established": "the case could not establish the project pre-tax IRR",
+        "no_debt_service": "the case has no debt service, so there is no DSCR",
+        "dscr_not_finite": "a year with debt service has no finite DSCR",
+        "dscr_unreadable": "the case's debt section cannot be read",
+    }
+    for key, words in expected.items():
+        assert ic._REASON_WORDS[key] == words
+        assert ic.reason_words({"reasons": [key]}) == words[0].upper() + words[1:]
+
+
+def test_the_returns_are_read_only_from_a_current_established_case(monkeypatch):
+    fact = _read(monkeypatch, ic.read_returns, report=_report())
+    assert fact["state"] == ic.ESTABLISHED
+    assert fact["returns"]["irr"] == pytest.approx(0.05) and fact["returns"]["currency"] == "EUR"
+    stale = _read(monkeypatch, ic.read_returns, report=_report(), current=False)
+    assert stale["returns"] is None and stale["state"] != ic.ESTABLISHED
+    changed = _read(monkeypatch, ic.read_returns, report=_report(hash_="other"))
+    assert changed["returns"] is None and changed["reasons"] == ["report_changed"]
+
+
+def test_an_empty_service_list_is_no_debt_service_whatever_the_cover_list_holds(monkeypatch):
+    report = _report(service=(), dscr=(None, 1.5, 1.3))
+    fact = _read(monkeypatch, ic.read_min_dscr, report=report)
+    assert fact["min_dscr"] is None and fact["reasons"] == ["no_debt_service"]
