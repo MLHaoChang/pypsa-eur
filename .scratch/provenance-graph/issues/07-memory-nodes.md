@@ -45,3 +45,7 @@ Checked on master: `memory_store.py` has no `node(id, version)` yet and `memory`
 - Likely files: `services/provenance_graph/`, `services/memory_store.py`, tests. Reviewer: GK B.
 
 The acceptance in the body stands.
+
+### 2026-11-12: GK B plan GO, conditions
+
+P1 fail-closed source parse in one reader (`memory.recall_of`); P2 list every writer that can write a `memory:` source (only `memory_parameters.apply`; the other approved writers build `upload:`/`pdf:`/reference ids); P3 a later edit ends the recall (`mark_customised` drops `approved_by`/`approved_at`, so no edge); P4 item shown only as the viewer may read it, else "not visible to you"; P5 an unreadable version says "memory item could not be read", state stays `from_memory`; P6 `from_memory` replaces only `fresh`; P7 byte-identity without memory sources; P8 every recorded field is read through `money.add_asset`; P9 new state `from_memory`: no frontend consumer of the why verdict, catalogue text updated. Mutants: drop the approved_by check; drop the approved_at check; remove recalled_from from walked; from_memory wins over stale; unresolvable version raises; skip the visibility check.

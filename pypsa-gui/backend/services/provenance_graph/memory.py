@@ -21,6 +21,13 @@ PREFIX = "memory:"
 #: `memory_parameters.SOURCE` = `memory:{id}@v{version}`; the id is the item's public id (`mem_…`).
 _SOURCE = re.compile(r"^memory:(?P<id>[A-Za-z0-9_\-]+)@v(?P<version>[1-9][0-9]*)$")
 STATE_TEXT = "from memory v{version}, user-approved"
+NOT_VISIBLE = "not visible to you"
+NOT_READ = "memory item could not be read"
+
+
+class ItemNotVisible(LookupError):
+    """A resolver raises this when the viewer may not read the item at its scope (or it is not there: the memory
+    side answers both the same, so a reader cannot probe for items it may not see)."""
 
 
 @dataclass(frozen=True)
@@ -44,11 +51,18 @@ def memory_id(item: str, version: int) -> str:
 
 
 def recall_of(entry: dict) -> MemoryRecall | None:
-    """The recall an entry's stamp records, or None when it is not a memory source or was not approved."""
-    match = _SOURCE.match(str(entry.get("source") or ""))
+    """The recall an entry's stamp records, or None when it is not a memory source or was not approved. Fail
+    closed (GK B P1): anything malformed (a non-string source, no version, a version below 1, a missing or
+    non-string approver or time) builds no edge."""
+    source = entry.get("source")
     approved_by, approved_at = entry.get("approved_by"), entry.get("approved_at")
-    if match is None or not approved_by or not approved_at:
+    if not isinstance(source, str) or not _SOURCE.fullmatch(source):
         return None
+    if not (isinstance(approved_by, str) and approved_by):
+        return None
+    if not (isinstance(approved_at, str) and approved_at):
+        return None
+    match = _SOURCE.fullmatch(source)
     return MemoryRecall(
         match["id"],
         int(match["version"]),

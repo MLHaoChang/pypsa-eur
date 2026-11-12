@@ -836,12 +836,19 @@ def get_asset_provenance_why(
     the graph cannot answer for is `why_target_unknown` (422 an unknown class, else 404)."""
     from services.provenance_graph.explain import TargetUnknown, explain
 
-    resolve = None
-    if user is not None:  # a value accepted from a memory item names it, as this user may read it (slice 07)
-        from services import memory_store
+    from services import memory_store
+    from services.provenance_graph.memory import ItemNotVisible
 
-        def resolve(item: str, version: int) -> dict | None:
+    def resolve(item: str, version: int) -> dict | None:
+        # A value accepted from a memory item names it only as this viewer may read it (slice 07, P4).
+        if user is None:
+            raise ItemNotVisible(item)
+        try:
             return memory_store.node(db, user, item, version)
+        except memory_store.MemoryError as exc:
+            if exc.status == 404:
+                raise ItemNotVisible(item) from exc
+            raise
 
     try:
         return explain(PyPSAService.get_network(), component, name, field, resolve)

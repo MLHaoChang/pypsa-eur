@@ -24,7 +24,12 @@ from typing import Any
 from services.asset_schema import fields as asset_fields
 from services.asset_schema.schema import CLASS_ATTR
 from services.provenance_graph import money
-from services.provenance_graph.memory import MemoryRecall
+from services.provenance_graph.memory import (
+    NOT_READ,
+    NOT_VISIBLE,
+    ItemNotVisible,
+    MemoryRecall,
+)
 from services.provenance_graph.queries import _check, money_graph, staleness, why
 from services.provenance_graph.types import Edge, Graph, Step, Unrecorded
 
@@ -203,19 +208,28 @@ def _pack_price(
     }
 
 
-def _memory(step: Step, resolve: Callable[[str, int], dict | None] | None) -> dict | None:
+def _memory(
+    step: Step, resolve: Callable[[str, int], dict | None] | None
+) -> dict | None:
     """The memory step's own state wording and, when the caller can read the item (`resolve`: memory_store.node
-    for the signed-in user), its summary, kind, owner scope and source evidence. An item the reader may not see,
-    or cannot resolve, still names its id and version: the stamp alone says what was approved."""
+    for the signed-in viewer), its summary, kind, owner scope and source evidence. Never a silent omission (P4,
+    P5): an item the viewer may not read says "not visible to you"; any other failure, or no reader, says "memory
+    item could not be read". The id and version always come from the approval stamp, and so does the state."""
     rec = step.via.recorded if step.via is not None else None
     if step.node.kind != "memory" or not isinstance(rec, MemoryRecall):
         return None
-    out = {"id": step.node.id, "state": rec.state, "item": None}
-    if resolve is not None:
-        try:
-            out["item"] = resolve(rec.item, rec.version)
-        except Exception:  # noqa: BLE001 - an unreadable item must not fail the walk
-            out["item"] = None
+    out = {"id": step.node.id, "state": rec.state, "item": None, "note": NOT_READ}
+    if resolve is None:
+        return out
+    try:
+        item = resolve(rec.item, rec.version)
+    except ItemNotVisible:
+        out["note"] = NOT_VISIBLE
+    except Exception:  # noqa: BLE001 - an unreadable item must not fail the walk
+        pass
+    else:
+        if item is not None:
+            out["item"], out["note"] = item, None
     return out
 
 
