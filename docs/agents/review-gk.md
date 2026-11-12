@@ -168,6 +168,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A digest gate enters a map or flag only when it changes an outcome, never on non-empty input (#1411 F1, GK B (49)).
 - A per-file exemption in an AST guard is keyed on the function or node, never the whole file (#1410 F4, GK B (49)).
 - A no-map or fallback selection by stream refuses whenever an asset-sourced slack line could be the same quantity (#1411 R, GK B (49)).
+- Finance never books volume beyond what a solved LP period served. A per-year volume factor scales the cost lines tied to dispatched volume together with the revenue lines, never revenue alone, and a line whose volume class is unknown refuses (fail closed) (homer-parity 04, GK B (50)).
 
 ## Engineering rules
 
