@@ -895,8 +895,13 @@ def test_g3_with_no_map_any_generator_opex_line_refuses_a_triggering_line():
     out = {"nh3": _flat("served_product.nh3")}
     with pytest.raises(LinkedOutputMissing):
         build_business_case(_case(grid_lost, FOM), inputs, out)
-    # No Generator opex line and no lost production: nothing to drop, it builds.
-    build_business_case(_case(FOM), inputs, out)
+    # No Generator opex line and no lost production: nothing to drop, it builds,
+    # beside a Link's opex too (only a Generator can be a slack).
+    sid = "opex:Link:electrolyser"
+    link = TemplateLine(
+        f"asset:{sid}", "energy_import", -30.0, "opex", source="asset", source_id=sid
+    )
+    build_business_case(_case(link, FOM), inputs, out)
     # No triggering line: the Generator opex line never refuses.
     build_business_case(_case(grid_lost, FOM), _inputs(), {})
 
