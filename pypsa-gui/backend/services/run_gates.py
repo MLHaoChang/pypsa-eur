@@ -424,7 +424,7 @@ def _granted_eh_study(env):
 def _eh_site_context(env):
     """Issue 33 (GK B (49)): `fetched` when the run's own fetch kept the
     site's whole map context; otherwise no evidence, with the reason (a site
-    not named, the service unavailable or truncated, or no fetch yet)."""
+    not named, the service unavailable, truncated or short of terrain, or no fetch yet)."""
     from harness import run_site
     state, reason, result = run_site.outcome(env.task)
     if state != "fetched":

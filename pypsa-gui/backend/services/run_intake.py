@@ -705,7 +705,40 @@ def goal(rows: list) -> float | None:
 
 
 SITE = "site"  # `run_profiles.SITE_LAT_PARAM`'s top: the point the inputs stage fetches the map context of
-_SITE_AXES = (("lat", "Site latitude", 85.05), ("lon", "Site longitude", 180.0))
+_HEMISPHERE = {"lat": "N", "lon": "E"}  # the one letter a positive value may carry
+
+
+def _site_axes():
+    from services import run_profiles  # one source for the bounds: the profile's fields
+
+    return (
+        ("lat", "Site latitude", run_profiles.SITE_LAT_MAX),
+        ("lon", "Site longitude", run_profiles.SITE_LON_MAX),
+    )
+
+
+def site_point_ok(point) -> bool:
+    """A frozen site point: exactly lat and lon, finite floats within bounds."""
+    return (
+        isinstance(point, dict)
+        and set(point) == {"lat", "lon"}
+        and all(
+            isinstance(point[axis], float)
+            and math.isfinite(point[axis])
+            and -limit <= point[axis] <= limit
+            for axis, _label, limit in _site_axes()
+        )
+    )
+
+
+def _hemisphere(row) -> str | None:
+    """The compass letter the cited quote writes right after the number, if any."""
+    src = row.get("source") or {}
+    raw, quote = src.get("raw"), src.get("quote")
+    if not isinstance(raw, str) or not isinstance(quote, str):
+        return None
+    m = re.search(re.escape(raw) + r"\s*(?:°|deg)?\s*([NSEWnsew])\b", quote)
+    return m.group(1).upper() if m else None
 
 
 def site(rows: list) -> tuple[dict | None, dict | None]:
@@ -727,7 +760,7 @@ def site(rows: list) -> tuple[dict | None, dict | None]:
     if not found:
         return None, None
     point = {}
-    for axis, label, limit in _SITE_AXES:
+    for axis, label, limit in _site_axes():
         r = found.get(axis)
         if r is None:
             return None, _gap(
@@ -747,6 +780,14 @@ def site(rows: list) -> tuple[dict | None, dict | None]:
                 f"{SITE}.{axis}",
                 "site_invalid",
                 f"{label} is a number of degrees from {-limit:g} to {limit:g}.",
+            )
+        letter = _hemisphere(r)
+        if letter is not None and (letter != _HEMISPHERE[axis] or v < 0):
+            # "0.12° W" reads as +0.12: never guess the sign a letter means (S1).
+            return None, _gap(
+                f"{SITE}.{axis}",
+                "site_invalid",
+                f"{label}: write south latitudes and west longitudes as negative numbers, without a letter.",
             )
         point[axis] = float(v)
     return point, None

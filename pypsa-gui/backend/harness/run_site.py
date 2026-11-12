@@ -13,16 +13,25 @@ writes nothing to the project and reserves no solve (Q2).
 The step always settles, inside `FETCH_TIMEOUT_S` (below the run lease,
 `runner.LEASE_SECONDS`; S3):
 - `fetched`: the document, with what the response held before any cap
-  (`found`) and whether the service truncated it (S6);
-- `unavailable`: the upstream refused, failed or took too long, with its
-  message; a programming error is not caught here and stops the step for
-  the user instead (`run_actions._dispatch`);
+  (`found`), whether the service truncated it (S6) and how many terrain
+  tiles it lacks;
+- `unavailable`: the upstream refused, failed, answered something it cannot
+  read, or took too long, with its message; a programming error is not
+  caught here and stops the step for the user instead
+  (`run_actions._dispatch`);
 - `not_named`: the intake names no site (or names it badly); nothing is
   fetched.
 
 The input gate's `eh.site.context` (warn) reads it (`outcome`): it passes on
-`fetched` with nothing truncated, and is not evaluated with its reason
-otherwise. The report lists that gap (`gap_line`); never a silent default.
+`fetched` with nothing truncated and every terrain tile in, and is not
+evaluated with its reason otherwise. The report lists that gap
+(`gap_line`); never a silent default.
+
+The fetch runs on a daemon thread the step waits on for at most
+`FETCH_TIMEOUT_S`. A fetch past it is abandoned: its answer is never read or
+kept, and the thread ends with its client's timeouts (an upstream that
+trickles bytes can hold it up to the service's 32 MB cap), never holding
+the run or the process's exit.
 
 Egress (S4): no setting gates the `fetch_site_context` tool's outbound call
 today; the endpoints are the operator's (`PYPSAGUI_OVERPASS_URL`,
@@ -33,11 +42,11 @@ reaches it.
 
 from __future__ import annotations
 
-import concurrent.futures
 import hashlib
 import json
 import logging
 import math
+import threading
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -67,12 +76,6 @@ def _rows(task) -> list:
     return intake if isinstance(intake, list) else []
 
 
-def _digest(value) -> str:
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, default=str).encode()
-    ).hexdigest()
-
-
 def freeze(task) -> dict:
     """The frozen record: the site the run's granted intake rows name (or
     none, with the reason a badly named one gives), and its digest."""
@@ -86,7 +89,7 @@ def freeze(task) -> dict:
         "invalid": gap["message"] if gap else None,
         "solves": 0,
     }
-    return {**frozen, "digest": _digest(core(frozen))}
+    return {**frozen, "digest": _run_actions().digest(core(frozen))}
 
 
 def core(frozen) -> dict:
@@ -101,25 +104,13 @@ def card(frozen) -> dict:
     }
 
 
-def _point_ok(site) -> bool:
-    from services import run_profiles
-
-    if not isinstance(site, dict) or set(site) != {"lat", "lon"}:
-        return False
-    limits = {"lat": run_profiles.SITE_LAT_MAX, "lon": run_profiles.SITE_LON_MAX}
-    return all(
-        isinstance(site[k], float)
-        and math.isfinite(site[k])
-        and abs(site[k]) <= limits[k]
-        for k in limits
-    )
-
-
 def valid(frozen) -> bool:
+    from services import run_intake
+
     return (
         frozen.get("version") == VERSION
         and frozen.get("solves") == 0
-        and (frozen.get("site") is None or _point_ok(frozen["site"]))
+        and (frozen.get("site") is None or run_intake.site_point_ok(frozen["site"]))
     )
 
 
@@ -146,52 +137,60 @@ def _unavailable(reason) -> dict:
     }
 
 
-def fetch(path, site) -> dict:
-    """The step's result for a named site: `fetched` with the document kept
-    beside the task, or `unavailable` with the reason, within
-    `FETCH_TIMEOUT_S`."""
+def _bounded(call):
+    """`call()` on a daemon thread, waited on for `FETCH_TIMEOUT_S`:
+    `(True, value)`, `(False, exception)`, or None past the bound."""
+    out = {}
+
+    def run():
+        try:
+            out["value"] = (True, call())
+        except BaseException as exc:  # noqa: BLE001 — handed to the waiting step, which decides
+            out["value"] = (False, exc)
+
+    worker = threading.Thread(target=run, name="site-context", daemon=True)
+    worker.start()
+    worker.join(FETCH_TIMEOUT_S)
+    return out.get("value")
+
+
+def fetch(path, site, attempt) -> dict:
+    """The step's result for a named site: `fetched` with the document
+    written beside the task under this attempt's name (`_publish` moves it
+    in while the attempt still holds the run), or `unavailable` with the
+    reason, within `FETCH_TIMEOUT_S`."""
     import httpx
 
     from services import site_context
     from services.atomic_io import atomic_write_text
 
     shape = boundary(site)
-    pool = concurrent.futures.ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix="site-context"
-    )
-    try:
-        future = pool.submit(
-            site_context.fetch_context,
+    done = _bounded(
+        lambda: site_context.fetch_context(
             shape,
             transport=_TRANSPORT,
             budget_s=min(site_context.TOTAL_BUDGET_S, FETCH_TIMEOUT_S),
         )
-        try:
-            doc = future.result(timeout=FETCH_TIMEOUT_S)
-        except concurrent.futures.TimeoutError:
-            # The fetch's own thread ends on its client's timeouts; its answer is never read.
-            return _unavailable(
-                f"the map services did not answer within {FETCH_TIMEOUT_S:.0f} s"
-            )
-        except (site_context.SiteContextUnavailable, httpx.HTTPError, OSError) as exc:
-            return _unavailable(exc)
-    finally:
-        pool.shutdown(wait=False, cancel_futures=True)
+    )
+    if done is None:
+        return _unavailable(
+            f"the map services did not answer within {FETCH_TIMEOUT_S:.0f} s"
+        )
+    ok, doc = done
+    if not ok:
+        if isinstance(
+            doc, (site_context.SiteContextUnavailable, httpx.HTTPError, OSError)
+        ):
+            return _unavailable(doc)
+        raise doc  # a programming error stops the step for the user (S3)
     text = json.dumps(doc, sort_keys=True)
     try:
-        atomic_write_text(context_path(path), text)
+        atomic_write_text(_pending_path(path, attempt), text)
     except OSError as exc:
         return _unavailable(
             f"the fetched context could not be kept ({type(exc).__name__})"
         )
-    found = (
-        doc.get("found")
-        if isinstance(doc.get("found"), dict)
-        else {
-            "buildings": len(doc.get("buildings") or []),
-            "lines": len(doc.get("lines") or []),
-        }
-    )
+    terrain = doc.get("terrain") if isinstance(doc.get("terrain"), dict) else None
     return {
         "kind": _run_actions().SITE_KIND,
         "version": VERSION,
@@ -199,12 +198,20 @@ def fetch(path, site) -> dict:
         "site": dict(site),
         "boundary": shape,
         "truncated": bool(doc.get("truncated")),
-        "found": dict(found),
+        "found": dict(doc["found"]),
+        "terrain_missing": None
+        if terrain is None
+        else int(terrain.get("missing_tiles") or 0),
         "source": doc.get("source"),
         "fetched_at": doc.get("fetched_at"),
         "file": context_path(path).name,
         "digest": hashlib.sha256(text.encode()).hexdigest(),
     }
+
+
+def _pending_path(path, attempt) -> Path:
+    target = context_path(path)
+    return target.with_name(f"{target.name}.{attempt}.tmp")
 
 
 def dispatch(path, step, frozen, attempt, instance) -> str:
@@ -220,24 +227,32 @@ def dispatch(path, step, frozen, attempt, instance) -> str:
             "reason": frozen.get("invalid") or NOT_NAMED,
         }
     else:
-        result = fetch(path, site)
+        result = fetch(path, site, attempt)
     return _publish(Path(path), step["id"], attempt, instance, result)
 
 
 def _publish(path, step_id, attempt, instance, result) -> str:
+    """Keep the result, and move this attempt's document in, only while the
+    attempt still holds the run; a run taken over keeps neither."""
     from harness import runner
 
     run_actions = _run_actions()
+    pending = _pending_path(path, attempt)
     wrote = {}
 
     def done(t):
         s = next(x for x in t["steps"] if x["id"] == step_id)
         if not run_actions._held(t, s, attempt, instance):
             return False
+        if result["state"] == "fetched":
+            pending.replace(context_path(path))
         s.update(status="completed", result=result)
         wrote["ok"] = True
 
-    runner._update(path, done)
+    try:
+        runner._update(path, done)
+    finally:
+        pending.unlink(missing_ok=True)
     if not wrote:
         logger.info(
             "run %s: the site context's result was not kept (run taken over)", path.stem
@@ -254,8 +269,13 @@ def shape_ok(result) -> bool:
     ):
         return False
     if result["state"] == "fetched":
-        return isinstance(result.get("truncated"), bool) and isinstance(
-            result.get("found"), dict
+        return (
+            isinstance(result.get("truncated"), bool)
+            and isinstance(result.get("found"), dict)
+            and (
+                result.get("terrain_missing") is None
+                or isinstance(result["terrain_missing"], int)
+            )
         )
     return isinstance(result.get("reason"), str)
 
@@ -277,9 +297,17 @@ def outcome(task) -> tuple[str, str | None, dict | None]:
         return (
             "truncated",
             (
-                f"the map service's answer was cut to the nearest features "
+                "the map service's answer was cut to the nearest features "
                 f"({result['found'].get('buildings', '?')} buildings found)"
             ),
+            result,
+        )
+    if result.get("terrain_missing") is None:
+        return "no_terrain", "the terrain around the site could not be fetched", result
+    if result["terrain_missing"]:
+        return (
+            "partial_terrain",
+            f"{result['terrain_missing']} terrain tile(s) around the site could not be fetched",
             result,
         )
     return "fetched", None, result

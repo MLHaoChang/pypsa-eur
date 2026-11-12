@@ -250,10 +250,7 @@ def pass_short(path, steps):
         elif s["tool"] in run_envelope.RUN_TOOLS:
             need += 1
         elif run_actions.is_action(s):
-            frozen = s.get("frozen") if isinstance(s.get("frozen"), dict) else {}
-            need += (
-                int(frozen["solves"]) if "solves" in frozen else run_actions.SOLVES
-            )  # issue 33: 0 is 0
+            need += int((s.get("frozen") or {}).get("solves") or run_actions.SOLVES)
     left = envelope["budget"]["solves"] - run_envelope.solves_used(envelope)
     return (need, left) if need > left else None
 

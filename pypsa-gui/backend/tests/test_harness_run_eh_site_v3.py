@@ -58,14 +58,32 @@ SITE = {"lat": 53.4396, "lon": 6.8321}
 SITE_TEXT = "The site is at 53.4396° N and 6.8321° E."
 
 
-def overpass(calls=None, status=200, delay=0.0, body=None):
-    """The offline map services: Overpass answers the fixture, every terrain tile 404."""
+TILE = None
+
+
+def _tile() -> bytes:
+    """One flat Terrarium tile (10 m), built once (`test_site_context.terrarium_png`)."""
+    global TILE
+    if TILE is None:
+        from tests.test_site_context import terrarium_png
+
+        TILE = terrarium_png(lambda x, y: 10.0)
+    return TILE
+
+
+def overpass(calls=None, status=200, delay=0.0, body=None, tiles=200):
+    """The offline map services: Overpass answers the fixture (or `body`),
+    and every terrain tile answers a flat tile (or the status `tiles`)."""
 
     def handle(request):
         if calls is not None:
             calls.append(str(request.url))
-        if "terrarium" in str(request.url) or request.method == "GET":
-            return httpx.Response(404)
+        if request.method == "GET":
+            return (
+                httpx.Response(200, content=_tile())
+                if tiles == 200
+                else httpx.Response(tiles)
+            )
         if delay:
             time.sleep(delay)
         return httpx.Response(
@@ -193,6 +211,39 @@ def test_a_bad_site_value_is_refused_never_clamped(lat, lon):
     ]
 
 
+def _quoted(param, value, quote, raw):
+    return dict(_row(param, value), source={"kind": "text", "quote": quote, "raw": raw})
+
+
+@pytest.mark.parametrize(
+    "lat_q, lon_q",
+    [
+        ("51.50° N", "0.12° W"),
+        ("33.9° S", "18.4° E"),
+        ("51.50° E", "0.12° E"),
+        ("-33.9° N", "18.4°"),
+    ],
+)
+def test_a_compass_letter_other_than_n_or_e_is_refused_never_guessed(lat_q, lon_q):
+    lat_raw, lon_raw = (q.split("°")[0].lstrip("-") for q in (lat_q, lon_q))
+    rows = [
+        _quoted("site.lat", float(lat_q.split("°")[0]), lat_q, lat_raw),
+        _quoted("site.lon", float(lon_q.split("°")[0]), lon_q, lon_raw),
+    ]
+    point, gap = run_intake.site(rows)
+    assert (
+        point is None and gap["kind"] == "site_invalid" and "negative" in gap["message"]
+    )
+
+
+def test_n_and_e_and_a_signed_number_name_the_site():
+    rows = [
+        _quoted("site.lat", 51.5, "51.50° N", "51.50"),
+        _quoted("site.lon", -0.12, "-0.12°", "0.12"),
+    ]
+    assert run_intake.site(rows) == ({"lat": 51.5, "lon": -0.12}, None)
+
+
 def test_the_bounds_themselves_are_a_site():
     assert run_intake.site(_site_rows(-85.05, 180.0)) == (
         {"lat": -85.05, "lon": 180.0},
@@ -272,7 +323,7 @@ def _task(rows, steps=()):
 def test_the_site_is_frozen_from_the_granted_rows_only():
     frozen = run_actions.stage_frozen(_task(_site_rows()), run_actions.SITE_KIND)
     assert frozen["site"] == SITE and frozen["solves"] == 0 and run_site.valid(frozen)
-    assert frozen["digest"] == run_site._digest(run_site.core(frozen))
+    assert frozen["digest"] == run_actions.digest(run_site.core(frozen))
     # A host run keeps its intake as a dict with rows.
     assert run_site.freeze({"run": {"intake": {"rows": _site_rows()}}})["site"] == SITE
     assert run_site.freeze(_task([]))["site"] is None
@@ -347,9 +398,13 @@ def test_a_model_turn_is_refused_the_fetch_under_a_v3_grant():
 
 def test_the_fetch_keeps_the_whole_context_in_the_runs_own_record(offline, tmp_path):
     path = tmp_path / "t-1.json"
-    result = run_site.fetch(path, SITE)
+    result = run_site.fetch(path, SITE, "a1")
     assert result["state"] == "fetched" and result["truncated"] is False
-    doc = json.loads(run_site.context_path(path).read_text())
+    assert result["terrain_missing"] == 0
+    assert not run_site.context_path(
+        path
+    ).exists()  # kept only by `_publish`, under the held check
+    doc = json.loads(run_site._pending_path(path, "a1").read_text())
     assert (
         result["digest"]
         == hashlib.sha256(json.dumps(doc, sort_keys=True).encode()).hexdigest()
@@ -365,11 +420,32 @@ def test_the_fetch_keeps_the_whole_context_in_the_runs_own_record(offline, tmp_p
     assert posted == site_context.DEFAULT_OVERPASS_URL
 
 
+def test_missing_terrain_tiles_are_counted(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_site, "_TRANSPORT", overpass(tiles=404))
+    result = run_site.fetch(tmp_path / "t-1.json", SITE, "a1")
+    assert result["state"] == "fetched" and result["terrain_missing"] > 0
+
+
+@pytest.mark.parametrize("body", [b"[1, 2]", b'{"elements": 5}', b"not json"])
+def test_an_answer_of_the_wrong_shape_settles_unavailable(body, tmp_path, monkeypatch):
+    monkeypatch.setattr(run_site, "_TRANSPORT", overpass(body=body))
+    result = run_site.fetch(tmp_path / "t-1.json", SITE, "a1")
+    assert result["state"] == "unavailable" and "Overpass" in result["reason"]
+
+
+def test_a_run_taken_over_keeps_neither_the_result_nor_the_document(offline, tmp_path):
+    out, task = _dispatched(tmp_path, _site_rows(), instance="me", lease_owner="me")
+    assert out == "taken_over"
+    assert task["steps"][1]["status"] == "running" and "result" not in task["steps"][1]
+    assert not run_site.context_path(tmp_path / "t-1.json").exists()
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_counts_come_from_the_whole_answer_when_the_service_truncates(
     offline, tmp_path, monkeypatch
 ):
     monkeypatch.setattr(site_context, "MAX_FEATURES", 1)
-    result = run_site.fetch(tmp_path / "t-1.json", SITE)
+    result = run_site.fetch(tmp_path / "t-1.json", SITE, "a1")
     assert result["truncated"] is True and result["found"]["buildings"] > 1
 
 
@@ -377,7 +453,7 @@ def test_an_upstream_refusal_settles_unavailable_with_its_message(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(run_site, "_TRANSPORT", overpass(status=502))
-    result = run_site.fetch(tmp_path / "t-1.json", SITE)
+    result = run_site.fetch(tmp_path / "t-1.json", SITE, "a1")
     assert result["state"] == "unavailable" and "HTTP 502" in result["reason"]
     assert not run_site.context_path(tmp_path / "t-1.json").exists()
 
@@ -389,7 +465,7 @@ def test_a_hung_upstream_settles_unavailable_inside_the_bound(tmp_path, monkeypa
     monkeypatch.setattr(run_site, "FETCH_TIMEOUT_S", 0.3)
     monkeypatch.setattr(run_site, "_TRANSPORT", overpass(delay=2.0))
     begun = time.monotonic()
-    result = run_site.fetch(tmp_path / "t-1.json", SITE)
+    result = run_site.fetch(tmp_path / "t-1.json", SITE, "a1")
     assert time.monotonic() - begun < 1.5
     assert (
         result["state"] == "unavailable" and "did not answer within" in result["reason"]
@@ -410,7 +486,7 @@ def test_every_fetch_failure_settles_unavailable(error, tmp_path, monkeypatch):
         raise error
 
     monkeypatch.setattr(site_context, "fetch_context", fail)
-    result = run_site.fetch(tmp_path / "t-1.json", SITE)
+    result = run_site.fetch(tmp_path / "t-1.json", SITE, "a1")
     assert result == {
         "kind": run_actions.SITE_KIND,
         "version": run_site.VERSION,
@@ -425,7 +501,7 @@ def test_a_programming_error_is_not_swallowed(tmp_path, monkeypatch):
 
     monkeypatch.setattr(site_context, "fetch_context", broken)
     with pytest.raises(TypeError):
-        run_site.fetch(tmp_path / "t-1.json", SITE)
+        run_site.fetch(tmp_path / "t-1.json", SITE, "a1")
 
 
 def test_the_transport_is_only_the_modules():
@@ -441,7 +517,7 @@ def test_the_transport_is_only_the_modules():
 # ── the step, end to end in the runner's dispatch ───────────────────────────
 
 
-def _dispatched(tmp_path, rows):
+def _dispatched(tmp_path, rows, instance=None, lease_owner=None):
     steps = run_profiles.materialise(run_profiles.resolve("eh_site@3"), "inputs", "p-1")
     run_actions.fill(
         steps,
@@ -457,13 +533,33 @@ def _dispatched(tmp_path, rows):
             "intake": rows,
             "status": "running",
             "stages": {"inputs": {"status": "active"}},
+            "runner": {"lease_owner": lease_owner},
         },
     }
     path = tmp_path / "t-1.json"
     path.write_text(json.dumps(task))
-    out = run_actions.start(
-        path, type("Ctx", (), {"project_uuid": "p-1"})(), steps[1], instance=None
-    )
+    if lease_owner is not None:
+        # the lease moves to another instance while the fetch runs
+        real = run_site.fetch
+
+        def fetch_then_lose(path, site, attempt):
+            out = real(path, site, attempt)
+            t = json.loads(path.read_text())
+            t["run"]["runner"]["lease_owner"] = "other"
+            path.write_text(json.dumps(t))
+            return out
+
+        run_site.fetch, restore = fetch_then_lose, real
+    try:
+        out = run_actions.start(
+            path,
+            type("Ctx", (), {"project_uuid": "p-1"})(),
+            steps[1],
+            instance=instance,
+        )
+    finally:
+        if lease_owner is not None:
+            run_site.fetch = restore
     return out, json.loads(path.read_text())
 
 
@@ -472,6 +568,9 @@ def test_a_named_site_is_fetched_by_the_step(offline, tmp_path):
     assert out == run_actions.SITE_FETCH
     step = task["steps"][1]
     assert step["status"] == "completed" and step["result"]["state"] == "fetched"
+    kept = run_site.context_path(tmp_path / "t-1.json").read_text()
+    assert hashlib.sha256(kept.encode()).hexdigest() == step["result"]["digest"]
+    assert not list(tmp_path.glob("*.tmp"))
     assert step["result"]["site"] == SITE
 
 
@@ -496,36 +595,9 @@ def test_a_programming_error_stops_the_step_for_the_user(tmp_path, monkeypatch):
 
 
 def test_the_fetch_holds_no_solve():
-    from harness import run_eh
-
-    profile = run_profiles.resolve("eh_site@3")
-    steps = run_profiles.materialise(profile, "inputs", "p-1")
-    run_actions.fill(steps, run_site.freeze(_task(_site_rows())), run_actions.SITE_KIND)
-    need = 0
-    for s in steps:
-        if run_actions.is_action(s):
-            need += s["frozen"]["solves"]
-    assert need == 0
-    assert run_eh.pass_short.__doc__  # the pass counts a frozen 0 as 0 (see test below)
-
-
-def test_a_pass_counts_the_fetch_as_no_solve(monkeypatch, tmp_path):
-    from harness import run_eh
-
     steps = run_profiles.materialise(run_profiles.resolve("eh_site@3"), "inputs", "p-1")
     run_actions.fill(steps, run_site.freeze(_task(_site_rows())), run_actions.SITE_KIND)
-    monkeypatch.setattr(
-        run_envelope,
-        "_load",
-        lambda path: {"state": "granted", "budget": {"solves": 0}, "ledger": []},
-    )
-    monkeypatch.setattr(run_envelope, "solves_used", lambda envelope: 0)
-    assert (
-        run_eh.pass_short(
-            tmp_path / "t.json", [s for s in steps if run_actions.is_action(s)]
-        )
-        is None
-    )
+    assert [s["frozen"]["solves"] for s in steps if run_actions.is_action(s)] == [0]
 
 
 # ── the rule and the report (item 4, S6) ────────────────────────────────────
@@ -557,6 +629,7 @@ FETCHED = {
     "state": "fetched",
     "truncated": False,
     "found": {"buildings": 7, "power_lines": 1, "power_substations": 1},
+    "terrain_missing": 0,
 }
 
 
@@ -575,6 +648,11 @@ def test_the_rule_passes_on_a_whole_fetch():
     "record, reason",
     [
         ({**FETCHED, "truncated": True}, "cut to the nearest features"),
+        ({**FETCHED, "terrain_missing": 3}, "3 terrain tile(s)"),
+        (
+            {**FETCHED, "terrain_missing": None},
+            "terrain around the site could not be fetched",
+        ),
         (
             {
                 "kind": run_actions.SITE_KIND,

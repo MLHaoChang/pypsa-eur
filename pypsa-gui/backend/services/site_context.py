@@ -442,7 +442,15 @@ def fetch_context(
             elements = json.loads(body).get("elements", [])
         except ValueError as exc:
             raise SiteContextUnavailable(f"Overpass at {url} returned something that is not JSON.") from exc
-        features = elements_to_context(elements)
+        except AttributeError as exc:  # JSON, but not an object
+            raise SiteContextUnavailable(f"Overpass at {url} returned JSON that is not an Overpass answer.") from exc
+        try:
+            features = elements_to_context(elements)
+        except (KeyError, TypeError, AttributeError, ValueError) as exc:
+            # Issue 33 (S3): an answer of the wrong shape is the upstream's failure, never a 500.
+            raise SiteContextUnavailable(
+                f"Overpass at {url} returned elements this app cannot read ({exc.__class__.__name__})."
+            ) from exc
 
         tiles: dict[tuple[int, int, int], list[list[float]] | None] = {}
         for key in terrain_tiles_for(bbox):
@@ -457,7 +465,7 @@ def fetch_context(
                 # whole answer past the frontend's timeout.
                 tr = client.get(terrain_url().format(z=z, x=x, y=y), timeout=min(TILE_TIMEOUT_S, remaining))
                 tiles[key] = decode_terrarium(tr.content) if tr.status_code == 200 else None
-            except (httpx.HTTPError, OSError):
+            except (httpx.HTTPError, OSError, ValueError):  # a tile that is not a Terrarium PNG is missing
                 tiles[key] = None
         terrain = terrain_grid(tiles, bbox) if tiles else None
 
