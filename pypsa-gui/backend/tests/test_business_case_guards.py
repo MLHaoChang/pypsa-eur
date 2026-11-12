@@ -280,6 +280,34 @@ def test_a2_a_shortfall_the_ledger_does_not_name_reads_not_evaluated():
         )
 
 
+def test_a2_a_shortfall_booked_at_no_cost_is_named_and_its_sale_line_builds():
+    """G3-1: the ledger's shortfall asset at no cost has no `lost_production` line, but
+    it is the ledger's slack: its bus is read, and a sale line on it drops nothing."""
+    from types import SimpleNamespace
+
+    from services.commercial.participants import PRODUCT_SLACK_FLAGS
+
+    n = _plant()
+    ic = _case(LOST_CONC, FOM)
+    asset = SimpleNamespace(
+        component="Generator",
+        name="__lost_nh3",
+        flags=[PRODUCT_SLACK_FLAGS["shortfall"]],
+    )
+    lpm = L.lost_production(n, _solve(n), ic, SimpleNamespace(assets=[asset]))
+    assert lpm.slack_bus == {"__lost_conc": "conc", "__lost_nh3": "nh3"}
+    assert lpm.unread == {}
+    bc = build_business_case(
+        ic,
+        _inputs(_linked("nh3", "served_product.nh3")),
+        {"nh3": _flat("served_product.nh3")},
+        lpm,
+    )
+    for y in OPS:
+        assert _by_year(bc)[y][LOST_CONC.key] == LOST_CONC
+    assert all(r.dropped == () for r in bc.locked)
+
+
 def test_g3_2_an_opex_line_on_the_quantity_and_a_share_never_drop():
     ic = _case(LOST_NH3, FOM)
     royalty = _linked("royalty", "served_product.nh3", kind="opex")

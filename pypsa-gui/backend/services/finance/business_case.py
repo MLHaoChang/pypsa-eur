@@ -965,7 +965,7 @@ def break_even(
     `price` is None and `price_scale` is the factor on every cell. A share line that
     reads this line moves with it; every other line is the same in every trial (C7).
     `lost_production` is `build_business_case`'s (G3)."""
-    outputs = (outputs, lost_production)
+    bound = (outputs, lost_production)
     out = {
         "status": None,
         "price_scale": None,
@@ -988,7 +988,7 @@ def break_even(
         scales.append(scales[-1] * 1.5)
     prev_s, prev_f = None, None
     for s in scales:
-        f = _npv_at(ic_case, inputs, outputs, i, pack, layers, s)
+        f = _npv_at(ic_case, inputs, bound, i, pack, layers, s)
         if f is None:
             out["status"] = "break_even_not_established"
             return out
@@ -1000,9 +1000,7 @@ def break_even(
                 # `disp=False`: non-convergence is the result's flag, never an exception,
                 # so any RuntimeError the engine raises still propagates (GK B #1404 B).
                 root, info = brentq(
-                    lambda x: _npv_or_raise(
-                        ic_case, inputs, outputs, i, pack, layers, x
-                    ),
+                    lambda x: _npv_or_raise(ic_case, inputs, bound, i, pack, layers, x),
                     prev_s,
                     s,
                     xtol=BREAK_EVEN_XTOL,
@@ -1024,11 +1022,11 @@ def break_even(
         return out
     # The re-run (C7): |NPV| at the solved scale within the tolerance of the line's revenue.
     try:
-        r = _result_at(ic_case, inputs, outputs, i, pack, layers, root)
+        r = _result_at(ic_case, inputs, bound, i, pack, layers, root)
     except FinanceRefused:
         out["status"] = "break_even_not_established"
         return out
-    v = _npv_at(ic_case, inputs, outputs, i, pack, layers, root)
+    v = _npv_at(ic_case, inputs, bound, i, pack, layers, root)
     series = r.op.lines.get(line)
     if v is None or series is None:
         out["status"] = "break_even_not_established"

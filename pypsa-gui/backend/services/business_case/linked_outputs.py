@@ -661,17 +661,18 @@ class LostProductionMap:
     unread: dict
 
 
-def lost_production(n, solve: LinkedSolve, ic_case) -> LostProductionMap:
+def lost_production(n, solve: LinkedSolve, ic_case, inputs=None) -> LostProductionMap:
     """The `LostProductionMap` of the IC case's `lost_production` lines on the run's own solve. A slack maps to
     its bus through `finance_case._lost_production_slacks` (GK A G3-1: the one helper, a captured slack with no
-    Generator too), fed the case's template lines as its ledger; its dispatch is `process_products.shortfalls`'s
+    Generator too), fed the case's template lines as its ledger and the run's commercial `inputs` (the ledger's
+    shortfall assets, so a slack booked at no cost is named and its bus read, not refused); its dispatch is `process_products.shortfalls`'s
     (A2: one slack set). Post-solve only: it reads the network and changes nothing (LO-9)."""
     from services.period_utils import period_years_map
     from services.process_products import shortfalls
     from services.results.finance_case import _lost_production_slacks
 
     ledger = {"": {ln.key: ln for t in ic_case.templates for ln in t.lines}}
-    slack_bus = dict(sorted(_lost_production_slacks(n, None, ledger).items()))
+    slack_bus = dict(sorted(_lost_production_slacks(n, inputs, ledger).items()))
     own = solve.network is n and solve.fresh
     found = {s.name: s for s in shortfalls(n, solve.lost_load)} if own else {}
     unread: dict = {}
