@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The hub-design, run-study and investment-decision workflow files are now generated from the harness profiles (`tools/generate_workflows.py`), and a test fails when one drifts from its profile.

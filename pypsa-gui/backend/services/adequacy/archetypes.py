@@ -9,9 +9,14 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 from models.energy_hub import ArchetypePack, ImportOverlaySpec
+try:
+    from gridspine.drivers.process_chain import truthy as _truthy
+except ImportError:  # a build without gridspine: the one pinned fallback, not a new copy
+    from services.solver.process_uc import _fallback_truthy as _truthy
 
 
 class ArchetypePackError(ValueError):
@@ -31,10 +36,6 @@ def pack_hash(pack: ArchetypePack) -> str:
     payload = pack.model_dump(mode="json")
     blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
-
-
-def _flag(v) -> bool:
-    return v is True or str(v).strip().lower() in ("true", "1", "yes")
 
 
 def select_import_links_with_rule(
@@ -90,7 +91,7 @@ def select_import_links(n, overlay: ImportOverlaySpec) -> list[str]:
 def _poc_buses(n) -> set[str]:
     if n.buses is None or n.buses.empty or "eh_poc" not in n.buses.columns:
         return set()
-    return {str(b) for b in n.buses.index if _flag(n.buses.at[b, "eh_poc"])}
+    return {str(b) for b in n.buses.index if _truthy(n.buses.at[b, "eh_poc"])}
 
 
 def dsr_double_count_warnings(n, *, dsr_buses: list[str]) -> list[str]:
@@ -565,7 +566,7 @@ def hub_boundary_copy(n, pack: ArchetypePack):
     crit = set()
     if "eh_critical" in mc.buses.columns:
         crit = {str(b) for b in mc.buses.index
-                if _flag(mc.buses.at[b, "eh_critical"])}
+                if _truthy(mc.buses.at[b, "eh_critical"])}
     if rule == "eh_poc":
         poc = _poc_buses(mc)
         hub_comps = [c for c in comps if not (c & poc)]

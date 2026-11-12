@@ -17,7 +17,7 @@ import { nk } from '../../utils/queryKeys'
 import { useResultsFilter } from './filterContext'
 import WindowSlider, { useWindowRange } from './WindowSlider'
 import {
-  CHART_AXIS, CHART_GRID, CHART_TOOLTIP, shortStamp, yAxisLabel,
+  CHART_AXIS, timeAxis, thinRows, ThinNote, CHART_GRID, CHART_TOOLTIP, shortStamp, yAxisLabel,
   ChartFrame, CHART_HEIGHT, chartFigure, CHART_LEGEND, carrierColour, seriesDash,
 } from './shared'
 import {
@@ -172,9 +172,9 @@ export default function LoadShapeTab() {
         {weekView?.status === 'ok' && wk ? (
           <>
             <ResponsiveContainer width="100%" height={CHART_HEIGHT.md}>
-              <ComposedChart data={wk.rows} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
+              <ComposedChart data={thinRows(wk.rows)} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
                 <CartesianGrid {...CHART_GRID} />
-                <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} />
+                <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} {...timeAxis(thinRows(wk.rows).length)} />
                 <YAxis {...CHART_AXIS} label={yAxisLabel('MW')} />
                 <Tooltip {...CHART_TOOLTIP} />
                 {/* A line swatch, so the key shows each series' dash as well as its colour. */}
@@ -186,6 +186,7 @@ export default function LoadShapeTab() {
                 ))}
               </ComposedChart>
             </ResponsiveContainer>
+            <ThinNote rows={wk.rows} />
             <p className="text-[11px] text-muted" data-testid="ls-flags">
               {weekView.flag_basis.length
                 ? `Flagged: ${weekView.flag_basis.join('; ')} — ${weekView.flagged.length} of ${weekView.index.length} intervals this week.`
@@ -193,9 +194,9 @@ export default function LoadShapeTab() {
             </p>
             {soc ? (
               <ResponsiveContainer width="100%" height={CHART_HEIGHT.sm}>
-                <AreaChart data={soc} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
+                <AreaChart data={thinRows(soc)} margin={{ top: 18, right: 40, left: 0, bottom: 0 }}>
                   <CartesianGrid {...CHART_GRID} />
-                  <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} />
+                  <XAxis dataKey="t" {...CHART_AXIS} minTickGap={40} tickFormatter={shortStamp} {...timeAxis(thinRows(soc).length)} />
                   <YAxis {...CHART_AXIS} label={yAxisLabel('Battery SoC, MWh')} />
                   <Tooltip {...CHART_TOOLTIP} />
                   <Area type="monotone" dataKey="soc" name={GROUP_LABEL.battery_soc} stroke={carrierColour('storage')} fill={carrierColour('storage')}
@@ -203,6 +204,7 @@ export default function LoadShapeTab() {
                 </AreaChart>
               </ResponsiveContainer>
             ) : null}
+            {soc ? <ThinNote rows={soc} /> : null}
           </>
         ) : (
           <ResultState state="unavailable" reason={weekView?.status === 'unavailable' ? weekView.reason : 'No week to show.'} />

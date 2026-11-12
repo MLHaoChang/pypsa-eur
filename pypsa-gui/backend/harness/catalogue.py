@@ -5102,6 +5102,24 @@ TOOLS: list[dict[str, Any]] = [
          "site_id": {"type": "string", "maxLength": 128}},
         ["name", "site_id"],
     ),
+    _t(
+        "confirm_unrecorded_series",
+        "Record that wind/solar series with no provenance record (get_profile_readiness rows "
+        "with profile `unrecorded`) are the network's own, after the user approves its card. "
+        "Only when the user says so: never infer it. Pass every series with the `digest` its "
+        "readiness row shows. Writes only the record, never the values, under ONE undo step. "
+        "All or nothing: a series listed twice (unrecorded_duplicate), one that is no longer "
+        "unrecorded (not_unrecorded) or one whose values changed since that read "
+        "(unrecorded_stale) refuses the whole batch and writes nothing; read the readiness "
+        "again. `project_id` is the project NAME and must be the open project. Safety: write.",
+        {"project_id": {"type": "string"},
+         "items": {"type": "array", "minItems": 1,
+                   "items": {"type": "object",
+                             "properties": {"component": {"type": "string", "minLength": 1},
+                                            "digest": {"type": "string", "minLength": 1}},
+                             "required": ["component", "digest"]}}},
+        ["project_id", "items"],
+    ),
 ]
 
 
@@ -5515,6 +5533,7 @@ TOOL_ROUTES: dict[str, list] = {
     "apply_generated_profiles": [("POST", "/api/projects/{name}/profiles/apply-batch")],
     "preview_default_series": [("POST", "/api/projects/{name}/profiles/defaults/preview")],
     "apply_default_series": [("POST", "/api/projects/{name}/profiles/defaults/apply")],
+    "confirm_unrecorded_series": [("POST", "/api/projects/{name}/profiles/unrecorded/confirm")],
     "list_load_profile_archetypes": [("GET", "/api/profiles/load-archetypes")],
     "generate_load_profile": [("POST", "/api/projects/{name}/profiles/loads/generate")],
     "generate_availability_profile": [

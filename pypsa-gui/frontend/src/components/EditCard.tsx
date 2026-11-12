@@ -17,6 +17,8 @@ export interface EditCardRow {
   field: string
   label: string
   old: Scalar
+  /** A code that ends `old` (a digest, RP-20), set in the mono id style. */
+  old_code?: string
   old_known?: boolean
   new: Scalar
   unit: string
@@ -211,7 +213,21 @@ export function editCardHeader(card: EditCard): string {
     if (!names.includes(words)) names.push(words)
     byKey.set(key, names)
   }
-  return [...byKey].map(([key, names]) => key ? `${key} \u203a ${names.join(', ')}` : names.join(', ')).join('; ')
+  const capped = CAPPED_SCOPE.has(card.tool)
+  const list = (names: string[]) => capped && names.length > SCOPE_NAME_CAP
+    ? `${names.slice(0, SCOPE_NAME_CAP).join(', ')} (${names.length - SCOPE_NAME_CAP} more)` : names.join(', ')
+  return [...byKey].map(([key, names]) => key ? `${key} \u203a ${list(names)}` : list(names)).join('; ')
+}
+
+/** Cards whose scope line names at most SCOPE_NAME_CAP assets then "(N more)": RP-20's record
+ * of N series (UX #1396), whose table lists every one. Other cards keep their full line. */
+export const CAPPED_SCOPE: ReadonlySet<string> = new Set(['confirm_unrecorded_series'])
+export const SCOPE_NAME_CAP = 5
+
+/** `text` with its trailing `code` in the mono id style; plain when it does not end with it. */
+function withCode(text: string, code?: string) {
+  if (!code || !text.endsWith(code)) return text
+  return <>{text.slice(0, -code.length)}<span className="font-mono" data-testid="chat-edit-code">{code}</span></>
 }
 
 /** A row's old and new cells. Guided shows a setting's value in the panel's words; an old
@@ -250,6 +266,10 @@ export function editLinesOf(value: unknown): string[] {
   if (!o || !rowsOk(o.rows) || !setsOk(o.sets)) return []
   return editCardLines({ rows: o.rows, sets: o.sets } as EditCard)
 }
+
+/** Tools whose Guided card headline is the card's own `says`, not a line per row: RP-20's
+ * record of N series (UX #1396), where a row line would repeat the digest. */
+export const SAYS_HEADLINE: ReadonlySet<string> = new Set(['confirm_unrecorded_series'])
 
 export function editCardWords(card: EditCard): string {
   const lines = editCardLines(card)
@@ -339,7 +359,7 @@ export function EditCardTable({ card, guided, labels }: { card: EditCard; guided
                       : r.role === 'at_solve' ? (r.note ?? 'Set at solve time') : 'Follows from the change'}
                   </span>}
                 </td>
-                <td className="p-1 border-b border-border break-words">{rowValues(r, guided, value)[0]}</td>
+                <td className="p-1 border-b border-border break-words">{withCode(rowValues(r, guided, value)[0], r.old_code)}</td>
                 <td className="p-1 border-b border-border break-words font-medium">{rowValues(r, guided, value)[1]}</td>
                 <td className="p-1 border-b border-border break-words">
                   {exists ? '' : (r.display?.unit || r.unit || (labels?.noUnit ?? 'No unit'))}

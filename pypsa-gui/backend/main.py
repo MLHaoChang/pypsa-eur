@@ -93,11 +93,13 @@ from routers import (
     library_references,
     local_settings,
     memory,
+    memory_dream,
     network,
     operational_gap,
     profiles,
     project_network,
     projects,
+    report_charts,
     report_jobs,
     reports,
     reserves,
@@ -659,6 +661,14 @@ async def lifespan(app: FastAPI):
             memory_store.sweep_dismissed(_db)
     except Exception:  # noqa: BLE001 — a sweep must never fail boot
         logger.exception("memory: dismissed-proposal sweep did not run")
+    # Assistant memory issue 04: the dream worker. Its start settles jobs whose
+    # lease lapsed (GK B D3). Off under pytest; never fails boot.
+    try:
+        from harness import dream as memory_dream
+
+        memory_dream.start_default()
+    except Exception:  # noqa: BLE001 — dream jobs wait for the next boot
+        logger.exception("memory: dream worker did not start")
     _load_skills_at_startup()
     # Ask macOS for the projects root NOW, on a thread, rather than letting
     # the first data request discover it is gated. On a granted machine this
@@ -686,6 +696,12 @@ async def lifespan(app: FastAPI):
         harness_runner.stop_default()
     except Exception:  # noqa: BLE001
         logger.exception("harness runner did not stop cleanly")
+    try:
+        from harness import dream as memory_dream
+
+        memory_dream.stop_default()  # releases its lease, owner-checked (D10)
+    except Exception:  # noqa: BLE001
+        logger.exception("memory: dream worker did not stop cleanly")
 
 
 app = FastAPI(
@@ -1431,6 +1447,12 @@ app.include_router(
     report_jobs.router, prefix="/api/projects", tags=["reports"],
     dependencies=_projects_router_guard,
 )
+# Charts saved from Results for the report (ui-modern 02 slice 7a): same guard and
+# ProjectAccessDep as the reports; the writes are lock-checked and human-only.
+app.include_router(
+    report_charts.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
 # The renewable profile generator (profile_gen Tasks 6–7). Global
 # presets/estimate at /api/profiles (no project path → no guard); the
 # project-scoped generate/pending/apply carry ProjectAccessDep and the
@@ -1502,6 +1524,7 @@ app.include_router(
 # Assistant memory (plan §4): the Memory page's API. Not a project route;
 # every item is checked against its owner scope in services/memory_store.py.
 app.include_router(memory.router, prefix="/api/memory", tags=["memory"])
+app.include_router(memory_dream.router, prefix="/api/memory", tags=["memory"])
 
 
 @app.on_event("startup")

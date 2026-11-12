@@ -300,7 +300,9 @@ component (`frontend/src/components/EditCard.tsx`).
 - **Receipt.** The tool result gains `_edit_receipt`: each row read back
   natively, `outcome: verified` only when every value equals the card's `new`
   (otherwise `uncertain`), `results_stale` (the last solve's input fingerprint
-  differs from now) and `undo: {tool: 'undo_last', available}`. A card with
+  differs from now) and `undo: {tool: 'undo_last', available}` (`available`
+  for a turn-captured tool, or one in `edit_card.SELF_UNDO_TOOLS` whose route
+  pushes its own one step, such as `confirm_unrecorded_series`). A card with
   `sets` passes them on, so Guided words the receipt as the card did; each set
   also lists `inactive_names`, which the table marks "(inactive)".
 - **Adding an edit kind** (TS-04's series refinement, a new settings tool):
@@ -1114,6 +1116,14 @@ too. A `gap` callout stands in its place, giving only the count of numbers
 and pointing to the "Numbers to check" appendix. The appendix (docx, the PDF's
 docx, the tagged template's `unverified`, `get_report`'s `audit.withheld`)
 lists the values marked withheld.
+
+A strict report carries no charts. The charts a person saved from Results
+(`reports/_charts/`, `services/reports/chart_snapshots.py`) are added only to
+a human report; `create_evidence_report` and `generate_report` run strict, so
+their reports leave the "Charts from Results" section out, and a saved chart's
+text never reaches an admitted fact or a draft prompt. The saving routes
+(`POST` and `DELETE .../report-charts`) are human-only (`not_via_chat`), and
+`reports/_charts` is not a "report" effect in the trajectory evaluation.
 
 A strict job and the assistant's `export_report_docx` and `export_report_pdf`
 check that every required disclosure of the version they start from is still

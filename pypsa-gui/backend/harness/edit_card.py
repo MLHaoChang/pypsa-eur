@@ -73,6 +73,8 @@ SETTINGS_EDITS = frozenset({
     "set_site_anchor",
     # SC-07 S1: one exact 3D site preview, through proposals.apply (edit_card_site.py)
     "site_scene_apply",
+    # RP-20: the record of series with none, every series and its digest (edit_card_unrecorded.py)
+    "confirm_unrecorded_series",
     # Study harness issue 23: a user-confirmed requirement on the durable thread
     "set_requirement",
 })
@@ -394,6 +396,11 @@ def _results_stale() -> bool:
     return bool(solved) and solved != _fingerprint()
 
 
+# Tools whose route pushes their own one undo step (not a turn snapshot, so the
+# turn pushes none and an approval costs exactly one): RP-20, GK B C7.
+SELF_UNDO_TOOLS: frozenset[str] = frozenset({"confirm_unrecorded_series"})
+
+
 def _undo(tool_name: str) -> dict:
     from services import chat_tools
 
@@ -401,7 +408,9 @@ def _undo(tool_name: str) -> dict:
         depth = int(chat_tools.undo_status().get("depth") or 0)
     except Exception:  # noqa: BLE001 — unknown undo state offers nothing
         depth = 0
-    return {"tool": "undo_last", "available": tool_name in chat_tools.UNDO_CAPTURED_TOOLS and depth > 0}
+    captured = tool_name in chat_tools.UNDO_CAPTURED_TOOLS or tool_name in SELF_UNDO_TOOLS
+    return {"tool": "undo_last", "available": captured and depth > 0}
+
 
 
 def receipt(card: dict, args: dict) -> dict:
@@ -1879,3 +1888,4 @@ register("update_decision_study", Adapter("settings_edit", _decision_study_previ
 from harness import (  # noqa: E402,F401
     edit_card_campus, edit_card_library, edit_card_records, edit_card_reports, edit_card_site)
 from harness import requirements  # noqa: E402,F401 — issue 23: set_requirement's card
+from harness import edit_card_unrecorded  # noqa: E402,F401 — RP-20: confirm_unrecorded_series's card

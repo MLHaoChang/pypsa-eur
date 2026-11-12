@@ -66,3 +66,31 @@ Not themed: the retired "Hourly marginal price" section in `LoadFlow.tsx` (behin
 7. **Reports reuse the exact chart specs** the user saw.
 
 Each new type has a unit test and shots in both modes.
+
+## Comments
+
+### Slice 7a (backend): conditions from GK B
+
+V1 A strict (assistant) report carries no snapshot.
+V2 POST and DELETE are human-only.
+V3 No snapshot text reaches admitted_facts or the draft prompt.
+V4 Provenance and "From an earlier solve" are server-computed.
+V5 The caption says "as shown", with the time.
+V6 PNG checks: type, IHDR, side and pixel caps.
+V7 Closed cell values.
+V8 The 12 cap holds under concurrency, with a 409 and the true total.
+V9 Ids are server-made and never collide with existing figure ids.
+V10 Lock and policy tests; the 404 is byte-equal to a ghost id.
+V11 reports/_charts does not count as a "report" effect; copy, save-as and sealed-export hashing are tested.
+V12 Byte-equal output with no snapshots; gaps never produce a 500.
+
+W1 Refuse inf, -inf and NaN in cells and in every float of the spec model. One test each.
+W2 Cap the spec part and the png part in bytes before reading or parsing, with a 413 or 422 that names the cap. Confirm validate_thumbnail bounds the pixel dimensions. Test: an oversized body is refused and nothing is written.
+W3 Server-generated ids, checked against a strict pattern before any path is built (GET, DELETE, {id}.png). Test `..`, `%2e%2e`, an uppercase id and a valid id from another project: all give the same 404 body. Serve the PNG as image/png with X-Content-Type-Options: nosniff.
+W4 Count and write inside the same durable.file_lock hold. Test: two threads post the 12th and 13th at once. One gets 409 and exactly 12 remain.
+W5 A chart whose solve_fingerprint differs from the solve the report reads is never presented as current. assemble.py shows it with an "out of date" callout (never "stale") or leaves it out with a gap callout. Test a matching and a differing fingerprint.
+W6 These are write routes. Run test_route_chat_disposition, test_project_route_acl_policy and test_write_surface_lock_policy, plus the three smoke --check scripts. Write access follows the project's existing write rule: project access, and the open-project 409 where that applies. A viewer from another org gets the same 404.
+W7 State here and in the PR text how fork (store.copy_reports), snapshot, restore, rename and delete treat reports/_charts. The lock must not leave a .lock file that gets copied or that blocks an rmtree on Windows. SH-07f is in flight on the same area, so name the lock order.
+W8 Key the trajectory_evaluation exclusion and the report_job draftable exclusion on the exact path or section id, never on a prefix (#1340). Mutate each exclusion.
+
+How `reports/_charts` is treated (W7): `store.copy_reports`, `clear_reports` and `reports_copy_lock` only touch names that are report ids (16 hex) or their `.<id>.lock` files, so fork, save-as, snapshot create and restore neither copy nor clear `_charts`; they are the live session's notes, tied to its solve. Rename moves the project folder, so `_charts` goes with it; delete removes it with the folder. A chart that is already in a report travels with that report (its PNG is copied under `reports/<id>/figures/`). The chart lock is `_charts/.lock` inside the folder, closed after each hold, so it is never copied by the report copy and an rmtree can remove it. Lock order: the chart lock is taken alone and nothing else is taken inside it (no report lock, no network lock).

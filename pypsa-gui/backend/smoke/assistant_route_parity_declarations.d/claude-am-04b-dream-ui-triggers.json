@@ -1,0 +1,33 @@
+{
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/memory/dream",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-DREAM-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/memory/dream",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-DREAM-1"
+  },
+  {
+   "method": "GET",
+   "path": "/api/memory/dream/settings",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-DREAM-1"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/memory/dream/settings",
+   "reason": "ui-pointer",
+   "decision": "MEMORY-DREAM-1"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/settings/llm/roles",
+   "reason": "assistant-self-config"
+  }
+ ]
+}

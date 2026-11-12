@@ -14,6 +14,7 @@ import { useMemoryStore, type MemoryTab } from '../../store/memoryStore'
 import MemoryEditForm from './MemoryEditForm'
 import { ParameterSummary, parameterBodyOf } from './ParameterMemory'
 import MemoryHistory from './MemoryHistory'
+import DreamReview from './DreamReview'
 
 // The Memory page (assistant-memory plan §4): account-level, so it opens as a
 // dialog from the account menu over whatever is open, and the user never
@@ -190,6 +191,8 @@ function MemoryPanel() {
           </div>
         )}
       </div>
+
+      {tab === 'proposals' && <DreamReview />}
 
       {editItem && (
         <MemoryEditForm
