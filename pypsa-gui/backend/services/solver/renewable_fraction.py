@@ -120,7 +120,7 @@ import numpy as np
 import pandas as pd
 
 from services.adequacy.archetypes import min_p_min_pu
-from services.adequacy.slack import slack_generator_mask
+from services.adequacy.slack import LOST_SLACK_PREFIX, slack_generator_mask
 from services.profile_shapes import _ELEC_CARRIERS
 from services.results.carrier_kpis import _is_renewable_carrier
 from services.results.load_shape import BATTERY
@@ -210,7 +210,7 @@ def classify(n) -> dict[str, list[str]]:
         for g in gens.index
         if not slack[g]
         and not _is_renewable_carrier(str(gens.at[g, "carrier"]))
-        and not str(g).startswith("__lost_")
+        and not str(g).startswith(LOST_SLACK_PREFIX)
     ]
     load_buses = set(n.loads["bus"].astype(str)) if len(n.loads) else set()
     branch_buses: set[str] = set()
@@ -416,7 +416,9 @@ def _withdrawing_generators(n) -> list[str]:
     names = [
         g
         for g in gens.index
-        if _active(gens, g) and not slack[g] and not str(g).startswith("__lost_")
+        if _active(gens, g)
+        and not slack[g]
+        and not str(g).startswith(LOST_SLACK_PREFIX)
     ]
     if not names:
         return []
