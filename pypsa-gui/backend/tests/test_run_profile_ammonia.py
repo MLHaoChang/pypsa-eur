@@ -491,6 +491,28 @@ def test_an_unreadable_weight_or_dispatch_reads_no_shortfall(direct):
     )
 
 
+def test_a_missing_dispatch_column_reads_no_shortfall(direct):
+    """Mutant at `_weighted_tpd`: a flow with no column is unreadable, never a KeyError."""
+    n = _solved(_network())
+    n.generators_t.p = n.generators_t.p.drop(columns="__lost_nh3")
+    result = direct("nh3.delivery.shortfall", network=n)
+    assert (result["verdict"], result["facts"][0]["value"]) == (
+        "not_evaluated",
+        "unreadable_dispatch",
+    )
+
+
+def test_no_context_reads_no_process_units():
+    """Mutant at `_process_units`: a run with no context reads none, never an error."""
+    env = run_gates.Env(task={"steps": []}, ctx=None, project=None, project_dir=None)
+    result = run_gates.evaluate([_rules("inputs")["nh3.process.units"]], env)[0]
+    assert (result["verdict"], result["facts"][0]["value"], result["reason"]) == (
+        "not_evaluated",
+        None,
+        "the fact reads as none",
+    )
+
+
 def test_results_that_predate_the_inputs_read_no_shortfall(direct, monkeypatch):
     """The freshness guard: a stale solve is no evidence with its own reason."""
     import harness.calculations as calculations
