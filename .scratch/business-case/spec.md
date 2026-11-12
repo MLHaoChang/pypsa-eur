@@ -241,7 +241,7 @@ offers the common rows below as one-click starts. Everything is editable.
 | Offered row | Kind / category | Unit | Quantity | Default |
 |---|---|---|---|---|
 | Product sales | revenue / product_sale | t, unit | typed (the site's output) | — |
-| Service or tolling fee | revenue / service_fee | unit_month, lump | typed | — |
+| Service or tolling fee | revenue / service_fee | unit_month | typed | — |
 | Flexibility / DR availability | revenue / capacity_payment | MW_year | typed or `capacity:<asset>` | — (DR settlement already in the ledger is locked, G2) |
 | Staff | opex / staff | unit (FTE) | typed | — |
 | Maintenance (non-energy) | opex / maintenance | share | `share_of:capex` | from pack, assumed |
@@ -249,7 +249,7 @@ offers the common rows below as one-click starts. Everything is editable.
 | Property tax | opex / property_tax | share | `share_of:capex` | from pack, assumed |
 | SG&A | opex / sga | share | `share_of:revenue` | — |
 | Building or process plant | capex / facility | lump | typed | — |
-| Land lease | opex / land | unit_month, lump | typed | — |
+| Land lease | opex / land | unit_month | typed | — |
 
 ### 6.2 Data centre (`eh_datacenter`, `eh_datacenter_staged`)
 

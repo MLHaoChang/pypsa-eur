@@ -27,8 +27,7 @@
     {
       "label": "Service or tolling fee",
       "units": [
-        "unit_month",
-        "lump"
+        "unit_month"
       ],
       "sources": [
         "typed"
@@ -167,8 +166,7 @@
     {
       "label": "Land lease",
       "units": [
-        "unit_month",
-        "lump"
+        "unit_month"
       ],
       "sources": [
         "typed"

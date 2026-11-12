@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from models.business_case import BusinessCaseInputs, LineItem
+from models.business_case import BusinessCaseInputs, LineItem, Unit
 
 if TYPE_CHECKING:
     from services.library.defaults_pack.loader import DefaultsPack
@@ -61,7 +61,7 @@ class OfferedRow(BaseModel):
     model_config = _FORBID
 
     label: str = Field(min_length=1)
-    units: list[str] = Field(min_length=1)
+    units: list[Unit] = Field(min_length=1)
     sources: list[
         Literal["typed", "linked:capacity", "share_of:capex", "share_of:revenue"]
     ]

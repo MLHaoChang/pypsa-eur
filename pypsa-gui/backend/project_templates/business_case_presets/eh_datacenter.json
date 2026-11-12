@@ -154,7 +154,7 @@
           "unit": "kW_month",
           "quantity_source": "linked:contracted_it_kw@1",
           "escalation": "contract",
-          "note": "Contracted IT kW, take-or-pay; linked_share_by_year is the lease-up ramp.",
+          "note": "Contracted IT kW, take-or-pay.",
           "preset_rule": {
             "requires": [
               "facility"

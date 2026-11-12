@@ -6,6 +6,7 @@ Spec: .scratch/business-case/spec.md §4, §6.1, §6.2; issue
 
 from __future__ import annotations
 
+import filecmp
 import json
 import math
 import pathlib
@@ -23,6 +24,7 @@ from models.business_case import (
     DefaultUnitMismatch,
     LineItem,
 )
+from project_templates.eh_templates import TEMPLATE_META, write_sidecars
 from services.business_case import presets as P
 from services.business_case.linked_outputs import LostProductionMap, Series
 from services.finance.business_case import (
@@ -307,7 +309,7 @@ def test_parity_r1_is_gpu_hours_times_sold_share_times_price_by_hand():
         )
 
 
-def test_parity_r2_is_contracted_kw_times_lease_up_times_price_by_hand():
+def test_parity_r2_is_contracted_kw_times_sold_share_times_price_by_hand():
     out = _outputs()
     r = run_case(build_business_case(_ic(), _filled("colocation"), out).case, PACK)
     share = {2031: 0.5, 2032: 0.75}
@@ -400,6 +402,18 @@ def test_p1_default_units_enter_beside_their_keys():
     a = _pin_case(capex={**key, "default_units": {"life_years": "years"}})
     b = _pin_case(capex={**key, "default_units": {"life_years": "yr"}})
     assert business_case_hash(_ic(), b, _NH3) != business_case_hash(_ic(), a, _NH3)
+
+
+def test_f3_a_scalar_shadowed_in_every_year_stays_out_of_the_digest():
+    every = {y: 0.5 for y in range(2031, 2036)}  # _ic's horizon
+    bare = _pin_case(nh3={"linked_share_by_year": every})
+    shadowed = _pin_case(nh3={"linked_share_by_year": every, "linked_share": 0.3})
+    h = business_case_hash(_ic(), bare, _NH3)
+    assert business_case_hash(_ic(), shadowed, _NH3) == h
+    part = {y: 0.5 for y in range(2031, 2035)}  # 2035 reads the scalar
+    assert business_case_hash(
+        _ic(), _pin_case(nh3={"linked_share_by_year": part, "linked_share": 0.3}), _NH3
+    ) != business_case_hash(_ic(), _pin_case(nh3={"linked_share_by_year": part}), _NH3)
 
 
 # ── P2: a hint is display only ───────────────────────────────────────────────
@@ -547,64 +561,135 @@ def _lost_ic():
     return lp, _ic(lines=(lp, TemplateLine("fom", "fom", -20.0, "opex")))
 
 
-def test_p4_a_sold_share_scales_the_revenue_and_never_the_drop():
-    """served_h2 on one load with a lost share f = 0.4 and a sold share s = 0.5: the
-    revenue line books series × s × price; the lost-production line keeps (1 − f) of
-    its amount, whatever s is."""
-    lp, ic = _lost_ic()
-    lpm = LostProductionMap(
-        slack_bus={"__lost_h2": "h2"},
-        load_bus={"offtake": "h2"},
-        share={"__lost_h2": {"offtake": Series("x", "share", {None: 0.4}, {})}},
-        unread={},
+_LPM_LOAD = dict(
+    slack_bus={"__lost_h2": "h2"},
+    load_bus={"offtake": "h2"},
+    share={"__lost_h2": {"offtake": Series("x", "share", {None: 0.4}, {})}},
+    unread={},
+)
+
+
+def _h2(**kw):
+    return _line(
+        name="h2",
+        unit="kg",
+        quantity=None,
+        quantity_source="linked:served_h2.offtake@1",
+        price=4.0,
+        **kw,
     )
+
+
+def _lost(bc, key):
+    return [
+        tl.amount
+        for t in bc.case.templates
+        if t.first_year >= 2031  # the construction year carries no BC line
+        for tl in t.lines
+        if tl.key == key
+    ]
+
+
+@pytest.mark.parametrize("share", [None, 0.0, 0.5, 1.0])
+def test_p4_a_sold_share_scales_the_revenue_and_the_drop(share):
+    """served_h2 on one load with a lost share f = 0.4 and a sold share s: the revenue
+    line books series × s × price, and the shortfall counts once, so the lost-production
+    line drops f × s of its amount (GK B ruling on #1430)."""
+    lp, ic = _lost_ic()
     s = {"h2": Series("served_h2.offtake", "kg", {None: 1000.0}, {})}
-
-    def line(**kw):
-        return _line(
-            name="h2",
-            unit="kg",
-            quantity=None,
-            quantity_source="linked:served_h2.offtake@1",
-            price=4.0,
-            **kw,
+    kw = {} if share is None else {"linked_share": share}
+    bc = build_business_case(ic, _inputs(_h2(**kw)), s, LostProductionMap(**_LPM_LOAD))
+    r = run_case(bc.case, PACK)
+    sold = 1.0 if share is None else share
+    for y in range(2031, 2036):
+        assert r.op.lines["h2"][_at(r, y)] == pytest.approx(
+            1000.0 * sold * 4.0 * 1.02 ** (y - 2031)
         )
-
-    for share in (None, 0.5):
-        kw = {} if share is None else {"linked_share": share}
-        bc = build_business_case(ic, _inputs(line(**kw)), s, lpm)
-        r = run_case(bc.case, PACK)
-        for y in range(2031, 2036):
-            i = _at(r, y)
-            assert r.op.lines["h2"][i] == pytest.approx(
-                1000.0 * (share or 1.0) * 4.0 * 1.02 ** (y - 2031)
-            )
-        lost = [
-            tl.amount
-            for t in bc.case.templates
-            if t.first_year >= 2031  # the construction year carries no BC line
-            for tl in t.lines
-            if tl.key == lp.key
-        ]
-        assert lost and all(a == pytest.approx(-50.0 * (1 - 0.4)) for a in lost)
+    lost = _lost(bc, lp.key)
+    assert lost and all(a == pytest.approx(-50.0 * (1 - 0.4 * sold)) for a in lost)
 
 
-def test_p4_a_whole_bus_drop_is_whole_with_any_share():
+def test_p4_a_share_of_zero_runs_as_the_case_without_the_line():
+    lp, ic = _lost_ic()
+    s = {"h2": Series("served_h2.offtake", "kg", {None: 1000.0}, {})}
+    lpm = LostProductionMap(**_LPM_LOAD)
+    with_zero = run_case(
+        build_business_case(ic, _inputs(_h2(linked_share=0.0)), s, lpm).case, PACK
+    )
+    without = run_case(build_business_case(ic, _inputs(), s, lpm).case, PACK)
+    assert with_zero.cash.keys() == without.cash.keys()
+    for k, v in without.cash.items():
+        np.testing.assert_array_equal(with_zero.cash[k], v)
+
+
+def test_p4_two_lines_on_one_load_drop_their_shares_once_capped():
+    lp, ic = _lost_ic()
+    one = Series("served_h2.offtake", "kg", {None: 1000.0}, {})
+    s = {"h2": one, "h2b": one}
+    lines = [_h2(linked_share=0.7), {**_h2(linked_share=0.6).model_dump(), "name": "h2b"}]
+    bc = build_business_case(ic, _inputs(*lines), s, LostProductionMap(**_LPM_LOAD))
+    lost = _lost(bc, lp.key)
+    assert lost and all(a == pytest.approx(-50.0 * (1 - 0.4)) for a in lost)
+
+
+def test_p4_a_line_selling_none_supersedes_nothing():
+    lp, ic = _lost_ic()
+    one = Series("served_h2.offtake", "kg", {None: 1000.0}, {})
+    lines = [_h2(linked_share=0.5), {**_h2(linked_share=0.0).model_dump(), "name": "h2b"}]
+    bc = build_business_case(
+        ic, _inputs(*lines), {"h2": one, "h2b": one}, LostProductionMap(**_LPM_LOAD)
+    )
+    (row,) = [r for r in bc.locked if r.key == lp.key]
+    assert row.superseded_by == ("h2",)
+
+
+def test_p4_a_whole_bus_drop_is_scaled_by_the_share():
     lp, ic = _lost_ic()
     lpm = LostProductionMap(
         slack_bus={"__lost_h2": "h2"}, load_bus={}, share={"__lost_h2": {}}, unread={}
     )
-    ln = _line(
-        name="h2",
-        quantity=None,
-        quantity_source="linked:served_product.h2@1",
-        linked_share=0.3,
-    )
-    bc = build_business_case(
-        ic, _inputs(ln), {"h2": Series("served_product.h2", "t", {None: 10.0}, {})}, lpm
-    )
-    keys = {tl.key for t in bc.case.templates if t.first_year >= 2031 for tl in t.lines}
-    assert "h2" in keys and lp.key not in keys
+    out = {"h2": Series("served_product.h2", "t", {None: 10.0}, {})}
+
+    def bc(**kw):
+        ln = _line(
+            name="h2", quantity=None, quantity_source="linked:served_product.h2@1", **kw
+        )
+        return build_business_case(ic, _inputs(ln), out, lpm)
+
+    lost = _lost(bc(linked_share=0.3), lp.key)
+    assert lost and all(a == pytest.approx(-50.0 * 0.7) for a in lost)
+    assert _lost(bc(), lp.key) == []
+
+
+# ── F1, F2: what the picker and the share may say (GK B on #1430) ────────────
+
+
+def test_f1_every_offered_unit_runs_on_its_row():
+    for t in ("eh_site", *DC):
+        for o in P.offered_rows(t):
+            for u in o.units:
+                ln = o.line.model_copy(update={"unit": u})
+                kinds = _kinds(_inputs(ln))
+                assert ("unit_not_allowed", "lines[0].unit") not in kinds, (o.label, u)
+
+
+def test_f1_an_offered_unit_outside_the_closed_list_is_refused(tmp_path):
+    f = json.loads((P.PRESETS_DIR / "eh_site.json").read_text())
+    f["offered"][0]["units"].append("barrels")
+    (tmp_path / "eh_site.json").write_text(json.dumps(f))
+    with pytest.raises(P.PresetInvalid):
+        P.offered_rows("eh_site", directory=tmp_path)
+
+
+def test_f2_the_share_is_a_sold_share_never_lease_up():
+    """Lease-up or occupancy is a volume factor that scales costs too (ruling 6): 07
+    offers only the commercial sold share."""
+    words = re.compile(r"lease.?up|occupan|ramp", re.I)
+    for f in P.PRESETS_DIR.glob("*.json"):
+        assert not words.search(f.read_text()), f.name
+    for name in ("linked_share", "linked_share_by_year"):
+        desc = LineItem.model_fields[name].description or ""
+        assert "sold share" in desc and not words.search(desc)
 
 
 # ── P5: MW ───────────────────────────────────────────────────────────────────
@@ -828,3 +913,24 @@ def test_p8_unpinned_load_defaults_pack_callers_are_listed():
         if re.search(r"load_defaults_pack\(\s*(\)|region)", f.read_text())
     )
     assert found == UNPINNED_BC_CALLERS
+
+
+# ── P11: the templates themselves are untouched ──────────────────────────────
+
+
+@pytest.mark.parametrize("template_id", sorted(TEMPLATE_META))
+def test_p11_each_template_writes_its_committed_sidecars(template_id, tmp_path):
+    write_sidecars(tmp_path, template_id)
+    files = [str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*") if p.is_file()]
+    assert files
+    _, mismatch, errors = filecmp.cmpfiles(
+        tmp_path, P.PRESETS_DIR.parent / template_id, files, shallow=False
+    )
+    assert (mismatch, errors) == ([], [])
+
+
+def test_p11_the_presets_ship_with_project_templates():
+    spec = (pathlib.Path(__file__).resolve().parents[2] / "pypsa-gui.spec").read_text()
+    assert '(str(BACKEND / "project_templates"), "project_templates")' in spec
+    assert P.PRESETS_DIR.parent.name == "project_templates"
+    assert P.PRESETS_DIR.parent.parent == pathlib.Path(__file__).resolve().parents[1]

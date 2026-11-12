@@ -229,11 +229,18 @@ class LineItem(BaseModel):
     # pack row in another unit is refused `default_unit_mismatch`, never filled (GK B BC 07 Q1).
     default_units: dict[DefaultColumn, str] = Field(default_factory=dict)
     preset_rule: PresetRule | None = None
-    # A linked line's share of its series (R1 sold share, R2 lease-up); a year's cell wins
-    # over the scalar; None reads 1.0 (GK B BC 07 P3).
-    linked_share: Finite | None = Field(default=None, ge=0.0, le=1.0)
+    # A linked line's sold share of its series: a commercial share only, never a
+    # volume factor such as lease-up (that scales costs too: ruling 6, GK B on #1430).
+    # A year's cell wins over the scalar; None reads 1.0 (GK B BC 07 P3).
+    linked_share: Finite | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="sold share: the share of the linked series sold under this line",
+    )
     linked_share_by_year: dict[int, Annotated[Finite, Field(ge=0.0, le=1.0)]] = Field(
-        default_factory=dict
+        default_factory=dict,
+        description="sold share by year; a year's cell wins over `linked_share`",
     )
     hint: Hint | None = None
 
