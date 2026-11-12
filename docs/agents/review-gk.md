@@ -169,6 +169,8 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A per-file exemption in an AST guard is keyed on the function or node, never the whole file (#1410 F4, GK B (49)).
 - A no-map or fallback selection by stream refuses whenever an asset-sourced slack line could be the same quantity (#1411 R, GK B (49)).
 - Finance never books volume beyond what a solved LP period served. A per-year volume factor scales the cost lines tied to dispatched volume together with the revenue lines, never revenue alone, and a line whose volume class is unknown refuses (fail closed) (homer-parity 04, GK B (50)).
+- A KPI never reads a value the solve did not produce. A component missing from its dispatch frame (added after the solve) reads None, never p_set, 0 or an inference from neighbours. Fixtures model a solved network rather than the KPI guessing (#1424 A1–A5, GK B (51)).
+- An outcome or extra-edit allowance is as narrow as what the write path writes: a cell write owns only its own provenance store entry (#1431 @191e64ed, GK B (51)).
 
 ## Engineering rules
 
