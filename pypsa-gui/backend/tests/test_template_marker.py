@@ -594,10 +594,11 @@ def test_a_capture_of_an_own_marker_is_byte_for_byte_as_before(eh_base, eh_case,
 ALLOWED = {
     "services/template_marker.py",
     "routers/projects.py",
-    # Its sidecar tuple names the marker; `_source` reads that entry through
-    # the helper (pinned by the capture tests above).
-    "services/solve_capture.py",
 }
+#: Per-function exemptions, so a new direct read elsewhere in the file is
+#: still seen. `sidecars()` names the marker in its tuple; `_source` reads
+#: that entry through the helper (pinned by the capture tests above).
+EXEMPT_FUNCTIONS = {"services/solve_capture.py": {"sidecars"}}
 ALLOWED_DIRS = ("project_templates/", "tests/", "smoke/")
 #: The names the marker file goes by.
 NAMES = {"MARKER_FILE", "TEMPLATE_FILE", "META_FILE"}
@@ -627,13 +628,25 @@ def _name_of(node) -> str | None:
     return node.id if isinstance(node, ast.Name) else getattr(node, "attr", None)
 
 
-def _direct_uses(source: str) -> list[int]:
+def _direct_uses(source: str, exempt: frozenset | set = frozenset()) -> list[int]:
     """Lines that name the marker file outside the helper: the file name
     built from constants anywhere, or one of its names (``NAMES`` and any
     name an import binds them to) used as a path part: the right of ``/``,
     an argument of any call (``joinpath``, ``os.path.join``, ``Path(d,
-    NAME)``, ``open``) or a member of a tuple, list or set literal."""
+    NAME)``, ``open``), the right of ``+`` (``str(d) + "/" + NAME``), the
+    value of an assignment (an alias) or a member of a tuple, list or set
+    literal. Lines inside a function named in ``exempt`` are skipped.
+
+    What it cannot see: a name rebound through a variable before use
+    (``x = NAME`` is caught, ``y = x; d / y`` is not), a name read through
+    ``getattr`` or a dict, and a file name assembled from non-constant parts.
+    ``str(d) + "/" + NAME`` and the alias assignment ``x = NAME`` are
+    covered."""
     tree = ast.parse(source)
+    skip = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name in exempt:
+            skip.update(range(node.lineno, node.end_lineno + 1))
     names = set(NAMES)
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom | ast.Import):
@@ -644,8 +657,11 @@ def _direct_uses(source: str) -> list[int]:
     for node in ast.walk(tree):
         if _constant_text(node) == tm.MARKER_FILE:
             lines.add(node.lineno)
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div | ast.Add):
             if _name_of(node.right) in names:
+                lines.add(node.lineno)
+        elif isinstance(node, ast.Assign | ast.AnnAssign):
+            if node.value is not None and _name_of(node.value) in names:
                 lines.add(node.lineno)
         elif isinstance(node, ast.Call):
             args = [*node.args, *(k.value for k in node.keywords)]
@@ -654,7 +670,7 @@ def _direct_uses(source: str) -> list[int]:
         elif isinstance(node, ast.Tuple | ast.List | ast.Set):
             if any(_name_of(e) in names for e in node.elts):
                 lines.add(node.lineno)
-    return sorted(lines)
+    return sorted(lines - skip)
 
 
 def test_no_module_reads_the_marker_file_but_through_the_helper():
@@ -663,7 +679,7 @@ def test_no_module_reads_the_marker_file_but_through_the_helper():
         rel = path.relative_to(BACKEND).as_posix()
         if rel in ALLOWED or rel.startswith(ALLOWED_DIRS) or "/." in "/" + rel:
             continue
-        lines = _direct_uses(path.read_text("utf-8"))
+        lines = _direct_uses(path.read_text("utf-8"), EXEMPT_FUNCTIONS.get(rel, set()))
         if lines:
             found[rel] = lines
     assert found == {}
@@ -684,6 +700,8 @@ def test_no_module_reads_the_marker_file_but_through_the_helper():
         "SIDECARS = (OTHER, TEMPLATE_FILE)",
         "files = [flow_service.TEMPLATE_FILE]",
         "p = open(d + MARKER_FILE)",
+        'p = str(d) + "/" + TEMPLATE_FILE',
+        "alias = flow_service.TEMPLATE_FILE",
     ],
 )
 def test_the_guard_sees_a_direct_reader(source):
@@ -693,6 +711,21 @@ def test_the_guard_sees_a_direct_reader(source):
 def test_the_guard_follows_a_renamed_import():
     source = "from services.template_marker import MARKER_FILE as X\np = d / X\n"
     assert _direct_uses(source) == [2]
+
+
+def test_the_exemption_covers_only_the_named_function():
+    source = (
+        "def sidecars():\n    return (A, TEMPLATE_FILE)\n"
+        "def other(d):\n    return d / TEMPLATE_FILE\n"
+    )
+    assert _direct_uses(source) == [2, 4]
+    assert _direct_uses(source, {"sidecars"}) == [4]
+
+
+def test_solve_capture_has_no_direct_read_outside_sidecars():
+    source = (BACKEND / "services/solve_capture.py").read_text("utf-8")
+    assert _direct_uses(source, EXEMPT_FUNCTIONS["services/solve_capture.py"]) == []
+    assert _direct_uses(source) != []
 
 
 def test_the_guard_passes_the_helper():
