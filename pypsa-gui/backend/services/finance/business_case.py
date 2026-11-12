@@ -232,6 +232,10 @@ def _drops(
     year outside every period of the solve has no share: None (not established, as
     the line's own quantity there). A year with nothing dropped is absent (D4).
 
+    A part drop scales the line's amount by (1 − share): it assumes the shortfall is
+    valued at one constant price per unit within the period, as the ledger books it
+    (GK A N3).
+
     Fail closed (D3, A6): a triggering line with valued lost production and no map,
     a line on a bus the map could not read, or a `lost_production` line the map
     cannot place on a bus while a line triggers, is refused `linked_output_missing`.

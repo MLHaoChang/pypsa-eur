@@ -446,6 +446,28 @@ def test_a3_the_hourly_split_is_not_the_periods_and_the_read_load_counts_once():
         )
 
 
+def test_a3_the_share_weights_each_hour_inside_a_period():
+    """GK A B2: with uneven weightings inside a period, the share is Σ w·part ÷ Σ w·p,
+    which differs from the unweighted ratio."""
+    n = _two_loads()
+    for col in n.snapshot_weightings.columns:
+        n.snapshot_weightings[col] = np.tile([1.0, 5.0, 2.0, 4.0], 2)
+    w = n.snapshot_weightings["generators"]
+    p = n.generators_t.p["__lost_conc"]
+    ps = n.loads_t.p_set[["shipments", "shipments_b"]]
+    want, flat = {}, {}
+    for per in PERIODS:
+        pp, pps, ww = (x.xs(per, level=0) for x in (p, ps, w))
+        tot = pps.sum(axis=1)
+        hour = pps["shipments"] / tot.where(tot != 0)
+        hour[tot == 0] = (pps["shipments"] * ww).sum() / (pps.sum(axis=1) * ww).sum()
+        want[per] = float((pp * hour * ww).sum()) / float((pp * ww).sum())
+        flat[per] = float((pp * hour).sum()) / float(pp.sum())
+    assert any(want[k] != pytest.approx(flat[k]) for k in PERIODS)
+    lpm = L.lost_production(n, _solve(n), _case(LOST_CONC, FOM))
+    assert lpm.share["__lost_conc"]["shipments"].per_period == pytest.approx(want)
+
+
 def test_a3_d1_shares_are_finite_with_idle_loads_and_no_shortfall():
     """D1, A3: a Load that never draws takes 0; a period with no shortfall drops 0
     (never NaN); a bus no Load draws on reads 0 while nothing is short, and is
