@@ -76,6 +76,15 @@ pipeline, `backend/routers/gridspine.py`), the adequacy studies (frontier, mc,
 fmea_sweep, margin_loop, coupling_loop, eh_study; `STUDY_KEYS` in
 `backend/services/project_context.py`)
 
+**Supply architecture** (homer-parity 03a):
+One combination of a Project's supply groups (PV, wind, battery, genset, grid
+supply) that can serve its load; HOMER Pro's "architecture". A decision study
+compares them by solving one throw-away fork each with the other groups'
+assets omitted (removed, never sized to zero), so each row is that
+architecture's best system (`backend/services/study/supply_architectures.py`).
+_Avoid_: architecture (unqualified: it already names the data-centre power
+chain, AC / MV UPS / 800 VDC, `backend/services/dc_architecture.py`), system type
+
 **Vintage**:
 A per-investment-period capacity bound on a component
 (`backend/routers/vintage.py`). Multi-period work expands these transiently

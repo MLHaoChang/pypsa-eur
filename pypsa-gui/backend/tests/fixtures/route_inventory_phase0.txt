@@ -378,6 +378,9 @@ GET     /api/projects/{name}/studies/{study_id}/report.xlsx                     
 GET     /api/projects/{name}/studies/{study_id}/run                                -> get_study_run_api_projects__name__studies__study_id__run_get
 POST    /api/projects/{name}/studies/{study_id}/run                                -> run_study_api_projects__name__studies__study_id__run_post
 POST    /api/projects/{name}/studies/{study_id}/run/abort                          -> abort_study_run_api_projects__name__studies__study_id__run_abort_post
+GET     /api/projects/{name}/studies/{study_id}/supply-architectures               -> get_supply_architectures_api_projects__name__studies__study_id__supply_architectures_get
+POST    /api/projects/{name}/studies/{study_id}/supply-architectures               -> start_supply_architectures_api_projects__name__studies__study_id__supply_architectures_post
+POST    /api/projects/{name}/studies/{study_id}/supply-architectures/abort         -> abort_supply_architectures_api_projects__name__studies__study_id__supply_architectures_abort_post
 GET     /api/projects/{name}/uploads                                               -> get_uploads_api_projects__name__uploads_get
 POST    /api/projects/{name}/uploads                                               -> post_upload_api_projects__name__uploads_post
 DELETE  /api/projects/{name}/uploads/{file_id}                                     -> delete_upload_route_api_projects__name__uploads__file_id__delete

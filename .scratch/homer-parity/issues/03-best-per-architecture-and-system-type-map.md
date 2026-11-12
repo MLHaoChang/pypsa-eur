@@ -56,3 +56,19 @@ Master check (`23aa3bc8`): none of the three views exist; the building blocks do
 
 ### Tests
 `backend/tests/test_study_tornado_routes.py` pattern; new `test_homer_architectures.py`, `test_homer_grid_extension_breakeven.py`; vitest beside `SweepCard.test.tsx`.
+
+### 03a plan GO, GK B (50), 2026-11-12
+
+The source is the base project's saved network. Named "supply architecture" (G11). Conditions and where each is held:
+- G1 pins the source: the record keeps the base fingerprint and row id, and GET reads `stale` (`test_an_edited_base_reads_stale`).
+- G2: slacks are never members and never a supply (`test_a_slack_is_never_a_member_nor_a_supply`).
+- G3: omit removes members and their dependants, and an unsupplied load bus is not listed (`test_omit_*`, `test_a_load_bus_with_no_supply_path_is_not_listed`).
+- G4: cost uses the runner's reading; capex is None when any extendable member lacks overnight cost (`test_row_reads_cost_capex_and_sizes`, `test_capex_is_unavailable_*`).
+- G5: renewable fraction is weighted, uses served load less shortfall, counts import gross, and has a 0/0 guard (`test_renewable_fraction_*`).
+- G6 statuses: ok / infeasible / failed / not_reached, in rank order (`test_compare_lists_every_status_and_ranks_them`, route tests).
+- G7: forks are deleted on every path (`test_a_solver_exception_*`, `test_a_worker_exception_leaves_no_fork`, abort test).
+- G8: one study slot. A run, a tornado or a second comparison is refused while one runs, and so is a delete. Budget and `budget_solves` work as for the tornado (`test_abort_marks_the_rest_not_reached_and_one_slot_at_a_time`, `test_budget_caps_the_run`).
+- G9: `schema_version`; an unknown one reads `not_evaluated` (`test_unknown_schema_version_reads_not_evaluated`), and never-run returns 404.
+- G10: `compare_supply_architectures` (execution_long_running, INPROC_SOLVER job) and `get_supply_architectures` (read) (`test_chat_tools_*`).
+- G11: the name is "supply architecture" in code, the tools and `pypsa-gui/CONTEXT.md`.
+- G12: mutants are listed in the PR body.
