@@ -111,7 +111,9 @@ WEIGHT_BASIS: dict[str, str] = {
 
 # Profiles whose captured index is not snapshots: the investment report's
 # years, the saved readiness scorecard and the saved project's time to power.
-NO_SNAPSHOT_INDEX = frozenset({*investment.PROFILES, readiness.PROFILE, time_to_power.PROFILE})
+NO_SNAPSHOT_INDEX = frozenset(
+    {*investment.PROFILES, readiness.PROFILE, time_to_power.PROFILE}
+)
 
 
 def _count(index, start, end):

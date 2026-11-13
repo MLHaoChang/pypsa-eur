@@ -1,6 +1,7 @@
 """DC 27: the time-to-power fact read through `harness.calculations` from a
 saved project (GK A plan G7, G9, G10)."""
 
+# ruff: noqa: F811 -- shared pytest fixtures
 import json
 
 import pytest
@@ -57,7 +58,11 @@ def facts(ctx):
 def test_the_staged_example_reads_12_months_to_the_2027_stage(staged_dc):
     raw, found, _ = facts(staged_dc[0])
     fact = found["time_to_power_months"]
-    assert (fact["value"], fact["unit"], fact["formula_id"]) == (12.0, "months", "dc-time-to-power/1")
+    assert (fact["value"], fact["unit"], fact["formula_id"]) == (
+        12.0,
+        "months",
+        "dc-time-to-power/1",
+    )
     lines = R.notes(raw, str)
     assert "First power on 2027-01-01" in lines[0] and "36-month period" in lines[0]
     assert "2026-01-01" in lines[0]
@@ -68,7 +73,11 @@ def test_a_checked_answer_states_the_fact(staged_dc, checked):
     _raw, found, _ = facts(ctx)
     values = {m: f["value"] for m, f in found.items()}
     scope = {**SCOPE, "project_id": ctx.project_uuid, "retain": False}
-    frames = checked.run(NumericalProvider(values), message="What is the time to power?", checked_scope=scope)
+    frames = checked.run(
+        NumericalProvider(values),
+        message="What is the time to power?",
+        checked_scope=scope,
+    )
     record = approval(frames)
     answer = checked.client.get("/api/chat/answers/" + record["answer_id"]).json()
     assert {b["metric"]: b["value"] for b in answer["blocks"]} == values
@@ -92,10 +101,13 @@ def test_a_single_stage_project_reads_its_modelled_year(baseline):
     assert "12-month period" in R.notes(raw, str)[0]
 
 
-@pytest.mark.parametrize("body, reason", [
-    (None, "no_dc_load_spec"),
-    ({}, "no_project_start"),
-])
+@pytest.mark.parametrize(
+    "body, reason",
+    [
+        (None, "no_dc_load_spec"),
+        ({}, "no_project_start"),
+    ],
+)
 def test_a_missing_input_is_withheld_with_its_reason_never_zero(baseline, body, reason):
     ctx, _project_id, path = baseline
     save(path, "eh_datacenter", body)
@@ -114,7 +126,9 @@ def test_a_stage_refusal_is_withheld_by_name(staged_dc):
     n.links.loc["grid_import", "eh_role"] = ""
     n.export_to_netcdf(str(path / "network.nc"))
     _raw, found, slots = facts(ctx)
-    assert found == {} and slots["time_to_power_months"]["reason"] == "import_link_missing"
+    assert (
+        found == {} and slots["time_to_power_months"]["reason"] == "import_link_missing"
+    )
 
 
 def test_no_saved_network_is_refused(staged_dc):
@@ -138,10 +152,14 @@ def test_an_edited_input_makes_the_checked_evidence_stale(staged_dc, change):
     ctx, path = staged_dc
     scope = {**SCOPE, "project_id": ctx.project_uuid, "retain": False}
     record = assurance_records.capture_scoped(assurance_records.actor_id(), scope)
-    assert assurance_records.evidence(assurance_records.actor_id(), record["evidence_id"])
+    assert assurance_records.evidence(
+        assurance_records.actor_id(), record["evidence_id"]
+    )
     if change == "schedule":
         n = pypsa.Network(str(path / "network.nc"))
-        n.links_t["eh_energization_mw"]["grid_import"] = n.links_t["eh_energization_mw"]["grid_import"] + 1.0
+        n.links_t["eh_energization_mw"]["grid_import"] = (
+            n.links_t["eh_energization_mw"]["grid_import"] + 1.0
+        )
         n.export_to_netcdf(str(path / "network.nc"))
     else:
         edit_spec(path, **{change: "2025-05-05"})
@@ -169,26 +187,53 @@ def test_a_disabled_profile_emits_no_fact(staged_dc, checked, monkeypatch):
     ctx, _ = staged_dc
     monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", "grid-readiness/1")
     scope = {**SCOPE, "project_id": ctx.project_uuid, "retain": False}
-    frames = checked.run(NumericalProvider({"time_to_power_months": 12.0}),
-                         message="What is the time to power?", checked_scope=scope)
+    frames = checked.run(
+        NumericalProvider({"time_to_power_months": 12.0}),
+        message="What is the time to power?",
+        checked_scope=scope,
+    )
     assert "profile_disabled" in json.dumps(frames)
     assert "dc-time-to-power/1" not in json.dumps(frames)
 
 
-@pytest.mark.parametrize("profile, index, expected", [
-    ("grid-readiness/1", ["saved scorecard"],
-     {"start": "saved scorecard", "end": "saved scorecard", "snapshots": None,
-      "weight_basis": {"checked_pass": "none", "checked_warn": "none", "checked_fail": "none",
-                       "not_checked": "none"}}),
-    ("time-to-power/1", ["saved project"],
-     {"start": "saved project", "end": "saved project", "snapshots": None,
-      "weight_basis": {"time_to_power_months": "none"}}),
-])
+@pytest.mark.parametrize(
+    "profile, index, expected",
+    [
+        (
+            "grid-readiness/1",
+            ["saved scorecard"],
+            {
+                "start": "saved scorecard",
+                "end": "saved scorecard",
+                "snapshots": None,
+                "weight_basis": {
+                    "checked_pass": "none",
+                    "checked_warn": "none",
+                    "checked_fail": "none",
+                    "not_checked": "none",
+                },
+            },
+        ),
+        (
+            "time-to-power/1",
+            ["saved project"],
+            {
+                "start": "saved project",
+                "end": "saved project",
+                "snapshots": None,
+                "weight_basis": {"time_to_power_months": "none"},
+            },
+        ),
+    ],
+)
 def test_fact_identity_windows_are_pinned(profile, index, expected):
     """G11: an existing network-scoped profile's window reads as before the new token."""
     from harness import fact_identity
 
-    assert fact_identity.window(index, {"profile": profile, "entity_id": "network"}) == expected
+    assert (
+        fact_identity.window(index, {"profile": profile, "entity_id": "network"})
+        == expected
+    )
 
 
 def test_the_disclosure_says_grid_power_only_and_the_period_resolution():

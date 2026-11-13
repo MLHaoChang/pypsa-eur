@@ -31,11 +31,15 @@ ROLE = "grid_import"
 REASONS = {
     "no_dc_load_spec": "the project was not created with a data-centre load",
     "no_project_start": "the project start date is not set",
-    "no_serving_stage": ("no connection date is set and no stage of the build has grid power "
-                         "while data-centre load is in service"),
+    "no_serving_stage": (
+        "no connection date is set and no stage of the build has grid power "
+        "while data-centre load is in service"
+    ),
     "power_before_start": "first power falls before the project start date",
-    "energisation_unset": ("a stage's energised MW is the example's placeholder, not a stated "
-                           "value, so it cannot show when power arrives"),
+    "energisation_unset": (
+        "a stage's energised MW is the example's placeholder, not a stated "
+        "value, so it cannot show when power arrives"
+    ),
     "import_link_missing": "the network has no grid import link",
     "import_link_ambiguous": "the network has more than one grid import link",
     "import_unsized": "the grid import is sized by the solve, so its energised MW is not stated",
@@ -66,7 +70,9 @@ def months_between(start: date, end: date) -> int:
 
 
 def _import_link(n) -> str | None:
-    roles = n.links["eh_role"] if "eh_role" in n.links.columns else pd.Series(dtype=object)
+    roles = (
+        n.links["eh_role"] if "eh_role" in n.links.columns else pd.Series(dtype=object)
+    )
     links = list(roles.index[roles == ROLE])
     if not links:
         raise StagesUnavailable("import_link_missing")
@@ -77,8 +83,13 @@ def _import_link(n) -> str | None:
 
 
 def _unset_periods(meta: dict | None) -> set[str]:
-    return {str(g.get("year")) for g in (meta or {}).get("growth_inputs") or []
-            if isinstance(g, dict) and g.get("kind") == "energized_mw" and g.get("set") is False}
+    return {
+        str(g.get("year"))
+        for g in (meta or {}).get("growth_inputs") or []
+        if isinstance(g, dict)
+        and g.get("kind") == "energized_mw"
+        and g.get("set") is False
+    }
 
 
 def import_stages(n, meta: dict | None) -> list[dict]:
@@ -107,25 +118,45 @@ def import_stages(n, meta: dict | None) -> list[dict]:
         for p in pd.unique(n.snapshots.get_level_values(0)):
             start = date(int(p), 1, 1)
             months = int(round(float(years.loc[p]) * 12))
-            out.append({"period": str(p), "start": start.isoformat(),
-                        "end": add_months(start, months).isoformat(),
-                        "energized_mw": energized(str(p)), "set": str(p) not in unset})
+            out.append(
+                {
+                    "period": str(p),
+                    "start": start.isoformat(),
+                    "end": add_months(start, months).isoformat(),
+                    "energized_mw": energized(str(p)),
+                    "set": str(p) not in unset,
+                }
+            )
         return out
     year = pd.DatetimeIndex(n.snapshots)[0].year
     mw = energized("all")
-    return [{"period": "all", "start": date(year, 1, 1).isoformat(),
-             "end": date(year + 1, 1, 1).isoformat(), "energized_mw": float(mw), "set": True}]
+    return [
+        {
+            "period": "all",
+            "start": date(year, 1, 1).isoformat(),
+            "end": date(year + 1, 1, 1).isoformat(),
+            "energized_mw": float(mw),
+            "set": True,
+        }
+    ]
 
 
 def _not_available(reason: str, detail: str | None = None) -> dict:
-    return {"status": "not_available", "reason": reason, "detail": detail, "words": REASONS[reason]}
+    return {
+        "status": "not_available",
+        "reason": reason,
+        "detail": detail,
+        "words": REASONS[reason],
+    }
 
 
 def _date(v) -> date | None:
     return None if v is None else date.fromisoformat(str(v))
 
 
-def time_to_power(spec: dict | None, stages: list[dict], stage_reason: dict | None = None) -> dict:
+def time_to_power(
+    spec: dict | None, stages: list[dict], stage_reason: dict | None = None
+) -> dict:
     """The fact from the stored spec's dates and phases and the import's
     stages (``import_stages``, or ``stage_reason`` when it refused)."""
     if spec is None:
@@ -139,10 +170,15 @@ def time_to_power(spec: dict | None, stages: list[dict], stage_reason: dict | No
     else:
         if stage_reason is not None:
             return _not_available(stage_reason["reason"], stage_reason.get("detail"))
-        cods = sorted(date.fromisoformat(str(p["cod"])) for p in spec.get("phases") or [])
+        cods = sorted(
+            date.fromisoformat(str(p["cod"])) for p in spec.get("phases") or []
+        )
         served = None
         for s in stages:
-            s_start, s_end = date.fromisoformat(s["start"]), date.fromisoformat(s["end"])
+            s_start, s_end = (
+                date.fromisoformat(s["start"]),
+                date.fromisoformat(s["end"]),
+            )
             in_service = bool(cods) and cods[0] < s_end
             if not in_service:
                 continue
@@ -155,8 +191,16 @@ def time_to_power(spec: dict | None, stages: list[dict], stage_reason: dict | No
         if served is None:
             return _not_available("no_serving_stage")
         source, period = "staged_build", served["period"]
-        resolution = months_between(date.fromisoformat(served["start"]), date.fromisoformat(served["end"]))
+        resolution = months_between(
+            date.fromisoformat(served["start"]), date.fromisoformat(served["end"])
+        )
     if first < start:
         return _not_available("power_before_start", first.isoformat())
-    return {"status": "available", "months": months_between(start, first), "first_power": first.isoformat(),
-            "source": source, "stage": period, "resolution_months": resolution}
+    return {
+        "status": "available",
+        "months": months_between(start, first),
+        "first_power": first.isoformat(),
+        "source": source,
+        "stage": period,
+        "resolution_months": resolution,
+    }

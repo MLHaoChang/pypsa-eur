@@ -323,6 +323,7 @@ def test_a_new_profile_in_a_returned_enum_is_additive_only_with_its_profile(froz
     """AA-V1-CHANGE-1: a new profile is additive, also where a returned shape
     embeds the profile enum (the scoped result's RequestScope); any other
     member added to that enum is a changed returned entry (DC 27)."""
+
     def with_profile(doc, profile, register):
         doc = copy.deepcopy(doc)
         defs = doc["evidence_identity"]["scoped_result"]["$defs"]
@@ -334,34 +335,50 @@ def test_a_new_profile_in_a_returned_enum_is_additive_only_with_its_profile(froz
 
     assert breaking_changes(frozen, with_profile(frozen, "brand-new/1", True)) == []
     assert breaking_changes(frozen, with_profile(frozen, "brand-new/1", False)) == [
-        "$.evidence_identity.scoped_result changed"]
+        "$.evidence_identity.scoped_result changed"
+    ]
     removed = with_profile(frozen, "brand-new/1", True)
-    removed["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"]["properties"]["profile"][
-        "enum"].remove("generator-dispatch/1")
-    assert breaking_changes(frozen, removed) == ["$.evidence_identity.scoped_result changed"]
+    removed["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"][
+        "properties"
+    ]["profile"]["enum"].remove("generator-dispatch/1")
+    assert breaking_changes(frozen, removed) == [
+        "$.evidence_identity.scoped_result changed"
+    ]
     # Another id beside the new profile's, or an existing profile listed twice, still breaks.
     for extra in ("unregistered/1", "generator-dispatch/1"):
         doc = with_profile(frozen, "brand-new/1", True)
-        doc["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"]["properties"]["profile"][
-            "enum"].append(extra)
-        assert breaking_changes(frozen, doc) == ["$.evidence_identity.scoped_result changed"]
+        doc["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"][
+            "properties"
+        ]["profile"]["enum"].append(extra)
+        assert breaking_changes(frozen, doc) == [
+            "$.evidence_identity.scoped_result changed"
+        ]
     # The new profile's id in an enum that is not the profile enum still breaks.
     elsewhere = with_profile(frozen, "brand-new/1", True)
-    elsewhere["evidence_identity"]["scoped_result"]["$defs"]["Slot"]["properties"]["disposition"][
-        "enum"].append("brand-new/1")
-    assert breaking_changes(frozen, elsewhere) == ["$.evidence_identity.scoped_result changed"]
+    elsewhere["evidence_identity"]["scoped_result"]["$defs"]["Slot"]["properties"][
+        "disposition"
+    ]["enum"].append("brand-new/1")
+    assert breaking_changes(frozen, elsewhere) == [
+        "$.evidence_identity.scoped_result changed"
+    ]
     # An id the old contract already listed without a profile (orphaned or
     # re-added) keeps its difference visible when it becomes a profile (GK B B2).
     orphan_old = copy.deepcopy(frozen)
-    orphan_old["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"]["properties"]["profile"][
-        "enum"].append("orphan/1")
+    orphan_old["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"][
+        "properties"
+    ]["profile"]["enum"].append("orphan/1")
     assert breaking_changes(orphan_old, with_profile(frozen, "orphan/1", True)) == [
-        "$.evidence_identity.scoped_result changed"]
+        "$.evidence_identity.scoped_result changed"
+    ]
     # Order counts, as on master: existing members reordered still break (GK B B3).
     reordered = with_profile(frozen, "brand-new/1", True)
-    enum = reordered["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"]["properties"]["profile"]["enum"]
+    enum = reordered["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"][
+        "properties"
+    ]["profile"]["enum"]
     enum[:-1] = enum[-2::-1]
-    assert breaking_changes(frozen, reordered) == ["$.evidence_identity.scoped_result changed"]
+    assert breaking_changes(frozen, reordered) == [
+        "$.evidence_identity.scoped_result changed"
+    ]
     # The live snapshot against master's: only the new profile's entries differ (G11).
     assert breaking_changes(frozen, contracts.build()) == []
 
@@ -369,7 +386,9 @@ def test_a_new_profile_in_a_returned_enum_is_additive_only_with_its_profile(froz
 def test_the_strip_reaches_profile_enums_in_lists_and_leaves_other_properties():
     strip = contracts._without_enum_members
     nested = {"anyOf": [{"properties": {"profile": {"enum": ["a/1", "new/1"]}}}]}
-    assert strip(nested, {"new/1"}) == {"anyOf": [{"properties": {"profile": {"enum": ["a/1"]}}}]}
+    assert strip(nested, {"new/1"}) == {
+        "anyOf": [{"properties": {"profile": {"enum": ["a/1"]}}}]
+    }
     plain = {"properties": {"profile": {"type": "string"}, "kind": {"enum": ["new/1"]}}}
     assert strip(plain, {"new/1"}) == plain
 

@@ -10,10 +10,15 @@ reason, never 0.
 from harness import profile_common as common
 
 PROFILE = "time-to-power/1"
-REFUSALS = frozenset({"network_scope_required", "no_saved_project", "unsupported_snapshot_scope"})
+REFUSALS = frozenset(
+    {"network_scope_required", "no_saved_project", "unsupported_snapshot_scope"}
+)
 METRICS = {
-    "time_to_power_months": {"formula_id": "dc-time-to-power/1", "unit": "months",
-                             "label": "Time to power from project start"},
+    "time_to_power_months": {
+        "formula_id": "dc-time-to-power/1",
+        "unit": "months",
+        "label": "Time to power from project start",
+    },
 }
 DISCLOSURE = (
     "Time to power is calendar months from the stated project start to first power, a partial month "
@@ -32,8 +37,14 @@ def _spec(meta):
     spec = block.get("spec") if isinstance(block, dict) else None
     if meta.get("id") not in DC_TEMPLATES or not isinstance(spec, dict):
         return None
-    return {"project_start": spec.get("project_start"), "connection_date": spec.get("connection_date"),
-            "phases": [{"cod": p.get("cod"), "it_mw": p.get("it_mw")} for p in spec.get("phases") or []]}
+    return {
+        "project_start": spec.get("project_start"),
+        "connection_date": spec.get("connection_date"),
+        "phases": [
+            {"cod": p.get("cod"), "it_mw": p.get("it_mw")}
+            for p in spec.get("phases") or []
+        ],
+    }
 
 
 def source(ctx, entity):
@@ -82,22 +93,31 @@ def result(raw):
 
 
 def calculate(raw, scope):
-    if raw.get("version") != 1 or raw.get("profile") != PROFILE or raw["entity_id"] != scope["entity_id"]:
+    if (
+        raw.get("version") != 1
+        or raw.get("profile") != PROFILE
+        or raw["entity_id"] != scope["entity_id"]
+    ):
         raise ValueError("time_to_power_source_identity")
     if "start" in scope:
         raise ValueError("unsupported_snapshot_scope")
     out = result(raw)
     if out["status"] == "available":
-        return common.facts_and_slots(scope, METRICS, {"time_to_power_months": float(out["months"])}, {}, 1)
-    return common.facts_and_slots(scope, METRICS, {}, {"time_to_power_months": out["reason"]}, 1)
+        return common.facts_and_slots(
+            scope, METRICS, {"time_to_power_months": float(out["months"])}, {}, 1
+        )
+    return common.facts_and_slots(
+        scope, METRICS, {}, {"time_to_power_months": out["reason"]}, 1
+    )
 
 
 def notes(raw, label):
     """The answer's lines: where the figure comes from and how fine it is,
     or why it is withheld."""
     out = result(raw)
-    saved = ("from the project's saved network and data-centre inputs"
-             + ("; unsaved edits are not included." if raw["unsaved_edits"] else "."))
+    saved = "from the project's saved network and data-centre inputs" + (
+        "; unsaved edits are not included." if raw["unsaved_edits"] else "."
+    )
     if out["status"] != "available":
         detail = f" ({label(str(out['detail']))})" if out.get("detail") else ""
         return [f"Time to power is not available: {out['words']}{detail}.", saved]
@@ -105,8 +125,15 @@ def notes(raw, label):
         how = f"First power on {out['first_power']}, the stated grid connection date"
         fine = "exact to the day"
     else:
-        how = (f"First power on {out['first_power']}, the first model period ({label(str(out['stage']))}) "
-               "with grid power while data-centre load is in service")
-        fine = (f"only as fine as that {out['resolution_months']}-month period: "
-                "first power may be up to a period earlier")
-    return [f"{how}, counted from the project start {raw['spec']['project_start']}; {fine}.", saved]
+        how = (
+            f"First power on {out['first_power']}, the first model period ({label(str(out['stage']))}) "
+            "with grid power while data-centre load is in service"
+        )
+        fine = (
+            f"only as fine as that {out['resolution_months']}-month period: "
+            "first power may be up to a period earlier"
+        )
+    return [
+        f"{how}, counted from the project start {raw['spec']['project_start']}; {fine}.",
+        saved,
+    ]
