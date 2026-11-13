@@ -199,6 +199,10 @@ GENERATOR: tuple[FieldSpec, ...] = (
                   "at once without financing. Annualised over the lifetime at the discount rate.", key_param=True),
     FieldSpec("lifetime", "investment", "Lifetime", "Technical and economic lifetime. The asset retires after its "
               "build year plus lifetime.", "years", "years", key_param=True),
+    FieldSpec("lifetime_run_hours", "investment", "Lifetime in running hours", "Engine-driven generators only. "
+              "Running hours before the unit is replaced (HOMER's generator lifetime). The investment case replaces "
+              "it at this many hours at the solved hours per year, or at Lifetime if sooner. The capital cost keeps "
+              "Lifetime.", "h", "h"),
     *_investment_common(),
     _money_per_mw_yr("capital_cost", "investment", "Capital cost (annualised)", "Derived: overnight cost × annuity("
                      "discount rate, lifetime); fixed O&M is charged on top. The optimiser pays it on every MW it adds, "
@@ -210,11 +214,15 @@ GENERATOR: tuple[FieldSpec, ...] = (
     FieldSpec("fuel_price", "variable", "Fuel price", "Fuel-burning generators only. Price per MWh of fuel "
               "burnt; sets marginal cost = slope × price and stand-by cost = no-load fuel × capacity × price.",
               "EUR/MWh fuel", "EUR/MWh"),
+    FieldSpec("om_cost_per_run_hour", "variable", "O&M per running hour", "Engine-driven generators only. "
+              "Operation and maintenance per hour the unit is on, at any output (HOMER's O&M per operating hour). "
+              "Adds to the stand-by cost. Needs Unit commitment.", "EUR/h", "EUR/h"),
     FieldSpec("curtailment_cost", "variable", "Curtailment cost", "Penalty per MWh of available but unused energy. "
               "Set above zero to discourage spilling wind or solar.", "EUR/MWh", "EUR/MWh"),
     *_uc_cost_rows(shut_down=True, stand_by=False),
     FieldSpec("stand_by_cost", "variable", "Stand-by cost", "Derived: cost per hour while the unit is on, at any "
-              "output, from the fuel curve (no-load fuel × capacity × fuel price).", "EUR/h", "EUR/h",
+              "output: the fuel curve's no-load fuel × capacity × fuel price, plus the O&M per running hour.", "EUR/h",
+              "EUR/h",
               reveal_when=_UC, derived=True),
     _share("efficiency", "performance", "Efficiency", "Conversion efficiency from primary energy to electricity. "
            "Used for CO₂ accounting (carrier emissions ÷ efficiency)."),
@@ -642,7 +650,8 @@ _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum",
                             "start_method", "ride_through_curve"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
-                   "Generator": {"dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load", "fuel_price"},
+                   "Generator": {"dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load", "fuel_price",
+                                 "om_cost_per_run_hour", "lifetime_run_hours"},
                    "Bus": {"mwh_per_t", "product_value", "lost_production_value", "temperature_c", "pressure_bar"},
                    "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min",
                             "single_phase_share", "motor_kw", "i_start_pu", "restart_time_h", "max_supply_temp_c", "max_pressure_bar"}}

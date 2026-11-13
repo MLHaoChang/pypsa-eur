@@ -2650,7 +2650,7 @@ def _check_fuel_curves(n) -> list[Issue]:
     from services import fuel_curve
 
     gens = n.generators
-    if gens.empty or not any(c in gens.columns for c in fuel_curve.COLUMNS):
+    if gens.empty or not any(c in gens.columns for c in fuel_curve.INPUT_COLUMNS):
         return []
     return [Issue("error", "fuel_curve_invalid", "Generator", str(name), f"{msg}.")
             for name in gens.index

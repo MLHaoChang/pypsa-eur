@@ -732,6 +732,9 @@ def compute_cost_breakdown(n, cfg):
         # intercept × p_nom × on-hours + slope × energy, weighted like the LP objective. Its cost is already
         # inside `opex` (PyPSA's marginal and stand-by costs); this splits it out. Empty without a curve.
         "fuel": fuel_curve.fuel_use(n, period_years),
+        # Hours run and O&M per running hour (homer-parity 02b), for each generator with an O&M per running hour
+        # or a lifetime in running hours. The O&M is already inside `opex` (the stand-by cost). Empty without one.
+        "run_hours": fuel_curve.run_hours(n, period_years),
         # CAPEX going into storage (StorageUnit + Store), expansion only.
         # Useful as a quick "how much of the investment is storage?" KPI.
         "storage_capex_expansion": storage_capex_expansion,

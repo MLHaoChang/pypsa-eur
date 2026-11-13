@@ -203,6 +203,7 @@ import numpy as np
 import pandas as pd
 
 from models.process_unit import product_roles
+from services import fuel_curve
 from services.adequacy.slack import lost_slack_name
 from services.asset_schema import schema as _schema
 from services.asset_schema.access import upfront_parts
@@ -1775,6 +1776,26 @@ def _parts(n, comp: str, name: str, df, cap: float | None, *, discount_rate: flo
                  for p in got), []
 
 
+def _run_hour_life(n, name: str, parts: tuple[AssetPart, ...], life: float | None
+                   ) -> tuple[tuple[AssetPart, ...], float | None, list[str]]:
+    """Generator `name`'s parts and lifetime worn by its lifetime in running hours (homer-parity 02b,
+    `fuel_curve.run_hour_lifetime`): each part's lifetime and the asset's become the shorter of their own and the
+    run-hour one, flagged `run_hour_lifetime:<name>` when it is shorter (an unknown or infinite calendar lifetime
+    counts as longer). Unchanged with no run-hour lifetime; `run_hour_lifetime_unknown:<name>` when not solved."""
+    years, flags = fuel_curve.run_hour_lifetime(n, name)
+    if years is None:
+        return parts, life, [f for f in flags if f.startswith("run_hour_lifetime_unknown:")]
+
+    def worn(v: float | None) -> float:
+        return years if v is None or v > years else v
+
+    if life is not None and life <= years and all(
+            p.lifetime_years is not None and p.lifetime_years <= years for p in parts):
+        return parts, life, []
+    return (tuple(dataclasses.replace(p, lifetime_years=worn(p.lifetime_years)) for p in parts), worn(life),
+            [f"run_hour_lifetime:{name}", *flags])
+
+
 def _assets(n, owned_list, *, discount_rate: float | None = None
             ) -> tuple[tuple[AssetFinance, ...], dict[str, float | None], list[str]]:
     """The owner's `AssetFinance`s with their parts (S1, S2), their own
@@ -1792,6 +1813,9 @@ def _assets(n, owned_list, *, discount_rate: float | None = None
         costs = [p.overnight_cost for p in parts]
         overnight = None if (not parts or any(c is None for c in costs)) else float(sum(costs))
         life = _fin(df.at[name, "lifetime"]) if "lifetime" in df.columns else None
+        if comp == "Generator":
+            parts, life, f = _run_hour_life(n, name, parts, life)
+            flags += f
         carrier = str(df.at[name, "carrier"]) if "carrier" in df.columns else None
         assets.append(AssetFinance(name=name, component=comp, overnight_cost=overnight,
                                    lifetime_years=life, carrier=carrier or None, parts=parts))

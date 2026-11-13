@@ -202,7 +202,7 @@ BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value", "lost_production_val
 # The fuel curve (homer-parity 02a, `services.fuel_curve`) is written only when sent: a generator without one
 # keeps no column for it and its own marginal_cost.
 GENERATOR_LAZY_COLUMNS = frozenset({"process_role", "dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load",
-                                    "fuel_price"})
+                                    "fuel_price", "om_cost_per_run_hour", "lifetime_run_hours"})
 
 
 class LinkCreate(BaseModel):
@@ -390,6 +390,10 @@ class GeneratorCreate(BaseModel):
     fuel_curve_slope: Finite | None = None    # MWh fuel per MWh generated
     fuel_curve_no_load: Finite | None = None  # MWh fuel per h per MW rated
     fuel_price: Finite | None = None          # EUR per MWh fuel
+    # Run hours (homer-parity 02b): O&M per running hour adds to stand_by_cost; the lifetime in running hours
+    # wears the finance case's parts at the solved rate. None = not set.
+    om_cost_per_run_hour: Finite | None = None  # EUR per hour while committed
+    lifetime_run_hours: Finite | None = None    # running hours
     # Per-generator annual energy floor / ceiling (MWh). PyPSA enforces
     # `e_sum_min ≤ Σ_t (p_t × weight_t) ≤ e_sum_max` on the dispatch.
     # Default to PyPSA's own sentinels (-inf / +inf) meaning "no bound".

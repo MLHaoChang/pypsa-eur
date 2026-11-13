@@ -616,6 +616,24 @@
       "technical_name": "lifetime"
      },
      {
+      "key": "lifetime_run_hours",
+      "group": "investment",
+      "label": "Lifetime in running hours",
+      "help": "Engine-driven generators only. Running hours before the unit is replaced (HOMER's generator lifetime). The investment case replaces it at this many hours at the solved hours per year, or at Lifetime if sooner. The capital cost keeps Lifetime.",
+      "unit_display": "h",
+      "unit_storage": "h",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "clear",
+      "technical_name": "lifetime_run_hours"
+     },
+     {
       "key": "build_year",
       "group": "investment",
       "label": "Build year",
@@ -736,6 +754,24 @@
       "technical_name": "fuel_price"
      },
      {
+      "key": "om_cost_per_run_hour",
+      "group": "variable",
+      "label": "O&M per running hour",
+      "help": "Engine-driven generators only. Operation and maintenance per hour the unit is on, at any output (HOMER's O&M per operating hour). Adds to the stand-by cost. Needs Unit commitment.",
+      "unit_display": "EUR/h",
+      "unit_storage": "EUR/h",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": null,
+      "part": null,
+      "blank": "clear",
+      "technical_name": "om_cost_per_run_hour"
+     },
+     {
       "key": "curtailment_cost",
       "group": "variable",
       "label": "Curtailment cost",
@@ -797,7 +833,7 @@
       "key": "stand_by_cost",
       "group": "variable",
       "label": "Stand-by cost",
-      "help": "Derived: cost per hour while the unit is on, at any output, from the fuel curve (no-load fuel × capacity × fuel price).",
+      "help": "Derived: cost per hour while the unit is on, at any output: the fuel curve's no-load fuel × capacity × fuel price, plus the O&M per running hour.",
       "unit_display": "EUR/h",
       "unit_storage": "EUR/h",
       "scale": 1.0,
