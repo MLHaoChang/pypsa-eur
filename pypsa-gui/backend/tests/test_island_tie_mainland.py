@@ -80,15 +80,23 @@ def test_a_sidecar_genset_on_the_mainland_bus_is_refused_by_name():
         ["mainland"],
         ["subsea_tie"],
     )
-    for word in ("diesel_new", "mainland", "mainland_supply", "move", "list"):
+    for word in (
+        "diesel_new",
+        "mainland",
+        "mainland_supply",
+        "subsea_tie",
+        "move",
+        "list",
+    ):
         assert word in out["reason"].lower(), word
 
 
-def test_a_storage_unit_the_sidecar_does_not_name_marks_its_bus_mainland_too():
+@pytest.mark.parametrize("component", ["StorageUnit", "Store"])
+def test_a_storage_the_sidecar_does_not_name_marks_its_bus_mainland_too(component):
     island = _island("eh_microgrid")
     n = T.BUILDERS["eh_microgrid"]()
     n.add("Bus", "m3")
-    n.add("StorageUnit", "m3_store", bus="m3", p_nom=5.0)
+    n.add(component, "m3_store", bus="m3")
     n.add("Link", "tie_m3", bus0="m3", bus1="island", p_nom=5.0)
     n.generators.at["diesel_new", "bus"] = "m3"
     out = S.tie_state(n, island)

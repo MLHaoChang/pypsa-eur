@@ -312,13 +312,19 @@ def _units_on_mainland(n, island) -> dict | None:
     why = []
     for bus in buses:
         on = ", ".join(u for u in units if unit_bus[u] == bus)
+        reasons = []
         if foreign[bus]:
-            reason = f"it hosts {', '.join(sorted(foreign[bus]))}, which the island sidecar does not list"
-        else:
-            reason = "it is the grid side (bus0) of the grid-import link " + ", ".join(
-                l for l in links if str(n.links.at[l, "bus0"]) == bus
+            reasons.append(
+                f"it hosts {', '.join(sorted(foreign[bus]))}, which the island sidecar does not list"
             )
-        why.append(f"{on} sits on bus {bus}, which reads as the mainland's: {reason}")
+        imports = [link for link in links if str(n.links.at[link, "bus0"]) == bus]
+        if imports:
+            reasons.append(
+                f"it is the grid side (bus0) of the grid-import link {', '.join(imports)}"
+            )
+        why.append(
+            f"{on} sits on bus {bus}, which reads as the mainland's: {' and '.join(reasons)}"
+        )
     words = (
         "; ".join(why)
         + ". Move the unit off that bus, or list that bus's supply in the "

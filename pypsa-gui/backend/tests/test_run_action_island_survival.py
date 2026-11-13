@@ -1499,3 +1499,16 @@ def test_a_sidecar_unit_on_the_mainland_is_no_evidence_by_name(hub):
     assert g["verdict"] == "not_evaluated"
     assert g["facts"][0]["value"] == "unit_on_mainland"
     assert "diesel_new" in g["reason"] and "mainland_supply" in g["reason"]
+
+
+def test_a_grid_import_link_inside_the_island_is_no_evidence_by_name(hub):
+    """#46 R4 through the gate: the mainland is fed only through the Link."""
+    _sidecar(hub)
+    n = T.BUILDERS[TID]()
+    n.remove("Generator", "mainland_supply")
+    n.generators.at["diesel_new", "bus"] = "mainland"
+    g = _gate(hub, "mg.tie.open", value="open", ctx=_ctx(hub, n))
+    assert g["verdict"] == "not_evaluated"
+    assert g["facts"][0]["value"] == "unit_on_mainland"
+    for word in ("diesel_new", "subsea_tie", "Move the unit off that bus"):
+        assert word in g["reason"], word
