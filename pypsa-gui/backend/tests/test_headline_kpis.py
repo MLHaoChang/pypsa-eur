@@ -1124,3 +1124,36 @@ def test_the_trend_of_a_solved_multi_period_run_adds_up_with_uneven_periods(
         (2040, pytest.approx(1500)),
     ]
     assert sum(p["value"] for p in points) == pytest.approx(system["value"])
+
+
+def test_a_failed_expansion_compute_is_unavailable_not_a_zero(
+    windy, client, monkeypatch
+):
+    """ui-modern 06: the expansion CAPEX loop raising leaves no figure, never 0.00."""
+    from services.results import cost_breakdown as cb
+
+    solve(windy)
+    real = cb.periodized_cost_view
+
+    def failing_for_expansion(n, cfg, *args, **kwargs):
+        # The lifetime resolve opens the view with `for_back_calculation`; only
+        # the expansion compute (opened without it) fails.
+        if kwargs.get("for_back_calculation"):
+            return real(n, cfg, *args, **kwargs)
+        raise RuntimeError("expansion view failed")
+
+    monkeypatch.setattr(cb, "periodized_cost_view", failing_for_expansion)
+    cost = client.get("/api/results/cost_breakdown").json()
+    assert cost["capex_expansion"] is None
+    assert cost["storage_capex_expansion"] is None
+    assert all(row["capex_expansion"] is None for row in cost["by_component"])
+    # The figures that do not depend on the expansion compute stay.
+    assert isinstance(cost["capex"], float) and isinstance(cost["total"], float)
+    _, by_id, _ = cards(client)
+    card = by_id["new_build_capital"]
+    assert (card["state"], card["value"], card["reason"]) == (
+        "unavailable",
+        None,
+        hk.FIGURE_NOT_COMPUTED,
+    )
+    assert by_id["system_cost"]["state"] != "unavailable"

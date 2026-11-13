@@ -308,6 +308,8 @@ RESULT_STATE_KEYS = (
     # per-item frames, and the solved `ic_*` commercial terms the cost
     # breakdown needs to reconcile after a reload (spec §5.1).
     "investment_case_report",
+    # Business case 08a: the business-case report (its run record is a study key).
+    "business_case_report",
     "billing_frames",
     "last_commercial_terms",
     "ac_pf_convergence", "ac_pf_convergence_list",
@@ -357,7 +359,8 @@ def cleared_result_state() -> dict[str, None]:
 # so `pypsa_service` cannot import `study_state`, but it already imports this
 # module.
 STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
-             "eh_study", "investment_case", "decision_study", "report_job")
+             "eh_study", "investment_case", "business_case", "decision_study",
+             "report_job")
 
 # The studies that re-solve the USER'S OWN network object in place, between
 # their iterates — so an edit landing mid-study is either overwritten by the
@@ -387,6 +390,8 @@ STUDY_LABELS = {
     # Edge Investment Case P4 WP4.6b: the finance run reads the solved network's
     # result tables, so it holds the mesh like any other study.
     "investment_case": "an investment-case run",
+    # Business case 08a: reads the solved network's linked outputs, so it holds the mesh.
+    "business_case": "a business-case run",
     "report_job": "report generation",
 }
 
@@ -404,7 +409,7 @@ STUDY_LABELS = {
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
                      "fmea_sweep", "eh_study", "investment_case",
-                     "decision_study", "report_job")
+                     "business_case", "decision_study", "report_job")
 
 
 def may_rewrite_user_ts(ctx: Any) -> bool:
@@ -568,6 +573,7 @@ class ProjectSolverState:
     adequacy_report: Any = None   # minimal AdequacyReport dict (target solves)
     eh_reference_design_report: Any = None  # ReferenceDesignReport dict (EH study)
     investment_case_report: Any = None  # InvestmentCaseReport dict (IC study)
+    business_case_report: Any = None    # business-case report dict (business case 08a)
     billing_frames: Any = None          # {tariff_item: DataFrame} from the billing pass
     last_commercial_terms: Any = None   # solved ic_* terms for reload-safe reconciliation
     eh_redundancy_comparison: Any = None
@@ -636,6 +642,7 @@ class ProjectSolverState:
     # code). Its REPORT is result state (`investment_case_report`); the record
     # is not persisted, like every study record above.
     investment_case: Any = None
+    business_case: Any = None
     decision_study: Any = None
     # Transient report worker/control record. Never persisted as solve results;
     # retain while alive and clear with finished study/job records on reset.

@@ -134,3 +134,13 @@ def test_json_and_held(tmp_path):
     held = {h["path"].split("/")[-1]: h["reason"] for h in data["held"]}
     assert held["16-cop.md"] == "Blocked by 15"
     assert "held" in run(root, "--held")
+
+
+def test_an_open_pr_beats_a_listed_session_in_the_stage(tmp_path):
+    root = make_root(tmp_path)
+    sessions = tmp_path / "sessions.txt"
+    sessions.write_text("abc idle Build · g2p 21 — claimed\n")
+    prs = tmp_path / "prs.txt"
+    prs.write_text("#12 .scratch/g2p/issues/21-claimed.md\n")
+    got = stages(root, "--sessions", str(sessions), "--open-prs", str(prs))
+    assert got["g2p/21"] == "In review"

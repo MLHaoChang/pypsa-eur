@@ -22,6 +22,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog'
 import CarrierSelect from '../components/CarrierSelect'
 import { ROLLING_WORDS } from './solver/rollingWords'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
+import { OffGridConstraints } from './solver/OffGridConstraints'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
 import { useLoadFlowOn, useN1On } from '../components/flowScope/useFlowScope'
 import { ScopeGate } from '../components/flowScope/ScopeGate'
@@ -160,6 +161,8 @@ export default function SolverSettings() {
   const { goal } = useReliabilityGoal()
   const [goalEdits, setGoalEdits] = useState<GoalEdits>({})
   const goalError = goalPatchFromEdits(goalEdits).error
+  const [offGridError, setOffGridError] = useState<string | null>(null)
+  const saveBlock = goalError ?? offGridError
   // Snapshot of `cfg` at the moment `draft` was hydrated. Used at Save
   // time to compute a DIFF — we send only the fields the user actually
   // changed in this form, never the unchanged ones. Without this, Save
@@ -268,6 +271,8 @@ export default function SolverSettings() {
     if (!blockRequest || !draft) return
     const [want, target] = blockRequest === 'sclopf'
       ? ['network', 'solver-sclopf-panel'] as const
+      : blockRequest === 'offgrid'
+      ? ['network', 'solver-offgrid-constraints'] as const
       : blockRequest === 'goal'
         ? ['network', 'solver-reliability-goal'] as const
         : blockRequest === 'strategy'
@@ -934,6 +939,9 @@ export default function SolverSettings() {
           if (!error) patch(p)
         }} />
 
+      {/* ── Off-grid constraints (homer-parity 01a; 01b joins it) ── */}
+      <OffGridConstraints draft={draft} patch={patch} onError={setOffGridError} />
+
       {/* ── Stress scenarios (the registry the B/C sweep reads) ─── */}
       <StressConditionsSection project={currentProject} />
 
@@ -953,8 +961,8 @@ export default function SolverSettings() {
       <div className="flex gap-2 p-3 border-t border-border bg-bg">
         <button
           onClick={() => draft && save.mutate(draft)}
-          disabled={save.isPending || goalError !== null}
-          title={goalError ?? undefined}
+          disabled={save.isPending || saveBlock !== null}
+          title={saveBlock ?? undefined}
           className="flex-1 px-3 py-1.5 bg-accent text-white rounded text-xs font-medium hover:bg-accent/90 disabled:opacity-40"
         >{save.isPending ? 'Saving…' : 'Save settings'}</button>
         <button

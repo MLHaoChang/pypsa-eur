@@ -6,6 +6,7 @@ import type {
   McStatus, MarginIteration, MarginLoopPayload, MarginLoopRequestBody,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { loopStatusWord, NOT_CONFIDENT_KEY } from '../../components/activityWords'
 import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { hasTarget, NO_GOAL, ReliabilityGoalSummary, ZERO_TARGET } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
@@ -135,6 +136,8 @@ export function ceilingLabel(fleet: number | null,
 const STATUS_CLASS: Record<string, string> = {
   running: 'bg-panel border border-border text-muted',
   met: 'bg-accent/10 text-accent',
+  // Adequacy loops 04: at or below the goal but not confidently; never met.
+  not_confident: 'bg-warn/10 text-warn',
   unreachable: 'bg-warn/10 text-warn',
   budget_exhausted: 'bg-warn/10 text-warn',
   aborted: 'bg-panel border border-border text-muted',
@@ -342,8 +345,9 @@ export function MarginLoopPanel() {
                     + (STATUS_CLASS[payload.status]
                       ?? 'bg-panel border border-border')}
                   data-testid="margin-loop-status"
+                  data-status={payload.status}
                 >
-                  {payload.status}
+                  {loopStatusWord(payload.status)}
                 </span>
                 <span
                   className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] font-mono"
@@ -407,6 +411,11 @@ export function MarginLoopPanel() {
                       + 'margin, not the plan this verdict is about'}
                 </span>
               </div>
+              {payload.status === 'not_confident' && (
+                <p className="text-[10px] text-warn" data-testid="margin-loop-not-confident-key">
+                  {NOT_CONFIDENT_KEY}
+                </p>
+              )}
               {payload.verdict && (
                 <p className="text-[11px] text-text" data-testid="margin-loop-verdict">
                   {payload.verdict}

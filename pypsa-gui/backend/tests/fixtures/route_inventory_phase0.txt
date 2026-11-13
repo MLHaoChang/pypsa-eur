@@ -161,6 +161,7 @@ POST    /api/mcp                                                                
 PATCH   /api/network/_bulk                                                         -> bulk_update_api_network__bulk_patch
 GET     /api/network/asset_costs                                                   -> get_asset_costs_api_network_asset_costs_get
 GET     /api/network/asset_schema/{component}                                      -> get_asset_schema_api_network_asset_schema__component__get
+GET     /api/network/asset_schema/{component}/units/{name}                         -> get_asset_units_api_network_asset_schema__component__units__name__get
 GET     /api/network/asset_schema/{component}/provenance/{name}                    -> get_asset_provenance_api_network_asset_schema__component__provenance__name__get
 GET     /api/network/asset_schema/{component}/provenance/{name}/why/{field}        -> get_asset_provenance_why_api_network_asset_schema__component__provenance__name__why__field__get
 GET     /api/network/buses                                                         -> get_buses_api_network_buses_get
@@ -364,6 +365,7 @@ GET     /api/projects/{name}/studies/{study_id}/findings                        
 GET     /api/projects/{name}/studies/{study_id}/findings/tornado                   -> get_findings_tornado_api_projects__name__studies__study_id__findings_tornado_get
 POST    /api/projects/{name}/studies/{study_id}/findings/tornado                   -> start_findings_tornado_api_projects__name__studies__study_id__findings_tornado_post
 POST    /api/projects/{name}/studies/{study_id}/findings/tornado/abort             -> abort_findings_tornado_api_projects__name__studies__study_id__findings_tornado_abort_post
+POST    /api/projects/{name}/studies/{study_id}/grid-extension-break-even          -> grid_extension_break_even_route_api_projects__name__studies__study_id__grid_extension_break_even_post
 GET     /api/projects/{name}/studies/{study_id}/ledger                             -> get_ledger_api_projects__name__studies__study_id__ledger_get
 PUT     /api/projects/{name}/studies/{study_id}/ledger                             -> put_ledger_api_projects__name__studies__study_id__ledger_put
 GET     /api/projects/{name}/studies/{study_id}/ledger/{key}/why                   -> get_ledger_row_why_api_projects__name__studies__study_id__ledger__key__why_get
@@ -462,6 +464,7 @@ GET     /api/results/price_drivers                                              
 GET     /api/results/prices                                                        -> get_prices_api_results_prices_get
 GET     /api/results/process_uc_check                                              -> get_process_uc_check_api_results_process_uc_check_get
 GET     /api/results/process_view                                                  -> get_process_view_api_results_process_view_get
+GET     /api/results/renewable_fraction                                            -> get_renewable_fraction_api_results_renewable_fraction_get
 GET     /api/results/reserve_margin                                                -> get_reserve_margin_api_results_reserve_margin_get
 GET     /api/results/run-view                                                      -> get_run_view_api_results_run_view_get
 GET     /api/results/statistics                                                    -> get_statistics_api_results_statistics_get

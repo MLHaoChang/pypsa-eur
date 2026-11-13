@@ -38,6 +38,7 @@ from models.report import (
 from services.reports.docx_reader import TemplateReadError
 from services.reports.docx_writer import render_document_docx
 from services.reports.roundtrip import (
+    REMOVED_TABLE_NOTE,
     RoundTripResult,
     RoundTripSection,
     merge_round_trip,
@@ -225,7 +226,10 @@ def test_edited_paragraph_marks_the_section_changed_and_keeps_inline_markdown():
     sec_m = _by_id(merged, "fmea_top")
     assert sec_m.source == "user_edit"
     assert sec_m.blocks[0].md == first.md
-    assert sec_m.audit.unverified == [] and sec_m.audit.verified == []
+    # LC-43a: the audit is re-run against the facts the base verified, so the
+    # unchanged 100,000 €/yr stays verified and nothing is listed to check.
+    assert sec_m.audit.unverified == []
+    assert [v.text for v in sec_m.audit.verified] == ["100,000 €/yr"]
     assert sec_m.status == "ok"
     # Untouched sections are byte-identical.
     assert _by_id(merged, "executive_summary") == _by_id(base, "executive_summary")
@@ -280,8 +284,14 @@ def test_edited_table_cell_becomes_an_edited_table_in_the_result():
     merged = merge_round_trip(base, result)
     assert new_id in merged.tables and merged.tables[new_id] == edited
     assert "fmea_top" in merged.tables  # the original is kept for earlier versions
-    assert [b.table_id for b in _by_id(merged, "fmea_top").blocks
-            if isinstance(b, TableRef)][0] == new_id
+    # LC-43a: text edited in a row that states a number fails closed, so the
+    # admitted table stays, followed by the withheld placeholder.
+    blocks = _by_id(merged, "fmea_top").blocks
+    assert blocks.index(TableRef(table_id="fmea_top", caption="Ranked modes")) + 1 == next(
+        i for i, b in enumerate(blocks)
+        if isinstance(b, Callout) and b.text.startswith("Withheld: 1 number")
+    )
+    assert _by_id(merged, "fmea_top").audit.unverified[-1] == "backup (edited)"
 
 
 # ── comments ─────────────────────────────────────────────────────────────
@@ -472,7 +482,11 @@ def test_merge_bumps_version_keeps_mode_and_adds_edited_tables():
     assert merged.template_file_id == base.template_file_id
     assert "headline_edited_v3" in merged.tables and "headline" in merged.tables
     s = _by_id(merged, "executive_summary")
-    assert s.blocks == [Paragraph(md="Rewritten by hand.")]
+    # LC-43a (GK B 55 F3): the headline table the edit dropped is recorded.
+    assert s.blocks == [
+        Paragraph(md="Rewritten by hand."),
+        Callout(kind="gap", text=REMOVED_TABLE_NOTE.format(name="Headline results")),
+    ]
     assert s.source == "user_edit" and s.pending_instruction == "tighten"
     assert s.comments == ["tighten"]
     # The other two were absent from the result: kept with the note.

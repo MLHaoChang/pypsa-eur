@@ -511,8 +511,10 @@ describe('LoopPanel verdict', () => {
   it('shows the machine-readable status as a chip beside it', async () => {
     vi.mocked(resultsApi.getCouplingLoop).mockResolvedValue(UNREACHABLE)
     await openPanel()
-    expect((await screen.findByTestId('loop-status')).textContent)
-      .toMatch(/unreachable/)
+    const chip = await screen.findByTestId('loop-status')
+    // UX (20): plain words on the chip; the engine id stays a data attribute.
+    expect(chip.textContent).toBe('Could not be reached')
+    expect(chip.getAttribute('data-status')).toBe('unreachable')
   })
 
   // ★ Bite: render the `confident` badge unconditionally. `confident` is the
@@ -791,5 +793,26 @@ describe('LoopPanel stale banner (LC-41b)', () => {
     } else {
       expect(screen.queryByTestId('loop-edited')).toBeNull()
     }
+  })
+})
+
+
+describe('adequacy loops 04: a not-confident finish', () => {
+  const NOT_CONFIDENT: CouplingLoopPayload = {
+    ...UNREACHABLE,
+    status: 'not_confident',
+    verdict: 'Not confident: no plan was confirmed to meet 2 h.',
+  }
+
+  it('says "Not confident" in words with a key, never met, and shows no final plan', async () => {
+    vi.mocked(resultsApi.getCouplingLoop).mockResolvedValue(NOT_CONFIDENT)
+    await openPanel()
+    const chip = await screen.findByTestId('loop-status')
+    expect(chip.textContent).toBe('Not confident')
+    expect(chip.className).toMatch(/text-warn/)
+    expect((await screen.findByTestId('loop-not-confident-key')).textContent)
+      .toMatch(/at or below the LOLE goal, but not by enough to call it a pass\./)
+    expect(screen.queryByTestId('loop-confident')).toBeNull()
+    expect(chip.textContent).not.toMatch(/met/i)
   })
 })

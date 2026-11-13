@@ -490,6 +490,69 @@ def test_restore_final_leaves_the_certified_cap_applied(
         pytest.approx(expected_cap) if expected_cap is not None else None)
 
 
+@pytest.mark.parametrize("restore_ok", [True, False])
+def test_a_not_confident_coupling_loop_restores_the_base_and_reports_the_nearest(
+        client, install_network, monkeypatch, restore_ok):
+    """★ Adequacy loops 04, F3 (GK A (26)): ``not_confident`` with
+    ``restore="final"`` still restores the user's OWN cap (``met`` is the only
+    status that keeps a plan), leaves the solver config alone, and the
+    record's goal fields and verdict come from the nearest iterate. When that
+    closing re-solve fails, the verdict says so instead of "re-solved".
+
+    0.95 h against 1.0 h with a range of (0.85, 1.05) and an ``event_h`` of
+    0.2 h is not confident at every iterate.
+
+    Bite: keep the nearest plan on ``not_confident`` (restore with
+    ``met=True`` at the nearest cap): ``restore_cfgs[0]`` carries it, not
+    the base's None.
+    """
+    from services.adequacy.lever_text import format_lever_value
+    from services.adequacy.lole_verdict import not_confident_copy
+
+    stubs = _Stubs(lole_seq=[0.95])
+    _install_stubs(monkeypatch, stubs)
+    import services.adequacy.mc as mc_mod
+    import services.solver_service as solver_mod
+    plain = stubs.mc_adequacy
+
+    def with_event(inputs, **kw):
+        return {**plain(inputs, **kw), "event_h": 0.2}
+
+    def restore_fails(cfg, n, lock, stop_event, log_queue, **kw):
+        stubs.restore_cfgs.append(cfg)
+        return "error", "infeasible"
+
+    monkeypatch.setattr(mc_mod, "mc_adequacy", with_event)
+    if not restore_ok:
+        monkeypatch.setattr(solver_mod, "run_simulation", restore_fails)
+    _setup(client, install_network)
+    before = client.get("/api/simulation/solver_config").json()
+
+    r = client.post(LOOP_URL, json={"target_lole_h": 1.0, "draws": DRAWS,
+                                    "seed": SEED, "restore": "final"})
+    assert r.status_code == 200, r.text
+    body = _poll(client)
+
+    assert body["status"] == "not_confident", body
+    assert body["final"] is None, body
+    nearest = body["nearest"]
+    assert nearest is not None, body
+    assert len(stubs.restore_cfgs) == 1
+    assert getattr(stubs.restore_cfgs[0], "ens_cap_permyriad") is None
+    assert body["base_restored"] is restore_ok, body
+    assert client.get("/api/simulation/solver_config").json() == before
+    goal = nearest["mc"]["goal"]
+    assert goal["event_h"] == pytest.approx(0.2)
+    for k in ("event_h", "settle_draws", "settle_reason"):
+        assert body[k] == goal[k], (k, body)
+    assert body["verdict"] == not_confident_copy(
+        nearest["mc"], 1.0,
+        "the energy strictness ε = "
+        f"{format_lever_value(nearest['eps_permyriad'])}‱",
+        base_restored=restore_ok)
+    assert ("has been re-solved" in body["verdict"]) is restore_ok
+
+
 # ── ★ the duck-typed plan-hash probe ──────────────────────────────────────
 
 def test_the_plan_hash_probe_skips_the_mc_outright_on_a_plateau(

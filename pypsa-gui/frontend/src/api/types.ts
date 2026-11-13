@@ -242,6 +242,8 @@ export interface SolverConfig {
   // (0.15 = 15%) of each active period's peak that derated firm capacity must
   // cover; null = off. Schema bounds are ge=0, le=5.
   reserve_margin?: number | null
+  /** homer-parity 01a: share of the electricity used on site (load plus converter draw) from renewables, 0–1; null = off. */
+  min_renewable_fraction?: number | null
   // Demand-response tier (spec §4.4): voluntary, volume-capped, opt-in.
   dsr_price_eur_per_mwh?: number
   dsr_share_of_load?: number
@@ -629,6 +631,14 @@ export interface FailureInfo {
   title: string
   hint: string
   detail: string
+  /** Named constraints the infeasibility diagnosis blamed (homer-parity 05);
+   *  `setting` names the Solver-settings block that edits the row. */
+  constraint_hints?: ConstraintHint[]
+}
+export interface ConstraintHint {
+  constraint: string
+  text: string
+  setting: 'offgrid' | string
 }
 export interface SimulationStatus {
   running: boolean; status: string; condition: string | null

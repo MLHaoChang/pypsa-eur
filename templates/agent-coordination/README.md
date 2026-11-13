@@ -39,7 +39,9 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `scripts/coord/premerge.sh` | The whole merge gate: conflicts, overlap, optional semantic tests, reviewer verdict comments, every check run |
 | `scripts/coord/sessions.py` | One line per live session from a saved `list_sessions` result, with context used and a `ROTATE` flag past 200k |
 | `scripts/coord/mutants.py` | AST mutants on the lines a PR changed in one module, run against one targeted test; prints survivors. A project-specific pre-push script (lint, the fixed contract tests first, mapped tests under a wall-clock cap, a diff guard such as `scripts/coord/prepush.sh` here) is written per project |
-| `scripts/coord/ciwait.sh` | Waits for CI on a PR that has no session; prints READY, FAIL, MACOS or TIMEOUT |
+| `scripts/coord/ciwait.sh` | Waits for CI on a PR that has no session; prints READY, FAIL, MACOS or TIMEOUT. `--board <board.json>` watches every `prs` row in one process and prints one line per PR head |
+| `scripts/coord/inputs.sh` | Writes `frontier.py`'s `prs.txt` and `sessions-issues.txt` from the board's rows and the PRs' fetched heads |
+| `scripts/coord/tasks.py` | Applies `frontier.py --stages` output, merge marks and notes to the feature dashboard's `tasks.json` |
 | `scripts/coord/events.py` | Time, assistant text and last tool call per event from a saved `list_events` result |
 | `scripts/coord/frontier.py` | The frontier from the issue headers: ready, unblocked, unclaimed issues no open PR or live session covers; `--stages` gives the dashboard stage per issue |
 | `scripts/coord/brief.py` | Fills `docs/agents/session-brief.md` from flags, adds Context budget, Process, any stream paragraph and a "Stay out of" built from open PRs and live sessions |

@@ -140,7 +140,8 @@ TOOLS_BY_FAMILY: dict[str, frozenset[str]] = {f: frozenset(names.split()) for f,
         preview_decision_study_intake put_library_item run_decision_study run_investment_case
         set_finance_inputs solve_ppa_price start_decision_study update_decision_study set_study_parameter
         get_study_findings get_poc_state get_value_flow_designer
-        get_supply_architectures compare_supply_architectures""",
+        get_supply_architectures compare_supply_architectures
+        get_grid_extension_break_even""",
     'experiments': """
         advance_experiment cancel_experiment compare_experiments compare_sensitivities get_experiment
         list_experiments prepare_experiment reconcile_experiment refresh_experiment run_sensitivity_sweep
@@ -687,7 +688,7 @@ VARIANTS: list[dict] = [
     _covered('LC-D20.delivery_gates', 'the open network fingerprint, report version counts, upload directories and blob count (tests/lc43_gates.py state) unchanged after each refusal: another project\'s id and malformed ids are 404 upload_not_found; another organisation\'s download is 404 Project not found; '
              'an unfinished blob (blob_ready false) is 404 upload_not_found to the tools and the download; each of the network, CSV, Excel and MATPOWER exports over the cap is 413 '
              'file_too_large, a delivery over the cap less 100 kB 413 delivery_too_large; an unnamed import format is 422 invalid_import_format, changed bytes 409 import_file_changed, '
-             'a malformed CSV bundle or workbook is refused with the open project and its unsaved edit kept; a chart outside 1-8 unique names of a known component '
+             'a malformed import is 422 import_unreadable (row LC-D20.malformed_import); a chart outside 1-8 unique names of a known component '
              'is 422 invalid_chart; export_run_evidence with no run named or discussed is 409 discussed_run_required',
              'build_delivery get_file_delivery export_network_nc export_csv_bundle import_uploaded_network create_chart export_run_evidence',
              B + 'test_lc43_d20_delivery_gates.py::test_an_id_from_another_project_or_a_malformed_id_reaches_no_file',
@@ -698,9 +699,11 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d20_delivery_gates.py::test_an_import_needs_a_named_format_and_unchanged_bytes',
              B + 'test_lc43_d20_delivery_gates.py::test_a_chart_outside_its_shape_is_refused_and_draws_nothing',
              B + 'test_lc43_d20_delivery_gates.py::test_run_evidence_is_never_exported_for_a_run_nobody_named',
-             B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_bundle_or_workbook_is_refused_and_keeps_the_open_network'),
-    _pending('LC-D20.malformed_import', 'a malformed netCDF import fails after dropping the open project and its unsaved edits, and a malformed MATPOWER file imports as an empty network '
-             '(LC-43c, .scratch/live-copilot/issues/43c-malformed-import-replaces-the-network.md)'),
+             B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_import_is_refused_and_keeps_the_open_network'),
+    _covered('LC-D20.malformed_import', 'a malformed netCDF file, CSV bundle, workbook and MATPOWER case (no mpc.bus rows) are each 422 import_unreadable through the dispatcher, no tool_result, '
+             'with the open project (project_uuid), its unsaved G1 edit (20 to 33 MW) and the lc43_gates state kept: each file is parsed into a candidate network before it replaces the open one (LC-43c)',
+             'import_uploaded_network',
+             B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_import_is_refused_and_keeps_the_open_network'),
     _pending('LC-D20.delivery_ttl', 'a delivery and its download never expire: no expiry gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D21.reports', 'exported DOCX read with python-docx: headline table MC LOLE 3.21 h/yr, ENS cap 10.00, unrun sections say not established; scripted 3.2 h/yr audited verified; '
              'regenerated 9.9 h/yr is version 2, unverified and listed in Numbers to check, tables and other sections unchanged, version 1 intact (one stored study report, scripted model)',
@@ -710,7 +713,7 @@ VARIANTS: list[dict] = [
     _covered('LC-D21.report_gates', 'the open network fingerprint, report version counts, upload directories and blob count (tests/lc43_gates.py state) unchanged after each refusal: an unknown section is 404 report_section_not_found on generate and regenerate, an unknown table '
              '404 report_table_not_found, an unknown version 404 report_not_found, a deleted report 404 report_not_found to get, regenerate and export; a second generate while one runs is 409 report_job_in_flight, an abort leaves each unwritten section '
              'code-only with an aborted note and no prose, and the next generate is its own report; an edited Word copy (bound as template or not) that changes MC LOLE to 1.00 '
-             'leaves the headline table (3.21 h/yr) under its own id and version 1 as delivered, whether it is imported or refused 4xx; a copy that edits only the summary prose '
+             'leaves the headline table (3.21 h/yr) under its own id and version 1 as delivered (row LC-D21.edited_admitted_number); a copy that edits only the summary prose '
              'becomes version 2 with source user_edit, the same headline and version 1, and a diff with version 3 is 404 report_version_not_found; a Word file that is not the report is 400 roundtrip_not_a_report; a mapping with no template is '
              '400 no_template and an invalid plan 400 invalid_mapping_plan; PDF without LibreOffice is 501 pdf_not_available and saves nothing',
              'generate_report regenerate_report_section get_report get_report_table list_reports abort_report_generation import_edited_report diff_report_versions delete_report set_report_mapping export_report_pdf export_report_docx',
@@ -722,8 +725,30 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d21_report_gates.py::test_a_word_file_that_is_not_the_report_merges_nothing',
              B + 'test_lc43_d21_report_gates.py::test_no_mapping_without_a_template_and_no_pdf_without_a_converter',
              B + 'test_chat_report_template_tools.py::test_set_report_mapping_strict_and_errors'),
-    _pending('LC-D21.edited_admitted_number', 'an edited Word table or prose changes an admitted headline number in the next delivered version with no Numbers to check entry '
-             '(LC-43a, .scratch/live-copilot/issues/43a-edited-table-bypasses-number-check.md)'),
+    _covered('LC-D21.edited_admitted_number', 'an edited Word copy (bound as the template or not) whose headline MC LOLE reads 1.00 h/yr is version 2 whose DOCX headline still '
+             'reads the admitted 3.21 h/yr, with a withheld placeholder and "Executive summary: 1.00 h/yr (unverified, withheld)" in Numbers to check; a copy whose summary '
+             'prose reads 1.0 h/yr keeps the sentence, its audit re-run against the facts version 1 verified lists 1.0 h/yr unverified, and Numbers to check lists it; cells are compared one by one: '
+             'two rows swapping values, 3.21 min/yr, a row label MC LOLE (min/yr), a Value (min/yr) header and an added 42 MW row or column are withheld and listed; a reformat 3.210 h/yr, a renamed label in a row '
+             'with no number and an added row with no number are accepted with no entry; a 3.2149 h/yr cell is withheld (exact compare); two text-only tables inserted above the headline '
+             'leave the edited headline paired with its own original by content and withheld; a row inserted mid-table plus a changed MC LOLE is withheld; a unit changed in the corner header '
+             'or a Unit column (MW to GW, t to kt) and a duplicated row label (Total 5/7 MW with an inserted row) are changes; prose 1.0 h/yr beside a withheld table becomes the withheld '
+             'placeholder and is listed; an admitted table keeps its own caption (a numeric table inserted above the headline is withheld and the headline keeps "Headline results"), '
+             'swapped tables or a table edited into its sibling never carry the other caption, duplicated column headers pair with nothing, and a deleted headline table is recorded '
+             'as removed (LC-43a, GK B 52, GK B 54, GK B 55)',
+             'import_edited_report export_report_docx get_report get_report_table',
+             B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_leaves_the_headline_and_version_one',
+             B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_in_prose_lists_it_to_check',
+             B + 'test_lc43_d21_report_gates.py::test_a_table_edit_that_moves_or_relabels_an_admitted_number_is_withheld',
+             B + 'test_lc43_d21_report_gates.py::test_an_added_row_or_column_that_states_a_number_is_withheld',
+             B + 'test_lc43_d21_report_gates.py::test_a_table_edit_that_changes_no_number_is_accepted',
+             B + 'test_lc43_d21_report_gates.py::test_text_tables_inserted_above_the_headline_leave_its_edit_withheld',
+             B + 'test_lc43_d21_report_gates.py::test_a_row_inserted_mid_table_and_a_changed_value_is_withheld',
+             B + 'test_lc43_d21_report_gates.py::test_a_prose_number_in_a_section_with_a_withheld_table_is_withheld',
+             B + 'test_lc43_d21_report_gates.py::test_a_unit_or_duplicate_label_change_is_a_changed_number',
+             B + 'test_lc43_d21_report_gates.py::test_a_numeric_table_inserted_above_the_headline_keeps_the_headline_caption',
+             B + 'test_lc43_d21_report_gates.py::test_a_deleted_headline_table_is_recorded',
+             B + 'test_lc43_d21_report_gates.py::test_a_table_turned_into_its_siblings_copy_keeps_no_wrong_caption',
+             B + 'test_lc43_d21_report_gates.py::test_two_swapped_tables_keep_their_own_captions_and_the_second_is_withheld'),
     _pending('LC-D21.stale_report', 'a report generated or exported after its study changed is neither refused nor flagged (only the IC case note): no stale gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D21.report_resume', 'a report job interrupted by a restart is not resumed (its record is in-process state): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D22.undo_checkpoints', 'input-table fingerprint before/after: undo restores the exact fingerprint and the matching results (objective 100, current again), '
@@ -762,8 +787,10 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d23_wire_gates.py::test_a_provider_switch_sends_nothing_and_keeps_the_session',
              B + 'test_chat_tool_pairing_invariant.py::test_the_cap_path_pairs_every_tool_use_it_refuses',
              B + 'test_chat_tool_pairing_invariant.py::test_a_stopped_turn_still_records_the_results_it_collected'),
-    _pending('LC-D23.timeout_outcome_text', 'a timed-out write is sent to the model as the bare kind tool_timeout, without saying its outcome is unknown '
-             '(LC-43b, .scratch/live-copilot/issues/43b-timeout-result-hides-unknown-outcome.md)'),
+    _covered('LC-D23.timeout_outcome_text', 'Claude wire only, read from the next request body: a timed-out write or destructive tool reaches the model as tool_timeout plus "Outcome unknown ... may have changed the project. Read the project back before any retry"; a timed-out read keeps the plain kind tool_timeout',
+             'update_component list_components',
+             B + 'test_lc43_d23_wire_gates.py::test_a_write_that_outlives_its_budget_is_never_reported_done',
+             B + 'test_lc43_d23_wire_gates.py::test_a_read_that_outlives_its_budget_keeps_the_plain_kind'),
     _pending('LC-D23.history_repair', 'a stored history with an unpaired tool_use is sent as it is: no repair step is built (the harness only avoids writing one) (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D23.approval_resume', 'a pending approval is not resumed after a restart (it expires or reads unknown_confirmation_token): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D23.profile_recovery', 'after a refused provider switch or a deleted profile, recovery (a new chat, or picking a profile and resending) is not tested (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),

@@ -311,6 +311,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/emissions", "/line_duals", "/price_drivers", "/asset_economics",
         # The Results headline strip's cards (ui-modern 03): one figure each.
         "/headline_kpis",
+        # homer-parity 01a: one share per period, not a series.
+        "/renewable_fraction",
         # Grid-to-process process view (ticket 04): per-product and per-unit
         # records; each inventory carries its own level list, not index/columns/data.
         "/process_view",
@@ -408,6 +410,9 @@ def test_the_endpoint_list_covers_every_series_endpoint():
     # test_results_source_navigation.py and test_loadflow_summary.py.
     # run-evidence.json serves that same section as a file (LC-03 past-run parity).
     aggregates.update({"/loadflow-view", "/run-view", "/run-evidence.json"})
+    # Business case (business-case 08a): the inputs state, the preset variants
+    # and the stored case are structured documents, not index/columns/data.
+    aggregates.update({"/business_case", "/business_case/inputs", "/business_case/preset"})
     unclassified = declared - ranged - aggregates
     assert not unclassified, (
         f"unclassified /results endpoints: {sorted(unclassified)} — add each to "

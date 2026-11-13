@@ -178,6 +178,38 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A test that only bounds a value (`>= target`) does not pin a guard: assert the exact value at binding, or the classification, so a mutant that loosens the guard fails (#1424 G2, GK A (24)).
 - An over-bound refusal for a wildcard lever is tested per instance, and the wildcard is checked against the built template so no never-lever matches (#1429 B1, GK A (24)).
 
+- A per-kg premium or incentive on the same served quantity is not a sale. Never link it beside the main sale: its share sums into f and drops the whole lost-production line (#1436 F1, GK B (52)).
+- No capex line sits in two maintenance-category share bases (insurance exempt), and a share base is never only a replacement lump (#1436 F3/G2, #1441 H3, GK B (52)).
+- A typed volume that earns revenue (a premium, GOs) is the verified volume expected, never above what the results show served (#1436 G1, #1441 H2, GK B (52)).
+- Moving a short-circuited compare into an evaluate-all verdict can add IO under a lock: keep the order and stop at the first break (#1443 K3, GK B (52)).
+- A no-promote lease release must not leave a pending utterance that a later admission then promotes (#1440 O5′, GK B (52)).
+- A table-edit compare is per cell, never a multiset (LC-43a T1, GK B (52)).
+
+- A detection that reads a bus's supply (mainland, supply bus, unattributed source) leaves out slack Generators (`slack_generator_mask`, `is_slack_name`). A persistent load-shedding or DSR slack is not a supply (#1461 S1, GK A (25)).
+- A fleet split at a trusted import Link (hub_side) carries its grid-side asset set into every comparison against a copper-plate payload. Such rows are left out by scope and named, never counted as an absent-row mismatch, and never silently dropped (#1456 C1, GK A (25)).
+- A refusal for a never-failing (firm-block) unit says that its credit would restate the assumption. It never says that nothing can be removed (#1456 C2, GK A (25)).
+- A pre-solve network repair is pinned as not-an-edit (fingerprint, revision, undo), with a mutant writing a non-default value. Every solve call site is covered by an AST guard keyed on (file, function) (#1457, GK A (25)).
+- A verdict "within tolerance of the goal" is computed from the draws and weights that produced the estimate, never from the requested draws or network weights. Its resolution is one more draw as heavy as the heaviest used draw, floored at one shortfall hour at the heaviest snapshot. A new loop status gets an explicit mapping in every status reader (adequacy-loops 04 D1, D3, D7, GK A (25), (26)).
+- A spy test that pins "the draws actually used" runs at least 2 batches with an early stop, n ≠ requested draws, and the heaviest draw in an earlier batch. A single-batch run cannot tell the used count from the requested count (#1463 F1, GK A (26)).
+- A new terminal loop status is tested at the runner level (restore flag, final/nearest, verdict copy), not only in the controller (#1463 F3, GK A (26)).
+- A date answered at model-period resolution discloses its true window: [earliest, reported]. earliest is the start of the earliest earlier period that was partly energised (max > 0) while load was in service, clamped by the first COD and the project start. Otherwise the date is exact. Never "up to a period earlier" (#1474 R1/R2, GK A (26)).
+- A thread-local handoff is cleared by its consumer on every outcome, success, refusal and raise alike (#1477 F1, GK B (54)).
+- A bulk write applies its side effects per target, never through one shared coerced dict (#1466 D1, GK B (54)).
+- A plain-text refusal keeps a structured kind; the mutant that widens the check to the base class in `isinstance` is killed (#1466 D2, GK B (54)).
+- When a bounded-try lock is busy, a read says "network busy" without comparing, never stale (PG-09 Y1, GK B (54)).
+- An evidence or probe record that a later gate will trust binds a digest of the exact configuration that gate checks, plus the code version (#1483 F3, GK B (55)).
+- A lock test that wraps lock entry pins only "the read comes after entry". When the property is "held across the whole read-modify-write", a second writer hooked inside the read must be shown to wait (#1479, GK B (55)).
+- A parity or "unchanged vs master" fixture compares exactly (==); a relative tolerance on values that should be bit-equal hides drift (#1466 F1, GK B (55)).
+- A cache keyed on a revision is safe only if every writer of a hashed input moves the key after its write. A bump before the handler lets a poll cache the pre-edit state (#1464 F1, GK B (53)).
+- A polled freshness read never blocks on the mutation lock, and never reports stale only because the lock was held (#1464 F2, GK B (53)).
+- A typed refusal's status code is pinned by test wherever a manifest row claims it (#1452 I1, GK B (53)).
+- A broad `except` that turns parser failures into a 4xx logs the traceback, because it also covers our own mapping code (#1452 I2, GK B (53)).
+- An admission check that a worker repeats must be repeated under the lock where the effect (a solve) happens (#1454 F1, GK B (53)).
+- A per-step marker set around a dispatch is cleared in `finally`, with a test that includes a raising dispatch (#1454 F2, GK B (53)).
+- A preset note never prices a cost that a linked row also prices (#1462 F1, GK B (53)).
+- A key-scoped restore makes the outcome check compare only the restored keys (UM10 K3, GK B (53)).
+- A solver-config write that touches only fields in `reliability_goal.NOT_LP_FIELDS` need not bump the network revision, provided the fields are dropped from `goal_free_config` with a pin test that the fingerprint, adequacy hash and IC digest are unchanged, and every reader of those fields keys its staleness on its own inputs hash, with a test. Any other solver-config write still bumps (refines LC40-COUNTER-1; owner LC40-COUNTER-2; #1467 C1, GK B (54)).
+
 ## Engineering rules
 
 - Grid source impedance derived from an entered S_k'' carries the IEC 60909 voltage factor c (Z = c·Un²/S_k''; S_sc2 = S_k''/c), in every screen: unbalance, the flicker note, the impedance scan.

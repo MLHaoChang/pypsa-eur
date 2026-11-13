@@ -688,6 +688,12 @@ class SolverConfigSchema(BaseModel):
     # 1500 % margin, which is not a margin, and a plan sized against it is a
     # fiction the LP would spend an hour building.
     reserve_margin: float | None = Field(default=None, ge=0, le=5)
+    # Minimum renewable fraction (homer-parity 01a, HOMER-GAPS-1): the share
+    # of electricity served that must come from renewable sources, a FRACTION
+    # (0.8 == 80 %); None/0 = off. One LP row per investment period
+    # (`services/solver/renewable_fraction.py`). `allow_inf_nan=False`: a NaN
+    # would read as "off" downstream, the same silent coercion as a negative.
+    min_renewable_fraction: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
     # Island ride-through rows (campus island I2a), opt-in per project (Q5).
     island_constraints: bool = False
     # Peak-coincidence window (snapshots) for must-take VRE credit; None ⇒ the
@@ -814,6 +820,9 @@ class SolverConfigSchema(BaseModel):
     # echo is ignored, a change is refused (422 `finance_via_dedicated_route`).
     # A plain dict, compared as stored (the dedicated route validates it).
     finance: dict[str, Any] | None = None
+    # Business case 08: owned by `PUT /api/results/business_case/inputs`; an
+    # unchanged echo is ignored, a change refused (422 `business_case_via_dedicated_route`).
+    business_case: dict[str, Any] | None = None
     # AS-03: the site-wide envelope floors and backup reserve (services/solver/envelope_floors.py).
     # None = no rows. Changes LP input, so it is in every solve fingerprint.
     envelope_floors: EnvelopeFloors | None = None

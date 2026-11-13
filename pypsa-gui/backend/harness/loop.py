@@ -2838,12 +2838,7 @@ def _run_turn_body(
                 session, tu.get("name"), tu.get("input") or {}
             )
         ]
-        session.turn_redirects = (
-            {}
-            if session.assurance_turn is not None
-            or not edit_routing.preview_available()
-            else edit_routing.redirects(routable, session.turn_single_edit_applied)
-        )
+        session.turn_redirects = edit_routing.turn_redirects(session, routable)
         # LC-47: this response's ordinary writes as one change-set card.
         from harness import change_set
         from harness import mcp_client as _mcp
@@ -4095,9 +4090,16 @@ def _dispatch_real_tool_call(
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
                         "is_error": True,
-                        "content": (
-                            f"tool_timeout. {hold_note}" if hold_note else "tool_timeout"
-                        ),
+                        "content": "tool_timeout"
+                        + (
+                            ". Outcome unknown: it ran longer than "
+                            f"{harness_budget.PER_TOOL_TIMEOUT_SECONDS:g} s and was stopped, "
+                            "and it may have changed the project. Read the project back "
+                            "before any retry."
+                            if timeout_effect
+                            else ""
+                        )
+                        + (f". {hold_note}" if hold_note else ""),
                     }
                 )
                 return
@@ -4403,6 +4405,14 @@ def _dispatch_real_tool_call(
                     # Study harness 07 B2: a run's EH step settles from its own
                     # study record, never from this start receipt (F2, F3).
                     if run_eh.wait(task_ticket, job_id, session.session_id, active_ctx,
+                                   result.get("started_at")):
+                        result = {**result, "waiting": True}
+                if task_ticket is not None and tool_name == "run_investment_case":
+                    from harness import run_ic
+
+                    # Study harness 14 (GK B (52) I2): a run's case step settles from the
+                    # case's own record, never from its start receipt, and nothing polls.
+                    if run_ic.wait(task_ticket, job_id, session.session_id, active_ctx,
                                    result.get("started_at")):
                         result = {**result, "waiting": True}
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort

@@ -609,7 +609,7 @@ _RESULTS_ENUM = (
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics", "billing", "cfe_score", "value_flows",
+    "asset_economics", "billing", "cfe_score", "value_flows", "renewable_fraction",
 )
 
 
@@ -646,6 +646,7 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     # Edge Investment Case P2 WP2.5.
     "billing": "get_billing",
     "cfe_score": "get_cfe_score",
+    "renewable_fraction": "get_renewable_fraction",
     # Edge Investment Case P3 WP3.4.
     "value_flows": "get_value_flows",
 }
@@ -3783,6 +3784,26 @@ def get_supply_architectures(project: str, study_id: str) -> dict:
             "note": ("A null figure was not computed (its reason is in unavailable): "
                      "never report it as 0. An infeasible, failed or not_reached row "
                      "has no best system.")}
+
+
+def get_grid_extension_break_even(project: str, study_id: str, architecture_id: str,
+                                  eur_per_km: float, grid_supply_npc: float,
+                                  grid_basis: dict, fixed_eur: float = 0.0,
+                                  max_km: float = 10_000.0) -> dict:
+    """homer-parity 03d: `POST .../grid-extension-break-even` (writes nothing)."""
+    from routers import grid_extension as R
+
+    try:
+        body = R.GridExtensionRequest(
+            architecture_id=architecture_id, eur_per_km=eur_per_km,
+            grid_supply_npc=grid_supply_npc, grid_basis=grid_basis,
+            fixed_eur=fixed_eur, max_km=max_km)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "grid_extension_input_invalid",
+            "message": _cut(str(exc), 300)}) from None
+    return _route(R.grid_extension_break_even_route, study_id, body,
+                  project=_authorized_project(project))
 
 
 # ── Project settings and scope (5) — LV08 B1 ────────────────────────────────
@@ -10008,6 +10029,7 @@ DISPATCHERS: dict[str, Any] = {
     # supply architectures (2) — homer-parity 03a
     "compare_supply_architectures": compare_supply_architectures,
     "get_supply_architectures": get_supply_architectures,
+    "get_grid_extension_break_even": get_grid_extension_break_even,
     # project settings and scope (5) — LV08 B1
     "get_site_template_form": get_site_template_form,
     "get_project_flow_scope": get_project_flow_scope,

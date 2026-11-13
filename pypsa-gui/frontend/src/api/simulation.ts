@@ -76,10 +76,12 @@ export interface CostBreakdown {
   // a component (Line was 95.8% of one user's CAPEX) reads as an answer.
   // `capex_lifetime_available` below is the matching summary flag.
   // The ANNUALISED fields are never null — they come from `n.statistics()`
-  // and owe nothing to the upfront-cost resolve.
+  // and owe nothing to the upfront-cost resolve — except the expansion ones
+  // (`capex_expansion`, `storage_capex_expansion`, per-component
+  // `capex_expansion`): those are null when the expansion compute failed.
   capex: number
   capex_lifetime: number | null
-  capex_expansion: number
+  capex_expansion: number | null
   capex_expansion_lifetime: number | null
   opex: number
   total: number
@@ -93,13 +95,13 @@ export interface CostBreakdown {
   curtailment_cost: number
   // CAPEX-expansion bucket for StorageUnit + Store only — quick "how much
   // of the new investment goes into storage" KPI for the cost overview.
-  storage_capex_expansion: number
+  storage_capex_expansion: number | null
   storage_capex_expansion_lifetime: number | null
   by_component: Array<{
     component: string
     capex: number
     capex_lifetime: number | null
-    capex_expansion: number
+    capex_expansion: number | null
     capex_expansion_lifetime: number | null
     opex: number
     fom?: number
@@ -449,7 +451,7 @@ export interface CouplingIteration {
 }
 
 export type CouplingLoopStatus =
-  | 'running' | 'met' | 'unreachable' | 'budget_exhausted' | 'aborted' | 'failed'
+  | 'running' | 'met' | 'not_confident' | 'unreachable' | 'budget_exhausted' | 'aborted' | 'failed'
 
 export interface CouplingLoopPayload {
   study: 'coupling_loop'
@@ -484,6 +486,8 @@ export interface CouplingLoopPayload {
    *  of the next one — the list GROWS while the study runs. */
   iterations: CouplingIteration[]
   final: CouplingIteration | null
+  /** Adequacy loops 04: the cheapest not-confident iterate when `status` is `not_confident`; never the met plan. */
+  nearest?: CouplingIteration | null
   /** A ready sentence ([N6]/v1.3 §4) — RENDER IT, never re-word it here. */
   verdict: string | null
   warning: string
@@ -610,6 +614,8 @@ export interface MarginLoopPayload {
   /** REBOUND by the worker between iterates — the list GROWS mid-run. */
   iterations: MarginIteration[]
   final: MarginIteration | null
+  /** Adequacy loops 04: the cheapest not-confident iterate when `status` is `not_confident`; never the met plan. */
+  nearest?: MarginIteration | null
   /** A ready sentence — RENDER IT, never re-word it here. */
   verdict: string | null
   warning: string

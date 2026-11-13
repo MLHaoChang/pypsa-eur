@@ -31,6 +31,7 @@ from typing import Any
 
 from services.results_workbook import budget, registry, scenarios
 from services.results_workbook.cells import NOT_ESTABLISHED, heading, put, width
+from services.results_workbook.business_case import business_case_text
 from services.results_workbook.overview import (
     RUN_THE_CASE, overview_figures, write_overview,
 )
@@ -68,6 +69,10 @@ class WorkbookInputs:
     # `investment_case_runner.staleness(...)` of the stored report against the
     # current inputs: a stale case is labelled, its figures not shown.
     case_state: dict | None = None
+    # Business case 08a: the stored business-case report and its staleness
+    # (`business_case.runner.staleness`); the export never runs it (C7).
+    bc_report: dict | None = None
+    bc_state: dict | None = None
     # The latest completed run's summary (`run_evidence.list_project_runs`), if any.
     run: dict | None = None
     # The base's sensitivity runs (`scenarios.gather_scenarios`), if it has any.
@@ -157,6 +162,7 @@ def _about(ws, inp: WorkbookInputs, statuses: list[tuple[str, str, str]], figs) 
         ("not_established", "the figure could not be computed from this run; no number "
                             "stands in for it"),
         ("Investment case", _case_text(rep, inp.case_state)),
+        ("Business case", business_case_text(inp.bc_report, inp.bc_state)),
     ]
     scen = inp.scenarios
     if scen is not None and scen.not_shown:

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A case with a long horizon (more than about 64 KiB of snapshot index, such as a three-period 504-snapshot run) now compares with its base; the basis digests no longer apply the experiment plan's size limit, and every digest saved before stays the same.

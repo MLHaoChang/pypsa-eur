@@ -25,6 +25,11 @@ from typing import Any
 # also part of the goal but stays in: it is an LP constraint.
 GOAL_FIELDS = frozenset({"target_lole_h", "mc_draws", "site_archetype"})
 
+# Config fields no solve and no investment case reads (business case 08, GK B
+# C1): always left out, so they leave every fingerprint and digest, and every
+# one computed before they existed, unchanged.
+NOT_LP_FIELDS = frozenset({"business_case"})
+
 ARCHETYPES = ("strong_grid", "weak_flexible", "off_grid")
 DEFAULT_ARCHETYPE = "strong_grid"
 # The engine default every MC-based study shares (mc, coupling and margin
@@ -57,12 +62,21 @@ def valid_archetype(v: Any) -> bool:
     return v in ARCHETYPES
 
 
+def valid_fraction(v: Any) -> bool:
+    """A minimum renewable fraction PUT accepts: a finite number in 0–1."""
+    n = _number(v)
+    return n is not None and 0 <= n <= 1
+
+
 def invalid_goal_fields(data: dict) -> dict[str, Any]:
     """The goal fields in a stored config that ``PUT /solver_config`` would
-    refuse, with their values. A load or bundle import drops them to None
-    (the resolver then falls back) and names them, never refuses the file."""
+    refuse, with their values, and likewise the minimum renewable fraction
+    (homer-parity 01a: 1.5 is an always-infeasible LP). A load or bundle
+    import drops them to None (the resolver then falls back; the fraction is
+    then off) and names them, never refuses the file."""
     checks = (("target_lole_h", valid_lole), ("mc_draws", valid_draws),
-              ("site_archetype", valid_archetype))
+              ("site_archetype", valid_archetype),
+              ("min_renewable_fraction", valid_fraction))
     return {k: data[k] for k, ok in checks
             if (data or {}).get(k) is not None and not ok(data[k])}
 
@@ -115,11 +129,26 @@ def goal_sources(goal: dict, overridden: set[str] | frozenset[str] = frozenset()
     return {k: (OVERRIDE if k in overridden else v["source"]) for k, v in goal.items()}
 
 
+# Opt-in LP fields added after fingerprints existed: left out while off
+# (None or 0, which change no outcome), so every fingerprint and digest
+# computed before the field existed still matches (homer-parity 01a R1).
+OFF_WHEN_FALSY = frozenset({"min_renewable_fraction"})
+
+
 def goal_free_config(cfg: Any) -> dict:
     """The solver config as a dict without the goal fields the LP never
-    reads: the input to every fingerprint and digest of the config."""
+    reads, nor an opt-in field that is off: the input to every fingerprint
+    and digest of the config."""
     d = cfg if isinstance(cfg, dict) else asdict(cfg)
-    return {k: v for k, v in d.items() if k not in GOAL_FIELDS}
+    return {k: v for k, v in d.items()
+            if k not in GOAL_FIELDS and k not in NOT_LP_FIELDS
+            and not (k in OFF_WHEN_FALSY and _off(v))}
+
+
+def _off(v: Any) -> bool:
+    """An opt-in field that changes no outcome: None, 0, or a non-finite
+    float (NaN / inf, which the LP reads as off too)."""
+    return not v or (isinstance(v, float) and not math.isfinite(v))
 
 
 def eh_request_with_goal(body: Any, goal: dict) -> tuple[Any, dict[str, str]]:
