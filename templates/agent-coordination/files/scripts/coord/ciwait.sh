@@ -71,7 +71,7 @@ for r in json.load(open(sys.argv[1]))["rows"]:
 check() {
   local pr=$1 runs fail pending since mid
   hit=""
-  sha=$(git ls-remote "$remote" "refs/pull/$pr/head" | cut -f1)
+  sha=$(git ls-remote "$remote" "refs/pull/$pr/head" | cut -f1) || sha="" # a 503 is retried next round
   [[ -n $sha ]] || return 0
   runs=$(gh api "repos/$repo/commits/$sha/check-runs?per_page=100" \
     --jq '.check_runs[] | [.status, (.conclusion // "-"), .name, (.started_at // ""), .id] | @tsv') || return 0

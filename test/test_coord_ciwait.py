@@ -79,3 +79,22 @@ def test_list_mode_still_exits_on_the_first_hit(tmp_path):
         timeout=20,
     )
     assert r.stdout.strip() == "FAIL 2 tests failure", r.stdout
+
+
+def test_a_failing_ls_remote_is_retried_not_fatal(tmp_path):
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    (bin_ / "git").write_text("#!/bin/sh\nexit 128\n")
+    (bin_ / "git").chmod(0o755)
+    env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "CIWAIT_INTERVAL": "1"}
+    try:
+        r = subprocess.run(
+            [str(SCRIPT), "5", "1", "2"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+    except subprocess.TimeoutExpired:
+        return  # still polling: the failure did not kill it
+    raise AssertionError(f"exited early: {r.returncode} {r.stderr}")
