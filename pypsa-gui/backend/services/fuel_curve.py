@@ -22,7 +22,9 @@ direct edit of either is refused, and setting a curve over a non-zero value says
 (``replace_notice``).
 
 The DC backup (``services/adequacy/dc_backup.py``) prices its genset fuel off the LP (``backup_cost_delta``) and
-never writes a generator's ``marginal_cost``, so the two never fight over one column.
+never writes a generator's ``marginal_cost``, so the two never fight over one column. Stated precedence (GK B
+ruling 3): the backup prices fuel from its own heat rate, says so in its cost notes when a genset carries a curve
+(``fuel_curve_ignored``), and its NPV is never summed into the solve's opex.
 
 A generator with none of the three set keeps its own costs: no curve, no change.
 """
@@ -191,6 +193,21 @@ def cleared(
     return {"stand_by_cost": 0.0}
 
 
+def clear_notice(
+    after: Mapping[str, Any], *, before: Mapping[str, Any] | None
+) -> str | None:
+    """What a write that clears a curve did to its costs (`cleared`), or None when it clears none.
+
+    ``after`` is the row as written; the marginal cost it keeps is the one it carries (derived, or sent)."""
+    if not cleared(after, before=before):
+        return None
+    mc = _num(after.get("marginal_cost"))
+    return (
+        "Fuel curve cleared: stand-by cost reset to 0 €/h; marginal cost keeps "
+        f"{mc or 0.0:g} €/MWh (was derived from the curve)."
+    )
+
+
 def derived_costs(row: Mapping[str, Any]) -> dict[str, float]:
     """The PyPSA cost columns the curve sets, or {} when the row sets no curve."""
     curve = curve_of(row)
@@ -230,6 +247,45 @@ def apply(n, names=None, *, stamp: bool = True) -> list[str]:
 
                 provenance.mark_customised(n, "Generator", name, changed)
     return written
+
+
+class FuelCurveError(ValueError):
+    """A solve refused before its LP is built: a curve it cannot price (`lp_refusals`)."""
+
+
+def lp_refusals(n) -> list[str]:
+    """``"<generator>: <why>"`` for each curve the LP cannot price: half a curve or a curve with a cost profile
+    (`guard`). Read as the solve starts, before any transient transform: a CO2 price writes the cost columns of
+    an emitter (a scalar adder, or a per-period series), which this would misread."""
+    gens = n.generators
+    if gens.empty or not any(c in gens.columns for c in COLUMNS):
+        return []
+    return [
+        f"{name}: {msg}"
+        for name in gens.index
+        if (msg := guard(gens.loc[name], cost_series=cost_series(n, name)))
+    ]
+
+
+def wrap_lp(network, user_fn, log_queue=None):
+    """Chain the fuel curve guard in front of ``user_fn`` (`solver_service.build_lp_chain`); ``user_fn``
+    unchanged when nothing is refused. The refusals are read here, as the chain is built (before the solve's
+    transient transforms), and raised as `FuelCurveError` when the LP is built. Writes nothing: staging the
+    derived costs is `apply`'s, in `run_simulation` and the sizing loop's `_prepare`."""
+    refusals = lp_refusals(network)
+    if not refusals:
+        return user_fn
+    msg = "Fuel curve: " + "; ".join(refusals)
+    if log_queue is not None:
+        try:
+            log_queue.put(f"[FUEL CURVE] ERROR: {msg}")
+        except Exception:  # noqa: BLE001 - a log is never a reason to fail differently
+            pass
+
+    def fuel_curve_fn(n, snapshots):
+        raise FuelCurveError("; ".join(refusals))
+
+    return fuel_curve_fn
 
 
 def fuel_use(

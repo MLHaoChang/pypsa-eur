@@ -560,6 +560,7 @@ def apply_bulk_update(body: dict) -> dict:
                                                   submitted=coerced):
                         notices.append(f"{t}: {notice}")
                     if reset := fuel_curve.cleared(after, before=before):
+                        notices.append(f"{t}: {fuel_curve.clear_notice(after, before=before)}")
                         coerced.update(reset)
 
         for _targets, coerced in pending:

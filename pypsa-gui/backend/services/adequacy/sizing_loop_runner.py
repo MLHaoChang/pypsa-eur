@@ -313,12 +313,17 @@ def _prepare(n, cfg, undo: list) -> dict:
     """The project solve's pre-LP transforms on the private copy `n`, and the `n.optimize` keywords it would pass.
     Each transform's restore goes on `undo`: the modelling assumptions register their VOLL and DSR slacks in the
     open project's transient rows, and only their restore clears them."""
+    from services import fuel_curve
     from services import solver_service as ss
     from services.adequacy.energization import apply_energization
 
+    # homer-parity 02a (GK B ruling 1, option A): stage the fuel curve costs on the copy, then build the chain
+    # before the transforms, as `run_simulation` does: the chain reads the network as the solve starts, and a CO2
+    # price's cost series is not a user's. Every other wrap reads the network inside its callback.
+    fuel_curve.apply(n, stamp=False)
+    kw = {"extra_functionality": ss.build_lp_chain(n, cfg, None)}
     undo.append(apply_energization(n))
     undo.append(ss._apply_modelling_assumptions(n, cfg, lambda _msg: None)[0])
-    kw = {"extra_functionality": ss.build_lp_chain(n, cfg, None)}
     if getattr(cfg, "transmission_losses", False):
         kw["transmission_losses"] = ss._compute_loss_atol(n)
     return kw

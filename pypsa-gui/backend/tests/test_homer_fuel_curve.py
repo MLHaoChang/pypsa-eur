@@ -631,6 +631,8 @@ def test_a_curve_generator_leaves_its_neighbours_costs_alone():
 
 # ── review fixes: clearing a curve, blank derived rows, bulk notices ───────────────────────────────────────
 
+CLEARED = "Fuel curve cleared: stand-by cost reset to 0 €/h; marginal cost keeps 10 €/MWh (was derived from the curve)."
+
 
 def test_clearing_a_curve_resets_the_read_only_stand_by_cost(client, install_network):
     n = _installed(install_network)
@@ -647,6 +649,7 @@ def test_clearing_a_curve_resets_the_read_only_stand_by_cost(client, install_net
     assert n.generators.at["genset", "marginal_cost"] == pytest.approx(
         SLOPE * PRICE
     )  # editable: it stays
+    assert r.json()["notice"] == CLEARED
 
 
 def test_bulk_clearing_resets_stand_by_and_a_new_curve_says_what_it_replaces(
@@ -683,7 +686,7 @@ def test_bulk_clearing_resets_stand_by_and_a_new_curve_says_what_it_replaces(
         },
     )
     assert r.status_code == 200, r.text
-    assert "notices" not in r.json()
+    assert r.json()["notices"] == [f"genset: {CLEARED}"]
     assert n.generators.at["genset", "stand_by_cost"] == 0.0
 
 
@@ -724,3 +727,333 @@ def test_cleared_and_cost_series():
     assert fuel_curve.cost_series(n, "genset") == []
     n.generators_t.stand_by_cost["genset"] = 1.0
     assert fuel_curve.cost_series(n, "genset") == ["stand_by_cost"]
+
+
+# ── DC backup: stated precedence (GK B ruling 3) ─────────────────────────────────────────────────────────────
+
+
+def _dc_assess(n):
+    import queue
+    import threading
+
+    from project_templates import eh_templates as t
+    from services.adequacy import dc_backup
+
+    from tests.test_dc_backup import _dc
+
+    out = dc_backup.assess(
+        n,
+        t.island_config("eh_datacenter"),
+        _dc("bess"),
+        years=20,
+        prices=dc_backup.pack_prices(t.TEMPLATE_PACK_VERSION),
+        cfg=SolverConfig(voll=500.0),
+        lock=threading.Lock(),
+        stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+    )
+    return out, dc_backup.genset_units(n, t.island_config("eh_datacenter"))
+
+
+def _dc_network():
+    from project_templates import eh_templates as t
+
+    from tests.test_dc_backup import _dc
+
+    spec = _dc("bess")
+    return t.build_eh_datacenter(
+        load_spec=spec.model_copy(
+            update={"backup": spec.backup.model_copy(update={"mode": "genset"})}
+        )
+    )
+
+
+def _curve_note(out):
+    return [x for x in out["cost"]["notes"] if x.startswith("fuel_curve_ignored")]
+
+
+@pytest.mark.live_solve
+def test_the_dc_backup_prices_fuel_from_its_heat_rate_not_a_genset_curve():
+    from services.adequacy import dc_backup
+
+    plain, units = _dc_assess(_dc_network())
+    assert len(units) > 1 and _curve_note(plain) == []
+    assert plain["cost"]["notes"][: len(dc_backup.COST_NOTES)] == list(
+        dc_backup.COST_NOTES
+    )
+    n = _dc_network()
+    other = next(g for g in n.generators.index if g not in units)
+    for col, v in CURVE.items():
+        n.generators.loc[other, col] = (
+            v  # a curve on a generator outside the backup fleet
+        )
+    off, _ = _dc_assess(n)
+    assert off["cost"]["notes"] == plain["cost"]["notes"]
+    for col, v in CURVE.items():
+        n.generators.loc[units[0], col] = v  # one backup genset of several
+    curved, _ = _dc_assess(n)
+    for key in (
+        "npv_genset",
+        "npv_chosen",
+        "delta",
+        "fuel_mwh_th_avoided_per_year",
+        "lines",
+        "inputs",
+    ):
+        assert curved["cost"][key] == plain["cost"][key], key
+    (note,) = _curve_note(curved)
+    assert note.startswith(
+        "fuel_curve_ignored: fuel is priced from the backup heat rate ("
+    )
+    assert "slope and no-load fuel" in note and "is not read here" in note
+    assert (
+        units[0] in note and not any(u in note for u in units[1:]) and other not in note
+    )
+
+
+@pytest.mark.live_solve
+def test_a_dc_backup_assessment_leaves_the_cost_breakdown_unchanged():
+    from project_templates import eh_templates as t
+    from services.adequacy import dc_backup
+
+    n = _dc_network()
+    units = dc_backup.genset_units(n, t.island_config("eh_datacenter"))
+    assert units
+    for g in units:
+        for col, v in CURVE.items():
+            n.generators.loc[g, col] = v
+    fuel_curve.apply(n, stamp=False)
+    n.optimize(solver_name="highs")
+    n.model.solver_model = None  # the assessment copies the network
+    cfg = SolverConfig()
+    before = compute_cost_breakdown(n, cfg)
+    _dc_assess(n)
+    after = compute_cost_breakdown(n, cfg)
+    for key in ("capex", "opex", "total"):
+        assert after[key] == pytest.approx(before[key]), key
+
+
+def test_a_bool_cell_in_a_curve_column_reads_as_unset():
+    # H8: a bool column read back from a file is not a number; float(True) would make it a slope of 1.
+    assert fuel_curve.curve_of({fuel_curve.SLOPE: True}) is None
+    assert fuel_curve.curve_of({fuel_curve.SLOPE: False, fuel_curve.PRICE: 40.0}) == (
+        0.0,
+        0.0,
+        40.0,
+    )
+
+
+# ── GK B ruling 1 (option A): the LP-chain guard on every solve path ─────────────────────────────────────────
+
+CO2_T_PER_MWH_TH, EFF = 0.25, 0.4
+
+
+def _co2_network(*, periods: bool) -> pypsa.Network:
+    """The curve genset, non-committable, burning a CO2-priced fuel at efficiency 0.4."""
+    n = _network(curve=True, committable=False)
+    n.add("Carrier", "diesel", co2_emissions=CO2_T_PER_MWH_TH)
+    n.generators.at["genset", "efficiency"] = EFF
+    if periods:
+        snaps = n.snapshots[:12]
+        n.set_snapshots(snaps)
+        n.set_investment_periods([2030, 2035])
+        n.investment_period_weightings.loc[:, ["objective", "years"]] = 1.0
+    return n
+
+
+def _run_sim(n, cfg):
+    import queue
+    import threading
+
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import run_simulation
+
+    PyPSAService.set_network(n)
+    log = queue.SimpleQueue()
+    status, cond = run_simulation(
+        cfg,
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        log,
+        state_update=lambda **kw: None,
+    )
+    lines = []
+    while not log.empty():
+        if (x := log.get()) is not None:
+            lines.append(str(x))
+    return status, cond, "\n".join(lines)
+
+
+@pytest.mark.parametrize("periods", [False, True])
+def test_a_co2_priced_curve_run_pays_the_adder_exactly_once(periods):
+    n = _co2_network(periods=periods)
+    prices = {2030: 100.0, 2035: 200.0}
+    cfg = SolverConfig(co2_price=100.0, co2_price_per_period=prices if periods else {})
+    # Hand calculation: fuel slope × price, plus price_CO2 × 0.25 t/MWh_th / 0.4 (= 62.5 €/MWh at 100 €/t).
+    if periods:
+        expect = sum(
+            12 * LOAD_MW * (SLOPE * PRICE + p * CO2_T_PER_MWH_TH / EFF)
+            for p in prices.values()
+        )
+    else:
+        expect = HOURS * LOAD_MW * (SLOPE * PRICE + 100.0 * CO2_T_PER_MWH_TH / EFF)
+    for _ in range(2):  # re-staging neither drops nor doubles the adder
+        status, cond, log = _run_sim(n, cfg)
+        assert status in ("ok", "optimal"), (cond, log[-800:])
+        assert n.objective == pytest.approx(expect, rel=1e-9)
+        assert n.generators.at["genset", "marginal_cost"] == pytest.approx(
+            SLOPE * PRICE
+        )
+        assert "genset" not in n.generators_t.marginal_cost.columns
+
+
+def test_the_chain_refuses_half_a_curve_and_a_user_cost_series_by_kind():
+    from services.solver_service import build_lp_chain
+
+    n = _network(curve=True)
+    n.generators.at["genset", fuel_curve.PRICE] = np.nan  # half a curve
+    chain = build_lp_chain(n, CFG, None)
+    with pytest.raises(fuel_curve.FuelCurveError, match="genset"):
+        chain(n, n.snapshots)
+    n = _network(curve=True)
+    n.generators_t.marginal_cost["genset"] = pd.Series(
+        5.0, n.snapshots
+    )  # a user cost series
+    with pytest.raises(fuel_curve.FuelCurveError, match="remove its profile"):
+        build_lp_chain(n, CFG, None)(n, n.snapshots)
+    assert (
+        fuel_curve.wrap_lp(_network(curve=False), None, None) is None
+    )  # no curve: nothing chained
+    assert fuel_curve.lp_refusals(_network(curve=True)) == []
+    assert issubclass(fuel_curve.FuelCurveError, ValueError)
+
+
+def _tiny_sizing(**over):
+    from tests.test_sizing_loop_runner import _tiny
+
+    n = _tiny()
+    for col, v in {**CURVE, **over}.items():
+        n.generators.at["genset", col] = v
+    return n
+
+
+def test_the_sizing_loop_refuses_half_a_curve_and_a_user_cost_series():
+    from services.adequacy.sizing_loop_runner import run_sizing
+
+    from tests.test_sizing_loop_runner import _config, _inputs
+
+    for n in (_tiny_sizing(**{fuel_curve.PRICE: np.nan}), _tiny_sizing()):
+        if fuel_curve.curve_of(n.generators.loc["genset"])[
+            2
+        ]:  # the full curve gets a user cost series
+            n.generators_t.marginal_cost["genset"] = pd.Series(5.0, n.snapshots)
+        out = run_sizing(n, _config(), _inputs())
+        cond = out["rounds"][0]["condition"]
+        assert out["rounds"][0]["status"] == "error", out["verdict"]
+        assert cond.startswith("FuelCurveError: genset: "), cond
+
+
+def test_the_sizing_loop_stages_a_p_nom_changed_outside_the_form():
+    from services.adequacy.sizing_loop_runner import _prepare, run_sizing
+
+    from tests.test_sizing_loop_runner import _config, _inputs
+
+    n = _tiny_sizing(p_nom_extendable=False, p_nom=50.0, committable=True)
+    fuel_curve.apply(n, stamp=False)
+    n.generators.at["genset", "p_nom"] = 60.0  # a writer that does not re-derive
+    out = run_sizing(n, _config(), _inputs())
+    assert out["status"] in ("converged", "not_converged"), out["verdict"]
+    assert all(r["status"] == "ok" for r in out["rounds"])
+    copy = n.copy()
+    _prepare(copy, _config(), [])
+    assert copy.generators.at["genset", "stand_by_cost"] == pytest.approx(
+        NO_LOAD * 60.0 * PRICE
+    )
+    assert copy.generators.at["genset", "marginal_cost"] == pytest.approx(SLOPE * PRICE)
+
+
+def test_the_sizing_loop_never_reads_a_per_period_co2_column_as_a_user_series():
+    from services.adequacy.sizing_loop_runner import _prepare
+
+    n = _co2_network(periods=True)
+    cfg = SolverConfig(co2_price_per_period={2030: 100.0, 2035: 200.0})
+    undo: list = []
+    kw = _prepare(n, cfg, undo)
+    assert "genset" in n.generators_t.marginal_cost.columns  # the transform ran
+    status, _ = n.optimize(solver_name="highs", multi_investment_periods=True, **kw)
+    assert status == "ok"
+
+
+def test_the_sizing_loop_result_is_unchanged_with_no_curve():
+    """A2 pin: master's result on `_tiny()` (captured on the code before the `_prepare` reorder)."""
+    from services.adequacy.sizing_loop_runner import run_sizing
+
+    from tests.test_sizing_loop_runner import _config, _inputs, _tiny
+
+    out = run_sizing(_tiny(), _config(), _inputs())
+    assert (out["status"], len(out["rounds"])) == ("converged", 2)
+    assert [r["cost_eur"] for r in out["rounds"]] == pytest.approx(
+        [71379629.67760263, 72640406.59389393], rel=1e-7
+    )
+    assert out["final"]["sizes"] == pytest.approx(
+        {
+            "trafo": 104.59183673469389,
+            "q_ss": 0.0,
+            "q_dyn": 3.367966804973091,
+            "p_sm": 40.0,
+            "e_sm": 1.83510172158991,
+            "store:energy": 21.052631578947366,
+            "charger:energy": 10.526315789473683,
+            "store:highC": 7.368421052631579,
+            "charger:highC": 29.473684210526315,
+            "s_x:energy": 2.0219298245614077,
+            "s_x:highC": 5.894736842105264,
+        },
+        rel=1e-6,
+        abs=1e-6,
+    )
+
+
+def test_a_tou_upload_onto_a_curve_generator_ends_in_the_pre_run_refusal(
+    client, install_network, session_ctx
+):
+    n = _installed(install_network)
+    assert (
+        client.post("/api/network/generators", json=_genset(**CURVE)).status_code == 201
+    )
+    assert (
+        client.post(
+            "/api/projects/Fuel Site", params={"force": True, "rebind": True}
+        ).status_code
+        == 200
+    )
+    gen = client.post(
+        "/api/projects/Fuel Site/profiles/series/generate",
+        json={
+            "kind": "tou",
+            "components": ["genset"],
+            "params": {
+                "component_type": "generators",
+                "currency": "EUR",
+                "price_basis": "nominal",
+                "currency_year": 2025,
+                "periods": [{"name": "flat", "rate": 50.0}],
+            },
+        },
+    )
+    assert gen.status_code == 200, gen.text
+    applied = client.post(
+        "/api/projects/Fuel Site/profiles/apply",
+        json={
+            "job_id": gen.json()["job_id"],
+            "component": "genset",
+            "time_basis": "UTC",
+        },
+    )
+    assert applied.status_code == 200, applied.text
+    n = session_ctx(client).network
+    assert "genset" in n.generators_t.marginal_cost.columns
+    status, cond, log = _run_sim(n, CFG)
+    assert (status, cond) == ("error", "validation_failed")
+    assert "fuel_curve_invalid" in log and "remove its profile" in log

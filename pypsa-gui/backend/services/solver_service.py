@@ -564,6 +564,9 @@ def build_lp_chain(network, config, log_queue):
     scale last). `run_simulation` and the AS-06 sizing loop both build their LP from it, so the two cannot
     drift. Raises what `_compile_extra_functionality` raises."""
     extra_fn = _compile_extra_functionality(config.extra_functionality_code)
+    # homer-parity 02a (GK B ruling 1): a fuel curve the LP cannot price refuses every solve path. Read here,
+    # before the transient transforms; raised when the LP is built.
+    extra_fn = fuel_curve.wrap_lp(network, extra_fn, log_queue)
     # Wrap whatever the user wrote (or nothing) with our auto-curtailment-cost
     # callback if any generator carries a non-zero `curtailment_cost`. This
     # mirrors the user's expectation that "set curtailment_cost on a renewable

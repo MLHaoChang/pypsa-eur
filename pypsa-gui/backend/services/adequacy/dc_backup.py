@@ -38,6 +38,7 @@ from collections.abc import Iterable
 import numpy as np
 
 from models.flex_archetypes import BackupSpec, RedundancyTier
+from services import fuel_curve
 from services.adequacy.site_peak import BACKUP_STRING_PREFIX as STRING_PREFIX
 from services.adequacy.site_peak import BACKUP_SPARE_PREFIX as SPARE_PREFIX
 from datetime import UTC
@@ -1330,6 +1331,12 @@ def assess(
         genset_mw_source=fleets["all_genset"]["source"],
     )
     cost["genset_unit_mw"] = unit
+    if curved := [g for g in gens if fuel_curve.curve_of(n.generators.loc[g]) is not None]:
+        # homer-parity 02a, GK B ruling 3: stated precedence. The backup NPV is off the LP and never summed into opex.
+        cost["notes"].append(
+            f"fuel_curve_ignored: fuel is priced from the backup heat rate ({heat_src}); the fuel curve on "
+            f"{', '.join(curved)} (slope and no-load fuel) is not read here, only by the solve"
+        )
     return {
         "mode": backup.mode,
         "sizing": sizing,

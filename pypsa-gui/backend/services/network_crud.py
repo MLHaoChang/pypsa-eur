@@ -644,6 +644,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         stored = df.loc[name].to_dict()
         notice = check_fuel_curve(component_class, merged, n=n, name=name, before=stored, submitted=kwargs)
         if component_class == "Generator":
+            notice = fuel_curve.clear_notice(merged, before=stored) or notice
             merged.update(fuel_curve.cleared(merged, before=stored))
         if merged.get("name", name) != name:
             # OPEN-ITEMS item 8. Before `ensure_carrier`, which can add a
