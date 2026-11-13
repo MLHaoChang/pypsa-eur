@@ -4069,9 +4069,16 @@ def _dispatch_real_tool_call(
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
                         "is_error": True,
-                        "content": (
-                            f"tool_timeout. {hold_note}" if hold_note else "tool_timeout"
-                        ),
+                        "content": "tool_timeout"
+                        + (
+                            ". Outcome unknown: it ran longer than "
+                            f"{harness_budget.PER_TOOL_TIMEOUT_SECONDS:g} s and was stopped, "
+                            "and it may have changed the project. Read the project back "
+                            "before any retry."
+                            if timeout_effect
+                            else ""
+                        )
+                        + (f". {hold_note}" if hold_note else ""),
                     }
                 )
                 return
