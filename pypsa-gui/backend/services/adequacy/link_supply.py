@@ -61,6 +61,9 @@ __all__ = [
     "NOTHING_TO_SAMPLE",
     "assemble_fleet",
     "firm_backup_units",
+    "fleet_side",
+    "grid_side_refusal",
+    "loop_scope",
     "nothing_to_sample",
     "sampled_fleet",
 ]
@@ -77,31 +80,74 @@ def _never_failing(model) -> str:
     return f"grid import taken as never failing: {why} for {model.name}"
 
 
+def loop_scope(n, *, keep_zero_capacity: bool = False):
+    """The ``hub_fleet_scope`` every sampled-fleet site uses: no carrier
+    fallback, so only a Link the network itself names is a boundary."""
+    from models.energy_hub import ImportOverlaySpec
+    from services.adequacy.eh_stages import hub_fleet_scope
+
+    return hub_fleet_scope(
+        n,
+        ImportOverlaySpec(import_carriers=[]),
+        sample_links=True,
+        keep_zero_capacity=keep_zero_capacity,
+    )
+
+
+def fleet_side(n, scope):
+    """The network the fleet is read from: the hub side when ``scope`` splits
+    the network at its import Link(s), else ``n`` itself."""
+    if scope.mode != "hub_side":
+        return n
+    from services.adequacy.eh_stages import _hub_side_copy
+
+    return _hub_side_copy(n, scope.excluded_buses)
+
+
+def grid_side_refusal(n, scope, kind: str, name: str) -> str | None:
+    """Why an asset asked for by name is not in the hub-side fleet: it sits
+    on the grid side of the import Link(s) ``scope`` splits at. ``None`` when
+    the network is not split or the asset is not on the grid side."""
+    if scope.mode != "hub_side":
+        return None
+    attrs = {
+        "generator": ("generators",),
+        "vre": ("generators",),
+        "storage_unit": ("storage_units", "stores"),
+    }.get(kind, ())
+    ex = set(scope.excluded_buses)
+    for attr in attrs:
+        df = getattr(n, attr, None)
+        if df is None or df.empty or "bus" not in df.columns or name not in df.index:
+            continue
+        if str(df.at[name, "bus"]) in ex:
+            links = ", ".join(sorted(str(x) for x in scope.import_links))
+            return (
+                f"{name!r} is on the grid side of import Link(s) {links}: the "
+                "study samples the hub side, where the grid reaches the hub "
+                "only through the Link, so the asset is not in the fleet and "
+                "its capacity credit is not priced"
+            )
+    return None
+
+
 def sampled_fleet(
     n,
     *,
     keep_zero_capacity: bool = False,
     cfg=None,
     demand_scaled_in_place: bool = False,
+    vre_assets=(),
 ):
-    """``MCInputs`` for the loops: ``snapshot_inputs`` plus the supplying
-    Links (module docstring). Call under the PyPSAService lock."""
-    from models.energy_hub import ImportOverlaySpec
-    from services.adequacy.eh_stages import hub_fleet_scope
-
-    # No carrier fallback: only a Link the network itself names is a boundary.
-    scope = hub_fleet_scope(
-        n,
-        ImportOverlaySpec(import_carriers=[]),
-        sample_links=True,
-        keep_zero_capacity=keep_zero_capacity,
-    )
+    """``MCInputs`` for the loops and the MC study: ``snapshot_inputs`` plus
+    the supplying Links (module docstring). Call under the PyPSAService lock."""
     return assemble_fleet(
         n,
-        scope,
+        loop_scope(n, keep_zero_capacity=keep_zero_capacity),
         keep_zero_capacity=keep_zero_capacity,
         cfg=cfg,
         demand_scaled_in_place=demand_scaled_in_place,
+        vre_assets=vre_assets,
     )
 
 
@@ -112,20 +158,25 @@ def assemble_fleet(
     keep_zero_capacity: bool = False,
     cfg=None,
     demand_scaled_in_place: bool = False,
+    vre_assets=(),
+    side=None,
 ):
     """``MCInputs`` for ``scope`` (a ``hub_fleet_scope`` result): the units in
     AL-4 order, the residual net of the firm-block imports, and the notes.
     The one assembly behind the loops and ``freeze_fixed_plan``, so the same
-    network and scope give both the same fleet and the same CRN substreams."""
-    from services.adequacy.eh_stages import _hub_side_copy
+    network and scope give both the same fleet and the same CRN substreams.
+    ``vre_assets`` is ``snapshot_inputs``' (the must-take profiles kept for
+    ELCC); ``side`` is ``fleet_side(n, scope)`` when the caller already has
+    it, so the hub side is copied once."""
     from services.adequacy.mc import snapshot_inputs
 
     notes: list[str] = []
     candidates: list[str] = []
     import_units: list = []
     firm = None
+    if side is None:
+        side = fleet_side(n, scope)
     if scope.mode == "hub_side":
-        side = _hub_side_copy(n, scope.excluded_buses)
         candidates += sorted(str(x) for x in scope.import_links)
         import_units = sorted(scope.import_units, key=lambda u: u.name)
         firm = np.asarray(scope.import_firm_mw, dtype=np.float64)
@@ -138,14 +189,13 @@ def assemble_fleet(
                 )
             elif m.model == "excluded":
                 notes.append(f"import Link {m.name}: not counted — {m.reason}")
-    else:
-        side = n
-        if scope.import_links:
-            # AL-6: a trusted Link that does not separate the sides is a
-            # branch inside the copper plate, not supply.
-            notes.append(scope.note)
+    elif scope.import_links:
+        # AL-6: a trusted Link that does not separate the sides is a
+        # branch inside the copper plate, not supply.
+        notes.append(scope.note)
     inputs = snapshot_inputs(
         side,
+        vre_assets=vre_assets,
         keep_zero_capacity=keep_zero_capacity,
         cfg=cfg,
         demand_scaled_in_place=demand_scaled_in_place,
