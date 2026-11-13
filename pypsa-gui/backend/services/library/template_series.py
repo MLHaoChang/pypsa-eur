@@ -23,6 +23,7 @@ gains currency, price basis, currency year, region and time basis (#448 S1), the
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -124,6 +125,49 @@ def _check_target(t: str) -> None:
         return
     raise TemplateSeriesError("template_series_target_unknown",
                               f"template series target {t!r} is not one a template may fill")
+
+
+def verify(template_dir: Path) -> None:
+    """Every series file of ``template_dir/price_series`` checked against its meta.json
+    (study harness 14, I8). Refuses, with a typed code, when the directory has no meta.json,
+    a series entry carries no ``sha256``, a named file is missing, a file the meta does not
+    name is there, or a file's bytes do not hash to its entry. A directory the template does
+    not ship is not this check's business (the caller asks only where series are expected).
+    A meta.json written before hashes existed never reads as verified."""
+    root = Path(template_dir) / DIR
+    meta_path = root / META
+    if not meta_path.is_file():
+        raise TemplateSeriesError("template_series_meta_missing",
+                                  f"{DIR}/ has no {META}, so its series cannot be verified")
+    try:
+        entries = json.loads(meta_path.read_text())["series"]
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise TemplateSeriesError("template_series_meta_invalid",
+                                  f"{DIR}/{META} is unreadable: {exc}") from exc
+    named = set()
+    for e in entries:
+        file = e.get("file") if isinstance(e, dict) else None
+        if not file or Path(file).name != file:
+            raise TemplateSeriesError("template_series_meta_invalid",
+                                      f"series entry {e!r} needs a plain file name")
+        named.add(file)
+        want = e.get("sha256")
+        if not isinstance(want, str) or not want:
+            raise TemplateSeriesError("template_series_hash_missing",
+                                      f"{DIR}/{file} has no sha256 in {META}, so it cannot be "
+                                      f"verified")
+        path = root / file
+        if not path.is_file():
+            raise TemplateSeriesError("template_series_file_missing",
+                                      f"{DIR}/{file} is named in {META} but is not there")
+        if hashlib.sha256(path.read_bytes()).hexdigest() != want:
+            raise TemplateSeriesError("template_series_hash_mismatch",
+                                      f"{DIR}/{file} does not match its sha256 in {META}")
+    extra = sorted(p.name for p in root.iterdir() if p.is_file() and p.name != META
+                   and p.name not in named)
+    if extra:
+        raise TemplateSeriesError("template_series_file_extra",
+                                  f"{DIR}/ holds {extra} that {META} does not name")
 
 
 def read(template_dir: Path) -> list[TemplateSeries]:

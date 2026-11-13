@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The IPP template's price series now carry a sha256 in `price_series/meta.json`, and creating a project from a template checks every series file against it. A missing `meta.json`, an entry with no hash, a missing or extra file, or a changed file is refused with a named reason (a 422), never a crash.

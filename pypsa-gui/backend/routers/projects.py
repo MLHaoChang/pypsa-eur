@@ -2173,9 +2173,13 @@ def _mint_template_series(db, user, template_key: str, planned=None) -> tuple[li
     try:
         with tempfile.TemporaryDirectory() as tmp:
             if mod is None:
-                series = TS.read(_PROJECT_TEMPLATES_DIR / template_key)
+                src = _PROJECT_TEMPLATES_DIR / template_key
+                if (src / TS.DIR).is_dir():
+                    TS.verify(src)
+                series = TS.read(src)
             else:
                 mod.PRICE_SERIES[template_key](tmp, mod._planned(template_key, planning))
+                TS.verify(tmp)
                 series = TS.read(tmp)
         if not series:
             return [], {}
