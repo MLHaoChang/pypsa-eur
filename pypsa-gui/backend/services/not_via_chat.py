@@ -472,7 +472,7 @@ _KEEP_VERBS = frozenset({'save', 'remember'})
 # Phrases that say a value is kept for reuse. Single words cannot: "later" and
 # "next time" are also model time and plain workflow.
 _REUSE_PHRASE = re.compile(
-    r'\b(?:for (?:later|next time)(?! use)|for (?:my |the |our )?(?:next|another|other|future) projects?'
+    r'\b(?:for (?:later|next time)|for (?:my |the |our )?(?:next|another|other|future) projects?'
     r'|to reuse|so i can (?:reuse|use (?:it|this|that) again)|as (?:a|the) default)\b')
 # "Store" is a component, so it counts only with a project or default phrase.
 _STORE_PHRASE = re.compile(
