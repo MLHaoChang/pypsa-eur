@@ -913,22 +913,83 @@ def _start_task_run_args(profile):
     }
 
 
-@pytest.mark.parametrize(
-    ("profile", "passes"),
-    [
-        ("eh_site@2", True),
-        ("eh_site@3", True),
-        ("eh_site@1", False),
-        ("eh_site@4", False),
-    ],
-)
-def test_start_task_offers_v2_and_v3_only(profile, passes):
+@pytest.mark.parametrize("profile", ["eh_site@2", "eh_site@3"])
+def test_start_task_offers_v2_and_v3(profile):
     from harness import catalogue, guards
 
     tool = next(t for t in catalogue.TOOLS if t["name"] == "start_task")
     enum = tool["input_schema"]["properties"]["run"]["properties"]["profile"]["enum"]
     assert enum == ["eh_site@2", "eh_site@3"]
-    assert (profile in enum) is passes
+    assert guards.check("start_task", _start_task_run_args(profile), "write") is None
+
+
+@pytest.mark.parametrize("profile", ["eh_site@1", "eh_site@4", None, 3, ["eh_site@3"]])
+def test_start_task_refuses_every_other_profile(profile):
+    from harness import guards
+
     refusal = guards.check("start_task", _start_task_run_args(profile), "write")
-    if refusal is not None:  # no schema guard may refuse an offered profile
-        assert not passes, refusal
+    assert refusal is not None and refusal[0] == "required_guard_failed"
+
+
+def test_a_chat_started_v3_run_fetches_only_the_granted_point(
+    site_host, site, offline, tmp_path
+):
+    base = [*site_host["citations"], site_host["goal"]]
+    view = _start([*base, *site_host["site"]], f"Site {uuid.uuid4().hex[:6]}")
+    intake = _intake(view, site)
+    rows = intake["rows"]
+    point = {r["param"]: r["value"] for r in rows if r["param"].startswith("site.")}
+    assert point == {"site.lat": SITE["lat"], "site.lon": SITE["lon"]}
+    # The plan-review card shows the point before the grant (O3).
+    frozen = run_actions.stage_frozen(_task(rows), run_actions.SITE_KIND)
+    assert run_site.card(frozen)["site"] == "53.43960, 6.83210"
+    out, task = _dispatched(tmp_path, rows)
+    assert out == run_actions.SITE_FETCH
+    assert task["steps"][1]["result"]["site"] == SITE
+    assert any(c == site_context.DEFAULT_OVERPASS_URL for c in offline)
+
+
+def test_a_chat_started_v3_run_without_a_site_reads_none_named(
+    goal_host, site, offline, tmp_path
+):
+    base = [*goal_host["citations"], goal_host["goal"]]
+    view = _start(base, f"Site {uuid.uuid4().hex[:6]}")
+    rows = _intake(view, site)["rows"]
+    frozen = run_actions.stage_frozen(_task(rows), run_actions.SITE_KIND)
+    assert run_site.card(frozen)["site"] == "none named"
+    _, task = _dispatched(tmp_path, rows)
+    assert offline == [] and task["steps"][-1]["result"]["state"] != "fetched"
+
+
+@pytest.mark.parametrize(
+    "lat_quote, lon_quote",
+    [
+        ("10.0000° N", "20.0000° E"),  # coordinates the user never typed
+        ("53.4396° N", "20.0000° E"),  # half of them typed
+    ],
+)
+def test_a_site_the_user_did_not_type_is_never_fetched(
+    site_host, site, offline, tmp_path, lat_quote, lon_quote
+):
+    base = [*site_host["citations"], site_host["goal"]]
+    cites = [
+        {
+            "param": "site.lat",
+            "turn_id": site_host["site"][0]["turn_id"],
+            "quote": lat_quote,
+            "unit": "°",
+        },
+        {
+            "param": "site.lon",
+            "turn_id": site_host["site"][0]["turn_id"],
+            "quote": lon_quote,
+            "unit": "°",
+        },
+    ]
+    view = _start([*base, *cites], f"Site {uuid.uuid4().hex[:6]}")
+    intake = _intake(view, site)
+    assert not [r for r in intake["rows"] if r["param"].startswith("site.")] or (
+        run_intake.site(intake["rows"])[0] is None
+    )
+    _, task = _dispatched(tmp_path, intake["rows"])
+    assert offline == []
