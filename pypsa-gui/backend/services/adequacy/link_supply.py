@@ -123,7 +123,7 @@ def grid_side_refusal(n, scope, kind: str, name: str) -> str | None:
         if str(df.at[name, "bus"]) in ex:
             links = ", ".join(sorted(str(x) for x in scope.import_links))
             return (
-                f"{name!r} is on the grid side of import Link(s) {links}: the "
+                f"{name} is on the grid side of import Link(s) {links}: the "
                 "study samples the hub side, where the grid reaches the hub "
                 "only through the Link, so the asset is not in the fleet and "
                 "its capacity credit is not priced"

@@ -53,7 +53,9 @@ def test_mc03(
     cfg = ctx.solver_state.get("solver_config")
     ctx.solver_state["solver_config"] = dataclasses.replace(cfg, target_lole_h=2.0)
     t0 = time.time()
-    r = client.post("/api/results/mc", json={"draws": 500, "seed": 0, "elcc_portfolio": True})
+    r = client.post(
+        "/api/results/mc", json={"draws": 500, "seed": 0, "elcc_portfolio": True}
+    )
     row = {"t": tid}
     if r.status_code not in (200, 202):
         row.update(start=r.status_code, detail=str(r.json().get("detail"))[:200])
@@ -77,7 +79,10 @@ def test_mc03(
             units=[u.get("name") for u in (res.get("units_provenance") or [])],
             fleet_notes=m.get("fleet_notes"),
             portfolio_status=pf.get("status"),
-            portfolio=[(x.get("kind"), x.get("name")) for x in ((pf.get("population") or {}).get("members") or [])],
+            portfolio=[
+                (x.get("kind"), x.get("name"))
+                for x in ((pf.get("population") or {}).get("members") or [])
+            ],
             portfolio_reason=str(pf.get("reason"))[:160],
             error=body.get("error"),
             secs=round(time.time() - t0),

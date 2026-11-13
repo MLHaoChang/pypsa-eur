@@ -145,7 +145,7 @@ def test_an_import_link_taken_as_a_firm_block_is_refused_by_name(asked):
     with pytest.raises(ValueError) as exc:
         elcc._resolve(inputs, "generator", asked)
     msg = str(exc.value)
-    assert "'grid_import'" in msg and "never failing: no outage data" in msg
+    assert "Link grid_import supplies" in msg and "never failing: no outage data" in msg
     assert "not priced" in msg
     assert "link:grid_import" not in {r["name"] for r in elcc.elcc_candidates(n)}
 
@@ -165,7 +165,7 @@ def test_a_grid_side_asset_is_refused_naming_the_import_link(kind, name):
     scope = link_supply.loop_scope(n)
     msg = link_supply.grid_side_refusal(n, scope, kind, name)
     assert msg is not None
-    assert repr(name) in msg and "grid_import" in msg and "grid side" in msg
+    assert f"{name} is on the grid side" in msg and "grid_import" in msg and "grid side" in msg
     assert link_supply.grid_side_refusal(n, scope, kind, "hub_pv") is None
 
 

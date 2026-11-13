@@ -543,7 +543,7 @@ def _refuse_unsampled_link(inputs, name: str) -> None:
              if lk in str(x)]
     why = "; ".join(notes) if notes else "it is not a sampled unit"
     raise ValueError(
-        f"Link {lk!r} supplies the fleet but is not a sampled unit ({why}): "
+        f"Link {lk} supplies the fleet but is not a sampled unit ({why}): "
         "there is no outage chain to remove, so its capacity credit is not "
         "priced")
 
