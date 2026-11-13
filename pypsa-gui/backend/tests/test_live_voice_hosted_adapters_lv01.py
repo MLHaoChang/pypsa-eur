@@ -13,6 +13,7 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+import logging
 import time
 
 import httpx
@@ -20,7 +21,11 @@ import pytest
 
 from harness.providers import live_media as lm
 from harness.providers.deepgram_stt import DeepgramProfile, DeepgramStreamingStt
-from harness.providers.livekit_media import LiveKitConfig, LiveKitTransport
+from harness.providers.livekit_media import (
+    MAX_API_RESPONSE_BYTES,
+    LiveKitConfig,
+    LiveKitTransport,
+)
 from harness.providers.openai_tts import OpenAiTts, OpenAiTtsProfile
 
 API_KEY = "APIlkTESTKEY"
@@ -587,7 +592,12 @@ def test_deepgram_default_connect_over_a_loopback_websocket():
         return None
 
     async def go():
-        async with serve(handler, "127.0.0.1", 0, process_request=reject) as server:
+        # The test server would log the headers it received; it is not ours.
+        quiet = logging.getLogger("lv01.test.server")
+        quiet.setLevel(logging.WARNING)
+        async with serve(
+            handler, "127.0.0.1", 0, process_request=reject, logger=quiet
+        ) as server:
             port = server.sockets[0].getsockname()[1]
             endpoint = f"ws://127.0.0.1:{port}/v1/listen"
             good = DeepgramStreamingStt(
@@ -608,3 +618,630 @@ def test_deepgram_default_connect_over_a_loopback_websocket():
     assert [e.text for e in events] == ["heard 160 bytes"]
     assert usage.provider_seconds == 0.5 and usage.audio_bytes == 160
     assert error.kind == "provider_auth" and "wrong" not in error.message
+
+
+# ── GK B #1482 review: F1–F7 and killing tests for the guard survivors ───────
+
+
+def test_openai_tts_retired_model_has_its_own_kind():
+    legacy = OpenAiTtsProfile(model="tts-1", voice="alloy", languages=frozenset({"en"}))
+    adapter, _ = openai(wav, profile=legacy, today=dt.date(2027, 1, 6))
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(adapter.synthesize("hello", language="en"))
+    assert (
+        err.value.kind == "model_retired"
+        and "model_retired" in lm.LIVE_MEDIA_ERROR_KINDS
+    )
+
+
+@pytest.mark.parametrize("cancel_first", [True, False])
+def test_deepgram_sync_frame_source_cannot_starve_cancel_or_idle_timeout(cancel_first):
+    import itertools
+
+    async def go():
+        cancel = lm.CancelToken()
+        adapter, _ = deepgram(FakeSocket([], block=True), idle_timeout_s=0.2)
+        if cancel_first:
+            asyncio.get_running_loop().call_later(0.05, cancel.cancel)
+        frames = itertools.repeat(b"")
+        with pytest.raises(lm.LiveMediaError) as err:
+            await asyncio.wait_for(collect(adapter, frames, cancel=cancel), 2)
+        return err.value.kind
+
+    assert asyncio.run(go()) == ("cancelled" if cancel_first else "timeout")
+
+
+def test_deepgram_sync_nonempty_source_is_cancelled_before_the_stream_cap():
+    import itertools
+
+    async def go():
+        cancel = lm.CancelToken()
+        socket = FakeSocket([], block=True)
+        adapter, _ = deepgram(socket)
+        asyncio.get_running_loop().call_later(0.05, cancel.cancel)
+        with pytest.raises(lm.LiveMediaError) as err:
+            await asyncio.wait_for(
+                collect(adapter, itertools.repeat(b"\x00" * 1024), cancel=cancel), 2
+            )
+        return err.value.kind, adapter.usage.audio_bytes
+
+    kind, sent = asyncio.run(go())
+    assert kind == "cancelled" and sent < 172 * 1024 * 1024
+
+
+def test_deepgram_key_reaches_no_log_record_at_debug(caplog):
+    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger="websockets")
+    test_deepgram_default_connect_over_a_loopback_websocket()
+    assert all(DG_KEY not in r.getMessage() for r in caplog.records)
+
+
+def test_livekit_create_room_timeout_deletes_the_room_best_effort():
+    calls = []
+
+    def factory():
+        def respond(request):
+            method = request.url.path.rsplit("/", 1)[-1]
+            calls.append(method)
+            if method == "CreateRoom":
+                raise httpx.ReadTimeout("slow", request=request)
+            return httpx.Response(200, json={})
+
+        return httpx.Client(transport=httpx.MockTransport(respond))
+
+    transport = LiveKitTransport(
+        LiveKitConfig(url=WSS, api_key=API_KEY, api_secret=SECRET),
+        client_factory=factory,
+    )
+    with pytest.raises(lm.LiveMediaError) as err:
+        _open(transport)
+    assert err.value.kind == "timeout" and calls == ["CreateRoom", "DeleteRoom"]
+    refused = LiveKitApi(fail={"CreateRoom": httpx.Response(401, json={})})
+    with pytest.raises(lm.LiveMediaError):
+        _open(livekit(refused))
+    assert refused.methods() == ["CreateRoom"]
+
+
+def test_livekit_connect_error_is_typed():
+    def factory():
+        def respond(request):
+            raise httpx.ConnectError("refused", request=request)
+
+        return httpx.Client(transport=httpx.MockTransport(respond))
+
+    transport = LiveKitTransport(
+        LiveKitConfig(url=WSS, api_key=API_KEY, api_secret=SECRET),
+        client_factory=factory,
+    )
+    with pytest.raises(lm.LiveMediaError) as err:
+        transport.close_session(room="pypsa-abc")
+    assert err.value.kind == "unavailable"
+
+
+def test_livekit_refuses_a_different_room_and_deletes_the_requested_one():
+    class OtherRoom(LiveKitApi):
+        def factory(self):
+            def respond(request):
+                method = request.url.path.rsplit("/", 1)[-1]
+                self.calls.append((method, json.loads(request.content), {}))
+                if method == "CreateRoom":
+                    return httpx.Response(200, json={"name": "someone-else"})
+                return httpx.Response(200, json={})
+
+            return httpx.Client(transport=httpx.MockTransport(respond))
+
+    api = OtherRoom()
+    with pytest.raises(lm.LiveMediaError) as err:
+        _open(livekit(api))
+    assert err.value.kind == "malformed_response"
+    assert api.methods() == ["CreateRoom", "DeleteRoom"]
+    assert api.calls[1][1] == {"room": "pypsa-abc"}
+
+
+def test_livekit_close_and_open_check_names_and_types_before_calling():
+    api = LiveKitApi()
+    with pytest.raises(lm.LiveMediaError) as err:
+        livekit(api).close_session(room="bad room")
+    assert err.value.kind == "invalid_request"
+    with pytest.raises(lm.LiveMediaError) as err:
+        _open(livekit(api), bridge_token=123)
+    assert err.value.kind == "invalid_request" and api.calls == []
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["wss://u@x.livekit.cloud", "wss://:p@x.livekit.cloud", "wss://x.livekit.cloud#f"],
+)
+def test_livekit_refuses_credentials_or_fragments_in_the_url(url):
+    with pytest.raises(lm.LiveMediaError) as err:
+        LiveKitTransport(LiveKitConfig(url=url, api_key=API_KEY, api_secret=SECRET))
+    assert err.value.kind == "not_configured"
+
+
+@pytest.mark.parametrize("key,secret", [("", SECRET), (API_KEY, "")])
+def test_livekit_needs_key_and_secret(key, secret):
+    with pytest.raises(lm.LiveMediaError) as err:
+        LiveKitTransport(LiveKitConfig(url=WSS, api_key=key, api_secret=secret))
+    assert err.value.kind == "not_configured"
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        OpenAiTtsProfile(
+            model="gpt-4o-mini-tts",
+            voice="alloy",
+            languages=frozenset({"en"}),
+            response_format="flac",
+        ),
+        OpenAiTtsProfile(model="gpt-4o-mini-tts", voice="alloy", languages=frozenset()),
+        OpenAiTtsProfile(
+            model="gpt-4o-mini-tts", voice="Alloy Voice", languages=frozenset({"en"})
+        ),
+    ],
+)
+def test_openai_tts_profile_is_validated(profile):
+    with pytest.raises(lm.LiveMediaError) as err:
+        OpenAiTts(profile, credential=lambda: OA_KEY)
+    assert err.value.kind == "not_configured"
+
+
+def test_openai_tts_text_type_and_length_boundary():
+    adapter, requests = openai(wav)
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(adapter.synthesize(123, language="en"))
+    assert err.value.kind == "invalid_request"
+    asyncio.run(adapter.synthesize("x" * 2000, language="en"))
+    assert len(requests) == 1
+
+
+def test_openai_tts_accepts_octet_stream_and_reports_the_profile_format():
+    def octet(request):
+        return httpx.Response(
+            200,
+            content=b"\x00\x01" * 10,
+            headers={"content-type": "application/octet-stream"},
+        )
+
+    adapter, _ = openai(octet)
+    assert asyncio.run(adapter.synthesize("hi", language="en")).mime == "audio/wav"
+
+
+def test_openai_tts_audio_is_bounded():
+    def big(request):
+        return httpx.Response(
+            200, content=b"\x00" * 5000, headers={"content-type": "audio/wav"}
+        )
+
+    requests: list = []
+
+    def factory():
+        return httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda r: (requests.append(r), big(r))[1])
+        )
+
+    adapter = OpenAiTts(
+        TTS_PROFILE,
+        credential=lambda: OA_KEY,
+        client_factory=factory,
+        max_audio_bytes=4096,
+    )
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(adapter.synthesize("hi", language="en"))
+    assert err.value.kind == "oversize_output"
+
+
+def test_deepgram_audio_format_params():
+    _, connector = deepgram(FakeSocket([]))
+    adapter = DeepgramStreamingStt(
+        PROFILE, credential=lambda: DG_KEY, connect=connector
+    )
+    asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert "encoding=linear16" in connector.url
+    assert "sample_rate=48000" in connector.url and "channels=1" in connector.url
+    wav_profile = DeepgramProfile(
+        model="nova-3", languages=frozenset({"en"}), encoding=None, sample_rate=None
+    )
+    wav_adapter = DeepgramStreamingStt(
+        wav_profile, credential=lambda: DG_KEY, connect=connector
+    )
+    asyncio.run(collect(wav_adapter, [b"\x00\x00"]))
+    assert "encoding" not in connector.url and "sample_rate" not in connector.url
+    assert "channels" not in connector.url and wav_adapter.usage.audio_seconds_sent == 0
+
+
+def test_deepgram_message_cap_and_event_cap(monkeypatch):
+    adapter, _ = deepgram(FakeSocket(["x" * (64 * 1024 + 1)]))
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert err.value.kind == "oversize_output"
+    from harness.providers import deepgram_stt
+
+    monkeypatch.setattr(deepgram_stt, "MAX_EVENTS", 2)
+    adapter, _ = deepgram(FakeSocket([result(f"w{i}", final=False) for i in range(3)]))
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert err.value.kind == "oversize_output"
+
+
+def test_deepgram_counts_finals_and_skips_empty_frames():
+    socket = FakeSocket(
+        [
+            result("a", final=True),
+            result("b", final=False),
+            result("c", final=True, start=2),
+        ]
+    )
+    adapter, _ = deepgram(socket)
+    asyncio.run(collect(adapter, [b"", b"\x00\x00", b""]))
+    assert adapter.usage.finals == 2 and adapter.usage.events == 3
+    assert [f for f in socket.sent if isinstance(f, bytes)] == [b"\x00\x00"]
+
+
+@pytest.mark.parametrize(
+    "meta,seconds,ids",
+    [
+        ({"duration": "2"}, None, []),
+        ({"duration": -1}, None, []),
+        ({"duration": 0, "request_id": "r" * 65}, 0.0, []),
+        ({"duration": 1.5, "request_id": "r" * 64}, 1.5, ["r" * 64]),
+    ],
+)
+def test_deepgram_metadata_is_validated(meta, seconds, ids):
+    adapter, _ = deepgram(FakeSocket([json.dumps({"type": "Metadata", **meta})]))
+    asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert (
+        adapter.usage.provider_seconds == seconds and adapter.usage.request_ids == ids
+    )
+
+
+def test_deepgram_needs_pinned_languages():
+    with pytest.raises(lm.LiveMediaError) as err:
+        DeepgramStreamingStt(
+            DeepgramProfile(model="nova-3", languages=frozenset()),
+            credential=lambda: DG_KEY,
+        )
+    assert err.value.kind == "not_configured"
+
+
+def test_deepgram_failed_sender_wins_over_a_chatty_socket():
+    class Chatty(FakeSocket):
+        async def recv(self):
+            await asyncio.sleep(0)
+            return result("more", final=False)
+
+    adapter, _ = deepgram(Chatty([]))
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(asyncio.wait_for(collect(adapter, ["not bytes"]), 2))
+    assert err.value.kind == "invalid_request"
+
+
+def test_deepgram_cancel_after_the_sender_finished():
+    async def go():
+        cancel = lm.CancelToken()
+        adapter, _ = deepgram(FakeSocket([], block=True))
+        asyncio.get_running_loop().call_later(0.1, cancel.cancel)
+        with pytest.raises(lm.LiveMediaError) as err:
+            await asyncio.wait_for(collect(adapter, [b"\x00\x00"], cancel=cancel), 2)
+        return err.value.kind
+
+    assert asyncio.run(go()) == "cancelled"
+
+
+# default_connect error paths, over a stand-in for websockets' connect.
+
+
+class _ClosedSocket:
+    def __init__(self, recv_exc=None, send_exc=None):
+        self.recv_exc, self.send_exc = recv_exc, send_exc
+
+    async def send(self, data):
+        if self.send_exc:
+            raise self.send_exc
+
+    async def recv(self):
+        await asyncio.sleep(0.01)
+        raise self.recv_exc
+
+    async def close(self):
+        pass
+
+
+def _with_connect(monkeypatch, behaviour):
+    import websockets.asyncio.client as client
+
+    async def fake_connect(url, **kwargs):
+        assert kwargs["logger"].name.endswith(".websocket")
+        return behaviour()
+
+    monkeypatch.setattr(client, "connect", fake_connect)
+
+
+def _stream_error(adapter):
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(asyncio.wait_for(collect(adapter, [b"\x00\x00"]), 2))
+    return err.value
+
+
+def _real_adapter():
+    return DeepgramStreamingStt(PROFILE, credential=lambda: DG_KEY)
+
+
+@pytest.mark.parametrize(
+    "status,kind",
+    [(401, "provider_auth"), (429, "provider_limit"), (500, "provider_error")],
+)
+def test_default_connect_maps_handshake_status(monkeypatch, status, kind):
+    from websockets.datastructures import Headers
+    from websockets.exceptions import InvalidStatus
+    from websockets.http11 import Response
+
+    def refuse():
+        raise InvalidStatus(Response(status, "", Headers()))
+
+    _with_connect(monkeypatch, refuse)
+    assert _stream_error(_real_adapter()).kind == kind
+
+
+def test_default_connect_maps_network_errors_and_abnormal_close(monkeypatch):
+    from websockets.exceptions import ConnectionClosedError
+    from websockets.frames import Close
+
+    def unreachable():
+        raise OSError("refused")
+
+    _with_connect(monkeypatch, unreachable)
+    assert _stream_error(_real_adapter()).kind == "unavailable"
+
+    abnormal = ConnectionClosedError(Close(1011, "boom"), None)
+    _with_connect(monkeypatch, lambda: _ClosedSocket(recv_exc=abnormal))
+    assert _stream_error(_real_adapter()).kind == "provider_error"
+
+    closed = ConnectionClosedError(None, None)
+    _with_connect(
+        monkeypatch, lambda: _ClosedSocket(recv_exc=abnormal, send_exc=closed)
+    )
+    assert _stream_error(_real_adapter()).kind == "unavailable"
+
+
+def test_default_connect_without_websockets_is_not_configured(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "websockets.asyncio.client", None)
+    assert _stream_error(_real_adapter()).kind == "not_configured"
+
+
+# ── GK B #1482: killing tests for the livekit guard survivors ────────────────
+
+
+def test_livekit_response_at_the_size_limit_is_accepted():
+    body = json.dumps({"name": "pypsa-abc", "pad": "x" * (60 * 1024)})
+    assert len(body) < MAX_API_RESPONSE_BYTES
+    api = LiveKitApi(fail={"CreateRoom": httpx.Response(200, content=body)})
+    _open(livekit(api))  # under the cap: no oversize_output
+
+
+def test_livekit_response_over_the_size_limit_is_refused():
+    big = LiveKitApi(
+        fail={
+            "CreateRoom": httpx.Response(
+                200, content=b"x" * (MAX_API_RESPONSE_BYTES + 1)
+            )
+        }
+    )
+    with pytest.raises(lm.LiveMediaError) as err:
+        _open(livekit(big))
+    assert err.value.kind == "oversize_output"
+
+
+def test_livekit_rejects_an_invalid_agent_name():
+    with pytest.raises(lm.LiveMediaError) as err:
+        LiveKitTransport(
+            LiveKitConfig(
+                url=WSS, api_key=API_KEY, api_secret=SECRET, agent_name="bad name"
+            )
+        )
+    assert err.value.kind == "not_configured"
+
+
+def test_livekit_treats_300_as_an_error():
+    api = LiveKitApi(fail={"CreateRoom": httpx.Response(300, json={})})
+    with pytest.raises(lm.LiveMediaError) as err:
+        _open(livekit(api))
+    assert err.value.kind == "provider_error"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [httpx.Response(404, json={}), httpx.Response(500, json={"code": "not_found"})],
+)
+def test_livekit_close_swallows_either_not_found_signal(response):
+    api = LiveKitApi(fail={"DeleteRoom": response})
+    livekit(api).close_session(room="pypsa-abc")  # no raise
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(429, json={}),
+        httpx.Response(500, json={"code": "resource_exhausted"}),
+    ],
+)
+def test_livekit_maps_either_quota_signal_to_provider_limit(response):
+    api = LiveKitApi(fail={"CreateRoom": response})
+    with pytest.raises(lm.LiveMediaError) as err:
+        _open(livekit(api))
+    assert err.value.kind == "provider_limit"
+
+
+def test_livekit_none_room_or_identity_is_a_typed_refusal():
+    api = LiveKitApi()
+    for kw in ({"room": None}, {"identity": None}):
+        with pytest.raises(lm.LiveMediaError) as err:
+            _open(livekit(api), **kw)
+        assert err.value.kind == "invalid_request"
+    with pytest.raises(lm.LiveMediaError) as err:
+        livekit(api).close_session(room=None)
+    assert err.value.kind == "invalid_request"
+    assert api.calls == []
+
+
+@pytest.mark.parametrize("model,voice", [(None, "alloy"), ("gpt-4o-mini-tts", None)])
+def test_openai_tts_unset_model_or_voice_is_a_typed_refusal(model, voice):
+    profile = OpenAiTtsProfile(model=model, voice=voice, languages=frozenset({"en"}))
+    with pytest.raises(lm.LiveMediaError) as err:
+        OpenAiTts(profile, credential=lambda: OA_KEY)
+    assert err.value.kind == "not_configured"
+
+
+# ── GK B #1482: killing tests for the deepgram guard survivors ───────────────
+
+from harness.providers import deepgram_stt as dg  # noqa: E402
+
+
+def _no_other_tasks():
+    return [
+        t
+        for t in asyncio.all_tasks()
+        if t is not asyncio.current_task() and not t.done()
+    ]
+
+
+def test_deepgram_frame_and_stream_limits_are_inclusive():
+    frame = b"\x00" * dg.MAX_FRAME_BYTES
+    adapter, socket = deepgram(FakeSocket([]), max_stream_bytes=2 * dg.MAX_FRAME_BYTES)
+    asyncio.run(collect(adapter, [frame, frame]))
+    assert adapter.usage.audio_bytes == 2 * dg.MAX_FRAME_BYTES
+
+
+def test_deepgram_message_and_text_limits_are_inclusive(monkeypatch):
+    text = "x" * dg.MAX_EVENT_CHARS
+    message = result(text, final=True)
+    monkeypatch.setattr(dg, "MAX_MESSAGE_CHARS", len(message))
+    monkeypatch.setattr(dg, "MAX_EVENTS", 1)
+    adapter, _ = deepgram(FakeSocket([message]))
+    events = asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert events[0].text == text
+
+
+def test_deepgram_rejects_valid_json_sent_as_binary():
+    adapter, _ = deepgram(FakeSocket([result("hi", final=True).encode()]))
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert err.value.kind == "malformed_response"
+
+
+@pytest.mark.parametrize("message", ["[1]", "3", '"Results"'])
+def test_deepgram_rejects_non_object_json(message):
+    adapter, _ = deepgram(FakeSocket([message]))
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert err.value.kind == "malformed_response"
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"start": "1"},
+        {"start": True},
+        {"start": -1},
+        {"channel": {"alternatives": [{"transcript": 5}]}},
+    ],
+)
+def test_deepgram_result_field_types(fields):
+    doc = json.loads(result("hi", final=True))
+    doc.update(fields)
+    adapter, _ = deepgram(FakeSocket([json.dumps(doc)]))
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert err.value.kind == "malformed_response"
+
+
+@pytest.mark.parametrize(
+    "encoding,rate",
+    [("linear16", None), ("mulaw", 8000)],
+)
+def test_deepgram_counts_seconds_only_for_linear16_with_a_rate(encoding, rate):
+    profile = DeepgramProfile(
+        model="nova-3", languages=frozenset({"en"}), encoding=encoding, sample_rate=rate
+    )
+    connector = Connector(FakeSocket([]))
+    adapter = DeepgramStreamingStt(
+        profile, credential=lambda: DG_KEY, connect=connector
+    )
+    asyncio.run(collect(adapter, [b"\x00" * 100]))
+    assert adapter.usage.audio_bytes == 100 and adapter.usage.audio_seconds_sent == 0
+
+
+def test_deepgram_unset_model_is_a_typed_refusal():
+    with pytest.raises(lm.LiveMediaError) as err:
+        DeepgramStreamingStt(
+            DeepgramProfile(model=None, languages=frozenset({"en"})),
+            credential=lambda: DG_KEY,
+        )
+    assert err.value.kind == "not_configured"
+
+
+def test_deepgram_log_filter_drops_authorization_and_unformattable_records():
+    import logging
+
+    keep = dg._NoAuthorization()
+
+    def record(msg, args=()):
+        return logging.LogRecord("x", logging.DEBUG, __file__, 1, msg, args, None)
+
+    assert keep.filter(record("> Authorization: Token %s", (DG_KEY,))) is False
+    assert keep.filter(record("> Host: api.deepgram.com")) is True
+    assert keep.filter(record("%s %s", (1,))) is False
+
+
+def test_deepgram_sender_honours_cancel_while_the_socket_keeps_talking():
+    import itertools
+
+    class Chatty(FakeSocket):
+        async def recv(self):
+            await asyncio.sleep(0)
+            return result("more", final=False)
+
+    async def go():
+        cancel = lm.CancelToken()
+        adapter, _ = deepgram(Chatty([]))
+        asyncio.get_running_loop().call_later(0.05, cancel.cancel)
+        with pytest.raises(lm.LiveMediaError) as err:
+            await asyncio.wait_for(
+                collect(adapter, itertools.repeat(b"\x00\x00"), cancel=cancel), 2
+            )
+        return err.value.kind
+
+    assert asyncio.run(go()) == "cancelled"
+
+
+def test_deepgram_an_unset_cancel_token_does_not_cancel():
+    class Late(FakeSocket):
+        async def recv(self):
+            await asyncio.sleep(0.05)  # the sender finishes first
+            return self.messages.pop(0) if self.messages else None
+
+    adapter, _ = deepgram(Late([result("hi", final=True)]))
+    events = asyncio.run(collect(adapter, [b"\x00\x00"], cancel=lm.CancelToken()))
+    assert [e.text for e in events] == ["hi"]
+
+
+def test_deepgram_leaves_no_task_behind():
+    async def go():
+        cancel = lm.CancelToken()
+        adapter, _ = deepgram(FakeSocket([result("a", final=False)], block=True))
+        stream = adapter.stream(_slow_frames(), language="en", cancel=cancel)
+        first = await stream.__anext__()
+        await stream.aclose()  # the consumer walks away mid-stream
+        await asyncio.sleep(0)
+        return first.text, _no_other_tasks()
+
+    text, left = asyncio.run(go())
+    assert text == "a" and left == []
+
+
+async def _slow_frames():
+    while True:
+        yield b"\x00\x00"
+        await asyncio.sleep(0.01)
