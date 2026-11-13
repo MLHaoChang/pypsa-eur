@@ -2900,3 +2900,42 @@ def test_the_infeasible_card_carries_the_named_hint():
     # Taken once: the next card carries none, and a non-infeasible card never does.
     assert "constraint_hints" not in classify_failure("warning", "infeasible")
     assert "constraint_hints" not in classify_failure("warning", "unbounded")
+
+
+def _diagnosed_hints() -> None:
+    import queue
+
+    from services.solver.diagnostics import _diagnose_infeasibility
+
+    _diagnose_infeasibility(
+        _network(pv_max=5.0),
+        SolverConfig(min_renewable_fraction=0.9),
+        queue.SimpleQueue(),
+    )
+
+
+def test_an_infeasible_or_unbounded_card_carries_the_hint():
+    """The diagnosis runs for any condition naming "infeasible", so that card too."""
+    from services.failure_taxonomy import classify_failure
+
+    _diagnosed_hints()
+    card = classify_failure("warning", "infeasible_or_unbounded")
+    assert card["category"] == "infeasible_or_unbounded"
+    assert [h["constraint"] for h in card["constraint_hints"]] == [
+        "Minimum renewable fraction"
+    ]
+
+
+def test_hints_never_outlive_the_solve_that_made_them():
+    """Taken on every classification: a success or another category clears them,
+    so a later undiagnosed infeasible card on the pooled thread shows none."""
+    from services.failure_taxonomy import classify_failure
+
+    for status, condition in (
+        ("ok", "optimal"),
+        ("aborted", "user_aborted"),
+        ("w", "unbounded"),
+    ):
+        _diagnosed_hints()
+        classify_failure(status, condition)
+        assert "constraint_hints" not in classify_failure("warning", "infeasible")

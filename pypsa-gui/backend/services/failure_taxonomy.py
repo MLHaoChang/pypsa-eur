@@ -18,6 +18,7 @@ stale failure from a previous run.
 
 Pure + dependency-free → unit-testable in isolation; no PyPSA import.
 """
+
 from __future__ import annotations
 
 # Conditions that mean "the solve succeeded" — never a failure card.
@@ -116,8 +117,14 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
         "representative periods — and re-run.",
     ),
     (
-        ("singular", "numerical", "ill-conditioned", "ill conditioned",
-         "scaling", "matrix is singular"),
+        (
+            "singular",
+            "numerical",
+            "ill-conditioned",
+            "ill conditioned",
+            "scaling",
+            "matrix is singular",
+        ),
         "numerical",
         "Numerical trouble",
         "The solver hit ill-conditioning — coefficients spanning a very wide "
@@ -132,9 +139,17 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
         # CLAUDE.md): "'tuple' object has no attribute 'lower'" (multi-period
         # statistics), "...not in index" (assign_duals on a stale MultiIndex),
         # "'snapshot' is not a valid dimension..." (lost axis name), etc.
-        ("not a valid dimension", "dim_0", "in a buffer", "cannot include dtype",
-         "object has no attribute", "not in index", "'snapshot'",
-         "is not a valid", "reindex"),
+        (
+            "not a valid dimension",
+            "dim_0",
+            "in a buffer",
+            "cannot include dtype",
+            "object has no attribute",
+            "not in index",
+            "'snapshot'",
+            "is not a valid",
+            "reindex",
+        ),
         "setup_error",
         "Model build error",
         "The LP couldn't be constructed — a structural problem (snapshot/index "
@@ -155,10 +170,15 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
 )
 
 
+# The diagnosis runs for any condition naming "infeasible".
+_HINTED_CATEGORIES = ("infeasible", "infeasible_or_unbounded")
+
+
 def _constraint_hints() -> list[dict]:
     """The named-constraint hints the infeasibility diagnosis just recorded."""
     try:
         from services.solver.diagnostics import take_constraint_hints
+
         return take_constraint_hints()
     except Exception:
         return []
@@ -172,6 +192,9 @@ def classify_failure(status: str | None, condition: str | None) -> dict | None:
     otherwise a dict ``{category, title, hint, detail}`` where ``detail`` is the
     raw condition string (so the UI can still show the underlying token).
     """
+    # Taken on EVERY classification, so hints from a diagnosed solve never
+    # outlive it on this (pooled) thread and reach a later card.
+    hints = _constraint_hints()
     status_l = (status or "").strip().lower()
     cond_l = (condition or "").strip().lower()
 
@@ -194,10 +217,8 @@ def classify_failure(status: str | None, condition: str | None) -> dict | None:
                 "hint": hint,
                 "detail": condition or "",
             }
-            if category == "infeasible":
-                hints = _constraint_hints()
-                if hints:
-                    card["constraint_hints"] = hints
+            if hints and category in _HINTED_CATEGORIES:
+                card["constraint_hints"] = hints
             return card
 
     # Unknown non-success outcome — generic but still actionable.
@@ -205,6 +226,6 @@ def classify_failure(status: str | None, condition: str | None) -> dict | None:
         "category": "solver_error",
         "title": "Solve failed",
         "hint": "The solver returned a non-optimal status. Check the log for "
-                "details — the TRACEBACK and ERROR lines show what went wrong.",
+        "details — the TRACEBACK and ERROR lines show what went wrong.",
         "detail": condition or "",
     }
