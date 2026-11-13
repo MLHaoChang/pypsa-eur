@@ -242,6 +242,12 @@ def _solved(n: pypsa.Network, *, pv=None, genset=None, grid=None, objective=1000
         if name in n.generators.index and series is not None:
             p[name] = pd.Series(series, index=idx, dtype=float)
     n.generators_t.p = pd.DataFrame(p, index=idx)
+    # A solved network carries every Load's dispatch and each Link's p0
+    # (GK B A4 on #1424: the shared KPI never guesses a missing column).
+    n.loads_t.p = n.get_switchable_as_dense("Load", "p_set")
+    n.links_t.p0 = pd.DataFrame(0.0, index=idx, columns=n.links.index)
+    if "grid_import" in n.links.index and "grid" in p:
+        n.links_t.p0["grid_import"] = p["grid"]
     for name, size in (("pv", 2.0), ("genset", 1.0)):
         if name in n.generators.index:
             n.generators.loc[name, "p_nom_opt"] = size
@@ -288,6 +294,7 @@ def test_renewable_fraction_weights_investment_periods():
     n.generators_t.p = pd.DataFrame(
         {"pv": [1.0, 0.0], "genset": [0.0, 1.0]}, index=n.snapshots
     )
+    n.loads_t.p = n.get_switchable_as_dense("Load", "p_set")  # GK B A4
     assert A.renewable_fraction(n) == pytest.approx(0.25)
 
 
@@ -303,16 +310,21 @@ def test_renewable_fraction_counts_grid_import_gross_and_slack_as_unserved():
 
 def test_renewable_fraction_is_none_without_dispatch_or_served_load():
     assert A.renewable_fraction(_net()) is None
-    n = _solved(_net(), pv=[0.0] * 4, genset=[0.0] * 4, grid=[0.0] * 4)
-    n.loads.loc["site_load", "p_set"] = 0.0
+    n = _net()
+    n.loads.loc["site_load", "p_set"] = 0.0  # before the dispatch (GK B A4)
+    n = _solved(n, pv=[0.0] * 4, genset=[0.0] * 4, grid=[0.0] * 4)
     assert A.renewable_fraction(n) is None  # 0/0 is not 1.0 or NaN
 
 
-def test_renewable_fraction_clips_to_unit_interval():
+def test_renewable_fraction_stays_in_unit_interval():
     n = _solved(_net(), pv=[3.0] * 4, genset=[0.0] * 4, grid=[0.0] * 4)
     assert A.renewable_fraction(n) == 1.0
+    # G13 with 01a's GK B N2: a genset putting out more than the site used
+    # reads None (unknown), no longer clipped to 0.0.
     n = _solved(_net(), pv=[0.0] * 4, genset=[2.0] * 4, grid=[0.0] * 4)
-    assert A.renewable_fraction(n) == 0.0
+    assert A.renewable_fraction(n) is None
+    row = A.row_of(_arch(_net(), "pv+battery+genset+grid"), n)
+    assert row["unavailable"]["renewable_fraction"] == "uncounted_non_renewable"
 
 
 # ── rows (G4) ─────────────────────────────────────────────────────────────
@@ -478,12 +490,16 @@ def test_capex_is_unavailable_for_a_zero_cost_or_unsized_member_and_skips_fixed(
     assert {s["asset"]: s["extendable"] for s in row["sizes"]}["genset"] is False
 
 
-def test_renewable_fraction_falls_back_to_p_set_when_load_dispatch_is_missing():
+def test_renewable_fraction_is_none_when_load_dispatch_is_missing():
+    # G13 with 01a's GK B A1: a Load missing from the dispatch is unknown,
+    # never read from its p_set (was: falls back to p_set, 0.75).
     n = _solved(
         _net(), pv=[1.0, 1.0, 0.0, 1.0], genset=[0.0, 0.0, 1.0, 0.0], grid=[0.0] * 4
     )
     n.loads_t.p = pd.DataFrame({"other": [9.0] * 4}, index=n.snapshots)
-    assert A.renewable_fraction(n) == pytest.approx(0.75)
+    assert A.renewable_fraction(n) is None
+    row = A.row_of(_arch(_net(), "pv+battery+genset+grid"), n)
+    assert row["unavailable"]["renewable_fraction"] == "no_served_load"
 
 
 def test_unsolved_row_shape_and_best_of_skips_unsolved_and_uncosted():
@@ -520,6 +536,7 @@ def test_renewable_fraction_counts_a_grid_import_link_once_by_its_delivery():
     n.links.loc["grid_import", ["carrier", "eh_role"]] = ["AC", "grid_import"]
     assert A.classify(n)["grid"] == [("Link", "grid_import"), ("Generator", "grid")]
     n = _solved(n, pv=[1.0, 1.0, 0.0, 1.0], genset=[0.0] * 4, grid=[0.0, 0.0, 2.0, 0.0])
+    n.links_t.p0 = n.links_t.p0.drop(columns="grid_import")  # read p1 alone
     n.links_t.p1 = pd.DataFrame(
         {"grid_import": [0.0, 0.0, -1.0, 0.0]}, index=n.snapshots
     )
@@ -582,6 +599,7 @@ def _ocgt_net() -> pypsa.Network:
         efficiency=0.4,
         p_nom_extendable=True,
     )
+    n.loads_t.p = n.get_switchable_as_dense("Load", "p_set")  # GK B A4
     return n
 
 
@@ -692,12 +710,17 @@ def test_row_cost_is_the_runners_system_cost(monkeypatch):
 
 
 def test_an_uncounted_non_renewable_generator_makes_the_fraction_none():
-    """F1'(a): a grid Generator that also feeds a non-member Link is neither
-    counted nor a slack, so the fraction is unknown, never 1.0."""
+    """F1'(a): a grid Generator that also feeds a non-member Link. Under 01a's
+    shared KPI (G13) both Links out of the grid bus into electrical buses
+    are counted source Links, so with their p0 dispatched the fraction is a
+    number (2 MWh imported of 4 served); without the second Link's p0 it is
+    unknown, never 1.0."""
     n = _eh_setup_net()
     n.add("Bus", "aux", carrier="AC")
     n.add("Link", "aux_link", bus0="grid", bus1="aux", carrier="AC", p_nom=1.0)
     n = _solved(n, pv=[1.0] * 4, genset=[0.0] * 4, grid=[0.0, 0.0, 2.0, 0.0])
+    assert A.renewable_fraction(n) == pytest.approx(0.5)
+    n.links_t.p0 = n.links_t.p0.drop(columns="aux_link")
     assert A.renewable_fraction(n) is None
     row = A.row_of(_arch(_eh_setup_net(), "pv+genset"), n)
     assert row["unavailable"]["renewable_fraction"] == "uncounted_non_renewable"

@@ -49,6 +49,23 @@ describe('CompanionLauncher', () => {
     expect(screen.getByTestId('companion-profile').textContent).toBe('Claude')
   })
 
+  it('closes the live composer on Escape and returns focus to Chat here; offers setup without a key (UM08)', async () => {
+    mockMotion(false)
+    const onLive = vi.fn()
+    const onProfiles = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <CompanionLauncher profileLabel="Claude" liveOpen modelKeyMissing
+        onCompose={vi.fn()} onSpeak={vi.fn()} onLive={onLive} onProfiles={onProfiles} />,
+    )
+    await user.click(screen.getByTestId('companion-setup'))
+    expect(onProfiles).toHaveBeenCalledTimes(1)
+    screen.getByTestId('companion-live-input').focus()
+    await user.keyboard('{Escape}')
+    expect(onLive).toHaveBeenCalledTimes(1)
+    expect(document.activeElement).toBe(screen.getByTestId('companion-live'))
+  })
+
   it('drops decorative motion when the user prefers reduced motion', () => {
     mockMotion(true)
     render(

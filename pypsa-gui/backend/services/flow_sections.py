@@ -150,6 +150,7 @@ CODE_SECTION: Final[dict[str, str]] = {
     "ens_cap_without_voll": "scenarios",
     "ens_zone_multiple_without_cap": "scenarios",
     "import_energy_cap_unsupported_strategy": "scenarios",
+    "min_renewable_fraction_unsupported_strategy": "scenarios",
     "reserve_margin_carrier_default_derating": "scenarios",
     "reserve_margin_myopic_report_is_partial": "scenarios",
     "reserve_margin_unpriceable_assets": "scenarios",
