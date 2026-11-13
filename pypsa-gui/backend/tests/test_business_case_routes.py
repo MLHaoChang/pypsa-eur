@@ -965,3 +965,110 @@ def test_a_report_without_a_current_ic_report_reads_stale(
     session_state(client)["investment_case_report"] = None
     st = client.get(BC_URL).json()["staleness"]
     assert st["stale"] is True and st["reason"] == "investment_case_missing"
+
+
+# ── mutation-run gaps: every stage's abort check, the validators, the sheet cells ──
+
+
+def _abort_in(st, fn):
+    def wrapped(*a, **k):
+        st["business_case"]["stop_event"].set()
+        return fn(*a, **k)
+
+    return wrapped
+
+
+@pytest.mark.parametrize(
+    "stage", ["rebuild_ic_case", "read_outputs", "build", "run_engine", "break_even"]
+)
+def test_an_abort_in_each_stage_stores_nothing_and_finishes_no_stage(
+    client, install_network, monkeypatch, session_state, stage
+):
+    import routers.results as R
+    import services.finance.business_case as BCM
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc(break_even_line="product")).status_code == 200
+    st = session_state(client)
+    if stage == "rebuild_ic_case":
+        real_build = R._ic_build_case
+        monkeypatch.setattr(
+            R,
+            "_ic_build_case",
+            lambda *a, **k: _abort_in(st, real_build(*a, **k)),
+        )
+    elif stage == "read_outputs":
+        real_read = R._bc_read_solve
+        monkeypatch.setattr(R, "_bc_read_solve", lambda h: _abort_in(st, real_read(h)))
+    else:
+        name = {"build": "build_business_case", "run_engine": "kpis"}.get(
+            stage, "break_even"
+        )
+        monkeypatch.setattr(BCM, name, _abort_in(st, getattr(BCM, name)))
+    assert client.post(BC_URL).status_code == 200
+    body = _bc_poll(client)
+    assert body["status"] == "aborted", body
+    assert body["stage"] == stage and stage not in body["stages_done"]
+    assert st.get("business_case_report") is None
+
+
+def test_a_stored_ic_report_without_a_case_hash_refuses(
+    client, install_network, monkeypatch, session_state
+):
+    import routers.results as R
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    rep = session_state(client)["investment_case_report"]
+    rep["sections"]["project"]["payload"]["provenance"]["finance_case_hash"] = None
+    monkeypatch.setattr(R, "_ic_case_hash", lambda case: None)
+    r = client.post(BC_URL)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["code"] == "investment_case_missing"
+    assert session_state(client).get("business_case") is None
+
+
+@pytest.mark.parametrize(
+    "capacity", [{"": 1.0}, {"pv": 0.0}, {"pv": float("inf")}, {"pv": float("nan")}]
+)
+def test_a_capacity_must_name_an_asset_and_be_finite_above_0(capacity):
+    from pydantic import ValidationError
+
+    from services.business_case.runner import BusinessCaseConfig
+
+    with pytest.raises(ValidationError, match="capacity of"):
+        BusinessCaseConfig.model_validate({**_bc(), "capacity": capacity})
+
+
+def test_the_sheet_cells_name_each_reason_and_unit():
+    import openpyxl
+
+    from services.results_workbook.business_case import (
+        business_case_text,
+        write_business_case_sheet,
+    )
+
+    assert "investment_case_missing" in business_case_text(
+        {"basis": {}},
+        {"stale": True, "changed": [], "reason": "investment_case_missing"},
+    )
+    assert "not readable now" in business_case_text({"basis": {}}, {"stale": True})
+    assert business_case_text({"basis": {}}, None).startswith("stale")
+    report = {
+        "basis": {"label": "the project on its own"},
+        "kpis": {
+            "a": {"status": "ok", "value": 1.5, "unit": "EUR/MW"},
+            "b": {"status": "not_established", "reason": None, "unit": None},
+        },
+    }
+    wb = openpyxl.Workbook()
+    write_business_case_sheet(wb, report, {"stale": False})
+    rows = {
+        r[0].value: [c.value for c in r[1:]]
+        for r in wb["Business case"].iter_rows()
+        if r[0].value
+    }
+    assert rows["a"][:3] == [1.5, "ok", "EUR/MW"]
+    assert rows["b"][:2] == ["not_established", "not_established"]
+    assert rows["b"][2] in (None, "")
+    assert rows["Price at NPV 0"][:2] == ["not_established", "not_established"]
