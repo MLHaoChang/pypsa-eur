@@ -196,7 +196,12 @@ def _capex(run) -> ViewData | None:
                     d.tables.append(_per_period_table(f"{label} by carrier and period", "EUR",
                                                       frame))
         d.tables += [t for t in (
-            _rows("Cost by component", "EUR", cb.get("by_component") or [], ["component"]),
+            # Value columns named, not inferred: a column every row has as
+            # None (a failed expansion compute, an unresolved upfront cost) is
+            # object dtype, and must stay as not-established cells, not vanish.
+            _rows("Cost by component", "EUR", cb.get("by_component") or [], ["component"],
+                  ["capex", "capex_lifetime", "capex_expansion", "capex_expansion_lifetime",
+                   "opex", "fom", "total"]),
             _rows("Cost by carrier", "EUR", cb.get("by_carrier") or [], ["component", "carrier"]),
         ) if t]
     by_carrier = ebc.get("by_carrier") or {}

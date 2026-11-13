@@ -429,6 +429,9 @@ def run_ac_pf_stage(
     #    Generator-p_set equality constraints on the next solve, making
     #    SCLOPF infeasible (no redispatch room for contingency LODF caps).
     phase("Stage 2: Fixing dispatch from LOPF (generators, storage units, stores, links)...")
+    # Study harness #42: the caller holds the lock (see the docstring).
+    from services.solver.link_ports import ensure_link_port_frames
+    ensure_link_port_frames(network)
     dispatch_fix_snapshot = _snapshot_dispatch_fix_state(network)
     _fix_dispatch_for_ac_pf(network)
 

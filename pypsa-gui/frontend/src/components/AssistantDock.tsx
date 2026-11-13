@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import { PanelRightClose, Pin, PinOff } from 'lucide-react'
 import { useChatStore } from '../store/chatStore'
@@ -36,20 +35,8 @@ function clearTimer(timer: { current: number | null }) {
  * Unmounting it mid-turn is what produced "still streaming, no tokens on
  * screen"; keeping it mounted is the fix, not an optimisation.
  */
-/** L2 (LC-04): the launcher floats over the canvas area only (`#companion-anchor`
- * in App.tsx: above the bottom panel, left of the Properties or slide panel), so
- * it never covers a panel. While a full-screen tab hides the canvas it keeps its
- * place in the workbench row. */
-function useCompanionAnchor(): HTMLElement | null {
-  const activeSlidePanel = useUIStore(s => s.activeSlidePanel)
-  const uiMode = useUIStore(s => s.uiMode)
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
-  useLayoutEffect(() => {
-    const el = document.getElementById('companion-anchor')
-    setAnchor(el && el.offsetParent !== null ? el : null)
-  }, [activeSlidePanel, uiMode])
-  return anchor
-}
+/** UM08-CHROME-1: the launcher (with "Chat here") lives in the dock's own
+ * collapsed rail, so it never floats over a chart, table or the canvas. */
 
 export default function AssistantDock() {
   // Per-field selectors, not the bare useUIStore() — see the identical
@@ -234,8 +221,9 @@ export default function AssistantDock() {
   // because the assistant WAS the slide panel. Pinned by
   // AssistantDock.eviction.test.tsx; its keyboard twin is the editable-target
   // guard on App.tsx's global Escape handler.
-  const anchor = useCompanionAnchor()
-  const place = (launcher: React.ReactElement) => (anchor ? createPortal(launcher, anchor) : launcher)
+  const place = (launcher: React.ReactElement) => (
+    <div className="absolute inset-0" data-testid="assistant-dock-rail">{launcher}</div>
+  )
 
   return (
     <>
@@ -243,7 +231,7 @@ export default function AssistantDock() {
         className={`relative flex flex-col min-h-0 min-w-0 bg-bg transition-[width] duration-300 ease-out motion-reduce:transition-none ${
           assistantDockOpen
             ? 'border-l border-border max-sm:absolute max-sm:inset-0 max-sm:z-30 max-sm:max-w-full'
-            : 'w-0 overflow-visible border-0'
+            : 'w-10 shrink-0 overflow-visible border-l border-border'
         }`}
         style={assistantDockOpen ? { width: `${assistantDockWidth}px` } : undefined}
         data-testid="assistant-dock"
@@ -329,7 +317,6 @@ export default function AssistantDock() {
         {assistantDockOpen && surface === 'activity' && <ErrorBoundary label="Activity could not be displayed">
           <AssistantActivity onConversation={() => setSurface('chat')} />
         </ErrorBoundary>}
-      </div>
       {!assistantDockOpen && place(
         <CompanionLauncher
           workState={workState}
@@ -386,10 +373,11 @@ export default function AssistantDock() {
             {choice && <div ref={setCompanionChoiceTarget} className="w-80 max-w-full" />}
             {liveOpen && <div ref={setCompanionAccessTarget} className="w-72 max-w-full" />}
             {walking && walkNextReady && <button type="button" data-no-panel-close className="fixed bottom-24 right-4 text-xs rounded border border-border bg-panel px-3 py-2" onClick={() => walkCancel.current?.next()}>Next evidence view</button>}
-      <CompanionOutcome docked={!anchor} />
+      <CompanionOutcome docked />
           </ErrorBoundary>
         </CompanionLauncher>,
       )}
+      </div>
     </>
   )
 }

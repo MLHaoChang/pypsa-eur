@@ -529,7 +529,8 @@ class PyPSAService:
     @classmethod
     def reset_network(cls, *, allow_during_study: bool = False,
                       action: str = "replace the network",
-                      carry: str = "fresh") -> None:
+                      carry: str = "fresh",
+                      network: pypsa.Network | None = None) -> None:
         # Swap in a fresh, UNBOUND context — no on-disk project owns it yet.
         # reset_network runs at the START of every load/import/restore (which
         # then re-bind via set_loaded_project at the end), and on explicit
@@ -587,8 +588,14 @@ class PyPSAService:
         # the 409 with no handler to register.
         if not allow_during_study:
             cls.refuse_if_study_running(action, ctx=prev)
-        n = pypsa.Network()
-        n.name = "Untitled Project"
+        # `network` — an already-parsed replacement (a raw import, LC-43c): the
+        # routes parse the file into it BEFORE calling here, so a file that does
+        # not parse never reaches the swap and the open project stays as it was.
+        if network is None:
+            n = pypsa.Network()
+            n.name = "Untitled Project"
+        else:
+            n = network
         # Carry the solver-state object (+ its lock) AND the undo stack forward so
         # the simulation `_state` proxy and undo_service are byte-identical to the
         # pre-split module globals, which survived every network swap. load_project

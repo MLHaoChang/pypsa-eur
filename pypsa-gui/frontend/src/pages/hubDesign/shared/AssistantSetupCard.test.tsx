@@ -21,7 +21,8 @@ const mount = (ui: ReactElement) => render(
 
 beforeEach(() => {
   useUIStore.setState({ uiMode: 'guided', assistantDockOpen: false })
-  useHubDesignStore.setState({ setupCardDismissed: false })
+  useHubDesignStore.setState({ setupCardDismissedFor: [] })
+  localStorage.clear()
 })
 afterEach(() => cleanup())
 
@@ -41,6 +42,23 @@ describe('Guided without an assistant', () => {
     unmount()
     mount(<AssistantSetupCard />)
     expect(screen.queryByTestId('assistant-setup-card')).toBeNull()
+  })
+
+  it('holds the dismissal per project, across a reload (UM08-CHROME-1)', () => {
+    readiness.ready = false
+    useUIStore.setState({ currentProject: 'alpha' })
+    const { unmount } = mount(<AssistantSetupCard />)
+    fireEvent.click(screen.getByTestId('assistant-setup-dismiss'))
+    unmount()
+    // A reload: the in-memory state is gone, the browser copy is read back.
+    expect(localStorage.getItem('pypsa.assistantSetupCardDismissed.alpha')).toBe('1')
+    useHubDesignStore.setState({ setupCardDismissedFor: [] })
+    mount(<AssistantSetupCard />)
+    expect(screen.queryByTestId('assistant-setup-card')).toBeNull()
+    cleanup()
+    useUIStore.setState({ currentProject: 'beta' })
+    mount(<AssistantSetupCard />)
+    expect(screen.getByTestId('assistant-setup-card')).toBeTruthy()
   })
 
   it('disables "Let the assistant do this" and says why', () => {
