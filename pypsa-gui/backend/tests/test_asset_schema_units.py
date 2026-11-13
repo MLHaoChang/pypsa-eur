@@ -1,4 +1,5 @@
 """The edit drawer's size unit follows the asset's bus (t/h, t on a tonne bus), as the Guided list does."""
+
 from __future__ import annotations
 
 import pathlib
@@ -6,7 +7,9 @@ import sys
 
 import pytest
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
+sys.path.insert(
+    0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates")
+)
 import eh_templates as T  # noqa: E402
 
 from services.asset_schema.fields import size_units  # noqa: E402

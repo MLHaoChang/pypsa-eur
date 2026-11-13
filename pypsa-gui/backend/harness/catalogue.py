@@ -5452,6 +5452,7 @@ TOOL_ROUTES: dict[str, list] = {
     # network topology and sites (8) — LV08 B1, in process through `_route`.
     "get_asset_reference": [("GET", "/api/network/asset_costs"),
                             ("GET", "/api/network/asset_schema/{component}"),
+                            ("GET", "/api/network/asset_schema/{component}/units/{name}"),
                             ("GET", "/api/network/catalog/{component}")],
     "geocode_place": [("GET", "/api/geocode")],
     "derive_lengths_from_geometry": [("POST", "/api/network/lengths/from_geometry")],
