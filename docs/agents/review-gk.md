@@ -189,7 +189,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A fleet split at a trusted import Link (hub_side) carries its grid-side asset set into every comparison against a copper-plate payload. Such rows are left out by scope and named, never counted as an absent-row mismatch, and never silently dropped (#1456 C1, GK A (25)).
 - A refusal for a never-failing (firm-block) unit says that its credit would restate the assumption. It never says that nothing can be removed (#1456 C2, GK A (25)).
 - A pre-solve network repair is pinned as not-an-edit (fingerprint, revision, undo), with a mutant writing a non-default value. Every solve call site is covered by an AST guard keyed on (file, function) (#1457, GK A (25)).
-- A verdict "within tolerance of the goal" is computed from the draws and weights that produced the estimate, never from the requested draws or network weights. A new loop status gets an explicit mapping in every status reader (adequacy-loops 04 D1, D3, GK A (25)).
+- A verdict "within tolerance of the goal" is computed from the draws and weights that produced the estimate, never from the requested draws or network weights. Its resolution is one more draw as heavy as the heaviest used draw, floored at one shortfall hour at the heaviest snapshot. A new loop status gets an explicit mapping in every status reader (adequacy-loops 04 D1, D3, D7, GK A (25), (26)).
 
 ## Engineering rules
 
