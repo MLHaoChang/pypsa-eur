@@ -53,7 +53,7 @@ export interface IntakeRow {
 }
 export interface IntakeDefault { param: string; value: unknown; preset_default: true }
 export interface RunIntake {
-  card: { rows: IntakeRow[]; defaults: IntakeDefault[] }
+  card: { rows: IntakeRow[]; defaults: IntakeDefault[]; site?: string }
   /** What a grant sends back as `envelope_decision.intake_digest`; never computed here. */
   digest: string; missing: unknown[]; request?: string
 }

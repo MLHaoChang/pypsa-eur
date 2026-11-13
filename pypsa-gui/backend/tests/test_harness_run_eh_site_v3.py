@@ -17,6 +17,7 @@ import hashlib
 import json
 import pathlib
 import time
+import urllib.parse
 import uuid
 
 import httpx
@@ -71,7 +72,7 @@ def _tile() -> bytes:
     return TILE
 
 
-def overpass(calls=None, status=200, delay=0.0, body=None, tiles=200):
+def overpass(calls=None, status=200, delay=0.0, body=None, tiles=200, posts=None):
     """The offline map services: Overpass answers the fixture (or `body`),
     and every terrain tile answers a flat tile (or the status `tiles`)."""
 
@@ -84,6 +85,8 @@ def overpass(calls=None, status=200, delay=0.0, body=None, tiles=200):
                 if tiles == 200
                 else httpx.Response(tiles)
             )
+        if posts is not None:
+            posts.append(request.content.decode())
         if delay:
             time.sleep(delay)
         return httpx.Response(
@@ -291,6 +294,10 @@ def _start(citations, name, ref="eh_site@3"):
             "intake": {"project_name": name, "citations": citations},
         },
     )
+
+
+def _run_of(site, view):
+    return json.loads(task_path(site[1], view).read_text())["run"]
 
 
 def _intake(view, site):
@@ -932,8 +939,10 @@ def test_start_task_refuses_every_other_profile(profile):
 
 
 def test_a_chat_started_v3_run_fetches_only_the_granted_point(
-    site_host, site, offline, tmp_path
+    site_host, site, offline, tmp_path, monkeypatch
 ):
+    posts = []
+    monkeypatch.setattr(run_site, "_TRANSPORT", overpass(offline, posts=posts))
     base = [*site_host["citations"], site_host["goal"]]
     view = _start([*base, *site_host["site"]], f"Site {uuid.uuid4().hex[:6]}")
     intake = _intake(view, site)
@@ -943,10 +952,26 @@ def test_a_chat_started_v3_run_fetches_only_the_granted_point(
     # The plan-review card shows the point before the grant (O3).
     frozen = run_actions.stage_frozen(_task(rows), run_actions.SITE_KIND)
     assert run_site.card(frozen)["site"] == "53.43960, 6.83210"
+    view = tasks._intake_view(_run_of(site, view))["card"]
+    assert "site" not in view  # a named site is its own two rows
+    shown = {r["param"]: r["value"] for r in view["rows"]}
+    assert (shown["site.lat"], shown["site.lon"]) == (SITE["lat"], SITE["lon"])
+    assert "site" not in {d["param"] for d in view["defaults"]}
     out, task = _dispatched(tmp_path, rows)
     assert out == run_actions.SITE_FETCH
     assert task["steps"][1]["result"]["site"] == SITE
     assert any(c == site_context.DEFAULT_OVERPASS_URL for c in offline)
+    # Exactly the granted point's square was asked for: its Overpass query and
+    # its terrain tiles, no other request (a shifted point changes both).
+    bbox = site_context.padded_bbox(run_site.boundary(SITE))
+    assert posts == [
+        urllib.parse.urlencode({"data": site_context.overpass_query(bbox)})
+    ]
+    tiles = {
+        site_context.TERRARIUM_URL.format(z=z, x=x, y=y)
+        for z, x, y in site_context.terrain_tiles_for(bbox)
+    }
+    assert set(offline) == {site_context.DEFAULT_OVERPASS_URL} | tiles
 
 
 def test_a_chat_started_v3_run_without_a_site_reads_none_named(
@@ -957,8 +982,11 @@ def test_a_chat_started_v3_run_without_a_site_reads_none_named(
     rows = _intake(view, site)["rows"]
     frozen = run_actions.stage_frozen(_task(rows), run_actions.SITE_KIND)
     assert run_site.card(frozen)["site"] == "none named"
+    view = tasks._intake_view(_run_of(site, view))["card"]
+    assert view["site"] == "none named"
+    assert "site" not in {d["param"] for d in view["defaults"]}
     _, task = _dispatched(tmp_path, rows)
-    assert offline == [] and task["steps"][-1]["result"]["state"] != "fetched"
+    assert offline == [] and task["steps"][-1]["result"]["state"] == "not_named"
 
 
 @pytest.mark.parametrize(
