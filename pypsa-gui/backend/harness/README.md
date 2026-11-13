@@ -1750,7 +1750,9 @@ the preset turns off (grid, control, reliability), with its reason, read from
   because it runs none: a case whose owner keeps an existing asset would
   re-solve the baseline (one or two LPs), so that case is refused
   `baseline_solve` (as is one whose plan cannot be read) rather than run
-  uncounted.
+  uncounted. The check runs at admission (for the call's own `owner`) and again
+  under the case builder's network lock (`_ic_build_case`, on a run's step), so
+  a kept asset added in between is refused there too.
 - **Result gate.** The core rules and:
   - `ipp.export.over_limit_mw` (block, at most 0): the peak export through the
     link the commercial config names (`export_link`) over every snapshot of

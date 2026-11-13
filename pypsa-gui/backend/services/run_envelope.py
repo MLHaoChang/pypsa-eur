@@ -1429,14 +1429,14 @@ def _in_bounds(entry, new, at_grant):
     return True
 
 
-def _case_solves_baseline(ctx) -> bool:
+def _case_solves_baseline(ctx, owner=None) -> bool:
     """Whether the investment case would re-solve the counterfactual baseline
     (`baseline_plan(...).needed`: the owner keeps an existing asset). Anything
     unreadable counts as yes (fail closed)."""
     try:
         from services.results.finance_case import baseline_plan
 
-        plan = baseline_plan(ctx.network, ctx.solver_state.get("solver_config"), None)
+        plan = baseline_plan(ctx.network, ctx.solver_state.get("solver_config"), owner)
         return plan is not None and plan.needed
     except Exception:  # noqa: BLE001 - an unreadable plan refuses
         return True
@@ -1462,7 +1462,8 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         # asset makes the case re-solve the baseline (one or two LPs), so it is refused.
         if not note.get("call_id") or note["call_id"] != getattr(session, "run_step_call", None):
             return "own_step_only"
-        if _case_solves_baseline(ctx):
+        # the owner the case will be built for (`InvestmentCaseRequest.owner`), as the route reads it
+        if _case_solves_baseline(ctx, args.get("owner") if isinstance(args, dict) else None):
             return "baseline_solve"
     if _deletes(tool, edit_card):
         return "delete"

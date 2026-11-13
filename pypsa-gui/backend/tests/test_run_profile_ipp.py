@@ -913,3 +913,157 @@ def test_an_empty_service_list_is_no_debt_service_whatever_the_cover_list_holds(
     report = _report(service=(), dscr=(None, 1.5, 1.3))
     fact = _read(monkeypatch, ic.read_min_dscr, report=report)
     assert fact["min_dscr"] is None and fact["reasons"] == ["no_debt_service"]
+
+
+# ── GK B (53) F1–F3: the case never runs an uncounted baseline solve ────────
+
+
+class _FlipLock:
+    """The network lock, entering which a kept asset appears (an edit landing after admission)."""
+
+    def __init__(self, flip):
+        self.flip = flip
+
+    def __enter__(self):
+        self.flip()
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _build_under(monkeypatch, *, in_run):
+    """`_ic_build_case`'s closure with the plan reading `kept` only once the lock is entered."""
+    import routers.results as results
+    from models.finance import FinanceInputs
+    from services import assistant_tasks, workflow_tools
+    from services.results import baseline, finance_case
+    from services.pypsa_service import PyPSAService
+
+    state = {"kept": (), "solved": 0}
+
+    def plan(n, cfg, owner=None):
+        return baseline.BaselinePlan(removed=(), kept=state["kept"], flags=())
+
+    def solve(snap, cfg, plan):
+        state["solved"] += 1
+        raise baseline.BaselineRefused("stop", "the probe stops after the solve")
+
+    def flip():
+        state["kept"] = (("StorageUnit", "old_bess"),)
+
+    monkeypatch.setattr(finance_case, "baseline_plan", plan)
+    monkeypatch.setattr(baseline, "solve_baseline", solve)
+    monkeypatch.setattr(workflow_tools, "_network_copy", lambda n: n)
+    monkeypatch.setattr(
+        FinanceInputs, "model_validate", classmethod(lambda cls, raw: raw)
+    )
+    monkeypatch.setattr(PyPSAService, "get_lock", staticmethod(lambda: _FlipLock(flip)))
+    token = assistant_tasks.RUN_CONTEXT.set(object() if in_run else None)
+    try:
+        build = results._ic_build_case(
+            object(), SimpleNamespace(finance={}), owner=None, lost_load=None
+        )
+    finally:
+        assistant_tasks.RUN_CONTEXT.reset(token)
+    return build, state
+
+
+def test_a_kept_asset_added_after_admission_is_refused_in_the_run_not_solved(
+    monkeypatch,
+):
+    """F1: the plan is read again under the build's own lock; a run's case refuses there."""
+    from services.finance.case import FinanceRefused
+
+    build, state = _build_under(monkeypatch, in_run=True)
+    with pytest.raises(FinanceRefused) as err:
+        build()
+    assert err.value.code == "baseline_solve" and state["solved"] == 0
+
+
+def test_the_same_case_outside_a_run_still_solves_its_baseline(monkeypatch):
+    from services.finance.case import FinanceRefused
+
+    build, state = _build_under(monkeypatch, in_run=False)
+    with pytest.raises(FinanceRefused) as err:
+        build()
+    assert err.value.code == "stop" and state["solved"] == 1
+
+
+def test_the_admission_plans_for_the_owner_the_call_names(monkeypatch):
+    """F3: the owner is the call's own `owner` argument."""
+    from services.results import baseline, finance_case
+
+    seen = []
+
+    def plan(n, cfg, owner=None):
+        seen.append(owner)
+        return baseline.BaselinePlan(removed=(), kept=(), flags=())
+
+    monkeypatch.setattr(finance_case, "baseline_plan", plan)
+    ctx = SimpleNamespace(network=object(), solver_state={"solver_config": object()})
+    assert run_envelope._case_solves_baseline(ctx, "acme") is False
+    assert run_envelope._case_solves_baseline(ctx) is False
+    assert seen == ["acme", None]
+    monkeypatch.setattr(run_envelope, "_standing", lambda *a, **k: None)
+    monkeypatch.setattr(run_envelope, "_names_another_project", lambda *a: False)
+    envelope = {"runs": [{"tool": "run_investment_case"}], "edits": []}
+    for args in ({"owner": "bob"}, None, "not a dict"):
+        run_envelope._refusal(
+            SimpleNamespace(run_step_call="c"),
+            envelope,
+            {},
+            "run_investment_case",
+            args,
+            "write",
+            False,
+            None,
+            ctx,
+            {"call_id": "c"},
+        )
+    assert seen[2:] == ["bob", None, None]
+
+
+@pytest.mark.parametrize("raises", [False, True])
+def test_the_runners_own_step_marker_is_gone_after_the_dispatch(monkeypatch, raises):
+    """F2: `run_step_call` names the call during the dispatch and is None afterwards
+    (a raising dispatch too), so a later call with that id is a model turn's: `own_step_only`."""
+    from harness import eventlog, loop, runner
+
+    seen = {}
+
+    def dispatch_tool_call(session, call, results, turn_ctx=None, guided=False):
+        seen["during"] = session.run_step_call
+        seen["id"] = call["id"]
+        if raises:
+            raise RuntimeError("dispatch failed")
+        return iter(())
+
+    monkeypatch.setattr(loop, "dispatch_tool_call", dispatch_tool_call)
+    monkeypatch.setattr(eventlog, "message", lambda *a, **k: None)
+    monkeypatch.setattr(eventlog, "record", lambda *a, **k: None)
+    monkeypatch.setattr(
+        runner,
+        "_tasks",
+        lambda: SimpleNamespace(
+            release_claim=lambda *a: None, _effectful=lambda tool: False
+        ),
+    )
+    fake = SimpleNamespace(wake=lambda path: None, _cards={})
+    session = SimpleNamespace(task_id="t", session_id="s", run_step_call=None)
+    step = {"id": "s1", "tool": "run_investment_case"}
+    ctx = SimpleNamespace()
+    try:
+        runner.Runner.dispatch(fake, "p", ctx, session, step, {}, "approve")
+    except RuntimeError:
+        assert raises
+    assert seen["during"] == seen["id"] and seen["id"].startswith("run-s1-")
+    assert session.run_step_call is None
+    from services.results import baseline
+
+    plan = baseline.BaselinePlan(removed=(), kept=(), flags=())
+    assert (
+        _case_refusal(
+            monkeypatch, plan=plan, call=seen["id"], step=session.run_step_call
+        )
+        == "own_step_only"
+    )
