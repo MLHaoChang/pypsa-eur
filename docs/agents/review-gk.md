@@ -198,6 +198,7 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A per-step marker set around a dispatch is cleared in `finally`, with a test that includes a raising dispatch (#1454 F2, GK B (53)).
 - A preset note never prices a cost that a linked row also prices (#1462 F1, GK B (53)).
 - A key-scoped restore makes the outcome check compare only the restored keys (UM10 K3, GK B (53)).
+- A solver-config write that touches only fields in `reliability_goal.NOT_LP_FIELDS` need not bump the network revision, provided the fields are dropped from `goal_free_config` with a pin test that the fingerprint, adequacy hash and IC digest are unchanged, and every reader of those fields keys its staleness on its own inputs hash, with a test. Any other solver-config write still bumps (refines LC40-COUNTER-1; owner LC40-COUNTER-2; #1467 C1, GK B (54)).
 
 ## Engineering rules
 

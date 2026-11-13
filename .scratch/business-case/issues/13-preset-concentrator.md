@@ -3,7 +3,7 @@
 
 # 13 — Mining concentrator preset
 
-Status: ready-for-agent (blocked by 06, 07; Sonnet; GK B, GK A for linked outputs)
+Status: done
 Type: task
 Blocked by: 06, 07
 Gated: yes (GK B; GK A for the linked outputs)
@@ -28,3 +28,7 @@ Revenue reads shipped t, not mill output (LO-2); a shortfall lowers revenue once
 ### 2026-11-11: triage
 
 Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.
+
+### 2026-11-13: done
+
+PR #1462 merged at 624386dc (GK A OK @88727860 carried, GK B OK @b40eb071). Left open: no pack defaults for the maintenance and insurance shares (no sourced figure); no offered rows; the process-plant line does not scale in a shipment shortfall (the note says so).
