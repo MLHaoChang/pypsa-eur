@@ -110,6 +110,9 @@ def _solved(n) -> bool:
 
 
 def _solve(n, extra_functionality, **kw):
+    from services.solver.link_ports import ensure_link_port_frames
+
+    ensure_link_port_frames(n)  # the private copy; study harness #42
     if isinstance(n.snapshots, pd.MultiIndex):
         kw["multi_investment_periods"] = True
     return n.optimize(
