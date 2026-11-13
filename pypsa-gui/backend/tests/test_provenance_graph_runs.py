@@ -626,7 +626,9 @@ def test_the_edit_card_never_reads_none_against_none_as_unchanged(solved, monkey
     assert runs.results_verdicts(runs.read())["optimisation"].state == "uncompared"
 
 
-def test_the_envelope_chain_never_reads_none_against_none_as_no_drift(solved, monkeypatch):
+def test_the_envelope_chain_never_reads_none_against_none_as_no_drift(
+    solved, monkeypatch
+):
     """`run_envelope.chain_head`: a chain whose last link holds None and a current None is unreadable, not 'no
     drift'."""
     from services import run_envelope

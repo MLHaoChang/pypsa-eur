@@ -202,7 +202,9 @@ def read(ctx=None, *, cached: bool = False) -> RunsRead:
         network = ctx.network
         records, locked = _locked_records(ctx)
         if not locked:
-            return RunsRead(current=None, **records)  # the lock wait timed out: unreadable, stale
+            return RunsRead(
+                current=None, **records
+            )  # the lock wait timed out: unreadable, stale
         current = _current(ctx, records, cached=cached)
         if ctx.network is network and _revision(ctx) == records["revision"]:
             return RunsRead(current=current, **records)
