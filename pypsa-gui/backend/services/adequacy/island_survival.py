@@ -255,7 +255,12 @@ def island_buses(n, island) -> set[str]:
     """The island's own buses: the bus of every unit the island sidecar names
     that the network has (the set the island rows cover). A genset or
     storage modelled as a Link counts on its output bus."""
-    out = set()
+    return set(_unit_buses(n, island).values())
+
+
+def _unit_buses(n, island) -> dict[str, str]:
+    """``{unit: bus}`` for every sidecar unit the network has (see ``island_buses``)."""
+    out = {}
     for unit in island["units"]:
         for table, col in (
             ("generators", "bus"),
@@ -266,8 +271,66 @@ def island_buses(n, island) -> set[str]:
         ):
             df = getattr(n, table)
             if unit in df.index:
-                out.add(str(df.at[unit, col]))
+                out[unit] = str(df.at[unit, col])
     return out
+
+
+#: The tables whose rows supply a bus directly. A row the sidecar does not name on a bus that
+#: holds a sidecar unit marks that bus as the mainland's (#46).
+_SUPPLY_TABLES = ("generators", "storage_units", "stores")
+
+
+def _units_on_mainland(n, island) -> dict | None:
+    """#46 (GK A N5): the refusal when a sidecar unit sits on a bus that reads as the mainland's,
+    else None. The island is never repaired here: a unit on the mainland is a sidecar error, and
+    the gate says so (#1079: what cannot be read is no evidence, never ``no_tie``).
+
+    A bus reads as the mainland's when it also hosts a supply the sidecar does not list. When the
+    mainland's supply arrives only through a Link, the grid-import Link (``eh_role ==
+    "grid_import"``, its ``bus0`` the grid side) with both ends on the units' buses names it."""
+    unit_bus = _unit_buses(n, island)
+    named = set(island["units"])
+    foreign: dict[str, list[str]] = {}
+    for table in _SUPPLY_TABLES:
+        df = getattr(n, table)
+        for name in df.index:
+            bus = str(df.at[name, "bus"])
+            if name not in named and bus in unit_bus.values():
+                foreign.setdefault(bus, []).append(str(name))
+    links = []
+    if "eh_role" in n.links.columns:
+        own = set(unit_bus.values())
+        for name in n.links.index[n.links["eh_role"].astype(str) == "grid_import"]:
+            ends = {str(n.links.at[name, c]) for c in ("bus0", "bus1")}
+            if ends <= own:
+                links.append(str(name))
+                foreign.setdefault(str(n.links.at[name, "bus0"]), [])
+    if not foreign:
+        return None
+    units = sorted(u for u, b in unit_bus.items() if b in foreign)
+    buses = sorted({unit_bus[u] for u in units})
+    why = []
+    for bus in buses:
+        on = ", ".join(u for u in units if unit_bus[u] == bus)
+        if foreign[bus]:
+            reason = f"it hosts {', '.join(sorted(foreign[bus]))}, which the island sidecar does not list"
+        else:
+            reason = "it is the grid side (bus0) of the grid-import link " + ", ".join(
+                l for l in links if str(n.links.at[l, "bus0"]) == bus
+            )
+        why.append(f"{on} sits on bus {bus}, which reads as the mainland's: {reason}")
+    words = (
+        "; ".join(why)
+        + ". Move the unit off that bus, or list that bus's supply in the "
+        "island sidecar if the bus really is part of the island."
+    )
+    return {
+        "state": "unit_on_mainland",
+        "units": units,
+        "buses": buses,
+        "links": links,
+        "reason": words,
+    }
 
 
 def _ties(n, own: set[str]) -> list[tuple[str, str]]:
@@ -318,6 +381,9 @@ def tie_state(n, island) -> dict:
     directions in every hour (the island runs alone), ``closed`` naming each
     branch that can carry power, ``no_tie`` when no branch leaves the island
     and ``no_island`` when the network has none of the sidecar's units.
+    ``unit_on_mainland`` (with ``units``, ``buses``, ``links`` and ``reason``)
+    refuses when a sidecar unit sits on a bus that reads as the mainland's
+    (``_units_on_mainland``).
 
     A bus with no sidecar unit on it is off the island, so a feeder to such a
     bus reads as a tie (closed when it carries power): never an open tie
@@ -325,6 +391,9 @@ def tie_state(n, island) -> dict:
     own = island_buses(n, island)
     if not own:
         return {"state": "no_island", "ties": [], "carrying": []}
+    refused = _units_on_mainland(n, island)
+    if refused is not None:
+        return refused
     ties = _ties(n, own)
     if not ties:
         return {"state": "no_tie", "ties": [], "carrying": []}

@@ -1488,3 +1488,14 @@ def test_the_check_on_the_microgrid_templates_own_solve(hub, monkeypatch):
         defaults.drop(
             index=[a for a in defaults.index if a not in before], inplace=True
         )
+
+
+def test_a_sidecar_unit_on_the_mainland_is_no_evidence_by_name(hub):
+    """#46 (GK A N5, R2): never a pass and never no_tie."""
+    _sidecar(hub)
+    n = T.BUILDERS[TID]()
+    n.generators.at["diesel_new", "bus"] = "mainland"
+    g = _gate(hub, "mg.tie.open", value="open", ctx=_ctx(hub, n))
+    assert g["verdict"] == "not_evaluated"
+    assert g["facts"][0]["value"] == "unit_on_mainland"
+    assert "diesel_new" in g["reason"] and "mainland_supply" in g["reason"]
