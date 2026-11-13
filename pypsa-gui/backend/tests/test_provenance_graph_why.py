@@ -237,6 +237,16 @@ def test_a_missing_priced_value_gives_no_pack_price(tmp_path, monkeypatch):
     assert cost["pack_price"]["status"] == E.NOT_ESTABLISHED
 
 
+def test_a_quotient_that_overflows_gives_no_pack_price(tmp_path, monkeypatch):
+    """A finite, non-zero scale small enough that value ÷ scale overflows: never an inf pack price (X3)."""
+    n = _pv(tmp_path, monkeypatch)
+    _scale(n, 1e-308)
+    assert math.isinf(float(n.generators.at["g", "overnight_cost"]) / 1e-308)
+    pack = explain(n, "Generator", "g", "overnight_cost")["steps"][0]["pack_price"]
+    assert pack["status"] == E.NOT_ESTABLISHED and pack["basis"] == E.ARITHMETIC
+    assert "value" not in pack and "not a finite number" in pack["reason"]
+
+
 def test_a_good_pack_price_is_finite_and_non_zero(tmp_path, monkeypatch):
     n = _pv(tmp_path, monkeypatch)
     _scale(n, 1.5)
