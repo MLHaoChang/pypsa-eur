@@ -965,7 +965,10 @@ def _export_over_limit(env):
         rating = n.links.at[name, "p_nom"]
         if not _number(rating) or rating <= 0:
             return NoEvidence("export_link_unrated", f"the export link {name} has no rating to hold the export to")
-        flags = n.buses["eh_poc"] if "eh_poc" in n.buses.columns else None
+        from services.solver.process_uc import flag_column
+
+        # the shared flag rule: NaN and "False" are not tags
+        flags = flag_column(n.buses, "eh_poc") if "eh_poc" in n.buses.columns else None
         if flags is None:
             return NoEvidence("no_poc_tag", "no bus is tagged as the point of connection, so the export's "
                                             "direction is not known")

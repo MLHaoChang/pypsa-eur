@@ -207,8 +207,73 @@ def test_a_grant_may_list_the_investment_case_and_it_counts_no_solve():
         run_envelope._check_run({"tool": "run_investment_case", "restore": "final"})
 
 
-def test_the_investment_case_step_charges_no_solve_in_the_profile_budget():
+def _case_refusal(
+    monkeypatch,
+    *,
+    plan=None,
+    call="c1",
+    step="c1",
+    raises=False,
+    tool="run_investment_case",
+):
+    """`_refusal` for a case call: the run's own step is `step`, this call is `call`;
+    `plan` is what the baseline planning says (`raises`: it cannot be read)."""
+    from services.results import finance_case
+
+    def baseline_plan(n, cfg, owner=None):
+        if raises:
+            raise ValueError("unreadable")
+        return plan
+
+    monkeypatch.setattr(finance_case, "baseline_plan", baseline_plan)
+    monkeypatch.setattr(run_envelope, "_standing", lambda *a, **k: None)
+    monkeypatch.setattr(run_envelope, "_names_another_project", lambda *a: False)
+    envelope = {"runs": [{"tool": tool}], "edits": []}
+    session = SimpleNamespace(run_step_call=step)
+    ctx = SimpleNamespace(network=object(), solver_state={"solver_config": object()})
+    note = {"call_id": call}
+    return run_envelope._refusal(
+        session, envelope, {}, tool, {}, "write", False, None, ctx, note
+    )
+
+
+def test_the_case_runs_no_solve_when_nothing_is_kept(monkeypatch):
+    from services.results import baseline
+
+    plan = baseline.BaselinePlan(removed=(), kept=(), flags=())
+    assert _case_refusal(monkeypatch, plan=plan) is None
     assert run_ic.SOLVES == 0
+
+
+def test_a_case_with_a_kept_asset_is_refused_since_its_baseline_solves_are_uncounted(
+    monkeypatch,
+):
+    from services.results import baseline
+
+    plan = baseline.BaselinePlan(
+        removed=(), kept=(("StorageUnit", "old_bess"),), flags=()
+    )
+    assert _case_refusal(monkeypatch, plan=plan) == "baseline_solve"
+
+
+def test_a_case_whose_baseline_plan_cannot_be_read_is_refused(monkeypatch):
+    assert _case_refusal(monkeypatch, raises=True) == "baseline_solve"
+    assert (
+        _case_refusal(monkeypatch, plan=None) is None
+    )  # no value flows: refused later, no solve
+
+
+@pytest.mark.parametrize(
+    "call,step", [("c1", None), ("c1", "c2"), (None, None), (None, "c1")]
+)
+def test_a_model_turn_never_starts_the_case_under_the_grant(monkeypatch, call, step):
+    """#1123: the `runs` entry covers the harness's own step only."""
+    from services.results import baseline
+
+    plan = baseline.BaselinePlan(removed=(), kept=(), flags=())
+    assert (
+        _case_refusal(monkeypatch, plan=plan, call=call, step=step) == "own_step_only"
+    )
 
 
 # ── the export reader (I3) ───────────────────────────────────────────────
@@ -377,6 +442,17 @@ def test_an_untagged_or_two_sided_point_of_connection_is_not_evaluated(direct):
     assert "poc_unreadable" in str(_export(direct, n))
 
 
+@pytest.mark.parametrize("off", ["False", "0", "", float("nan"), None])
+def test_a_tag_that_does_not_read_as_true_is_not_a_tag(direct, off):
+    """The shared flag rule: the grid side tagged, the other side written as text or
+    NaN, still reads the one-sided tag (`bool("False")` would read two sides)."""
+    n = _site()
+    n.buses["eh_poc"] = n.buses["eh_poc"].astype(object)
+    n.buses.at["poi", "eh_poc"] = off
+    result = _export(direct, n)
+    assert result["verdict"] == "pass" and "poc_unreadable" not in str(result)
+
+
 def test_a_stale_solve_is_not_evaluated(direct, monkeypatch):
     import harness.calculations as calculations
 
@@ -495,6 +571,53 @@ def test_a_stale_report_and_results_that_no_longer_describe_the_network_give_no_
     fact = _read(monkeypatch, reader, report=_report(), current=False)
     assert fact[key] is None and "results_not_current" in fact["reasons"]
     assert _read(monkeypatch, reader, body=None, report=None)[key] is None
+
+
+def _written(debt):
+    """The report the finance writer itself assembles for a case with these tranches
+    (#1427: the section shape is the real writer's, not a hand-built one)."""
+    from services.finance.engine import run_case
+    from services.finance.report import assemble_finance_sections
+    from tests.test_finance_engine import LAYER, _case
+
+    case = _case(debt=debt)
+    rep = assemble_finance_sections(
+        run_case(case, layers=LAYER), case, assumptions_hash="a" * 16, packs={}
+    )
+    return {
+        **rep.model_dump(mode="json"),
+        "assumptions_hash": "h1",
+    }  # the status's own hash
+
+
+def test_the_cover_of_a_case_the_real_writer_assembled_with_a_debt_tranche(monkeypatch):
+    from models.finance import DebtTranche
+
+    loan = DebtTranche(
+        kind="term_loan",
+        amount=400.0,
+        rate=0.05,
+        tenor_years=5,
+        upfront_fee=0.01,
+        dsra_months=0,
+        grace_years=0,
+        commitment_fee=0.0,
+    )
+    report = _written([loan])
+    debt = report["sections"]["debt"]["payload"]
+    expect = min(r for p, r in zip(debt["service"], debt["dscr"]) if p > 0)
+    fact = _read(monkeypatch, ic.read_min_dscr, report=report)
+    assert fact["state"] == ic.ESTABLISHED
+    assert fact["min_dscr"] == pytest.approx(expect) and fact["min_dscr"] > 1.0
+    assert fact["years"] == sum(1 for p in debt["service"] if p > 0) >= 5
+
+
+def test_a_case_the_real_writer_assembled_with_no_debt_has_no_cover_to_judge(
+    monkeypatch,
+):
+    """The shipped template has no debt: `no_debt_service`, which the gate leaves not evaluated."""
+    fact = _read(monkeypatch, ic.read_min_dscr, report=_written([]))
+    assert fact["min_dscr"] is None and fact["reasons"] == ["no_debt_service"]
 
 
 def test_the_cover_is_the_minimum_over_the_years_with_debt_service_only(monkeypatch):
@@ -677,6 +800,9 @@ def test_a_run_entry_naming_the_case_is_checked_like_any_other_run():
 
 
 def test_only_a_listed_solving_run_is_held_to_the_solve_budget(monkeypatch):
+    from services.results import finance_case
+
+    monkeypatch.setattr(finance_case, "baseline_plan", lambda *a, **k: None)
     seen = []
 
     def standing(session, envelope, task, ctx, solve=False):
@@ -691,7 +817,16 @@ def test_only_a_listed_solving_run_is_held_to_the_solve_budget(monkeypatch):
 
     def refusal(tool):
         return run_envelope._refusal(
-            None, envelope, {}, tool, {}, "write", False, None, None, {}
+            SimpleNamespace(run_step_call="c"),
+            envelope,
+            {},
+            tool,
+            {},
+            "write",
+            False,
+            None,
+            SimpleNamespace(network=None, solver_state={}),
+            {"call_id": "c"},
         )
 
     assert refusal("run_investment_case") == "probe" and seen == [

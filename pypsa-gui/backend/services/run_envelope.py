@@ -1429,6 +1429,19 @@ def _in_bounds(entry, new, at_grant):
     return True
 
 
+def _case_solves_baseline(ctx) -> bool:
+    """Whether the investment case would re-solve the counterfactual baseline
+    (`baseline_plan(...).needed`: the owner keeps an existing asset). Anything
+    unreadable counts as yes (fail closed)."""
+    try:
+        from services.results.finance_case import baseline_plan
+
+        plan = baseline_plan(ctx.network, ctx.solver_state.get("solver_config"), None)
+        return plan is not None and plan.needed
+    except Exception:  # noqa: BLE001 - an unreadable plan refuses
+        return True
+
+
 def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx, note):
     from harness.catalogue import TOOLS
     if external:
@@ -1443,6 +1456,14 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         # A `runs` entry covers the harness's own engine step only (C9, #875): a model turn
         # never starts a loop, its solves and target its own.
         return "engine_only"
+    if tool in CASE_TOOLS:
+        # Study harness 14 (GK B (53) B1, B2): the case is the harness's own step, never a
+        # model turn's, and it runs no solve the budget has not counted: a kept existing
+        # asset makes the case re-solve the baseline (one or two LPs), so it is refused.
+        if not note.get("call_id") or note["call_id"] != getattr(session, "run_step_call", None):
+            return "own_step_only"
+        if _case_solves_baseline(ctx):
+            return "baseline_solve"
     if _deletes(tool, edit_card):
         return "delete"
     if tier == "destructive" and tool not in PLANNED_TOOLS:
@@ -1573,7 +1594,7 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
     if envelope is None or not task.get("run"):
         return None
     ctx = assistant_tasks.RUN_CONTEXT.get()
-    note = {"scope": getattr(session, "loop_scope", None)}
+    note = {"scope": getattr(session, "loop_scope", None), "call_id": call_id}
     reason = _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx, note)
     guard = getattr(session, "decision_guard", None)
     if reason is None and (guard is None or not guard(tool, args)):

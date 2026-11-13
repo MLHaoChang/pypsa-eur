@@ -927,7 +927,8 @@ def _eh_ipp_hybrid() -> dict:
                  "unit": "MW"},
                 _rule("ipp.ic.min_dscr", "ic.min_dscr", "ge", IPP_DSCR_MIN, severity="warn",
                       basis=f"The investment case's lowest debt cover over the years with debt service is "
-                            f"at least {IPP_DSCR_MIN}; with no debt there is no cover to judge."),
+                            f"at least {IPP_DSCR_MIN}, an assumed floor and not the lender's covenant; "
+                            "with no debt there is no cover to judge."),
                 _rule("ipp.ic.pre_tax_irr", "ic.project_pre_tax_irr", "nonempty", severity="warn",
                       basis="The investment case established the project's pre-tax IRR."),
             ]},

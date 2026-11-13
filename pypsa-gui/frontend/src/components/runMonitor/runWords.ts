@@ -71,7 +71,7 @@ export const FACT_WORDS: Record<string, string> = {
   'process.delivery.shortfall': 'The product delivery is met within its tolerance in every period',
   // Study harness 14: the renewables IPP's export and investment-case figures.
   'ipp.export.over_limit_mw': 'The power exported never passes the export connection\'s rating',
-  'ic.min_dscr': 'The investment case\'s lowest debt cover is at or above the floor',
+  'ic.min_dscr': 'The investment case\'s lowest debt cover is at or above the assumed floor (not the lender\'s covenant)',
   'ic.project_pre_tax_irr': 'The investment case reports the project\'s pre-tax IRR',
 }
 

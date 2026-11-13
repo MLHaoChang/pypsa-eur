@@ -1082,6 +1082,7 @@ class Runner:
         carded, ran, errors = [], [], []
         session._undo_snapshotted = []  # each runner step is its own undo step, as a chat turn is
         session._turn_in_flight = True
+        session.run_step_call = tool_use_id  # the harness's own step (the case tool's admission, SH-14)
         try:
             if decision is None and not take_locks():
                 return
@@ -1116,6 +1117,7 @@ class Runner:
             locks.close()
             session.decision_guard = None
             session.write_guard = None
+            session.run_step_call = None
             session._turn_in_flight = False
             if results:
                 eventlog.message(session, {"role": "user", "content": [results[-1]]})

@@ -1744,8 +1744,13 @@ the preset turns off (grid, control, reliability), with its reason, read from
   `harness/run_ic.py` settles it from the case's record, the one whose
   `started_at` the start receipt names (the shape of `run_eh`; nothing
   polls, LC-45). A refused, failed or aborted case fails the step; a replaced
-  or lost record is uncertain. It solves no LP: `run_envelope.CASE_TOOLS` lets a
-  grant list it, and it never counts against the solves budget.
+  or lost record is uncertain. `run_envelope.CASE_TOOLS` lets a
+  grant list it, but only as the runner's own step (`session.run_step_call`;
+  a model turn is refused `own_step_only`). It is never counted as a solve
+  because it runs none: a case whose owner keeps an existing asset would
+  re-solve the baseline (one or two LPs), so that case is refused
+  `baseline_solve` (as is one whose plan cannot be read) rather than run
+  uncounted.
 - **Result gate.** The core rules and:
   - `ipp.export.over_limit_mw` (block, at most 0): the peak export through the
     link the commercial config names (`export_link`) over every snapshot of
@@ -1753,7 +1758,7 @@ the preset turns off (grid, control, reliability), with its reason, read from
     of connection (`eh_poc`) is bus1 and `-p0` when it is bus0, so an import
     never counts. No named link, no rating, no tag or a non-finite flow is no
     evidence; no limit is assumed;
-  - `ic.min_dscr` (warn, at least `IPP_DSCR_MIN`, an assumed 1.2): the least
+  - `ic.min_dscr` (warn, at least `IPP_DSCR_MIN`, an assumed 1.2 that is not the lender's covenant, labelled so on the rule and the card): the least
     DSCR over the years with debt service. No debt, or a year with service
     and no finite DSCR, is not established (the shipped template has no debt,
     so the rule is then not evaluated);
