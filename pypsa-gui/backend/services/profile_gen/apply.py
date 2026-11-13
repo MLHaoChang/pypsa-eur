@@ -1543,6 +1543,11 @@ def assign_profile(
         # A new profile invalidates solved dispatch exactly like a topology
         # edit — flip freshness so Results can't serve the old solve.
         dispatch_cleared = clear_dispatch(n)
+        # PG-04a F1: these routes cross no edit seam (/api/projects), so the
+        # fingerprint cache learns of the write here, after it.
+        from services import dirty_state
+
+        dirty_state.bump_inputs(ctx)
 
     if family_name == "renewable":
         what = f"generated {meta.get('technology', '?')} profile"

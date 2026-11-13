@@ -72,11 +72,25 @@ def _answers(*, solving=False):
         "changed": fresh["inputs_changed_since_solve"],
         "current": fresh["results_current"],
         "edit_card": edit_card._results_stale(),
+        "with_freshness": _note_word(),
     }
+
+
+def _note_word():
+    """`chat_tools._with_freshness`'s note on a result read, as a word: stale, not current, or none."""
+    from services import chat_tools
+
+    note = chat_tools._with_freshness({}).get("freshness_note") or ""
+    return "stale" if note.startswith("stale") else ("not current" if note else "none")
 
 
 def _value_edit(n, ctx):
     n.generators.at["g", "marginal_cost"] = 60
+
+
+def _sub_precision_edit(n, ctx):
+    """F4: an edit below the plain hash's precision: the plain fingerprint is equal, the exact one differs."""
+    n.generators.at["g", "marginal_cost"] = 50 + 1e-11
 
 
 def _shape_edit(n, ctx):
@@ -115,43 +129,61 @@ def _study(n, ctx, *, revision="now"):
     ctx.solver_state["eh_study"] = record
 
 
-#: scenario → (now, before this slice) for each consumer. Keys: optimisation, loadflow, study (the flow), changed
-#: (`inputs_changed_since_solve`), edit_card (`_results_stale`). "raise" was an exception out of `solve_freshness`.
+#: scenario → (now, today on master `8ea2ed90f`) per consumer, each its own column (V3): header (the flow's
+#: optimisation word, `freshness_by_kind`), with_freshness (`chat_tools._with_freshness`'s note), current
+#: (`results_current`, which `run_gates._fresh` returns), changed (`inputs_changed_since_solve`), edit_card
+#: (`_results_stale`). "raise" was an exception out of `solve_freshness`. Today's values were read by running these
+#: scenarios on master.
+_COLS = ("optimisation", "with_freshness", "current", "changed", "edit_card")
+
+
+def _row(*values):
+    return dict(zip(_COLS, values))
+
+
 SCENARIOS = {
     "solved, untouched": (
         [],
-        dict(optimisation="fresh", changed=False, edit_card=False),
-        dict(optimisation="fresh", changed=False, edit_card=False),
+        _row("fresh", "none", True, False, False),
+        _row("fresh", "none", True, False, False),
     ),
     "value edit, same dispatch shape": (
         [_value_edit],
-        dict(optimisation="stale", changed=True, edit_card=True),
-        dict(optimisation="fresh", changed=True, edit_card=True),
+        _row("stale", "stale", False, True, True),
+        _row("fresh", "stale", False, True, True),
+    ),
+    "sub-precision value edit (plain equal, exact differs)": (
+        [_sub_precision_edit],
+        _row("stale", "stale", False, True, True),
+        _row("fresh", "stale", False, True, False),
     ),
     "shape edit": (
         [_shape_edit],
-        dict(optimisation="stale", changed=True, edit_card=True),
-        dict(optimisation="stale", changed=True, edit_card=True),
+        _row("stale", "stale", False, True, True),
+        _row("stale", "stale", False, True, True),
     ),
     "current fingerprint unreadable": (
         [_raising],
-        dict(optimisation="stale", changed=True, edit_card=True),
-        dict(optimisation="fresh", changed="raise", edit_card=True),
+        _row("stale", "stale", False, True, True),
+        _row("fresh", "raise", "raise", "raise", True),
     ),
     "no solve recorded its inputs (a loaded network)": (
         [_unrecorded],
-        dict(optimisation="uncompared", changed=None, edit_card=False),
-        dict(optimisation="fresh", changed=None, edit_card=False),
+        _row("uncompared", "none", False, None, False),
+        _row("fresh", "none", False, None, False),
     ),
     "exact fingerprint never recorded": (
         [_plain_only],
-        dict(optimisation="stale", changed=True, edit_card=True),
-        dict(optimisation="fresh", changed=True, edit_card=False),
+        _row("stale", "stale", False, True, True),
+        _row("fresh", "stale", False, True, False),
     ),
 }
 
 #: Worse is larger; a consumer may move up the order, never down (V3).
 RANK = {"fresh": 0, False: 0, None: 1, "uncompared": 1, "stale": 2, True: 2, "raise": 2}
+#: For `current` (results_current), True is the fresh end; and a note's words.
+RANK_CURRENT = {True: 0, False: 2, "raise": 2}
+RANK_NOTE = {"none": 0, "not current": 1, "stale": 2, "raise": 2}
 
 
 @pytest.mark.parametrize("name", list(SCENARIOS))
@@ -173,7 +205,8 @@ def test_every_consumer_agrees_with_the_optimisation_verdict(solved, monkeypatch
     # `run_gates._fresh` reads `results_current`: never current unless the verdict is fresh (V3: None is not fresh).
     assert got["current"] is (got["optimisation"] == "fresh")
     for key in now:
-        assert RANK[now[key]] >= RANK[before[key]], (name, key)
+        rank = {"current": RANK_CURRENT, "with_freshness": RANK_NOTE}.get(key, RANK)
+        assert rank[now[key]] >= rank[before[key]], (name, key)
 
 
 def test_run_gates_fresh_treats_no_recorded_inputs_as_not_fresh(solved):
@@ -563,40 +596,240 @@ def test_loadflow_current_is_the_flow_s_load_flow_word(solved):
 # ── locks (#1384 N1) ─────────────────────────────────────────────────────────
 
 
-def test_a_mutation_lock_wait_that_times_out_reads_unreadable(solved, monkeypatch):
-    """A network held mid-edit past `LOCK_WAIT_S` is never compared unlocked: the current fingerprint reads as
-    unreadable, so the solved results are stale, and the hash is not read at all."""
+def _held(ctx):
+    """Another thread holds the mutation lock until the returned `release` is called."""
     import threading
 
+    held, done = threading.Event(), threading.Event()
+
+    def holder():
+        with ctx.mutation_lock:
+            held.set()
+            done.wait(10)
+
+    t = threading.Thread(target=holder)
+    t.start()
+    assert held.wait(5)
+
+    def release():
+        done.set()
+        t.join()
+
+    return release
+
+
+@pytest.mark.parametrize("solving", [False, True])
+def test_a_freshness_read_never_waits_for_the_mutation_lock(
+    solved, monkeypatch, solving
+):
+    """F2: another thread holding the mutation lock (a save, a hand-over, or a solve) neither stalls the header or the
+    chat read nor makes it stale: they read what they read with the lock free."""
+    from services import flow_service
+
     _, ctx = solved
-    assert runs.results_verdicts(runs.read())["optimisation"].state == "fresh"
-    monkeypatch.setattr(runs, "LOCK_WAIT_S", 0.01)
-    hashed = []
+    if solving:  # a solve holds the lock for its whole run; the flow reports it running
+        monkeypatch.setattr(
+            flow_service, "_solver_in_flight", lambda: True, raising=False
+        )
+    release = _held(ctx)
+    real_lock = ctx.mutation_lock
+    waits = []
+
+    class Spy:
+        def acquire(self, blocking=True, timeout=-1):
+            waits.append((blocking, timeout))
+            return real_lock.acquire(blocking, timeout)
+
+        def release(self):
+            real_lock.release()
+
+    ctx.mutation_lock = Spy()
+    try:
+        cached = runs.results_verdicts(runs.read(cached=True))["optimisation"].state
+        live = runs.results_verdicts(runs.read())["optimisation"].state
+        chat = workflow_tools.solve_freshness()
+    finally:
+        ctx.mutation_lock = real_lock
+        release()
+    assert cached == live == "fresh"
+    assert chat["inputs_changed_since_solve"] is False
+    assert waits and all(w == (False, -1) for w in waits), (
+        waits
+    )  # never a blocking acquire
+
+
+def test_a_held_lock_still_reads_an_edit_as_stale(solved):
+    """F2: never waiting is not reading blind: an edit made before the read is stale with the lock held."""
+    n, ctx = solved
+    _value_edit(n, ctx)
+    release = _held(ctx)
+    try:
+        assert runs.results_verdicts(runs.read())["optimisation"].state == "stale"
+    finally:
+        release()
+
+
+# ── F1: every writer of a hashed input invalidates the cache ────────────────
+
+
+def _hashes(monkeypatch):
+    calls = []
     real = workflow_tools._network_input_fingerprint
     monkeypatch.setattr(
         workflow_tools,
         "_network_input_fingerprint",
-        lambda *a, **k: hashed.append(1) or real(*a, **k),
+        lambda *a, **k: calls.append(k.get("exact", False)) or real(*a, **k),
     )
-    held, done = threading.Event(), threading.Event()
+    return calls
 
-    def editor():
-        with ctx.mutation_lock:
-            held.set()
-            done.wait(5)
 
-    t = threading.Thread(target=editor)
-    t.start()
-    try:
-        assert held.wait(5)
-        r = runs.read()
-    finally:
-        done.set()
+def _agree():
+    """The cached verdict is the live one (the property: never served for another state)."""
+    cached = runs.results_verdicts(runs.read(cached=True))["optimisation"].state
+    live = runs.results_verdicts(runs.read())["optimisation"].state
+    assert cached == live, (cached, live)
+    return cached
+
+
+def test_a_finance_edit_reaches_the_cache(solved):
+    """F1(a): PUT /api/simulation/finance writes `solver_config.finance`, which the fingerprint hashes, and bumps
+    nothing. The stamp digests the goal-free config."""
+    _, ctx = solved
+    assert _agree() == "fresh"
+    import dataclasses
+
+    config = ctx.solver_state["solver_config"]
+    # As the route writes it: the config rebuilt with the new finance, no bump.
+    ctx.solver_state["solver_config"] = dataclasses.replace(
+        config, finance={"discount_rate": 0.0731}
+    )
+    assert _agree() == "stale"
+
+
+@pytest.mark.parametrize("name", ["eh_template.json", "island_config.json"])
+def test_a_sidecar_write_reaches_the_cache(solved, monkeypatch, tmp_path, name):
+    """F1(c): `dc_backup.save_backup` (PUT dc-backup) writes the DC spec in `eh_template.json`; PUT island and POST
+    island/preset write `island_config.json`. The reserve floors and the DC curtailment terms the fingerprint hashes
+    come from them, and neither write bumps. The stamp digests both files, so the next read hashes again."""
+    _, ctx = solved
+    monkeypatch.setattr(ctx, "storage_dir", tmp_path, raising=False)
+    (tmp_path / name).write_text('{"v": 1}')
+    calls = _hashes(monkeypatch)
+    runs.read(cached=True)
+    runs.read(cached=True)
+    first = len(calls)
+    (tmp_path / name).write_text('{"v": 2}')
+    runs.read(cached=True)
+    assert len(calls) > first
+
+
+def test_the_chat_seam_moves_the_input_generation_after_its_handler(
+    solved, monkeypatch
+):
+    """F1(b): the chat seam bumps the edit counter before the handler; a poll in between caches the pre-edit hash
+    at the new counter. The handler is wrapped so the input generation moves once it returns, or raises."""
+    from harness import loop
+
+    n, ctx = solved
+    calls = _hashes(monkeypatch)
+    ctx.network_revision = int(ctx.network_revision or 0) + 1  # the seam's bump
+    assert (
+        _agree() == "fresh"
+    )  # a poll before the handler runs caches the pre-edit hash
+
+    def handler():
+        _value_edit(n, ctx)
+        return {"ok": True}
+
+    assert loop._bump_inputs_after(handler, ctx)() == {"ok": True}
+    assert _agree() == "stale"
+
+    def raising():
+        raise RuntimeError("part-way")
+
+    before = ctx.input_generation
+    with pytest.raises(RuntimeError):
+        loop._bump_inputs_after(raising, ctx)()
+    assert ctx.input_generation == before + 1
+    assert calls
+
+
+def test_a_profile_apply_reaches_the_cache(install_network):
+    """F1: the profile apply routes (/api/projects/{name}/profiles/...) and their chat tools write `user_ts` and the
+    network through `assign_profile`, crossing no edit seam; it moves the input generation after the write."""
+    from services.profile_gen.apply import assign_profile
+    from tests.test_profile_gen_load_family import NOW, _gen
+
+    n = pypsa.Network()
+    idx = pd.date_range("2023-01-01", "2023-12-31T23:00", freq="h", name="snapshot")
+    n.set_snapshots(idx)
+    n.add("Bus", "B1")
+    n.add("Load", "L1", bus="B1")
+    install_network(n)
+    ctx = PyPSAService.get_active_context()
+    stamp = runs._stamp(ctx)
+    res = _gen("commercial", {"peak_mw": None, "annual_mwh": 8000.0})
+    assign_profile(
+        ctx,
+        "L1",
+        res.series["L1"],
+        res.meta,
+        component_type="loads",
+        attribute="p_set",
+        now=NOW,
+    )
+    assert runs._stamp(ctx) != stamp
+
+
+def test_the_cache_hashes_once_per_state_for_concurrent_polls(solved, monkeypatch):
+    """F3: single flight. Concurrent polls of one state hash once (one plain, one exact), not once each."""
+    import threading
+    import time
+
+    calls = []
+    real = workflow_tools._network_input_fingerprint
+
+    def slow(*a, **k):
+        calls.append(k.get("exact", False))
+        time.sleep(0.2)
+        return real(*a, **k)
+
+    monkeypatch.setattr(workflow_tools, "_network_input_fingerprint", slow)
+    out = []
+    threads = [
+        threading.Thread(
+            target=lambda: out.append(
+                runs.results_verdicts(runs.read(cached=True))["optimisation"].state
+            )
+        )
+        for _ in range(4)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
         t.join()
-    assert r.current is None and r.solved is not None and hashed == []
-    assert runs.results_verdicts(r)["optimisation"].state == "stale"
-    # The lock free again: fresh, as before.
-    assert runs.results_verdicts(runs.read())["optimisation"].state == "fresh"
+    assert out == ["fresh"] * 4
+    assert sorted(calls) == [False, True]
+
+
+def test_an_entry_is_not_stored_when_the_state_moved_during_the_hash(
+    solved, monkeypatch
+):
+    """A hash during which the stamp moved is returned, never stored for the stamp read before it."""
+    _, ctx = solved
+    real = workflow_tools._network_input_fingerprint
+    moved = []
+
+    def moving(*a, **k):
+        if not moved:
+            moved.append(1)
+            ctx.input_generation += 1
+        return real(*a, **k)
+
+    monkeypatch.setattr(workflow_tools, "_network_input_fingerprint", moving)
+    stamp = runs._stamp(ctx)
+    runs._cached_fingerprint(ctx, stamp, exact=False)
+    assert runs._lookup((id(ctx), False), ctx, ctx.network, stamp) is runs._MISS
 
 
 def test_solver_state_is_read_under_its_lock_inside_the_mutation_lock(solved):
@@ -665,3 +898,20 @@ def test_a_brief_never_reads_none_against_none_as_current(solved, monkeypatch):
     _raising(n, ctx, monkeypatch)
     task = {"id": "t", "brief": {"x": 1}, "status": "ready", "fingerprint": None}
     assert assistant_tasks._stale(task) is True
+
+
+def test_run_evidence_never_keeps_captures_on_none_against_none(solved, monkeypatch):
+    """V2: `run_evidence._capture_retained` keeps the retained sections only when the current fingerprint matches
+    the solved one; no recorded one and no readable current one compare nothing, so nothing is kept."""
+    from services import retained_results, run_evidence
+
+    n, ctx = solved
+    monkeypatch.setattr(
+        retained_results, "capture", lambda _ctx, _token: ({"x": {"v": 1}}, [])
+    )
+    kept, _fp, _w = run_evidence._capture_retained(ctx, {})
+    assert kept == {"x": {"v": 1}}  # matching: kept
+    _unrecorded(n, ctx)
+    _raising(n, ctx, monkeypatch)
+    kept, fp, _w = run_evidence._capture_retained(ctx, {})
+    assert fp is None and kept == {}

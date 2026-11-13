@@ -889,7 +889,9 @@ def _capture_retained(ctx: Any, token: dict) -> tuple[dict[str, dict], str | Non
         warnings.append('inputs_changed_before_publish')
     else:
         captured, not_kept = retained_results.capture(ctx, token)
-        if _input_fingerprint(ctx) == fingerprint:
+        # A current None never matches a recorded None (PG-04a V2): unreadable inputs keep nothing.
+        current = _input_fingerprint(ctx)
+        if current is not None and current == fingerprint:
             kept = captured
             missed = not_kept
     warnings.extend(f'{name}_not_captured' for name in missed)
