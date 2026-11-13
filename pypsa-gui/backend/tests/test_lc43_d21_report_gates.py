@@ -27,8 +27,9 @@ still reads MC LOLE 3.21 h/yr:
   check" (the section's audit re-run against the facts version 1 verified, LC-43a);
 - table cells are compared one by one (GK B 52): two rows that swap values, a unit
   changed beside the number ("3.21 min/yr") or in the row label ("MC LOLE (min/yr)")
-  are withheld and listed the same way, while a reformat ("3.210 h/yr") is accepted
-  with no Numbers to check entry;
+  are withheld and listed the same way, as is an added row "42 MW"; a reformat
+  ("3.210 h/yr"), a label renamed in a row with no number and an added row with no
+  number are accepted with no Numbers to check entry;
 - a copy that changes only the summary prose to "The plan is robust." becomes version 2
   with that summary's ``source`` ``user_edit``, the headline and version 1 as above, and
   a diff with version 3 is 404 report_version_not_found;
@@ -237,21 +238,53 @@ def test_a_table_edit_that_moves_or_relabels_an_admitted_number_is_withheld(
     assert f"Executive summary: {listed}" in [p.text for p in delivered.paragraphs]
 
 
-def test_a_table_edit_that_only_reformats_a_number_is_accepted(
-    project, client, monkeypatch
-):
-    """T3: "3.210 h/yr" states the admitted 3.21 h/yr, so the edit stands."""
+def test_an_added_row_that_states_a_number_is_withheld(project, client, monkeypatch):
+    """A row the admitted table does not have, as the reshaped-table pairing reads it."""
     report_id = _generated(monkeypatch)
     doc = _docx(client, report_id)
-    for row in doc.tables[0].rows:
-        if row.cells[0].text == _LOLE:
-            row.cells[1].text = "3.210 h/yr"
+    row = doc.tables[0].add_row()
+    row.cells[0].text, row.cells[1].text = "Peak shed (MW)", "42 MW"
 
     assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
 
     delivered = _docx(client, report_id, 2)
     headline = [[c.text for c in row.cells] for row in delivered.tables[0].rows]
-    assert [_LOLE, "3.210 h/yr"] in headline
+    assert headline == [["Item", "Value"]] + HEADLINE
+    paragraphs = [p.text for p in delivered.paragraphs]
+    assert "Executive summary: 42 MW (unverified, withheld)" in paragraphs
+
+
+@pytest.mark.parametrize(
+    "edit, shown",
+    [
+        # T3: "3.210 h/yr" states the admitted 3.21 h/yr.
+        ("reformat", [_LOLE, "3.210 h/yr"]),
+        # A label renamed in a row that holds no number.
+        ("label", ["Archetype name", "strong_grid"]),
+        # A row added with no number in it (the reshaped-table pairing).
+        ("row", ["Reviewer", "not established"]),
+    ],
+)
+def test_a_table_edit_that_changes_no_number_is_accepted(
+    project, client, monkeypatch, edit, shown
+):
+    report_id = _generated(monkeypatch)
+    doc = _docx(client, report_id)
+    table = doc.tables[0]
+    if edit == "row":
+        row = table.add_row()
+        row.cells[0].text, row.cells[1].text = shown
+    for row in table.rows:
+        if edit == "reformat" and row.cells[0].text == _LOLE:
+            row.cells[1].text = "3.210 h/yr"
+        if edit == "label" and row.cells[0].text == "Archetype":
+            row.cells[0].text = "Archetype name"
+
+    assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
+
+    delivered = _docx(client, report_id, 2)
+    headline = [[c.text for c in row.cells] for row in delivered.tables[0].rows]
+    assert shown in headline
     paragraphs = [p.text for p in delivered.paragraphs]
     assert not [p for p in paragraphs if p.startswith("Executive summary:")]
     assert not [p for p in paragraphs if "Withheld:" in p]

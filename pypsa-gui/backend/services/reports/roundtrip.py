@@ -792,8 +792,8 @@ def _changed_numbers(original: Table, edited: Table) -> list[str]:
     equal reformat ("3.210", "1,000", a Unicode minus) is not (T3). A row
     label or column header is a change when its text differs and its row or
     column holds a number (a unit edited in "MC LOLE (h/yr)"). A cell with no
-    original counterpart is a change when it, or its row or column if it is a
-    label, holds a number.
+    original counterpart (a new or renamed row or column) is a change when it
+    states a number.
     """
     from services.reports.revisions import numbers
 
@@ -820,7 +820,8 @@ def _changed_numbers(original: Table, edited: Table) -> list[str]:
             c0 = c if cols is None else cols.get(c)
             label = r == 0 or c == 0
             if r0 is None or c0 is None or c0 >= len(old[r0]):
-                changed = bool(numbers(cell)) or (label and has_number(new, r, c))
+                # A new or renamed row or column: its own numbers are new.
+                changed = bool(numbers(cell))
             else:
                 before = old[r0][c0]
                 changed = bool(numbers(cell) - numbers(before)) or (
@@ -849,16 +850,11 @@ def _checked(section: Section, blocks: list, base: ReportDocument,
     kept: list = []
     withheld: list[str] = []
     for block in blocks:
+        edited = edited_tables.get(block.table_id) if isinstance(block, TableRef) else None
         original = (
-            base.tables.get(block.table_id.removesuffix(suffix))
-            if isinstance(block, TableRef) and block.table_id.endswith(suffix)
-            else None
+            base.tables.get(block.table_id.removesuffix(suffix)) if edited is not None else None
         )
-        new = (
-            _changed_numbers(original, edited_tables[block.table_id])
-            if original is not None and block.table_id in edited_tables
-            else []
-        )
+        new = _changed_numbers(original, edited) if original is not None else []
         if not new:
             kept.append(block)
             continue

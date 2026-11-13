@@ -725,12 +725,14 @@ VARIANTS: list[dict] = [
     _covered('LC-D21.edited_admitted_number', 'an edited Word copy (bound as the template or not) whose headline MC LOLE reads 1.00 h/yr is version 2 whose DOCX headline still '
              'reads the admitted 3.21 h/yr, with a withheld placeholder and "Executive summary: 1.00 h/yr (unverified, withheld)" in Numbers to check; a copy whose summary '
              'prose reads 1.0 h/yr keeps the sentence, its audit re-run against the facts version 1 verified lists 1.0 h/yr unverified, and Numbers to check lists it; cells are compared one by one: '
-             'two rows swapping values, 3.21 min/yr and a row label MC LOLE (min/yr) are withheld and listed, a reformat 3.210 h/yr is accepted with no entry (LC-43a, GK B 52)',
+             'two rows swapping values, 3.21 min/yr, a row label MC LOLE (min/yr) and an added 42 MW row are withheld and listed; a reformat 3.210 h/yr, a renamed label in a row '
+             'with no number and an added row with no number are accepted with no entry (LC-43a, GK B 52)',
              'import_edited_report export_report_docx get_report get_report_table',
              B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_leaves_the_headline_and_version_one',
              B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_in_prose_lists_it_to_check',
              B + 'test_lc43_d21_report_gates.py::test_a_table_edit_that_moves_or_relabels_an_admitted_number_is_withheld',
-             B + 'test_lc43_d21_report_gates.py::test_a_table_edit_that_only_reformats_a_number_is_accepted'),
+             B + 'test_lc43_d21_report_gates.py::test_an_added_row_that_states_a_number_is_withheld',
+             B + 'test_lc43_d21_report_gates.py::test_a_table_edit_that_changes_no_number_is_accepted'),
     _pending('LC-D21.stale_report', 'a report generated or exported after its study changed is neither refused nor flagged (only the IC case note): no stale gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D21.report_resume', 'a report job interrupted by a restart is not resumed (its record is in-process state): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D22.undo_checkpoints', 'input-table fingerprint before/after: undo restores the exact fingerprint and the matching results (objective 100, current again), '
