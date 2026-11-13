@@ -553,8 +553,9 @@ def _network_input_fingerprint(ctx, *, exact=False):
             parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
     # AS-02, homer-parity 02a: a generator fuel curve's inputs, which the solve staging turns into marginal_cost
     # and stand_by_cost (both already hashed as PyPSA columns). Appended only when present.
-    # homer-parity 02b: the run-hour pair rides in the same block (a lifetime in running hours prices no LP column).
-    from services.fuel_curve import INPUT_COLUMNS as FUEL_CURVE_COLUMNS
+    # homer-parity 02b: the O&M per running hour rides in the same block (a lifetime in running hours is the
+    # investment case's, `finance_case.owner_assets_digest`).
+    from services.fuel_curve import LP_COLUMNS as FUEL_CURVE_COLUMNS
     present = [c for c in FUEL_CURVE_COLUMNS if c in n.generators.columns]
     if present:
         parts.append("fuel-curve/1")

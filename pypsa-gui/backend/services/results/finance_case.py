@@ -1781,10 +1781,15 @@ def _run_hour_life(n, name: str, parts: tuple[AssetPart, ...], life: float | Non
     """Generator `name`'s parts and lifetime worn by its lifetime in running hours (homer-parity 02b,
     `fuel_curve.run_hour_lifetime`): each part's lifetime and the asset's become the shorter of their own and the
     run-hour one, flagged `run_hour_lifetime:<name>` when it is shorter (an unknown or infinite calendar lifetime
-    counts as longer). Unchanged with no run-hour lifetime; `run_hour_lifetime_unknown:<name>` when not solved."""
+    counts as longer). Unchanged with no run-hour lifetime; `run_hour_lifetime_unknown:<name>` when not solved; a
+    generator of several parts keeps its calendar lives, flagged `run_hour_lifetime_multi_part:<name>`."""
     years, flags = fuel_curve.run_hour_lifetime(n, name)
     if years is None:
-        return parts, life, [f for f in flags if f.startswith("run_hour_lifetime_unknown:")]
+        return parts, life, flags
+    if len(parts) > 1:
+        # GK B H4: a part that does not run (civil works, a tank) keeps its calendar life, and parts cannot be
+        # told apart here, so a multi-part generator keeps every calendar life.
+        return parts, life, [f"run_hour_lifetime_multi_part:{name}"]
 
     def worn(v: float | None) -> float:
         return years if v is None or v > years else v
@@ -1865,6 +1870,8 @@ def owner_assets_digest(n, commercial) -> str:
                 out.append([comp, name, "missing"])
                 continue
             cols = [*_INVESTMENT_COLS, *_schema.part_columns(comp), _CAPACITY_COLS[comp]]
+            if comp == "Generator":
+                cols.append(fuel_curve.LIFE_HOURS)      # homer-parity 02b: it wears the parts (present only if set)
             if comp == "Transformer":
                 cols.append("s_nom_opt")
             out.append([comp, name, {c: _raw_value(df.at[name, c]) for c in cols

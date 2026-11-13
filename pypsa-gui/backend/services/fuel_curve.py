@@ -56,6 +56,9 @@ OM_HOUR = "om_cost_per_run_hour"
 LIFE_HOURS = "lifetime_run_hours"
 #: Every input this module reads (the fingerprint, the pre-run check): the curve and the run-hour pair.
 INPUT_COLUMNS = (*COLUMNS, OM_HOUR, LIFE_HOURS)
+#: The inputs the LP reads (the solve fingerprint). A lifetime in running hours is read by the investment case only
+#: (`finance_case.owner_assets_digest`).
+LP_COLUMNS = (*COLUMNS, OM_HOUR)
 #: The PyPSA columns the curve writes.
 DERIVED = ("marginal_cost", "stand_by_cost")
 #: Each column as the Generator form labels it (`services/asset_schema/fields.py`): a refusal opens with it.
@@ -113,9 +116,7 @@ def _check_run_hours(row: Mapping[str, Any]) -> str | None:
     if om is not None and om < 0:
         return f"{LABELS[OM_HOUR]}: enter zero or more (got {om:g})"
     if om and not _flag(row.get("committable")):
-        return (
-            f"{LABELS[OM_HOUR]}: turn on Unit commitment, or set it to 0. It is paid only while the unit is on"
-        )
+        return f"{LABELS[OM_HOUR]}: turn on Unit commitment, or set it to 0. It is paid only while the unit is on"
     if life is not None and life <= 0:
         return f"{LABELS[LIFE_HOURS]}: enter more than zero (got {life:g})"
     return None
@@ -229,7 +230,11 @@ def replace_notice(
     ``after`` is the row as written (the stored values overlaid with what was sent), so a cost sent together with
     a new curve is the one named.
     """
-    newly = [c for c in owned(after) if c not in (owned(before) if before is not None else ())]
+    newly = [
+        c
+        for c in owned(after)
+        if c not in (owned(before) if before is not None else ())
+    ]
     if not newly:
         return None
     new = derived_costs(after)
@@ -239,7 +244,9 @@ def replace_notice(
         for col in newly
         if (_num(after.get(col)) or 0.0) != 0.0 and not _same(after.get(col), new[col])
     ]
-    return f"The {_setter(after)} replaces {' and '.join(replaced)}." if replaced else None
+    return (
+        f"The {_setter(after)} replaces {' and '.join(replaced)}." if replaced else None
+    )
 
 
 def cleared(
@@ -247,7 +254,11 @@ def cleared(
 ) -> dict[str, float]:
     """The costs a write that clears a curve resets: the stand-by cost, which the form cannot edit and which
     would otherwise stay a charge per on-hour with no curve behind it. Marginal cost stays (it is editable)."""
-    if before is None or "stand_by_cost" not in owned(before) or "stand_by_cost" in owned(after):
+    if (
+        before is None
+        or "stand_by_cost" not in owned(before)
+        or "stand_by_cost" in owned(after)
+    ):
         return {}
     return {"stand_by_cost": 0.0}
 
@@ -259,7 +270,9 @@ def clear_notice(
 
     ``after`` is the row as written; the marginal cost it keeps is the one it carries (derived, or sent)."""
     mc = _num(after.get("marginal_cost"))
-    curve_gone = before is not None and curve_of(before) is not None and curve_of(after) is None
+    curve_gone = (
+        before is not None and curve_of(before) is not None and curve_of(after) is None
+    )
     if not cleared(after, before=before):
         if not curve_gone:
             return None
@@ -430,7 +443,8 @@ def _run_hour_generators(gens: pd.DataFrame) -> list[str]:
 
 def _on(n, name: str) -> pd.Series | None:
     """1 for each snapshot generator ``name`` runs, from solved values only: its status when committable, else
-    output above 1e-6 × p_nom (a non-committable unit has no status). None when not solved."""
+    output above 1e-6 × capacity (``p_nom_opt`` when extendable, else ``p_nom``; a non-committable unit has no
+    status). None when the solved frame has no column for it."""
     gens = n.generators
     if _flag(gens.at[name, "committable"]):
         status = getattr(n.generators_t, "status", None)
@@ -440,7 +454,12 @@ def _on(n, name: str) -> pd.Series | None:
     p = getattr(n.generators_t, "p", None)
     if p is None or name not in p.columns:
         return None
-    tol = 1e-6 * max(_num(gens.at[name, "p_nom"]) or 0.0, 1.0)
+    cap_col = (
+        "p_nom_opt"
+        if _flag(gens.at[name, "p_nom_extendable"]) and "p_nom_opt" in gens.columns
+        else "p_nom"
+    )
+    tol = 1e-6 * (_num(gens.at[name, cap_col]) or 0.0)
     return (p[name].reindex(n.snapshots).fillna(0.0) > tol).astype(float)
 
 
@@ -450,11 +469,15 @@ def _weights(n, column: str, period_years: Mapping[Any, float] | None) -> pd.Ser
     if isinstance(index, pd.MultiIndex) and period_years:
         from services.period_utils import years_for_period
 
-        w = w * pd.Series([years_for_period(period_years, k[0]) for k in index], index=index)
+        w = w * pd.Series(
+            [years_for_period(period_years, k[0]) for k in index], index=index
+        )
     return w
 
 
-def run_hours(n, period_years: Mapping[Any, float] | None = None) -> list[dict[str, Any]]:
+def run_hours(
+    n, period_years: Mapping[Any, float] | None = None
+) -> list[dict[str, Any]]:
     """Each run-hour generator's (an O&M per running hour or a lifetime in running hours set) hours run and O&M
     over the solved horizon, from solved values only (None when not solved).
 
@@ -478,19 +501,24 @@ def run_hours(n, period_years: Mapping[Any, float] | None = None) -> list[dict[s
         if on is None:
             continue
         row["hours_run"] = float((on * _weights(n, "generators", period_years)).sum())
-        row["om_cost_eur"] = float((on * _weights(n, "objective", period_years)).sum()) * (om or 0.0)
+        row["om_cost_eur"] = float(
+            (on * _weights(n, "objective", period_years)).sum()
+        ) * (om or 0.0)
     return rows
 
 
 def run_hour_lifetime(n, name: str) -> tuple[float | None, list[str]]:
     """Generator ``name``'s lifetime in years from its lifetime in running hours at the solved rate, and flags.
 
-    The rate is the horizon's run hours ÷ its years (one average rate over every period, flagged
-    ``run_hour_lifetime_averaged:<name>`` on a multi-period solve). None when no lifetime in running hours is set,
-    when the unit never ran (it does not wear), or when it is not solved (flagged
-    ``run_hour_lifetime_unknown:<name>``).
+    The rate is the horizon's run hours (Σ on × the generator snapshot weights, period years included) ÷
+    ``adequacy.metrics.horizon_years`` (the modelled time in years, never an 8760-hour assumption): one average rate
+    over every period, flagged ``run_hour_lifetime_averaged:<name>`` on a multi-period solve. A non-committable unit
+    is counted from its dispatch, flagged ``run_hour_lifetime_from_dispatch:<name>``. None when no lifetime in
+    running hours is set, when the unit never ran (it does not wear), when the result is not finite, or when the
+    solved frame has no column for it (flagged ``run_hour_lifetime_unknown:<name>``, never inferred).
     """
-    from services.period_utils import period_years_map
+    from services.adequacy.metrics import horizon_years
+    from services.period_utils import period_years_map, snapshot_weights
 
     gens = n.generators
     if name not in gens.index or LIFE_HOURS not in gens.columns:
@@ -501,10 +529,18 @@ def run_hour_lifetime(n, name: str) -> tuple[float | None, list[str]]:
     on = _on(n, name)
     if on is None:
         return None, [f"run_hour_lifetime_unknown:{name}"]
-    ymap = period_years_map(n)
-    years = sum(float(y) for y in ymap.values()) if ymap else 1.0
-    hours = float((on * _weights(n, "generators", ymap)).sum())
-    if hours <= 0 or years <= 0:
+    hours = float((on * snapshot_weights(n, "generators")).sum())
+    horizon = horizon_years(n)
+    if hours <= 0 or horizon <= 0:
         return None, []
-    flags = [f"run_hour_lifetime_averaged:{name}"] if len(ymap) > 1 else []
-    return life_h / (hours / years), flags
+    years = life_h / (hours / horizon)
+    if not math.isfinite(years):
+        return None, []
+    flags = (
+        []
+        if _flag(gens.at[name, "committable"])
+        else [f"run_hour_lifetime_from_dispatch:{name}"]
+    )
+    if len(period_years_map(n)) > 1:
+        flags.append(f"run_hour_lifetime_averaged:{name}")
+    return years, flags
