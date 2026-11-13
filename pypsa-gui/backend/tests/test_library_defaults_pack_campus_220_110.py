@@ -119,12 +119,9 @@ def test_the_manifest_changes_only_the_version_the_campus_pin_and_records_why():
         cur["seeded_from"]["campus_equipment"],
         old["seeded_from"]["campus_equipment"],
     )
-    import hashlib
-
-    assert (
-        seed.pop("sha256")
-        == hashlib.sha256(CAMPUS_YAML.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
-    )
+    # The library as it shipped with the 220/110 kV units; 2026-11-13 (campus-library-gaps 03) pins
+    # the file again with their sourced losses, so this pin is a literal, not the live YAML.
+    assert seed.pop("sha256") == "5058116ad6b169fad78677e5638b957ca86ece4e30d63465538c5dc50bb6c23f"
     assert seed.pop("entries") == 86 == old_seed.pop("entries") + len(UNITS)
     old_seed.pop("sha256")
     assert cur.pop("version") == NEW

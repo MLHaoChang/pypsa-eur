@@ -39,6 +39,15 @@
 #               Strom 2035, Version 2021, 2. Entwurf: Kostenschätzungen"
 #               (standard costs, cost basis mid-2020; quoted in notes only).
 #               https://www.netzentwicklungsplan.de/sites/default/files/2023-02/26_NEP_2035_V2021_2E_Kostenschaetzung_0.pdf
+#   [OPTCL-TS]  Odisha Power Transmission Corporation Ltd (OPTCL, India),
+#               "Technical Specification for Power and Auto Transformers (From
+#               132 kV up to 400 kV level)", Revision 1 (May 2025), Annexure-A
+#               section C "200 & 160 MVA 220/132 kV 3-phase auto transformer
+#               (NEW)", item 32 "Maximum Permissible Losses": no-load loss at
+#               rated voltage and frequency 35 kW (200 MVA) and 30 kW (160 MVA);
+#               load loss HV-LV at rated current and 75 degC 260 kW and 200 kW.
+#               Clause 9.3 states the limits follow the latest CEA guideline.
+#               https://www.optcl.co.in/writereaddata/Tender/110325040316TenderSpecification%20(2).pdf
 #
 # Conversion. Money is EUR in 2025 prices. SEK of 2022 -> EUR at the ECB's
 # 2022 annual average reference rate, 10.6296 SEK/EUR (series
@@ -56,8 +65,18 @@
 # priced from the [EI-NVL] rows R-NR-T-8-1..5 (245/123-145 kV, 120-315 MVA):
 # 200, 250 and 315 MVA read straight, 125 and 160 MVA interpolated as above
 # between the bracketing rows (120 and 150 MVA are anchors only). Their
-# impedances and losses have no public source and follow producers/campus.py's
-# class rule (tagged assumed).
+# impedances follow producers/campus.py's class rule (tagged assumed). Their
+# load and no-load losses (2026-11-13, campus-library-gaps 03) are read from
+# [OPTCL-TS]: 160 and 200 MVA as printed, 125 MVA at the 160 MVA row's kW per
+# MVA and 250/315 MVA at the 200 MVA row's. No public 220/110 kV split was
+# found; the source is 220/132 kV, the same 245/123-145 kV class as [EI-NVL]
+# R-NR-T-8. Its values are maximum permissible (guaranteed) losses, so a
+# compliant unit loses at most this. Each unit's Peak Efficiency Index,
+# 1 - 2 sqrt(P0 Pk) / Sr, is 99.90 %, above the Ecodesign Tier 2 minimum
+# (Regulation (EU) 2019/1783, Annex I Table I.7: 99.780-99.797 % at
+# 125-315 MVA). They stay tagged assumed: a rating may not be tagged
+# literature, and the voltage and the scaled sizes are not the source's own.
+# The no-load current has no source and follows the class rule.
 #
 # The discount rate is unchanged (0.07, assumed): no source here justifies
 # another, and the project's own rate replaces it when the study runs.
@@ -393,8 +412,8 @@ transformers:
     lv_kv: {value: 110.0, source: assumed, note: "[EI-NVL] R-NR-T-8 voltage class 245/123-145 kV"}
     s_mva: {value: 125.0, source: assumed, note: "R10 size between [EI-NVL] R-NR-T-8-1 (120 MVA) and R-NR-T-8-2 (150 MVA)"}
     vk_percent: {value: 12.5, source: assumed, note: "IEC 60076-5:2006 Table 1 gives a minimum for > 100 MVA (12.5 %), not a typical value; producers/campus.py class rule"}
-    vkr_percent: {value: 0.3, source: assumed, note: "no public source; producers/campus.py class rule"}
-    pfe_kw: {value: 125.0, source: assumed, note: "no public source; producers/campus.py class rule"}
+    vkr_percent: {value: 0.125, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 160 MVA maximum limit at constant kW per MVA: load loss 200 kW at 75 degC -> 156.25 kW"}
+    pfe_kw: {value: 23.4, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 160 MVA maximum limit at constant kW per MVA: no-load loss 30 kW -> 23.4 kW"}
     i0_percent: {value: 0.1, source: assumed, note: "no public source; producers/campus.py class rule"}
     capex_eur: {value: 3608000, source: literature, note: "[EI-NVL] 245/123-145 kV, log-log interpolation between R-NR-T-8-1 (120 MVA, 33884380 SEK) and R-NR-T-8-2 (150 MVA, 38992520 SEK), exponent 0.629: 34766068 SEK (2022) -> EUR 2025; the rows' scope names a line span (linspann) where the 123-145 kV rows name a cable joint"}
     opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
@@ -404,8 +423,8 @@ transformers:
     lv_kv: {value: 110.0, source: assumed, note: "[EI-NVL] R-NR-T-8 voltage class 245/123-145 kV"}
     s_mva: {value: 160.0, source: assumed, note: "R10 size between [EI-NVL] R-NR-T-8-2 (150 MVA) and R-NR-T-8-3 (200 MVA)"}
     vk_percent: {value: 12.5, source: assumed, note: "IEC 60076-5:2006 Table 1 gives a minimum for > 100 MVA (12.5 %), not a typical value; producers/campus.py class rule"}
-    vkr_percent: {value: 0.3, source: assumed, note: "no public source; producers/campus.py class rule"}
-    pfe_kw: {value: 160.0, source: assumed, note: "no public source; producers/campus.py class rule"}
+    vkr_percent: {value: 0.125, source: assumed, note: "[OPTCL-TS] 220/132 kV 160 MVA maximum limit: load loss 200 kW at 75 degC"}
+    pfe_kw: {value: 30, source: assumed, note: "[OPTCL-TS] 220/132 kV 160 MVA maximum limit: no-load loss 30 kW"}
     i0_percent: {value: 0.1, source: assumed, note: "no public source; producers/campus.py class rule"}
     capex_eur: {value: 4212800, source: literature, note: "[EI-NVL] 245/123-145 kV, log-log interpolation between R-NR-T-8-2 (150 MVA, 38992520 SEK) and R-NR-T-8-3 (200 MVA, 46654733 SEK), exponent 0.624: 40593883 SEK (2022) -> EUR 2025; the rows' scope names a line span (linspann) where the 123-145 kV rows name a cable joint"}
     opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
@@ -415,8 +434,8 @@ transformers:
     lv_kv: {value: 110.0, source: assumed, note: "[EI-NVL] R-NR-T-8-3 voltage class 245/123-145 kV"}
     s_mva: {value: 200.0, source: assumed, note: "[EI-NVL] R-NR-T-8-3 size 200 MVA"}
     vk_percent: {value: 12.5, source: assumed, note: "IEC 60076-5:2006 Table 1 gives a minimum for > 100 MVA (12.5 %), not a typical value; producers/campus.py class rule"}
-    vkr_percent: {value: 0.3, source: assumed, note: "no public source; producers/campus.py class rule"}
-    pfe_kw: {value: 200.0, source: assumed, note: "no public source; producers/campus.py class rule"}
+    vkr_percent: {value: 0.13, source: assumed, note: "[OPTCL-TS] 220/132 kV 200 MVA maximum limit: load loss 260 kW at 75 degC"}
+    pfe_kw: {value: 35, source: assumed, note: "[OPTCL-TS] 220/132 kV 200 MVA maximum limit: no-load loss 35 kW"}
     i0_percent: {value: 0.1, source: assumed, note: "no public source; producers/campus.py class rule"}
     capex_eur: {value: 4841800, source: literature, note: "[EI-NVL] R-NR-T-8-3, 245/123-145 kV 200 MVA, 46654733 SEK (2022) -> EUR 2025; the row's scope names a line span (linspann) where the 123-145 kV rows name a cable joint"}
     opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
@@ -426,8 +445,8 @@ transformers:
     lv_kv: {value: 110.0, source: assumed, note: "[EI-NVL] R-NR-T-8-4 voltage class 245/123-145 kV"}
     s_mva: {value: 250.0, source: assumed, note: "[EI-NVL] R-NR-T-8-4 size 250 MVA"}
     vk_percent: {value: 12.5, source: assumed, note: "IEC 60076-5:2006 Table 1 gives a minimum for > 100 MVA (12.5 %), not a typical value; producers/campus.py class rule"}
-    vkr_percent: {value: 0.3, source: assumed, note: "no public source; producers/campus.py class rule"}
-    pfe_kw: {value: 250.0, source: assumed, note: "no public source; producers/campus.py class rule"}
+    vkr_percent: {value: 0.13, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA maximum limit at constant kW per MVA: load loss 260 kW at 75 degC -> 325 kW"}
+    pfe_kw: {value: 43.8, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA maximum limit at constant kW per MVA: no-load loss 35 kW -> 43.8 kW"}
     i0_percent: {value: 0.1, source: assumed, note: "no public source; producers/campus.py class rule"}
     capex_eur: {value: 5371900, source: literature, note: "[EI-NVL] R-NR-T-8-4, 245/123-145 kV 250 MVA, 51762875 SEK (2022) -> EUR 2025; the row's scope names a line span (linspann) where the 123-145 kV rows name a cable joint"}
     opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
@@ -437,8 +456,8 @@ transformers:
     lv_kv: {value: 110.0, source: assumed, note: "[EI-NVL] R-NR-T-8-5 voltage class 245/123-145 kV"}
     s_mva: {value: 315.0, source: assumed, note: "[EI-NVL] R-NR-T-8-5 size 315 MVA"}
     vk_percent: {value: 12.5, source: assumed, note: "IEC 60076-5:2006 Table 1 gives a minimum for > 100 MVA (12.5 %), not a typical value; producers/campus.py class rule"}
-    vkr_percent: {value: 0.3, source: assumed, note: "no public source; producers/campus.py class rule"}
-    pfe_kw: {value: 315.0, source: assumed, note: "no public source; producers/campus.py class rule"}
+    vkr_percent: {value: 0.13, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA maximum limit at constant kW per MVA: load loss 260 kW at 75 degC -> 409.5 kW"}
+    pfe_kw: {value: 55.1, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA maximum limit at constant kW per MVA: no-load loss 35 kW -> 55.1 kW"}
     i0_percent: {value: 0.1, source: assumed, note: "no public source; producers/campus.py class rule"}
     capex_eur: {value: 5902000, source: literature, note: "[EI-NVL] R-NR-T-8-5, 245/123-145 kV 315 MVA, 56871016 SEK (2022) -> EUR 2025; the row's scope names a line span (linspann) where the 123-145 kV rows name a cable joint"}
     opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
