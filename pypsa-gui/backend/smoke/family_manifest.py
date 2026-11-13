@@ -710,7 +710,7 @@ VARIANTS: list[dict] = [
     _covered('LC-D21.report_gates', 'the open network fingerprint, report version counts, upload directories and blob count (tests/lc43_gates.py state) unchanged after each refusal: an unknown section is 404 report_section_not_found on generate and regenerate, an unknown table '
              '404 report_table_not_found, an unknown version 404 report_not_found, a deleted report 404 report_not_found to get, regenerate and export; a second generate while one runs is 409 report_job_in_flight, an abort leaves each unwritten section '
              'code-only with an aborted note and no prose, and the next generate is its own report; an edited Word copy (bound as template or not) that changes MC LOLE to 1.00 '
-             'leaves the headline table (3.21 h/yr) under its own id and version 1 as delivered, whether it is imported or refused 4xx; a copy that edits only the summary prose '
+             'leaves the headline table (3.21 h/yr) under its own id and version 1 as delivered (row LC-D21.edited_admitted_number); a copy that edits only the summary prose '
              'becomes version 2 with source user_edit, the same headline and version 1, and a diff with version 3 is 404 report_version_not_found; a Word file that is not the report is 400 roundtrip_not_a_report; a mapping with no template is '
              '400 no_template and an invalid plan 400 invalid_mapping_plan; PDF without LibreOffice is 501 pdf_not_available and saves nothing',
              'generate_report regenerate_report_section get_report get_report_table list_reports abort_report_generation import_edited_report diff_report_versions delete_report set_report_mapping export_report_pdf export_report_docx',
@@ -722,8 +722,12 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d21_report_gates.py::test_a_word_file_that_is_not_the_report_merges_nothing',
              B + 'test_lc43_d21_report_gates.py::test_no_mapping_without_a_template_and_no_pdf_without_a_converter',
              B + 'test_chat_report_template_tools.py::test_set_report_mapping_strict_and_errors'),
-    _pending('LC-D21.edited_admitted_number', 'an edited Word table or prose changes an admitted headline number in the next delivered version with no Numbers to check entry '
-             '(LC-43a, .scratch/live-copilot/issues/43a-edited-table-bypasses-number-check.md)'),
+    _covered('LC-D21.edited_admitted_number', 'an edited Word copy (bound as the template or not) whose headline MC LOLE reads 1.00 h/yr is version 2 whose DOCX headline still '
+             'reads the admitted 3.21 h/yr, with a withheld placeholder and "Executive summary: 1.00 h/yr (unverified, withheld)" in Numbers to check; a copy whose summary '
+             'prose reads 1.0 h/yr keeps the sentence, its audit re-run against the facts version 1 verified lists 1.0 h/yr unverified, and Numbers to check lists it (LC-43a)',
+             'import_edited_report export_report_docx get_report get_report_table',
+             B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_leaves_the_headline_and_version_one',
+             B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_in_prose_lists_it_to_check'),
     _pending('LC-D21.stale_report', 'a report generated or exported after its study changed is neither refused nor flagged (only the IC case note): no stale gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D21.report_resume', 'a report job interrupted by a restart is not resumed (its record is in-process state): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D22.undo_checkpoints', 'input-table fingerprint before/after: undo restores the exact fingerprint and the matching results (objective 100, current again), '

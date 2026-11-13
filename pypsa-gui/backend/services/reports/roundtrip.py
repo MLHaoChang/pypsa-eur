@@ -66,6 +66,7 @@ from __future__ import annotations
 import difflib
 import io
 import re
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
@@ -779,6 +780,67 @@ def _first_text(section: RoundTripSection) -> str:
 # ── the merge ────────────────────────────────────────────────────────────
 
 
+def _changed_numbers(original: Table, edited: Table) -> list[str]:
+    """The numbers `edited` states that `original` does not, each as written:
+    a cell whose numbers are not all in the original table is listed whole."""
+    from services.reports import number_audit
+    from services.reports.revisions import numbers
+
+    def cells(table: Table) -> list[str]:
+        return list(table.columns) + [cell for row in table.rows for cell in row]
+
+    remaining = sum((numbers(c) for c in cells(original)), Counter())
+    out: list[str] = []
+    for cell in cells(edited):
+        found = numbers(cell)
+        if found - remaining:
+            tokens = [t.text for t in number_audit.extract_numbers(cell)]
+            out.extend(tokens or [cell])
+        remaining -= found
+    return out
+
+
+def _checked(section: Section, blocks: list, base: ReportDocument,
+             edited_tables: dict[str, Table]) -> tuple[list, SectionAudit]:
+    """LC-43a: the blocks and audit of a section the user edited in Word.
+
+    The audit is re-run against the facts the base verified (R4, as a
+    comment-anchored edit is), so a changed number in the prose reads
+    unverified and is listed under "Numbers to check". An edited copy of one
+    of the report's own tables that brings in a number the table does not
+    hold is withheld: the section keeps the admitted table, followed by the
+    withheld placeholder, and the new numbers are listed "(unverified,
+    withheld)". The edited table is still stored under its own id.
+    """
+    from services.reports.formatting import withheld_placeholder
+    from services.reports.revisions import rerun_audit
+
+    suffix = f"_edited_v{base.version + 1}"
+    kept: list = []
+    withheld: list[str] = []
+    for block in blocks:
+        original = (
+            base.tables.get(block.table_id.removesuffix(suffix))
+            if isinstance(block, TableRef) and block.table_id.endswith(suffix)
+            else None
+        )
+        new = (
+            _changed_numbers(original, edited_tables[block.table_id])
+            if original is not None and block.table_id in edited_tables
+            else []
+        )
+        if not new:
+            kept.append(block)
+            continue
+        kept.append(TableRef(table_id=original.table_id, caption=block.caption))
+        kept.append(Callout(kind="gap", text=withheld_placeholder(len(new))))
+        withheld.extend(new)
+    audit = rerun_audit(section, section.model_copy(update={"blocks": kept}))
+    if withheld:
+        audit = audit.model_copy(update={"unverified": list(audit.unverified) + withheld})
+    return kept, audit
+
+
 def merge_round_trip(base: ReportDocument, result: RoundTripResult) -> ReportDocument:
     """
     The next version of ``base`` with the edited copy folded in: changed
@@ -799,8 +861,9 @@ def merge_round_trip(base: ReportDocument, result: RoundTripResult) -> ReportDoc
             continue
         update: dict[str, Any] = {}
         if edited.changed:
-            update.update(blocks=list(edited.blocks), source="user_edit",
-                          audit=SectionAudit())
+            blocks, audit = _checked(section, list(edited.blocks), base,
+                                     result.edited_tables)
+            update.update(blocks=blocks, source="user_edit", audit=audit)
         if edited.comments:
             update["comments"] = list(edited.comments)
             update["pending_instruction"] = "; ".join(edited.comments)

@@ -18,10 +18,13 @@ still reads MC LOLE 3.21 h/yr:
   the earlier reports are unchanged;
 - a deleted report is 404 report_not_found to get, regenerate and export;
 - an edited Word copy (bound as the template or not) that changes the headline MC LOLE
-  to 1.00 is either a new version or a 4xx refusal (which one is LC-43a, pending row
-  ``LC-D21.edited_admitted_number``); either way the ``headline`` table still reads
-  3.21 h/yr under its own id and version 1 still reads "The plan meets 3.2 h/yr." with
-  3.21 h/yr in its headline;
+  to 1.00 becomes version 2 whose DOCX headline still reads the admitted 3.21 h/yr and
+  whose "Numbers to check" lists "Executive summary: 1.00 h/yr (unverified, withheld)"
+  (LC-43a); the ``headline`` table still reads 3.21 h/yr under its own id and version 1
+  still reads "The plan meets 3.2 h/yr." with 3.21 h/yr in its headline;
+- a copy that edits the summary prose to "The plan meets 1.0 h/yr." becomes version 2
+  that keeps the sentence and lists "Executive summary: 1.0 h/yr" under "Numbers to
+  check" (the section's audit re-run against the facts version 1 verified, LC-43a);
 - a copy that changes only the summary prose to "The plan is robust." becomes version 2
   with that summary's ``source`` ``user_edit``, the headline and version 1 as above, and
   a diff with version 3 is 404 report_version_not_found;
@@ -36,7 +39,6 @@ import threading
 
 import pytest
 from docx import Document
-from fastapi import HTTPException
 
 from services import chat_tools as T, upload_service
 from services.llm_fake import FakeProvider
@@ -182,15 +184,41 @@ def test_a_copy_that_changes_an_admitted_number_leaves_the_headline_and_version_
         if row.cells[0].text == "MC LOLE (h/yr)":
             row.cells[1].text = "1.00 h/yr"
 
-    # Whether this import becomes a version or is refused is LC-43a (pending row
-    # LC-D21.edited_admitted_number); only what holds either way is asserted.
-    try:
-        T.import_edited_report(
-            report_id, _upload(project, doc), bind_as_template=bind_as_template
-        )
-    except HTTPException as refusal:
-        assert 400 <= refusal.status_code < 500, refusal.detail
+    out = T.import_edited_report(
+        report_id, _upload(project, doc), bind_as_template=bind_as_template
+    )
 
+    assert out["version"] == 2
+    delivered = _docx(client, report_id, 2)
+    headline = [[c.text for c in row.cells] for row in delivered.tables[0].rows]
+    assert headline == [["Item", "Value"]] + HEADLINE
+    paragraphs = [p.text for p in delivered.paragraphs]
+    assert "Executive summary: 1.00 h/yr (unverified, withheld)" in paragraphs
+    assert T.get_report_table(report_id, "headline")["items"] == HEADLINE
+    _version_one_reads_as_delivered(client, report_id)
+
+
+@pytest.mark.parametrize("bind_as_template", [False, True])
+def test_a_copy_that_changes_an_admitted_number_in_prose_lists_it_to_check(
+    project, client, monkeypatch, bind_as_template
+):
+    report_id = _generated(monkeypatch)
+    doc = _docx(client, report_id)
+    for paragraph in doc.paragraphs:
+        if paragraph.text == "The plan meets 3.2 h/yr.":
+            paragraph.text = "The plan meets 1.0 h/yr."
+
+    out = T.import_edited_report(
+        report_id, _upload(project, doc), bind_as_template=bind_as_template
+    )
+
+    assert out["version"] == 2
+    summary = T.get_report(report_id)["sections"][0]
+    assert summary["source"] == "user_edit"
+    assert summary["blocks"][0] == {"type": "paragraph", "md": "The plan meets 1.0 h/yr."}
+    assert summary["audit"]["unverified"] == ["1.0 h/yr"]
+    paragraphs = [p.text for p in _docx(client, report_id, 2).paragraphs]
+    assert "Executive summary: 1.0 h/yr" in paragraphs
     assert T.get_report_table(report_id, "headline")["items"] == HEADLINE
     _version_one_reads_as_delivered(client, report_id)
 
