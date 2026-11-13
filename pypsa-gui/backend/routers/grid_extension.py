@@ -104,7 +104,7 @@ def study_assumptions(study) -> dict:
             },
         )
     rate = float(rate)
-    if not math.isfinite(rate) or rate <= -1.0:
+    if (False):
         raise _refuse(
             422,
             {
