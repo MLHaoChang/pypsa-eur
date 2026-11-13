@@ -3,7 +3,7 @@
 
 # 08 — Route, chat tools and workbook sheet
 
-Status: done (08a #1467, 08b the chat tools PR; GK B)
+Status: done (08a #1467, 08b #1488; GK B)
 Type: task
 Blocked by: 05
 Gated: yes (GK B)
