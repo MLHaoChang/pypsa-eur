@@ -172,3 +172,89 @@ def _rewrite_ratio(path, ratio):
     if path.stat().st_mtime_ns == before:  # a coarse clock: a real save is later
         t = time.time_ns() + 1_000_000
         os.utime(path, ns=(t, t))
+
+
+# ── provenance-graph 11: the battery rows walk the fields they compile to ──────
+
+
+@pytest.fixture(scope="module")
+def battery_pack():
+    """A pack-built site network with the battery and PV, the ledger it was built from, and the grid-only
+    baseline (no battery) from the same ledger."""
+    from services.study import library, packs, questions
+    from tests.golden import site_fixture as SF
+
+    defaults = library.load_defaults()
+    intake = {
+        **SF.site_intake(),
+        "tariff": {"tariff_id": "de_industrial_illustrative"},
+    }
+    ledger = library.seed_ledger(questions.BESS_AT_SITE, intake, defaults)
+    build = lambda option: packs.build_site_network(  # noqa: E731
+        intake, ledger, option, library=defaults
+    )
+    return build("bess_pv_2h"), ledger, build("none")
+
+
+def _battery_keys():
+    from services.study import asset_view
+
+    return sorted(
+        {m.key for m in asset_view.LEDGER_FIELDS if m.component == "StorageUnit"}
+    )
+
+
+def test_each_battery_ledger_row_walks_the_fields_it_compiles_to(battery_pack):
+    """Every battery row of `asset_view.LEDGER_FIELDS`, on a network that has the battery: the fields walked are
+    the row's fields on this network, each value is the network column and the pack's conversion of the ledger
+    value, and the verdict is uncompared (a pack default compares nothing; never fresh)."""
+    from services.provenance_graph.explain import explain_ledger_row
+    from services.study import asset_view
+
+    n, ledger, _ = battery_pack
+    rows = {r.key: r for r in ledger.rows}
+    keys = _battery_keys()
+    assert len(keys) == 7  # the round trip is one row, two fields
+    for key in keys:
+        want = [
+            m
+            for m in asset_view.LEDGER_FIELDS
+            if m.key == key
+            and m.name in getattr(n, n.components[m.component].list_name).index
+        ]
+        out = explain_ledger_row(n, key)
+        assert out["target"] == {"ledger_key": key}
+        assert [f["target"] for f in out["fields"]] == [
+            {"component": m.component, "name": m.name, "field": m.field}
+            for m in want
+        ], key
+        for m, field in zip(want, out["fields"]):
+            column = getattr(n, n.components[m.component].list_name).at[
+                m.name, m.field
+            ]
+            first = field["steps"][0]
+            assert first["node"] == f"input:{m.component}/{m.name}/{m.field}"
+            assert first["value"] == pytest.approx(column), key
+            assert column == pytest.approx(m.to_store(rows[key].value)), key
+            assert first["stamp"]["status"] == "default", key
+            assert field["outcome"]["state"] == "uncompared", key
+        assert out["outcome"]["state"] == "uncompared", key
+        assert out["outcome"]["complete"] is True, key
+    # The round trip compiles to both halves; the discount rate to the battery and the PV.
+    assert len(explain_ledger_row(n, "battery_round_trip_efficiency")["fields"]) == 2
+    assert [
+        f["target"]["component"]
+        for f in explain_ledger_row(n, "discount_rate")["fields"]
+    ] == ["StorageUnit", "Generator"]
+
+
+def test_a_battery_row_on_a_network_without_the_battery_refuses(battery_pack):
+    from services.provenance_graph.explain import TargetUnknown, explain_ledger_row
+
+    _, _, baseline = battery_pack
+    assert "battery" not in baseline.storage_units.index
+    for key in _battery_keys():
+        with pytest.raises(TargetUnknown) as exc:
+            explain_ledger_row(baseline, key)
+        assert exc.value.error_kind == "why_target_unknown"
+        assert exc.value.status == 404

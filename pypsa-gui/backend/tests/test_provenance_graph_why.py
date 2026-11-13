@@ -562,6 +562,7 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
     )
     assert json.loads(json.dumps(via_tool)) == got
 
+    assert (project_storage_dir(f"{name}-opt-none") / "network.nc").exists()
     for key, option, code in (
         ("no_such_row", "bess_pv_2h", 404),
         ("pv_rooftop_eur_per_kw", "no_such_option", 404),
@@ -570,6 +571,8 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
             "bess_pv_2h",
             404,
         ),  # the PV kind this study's pack did not read
+        # provenance-graph 11: a battery row on the grid-only fork, which has no battery: refused, never a 500
+        ("battery_storage_eur_per_kwh", "none", 404),
     ):
         r = client.get(
             f"/api/projects/{name}/studies/{sid}/ledger/{key}/why",
