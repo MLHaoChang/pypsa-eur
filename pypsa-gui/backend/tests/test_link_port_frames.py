@@ -20,11 +20,24 @@ from services.solver.link_ports import ensure_link_port_frames
 
 @pytest.fixture(autouse=True)
 def _link_ports_stay_in_their_test():
-    """Each test leaves the process-wide Link attribute table as it found it."""
+    """Each test starts from a table with no extra Link ports (an earlier test file may have
+    grown it, so ``_net()`` would already carry them and never be stale) and leaves the
+    process-wide table exactly as it found it."""
+    import re
+
     defaults = pypsa.Network().components.links.defaults
-    before = set(defaults.index)
-    yield
-    defaults.drop(index=[a for a in defaults.index if a not in before], inplace=True)
+    saved = defaults.copy()
+    extra = [a for a in defaults.index if (m := re.fullmatch(r"(bus|efficiency|p)(\d+)", a))
+             and int(m.group(2)) >= 2]
+    base = set(saved.index) - set(extra)
+    defaults.drop(index=extra, inplace=True)
+    try:
+        yield
+    finally:
+        defaults.drop(index=[a for a in defaults.index if a not in base], inplace=True)
+        for a in extra:  # PyPSA appends extra ports, so re-appending keeps the original order
+            defaults.loc[a] = saved.loc[a]
+        assert defaults.index.equals(saved.index)
 
 
 def _net() -> pypsa.Network:
