@@ -540,9 +540,13 @@ _BUSINESS_CASE_ASKS = frozenset({
 })
 
 
+# "Business as usual" (BAU) is a scenario, not this feature (GK B (54) D3).
+_BUSINESS_AS_USUAL = frozenset({'usual', 'bau'})
+
+
 def _asks_for_the_business_case(words: set[str]) -> bool:
     return bool('business' in words and words & _BUSINESS_CASE_NOUN
-                and words & _BUSINESS_CASE_ASKS)
+                and words & _BUSINESS_CASE_ASKS and not words & _BUSINESS_AS_USUAL)
 
 
 def matches(words: set[str], limit: int = 2) -> list[dict]:

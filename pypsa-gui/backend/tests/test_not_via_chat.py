@@ -163,6 +163,10 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     # BC 08a (GK B (54) D3): EBITDA and break-even asked of the investment case are its tools'.
     'what is the island breakeven in the investment case', 'show ebitda by year from the investment case',
     'export the investment case workbook with the ebitda rows',
+    # The guard, one part each: "business as usual" is a scenario; no case noun; no ask.
+    'What is the business as usual case?', 'Show the business-as-usual case results',
+    'change the business as usual case demand', 'Show the BAU business case',
+    'Run the business hours report', 'the business case for adding a battery',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)
