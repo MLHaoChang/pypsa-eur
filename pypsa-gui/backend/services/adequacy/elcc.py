@@ -533,19 +533,34 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
 
 
 def _refuse_unsampled_link(inputs, name: str) -> None:
-    """A supplying Link the fleet knows but does not sample (an import Link
-    taken as a firm block, a firm backup not credited) has no outage chain to
-    remove: refuse it by name, with the fleet's own note, rather than 404."""
-    lk = name[len("link:"):] if name.startswith("link:") else name
+    """A supplying Link the fleet knows but does not sample, refused by name
+    with the fleet's own reason (GK A (25) C2, C3) rather than a bare 404:
+
+    * an import Link taken as a firm block: un-netting it is well defined,
+      but its ELCC would only restate the never-failing assumption;
+    * a firm backup AL-1 withholds, or an import Link not counted: it is not
+      in the sampled fleet, so it has no credit to price.
+    """
+    lk = name[len("link:") :] if name.startswith("link:") else name
     if lk not in tuple(getattr(inputs, "supply_links", ()) or ()):
         return
-    notes = [str(x) for x in (getattr(inputs, "fleet_notes", ()) or ())
-             if lk in str(x)]
-    why = "; ".join(notes) if notes else "it is not a sampled unit"
+    notes = [str(x) for x in (getattr(inputs, "fleet_notes", ()) or ())]
+    firm_block = "grid import taken as never failing: "
+    for note in notes:
+        if note.startswith(firm_block) and note.endswith(f" for {lk}"):
+            cause = note[len(firm_block) : -len(f" for {lk}")]
+            raise ValueError(
+                f"{lk} is taken as never failing ({cause}); its credit would "
+                "restate that assumption, so none is priced")
+    for prefix in (f"firm Link {lk}: ", f"import Link {lk}: "):
+        for note in notes:
+            if note.startswith(prefix):
+                raise ValueError(
+                    f"{prefix[:-2]} is not in the sampled fleet "
+                    f"({note[len(prefix):]}), so no credit is priced")
     raise ValueError(
-        f"Link {lk} supplies the fleet but is not a sampled unit ({why}): "
-        "there is no outage chain to remove, so its capacity credit is not "
-        "priced")
+        f"Link {lk} supplies the fleet but is not a sampled unit, so no "
+        "credit is priced")
 
 
 def _resolve(inputs, kind: str, name: str):

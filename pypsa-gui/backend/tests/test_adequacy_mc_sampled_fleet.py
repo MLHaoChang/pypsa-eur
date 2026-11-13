@@ -145,8 +145,8 @@ def test_an_import_link_taken_as_a_firm_block_is_refused_by_name(asked):
     with pytest.raises(ValueError) as exc:
         elcc._resolve(inputs, "generator", asked)
     msg = str(exc.value)
-    assert "Link grid_import supplies" in msg and "never failing: no outage data" in msg
-    assert "not priced" in msg
+    assert msg.startswith("grid_import is taken as never failing (no outage data)")
+    assert "restate that assumption" in msg
     assert "link:grid_import" not in {r["name"] for r in elcc.elcc_candidates(n)}
 
 
@@ -265,3 +265,183 @@ def test_the_endpoint_refuses_a_firm_block_import_by_name(client, install_networ
     r = _post(client, elcc_assets=[{"kind": "generator", "name": "link:grid_import"}])
     assert r.status_code == 422, r.text
     assert "never failing" in r.json()["detail"]
+
+
+# ── C1: the portfolio against a copper-plate margin payload ───────────────
+
+
+def _portfolio_block(n, *, drop=None):
+    from services.adequacy.copt import must_take_generators
+    from services.adequacy.portfolio import (
+        network_fingerprint,
+        portfolio_block,
+        portfolio_population,
+    )
+
+    scope, side, inputs = _study_inputs(n, vre=list(must_take_generators(n)))
+    pop = portfolio_population(side, inputs)
+    if drop is not None:
+        pop["snapshot_names"] = set(pop["snapshot_names"]) - {drop}
+    label = str(inputs.periods[0][0])
+    caps = {"grid_supply": 1000.0, "grid_pv": 300.0, "diesel": 5.0, "hub_pv": 20.0}
+    payload = {
+        "fingerprint": network_fingerprint(n),
+        "assets": [
+            {
+                "period": label,
+                "kind": "generator",
+                "name": nm,
+                "capacity_mw": cap,
+                "derate": 1.0,
+            }
+            for nm, cap in caps.items()
+        ],
+        "by_period": [],
+    }
+    return portfolio_block(
+        inputs,
+        pop,
+        margin_payload=payload,
+        snapshot_fingerprint=network_fingerprint(n),
+        seed=1,
+        draws=32,
+        cov_target=1.0,
+        baseline=None,
+        baseline_key=None,
+        grid_side=link_supply.grid_side_assets(n, scope),
+    )
+
+
+def test_grid_side_margin_rows_are_left_out_by_scope_and_named():
+    block = _portfolio_block(_net())
+    assert block["status"] != "activity_mismatch", block.get("reason")
+    assert block["notes"][0].endswith("grid_pv, grid_supply")
+    assert "two standards" in block["notes"][1]
+
+
+def test_a_hub_side_row_absent_from_the_snapshot_is_still_a_mismatch():
+    block = _portfolio_block(_net(), drop="diesel")
+    assert block["status"] == "activity_mismatch"
+    assert "margin row diesel" in block["reason"]
+    assert "grid_supply" not in block["reason"]
+
+
+def test_grid_side_assets_are_the_excluded_buses_assets():
+    n = _net()
+    n.add("StorageUnit", "grid_battery", bus="grid", p_nom=10.0)
+    scope = link_supply.loop_scope(n)
+    assert link_supply.grid_side_assets(n, scope) == {
+        "grid_supply",
+        "grid_pv",
+        "grid_battery",
+    }
+    n.links.at["grid_import", "eh_role"] = ""
+    assert link_supply.grid_side_assets(n, link_supply.loop_scope(n)) == frozenset()
+
+
+# ── C3: a withheld firm backup is refused with its withhold reason ────────
+
+
+def test_a_store_fed_fuel_cell_is_refused_with_its_withhold_reason():
+    n = _net()
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Store", "h2_store", bus="h2", e_nom=1.0)
+    n.add("Link", "fuel_cell", bus0="h2", bus1="hub", p_nom=10.0, efficiency=0.5)
+    _outage(n.links, "fuel_cell", 0.02, 24.0)
+    _, _, inputs = _study_inputs(n)
+    assert "link:fuel_cell" not in [u.name for u in inputs.units]
+    with pytest.raises(ValueError) as exc:
+        elcc._resolve(inputs, "generator", "link:fuel_cell")
+    msg = str(exc.value)
+    assert msg.startswith("firm Link fuel_cell is not in the sampled fleet")
+    assert "not credited (0 MW)" in msg and "h2_store" in msg
+    assert "link:fuel_cell" not in {r["name"] for r in elcc.elcc_candidates(n)}
+
+
+# ── C4: the link unit's ELCC ──────────────────────────────────────────────
+
+
+def test_excluding_the_link_unit_keeps_every_other_units_draws():
+    from services.adequacy.mc import sample_capacity
+
+    _, _, inputs = _study_inputs(_net())
+    _, exclude, _, _ = elcc._resolve(inputs, "generator", "link:grid_import")
+    H_ = len(inputs.residual)
+    without = sample_capacity(inputs.units, H_, 64, 11, exclude=exclude)
+    others = sample_capacity(inputs.units[:1], H_, 64, 11)
+    np.testing.assert_array_equal(without, others)
+
+
+def test_the_link_units_elcc_is_within_its_nameplate_on_the_runs_baseline():
+    _, _, inputs = _study_inputs(_net())
+    row = elcc.elcc_for_asset(
+        inputs, "generator", "link:grid_import", seed=3, draws=400, max_draws=400
+    )
+    run = mc_adequacy(inputs, draws=400, seed=3, max_draws=400)
+    assert row["status"] == "ok"
+    assert 0.0 < row["elcc_mw"] <= row["nameplate_mw"] == pytest.approx(40.0)
+    assert row["baseline_lole_h"] == pytest.approx(run["lole_hours"])
+
+
+# ── C5: candidates <-> resolve, both ways, on every EH template ───────────
+
+EH_TEMPLATES = [
+    "eh_h2_hub",
+    "eh_h2_hub_staged",
+    "eh_datacenter",
+    "eh_datacenter_staged",
+    "eh_microgrid",
+    "eh_microgrid_staged",
+    "eh_ammonia_staged",
+    "eh_ipp_hybrid",
+    "eh_concentrator_staged",
+]
+
+
+@pytest.mark.parametrize("tid", EH_TEMPLATES)
+def test_candidates_and_resolution_agree_both_ways_on_each_template(tid):
+    from project_templates import eh_templates as T
+    from services.adequacy.copt import must_take_generators
+
+    n = T.BUILDERS[tid]()
+    scope = link_supply.loop_scope(n)
+    side = link_supply.fleet_side(n, scope)
+    inputs = link_supply.assemble_fleet(
+        n, scope, side=side, vre_assets=must_take_generators(side)
+    )
+    cands = {(r["kind"], r["name"]) for r in elcc.elcc_candidates(n)}
+    for kind, name in cands:
+        elcc._resolve(inputs, kind, name)
+    resolvable = set()
+    for u in inputs.units:
+        if elcc.unit_nameplate_mw(u) > 0.0:
+            resolvable.add(("generator", str(u.name)))
+    resolvable |= {("storage_unit", str(s.name)) for s in inputs.storage}
+    for nm, prof in inputs.vre_profiles.items():
+        if float(np.asarray(prof).max(initial=0.0)) > 0.0:
+            resolvable.add(("vre", str(nm)))
+    assert cands == resolvable
+    grid = link_supply.grid_side_assets(n, scope)
+    assert not {nm for _, nm in cands} & grid
+
+
+@pytest.mark.parametrize(
+    "kind,name",
+    [
+        ("generator", "grid_supply"),
+        ("vre", "grid_pv"),
+        ("storage_unit", "grid_battery"),
+    ],
+)
+def test_each_grid_side_kind_is_a_422_naming_the_import_link(
+    client, install_network, kind, name
+):
+    n = _net()
+    n.add("StorageUnit", "grid_battery", bus="grid", p_nom=10.0, max_hours=2.0)
+    install_network(n)
+    r = _post(client, elcc_assets=[{"kind": kind, "name": name}])
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail.startswith(
+        f"{name} is on the grid side of import Link(s) grid_import"
+    )

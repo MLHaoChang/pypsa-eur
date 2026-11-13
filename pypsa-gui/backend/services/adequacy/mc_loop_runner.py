@@ -144,6 +144,7 @@ def start_mc(
         from services.adequacy.link_supply import (
             assemble_fleet,
             fleet_side,
+            grid_side_assets,
             grid_side_refusal,
             loop_scope,
         )
@@ -152,6 +153,7 @@ def start_mc(
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         side = fleet_side(n, scope)
+        grid_side = grid_side_assets(n, scope)
         for kind, nm in assets:
             _why = grid_side_refusal(n, scope, kind, nm)
             if _why is not None:
@@ -181,9 +183,10 @@ def start_mc(
         # disclosure is not in the fleet (shipped-code review, finding 1).
         # Read off the fleet's own network (the hub side when split).
         activity_block = _activity_summary(side, inputs.periods)
-        # Grid-to-process ticket 08b: the sequential MC samples no process
-        # Link outage (only supplying Links, adequacy loops 03), so it cannot
-        # say what one costs in tonnes.
+        # Grid-to-process ticket 08b: the sequential MC samples the trusted
+        # import Links and the credited firm backup (adequacy loops 03); it
+        # samples no process Link and no withheld converter, so it cannot say
+        # what a process outage costs in tonnes.
         from services.solver.process_uc import process_mask
         has_process = bool(len(n.links)) and bool(process_mask(n.links).any())
         if want_portfolio:
@@ -290,7 +293,7 @@ def start_mc(
                     inputs, population, margin_payload=margin_payload,
                     snapshot_fingerprint=snapshot_fp, seed=seed, draws=draws,
                     cov_target=cov_target, baseline=metrics, baseline_key=key,
-                    stop_event=stop_event)
+                    stop_event=stop_event, grid_side=grid_side)
             record.update(
                 status="aborted" if stop_event.is_set() else "done",
                 error=None, finished_at=time.time(),

@@ -62,6 +62,7 @@ __all__ = [
     "assemble_fleet",
     "firm_backup_units",
     "fleet_side",
+    "grid_side_assets",
     "grid_side_refusal",
     "loop_scope",
     "nothing_to_sample",
@@ -129,6 +130,21 @@ def grid_side_refusal(n, scope, kind: str, name: str) -> str | None:
                 "its capacity credit is not priced"
             )
     return None
+
+
+def grid_side_assets(n, scope) -> frozenset:
+    """The generators, storage units and stores on the grid side of the
+    import Link(s) ``scope`` splits at; empty when it does not split."""
+    if scope.mode != "hub_side":
+        return frozenset()
+    ex = set(scope.excluded_buses)
+    out: set[str] = set()
+    for attr in ("generators", "storage_units", "stores"):
+        df = getattr(n, attr, None)
+        if df is None or df.empty or "bus" not in df.columns:
+            continue
+        out.update(str(i) for i in df.index if str(df.at[i, "bus"]) in ex)
+    return frozenset(out)
 
 
 def sampled_fleet(

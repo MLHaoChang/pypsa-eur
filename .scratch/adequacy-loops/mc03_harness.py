@@ -53,10 +53,15 @@ def test_mc03(
     cfg = ctx.solver_state.get("solver_config")
     ctx.solver_state["solver_config"] = dataclasses.replace(cfg, target_lole_h=2.0)
     t0 = time.time()
+    cands = client.get("/api/results/mc/elcc_candidates").json().get("assets") or []
+    links = [a for a in cands if str(a["name"]).startswith("link:")]
+    pick = (links + [a for a in cands if a not in links])[:3]
+    assets = [{"kind": a["kind"], "name": a["name"]} for a in pick]
     r = client.post(
-        "/api/results/mc", json={"draws": 500, "seed": 0, "elcc_portfolio": True}
+        "/api/results/mc",
+        json={"draws": 500, "seed": 0, "elcc_portfolio": True, "elcc_assets": assets},
     )
-    row = {"t": tid}
+    row = {"t": tid, "asked": [a["name"] for a in assets]}
     if r.status_code not in (200, 202):
         row.update(start=r.status_code, detail=str(r.json().get("detail"))[:200])
     else:
@@ -84,6 +89,15 @@ def test_mc03(
                 for x in ((pf.get("population") or {}).get("members") or [])
             ],
             portfolio_reason=str(pf.get("reason"))[:160],
+            elcc=[
+                (e.get("name"), e.get("elcc_mw"), e.get("status"))
+                for e in (res.get("elcc") or [])
+            ],
+            portfolio_notes=pf.get("notes"),
+            portfolio_periods=[
+                (x.get("period"), x.get("elcc_mw"), x.get("status"))
+                for x in (pf.get("periods") or [])
+            ],
             error=body.get("error"),
             secs=round(time.time() - t0),
         )
