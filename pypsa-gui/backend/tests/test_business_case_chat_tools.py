@@ -594,3 +594,32 @@ def test_wait_to_done_names_the_business_case_tools(client, seeded_identity, ses
     finally:
         PyPSAService._request_ctx.reset(token)
         ja._reset_for_tests()
+
+
+@pytest.mark.parametrize("change", [{"unit": "kg"}, {"money_year": 2030}])
+def test_a_price_whose_unit_or_money_year_changes_needs_a_new_citation(bc, change):
+    """45 USD/t never silently becomes 45 USD/kg (or 45 in another year's money)."""
+    t1 = _say(bc, "45 USD/t for the product.")
+    _store(bc, _bc(_line()), [_cite(t1, "45 USD/t")])
+    d = _refused(edit_card.preview, TOOL, _args(_bc(_line(**change))))
+    assert d["error_kind"] == "price_not_from_user" and d["reason"] == "no_citation"
+    unit = change.get("unit", "t")
+    t2 = _say(bc, f"Yes, 45 USD/{unit}.")
+    card = edit_card.preview(TOOL, _args(_bc(_line(**change)), [_cite(t2, f"45 USD/{unit}",
+                                                                       unit=f"{CUR}/{unit}")]))
+    price = _rows(card)["product · Price"]
+    assert price["change"] == "changed" and price["price_source"] == f"you wrote '45 USD/{unit}'"
+
+
+def test_duplicate_line_names_are_refused_never_shadowed(bc):
+    d = _refused(edit_card.preview, TOOL, _args(_bc(_line(price=None), _line(price=None, quantity=1.0))))
+    assert d["error_kind"] == "business_case_inputs_invalid" and "product" in d["message"]
+
+
+def test_an_envelope_never_admits_the_run_on_a_model_turn():
+    """#1123 / SH-14 B2: no runs entry, the harness's own or a profile's, lists it."""
+    from services import run_envelope
+
+    for tool in ("run_business_case", "abort_business_case"):
+        with pytest.raises(run_envelope.EnvelopeError):
+            run_envelope._check_run({"tool": tool})
