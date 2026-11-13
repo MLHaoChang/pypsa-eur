@@ -116,7 +116,7 @@ NOT_MODELLED_LOST_LOAD = (
 NO_COST = "This solve has no cost breakdown."
 #: The breakdown exists but this figure failed to compute (ui-modern 06: the
 #: expansion CAPEX compute raised). The Capacity expansion tab shows the same
-#: sentence (`FIGURE_NOT_COMPUTED` in CapacityExpansion.tsx).
+#: sentence (`FIGURE_NOT_COMPUTED` in frontend pages/results/shared.tsx).
 FIGURE_NOT_COMPUTED = "This figure could not be computed for this solve."
 
 

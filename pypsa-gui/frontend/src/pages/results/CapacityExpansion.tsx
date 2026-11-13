@@ -13,7 +13,7 @@ import { nk } from '../../utils/queryKeys'
 import type { Generator, Line as LineT, Link as LinkT, StorageUnit, Store, Transformer } from '../../api/types'
 import { fmtCurrency, fmtPower, fmtEnergy, downloadCSV, KPI, isRenewableCarrier, ChartActions,
   Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
-  COST_UNAVAILABLE, ChartFrame, CHART_HEIGHT, carrierColour, chartFigure } from './shared'
+  COST_UNAVAILABLE, FIGURE_NOT_COMPUTED, ChartFrame, CHART_HEIGHT, carrierColour, chartFigure } from './shared'
 import { useResultsFilter } from './filterContext'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
@@ -900,9 +900,6 @@ export default function CapacityExpansion() {
   // of confident nonsense, so the null is carried through explicitly.
   const displayTotalCost: number | null =
     displayCapex == null ? null : displayCapex + displayOpex
-  // The headline strip's sentence for a figure that failed to compute
-  // (`FIGURE_NOT_COMPUTED` in services/results/headline_kpis.py).
-  const FIGURE_NOT_COMPUTED = 'This figure could not be computed for this solve.'
   const fmtCostOrUnavailable = (v: number | null) =>
     v == null ? COST_UNAVAILABLE : fmtCurrency(v)
   const scopeLabel = periodEntry ? `period ${filter.selectedPeriod}` : 'horizon (all periods)'

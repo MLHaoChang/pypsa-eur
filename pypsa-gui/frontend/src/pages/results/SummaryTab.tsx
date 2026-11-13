@@ -12,7 +12,7 @@ import { resultsApi, simulationApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { useResultsFilter } from './filterContext'
-import { COST_UNAVAILABLE, fmtCurrency, fmtEnergy } from './shared'
+import { COST_UNAVAILABLE, FIGURE_NOT_COMPUTED, fmtCurrency, fmtEnergy } from './shared'
 import { kpiFigure, splitValueUnit } from '../../utils/format'
 import {
   capacityRows, costView, emissionsView, reserveMarginVerdict,
@@ -207,7 +207,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
                 <span title="Annualised capital of capacity this solve built: max(0, optimal − installed) × capital cost, as on the Capacity expansion tab.">
                   <Line label="of which new build" value={c.newBuild == null ? COST_UNAVAILABLE : fmtCurrency(c.newBuild)} />
                   {c.newBuild == null && (
-                    <p className="text-[11px] text-muted text-right">This figure could not be computed for this solve.</p>
+                    <p className="text-[11px] text-muted text-right">{FIGURE_NOT_COMPUTED}</p>
                   )}
                 </span>
               )}
