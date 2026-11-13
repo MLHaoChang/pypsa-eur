@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from harness import experiment_comparison as ec
 from services import experiments as ex, workflow_tools as wt
 from services.solver_service import SolverConfig
+from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
 
 
 def _saved(snapshots, periods=None):
@@ -136,3 +137,29 @@ def test_a_change_in_snapshot_weightings_changes_the_weights_digest():
     after = ec.basis_digests(saved)
     assert after["weights_sha256"] != before["weights_sha256"]
     assert after["snapshots_sha256"] == before["snapshots_sha256"]
+
+
+def test_a_long_horizon_case_compares_with_its_base_end_to_end(baseline):  # noqa: F811
+    """The chat comparison reads both projects' basis digests; past 64 KiB of
+    snapshot index it used to answer 422 for the base."""
+    from tests.test_sensitivity_comparison import (
+        by_name,
+        edit_saved,
+        solve,
+        sweep,
+        tool,
+    )
+
+    _ctx, base_id, _root = baseline
+
+    def long_horizon(ctx):
+        ctx.network.set_snapshots(_hours(1000))
+
+    edit_saved(base_id, long_horizon)
+    solve(base_id)
+    ids = sweep(base_id, 20)
+    report = tool("compare_sensitivities", baseline_project_id=base_id)
+    case = by_name(report)["Gas 20"]
+    assert case["project_id"] == ids["Gas 20"]
+    assert "not_comparable" not in case, case.get("not_comparable")
+    assert case["values"]["opex_meur"]["delta"] is not None
