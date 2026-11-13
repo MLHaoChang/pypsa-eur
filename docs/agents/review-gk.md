@@ -185,6 +185,12 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A no-promote lease release must not leave a pending utterance that a later admission then promotes (#1440 O5′, GK B (52)).
 - A table-edit compare is per cell, never a multiset (LC-43a T1, GK B (52)).
 
+- A detection that reads a bus's supply (mainland, supply bus, unattributed source) leaves out slack Generators (`slack_generator_mask`, `is_slack_name`). A persistent load-shedding or DSR slack is not a supply (#1461 S1, GK A (25)).
+- A fleet split at a trusted import Link (hub_side) carries its grid-side asset set into every comparison against a copper-plate payload. Such rows are left out by scope and named, never counted as an absent-row mismatch, and never silently dropped (#1456 C1, GK A (25)).
+- A refusal for a never-failing (firm-block) unit says that its credit would restate the assumption. It never says that nothing can be removed (#1456 C2, GK A (25)).
+- A pre-solve network repair is pinned as not-an-edit (fingerprint, revision, undo), with a mutant writing a non-default value. Every solve call site is covered by an AST guard keyed on (file, function) (#1457, GK A (25)).
+- A verdict "within tolerance of the goal" is computed from the draws and weights that produced the estimate, never from the requested draws or network weights. A new loop status gets an explicit mapping in every status reader (adequacy-loops 04 D1, D3, GK A (25)).
+
 ## Engineering rules
 
 - Grid source impedance derived from an entered S_k'' carries the IEC 60909 voltage factor c (Z = c·Un²/S_k''; S_sc2 = S_k''/c), in every screen: unbalance, the flicker note, the impedance scan.
