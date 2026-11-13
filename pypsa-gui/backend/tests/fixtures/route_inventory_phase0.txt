@@ -364,6 +364,7 @@ GET     /api/projects/{name}/studies/{study_id}/findings                        
 GET     /api/projects/{name}/studies/{study_id}/findings/tornado                   -> get_findings_tornado_api_projects__name__studies__study_id__findings_tornado_get
 POST    /api/projects/{name}/studies/{study_id}/findings/tornado                   -> start_findings_tornado_api_projects__name__studies__study_id__findings_tornado_post
 POST    /api/projects/{name}/studies/{study_id}/findings/tornado/abort             -> abort_findings_tornado_api_projects__name__studies__study_id__findings_tornado_abort_post
+POST    /api/projects/{name}/studies/{study_id}/grid-extension-break-even          -> grid_extension_break_even_route_api_projects__name__studies__study_id__grid_extension_break_even_post
 GET     /api/projects/{name}/studies/{study_id}/ledger                             -> get_ledger_api_projects__name__studies__study_id__ledger_get
 PUT     /api/projects/{name}/studies/{study_id}/ledger                             -> put_ledger_api_projects__name__studies__study_id__ledger_put
 GET     /api/projects/{name}/studies/{study_id}/ledger/{key}/why                   -> get_ledger_row_why_api_projects__name__studies__study_id__ledger__key__why_get

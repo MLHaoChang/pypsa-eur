@@ -104,12 +104,12 @@ def study_assumptions(study) -> dict:
             },
         )
     rate = float(rate)
-    if (False):
+    if not math.isfinite(rate) or rate <= -1.0:
         raise _refuse(
             422,
             {
                 "error_kind": "discount_rate_invalid",
-                "message": f"the study's discount rate {rate!r} is not usable",
+                "message": f"the study's discount rate {rate} is not usable",
             },
         )
     return {
