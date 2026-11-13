@@ -915,3 +915,73 @@ def test_run_evidence_never_keeps_captures_on_none_against_none(solved, monkeypa
     _raising(n, ctx, monkeypatch)
     kept, fp, _w = run_evidence._capture_retained(ctx, {})
     assert fp is None and kept == {}
+
+
+def test_an_entry_is_never_served_to_another_context(solved):
+    """The key holds `id(ctx)`; an id reused by a later context never serves the earlier one's entry."""
+    import types
+
+    _, ctx = solved
+    stamp = runs._stamp(ctx)
+    runs._cached_fingerprint(ctx, stamp, exact=False)
+    key = (id(ctx), False)
+    assert runs._lookup(key, ctx, ctx.network, stamp) is not runs._MISS
+    other = types.SimpleNamespace(network=ctx.network)
+    assert runs._lookup(key, other, ctx.network, stamp) is runs._MISS
+
+
+def test_a_network_swapped_during_the_hash_is_not_stored(solved, monkeypatch):
+    """The hash read the swapped-in network: storing it under the old network would serve it once that returns."""
+    n, ctx = solved
+    other = n.copy()
+    other.meta = dict(n.meta)
+    other.generators.at["g", "marginal_cost"] = 99
+    real = workflow_tools._network_input_fingerprint
+
+    def swapping(*a, **k):
+        ctx.network = other
+        return real(*a, **k)
+
+    monkeypatch.setattr(workflow_tools, "_network_input_fingerprint", swapping)
+    stamp = runs._stamp(ctx)
+    try:
+        runs._cached_fingerprint(ctx, stamp, exact=False)
+    finally:
+        ctx.network = n
+    assert runs._lookup((id(ctx), False), ctx, n, stamp) is runs._MISS
+
+
+def test_a_stamp_that_moves_during_a_cached_read_is_read_again(solved, monkeypatch):
+    """The cached read brackets the stamp too: a config write during the hash reads again."""
+    import dataclasses
+
+    _, ctx = solved
+    real = workflow_tools._network_input_fingerprint
+    moved = []
+
+    def moving(*a, **k):
+        if not moved:
+            moved.append(1)
+            config = ctx.solver_state["solver_config"]
+            ctx.solver_state["solver_config"] = dataclasses.replace(
+                config, finance={"x": 1}
+            )
+        return real(*a, **k)
+
+    monkeypatch.setattr(workflow_tools, "_network_input_fingerprint", moving)
+    runs.read(cached=True)
+    assert len(moved) == 1
+    # The first attempt's hash is not stored (the stamp moved during it); only a second attempt stores one.
+    assert (
+        runs._lookup((id(ctx), False), ctx, ctx.network, runs._stamp(ctx))
+        is not runs._MISS
+    )
+
+
+def test_an_input_generation_of_none_reads_as_zero(solved):
+    _, ctx = solved
+    ctx.input_generation = None
+    assert runs._stamp(ctx)[1] == 0
+    assert (
+        runs.results_verdicts(runs.read(cached=True))["optimisation"].state == "fresh"
+    )
