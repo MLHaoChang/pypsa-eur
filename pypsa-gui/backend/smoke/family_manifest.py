@@ -766,7 +766,6 @@ VARIANTS: list[dict] = [
              'update_component list_components',
              B + 'test_lc43_d23_wire_gates.py::test_a_write_that_outlives_its_budget_is_never_reported_done',
              B + 'test_lc43_d23_wire_gates.py::test_a_read_that_outlives_its_budget_keeps_the_plain_kind'),
-             '(LC-43b, .scratch/live-copilot/issues/43b-timeout-result-hides-unknown-outcome.md)'),
     _pending('LC-D23.history_repair', 'a stored history with an unpaired tool_use is sent as it is: no repair step is built (the harness only avoids writing one) (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D23.approval_resume', 'a pending approval is not resumed after a restart (it expires or reads unknown_confirmation_token): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D23.profile_recovery', 'after a refused provider switch or a deleted profile, recovery (a new chat, or picking a profile and resending) is not tested (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
