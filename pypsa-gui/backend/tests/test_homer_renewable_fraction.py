@@ -2884,7 +2884,9 @@ def test_the_infeasible_card_carries_the_named_hint():
     from services.solver.diagnostics import _diagnose_infeasibility
 
     _diagnose_infeasibility(
-        _network(pv_max=5.0), SolverConfig(min_renewable_fraction=0.9), queue.SimpleQueue()
+        _network(pv_max=5.0),
+        SolverConfig(min_renewable_fraction=0.9),
+        queue.SimpleQueue(),
     )
     card = classify_failure("warning", "infeasible")
     assert card["category"] == "infeasible"
