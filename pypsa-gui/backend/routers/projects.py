@@ -1558,23 +1558,31 @@ async def import_bundle(
         _reapply_user_ts_to_network,
         _restore_user_ts,
     )
-    user_ts_path = dest / "user_ts.json"
-    if user_ts_path.exists():
-        _restore_user_ts(json.loads(user_ts_path.read_text()))
-    else:
-        _restore_user_ts({})
-    n = PyPSAService.get_network()
-    # Saved network.nc may have a smaller snapshot index than the user-uploaded
-    # time series in user_ts.json. Expand n.snapshots to match the longest
-    # uploaded series before re-applying so the bundle round-trip preserves
-    # full-resolution data and the GUI shows the real snapshot count.
-    with PyPSAService.get_lock():
-        _ensure_snapshots_cover_user_ts(n)
-    # Set n.name so the StatusBar / meta endpoint reflect the project name
-    # rather than PyPSA's "Unnamed Network" default. The authoritative
-    # loaded-project binding was already set inside the swap lock above.
-    n.name = target_name
-    _reapply_user_ts_to_network(n)
+    try:
+        user_ts_path = dest / "user_ts.json"
+        if user_ts_path.exists():
+            _restore_user_ts(json.loads(user_ts_path.read_text()))
+        else:
+            _restore_user_ts({})
+        n = PyPSAService.get_network()
+        # Saved network.nc may have a smaller snapshot index than the user-uploaded
+        # time series in user_ts.json. Expand n.snapshots to match the longest
+        # uploaded series before re-applying so the bundle round-trip preserves
+        # full-resolution data and the GUI shows the real snapshot count.
+        with PyPSAService.get_lock():
+            _ensure_snapshots_cover_user_ts(n)
+        # Set n.name so the StatusBar / meta endpoint reflect the project name
+        # rather than PyPSA's "Unnamed Network" default. The authoritative
+        # loaded-project binding was already set inside the swap lock above.
+        n.name = target_name
+        _reapply_user_ts_to_network(n)
+    finally:
+        # PG-04a F1: the restored `user_ts` land after the revision moved, so a
+        # fingerprint a header poll cached in between stands for the network
+        # without them; move the inputs stamp once they are in, or the step failed.
+        from services import dirty_state as _dirty
+
+        _dirty.bump_inputs()
 
     # Bundle import is a load path too — restore side-results so the LP/PF
     # toggle, lost-load panel, and AC-PF badges hydrate immediately rather
@@ -3814,27 +3822,35 @@ def load_project(
         _reapply_user_ts_to_network,
         _restore_user_ts,
     )
-    user_ts_path = src / "user_ts.json"
-    if user_ts_path.exists():
-        user_ts_data = json.loads(user_ts_path.read_text())
-        _restore_user_ts(user_ts_data)
-    else:
-        _restore_user_ts({})
+    try:
+        user_ts_path = src / "user_ts.json"
+        if user_ts_path.exists():
+            user_ts_data = json.loads(user_ts_path.read_text())
+            _restore_user_ts(user_ts_data)
+        else:
+            _restore_user_ts({})
 
-    # If user_ts.json contains a longer time index than network.nc captured,
-    # expand n.snapshots so the GUI surfaces the real time-series resolution
-    # (otherwise the loaded project would silently truncate to network.nc's
-    # snapshot count and the user's uploaded data would be invisible).
-    n = PyPSAService.get_network()
-    with PyPSAService.get_lock():
-        _ensure_snapshots_cover_user_ts(n)
-    # Surface the project name to the GUI's StatusBar (which reads n.name via
-    # /network/meta). The authoritative loaded-project binding was already set
-    # atomically inside the swap lock above.
-    n.name = name
-    # Re-apply restored profiles to the network's _t tables (aligned to current
-    # snapshots) so that simulation picks up the correct time series.
-    _reapply_user_ts_to_network(n)
+        # If user_ts.json contains a longer time index than network.nc captured,
+        # expand n.snapshots so the GUI surfaces the real time-series resolution
+        # (otherwise the loaded project would silently truncate to network.nc's
+        # snapshot count and the user's uploaded data would be invisible).
+        n = PyPSAService.get_network()
+        with PyPSAService.get_lock():
+            _ensure_snapshots_cover_user_ts(n)
+        # Surface the project name to the GUI's StatusBar (which reads n.name via
+        # /network/meta). The authoritative loaded-project binding was already set
+        # atomically inside the swap lock above.
+        n.name = name
+        # Re-apply restored profiles to the network's _t tables (aligned to current
+        # snapshots) so that simulation picks up the correct time series.
+        _reapply_user_ts_to_network(n)
+    finally:
+        # PG-04a F1: the restored `user_ts` land after the revision moved, so a
+        # fingerprint a header poll cached in between stands for the network
+        # without them; move the inputs stamp once they are in, or the step failed.
+        from services import dirty_state as _dirty
+
+        _dirty.bump_inputs()
     # Register the now-bound active ctx in the resident registry (B8) so a later
     # tab switch back to this project finds it resident and does an INSTANT
     # in-memory pointer swap instead of re-loading from disk. Opening a project

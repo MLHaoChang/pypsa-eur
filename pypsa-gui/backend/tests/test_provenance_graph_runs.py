@@ -90,7 +90,12 @@ def _value_edit(n, ctx):
 
 def _sub_precision_edit(n, ctx):
     """F4: an edit below the plain hash's precision: the plain fingerprint is equal, the exact one differs."""
+    fp = workflow_tools._network_input_fingerprint
+    plain, exact = fp(ctx), fp(ctx, exact=True)
     n.generators.at["g", "marginal_cost"] = 50 + 1e-11
+    # The row's premise, pinned: a precision change must not turn it into a plain value edit.
+    assert fp(ctx) == plain
+    assert fp(ctx, exact=True) != exact
 
 
 def _shape_edit(n, ctx):
@@ -778,6 +783,228 @@ def test_a_profile_apply_reaches_the_cache(install_network):
         attribute="p_set",
         now=NOW,
     )
+    assert runs._stamp(ctx) != stamp
+
+
+def test_a_profile_apply_moves_the_stamp_after_its_write(install_network, monkeypatch):
+    """M4: a poll while `assign_profile` writes (here: once the profiles are on the network) caches at the stamp of
+    that moment; the bump lands after, so the cache never serves that entry. A raising reapply still bumps."""
+    from services.profile_gen import apply
+    from tests.test_profile_gen_load_family import NOW, _gen
+
+    n = pypsa.Network()
+    idx = pd.date_range("2023-01-01", "2023-12-31T23:00", freq="h", name="snapshot")
+    n.set_snapshots(idx)
+    n.add("Bus", "B1")
+    n.add("Load", "L1", bus="B1")
+    install_network(n)
+    ctx = PyPSAService.get_active_context()
+    res = _gen("commercial", {"peak_mw": None, "annual_mwh": 8000.0})
+    seen = []
+    real = apply._reapply_user_ts_to_network
+
+    def polled(*a, **k):
+        out = real(*a, **k)
+        runs.read(cached=True)
+        seen.append(runs._stamp(ctx))
+        return out
+
+    monkeypatch.setattr(apply, "_reapply_user_ts_to_network", polled)
+    kw = dict(component_type="loads", attribute="p_set", now=NOW)
+    apply.assign_profile(ctx, "L1", res.series["L1"], res.meta, **kw)
+    assert seen and runs._stamp(ctx) != seen[-1]
+
+    def raising(*a, **k):
+        raise RuntimeError("part-way")
+
+    monkeypatch.setattr(apply, "_reapply_user_ts_to_network", raising)
+    before = runs._stamp(ctx)
+    with pytest.raises(RuntimeError):
+        apply.assign_profile(ctx, "L1", res.series["L1"], res.meta, **kw)
+    assert runs._stamp(ctx) != before
+
+
+def _poll_in_the_reapply_window(monkeypatch):
+    """Poll once the restored `user_ts` are back on the network: the last moment before the route's bump."""
+    from routers import network as network_router
+
+    seen = []
+    real = network_router._reapply_user_ts_to_network
+
+    def polled(*a, **k):
+        out = real(*a, **k)
+        ctx = PyPSAService.get_active_context()
+        runs.read(cached=True)
+        seen.append((ctx, runs._stamp(ctx)))
+        return out
+
+    monkeypatch.setattr(network_router, "_reapply_user_ts_to_network", polled)
+    return seen
+
+
+def test_a_snapshot_restore_moves_the_stamp_after_the_user_ts(
+    client, api_project, monkeypatch
+):
+    """F1: `restore_snapshot` sets the revision with the results state, then restores and reapplies `user_ts`. A
+    poll in that window caches the network without them; the stamp moves once they are in."""
+    name = api_project("pgrestore")
+    r = client.post(f"/api/projects/{name}/snapshots", json={"label": "v1"})
+    assert r.status_code in (200, 201), r.text
+    seen = _poll_in_the_reapply_window(monkeypatch)
+    r = client.post(f"/api/projects/{name}/snapshots/{r.json()['id']}/restore")
+    assert r.status_code == 200, r.text
+    assert seen
+    ctx, stamp = seen[-1]
+    assert runs._stamp(ctx) != stamp
+
+
+def test_a_project_load_moves_the_stamp_after_the_user_ts(
+    client, api_project, monkeypatch
+):
+    """F1: `load_project` has the same order as the restore (results state, then `user_ts`)."""
+    name = api_project("pgload")
+    seen = _poll_in_the_reapply_window(monkeypatch)
+    r = client.get(f"/api/projects/{name}")
+    assert r.status_code == 200, r.text
+    assert seen
+    ctx, stamp = seen[-1]
+    assert runs._stamp(ctx) != stamp
+
+
+def test_the_chat_seam_polled_inside_the_handler_never_serves_the_pre_edit_hash(
+    client, solved, monkeypatch
+):
+    """F1(b) at the seam: drive `_dispatch_real_tool_call` with an editing tool and poll from inside its handler,
+    before the write. The seam's `bump_revision` has landed, so that poll caches the pre-edit hash at the new
+    revision; the input generation must move after the handler (not before it, and not never)."""
+    from harness import loop
+    from services import chat_service, chat_tools
+
+    n, ctx = solved
+    name = "update_component"
+    real = chat_tools.DISPATCHERS[name]
+    polled = []
+
+    def handler(*a, **k):
+        polled.append(_agree())
+        return real(*a, **k)
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, name, handler)
+    chat_service._reset_sessions_for_tests()
+    session = chat_service.ChatSession()
+    args = {
+        "component_class": "Generator",
+        "name": "g",
+        "attrs": {"marginal_cost": 60.0},
+    }
+    for event, data in loop._dispatch_real_tool_call(
+        session, {"id": "tu-1", "name": name, "input": args}, []
+    ):
+        if event == "tool_pending_confirmation":
+            session.record_decision(data["confirmation_token"], "approve")
+    assert polled == ["fresh"]
+    assert n.generators.at["g", "marginal_cost"] == 60.0
+    assert _agree() == "stale"
+
+
+def _a_write_that_mutates_then(monkeypatch, fail):
+    """Patch the generator PUT's handler: it swaps in another context mid-request (as undo, "New" and import do),
+    changes that context's network in place, then fails with `fail`. The context the request started on (the
+    active one in the middleware) and the one it ended on differ, so a bump of the active context is told apart
+    from a bump of the request's own (W2). Records both, with their input generations before the write."""
+    from routers import network as network_router
+    from services.project_context import ProjectContext
+
+    seen = {}
+
+    def handler(component, list_name, name, attrs):
+        started = PyPSAService.get_active_context()
+        ended = ProjectContext(network=_net())
+        PyPSAService._note_request_ctx(ended)
+        seen["started"], seen["started_before"] = (
+            started,
+            int(started.input_generation or 0),
+        )
+        seen["ctx"], seen["before"] = ended, int(ended.input_generation or 0)
+        ended.network.generators.at[name, "marginal_cost"] = 77.0
+        raise fail
+
+    monkeypatch.setattr(network_router, "_update_component", handler)
+    return seen
+
+
+def _only_the_request_s_context_moved(seen):
+    assert seen["ctx"] is not seen["started"]
+    assert seen["ctx"].network.generators.at["g", "marginal_cost"] == 77.0
+    assert int(seen["ctx"].input_generation or 0) == seen["before"] + 1
+    assert int(seen["started"].input_generation or 0) == seen["started_before"]
+
+
+def test_a_refused_network_write_still_moves_the_stamp(
+    client, install_network, monkeypatch
+):
+    """A route under /api/network may change the network in place and then fail; the middleware's revision bump
+    is 2xx-only, so on a 4xx/5xx it moves the request's own inputs stamp instead (W2)."""
+    from fastapi import HTTPException
+
+    install_network(_net())
+    seen = _a_write_that_mutates_then(
+        monkeypatch, HTTPException(409, "refused part-way")
+    )
+    r = client.put(
+        "/api/network/generators/g", json={"name": "g", "bus": "b", "p_nom": 10.0}
+    )
+    assert r.status_code == 409, r.text
+    _only_the_request_s_context_moved(seen)
+
+
+def test_a_network_write_that_raises_still_moves_the_stamp(
+    client, install_network, monkeypatch
+):
+    """G1: a write that changes the network and then raises never reaches either status branch; the middleware
+    moves the request's inputs stamp and re-raises."""
+    install_network(_net())
+    seen = _a_write_that_mutates_then(monkeypatch, RuntimeError("part-way"))
+    with pytest.raises(RuntimeError, match="part-way"):
+        client.put(
+            "/api/network/generators/g", json={"name": "g", "bus": "b", "p_nom": 10.0}
+        )
+    _only_the_request_s_context_moved(seen)
+
+
+def test_a_bundle_import_moves_the_stamp_after_the_user_ts(
+    client, api_project, monkeypatch
+):
+    """G2: `import_bundle` restores and reapplies `user_ts` like a load; a bundle without `network_revision`
+    leaves the revision where it was, so the stamp moves after the reapply."""
+    import io
+    import json
+    import zipfile
+
+    name = api_project("pgbundle")
+    raw = zipfile.ZipFile(
+        io.BytesIO(client.get(f"/api/projects/{name}/bundle").content)
+    )
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        for item in raw.infolist():
+            data = raw.read(item)
+            if item.filename.endswith("metadata.json"):
+                meta = json.loads(data)
+                meta.pop("network_revision", None)
+                data = json.dumps(meta).encode()
+            z.writestr(item, data)
+    assert any(i.filename.endswith("metadata.json") for i in raw.infolist())
+    bundle = out.getvalue()
+    seen = _poll_in_the_reapply_window(monkeypatch)
+    r = client.post(
+        "/api/projects/import_bundle",
+        files={"file": ("pg.zip", bundle, "application/zip")},
+        params={"name": "pgbundle_imported"},
+    )
+    assert r.status_code in (200, 201), r.text
+    assert seen
+    ctx, stamp = seen[-1]
     assert runs._stamp(ctx) != stamp
 
 
