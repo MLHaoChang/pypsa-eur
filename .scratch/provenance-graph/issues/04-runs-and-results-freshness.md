@@ -1,6 +1,6 @@
 # Runs and results freshness on the graph
 
-Status: ready-for-agent (Opus; GK B plan first, UX for UI parts)
+Status: done (04a #1464, 04b #1478)
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 
