@@ -1075,11 +1075,15 @@ export default function CapacityExpansion() {
           bodyClassName="p-3"
         >
           <p className="text-[11px] text-muted mb-3">
-            Existing-capacity CAPEX, new-build CAPEX and OPEX stack up to the optimised
-            Total annual system cost.{cost?.capex_expansion == null && (
-              <span data-testid="waterfall-split-unavailable" className="text-warn">
-                {' '}The split into existing and new-build CAPEX is unavailable: it could not be computed for this solve, so CAPEX is one step.
-              </span>
+            {cost?.capex_expansion == null ? (
+              <>CAPEX and OPEX stack up to the optimised Total annual system cost.{' '}
+                <span data-testid="waterfall-split-unavailable" className="text-warn">
+                  The split into existing and new-build CAPEX is unavailable: it could not be computed for this solve, so CAPEX is one step.
+                </span>
+              </>
+            ) : (
+              <>Existing-capacity CAPEX, new-build CAPEX and OPEX stack up to the optimised
+              Total annual system cost.</>
             )}{cost && cost.curtailment_cost > 0 && (
               <> A curtailment penalty of <span className="font-medium text-text">{fmtCurrency(cost.curtailment_cost)}</span>{' '}
               is a separate objective term, not part of Total.</>

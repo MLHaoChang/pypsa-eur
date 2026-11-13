@@ -139,6 +139,27 @@ describe('the Summary tab (M3)', () => {
     expect(cost.textContent).not.toContain('€0')
   })
 
+  it('the line is not repeated when the strip already says the figure could not be computed', async () => {
+    api.getCostBreakdown.mockResolvedValue({ ...COST, capex_expansion: null })
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'network', cards: [
+      { id: 'new_build_capital', value: null, unit: null, state: 'unavailable',
+        reason: 'This figure could not be computed for this solve.', formula_id: null, detail: null },
+    ] })
+    renderTab()
+    await screen.findByTestId('headline-new_build_capital')
+    expect(screen.getByTestId('summary-cost').textContent).not.toContain('of which new build')
+  })
+
+  it('a busy strip card does not hide the line', async () => {
+    api.getHeadlineKpis.mockResolvedValue({ kind: 'network', cards: [
+      { id: 'new_build_capital', value: null, unit: null, state: 'unavailable',
+        reason: 'The project is busy. Try again in a moment.', formula_id: null, detail: null },
+    ] })
+    renderTab()
+    await screen.findByTestId('headline-new_build_capital')
+    await waitFor(() => expect(screen.getByTestId('summary-cost').textContent).toContain('of which new build'))
+  })
+
   it('before any solve it says there is nothing yet', async () => {
     for (const f of [api.getCostBreakdown, api.getEmissions, api.getStatistics, api.getLostLoad]) f.mockResolvedValue(null)
     renderTab()

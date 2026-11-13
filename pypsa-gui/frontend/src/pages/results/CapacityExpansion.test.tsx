@@ -439,4 +439,5 @@ it('reads a failed expansion compute as unavailable, the state the headline stri
   // The one-step CAPEX in the build-up says why it is not split.
   expect(screen.getByTestId('waterfall-split-unavailable').textContent)
     .toMatch(/split into existing and new-build CAPEX is unavailable/)
+  expect(screen.queryByText(/Existing-capacity CAPEX, new-build CAPEX and OPEX stack up/)).toBeNull()
 })
