@@ -452,3 +452,31 @@ def test_a_bad_import_rate_is_a_422_at_the_study(client, install_network):
     r = _post(client)
     assert r.status_code == 422, r.text
     assert "grid_import" in r.json()["detail"]
+
+
+def test_each_firm_block_import_is_refused_with_its_own_cause():
+    n = _net(import_data=None)
+    n.add("Link", "grid_import_b", bus0="grid", bus1="hub", p_nom=5.0, efficiency=1.0)
+    n.links.at["grid_import_b", "eh_role"] = "grid_import"
+    n.links.at["grid_import_b", "outage_rate_value"] = 0.01  # no MTTR
+    _, _, inputs = _study_inputs(n)
+    causes = {}
+    for lk in ("grid_import", "grid_import_b"):
+        with pytest.raises(ValueError) as exc:
+            elcc._resolve(inputs, "generator", f"link:{lk}")
+        causes[lk] = str(exc.value)
+    assert causes["grid_import"].startswith(
+        "grid_import is taken as never failing (no outage data);"
+    )
+    assert causes["grid_import_b"].startswith(
+        "grid_import_b is taken as never failing (no finite MTTR in its outage data);"
+    )
+
+
+def test_a_supplying_link_without_a_note_is_still_refused_by_name():
+    import dataclasses
+
+    _, _, inputs = _study_inputs(_net())
+    bare = dataclasses.replace(inputs, supply_links=("ghost",), fleet_notes=())
+    with pytest.raises(ValueError, match="Link ghost supplies the fleet"):
+        elcc._resolve(bare, "generator", "link:ghost")
