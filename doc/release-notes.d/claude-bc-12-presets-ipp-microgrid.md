@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Business-case presets for the IPP hybrid (capacity payment on the battery, guarantees of origin, land lease, insurance) and the microgrid templates (tariff rows on the served residential and hospital loads, EaaS fee offered but off by default, opex rows).

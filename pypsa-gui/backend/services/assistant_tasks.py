@@ -14,6 +14,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 from fastapi import HTTPException
+from services.provenance_graph import Pin, pin_stale
 from services.pypsa_service import PyPSAService
 
 _LOCK = threading.RLock()
@@ -274,9 +275,18 @@ def _stale(task, current=None):
     if not task.get("brief") or task["status"] in ("completed", "cancelled"):
         return False
     current = current or _fingerprint()
-    if current is None or current != task.get("fingerprint"):
+
+    def read():
+        if current is None:
+            raise ValueError("the inputs cannot be read")
+        return current
+
+    # The first broken pin stops the check: the requirements thread is read (under the caller's lock) only when
+    # the fingerprint still matches, as before.
+    subject = f"assistant_task:{task.get('id')}"
+    if pin_stale(subject, [Pin("inputs", task.get("fingerprint"), read)]):
         return True
-    return _requirements_moved(task)
+    return pin_stale(subject, [Pin("requirements", False, lambda: bool(_requirements_moved(task)))])
 
 
 def _requirements_moved(task):

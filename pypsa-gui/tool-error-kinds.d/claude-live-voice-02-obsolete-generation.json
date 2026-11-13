@@ -1,0 +1,1 @@
+{"kinds": {"obsolete_generation": {"surface": "inline", "why": "Issue 02: a rebind bumped the conversation's generation while this live (utterance) turn ran. The turn runs no further tool and no model call, and publishes no answer; executed tool results stay in history as facts. Emitted on an `error` frame, then `session_done`; a queued new-generation utterance drains next."}}}

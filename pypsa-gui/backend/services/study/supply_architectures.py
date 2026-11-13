@@ -27,11 +27,11 @@ the data-centre power chain (`services/dc_architecture.py`).
   injected ``solve`` and keeps every architecture: one that did not solve is
   listed as ``infeasible``, ``failed`` or ``not_reached`` with null figures
   flagged in ``unavailable``, never dropped (ADR-0001, gate G6).
-* **Renewable fraction** is computed here from served energy
-  (:func:`renewable_fraction`). homer-parity 01a builds a
-  ``renewable_fraction`` KPI; that KPI and this column must share one
-  definition, so 01a reuses or replaces this function rather than adding a
-  second one.
+* **Renewable fraction** is homer-parity 01a's KPI
+  (``services.solver.renewable_fraction``, the one definition; GK B G13):
+  :func:`renewable_fraction` calls it. Since RENFRAC-ALL-1 it is the share of
+  all electricity used on site, so on a sector-coupled architecture what
+  converters draw counts as used (R14f).
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ from typing import Any
 import pandas as pd
 
 from services.adequacy.slack import LOST_SLACK_PREFIX, slack_generator_mask
-from services.results.carrier_kpis import _is_renewable_carrier
+from services.solver import renewable_fraction as _RF
 from services.study import runner as _runner
 from services.study.runner import _opt_value
 
@@ -66,7 +66,6 @@ __all__ = [
 # Canonical order: an architecture's id joins its groups in this order.
 GROUP_ORDER = ("pv", "wind", "battery", "genset", "grid")
 SOURCES = frozenset({"pv", "wind", "genset", "grid"})
-NON_RENEWABLE = ("genset", "grid")
 LABELS = {
     "pv": "PV",
     "wind": "Wind",
@@ -405,13 +404,6 @@ def _weights(n) -> pd.Series:
 _ELECTRIC = frozenset({"ac", "dc", "low voltage", "lv", "mv", "hv", "electricity", ""})
 
 
-def _energy(df: pd.DataFrame, names: Iterable[str], w: pd.Series) -> float:
-    cols = [c for c in names if c in df.columns]
-    if not cols:
-        return 0.0
-    return float(df[cols].clip(lower=0.0).mul(w, axis=0).to_numpy().sum())
-
-
 def _electrical_buses(n) -> set[str]:
     """Buses whose carrier is electric (AC, DC, a voltage level or none; see
     ``_ELECTRIC``)."""
@@ -425,160 +417,19 @@ def _electrical_buses(n) -> set[str]:
     }
 
 
-def _demand(n, w: pd.Series, electric: set[str]) -> float:
-    names = [x for x in n.loads.index if str(n.loads.at[x, "bus"]) in electric]
-    if not names:
-        return 0.0
-    p = n.loads_t.p
-    if p.empty or not set(names).issubset(p.columns):
-        p = n.get_switchable_as_dense("Load", "p_set")
-    return float(p[names].mul(w, axis=0).to_numpy().sum())
-
-
-def _delivery(n, links: list[str]) -> pd.DataFrame:
-    """Each dispatched Link's delivery into its ``bus1``: ``-p1``, else
-    ``efficiency * p0`` (time-varying efficiency included). A Link with no
-    dispatch is left out."""
-    p1, p0 = n.links_t.p1, n.links_t.p0
-    out = {}
-    eff = None
-    for name in links:
-        if name in p1.columns:
-            out[name] = -p1[name]
-        elif name in p0.columns:
-            if eff is None:
-                eff = n.get_switchable_as_dense("Link", "efficiency")
-            out[name] = p0[name] * eff[name]
-    return pd.DataFrame(out, index=n.snapshots)
-
-
-def _non_renewable_energy(n, members, w: pd.Series, electric: set[str]) -> float:
-    """A non-renewable group's energy delivered into the site's electrical
-    buses, each import path once:
-
-    * an import Link (bus1 electrical, bus0 a fuel bus or a supply bus: one
-      holding a member Generator and no Load) counts by its delivery
-      (:func:`_delivery`) and stands for the Generators on its bus0;
-    * a member Generator on an electrical bus counts by output unless such a
-      dispatched Link stands for it; one on a fuel bus never counts (its
-      fuel is not electricity);
-    * any other member Link (an export from the site) never counts."""
-    links = _static(n, "Link")
-    gens = [x for comp, x in members if comp == "Generator"]
-    g_bus = {x: str(n.generators.at[x, "bus"]) for x in gens}
-    load_buses = {str(b) for b in n.loads["bus"]}
-    supply = set(g_bus.values()) - load_buses
-    imports = [
-        x
-        for comp, x in members
-        if comp == "Link"
-        and str(links.at[x, "bus1"]) in electric
-        and (
-            str(links.at[x, "bus0"]) in supply
-            or str(links.at[x, "bus0"]) not in electric
-        )
-    ]
-    delivered = _delivery(n, imports)
-    covered = {str(links.at[x, "bus0"]) for x in delivered.columns}
-    counted = [x for x, b in g_bus.items() if b in electric and b not in covered]
-    return _energy(delivered, delivered.columns, w) + _energy(
-        n.generators_t.p, counted, w
-    )
-
-
-def _reaches(start: str, edges: Mapping[str, set[str]], electric: set[str]) -> bool:
-    """``start`` is electrical or reaches an electrical bus through
-    ``edges`` (:func:`_link_edges`, each Link in the directions it runs, any
-    number of hops through non-electrical buses, storage or not: an H2 tank
-    does not launder gas). The walk ends at the first electrical bus."""
-    seen = {start}
-    todo = [start]
-    while todo:
-        bus = todo.pop()
-        if bus in electric:
-            return True
-        for b in edges.get(bus, ()):
-            if b not in seen:
-                seen.add(b)
-                todo.append(b)
-    return False
-
-
-def _uncounted(n, groups, w: pd.Series) -> bool:
-    """A dispatched non-slack Generator with a non-renewable carrier
-    (``carrier_kpis._is_renewable_carrier``, the shared definition) that no
-    non-renewable path counts: not a member of :data:`NON_RENEWABLE`, nor
-    on a bus (no Load, Line or Transformer) whose every Link is such a
-    member, which then counts its delivery. A Generator whose output reaches
-    no electrical bus but through such members (:func:`_reaches`) is outside
-    the fraction or counted by them."""
-    members = {m for g in NON_RENEWABLE for m in groups.get(g, ())}
-    member_links = {x for comp, x in members if comp == "Link"}
-    held = {str(b) for b in _static(n, "Load")["bus"]}
-    for comp in _BRANCHES:
-        df = _static(n, comp)
-        held.update(str(b) for c in ("bus0", "bus1") for b in df[c])
-    electric = _electrical_buses(n)
-    link_buses = _link_buses(n)
-    touching: dict[str, set[str]] = {}
-    for name, buses in link_buses.items():
-        for b in buses:
-            touching.setdefault(b, set()).add(name)
-    # Counted Links are left out: their delivery into electricity is counted.
-    edges = _link_edges(n, {("Link", x) for x in member_links})
-    slacks = slack_names(n)
-    g = n.generators
-    for x in g.index:
-        x = str(x)
-        if x in slacks or ("Generator", x) in members:
-            continue
-        if _is_renewable_carrier(str(g.at[x, "carrier"])):
-            continue
-        bus = str(g.at[x, "bus"])
-        links = touching.get(bus, set())
-        if not _reaches(bus, edges, electric):
-            continue  # no uncounted way to electricity (e.g. a boiler's fuel)
-        if bus not in held and links and links <= member_links:
-            continue  # covered: its output leaves only through counted links
-        if _energy(n.generators_t.p, [x], w) > 0:
-            return True
-    return False
-
-
 def renewable_fraction(n) -> float | None:
     """
-    The share of served load not met by a genset or the grid, HOMER's
-    definition: ``1 - (genset energy + grid import) / served load``, clipped
-    to [0, 1] (exported surplus does not lift it above 1). Grid import counts
-    gross (export does not net against it) and as non-renewable; an import
-    Link counts once, by its delivery (:func:`_non_renewable_energy`). Served load
-    is the load less the slacks' shortfall. Energy is weighted by
-    :func:`_weights`. None when the network has no dispatch or serves no load,
-    or when a dispatched non-renewable Generator is neither counted nor a
-    slack (:func:`_uncounted`: fail closed, never 1.0 or NaN).
-
-    The ONE definition: homer-parity 01a's ``renewable_fraction`` KPI reuses
-    or replaces this function.
+    The architecture's renewable fraction: homer-parity 01a's
+    :func:`services.solver.renewable_fraction.renewable_fraction`, the one
+    definition (GK B G13, owner decision RENFRAC-ALL-1): the share of all
+    electricity used on site (served Load plus what conversion Links draw,
+    less every slack's shortfall) not supplied by a non-renewable source.
+    Always in [0, 1]. None, never 1.0 or NaN, when nothing is served or
+    dispatched, or when the fraction cannot attribute a source or a
+    conversion, or non-renewable output exceeds what was used (fail closed;
+    the shared result carries the reason).
     """
-    gp = n.generators_t.p
-    if gp.empty:
-        return None
-    w = _weights(n)
-    electric = _electrical_buses(n)
-    slacks = [x for x in slack_names(n) if str(n.generators.at[x, "bus"]) in electric]
-    served = _demand(n, w, electric) - _energy(gp, slacks, w)
-    if not served > 0:
-        return None
-    groups = classify(n)
-    if _uncounted(n, groups, w):
-        return None
-    non_ren = sum(
-        _non_renewable_energy(n, groups.get(g, ()), w, electric) for g in NON_RENEWABLE
-    )
-    rf = 1.0 - non_ren / served
-    if rf != rf:
-        return None  # a NaN in the dispatch is unknown, never 0.0
-    return min(1.0, max(0.0, rf))
+    return _RF.renewable_fraction(n)["fraction"]
 
 
 def _sizes(
@@ -633,12 +484,16 @@ def row_of(arch: SupplyArchitecture, n) -> dict:
     sizes, capex, why = _sizes(n, members)
     if why:
         unavailable["capex_eur"] = why
-    rf = renewable_fraction(n)
+    kpi = _RF.renewable_fraction(n)
+    rf = kpi["fraction"]
     if rf is None:
+        # Otherwise the fraction could not attribute a source or a conversion,
+        # a counted dispatch was NaN, or non-renewable output exceeded what
+        # was used on site.
         unavailable["renewable_fraction"] = (
-            "uncounted_non_renewable"
-            if not n.generators_t.p.empty and _uncounted(n, groups, _weights(n))
-            else "no_served_load"
+            "no_served_load"
+            if kpi["reason"] in (_RF.NO_DISPATCH_REASON, _RF.NO_SERVED_REASON)
+            else "uncounted_non_renewable"
         )
     return {
         "architecture_id": arch.architecture_id,

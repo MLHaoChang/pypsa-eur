@@ -18,7 +18,6 @@ import { Term, TERM_FALLBACK } from '../shared/Term'
 import { useDispatchSolved, useHubReport, useHubReview, useHubStudy } from '../useHubData'
 import { FROM_STUDY_HINT } from '../chapters'
 import { SECTION_LABEL } from '../sectionLabels'
-import { STALE_TILE_REASON } from '../chapters'
 import { costTileLabel, kpiMoney } from '../plainWords'
 import { useQuery } from '@tanstack/react-query'
 import { networkApi } from '../../../api/network'
@@ -148,7 +147,8 @@ export function ResultsCard() {
             label={costTileLabel(report?.period_basis, periods.data?.periods)}
             value={fmtCurrency(cost)} fromStudy={solved === false && !stale}
             hint={solved === false && !stale ? `${TERM_FALLBACK.cost_at_target} ${FROM_STUDY_HINT}` : TERM_FALLBACK.cost_at_target}
-            state={stale ? 'stale' : 'ready'} reason={stale ? STALE_TILE_REASON : undefined} />
+            // The banner above says "Out of date" once for the card; the tile only dims.
+            state="ready" dimmed={stale} />
         </div>
       )}
 

@@ -12,7 +12,7 @@ import { resultsApi, simulationApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { useResultsFilter } from './filterContext'
-import { fmtCurrency, fmtEnergy } from './shared'
+import { COST_UNAVAILABLE, FIGURE_NOT_COMPUTED, fmtCurrency, fmtEnergy } from './shared'
 import { kpiFigure, splitValueUnit } from '../../utils/format'
 import {
   capacityRows, costView, emissionsView, reserveMarginVerdict,
@@ -132,6 +132,11 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   // (one figure, one place). A card narrowed to one period keeps its own.
   const { data: headline } = useHeadlineKpis()
   const inStrip = (id: string) => selectedPeriod == null && !!headline?.cards.some(k => k.id === id && k.value != null)
+  // The same holds for a figure the strip already says could not be computed
+  // (ui-modern 06): the card would only repeat the strip's reason. A card
+  // unavailable for any other reason (busy, out of date) keeps its figure here.
+  const notComputedInStrip = (id: string) => selectedPeriod == null
+    && !!headline?.cards.some(k => k.id === id && k.reason === FIGURE_NOT_COMPUTED)
 
   const c = costView(cost, selectedPeriod)
   const e = emissionsView(emissions as EmissionsPayload | null | undefined, selectedPeriod)
@@ -200,9 +205,15 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
               {!inStrip('system_cost') && <Headline value={fmtCurrency(c.total)} sub="total system cost in this solve" />}
               <Line label={COST_WORDS.capital} value={fmtCurrency(c.capital)} />
               <Line label="Operating cost" value={fmtCurrency(c.operating)} />
-              {c.newBuild != null && !inStrip('new_build_capital') && (
+              {/* Horizon only (new build is not split per period). A null on
+                  the horizon is a failed expansion compute: it reads as
+                  unavailable, never a missing line (ui-modern 06). */}
+              {c.period == null && !inStrip('new_build_capital') && !notComputedInStrip('new_build_capital') && (
                 <span title="Annualised capital of capacity this solve built: max(0, optimal − installed) × capital cost, as on the Capacity expansion tab.">
-                  <Line label="of which new build" value={fmtCurrency(c.newBuild)} />
+                  <Line label="of which new build" value={c.newBuild == null ? COST_UNAVAILABLE : fmtCurrency(c.newBuild)} />
+                  {c.newBuild == null && (
+                    <p className="text-[11px] text-muted text-right">{FIGURE_NOT_COMPUTED}</p>
+                  )}
                 </span>
               )}
             </>

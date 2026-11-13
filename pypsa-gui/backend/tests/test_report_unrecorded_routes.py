@@ -346,3 +346,60 @@ def test_a_regenerate_bases_on_the_unrecorded_version_and_records_its_own_receip
     meta = store.load_meta(pdir, rid)
     assert meta.settings_unrecorded is None
     assert meta.generation["sections"] == ["fmea_top"]
+
+
+def test_an_older_version_is_not_exported_through_the_latest_mapping(
+    client,
+    api_project,
+    session_state,
+    project_storage_dir,
+    fixtures,
+    fake_untagged,
+):
+    """Study harness 43: the meta keeps only the latest mapping plan, so an older version
+    of an untagged-template report is refused (never rendered through version 2's
+    plan, unsaid); the latest version still exports."""
+    name, rid, _plan = _untagged_with_plan(
+        client, api_project, session_state, project_storage_dir, fixtures, "export-v1"
+    )
+    bound_v = store.load_meta(project_storage_dir(name), rid).latest_version
+    n = _unrecorded(project_storage_dir(name), rid)
+    assert n == bound_v + 1
+    store.update_meta(project_storage_dir(name), rid, mapping_plan={"entries": []})
+    r = client.post(
+        f"/api/projects/{name}/reports/{rid}/export", json={"version": bound_v}
+    )
+    assert r.status_code == 409, r.text[:300]
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "report_settings_unrecorded"
+    assert (
+        f"version {bound_v}" in detail["message"]
+        and f"version {n}" in detail["message"]
+    )
+    assert fake_untagged.rendered == []
+    r = client.post(f"/api/projects/{name}/reports/{rid}/export", json={"version": n})
+    assert r.status_code == 200, r.text[:300]
+    assert fake_untagged.rendered[-1]["entries"] == []
+
+
+def test_an_older_version_of_a_tagged_template_report_still_exports(
+    client,
+    api_project,
+    session_state,
+    project_storage_dir,
+    fixtures,
+):
+    """Study harness 43 (GK B): a tagged template ignores the mapping plan, so a
+    stored plan does not stop an older version from exporting."""
+    name = api_project("export-v-tagged")
+    rid = _report(client, name, session_state)
+    tpl = _upload(client, name, "tagged_minimal.docx", fixtures["tagged_minimal.docx"])
+    _bind(client, name, rid, tpl["file_id"])
+    pdir = project_storage_dir(name)
+    bound_v = store.load_meta(pdir, rid).latest_version
+    store.update_meta(pdir, rid, mapping_plan={"entries": []})
+    assert _unrecorded(pdir, rid) == bound_v + 1
+    r = client.post(
+        f"/api/projects/{name}/reports/{rid}/export", json={"version": bound_v}
+    )
+    assert r.status_code == 200, r.text[:300]

@@ -172,6 +172,25 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A KPI never reads a value the solve did not produce. A component missing from its dispatch frame (added after the solve) reads None, never p_set, 0 or an inference from neighbours. Fixtures model a solved network rather than the KPI guessing (#1424 A1–A5, GK B (51)).
 - An outcome or extra-edit allowance is as narrow as what the write path writes: a cell write owns only its own provenance store entry (#1431 @191e64ed, GK B (51)).
 
+- A gate that reads a product shortfall uses `process_products.shortfalls` with the run's own solve's `last_lost_load`, never `product_role_generators(n, "shortfall")`. Role-only misses a solve-time capture slack and fails open. A flagged entry (name fallback, stale or missing capture) is no evidence (#1429, GK A (24)).
+- A sign<0 component that can inject (p_min_pu<0, static or series) is counted on its injecting side gross, through an aux y ≥ −p scaled by |sign|, in both the LP row and the KPI. A warning alone is fail-open (#1424 R1, G4, GK A (24)).
+- A KPI fallback for a missing dispatch column fails closed (None). It never substitutes p_set or a sum over neighbouring components, since each guessed probe misread either way (#1424 B1–B3, GK A (24)).
+- A test that only bounds a value (`>= target`) does not pin a guard: assert the exact value at binding, or the classification, so a mutant that loosens the guard fails (#1424 G2, GK A (24)).
+- An over-bound refusal for a wildcard lever is tested per instance, and the wildcard is checked against the built template so no never-lever matches (#1429 B1, GK A (24)).
+
+- A per-kg premium or incentive on the same served quantity is not a sale. Never link it beside the main sale: its share sums into f and drops the whole lost-production line (#1436 F1, GK B (52)).
+- No capex line sits in two maintenance-category share bases (insurance exempt), and a share base is never only a replacement lump (#1436 F3/G2, #1441 H3, GK B (52)).
+- A typed volume that earns revenue (a premium, GOs) is the verified volume expected, never above what the results show served (#1436 G1, #1441 H2, GK B (52)).
+- Moving a short-circuited compare into an evaluate-all verdict can add IO under a lock: keep the order and stop at the first break (#1443 K3, GK B (52)).
+- A no-promote lease release must not leave a pending utterance that a later admission then promotes (#1440 O5′, GK B (52)).
+- A table-edit compare is per cell, never a multiset (LC-43a T1, GK B (52)).
+
+- A detection that reads a bus's supply (mainland, supply bus, unattributed source) leaves out slack Generators (`slack_generator_mask`, `is_slack_name`). A persistent load-shedding or DSR slack is not a supply (#1461 S1, GK A (25)).
+- A fleet split at a trusted import Link (hub_side) carries its grid-side asset set into every comparison against a copper-plate payload. Such rows are left out by scope and named, never counted as an absent-row mismatch, and never silently dropped (#1456 C1, GK A (25)).
+- A refusal for a never-failing (firm-block) unit says that its credit would restate the assumption. It never says that nothing can be removed (#1456 C2, GK A (25)).
+- A pre-solve network repair is pinned as not-an-edit (fingerprint, revision, undo), with a mutant writing a non-default value. Every solve call site is covered by an AST guard keyed on (file, function) (#1457, GK A (25)).
+- A verdict "within tolerance of the goal" is computed from the draws and weights that produced the estimate, never from the requested draws or network weights. Its resolution is one more draw as heavy as the heaviest used draw, floored at one shortfall hour at the heaviest snapshot. A new loop status gets an explicit mapping in every status reader (adequacy-loops 04 D1, D3, D7, GK A (25), (26)).
+
 ## Engineering rules
 
 - Grid source impedance derived from an entered S_k'' carries the IEC 60909 voltage factor c (Z = c·Un²/S_k''; S_sc2 = S_k''/c), in every screen: unbalance, the flicker note, the impedance scan.

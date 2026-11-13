@@ -31,6 +31,7 @@ from typing import Any
 KIND = "use_project_preview"
 SINGLE = "update_component"
 BULK = "bulk_update_components"
+PREVIEW = "preview_project_changes"
 RESET_TIERS = frozenset({"execution", "execution_long_running"})
 
 
@@ -80,6 +81,18 @@ def preview_available() -> bool:
     """The preview needs an active project (`assistant_tools._project`)."""
     from services.pypsa_service import PyPSAService
     return bool(PyPSAService.get_active_context().project_uuid)
+
+
+def turn_redirects(session: Any, tool_uses: list[dict[str, Any]]) -> dict[str, str]:
+    """The refusals for one model response of `session`. None inside an assurance
+    turn, without an active project, or in a run stage whose allowlist lacks the
+    preview: a refusal toward a tool the stage does not offer would leave the
+    edit unable to land (a staged L2 round's second lever change)."""
+    stage = getattr(session, "stage_tools", None)
+    if (session.assurance_turn is not None or not preview_available()
+            or (stage is not None and PREVIEW not in stage)):
+        return {}
+    return redirects(tool_uses, session.turn_single_edit_applied)
 
 
 def redirects(tool_uses: list[dict[str, Any]], single_edit_applied: bool) -> dict[str, str]:

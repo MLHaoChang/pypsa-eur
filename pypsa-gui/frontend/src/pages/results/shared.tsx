@@ -140,6 +140,11 @@ export function isTruncatedPayload(
 // version of "unavailable" is exactly the drift this module exists to stop.
 export const COST_UNAVAILABLE = 'unavailable'
 
+// The reason a figure reads unavailable when its compute failed (ui-modern 06);
+// the headline strip's `FIGURE_NOT_COMPUTED` (services/results/headline_kpis.py)
+// says the same.
+export const FIGURE_NOT_COMPUTED = 'This figure could not be computed for this solve.'
+
 // The inline cell rendering of the above. The word was already centralised;
 // its PRESENTATION was not — CompareView carried 19 verbatim copies of this
 // exact span, so the tooltip copy could drift on an edit to any one of them

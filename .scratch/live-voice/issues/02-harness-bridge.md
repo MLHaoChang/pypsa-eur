@@ -1,6 +1,6 @@
 # Shared harness delegation bridge
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 08, 09 (integrated acceptance; bridge extraction can start earlier)
 
@@ -69,3 +69,17 @@ Still open: Live UI durable create/rebind entry.
 `ensureLiveDurableThread()` (create if unbound, else rebind). Generation sync
 reuses `applyDurableThreadGeneration`. Tests: `durableConversations.test.ts`,
 `AssistantDock.test.tsx`. Still open: LiveKit credentials/deployment smoke.
+
+2026-11-12: Slice plan GO from GK B (52) on master 432655af, two PRs.
+PR-1, generation-aware result projection:
+- V1: check before each tool dispatch, after each tool result and before the next model call, and before any answer text is streamed or persisted. Once a turn is obsolete, no text deltas go out and no answer is persisted. Executed tool results stay as facts.
+- V2: fail closed when the generation is unreadable.
+- V3: a new-generation pending utterance drains exactly once after the obsolete lease is released.
+- V4: typed turns are untouched, and the guard's mutants are killed separately.
+- V5: `obsolete_generation` goes only in its own `tool-error-kinds.d` fragment, plus the manifest, ChatPanel and fragment checks.
+PR-2, transport-equivalence fixtures:
+- V6: compare tool names and normalised arguments, the SSE event-type sequence, the write count and the card digest across transports.
+- V7: a late older-generation utterance and a duplicate id are tested separately; neither causes a second write.
+- V8: no dependency on the known-red `test_workflow_provider_parity[*-anthropic]`, and the PR body says where each provider case runs green.
+
+2026-11-12: PR-1 — `run_turn` reads `project_result` for an admitted turn (`harness/loop.py` `_generation_reader`; it fails closed). The turn stops with `obsolete_generation` before a model call, after a stream (nothing persisted, tools not run) and before each tool dispatch (paired error results). Its `token` frames are dropped. `bump_generation` keeps the running lease and drops only the old pending. `release_lease` frees an obsolete lease and promotes the new-generation pending. Tests: `tests/test_obsolete_generation_projection.py`.

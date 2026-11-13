@@ -687,7 +687,7 @@ VARIANTS: list[dict] = [
     _covered('LC-D20.delivery_gates', 'the open network fingerprint, report version counts, upload directories and blob count (tests/lc43_gates.py state) unchanged after each refusal: another project\'s id and malformed ids are 404 upload_not_found; another organisation\'s download is 404 Project not found; '
              'an unfinished blob (blob_ready false) is 404 upload_not_found to the tools and the download; each of the network, CSV, Excel and MATPOWER exports over the cap is 413 '
              'file_too_large, a delivery over the cap less 100 kB 413 delivery_too_large; an unnamed import format is 422 invalid_import_format, changed bytes 409 import_file_changed, '
-             'a malformed CSV bundle or workbook is refused with the open project and its unsaved edit kept; a chart outside 1-8 unique names of a known component '
+             'a malformed import is 422 import_unreadable (row LC-D20.malformed_import); a chart outside 1-8 unique names of a known component '
              'is 422 invalid_chart; export_run_evidence with no run named or discussed is 409 discussed_run_required',
              'build_delivery get_file_delivery export_network_nc export_csv_bundle import_uploaded_network create_chart export_run_evidence',
              B + 'test_lc43_d20_delivery_gates.py::test_an_id_from_another_project_or_a_malformed_id_reaches_no_file',
@@ -698,9 +698,11 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d20_delivery_gates.py::test_an_import_needs_a_named_format_and_unchanged_bytes',
              B + 'test_lc43_d20_delivery_gates.py::test_a_chart_outside_its_shape_is_refused_and_draws_nothing',
              B + 'test_lc43_d20_delivery_gates.py::test_run_evidence_is_never_exported_for_a_run_nobody_named',
-             B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_bundle_or_workbook_is_refused_and_keeps_the_open_network'),
-    _pending('LC-D20.malformed_import', 'a malformed netCDF import fails after dropping the open project and its unsaved edits, and a malformed MATPOWER file imports as an empty network '
-             '(LC-43c, .scratch/live-copilot/issues/43c-malformed-import-replaces-the-network.md)'),
+             B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_import_is_refused_and_keeps_the_open_network'),
+    _covered('LC-D20.malformed_import', 'a malformed netCDF file, CSV bundle, workbook and MATPOWER case (no mpc.bus rows) are each 422 import_unreadable through the dispatcher, no tool_result, '
+             'with the open project (project_uuid), its unsaved G1 edit (20 to 33 MW) and the lc43_gates state kept: each file is parsed into a candidate network before it replaces the open one (LC-43c)',
+             'import_uploaded_network',
+             B + 'test_lc43_d20_delivery_gates.py::test_a_malformed_import_is_refused_and_keeps_the_open_network'),
     _pending('LC-D20.delivery_ttl', 'a delivery and its download never expire: no expiry gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D21.reports', 'exported DOCX read with python-docx: headline table MC LOLE 3.21 h/yr, ENS cap 10.00, unrun sections say not established; scripted 3.2 h/yr audited verified; '
              'regenerated 9.9 h/yr is version 2, unverified and listed in Numbers to check, tables and other sections unchanged, version 1 intact (one stored study report, scripted model)',
@@ -762,8 +764,10 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d23_wire_gates.py::test_a_provider_switch_sends_nothing_and_keeps_the_session',
              B + 'test_chat_tool_pairing_invariant.py::test_the_cap_path_pairs_every_tool_use_it_refuses',
              B + 'test_chat_tool_pairing_invariant.py::test_a_stopped_turn_still_records_the_results_it_collected'),
-    _pending('LC-D23.timeout_outcome_text', 'a timed-out write is sent to the model as the bare kind tool_timeout, without saying its outcome is unknown '
-             '(LC-43b, .scratch/live-copilot/issues/43b-timeout-result-hides-unknown-outcome.md)'),
+    _covered('LC-D23.timeout_outcome_text', 'Claude wire only, read from the next request body: a timed-out write or destructive tool reaches the model as tool_timeout plus "Outcome unknown ... may have changed the project. Read the project back before any retry"; a timed-out read keeps the plain kind tool_timeout',
+             'update_component list_components',
+             B + 'test_lc43_d23_wire_gates.py::test_a_write_that_outlives_its_budget_is_never_reported_done',
+             B + 'test_lc43_d23_wire_gates.py::test_a_read_that_outlives_its_budget_keeps_the_plain_kind'),
     _pending('LC-D23.history_repair', 'a stored history with an unpaired tool_use is sent as it is: no repair step is built (the harness only avoids writing one) (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D23.approval_resume', 'a pending approval is not resumed after a restart (it expires or reads unknown_confirmation_token): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D23.profile_recovery', 'after a refused provider switch or a deleted profile, recovery (a new chat, or picking a profile and resending) is not tested (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
