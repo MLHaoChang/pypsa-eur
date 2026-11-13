@@ -27,7 +27,8 @@ still reads MC LOLE 3.21 h/yr:
   check" (the section's audit re-run against the facts version 1 verified, LC-43a);
 - table cells are compared one by one (GK B 52): two rows that swap values, a unit
   changed beside the number ("3.21 min/yr") or in the row label ("MC LOLE (min/yr)")
-  are withheld and listed the same way, as is an added row "42 MW"; a reformat
+  are withheld and listed the same way, as are a unit added to the "Value" header and
+  an added row or column stating "42 MW"; a reformat
   ("3.210 h/yr"), a label renamed in a row with no number and an added row with no
   number are accepted with no Numbers to check entry;
 - a copy that changes only the summary prose to "The plan is robust." becomes version 2
@@ -215,8 +216,10 @@ _LOLE, _CAP = "MC LOLE (h/yr)", "ENS cap (‱ of demand)"
         # T2: a unit changed beside the number, and in the row label.
         ({_LOLE: (None, "3.21 min/yr")}, "3.21 min/yr (unverified, withheld)"),
         ({_LOLE: ("MC LOLE (min/yr)", None)}, "MC LOLE (min/yr) (unverified, withheld)"),
+        # T2: a unit added to the header of the column that holds the numbers.
+        ({"Item": (None, "Value (min/yr)")}, "Value (min/yr) (unverified, withheld)"),
     ],
-    ids=["swap", "unit", "label_unit"],
+    ids=["swap", "unit", "label_unit", "header_unit"],
 )
 def test_a_table_edit_that_moves_or_relabels_an_admitted_number_is_withheld(
     project, client, monkeypatch, edits, listed
@@ -238,12 +241,21 @@ def test_a_table_edit_that_moves_or_relabels_an_admitted_number_is_withheld(
     assert f"Executive summary: {listed}" in [p.text for p in delivered.paragraphs]
 
 
-def test_an_added_row_that_states_a_number_is_withheld(project, client, monkeypatch):
-    """A row the admitted table does not have, as the reshaped-table pairing reads it."""
+@pytest.mark.parametrize("added", ["row", "column"])
+def test_an_added_row_or_column_that_states_a_number_is_withheld(
+    project, client, monkeypatch, added
+):
+    """A row or column the admitted table does not have, as the reshaped-table
+    pairing (by row label and column header) reads it."""
     report_id = _generated(monkeypatch)
     doc = _docx(client, report_id)
-    row = doc.tables[0].add_row()
-    row.cells[0].text, row.cells[1].text = "Peak shed (MW)", "42 MW"
+    table = doc.tables[0]
+    if added == "row":
+        row = table.add_row()
+        row.cells[0].text, row.cells[1].text = "Peak shed (MW)", "42 MW"
+    else:
+        column = table.add_column(table.columns[1].width)
+        column.cells[0].text, column.cells[1].text = "Peak shed", "42 MW"
 
     assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
 
