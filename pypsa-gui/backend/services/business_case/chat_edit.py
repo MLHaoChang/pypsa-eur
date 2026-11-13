@@ -253,11 +253,16 @@ def _line_rows(name: str, old: dict | None, new: dict | None, citations, host: _
     old_l, new_l = _leaves(old), _leaves(new)
     line = new if new is not None else old
     change = "added" if old is None else "removed" if new is None else "changed"
+    # A price is read in its line's unit and money year: 45 USD/t is not 45 USD/kg, so a
+    # changed unit or money year changes every price of the line (spec review, Q1).
+    basis_moved = change == "changed" and any(
+        not _equal(old.get(k), new.get(k)) for k in ("unit", "money_year"))
     rows: list[dict] = []
     for path in sorted(set(old_l) | set(new_l), key=lambda p: tuple(map(str, p))):
         o, n = old_l.get(path), new_l.get(path)
         differs = not _equal(o, n) if (path in old_l and path in new_l) else True
         price = _is_price(path)
+        differs = differs or (price and basis_moved)
         if not differs and not (price and change == "changed"):
             continue                      # an unchanged value; a changed line shows its prices
         row = _row(name, path, o, n, change if differs else "unchanged",
@@ -352,6 +357,11 @@ def plan(args: dict) -> dict:
             d = exc.detail if isinstance(exc.detail, dict) else {}
             _refuse("business_case_inputs_invalid", str(d.get("message") or exc.detail)[:300],
                     errors=list(d.get("errors") or [])[:20])
+        names = [ln.get("name") for ln in new["inputs"]["lines"]]
+        twice = sorted({n for n in names if names.count(n) > 1})
+        if twice:   # the card keys lines by name: a duplicate would hide a line
+            _refuse("business_case_inputs_invalid",
+                    f"each line has its own name; named twice: {', '.join(twice)[:200]}")
     cfg = results._state["solver_config"]
     old = getattr(cfg, "business_case", None)
     if _entity_tag(tag) != config_digest(old):

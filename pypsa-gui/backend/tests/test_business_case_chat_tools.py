@@ -623,3 +623,10 @@ def test_an_envelope_never_admits_the_run_on_a_model_turn():
     for tool in ("run_business_case", "abort_business_case"):
         with pytest.raises(run_envelope.EnvelopeError):
             run_envelope._check_run({"tool": tool})
+
+
+def test_an_int_and_a_float_price_of_one_value_are_unchanged(bc):
+    t1 = _say(bc, "45 USD/t.")
+    _store(bc, _bc(_line(price=45.0)), [_cite(t1, "45 USD/t")])
+    card = edit_card.preview(TOOL, _args(_bc(_line(price=45, quantity=11.0))))
+    assert _rows(card)["product · Price"]["change"] == "unchanged"
