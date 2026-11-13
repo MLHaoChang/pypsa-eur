@@ -25,6 +25,10 @@ still reads MC LOLE 3.21 h/yr:
 - a copy that edits the summary prose to "The plan meets 1.0 h/yr." becomes version 2
   that keeps the sentence and lists "Executive summary: 1.0 h/yr" under "Numbers to
   check" (the section's audit re-run against the facts version 1 verified, LC-43a);
+- table cells are compared one by one (GK B 52): two rows that swap values, a unit
+  changed beside the number ("3.21 min/yr") or in the row label ("MC LOLE (min/yr)")
+  are withheld and listed the same way, while a reformat ("3.210 h/yr") is accepted
+  with no Numbers to check entry;
 - a copy that changes only the summary prose to "The plan is robust." becomes version 2
   with that summary's ``source`` ``user_edit``, the headline and version 1 as above, and
   a diff with version 3 is 404 report_version_not_found;
@@ -196,6 +200,61 @@ def test_a_copy_that_changes_an_admitted_number_leaves_the_headline_and_version_
     assert "Executive summary: 1.00 h/yr (unverified, withheld)" in paragraphs
     assert T.get_report_table(report_id, "headline")["items"] == HEADLINE
     _version_one_reads_as_delivered(client, report_id)
+
+
+_LOLE, _CAP = "MC LOLE (h/yr)", "ENS cap (‱ of demand)"
+
+
+@pytest.mark.parametrize(
+    "edits, listed",
+    [
+        # T1: two rows swap their values; the multiset of numbers is unchanged.
+        ({_CAP: (None, "3.21 h/yr"), _LOLE: (None, "10.00")},
+         "3.21 h/yr (unverified, withheld), 10.00 (unverified, withheld)"),
+        # T2: a unit changed beside the number, and in the row label.
+        ({_LOLE: (None, "3.21 min/yr")}, "3.21 min/yr (unverified, withheld)"),
+        ({_LOLE: ("MC LOLE (min/yr)", None)}, "MC LOLE (min/yr) (unverified, withheld)"),
+    ],
+    ids=["swap", "unit", "label_unit"],
+)
+def test_a_table_edit_that_moves_or_relabels_an_admitted_number_is_withheld(
+    project, client, monkeypatch, edits, listed
+):
+    report_id = _generated(monkeypatch)
+    doc = _docx(client, report_id)
+    for row in doc.tables[0].rows:
+        label, value = edits.get(row.cells[0].text, (None, None))
+        if value is not None:
+            row.cells[1].text = value
+        if label is not None:
+            row.cells[0].text = label
+
+    assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
+
+    delivered = _docx(client, report_id, 2)
+    headline = [[c.text for c in row.cells] for row in delivered.tables[0].rows]
+    assert headline == [["Item", "Value"]] + HEADLINE
+    assert f"Executive summary: {listed}" in [p.text for p in delivered.paragraphs]
+
+
+def test_a_table_edit_that_only_reformats_a_number_is_accepted(
+    project, client, monkeypatch
+):
+    """T3: "3.210 h/yr" states the admitted 3.21 h/yr, so the edit stands."""
+    report_id = _generated(monkeypatch)
+    doc = _docx(client, report_id)
+    for row in doc.tables[0].rows:
+        if row.cells[0].text == _LOLE:
+            row.cells[1].text = "3.210 h/yr"
+
+    assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
+
+    delivered = _docx(client, report_id, 2)
+    headline = [[c.text for c in row.cells] for row in delivered.tables[0].rows]
+    assert [_LOLE, "3.210 h/yr"] in headline
+    paragraphs = [p.text for p in delivered.paragraphs]
+    assert not [p for p in paragraphs if p.startswith("Executive summary:")]
+    assert not [p for p in paragraphs if "Withheld:" in p]
 
 
 @pytest.mark.parametrize("bind_as_template", [False, True])

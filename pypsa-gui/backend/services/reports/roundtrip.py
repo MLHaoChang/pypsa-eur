@@ -66,7 +66,6 @@ from __future__ import annotations
 import difflib
 import io
 import re
-from collections import Counter
 from datetime import UTC, datetime
 from typing import Any
 
@@ -781,22 +780,53 @@ def _first_text(section: RoundTripSection) -> str:
 
 
 def _changed_numbers(original: Table, edited: Table) -> list[str]:
-    """The numbers `edited` states that `original` does not, each as written:
-    a cell whose numbers are not all in the original table is listed whole."""
-    from services.reports import number_audit
+    """The cells of `edited` that change a number `original` states, each
+    listed whole, unit included (GK B 52, T1-T3).
+
+    Cells are compared one by one, never as one multiset, so two rows that
+    swap values are a change (T1). A cell is paired with the original cell at
+    the same position when the two tables have the same shape, else with the
+    cell under the same row label (first column) and column header. A number
+    cell is a change when it states a number, with its unit, that its
+    original cell does not (T2: "3.21 h/yr" to "3.21 min/yr"); a numerically
+    equal reformat ("3.210", "1,000", a Unicode minus) is not (T3). A row
+    label or column header is a change when its text differs and its row or
+    column holds a number (a unit edited in "MC LOLE (h/yr)"). A cell with no
+    original counterpart is a change when it, or its row or column if it is a
+    label, holds a number.
+    """
     from services.reports.revisions import numbers
 
-    def cells(table: Table) -> list[str]:
-        return list(table.columns) + [cell for row in table.rows for cell in row]
+    old = [list(original.columns)] + [list(row) for row in original.rows]
+    new = [list(edited.columns)] + [list(row) for row in edited.rows]
 
-    remaining = sum((numbers(c) for c in cells(original)), Counter())
+    def has_number(grid: list[list[str]], r: int, c: int) -> bool:
+        line = grid[r] if c == 0 else [row[c] for row in grid if c < len(row)]
+        return any(numbers(cell) for cell in line)
+
+    if [len(row) for row in old] == [len(row) for row in new]:
+        rows = {r: r for r in range(len(new))}
+        cols = None
+    else:
+        labels = {_norm(row[0]): r for r, row in enumerate(old) if row}
+        rows = {r: labels.get(_norm(row[0])) if row else None for r, row in enumerate(new)}
+        rows[0] = 0
+        headers = {_norm(h): c for c, h in enumerate(old[0])}
+        cols = {c: headers.get(_norm(h)) for c, h in enumerate(new[0])}
     out: list[str] = []
-    for cell in cells(edited):
-        found = numbers(cell)
-        if found - remaining:
-            tokens = [t.text for t in number_audit.extract_numbers(cell)]
-            out.extend(tokens or [cell])
-        remaining -= found
+    for r, row in enumerate(new):
+        for c, cell in enumerate(row):
+            r0 = rows.get(r)
+            c0 = c if cols is None else cols.get(c)
+            label = r == 0 or c == 0
+            if r0 is None or c0 is None or c0 >= len(old[r0]):
+                changed = bool(numbers(cell)) or (label and has_number(new, r, c))
+            else:
+                before = old[r0][c0]
+                changed = bool(numbers(cell) - numbers(before)) or (
+                    label and _norm(cell) != _norm(before) and has_number(old, r0, c0))
+            if changed:
+                out.append(cell.strip())
     return out
 
 
