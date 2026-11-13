@@ -2894,6 +2894,9 @@ def test_the_infeasible_card_carries_the_named_hint():
     assert hint["constraint"] == "Minimum renewable fraction"
     assert hint["setting"] == "offgrid"
     assert "216.0 MWh" in hint["text"] and "at most 40.0 MWh" in hint["text"]
+    # Plain words only: no engine row name, no advice sentence (the log keeps both).
+    assert "row " not in hint["text"] and "p_nom_max" not in hint["text"]
+    assert hint["text"].endswith("at most 40.0 MWh.")
     # Taken once: the next card carries none, and a non-infeasible card never does.
     assert "constraint_hints" not in classify_failure("warning", "infeasible")
     assert "constraint_hints" not in classify_failure("warning", "unbounded")

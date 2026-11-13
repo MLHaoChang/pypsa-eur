@@ -24,6 +24,7 @@ Never imports from `solver_service`; `tests/test_solver_facade_surface.py`
 enforces that.
 """
 
+import re as _regex
 import threading
 
 import pandas as pd
@@ -57,8 +58,9 @@ def add_constraint_hint(constraint: str, text: str, setting: str) -> None:
     hints.append({"constraint": constraint, "text": text, "setting": setting})
 
 
-def _diagnose_infeasibility(network, config, log_queue,
-                            margin_targets: dict | None = None) -> None:
+def _diagnose_infeasibility(
+    network, config, log_queue, margin_targets: dict | None = None
+) -> None:
     """
     Heuristic "why is it infeasible?" hints, emitted as ``[INFEASIBLE]`` lines.
 
@@ -78,6 +80,7 @@ def _diagnose_infeasibility(network, config, log_queue,
     every hint is a safe pointer, never a false block. When the solver is Gurobi,
     also surface its native infeasibility report.
     """
+
     def emit(msg: str) -> None:
         try:
             log_queue.put(msg)
@@ -86,8 +89,10 @@ def _diagnose_infeasibility(network, config, log_queue,
 
     n = network
     _CONSTRAINT_HINTS.hints = []
-    emit("[INFEASIBLE] Diagnosing likely causes (heuristic — the LP solver found "
-         "no feasible point):")
+    emit(
+        "[INFEASIBLE] Diagnosing likely causes (heuristic — the LP solver found "
+        "no feasible point):"
+    )
     hints = 0
 
     # 1) Islanded load: a bus with load but no local supply AND no branch.
@@ -117,8 +122,10 @@ def _diagnose_infeasibility(network, config, log_queue,
                 else:
                     peak = float(abs(ld.get("p_set", 0.0)))
                 if peak > 1e-6 and bus not in supply_buses and bus not in connected:
-                    emit(f"[INFEASIBLE]   • Bus '{bus}' carries ~{peak:,.0f} MW of load but "
-                         "has no generator/storage and no line/link — it can never be served.")
+                    emit(
+                        f"[INFEASIBLE]   • Bus '{bus}' carries ~{peak:,.0f} MW of load but "
+                        "has no generator/storage and no line/link — it can never be served."
+                    )
                     hints += 1
     except Exception:
         pass
@@ -126,11 +133,14 @@ def _diagnose_infeasibility(network, config, log_queue,
     # 2) Whole-network peak demand vs maximum available + buildable supply.
     try:
         import numpy as _np
+
         ldt = getattr(n.loads_t, "p_set", None)
         if ldt is not None and not ldt.empty:
             peak_load = float(ldt.sum(axis=1).abs().max())
         else:
-            peak_load = float(n.loads["p_set"].abs().sum()) if not n.loads.empty else 0.0
+            peak_load = (
+                float(n.loads["p_set"].abs().sum()) if not n.loads.empty else 0.0
+            )
         avail = 0.0
         gens = getattr(n, "generators", None)
         if gens is not None and not gens.empty:
@@ -140,8 +150,11 @@ def _diagnose_infeasibility(network, config, log_queue,
                     pmax = float(g.get("p_nom_max", _np.inf))
                     avail += pmax if _np.isfinite(pmax) else _np.inf
                 else:
-                    pu = (float(gmax[name].max()) if gmax is not None and name in gmax.columns
-                          else float(g.get("p_max_pu", 1.0)))
+                    pu = (
+                        float(gmax[name].max())
+                        if gmax is not None and name in gmax.columns
+                        else float(g.get("p_max_pu", 1.0))
+                    )
                     avail += float(g.get("p_nom", 0.0)) * pu
         # storage/store discharge headroom (an upper bound on instantaneous supply)
         for comp, col in (("storage_units", "p_nom"), ("stores", "e_nom")):
@@ -150,10 +163,12 @@ def _diagnose_infeasibility(network, config, log_queue,
                 avail += float(df[col].clip(lower=0).sum())
         voll = float(getattr(config, "voll", 0.0) or 0.0)
         if _np.isfinite(avail) and peak_load > avail * (1.0 + 1e-6) and voll <= 0:
-            emit(f"[INFEASIBLE]   • Peak demand ~{peak_load:,.0f} MW exceeds the maximum "
-                 f"available + buildable generation ~{avail:,.0f} MW, and no Value of Lost "
-                 "Load is set. Add capacity, raise an extendable p_nom_max, or set a VOLL "
-                 "to price unserved demand.")
+            emit(
+                f"[INFEASIBLE]   • Peak demand ~{peak_load:,.0f} MW exceeds the maximum "
+                f"available + buildable generation ~{avail:,.0f} MW, and no Value of Lost "
+                "Load is set. Add capacity, raise an extendable p_nom_max, or set a VOLL "
+                "to price unserved demand."
+            )
             hints += 1
     except Exception:
         pass
@@ -194,11 +209,15 @@ def _diagnose_infeasibility(network, config, log_queue,
     #     period, what it needs and the most the renewables can produce.
     try:
         from services.solver.renewable_fraction import LABEL, infeasibility_lines
+
         for line in infeasibility_lines(n, config):
             emit(f"[INFEASIBLE]   • {line}")
-            add_constraint_hint(
-                LABEL, line[len(LABEL) + 2:] if line.startswith(f"{LABEL}: ") else line,
-                "offgrid")
+            # The card keeps the plain-word sentence (what the target needs,
+            # what the plan can reach): the engine row name and the advice
+            # sentence stay in the log.
+            body = line[len(LABEL) + 2 :] if line.startswith(f"{LABEL}: ") else line
+            body = _regex.sub(r" \(row [^)]*\)", "", body.split(". ", 1)[0] + ".")
+            add_constraint_hint(LABEL, body, "offgrid")
             hints += 1
     except Exception:
         pass
@@ -208,11 +227,13 @@ def _diagnose_infeasibility(network, config, log_queue,
         gc = getattr(n, "global_constraints", None)
         if gc is not None and not gc.empty:
             for name, row in gc.iterrows():
-                emit(f"[INFEASIBLE]   • Global constraint '{name}' "
-                     f"({row.get('type', '?')} {row.get('sense', '')} "
-                     f"{row.get('constant', '?')}) is active — if it's a CO2 / primary-"
-                     "energy cap it may be infeasibly tight; relax it or check must-run "
-                     "emitters.")
+                emit(
+                    f"[INFEASIBLE]   • Global constraint '{name}' "
+                    f"({row.get('type', '?')} {row.get('sense', '')} "
+                    f"{row.get('constant', '?')}) is active — if it's a CO2 / primary-"
+                    "energy cap it may be infeasibly tight; relax it or check must-run "
+                    "emitters."
+                )
                 hints += 1
     except Exception:
         pass
@@ -222,18 +243,25 @@ def _diagnose_infeasibility(network, config, log_queue,
     #     own events (E2 the largest load step, E3 a unit trip, E5 the PV
     #     lost), is infeasible, not short. Their families are named.
     try:
-        rows = ((getattr(n, "_island_facts", None) or {}).get("instant") or {}).get("rows") or []
+        rows = ((getattr(n, "_island_facts", None) or {}).get("instant") or {}).get(
+            "rows"
+        ) or []
         if rows:
             import re as _re
+
             families = sorted({_re.sub(r"-\d{4}$", "", r) for r in rows})
-            emit("[INFEASIBLE]   • The island rows are on (island_constraints): "
-                 + ", ".join(families) + ". The plan may not be able to hold the islanding "
-                 "step or the seamless island's own events (Island-e2-up: the largest load "
-                 "step; Island-n1-up/-down-<unit>: that unit tripping; Island-e5-up: the PV "
-                 "lost) with what it can build; solve with island_constraints off to check, "
-                 "or raise the candidates' p_nom_max.")
+            emit(
+                "[INFEASIBLE]   • The island rows are on (island_constraints): "
+                + ", ".join(families)
+                + ". The plan may not be able to hold the islanding "
+                "step or the seamless island's own events (Island-e2-up: the largest load "
+                "step; Island-n1-up/-down-<unit>: that unit tripping; Island-e5-up: the PV "
+                "lost) with what it can build; solve with island_constraints off to check, "
+                "or raise the candidates' p_nom_max."
+            )
             hints += 1
         from services.solver.island import island_shortfalls, shortfall_line
+
         for sh in island_shortfalls(getattr(n, "_island_facts", None)):
             emit(f"[INFEASIBLE]   • {shortfall_line(sh)}")
             hints += 1
@@ -246,17 +274,21 @@ def _diagnose_infeasibility(network, config, log_queue,
             model = getattr(n, "model", None)
             printer = getattr(model, "print_infeasibilities", None)
             if callable(printer):
-                emit("[INFEASIBLE]   • Gurobi infeasibility report (constraints in the "
-                     "irreducible conflict set) follows in the solver log.")
+                emit(
+                    "[INFEASIBLE]   • Gurobi infeasibility report (constraints in the "
+                    "irreducible conflict set) follows in the solver log."
+                )
                 printer()
     except Exception:
         pass
 
     if hints == 0:
-        emit("[INFEASIBLE]   • No obvious structural cause found. Check binding capacity "
-             "bounds (p_nom_min/max), reserve / storage-SoC targets, ramp limits, or a "
-             "too-tight global constraint. Turning OFF presolve can make the solver report "
-             "whether the model is infeasible vs unbounded.")
+        emit(
+            "[INFEASIBLE]   • No obvious structural cause found. Check binding capacity "
+            "bounds (p_nom_min/max), reserve / storage-SoC targets, ramp limits, or a "
+            "too-tight global constraint. Turning OFF presolve can make the solver report "
+            "whether the model is infeasible vs unbounded."
+        )
 
 
 def _log_global_constraint_shadow_prices(network, log_queue) -> None:
@@ -345,7 +377,8 @@ def _log_curtailment_post_solve(network, sns, current_period, phase) -> None:
             period_lvl = sns.get_level_values(0)
             year_mul = pd.Series(
                 [float(ipw.get(int(p), 1.0)) for p in period_lvl],
-                index=sns, dtype=float,
+                index=sns,
+                dtype=float,
             )
             weights = sw * year_mul
         except Exception:
@@ -381,9 +414,9 @@ def _log_curtailment_post_solve(network, sns, current_period, phase) -> None:
             penalty = curtailed * cc
             phase(
                 f"[CURT-POST] {g}: p_nom_opt={p_nom_opt:.1f} MW | "
-                f"dispatched={dispatched/1000:.1f} GWh | "
-                f"potential={potential/1000:.1f} GWh | "
-                f"curtailed={curtailed/1000:.1f} GWh ({curt_pct:.1f}%) | "
+                f"dispatched={dispatched / 1000:.1f} GWh | "
+                f"potential={potential / 1000:.1f} GWh | "
+                f"curtailed={curtailed / 1000:.1f} GWh ({curt_pct:.1f}%) | "
                 f"penalty_eur={penalty:,.0f}"
             )
         except Exception as exc:
@@ -432,7 +465,8 @@ def _log_storage_post_solve(network, sns, current_period, phase) -> None:
             period_lvl = sns.get_level_values(0)
             year_mul = pd.Series(
                 [float(ipw.get(int(p), 1.0)) for p in period_lvl],
-                index=sns, dtype=float,
+                index=sns,
+                dtype=float,
             )
             weights = sw * year_mul
         except Exception:
@@ -447,22 +481,31 @@ def _log_storage_post_solve(network, sns, current_period, phase) -> None:
     for name in rows.index:
         try:
             p_nom_opt = float(rows.at[name, p_nom_col] or 0.0)
-            max_hours = float(rows.at[name, "max_hours"] or 0.0) if "max_hours" in rows.columns else 0.0
+            max_hours = (
+                float(rows.at[name, "max_hours"] or 0.0)
+                if "max_hours" in rows.columns
+                else 0.0
+            )
             energy_cap = p_nom_opt * max_hours
             throughput = 0.0
             mean_soc_pct = 0.0
             if p_t is not None and not p_t.empty and name in p_t.columns:
                 p_series = p_t[name].reindex(sns).fillna(0.0).abs()
                 throughput = float((p_series * weights).sum())
-            if soc_t is not None and not soc_t.empty and name in soc_t.columns and energy_cap > 0:
+            if (
+                soc_t is not None
+                and not soc_t.empty
+                and name in soc_t.columns
+                and energy_cap > 0
+            ):
                 soc_series = soc_t[name].reindex(sns).fillna(0.0)
                 # SoC is in MWh; convert to % of energy capacity.
                 mean_soc_pct = float(soc_series.mean() / energy_cap * 100.0)
             cycles = throughput / (2 * energy_cap) if energy_cap > 0 else 0.0
             phase(
                 f"[STORAGE-POST] {name}: p_nom_opt={p_nom_opt:.1f} MW | "
-                f"max_hours={max_hours:.1f} h | energy_cap={energy_cap/1000:.2f} GWh | "
-                f"throughput={throughput/1000:.1f} GWh | "
+                f"max_hours={max_hours:.1f} h | energy_cap={energy_cap / 1000:.2f} GWh | "
+                f"throughput={throughput / 1000:.1f} GWh | "
                 f"equiv_cycles={cycles:.1f} | mean_SoC={mean_soc_pct:.1f}%"
             )
         except Exception as exc:
@@ -565,7 +608,9 @@ def _log_sclopf_post_solve(
     if not bodf_by_subnet:
         return
     # For each outage candidate, find the worst affected branch loading.
-    phase(f"[SCLOPF-POST] Period {current_period} — N-1 contingency analysis ({len(iter_outages)} outage(s)):")
+    phase(
+        f"[SCLOPF-POST] Period {current_period} — N-1 contingency analysis ({len(iter_outages)} outage(s)):"
+    )
     binding_threshold = 0.99
     for outage_comp, outage_name in iter_outages:
         # Find which sub-network owns this branch.
@@ -621,7 +666,9 @@ def _log_sclopf_post_solve(
                     f"[SCLOPF-POST] outage '{outage_comp}:{outage_name}' → no affected branch flow available"
                 )
         except Exception as exc:
-            phase(f"[SCLOPF-POST] outage '{outage_comp}:{outage_name}' → analysis failed ({type(exc).__name__}: {exc})")
+            phase(
+                f"[SCLOPF-POST] outage '{outage_comp}:{outage_name}' → analysis failed ({type(exc).__name__}: {exc})"
+            )
 
 
 def _log_capacity_summary_post_solve(network, current_period, phase) -> None:
@@ -639,17 +686,20 @@ def _log_capacity_summary_post_solve(network, current_period, phase) -> None:
     """
     phase(f"[CAP-SUM] Period {current_period} — total active capacity by carrier:")
     for comp, attr, unit in (
-        ("Generator",   "generators",    "MW"),
+        ("Generator", "generators", "MW"),
         ("StorageUnit", "storage_units", "MW (×max_hours = MWh energy)"),
-        ("Store",       "stores",        "MWh"),
+        ("Store", "stores", "MWh"),
     ):
         df = getattr(network, attr, None)
         if df is None or df.empty:
             continue
         cap_col = (
-            "p_nom_opt" if "p_nom_opt" in df.columns
-            else "e_nom_opt" if "e_nom_opt" in df.columns
-            else "p_nom" if "p_nom" in df.columns
+            "p_nom_opt"
+            if "p_nom_opt" in df.columns
+            else "e_nom_opt"
+            if "e_nom_opt" in df.columns
+            else "p_nom"
+            if "p_nom" in df.columns
             else "e_nom"
         )
         if cap_col not in df.columns:
@@ -658,7 +708,7 @@ def _log_capacity_summary_post_solve(network, current_period, phase) -> None:
             continue
         # Sum capacity per carrier. Skip near-zero rows so the summary
         # doesn't list every empty asset.
-        agg = (df.groupby("carrier")[cap_col].sum().sort_values(ascending=False))
+        agg = df.groupby("carrier")[cap_col].sum().sort_values(ascending=False)
         agg = agg[agg > 0.01]
         if agg.empty:
             continue
@@ -694,7 +744,8 @@ def _log_line_post_solve(network, sns, current_period, phase) -> None:
             period_lvl = sns.get_level_values(0)
             year_mul = pd.Series(
                 [float(ipw.get(int(p), 1.0)) for p in period_lvl],
-                index=sns, dtype=float,
+                index=sns,
+                dtype=float,
             )
             weights = sw_full * year_mul
         except Exception:
@@ -703,7 +754,10 @@ def _log_line_post_solve(network, sns, current_period, phase) -> None:
         weights = sw_full
     total_w = float(weights.sum()) if weights.sum() > 0 else 1.0
 
-    for comp_class, attr, t_attr in (("Line", "lines", "p0"), ("Transformer", "transformers", "p0")):
+    for comp_class, attr, t_attr in (
+        ("Line", "lines", "p0"),
+        ("Transformer", "transformers", "p0"),
+    ):
         df = getattr(network, attr, None)
         if df is None or df.empty:
             continue
@@ -739,21 +793,34 @@ def _log_line_post_solve(network, sns, current_period, phase) -> None:
         for name in rows.index:
             try:
                 s_nom_opt = float(rows.at[name, cap_col] or 0.0)
-                s_nom_max = float(rows.at[name, "s_nom_max"] or 0.0) if "s_nom_max" in rows.columns else float("inf")
+                s_nom_max = (
+                    float(rows.at[name, "s_nom_max"] or 0.0)
+                    if "s_nom_max" in rows.columns
+                    else float("inf")
+                )
                 x_val = float(rows.at[name, "x"] or 0.0) if "x" in rows.columns else 0.0
                 capex_eff = (
                     float(eff_cap_cost.get(name, float("nan")))
-                    if eff_cap_cost is not None else float("nan")
+                    if eff_cap_cost is not None
+                    else float("nan")
                 )
                 peak_pct = 0.0
                 mean_pct = 0.0
                 binding_h = 0
                 congestion_eur = 0.0
-                if flow_df is not None and not flow_df.empty and name in flow_df.columns:
+                if (
+                    flow_df is not None
+                    and not flow_df.empty
+                    and name in flow_df.columns
+                ):
                     flow_series = flow_df[name].reindex(sns).fillna(0.0).abs()
                     if s_nom_opt > 0:
                         peak_pct = float(flow_series.max() / s_nom_opt * 100.0)
-                        mean_pct = float((flow_series * weights).sum() / (s_nom_opt * total_w) * 100.0)
+                        mean_pct = float(
+                            (flow_series * weights).sum()
+                            / (s_nom_opt * total_w)
+                            * 100.0
+                        )
                 # mu_upper + mu_lower combined (binding in EITHER direction).
                 for mu_df in (mu_up_df, mu_lo_df):
                     if mu_df is not None and not mu_df.empty and name in mu_df.columns:
@@ -763,7 +830,8 @@ def _log_line_post_solve(network, sns, current_period, phase) -> None:
                         binding_h += int((mu_series > 1e-6).sum())
                         congestion_eur += float((mu_series * weights).sum() * s_nom_opt)
                 (
-                    f"[{s_nom_opt:.1f}/{s_nom_max:.0f}]" if s_nom_max != float("inf")
+                    f"[{s_nom_opt:.1f}/{s_nom_max:.0f}]"
+                    if s_nom_max != float("inf")
                     else f"[{s_nom_opt:.1f}]"
                 )
                 phase(
@@ -803,7 +871,8 @@ def _log_corridor_summary_post_solve(network, sns, current_period, phase) -> Non
             period_lvl = sns.get_level_values(0)
             year_mul = pd.Series(
                 [float(ipw.get(int(p), 1.0)) for p in period_lvl],
-                index=sns, dtype=float,
+                index=sns,
+                dtype=float,
             )
             weights = sw * year_mul
         except Exception:
@@ -812,7 +881,10 @@ def _log_corridor_summary_post_solve(network, sns, current_period, phase) -> Non
         weights = sw
 
     phase(f"[CORRIDOR] Period {current_period} — corridor-level capacity vs. flow:")
-    for comp_class, attr, t_attr in (("Line", "lines", "p0"), ("Transformer", "transformers", "p0")):
+    for comp_class, attr, t_attr in (
+        ("Line", "lines", "p0"),
+        ("Transformer", "transformers", "p0"),
+    ):
         df = getattr(network, attr, None)
         if df is None or df.empty:
             continue
@@ -849,9 +921,19 @@ def _log_corridor_summary_post_solve(network, sns, current_period, phase) -> Non
                         # Sum across branches (signed sum better captures net
                         # corridor flow than abs-then-sum — counter-flow on
                         # one branch cancels on another).
-                        total_flow_series = flow_df[cols].sum(axis=1).reindex(sns).fillna(0.0).abs()
-                peak_flow = float(total_flow_series.max()) if total_flow_series is not None else 0.0
-                mean_flow = float((total_flow_series * weights).sum() / weights.sum()) if total_flow_series is not None and weights.sum() > 0 else 0.0
+                        total_flow_series = (
+                            flow_df[cols].sum(axis=1).reindex(sns).fillna(0.0).abs()
+                        )
+                peak_flow = (
+                    float(total_flow_series.max())
+                    if total_flow_series is not None
+                    else 0.0
+                )
+                mean_flow = (
+                    float((total_flow_series * weights).sum() / weights.sum())
+                    if total_flow_series is not None and weights.sum() > 0
+                    else 0.0
+                )
                 util_pct = (peak_flow / total_sn * 100.0) if total_sn > 0 else 0.0
                 # Sum congestion rent across all branches in this corridor.
                 total_rent = 0.0
@@ -900,7 +982,8 @@ def _log_bus_balance_post_solve(network, sns, current_period, phase) -> None:
             period_lvl = sns.get_level_values(0)
             year_mul = pd.Series(
                 [float(ipw.get(int(p), 1.0)) for p in period_lvl],
-                index=sns, dtype=float,
+                index=sns,
+                dtype=float,
             )
             weights = sw * year_mul
         except Exception:
@@ -914,7 +997,9 @@ def _log_bus_balance_post_solve(network, sns, current_period, phase) -> None:
     loads_t_p = getattr(network.loads_t, "p", None)
     loads_t_pset = getattr(network.loads_t, "p_set", None)
     # Prefer solved p (matches the load actually served), fall back to p_set.
-    load_frame = loads_t_p if (loads_t_p is not None and not loads_t_p.empty) else loads_t_pset
+    load_frame = (
+        loads_t_p if (loads_t_p is not None and not loads_t_p.empty) else loads_t_pset
+    )
     if load_frame is not None and not load_frame.empty and not loads.empty:
         for load_name in loads.index:
             if load_name not in load_frame.columns:
@@ -953,12 +1038,14 @@ def _log_bus_balance_post_solve(network, sns, current_period, phase) -> None:
         gen_mwh = gen_per_bus.get(bus, 0.0)
         net = gen_mwh - load_mwh  # > 0 export, < 0 import
         phase(
-            f"[BUS-BAL] {bus}: load={load_mwh/1000:.1f} | "
-            f"gen={gen_mwh/1000:.1f} | net_export={net/1000:+.1f}"
+            f"[BUS-BAL] {bus}: load={load_mwh / 1000:.1f} | "
+            f"gen={gen_mwh / 1000:.1f} | net_export={net / 1000:+.1f}"
         )
 
 
-def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase) -> None:
+def _log_cost_decomposition_post_solve(
+    network, cfg, sns, current_period, phase
+) -> None:
     """
     Decompose the LP objective by period × cost category.
 
@@ -985,7 +1072,6 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
     """
     import math as _math
 
-
     gens = getattr(network, "generators", None)
     if gens is None or gens.empty:
         return
@@ -1007,12 +1093,18 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
     else:
         periods_seen = ["ALL"]
     period_data: dict = {
-        p: {"opex_var_mc0": 0.0, "co2_surcharge": 0.0, "curt_penalty": 0.0,
-            "voll_shed_cost": 0.0, "voll_shed_mwh": 0.0,
-            "dsr_cost": 0.0, "dsr_mwh": 0.0,
+        p: {
+            "opex_var_mc0": 0.0,
+            "co2_surcharge": 0.0,
+            "curt_penalty": 0.0,
+            "voll_shed_cost": 0.0,
+            "voll_shed_mwh": 0.0,
+            "dsr_cost": 0.0,
+            "dsr_mwh": 0.0,
             "new_capex": 0.0,
             "co2_emitted_t": 0.0,
-            "by_carrier_mwh": {}}
+            "by_carrier_mwh": {},
+        }
         for p in periods_seen
     }
 
@@ -1036,9 +1128,12 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
 
     def _per_period_split(series, weights):
         """Group a per-snapshot series by period, returning {period → sum}."""
-        weighted = (series.reindex(sns).fillna(0.0) * weights)
+        weighted = series.reindex(sns).fillna(0.0) * weights
         if is_multi:
-            return {int(p): float(v) for p, v in weighted.groupby(sns.get_level_values(0)).sum().items()}
+            return {
+                int(p): float(v)
+                for p, v in weighted.groupby(sns.get_level_values(0)).sum().items()
+            }
         return {"ALL": float(weighted.sum())}
 
     if p_t is not None and not p_t.empty:
@@ -1051,7 +1146,11 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
                 continue
             # User-typed marginal_cost (scalar). The wrapper restores this
             # after solve so what's on n.generators is the user's value.
-            mc_scalar = float(gens.at[g, "marginal_cost"]) if "marginal_cost" in gens.columns else 0.0
+            mc_scalar = (
+                float(gens.at[g, "marginal_cost"])
+                if "marginal_cost" in gens.columns
+                else 0.0
+            )
             # LP-effective marginal_cost (time-varying if our wrapper wrote
             # to generators_t.marginal_cost during solve, but those get
             # cleared in restore — so this typically equals the scalar).
@@ -1059,18 +1158,31 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
             # applied analytically from cfg.co2_price_per_period.
             mwh_per_period = _per_period_split(p_series, weights)
             opex0_per_period = _per_period_split(p_series * mc_scalar, weights)
-            carrier = str(gens.at[g, "carrier"]).lower() if "carrier" in gens.columns else ""
-            eff = float(gens.at[g, "efficiency"]) if "efficiency" in gens.columns else 1.0
+            carrier = (
+                str(gens.at[g, "carrier"]).lower() if "carrier" in gens.columns else ""
+            )
+            eff = (
+                float(gens.at[g, "efficiency"]) if "efficiency" in gens.columns else 1.0
+            )
             if not _math.isfinite(eff) or eff <= 0:
                 eff = 1.0
             intensity = co2_by_carrier.get(carrier, 0.0)
             for p, m in mwh_per_period.items():
-                period_data.setdefault(p, {
-                    "opex_var_mc0": 0.0, "co2_surcharge": 0.0,
-                    "curt_penalty": 0.0, "voll_shed_cost": 0.0,
-                    "voll_shed_mwh": 0.0, "dsr_cost": 0.0, "dsr_mwh": 0.0,
-                    "new_capex": 0.0,
-                    "co2_emitted_t": 0.0, "by_carrier_mwh": {}})
+                period_data.setdefault(
+                    p,
+                    {
+                        "opex_var_mc0": 0.0,
+                        "co2_surcharge": 0.0,
+                        "curt_penalty": 0.0,
+                        "voll_shed_cost": 0.0,
+                        "voll_shed_mwh": 0.0,
+                        "dsr_cost": 0.0,
+                        "dsr_mwh": 0.0,
+                        "new_capex": 0.0,
+                        "co2_emitted_t": 0.0,
+                        "by_carrier_mwh": {},
+                    },
+                )
                 period_data[p]["by_carrier_mwh"][carrier] = (
                     period_data[p]["by_carrier_mwh"].get(carrier, 0.0) + m
                 )
@@ -1087,7 +1199,11 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
                 co2_scalar = getattr(cfg, "co2_price", 0.0) or 0.0
                 for p, t_co2 in tco2_per_period.items():
                     try:
-                        price = float(pp.get(str(int(p)), co2_scalar)) if p != "ALL" else float(co2_scalar)
+                        price = (
+                            float(pp.get(str(int(p)), co2_scalar))
+                            if p != "ALL"
+                            else float(co2_scalar)
+                        )
                     except (TypeError, ValueError):
                         price = float(co2_scalar)
                     period_data[p]["co2_surcharge"] += t_co2 * price
@@ -1113,12 +1229,12 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
     # what cost_breakdown computes but split by build_year so the user sees
     # the LP's chronological allocation.
     for comp_attr, nom in (
-        ("generators",    "p_nom"),
+        ("generators", "p_nom"),
         ("storage_units", "p_nom"),
-        ("stores",        "e_nom"),
-        ("links",         "p_nom"),
-        ("lines",         "s_nom"),
-        ("transformers",  "s_nom"),
+        ("stores", "e_nom"),
+        ("links", "p_nom"),
+        ("lines", "s_nom"),
+        ("transformers", "s_nom"),
     ):
         df = getattr(network, comp_attr, None)
         if df is None or df.empty:
@@ -1143,7 +1259,11 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
             try:
                 opt = float(df.at[name, f"{nom}_opt"])
                 ini = float(df.at[name, nom]) if nom in df.columns else 0.0
-                cc = float(df.at[name, "capital_cost"]) if "capital_cost" in df.columns else 0.0
+                cc = (
+                    float(df.at[name, "capital_cost"])
+                    if "capital_cost" in df.columns
+                    else 0.0
+                )
             except (TypeError, ValueError):
                 continue
             # When capital_cost is 0 / NaN, fall back to annuitising
@@ -1186,22 +1306,26 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
     # the upper bound by 1 MW — i.e., the LP's "willingness to pay" for one
     # more MW of capacity. Positive ⇒ the LP wanted more but the cap held;
     # 0 ⇒ the cap wasn't binding.
-    marginal_caps: list[tuple[str, str, float, float]] = []  # (comp_class, name, p_nom_opt, mu)
+    marginal_caps: list[
+        tuple[str, str, float, float]
+    ] = []  # (comp_class, name, p_nom_opt, mu)
     model = getattr(network, "model", None)
     if model is not None:
         for comp_class, df_attr in (
-            ("Generator",    "generators"),
-            ("StorageUnit",  "storage_units"),
-            ("Store",        "stores"),
-            ("Link",         "links"),
-            ("Line",         "lines"),
-            ("Transformer",  "transformers"),
+            ("Generator", "generators"),
+            ("StorageUnit", "storage_units"),
+            ("Store", "stores"),
+            ("Link", "links"),
+            ("Line", "lines"),
+            ("Transformer", "transformers"),
         ):
             df = getattr(network, df_attr, None)
             if df is None or df.empty:
                 continue
-            nom_col = "e_nom" if comp_class == "Store" else (
-                "s_nom" if comp_class in ("Line", "Transformer") else "p_nom"
+            nom_col = (
+                "e_nom"
+                if comp_class == "Store"
+                else ("s_nom" if comp_class in ("Line", "Transformer") else "p_nom")
             )
             if f"{nom_col}_opt" not in df.columns:
                 continue
@@ -1230,41 +1354,53 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
 
     # ── Emit log ────────────────────────────────────────────────────────
     phase(f"[COST-DECOMP] Period {current_period} — investment-vs-OPEX breakdown:")
-    for p in sorted([k for k in period_data.keys() if k != "ALL"],
-                    key=lambda x: int(x) if isinstance(x, int) else 99999) + (
-            ["ALL"] if "ALL" in period_data else []):
+    for p in sorted(
+        [k for k in period_data.keys() if k != "ALL"],
+        key=lambda x: int(x) if isinstance(x, int) else 99999,
+    ) + (["ALL"] if "ALL" in period_data else []):
         d = period_data[p]
-        total = (d["new_capex"] + d["opex_var_mc0"] + d["co2_surcharge"]
-                 + d["voll_shed_cost"] + d["dsr_cost"])
+        total = (
+            d["new_capex"]
+            + d["opex_var_mc0"]
+            + d["co2_surcharge"]
+            + d["voll_shed_cost"]
+            + d["dsr_cost"]
+        )
         # Highlight the dominant cost component so user can scan visually.
         components = [
             ("CAPEX(new)", d["new_capex"]),
-            ("OPEX(mc)",   d["opex_var_mc0"]),
+            ("OPEX(mc)", d["opex_var_mc0"]),
             ("CO2 surcharge", d["co2_surcharge"]),
-            ("VOLL shed",  d["voll_shed_cost"]),
-            ("DSR",        d["dsr_cost"]),
+            ("VOLL shed", d["voll_shed_cost"]),
+            ("DSR", d["dsr_cost"]),
         ]
         dominant = max(components, key=lambda x: abs(x[1]))[0]
         carrier_str = ", ".join(
-            f"{c}={m/1000:.1f} GWh" for c, m in
-            sorted(d["by_carrier_mwh"].items(), key=lambda x: -abs(x[1]))[:6]
+            f"{c}={m / 1000:.1f} GWh"
+            for c, m in sorted(d["by_carrier_mwh"].items(), key=lambda x: -abs(x[1]))[
+                :6
+            ]
         )
         phase(
-            f"[COST-DECOMP] {p}: new_CAPEX={d['new_capex']/1e6:.2f}M€ | "
-            f"OPEX(mc)={d['opex_var_mc0']/1e6:.2f}M€ | "
-            f"CO2_surcharge={d['co2_surcharge']/1e6:.2f}M€ "
-            f"({d['co2_emitted_t']/1e3:.1f} kt) | "
-            f"VOLL_shed={d['voll_shed_cost']/1e6:.2f}M€ ({d['voll_shed_mwh']:.1f} MWh) | "
-            f"DSR={d['dsr_cost']/1e6:.2f}M€ ({d['dsr_mwh']:.1f} MWh) | "
+            f"[COST-DECOMP] {p}: new_CAPEX={d['new_capex'] / 1e6:.2f}M€ | "
+            f"OPEX(mc)={d['opex_var_mc0'] / 1e6:.2f}M€ | "
+            f"CO2_surcharge={d['co2_surcharge'] / 1e6:.2f}M€ "
+            f"({d['co2_emitted_t'] / 1e3:.1f} kt) | "
+            f"VOLL_shed={d['voll_shed_cost'] / 1e6:.2f}M€ ({d['voll_shed_mwh']:.1f} MWh) | "
+            f"DSR={d['dsr_cost'] / 1e6:.2f}M€ ({d['dsr_mwh']:.1f} MWh) | "
             f"dispatch: {carrier_str} | "
-            f"dominant={dominant}, total={total/1e6:.2f}M€"
+            f"dominant={dominant}, total={total / 1e6:.2f}M€"
         )
 
     # Marginal capacity value table (compact — only assets with non-zero dual).
     if marginal_caps:
-        phase(f"[COST-DECOMP] Period {current_period} — marginal capacity value (LP dual on p_nom_max):")
+        phase(
+            f"[COST-DECOMP] Period {current_period} — marginal capacity value (LP dual on p_nom_max):"
+        )
         # Top 10 by magnitude — these are the assets where the cap was binding.
-        for cls, name, p_opt, mu in sorted(marginal_caps, key=lambda x: -abs(x[3]))[:10]:
+        for cls, name, p_opt, mu in sorted(marginal_caps, key=lambda x: -abs(x[3]))[
+            :10
+        ]:
             phase(
                 f"[COST-DECOMP]   {cls} '{name}' @ p_nom_opt={p_opt:.1f} MW: "
                 f"μ(p_nom_max)={mu:.2f} €/MW — "

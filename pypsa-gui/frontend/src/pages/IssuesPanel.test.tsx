@@ -241,4 +241,26 @@ describe('IssuesPanel — infeasible card names the constraint (homer-parity 05)
     await userEvent.click(screen.getByRole('button', { name: /Open Off-grid constraints/ }))
     expect(useUIStore.getState().solverBlockRequest).toBe('offgrid')
   })
+
+  it('lists every hint, and adds nothing when the list is empty', async () => {
+    vi.mocked(simulationApi.preflight).mockResolvedValue({ ok: true, errors: 0, warnings: 0, issues: [] })
+    vi.mocked(networkApi.getCarriers).mockResolvedValue([])
+    const base = { category: 'infeasible', title: 'No feasible solution', hint: 'Generic hint.', detail: 'infeasible' }
+    useSimulationStore.getState().setLastFailure({
+      ...base,
+      constraint_hints: [
+        { constraint: 'Minimum renewable fraction', setting: 'offgrid', text: 'needs 10 MWh; at most 5 MWh.' },
+        { constraint: 'Operating reserve', setting: 'other', text: 'needs 12 MW; at most 9 MW.' },
+      ],
+    })
+    const view = renderPanel()
+    expect((await screen.findAllByTestId('failure-constraint-hint')).length).toBe(2)
+    // Only the off-grid row carries the link.
+    expect(screen.getAllByRole('button', { name: /Open Off-grid constraints/ }).length).toBe(1)
+    view.unmount()
+    useSimulationStore.getState().setLastFailure({ ...base, constraint_hints: [] })
+    renderPanel()
+    await screen.findByText('No feasible solution')
+    expect(screen.queryByTestId('failure-constraint-hint')).toBeNull()
+  })
 })
