@@ -21,7 +21,7 @@ import pytest
 
 from harness.providers import live_media as lm
 from harness.providers.deepgram_stt import DeepgramProfile, DeepgramStreamingStt
-from harness.providers.livekit_media import LiveKitConfig, LiveKitTransport
+from harness.providers.livekit_media import MAX_API_RESPONSE_BYTES, LiveKitConfig, LiveKitTransport
 from harness.providers.openai_tts import OpenAiTts, OpenAiTtsProfile
 
 API_KEY = "APIlkTESTKEY"
@@ -1005,3 +1005,78 @@ def test_default_connect_without_websockets_is_not_configured(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "websockets.asyncio.client", None)
     assert _stream_error(_real_adapter()).kind == "not_configured"
+
+
+# ── GK B #1482: killing tests for the livekit guard survivors ────────────────
+
+
+def test_livekit_response_at_the_size_limit_is_accepted():
+    body = json.dumps({"name": "pypsa-abc", "pad": "x" * (60 * 1024)})
+    assert len(body) < MAX_API_RESPONSE_BYTES
+    api = LiveKitApi(fail={"CreateRoom": httpx.Response(200, content=body)})
+    _open(livekit(api))  # under the cap: no oversize_output
+
+
+def test_livekit_response_over_the_size_limit_is_refused():
+    big = LiveKitApi(
+        fail={
+            "CreateRoom": httpx.Response(
+                200, content=b"x" * (MAX_API_RESPONSE_BYTES + 1)
+            )
+        }
+    )
+    with pytest.raises(lm.LiveMediaError) as err:
+        _open(livekit(big))
+    assert err.value.kind == "oversize_output"
+
+
+def test_livekit_rejects_an_invalid_agent_name():
+    with pytest.raises(lm.LiveMediaError) as err:
+        LiveKitTransport(
+            LiveKitConfig(
+                url=WSS, api_key=API_KEY, api_secret=SECRET, agent_name="bad name"
+            )
+        )
+    assert err.value.kind == "not_configured"
+
+
+def test_livekit_treats_300_as_an_error():
+    api = LiveKitApi(fail={"CreateRoom": httpx.Response(300, json={})})
+    with pytest.raises(lm.LiveMediaError) as err:
+        _open(livekit(api))
+    assert err.value.kind == "provider_error"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [httpx.Response(404, json={}), httpx.Response(500, json={"code": "not_found"})],
+)
+def test_livekit_close_swallows_either_not_found_signal(response):
+    api = LiveKitApi(fail={"DeleteRoom": response})
+    livekit(api).close_session(room="pypsa-abc")  # no raise
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(429, json={}),
+        httpx.Response(500, json={"code": "resource_exhausted"}),
+    ],
+)
+def test_livekit_maps_either_quota_signal_to_provider_limit(response):
+    api = LiveKitApi(fail={"CreateRoom": response})
+    with pytest.raises(lm.LiveMediaError) as err:
+        _open(livekit(api))
+    assert err.value.kind == "provider_limit"
+
+
+def test_livekit_none_room_or_identity_is_a_typed_refusal():
+    api = LiveKitApi()
+    for kw in ({"room": None}, {"identity": None}):
+        with pytest.raises(lm.LiveMediaError) as err:
+            _open(livekit(api), **kw)
+        assert err.value.kind == "invalid_request"
+    with pytest.raises(lm.LiveMediaError) as err:
+        livekit(api).close_session(room=None)
+    assert err.value.kind == "invalid_request"
+    assert api.calls == []
