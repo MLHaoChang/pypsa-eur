@@ -17,6 +17,8 @@ approved budget that fits both the plan ceiling and the price estimate is set.
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
+import json
 import math
 import os
 import re
@@ -169,6 +171,7 @@ class GateResult:
     budget_usd: float | None = None
     approval: str | None = None
     estimate: dict[str, float] = field(default_factory=dict)
+    config_digest: str = ""
 
     @property
     def ok(self) -> bool:
@@ -259,7 +262,37 @@ def probe_gate(
         budget_usd=budget,
         approval=approval or None,
         estimate=estimate,
+        config_digest=config_digest(env),
     )
+
+
+CONFIG_ENVS = (
+    LIVEKIT_URL,
+    AGENT_NAME,
+    STT_MODEL,
+    TTS_MODEL,
+    TTS_VOICE,
+    PROBE_BUDGET,
+    PROBE_APPROVAL,
+)
+
+
+def config_digest(env: Mapping[str, str]) -> str:
+    """SHA-256 of the non-secret configuration `probe_gate` checks.
+
+    Evidence carries it so a result is tied to the exact models, voice,
+    languages, budget and prices it ran with. No credential is an input.
+    """
+    doc = {
+        "env": {name: _get(env, name) for name in CONFIG_ENVS},
+        "languages": sorted(languages(env)),
+        "prices": PRICES_USD,
+        "prices_checked": PRICES_CHECKED.isoformat(),
+        "probe_seconds": PROBE_SECONDS,
+        "plan_ceiling_usd": PLAN_CEILING_USD,
+    }
+    blob = json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(blob).hexdigest()
 
 
 _SECRET_FIELD_RE = re.compile(

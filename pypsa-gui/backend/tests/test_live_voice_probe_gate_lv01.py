@@ -341,3 +341,134 @@ def test_startup_installs_the_livekit_transport_only_when_speech_is_enabled(
     monkeypatch.setattr(live_speech, "_TRANSPORT", None)
     main._speech_boot_sweep()
     assert live_speech._TRANSPORT is None  # bad config: speech stays off, the app boots
+
+
+# ── GK B #1483 review: boot safety, evidence identity, grant bound, mutants ──
+
+
+def test_startup_survives_a_broken_adapter_import(monkeypatch):
+    import sys
+
+    import main
+    from services import live_speech
+
+    swept = []
+    monkeypatch.setattr(live_speech, "start_boot_sweep", lambda: swept.append(1))
+    monkeypatch.setattr(live_speech, "_TRANSPORT", None)
+    monkeypatch.setenv(live_speech.ENABLE_ENV, "1")
+    monkeypatch.setitem(
+        sys.modules, "harness.providers.hosted_speech", None
+    )  # import fails
+    main._speech_boot_sweep()
+    assert live_speech._TRANSPORT is None and swept == [1]
+
+
+def test_evidence_records_the_config_digest_and_code_version():
+    gate = hs.probe_gate(env(), today=TODAY)
+    assert len(gate.config_digest) == 64
+    evidence = asyncio.run(
+        probe.run_probe(
+            gate,
+            language="en",
+            transport=FakeTransport(),
+            tts=FakeTts(),
+            stt=FakeStt("250 and 48"),
+        )
+    )
+    assert evidence["config_digest"] == gate.config_digest
+    assert evidence["code_version"] == probe.code_version() != ""
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {hs.STT_MODEL: "nova-2"},
+        {hs.TTS_MODEL: "tts-1"},
+        {hs.TTS_VOICE: "verse"},
+        {hs.LANGUAGES: "en"},
+        {hs.PROBE_BUDGET: "0.06"},
+        {hs.PROBE_APPROVAL: "LV01-PROBE-2"},
+        {hs.LIVEKIT_URL: "wss://other.livekit.invalid"},
+    ],
+)
+def test_config_digest_changes_with_what_the_gate_checks(changes):
+    assert hs.config_digest(env(**changes)) != hs.config_digest(env())
+
+
+def test_config_digest_ignores_credentials():
+    rotated = env(
+        **{hs.DEEPGRAM_API_KEY: "other-dg-key", hs.LIVEKIT_API_SECRET: "other-secret"}
+    )
+    assert hs.config_digest(rotated) == hs.config_digest(env())
+    assert hs.config_digest(env(**{hs.LANGUAGES: "de,en"})) == hs.config_digest(env())
+
+
+def test_probe_fails_when_the_grant_outlives_900_seconds():
+    class LongGrant(FakeTransport):
+        def open_session(self, **kw):
+            grant = super().open_session(**kw)
+            return lm.MediaGrant(
+                url=grant.url, token=grant.token, expires_at=time.time() + 901
+            )
+
+    heard = "250 and 48"
+    assert run(FakeTransport(), FakeTts(), FakeStt(heard))["passed"] is True
+    evidence = run(LongGrant(), FakeTts(), FakeStt(heard))
+    assert evidence["media"]["grant_ttl_s"] > 900 and evidence["passed"] is False
+
+
+def test_adapter_builders_read_os_environ_by_default(monkeypatch):
+    for name, value in FAKE.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv(hs.STT_MODEL, "nova-env")
+    monkeypatch.setenv(hs.TTS_MODEL, "tts-env")
+    assert "nova-env" in repr(hs.stt_from_env())
+    assert "tts-env" in repr(hs.tts_from_env())
+
+
+def test_stt_credential_reads_the_key_at_call_time():
+    live = env()
+    stt = hs.stt_from_env(live)
+    assert stt._credential() == FAKE[hs.DEEPGRAM_API_KEY]
+    live[hs.DEEPGRAM_API_KEY] = ""
+    assert stt._credential() is None
+
+
+def test_estimate_parts_are_exact():
+    e = hs.estimate_probe_usd(60)
+    p = hs.PRICES_USD
+    assert e["stt"] == pytest.approx(p["deepgram_streaming_minute"])
+    assert e["tts"] == pytest.approx(
+        p["openai_tts_audio_minute"] + p["openai_tts_input_char"] * hs.PROBE_TTS_CHARS
+    )
+    assert e["tts"] > p["openai_tts_audio_minute"]
+
+
+def test_prices_are_fresh_through_day_90_and_stale_from_day_91():
+    day = hs.PRICES_CHECKED + dt.timedelta(days=hs.PRICES_MAX_AGE_DAYS)
+    assert hs.probe_gate(env(), today=day).ok
+    assert hs.probe_gate(env(), today=day + dt.timedelta(days=1)).kinds == [
+        "prices_stale"
+    ]
+
+
+def test_sanitize_redacts_secrets_from_four_characters():
+    assert hs.sanitize({"n": "x-abcd-x"}, {hs.DEEPGRAM_API_KEY: "abcd"}) == {
+        "n": "[redacted]"
+    }
+    assert hs.sanitize({"n": "x-abc-x"}, {hs.DEEPGRAM_API_KEY: "abc"}) == {
+        "n": "x-abc-x"
+    }
+
+
+@pytest.mark.parametrize(
+    "value,redacted",
+    [
+        ("eyJ" + "a" * 20 + "." + "b" * 20 + "." + "c", True),  # 2 dots, 45 chars
+        ("eyJ" + "a" * 20 + "." + "b" * 20 + "." + "c" + ".d", False),  # 3 dots
+        ("eyJ" + "a" * 16 + "." + "b" * 18 + "." + "c", False),  # exactly 40 chars
+        ("xyJ" + "a" * 20 + "." + "b" * 20 + "." + "c", False),  # not a JWT header
+    ],
+)
+def test_sanitize_jwt_rule_needs_every_conjunct(value, redacted):
+    assert (hs.sanitize({"n": value}, {}) == {"n": "[redacted]"}) is redacted

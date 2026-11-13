@@ -13,7 +13,7 @@ decision id in ``PYPSA_GUI_LIVE_PROBE_APPROVAL``) are absent. When the gate is
 open it runs one bounded connectivity probe, no project writes:
 
 1. opens and closes one LiveKit room (worker dispatch only when
-   ``PYPSA_GUI_LIVE_AGENT_NAME`` is set) and checks the grant's lifetime;
+   ``PYPSA_GUI_LIVE_AGENT_NAME`` is set) and checks the grant lives at most 900 s;
 2. synthesizes one short sentence with exact numbers through the pinned TTS;
 3. streams that audio through the pinned Deepgram model and checks that every
    number comes back exactly.
@@ -32,6 +32,7 @@ import datetime as _dt
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import uuid
@@ -42,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from harness.providers import hosted_speech  # noqa: E402
 from harness.providers.live_media import LiveMediaError  # noqa: E402
+from harness.providers.livekit_media import MAX_GRANT_TTL_S  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[3]
 EVIDENCE_DIR = REPO / ".scratch" / "live-voice" / "evidence"
@@ -51,6 +53,28 @@ SENTENCES = {
 }
 FRAME_BYTES = 8192
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
+
+
+def code_version() -> str:
+    """The checked-out commit, with a marker when the tree has local changes."""
+    try:
+        head = subprocess.run(
+            ["git", "-C", str(REPO), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "-C", str(REPO), "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+    return f"{head}+dirty" if dirty else head
 
 
 def numbers(text: str) -> list[str]:
@@ -79,6 +103,8 @@ async def run_probe(
     evidence: dict[str, Any] = {
         "date": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
         "approval": gate.approval,
+        "config_digest": gate.config_digest,
+        "code_version": code_version(),
         "budget_usd": gate.budget_usd,
         "estimate_usd": gate.estimate,
         "language": language,
@@ -157,6 +183,7 @@ async def run_probe(
     evidence["passed"] = (
         not errors
         and evidence.get("media", {}).get("room_closed") is True
+        and 0 < evidence.get("media", {}).get("grant_ttl_s", 0) <= MAX_GRANT_TTL_S
         and evidence.get("stt", {}).get("numbers_exact") is True
     )
     return evidence

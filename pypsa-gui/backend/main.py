@@ -1536,8 +1536,9 @@ def _speech_boot_sweep() -> None:
     """
     from services import live_speech
     if live_speech.enabled():
-        from harness.providers import hosted_speech
         try:
+            from harness.providers import hosted_speech
+
             live_speech.configure_transport(hosted_speech.transport_from_env())
         except Exception as exc:  # noqa: BLE001 — speech stays off; the app boots
             logger.warning("speech transport not configured: %s", type(exc).__name__)
