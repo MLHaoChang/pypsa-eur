@@ -405,3 +405,120 @@ def test_the_flow_hashes_once_per_edit(solved, monkeypatch):
     ctx.network = other
     runs.read(cached=True)
     assert calls == [False, True, False, False]
+
+
+# ── what the mutants asked for (V9) ─────────────────────────────────────────
+
+
+def test_an_unreadable_current_fingerprint_is_named_as_such(solved, monkeypatch):
+    n, ctx = solved
+    _raising(n, ctx, monkeypatch)
+    (broke,) = runs.results_verdicts(runs.read())["optimisation"].broken
+    assert broke.edge == "computed_in" and broke.reason.startswith("cannot be read now")
+
+
+def test_no_context_or_no_network_reads_nothing(monkeypatch):
+    import types
+
+    def boom():
+        raise RuntimeError("no active project")
+
+    monkeypatch.setattr(PyPSAService, "get_active_context", boom)
+    for r in (runs.read(), runs.read(types.SimpleNamespace(network=None))):
+        assert (r.dispatch, r.solved, r.current) == ("none", None, None)
+        assert runs.results_verdicts(r)["optimisation"].state == "uncompared"
+    assert runs.active_input_fingerprint() is None
+
+
+def test_a_bare_context_is_read_with_its_defaults():
+    """A context with no solver state, edit counter or lock: read, never raised."""
+    import types
+
+    r = runs.read(types.SimpleNamespace(network=_net(), solver_state=None))
+    assert r.solved is None and r.revision == 0 and r.study_done is False
+    assert r.loadflow_ran is False
+
+
+def test_the_lock_is_released_after_the_read(solved):
+    import threading
+
+    _, ctx = solved
+    runs.read()
+    got = []
+
+    def other():
+        ok = ctx.mutation_lock.acquire(timeout=2)
+        got.append(ok)
+        if ok:
+            ctx.mutation_lock.release()
+
+    t = threading.Thread(target=other)
+    t.start()
+    t.join()
+    assert got == [True]
+
+
+def test_only_the_active_context_reads_the_transient_rows(solved, monkeypatch):
+    import copy
+
+    from services import dispatch_status as D
+
+    _, ctx = solved
+    seen = []
+    real = D.dispatch_status
+    monkeypatch.setattr(
+        D,
+        "dispatch_status",
+        lambda n, *, transient=None: (
+            seen.append(transient) or real(n, transient=transient)
+        ),
+    )
+    runs.read(ctx)
+    runs.read(copy.copy(ctx))
+    assert seen == [None, {}]
+
+
+def test_a_network_swapped_during_the_read_is_unreadable(solved, monkeypatch):
+    n, ctx = solved
+    real = runs._current
+
+    def swap(*a, **k):
+        out = real(*a, **k)
+        other = n.copy()
+        other.meta = dict(n.meta)
+        ctx.network = other  # no counter bump: the object identity alone moved
+        return out
+
+    monkeypatch.setattr(runs, "_current", swap)
+    assert runs.read().current is None
+
+
+@pytest.mark.parametrize("status", ["running", "failed"])
+def test_a_study_that_is_not_done_reads_not_run(solved, status):
+    n, ctx = solved
+    ctx.solver_state["eh_study"] = {"status": status, "network_revision": 0}
+    assert _answers()["study"] in ("not_run", "running")
+    assert runs.read().study_done is False
+
+
+def test_the_flow_s_study_is_null_without_a_study_and_the_load_flow_needs_results(
+    solved,
+):
+    from services import flow_service as F
+
+    n, ctx = solved
+    states = F._run_states(solving=False)
+    assert F._freshness_by_kind(states, has_study=False)["study"] is None
+    assert F._freshness_by_kind(states, has_study=True)["study"] == "not_run"
+    assert states["loadflow"] == "not_run"  # results, but no load flow ran
+    _loadflow(n, ctx)
+    n.generators_t.p = n.generators_t.p.iloc[:, :0]  # an edit cleared the dispatch
+    assert F._run_states(solving=False)["loadflow"] == "not_run"
+
+
+def test_results_current_still_needs_check_answers_guard(solved):
+    """A fresh verdict is not enough: a solve that did not finish optimal is never current."""
+    _, ctx = solved
+    ctx.solver_state["condition"] = "infeasible"
+    got = workflow_tools.solve_freshness()
+    assert got == {"inputs_changed_since_solve": False, "results_current": False}

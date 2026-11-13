@@ -49,11 +49,9 @@ def run_id(kind: str) -> str:
 def input_fingerprint(ctx, *, exact: bool = False) -> str | None:
     """The context's input fingerprint (solver outputs excluded), or None when it cannot be read: no context, a
     network the hash cannot read, or an empty digest. None is never a fingerprint, so it never matches one."""
-    if ctx is None:
-        return None
     from services import workflow_tools
 
-    try:
+    try:  # no context raises too: None
         return workflow_tools._network_input_fingerprint(ctx, exact=exact) or None
     except Exception:  # noqa: BLE001 — unreadable inputs are no evidence
         return None
@@ -131,7 +129,7 @@ def _cheap(ctx) -> dict:
     n = ctx.network
     meta = getattr(n, "meta", None) or {}
     solved = meta.get(_SOLVED) or None
-    exact = meta.get(_SOLVED_EXACT) or None
+    exact = meta.get(_SOLVED_EXACT)
     try:
         # A running solve's transient rows are the active context's own: another context (a saved one) has none.
         dispatch = dispatch_status(n, transient=None if _is_active(ctx) else {})
