@@ -586,7 +586,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={store.name} badge={store.carrier}
-        meta={`${store.e_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'e_nom', 'MWh')}${store.e_nom_extendable ? ' · extendable' : ''}${isH2Store ? ` ≈ ${((store.e_nom ?? 0) / 0.0336).toFixed(0)} kg H₂` : ''}`}
+        meta={`${store.e_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'e_nom', 'MWh')}${store.e_nom_extendable ? ' · extendable' : ''}${isH2Store && fieldUnit(schema, 'e_nom', 'MWh') === 'MWh' ? ` ≈ ${((store.e_nom ?? 0) / 0.0336).toFixed(0)} kg H₂` : ''}`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}

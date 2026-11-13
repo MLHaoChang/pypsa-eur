@@ -43,7 +43,7 @@ vi.mock('../api/simulation', async (importOriginal) => {
   }
 })
 
-import { GeneratorCard } from './PropertiesPanel'
+import { GeneratorCard, StoreCard } from './PropertiesPanel'
 
 const GEN = {
   name: 'crusher', bus: 'ore', carrier: 'ore', control: 'PQ', p_nom: 120, p_nom_extendable: false,
@@ -76,5 +76,31 @@ describe('a generator on a tonne bus', () => {
     expect(await screen.findByText(/120 MW/)).toBeTruthy()
     await userEvent.click(await screen.findByRole('button', { name: /edit/i }))
     expect(await screen.findByText(/Capacity \(MW\)/)).toBeTruthy()
+  })
+})
+
+const STORE = {
+  name: 'tank', bus: 'h2', carrier: 'H2', e_nom: 336, e_nom_extendable: false, e_nom_min: 0, e_nom_max: 1000,
+  e_cyclic: false, standing_loss: 0, lifetime: 30, build_year: 2027,
+} as never
+
+async function mountStore() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  client.setQueryData(nk('Demo', 'stores'), [STORE])
+  render(<QueryClientProvider client={client}><StoreCard store={STORE} onRename={() => {}} /></QueryClientProvider>)
+}
+
+describe('a hydrogen store', () => {
+  it('on a tonne bus reads t and drops the MWh-based kg H₂ tail', async () => {
+    units.mockResolvedValue({ component: 'Store', name: 'tank', units: { e_nom: 't', e_nom_max: 't' } })
+    await mountStore()
+    expect(await screen.findByText(/336 t\b/)).toBeTruthy()
+    expect(screen.queryByText(/kg H₂/)).toBeNull()
+  })
+
+  it('on an energy bus keeps MWh and the kg H₂ tail', async () => {
+    units.mockResolvedValue({ component: 'Store', name: 'tank', units: {} })
+    await mountStore()
+    expect(await screen.findByText(/336 MWh.*10000 kg H₂/)).toBeTruthy()
   })
 })
