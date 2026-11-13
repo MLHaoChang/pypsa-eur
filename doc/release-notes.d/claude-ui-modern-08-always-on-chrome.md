@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant's "Chat here" launcher now lives in a slim rail on the collapsed assistant dock instead of floating over charts and tables, and the Guided "Set up the assistant" banner stays dismissed per project across reloads.
