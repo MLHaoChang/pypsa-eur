@@ -77,14 +77,12 @@ def test_repair_adds_the_missing_link_port_frames_and_the_network_solves():
 
 
 def test_repair_is_a_no_op_on_a_healthy_network():
-    n = _net()
-    assert ensure_link_port_frames(n) == []
+    resident = _net()
+    assert ensure_link_port_frames(resident) == []  # nothing grew the table yet
     _net().add("Link", "three", bus0="a", bus1="b", bus2="c", p_nom=1)
-    fresh = _net()
-    assert ensure_link_port_frames(fresh) == []
-    stale = n
-    assert ensure_link_port_frames(stale)
-    assert ensure_link_port_frames(stale) == []
+    assert ensure_link_port_frames(_net()) == []  # built after the table grew
+    assert ensure_link_port_frames(resident)  # stale: repaired once
+    assert ensure_link_port_frames(resident) == []  # then healthy
 
 
 def test_run_simulation_solves_a_stale_resident_network():
@@ -99,16 +97,17 @@ def test_run_simulation_solves_a_stale_resident_network():
     assert n.links_t.p0.loc[:, "l"].tolist() == pytest.approx([0.5, 0.5])
 
 
-def test_every_port_the_table_names_is_repaired_bus3_too():
+def test_every_port_the_table_names_is_repaired_bus3_and_bus4_too():
     resident = _net()
     other = _net()
-    other.add("Bus", "e")
-    other.add("Link", "four", bus0="a", bus1="b", bus2="c", bus3="e", p_nom=1)
+    other.add("Bus", ["e", "f"])
+    other.add("Link", "five", bus0="a", bus1="b", bus2="c", bus3="e", bus4="f", p_nom=1)
     added = ensure_link_port_frames(resident)
-    assert {"links.bus3", "links.efficiency3", "links_t.efficiency3", "links_t.p3"} <= set(added)
+    for k in (2, 3, 4):
+        assert {f"links.bus{k}", f"links.efficiency{k}", f"links_t.efficiency{k}", f"links_t.p{k}"} <= set(added)
     defaults = resident.components["Link"].defaults
-    assert resident.links.loc["l", "efficiency3"] == defaults.at["efficiency3", "default"]
-    assert resident.links.loc["l", "bus3"] == defaults.at["bus3", "default"]
+    for attr in ("bus3", "efficiency3", "bus4", "efficiency4"):
+        assert resident.links.loc["l", attr] == defaults.at[attr, "default"]
     resident.consistency_check()
     assert resident.optimize(solver_name="highs")[0] == "ok"
 
@@ -225,5 +224,16 @@ def test_the_guard_sees_a_site_whose_repair_was_removed():
     assert text != sources[rel]
     sources[rel] = text
     assert any(s.startswith(rel) for s in unrepaired_solve_sites(sources.items()))
-    for rel_fn in _REACHED_THROUGH_RUN_SIMULATION:
-        assert rel_fn[0] in sources, rel_fn  # the allow-list names files that exist
+
+
+def test_the_allow_list_names_functions_that_exist_and_solve():
+    """A renamed or moved function must not leave a stale exemption behind."""
+    import ast
+
+    sources = dict(_app_sources())
+    for rel, name in _REACHED_THROUGH_RUN_SIMULATION:
+        fns = [f for f in ast.walk(ast.parse(sources[rel]))
+               if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)) and f.name == name]
+        assert fns, (rel, name)
+        assert any(isinstance(c, ast.Call) and getattr(c.func, "attr", None) in _SOLVE_CALLS
+                   for f in fns for c in ast.walk(f)), (rel, name)
