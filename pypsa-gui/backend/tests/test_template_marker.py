@@ -1037,7 +1037,7 @@ def test_a_dc_backup_save_while_the_marker_is_busy_is_refused(eh_base, monkeypat
     real = tm.write_lock
     monkeypatch.setattr(tm, "write_lock", lambda d, **kw: real(d, timeout=0.1))
     before = stamp(eh_base.dir / tm.MARKER_FILE)
-    with real(eh_base.dir), pytest.raises(dc_backup.DcBackupError, match="busy"):
+    with real(eh_base.dir), pytest.raises(dc_backup.DcBackupBusy, match="busy"):
         dc_backup.save_backup(eh_base.dir, t, {"mode": "hybrid"})
     assert stamp(eh_base.dir / tm.MARKER_FILE) == before
 
@@ -1059,3 +1059,76 @@ def test_a_lock_that_cannot_be_taken_never_fails_the_edit_or_the_undo(
     assert gp.mark_set(n, "loads", "p_set", {"L1": series}, {"L1": {None: 1.0}}) == []
     write_marker(active_case, eh_base.meta)
     assert gp.restore_meta(gp.snapshot_meta()) == "write_failed"
+
+
+def test_the_dc_backup_route_answers_409_busy_while_the_marker_is_locked(
+    eh_base, client, monkeypatch
+):
+    """GK B F3: a busy marker is retryable, not an invalid setting."""
+    real = tm.write_lock
+    monkeypatch.setattr(tm, "write_lock", lambda d, **kw: real(d, timeout=0.1))
+    with chat_tools._acting() as (db, user):
+        name = project_registry.resolve_project(db, user, eh_base.id).name
+    before = stamp(eh_base.dir / tm.MARKER_FILE)
+    with real(eh_base.dir):
+        r = client.put(
+            f"/api/campus-electrical/{name}/dc-backup", json={"mode": "hybrid"}
+        )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["error_kind"] == "dc_backup_busy"
+    assert stamp(eh_base.dir / tm.MARKER_FILE) == before
+    r = client.put(f"/api/campus-electrical/{name}/dc-backup", json={"mode": "hybrid"})
+    assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("torn", ["{torn", "[]", "null"])
+def test_a_case_undo_over_a_base_marker_that_is_not_an_object_leaves_the_copy(
+    eh_base, active_case, torn
+):
+    """GK B F1 (K4/K5 on the undo path): no base rows to restore, so the
+    case's copy stays byte for byte and the undo says it is not restored."""
+    from services import growth_placeholders as gp
+
+    snapshot = gp.snapshot_meta()
+    assert snapshot is None
+    own = write_marker(active_case, {**eh_base.meta, "growth_inputs": []})
+    before = own.read_bytes()
+    write_marker(eh_base.dir, torn)
+    assert gp.restore_meta(snapshot) == "unreadable"
+    assert own.read_bytes() == before
+
+
+def test_a_backup_written_while_mark_set_waits_for_the_lock_survives(
+    eh_base, monkeypatch
+):
+    """GK B F2 (#1378 K1b): mark_set reads the marker under the lock every
+    marker writer holds; a backup written at its lock entry is kept with the
+    growth row it sets."""
+    import pandas as pd
+
+    from project_templates import eh_templates as t
+    from services import growth_placeholders as gp
+    from services.adequacy import dc_backup
+
+    row = {"kind": "load_scale", "year": 2030, "set": False, "value": {"L1": 1.0}}
+    write_marker(eh_base.dir, {**eh_base.meta, "growth_inputs": [row]})
+    n = eh_base.ctx.network
+    prior = gp.before(n, "loads", "p_set", ["L1"], project_dir=eh_base.dir)
+    real = tm.write_lock
+    landed, entered = [], []
+
+    def lock_with_a_write_at_entry(project_dir, **kw):
+        if not entered:  # mark_set's own entry; save_backup takes it too
+            entered.append(True)
+            landed.append(dc_backup.save_backup(eh_base.dir, t, {"mode": "hybrid"}))
+        return real(project_dir, **kw)
+
+    monkeypatch.setattr(tm, "write_lock", lock_with_a_write_at_entry)
+    series = pd.Series(10.0, index=n.snapshots)
+    now = gp.mark_set(
+        n, "loads", "p_set", {"L1": series}, prior, project_dir=eh_base.dir
+    )
+    assert now == ["load_scale_2030"]
+    meta = json.loads((eh_base.dir / tm.MARKER_FILE).read_text())
+    assert landed and meta["dc_load"]["spec"]["backup"] == landed[0]
+    assert meta["growth_inputs"][0]["set"] is True

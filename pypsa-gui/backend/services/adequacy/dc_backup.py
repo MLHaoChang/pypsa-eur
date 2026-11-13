@@ -99,6 +99,11 @@ class DcBackupError(ValueError):
         self.field = field
 
 
+class DcBackupBusy(Exception):
+    """The project's template marker stayed locked past its bound (another
+    marker write or an undo holds it): nothing was stored; retry."""
+
+
 def _finite(name: str, *values) -> None:
     for v in values:
         arr = np.asarray(v, dtype=float)
@@ -1420,8 +1425,8 @@ def save_backup(project_dir, tpl, backup: dict) -> dict:
             )
             _write_meta(project_dir, meta)
     except TimeoutError:
-        raise DcBackupError(
-            "backup: the project's template metadata is busy; try again", "project"
+        raise DcBackupBusy(
+            "backup: the project's template metadata is busy; try again"
         ) from None
     return meta["dc_load"]["spec"]["backup"]
 
