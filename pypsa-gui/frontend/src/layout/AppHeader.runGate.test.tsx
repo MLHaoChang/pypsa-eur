@@ -143,6 +143,18 @@ describe('AppHeader — the Run gate', () => {
       + 'Optimisation results came with the project and were not checked against its inputs. Run to check them.')
   })
 
+  it('does not count an unchecked kind the Run does not request (PG-04b C6)', async () => {
+    const results = { section: 'results', label: 'Results', state: null, required: false, items: [], summary: null,
+      freshness: 'stale', freshness_by_kind: { optimisation: 'stale', study: null, loadflow: 'uncompared' } }
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(flow({
+      sections: [results], run_request: { optimisation: true, study: false, loadflow: false },
+    }))
+    renderHeader()
+    expect((await screen.findByTestId('run-stale')).textContent).toBe('(1 out of date)')
+    expect(screen.queryByTestId('run-unchecked')).toBeNull()
+    expect(screen.getByTestId('run-stale').title).toBe('Optimisation results are older than the inputs.')
+  })
+
   it('shows no count when nothing the Run requests is stale', async () => {
     const results = { section: 'results', label: 'Results', state: null, required: false, items: [], summary: null,
       freshness: 'fresh', freshness_by_kind: { optimisation: 'fresh', study: null, loadflow: 'stale' } }

@@ -141,7 +141,39 @@ def test_both_callers_flag_a_stale_solve_as_today(solved):
         line.flags
     )
     view = reserve_view(n, _cfg(now), solved=True, backup=(FLOORS, frozenset({STRING})))
-    assert "reserve_inputs_changed_since_solve" in str(view)
+    # M16: the view's own frame flags, not the line's (which `str(view)` would also match).
+    assert view["flags"] == ["reserve_inputs_changed_since_solve", "reserve_not_solved"]
+    assert all(st["committed"] is None for st in view["storages"])
+
+
+@pytest.mark.parametrize("caller", ["reserve_lines", "reserve_view"])
+def test_a_digest_that_cannot_be_read_is_stale_at_each_caller(
+    solved, monkeypatch, caller
+):
+    """M13/M14: each caller hands `solved()` the digest as a callable, so a digest that raises reads stale (W4)
+    instead of raising out of the caller, as the eager form did."""
+    from services.results import billing as B
+    from services.results.reserves import reserve_view
+
+    n, fcr = solved
+
+    def unreadable(*a, **k):
+        raise RuntimeError("digest unreadable")
+
+    monkeypatch.setattr(RP, "inputs_digest", unreadable)
+    backup = (FLOORS, frozenset({STRING}))
+    if caller == "reserve_lines":
+        (line,), _ = B.reserve_lines(n, _cfg([fcr]), "site", backup=backup)
+        assert line.amount is None
+        assert {"reserve_not_solved", "reserve_inputs_changed_since_solve"} <= set(
+            line.flags
+        )
+    else:
+        view = reserve_view(n, _cfg([fcr]), solved=True, backup=backup)
+        assert view["flags"] == [
+            "reserve_inputs_changed_since_solve",
+            "reserve_not_solved",
+        ]
 
 
 # ── W3: one read under the open project's lock ───────────────────────────────
