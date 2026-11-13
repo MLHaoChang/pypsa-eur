@@ -33,7 +33,9 @@ METRIC = "dispatch_energy"
 def fact_store(tmp_path):
     with pytest.MonkeyPatch.context() as patch:
         patch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
-        patch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", ",".join(calculations.PROFILES))
+        patch.setenv(
+            "PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", ",".join(calculations.PROFILES)
+        )
         yield
 
 
@@ -59,7 +61,9 @@ def _steps(out):
     return {s["label"]: s for s in out["steps"]}
 
 
-def test_an_unchanged_network_reads_every_pin_fresh_and_the_outcome_uncompared(captured):
+def test_an_unchanged_network_reads_every_pin_fresh_and_the_outcome_uncompared(
+    captured,
+):
     ctx, owner, record = captured
     out = explain_metric(owner, record["evidence_id"], METRIC)
     assert list(out)[0] == "outcome"
@@ -68,13 +72,18 @@ def test_an_unchanged_network_reads_every_pin_fresh_and_the_outcome_uncompared(c
     assert pinned and all(s["state"] == "fresh" for s in pinned), [
         (s["label"], s["state"], s["broken"]) for s in pinned
     ]
-    assert {"window", "generators/G1/capacity", "generators/G1/inputs/p", "generators/G1/inputs/marginal_cost",
-            "generators/G1/index", "value (generator-energy/1)"} <= set(steps)
+    assert {
+        "window",
+        "generators/G1/capacity",
+        "generators/G1/inputs/p",
+        "generators/G1/inputs/marginal_cost",
+        "generators/G1/index",
+        "value (generator-energy/1)",
+    } <= set(steps)
     assert out["outcome"]["state"] == "uncompared"
     assert out["outcome"]["uncompared"] == [f"run:{record['evidence_id']}"]
     assert out["steps"][-1]["via"]["edge"] == "computed_in"
     assert out["steps"][-1]["state"] == "uncompared"
-
 
 
 def _why(owner, record, metric=METRIC):
@@ -90,7 +99,9 @@ def _with_record(monkeypatch, record, **changes):
         else:
             changed[key] = value
     real = records.load
-    monkeypatch.setattr(records, "load", lambda owner, rid, kind: (real(owner, rid, kind), changed)[1])
+    monkeypatch.setattr(
+        records, "load", lambda owner, rid, kind: (real(owner, rid, kind), changed)[1]
+    )
     return changed
 
 
@@ -105,16 +116,30 @@ def test_a_sub_precision_edit_reads_stale_with_only_the_compared_fields(captured
     step = _steps(out)["generators/G1/inputs/marginal_cost"]
     assert step["state"] == "stale"
     assert step["broken"]["reason"] == "changed"
-    assert set(step["broken"]["compared"]) == {"field", "recorded", "current_field", "current"}
+    assert set(step["broken"]["compared"]) == {
+        "field",
+        "recorded",
+        "current_field",
+        "current",
+    }
     assert step["broken"]["uncompared"] == []
-    assert step["broken"]["compared"]["recorded"] != step["broken"]["compared"]["current"]
+    assert (
+        step["broken"]["compared"]["recorded"] != step["broken"]["compared"]["current"]
+    )
     # The solve no longer matches its inputs, so the metric is not answered now: the value pin cannot be read.
     value = _steps(out)["value (generator-energy/1)"]
     assert value["state"] == "stale"
-    assert value["broken"]["reason"] == f"cannot be read now: '{METRIC}' is not answered now"
+    assert (
+        value["broken"]["reason"]
+        == f"cannot be read now: '{METRIC}' is not answered now"
+    )
     # Every other input still compared and matched: the stale edge is named, not the whole walk.
-    others = [s for s in out["steps"] if s["kind"] == "input" and s not in (step, value)]
-    assert all(s["state"] == "fresh" for s in others), [(s["label"], s["state"]) for s in others]
+    others = [
+        s for s in out["steps"] if s["kind"] == "input" and s not in (step, value)
+    ]
+    assert all(s["state"] == "fresh" for s in others), [
+        (s["label"], s["state"]) for s in others
+    ]
 
 
 def test_a_changed_dispatch_breaks_the_value_pin_exactly(captured):
@@ -130,7 +155,9 @@ def test_a_changed_dispatch_breaks_the_value_pin_exactly(captured):
     assert out["outcome"]["state"] == "stale"
 
 
-def test_an_unchanged_network_still_reads_fresh_after_a_save_and_reload(captured, tmp_path):
+def test_an_unchanged_network_still_reads_fresh_after_a_save_and_reload(
+    captured, tmp_path
+):
     """Y3: the series digest is taken over the canonical form, so dtype or index changes of a round trip do not
     read as an edit."""
     import pypsa
@@ -141,14 +168,20 @@ def test_an_unchanged_network_still_reads_fresh_after_a_save_and_reload(captured
     ctx.network = pypsa.Network(path)
     out = _why(owner, record)
     pinned = [s for s in out["steps"] if s["kind"] == "input"]
-    assert all(s["state"] == "fresh" for s in pinned), [(s["label"], s["state"], s["broken"]) for s in pinned]
+    assert all(s["state"] == "fresh" for s in pinned), [
+        (s["label"], s["state"], s["broken"]) for s in pinned
+    ]
 
 
-def test_a_retained_record_compares_nothing_with_the_open_network(captured, monkeypatch):
+def test_a_retained_record_compares_nothing_with_the_open_network(
+    captured, monkeypatch
+):
     ctx, owner, record = captured
     _with_record(monkeypatch, record, retain=True)
     monkeypatch.setattr(calculations, "scoped_source", _never)
-    ctx.network.generators.at["G1", "marginal_cost"] += 5  # not compared: the run is retained
+    ctx.network.generators.at["G1", "marginal_cost"] += (
+        5  # not compared: the run is retained
+    )
     out = _why(owner, record)
     pinned = [s for s in out["steps"] if s["kind"] == "input"]
     assert pinned and all(s["state"] == "uncompared" for s in pinned)
@@ -178,12 +211,16 @@ def _never(*_a, **_k):
 # --- Y1 busy lock, Y2 another project ------------------------------------------------------------------------
 
 
-def test_a_busy_network_reads_uncompared_never_stale_and_does_not_wait_unbounded(captured):
+def test_a_busy_network_reads_uncompared_never_stale_and_does_not_wait_unbounded(
+    captured,
+):
     import time
 
     ctx, owner, record = captured
     held, release = threading.Event(), threading.Event()
-    lock = PyPSAService.get_lock()  # this context's lock, held from another thread (a solve or an edit)
+    lock = (
+        PyPSAService.get_lock()
+    )  # this context's lock, held from another thread (a solve or an edit)
 
     def hold():
         with lock:
@@ -206,7 +243,9 @@ def test_a_busy_network_reads_uncompared_never_stale_and_does_not_wait_unbounded
     assert out["outcome"]["state"] == "uncompared"
 
 
-def test_a_record_for_another_project_never_reads_the_open_network(captured, monkeypatch):
+def test_a_record_for_another_project_never_reads_the_open_network(
+    captured, monkeypatch
+):
     ctx, owner, record = captured
     _with_record(monkeypatch, record, project_id="00000000-0000-4000-8000-000000000000")
     monkeypatch.setattr(calculations, "scoped_source", _never)
@@ -216,21 +255,38 @@ def test_a_record_for_another_project_never_reads_the_open_network(captured, mon
     assert pinned and all(s["state"] == "stale" for s in pinned)
     broken = pinned[0]["broken"]
     assert broken["reason"] == f"cannot be read now: {M.OTHER_PROJECT}"
-    assert broken["uncompared"] == ["current_field", "current"]  # X2: only what was compared is listed
+    assert broken["uncompared"] == [
+        "current_field",
+        "current",
+    ]  # X2: only what was compared is listed
     assert out["outcome"]["state"] == "stale"
 
 
-def test_an_unreadable_source_reads_stale(captured, monkeypatch):
+@pytest.mark.parametrize(
+    "error", [ValueError("missing_dispatch"), RuntimeError("missing_dispatch")]
+)
+def test_an_unreadable_source_reads_stale_never_a_500(captured, monkeypatch, error):
     ctx, owner, record = captured
 
     def refuse(*_a, **_k):
-        raise ValueError("missing_dispatch")
+        raise error
 
     monkeypatch.setattr(records, "scoped_read", refuse)
     out = _why(owner, record)
     pinned = [s for s in out["steps"] if s["kind"] == "input"]
     assert all(s["state"] == "stale" for s in pinned)
     assert pinned[0]["broken"]["reason"] == "cannot be read now: missing_dispatch"
+
+
+def test_each_pin_reads_the_source_once(captured, monkeypatch):
+    ctx, owner, record = captured
+    calls = []
+    real = calculations.scoped_calculate
+    monkeypatch.setattr(
+        calculations, "scoped_calculate", lambda *a: (calls.append(1), real(*a))[1]
+    )
+    _why(owner, record)
+    assert len(calls) == 1
 
 
 # --- Y4 the run-key deny-list --------------------------------------------------------------------------------
@@ -245,14 +301,29 @@ def test_the_run_keys_are_pinned_and_never_compared_as_inputs():
         "valid_solve",
         "profile",
     }
-    raw = {"profile": "p", "status": "ok", "a": {"input_fingerprint": "x", "b": [1], "c": {}}}
+    raw = {
+        "profile": "p",
+        "status": "ok",
+        "a": {"input_fingerprint": "x", "b": [1], "c": {}},
+    }
     assert M.raw_paths(raw) == [("a", "b"), ("a", "c")]
+    assert M.raw_paths({}) == [] and M.raw_paths({"status": "ok"}) == []
 
 
-def test_a_source_key_the_record_lacks_is_one_more_pin_and_fails_closed(captured, monkeypatch):
+def test_two_paths_never_share_a_node():
+    """A name holding "/" is escaped, so no pin is merged into another and dropped."""
+    paths = [("generators", "a/b", "p"), ("generators", "a", "b", "p"), ("g", "a~1b")]
+    assert len({M.label(p) for p in paths}) == 3
+
+
+def test_a_source_key_the_record_lacks_is_one_more_pin_and_fails_closed(
+    captured, monkeypatch
+):
     ctx, owner, record = captured
     real = records.scoped_read
-    monkeypatch.setattr(records, "scoped_read", lambda *a: {**real(*a), "new_input": 1.0})
+    monkeypatch.setattr(
+        records, "scoped_read", lambda *a: {**real(*a), "new_input": 1.0}
+    )
     out = _why(owner, record)
     step = _steps(out)["new_input"]
     assert step["state"] == "stale" and step["broken"]["reason"] == "not recorded"
@@ -276,7 +347,6 @@ def _status(call):
 
 
 def test_each_refusal_has_its_own_status(captured, monkeypatch):
-    import time
     import uuid
 
     ctx, owner, record = captured
@@ -285,11 +355,24 @@ def test_each_refusal_has_its_own_status(captured, monkeypatch):
     assert _status(lambda: explain_metric(owner, eid, "no_such_metric")) == 422
     assert _status(lambda: explain_metric(owner, str(uuid.uuid4()), METRIC)) == 404
     assert _status(lambda: explain_metric(owner, "not-a-uuid", METRIC)) == 404
-    unanswered = next(m for m in calculations.DEFINITIONS if m not in {f["metric"] for f in record["facts"]})
+    unanswered = next(
+        m
+        for m in calculations.DEFINITIONS
+        if m not in {f["metric"] for f in record["facts"]}
+    )
     assert _status(lambda: explain_metric(owner, eid, unanswered)) == 404
     with monkeypatch.context() as m:
         m.setattr(records.time, "time", lambda: record["expires_at"] + 1)
         assert _status(lambda: explain_metric(owner, eid, METRIC)) == 404
+    with monkeypatch.context() as m:
+        m.setattr(
+            records,
+            "load",
+            lambda *a: (_ for _ in ()).throw(records.AccessRevoked(403, "Forbidden")),
+        )
+        assert (
+            _status(lambda: explain_metric(owner, eid, METRIC)) == 404
+        )  # revoked reads as never existed
     with monkeypatch.context() as m:
         _with_record(m, record, source_kind="calculated_result")
         assert _status(lambda: explain_metric(owner, eid, METRIC)) == 422
@@ -302,14 +385,18 @@ def test_another_owners_record_reads_as_unknown(captured):
     ctx, owner, record = captured
     rid = str(uuid.uuid4())
     path = records._path(owner, rid)
-    envelope = records.seal({**record, "evidence_id": rid, "owner_id": str(uuid.uuid4())}, rid)
+    envelope = records.seal(
+        {**record, "evidence_id": rid, "owner_id": str(uuid.uuid4())}, rid
+    )
     path.write_bytes(json.dumps(envelope).encode())
     with pytest.raises(TargetUnknown) as other:
         explain_metric(owner, rid, METRIC)
     with pytest.raises(TargetUnknown) as unknown:
         explain_metric(owner, str(uuid.uuid4()), METRIC)
     assert other.value.status == unknown.value.status == 404
-    assert str(other.value).replace(rid, "ID") == str(unknown.value).split("'")[0] + "'ID'"
+    assert (
+        str(other.value).replace(rid, "ID") == str(unknown.value).split("'")[0] + "'ID'"
+    )
 
 
 def test_only_a_refused_read_is_turned_into_a_refusal(captured, monkeypatch):
@@ -345,7 +432,11 @@ def test_the_shape_names_what_the_stamp_lacks_and_never_fills_it(captured):
     assert head["unit"] == "MWh" and head["stamp_missing"] == []
     assert head["stamp"]["source"] == f"evidence:{record['evidence_id']}"
     assert head["stamp"]["formula_id"] == "generator-energy/1"
-    inputs = [s for s in out["steps"] if s["kind"] == "input" and not s["label"].startswith("value")]
+    inputs = [
+        s
+        for s in out["steps"]
+        if s["kind"] == "input" and not s["label"].startswith("value")
+    ]
     assert all(s["unit"] is None and s["stamp_missing"] == ["unit"] for s in inputs)
 
 
@@ -355,8 +446,16 @@ def test_a_long_walk_is_cut_and_marked_truncated(captured, monkeypatch):
     monkeypatch.setattr(E, "MAX_STEPS", 5)
     out = _why(owner, record)
     assert out["outcome"]["truncated"] is True and out["outcome"]["complete"] is False
-    assert len(out["steps"]) == 5 and out["outcome"]["steps_total"] == whole["outcome"]["steps_total"] > 5
-    assert whole["outcome"]["truncated"] is False and whole["outcome"]["complete"] is True
+    assert (
+        len(out["steps"]) == 5
+        and out["outcome"]["steps_total"] == whole["outcome"]["steps_total"] > 5
+    )
+    assert (
+        out["steps"][-1]["via"]["edge"] == "computed_in"
+    )  # why it is never fresh survives the cut
+    assert (
+        whole["outcome"]["truncated"] is False and whole["outcome"]["complete"] is True
+    )
 
 
 # --- X1/Y8 read-only, X6 route and tool ----------------------------------------------------------------------
@@ -365,8 +464,15 @@ def test_a_long_walk_is_cut_and_marked_truncated(captured, monkeypatch):
 def _snapshot(ctx, record_path):
     n = ctx.network
     return (
-        json.dumps({"meta": n.meta, "generators": n.generators.to_json(),
-                    "p": n.generators_t.p.to_json()}, sort_keys=True, default=str),
+        json.dumps(
+            {
+                "meta": n.meta,
+                "generators": n.generators.to_json(),
+                "p": n.generators_t.p.to_json(),
+            },
+            sort_keys=True,
+            default=str,
+        ),
         json.dumps(ctx.user_ts_meta, sort_keys=True, default=str),
         record_path.read_bytes(),
         record_path.stat().st_mtime_ns,
@@ -404,7 +510,9 @@ def test_the_tool_with_no_acting_user_refuses_401(captured):
     token = chat_tools._ACTING_USER_ID.set(None)
     try:
         with pytest.raises(HTTPException) as refused:
-            chat_tools.DISPATCHERS["why_this_number"](evidence_id=record["evidence_id"], metric=METRIC)
+            chat_tools.DISPATCHERS["why_this_number"](
+                evidence_id=record["evidence_id"], metric=METRIC
+            )
     finally:
         chat_tools._ACTING_USER_ID.reset(token)
     assert refused.value.status_code == 401
@@ -413,7 +521,13 @@ def test_the_tool_with_no_acting_user_refuses_401(captured):
 
 def test_the_tool_refuses_mixed_targets():
     for args in (
-        {"evidence_id": "e", "metric": METRIC, "component": "Generator", "name": "g", "field": "f"},
+        {
+            "evidence_id": "e",
+            "metric": METRIC,
+            "component": "Generator",
+            "name": "g",
+            "field": "f",
+        },
         {"evidence_id": "e"},
         {"metric": METRIC},
     ):
@@ -429,12 +543,23 @@ def test_the_tool_through_the_harness_dispatch_path(captured):
     ctx, owner, record = captured
     session = ChatSession(model="m", owner_user_id=owner)
     collector: list[dict] = []
-    tu = {"id": "tu_1", "name": "why_this_number",
-          "input": {"evidence_id": record["evidence_id"], "metric": METRIC}}
-    frames = list(dispatch_tool_call(session, tu, collector, offered_tool_names={"why_this_number"}))
+    tu = {
+        "id": "tu_1",
+        "name": "why_this_number",
+        "input": {"evidence_id": record["evidence_id"], "metric": METRIC},
+    }
+    frames = list(
+        dispatch_tool_call(
+            session, tu, collector, offered_tool_names={"why_this_number"}
+        )
+    )
     assert "tool_pending_confirmation" not in [e for e, _ in frames]
     (result,) = collector
     assert result.get("is_error") is not True, result
-    text = result["content"] if isinstance(result["content"], str) else json.dumps(result["content"])
+    text = (
+        result["content"]
+        if isinstance(result["content"], str)
+        else json.dumps(result["content"])
+    )
     # A long answer is spilled to a page; its preview, and the dict, start with the outcome (X5).
     assert text.index("outcome") < text.index("steps") and "uncompared" in text

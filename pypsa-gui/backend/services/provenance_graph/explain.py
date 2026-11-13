@@ -442,17 +442,19 @@ def explain_metric(owner: str | None, evidence_id: str, metric: str) -> dict:
         "state": "uncompared",
         "broken": None,
     }
-    wire = [_metric_step(mg, s) for s in steps] + [run_step]
-    truncated = len(wire) > MAX_STEPS
+    total = len(steps) + 1
+    truncated = total > MAX_STEPS
+    # The run step stays when the walk is cut: it is why the outcome is never fresh (X5).
+    wire = [_metric_step(mg, s) for s in steps[: MAX_STEPS - 1]] + [run_step]
     return {
         "outcome": {
             "state": "stale" if verdict.state == "stale" else "uncompared",
             "uncompared": [*verdict.uncompared, mg.run],
             "complete": not truncated,
             "truncated": truncated,
-            "steps_total": len(wire),
+            "steps_total": total,
         },
         "target": {"evidence_id": evidence_id, "metric": metric},
         "node": mg.start,
-        "steps": wire[:MAX_STEPS],
+        "steps": wire,
     }
