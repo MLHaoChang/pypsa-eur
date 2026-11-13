@@ -64,3 +64,5 @@ is listed in "Numbers to check" (unverified, withheld from the headline), under 
 - **T5, mutants:** `scripts/coord/mutants.py` runs on the changed lines of `roundtrip.py` and `revisions.py`; the PR body lists every survivor and why it is equivalent.
 
 **GK B (54) NOT OK fixes 2026-11-13** (#1471). Edited tables pair with the section's tables by content (`_pair`), not position (D1); a unit edit in the corner header or a Unit column counts (D2, D3); duplicated row labels pair with nothing (D4); prose a withheld section cannot verify becomes the withheld placeholder and is listed in the appendix (D5). Killing tests for each, and for M1b and M2, are in `tests/test_lc43_d21_report_gates.py`.
+
+**GK B (55) NOT OK fixes 2026-11-13** (#1471). An admitted table carries its original's own caption, and admitted tables keep the base's order, so a swap is withheld (F1). Duplicated column headers pair with nothing (F2). An original that no edited table pairs with is recorded in place as removed or replaced (F3). A text-only table with no original keeps no caption.

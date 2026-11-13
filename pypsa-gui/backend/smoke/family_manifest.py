@@ -731,7 +731,9 @@ VARIANTS: list[dict] = [
              'with no number and an added row with no number are accepted with no entry; a 3.2149 h/yr cell is withheld (exact compare); two text-only tables inserted above the headline '
              'leave the edited headline paired with its own original by content and withheld; a row inserted mid-table plus a changed MC LOLE is withheld; a unit changed in the corner header '
              'or a Unit column (MW to GW, t to kt) and a duplicated row label (Total 5/7 MW with an inserted row) are changes; prose 1.0 h/yr beside a withheld table becomes the withheld '
-             'placeholder and is listed (LC-43a, GK B 52, GK B 54)',
+             'placeholder and is listed; an admitted table keeps its own caption (a numeric table inserted above the headline is withheld and the headline keeps "Headline results"), '
+             'swapped tables or a table edited into its sibling never carry the other caption, duplicated column headers pair with nothing, and a deleted headline table is recorded '
+             'as removed (LC-43a, GK B 52, GK B 54, GK B 55)',
              'import_edited_report export_report_docx get_report get_report_table',
              B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_leaves_the_headline_and_version_one',
              B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_in_prose_lists_it_to_check',
@@ -741,7 +743,11 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d21_report_gates.py::test_text_tables_inserted_above_the_headline_leave_its_edit_withheld',
              B + 'test_lc43_d21_report_gates.py::test_a_row_inserted_mid_table_and_a_changed_value_is_withheld',
              B + 'test_lc43_d21_report_gates.py::test_a_prose_number_in_a_section_with_a_withheld_table_is_withheld',
-             B + 'test_lc43_d21_report_gates.py::test_a_unit_or_duplicate_label_change_is_a_changed_number'),
+             B + 'test_lc43_d21_report_gates.py::test_a_unit_or_duplicate_label_change_is_a_changed_number',
+             B + 'test_lc43_d21_report_gates.py::test_a_numeric_table_inserted_above_the_headline_keeps_the_headline_caption',
+             B + 'test_lc43_d21_report_gates.py::test_a_deleted_headline_table_is_recorded',
+             B + 'test_lc43_d21_report_gates.py::test_a_table_turned_into_its_siblings_copy_keeps_no_wrong_caption',
+             B + 'test_lc43_d21_report_gates.py::test_two_swapped_tables_keep_their_own_captions_and_the_second_is_withheld'),
     _pending('LC-D21.stale_report', 'a report generated or exported after its study changed is neither refused nor flagged (only the IC case note): no stale gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D21.report_resume', 'a report job interrupted by a restart is not resumed (its record is in-process state): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D22.undo_checkpoints', 'input-table fingerprint before/after: undo restores the exact fingerprint and the matching results (objective 100, current again), '

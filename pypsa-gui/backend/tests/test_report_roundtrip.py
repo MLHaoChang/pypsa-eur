@@ -38,6 +38,7 @@ from models.report import (
 from services.reports.docx_reader import TemplateReadError
 from services.reports.docx_writer import render_document_docx
 from services.reports.roundtrip import (
+    REMOVED_TABLE_NOTE,
     RoundTripResult,
     RoundTripSection,
     merge_round_trip,
@@ -481,7 +482,11 @@ def test_merge_bumps_version_keeps_mode_and_adds_edited_tables():
     assert merged.template_file_id == base.template_file_id
     assert "headline_edited_v3" in merged.tables and "headline" in merged.tables
     s = _by_id(merged, "executive_summary")
-    assert s.blocks == [Paragraph(md="Rewritten by hand.")]
+    # LC-43a (GK B 55 F3): the headline table the edit dropped is recorded.
+    assert s.blocks == [
+        Paragraph(md="Rewritten by hand."),
+        Callout(kind="gap", text=REMOVED_TABLE_NOTE.format(name="Headline results")),
+    ]
     assert s.source == "user_edit" and s.pending_instruction == "tighten"
     assert s.comments == ["tighten"]
     # The other two were absent from the result: kept with the note.

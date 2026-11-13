@@ -103,6 +103,10 @@ from services.reports.docx_writer import (
 APPENDIX_ID = "numbers_to_check"
 HEADING_MATCH_RATIO = 0.85
 REMOVED_NOTE = "removed from the edited copy; kept from version {version}"
+REMOVED_TABLE_NOTE = (
+    'the table "{name}" was removed or replaced in the edited copy; '
+    "its numbers are not in this version"
+)
 ADDED_PICTURE_TEXT = (
     "A picture added in the edited copy has no place in the "
     "report model and was not carried over."
@@ -935,8 +939,12 @@ def _changed_numbers(original: Table, edited: Table) -> list[str]:
             for r in range(1, len(new))
         }
         rows[0] = 0
-        headers = {_norm(h): c for c, h in enumerate(old[0])}
-        cols = {c: headers.get(_norm(h)) for c, h in enumerate(new[0])}
+        old_heads = unique(old[0], lambda c: _norm(old[0][c]))
+        new_heads = unique(new[0], lambda c: _norm(new[0][c]))
+        cols = {
+            c: old_heads.get(_norm(h)) if _norm(h) in new_heads else None
+            for c, h in enumerate(new[0])
+        }
     out: list[str] = []
     for r, row in enumerate(new):
         for c, cell in enumerate(row):
@@ -1027,7 +1035,12 @@ def _checked(
     with the changed cells listed "(unverified, withheld)"; an unchanged copy
     keeps the admitted table. One that pairs with none and states a number
     is withheld whole (placeholder, numbers listed); a table of text only
-    stays. The edited tables are still stored under their own ids. A section
+    stays, uncaptioned. An admitted table always carries its original's own
+    caption, never that of its position in the Word file, and admitted tables
+    keep the base's order: a copy of an original the base placed above one
+    already admitted (a swap) is withheld. An original no edited table pairs
+    with is recorded in place as removed (GK B 55 F1, F3). The edited tables
+    are still stored under their own ids. A section
     with a withheld table is a withheld section, so its prose statements the
     audit cannot verify are withheld too, never listed as withheld while
     still standing in the text.
@@ -1036,43 +1049,79 @@ def _checked(
     from services.reports.revisions import rerun_audit, verified_facts
 
     suffix = f"_edited_v{base.version + 1}"
-    originals = {
-        b.table_id: base.tables[b.table_id]
-        for b in section.blocks
-        if isinstance(b, TableRef) and b.table_id in base.tables
-    }
+    own_caption: dict[str, str | None] = {}
+    originals: dict[str, Table] = {}
+    order: dict[str, int] = {}
+    for b in section.blocks:
+        if isinstance(b, TableRef) and b.table_id in base.tables:
+            originals[b.table_id] = base.tables[b.table_id]
+            own_caption[b.table_id] = b.caption or base.tables[b.table_id].caption
+            order.setdefault(b.table_id, len(order))
     for block in blocks:
         if isinstance(block, TableRef) and block.table_id not in edited_tables:
             originals.pop(block.table_id, None)  # kept as delivered
     kept: list = []
     withheld: list[str] = []
+
+    def uncaptioned(block: TableRef, edited: Table) -> TableRef:
+        # The Word reader captions a table by its position; one that is no
+        # admitted original's copy keeps no admitted caption (GK B 55 F1).
+        edited_tables[block.table_id] = edited.model_copy(update={"caption": None})
+        return TableRef(table_id=block.table_id)
+
+    def withhold(block: TableRef, edited: Table) -> None:
+        new = _numeric_cells(edited)
+        if new:
+            kept.append(Callout(kind="gap", text=withheld_placeholder(len(new))))
+            withheld.extend(new)
+        else:
+            kept.append(uncaptioned(block, edited))
+
+    last = -1  # the base position of the last table admitted
     for block in blocks:
         edited = (
             edited_tables.get(block.table_id) if isinstance(block, TableRef) else None
         )
         if edited is None:
+            if isinstance(block, TableRef):
+                last = max(last, order.get(block.table_id, last))
             kept.append(block)
             continue
         nominal = block.table_id.removesuffix(suffix)
         tid = _pair(edited, originals, nominal if nominal != block.table_id else None)
-        if tid is None:
-            new = _numeric_cells(edited)
-            if new:
-                kept.append(Callout(kind="gap", text=withheld_placeholder(len(new))))
-                withheld.extend(new)
-            else:
-                kept.append(block)
+        if tid is None or order[tid] < last:
+            # A copy of no original, or of one the base placed above a table
+            # already admitted (a swap): withheld, never admitted under an
+            # original's caption (GK B 55 F1).
+            withhold(block, edited)
             continue
+        last = order[tid]
         original = originals.pop(tid)
+        caption = own_caption.get(tid)
         new = _changed_numbers(original, edited)
-        ref = TableRef(table_id=tid, caption=block.caption or original.caption)
         if new:
-            kept.extend([ref, Callout(kind="gap", text=withheld_placeholder(len(new)))])
+            kept.extend(
+                [
+                    TableRef(table_id=tid, caption=caption),
+                    Callout(kind="gap", text=withheld_placeholder(len(new))),
+                ]
+            )
             withheld.extend(new)
         elif _cells(edited) == _cells(original):
-            kept.append(ref)
+            kept.append(TableRef(table_id=tid, caption=caption))
         else:
-            kept.append(block)
+            edited_tables[block.table_id] = edited.model_copy(
+                update={"caption": caption}
+            )
+            kept.append(TableRef(table_id=block.table_id, caption=caption))
+    for tid in originals:
+        # An admitted table the edited copy no longer holds (GK B 55 F3).
+        kept.append(
+            Callout(
+                kind="gap",
+                text=REMOVED_TABLE_NOTE.format(name=own_caption.get(tid) or tid),
+            )
+        )
     facts = verified_facts(section)
     if withheld and facts is not None:
         kept, prose = _withhold_prose(kept, facts)

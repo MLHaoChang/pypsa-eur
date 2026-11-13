@@ -52,7 +52,13 @@ from services import chat_tools as T, upload_service
 from services.llm_fake import FakeProvider
 from services.reports import pdf
 from services.reports.docx_writer import DOCX_MIME
-from services.reports.roundtrip import _changed_numbers, _checked, _pair
+from services.reports.formatting import withheld_placeholder
+from services.reports.roundtrip import (
+    REMOVED_TABLE_NOTE,
+    _changed_numbers,
+    _checked,
+    _pair,
+)
 from tests.test_chat_report_tools import (
     PROJECT,
     _Holding,
@@ -290,6 +296,15 @@ def test_text_tables_inserted_above_the_headline_leave_its_edit_withheld(
     paragraphs = [p.text for p in delivered.paragraphs]
     assert "Executive summary: 1.00 h/yr (unverified, withheld)" in paragraphs
     assert "The plan meets 3.2 h/yr." in paragraphs
+    refs = [
+        b
+        for b in T.get_report(report_id, section_id="executive_summary")["sections"][0][
+            "blocks"
+        ]
+        if b["type"] == "table"
+    ]
+    captioned = [b["table_id"] for b in refs if b.get("caption")]
+    assert captioned == ["headline", "completeness"], refs
     assert T.get_report_table(report_id, "headline")["items"] == HEADLINE
 
 
@@ -332,7 +347,9 @@ def test_a_prose_number_in_a_section_with_a_withheld_table_is_withheld(
 
     assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
 
-    first = T.get_report(report_id)["sections"][0]["blocks"][0]
+    first = T.get_report(report_id, section_id="executive_summary")["sections"][0][
+        "blocks"
+    ][0]
     assert first["type"] == "callout" and first["text"].startswith("Withheld:")
     paragraphs = [p.text for p in _docx(client, report_id, 2).paragraphs]
     assert "The plan meets 1.0 h/yr." not in paragraphs
@@ -379,8 +396,41 @@ def _table(columns, *rows) -> Table:
             ),
             ["7 MW", "7 MW"],
         ),
+        # GK B 55 F2: a duplicated column header pairs with nothing either.
+        (
+            _table(["Item", "MW", "MW"], ["Wind", "10", "20"]),
+            _table(["Item", "MW", "MW"], ["Wind", "20", "20"], ["Note", "see", "text"]),
+            ["20", "20"],
+        ),
+        # ... and a header duplicated only in the edit.
+        (
+            _table(["Item", "MW"], ["Wind", "10"]),
+            _table(["Item", "MW", "MW"], ["Wind", "10", "20"]),
+            ["10", "20"],
+        ),
+        # Word rows can be ragged (`_table_cells` drops repeated merged
+        # cells), and an accepted edited table becomes a later original.
+        (
+            _table(["Item", "Value"], ["Wind"]),
+            _table(["Item", "Value"], ["Wind", "10 MW"], ["Solar", "none"]),
+            ["10 MW"],
+        ),
+        (
+            _table(["Item", "Value"], ["Wind", "note"], ["X"]),
+            _table(["Item", "Value"], ["Wind", "other note"], ["X"]),
+            [],
+        ),
     ],
-    ids=["corner_header_unit", "unit_column_mw", "unit_column_t", "duplicate_label"],
+    ids=[
+        "corner_header_unit",
+        "unit_column_mw",
+        "unit_column_t",
+        "duplicate_label",
+        "duplicate_column",
+        "duplicate_column_in_edit",
+        "ragged_original_reshaped",
+        "ragged_original_same_shape",
+    ],
 )
 def test_a_unit_or_duplicate_label_change_is_a_changed_number(original, edited, listed):
     assert _changed_numbers(original, edited) == listed
@@ -452,11 +502,10 @@ def test_a_withheld_table_withholds_only_the_prose_the_audit_cannot_verify():
     assert audit.unverified == ["9 €/yr", "26,000 €/yr"]
 
 
-def _two_table_doc(a: Table, b: Table):
+def _two_table_doc(a: Table, b: Table, captions=(None, None)):
     base = _document()
-    section = _section_of(base, "executive_summary").model_copy(
-        update={"blocks": [TableRef(table_id="a"), TableRef(table_id="b")]}
-    )
+    refs = [TableRef(table_id=t, caption=c) for t, c in zip("ab", captions)]
+    section = _section_of(base, "executive_summary").model_copy(update={"blocks": refs})
     tables = {**base.tables, "a": a.model_copy(update={"table_id": "a"})}
     tables["b"] = b.model_copy(update={"table_id": "b"})
     return base.model_copy(update={"tables": tables}), section
@@ -493,6 +542,111 @@ def test_a_table_kept_as_delivered_is_not_paired_again():
 
     assert [b.table_id for b in kept if isinstance(b, TableRef)] == ["a", "b"]
     assert audit.unverified == ["X", "5"]
+
+
+_Y2030 = _table(["Item", "Value"], ["LOLE", "3.21 h/yr"])
+_Y2040 = _table(["Item", "Value"], ["LOLE", "1.00 h/yr"], ["CO2", "5 t"])
+
+
+def test_a_table_turned_into_its_siblings_copy_keeps_no_wrong_caption():
+    """GK B 55 F1: the 2030 table edited into the 2040 one (and the 2040 one
+    deleted) is the 2040 table under its own caption, and the 2030 table is
+    recorded as removed; 2040 figures never read as 2030."""
+    base, section = _two_table_doc(_Y2030, _Y2040, ("2030 results", "2040 results"))
+    edited = {"a_edited_v3": _Y2040.model_copy(update={"caption": "2030 results"})}
+    blocks = [TableRef(table_id="a_edited_v3", caption="2030 results")]
+
+    kept, audit = _checked(section, blocks, base, edited)
+
+    assert kept == [
+        TableRef(table_id="b", caption="2040 results"),
+        Callout(kind="gap", text=REMOVED_TABLE_NOTE.format(name="2030 results")),
+    ]
+    assert audit.unverified == []
+
+
+def test_two_swapped_tables_keep_their_own_captions_and_the_second_is_withheld():
+    base, section = _two_table_doc(_Y2030, _Y2040, ("2030 results", "2040 results"))
+    edited = {
+        "a_edited_v3": _Y2040.model_copy(update={"caption": "2030 results"}),
+        "b_edited_v3": _Y2030.model_copy(update={"caption": "2040 results"}),
+    }
+    blocks = [
+        TableRef(table_id="a_edited_v3", caption="2030 results"),
+        TableRef(table_id="b_edited_v3", caption="2040 results"),
+    ]
+
+    kept, audit = _checked(section, blocks, base, edited)
+
+    assert kept == [
+        TableRef(table_id="b", caption="2040 results"),
+        Callout(kind="gap", text=withheld_placeholder(1)),
+        Callout(kind="gap", text=REMOVED_TABLE_NOTE.format(name="2030 results")),
+    ]
+    assert audit.unverified == ["3.21 h/yr"]
+
+
+def test_an_edited_table_moved_below_a_delivered_sibling_is_withheld():
+    base, section = _two_table_doc(_Y2030, _Y2040, ("2030 results", "2040 results"))
+    edited = {"a_edited_v3": _table(["Item", "Value"], ["LOLE", "3.30 h/yr"])}
+    blocks = [TableRef(table_id="b"), TableRef(table_id="a_edited_v3")]
+
+    kept, audit = _checked(section, blocks, base, edited)
+
+    assert kept == [
+        TableRef(table_id="b"),
+        Callout(kind="gap", text=withheld_placeholder(1)),
+        Callout(kind="gap", text=REMOVED_TABLE_NOTE.format(name="2030 results")),
+    ]
+    assert audit.unverified == ["3.30 h/yr"]
+
+
+def test_a_numeric_table_inserted_above_the_headline_keeps_the_headline_caption(
+    project, client, monkeypatch
+):
+    report_id = _generated(monkeypatch)
+    doc = _docx(client, report_id)
+    note = doc.add_table(rows=1, cols=2)
+    note.cell(0, 0).text, note.cell(0, 1).text = "Peak shed", "42 MW"
+    doc.tables[0]._tbl.addprevious(note._tbl)
+
+    assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
+
+    blocks = T.get_report(report_id, section_id="executive_summary")["sections"][0][
+        "blocks"
+    ]
+    refs = [b for b in blocks if b["type"] == "table"]
+    assert refs[0]["table_id"] == "headline"
+    assert "Headline results" in refs[0]["caption"]
+    assert not [b for b in refs[1:] if "Headline results" in (b.get("caption") or "")]
+    delivered = _docx(client, report_id, 2)
+    assert _headline_of(delivered) is not None
+    paragraphs = [p.text for p in delivered.paragraphs]
+    assert "Executive summary: 42 MW (unverified, withheld)" in paragraphs
+
+
+def test_a_deleted_headline_table_is_recorded(project, client, monkeypatch):
+    """GK B 55 F3: an admitted table the edited copy drops is never silent."""
+    report_id = _generated(monkeypatch)
+    doc = _docx(client, report_id)
+    headline = doc.tables[0]._tbl
+    headline.getparent().remove(headline)
+
+    assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
+
+    blocks = T.get_report(report_id, section_id="executive_summary")["sections"][0][
+        "blocks"
+    ]
+    assert not [b for b in blocks if b.get("table_id") == "headline"]
+    notes = [b["text"] for b in blocks if b["type"] == "callout"]
+    assert [n for n in notes if "Headline results" in n and "removed" in n], notes
+    assert not [
+        b
+        for b in blocks
+        if b["type"] == "table" and "Headline results" in (b.get("caption") or "")
+    ]
+    paragraphs = [p.text for p in _docx(client, report_id, 2).paragraphs]
+    assert [p for p in paragraphs if "Headline results" in p and "removed" in p]
 
 
 @pytest.mark.parametrize("added", ["row", "column"])
@@ -627,7 +781,9 @@ def test_a_word_file_that_is_not_the_report_merges_nothing(project, monkeypatch)
     )
     assert _stored() == before
     assert state(project) == kept
-    assert T.get_report(report_id)["sections"][0]["blocks"][0] == {
+    assert T.get_report(report_id, section_id="executive_summary")["sections"][0][
+        "blocks"
+    ][0] == {
         "type": "paragraph",
         "md": "The plan meets 3.2 h/yr.",
     }
