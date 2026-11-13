@@ -251,15 +251,22 @@ def export_matpower():
 
 # ── Imports ───────────────────────────────────────────────────────────────────
 
-def _replace_with(candidate):
+def _replace_with(candidate) -> None:
     """Swap the parsed ``candidate`` in as the open network and clear any
-    user-uploaded time series; returns the network now open (``candidate``)."""
+    user-uploaded time series. The caller holds ``PyPSAService.get_lock()``."""
     from routers.network import _restore_user_ts
     # The same workspace gets a new network: a COPY of the undo stack keeps the
     # import undoable without touching the outgoing context's own history.
     PyPSAService.reset_network(carry="copy", network=candidate)
     _restore_user_ts({})
-    return PyPSAService.get_network()
+
+
+def _unreadable(what: str) -> HTTPException:
+    return HTTPException(422, {
+        "error_kind": "import_unreadable",
+        "message": f"The file is not a readable {what} with at least one bus; "
+                   "the open network is unchanged.",
+    })
 
 
 def _parse_candidate(what: str, parse, *, check_names: bool = True):
@@ -271,10 +278,12 @@ def _parse_candidate(what: str, parse, *, check_names: bool = True):
     an empty network. Parsing into a candidate means a refusal, for whatever
     reason, leaves the open project exactly as it was; `_replace_with` swaps
     the candidate in only once it has parsed and passed the name checks.
+    The candidate is no one's network yet, so it is parsed WITHOUT
+    `PyPSAService.get_lock()`: the lock is held for the swap only.
 
     A route's own refusal (an HTTPException, such as an unsafe zip member or a
-    bad baseMVA) keeps its status and detail; any other parse failure is 422
-    ``import_unreadable``.
+    bad baseMVA) keeps its status and detail; any other parse failure, and a
+    file that parses to no buses at all, is 422 ``import_unreadable``.
     """
     import pypsa
 
@@ -285,10 +294,11 @@ def _parse_candidate(what: str, parse, *, check_names: bool = True):
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 - any parser failure is one refusal
-        raise HTTPException(422, {
-            "error_kind": "import_unreadable",
-            "message": f"The file is not a readable {what}; the open network is unchanged.",
-        }) from exc
+        raise _unreadable(what) from exc
+    if candidate.buses.empty:
+        # A zip of no PyPSA tables, a workbook of no component sheets or a
+        # MATPOWER file of no `mpc.bus` rows "parses" to an empty network.
+        raise _unreadable(what)
     _refuse_reserved_buses(candidate)
     if check_names:
         _refuse_invalid_names(candidate)
@@ -352,13 +362,13 @@ async def import_netcdf(
         f.write(data)
         tmp = pathlib.Path(f.name)
     try:
+        with PyPSAService.get_netcdf_io_lock():
+            n = _parse_candidate(
+                "netCDF network",
+                lambda c: PyPSAService.import_network_from_netcdf(c, tmp),
+            )
         with PyPSAService.get_lock():
-            with PyPSAService.get_netcdf_io_lock():
-                candidate = _parse_candidate(
-                    "netCDF network",
-                    lambda c: PyPSAService.import_network_from_netcdf(c, tmp),
-                )
-            n = _replace_with(candidate)
+            _replace_with(n)
     finally:
         tmp.unlink(missing_ok=True)
     summary = _build_summary(n)
@@ -387,10 +397,10 @@ async def import_csv(
             _map_csv_folder(tmpdir, _unescape_formula)
             c.import_from_csv_folder(tmpdir)
 
+        n = _parse_candidate("CSV bundle (a .zip of PyPSA CSV tables)", parse)
+        normalise_eh_columns(n)
         with PyPSAService.get_lock():
-            candidate = _parse_candidate("CSV bundle (a .zip of PyPSA CSV tables)", parse)
-            normalise_eh_columns(candidate)
-            n = _replace_with(candidate)
+            _replace_with(n)
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network_csv.zip",
@@ -441,12 +451,12 @@ async def import_excel(
                         except Exception:
                             pass
 
+    n = _parse_candidate("Excel workbook", parse)
+    # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
+    from services.adequacy.eh_columns import normalise_eh_columns
+    normalise_eh_columns(n)
     with PyPSAService.get_lock():
-        candidate = _parse_candidate("Excel workbook", parse)
-        # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
-        from services.adequacy.eh_columns import normalise_eh_columns
-        normalise_eh_columns(candidate)
-        n = _replace_with(candidate)
+        _replace_with(n)
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network.xlsx",
@@ -463,13 +473,13 @@ async def import_matpower(
     session: SessionRow | None = Depends(current_session),
 ):
     data = await read_capped(file)
+    # No `_refuse_invalid_names`: every MATPOWER name is built from an int.
+    n = _parse_candidate(
+        "MATPOWER case", lambda c: _parse_matpower(c, data.decode("utf-8")),
+        check_names=False,
+    )
     with PyPSAService.get_lock():
-        # No `_refuse_invalid_names`: every MATPOWER name is built from an int.
-        candidate = _parse_candidate(
-            "MATPOWER case", lambda c: _parse_matpower(c, data.decode("utf-8")),
-            check_names=False,
-        )
-        n = _replace_with(candidate)
+        _replace_with(n)
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network.m",
@@ -501,10 +511,6 @@ def _parse_matpower(n, text: str) -> None:
     if not math.isfinite(base_mva) or base_mva <= 0:
         raise HTTPException(422, "MATPOWER baseMVA must be positive and finite")
     buses_data = _section("bus")
-    if not buses_data:
-        # A file with no `mpc.bus` rows is not a case: it used to import as an
-        # empty network over the open project (LC-43c).
-        raise ValueError("no mpc.bus rows")
     bus_map = {}
     for row in buses_data:
         bus_i = int(row[0])

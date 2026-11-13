@@ -21,9 +21,11 @@ and the blob count) is exactly as before:
   two-snapshot network crosses it);
 - an import with an unnamed format is 422 invalid_import_format; an upload whose bytes
   no longer match their hash is 409 import_file_changed;
-- a malformed netCDF file, CSV bundle, workbook or MATPOWER case is 422
-  import_unreadable, with the open project and its unsaved G1 edit (33 MW) kept
-  (LC-43c: each file is parsed into a candidate network before it replaces the open one);
+- a malformed netCDF file, CSV bundle, workbook or MATPOWER case, and a well-formed zip
+  or workbook that holds no network, is 422 import_unreadable, with the open project and
+  its unsaved G1 edit (33 MW) kept (LC-43c: each file is parsed into a candidate network
+  before it replaces the open one); a route's own refusal (a MATPOWER baseMVA of -1)
+  keeps its 422 and detail and the network too;
 - a chart of an unknown component, no names, a repeated name or nine names is 422
   invalid_chart;
 - ``export_run_evidence`` with no run named and none discussed is 409
@@ -31,7 +33,12 @@ and the blob count) is exactly as before:
 """
 
 # ruff: noqa: F811 -- shared public harness fixtures
+import base64
+import io
 import json
+import zipfile
+
+import openpyxl
 
 import pytest
 
@@ -190,10 +197,27 @@ def test_run_evidence_is_never_exported_for_a_run_nobody_named(baseline):
     assert state(project_dir) == before
 
 
+def _empty_zip() -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("readme.txt", "no tables")
+    return buffer.getvalue()
+
+
+def _empty_workbook() -> bytes:
+    buffer = io.BytesIO()
+    workbook = openpyxl.Workbook()
+    workbook.active.title = "notes"
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
 @pytest.mark.parametrize(
     "name, data, fmt",
     [
         ("bad.nc", b"not a netcdf", "netcdf"),
+        ("empty.zip", _empty_zip(), "csv_bundle"),
+        ("empty.xlsx", _empty_workbook(), "excel"),
         ("bad.zip", b"PK\x03\x04junk", "csv_bundle"),
         ("bad.xlsx", b"junk", "excel"),
         ("bad.m", b"function x", "matpower"),
@@ -215,6 +239,23 @@ def test_a_malformed_import_is_refused_and_keeps_the_open_network(
         "import_unreadable"
     ]
     assert not [d for e, d in frames if e == "tool_result"]
+    assert str(PyPSAService.get_active_context().project_uuid) == project_id
+    assert state(project_dir) == before
+    assert PyPSAService.get_network().generators.at["G1", "p_nom"] == 33.0
+
+
+def test_a_routes_own_import_refusal_keeps_its_detail_and_the_open_network(baseline):
+    """The candidate parse passes a route's own HTTPException through unchanged
+    (it is not re-labelled import_unreadable) and swaps nothing in."""
+    _ctx, project_id, project_dir = baseline
+    PyPSAService.get_network().generators.at["G1", "p_nom"] = 33.0  # an unsaved edit
+    before = state(project_dir)
+    case = b"mpc.baseMVA = -1;\nmpc.bus = [\n1 3 0 0 0 0 1 1 0 110 1 1.1 0.9;\n];\n"
+    refused(
+        lambda: chat_tools.import_matpower(base64.b64encode(case).decode()),
+        422,
+        "MATPOWER baseMVA must be positive and finite",
+    )
     assert str(PyPSAService.get_active_context().project_uuid) == project_id
     assert state(project_dir) == before
     assert PyPSAService.get_network().generators.at["G1", "p_nom"] == 33.0
