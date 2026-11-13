@@ -46,6 +46,8 @@ VERSIONS: dict[str, str] = {
     "eh_datacenter": "1",
     "eh_h2_hub": "1",
     "eh_h2_hub_staged": "1",
+    "eh_ipp_hybrid": "1",
+    "eh_microgrid": "1",
     "eh_site": "1",
 }
 
