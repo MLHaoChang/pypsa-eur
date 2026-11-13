@@ -842,7 +842,9 @@ def _poll_in_the_reapply_window(monkeypatch):
     return seen
 
 
-def test_a_snapshot_restore_moves_the_stamp_after_the_user_ts(client, api_project, monkeypatch):
+def test_a_snapshot_restore_moves_the_stamp_after_the_user_ts(
+    client, api_project, monkeypatch
+):
     """F1: `restore_snapshot` sets the revision with the results state, then restores and reapplies `user_ts`. A
     poll in that window caches the network without them; the stamp moves once they are in."""
     name = api_project("pgrestore")
@@ -856,7 +858,9 @@ def test_a_snapshot_restore_moves_the_stamp_after_the_user_ts(client, api_projec
     assert runs._stamp(ctx) != stamp
 
 
-def test_a_project_load_moves_the_stamp_after_the_user_ts(client, api_project, monkeypatch):
+def test_a_project_load_moves_the_stamp_after_the_user_ts(
+    client, api_project, monkeypatch
+):
     """F1: `load_project` has the same order as the restore (results state, then `user_ts`)."""
     name = api_project("pgload")
     seen = _poll_in_the_reapply_window(monkeypatch)
@@ -888,7 +892,11 @@ def test_the_chat_seam_polled_inside_the_handler_never_serves_the_pre_edit_hash(
     monkeypatch.setitem(chat_tools.DISPATCHERS, name, handler)
     chat_service._reset_sessions_for_tests()
     session = chat_service.ChatSession()
-    args = {"component_class": "Generator", "name": "g", "attrs": {"marginal_cost": 60.0}}
+    args = {
+        "component_class": "Generator",
+        "name": "g",
+        "attrs": {"marginal_cost": 60.0},
+    }
     for event, data in loop._dispatch_real_tool_call(
         session, {"id": "tu-1", "name": name, "input": args}, []
     ):
