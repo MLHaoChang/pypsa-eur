@@ -3,7 +3,7 @@
 
 # No route-level test for the asset units route
 
-Status: done (this PR; PR number pending)
+Status: done (#1481)
 Type: follow-up
 Gated: GK B
 

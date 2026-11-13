@@ -3,7 +3,7 @@
 
 # Workbook view drops all-empty columns; the horizon refusal has no error kind of its own
 
-Status: done (this PR; PR number pending)
+Status: done (#1481)
 Type: follow-up
 Gated: GK B
 

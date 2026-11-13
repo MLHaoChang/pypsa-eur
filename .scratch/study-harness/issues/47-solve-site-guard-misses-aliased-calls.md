@@ -3,7 +3,7 @@
 
 # The solve-site guard misses aliased calls
 
-Status: done (this PR; PR number pending)
+Status: done (#1481)
 Type: follow-up
 Gated: GK B
 
