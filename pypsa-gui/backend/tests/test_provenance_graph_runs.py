@@ -441,6 +441,19 @@ def test_a_bare_context_is_read_with_its_defaults():
     assert r.loadflow_ran is False
 
 
+def test_a_context_with_no_solver_state_lock_still_reads_its_records():
+    import types
+
+    r = runs.read(
+        types.SimpleNamespace(
+            network=_net(),
+            solver_state={"ac_pf_results": {}, "ac_pf_network_revision": 3},
+            network_revision=3,
+        )
+    )
+    assert r.loadflow_ran is True and r.loadflow_revision == 3
+
+
 def test_the_lock_is_released_after_the_read(solved):
     import threading
 

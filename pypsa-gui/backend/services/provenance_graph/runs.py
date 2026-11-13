@@ -19,6 +19,7 @@ An unreadable current fingerprint is stale (fail closed, ADR-0001). Reads only: 
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import weakref
 from dataclasses import dataclass
@@ -138,11 +139,8 @@ def _records(ctx) -> dict:
         dispatch = dispatch_status(n, transient=None if _is_active(ctx) else {})
     except Exception:  # noqa: BLE001 — as the flow read it: no results to compare
         dispatch = "none"
-    state_lock = getattr(ctx, "solver_state_lock", None)
-    if state_lock is not None:
-        with state_lock:  # lock order: mutation, then solver_state
-            state = dict(getattr(ctx, "solver_state", None) or {})
-    else:
+    # Lock order: mutation, then solver_state. A context with no solver_state lock has nothing to wait for.
+    with getattr(ctx, "solver_state_lock", None) or contextlib.nullcontext():
         state = dict(getattr(ctx, "solver_state", None) or {})
     record = state.get("eh_study")
     revision = _revision(ctx)
