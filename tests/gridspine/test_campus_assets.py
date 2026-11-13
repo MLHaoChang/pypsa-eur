@@ -86,7 +86,7 @@ def test_every_entry_carries_every_field_tagged():
 #: sha256 of the shipped library: the defaults pack 2026-11-13 manifest pins the same bytes
 #: (2026-10-23 .. 2026-10-30 pinned the library before the 220/110 kV units, 2026-11-06 .. 2026-11-10
 #: before their sourced losses).
-SHIPPED_SHA256 = "8d999863b8acc4f4f8ebe45019f04aadc00d7367953ef81a7f4be6a42b32901e"
+SHIPPED_SHA256 = "7e327db456dcb96435433b9c49234d680d97b5c76c7a718314c64891913e0250"
 #: How many cost fields of each kind are cited reference values (tag literature).
 LITERATURE_COUNTS = {
     ("transformers", "capex_eur"): 29,
@@ -149,7 +149,7 @@ def test_transformer_data_is_the_producers_typical_class_data():
         s = value(t["s_mva"])
         vk, vkr = _trafo_class(s)
         assert value(t["vk_percent"]) == vk and value(t["i0_percent"]) == I0_PERCENT, t["id"]
-        if t["id"].startswith("TR_220_110_"):
+        if t["id"] in SOURCED_LOSSES:
             continue
         assert value(t["vkr_percent"]) == vkr, t["id"]
         assert value(t["pfe_kw"]) == pytest.approx(PFE_KW_PER_MVA * s)
@@ -728,29 +728,71 @@ def test_the_220_110_kv_units_are_priced_from_their_ei_rows_with_the_class_rule_
 #: [OPTCL-TS] Annexure-A section C item 32, 220/132 kV 3-phase autotransformers: MVA -> (max no-load loss,
 #: max load loss at 75 degC), kW.
 OPTCL_220_132 = {160.0: (30.0, 200.0), 200.0: (35.0, 260.0)}
+#: An autotransformer's losses follow its equivalent winding rating S (1 - U_LV/U_HV): 220/110 over 220/132 kV.
+AUTO_220_110 = (1 - 110 / 220) / (1 - 132 / 220)
+#: The units whose losses are sourced and not the class rule (campus-library-gaps 03), by id.
+SOURCED_LOSSES = ("TR_220_110_125", "TR_220_110_160", "TR_220_110_200", "TR_220_110_250", "TR_220_110_315")
 #: Regulation (EU) 2019/1783 Annex I Table I.7, Tier 2 minimum PEI (%) at the library's sizes.
 TIER2_PEI = {125.0: 99.780, 160.0: 99.790, 200.0: 99.797, 250.0: 99.797, 315.0: 99.797}
 
 
-def test_the_220_110_kv_losses_are_optcls_220_132_kv_limits_and_meet_ecodesign_tier_2():
-    """campus-library-gaps 03 (CLG03-SOURCE-1): 160 and 200 MVA read [OPTCL-TS] as printed; 125 MVA takes
-    the 160 MVA row's kW per MVA and 250/315 MVA the 200 MVA row's. Each stays tagged assumed (a rating may
-    not be literature) with a note naming the source row, and its Peak Efficiency Index clears Tier 2."""
+def test_the_220_110_kv_losses_are_optcls_220_132_kv_caps_for_an_autotransformer_and_meet_tier_2():
+    """campus-library-gaps 03 (CLG03-SOURCE-1): 160 and 200 MVA read [OPTCL-TS] x1.25 (a 220/110 kV
+    autotransformer's equivalent winding rating over a 220/132 kV one's); 125 MVA is scaled down from the
+    160 MVA row and 250/315 MVA up from the 200 MVA row at constant kW/MVA. Each stays tagged assumed (a
+    rating may not be literature) with a note naming the row, the winding type, the cap and the scaling,
+    and its Peak Efficiency Index clears Tier 2. The class rule would miss it."""
+    assert AUTO_220_110 == pytest.approx(1.25)
     units = library_entries(LIB, "transformers", hv_kv=220.0, lv_kv=110.0)
-    assert len(units) == 5
+    assert tuple(t["id"] for t in units) == SOURCED_LOSSES
     for t in units:
         s = value(t["s_mva"])
         ref = 160.0 if s <= 160.0 else 200.0
         p0_ref, pk_ref = OPTCL_220_132[ref]
-        assert value(t["pfe_kw"]) == round(p0_ref * s / ref, 1), t["id"]
-        assert value(t["vkr_percent"]) == round(pk_ref / (ref * 1000) * 100, 3), t["id"]
+        assert value(t["pfe_kw"]) == round(p0_ref * AUTO_220_110 * s / ref, 2), t["id"]
+        assert value(t["vkr_percent"]) == pytest.approx(pk_ref * AUTO_220_110 / (ref * 1000) * 100), t["id"]
         for f in ("vkr_percent", "pfe_kw"):
             note = t[f]["note"]
             assert t[f]["source"] == "assumed" and set(t[f]) == {"value", "source", "note"}, (t["id"], f)
-            assert f"[OPTCL-TS] 220/132 kV {ref:g} MVA maximum limit" in note, (t["id"], f)
-            assert note.startswith("scaled from ") == (s != ref), (t["id"], f)
+            assert f"[OPTCL-TS] 220/132 kV {ref:g} MVA autotransformer" in note, (t["id"], f)
+            assert "220/110 kV autotransformer" in note and "x1.25" in note, (t["id"], f)
+            assert "maximum permissible" in note and "cap" in note, (t["id"], f)
+            assert ("constant kW/MVA" in note) == (s != ref), (t["id"], f)
+            assert note.startswith("scaled down from ") == (s < ref), (t["id"], f)
+            assert ("extrapolated beyond the source's range" in note) == (s > ref), (t["id"], f)
         p0 = value(t["pfe_kw"])
         pk = value(t["vkr_percent"]) / 100 * s * 1000
         pei = 1 - 2 * math.sqrt(p0 * pk) / (s * 1000)
         assert pei * 100 >= TIER2_PEI[s], (t["id"], pei)
+        _, vkr_rule = _trafo_class(s)
+        rule_pei = 1 - 2 * math.sqrt(PFE_KW_PER_MVA * s * vkr_rule / 100 * s * 1000) / (s * 1000)
+        assert rule_pei * 100 < TIER2_PEI[s]                      # why the class rule was replaced
     assert "[OPTCL-TS]" in DEFAULT_PATH.read_text(encoding="utf-8").split("\ntransformers:")[0]
+
+
+#: The library's sha256 as the defaults packs 2026-11-06 .. 2026-11-10 pin it, before the sourced losses.
+PREV_SHA256 = "5058116ad6b169fad78677e5638b957ca86ece4e30d63465538c5dc50bb6c23f"
+
+
+def test_the_library_differs_from_the_previous_pin_only_in_the_220_110_losses_and_their_citation():
+    """GK A C4: putting the class rule back into the five units' vkr_percent and pfe_kw, and dropping the
+    [OPTCL-TS] source entry and header paragraph, gives the previous pin byte for byte."""
+    text = DEFAULT_PATH.read_text(encoding="utf-8")
+    src = text.index("#   [OPTCL-TS]")
+    text = text[:src] + text[text.index("\n#\n", src) + 1:]
+    para = text.index("# impedances follow producers/campus.py's class rule (tagged assumed). Their\n")
+    end = text.index("# The no-load current has no source and follows the class rule.\n") + len(
+        "# The no-load current has no source and follows the class rule.\n")
+    text = (text[:para] + "# impedances and losses have no public source and follow producers/campus.py's\n"
+            "# class rule (tagged assumed).\n" + text[end:])
+    rule = 'source: assumed, note: "no public source; producers/campus.py class rule"}'
+    lines = text.split("\n")
+    unit = None
+    for i, line in enumerate(lines):
+        if line.startswith("  - id: "):
+            unit = line[len("  - id: "):]
+        if unit in SOURCED_LOSSES and line.startswith("    vkr_percent: "):
+            lines[i] = "    vkr_percent: {value: 0.3, " + rule
+        if unit in SOURCED_LOSSES and line.startswith("    pfe_kw: "):
+            lines[i] = f"    pfe_kw: {{value: {float(unit.rsplit('_', 1)[1]):.1f}, " + rule
+    assert hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest() == PREV_SHA256

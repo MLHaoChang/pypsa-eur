@@ -16,7 +16,7 @@
     "library_version": "technology-data v0.14.0",
     "campus_equipment": {
       "path": "gridspine/templates/data/campus_assets.yaml",
-      "sha256": "8d999863b8acc4f4f8ebe45019f04aadc00d7367953ef81a7f4be6a42b32901e",
+      "sha256": "7e327db456dcb96435433b9c49234d680d97b5c76c7a718314c64891913e0250",
       "entries": 86,
       "currency": "EUR",
       "price_year": 2025,
@@ -185,7 +185,7 @@
   },
   "campus_220_110_losses": {
     "from": "2026-11-10",
-    "why": "campus-library-gaps 03 (owner CLG03-SOURCE-1): the campus library's five 220/110 kV transformers take load and no-load losses (vkr_percent, pfe_kw) from OPTCL's 220/132 kV maximum permissible losses (Technical Specification for Power and Auto Transformers, Rev. 1, May 2025, Annexure-A section C item 32), replacing the class rule that missed Ecodesign Tier 2; the pack carries no loss, so every 2026-11-10 row, the finance defaults, tariffs and load profiles are unchanged and only the campus sha256 moves",
+    "why": "campus-library-gaps 03 (owner CLG03-SOURCE-1): the campus library's five 220/110 kV transformers take load and no-load losses (vkr_percent, pfe_kw) from OPTCL's 220/132 kV autotransformer maximum permissible losses (Technical Specification for Power and Auto Transformers, Rev. 1, May 2025, Annexure-A section C item 32), x1.25 for a 220/110 kV autotransformer's equivalent winding rating, replacing the class rule that missed Ecodesign Tier 2; the pack carries no loss, so every 2026-11-10 row, the finance defaults, tariffs and load profiles are unchanged and only the campus sha256 moves",
     "source": "https://www.optcl.co.in/writereaddata/Tender/110325040316TenderSpecification%20(2).pdf"
   }
 }
