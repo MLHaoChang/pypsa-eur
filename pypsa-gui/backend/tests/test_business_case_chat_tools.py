@@ -22,6 +22,7 @@ from services.chat_tools_schema import TOOL_ROUTES, TOOLS, safety_tier_for
 
 TOOL = "set_business_case_lines"
 NAMES = ("run_business_case", "get_business_case", TOOL, "abort_business_case")
+_HOST_GET = chat_edit._Host.get  # the real reader, before `bc` stubs it
 
 
 def _finance():
@@ -849,3 +850,170 @@ def test_an_int_and_a_float_price_of_one_value_are_unchanged(bc):
     _store(bc, _bc(_line(price=45.0)), [_cite(t1, "45 USD/t")])
     card = edit_card.preview(TOOL, _args(_bc(_line(price=45, quantity=11.0))))
     assert _rows(card)["product · Price"]["change"] == "unchanged"
+
+
+# ── the diff, the request and the read-back, at their edges ─────────────────
+
+
+def test_a_number_compares_by_value_but_a_flag_or_a_text_never_equals_one():
+    assert chat_edit.rows({"k": 1}, {"k": 1.0}, [], None) == []
+    for old, new in ((True, 1), (1, True), (1, "1"), (1, 2)):
+        (row,) = chat_edit.rows({"k": old}, {"k": new}, [], None)
+        assert row["change"] == "changed", (old, new)
+    # An emptied list is a removal, never a change to [].
+    (row,) = chat_edit.rows({"k": [1]}, {"k": []}, [], None)
+    assert (row["change"], row["new"]) == ("removed", None)
+    assert chat_edit.says([]) == "business case: no change"
+
+
+def test_a_case_level_setting_inside_inputs_shows_under_its_own_name(bc):
+    _store(bc, {"inputs": {"lines": [_line(price=None)], "receivable_days": 30.0}})
+    new = {"inputs": {"lines": [_line(price=None)], "receivable_days": 45.0}}
+    card = edit_card.preview(TOOL, _args(new))
+    (row,) = card["rows"]
+    assert (row["label"], row["old"], row["new"], row["unit"], row["change"]) == (
+        "Receivable days",
+        30.0,
+        45.0,
+        "",
+        "changed",
+    )
+    assert row["path"] == ["inputs", "receivable_days"]
+    assert card["says"] == "business case: 1 setting changed"
+
+
+def test_a_changed_setting_shows_old_and_new(bc):
+    _store(bc, _bc(_line(price=None), kw_per_gpu=1.2))
+    card = edit_card.preview(TOOL, _args(_bc(_line(price=None), kw_per_gpu=1.3)))
+    (row,) = card["rows"]
+    assert (row["label"], row["old"], row["new"]) == ("kW per GPU", 1.2, 1.3)
+
+
+def test_a_quantity_reads_in_its_line_unit_and_other_values_carry_none(bc):
+    card = edit_card.preview(
+        TOOL, _args(_bc(_opex(quantity_by_year={"2029": 7.0}), _linked()))
+    )
+    rows = _rows(card)
+    assert rows["maint · Quantity"]["unit"] == "MWh"
+    assert rows["maint · Quantity 2029"]["unit"] == "MWh"
+    for label in ("power · Sold share", "maint · Kind", "maint · Default key price"):
+        assert rows[label]["unit"] == "", label
+
+
+def test_a_removed_price_reads_in_the_case_currency_or_a_placeholder():
+    old = _bc(_line(), _line(name="fee", unit="lump", price=9.0))
+    for finance, cur in ((None, "currency"), (_finance(), CUR)):
+        rows = _rows({"rows": chat_edit.rows(old, None, [], finance)})
+        assert rows["product · Price"]["unit"] == f"{cur}/t"
+        assert rows["fee · Price"]["unit"] == cur
+        assert rows["product · Price"]["price_source"] == "removed"
+
+
+def test_a_changed_line_shows_only_what_changed_and_its_prices(bc):
+    import routers.results as R
+
+    fee = _line(name="fee", unit="lump", price=9.0)
+    R.put_business_case_inputs(
+        R.BusinessCaseIn(business_case=_bc(_line(), fee)), if_match=None
+    )
+    card = edit_card.preview(TOOL, _args(_bc(_line(quantity=12.0), fee)))
+    # `fee` is unchanged: none of its rows, not even its price, shows.
+    assert set(_rows(card)) == {"product · Quantity", "product · Price"}
+    assert card["says"] == "business case: 1 line changed"
+
+
+def test_only_the_assumed_price_reads_preset_default(bc):
+    import routers.results as R
+
+    assumed = {
+        "price": {
+            "key": "maint_k",
+            "value": 3.0,
+            "unit": f"{CUR}/MWh",
+            "source": "pack",
+            "source_year": 2024,
+            "pack": "pack@1#h",
+        }
+    }
+    line = _opex(price=3.0, assumed=assumed, price_by_year={"2029": 3.5})
+    R.put_business_case_inputs(R.BusinessCaseIn(business_case=_bc(line)), if_match=None)
+    card = edit_card.preview(TOOL, _args(_bc({**line, "quantity": 9.0})))
+    rows = _rows(card)
+    assert rows["maint · Price"]["price_source"] == "preset default (assumed)"
+    assert rows["maint · Price 2029"]["price_source"] == "unchanged"
+
+
+def test_clear_shows_every_removed_value_and_needs_something_stored(bc):
+    _store(bc, _bc(_line(price=None)))
+    card = edit_card.preview(TOOL, {"clear": True, "if_match": _digest()})
+    assert card["rows"] and all(
+        r["change"] == "removed" and r["new"] is None for r in card["rows"]
+    )
+    assert card["says"].startswith("business case: 1 line removed")
+    chat_tools.set_business_case_lines(_digest(), clear=True)
+    assert chat_tools.get_business_case(detail="inputs")["business_case"] is None
+    d = _refused(edit_card.preview, TOOL, {"clear": True, "if_match": _digest()})
+    assert d["error_kind"] == "empty_edit" and "nothing to clear" in d["message"]
+
+
+def test_a_business_case_that_is_not_an_object_is_refused(bc):
+    d = _refused(chat_tools.set_business_case_lines, _digest(), [_line(price=None)])
+    assert d["error_kind"] == "business_case_inputs_invalid"
+    assert d["message"] == "`business_case` is an object"
+
+
+def test_the_card_caps_are_exact(bc, monkeypatch):
+    args = _args(_bc(_opex()))
+    out = chat_edit.plan(args)["rows"]
+    n, chars = len(out), len(chat_edit.json.dumps(out, default=str))
+    assert n < chat_edit.CARD_ROW_CAP and chars < chat_edit.CARD_CHARS
+    for cap, at in (("CARD_ROW_CAP", n), ("CARD_CHARS", chars)):
+        with monkeypatch.context() as m:
+            m.setattr(chat_edit, cap, at)
+            assert chat_edit.plan(args)["rows"] == out, cap
+            m.setattr(chat_edit, cap, at - 1)
+            d = _refused(chat_edit.plan, args)
+            assert d["error_kind"] == "business_case_card_too_large", cap
+            assert d["rows"] == n
+
+
+def test_a_citation_counts_only_for_its_own_line(bc):
+    tid = _say(bc, "45 USD/t.")
+    other = _cite(tid, "45 USD/t", line="other")
+    d = _refused(edit_card.preview, TOOL, _args(_bc(_line()), ["junk", other]))
+    assert d["error_kind"] == "price_not_from_user" and d["reason"] == "no_citation"
+    card = edit_card.preview(
+        TOOL, _args(_bc(_line()), ["junk", _cite(tid, "45 USD/t")])
+    )
+    assert _rows(card)["product · Price"]["source"]["turn_id"] == tid
+
+
+def test_the_intake_host_is_read_once_and_only_for_a_saved_project(bc, monkeypatch):
+    from services.pypsa_service import PyPSAService
+
+    monkeypatch.setattr(chat_edit._Host, "get", _HOST_GET)
+    tid = _say(bc, "45 USD/t; 47 USD/t in 2029.")
+    args = _args(
+        _bc(_line(price_by_year={"2029": 47.0})),
+        [_cite(tid, "45 USD/t"), _cite(tid, "47 USD/t", year=2029)],
+    )
+    ctx = PyPSAService.get_active_context()
+    assert not getattr(ctx, "project_uuid", None)
+    d = _refused(edit_card.preview, TOOL, args)
+    assert d["error_kind"] == "price_not_from_user" and d["reason"] == "not_found"
+    calls = []
+    stub = run_intake.host_for
+    monkeypatch.setattr(ctx, "project_uuid", "p-1", raising=False)
+    monkeypatch.setattr(
+        run_intake, "host_for", lambda c, o, p: calls.append(p) or stub(c, o, p)
+    )
+    card = edit_card.preview(TOOL, args)
+    assert {"product · Price", "product · Price 2029"} <= set(_rows(card))
+    assert calls == ["p-1"]
+
+
+def test_the_receipt_reads_back_a_removed_line_and_a_nested_setting_by_path():
+    row = {"path": ["inputs", "lines", "power", "linked_share"]}
+    assert chat_edit.read_cell(row, _bc(_linked())) == 0.8
+    assert chat_edit.read_cell(row, _bc(_line())) is None
+    assert chat_edit.read_cell({"path": ["a", "b", "c"]}, {"a": {"b": {"c": 5}}}) == 5
