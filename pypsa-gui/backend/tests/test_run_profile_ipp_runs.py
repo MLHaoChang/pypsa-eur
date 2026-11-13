@@ -12,7 +12,6 @@ import types
 import time
 from pathlib import Path
 
-import pypsa
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient  # noqa: F401
@@ -22,7 +21,7 @@ from services import assistant_tasks, chat_tools, flow_service, project_registry
 from services.pypsa_service import PyPSAService
 from tests.test_assistant_tasks_study_brief import helpers_state, session  # noqa: F401
 from tests.test_harness_envelope import envelope_of, granted, profile  # noqa: F401
-from tests.test_harness_run_loops import Script, call, go, rated, refused, say  # noqa: F401
+from tests.test_harness_run_loops import Script, go, rated, refused, say  # noqa: F401
 from tests.test_harness_run_eh import PROJECT, ctx_for
 from tests.test_harness_run_report_handoff import fake_report  # noqa: F401
 from tests.test_harness_run_skeleton import RUN
@@ -30,7 +29,6 @@ from tests.test_harness_runner import detached, fake_report_provider  # noqa: F4
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND / "project_templates"))
-import eh_templates as T  # noqa: E402
 
 REF = "eh_ipp_hybrid@1"
 TEMPLATE = "eh_ipp_hybrid"
