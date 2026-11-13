@@ -117,7 +117,7 @@ NOTHING_TO_SAMPLE = "nothing to sample: no electrical generator carries resolvab
 # meets the target (study harness issue 05: the gate's converged fact).
 # "not_confident" (adequacy loops 04, GK A (25)): no iterate passed
 # `lole_verdict`, but one sat at or below the goal without confidence and
-# within one sampled shortfall hour of it. It is never met, done or a pass.
+# within one more sampled draw of it. It is never met, done or a pass.
 LOOP_STATUSES = frozenset({"met", "not_confident", "budget_exhausted",
                            "unreachable", "aborted", "failed"})
 
@@ -194,8 +194,8 @@ def _mc_block(metrics: dict) -> dict:
         "eue_mwh": float(metrics.get("eue_mwh") or 0.0),
         "eue_ci": [float(elo), float(ehi)],
         "n_samples": int(metrics.get("n_samples") or 0),
-        # Adequacy loops 04 (D2): one sampled shortfall hour at the heaviest
-        # snapshot, for `lole_verdict`; None when the MC did not report it.
+        # Adequacy loops 04 (D2, E1): one more sampled draw as heavy as the
+        # heaviest seen, for `lole_verdict`; None when the MC did not report it.
         "event_h": (None if metrics.get("event_h") is None
                     else float(metrics["event_h"])),
         "by_period": dict(metrics.get("by_period") or {}),

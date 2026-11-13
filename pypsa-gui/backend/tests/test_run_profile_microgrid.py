@@ -1926,5 +1926,5 @@ def test_a_not_confident_lole_loop_is_not_evaluated_and_never_met(tmp_path):
     assert result["verdict"] == "not_evaluated"
     assert result["facts"][0]["value"] == run_gates.LOOP_NOT_CONFIDENT == "not_confident"
     assert "never counts as met" in result["reason"]
-    assert "~1200 draws if the mean and spread hold" in result["reason"]
+    assert "about 1200 draws would settle it" in result["reason"]
     assert not run_gates.converged({"status": "not_confident"})

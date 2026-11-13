@@ -8,27 +8,28 @@ per-horizon already):
 
 * ``miss`` — the estimate is above the goal;
 * ``pass`` — the estimate is at or below the goal and EITHER its confidence
-  interval's upper bound is too (``confident``), OR one more sampled
-  shortfall hour at the heaviest snapshot would still leave it at or below
-  the goal;
+  interval's upper bound is too (``confident``), OR one more sampled draw as
+  heavy as the heaviest seen would still leave it at or below the goal;
 * ``not_confident`` — otherwise: at or below the goal, but not confidently,
-  and one more sampled shortfall hour at the heaviest snapshot would put it
-  above. That is never a pass.
+  and one more such draw would put it above. That is never a pass.
 
-**One sampled shortfall hour at the heaviest snapshot** is
-``event_h = w_max / n``: a shortfall in one snapshot of one draw adds that
-snapshot's weight over the draw count to the estimate, and the heaviest
-snapshot gives the largest single increment. ``w_max`` is the largest
-positive weight of the array the MC accumulated LOLE with (snapshot weight ×
-period years, so it is per-horizon on a multi-period network) and ``n`` is
-the draws that produced the estimate (adaptive stopping), never the requested
-budget. A single outage EVENT can short several consecutive hours (a long
-MTTR), so it can move the estimate by more than ``event_h``: the rule bounds
-one more hour, not one more outage.
+**One more sampled draw as heavy as the heaviest seen, never less than one
+shortfall hour at the heaviest snapshot** is
+``event_h = max(w_max, d_max) / n`` (GK A (26), E1–E4): the estimate's
+quantum is one draw, and one outage spans consecutive snapshots, so one more
+sampled event moves the mean by that draw's whole shortfall over ``n``.
+``d_max`` is the heaviest single draw's LOLE, taken from exactly the per-draw
+array the mean is taken over; ``w_max`` is the largest positive weight of
+the array the MC accumulated LOLE with (snapshot weight × period years, so it
+is per-horizon on a multi-period network). The ``w_max`` floor keeps an
+estimate with nothing sampled (0 h) from passing a goal it cannot resolve.
+``n`` is the draws that produced the estimate (adaptive stopping), never the
+requested budget. Only the horizon's ``event_h`` is emitted; no per-period
+verdict exists (E3).
 
 ``settle_draws`` names what would settle a ``not_confident`` estimate: about
 ``ceil(n · ((ci_hi − lole) / (goal − lole))²)`` draws if the mean and spread
-hold, the count at which the interval's upper bound reaches the goal. It is
+hold (in user text: "if the estimate and its range stay as they are"), the count at which the interval's upper bound reaches the goal. It is
 ``None`` with a reason when that count is above the engine cap, when the
 estimate equals the goal, or when the interval is degenerate.
 """
@@ -40,13 +41,19 @@ import math
 __all__ = ["event_hours", "goal_fields", "lole_verdict", "not_confident_copy", "settle_text"]
 
 
-def event_hours(weights, n_samples) -> float | None:
-    """One sampled shortfall hour at the heaviest snapshot: ``w_max / n``.
-    ``None`` when there is no positive weight or no draw."""
-    w_max = max((float(w) for w in weights if float(w) > 0.0), default=None)
-    if w_max is None or not n_samples or int(n_samples) <= 0:
+def event_hours(weights, n_samples, draws=()) -> float | None:
+    """One more sampled draw as heavy as the heaviest seen, never less than
+    one shortfall hour at the heaviest snapshot: ``max(w_max, d_max) / n``.
+    ``draws`` is the per-draw LOLE array the estimate is the mean of.
+    ``None`` when there is no draw, or neither a positive weight nor a
+    shortfall."""
+    n = int(n_samples or 0)
+    if n <= 0:
         return None
-    return w_max / int(n_samples)
+    w_max = max((float(w) for w in weights if float(w) > 0.0), default=0.0)
+    d_max = max((float(d) for d in draws), default=0.0)
+    quantum = max(w_max, d_max)
+    return quantum / n if quantum > 0.0 else None
 
 
 def _settle(lole: float, hi: float, target: float, n: int, max_draws: int):
@@ -87,10 +94,11 @@ def lole_verdict(lole_h, lole_ci, target_h, event_h, n_samples, max_draws) -> di
 
 
 def settle_text(goal: dict) -> str:
-    """What would settle a ``not_confident`` verdict, in words (D5)."""
+    """What would settle a ``not_confident`` verdict, in plain words (D5;
+    UX (20) asked for plainer words than "if the mean and spread hold")."""
     if goal.get("settle_draws") is not None:
-        return (f"~{int(goal['settle_draws'])} draws if the mean and spread "
-                "hold would settle it")
+        return (f"about {int(goal['settle_draws'])} draws would settle it, if "
+                "the estimate and its range stay as they are")
     return f"more draws alone will not settle it ({goal.get('settle_reason')})"
 
 
@@ -103,17 +111,19 @@ def not_confident_copy(mc: dict, target_h: float, lever: str) -> str:
     hi = mc["lole_ci"][1]
     event = goal.get("event_h")
     event_clause = (
-        f"one sampled shortfall hour at the heaviest snapshot "
+        f"one more sampled draw as heavy as the heaviest seen "
         f"({float(event):.3g} h) would put it above"
         if event is not None else
-        "the MC did not report what one sampled shortfall hour is worth")
+        "the study did not report how much one more sampled draw is worth")
+    settle = settle_text(goal)
     return (
-        f"Not confident: no plan was verified against {target_h:g} h. The "
+        f"Not confident: no plan was confirmed to meet {target_h:g} h. The "
         f"nearest, at {lever}, estimates {float(mc['lole_hours']):.3g} h, at "
-        f"or below the goal, but its 95% interval reaches {float(hi):.3g} h "
-        f"and {event_clause}, so it is not a pass; "
-        f"{settle_text(goal)}. Your original config has been re-solved, so "
-        "the network you are holding is your own plan, not that one.")
+        f"or below the goal, but the top of its 95% range is "
+        f"{float(hi):.3g} h and {event_clause}, so it is not a pass. "
+        f"{settle[0].upper()}{settle[1:]}. Your original config has been "
+        "re-solved, so the network you are holding is your own plan, not "
+        "that one.")
 
 
 def goal_fields(nearest, final) -> dict:

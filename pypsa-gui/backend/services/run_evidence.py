@@ -1314,7 +1314,8 @@ def publish_study_run(study_key: str, record: dict) -> dict | None:
                 message = (
                     'The study finished without a confident plan: the nearest '
                     'estimate is at or below the target, but one more sampled '
-                    'shortfall hour would put it above (not_confident).'
+                    'draw as heavy as the heaviest seen would put it above '
+                    '(not_confident).'
                 )
             else:
                 message = str(record.get('error') or 'The study failed.')[:500]

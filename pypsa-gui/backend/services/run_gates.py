@@ -248,7 +248,7 @@ LOOP_FIELDS = ("status", "solves_used", "probe_solves", "restore", "base_restore
                "event_h", "settle_draws", "settle_reason")
 
 # Adequacy loops 04 (D3, GK A (25)): a loop whose nearest plan sits at or
-# below the goal without confidence, within one sampled shortfall hour of it.
+# below the goal without confidence, within one more sampled draw of it.
 # Read as not evaluated with words, like the budget cut: never met, never a
 # pass.
 LOOP_NOT_CONFIDENT = "not_confident"
@@ -257,7 +257,7 @@ LOOP_NOT_CONFIDENT = "not_confident"
 def _not_confident_words(loop):
     from services.adequacy.lole_verdict import settle_text
     return ("the engine loop's nearest plan estimates LOLE at or below the goal, but not confidently, and one "
-            "sampled shortfall hour at the heaviest snapshot would put it above, so the rule is not evaluated; "
+            "more sampled draw as heavy as the heaviest seen would put it above, so the rule is not evaluated; "
             f"it never counts as met; {settle_text(loop)}")
 
 

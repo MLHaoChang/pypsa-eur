@@ -98,6 +98,15 @@ export const activityFamilyWord = (f: string): string => ACTIVITY_FAMILY_WORDS[f
 export const ACTIVITY_MODE_WORDS: Record<string, string> = { foreground: 'Foreground', background: 'Background' }
 export const activityModeWord = (m: string): string => ACTIVITY_MODE_WORDS[m] ?? (spaced(m).charAt(0).toUpperCase() + spaced(m).slice(1))
 
+/** A finished loop's status in plain words for its status chip (UX (20): no engine ids in user text). */
+export const loopStatusWord = (status: string): string =>
+  NATIVE_OUTCOME_WORDS[status] ?? (spaced(status).charAt(0).toUpperCase() + spaced(status).slice(1))
+
+/** The key under a `not_confident` loop's warn chip (adequacy loops 04): what the colour means, in words. */
+export const NOT_CONFIDENT_KEY = 'Not confident: the estimate is at or below the LOLE goal, but not confidently. '
+  + 'One more sampled draw as heavy as the heaviest seen would put it above, so it is not a pass. '
+  + 'The verdict below says how many draws would settle it.'
+
 /** Plain words for the source's own end state where it says more than the plain status (met, refused, expired…). */
 export const NATIVE_OUTCOME_WORDS: Record<string, string> = {
   met: 'Target met', not_confident: 'Not confident', budget_exhausted: 'Budget used up', unreachable: 'Could not be reached', refused: 'Refused',
