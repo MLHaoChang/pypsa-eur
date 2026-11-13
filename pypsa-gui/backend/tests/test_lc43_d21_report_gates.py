@@ -402,6 +402,14 @@ def _table(columns, *rows) -> Table:
             _table(["Item", "MW", "MW"], ["Wind", "20", "20"], ["Note", "see", "text"]),
             ["20", "20"],
         ),
+        # ... on the original's side too.
+        (
+            _table(["Item", "MW", "MW"], ["Wind", "10", "20"]),
+            _table(
+                ["Item", "MW", "Note"], ["Solar", "none", "new"], ["Wind", "20", "ok"]
+            ),
+            ["20"],
+        ),
         # ... and a header duplicated only in the edit.
         (
             _table(["Item", "MW"], ["Wind", "10"]),
@@ -427,6 +435,7 @@ def _table(columns, *rows) -> Table:
         "unit_column_t",
         "duplicate_label",
         "duplicate_column",
+        "duplicate_column_in_original",
         "duplicate_column_in_edit",
         "ragged_original_reshaped",
         "ragged_original_same_shape",

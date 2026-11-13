@@ -1039,11 +1039,11 @@ def _checked(
     caption, never that of its position in the Word file, and admitted tables
     keep the base's order: a copy of an original the base placed above one
     already admitted (a swap) is withheld. An original no edited table pairs
-    with is recorded in place as removed (GK B 55 F1, F3). The edited tables
-    are still stored under their own ids. A section
-    with a withheld table is a withheld section, so its prose statements the
-    audit cannot verify are withheld too, never listed as withheld while
-    still standing in the text.
+    with is recorded as removed, in a note at the section's end (GK B 55
+    F1, F3). The edited tables are still stored under their own ids. A
+    section with a withheld table is a withheld section, so its prose
+    statements the audit cannot verify are withheld too, never listed as
+    withheld while still standing in the text.
     """
     from services.reports.formatting import withheld_placeholder
     from services.reports.revisions import rerun_audit, verified_facts
