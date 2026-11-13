@@ -231,7 +231,7 @@ def _empty_workbook() -> bytes:
     ],
 )
 def test_a_malformed_import_is_refused_and_keeps_the_open_network(
-    baseline, session, name, data, fmt
+    baseline, session, caplog, name, data, fmt
 ):
     _ctx, project_id, project_dir = baseline
     PyPSAService.get_network().generators.at["G1", "p_nom"] = 33.0  # an unsaved edit
@@ -247,6 +247,26 @@ def test_a_malformed_import_is_refused_and_keeps_the_open_network(
     ]
     assert not [d for e, d in frames if e == "tool_result"]
     assert str(PyPSAService.get_active_context().project_uuid) == project_id
+    assert state(project_dir) == before
+    assert PyPSAService.get_network().generators.at["G1", "p_nom"] == 33.0
+
+    # The import tool itself refuses with the manifest's status (GK B 53, I1), and
+    # a parser that raised is logged with its traceback, not swallowed (I2).
+    tool = {
+        "netcdf": chat_tools.import_network_nc,
+        "csv_bundle": chat_tools.import_csv_bundle,
+        "excel": chat_tools.import_excel,
+        "matpower": chat_tools.import_matpower,
+    }[fmt]
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="routers.io"):
+        refused(
+            lambda: tool(base64.b64encode(data).decode(), filename=name),
+            422,
+            "import_unreadable",
+        )
+    logged = [r for r in caplog.records if r.name == "routers.io" and r.exc_info]
+    assert len(logged) == (0 if name in ("bad.m", "empty.zip", "empty.xlsx") else 1)
     assert state(project_dir) == before
     assert PyPSAService.get_network().generators.at["G1", "p_nom"] == 33.0
 

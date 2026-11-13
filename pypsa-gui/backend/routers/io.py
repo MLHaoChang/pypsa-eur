@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import pathlib
 import tempfile
 import zipfile
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session as DBSession
 from services.pypsa_service import PyPSAService
 from services.upload_guard import read_capped, safe_extract
 from starlette.responses import StreamingResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -294,6 +297,10 @@ def _parse_candidate(what: str, parse, *, check_names: bool = True):
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001 - any parser failure is one refusal
+        # The catch also covers our own mapping code (the CSV formula unescape,
+        # the workbook rows, the MATPOWER tables): log the traceback so a bug
+        # there is not hidden behind the user's 422 (GK B 53, I2).
+        logger.warning("import of a %s refused as unreadable", what, exc_info=True)
         raise _unreadable(what) from exc
     if candidate.buses.empty:
         # A zip of no PyPSA tables, a workbook of no component sheets or a
