@@ -624,7 +624,8 @@ writes one line per row.
 (`services/dc_time_to_power.py`) from its saved network's grid-import stages and its stored
 `dc_load` spec: calendar months from `project_start` to the stated `connection_date`, else
 to the first model period energised above 0 MW while a phase is in service, a partial month
-rounded up. Grid-delivered power only; a staged date is as fine as its period. A missing
+rounded up. Grid-delivered power only; a staged date is exact unless the preceding period
+was partly energised with load in service, then it is a window from that period. A missing
 input withholds the fact with its reason, never 0.
 A checked request may add `chart` (or end with "; chart <series>, ..."): `services/checked_charts.py`
 draws only per-snapshot series the request's evidence holds (generator `p`; StorageUnit `p_store`,

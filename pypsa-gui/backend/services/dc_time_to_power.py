@@ -6,8 +6,11 @@ date) wins. Otherwise it is the staged build's first serving stage: the first
 model period whose energised import is above 0 MW for the whole period (the
 schedule's minimum in it) while a data-centre phase is in service by the
 period's end. Its date is the later of the period's start and the first
-phase's COD, so it is only as fine as the period: the true first power is no
-later and may be up to a period earlier (``resolution_months``). A period
+phase's COD. Energised all through that period, the date is exact, unless
+the preceding period was partly energised (its maximum above 0, its minimum
+0) while load was in service: first power then lies between
+``earliest_first_power`` (the later of that period's start, the first COD and
+the project start) and the date (``resolution_months`` apart). A period
 whose energisation is the example's same-stage placeholder is never serving
 evidence. Grid-delivered power only: on-site generation that could carry
 the load before energisation is not counted.
@@ -22,6 +25,7 @@ from __future__ import annotations
 import calendar
 from datetime import date
 
+import numpy as np
 import pandas as pd
 
 from services.adequacy import energization
@@ -94,18 +98,20 @@ def _unset_periods(meta: dict | None) -> set[str]:
 
 def import_stages(n, meta: dict | None) -> list[dict]:
     """The grid import's stages of the saved network: per model period, its
-    start, end (exclusive), the schedule's minimum MW in it and whether that
-    MW is stated (``set``) or a placeholder. A single-period network is one
-    stage, the modelled year. ``StagesUnavailable`` names why there are none."""
+    start, end (exclusive), the schedule's minimum and maximum MW in it and
+    whether that MW is stated (``set``) or a placeholder. A single-period
+    network is one stage, the modelled year. ``StagesUnavailable`` names why
+    there are none."""
     link = _import_link(n)
     by_period = energization.energized_mw_by_period(n, link)
+    peaks = _max_by_period(n, link)
     unset = _unset_periods(meta)
 
-    def energized(period):
+    def energized(period, table):
         # A period the schedule leaves without a finite value has no
         # schedule limit (`services.adequacy.energization`): the link's own
         # fixed size, never 0; a size the solve chooses is not stated.
-        mw = (by_period or {}).get(period)
+        mw = (table or {}).get(period)
         if mw is not None:
             return float(mw)
         if n.links.at[link, "p_nom_extendable"]:
@@ -123,22 +129,40 @@ def import_stages(n, meta: dict | None) -> list[dict]:
                     "period": str(p),
                     "start": start.isoformat(),
                     "end": add_months(start, months).isoformat(),
-                    "energized_mw": energized(str(p)),
+                    "energized_mw": energized(str(p), by_period),
+                    "max_mw": energized(str(p), peaks),
                     "set": str(p) not in unset,
                 }
             )
         return out
     year = pd.DatetimeIndex(n.snapshots)[0].year
-    mw = energized("all")
+    mw = energized("all", by_period)
     return [
         {
             "period": "all",
             "start": date(year, 1, 1).isoformat(),
             "end": date(year + 1, 1, 1).isoformat(),
             "energized_mw": float(mw),
+            "max_mw": energized("all", peaks),
             "set": True,
         }
     ]
+
+
+def _max_by_period(n, link: str) -> dict[str, float] | None:
+    """{period: the schedule's maximum in it}, as ``energized_mw_by_period``
+    gives the minimum ("all" on a single-period axis); None without a schedule."""
+    e = energization.energization_mw(n, link)
+    if e is None or not np.isfinite(e).any():
+        return None
+    if isinstance(n.snapshots, pd.MultiIndex):
+        level = n.snapshots.get_level_values(0)
+        return {
+            str(p): float(np.nanmax(e[level == p]))
+            for p in pd.unique(level)
+            if np.isfinite(e[level == p]).any()
+        }
+    return {"all": float(np.nanmax(e))}
 
 
 def _not_available(reason: str, detail: str | None = None) -> dict:
@@ -166,7 +190,12 @@ def time_to_power(
         return _not_available("no_project_start")
     connection = _date(spec.get("connection_date"))
     if connection is not None:
-        first, source, period, resolution = connection, "connection_date", None, 0
+        first, earliest, source, period = (
+            connection,
+            connection,
+            "connection_date",
+            None,
+        )
     else:
         if stage_reason is not None:
             return _not_available(stage_reason["reason"], stage_reason.get("detail"))
@@ -174,7 +203,7 @@ def time_to_power(
             date.fromisoformat(str(p["cod"])) for p in spec.get("phases") or []
         )
         served = None
-        for s in stages:
+        for i, s in enumerate(stages):
             s_start, s_end = (
                 date.fromisoformat(s["start"]),
                 date.fromisoformat(s["end"]),
@@ -187,13 +216,13 @@ def time_to_power(
             if s["energized_mw"] > 0:
                 served = s
                 first = max(s_start, cods[0])
+                earliest = _earliest(
+                    stages[i - 1] if i else None, first, s_start, cods[0], start
+                )
                 break
         if served is None:
             return _not_available("no_serving_stage")
         source, period = "staged_build", served["period"]
-        resolution = months_between(
-            date.fromisoformat(served["start"]), date.fromisoformat(served["end"])
-        )
     if first < start:
         return _not_available("power_before_start", first.isoformat())
     return {
@@ -202,5 +231,27 @@ def time_to_power(
         "first_power": first.isoformat(),
         "source": source,
         "stage": period,
-        "resolution_months": resolution,
+        "earliest_first_power": earliest.isoformat(),
+        "resolution_months": months_between(earliest, first),
     }
+
+
+def _earliest(
+    previous: dict | None,
+    first: date,
+    s_start: date,
+    first_cod: date,
+    project_start: date,
+) -> date:
+    """The earliest first power can be when the served stage gives ``first``:
+    ``first`` itself unless it is the stage's start and the preceding stage
+    was partly energised (its maximum above 0) while load was in service."""
+    if previous is None or first != s_start or previous["max_mw"] <= 0:
+        return first
+    p_start, p_end = (
+        date.fromisoformat(previous["start"]),
+        date.fromisoformat(previous["end"]),
+    )
+    if first_cod >= p_end:
+        return first
+    return max(p_start, first_cod, project_start)

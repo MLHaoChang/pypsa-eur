@@ -24,7 +24,9 @@ DISCLOSURE = (
     "Time to power is calendar months from the stated project start to first power, a partial month "
     "rounded up. First power is the stated grid connection date, else the first model period whose "
     "energised grid import is above 0 MW for the whole period while data-centre load is in service; "
-    "such a date is only as fine as that period and the true first power may be up to a period earlier. "
+    "such a date is exact, unless the preceding period was partly energised while load was in service: "
+    "first power then lies between the later of that period's start, the first COD and the project start, "
+    "and the date. "
     "Grid-delivered power only: on-site generation that could carry the load before energisation is "
     "not counted."
 )
@@ -130,8 +132,10 @@ def notes(raw, label):
             "with grid power while data-centre load is in service"
         )
         fine = (
-            f"only as fine as that {out['resolution_months']}-month period: "
-            "first power may be up to a period earlier"
+            f"first power lies between {out['earliest_first_power']} and {out['first_power']} "
+            f"({out['resolution_months']} months), as the preceding period was partly energised"
+            if out["resolution_months"]
+            else "exact: energised throughout that period"
         )
     return [
         f"{how}, counted from the project start {raw['spec']['project_start']}; {fine}.",

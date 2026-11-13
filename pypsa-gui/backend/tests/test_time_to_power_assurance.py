@@ -64,7 +64,10 @@ def test_the_staged_example_reads_12_months_to_the_2027_stage(staged_dc):
         "dc-time-to-power/1",
     )
     lines = R.notes(raw, str)
-    assert "First power on 2027-01-01" in lines[0] and "36-month period" in lines[0]
+    assert (
+        "First power on 2027-01-01" in lines[0]
+        and "exact: energised throughout that period" in lines[0]
+    )
     assert "2026-01-01" in lines[0]
 
 
@@ -98,7 +101,7 @@ def test_a_single_stage_project_reads_its_modelled_year(baseline):
     raw, found, _ = facts(ctx)
     # One stage, the modelled 2030 year at the fixed 40 MW import; the phase is in from 2030-01-01.
     assert found["time_to_power_months"]["value"] == 15.0
-    assert "12-month period" in R.notes(raw, str)[0]
+    assert "exact: energised throughout that period" in R.notes(raw, str)[0]
 
 
 @pytest.mark.parametrize(
@@ -242,4 +245,22 @@ def test_the_disclosure_says_grid_power_only_and_the_period_resolution():
 
     words = calculations.disclosure(SCOPE)
     assert "Grid-delivered power only" in words and "on-site generation" in words
-    assert "not counted" in words and "up to a period earlier" in words
+    assert "not counted" in words and "partly energised" in words
+
+
+def test_a_partly_energised_preceding_period_reads_between_two_dates(staged_dc):
+    import pypsa
+
+    ctx, path = staged_dc
+    n = pypsa.Network(str(path / "network.nc"))
+    frame = n.links_t["eh_energization_mw"]
+    first = frame.index.get_level_values(0) == 2027
+    frame.loc[first, "grid_import"] = 0.0
+    frame.loc[frame.index[first][-3:], "grid_import"] = 15.0
+    n.export_to_netcdf(str(path / "network.nc"))
+    raw, found, _ = facts(ctx)
+    assert found["time_to_power_months"]["value"] == 48.0
+    assert (
+        "first power lies between 2027-01-01 and 2030-01-01 (36 months)"
+        in R.notes(raw, str)[0]
+    )

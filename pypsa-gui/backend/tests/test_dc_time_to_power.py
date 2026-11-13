@@ -21,12 +21,13 @@ PHASES = [
 ]
 
 
-def stage(period, start, end, mw, is_set=True):
+def stage(period, start, end, mw, is_set=True, max_mw=None):
     return {
         "period": str(period),
         "start": start,
         "end": end,
         "energized_mw": mw,
+        "max_mw": mw if max_mw is None else max_mw,
         "set": is_set,
     }
 
@@ -90,7 +91,8 @@ def test_staged_first_power_is_the_first_serving_stage():
         "first_power": "2027-01-01",
         "source": "staged_build",
         "stage": "2027",
-        "resolution_months": 36,
+        "earliest_first_power": "2027-01-01",
+        "resolution_months": 0,
     }
 
 
@@ -102,7 +104,7 @@ def test_a_zero_mw_stage_is_not_serving_and_the_next_one_is():
         out["stage"],
         out["first_power"],
         out["resolution_months"],
-    ) == (48, "2030", "2030-01-01", 60)
+    ) == (48, "2030", "2030-01-01", 0)
 
 
 def test_an_energised_stage_without_load_in_service_is_not_serving():
@@ -132,7 +134,7 @@ def test_a_phase_cod_inside_the_last_period_is_served_there():
     assert (out["stage"], out["first_power"], out["resolution_months"]) == (
         "2035",
         "2044-12-31",
-        120,
+        0,
     )
     beyond = [{"cod": "2045-01-01", "it_mw": 36.0}]
     assert ttp(spec(phases=beyond))["reason"] == "no_serving_stage"
@@ -149,6 +151,7 @@ def test_a_set_connection_date_wins_over_the_staged_build():
         "first_power": "2028-07-15",
         "source": "connection_date",
         "stage": None,
+        "earliest_first_power": "2028-07-15",
         "resolution_months": 0,
     }
 
@@ -480,3 +483,75 @@ def test_a_spec_without_phases_is_no_serving_stage():
     s = spec()
     del s["phases"]
     assert ttp(s)["reason"] == "no_serving_stage"
+
+
+# ── how exact a staged date is (GK A R1) ────────────────────────────────────
+
+HALF = [stage(2027, "2027-01-01", "2030-01-01", 0.0, max_mw=15.0), *STAGES[1:]]
+
+
+def window(out):
+    return out["first_power"], out["earliest_first_power"], out["resolution_months"]
+
+
+def test_energised_throughout_with_no_partial_period_before_is_exact():
+    assert window(ttp()) == ("2027-01-01", "2027-01-01", 0)
+
+
+def test_a_cod_inside_the_served_period_is_exact():
+    phases = [{"cod": "2028-06-01", "it_mw": 12.0}, *PHASES[1:]]
+    assert window(ttp(spec(phases=phases))) == ("2028-06-01", "2028-06-01", 0)
+
+
+def test_a_partly_energised_preceding_period_with_load_is_the_window():
+    assert window(ttp(stages=HALF)) == ("2030-01-01", "2027-01-01", 36)
+
+
+def test_the_window_starts_no_earlier_than_the_first_cod():
+    phases = [{"cod": "2028-03-01", "it_mw": 12.0}, *PHASES[1:]]
+    assert window(ttp(spec(phases=phases), HALF)) == ("2030-01-01", "2028-03-01", 22)
+
+
+def test_the_window_starts_no_earlier_than_the_project_start():
+    assert window(ttp(spec(project_start="2028-01-01"), HALF)) == (
+        "2030-01-01",
+        "2028-01-01",
+        24,
+    )
+
+
+def test_a_preceding_period_without_load_in_service_leaves_it_exact():
+    phases = [{"cod": "2030-01-01", "it_mw": 24.0}, *PHASES[2:]]
+    assert window(ttp(spec(phases=phases), HALF)) == ("2030-01-01", "2030-01-01", 0)
+
+
+def test_a_preceding_period_never_energised_leaves_it_exact():
+    stages = [stage(2027, "2027-01-01", "2030-01-01", 0.0), *STAGES[1:]]
+    assert window(ttp(stages=stages)) == ("2030-01-01", "2030-01-01", 0)
+
+
+def test_only_the_immediately_preceding_period_counts():
+    stages = [
+        stage(2025, "2025-01-01", "2027-01-01", 0.0, max_mw=15.0),
+        stage(2027, "2027-01-01", "2030-01-01", 0.0),
+        *STAGES[1:],
+    ]
+    out = ttp(
+        spec(project_start="2024-01-01", phases=[{"cod": "2025-01-01", "it_mw": 12.0}]),
+        stages,
+    )
+    assert window(out) == ("2030-01-01", "2030-01-01", 0)
+
+
+def test_staged_network_stages_carry_each_periods_maximum():
+    n = T.BUILDERS["eh_datacenter_staged"]()
+    frame = n.links_t["eh_energization_mw"]
+    first = frame.index.get_level_values(0) == 2027
+    frame.loc[first, "grid_import"] = 0.0
+    frame.loc[frame.index[first][:3], "grid_import"] = 15.0
+    stages = D.import_stages(n, {})
+    assert [(s["energized_mw"], s["max_mw"]) for s in stages] == [
+        (0.0, 15.0),
+        (55.0, 55.0),
+        (55.0, 55.0),
+    ]
