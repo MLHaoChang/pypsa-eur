@@ -37,9 +37,6 @@ KINDS = ("optimisation", "study", "loadflow")
 
 _SOLVED = "assistant_solve_input_fingerprint"
 _SOLVED_EXACT = "assistant_solve_exact_input_fingerprint"
-#: How long `read` waits for the network's mutation lock for its record reads; past it the current fingerprint reads
-#: as unreadable (stale), never as an unlocked read (#1384 N1).
-LOCK_WAIT_S = 0.5
 
 
 def results_id(kind: str) -> str:
@@ -76,36 +73,88 @@ def active_input_fingerprint(*, exact: bool = False) -> str | None:
 
 
 # A full-year hourly network takes about a second to hash (several for the exact form), and the header polls the
-# project flow: the flow reads through this cache, keyed on the context, its network object and its edit counter
-# (every edit seam bumps it: `project_context.network_revision`). The chat and the edit card read live.
-_cache: dict[tuple[int, bool], tuple[Any, Any, int, str | None]] = {}
+# project flow: the flow reads through this cache. An entry is served only for the exact state it was computed
+# from (`_stamp`): the context and network objects, the edit counter (`network_revision`, bumped by every edit
+# seam), the input generation (`dirty_state.bump_inputs`: the chat seam after its handler, and every writer of a
+# hashed input that crosses no edit seam), and a digest of the hashed inputs kept outside the network (the
+# goal-free config, the DC spec and island sidecars). One hash per state at a time (single flight): a concurrent
+# poll waits for it instead of hashing again. The chat and the edit card read live.
+_cache: dict[tuple[int, bool], tuple[Any, Any, tuple, str | None]] = {}
+_flights: dict[tuple[int, bool], threading.Lock] = {}
 _cache_lock = threading.Lock()
+_MISS = object()
 
 
-def _cached_fingerprint(ctx, revision: int, *, exact: bool) -> str | None:
-    key = (id(ctx), exact)
-    network = ctx.network
+def _stamp(ctx) -> tuple:
+    """The state a cached fingerprint stands for, besides the context and network objects (see above)."""
+    import hashlib
+    import json
+    import pathlib
+
+    from services.reliability_goal import goal_free_config
+
+    h = hashlib.sha256()
+    try:
+        config = (getattr(ctx, "solver_state", None) or {}).get("solver_config")
+        h.update(
+            json.dumps(goal_free_config(config), sort_keys=True, default=str).encode()
+        )
+    except Exception:  # noqa: BLE001 — an unreadable config is its own state
+        h.update(b"config unreadable")
+    d = getattr(ctx, "storage_dir", None)
+    for name in ("eh_template.json", "island_config.json"):
+        h.update(name.encode())
+        try:
+            h.update(pathlib.Path(d, name).read_bytes() if d else b"no project dir")
+        except OSError:
+            h.update(b"absent")
+    return (
+        _revision(ctx),
+        int(getattr(ctx, "input_generation", 0) or 0),
+        h.hexdigest(),
+    )
+
+
+def _lookup(key, ctx, network, stamp):
     with _cache_lock:
         hit = _cache.get(key)
-    if hit is not None:
-        ctx_ref, net_ref, rev, fp = hit
-        if ctx_ref() is ctx and net_ref() is network and rev == revision:
-            return fp
-    fp = input_fingerprint(ctx, exact=exact)
-    try:
-        entry = (weakref.ref(ctx), weakref.ref(network), revision, fp)
-    except TypeError:  # an object that takes no weak reference is never cached
+    if hit is None:
+        return _MISS
+    ctx_ref, net_ref, at, fp = hit
+    return fp if ctx_ref() is ctx and net_ref() is network and at == stamp else _MISS
+
+
+def _cached_fingerprint(ctx, stamp: tuple, *, exact: bool) -> str | None:
+    key = (id(ctx), exact)
+    network = ctx.network
+    fp = _lookup(key, ctx, network, stamp)
+    if fp is not _MISS:
         return fp
     with _cache_lock:
-        if len(_cache) > 16:
-            _cache.clear()
-        _cache[key] = entry
-    return fp
+        flight = _flights.setdefault(key, threading.Lock())
+    with flight:  # single flight: a concurrent poll of the same state waits for this hash, never the mutation lock
+        fp = _lookup(key, ctx, network, stamp)
+        if fp is not _MISS:
+            return fp
+        fp = input_fingerprint(ctx, exact=exact)
+        # Stored only when nothing moved during the hash: the entry stands for the state it was read from.
+        if ctx.network is not network or _stamp(ctx) != stamp:
+            return fp
+        try:
+            entry = (weakref.ref(ctx), weakref.ref(network), stamp, fp)
+        except TypeError:  # an object that takes no weak reference is never cached
+            return fp
+        with _cache_lock:
+            if len(_cache) > 16:
+                _cache.clear()
+            _cache[key] = entry
+        return fp
 
 
 def _clear_cache_for_tests() -> None:
     with _cache_lock:
         _cache.clear()
+        _flights.clear()
 
 
 # ── one read ─────────────────────────────────────────────────────────────────
@@ -172,26 +221,25 @@ def _is_active(ctx) -> bool:
         return False
 
 
-def _locked_records(ctx) -> tuple[dict, bool]:
-    """The run records under the network's mutation lock, and whether the lock was held. A context with no lock
-    has nothing to wait for. When the wait times out the records are still read (the caller then reads the current
-    fingerprint as unreadable, so nothing compares fresh against a network mid-edit)."""
+def _try_locked_records(ctx) -> dict:
+    """The run records, under the network's mutation lock when it is free. A freshness read never waits for it
+    (as `preflight_validate`): a solve holds it for the whole solve, and other holders (a save, a hand-over) change
+    no input. When it is held the records are read as they stand; the edit-counter bracket in `read` still catches an
+    edit that lands."""
     lock = getattr(ctx, "mutation_lock", None)
-    if lock is None:
-        return _records(ctx), True
-    if not lock.acquire(timeout=LOCK_WAIT_S):
-        return _records(ctx), False
+    if lock is None or not lock.acquire(blocking=False):
+        return _records(ctx)
     try:
-        return _records(ctx), True
+        return _records(ctx)
     finally:
         lock.release()
 
 
 def read(ctx=None, *, cached: bool = False) -> RunsRead:
-    """One read of the run records and the current inputs (#1384 N1): the records under the network's mutation
-    lock (and `solver_state` under its own lock inside it), the fingerprint between two reads of the edit counter
-    and network object. An edit that lands meanwhile is read again once; a second move, or a mutation-lock wait past
-    `LOCK_WAIT_S`, reads the current fingerprint as unreadable (stale)."""
+    """One read of the run records and the current inputs (#1384 N1): the records (under the mutation lock when it
+    is free, never waiting for it; `solver_state` under its own lock), the fingerprint between two reads of the edit
+    counter and network object (and, `cached`, the cache stamp). An edit that lands meanwhile is read again once; a
+    second move reads the current fingerprint as unreadable (stale)."""
     from services.pypsa_service import PyPSAService
 
     if ctx is None:
@@ -203,13 +251,11 @@ def read(ctx=None, *, cached: bool = False) -> RunsRead:
         return RunsRead("none", None, None, False, None, False, None, 0)
     for _attempt in range(2):
         network = ctx.network
-        records, locked = _locked_records(ctx)
-        if not locked:
-            return RunsRead(
-                current=None, **records
-            )  # the lock wait timed out: unreadable, stale
-        current = _current(ctx, records, cached=cached)
-        if ctx.network is network and _revision(ctx) == records["revision"]:
+        stamp = _stamp(ctx) if cached else None
+        records = _try_locked_records(ctx)
+        current = _current(ctx, records, stamp=stamp)
+        moved = ctx.network is not network or _revision(ctx) != records["revision"]
+        if not moved and (stamp is None or _stamp(ctx) == stamp):
             return RunsRead(current=current, **records)
     return RunsRead(current=None, **records)
 
@@ -218,14 +264,16 @@ def _revision(ctx) -> int:
     return int(getattr(ctx, "network_revision", 0) or 0)
 
 
-def _current(ctx, records: dict, *, cached: bool) -> tuple[str, str | None] | None:
+def _current(
+    ctx, records: dict, *, stamp: tuple | None
+) -> tuple[str, str | None] | None:
     solved = records["solved"]
     if solved is None:
         return None  # nothing recorded to compare with: the hash is not read
 
     def fp(exact):
-        if cached:
-            return _cached_fingerprint(ctx, records["revision"], exact=exact)
+        if stamp is not None:
+            return _cached_fingerprint(ctx, stamp, exact=exact)
         return input_fingerprint(ctx, exact=exact)
 
     plain = fp(False)
