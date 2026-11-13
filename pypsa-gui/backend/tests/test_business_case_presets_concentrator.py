@@ -134,3 +134,35 @@ def test_f3_shares_have_a_plant_capex_base_and_each_capex_is_in_one_maintenance_
         assert [b for b in base if b.refresh_years is None], ln.name
     maint = [ln for ln in shares if ln.category == "maintenance"]
     assert len(maint) <= 1
+
+
+def test_f1_freight_is_priced_once_and_the_notes_say_where():
+    by = {ln.name: ln for ln in P.preset(T, "concentrate_sales", currency="EUR").lines}
+    sale, freight = by["Concentrate sales (net)"], by["Freight"]
+    assert "Do not deduct freight" in sale.note and "priced here only" in freight.note
+    assert (freight.kind, freight.quantity_source, freight.linked_share) == (
+        "opex",
+        SHIPPED,
+        None,
+    )
+
+
+def test_g1_freight_is_a_linked_opex_at_share_one_and_costs_exactly_the_shipped_t():
+    inputs = _fill()
+    shipped = L.Series("shipped.shipments", "t", {None: 9000.0}, {})
+    ic = _ic(lines=(TemplateLine("fom", "fom", -20.0, "opex"),), analysis_years=8)
+    bc = build_business_case(
+        ic, inputs, {"Concentrate sales (net)": shipped, "Freight": shipped}
+    )
+    for y in OPS:
+        assert _by_year(bc)[y]["Freight"].amount == pytest.approx(-20.0 * 9000.0)
+
+
+def test_g1_each_share_reads_the_capex_base_and_the_plant_note_has_range_and_source():
+    by = {ln.name: ln for ln in P.preset(T, "concentrate_sales", currency="EUR").lines}
+    for name in ("Maintenance", "Insurance"):
+        assert by[name].quantity_source == "share_of:capex"
+    note = by["Process plant cost"].note
+    assert "5.58-11.26" in note and "Project Blue" in note and "milled tonnes" in note
+    assert "does not scale" in note
+    assert "S&P Global" in by["Concentrate sales (net)"].note

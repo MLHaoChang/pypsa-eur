@@ -34,7 +34,7 @@ Checked on master: `services/finance/business_case.py` and `project_templates/bu
 Built: `project_templates/business_case_presets/eh_concentrator_staged.json` (variant `concentrate_sales`), `eh_concentrator_staged` in `presets.py` VERSIONS; tests in `tests/test_business_case_presets_concentrator.py` (rows, linked ids exist, LO-2 shipped t, G3 shortfall once, share bases).
 
 Choices to review:
-- Concentrate sales and Freight both link `shipped.shipments` (freight is a cost, so G3 adds no second revenue share). Freight's note says to delete it if the net price is already net of freight.
-- Process plant cost is typed per t milled. The US$5.6-11.3/t figure sits in the note, not a `hint`, because the preset schema allows hints on revenue rows only.
+- Concentrate sales and Freight both link `shipped.shipments` (freight is a cost, so G3 adds no second revenue share). Freight is priced in the Freight row only; the sales note says not to deduct it (GK B F1).
+- Process plant cost is typed per t milled. The US$5.6-11.3/t figure sits in the note, not a `hint`, because the preset schema allows hints on revenue rows only; it is sourced to Project Blue [16] (secondary), the TC/RC figure to S&P/SMM [14] (GK B F3). The note says the line does not scale in a shortfall: type the milled t from the results (F2).
 - A typed "Plant capex" lump is the base of both Maintenance and Insurance shares (one maintenance share, so no capex line sits in two maintenance bases). No pack defaults for either share.
 - No offered rows.

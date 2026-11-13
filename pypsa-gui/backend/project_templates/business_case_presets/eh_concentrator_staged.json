@@ -16,14 +16,14 @@
           "unit": "t",
           "quantity_source": "linked:shipped.shipments@1",
           "escalation": "contract",
-          "note": "Concentrate shipped in tonnes (the vessels loaded out of the shed), not the mill's output. Price per tonne is one net figure you type: grade x payable x metal price - treatment and refining charges (TC/RC) - freight to the smelter. The 2026 copper TC/RC benchmark is $0/dmt and 0 cents/lb. linked_share is the sold share. A shortfall in shipments lowers this line once: the energy model's lost-production penalty on the concentrate bus is dropped, not charged on top."
+          "note": "Concentrate shipped in tonnes (the vessels loaded out of the shed), not the mill's output. Price per tonne is one net figure you type: grade x payable x metal price - treatment and refining charges (TC/RC). Do not deduct freight here: the Freight row below prices it once. The 2026 copper TC/RC benchmark is $0/dmt and 0 cents/lb (S&P Global 2025 settlement, Dec 2024; SMM 2026 benchmark). linked_share is the sold share. A shortfall in shipments lowers this line once: the energy model's lost-production penalty on the concentrate bus is dropped, not charged on top."
         },
         {
           "name": "Process plant cost",
           "kind": "opex",
           "category": "consumables",
           "unit": "t",
-          "note": "Per tonne of ore milled, typed: the mill throughput a year (t milled), not the concentrate tonnes. No sourced split, so no default. Reference only, not a default: US$5.6-11.3 per tonne milled in 2025 company technical reports (USD, not converted); the energy model already prices the plant's electricity, so enter the non-energy part.",
+          "note": "Per tonne of ore milled, typed: type the milled tonnes a year the results show, not the concentrate tonnes. This line does not scale with a shipment shortfall: if the mill runs less, lower the quantity yourself. No sourced split, so no default. Reference only, not a default: US$5.58-11.26 per tonne milled in 2025 reports (Project Blue, 'Digging into copper costs', 2024-25; secondary source; USD, not converted). The energy model already prices the plant's electricity, so enter the non-energy part.",
           "escalation": "opex"
         },
         {
@@ -33,7 +33,7 @@
           "unit": "t",
           "quantity_source": "linked:shipped.shipments@1",
           "escalation": "opex",
-          "note": "Per tonne of concentrate shipped (road, rail, port, vessel). No sourced default: enter the price. If your net price above is already net of freight, delete this row so freight is not counted twice."
+          "note": "Per tonne of concentrate shipped (road, rail, port, vessel to the smelter), priced here only: the sales price above is before freight. No sourced default: enter the price."
         },
         {
           "name": "Plant capex",
