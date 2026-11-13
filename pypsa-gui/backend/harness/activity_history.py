@@ -25,7 +25,9 @@ _TOOLS = {
 _PREFIXES = {'foreground_simulation': 'fg:', 'adequacy_study': 'ad:', 'report_job': 'rpt:'}
 _TERMINAL = {
     'foreground_simulation': {'completed', 'failed', 'aborted'},
-    'adequacy_study': {'done', 'met', 'failed', 'aborted', 'refused', 'unreachable', 'budget_exhausted'},
+    # 'not_confident': adequacy loops 04, a finished loop that never met.
+    'adequacy_study': {'done', 'met', 'failed', 'aborted', 'refused', 'unreachable', 'budget_exhausted',
+                       'not_confident'},
     'report_job': {'done', 'failed', 'aborted'},
 }
 _FIELDS = {'source_id', 'family', 'tool_name', 'native_status', 'created_at', 'observed_at'}

@@ -59,6 +59,10 @@ RUN_TOOLS = frozenset({"run_simulation", "run_ac_pf_stage", "solve_queue_enqueue
 # only to cover `restore: "final"` (a solver-config write, LC-40); its solves
 # are its own audit row's (`reserve_engine`), never one admitted solve.
 ENGINE_TOOLS = frozenset({"run_margin_loop", "run_coupling_loop"})
+# Study harness 14 (GK B (52) I2): a run the grant lists that solves no LP: the
+# single-owner investment case values the solved dispatch. It is admitted like
+# a run but never counts as a solve, so it never spends the solves budget.
+CASE_TOOLS = frozenset({"run_investment_case"})
 # Study harness 07 (GK B B1-b): a grant that lists the run's report covers only
 # the stage-7 card (`cross`); the runner starts that job itself, so a chat
 # `generate_report` is never admitted on it, and it never counts as a solve.
@@ -147,11 +151,8 @@ def _epoch(text):
 def _fingerprint(ctx):
     """The run project's input fingerprint (solver outputs excluded), or
     None when it cannot be read: that counts as drift (fail closed)."""
-    from services import workflow_tools
-    try:
-        return workflow_tools._network_input_fingerprint(ctx) or None
-    except Exception:  # noqa: BLE001
-        return None
+    from services.provenance_graph.runs import input_fingerprint
+    return input_fingerprint(ctx)
 
 
 def _number(value):
@@ -205,11 +206,11 @@ def _check_edit(entry):
 
 def _check_run(entry):
     if not isinstance(entry, dict) or "tool" not in entry or not set(entry) <= {"tool", "kind", "restore"} \
-            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS \
+            or entry["tool"] not in RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS \
             or not isinstance(entry.get("kind", ""), str) \
             or ("kind" in entry and entry["tool"] in REPORT_TOOLS) \
             or ("restore" in entry and (entry["tool"] not in ENGINE_TOOLS or entry["restore"] != "final")):
-        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS)} and an optional "
+        raise EnvelopeError(f"A run names one of {sorted(RUN_TOOLS | ENGINE_TOOLS | REPORT_TOOLS | CASE_TOOLS)} and an optional "
                             "kind (none for the report); a "
                             f"loop-driving tool may carry restore \"final\": {entry!r}")
     if entry["tool"] in NEVER_LISTED:
@@ -1425,6 +1426,19 @@ def _in_bounds(entry, new, at_grant):
     return True
 
 
+def _case_solves_baseline(ctx, owner=None) -> bool:
+    """Whether the investment case would re-solve the counterfactual baseline
+    (`baseline_plan(...).needed`: the owner keeps an existing asset). Anything
+    unreadable counts as yes (fail closed)."""
+    try:
+        from services.results.finance_case import baseline_plan
+
+        plan = baseline_plan(ctx.network, ctx.solver_state.get("solver_config"), owner)
+        return plan is not None and plan.needed
+    except Exception:  # noqa: BLE001 - an unreadable plan refuses
+        return True
+
+
 def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx, note):
     from harness.catalogue import TOOLS
     if external:
@@ -1439,6 +1453,15 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
         # A `runs` entry covers the harness's own engine step only (C9, #875): a model turn
         # never starts a loop, its solves and target its own.
         return "engine_only"
+    if tool in CASE_TOOLS:
+        # Study harness 14 (GK B (53) B1, B2): the case is the harness's own step, never a
+        # model turn's, and it runs no solve the budget has not counted: a kept existing
+        # asset makes the case re-solve the baseline (one or two LPs), so it is refused.
+        if not note.get("call_id") or note["call_id"] != getattr(session, "run_step_call", None):
+            return "own_step_only"
+        # the owner the case will be built for (`InvestmentCaseRequest.owner`), as the route reads it
+        if _case_solves_baseline(ctx, args.get("owner") if isinstance(args, dict) else None):
+            return "baseline_solve"
     if _deletes(tool, edit_card):
         return "delete"
     if tier == "destructive" and tool not in PLANNED_TOOLS:
@@ -1449,7 +1472,7 @@ def _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx
     if _research(args):
         return "research_value"
     is_run = any(r["tool"] == tool for r in envelope["runs"])
-    reason = _standing(session, envelope, task, ctx, solve=is_run)
+    reason = _standing(session, envelope, task, ctx, solve=is_run and tool in RUN_TOOLS)
     if reason is not None:
         return reason
     if _names_another_project(args, ctx):
@@ -1569,7 +1592,7 @@ def admit(session, *, call_id, tool, args, tier, external, edit_card):
     if envelope is None or not task.get("run"):
         return None
     ctx = assistant_tasks.RUN_CONTEXT.get()
-    note = {"scope": getattr(session, "loop_scope", None)}
+    note = {"scope": getattr(session, "loop_scope", None), "call_id": call_id}
     reason = _refusal(session, envelope, task, tool, args, tier, external, edit_card, ctx, note)
     guard = getattr(session, "decision_guard", None)
     if reason is None and (guard is None or not guard(tool, args)):
@@ -1703,11 +1726,8 @@ def cross(session, task_path, card, ctx):
 def _exact(ctx):
     """The exact input fingerprint (`exact=True`: a sub-precision change
     moves it), or None when it cannot be read."""
-    from services import workflow_tools
-    try:
-        return workflow_tools._network_input_fingerprint(ctx, exact=True) or None
-    except Exception:  # noqa: BLE001
-        return None
+    from services.provenance_graph.runs import input_fingerprint
+    return input_fingerprint(ctx, exact=True)
 
 
 def identity(ctx, exact=True):

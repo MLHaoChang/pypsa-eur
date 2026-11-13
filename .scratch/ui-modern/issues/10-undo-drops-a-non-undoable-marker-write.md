@@ -37,6 +37,16 @@ setting on the undo stack.
 
 **Triage 2026-11-12** (master `397a2f1c6`). Confirmed in code (`network_undo` snapshots and restores the whole marker). The fix has three shapes and the issue asks which; asked the coordinator. Recommended: restore only the marker keys the undone edit wrote.
 
+**Decision 2026-11-13** (owner, UM10-UNDO-1): undo restores only the marker keys the undone edit wrote (the growth rows); writes not on the undo stack, such as `dc_backup.save_backup`, survive an undo.
+
+**GK B plan GO 2026-11-13**, conditions:
+- K1: after the restore, the `placeholder …` ledger rows equal the snapshot's (or the base's) exactly: a row the edit added goes, a row it removed comes back, every other row stays as it is now, in its order.
+- K2: the restore's read-modify-write runs under the one cross-process lock every marker writer holds (`mark_set`, `dc_backup.save_backup`); a test writes a backup at lock entry and it survives.
+- K3: the undo read-back compares only the keys the undo restores and names the rest as not compared; a kept backup reads completed, a growth mismatch does not.
+- K4: a marker left as it is (unparseable snapshot, marker or base; unreadable base) says so in the undo's result, not only the log.
+- K5: the base read is tri-state; malformed JSON, a non-object, `[]` and `null` read unreadable, never none.
+- K6: a case copy is removed only when it equals the base's marker after the restore; one holding anything else, a backup included, stays.
+
 ### 2026-11-13: owner decision
 
 Owner answered (UM10-UNDO-1, `docs/agents/owner-decisions.md`). Status: ready-for-agent.

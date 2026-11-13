@@ -13,7 +13,7 @@ read.
 import pytest
 
 from harness import outcomes
-from services import chat_tools, undo_service
+from services import chat_tools, growth_placeholders, undo_service
 from services.pypsa_service import PyPSAService
 from tests.assurance_acceptance.test_p3_write_outcomes import _stream
 
@@ -51,7 +51,12 @@ def _edit(harness, value=61.5):
 def test_an_undo_that_restores_the_peeked_entry_is_completed(baseline, harness):
     before = _edit(harness)
     result = _stream(harness, "undo_last", {})
-    assert result["_outcome"] == {"version": 1, "outcome": "completed", "reason": None}
+    assert result["_outcome"] == {
+        "version": 1,
+        "outcome": "completed",
+        "reason": None,
+        "not_compared": list(outcomes.UNDO_NOT_COMPARED),
+    }
     assert _gens().at["G1", "marginal_cost"] == before
 
 
@@ -177,11 +182,107 @@ def test_an_undo_on_a_real_template_network_is_completed(baseline, harness):
         },
     )
     result = _stream(harness, "undo_last", {})
-    assert result["_outcome"] == {"version": 1, "outcome": "completed", "reason": None}
+    assert result["_outcome"] == {
+        "version": 1,
+        "outcome": "completed",
+        "reason": None,
+        "not_compared": list(outcomes.UNDO_NOT_COMPARED),
+    }
     assert (
         PyPSAService.get_active_context().network.generators.at[name, "marginal_cost"]
         == before
     )
+
+
+# ── UM10-UNDO-1: the marker keys an undo restores (GK B K3, K4) ─────────
+
+
+def _marker_edit_then_backup(baseline, harness):
+    """A marker with a placeholder row; a chat edit (its snapshot holds the
+    marker); the edit's growth write (the row set, as ``mark_set`` writes
+    it); then the DC
+    backup saved, which is not on the undo stack. Returns the project dir."""
+    import json
+
+    from project_templates import eh_templates as t
+    from services import network_lengths, template_marker as tm
+    from services.adequacy import dc_backup
+    from tests.test_template_marker import dc_marker
+
+    _ctx, _pid, d = baseline
+    assert network_lengths.active_project_dir() == d
+    row = {
+        "kind": "it_mw",
+        "year": 2030,
+        "set": False,
+        "source": "assumed",
+        "value": 1.0,
+    }
+    meta = {**dc_marker(), "growth_inputs": [row]}
+    (d / tm.MARKER_FILE).write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
+    _edit(harness)
+    entered = {**row, "set": True, "source": "entered"}
+    growth_placeholders._write(d / tm.MARKER_FILE, {**meta, "growth_inputs": [entered]})
+    dc_backup.save_backup(d, t, {"mode": "hybrid"})
+    return d
+
+
+def _marker(d):
+    import json
+
+    from services import template_marker as tm
+
+    return json.loads((d / tm.MARKER_FILE).read_text())
+
+
+def test_an_undo_that_keeps_a_later_backup_write_is_completed(baseline, harness):
+    d = _marker_edit_then_backup(baseline, harness)
+    result = _stream(harness, "undo_last", {})
+    assert result["_outcome"]["outcome"] == "completed", result["_outcome"]
+    assert result["_outcome"]["not_compared"] == list(outcomes.UNDO_NOT_COMPARED)
+    assert "template_meta" not in result
+    meta = _marker(d)
+    assert meta["growth_inputs"][0]["set"] is False
+    assert meta["dc_load"]["spec"]["backup"] == {"mode": "hybrid"}
+
+
+def test_an_undo_that_leaves_the_growth_rows_entered_is_not_completed(
+    baseline, harness, monkeypatch
+):
+    _marker_edit_then_backup(baseline, harness)
+    monkeypatch.setattr(growth_placeholders, "restore_meta", lambda data: None)
+    result = _stream(harness, "undo_last", {})
+    assert result["_outcome"] == {
+        "version": 1,
+        "outcome": "uncertain",
+        "reason": "not_restored",
+    }
+
+
+def test_an_undo_whose_marker_stays_says_so(baseline, harness):
+    """GK B K4 (#1175 E2): the marker busy past the lock's timeout is left
+    as it is, and the undo's result and outcome say it is not restored."""
+    from services import template_marker as tm
+
+    d = _marker_edit_then_backup(baseline, harness)
+    with tm.write_lock(d):
+        result = _stream(harness, "undo_last", {})
+    assert result["template_meta"] == {"restored": False, "reason": "busy"}
+    assert result["_outcome"]["outcome"] == "uncertain"
+    assert _marker(d)["growth_inputs"][0]["set"] is True
+
+
+def test_an_undo_into_a_marker_that_does_not_parse_says_so(baseline, harness):
+    """GK B K4 (#1175 E2): a marker the restore cannot read is left as it is,
+    and the undo's result and outcome say it is not restored."""
+    from services import template_marker as tm
+
+    d = _marker_edit_then_backup(baseline, harness)
+    (d / tm.MARKER_FILE).write_text("{torn")
+    result = _stream(harness, "undo_last", {})
+    assert result["template_meta"] == {"restored": False, "reason": "unreadable"}
+    assert result["_outcome"]["outcome"] == "uncertain"
+    assert (d / tm.MARKER_FILE).read_text() == "{torn"
 
 
 def test_a_pop_by_another_session_reads_uncertain(baseline, harness, monkeypatch):
@@ -250,6 +351,7 @@ def _note(**kw):
             "digest": "d-snap",
             "user_ts": {"a": 0},
             "template_meta": b"m1",
+            "template_rows": {"growth_inputs": [1]},
         },
     }
     note.update(kw)
@@ -265,6 +367,7 @@ def _read(**kw):
         "depth": 1,
         "digest": "d-snap",
         "template_meta": b"m1",
+        "template_rows": {"growth_inputs": [1]},
         "user_ts": {"a": 0},
     }
     read.update(kw)
@@ -321,12 +424,31 @@ UNCHANGED = {
         (_note(), _read(digest=outcomes.UNCOMPARABLE), "uncertain", "not_comparable"),
         (_note(), _read(digest="other"), "uncertain", "not_restored"),
         (_note(), _read(user_ts={"a": 9}), "uncertain", "not_restored"),
-        (_note(), _read(template_meta=b"x"), "uncertain", "not_restored"),
         (
-            _note(expected={**_note()["expected"], "template_meta": None}),
-            _read(template_meta=b"anything"),
-            "completed",
-            None,
+            _note(),
+            _read(template_rows={"growth_inputs": [2]}),
+            "uncertain",
+            "not_restored",
+        ),
+        # UM10-UNDO-1 (GK B K3): only the restored keys are compared; a later
+        # write the undo keeps (the DC backup) changes the bytes, not the rows.
+        (_note(), _read(template_meta=b"m1 + backup"), "completed", None),
+        (
+            _note(),
+            _read(template_rows=growth_placeholders.UNREADABLE_ROWS),
+            "uncertain",
+            "not_restored",
+        ),
+        (
+            _note(
+                expected={
+                    **_note()["expected"],
+                    "template_rows": growth_placeholders.UNREADABLE_ROWS,
+                }
+            ),
+            _read(template_rows=growth_placeholders.UNREADABLE_ROWS),
+            "uncertain",
+            "not_restored",
         ),
         (_note(), _read(), "completed", None),
     ],

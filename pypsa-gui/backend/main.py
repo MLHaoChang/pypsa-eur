@@ -108,6 +108,7 @@ from routers import (
     snapshots,
     spectrum,
     solve_queue,
+    grid_extension,
     studies,
     uploads,
     vintage,
@@ -125,6 +126,21 @@ _UNDO_PREFIXES = ("/api/network/", "/api/io/")
 # Exact paths that must never trigger a snapshot (the undo endpoint itself,
 # and the info probe which is a GET anyway but listed for safety).
 _UNDO_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
+
+
+def _bump_request_inputs() -> None:
+    """Move only the provenance fingerprint's inputs stamp of the context the
+    request ended on (PG-04a F1): for a write under the undo prefixes that
+    failed (4xx/5xx) or raised, so a fingerprint cached before it is never
+    served for what the network holds now. Never masks the route's own error."""
+    try:
+        from services import dirty_state
+        from services.pypsa_service import PyPSAService
+
+        box = PyPSAService._request_ctx_box.get()
+        dirty_state.bump_inputs(box[0] if box else None)
+    except Exception:  # noqa: BLE001
+        logger.exception("could not bump the inputs stamp")
 
 # Prefixes gated by the foreign-lock check (project-write-safety Task 6),
 # below. These are exactly the routes that mutate the resident PyPSA network
@@ -1214,7 +1230,13 @@ async def undo_snapshot_middleware(request: Request, call_next):
         except Exception:
             pre_dispatch = None  # treat as "unknown" → don't clear
 
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except BaseException:
+        # PG-04a F1: a write that raised may have changed the network first.
+        if is_write and any(path.startswith(p) for p in _UNDO_PREFIXES):
+            _bump_request_inputs()
+        raise
 
     # ★ P33b B1: an accepted write under the undo prefixes is an EDIT — bump
     # the project's edit counter (`ProjectContext.network_revision`). Undo IS
@@ -1236,6 +1258,15 @@ async def undo_snapshot_middleware(request: Request, call_next):
             dirty_state.bump_revision(box[0] if box else None)
         except Exception:  # noqa: BLE001 — never fail an applied edit
             logger.exception("could not bump the network revision")
+    elif (
+        is_write
+        and response.status_code >= 400
+        and any(path.startswith(p) for p in _UNDO_PREFIXES)
+    ):
+        # PG-04a F1: a refused write keeps the edit counter, but a route may
+        # have changed the network in place before it failed (the undo pop
+        # below drops the snapshot without restoring it).
+        _bump_request_inputs()
 
     # Rollback the snapshot if the mutation was rejected by the server.
     if pushed and response.status_code >= 400:
@@ -1472,6 +1503,12 @@ app.include_router(
 # closes (BC-6); the refusal is the router's own dependency.
 app.include_router(
     studies.router, prefix="/api/projects/{name}/studies",
+    tags=["decision-studies"], dependencies=_projects_router_guard,
+)
+# The grid-extension break-even read (homer-parity 03d): its own router module,
+# same prefix and guard as the studies; writes nothing.
+app.include_router(
+    grid_extension.router, prefix="/api/projects/{name}/studies",
     tags=["decision-studies"], dependencies=_projects_router_guard,
 )
 # The Site 3D native scene (SC-01a): the site anchor and a Site's scene,

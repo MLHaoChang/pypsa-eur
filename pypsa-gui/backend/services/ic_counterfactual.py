@@ -128,6 +128,30 @@ def reason_words(fact: dict) -> str:
 # ── `ic.returns` (study harness 10b, GK A ST-3) ─────────────────────────────
 
 
+def _current_report(ctx, on) -> tuple[dict, dict | None]:
+    """``(fact, report)``: the stored case's full report, only when `classify`
+    finds the case current for this network with an established
+    counterfactual and the report read is the one it judged (its assumptions
+    hash, GK B F3); else the typed fact and None."""
+    from functools import partial
+
+    from fastapi import Response
+
+    from routers.results import get_investment_case_report
+
+    body, current = _case(ctx, on)
+    fact = classify(body, current)
+    if fact["state"] != ESTABLISHED:
+        return fact, None
+    report = on(partial(get_investment_case_report, detail="full"))
+    if isinstance(report, Response) or not isinstance(report, dict):
+        return {"state": NOT_RUN, "basis": fact["basis"], "reasons": ["no_report"]}, None
+    judged = (body.get("report") or {}).get("assumptions_hash")
+    if not judged or report.get("assumptions_hash") != judged:
+        return {"state": NOT_RUN, "basis": fact["basis"], "reasons": ["report_changed"]}, None
+    return fact, report
+
+
 def read_returns(ctx, on) -> dict:
     """The stored case's project post-tax NPV at the WACC and IRR, read only
     when `classify` finds the case current for this network with an
@@ -136,24 +160,10 @@ def read_returns(ctx, on) -> dict:
     the case could not establish (an IRR with no sign change) is
     `not_established` with its reason, never a zero. Never compared with a
     hurdle: the gate reports it."""
-    from functools import partial
-
-    from fastapi import Response
-
-    from routers.results import get_investment_case_report
-    from services.chat_tools import _NE, _ic_headlines, _section
-
-    body, current = _case(ctx, on)
-    fact = classify(body, current)
-    if fact["state"] != ESTABLISHED:
+    fact, report = _current_report(ctx, on)
+    if report is None:
         return {**fact, "returns": None}
-    report = on(partial(get_investment_case_report, detail="full"))
-    if isinstance(report, Response) or not isinstance(report, dict):
-        return {"state": NOT_RUN, "basis": fact["basis"], "reasons": ["no_report"], "returns": None}
-    # GK B F3: the report read is the one `classify` judged current, by its assumptions hash.
-    judged = (body.get("report") or {}).get("assumptions_hash")
-    if not judged or report.get("assumptions_hash") != judged:
-        return {"state": NOT_RUN, "basis": fact["basis"], "reasons": ["report_changed"], "returns": None}
+    from services.chat_tools import _NE, _ic_headlines, _section
     heads = _ic_headlines(report)
     npv, irr = heads["project_post_tax_npv_at_wacc"], heads["project_post_tax_irr"]
     missing = [name for name, v in (("npv", npv), ("irr", irr)) if v == _NE or v is None]
@@ -162,6 +172,71 @@ def read_returns(ctx, on) -> dict:
                 "reasons": [f"{m}_not_established" for m in missing], "returns": None}
     currency = (_section(report, "project").get("payload") or {}).get("currency")
     return {**fact, "returns": {"npv_at_wacc": npv, "irr": irr, "currency": currency}}
+
+
+# ── `ic.project_pre_tax_irr`, `ic.min_dscr` (study harness 14, GK B (52) I4, I5) ──
+
+_REASON_WORDS.update({
+    "irr_not_established": "the case could not establish the project pre-tax IRR",
+    "no_debt_service": "the case has no debt service, so there is no DSCR",
+    "dscr_not_finite": "a year with debt service has no finite DSCR",
+    "dscr_unreadable": "the case's debt section cannot be read",
+})
+
+
+def _finite(value) -> bool:
+    import math
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def read_pre_tax_irr(ctx, on) -> dict:
+    """The stored case's project pre-tax IRR, read only from a current case
+    with an established counterfactual (`_current_report`): ``{"state",
+    "reasons", "irr"}``. An IRR the case could not establish (no sign change)
+    is `not_established`, never a zero."""
+    from services.chat_tools import _ic_headlines
+    fact, report = _current_report(ctx, on)
+    if report is None:
+        return {**fact, "irr": None}
+    irr = _ic_headlines(report)["project_pre_tax_irr"]
+    if not _finite(irr):
+        return {"state": NOT_ESTABLISHED, "basis": fact["basis"], "reasons": ["irr_not_established"], "irr": None}
+    return {**fact, "irr": float(irr)}
+
+
+def read_min_dscr(ctx, on) -> dict:
+    """The stored case's minimum DSCR over the years that have debt service
+    only (a year with none has no DSCR): ``{"state", "reasons", "min_dscr",
+    "years"}``. No debt, no year with service, or a year with service whose
+    DSCR is not finite is `not_established`, never a zero or a pass."""
+    from services.chat_tools import _section
+    fact, report = _current_report(ctx, on)
+    if report is None:
+        return {**fact, "min_dscr": None, "years": 0}
+
+    def refuse(reason):
+        return {"state": NOT_ESTABLISHED, "basis": fact["basis"], "reasons": [reason], "min_dscr": None,
+                "years": 0}
+    debt = _section(report, "debt").get("payload")
+    if not isinstance(debt, dict):
+        return refuse("dscr_unreadable")
+    service, dscr = debt.get("service"), debt.get("dscr")
+    if debt.get("amount") is None or not isinstance(service, list) or not service:
+        return refuse("no_debt_service")
+    if not isinstance(dscr, list) or len(dscr) != len(service):
+        return refuse("dscr_unreadable")
+    values = []
+    for paid, ratio in zip(service, dscr):
+        if not _finite(paid):
+            return refuse("dscr_unreadable")
+        if paid <= 0:
+            continue
+        if not _finite(ratio):
+            return refuse("dscr_not_finite")
+        values.append(float(ratio))
+    if not values:
+        return refuse("no_debt_service")
+    return {**fact, "min_dscr": min(values), "years": len(values)}
 
 
 # ── `ic.baseline_keeps` (study harness issue 20) ─────────────────────────────

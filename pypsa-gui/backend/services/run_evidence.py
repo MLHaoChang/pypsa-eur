@@ -860,11 +860,9 @@ def start_foreground_run(ctx: Any, *, job_id: str, tool_name: str,
 
 
 def _input_fingerprint(ctx: Any) -> str | None:
-    try:
-        from services.workflow_tools import _network_input_fingerprint
-        return _network_input_fingerprint(ctx)
-    except Exception:  # noqa: BLE001 — unknown beats a wrong fingerprint
-        return None
+    """None when unreadable: unknown beats a wrong fingerprint (`provenance_graph.runs`)."""
+    from services.provenance_graph.runs import input_fingerprint
+    return input_fingerprint(ctx)
 
 
 def _capture_retained(ctx: Any, token: dict) -> tuple[dict[str, dict], str | None, list[str]]:
@@ -891,7 +889,9 @@ def _capture_retained(ctx: Any, token: dict) -> tuple[dict[str, dict], str | Non
         warnings.append('inputs_changed_before_publish')
     else:
         captured, not_kept = retained_results.capture(ctx, token)
-        if _input_fingerprint(ctx) == fingerprint:
+        # A current None never matches a recorded None (PG-04a V2): unreadable inputs keep nothing.
+        current = _input_fingerprint(ctx)
+        if current is not None and current == fingerprint:
             kept = captured
             missed = not_kept
     warnings.extend(f'{name}_not_captured' for name in missed)
@@ -982,6 +982,8 @@ _STUDY_KIND = {
 _WORKER_COMPLETED = frozenset({'completed', 'done', 'met'})
 _WORKER_FAILED = frozenset({
     'failed', 'budget_exhausted', 'refused', 'unreachable',
+    # Adequacy loops 04 (D3): a loop that ended not confident never met.
+    'not_confident',
 })
 _WORKER_INTERRUPTED = frozenset({'aborted', 'interrupted', 'idle'})
 
@@ -1307,6 +1309,12 @@ def publish_study_run(study_key: str, record: dict) -> dict | None:
             if raw == 'unreachable':
                 message = (
                     'The study finished and no plan meets the target (unreachable).'
+                )
+            elif raw == 'not_confident':
+                message = (
+                    'The study finished without a confident plan: the nearest '
+                    'estimate is at or below the target, but one more sampled '
+                    'draw as heavy as the heaviest seen would put it above.'
                 )
             else:
                 message = str(record.get('error') or 'The study failed.')[:500]
