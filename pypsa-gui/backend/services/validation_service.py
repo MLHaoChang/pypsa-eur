@@ -2291,6 +2291,24 @@ def _check_import_energy_cap(n, solver_config) -> list[Issue]:
     return issues
 
 
+def _check_min_renewable_fraction(solver_config) -> list[Issue]:
+    """homer-parity 01a: the minimum renewable fraction is one row per
+    investment period; rolling and myopic would build one per LP window."""
+    from services.solver.renewable_fraction import target_of
+
+    if target_of(solver_config) is None:
+        return []
+    strategy = str(getattr(solver_config, "solve_strategy", "full") or "full")
+    if strategy not in ("rolling", "myopic"):
+        return []
+    return [_err(
+        "min_renewable_fraction_unsupported_strategy", "", "",
+        f"The minimum renewable fraction is not supported with the '{strategy}' "
+        "solve strategy: each LP window would get its own target instead of one "
+        "per investment period. Use the full strategy, or unset the target.",
+    )]
+
+
 def _check_reserve_margin(n, solver_config) -> list[Issue]:
     """
     Firm-capacity (reserve-margin) coherence — Phase 8 spec §3.
@@ -2692,6 +2710,7 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     # Reliability-target coherence — pure config checks.
     issues += _check_ens_cap_coherence(solver_config)
     issues += _check_import_energy_cap(n, solver_config)
+    issues += _check_min_renewable_fraction(solver_config)
     # Demand-response tier coherence (spec §4.4).
     issues += _check_dsr_coherence(n, solver_config)
 

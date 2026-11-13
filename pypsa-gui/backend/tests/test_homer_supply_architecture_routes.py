@@ -112,6 +112,13 @@ class ArchSolver:
         src = "pv" if "pv" in gens else ("grid" if "grid" in gens else "genset")
         p[src] = 1.0
         n.generators_t.p = pd.DataFrame(p, index=n.snapshots)
+        # A solved network carries every Load's and Link's dispatch (GK B A4
+        # on #1424: the shared renewable-fraction KPI never guesses one).
+        n.loads_t.p = n.get_switchable_as_dense("Load", "p_set")
+        n.links_t.p0 = pd.DataFrame(0.0, index=n.snapshots, columns=n.links.index)
+        if "grid" in p:
+            for l in n.links.index[n.links.bus0 == n.generators.at["grid", "bus"]]:
+                n.links_t.p0[l] = p["grid"]
         n._objective = 100.0 * len(names)
         return "ok", "optimal"
 
