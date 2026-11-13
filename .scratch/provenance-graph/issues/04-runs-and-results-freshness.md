@@ -54,3 +54,7 @@ V5 measure the flow's cost on a full-year network, cache on (ctx identity, dirty
 invalidation test; V6 every consumer of `freshness_by_kind` handles `uncompared`, tsc, route-parity and
 control-matrix checks; V7 no stored digest or meta key changes; V8 `solve_freshness` callers that saw the raise;
 V9 mutants on `runs.py` and each migrated reader, including the graph propagation.
+
+### 2026-11-13: 04a built (session_01G7qCumghRZMeJ12hfk8vfU)
+
+04a is on `claude/provenance-graph-04a-runs-freshness`. The PR body records V1–V9 and the follow-ups: the readers still calling `_network_input_fingerprint` directly. 04b (the `run:reserves` node, and the client wording for `uncompared` with UX) is still open, so this issue stays open until it lands.
