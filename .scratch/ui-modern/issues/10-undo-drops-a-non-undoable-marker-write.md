@@ -3,7 +3,7 @@
 
 # Undo drops a template-marker write that is not on the undo stack
 
-Status: ready-for-agent
+Status: done
 Type: bug (found in the UM07 review, PR #1410; GK B ruled it out of that PR)
 Reviewer: GK B.
 
