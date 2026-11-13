@@ -1529,8 +1529,18 @@ app.include_router(memory_dream.router, prefix="/api/memory", tags=["memory"])
 
 @app.on_event("startup")
 def _speech_boot_sweep() -> None:
-    """LC-07: settle speech sessions a previous process left holding budget."""
+    """LC-07: settle speech sessions a previous process left holding budget.
+
+    Live-voice 01: when speech is enabled, install the LiveKit transport from
+    the environment first, so the sweep can also delete the rooms it settles.
+    """
     from services import live_speech
+    if live_speech.enabled():
+        from harness.providers import hosted_speech
+        try:
+            live_speech.configure_transport(hosted_speech.transport_from_env())
+        except Exception as exc:  # noqa: BLE001 — speech stays off; the app boots
+            logger.warning("speech transport not configured: %s", type(exc).__name__)
     live_speech.start_boot_sweep()
 
 
