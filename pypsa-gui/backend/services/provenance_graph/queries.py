@@ -24,10 +24,11 @@ from services.provenance_graph.types import (
     Walk,
 )
 
-#: The one comparison per edge kind. `computed_in` joins with the runs slice (04).
+#: The one comparison per edge kind. A `computed_in` edge pins what its run recorded (`runs.add_runs`).
 COMPARATORS: dict[str, Callable[[Graph, Edge], Broken | None]] = {
     "priced_through": money.compare_priced_through,
     "derived_from": pins.compare_pin,
+    "computed_in": pins.compare_pin,
     "stamped_with": commercial.compare_stamp,
 }
 
@@ -120,7 +121,10 @@ def _check(g: Graph, edge: Edge) -> tuple[State, Broken | None]:
     compare = COMPARATORS.get(edge.kind)
     if compare is None or edge.recorded is None:
         return "uncompared", None
-    if edge.kind == "derived_from" and not isinstance(edge.recorded, pins.Pin):
+    # A pinned edge compares a `Pin`; anything else it recorded compares nothing.
+    if edge.kind in ("derived_from", "computed_in") and not isinstance(
+        edge.recorded, pins.Pin
+    ):
         return "uncompared", None
     broke = compare(g, edge)
     return ("fresh", None) if broke is None else ("stale", broke)

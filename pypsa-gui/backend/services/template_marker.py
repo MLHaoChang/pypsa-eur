@@ -145,6 +145,45 @@ def resolve(project_dir) -> Marker:
     return Marker(NONE)
 
 
+#: The lock file every write of a project's own marker holds (UM10-UNDO-1).
+LOCK_FILE = ".eh_template.lock"
+
+
+def write_lock(project_dir, *, timeout=5):
+    """The cross-process lock every read-modify-write of the project's own
+    marker runs under (``growth_placeholders.mark_set`` / ``restore_meta``,
+    ``dc_backup.save_backup``); TimeoutError (an OSError) when it stays busy."""
+    from harness.durable import file_lock
+
+    return file_lock(
+        pathlib.Path(project_dir) / LOCK_FILE,
+        timeout=timeout,
+        busy="template marker busy",
+    )
+
+
+def resolve_base(project_dir) -> Marker:
+    """The marker a sensitivity case would read without a copy of its own:
+    its base's (UM10-UNDO-1: what an undo of the edit that made the copy
+    puts back). OWN or BASE with the path; NONE when the folder is not a case
+    or its base has none; UNREADABLE when the case record or the base cannot
+    be read, or the base's marker is not a JSON object (#1390 F2)."""
+    here = pathlib.Path(project_dir)
+    try:
+        base = _base_dir(here)
+    except _Unreadable as exc:
+        _log.warning("template marker: case record %s cannot be read", exc)
+        return Marker(UNREADABLE)
+    if base is None or _same_dir(base, here):
+        return Marker(NONE)
+    found = resolve(base)
+    if found.path is not None and _same_dir(found.path.parent, here):
+        return Marker(NONE)  # a loop back to the case itself
+    if found.path is not None and not isinstance(_read_json(found.path), dict):
+        return Marker(UNREADABLE)
+    return found
+
+
 def source_path(project_dir) -> pathlib.Path | None:
     """The marker file the project reads: its own, else its base's when it is
     a sensitivity case; None otherwise."""

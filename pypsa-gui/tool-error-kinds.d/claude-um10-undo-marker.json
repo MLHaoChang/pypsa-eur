@@ -1,0 +1,1 @@
+{"kinds": {"dc_backup_busy": {"surface": "inline", "why": "PUT /api/campus-electrical/{name}/dc-backup answers 409: the project's eh_template.json stayed locked past its 5 s bound while another marker write (a growth-placeholder edit) or an undo held it (UM10-UNDO-1). Nothing was stored; the save can be retried in a moment."}}}

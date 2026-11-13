@@ -151,11 +151,8 @@ def _epoch(text):
 def _fingerprint(ctx):
     """The run project's input fingerprint (solver outputs excluded), or
     None when it cannot be read: that counts as drift (fail closed)."""
-    from services import workflow_tools
-    try:
-        return workflow_tools._network_input_fingerprint(ctx) or None
-    except Exception:  # noqa: BLE001
-        return None
+    from services.provenance_graph.runs import input_fingerprint
+    return input_fingerprint(ctx)
 
 
 def _number(value):
@@ -1729,11 +1726,8 @@ def cross(session, task_path, card, ctx):
 def _exact(ctx):
     """The exact input fingerprint (`exact=True`: a sub-precision change
     moves it), or None when it cannot be read."""
-    from services import workflow_tools
-    try:
-        return workflow_tools._network_input_fingerprint(ctx, exact=True) or None
-    except Exception:  # noqa: BLE001
-        return None
+    from services.provenance_graph.runs import input_fingerprint
+    return input_fingerprint(ctx, exact=True)
 
 
 def identity(ctx, exact=True):
