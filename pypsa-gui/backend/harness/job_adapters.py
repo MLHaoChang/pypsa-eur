@@ -31,6 +31,7 @@ STUDY_FAMILY = 'adequacy_study'
 # time out on a finished study.
 _STUDY_TERMINAL = frozenset({'done', 'failed', 'aborted', 'refused'}) | LOOP_STATUSES
 # `done` is the sweep/MC/frontier success label; `met` is the loop success label.
+# `not_confident` (adequacy loops 04) is terminal through LOOP_STATUSES and never a success.
 _STUDY_SUCCESS = frozenset({'done', 'met'})
 
 REPORT_PREFIX = 'rpt:'

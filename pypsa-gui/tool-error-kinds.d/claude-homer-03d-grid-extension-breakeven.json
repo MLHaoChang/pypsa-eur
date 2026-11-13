@@ -1,0 +1,12 @@
+{"kinds": {
+  "grid_extension_input_invalid": {"surface": "inline", "why": "get_grid_extension_break_even was given an input that is not finite or out of range (negative eur_per_km, non-positive max_km, a malformed grid_basis). Nothing ran; the assistant corrects the number the message names."},
+  "basis_mismatch": {"surface": "inline", "why": "get_grid_extension_break_even: grid_basis differs from the study's discount rate, horizon, currency or currency year. Nothing is converted; the assistant restates the grid cost on the expected basis (named in the result) or tells the user it cannot."},
+  "assumptions_not_set": {"surface": "inline", "why": "get_grid_extension_break_even: the study has no stored ledger, discount rate, horizon or currency year. The assistant asks the user to set them in the study; it never invents a default."},
+  "discount_rate_invalid": {"surface": "inline", "why": "get_grid_extension_break_even: the study's discount rate is not finite or is at or below -100%. The assistant asks the user to correct it in the study."},
+  "npc_not_finite": {"surface": "inline", "why": "get_grid_extension_break_even: the annuity factor or derived off-grid NPC is not a finite number. The assistant reports that no break-even was computed."},
+  "supply_architectures_running": {"surface": "inline", "why": "get_grid_extension_break_even: the supply-architecture comparison is still running. The assistant waits and polls get_supply_architectures."},
+  "supply_architectures_stale": {"surface": "inline", "why": "get_grid_extension_break_even: the base project changed since the comparison, so its rows are not current. The assistant offers to compare the architectures again; it never presents the old figure as current."},
+  "supply_architectures_not_evaluated": {"surface": "inline", "why": "get_grid_extension_break_even: the stored comparison cannot be read or is of an unknown version. The assistant offers to compare again."},
+  "architecture_unknown": {"surface": "inline", "why": "get_grid_extension_break_even: architecture_id is not in the stored table. The assistant reads the ids from get_supply_architectures."},
+  "architecture_not_solved": {"surface": "inline", "why": "get_grid_extension_break_even: that architecture is infeasible, failed, not reached or has no annual cost, so it has no off-grid NPC. The assistant says so and offers another architecture."}
+}}

@@ -3,7 +3,7 @@
 
 # A case with a long horizon never compares with its base
 
-Status: ready-for-agent
+Status: done
 Model tier: opus.
 Size: S.
 Blocked by: none.
@@ -58,3 +58,11 @@ today, so saved records stay valid.
 **Triage 2026-11-12** (master `397a2f1c6`). Confirmed on master: `_digest` still refuses blobs over `MAX_RECORD_BYTES // 2` (64 KiB) and `basis_digests` uses it. Decision taken from the issue's own reasoning (recommended): hash the snapshot and weighting frames with a size-free digest that returns the same value for every index that passes today, so saved records stay valid. Pin that equality in a test. Keep the plan limit for plans.
 
 **GK B plan GO with conditions, 2026-11-13.** D1: `_basis_digest` is `ex._digest` minus the plan size check only (same `json.dumps` arguments, same caught set, same 422), pinned equal on nested dicts, non-ASCII strings, 0.1 / 1e-7, ints vs floats. D2: keep an explicit cap far above the largest realistic basis (three periods of a full hourly year: 4.0 MB index, 5.1 MB weightings, measured), with a typed refusal just over it. D3: `solver_config` and `experiments._digest` unchanged, pinned by a test.
+
+### 2026-11-13: done
+
+**Done 2026-11-13: PR #1451, merged at c85affa2 (GK B OK @12d31586).**
+- `harness/experiment_comparison._basis_digest` is `ex._digest` with the 64 KiB plan check replaced by `MAX_BASIS_BYTES` (64 MiB). Over the cap it is a typed 422 `invalid_experiment`.
+- Saved digests are unchanged, pinned by an equality test. `solver_config` and `experiments._digest` keep the plan limit.
+- Tests in `tests/test_basis_digests_long_horizon.py`: a 504-snapshot basis; an end-to-end `compare_sensitivities` on a 1,000-snapshot base; the over-cap refusal where it is caught (`compare_experiments` case unavailable; sensitivity tool 422); the solver_config limit; deep nesting; a weightings change.
+- Left open: the over-cap refusal reuses the `invalid_experiment` kind, so it can't be told apart from a bad plan (GK B: not blocking; follow-up: a distinct error kind for "horizon too large to compare"). The workbook scenario sheet and headline `?compare=1` have no end-to-end test of their own; they share `basis_digests`.

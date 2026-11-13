@@ -155,6 +155,19 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
 )
 
 
+# The diagnosis runs for any condition naming "infeasible".
+_HINTED_CATEGORIES = ("infeasible", "infeasible_or_unbounded")
+
+
+def _constraint_hints() -> list[dict]:
+    """The named-constraint hints the infeasibility diagnosis just recorded."""
+    try:
+        from services.solver.diagnostics import take_constraint_hints
+        return take_constraint_hints()
+    except Exception:
+        return []
+
+
 def classify_failure(status: str | None, condition: str | None) -> dict | None:
     """
     Classify a finished solve outcome.
@@ -163,6 +176,9 @@ def classify_failure(status: str | None, condition: str | None) -> dict | None:
     otherwise a dict ``{category, title, hint, detail}`` where ``detail`` is the
     raw condition string (so the UI can still show the underlying token).
     """
+    # Taken on EVERY classification, so hints from a diagnosed solve never
+    # outlive it on this (pooled) thread and reach a later card.
+    hints = _constraint_hints()
     status_l = (status or "").strip().lower()
     cond_l = (condition or "").strip().lower()
 
@@ -179,12 +195,15 @@ def classify_failure(status: str | None, condition: str | None) -> dict | None:
     haystack = cond_l
     for needles, category, title, hint in _RULES:
         if any(n in haystack for n in needles):
-            return {
+            card = {
                 "category": category,
                 "title": title,
                 "hint": hint,
                 "detail": condition or "",
             }
+            if hints and category in _HINTED_CATEGORIES:
+                card["constraint_hints"] = hints
+            return card
 
     # Unknown non-success outcome — generic but still actionable.
     return {

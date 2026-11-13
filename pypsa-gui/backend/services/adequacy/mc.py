@@ -991,6 +991,8 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
     from services.adequacy.metrics import resolve_time_basis
 
     nyears = float(inputs.nyears)
+    from services.adequacy.lole_verdict import event_hours
+
     # A horizon of unknown length cannot state a floor; None says so instead of
     # dividing by zero or printing an infinity into the payload.
     w_pos = inputs.weights[inputs.weights > 0]
@@ -1007,6 +1009,11 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
         "time_basis": resolve_time_basis(nyears),
         "horizon_years": nyears,
         "resolution_floor_h": floor,
+        # Adequacy loops 04 (D1, E1): one more sampled draw as heavy as the
+        # heaviest seen, never less than one shortfall hour at the heaviest
+        # snapshot — on the weights LOLE was accumulated with and the very
+        # per-draw array `lole_mean` is the mean of. What `lole_verdict` reads.
+        "event_h": event_hours(inputs.weights, n_total, lole_all),
         "warning": MC_WARNING_V1,
         **({"storage_notes": list(inputs.storage_notes)} if inputs.storage_notes else {}),
         **({"fleet_notes": list(inputs.fleet_notes)} if inputs.fleet_notes else {}),

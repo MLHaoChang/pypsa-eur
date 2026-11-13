@@ -267,9 +267,9 @@ describe('EnvelopeSection reliability goal', () => {
   const SETUP = { tool: 'create_project_from_template', template: 'eh_site', name: 'Acme site', params_digest: DIGEST }
   const row = (i: number, over: Record<string, unknown> = {}) => ({ index: i, param: `p${i}`, label: `Input ${i}`, value: i, unit: 'MW',
     status: 'confirmed', source: `you wrote 'x${i}'`, from_document: false, mapped: false, ...over })
-  function openIntake(rows: ReturnType<typeof row>[], defaults: unknown[] = []) {
+  function openIntake(rows: ReturnType<typeof row>[], defaults: unknown[] = [], site?: string) {
     const view = { ...STATES.proposal, envelope: { ...ENVELOPE, setup: SETUP },
-      run: { ...STATES.proposal.run, intake: { card: { rows, defaults }, digest: DIGEST, missing: [] } } }
+      run: { ...STATES.proposal.run, intake: { card: { rows, defaults, ...(site ? { site } : {}) }, digest: DIGEST, missing: [] } } }
     vi.mocked(api.getRun).mockResolvedValue(view as never)
     useChatStore.setState({ choice: REVIEW, messages: [{ ...STARTED, tool_result: { ...STARTED.tool_result, envelope: { ...ENVELOPE, setup: SETUP } } }] })
     render(<ChoiceCard />)
@@ -284,6 +284,20 @@ describe('EnvelopeSection reliability goal', () => {
       expect(screen.getByTestId('envelope-setup').textContent).toBe('Creates project Acme site from the site template')
       expect(section.textContent).not.toContain(DIGEST.slice(0, 8))
     }
+  })
+
+  it('says "Site: none named" when a site-aware run names no site, and never calls it a default', async () => {
+    openIntake([row(0)], [], 'none named')
+    await screen.findByTestId('envelope-intake')
+    expect(screen.getByTestId('envelope-intake-site').textContent).toBe('Site: none named')
+    expect(screen.queryByTestId('envelope-intake-default')).toBeNull()
+    expect(screen.getByTestId('envelope-intake').textContent).not.toContain('Another setting')
+  })
+
+  it('shows no site line when the card has none (a named site is its own two rows)', async () => {
+    openIntake([row(0)])
+    await screen.findByTestId('envelope-intake')
+    expect(screen.queryByTestId('envelope-intake-site')).toBeNull()
   })
 
   it('lists rows with source, document mark, struck and conflict words, and preset defaults', async () => {

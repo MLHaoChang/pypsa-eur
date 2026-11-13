@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Read-only grid-extension break-even tool and route for a decision study: the break-even distance against one supply-architecture row, with the off-grid cost derived (annualised) at the study's own discount rate and horizon, and a grid basis that differs from the study's refused.
