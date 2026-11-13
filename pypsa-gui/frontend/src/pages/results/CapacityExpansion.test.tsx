@@ -436,4 +436,7 @@ it('reads a failed expansion compute as unavailable, the state the headline stri
   }
   // The figures that do not depend on the expansion compute stay.
   expect(getKpiValueWithin(kpiCard('CAPEX (installed)'), '€8.07 B')).toBeTruthy()
+  // The one-step CAPEX in the build-up says why it is not split.
+  expect(screen.getByTestId('waterfall-split-unavailable').textContent)
+    .toMatch(/split into existing and new-build CAPEX is unavailable/)
 })

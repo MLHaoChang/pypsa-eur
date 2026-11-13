@@ -135,6 +135,7 @@ describe('the Summary tab (M3)', () => {
     const cost = await screen.findByTestId('summary-cost')
     await waitFor(() => expect(cost.textContent).toContain('of which new build'))
     expect(cost.textContent).toContain('unavailable')
+    expect(cost.textContent).toContain('This figure could not be computed for this solve.')
     expect(cost.textContent).not.toContain('€0')
   })
 
