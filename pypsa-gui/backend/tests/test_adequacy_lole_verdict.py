@@ -80,11 +80,13 @@ def test_event_hours_is_the_heaviest_draw_when_it_outweighs_a_snapshot():
     draws = [0.0] * 496 + [208.6, 208.6, 208.6, 104.2]
     e = event_hours([52.14] * 168, 500, draws)
     assert e == pytest.approx(208.6 / 500)
-    lole = sum(draws) / 500                       # 1.46
+    lole = sum(draws) / 500  # 1.46
     v = lole_verdict(lole, (0.08, 2.84), 1.8, e, 500, CAP)
     assert v["verdict"] == "not_confident"
-    assert lole_verdict(lole, (0.08, 2.84), 1.8, 52.14 / 500, 500, CAP)[
-        "verdict"] == "pass"
+    assert (
+        lole_verdict(lole, (0.08, 2.84), 1.8, 52.14 / 500, 500, CAP)["verdict"]
+        == "pass"
+    )
 
 
 def test_a_one_draw_estimate_is_not_a_pass_eh_datacenter_shape():
@@ -158,8 +160,11 @@ def test_event_h_uses_the_generator_weights_and_the_draws_that_ran(monkeypatch):
     real = lv.event_hours
 
     def spy(weights, n_samples, draws=()):
-        seen.update(weights=np.asarray(weights).copy(), n=n_samples,
-                    draws=np.asarray(draws).copy())
+        seen.update(
+            weights=np.asarray(weights).copy(),
+            n=n_samples,
+            draws=np.asarray(draws).copy(),
+        )
         return real(weights, n_samples, draws)
 
     monkeypatch.setattr(lv, "event_hours", spy)
@@ -170,24 +175,35 @@ def test_event_h_uses_the_generator_weights_and_the_draws_that_ran(monkeypatch):
     assert n < 2000  # stopped early
     assert seen["n"] == n and len(seen["draws"]) == n
     assert float(np.mean(seen["draws"])) == pytest.approx(m["lole_hours"])
-    assert seen["weights"].max() == pytest.approx(730.0)   # generator, not objective
+    assert seen["weights"].max() == pytest.approx(730.0)  # generator, not objective
     assert m["event_h"] == pytest.approx(max(730.0, seen["draws"].max()) / n)
 
 
 # ── the words a not-confident loop ends on (D4/D5) ─────────────────────────
 
+
 def _nc_mc(settle_draws=1200, reason=None, event_h=0.73):
-    return {"lole_hours": 1.46, "lole_ci": [0.2, 3.5],
-            "goal": {"verdict": "not_confident", "confident": False,
-                     "event_h": event_h, "settle_draws": settle_draws,
-                     "settle_reason": reason}}
+    return {
+        "lole_hours": 1.46,
+        "lole_ci": [0.2, 3.5],
+        "goal": {
+            "verdict": "not_confident",
+            "confident": False,
+            "event_h": event_h,
+            "settle_draws": settle_draws,
+            "settle_reason": reason,
+        },
+    }
 
 
 def test_the_not_confident_copy_names_the_settle_and_the_network_left():
     from services.adequacy.lole_verdict import not_confident_copy
+
     text = not_confident_copy(_nc_mc(), 2.0, "ε = 0.035‱")
     assert text.startswith("Not confident")
-    assert "one more sampled draw as heavy as the heaviest seen would put it above" in text
+    assert (
+        "one more sampled draw as heavy as the heaviest seen would put it above" in text
+    )
     assert "About 1200 draws would settle it, if the estimate and its range" in text
     assert "not a pass" in text
     assert "the network you have now is your own plan, not that one" in text
@@ -195,19 +211,29 @@ def test_the_not_confident_copy_names_the_settle_and_the_network_left():
 
 def test_the_not_confident_copy_says_when_draws_alone_cannot_settle_it():
     from services.adequacy.lole_verdict import not_confident_copy
+
     text = not_confident_copy(
-        _nc_mc(None, "beyond the limit of 2000 draws", None), 2.0, "x")
+        _nc_mc(None, "beyond the limit of 2000 draws", None), 2.0, "x"
+    )
     assert "beyond the limit of 2000 draws" in text
     assert "did not report" in text
 
 
 def test_goal_fields_prefer_the_nearest_iterate():
     from services.adequacy.lole_verdict import goal_fields
+
     near = {"mc": _nc_mc()}
-    final = {"mc": {"goal": {"event_h": 0.1, "settle_draws": None,
-                             "settle_reason": None}}}
-    assert goal_fields(near, final) == {"event_h": 0.73, "settle_draws": 1200,
-                                        "settle_reason": None}
+    final = {
+        "mc": {"goal": {"event_h": 0.1, "settle_draws": None, "settle_reason": None}}
+    }
+    assert goal_fields(near, final) == {
+        "event_h": 0.73,
+        "settle_draws": 1200,
+        "settle_reason": None,
+    }
     assert goal_fields(None, final)["event_h"] == 0.1
-    assert goal_fields(None, None) == {"event_h": None, "settle_draws": None,
-                                       "settle_reason": None}
+    assert goal_fields(None, None) == {
+        "event_h": None,
+        "settle_draws": None,
+        "settle_reason": None,
+    }

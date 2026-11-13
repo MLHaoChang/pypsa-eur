@@ -40,7 +40,13 @@ from __future__ import annotations
 
 import math
 
-__all__ = ["event_hours", "goal_fields", "lole_verdict", "not_confident_copy", "settle_text"]
+__all__ = [
+    "event_hours",
+    "goal_fields",
+    "lole_verdict",
+    "not_confident_copy",
+    "settle_text",
+]
 
 
 def event_hours(weights, n_samples, draws=()) -> float | None:
@@ -99,8 +105,10 @@ def settle_text(goal: dict) -> str:
     """What would settle a ``not_confident`` verdict, in plain words (D5;
     UX (20) asked for plainer words than "if the mean and spread hold")."""
     if goal.get("settle_draws") is not None:
-        return (f"about {int(goal['settle_draws'])} draws would settle it, if "
-                "the estimate and its range stay as they are")
+        return (
+            f"about {int(goal['settle_draws'])} draws would settle it, if "
+            "the estimate and its range stay as they are"
+        )
     return f"more draws alone will not settle it ({goal.get('settle_reason')})"
 
 
@@ -116,8 +124,9 @@ def not_confident_copy(mc: dict, target_h: float, lever: str) -> str:
     # and reads as a typo.
     event_clause = (
         "one more sampled draw as heavy as the heaviest seen would put it above"
-        if event is not None else
-        "the study did not report how much one more sampled draw is worth")
+        if event is not None
+        else "the study did not report how much one more sampled draw is worth"
+    )
     settle = settle_text(goal)
     return (
         f"Not confident: no plan was confirmed to meet {target_h:g} h. The "
@@ -126,7 +135,8 @@ def not_confident_copy(mc: dict, target_h: float, lever: str) -> str:
         f"{float(hi):.3g} h and {event_clause}, so it is not a pass. "
         f"{settle[0].upper()}{settle[1:]}. Your original plan has been "
         "re-solved, so the network you have now is your own plan, not that "
-        "one.")
+        "one."
+    )
 
 
 def goal_fields(nearest, final) -> dict:
