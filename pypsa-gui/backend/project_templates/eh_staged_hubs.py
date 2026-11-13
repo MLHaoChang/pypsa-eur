@@ -389,11 +389,22 @@ def _mg_commercial_and_finance(T, planning=None) -> dict:
 MG_TRANSITION_ROCOF = 2.0
 
 
+#: The island's grid-forming battery settings (study-harness 40, owner SH40-FREQ-1):
+#: 2 % droop and τ_f 0.3 s (equivalent H about 7 s), retuned from 4 % and 0.1 s so
+#: both microgrid templates pass the island frequency check (E2, E3, E5) at their
+#: own island hours. The GFM settings recommender asked for 4 % / 0.53 s on the
+#: single-year island and 1.8 % / 0.045 s on the staged one; this one setting
+#: passes both with the stiffer droop and the higher inertia.
+MG_GFM_DROOP_PCT = 2.0
+MG_GFM_TAU_F_S = 0.3
+
+
 def _mg_island_blocks(T) -> tuple[dict, dict, dict]:
     """The island's three converter blocks: the grid-forming battery, PV and wind."""
     a = T._a
-    bess = {"kind": "bess", "control": "gfm_droop", "pf_rated": a(0.95), "droop_pct": a(4.0),
-            "q_droop_pct": a(4.0), "tau_f_s": a(0.1), "i_max_pu": a(1.2), "k_gfm_min": a(1.0)}
+    bess = {"kind": "bess", "control": "gfm_droop", "pf_rated": a(0.95),
+            "droop_pct": a(MG_GFM_DROOP_PCT), "q_droop_pct": a(4.0), "tau_f_s": a(MG_GFM_TAU_F_S),
+            "i_max_pu": a(1.2), "k_gfm_min": a(1.0)}
     pv = {"kind": "pv", "control": "gfl_qu", "pf_rated": a(0.95),
           "qu_points": a([[0.9, 0.33], [0.97, 0.0], [1.03, 0.0], [1.1, -0.33]])}
     wind = {"kind": "wind", "control": "gfl_qu", "pf_rated": a(0.95),
@@ -777,8 +788,9 @@ def _mg_meta(T, planning=None) -> dict:
              "source": "assumed",
              "note": _measured("measured 2026-10-16 on this plan: battery 6 (existing) + 6.08 / 6.08 / 3.27 MW "
                      "built in 2027 / 2030 / 2035, demo pre-tax NPV +43.2 M EUR (+43.9 M EUR when "
-                     "the rows held the islanding step alone); the GFM settings recommender then "
-                     "finds settings at the Guided defaults", plan)},
+                     "the rows held the islanding step alone); re-checked 2026-11-13 with the "
+                     "retuned grid-forming settings (study-harness 40): the same sizes, and no "
+                     "island-hour event fails the frequency check", plan)},
             {"item": "existing island", "value": ", ".join(a for a in MG_EXISTING)
                                                  + f": COD {y0}-01-01, overnight cost 0",
              "source": "assumed", "note": "in service at the first period and sunk"},
@@ -790,8 +802,9 @@ def _mg_meta(T, planning=None) -> dict:
             "also keep the headroom the frequency check asks for: the largest load step, any one "
             "unit's trip and the PV lost.",
             f"The transition RoCoF limit is {MG_TRANSITION_ROCOF:g} Hz/s over 500 ms, a demo value "
-            "relaxed from the data center's 1 Hz/s: the GFM settings recommender can then tune "
-            "the batteries to meet it.",
+            "relaxed from the data center's 1 Hz/s. The batteries ship grid-forming settings "
+            f"that meet it ({MG_GFM_DROOP_PCT:g} % droop, tau_f {MG_GFM_TAU_F_S:g} s, retuned "
+            "from 4 % and 0.1 s).",
             "After a solve the investment case compares the plan with the island as it stands "
             "today (the existing diesels, PV, wind and battery, no grid), re-solved without the "
             "candidates.",

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The microgrid templates' grid-forming batteries ship retuned island settings (2 % droop, τ_f 0.3 s, were 4 % and 0.1 s), so ``eh_microgrid`` and ``eh_microgrid_staged`` pass the island frequency check's events at their own island hours; ``mg.island.frequency`` stays a warning.

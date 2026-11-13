@@ -46,3 +46,10 @@ examples pass, and whether the rule then becomes blocking.
 ### 2026-11-13: owner decision
 
 Owner answered (SH40-FREQ-1, `docs/agents/owner-decisions.md`). Status: ready-for-agent.
+
+### 2026-11-13: sidecar retune (session_01G7qCumcFH3omctm4xpif6o)
+
+- Reproduced on master 21d44207 (campus run up to I6, Guided default k = 3): `eh_microgrid` hours 68, 141, 165 fail E2/E3 on the 2 Hz/s transition RoCoF (the battery saturates or is the unit lost); `eh_microgrid_staged` 15 failing hours (E2 24, E3 9, E5 8: RoCoF, the 1 Hz steady deviation, the transition f_max trip) and 24 bridge-failing hours.
+- The GFM settings recommender asked for 4 % / τ_f 0.53 s (single year) and 1.8 % / 0.045 s (staged). One setting for both, 2 % droop and τ_f 0.3 s (equivalent H about 7 s), passes both on their old sizing, and after the re-solve: `eh_microgrid` 0 failing, 0 bridge (10 island hours); staged 0 failing (35 island hours), sizes unchanged (battery 6 + 6.08 / 6.08 / 3.27 MW), NPV inside its 1 % pin.
+- Left: the staged template's 24 bridge hours. In each, one grid-forming battery is empty (e(t−1) = 0) and the screen asks it for its droop share (16–52 Wh) of I4's 25 kW AC-loss step until the cold diesels join at 15 s. The island LP reserves the bridge energy summed over the grid-forming batteries (`services/solver/island.py:829-838`); the screen checks each battery on its own (`gridspine/static/frequency.py:1173`). No sidecar setting reaches it. Question SH40-BRIDGE sent to the coordinator.
+- `mg.island.frequency` stays `warn` (SH40-FREQ-1); `services/run_gates.py` untouched.
