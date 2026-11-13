@@ -204,8 +204,10 @@ def mark_set(n, component: str, attribute: str, written: dict, prior: dict | Non
     try:
         with tm.write_lock(own.parent):
             return _mark_set(n, component, attribute, written, prior, project_dir)
-    except TimeoutError as exc:
-        # The series edit has landed; the row stays a placeholder (the safe
+    except (OSError, ValueError) as exc:
+        # The lock is busy or cannot be taken (TimeoutError is an OSError;
+        # file_lock refuses a lock outside its folder with ValueError). The
+        # series edit has landed; the row stays a placeholder (the safe
         # side), as when the write fails.
         _log.warning("growth placeholder not recorded in %s: %s", own, exc)
         return []
@@ -339,7 +341,7 @@ def _with_growth_of(current: dict, old: dict) -> dict | None:
 
 
 #: ``undo_rows`` when the rows cannot be read: compares unequal to anything.
-class _Unreadable:
+class _NeverEqual:
     def __eq__(self, other):
         return False
 
@@ -352,7 +354,7 @@ class _Unreadable:
         return "UNREADABLE_ROWS"
 
 
-UNREADABLE_ROWS = _Unreadable()
+UNREADABLE_ROWS = _NeverEqual()
 
 
 def _rows_of(meta: dict):
@@ -435,6 +437,7 @@ def restore_meta(data: bytes | None) -> str | None:
     except TimeoutError as exc:
         _log.warning("undo: %s not restored: %s", path, exc)
         return "busy"
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
+        # ValueError: file_lock refuses a lock outside its folder.
         _log.warning("undo: %s not restored: %s", path, exc)
         return "write_failed"

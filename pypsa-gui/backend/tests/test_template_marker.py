@@ -1038,3 +1038,22 @@ def test_a_dc_backup_save_while_the_marker_is_busy_is_refused(eh_base, monkeypat
     with real(eh_base.dir), pytest.raises(dc_backup.DcBackupError, match="busy"):
         dc_backup.save_backup(eh_base.dir, t, {"mode": "hybrid"})
     assert stamp(eh_base.dir / tm.MARKER_FILE) == before
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), ValueError("outside")])
+def test_a_lock_that_cannot_be_taken_never_fails_the_edit_or_the_undo(
+    eh_base, active_case, monkeypatch, error
+):
+    import pandas as pd
+
+    from services import growth_placeholders as gp
+
+    def broken(project_dir, **kw):
+        raise error
+
+    monkeypatch.setattr(tm, "write_lock", broken)
+    n = eh_base.ctx.network
+    series = pd.Series(10.0, index=n.snapshots)
+    assert gp.mark_set(n, "loads", "p_set", {"L1": series}, {"L1": {None: 1.0}}) == []
+    write_marker(active_case, eh_base.meta)
+    assert gp.restore_meta(gp.snapshot_meta()) == "write_failed"

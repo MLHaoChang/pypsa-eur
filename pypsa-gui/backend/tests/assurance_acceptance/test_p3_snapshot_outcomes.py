@@ -199,7 +199,8 @@ def test_an_undo_on_a_real_template_network_is_completed(baseline, harness):
 
 def _marker_edit_then_backup(baseline, harness):
     """A marker with a placeholder row; a chat edit (its snapshot holds the
-    marker); the edit's growth write (``mark_set`` sets the row); then the DC
+    marker); the edit's growth write (the row set, as ``mark_set`` writes
+    it); then the DC
     backup saved, which is not on the undo stack. Returns the project dir."""
     import json
 
@@ -269,6 +270,19 @@ def test_an_undo_whose_marker_stays_says_so(baseline, harness):
     assert result["template_meta"] == {"restored": False, "reason": "busy"}
     assert result["_outcome"]["outcome"] == "uncertain"
     assert _marker(d)["growth_inputs"][0]["set"] is True
+
+
+def test_an_undo_into_a_marker_that_does_not_parse_says_so(baseline, harness):
+    """GK B K4 (#1175 E2): a marker the restore cannot read is left as it is,
+    and the undo's result and outcome say it is not restored."""
+    from services import template_marker as tm
+
+    d = _marker_edit_then_backup(baseline, harness)
+    (d / tm.MARKER_FILE).write_text("{torn")
+    result = _stream(harness, "undo_last", {})
+    assert result["template_meta"] == {"restored": False, "reason": "unreadable"}
+    assert result["_outcome"]["outcome"] == "uncertain"
+    assert (d / tm.MARKER_FILE).read_text() == "{torn"
 
 
 def test_a_pop_by_another_session_reads_uncertain(baseline, harness, monkeypatch):
