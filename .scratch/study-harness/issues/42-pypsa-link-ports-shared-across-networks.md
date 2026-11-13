@@ -3,7 +3,7 @@
 
 # 42 — A Link with a third port in one network breaks the next solve of a network already in memory
 
-Status: ready-for-agent
+Status: done (#1457)
 Model tier: sonnet
 Size: S
 Blocked by: none
@@ -55,3 +55,4 @@ solve, or to report it upstream and pin a fixed PyPSA.
 - 2026-11-12 triage: Checked against master 397a2f1c6: no repair of the missing `efficiency2` frames exists in the app (only the test-side table restore). Brief: (1) run the issue's repro in the app path (load/edit a three-port Link network while another is in memory, then solve) and record whether it is reachable; (2) if yes, add the missing port time-series frames before the solve, with a regression test from the repro; if no, close with the evidence and a one-line guard note. Report upstream only if (1) shows it reachable and the pre-solve repair is not enough.
 - 2026-11-13 GK A plan GO, conditions: C1 every solve site repairs first (run_simulation or the site itself), pinned by an AST guard over services/ and routers/ with a red case; C2 defaults read from the live Link attrs, every port (bus2–bus4), a bus3 test; C3 the repair is not an edit: input fingerprint (both modes), revision and undo stack unchanged, netcdf round-trip keeps p0/p1 and solves, each pin red under a non-default mutant; C4 only under the context's own lock (copies are private), a test that the lock is held; C5 the shared table restored in a fixture; the PF route tested only if it breaks.
 - 2026-11-13 step 1 result: reachable. `PyPSAService` keeps one ProjectContext per open project resident in one process, so a heat pump added to project B breaks project A's next solve. `n.pf()` and `n.lpf()` do not break on a stale network (checked on a 3-bus network with a Link), only the optimize path's consistency check does.
+- 2026-11-13 hand-off: done in #1457 (merged 21d44207; GK OK @ccdce7ac4fd3fec84f392c718538c72916dc0e6f, carried by a clean master merge to 791ee0f2). `services/solver/link_ports.ensure_link_port_frames(n)` adds the Link columns and frames the shared defaults table names but the network lacks; called under the lock in `solver_service.run_simulation` and at the solve sites in `ac_pf_service`, `adequacy/island_survival`, `solver/island` and `adequacy/sizing_loop_runner`. Tests: `tests/test_link_port_frames.py` (C1–C5, including an AST guard with a red case). Follow-up: the AST guard misses a solve reached through an aliased method (`opt = n.optimize; opt()`); none exists today.
