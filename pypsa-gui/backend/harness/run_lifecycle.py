@@ -97,11 +97,12 @@ def check_rerun(tool_name: str, args: dict[str, Any]) -> dict | None:
 
 def loadflow_current(ctx) -> bool:
     """The load flow's results still describe the open network: the same word
-    the project flow's results row shows (`freshness_by_kind.loadflow`)."""
-    from services.dispatch_status import dispatch_status
-    from services.flow_service import _loadflow_freshness
-    with ctx.solver_state_lock:
-        return _loadflow_freshness(dispatch_status(ctx.network), running=False) == "fresh"
+    the project flow's results row shows (`freshness_by_kind.loadflow`): the
+    load flow's verdict on the provenance graph (`provenance_graph.runs`)."""
+    from services.provenance_graph import runs
+    read = runs.read(ctx)
+    return (read.loadflow_ran and read.dispatch != "none"
+            and runs.results_verdicts(read)["loadflow"].state == "fresh")
 
 
 def _check_loadflow_rerun() -> dict | None:
