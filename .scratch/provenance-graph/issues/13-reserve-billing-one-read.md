@@ -26,6 +26,14 @@ This predates 04b. GK B (54) found it while reviewing #1478.
 
 ## Comments
 
+### 2026-11-13: GK B (56) plan GO, conditions P1–P5
+
+- P1: a `Solved` read carries the inputs digest it compared; `reserve_lines(read=...)` re-reads when it differs from its own (or is None). Tested with a read handed over from other products.
+- P2: test 1 goes red with the weights read moved back outside the `locked_read` bracket, not only against the old code.
+- P3: hours None, or hours for other snapshots, give amounts None with `reserve_not_solved`, never 0 or a partial price; "hours None ⇔ flags" tested both ways, including a hand-built `Solved`.
+- P4: every other caller of `reserve_weights` / `reserve_lines` named in the PR body, with one read or a ticket.
+- P5: `solved()` and the unflagged paths stay `==` master; W1/W3/W4 tests unchanged; mutants on all three files, survivors listed.
+
 ### 2026-11-13: built (session_01G7qCunXsNqVXkNbn8y1sai)
 
 `reserve_products.solved_read` returns the frame, the flags and the hours read under the one `runs.locked_read` bracket (the hours only for a fresh frame); `solved()` returns the first two, unchanged. `billing.reserve_lines(read=...)` prices at that read's hours, and `reserve_view` hands its own read to the lines (one bracket per view). Tests in `tests/test_provenance_graph_reserves.py` (PG-13 block): a reweighting right after the bracket, the view's single read, an unreadable read.
