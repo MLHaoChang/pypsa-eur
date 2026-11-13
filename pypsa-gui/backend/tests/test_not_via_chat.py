@@ -134,7 +134,7 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Export costs and save the report', 'Save results with prices', 'Save the price series I uploaded',
     'Save the scenario costs for later', 'Save this run with its prices and solve again',
     'Show my saved charts', 'Save the report for later',
-    'Save the capacity and check the next time step', 'Save the cost and solve it later',
+    'Set the capex as a default for the next project', 'Save the capacity and check the next time step', 'Save the cost and solve it later',
     'Remember the price rises later in the year', 'Remember that the capex is lower in another project',
     'Save the price and solve again', 'Save the price again',
     'Set capacity to 50 and save, then do the next one', 'Save the capacity, then try another carrier',
