@@ -474,7 +474,7 @@ _KEEP_VERBS = frozenset({'save', 'remember'})
 _REUSE_PHRASE = re.compile(
     r'\b(?:for (?:later|next time)|for (?:my |the |our )?(?:next|another|other|future) projects?'
     r'|to reuse|so i can (?:reuse|use (?:it|this|that) again)|as (?:a|the) default)\b')
-# "Store" is a component, so it counts only with a project or default phrase.
+# "Store" is a component, so it counts only as the opening verb, with a project or default phrase.
 _STORE_PHRASE = re.compile(
     r'\b(?:for (?:my |the |our )?(?:next|another|other|future) projects?|as (?:a|the) default)\b')
 _KEPT_ELSEWHERE = (_SAVED_ELSEWHERE - {'project', 'projects'}) | {
@@ -495,7 +495,7 @@ def _asks_for_a_saved_value(words: set[str], goal: str = '') -> bool:
     text = ' '.join(re.findall(r'[a-z0-9]+', goal.lower()))
     if words & (_KEEP_VERBS | {'keep'}):
         return bool(_REUSE_PHRASE.search(text))
-    return 'store' in words and bool(_STORE_PHRASE.search(text))
+    return text.startswith('store ') and bool(_STORE_PHRASE.search(text))
 
 
 # The headline strip entry answers only what the strip itself owns: what it
