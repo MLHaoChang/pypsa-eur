@@ -38,6 +38,7 @@ from services.study import compile as study_compile
 router = APIRouter(dependencies=[Depends(require_decision_studies_enabled)])
 
 RATE_ROW = "discount_rate"
+RATE_TOLERANCE = 1e-9
 HORIZON_ROW = "battery_storage_lifetime_years"
 APPROXIMATION = (
     "annualised approximation: the off-grid NPC is the 03a row's annual cost times the "
@@ -123,15 +124,20 @@ def study_assumptions(study) -> dict:
 def annuity_factor(rate: float, horizon: int) -> float:
     """Present value of 1 per year for `horizon` years; `horizon` at a zero rate."""
     try:
-        f = float(horizon) if rate == 0.0 else (1.0 - (1.0 + rate) ** -horizon) / rate
+        # expm1/log1p keep the factor accurate for a tiny rate, where 1 - (1+r)**-n is 0.
+        f = (
+            float(horizon)
+            if abs(rate) < 1e-12
+            else -math.expm1(-horizon * math.log1p(rate)) / rate
+        )
     except (OverflowError, ZeroDivisionError):
         f = math.inf
-    if not math.isfinite(f) or f <= 0.0:
+    if not math.isfinite(f):
         raise _refuse(
             422,
             {
                 "error_kind": "npc_not_finite",
-                "message": "the annuity factor is not a finite positive number",
+                "message": "the annuity factor is not finite",
             },
         )
     return f
@@ -163,7 +169,7 @@ def _row(rec: dict | None, architecture_id: str) -> dict:
             },
         )
     rows = rec.get("rows")
-    if not isinstance(rows, list):
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
         raise _refuse(
             409,
             {
@@ -204,7 +210,15 @@ def evaluate(study, rec: dict | None, body: GridExtensionRequest) -> dict:
     row = _row(rec, body.architecture_id)
     basis = study_assumptions(study)
     declared = body.grid_basis.model_dump()
-    bad = [k for k in basis if declared[k] != basis[k]]
+    bad = [
+        k
+        for k in basis
+        if (
+            abs(declared[k] - basis[k]) > RATE_TOLERANCE
+            if k == "discount_rate"
+            else declared[k] != basis[k]
+        )
+    ]
     if bad:
         raise _refuse(
             422,

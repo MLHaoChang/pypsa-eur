@@ -108,16 +108,24 @@ def test_e1_each_basis_field_refuses_on_its_own(field, value):
     assert e.value.detail["fields"] == [field]
 
 
-def test_e1_rate_difference_below_tolerance_is_a_mismatch():
+@pytest.mark.parametrize(
+    "delta,ok", [(5e-10, True), (-5e-10, True), (2e-9, False), (-2e-9, False)]
+)
+def test_e1_rate_tolerance_is_1e9(delta, ok):
     basis = dict(
         currency="EUR",
         currency_year=YEAR,
-        discount_rate=RATE + 1e-6,
+        discount_rate=RATE + delta,
         horizon_years=LIFE,
     )
+    if ok:
+        assert G.evaluate(_study(), _rec(), _body(grid_basis=basis))["status"]
+        return
     with pytest.raises(HTTPException) as e:
         G.evaluate(_study(), _rec(), _body(grid_basis=basis))
-    assert _kind(e) == "basis_mismatch"
+    assert _kind(e) == "basis_mismatch" and e.value.detail["fields"] == [
+        "discount_rate"
+    ]
 
 
 def test_e2_ledger_changes_move_npc_and_expected_basis():
@@ -349,3 +357,49 @@ def test_mutant_gaps_nonfinite_rate_status_bool_cost_and_npc_overflow():
     ) as e:  # finite cost, annuity pushes the NPC to inf
         G.evaluate(_study(), _rec(_row(cost=1.7e308)), _body())
     assert _kind(e) == "npc_not_finite"
+
+
+@pytest.mark.parametrize("rate", [1e-16, -1e-16, 1e-13, 1e-11])
+def test_d1_tiny_rate_keeps_a_positive_annuity(rate):
+    f = G.annuity_factor(rate, 20)
+    assert f == pytest.approx(20.0, rel=1e-6)
+    b = dict(currency="EUR", currency_year=YEAR, discount_rate=rate, horizon_years=20)
+    out = G.evaluate(_study(_ledger(rate=rate, life=20)), _rec(), _body(grid_basis=b))
+    assert out["offgrid_npc"] == pytest.approx(20_000.0, rel=1e-6)
+
+
+def test_d1_annuity_matches_the_closed_form_at_ordinary_rates():
+    assert G.annuity_factor(0.05, 10) == pytest.approx(_annuity(0.05, 10))
+    assert G.annuity_factor(-0.5, 3) == pytest.approx(_annuity(-0.5, 3))
+
+
+@pytest.mark.parametrize("rows", [["junk"], [None], [_row(), 5]])
+def test_d2_a_non_dict_saved_row_is_refused_not_a_500(rows):
+    with pytest.raises(HTTPException) as e:
+        G.evaluate(_study(), {"status": "done", "stale": False, "rows": rows}, _body())
+    assert _kind(e) == "supply_architectures_not_evaluated"
+
+
+def test_d3_the_handler_refuses_when_studies_are_off_as_a_plain_call(monkeypatch):
+    from routers import studies as S
+
+    def off():
+        raise HTTPException(404, "off")
+
+    monkeypatch.setattr(S, "require_decision_studies_enabled", off)
+    with pytest.raises(HTTPException) as e:
+        G.grid_extension_break_even_route(
+            "s", _body(), project=None, db=None, user=None
+        )
+    assert e.value.status_code == 404
+
+
+def test_grid_basis_rejects_an_extra_key():
+    with pytest.raises(ValidationError):
+        G.GridBasis(
+            currency="EUR",
+            currency_year=YEAR,
+            discount_rate=RATE,
+            horizon_years=LIFE,
+            extra_key=1,
+        )
