@@ -142,6 +142,19 @@ def test_a_sub_precision_edit_reads_stale_with_only_the_compared_fields(captured
     ]
 
 
+@pytest.mark.parametrize(
+    ("column", "leaf"), [("p_nom", "capacity"), ("capital_cost", "capital_cost")]
+)
+def test_a_sub_precision_scalar_edit_reads_its_pin_stale(captured, column, leaf):
+    """Y3 for a scalar pin: compared exactly, never rounded (GK B (55) F1)."""
+    ctx, owner, record = captured
+    ctx.network.generators.at["G1", column] += 1e-9
+    step = _steps(_why(owner, record))[f"generators/G1/{leaf}"]
+    assert step["state"] == "stale"
+    compared = step["broken"]["compared"]
+    assert compared["current"] - compared["recorded"] == pytest.approx(1e-9, rel=1e-3)
+
+
 def test_a_changed_dispatch_breaks_the_value_pin_exactly(captured):
     ctx, owner, record = captured
     ctx.network.generators_t.p.loc[:, "G1"] *= 2
