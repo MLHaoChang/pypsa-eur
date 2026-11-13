@@ -28,7 +28,7 @@ await p.evaluate(async ([mode, hints]) => {
   const { useUIStore } = await import('/src/store/uiStore.ts')
   const { useSimulationStore } = await import('/src/store/simulationStore.ts')
   useUIStore.getState().setUiMode?.(mode, { explicit: true })
-  useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: 'issues' })
+  useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: 'issues', assistantDockOpen: false })
   useSimulationStore.getState().setLastFailure({ category: 'infeasible', title: 'No feasible solution',
     hint: 'The solver proved the model has no solution that satisfies every constraint at once.', detail: 'infeasible', constraint_hints: hints })
 }, [MODE, hints])
