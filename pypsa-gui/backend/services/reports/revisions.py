@@ -480,6 +480,12 @@ def reaudit(section, facts: list[NumberFact]) -> SectionAudit:
     return number_audit.audit(_audited_texts(section), facts)
 
 
+def verified_facts(base_section) -> list[NumberFact] | None:
+    """The facts `base_section`'s audit verified, or None for an unaudited
+    section (nothing to check an edit against)."""
+    return _facts(base_section) if _audited(base_section) else None
+
+
 def rerun_audit(base_section, edited) -> SectionAudit:
     """R4: the audit of `edited`, a user's edit of `base_section`. A section
     the base audited is re-audited against the facts the base verified, so a
