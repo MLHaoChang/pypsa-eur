@@ -1072,3 +1072,142 @@ def test_the_sheet_cells_name_each_reason_and_unit():
     assert rows["b"][:2] == ["not_established", "not_established"]
     assert rows["b"][2] in (None, "")
     assert rows["Price at NPV 0"][:2] == ["not_established", "not_established"]
+
+
+# ── GK B (54) D1, D2, M8: the under-lock re-checks, each pinned at lock entry ──
+
+
+class _EnteringLock:
+    """Wraps a lock; `on_enter` runs as the lock is taken, so a test can change the
+    world exactly between a check made before the lock and one made under it."""
+
+    def __init__(self, real, on_enter):
+        self._real, self._on_enter = real, on_enter
+
+    def acquire(self, *a, **k):
+        self._on_enter()
+        return self._real.acquire(*a, **k)
+
+    def release(self):
+        return self._real.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *exc):
+        self.release()
+        return False
+
+
+@pytest.mark.parametrize(
+    "at_lock_entry, reason",
+    [("moved", "inputs_changed"), ("unreadable", "network_busy")],
+)
+def test_c4_the_ic_key_is_rechecked_under_the_network_lock(
+    client, install_network, monkeypatch, session_state, at_lock_entry, reason
+):
+    """The IC key moves (or turns unreadable) as the worker takes the network lock: only
+    a re-check made under the lock sees it, and the run refuses before any read."""
+    import routers.results as R
+    from services.business_case import linked_outputs as L
+    from services.pypsa_service import PyPSAService
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    real_key = R._ic_current_assumptions
+    state = {"armed": False, "moved": False}
+
+    def key():
+        if not state["moved"]:
+            return real_key()
+        if at_lock_entry == "unreadable":
+            return None, "network_busy"
+        (h, *rest), why = real_key()
+        return (h + "-moved", *rest), why
+
+    def on_enter():
+        if state["armed"]:
+            state["moved"] = True
+
+    real_build = R._ic_build_case
+
+    def build(*a, **k):
+        inner = real_build(*a, **k)
+
+        def rebuild():
+            state["armed"] = True  # in the worker, after the route's check
+            return inner()
+
+        return rebuild
+
+    real_get_lock = PyPSAService.get_lock
+    monkeypatch.setattr(R, "_ic_current_assumptions", key)
+    monkeypatch.setattr(R, "_ic_build_case", build)
+    monkeypatch.setattr(
+        PyPSAService,
+        "get_lock",
+        classmethod(lambda cls: _EnteringLock(real_get_lock(), on_enter)),
+    )
+    read = []
+    monkeypatch.setattr(L, "bind", lambda *a, **k: read.append(1))
+    assert client.post(BC_URL).status_code == 200
+    body = _bc_poll(client)
+    assert body["status"] == "refused", body
+    assert body["error_code"] == "investment_case_missing"
+    assert body["refusal"]["reason"] == reason
+    assert state["moved"] and read == []
+    assert session_state(client).get("business_case_report") is None
+
+
+def test_the_put_rechecks_the_solve_under_the_state_lock(
+    client, install_network, monkeypatch, session_state
+):
+    """A solve that starts as the PUT takes the state lock: the re-check under the lock
+    refuses it, and nothing is stored."""
+    import contextlib
+
+    from services.pypsa_service import PyPSAService
+    from tests.test_investment_case_routes import _live_thread
+
+    install_network(build_network())
+    st = session_state(client)
+    stack = contextlib.ExitStack()
+    real_get = PyPSAService.get_solver_state_lock
+    entered = {"n": 0}
+
+    def on_enter():
+        import sys
+
+        f = sys._getframe(1)
+        while f is not None and f.f_code.co_filename == __file__:
+            f = f.f_back  # past this wrapper, to the code that takes the lock
+        if f is not None and f.f_code.co_name == "put_business_case_inputs":
+            entered["n"] += 1
+            if entered["n"] == 1:  # the PUT's own `with`, after its early check
+                stack.enter_context(_live_thread(st, "thread", record=False))
+
+    monkeypatch.setattr(
+        PyPSAService,
+        "get_solver_state_lock",
+        classmethod(lambda cls: _EnteringLock(real_get(), on_enter)),
+    )
+    try:
+        r = _put(client, _bc())
+    finally:
+        stack.close()
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["code"] == "solver_in_flight"
+    assert entered["n"] == 1
+    assert st["solver_config"].business_case is None
+
+
+def test_c3_a_stored_ic_report_without_its_assumptions_hash_is_no_report(
+    client, install_network, monkeypatch, session_state
+):
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    session_state(client)["investment_case_report"]["assumptions_hash"] = None
+    r = client.post(BC_URL)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["reason"] == "no_report"
