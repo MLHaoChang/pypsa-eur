@@ -211,11 +211,16 @@ _LOLE, _CAP = "MC LOLE (h/yr)", "ENS cap (‱ of demand)"
     "edits, listed",
     [
         # T1: two rows swap their values; the multiset of numbers is unchanged.
-        ({_CAP: (None, "3.21 h/yr"), _LOLE: (None, "10.00")},
-         "3.21 h/yr (unverified, withheld), 10.00 (unverified, withheld)"),
+        (
+            {_CAP: (None, "3.21 h/yr"), _LOLE: (None, "10.00")},
+            "3.21 h/yr (unverified, withheld), 10.00 (unverified, withheld)",
+        ),
         # T2: a unit changed beside the number, and in the row label.
         ({_LOLE: (None, "3.21 min/yr")}, "3.21 min/yr (unverified, withheld)"),
-        ({_LOLE: ("MC LOLE (min/yr)", None)}, "MC LOLE (min/yr) (unverified, withheld)"),
+        (
+            {_LOLE: ("MC LOLE (min/yr)", None)},
+            "MC LOLE (min/yr) (unverified, withheld)",
+        ),
         # T2: a unit added to the header of the column that holds the numbers.
         ({"Item": (None, "Value (min/yr)")}, "Value (min/yr) (unverified, withheld)"),
     ],
@@ -319,7 +324,10 @@ def test_a_copy_that_changes_an_admitted_number_in_prose_lists_it_to_check(
     assert out["version"] == 2
     summary = T.get_report(report_id)["sections"][0]
     assert summary["source"] == "user_edit"
-    assert summary["blocks"][0] == {"type": "paragraph", "md": "The plan meets 1.0 h/yr."}
+    assert summary["blocks"][0] == {
+        "type": "paragraph",
+        "md": "The plan meets 1.0 h/yr.",
+    }
     assert summary["audit"]["unverified"] == ["1.0 h/yr"]
     paragraphs = [p.text for p in _docx(client, report_id, 2).paragraphs]
     assert "Executive summary: 1.0 h/yr" in paragraphs
