@@ -380,3 +380,26 @@ def test_an_older_version_is_not_exported_through_the_latest_mapping(
     r = client.post(f"/api/projects/{name}/reports/{rid}/export", json={"version": n})
     assert r.status_code == 200, r.text[:300]
     assert fake_untagged.rendered[-1]["entries"] == []
+
+
+def test_an_older_version_of_a_tagged_template_report_still_exports(
+    client,
+    api_project,
+    session_state,
+    project_storage_dir,
+    fixtures,
+):
+    """Study harness 43 (GK B): a tagged template ignores the mapping plan, so a
+    stored plan does not stop an older version from exporting."""
+    name = api_project("export-v-tagged")
+    rid = _report(client, name, session_state)
+    tpl = _upload(client, name, "tagged_minimal.docx", fixtures["tagged_minimal.docx"])
+    _bind(client, name, rid, tpl["file_id"])
+    pdir = project_storage_dir(name)
+    bound_v = store.load_meta(pdir, rid).latest_version
+    store.update_meta(pdir, rid, mapping_plan={"entries": []})
+    assert _unrecorded(pdir, rid) == bound_v + 1
+    r = client.post(
+        f"/api/projects/{name}/reports/{rid}/export", json={"version": bound_v}
+    )
+    assert r.status_code == 200, r.text[:300]
