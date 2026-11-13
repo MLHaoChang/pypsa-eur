@@ -170,12 +170,23 @@ def test_event_h_uses_the_generator_weights_and_the_draws_that_ran(monkeypatch):
         return real(weights, n_samples, draws)
 
     monkeypatch.setattr(lv, "event_hours", spy)
+    # GK A (26) F1: several batches, an early stop with n != draws, and the
+    # heaviest draw in an EARLIER batch than the last, so passing the last
+    # batch's array or the requested draw count would show. Seed 22 is chosen
+    # for that shape.
     m = mc_adequacy(
-        snapshot_inputs(_net()), draws=100, seed=1, max_draws=2000, cov_target=0.5
+        snapshot_inputs(_net()),
+        draws=20,
+        batch=20,
+        seed=22,
+        max_draws=2000,
+        cov_target=0.2,
     )
     n = m["n_samples"]
-    assert n < 2000  # stopped early
+    assert 20 < n < 2000  # several batches, stopped early
     assert seen["n"] == n and len(seen["draws"]) == n
+    assert seen["draws"][-20:].max() < seen["draws"].max()  # not in the last batch
+    assert seen["draws"].max() > 730.0  # the draw operand decides, not w_max
     assert float(np.mean(seen["draws"])) == pytest.approx(m["lole_hours"])
     assert seen["weights"].max() == pytest.approx(730.0)  # generator, not objective
     assert m["event_h"] == pytest.approx(max(730.0, seen["draws"].max()) / n)
