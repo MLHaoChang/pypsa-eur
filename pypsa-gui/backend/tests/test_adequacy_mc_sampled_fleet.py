@@ -165,7 +165,11 @@ def test_a_grid_side_asset_is_refused_naming_the_import_link(kind, name):
     scope = link_supply.loop_scope(n)
     msg = link_supply.grid_side_refusal(n, scope, kind, name)
     assert msg is not None
-    assert f"{name} is on the grid side" in msg and "grid_import" in msg and "grid side" in msg
+    assert (
+        f"{name} is on the grid side" in msg
+        and "grid_import" in msg
+        and "grid side" in msg
+    )
     assert link_supply.grid_side_refusal(n, scope, kind, "hub_pv") is None
 
 
