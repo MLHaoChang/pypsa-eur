@@ -190,6 +190,15 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A refusal for a never-failing (firm-block) unit says that its credit would restate the assumption. It never says that nothing can be removed (#1456 C2, GK A (25)).
 - A pre-solve network repair is pinned as not-an-edit (fingerprint, revision, undo), with a mutant writing a non-default value. Every solve call site is covered by an AST guard keyed on (file, function) (#1457, GK A (25)).
 - A verdict "within tolerance of the goal" is computed from the draws and weights that produced the estimate, never from the requested draws or network weights. Its resolution is one more draw as heavy as the heaviest used draw, floored at one shortfall hour at the heaviest snapshot. A new loop status gets an explicit mapping in every status reader (adequacy-loops 04 D1, D3, D7, GK A (25), (26)).
+- A cache keyed on a revision is safe only if every writer of a hashed input moves the key after its write. A bump before the handler lets a poll cache the pre-edit state (#1464 F1, GK B (53)).
+- A polled freshness read never blocks on the mutation lock, and never reports stale only because the lock was held (#1464 F2, GK B (53)).
+- A typed refusal's status code is pinned by test wherever a manifest row claims it (#1452 I1, GK B (53)).
+- A broad `except` that turns parser failures into a 4xx logs the traceback, because it also covers our own mapping code (#1452 I2, GK B (53)).
+- An admission check that a worker repeats must be repeated under the lock where the effect (a solve) happens (#1454 F1, GK B (53)).
+- A per-step marker set around a dispatch is cleared in `finally`, with a test that includes a raising dispatch (#1454 F2, GK B (53)).
+- A preset note never prices a cost that a linked row also prices (#1462 F1, GK B (53)).
+- A key-scoped restore makes the outcome check compare only the restored keys (UM10 K3, GK B (53)).
+- A solver-config write that touches only fields in `reliability_goal.NOT_LP_FIELDS` need not bump the network revision, provided the fields are dropped from `goal_free_config` with a pin test that the fingerprint, adequacy hash and IC digest are unchanged, and every reader of those fields keys its staleness on its own inputs hash, with a test. Any other solver-config write still bumps (refines LC40-COUNTER-1; owner LC40-COUNTER-2; #1467 C1, GK B (54)).
 
 ## Engineering rules
 
