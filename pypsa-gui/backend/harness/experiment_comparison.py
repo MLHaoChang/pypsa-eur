@@ -9,6 +9,8 @@ from harness import experiment_execution as engine
 from services import experiments as ex
 from services.reliability_goal import goal_free_config
 
+_refuse = ex._refuse  # a bare name, so the error-kind manifest test sees the literal kinds
+
 _ERRORS = {
     'selection': {'error_kind': 'invalid_experiment_comparison',
                   'message': 'Select two distinct owned network case receipts.'},
@@ -65,9 +67,9 @@ def _basis_digest(value):
     try:
         blob = json.dumps(value, sort_keys=True, allow_nan=False).encode()
     except (TypeError, ValueError, RecursionError):
-        ex._refuse('invalid_experiment', 'The plan must contain bounded finite JSON values.', 422)
+        _refuse('invalid_experiment', 'The plan must contain bounded finite JSON values.', 422)
     if len(blob) > MAX_BASIS_BYTES:
-        ex._refuse('invalid_experiment', 'The run\'s horizon is too large to compare.', 422)
+        _refuse('horizon_too_large_to_compare', 'The run\'s horizon is too large to compare.', 422)
     return hashlib.sha256(blob).hexdigest()
 
 

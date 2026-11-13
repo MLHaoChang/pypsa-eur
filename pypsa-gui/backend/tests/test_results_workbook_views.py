@@ -355,3 +355,12 @@ def test_a_period_total_with_an_unknown_part_is_not_established(solved, monkeypa
     ws = _wb(_build(solved, ["economics"]))["Economics"]
     assert _key(ws, "Net profit (all assets)", P2) == "not_established"
     assert isinstance(_key(ws, "Net profit (all assets)", "2030"), (int, float))
+
+
+def test_rows_keeps_a_column_with_no_values():
+    from services.results_workbook.views_network import _rows
+
+    table = _rows("T", "MW", [{"name": "a", "mw": 1.0, "cap": None},
+                              {"name": "b", "mw": 2.0, "cap": None}], ["name"])
+    assert list(table.frame.columns) == ["name", "mw", "cap"]
+    assert table.frame["cap"].isna().all()
