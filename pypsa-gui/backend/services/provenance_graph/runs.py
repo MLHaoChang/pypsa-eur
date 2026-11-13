@@ -14,6 +14,11 @@ whether the results still describe the current inputs:
 - `results:study` -computed_in-> `run:study`: whether an edit seam was crossed since the study started
   (`study_state.edited_since`); a record with no captured revision is uncompared.
 
+- `results:reserves` -computed_in-> `run:reserves` (04b, `reserves_verdict`): the reserve products and floors digest
+  the solve recorded against the current one, and `derived_from` the hours and period weights it multiplied by.
+  Reserves is not a run kind of the flow (`KINDS`, `freshness_by_kind`): no Run request carries it, so its absence
+  from the header's count says nothing about it. The reserves card shows its own "Out of date" state.
+
 An unreadable current fingerprint is stale (fail closed, ADR-0001). Reads only: nothing is written.
 """
 
@@ -313,6 +318,47 @@ def runs_graph(r: RunsRead, memory=None):
     b = Builder(r, memory)
     add_runs(b, r)
     return b.build()
+
+
+def locked_read(ctx, fn):
+    """`fn()` under `ctx`'s mutation lock, between two reads of its edit counter and network object (as `read`).
+    An edit that lands meanwhile is read again once. A second move, or a lock wait past `LOCK_WAIT_S`, returns
+    `pins.UNREADABLE`. No context, or one with no lock, has nothing to wait for."""
+    if ctx is None:
+        return fn()
+    for _attempt in range(2):
+        network, revision = getattr(ctx, "network", None), _revision(ctx)
+        lock = getattr(ctx, "mutation_lock", None)
+        if lock is None:
+            value = fn()
+        elif not lock.acquire(timeout=LOCK_WAIT_S):
+            return pins.UNREADABLE
+        else:
+            try:
+                value = fn()
+            finally:
+                lock.release()
+        if getattr(ctx, "network", None) is network and _revision(ctx) == revision:
+            return value
+    return pins.UNREADABLE
+
+
+def reserves_verdict(inputs: pins.Pin | None, weights: pins.Pin) -> Verdict:
+    """The reserve commitments' verdict (04b): `results:reserves` -computed_in-> `run:reserves`, pinned on the
+    products and floors digest the solve recorded (`inputs`; None when the caller does not compare it), and
+    `derived_from` the hours and period weights (`weights`). A recorded None never matches; a read that raises is
+    stale."""
+    from services.provenance_graph.queries import Builder, staleness
+
+    res = results_id("reserves")
+    b = Builder(None)
+    b.node(Node("derived", res))
+    b.node(Node("run", run_id("reserves"), inputs.recorded if inputs else None))
+    b.node(Node("input", "input:reserve_weights", weights.recorded))
+    if inputs is not None:
+        b.edge(Edge("computed_in", res, run_id("reserves"), inputs))
+    b.edge(Edge("derived_from", res, "input:reserve_weights", weights))
+    return staleness(b.build(), res)
 
 
 def results_verdicts(r: RunsRead) -> dict[str, Verdict]:
