@@ -260,6 +260,25 @@ def test_single_year_network_is_one_stage_of_the_modelled_year():
     assert D.import_stages(n, {}) == [stage("all", "2030-01-01", "2031-01-01", 40.0)]
 
 
+def test_a_single_year_schedule_without_a_finite_value_is_the_fixed_size():
+    import numpy as np
+    import pandas as pd
+
+    n = T.BUILDERS["eh_datacenter"]()
+    n.links_t["eh_energization_mw"] = pd.DataFrame(
+        {"grid_import": np.nan}, index=n.snapshots
+    )
+    assert D.import_stages(n, {}) == [stage("all", "2030-01-01", "2031-01-01", 40.0)]
+
+
+def test_an_earlier_partial_period_ending_at_the_first_cod_leaves_it_exact():
+    out = ttp(
+        spec(project_start="2024-01-01", phases=[{"cod": "2027-01-01", "it_mw": 12.0}]),
+        TWO_BEFORE,
+    )
+    assert window(out) == ("2030-01-01", "2030-01-01", 0)
+
+
 def test_an_extendable_import_without_a_schedule_is_unsized():
     n = T.BUILDERS["eh_datacenter"]()
     n.links.loc["grid_import", "p_nom_extendable"] = True
@@ -472,7 +491,11 @@ def test_a_period_the_schedule_leaves_unlimited_is_the_fixed_size_never_zero():
     n = T.BUILDERS["eh_datacenter_staged"]()
     frame = n.links_t["eh_energization_mw"]
     frame.loc[frame.index.get_level_values(0) == 2027, "grid_import"] = np.nan
-    assert [s["energized_mw"] for s in D.import_stages(n, {})] == [55.0, 55.0, 55.0]
+    assert [(s["energized_mw"], s["max_mw"]) for s in D.import_stages(n, {})] == [
+        (55.0, 55.0),
+        (55.0, 55.0),
+        (55.0, 55.0),
+    ]
     n.links.loc["grid_import", "p_nom_extendable"] = True
     with pytest.raises(D.StagesUnavailable) as exc:
         D.import_stages(n, {})
