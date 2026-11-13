@@ -237,6 +237,38 @@ def test_a_missing_priced_value_gives_no_pack_price(tmp_path, monkeypatch):
     assert cost["pack_price"]["status"] == E.NOT_ESTABLISHED
 
 
+@pytest.mark.parametrize(
+    "value, scale",
+    [
+        (None, 1e-308),  # the PV's own cost over a tiny finite scale
+        (
+            1e308,
+            0.1,
+        ),  # a huge finite cost over an ordinary scale: the check is on the result
+    ],
+)
+def test_a_quotient_that_overflows_gives_no_pack_price(
+    tmp_path, monkeypatch, client, install_network, value, scale
+):
+    """A finite value over a finite, non-zero scale whose quotient overflows: never an inf pack price (X3), and
+    the why answer still serialises (no 500)."""
+    n = install_network(_pv(tmp_path, monkeypatch))
+    if value is not None:
+        n.generators.at["g", "overnight_cost"] = value
+    _scale(n, scale)
+    assert math.isinf(float(n.generators.at["g", "overnight_cost"]) / scale)
+    want = {
+        "status": E.NOT_ESTABLISHED,
+        "reason": "the pack price (value ÷ scale) is not a finite number",
+        "basis": E.ARITHMETIC,
+    }
+    pack = explain(n, "Generator", "g", "overnight_cost")["steps"][0]["pack_price"]
+    assert pack == want
+    r = client.get(URL.format("Generator", "g", "overnight_cost"))
+    assert r.status_code == 200, r.text
+    assert r.json()["steps"][0]["pack_price"] == want
+
+
 def test_a_good_pack_price_is_finite_and_non_zero(tmp_path, monkeypatch):
     n = _pv(tmp_path, monkeypatch)
     _scale(n, 1.5)
