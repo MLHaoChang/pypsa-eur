@@ -178,6 +178,13 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A test that only bounds a value (`>= target`) does not pin a guard: assert the exact value at binding, or the classification, so a mutant that loosens the guard fails (#1424 G2, GK A (24)).
 - An over-bound refusal for a wildcard lever is tested per instance, and the wildcard is checked against the built template so no never-lever matches (#1429 B1, GK A (24)).
 
+- A per-kg premium or incentive on the same served quantity is not a sale. Never link it beside the main sale: its share sums into f and drops the whole lost-production line (#1436 F1, GK B (52)).
+- No capex line sits in two maintenance-category share bases (insurance exempt), and a share base is never only a replacement lump (#1436 F3/G2, #1441 H3, GK B (52)).
+- A typed volume that earns revenue (a premium, GOs) is the verified volume expected, never above what the results show served (#1436 G1, #1441 H2, GK B (52)).
+- Moving a short-circuited compare into an evaluate-all verdict can add IO under a lock: keep the order and stop at the first break (#1443 K3, GK B (52)).
+- A no-promote lease release must not leave a pending utterance that a later admission then promotes (#1440 O5′, GK B (52)).
+- A table-edit compare is per cell, never a multiset (LC-43a T1, GK B (52)).
+
 ## Engineering rules
 
 - Grid source impedance derived from an entered S_k'' carries the IEC 60909 voltage factor c (Z = c·Un²/S_k''; S_sc2 = S_k''/c), in every screen: unbalance, the flicker note, the impedance scan.
