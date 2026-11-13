@@ -778,6 +778,7 @@ def test_the_dc_backup_prices_fuel_from_its_heat_rate_not_a_genset_curve():
 
     plain, units = _dc_assess(_dc_network())
     assert len(units) > 1 and _curve_note(plain) == []
+    assert "fuel_curve_ignored" not in plain["cost"]
     assert plain["cost"]["notes"][: len(dc_backup.COST_NOTES)] == list(
         dc_backup.COST_NOTES
     )
@@ -802,6 +803,8 @@ def test_the_dc_backup_prices_fuel_from_its_heat_rate_not_a_genset_curve():
     ):
         assert curved["cost"][key] == plain["cost"][key], key
     (note,) = _curve_note(curved)
+    assert curved["cost"]["fuel_curve_ignored"] == [units[0]]
+    assert "fuel_curve_ignored" not in off["cost"]
     assert note.startswith(
         "Fuel curve not used here: fuel is priced from the backup heat rate ("
     )
@@ -953,6 +956,22 @@ def test_the_sizing_loop_refuses_half_a_curve_and_a_user_cost_series():
         assert out["rounds"][0]["status"] == "error", out["verdict"]
         # UX: the condition opens with the generator, never the exception class.
         assert cond.startswith("genset: ") and "Error" not in cond, cond
+        assert out["rounds"][0]["kind"] == "fuel_curve_invalid"
+
+
+def test_any_other_sizing_solve_error_keeps_its_type_name_and_no_kind(monkeypatch):
+    """GK B D2: only the fuel curve refusal drops its class name; a plain ValueError keeps it."""
+    from services.adequacy import sizing_loop_runner as slr
+
+    from tests.test_sizing_loop_runner import _config, _inputs, _tiny
+
+    def boom(n, cfg, undo):
+        raise ValueError("boom")
+
+    monkeypatch.setattr(slr, "_prepare", boom)
+    out = slr.run_sizing(_tiny(), _config(), _inputs())
+    assert out["rounds"][0]["condition"] == "ValueError: boom"
+    assert "kind" not in out["rounds"][0]
 
 
 def test_the_sizing_loop_stages_a_p_nom_changed_outside_the_form():
@@ -1145,3 +1164,42 @@ def test_a_curve_with_no_no_load_term_needs_no_solved_status():
         row["fuel_mwh"] == pytest.approx(HOURS * LOAD_MW * SLOPE)
         and row["no_load_fuel_mwh"] == 0.0
     )
+
+
+def test_a_bulk_clear_resets_stand_by_only_on_the_curve_generators(
+    client, install_network
+):
+    """GK B D1: the reset is per target; a no-curve generator in the batch keeps its stand-by cost."""
+    n = _installed(install_network)
+    assert (
+        client.post("/api/network/generators", json=_genset(**CURVE)).status_code == 201
+    )
+    plain = {**_genset(stand_by_cost=3.0), "name": "plain"}
+    assert client.post("/api/network/generators", json=plain).status_code == 201
+    r = client.patch(
+        "/api/network/_bulk",
+        json={
+            "component_class": "Generator",
+            "names": ["genset", "plain"],
+            "updates": {k: None for k in fuel_curve.COLUMNS},
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["notices"] == [f"genset: {CLEARED}"]
+    assert n.generators.at["genset", "stand_by_cost"] == 0.0
+    assert n.generators.at["plain", "stand_by_cost"] == 3.0
+
+
+def test_fuel_use_scales_no_load_fuel_by_p_nom_and_names_the_carrier():
+    """GK B T1: p_nom 1.25 (its 20 % minimum, 0.25 MW, sits under the 0.3 MW load, so the unit runs every hour)."""
+    n = _network(curve=True)
+    n.generators.at["genset", "p_nom"] = 1.25
+    fuel_curve.apply(n)
+    _solve(n)
+    (row,) = fuel_curve.fuel_use(n)
+    assert row["carrier"] == "diesel"
+    assert row["no_load_fuel_mwh"] == pytest.approx(NO_LOAD * 1.25 * HOURS)
+    assert row["fuel_mwh"] == pytest.approx(
+        NO_LOAD * 1.25 * HOURS + SLOPE * LOAD_MW * HOURS
+    )
+    assert row["fuel_cost_eur"] == pytest.approx(row["fuel_mwh"] * PRICE)

@@ -389,8 +389,9 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
         # A fuel curve refusal (homer-parity 02a) reads as its user-facing words; anything else names its type.
         from services.fuel_curve import FuelCurveError
 
-        cond = str(exc) if isinstance(exc, FuelCurveError) else f"{type(exc).__name__}: {exc}"
-        return {"status": "error", "condition": cond, "info": info}
+        if type(exc) is FuelCurveError:
+            return {"status": "error", "condition": str(exc), "kind": "fuel_curve_invalid", "info": info}
+        return {"status": "error", "condition": f"{type(exc).__name__}: {exc}", "info": info}
     finally:
         watcher.disarm()
         watcher.shutdown()

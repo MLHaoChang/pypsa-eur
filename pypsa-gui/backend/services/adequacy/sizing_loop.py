@@ -205,6 +205,8 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
         if not _solved(result):
             cond = _why(result)
             row.update(status=(result or {}).get("status"), condition=cond, forward_s=0.0)
+            if kind := (result or {}).get("kind"):  # a refusal's machine key (homer-parity 02a: fuel_curve_invalid)
+                row["kind"] = kind
             rounds.append(row)
             if on_iteration is not None:
                 on_iteration(row)

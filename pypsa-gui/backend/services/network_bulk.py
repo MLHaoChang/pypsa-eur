@@ -275,6 +275,7 @@ def apply_bulk_update(body: dict) -> dict:
     """
     refuse_edit_during_live_study()  # P27a A1: not routed via _update_component
     notices: list[str] = []  # homer-parity 02a: what a newly set fuel curve replaces, per generator
+    resets: dict[str, dict[str, float]] = {}  # homer-parity 02a: the stand-by reset of each target whose curve is cleared
     component_class = body.get("component_class", "")
     names = body.get("names", [])
     updates = body.get("updates", {})
@@ -560,8 +561,9 @@ def apply_bulk_update(body: dict) -> dict:
                                                   submitted=coerced):
                         notices.append(f"{t}: {notice}")
                     if reset := fuel_curve.cleared(after, before=before):
+                        # Per target (GK B D1): a no-curve generator in the same batch keeps its costs.
                         notices.append(f"{t}: {fuel_curve.clear_notice(after, before=before)}")
-                        coerced.update(reset)
+                        resets[t] = reset
 
         for _targets, coerced in pending:
             carrier = coerced.get("carrier")
@@ -590,6 +592,12 @@ def apply_bulk_update(body: dict) -> dict:
                 changed = [c for c in typed if not _same_value(before[(t, c)], df.at[t, c])]
                 if changed:
                     asset_provenance.mark_customised(n, component_class, t, changed)
+                if reset := resets.get(t):
+                    reset = {c: v for c, v in reset.items() if not _same_value(df.at[t, c], v)}
+                    for col, value in reset.items():
+                        df.at[t, col] = value
+                    if reset:
+                        asset_provenance.mark_customised(n, component_class, t, list(reset))
             if component_class == "Generator":
                 fuel_curve.apply(n, _targets, stamp=True)
 
