@@ -352,13 +352,19 @@ def test_startup_survives_a_broken_adapter_import(monkeypatch):
     import main
     from services import live_speech
 
+    import harness.providers
+
     swept = []
     monkeypatch.setattr(live_speech, "start_boot_sweep", lambda: swept.append(1))
     monkeypatch.setattr(live_speech, "_TRANSPORT", None)
     monkeypatch.setenv(live_speech.ENABLE_ENV, "1")
-    monkeypatch.setitem(
-        sys.modules, "harness.providers.hosted_speech", None
-    )  # import fails
+    for name, value in FAKE.items():  # a working import would install LiveKit
+        monkeypatch.setenv(name, value)
+    # Both routes to the module must fail: the package attribute and sys.modules.
+    monkeypatch.delattr(harness.providers, "hosted_speech")
+    monkeypatch.setitem(sys.modules, "harness.providers.hosted_speech", None)
+    with pytest.raises(ImportError):
+        from harness.providers import hosted_speech  # noqa: F401
     main._speech_boot_sweep()
     assert live_speech._TRANSPORT is None and swept == [1]
 
@@ -389,6 +395,7 @@ def test_evidence_records_the_config_digest_and_code_version():
         {hs.PROBE_BUDGET: "0.06"},
         {hs.PROBE_APPROVAL: "LV01-PROBE-2"},
         {hs.LIVEKIT_URL: "wss://other.livekit.invalid"},
+        {hs.AGENT_NAME: "other-agent"},
     ],
 )
 def test_config_digest_changes_with_what_the_gate_checks(changes):
@@ -415,6 +422,44 @@ def test_probe_fails_when_the_grant_outlives_900_seconds():
     assert run(FakeTransport(), FakeTts(), FakeStt(heard))["passed"] is True
     evidence = run(LongGrant(), FakeTts(), FakeStt(heard))
     assert evidence["media"]["grant_ttl_s"] > 900 and evidence["passed"] is False
+
+
+def _grant_for(ttl_s):
+    class Grant(FakeTransport):
+        def open_session(self, **kw):
+            grant = super().open_session(**kw)
+            return lm.MediaGrant(
+                url=grant.url, token=grant.token, expires_at=time.time() + ttl_s
+            )
+
+    return Grant()
+
+
+@pytest.mark.parametrize("ttl_s, passed", [(900, True), (1, True), (0, False)])
+def test_probe_grant_bound_is_inclusive_at_900_and_exclusive_at_0(ttl_s, passed):
+    evidence = run(_grant_for(ttl_s), FakeTts(), FakeStt("250 and 48"))
+    assert evidence["media"]["grant_ttl_s"] == ttl_s and evidence["errors"] == {}
+    assert evidence["passed"] is passed
+
+
+def test_code_version_is_git_head_with_a_dirty_marker(monkeypatch):
+    import subprocess
+
+    head = subprocess.run(
+        ["git", "-C", str(probe.REPO), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert probe.code_version() in (head, f"{head}+dirty")
+
+    outputs = iter([f"{head}\n", " M some/file.py\n"])
+
+    def fake_run(*a, **kw):
+        return subprocess.CompletedProcess(a, 0, stdout=next(outputs), stderr="")
+
+    monkeypatch.setattr(probe.subprocess, "run", fake_run)
+    assert probe.code_version() == f"{head}+dirty"
 
 
 def test_adapter_builders_read_os_environ_by_default(monkeypatch):
