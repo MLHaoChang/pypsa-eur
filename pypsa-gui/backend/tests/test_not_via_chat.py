@@ -65,6 +65,7 @@ def test_the_issue_rows_are_declared():
         'site_scene': ('unbuilt', 'map'),
         'accept_assumed_defaults': ('unbuilt', None),
         'intent_comparison': ('unbuilt', None),
+        'business_case': ('unbuilt', None),     # business case 08a; 08b adds the tools
         'dc_backup': ('unbuilt', None),
         'dc_architecture': ('unbuilt', None),
         'dc_operational_gap': ('manual', 'results'), 'results_headline_strip': ('manual', 'results'),

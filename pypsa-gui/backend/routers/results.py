@@ -2375,6 +2375,10 @@ def put_business_case_inputs(body: BusinessCaseIn, if_match: str | None = Header
     if body.business_case is not None:
         new = config_or_422(body.business_case).model_dump(mode="json")
     with PyPSAService.get_solver_state_lock():
+        if _solver_in_flight():          # re-checked under the lock (K1b)
+            raise HTTPException(409, {"code": "solver_in_flight",
+                                      "message": "a solve is running on this project; change "
+                                                 "the business-case inputs after it finishes"})
         current = _bc_raw()
         tag = _entity_tag(if_match)
         if tag is not None and tag != "*" and tag != config_digest(current):
@@ -2465,16 +2469,20 @@ def _bc_read_solve(ic_hash: str):
     refused if it moved since the route's check, then every linked line's series and the
     lost production from that same live solve."""
     def read(case, cfg):
+        from models.commercial import CommercialConfig
         from services.business_case import linked_outputs as L
-        from services.business_case.runner import StaleInvestmentCase
+        from services.business_case.runner import RunRefused, StaleInvestmentCase
 
         commercial = getattr(_state["solver_config"], "commercial", None)
         try:
-            from models.commercial import CommercialConfig
             bound = CommercialConfig.model_validate(commercial) if isinstance(commercial, dict) \
                 else None
-        except ValidationError:
-            bound = None
+        except ValidationError as exc:
+            # "Cannot read" is a refusal, never "no shortfall assets" (GK #1079).
+            raise RunRefused("commercial_config_invalid",
+                             "the commercial config cannot be read, so the lost production "
+                             "cannot be bound; fix it and run the investment case again",
+                             detail=str(exc.errors()[0].get("msg"))) from exc
         lock = PyPSAService.get_lock()
         if not lock.acquire(timeout=_IC_LOCK_WAIT_S):
             raise StaleInvestmentCase("network_busy")
@@ -2508,27 +2516,41 @@ def get_business_case():
     """The business-case run: its status (stage, refusal code and field) and the stored
     report with its staleness (on its own inputs digest and the IC key it ran on). 204
     when neither a run nor a report exists."""
-    from services.business_case.runner import REPORT_KEY, STUDY_KEY, staleness
+    from services.business_case.runner import REPORT_KEY, STUDY_KEY
     from services.finance.investment_case_runner import public_record
 
     record = public_record(_state.get(STUDY_KEY))
     stored = _state.get(REPORT_KEY)
     if not record and not stored:
         return Response(status_code=204)
-    ic_now = (None, None)
-    if stored:
-        current, why = _ic_current_assumptions()
-        ic_now = (current[0] if current else None, why)
     body = record or {"status": "idle", "study": STUDY_KEY}
     body["report"] = stored
-    body["staleness"] = staleness(stored, inputs_raw=_bc_raw(), ic_current=ic_now)
+    body["staleness"] = _bc_staleness_now(stored)
     return body
+
+
+def _bc_staleness_now(stored: dict | None, ic_key: tuple | None = None) -> dict:
+    """The stored business-case report's staleness now: on its own inputs digest and on
+    the current investment case, which must still have a current report. `ic_key` is an
+    already-read `_ic_current_assumptions()` result, so one response reads it once."""
+    from services.business_case.runner import staleness
+
+    if not stored:
+        return staleness(None, inputs_raw=None, ic_current=(None, None))
+    if not _state.get("investment_case_report"):
+        return staleness(stored, inputs_raw=_bc_raw(),
+                         ic_current=(None, "investment_case_missing"))
+    current, why = ic_key if ic_key is not None else _ic_current_assumptions()
+    return staleness(stored, inputs_raw=_bc_raw(),
+                     ic_current=(current[0] if current else None, why))
 
 
 @results_router.post("/business_case/abort")
 def post_business_case_abort():
     """Ask a running business-case run to stop (at its next stage; stores nothing)."""
-    return _abort_study("business_case", "no business-case run has been recorded in this session")
+    from services.business_case.runner import STUDY_KEY
+
+    return _abort_study(STUDY_KEY, "no business-case run has been recorded in this session")
 
 
 @results_router.post("/business_case")
@@ -2538,9 +2560,9 @@ def post_business_case():
     report ("run the investment case first", C3); 409 while a solve or another study
     runs, re-checked when the run claims the mesh under the lock (C5)."""
     from routers.simulation import _state_update
-    from services.business_case.runner import config_or_422, start_business_case
+    from services.business_case.runner import STUDY_KEY, config_or_422, start_business_case
 
-    _refuse_if_mesh_busy("business_case")
+    _refuse_if_mesh_busy(STUDY_KEY)
     cfg = _state["solver_config"]
     raw = getattr(cfg, "business_case", None)
     if raw is None:
@@ -2776,21 +2798,18 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
     project = PyPSAService.get_loaded_project()
     report = load_ic_report(_state)
     case_state = None
+    ic_key = None
     if report is not None:
         # The same staleness key GET /investment_case reports (IC P4 WP4.6b).
         from services.finance.investment_case_runner import staleness
 
-        current, why = _ic_current_assumptions()
+        ic_key = current, why = _ic_current_assumptions()
         case_state = staleness(report.model_dump(mode="json"), current, reason=why)
-    # Business case 08a (C7): the stored report and its staleness; never run here.
+    # Business case 08a (C7): the stored report and its staleness on the same IC key
+    # read; the export never runs it.
     from services.business_case.runner import REPORT_KEY as _BC_KEY
-    from services.business_case.runner import staleness as _bc_staleness
     bc_report = _state.get(_BC_KEY)
-    bc_state = None
-    if bc_report:
-        bc_cur, bc_why = _ic_current_assumptions()
-        bc_state = _bc_staleness(bc_report, inputs_raw=_bc_raw(),
-                                 ic_current=(bc_cur[0] if bc_cur else None, bc_why))
+    bc_state = _bc_staleness_now(bc_report, ic_key) if bc_report else None
     # The acting user covers the build too: the views whose routes read a
     # project's files resolve each run's project for this user first.
     previous = chat_tools.acting_user_id()

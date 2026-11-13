@@ -198,8 +198,8 @@ def report_body(*, bc, result, p, k: dict, be: dict, outputs: dict, raw: dict,
 def staleness(stored: dict | None, *, inputs_raw: dict | None,
               ic_current: tuple[str | None, str | None]) -> dict:
     """Whether the stored report still describes the current inputs and investment case.
-    `ic_current` is (the current IC key, why it is None). A key not readable now is stale,
-    never silently current."""
+    `ic_current` is (the current IC key, why it is None): None when no current IC report
+    exists or its key is not readable now. Either is stale, never silently current."""
     if not stored:
         return {"present": False, "stale": None, "changed": [], "reason": None}
     changed = []
@@ -218,7 +218,9 @@ def staleness(stored: dict | None, *, inputs_raw: dict | None,
 # ── the study ────────────────────────────────────────────────────────────────
 
 
-class _Refused(Exception):
+class RunRefused(Exception):
+    """A typed refusal of the run (its record's `error_code` and `refusal`)."""
+
     def __init__(self, code: str, message: str, **detail):
         super().__init__(message)
         self.code, self.detail = code, {"code": code, "message": message, **detail}
@@ -290,7 +292,7 @@ def start_business_case(
                 return
             got = case_hash(case)
             if ic_case_hash is None or got != ic_case_hash:
-                raise _Refused("investment_case_missing",
+                raise RunRefused("investment_case_missing",
                                "the investment case changed since it was run; run the "
                                "investment case first", reason="case_hash_differs")
             progress("read_outputs")
@@ -319,9 +321,15 @@ def start_business_case(
             progress("store")
             body = report_body(bc=bc, result=result, p=p, k=k, be=be, outputs=outputs,
                                raw=raw, ic_hash=ic_hash, ic_case_hash=got)
-            state_update(**{REPORT_KEY: body})
-            finish("done", error=None, business_case_hash=bc.hash)
-        except _Refused as exc:
+            # The stop check, the store and the finish are one step under the state lock,
+            # which the abort route reads the record under: an abort seen here stores
+            # nothing; one that reads the record after this step sees it finished.
+            with lock:
+                if aborted():
+                    return
+                state_update(**{REPORT_KEY: body})
+                finish("done", error=None, business_case_hash=bc.hash)
+        except RunRefused as exc:
             refused(exc.code, str(exc), exc.detail)
         except BusinessCaseRefused as exc:
             d = refusal_detail(exc)
@@ -341,7 +349,7 @@ def start_business_case(
     return {"status": "running", "study": STUDY_KEY, "ic_assumptions_hash": ic_hash}
 
 
-class StaleInvestmentCase(_Refused):
+class StaleInvestmentCase(RunRefused):
     """The IC key moved between the route's check and the solve read (C4)."""
 
     def __init__(self, reason: str):

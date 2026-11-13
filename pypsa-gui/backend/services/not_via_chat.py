@@ -222,11 +222,12 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'id': 'business_case',
         'title': 'Business case',
         'disposition': 'unbuilt',
-        'reason': 'Running the business case and editing its lines is not available from chat yet (business case 08b adds the tools). Use the Business case view beside the investment case on the Results page.',
+        'reason': 'Running the business case and editing its lines is not available from chat yet. Use the Business case view beside the investment case on the Results page.',
         'page': 'Results (Investment tab)',
         'panel': None,
         'keywords': frozenset({
-            'business_case',
+            'ebitda',
+            'breakeven',
         }),
         'routes': frozenset({
             ('GET', '/api/results/business_case'),

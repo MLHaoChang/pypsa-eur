@@ -653,3 +653,127 @@ def test_c6_a_pack_row_in_another_unit_is_422_never_a_filled_default(client, ins
     assert d["field"].startswith("lines[") and "default_keys[" in d["field"]
     assert "business_case" not in r.json()
     assert session_state(client)["solver_config"].business_case is None
+
+
+# ── review round: the gaps the 08a spec review named ─────────────────────────
+
+
+def test_c2_an_unbuildable_config_is_422_never_a_silent_default(client, install_network,
+                                                               monkeypatch, session_state):
+    import routers.projects as P
+
+    install_network(build_network())
+
+    def boom(data):
+        raise TypeError("unexpected keyword 'x'")
+    monkeypatch.setattr(P, "_solver_config_from_dict", boom)
+    r = _put(client, _bc())
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "solver_config_invalid"
+    assert session_state(client)["solver_config"].business_case is None
+
+
+def test_c4_lost_production_reads_the_ic_runs_own_live_solve(client, install_network,
+                                                             monkeypatch, session_ctx):
+    from services.business_case import linked_outputs as L
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    seen = []
+    real = L.lost_production
+
+    def spy(n, solve, case, inputs=None):
+        seen.append((n, solve))
+        return real(n, solve, case, inputs)
+    monkeypatch.setattr(L, "lost_production", spy)
+    assert client.post(BC_URL).status_code == 200
+    assert _bc_poll(client)["status"] == "done"
+    ctx = session_ctx(client)
+    (n, solve), = seen
+    assert n is ctx.network and solve.network is ctx.network
+    assert solve.lost_load is ctx.solver_state.get("last_lost_load")
+
+
+def test_an_unreadable_commercial_config_refuses_never_reads_as_none(
+        client, install_network, monkeypatch, session_state):
+    """GK #1079: a commercial config the model refuses is a typed refusal, never "no
+    shortfall assets". The IC key is pinned so the route's check passes."""
+    import routers.results as R
+    from services.business_case import linked_outputs as L
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    stored_key = client.get(IC_URL).json()["report"]["current_hash"]
+    monkeypatch.setattr(R, "_ic_current_assumptions", lambda: ((stored_key, {}), None))
+    called = []
+    monkeypatch.setattr(L, "lost_production", lambda *a, **k: called.append(1))
+    st = session_state(client)
+    st["solver_config"] = dataclasses.replace(st["solver_config"],
+                                              commercial={"poc_link": 12, "bogus": True})
+    assert client.post(BC_URL).status_code == 200
+    body = _bc_poll(client)
+    assert body["status"] == "refused" and body["error_code"] == "commercial_config_invalid"
+    assert called == [] and st.get("business_case_report") is None
+
+
+def test_an_abort_landing_at_the_store_stores_nothing(client, install_network, monkeypatch,
+                                                      session_state):
+    import services.business_case.runner as RN
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    st = session_state(client)
+    real = RN.report_body
+
+    def late_abort(**kw):
+        st["business_case"]["stop_event"].set()          # after the last stage check
+        return real(**kw)
+    monkeypatch.setattr(RN, "report_body", late_abort)
+    assert client.post(BC_URL).status_code == 200
+    assert _bc_poll(client)["status"] == "aborted"
+    assert st.get("business_case_report") is None
+
+
+def test_c6_a_break_even_without_a_root_is_not_established_end_to_end(
+        client, install_network, monkeypatch, session_state):
+    import services.finance.business_case as BCM
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc(break_even_line="product")).status_code == 200
+    monkeypatch.setattr(BCM, "break_even", lambda *a, **k: {
+        "status": "break_even_not_bracketed", "price_scale": None, "price": None,
+        "money_year": None})
+    assert client.post(BC_URL).status_code == 200
+    body = _bc_poll(client)
+    assert body["status"] == "done", body
+    be = body["report"]["break_even"]
+    assert be["status"] == "break_even_not_bracketed" and be["price"] is None
+    assert be["line"] == "product"
+    rows = _sheet(client)["rows"]
+    assert rows["Price at NPV 0"][:2] == ["not_established", "break_even_not_bracketed"]
+
+
+def test_c6_kw_per_gpu_missing_reads_not_established_in_the_workbook(
+        client, install_network, monkeypatch):
+    from services.business_case import linked_outputs as L
+
+    _with_ic(client, install_network, monkeypatch)
+    monkeypatch.setattr(L, "resolve", lambda line, n, solve, **p: L.NotEvaluated(
+        "it_energy", "kw_per_gpu_missing"))
+    gpu = _line(name="gpu", unit="GPU_h", quantity=None, quantity_source="linked:it_energy@1")
+    assert _put(client, _bc(gpu)).status_code == 200
+    assert client.post(BC_URL).status_code == 200
+    assert _bc_poll(client)["status"] == "done"
+    rows = _sheet(client)["rows"]
+    assert rows["ebitda_margin_gross"][0] == "not_established"
+    assert rows["revenue"][0] == "not_established"
+
+
+def test_a_report_without_a_current_ic_report_reads_stale(client, install_network,
+                                                          monkeypatch, session_state):
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    assert client.post(BC_URL).status_code == 200
+    assert _bc_poll(client)["status"] == "done"
+    session_state(client)["investment_case_report"] = None
+    st = client.get(BC_URL).json()["staleness"]
+    assert st["stale"] is True and st["reason"] == "investment_case_missing"
