@@ -494,15 +494,188 @@ def test_undoing_the_edit_that_made_a_case_copy_removes_it(eh_base, active_case)
     assert stamp(eh_base.dir / tm.MARKER_FILE) == before
 
 
+def test_undo_on_a_case_keeps_a_dc_backup_saved_after_the_edit(eh_base, active_case):
+    """UM10-UNDO-1 on a case with no copy at the snapshot (UM07-KIND-1): the
+    edit makes the case's copy, the backup is saved into it, and the undo
+    puts back only the growth rows: the copy stays, with the backup and the
+    base's growth rows."""
+    import pandas as pd
+
+    from project_templates import eh_templates as t
+    from services import growth_placeholders as gp
+    from services.adequacy import dc_backup
+
+    row = {"kind": "load_scale", "year": 2030, "set": False, "value": {"L1": 1.0}}
+    base_meta = {**eh_base.meta, "growth_inputs": [row]}
+    write_marker(eh_base.dir, base_meta)
+    before = stamp(eh_base.dir / tm.MARKER_FILE)
+    snapshot = gp.snapshot_meta()
+    assert snapshot is None
+    n = eh_base.ctx.network
+    prior = gp.before(n, "loads", "p_set", ["L1"])
+    gp.mark_set(n, "loads", "p_set", {"L1": pd.Series(10.0, index=n.snapshots)}, prior)
+    stored = dc_backup.save_backup(
+        active_case, t, {"mode": "hybrid", "autonomy_h": 8.0}
+    )
+    gp.restore_meta(snapshot)
+    own = json.loads((active_case / tm.MARKER_FILE).read_text())
+    assert own["dc_load"]["spec"]["backup"] == stored
+    assert own["growth_inputs"] == base_meta["growth_inputs"]
+    assert own["ledger"] == base_meta["ledger"]
+    assert stamp(eh_base.dir / tm.MARKER_FILE) == before
+
+
+def test_undo_leaves_the_case_copy_when_its_base_cannot_be_read(
+    eh_base, active_case, monkeypatch
+):
+    """Fail closed (#1390 F2): no base to take the rows from, no restore."""
+    from db import session as _db
+    from services import growth_placeholders as gp
+
+    snapshot = gp.snapshot_meta()
+    own = write_marker(active_case, {**eh_base.meta, "growth_inputs": []})
+    bytes_before = own.read_bytes()
+
+    def broken():
+        raise RuntimeError("database gone")
+
+    with monkeypatch.context() as m:  # the sweep's teardown needs the database
+        m.setattr(_db, "SessionLocal", broken)
+        assert gp.restore_meta(snapshot) == "unreadable"
+    assert own.read_bytes() == bytes_before
+
+
+@pytest.mark.parametrize("snapshot", [b"{torn", b"[]", b"\xff"])
+def test_undo_leaves_the_marker_when_the_snapshot_does_not_parse(
+    eh_base, active_case, snapshot
+):
+    from services import growth_placeholders as gp
+
+    own = write_marker(active_case, {**eh_base.meta, "growth_inputs": []})
+    bytes_before = own.read_bytes()
+    assert gp.restore_meta(snapshot) == "unreadable"
+    assert own.read_bytes() == bytes_before
+
+
+def test_undo_leaves_a_marker_that_does_not_parse(eh_base, active_case):
+    from services import growth_placeholders as gp
+
+    own = write_marker(active_case, "{torn")
+    assert gp.restore_meta(json.dumps(eh_base.meta).encode()) == "unreadable"
+    assert own.read_text() == "{torn"
+
+
+def _ph(kind, year, source="assumed"):
+    return {"item": f"placeholder {kind} {year}", "source": source, "value": 1.0}
+
+
+def _undo_ledger(active_case, base_meta, before_rows, after_rows):
+    """A case copy whose ledger the undone edit changed from ``before_rows``
+    to ``after_rows``; returns the ledger after the undo."""
+    from services import growth_placeholders as gp
+
+    write_marker(active_case, {**base_meta, "ledger": before_rows})
+    snapshot = gp.snapshot_meta()
+    write_marker(active_case, {**base_meta, "ledger": after_rows})
+    assert gp.restore_meta(snapshot) is None
+    return json.loads((active_case / tm.MARKER_FILE).read_text())["ledger"]
+
+
+def test_undo_removes_a_placeholder_row_the_edit_added(eh_base, active_case):
+    """GK B K1: the placeholder rows match the snapshot's both ways."""
+    other = {"item": "grid fee", "source": "assumed"}
+    got = _undo_ledger(
+        active_case, eh_base.meta, [other], [other, _ph("it_mw", 2030, "entered")]
+    )
+    assert got == [other]
+
+
+def test_undo_brings_back_a_placeholder_row_the_edit_removed(eh_base, active_case):
+    other = {"item": "grid fee", "source": "assumed"}
+    got = _undo_ledger(active_case, eh_base.meta, [other, _ph("it_mw", 2030)], [other])
+    assert got == [other, _ph("it_mw", 2030)]
+
+
+def test_undo_keeps_the_other_ledger_rows_as_they_are_now_in_their_order(
+    eh_base, active_case
+):
+    a, b = {"item": "a", "v": 1}, {"item": "b", "v": 1}
+    b_now, c_now = {"item": "b", "v": 2}, {"item": "c", "v": 3}
+    got = _undo_ledger(
+        active_case,
+        eh_base.meta,
+        [a, _ph("it_mw", 2030), b],
+        [c_now, _ph("it_mw", 2030, "entered"), b_now],
+    )
+    assert got == [c_now, _ph("it_mw", 2030), b_now]
+
+
+def test_a_backup_written_while_the_undo_waits_for_the_lock_survives(
+    eh_base, active_case, monkeypatch
+):
+    """GK B K2 (#1378 K1b): the restore reads the marker under the lock every
+    marker writer holds; a backup written at lock entry is kept."""
+    from project_templates import eh_templates as t
+    from services import growth_placeholders as gp
+    from services.adequacy import dc_backup
+
+    snapshot = gp.snapshot_meta()
+    gp._write(gp._own_meta_path(), {**eh_base.meta, "growth_inputs": []})
+    real = tm.write_lock
+    landed, entered = [], []
+
+    def lock_with_a_write_at_entry(project_dir, **kw):
+        if not entered:  # the restore's own entry; save_backup takes it too
+            entered.append(True)
+            landed.append(dc_backup.save_backup(active_case, t, {"mode": "hybrid"}))
+        return real(project_dir, **kw)
+
+    monkeypatch.setattr(tm, "write_lock", lock_with_a_write_at_entry)
+    assert gp.restore_meta(snapshot) is None
+    own = json.loads((active_case / tm.MARKER_FILE).read_text())
+    assert landed and own["dc_load"]["spec"]["backup"] == landed[0]
+    assert own["growth_inputs"] == eh_base.meta["growth_inputs"]
+
+
+@pytest.mark.parametrize("torn", ["{torn", "[]", "null", '"text"', "3"])
+def test_a_base_marker_that_is_not_an_object_reads_unreadable(eh_base, eh_case, torn):
+    """GK B K5 (#1390 F2): never "none"."""
+    write_marker(eh_base.dir, torn)
+    assert tm.resolve_base(eh_case) == tm.Marker(tm.UNREADABLE)
+
+
+def test_resolve_base_reads_the_bases_marker_and_none_for_a_plain_folder(
+    eh_base, eh_case, tmp_path
+):
+    assert tm.resolve_base(eh_case) == tm.Marker(tm.OWN, eh_base.dir / tm.MARKER_FILE)
+    assert tm.resolve_base(tmp_path) == tm.Marker(tm.NONE)
+    (eh_base.dir / tm.MARKER_FILE).unlink()
+    assert tm.resolve_base(eh_case) == tm.Marker(tm.NONE)
+
+
+def test_a_base_that_cannot_be_looked_up_reads_unreadable_for_the_undo(
+    eh_case, monkeypatch
+):
+    from db import session as _db
+
+    def broken():
+        raise RuntimeError("database gone")
+
+    with monkeypatch.context() as m:
+        m.setattr(_db, "SessionLocal", broken)
+        assert tm.resolve_base(eh_case) == tm.Marker(tm.UNREADABLE)
+
+
 def test_undo_keeps_a_copy_the_case_had_before_the_edit(eh_base, active_case):
     from services import growth_placeholders as gp
 
-    own = write_marker(active_case, {**eh_base.meta, "id": "eh_microgrid"})
+    own_meta = {**eh_base.meta, "id": "eh_microgrid"}
+    own = write_marker(active_case, own_meta)
     snapshot = gp.snapshot_meta()
     assert snapshot == own.read_bytes()
-    gp._write(gp._own_meta_path(), {**eh_base.meta, "growth_inputs": []})
+    gp._write(gp._own_meta_path(), {**own_meta, "growth_inputs": []})
     gp.restore_meta(snapshot)
-    assert own.read_bytes() == snapshot
+    assert json.loads(own.read_text()) == own_meta
 
 
 def test_a_case_copy_that_cannot_be_read_skips_the_snapshot(

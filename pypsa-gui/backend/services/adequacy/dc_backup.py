@@ -1407,12 +1407,22 @@ def save_backup(project_dir, tpl, backup: dict) -> dict:
         checked = tpl.dc_load_spec(tid, raw, planning)
     except DcLoadError as exc:
         raise DcBackupError(str(exc), exc.field) from None
-    meta = _meta(project_dir)
-    # Only what was set is stored, so a default reloads as assumed.
-    meta["dc_load"]["spec"]["backup"] = checked.backup.model_dump(
-        mode="json", exclude_unset=True
-    )
-    _write_meta(project_dir, meta)
+    from services.template_marker import write_lock
+
+    try:
+        # Read and write under the marker's lock, so an undo's restore
+        # (growth_placeholders.restore_meta) never writes over it.
+        with write_lock(project_dir):
+            meta = _meta(project_dir)
+            # Only what was set is stored, so a default reloads as assumed.
+            meta["dc_load"]["spec"]["backup"] = checked.backup.model_dump(
+                mode="json", exclude_unset=True
+            )
+            _write_meta(project_dir, meta)
+    except TimeoutError:
+        raise DcBackupError(
+            "backup: the project's template metadata is busy; try again", "project"
+        ) from None
     return meta["dc_load"]["spec"]["backup"]
 
 

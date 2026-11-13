@@ -16,7 +16,8 @@ tool) call ``before`` ahead of their write and ``mark_set`` after it, under the
 PyPSA lock, in the same request (gatekeeper B plan verdict, conditions C1-C5).
 Internal copies (``_backup_network_ts_to_user_ts``, the flat rebase, the rename,
 the stress and DTC copies) are not edits and do not call it. Undo restores the
-file with the series (``snapshot_meta`` / ``restore_meta``, C3).
+rows with the series (``snapshot_meta`` / ``restore_meta``, C3), and only the
+rows: other writes to the file survive it (UM10-UNDO-1).
 """
 from __future__ import annotations
 
@@ -196,6 +197,21 @@ def mark_set(n, component: str, attribute: str, written: dict, prior: dict | Non
     (Q1 a); until then the loads written are kept on the row."""
     if not prior:
         return []
+    from services import template_marker as tm
+    own = _own_meta_path(project_dir)
+    if own is None:
+        return []
+    try:
+        with tm.write_lock(own.parent):
+            return _mark_set(n, component, attribute, written, prior, project_dir)
+    except TimeoutError as exc:
+        # The series edit has landed; the row stays a placeholder (the safe
+        # side), as when the write fails.
+        _log.warning("growth placeholder not recorded in %s: %s", own, exc)
+        return []
+
+
+def _mark_set(n, component, attribute, written, prior, project_dir) -> list[str]:
     meta = _read(_meta_path(project_dir))
     rows = _open_rows(meta, component, attribute)
     if not rows:
@@ -273,27 +289,152 @@ def snapshot_meta() -> bytes | None:
         return None
 
 
-def restore_meta(data: bytes | None) -> None:
-    """Undo (C3): put back the ``eh_template.json`` the undone edit started
-    from, so an undone edit does not stay entered. ``data`` None on a
-    sensitivity case: the undone edit made the case's own copy, which goes,
-    so the case reads its base's again. A project that is not a case keeps
-    its file (a marker never goes because a snapshot could not read it)."""
-    from services.template_marker import is_case
-    path = _own_meta_path()
-    if path is None:
-        return
-    if data is None:
-        if path.is_file() and is_case(path.parent):
-            try:
-                path.unlink()
-            except OSError as exc:
-                _log.warning("undo: %s not removed: %s", path, exc)
-        return
+def _parse(data: bytes):
     try:
-        if path.is_file() and path.read_bytes() == data:
-            return
-        from services.atomic_io import atomic_write_bytes
-        atomic_write_bytes(path, data)
+        meta = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
+def _is_placeholder_ledger(e) -> bool:
+    return isinstance(e, dict) and str(e.get("item", "")).startswith("placeholder ")
+
+
+def _ledger_of(meta: dict) -> list | None:
+    """The marker's ledger list ([] when it has none); None when it is not a
+    list (a marker the undo cannot merge into: fail closed)."""
+    ledger = meta.get("ledger", [])
+    return ledger if isinstance(ledger, list) else None
+
+
+def _with_growth_of(current: dict, old: dict) -> dict | None:
+    """``current`` with the keys an edit writes (``mark_set``) as ``old`` has
+    them (UM10-UNDO-1): ``growth_inputs``, and the ``placeholder <kind>
+    <year>`` ledger rows, matched both ways (GK B K1): a placeholder row not
+    in ``old`` goes, one only in ``old`` comes back, and every other ledger
+    row stays as it is now, in its order. Every other key stays as it is
+    now. None when a ledger is not a list."""
+    now, then = _ledger_of(current), _ledger_of(old)
+    if now is None or then is None:
+        return None
+    out = dict(current)
+    if "growth_inputs" in old:
+        out["growth_inputs"] = old["growth_inputs"]
+    else:
+        out.pop("growth_inputs", None)
+    left = [e for e in then if _is_placeholder_ledger(e)]
+    ledger = []
+    for e in now:
+        if not _is_placeholder_ledger(e):
+            ledger.append(e)
+            continue
+        match = next((k for k, o in enumerate(left) if o["item"] == e["item"]), None)
+        if match is not None:
+            ledger.append(left.pop(match))
+    ledger.extend(left)
+    if ledger or "ledger" in current:
+        out["ledger"] = ledger
+    return out
+
+
+#: ``undo_rows`` when the rows cannot be read: compares unequal to anything.
+class _Unreadable:
+    def __eq__(self, other):
+        return False
+
+    def __ne__(self, other):
+        return True
+
+    __hash__ = None
+
+    def __repr__(self):
+        return "UNREADABLE_ROWS"
+
+
+UNREADABLE_ROWS = _Unreadable()
+
+
+def _rows_of(meta: dict):
+    ledger = _ledger_of(meta)
+    if ledger is None:
+        return UNREADABLE_ROWS
+    placeholders = sorted((e for e in ledger if _is_placeholder_ledger(e)),
+                          key=lambda e: json.dumps(e, sort_keys=True))
+    return {"growth_inputs": meta.get("growth_inputs"), "placeholder_ledger": placeholders}
+
+
+def _old_marker(data: bytes | None, project_dir):
+    """The marker the undone edit started from: ``data`` parsed; for None,
+    the base's marker on a sensitivity case (it had no copy of its own) or
+    {} for a project with no marker. UNREADABLE_ROWS when it cannot be read."""
+    from services import template_marker as tm
+    if data is not None:
+        old = _parse(data)
+        return old if old is not None else UNREADABLE_ROWS
+    if project_dir is None or not tm.is_case(project_dir):
+        return {}
+    base = tm.resolve_base(project_dir)
+    if base.state == tm.UNREADABLE:
+        return UNREADABLE_ROWS
+    if base.path is None:
+        return {}
+    old = _read(base.path)
+    return old if old is not None else UNREADABLE_ROWS
+
+
+def undo_rows(data: bytes | None, project_dir=None):
+    """The keys an undo restores (``growth_inputs`` and the placeholder
+    ledger rows) of the marker ``data`` (a ``snapshot_meta`` value; None:
+    what the project reads without a copy of its own), for the undo
+    read-back (GK B K3); the rest of the marker is not compared.
+    UNREADABLE_ROWS when they cannot be read."""
+    old = _old_marker(data, _dir_or_active(project_dir))
+    return old if old is UNREADABLE_ROWS else _rows_of(old)
+
+
+def restore_meta(data: bytes | None) -> str | None:
+    """Undo (C3): put back the growth rows the undone edit started from, so an
+    undone edit does not stay entered. Only the keys an edit writes go back
+    (``growth_inputs`` and the placeholder ledger rows, UM10-UNDO-1): a write
+    that is not on the undo stack, such as ``dc_backup.save_backup``,
+    survives. ``data`` None on a sensitivity case: the case read its base's
+    marker, whose rows go back; a copy that then equals the base's is
+    removed, so the case reads its base's again (UM07-KIND-1).
+
+    Returns None when the rows are back (or there was nothing to restore),
+    else why the marker was left as it is (GK B K4): ``unreadable`` (a
+    marker or the base that does not parse or cannot be read: no guessed
+    restore), ``busy`` or ``write_failed``. A project that is not a case
+    keeps its file."""
+    from services import template_marker as tm
+    path = _own_meta_path()
+    if path is None or (data is None and not tm.is_case(path.parent)):
+        return None  # no marker at the snapshot: a marker never goes
+    try:
+        with tm.write_lock(path.parent):
+            if not path.is_file():
+                return None
+            current = _parse(path.read_bytes())
+            old = _old_marker(data, path.parent)
+            if current is None or old is UNREADABLE_ROWS:
+                _log.warning("undo: %s not restored: a marker cannot be read", path)
+                return "unreadable"
+            merged = _with_growth_of(current, old)
+            if merged is None:
+                _log.warning("undo: %s not restored: a ledger is not a list", path)
+                return "unreadable"
+            if data is None and merged == old:
+                path.unlink()
+                return None
+            if merged == current:
+                return None
+            from services.atomic_io import atomic_write_text
+            atomic_write_text(path, json.dumps(merged, indent=2, sort_keys=True) + "\n")
+            return None
+    except TimeoutError as exc:
+        _log.warning("undo: %s not restored: %s", path, exc)
+        return "busy"
     except OSError as exc:
         _log.warning("undo: %s not restored: %s", path, exc)
+        return "write_failed"
