@@ -545,3 +545,108 @@ def test_loadflow_current_is_the_flow_s_load_flow_word(solved):
     # The seam's counter bump, which the flow's cache keys on.
     ctx.network_revision = int(ctx.network_revision or 0) + 1
     assert _answers()["loadflow"] == "stale"
+
+
+# ── locks (#1384 N1) ─────────────────────────────────────────────────────────
+
+
+def test_a_mutation_lock_wait_that_times_out_reads_unreadable(solved, monkeypatch):
+    """A network held mid-edit past `LOCK_WAIT_S` is never compared unlocked: the current fingerprint reads as
+    unreadable, so the solved results are stale, and the hash is not read at all."""
+    import threading
+
+    _, ctx = solved
+    assert runs.results_verdicts(runs.read())["optimisation"].state == "fresh"
+    monkeypatch.setattr(runs, "LOCK_WAIT_S", 0.01)
+    hashed = []
+    real = workflow_tools._network_input_fingerprint
+    monkeypatch.setattr(
+        workflow_tools,
+        "_network_input_fingerprint",
+        lambda *a, **k: hashed.append(1) or real(*a, **k),
+    )
+    held, done = threading.Event(), threading.Event()
+
+    def editor():
+        with ctx.mutation_lock:
+            held.set()
+            done.wait(5)
+
+    t = threading.Thread(target=editor)
+    t.start()
+    try:
+        assert held.wait(5)
+        r = runs.read()
+    finally:
+        done.set()
+        t.join()
+    assert r.current is None and r.solved is not None and hashed == []
+    assert runs.results_verdicts(r)["optimisation"].state == "stale"
+    # The lock free again: fresh, as before.
+    assert runs.results_verdicts(runs.read())["optimisation"].state == "fresh"
+
+
+def test_solver_state_is_read_under_its_lock_inside_the_mutation_lock(solved):
+    """Lock order: the mutation lock, then `solver_state_lock` (as `loadflow_current` took it)."""
+    _, ctx = solved
+    seen = []
+    real_state = ctx.solver_state_lock
+
+    class Spy:
+        def __enter__(self):
+            # An RLock held by this thread can be taken again; another thread's cannot.
+            seen.append(ctx.mutation_lock._is_owned())
+            return real_state.__enter__()
+
+        def __exit__(self, *exc):
+            return real_state.__exit__(*exc)
+
+    ctx.solver_state_lock = Spy()
+    try:
+        runs.read()
+    finally:
+        ctx.solver_state_lock = real_state
+    assert seen == [True]
+
+
+# ── V2: a recorded None against a current None (the touched comparers) ───────
+
+
+def test_the_edit_card_never_reads_none_against_none_as_unchanged(solved, monkeypatch):
+    """`edit_card._results_stale`: no recorded fingerprint compares nothing (uncompared, not claimed stale, as
+    before); a recorded one against an unreadable current one is stale."""
+    from harness import edit_card
+
+    n, ctx = solved
+    _raising(n, ctx, monkeypatch)
+    assert edit_card._fingerprint() is None
+    assert edit_card._results_stale() is True  # recorded vs None
+    _unrecorded(n, ctx)
+    assert edit_card._results_stale() is False  # None vs None: no claim either way
+    assert runs.results_verdicts(runs.read())["optimisation"].state == "uncompared"
+
+
+def test_the_envelope_chain_never_reads_none_against_none_as_no_drift(solved, monkeypatch):
+    """`run_envelope.chain_head`: a chain whose last link holds None and a current None is unreadable, not 'no
+    drift'."""
+    from services import run_envelope
+
+    n, ctx = solved
+    _raising(n, ctx, monkeypatch)
+    monkeypatch.setattr(run_envelope, "live", lambda _p: True)
+    monkeypatch.setattr(
+        run_envelope,
+        "_load",
+        lambda _p: {"id": "e", "state": "granted", "chain": [], "fingerprint": None},
+    )
+    assert run_envelope.chain_head("unused", ctx) == (None, "fingerprint_unreadable")
+
+
+def test_a_brief_never_reads_none_against_none_as_current(solved, monkeypatch):
+    """`assistant_tasks._stale`: a brief recorded on None against a current None is stale (fail closed)."""
+    from services import assistant_tasks
+
+    n, ctx = solved
+    _raising(n, ctx, monkeypatch)
+    task = {"id": "t", "brief": {"x": 1}, "status": "ready", "fingerprint": None}
+    assert assistant_tasks._stale(task) is True

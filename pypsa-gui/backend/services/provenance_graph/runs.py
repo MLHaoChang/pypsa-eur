@@ -1,7 +1,8 @@
 """
 Runs and results freshness on the graph (provenance-graph 04a, spec "Runs and results").
 
-One wrapper reads the input fingerprint (`input_fingerprint`); every reader that kept its own copy is an alias of it.
+One wrapper reads the input fingerprint (`input_fingerprint`); the readers the spec's survey names that kept their
+own copy are aliases of it.
 `read` takes what the run verdicts compare in one go (`RunsRead`), and `results_verdicts` answers, per run kind,
 whether the results still describe the current inputs:
 
@@ -30,8 +31,8 @@ KINDS = ("optimisation", "study", "loadflow")
 
 _SOLVED = "assistant_solve_input_fingerprint"
 _SOLVED_EXACT = "assistant_solve_exact_input_fingerprint"
-#: How long `read` waits for the network's mutation lock for its cheap reads; past it they read unlocked, and the
-#: revision bracket still catches an edit that landed meanwhile.
+#: How long `read` waits for the network's mutation lock for its record reads; past it the current fingerprint reads
+#: as unreadable (stale), never as an unlocked read (#1384 N1).
 LOCK_WAIT_S = 0.5
 
 
@@ -122,7 +123,9 @@ class RunsRead:
     revision: int
 
 
-def _cheap(ctx) -> dict:
+def _records(ctx) -> dict:
+    """The run records, read under the caller's locks: the solve's recorded fingerprints, the dispatch shape, the
+    load flow's and the study's records, and the edit counter."""
     from services import study_state
     from services.dispatch_status import dispatch_status
 
@@ -135,9 +138,14 @@ def _cheap(ctx) -> dict:
         dispatch = dispatch_status(n, transient=None if _is_active(ctx) else {})
     except Exception:  # noqa: BLE001 — as the flow read it: no results to compare
         dispatch = "none"
-    state = getattr(ctx, "solver_state", None) or {}
+    state_lock = getattr(ctx, "solver_state_lock", None)
+    if state_lock is not None:
+        with state_lock:  # lock order: mutation, then solver_state
+            state = dict(getattr(ctx, "solver_state", None) or {})
+    else:
+        state = dict(getattr(ctx, "solver_state", None) or {})
     record = state.get("eh_study")
-    revision = int(getattr(ctx, "network_revision", 0) or 0)
+    revision = _revision(ctx)
     done = isinstance(record, dict) and record.get("status") == "done"
     return {
         "dispatch": dispatch,
@@ -161,20 +169,26 @@ def _is_active(ctx) -> bool:
         return False
 
 
-def _locked_cheap(ctx) -> dict:
+def _locked_records(ctx) -> tuple[dict, bool]:
+    """The run records under the network's mutation lock, and whether the lock was held. A context with no lock
+    has nothing to wait for. When the wait times out the records are still read (the caller then reads the current
+    fingerprint as unreadable, so nothing compares fresh against a network mid-edit)."""
     lock = getattr(ctx, "mutation_lock", None)
-    got = lock.acquire(timeout=LOCK_WAIT_S) if lock is not None else False
+    if lock is None:
+        return _records(ctx), True
+    if not lock.acquire(timeout=LOCK_WAIT_S):
+        return _records(ctx), False
     try:
-        return _cheap(ctx)
+        return _records(ctx), True
     finally:
-        if got:
-            lock.release()
+        lock.release()
 
 
 def read(ctx=None, *, cached: bool = False) -> RunsRead:
-    """One read of the run records and the current inputs (#1384 N1): the cheap records under the network's
-    mutation lock, the fingerprint between two reads of the edit counter and network object. An edit that lands
-    meanwhile is read again once; a second move reads the current fingerprint as unreadable (stale)."""
+    """One read of the run records and the current inputs (#1384 N1): the records under the network's mutation
+    lock (and `solver_state` under its own lock inside it), the fingerprint between two reads of the edit counter
+    and network object. An edit that lands meanwhile is read again once; a second move, or a mutation-lock wait past
+    `LOCK_WAIT_S`, reads the current fingerprint as unreadable (stale)."""
     from services.pypsa_service import PyPSAService
 
     if ctx is None:
@@ -186,25 +200,27 @@ def read(ctx=None, *, cached: bool = False) -> RunsRead:
         return RunsRead("none", None, None, False, None, False, None, 0)
     for _attempt in range(2):
         network = ctx.network
-        cheap = _locked_cheap(ctx)
-        current = _current(ctx, cheap, cached=cached)
-        if ctx.network is network and _revision(ctx) == cheap["revision"]:
-            return RunsRead(current=current, **cheap)
-    return RunsRead(current=None, **cheap)
+        records, locked = _locked_records(ctx)
+        if not locked:
+            return RunsRead(current=None, **records)  # the lock wait timed out: unreadable, stale
+        current = _current(ctx, records, cached=cached)
+        if ctx.network is network and _revision(ctx) == records["revision"]:
+            return RunsRead(current=current, **records)
+    return RunsRead(current=None, **records)
 
 
 def _revision(ctx) -> int:
     return int(getattr(ctx, "network_revision", 0) or 0)
 
 
-def _current(ctx, cheap: dict, *, cached: bool) -> tuple[str, str | None] | None:
-    solved = cheap["solved"]
+def _current(ctx, records: dict, *, cached: bool) -> tuple[str, str | None] | None:
+    solved = records["solved"]
     if solved is None:
         return None  # nothing recorded to compare with: the hash is not read
 
     def fp(exact):
         if cached:
-            return _cached_fingerprint(ctx, cheap["revision"], exact=exact)
+            return _cached_fingerprint(ctx, records["revision"], exact=exact)
         return input_fingerprint(ctx, exact=exact)
 
     plain = fp(False)
