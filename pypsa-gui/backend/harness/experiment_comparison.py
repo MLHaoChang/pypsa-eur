@@ -1,5 +1,6 @@
 """Read two selected owned network-case receipts; no execution or override."""
 import copy
+import hashlib
 import math
 import json
 
@@ -46,14 +47,29 @@ def _load_case(record, data, saved=None):
             window='full_prepared_horizon', objective_unit=data['objective_unit'], **basis_digests(saved))
 
 
+def _basis_digest(value):
+    """`ex._digest` without the plan's size limit (ui-modern 08).
+
+    The snapshot index and weightings are the run's own data, not user input,
+    and a full hourly year is several hundred kilobytes, far past the 64 KiB a
+    plan may take. The bytes hashed are the same as `ex._digest`'s, so every
+    index that passed the limit keeps the digest saved records hold. A value
+    that is not finite JSON is still refused the same way."""
+    try:
+        blob = json.dumps(value, sort_keys=True, allow_nan=False).encode()
+    except (TypeError, ValueError, RecursionError):
+        ex._refuse('invalid_experiment', 'The plan must contain bounded finite JSON values.', 422)
+    return hashlib.sha256(blob).hexdigest()
+
+
 def basis_digests(saved):
     """The horizon, weights and solver settings a saved case was solved on
     (shared with LC-18's sensitivity comparison)."""
     from services import workflow_tools as wt
     n = saved.network
     return dict(
-        snapshots_sha256=ex._digest(wt._exact_frame_json(n.snapshots.to_series().to_frame())),
-        weights_sha256=ex._digest([wt._exact_frame_json(n.snapshot_weightings),
+        snapshots_sha256=_basis_digest(wt._exact_frame_json(n.snapshots.to_series().to_frame())),
+        weights_sha256=_basis_digest([wt._exact_frame_json(n.snapshot_weightings),
             wt._exact_frame_json(n.investment_period_weightings)]),
         solver_config_sha256=ex._digest(goal_free_config(saved.solver_state['solver_config'])))
 
