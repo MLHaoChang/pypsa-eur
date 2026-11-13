@@ -55,3 +55,12 @@ is listed in "Numbers to check" (unverified, withheld from the headline), under 
 **Triage 2026-11-12** (master `397a2f1c6`). Confirmed: the manifest row is still `_pending`. Number integrity in delivered reports, so Opus. Either outcome in the issue (refuse or list under "Numbers to check") is acceptable; prefer listing, as that is how regenerated edits are already handled.
 
 **Hand-off 2026-11-13** (#1471). `merge_round_trip` re-audits an edited section against the base's verified facts (`revisions.rerun_audit`). An edited copy of a report table that changes a number cell by cell (position, or row label and header; units count; reformats do not) keeps the admitted table, with a withheld placeholder and the cells listed "(unverified, withheld)". `LC-D21.edited_admitted_number` is covered by `test_lc43_d21_report_gates.py`. Prose with a changed number stays as written and is listed as unverified, not withheld.
+
+**Plan GO conditions, GK B (52)** (option 1; recorded here per GK B (54)). The plan was built under these:
+- **T1, per-cell compare:** an edited table is compared with its original cell by cell, never as one multiset, so two rows that swap values are a change.
+- **T2, units count:** a unit changed beside a number, in a row label, a column header (corner header included) or a separate Unit column is a change.
+- **T3, exact compare:** numbers are compared exactly by value and unit (`revisions.numbers()`), so 3.2149 vs 3.21 is a change and a numerically equal reformat (3.210, 1,000, a Unicode minus) is not.
+- **T4, prose re-audit:** a changed section's prose is re-audited against the facts the base verified (`revisions.rerun_audit`).
+- **T5, mutants:** `scripts/coord/mutants.py` runs on the changed lines of `roundtrip.py` and `revisions.py`; the PR body lists every survivor and why it is equivalent.
+
+**GK B (54) NOT OK fixes 2026-11-13** (#1471). Edited tables pair with the section's tables by content (`_pair`), not position (D1); a unit edit in the corner header or a Unit column counts (D2, D3); duplicated row labels pair with nothing (D4); prose a withheld section cannot verify becomes the withheld placeholder and is listed in the appendix (D5). Killing tests for each, and for M1b and M2, are in `tests/test_lc43_d21_report_gates.py`.

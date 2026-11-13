@@ -977,32 +977,36 @@ def _pair(
     return max(scored)[2] if scored else None
 
 
-def _withhold_prose(blocks: list, facts) -> list:
+def _withhold_prose(blocks: list, facts) -> tuple[list, list[str]]:
     """`blocks` with each paragraph or bullet whose numbers the audit cannot
     verify against `facts` replaced by the withheld placeholder (V1), as a
-    strict job's section reads (GK B 54 D5)."""
+    strict job's section reads (GK B 54 D5), and the numbers so withheld, for
+    the appendix the placeholder points to."""
     from services.reports import number_audit
     from services.reports.formatting import withheld_placeholder
 
-    def bad(text: str) -> int:
-        return len(number_audit.audit([text], facts).unverified)
+    withheld: list[str] = []
+
+    def bad(text: str) -> list[str]:
+        return list(number_audit.audit([text], facts).unverified)
+
+    def placeholder(text: str) -> Callout:
+        found = bad(text)
+        withheld.extend(found)
+        return Callout(kind="gap", text=withheld_placeholder(len(found)))
 
     out: list = []
     for block in blocks:
         if isinstance(block, Paragraph) and bad(block.md):
-            out.append(Callout(kind="gap", text=withheld_placeholder(bad(block.md))))
+            out.append(placeholder(block.md))
         elif isinstance(block, Bullets):
             kept = [item for item in block.items if not bad(item)]
             if kept:
                 out.append(block.model_copy(update={"items": kept}))
-            out.extend(
-                Callout(kind="gap", text=withheld_placeholder(bad(item)))
-                for item in block.items
-                if bad(item)
-            )
+            out.extend(placeholder(item) for item in block.items if bad(item))
         else:
             out.append(block)
-    return out
+    return out, withheld
 
 
 def _checked(
@@ -1071,7 +1075,8 @@ def _checked(
             kept.append(block)
     facts = verified_facts(section)
     if withheld and facts is not None:
-        kept = _withhold_prose(kept, facts)
+        kept, prose = _withhold_prose(kept, facts)
+        withheld = prose + withheld
     audit = rerun_audit(section, section.model_copy(update={"blocks": kept}))
     if withheld:
         audit = audit.model_copy(

@@ -728,13 +728,20 @@ VARIANTS: list[dict] = [
              'reads the admitted 3.21 h/yr, with a withheld placeholder and "Executive summary: 1.00 h/yr (unverified, withheld)" in Numbers to check; a copy whose summary '
              'prose reads 1.0 h/yr keeps the sentence, its audit re-run against the facts version 1 verified lists 1.0 h/yr unverified, and Numbers to check lists it; cells are compared one by one: '
              'two rows swapping values, 3.21 min/yr, a row label MC LOLE (min/yr), a Value (min/yr) header and an added 42 MW row or column are withheld and listed; a reformat 3.210 h/yr, a renamed label in a row '
-             'with no number and an added row with no number are accepted with no entry (LC-43a, GK B 52)',
+             'with no number and an added row with no number are accepted with no entry; a 3.2149 h/yr cell is withheld (exact compare); two text-only tables inserted above the headline '
+             'leave the edited headline paired with its own original by content and withheld; a row inserted mid-table plus a changed MC LOLE is withheld; a unit changed in the corner header '
+             'or a Unit column (MW to GW, t to kt) and a duplicated row label (Total 5/7 MW with an inserted row) are changes; prose 1.0 h/yr beside a withheld table becomes the withheld '
+             'placeholder and is listed (LC-43a, GK B 52, GK B 54)',
              'import_edited_report export_report_docx get_report get_report_table',
              B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_leaves_the_headline_and_version_one',
              B + 'test_lc43_d21_report_gates.py::test_a_copy_that_changes_an_admitted_number_in_prose_lists_it_to_check',
              B + 'test_lc43_d21_report_gates.py::test_a_table_edit_that_moves_or_relabels_an_admitted_number_is_withheld',
              B + 'test_lc43_d21_report_gates.py::test_an_added_row_or_column_that_states_a_number_is_withheld',
-             B + 'test_lc43_d21_report_gates.py::test_a_table_edit_that_changes_no_number_is_accepted'),
+             B + 'test_lc43_d21_report_gates.py::test_a_table_edit_that_changes_no_number_is_accepted',
+             B + 'test_lc43_d21_report_gates.py::test_text_tables_inserted_above_the_headline_leave_its_edit_withheld',
+             B + 'test_lc43_d21_report_gates.py::test_a_row_inserted_mid_table_and_a_changed_value_is_withheld',
+             B + 'test_lc43_d21_report_gates.py::test_a_prose_number_in_a_section_with_a_withheld_table_is_withheld',
+             B + 'test_lc43_d21_report_gates.py::test_a_unit_or_duplicate_label_change_is_a_changed_number'),
     _pending('LC-D21.stale_report', 'a report generated or exported after its study changed is neither refused nor flagged (only the IC case note): no stale gate is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D21.report_resume', 'a report job interrupted by a restart is not resumed (its record is in-process state): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _covered('LC-D22.undo_checkpoints', 'input-table fingerprint before/after: undo restores the exact fingerprint and the matching results (objective 100, current again), '

@@ -45,11 +45,14 @@ import threading
 
 import pytest
 from docx import Document
+from models.report import Table
+
 
 from services import chat_tools as T, upload_service
 from services.llm_fake import FakeProvider
 from services.reports import pdf
 from services.reports.docx_writer import DOCX_MIME
+from services.reports.roundtrip import _changed_numbers
 from tests.test_chat_report_tools import (
     PROJECT,
     _Holding,
@@ -223,8 +226,11 @@ _LOLE, _CAP = "MC LOLE (h/yr)", "ENS cap (‱ of demand)"
         ),
         # T2: a unit added to the header of the column that holds the numbers.
         ({"Item": (None, "Value (min/yr)")}, "Value (min/yr) (unverified, withheld)"),
+        # T3 (kills M2): an exact compare, never one rounded to the admitted
+        # figure's places.
+        ({_LOLE: (None, "3.2149 h/yr")}, "3.2149 h/yr (unverified, withheld)"),
     ],
-    ids=["swap", "unit", "label_unit", "header_unit"],
+    ids=["swap", "unit", "label_unit", "header_unit", "exact"],
 )
 def test_a_table_edit_that_moves_or_relabels_an_admitted_number_is_withheld(
     project, client, monkeypatch, edits, listed
@@ -244,6 +250,138 @@ def test_a_table_edit_that_moves_or_relabels_an_admitted_number_is_withheld(
     headline = [[c.text for c in row.cells] for row in delivered.tables[0].rows]
     assert headline == [["Item", "Value"]] + HEADLINE
     assert f"Executive summary: {listed}" in [p.text for p in delivered.paragraphs]
+
+
+def _text_table(doc, before, text: str) -> None:
+    """A one-cell table of text only, inserted above the table `before`."""
+    note = doc.add_table(rows=1, cols=1)
+    note.cell(0, 0).text = text
+    before._tbl.addprevious(note._tbl)
+
+
+def _headline_of(delivered) -> list[list[str]] | None:
+    expected = [["Item", "Value"]] + HEADLINE
+    for table in delivered.tables:
+        cells = [[c.text for c in row.cells] for row in table.rows]
+        if cells == expected:
+            return cells
+    return None
+
+
+def test_text_tables_inserted_above_the_headline_leave_its_edit_withheld(
+    project, client, monkeypatch
+):
+    """GK B 54 D1: a table inserted above the headline must not shift which
+    admitted table the edited headline is compared with."""
+    report_id = _generated(monkeypatch)
+    doc = _docx(client, report_id)
+    headline = doc.tables[0]
+    _text_table(doc, headline, "Reviewer note")
+    _text_table(doc, headline, "See the appendix")
+    for row in headline.rows:
+        if row.cells[0].text == _LOLE:
+            row.cells[1].text = "1.00 h/yr"
+
+    assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
+
+    delivered = _docx(client, report_id, 2)
+    assert _headline_of(delivered) is not None
+    paragraphs = [p.text for p in delivered.paragraphs]
+    assert "Executive summary: 1.00 h/yr (unverified, withheld)" in paragraphs
+    assert T.get_report_table(report_id, "headline")["items"] == HEADLINE
+
+
+def test_a_row_inserted_mid_table_and_a_changed_value_is_withheld(
+    project, client, monkeypatch
+):
+    """Kills M1b: with the shape changed, rows pair by label, so the rows
+    below the inserted one still meet their own originals."""
+    report_id = _generated(monkeypatch)
+    doc = _docx(client, report_id)
+    table = doc.tables[0]
+    row = table.add_row()
+    row.cells[0].text, row.cells[1].text = "Reviewer", "not established"
+    table.rows[0]._tr.addnext(row._tr)
+    for row in table.rows:
+        if row.cells[0].text == _LOLE:
+            row.cells[1].text = "1.00 h/yr"
+
+    assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
+
+    delivered = _docx(client, report_id, 2)
+    assert _headline_of(delivered) is not None
+    paragraphs = [p.text for p in delivered.paragraphs]
+    assert "Executive summary: 1.00 h/yr (unverified, withheld)" in paragraphs
+
+
+def test_a_prose_number_in_a_section_with_a_withheld_table_is_withheld(
+    project, client, monkeypatch
+):
+    """GK B 54 D5: the appendix says a withheld number was taken out of the
+    prose, so the prose must not still state it."""
+    report_id = _generated(monkeypatch)
+    doc = _docx(client, report_id)
+    for paragraph in doc.paragraphs:
+        if paragraph.text == "The plan meets 3.2 h/yr.":
+            paragraph.text = "The plan meets 1.0 h/yr."
+    for row in doc.tables[0].rows:
+        if row.cells[0].text == _LOLE:
+            row.cells[1].text = "1.00 h/yr"
+
+    assert T.import_edited_report(report_id, _upload(project, doc))["version"] == 2
+
+    first = T.get_report(report_id)["sections"][0]["blocks"][0]
+    assert first["type"] == "callout" and first["text"].startswith("Withheld:")
+    paragraphs = [p.text for p in _docx(client, report_id, 2).paragraphs]
+    assert "The plan meets 1.0 h/yr." not in paragraphs
+    assert "The plan meets 3.2 h/yr." not in paragraphs
+    assert (
+        "Executive summary: 1.0 h/yr (unverified, withheld), "
+        "1.00 h/yr (unverified, withheld)"
+    ) in paragraphs
+
+
+def _table(columns, *rows) -> Table:
+    return Table(table_id="t", columns=list(columns), rows=[list(r) for r in rows])
+
+
+@pytest.mark.parametrize(
+    "original, edited, listed",
+    [
+        # D2: a unit in the corner header, over a column of numbers.
+        (
+            _table(["Target (‱)", "Achieved"], ["10", "not established"]),
+            _table(["Target (%)", "Achieved"], ["10", "not established"]),
+            ["Target (%)"],
+        ),
+        # D3: a separate Unit column.
+        (
+            _table(["Item", "Value", "Unit"], ["Wind", "10", "MW"]),
+            _table(["Item", "Value", "Unit"], ["Wind", "10", "GW"]),
+            ["GW"],
+        ),
+        (
+            _table(["Item", "Value", "Unit"], ["CO2", "5", "t"]),
+            _table(["Item", "Value", "Unit"], ["CO2", "5", "kt"]),
+            ["kt"],
+        ),
+        # D4: a duplicated row label pairs with nothing, so 5 -> 7 is caught
+        # even after a row insert changes the shape.
+        (
+            _table(["Item", "Value"], ["Total", "5 MW"], ["Total", "7 MW"]),
+            _table(
+                ["Item", "Value"],
+                ["Note", "see text"],
+                ["Total", "7 MW"],
+                ["Total", "7 MW"],
+            ),
+            ["7 MW", "7 MW"],
+        ),
+    ],
+    ids=["corner_header_unit", "unit_column_mw", "unit_column_t", "duplicate_label"],
+)
+def test_a_unit_or_duplicate_label_change_is_a_changed_number(original, edited, listed):
+    assert _changed_numbers(original, edited) == listed
 
 
 @pytest.mark.parametrize("added", ["row", "column"])
