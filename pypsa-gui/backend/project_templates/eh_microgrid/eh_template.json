@@ -55,7 +55,7 @@
       "item": "island unit data",
       "note": "demo values copied from the staged microgrid, not from a datasheet or a grid code",
       "source": "assumed",
-      "value": "the staged microgrid's: diesel droop 4 %, H 1.5 s; batteries droop 4 %, tau_f 0.1 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95; PV and wind Q(U), pf 0.95; sustained 24 h, bridge 600 s"
+      "value": "the staged microgrid's: diesel droop 4 %, H 1.5 s; batteries droop 2 %, tau_f 0.3 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95; PV and wind Q(U), pf 0.95; sustained 24 h, bridge 600 s"
     },
     {
       "item": "transition RoCoF limit",

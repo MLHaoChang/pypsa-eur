@@ -67,6 +67,25 @@ def test_the_shipped_sidecar_file_is_the_built_one(tid):
     )
 
 
+def _shipped_meta_ids():
+    from pathlib import Path
+
+    root = Path(T.__file__).parent
+    return sorted(t for t in T.TEMPLATE_META if (root / t / T.META_FILE).is_file())
+
+
+@pytest.mark.parametrize("tid", _shipped_meta_ids())
+def test_the_shipped_metadata_file_is_the_built_one(tid):
+    """A ledger edit reaches new projects only through the shipped file
+    (``from_template`` copies it), so it must be regenerated with the code."""
+    from pathlib import Path
+
+    shipped = Path(T.__file__).parent / tid / T.META_FILE
+    assert json.loads(shipped.read_text()) == json.loads(
+        json.dumps(T.template_meta(tid))
+    )
+
+
 @pytest.mark.live_solve
 @pytest.mark.slow
 @pytest.mark.parametrize("tid", MICROGRIDS)
