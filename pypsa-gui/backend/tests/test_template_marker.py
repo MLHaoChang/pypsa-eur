@@ -970,6 +970,8 @@ def test_mark_set_without_a_project_writes_nothing(eh_base, monkeypatch):
     [
         # the current marker has no ledger: the snapshot's placeholder rows come back
         ({}, {"ledger": [_ph("it_mw", 2030)]}, [_ph("it_mw", 2030)]),
+        # the edit added the only ledger row: the undo empties the ledger
+        ({"ledger": [_ph("it_mw", 2030)]}, {}, []),
         # an empty ledger stays an empty ledger
         ({"ledger": []}, {}, []),
         # no ledger on either side: none is added
