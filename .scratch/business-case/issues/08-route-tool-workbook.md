@@ -37,3 +37,19 @@ through `_solver_config_from_dict` (#1009).
 ### 2026-11-11: triage
 
 Checked on master: `services/finance/business_case.py` and `project_templates/business_case_presets/` do not exist; 01 and 02 are done (#1322, #1320); business-case 04 is in progress in another session and was left alone. Verdict: ready-for-agent, held by its Blocked by line. Likely files, tests and acceptance are in the body.
+
+### 2026-11-13: GK B (53) plan GO, two slices (08a route/job/workbook, then 08b chat tools)
+
+- Q1 lease-up volume factor: out of BC 08, follow-up issue. Until then #1430 F2 holds: a year-varying linked_share is a commercial sold share only; nothing in 08a/08b offers or words it as physical lease-up; the 08b card labels it "sold share".
+- Q2 `ebitda_margin`: no change. `business_case.py:789` is the per-year P&L row (None only when ebitda is); the KPIs `ebitda_margin_gross`/`_net` are gross/net of pass-through. No alias.
+- Q3: two slices.
+- 08a C1 fingerprint: `business_case` changes leave `_network_input_fingerprint` (exact and non-exact), `goal_free_config`, the IC digest and the stored IC hash unchanged (BC1 pin). The PR body states how a BC-input write invalidates the stored BC result (staleness on its own inputs hash, tested) and whether it bumps the network revision.
+- C2 one config reader: PUT and POST read through `_solver_config_from_dict` (#1009); legacy dict without `business_case` loads; an unbuildable one is 422.
+- C3 IC freshness: `investment_case_missing` for no report, a stale report, and a hash/assumptions mismatch with the rebuilt case, through the IC's own staleness reader; a test each, red under a mutant.
+- C4 same solve: linked outputs and lost production from the IC report's own solve; shortfalls through `process_products.shortfalls` with that solve's `last_lost_load` (#1429); network edited after the IC → refuse or stale, never mixed.
+- C5 job: mirror `start_investment_case` (`_refuse_if_mesh_busy`, abort); start check and job creation under one cross-process lock or unique key (#1401 T1), two concurrent POSTs tested; the 409 while a solve runs checked under the lock (#1378 K1b).
+- C6 refusals: typed 422/409, kinds in the fragment; `DefaultUnitMismatch` fail-closed at its catching site with a base-class mutant killed; break_even_* and `kw_per_gpu_missing` read not_established (KPI, workbook, API), tested.
+- C7 workbook: nothing stored → `not_established` with reason, export never runs it; stale stored result → says stale.
+- C8 PUT runs exactly the `BusinessCaseInputs` validators; no bulk path skips one (#738).
+- C9 at the trial merge: the four route-add tests, `test_packaging_requirements` on new imports, the error-kind manifest tests, inventory / route-parity / control-matrix `--check`.
+- 08b (plan delta before building): the card shows every digest-bound value (price, unit, linked_share, each year of linked_share_by_year, default_units, default_keys, kw_per_gpu; #1379 F2); a grant freezes only what the card showed; prices only from the user's words, bound at the grant (#1072), model-supplied price not on the card refuses; no `*project*` argument but the session's own (BOUND_CONTEXT_TOOLS + #875 test if a run profile lists them); a runs entry for the harness's own step never admits `run_business_case` on a model turn (#1123 / SH-14 B2); solves counted, plan delta states whether it solves.
