@@ -225,7 +225,10 @@ def test_edited_paragraph_marks_the_section_changed_and_keeps_inline_markdown():
     sec_m = _by_id(merged, "fmea_top")
     assert sec_m.source == "user_edit"
     assert sec_m.blocks[0].md == first.md
-    assert sec_m.audit.unverified == [] and sec_m.audit.verified == []
+    # LC-43a: the audit is re-run against the facts the base verified, so the
+    # unchanged 100,000 €/yr stays verified and nothing is listed to check.
+    assert sec_m.audit.unverified == []
+    assert [v.text for v in sec_m.audit.verified] == ["100,000 €/yr"]
     assert sec_m.status == "ok"
     # Untouched sections are byte-identical.
     assert _by_id(merged, "executive_summary") == _by_id(base, "executive_summary")
@@ -280,8 +283,14 @@ def test_edited_table_cell_becomes_an_edited_table_in_the_result():
     merged = merge_round_trip(base, result)
     assert new_id in merged.tables and merged.tables[new_id] == edited
     assert "fmea_top" in merged.tables  # the original is kept for earlier versions
-    assert [b.table_id for b in _by_id(merged, "fmea_top").blocks
-            if isinstance(b, TableRef)][0] == new_id
+    # LC-43a: text edited in a row that states a number fails closed, so the
+    # admitted table stays, followed by the withheld placeholder.
+    blocks = _by_id(merged, "fmea_top").blocks
+    assert blocks.index(TableRef(table_id="fmea_top", caption="Ranked modes")) + 1 == next(
+        i for i, b in enumerate(blocks)
+        if isinstance(b, Callout) and b.text.startswith("Withheld: 1 number")
+    )
+    assert _by_id(merged, "fmea_top").audit.unverified[-1] == "backup (edited)"
 
 
 # ── comments ─────────────────────────────────────────────────────────────
