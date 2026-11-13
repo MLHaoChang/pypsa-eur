@@ -545,6 +545,17 @@ def apply_bulk_update(body: dict) -> dict:
         # before the first write, so a bad one cannot leave a half-applied batch.
         from services.component_names import require_valid_name
 
+        # homer-parity 02a: the generator fuel curve's guard, as on the single edit, before the first write.
+        if component_class == "Generator":
+            from services import fuel_curve
+            from services.network_crud import _check_fuel_curve
+
+            for _targets, coerced in pending:
+                for t in _targets:
+                    before = df.loc[t].to_dict()
+                    _check_fuel_curve(component_class, {**before, **coerced}, n=n, name=t, before=before,
+                                      submitted=coerced)
+
         for _targets, coerced in pending:
             carrier = coerced.get("carrier")
             if (component_class != "Carrier" and isinstance(carrier, str) and carrier
@@ -572,6 +583,8 @@ def apply_bulk_update(body: dict) -> dict:
                 changed = [c for c in typed if not _same_value(before[(t, c)], df.at[t, c])]
                 if changed:
                     asset_provenance.mark_customised(n, component_class, t, changed)
+            if component_class == "Generator":
+                fuel_curve.apply(n, _targets, stamp=True)
 
     # One audit entry per bulk op (not per component). The row form cannot
     # print every value, so it prints the shape instead.

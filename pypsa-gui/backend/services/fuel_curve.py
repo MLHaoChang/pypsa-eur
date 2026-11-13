@@ -15,12 +15,21 @@ own columns, so the objective and ``n.statistics`` opex carry it with no extra t
   weighting in both the objective and the statistics; it needs ``committable`` and a fixed ``p_nom`` (a cost per
   hour cannot follow ``p_nom_opt``).
 
+``derived_costs`` is the one derivation. The solve staging (``solver_service``) applies it to every generator and
+is authoritative; the asset writers (``network_crud``, ``network_bulk``) apply it too so the form shows the values,
+and every writer refuses what ``guard`` refuses. While a curve is set the two cost columns are the curve's: a
+direct edit of either is refused, and setting a curve over a non-zero value says what it replaces
+(``replace_notice``).
+
+The DC backup (``services/adequacy/dc_backup.py``) prices its genset fuel off the LP (``backup_cost_delta``) and
+never writes a generator's ``marginal_cost``, so the two never fight over one column.
+
 A generator with none of the three set keeps its own costs: no curve, no change.
 """
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import pandas as pd
@@ -29,6 +38,8 @@ SLOPE = "fuel_curve_slope"
 NO_LOAD = "fuel_curve_no_load"
 PRICE = "fuel_price"
 COLUMNS = (SLOPE, NO_LOAD, PRICE)
+#: The PyPSA columns the curve writes.
+DERIVED = ("marginal_cost", "stand_by_cost")
 
 
 def _num(v: Any) -> float | None:
@@ -40,6 +51,10 @@ def _num(v: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return f if math.isfinite(f) else None
+
+
+def _is_unset(v: Any) -> bool:
+    return v is None or (isinstance(v, float) and math.isnan(v))
 
 
 def curve_of(row: Mapping[str, Any]) -> tuple[float, float, float] | None:
@@ -55,12 +70,12 @@ def check(row: Mapping[str, Any]) -> str | None:
     """Why the row's curve cannot be priced, or None when it can (or sets none)."""
     for k in COLUMNS:
         v = row.get(k)
-        if v is not None and not (isinstance(v, float) and math.isnan(v)) and _num(v) is None:
+        if not _is_unset(v) and _num(v) is None:
             return f"{k} must be a finite number (got {v!r})"
     curve = curve_of(row)
     if curve is None:
         return None
-    slope, no_load, price = curve
+    slope, no_load, _price = curve
     for k, v in zip(COLUMNS, curve):
         if v < 0:
             return f"{k} must be zero or more (got {v:g})"
@@ -76,6 +91,46 @@ def check(row: Mapping[str, Any]) -> str | None:
     return None
 
 
+def _same(a: Any, b: Any) -> bool:
+    fa, fb = _num(a), _num(b)
+    if fa is None or fb is None:
+        return _is_unset(a) and _is_unset(b)
+    return math.isclose(fa, fb, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def guard(after: Mapping[str, Any], *, before: Mapping[str, Any] | None = None,
+          submitted: Mapping[str, Any] | None = None, cost_series: Iterable[str] = ()) -> str | None:
+    """Why a write that leaves the generator as ``after`` is refused, or None.
+
+    ``before`` is the stored row (None on a create), ``submitted`` the fields the writer sent, ``cost_series`` the
+    derived columns the generator also has a time series for.
+    """
+    if msg := check(after):
+        return msg
+    if curve_of(after) is None:
+        return None
+    if series := [c for c in DERIVED if c in set(cost_series)]:
+        return (f"a fuel curve sets {series[0]}, so the generator's {series[0]} time series would be ignored: "
+                "remove the series or clear the fuel curve")
+    if before is not None and curve_of(before) is not None:
+        for col in DERIVED:
+            if col in (submitted or {}) and not _same(submitted[col], before.get(col)):
+                return (f"{col} is derived from the fuel curve (fuel price, slope and no-load fuel): edit those, "
+                        "or clear the curve to set it directly")
+    return None
+
+
+def replace_notice(after: Mapping[str, Any], *, before: Mapping[str, Any] | None = None) -> str | None:
+    """What a newly set curve replaces: the non-zero cost columns it overwrites, or None."""
+    if curve_of(after) is None or (before is not None and curve_of(before) is not None):
+        return None
+    old_row = after if before is None else before
+    new = derived_costs(after)
+    replaced = [f"{col} {_num(old_row.get(col)):g} with {new[col]:g}" for col in DERIVED
+                if (_num(old_row.get(col)) or 0.0) != 0.0 and not _same(old_row.get(col), new[col])]
+    return f"The fuel curve replaces {' and '.join(replaced)}." if replaced else None
+
+
 def derived_costs(row: Mapping[str, Any]) -> dict[str, float]:
     """The PyPSA cost columns the curve sets, or {} when the row sets no curve."""
     curve = curve_of(row)
@@ -86,10 +141,11 @@ def derived_costs(row: Mapping[str, Any]) -> dict[str, float]:
     return {"marginal_cost": slope * price, "stand_by_cost": no_load * p_nom * price}
 
 
-def apply(n, names=None) -> list[str]:
+def apply(n, names=None, *, stamp: bool = True) -> list[str]:
     """Write ``derived_costs`` onto ``n.generators`` for each curve generator in ``names`` (all when None).
 
-    Idempotent: the derived columns follow the inputs and ``p_nom`` only. Returns the generators written.
+    Idempotent: the derived columns follow the inputs and ``p_nom`` only. A value that changes is stamped
+    customised like any edit (``stamp``). Returns the generators whose costs changed.
     """
     gens = n.generators
     if gens.empty or not any(c in gens.columns for c in COLUMNS):
@@ -102,41 +158,54 @@ def apply(n, names=None) -> list[str]:
             continue
         if "stand_by_cost" not in gens.columns:
             gens["stand_by_cost"] = 0.0
-        for col, val in costs.items():
-            gens.at[name, col] = val
-        written.append(name)
+        changed = [col for col, val in costs.items() if not _same(gens.at[name, col], val)]
+        for col in changed:
+            gens.at[name, col] = costs[col]
+        if changed:
+            written.append(name)
+            if stamp:
+                from services.asset_schema import provenance
+
+                provenance.mark_customised(n, "Generator", name, changed)
     return written
 
 
 def fuel_use(n, period_years: Mapping[Any, float] | None = None) -> list[dict[str, Any]]:
-    """Each curve generator's fuel burn and cost over the solved horizon.
+    """Each curve generator's fuel burn and cost over the solved horizon, from solved values only.
 
     Weighted like the LP objective: ``snapshot_weightings.objective`` × the period's ``years`` (``period_years``,
-    from ``services.period_utils.period_years_map``; empty or None for a single period).
+    from ``services.period_utils.period_years_map``; empty or None for a single period). A generator with no
+    solved dispatch, or a no-load term and no solved status, reads None: never 0, never ``p_set``.
     """
     gens = n.generators
-    p = getattr(n.generators_t, "p", None)
-    if gens.empty or p is None or p.empty or not any(c in gens.columns for c in COLUMNS):
+    if gens.empty or not any(c in gens.columns for c in COLUMNS):
         return []
-    w = n.snapshot_weightings.objective.reindex(p.index).fillna(0.0)
-    if isinstance(p.index, pd.MultiIndex) and period_years:
+    p = getattr(n.generators_t, "p", None)
+    status = getattr(n.generators_t, "status", None)
+    index = n.snapshots
+    w = n.snapshot_weightings.objective.reindex(index).fillna(0.0)
+    if isinstance(index, pd.MultiIndex) and period_years:
         from services.period_utils import years_for_period
 
-        w = w * pd.Series([years_for_period(period_years, k[0]) for k in p.index], index=p.index)
-    status = getattr(n.generators_t, "status", None)
+        w = w * pd.Series([years_for_period(period_years, k[0]) for k in index], index=index)
     rows = []
     for name in gens.index:
         curve = curve_of(gens.loc[name])
-        if curve is None or name not in p.columns:
+        if curve is None:
             continue
         slope, no_load, price = curve
-        on = (status[name] if status is not None and name in status.columns
-              else pd.Series(1.0, index=p.index)).reindex(p.index).fillna(0.0)
+        row = {"generator": name, "carrier": str(gens.at[name, "carrier"]), "fuel_mwh": None,
+               "no_load_fuel_mwh": None, "fuel_cost_eur": None, "no_load_cost_eur": None}
+        rows.append(row)
+        if p is None or name not in p.columns:
+            continue
+        no_load_on = no_load > 0 and bool(gens.at[name, "committable"])
+        if no_load_on and (status is None or name not in status.columns):
+            continue
         p_nom = _num(gens.at[name, "p_nom"]) or 0.0
-        slope_mwh = float((slope * p[name] * w).sum())
-        no_load_mwh = float((no_load * p_nom * on * w).sum()) if bool(gens.at[name, "committable"]) else 0.0
+        slope_mwh = float((slope * p[name].reindex(index) * w).sum())
+        no_load_mwh = float((no_load * p_nom * status[name].reindex(index) * w).sum()) if no_load_on else 0.0
         fuel = slope_mwh + no_load_mwh
-        rows.append({"generator": name, "carrier": str(gens.at[name, "carrier"]),
-                     "fuel_mwh": fuel, "no_load_fuel_mwh": no_load_mwh,
-                     "fuel_cost_eur": fuel * price, "no_load_cost_eur": no_load_mwh * price})
+        row.update(fuel_mwh=fuel, no_load_fuel_mwh=no_load_mwh, fuel_cost_eur=fuel * price,
+                   no_load_cost_eur=no_load_mwh * price)
     return rows

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 import pandas as pd
 import pypsa
 import pytest
@@ -105,8 +107,9 @@ def test_apply_rederives_after_a_p_nom_edit():
 
 
 @pytest.mark.parametrize("row, msg", [
-    ({fuel_curve.SLOPE: -0.1, fuel_curve.PRICE: 40.0}, "zero or more"),
-    ({fuel_curve.PRICE: -1.0}, "zero or more"),
+    ({fuel_curve.SLOPE: -0.1, fuel_curve.PRICE: 40.0}, "fuel_curve_slope must be zero or more"),
+    ({fuel_curve.NO_LOAD: -0.1, fuel_curve.PRICE: 40.0}, "fuel_curve_no_load must be zero or more"),
+    ({fuel_curve.PRICE: -1.0}, "fuel_price must be zero or more"),
     ({fuel_curve.SLOPE: 0.25}, "fuel price"),
     ({fuel_curve.NO_LOAD: 0.05, fuel_curve.PRICE: 40.0}, "Unit commitment"),
     ({fuel_curve.NO_LOAD: 0.05, fuel_curve.PRICE: 40.0, "committable": True, "p_nom_extendable": True},
@@ -198,15 +201,222 @@ def test_validation_flags_a_curve_it_cannot_price():
     assert _check_fuel_curves(_network(curve=False)) == []
 
 
-def test_the_generator_form_shows_the_curve_for_fuel_carriers_only():
+def test_the_generator_form_shows_the_curve_on_every_generator():
+    """GK B Q1: an LP input never hides, and `reveal_when` cannot say "fuel carrier OR a curve is set", so the
+    rows show on every generator and their help names them fuel-burning only."""
     from services.asset_schema import fields as F
 
     rows = {f.key: f for f in F.fields_for("Generator")}
     for key in fuel_curve.COLUMNS:
-        assert rows[key].reveal_when == {"carrier": F.FUEL_CARRIERS}, key
+        assert rows[key].reveal_when is None, key
         assert rows[key].blank == "clear", key
-    assert {"diesel", "gas", "oil"} <= set(F.FUEL_CARRIERS)
-    assert not {"solar", "onwind", "offwind", "ror"} & set(F.FUEL_CARRIERS)
+        assert rows[key].help.startswith("Fuel-burning generators only."), key
     assert "Unit commitment" in rows[fuel_curve.NO_LOAD].help
     assert rows["stand_by_cost"].derived and rows["stand_by_cost"].reveal_when == {"committable": True}
     assert "minimum load ratio" in rows["p_min_pu"].help
+
+
+# ── GK B H1: every writer runs the same guard; the solve staging is authoritative ──────────────────────────
+
+def _installed(install_network):
+    from tests.conftest import build_network
+
+    n = build_network()
+    install_network(n)
+    return n
+
+
+def test_put_refuses_a_direct_edit_of_a_derived_cost_while_a_curve_is_set(client, install_network):
+    n = _installed(install_network)
+    assert client.post("/api/network/generators", json=_genset(**CURVE)).status_code == 201
+    for col, val in (("marginal_cost", 99.0), ("stand_by_cost", 1.0)):
+        r = client.put("/api/network/generators/genset", json=_genset(**CURVE, **{col: val}))
+        assert r.status_code == 422 and f"{col} is derived from the fuel curve" in r.json()["detail"], r.text
+    # The card sends its whole form: the stored derived values unchanged are not an edit.
+    row = {c: float(n.generators.at["genset", c]) for c in fuel_curve.DERIVED}
+    r = client.put("/api/network/generators/genset", json=_genset(**{**CURVE, fuel_curve.PRICE: 50.0}, **row))
+    assert r.status_code == 200, r.text
+    assert n.generators.at["genset", "marginal_cost"] == pytest.approx(SLOPE * 50.0)
+    # Clearing the curve frees the column again.
+    cleared = {k: None for k in fuel_curve.COLUMNS}
+    r = client.put("/api/network/generators/genset", json=_genset(**cleared, marginal_cost=7.0))
+    assert r.status_code == 200, r.text
+    assert n.generators.at["genset", "marginal_cost"] == 7.0
+
+
+def test_setting_a_curve_says_what_it_replaces(client, install_network):
+    from services import change_log_service
+
+    _installed(install_network)
+    r = client.post("/api/network/generators", json=_genset(**CURVE, marginal_cost=12.0))
+    assert r.status_code == 201
+    assert r.json()["notice"] == "The fuel curve replaces marginal_cost 12 with 10."
+    assert client.post("/api/network/generators", json={**_genset(marginal_cost=3.0), "name": "g2"}).status_code == 201
+    r = client.put("/api/network/generators/g2", json={**_genset(**CURVE), "name": "g2"})
+    assert r.json()["notice"] == "The fuel curve replaces marginal_cost 3 with 10."
+    assert any("replaces marginal_cost 3 with 10" in str(e) for e in change_log_service.get_all())
+    # Changing an existing curve says nothing: there is nothing of the person's left to replace.
+    r = client.put("/api/network/generators/g2", json={**_genset(**{**CURVE, fuel_curve.PRICE: 41.0}),
+                                                       "name": "g2"})
+    assert "notice" not in r.json()
+
+
+def test_a_curve_and_a_marginal_cost_series_refuse(client, install_network):
+    n = _installed(install_network)
+    assert client.post("/api/network/generators", json=_genset()).status_code == 201
+    n.generators_t.marginal_cost["genset"] = 5.0
+    r = client.put("/api/network/generators/genset", json=_genset(**CURVE))
+    assert r.status_code == 422 and "marginal_cost time series" in r.json()["detail"]
+    m = _network(curve=True)
+    m.generators_t.marginal_cost["genset"] = 5.0
+    from services.validation_service import _check_fuel_curves
+
+    (issue,) = _check_fuel_curves(m)
+    assert "time series" in issue.message
+
+
+def test_a_curve_edit_stamps_the_derived_costs_customised(client, install_network):
+    from services.asset_schema import provenance
+
+    n = _installed(install_network)
+    assert client.post("/api/network/generators", json=_genset(**CURVE)).status_code == 201
+    r = client.put("/api/network/generators/genset", json=_genset(**{**CURVE, fuel_curve.PRICE: 60.0}))
+    assert r.status_code == 200
+    stamped = provenance._root(n).get("Generator", {}).get("genset", {})
+    assert {"marginal_cost", "stand_by_cost"} <= set(stamped), stamped
+
+
+def test_bulk_runs_the_same_guard_and_derivation(client, install_network):
+    n = _installed(install_network)
+    assert client.post("/api/network/generators", json=_genset(**CURVE)).status_code == 201
+    r = client.patch("/api/network/_bulk", json={"component_class": "Generator", "names": ["genset"],
+                                                  "updates": {"marginal_cost": 99.0}})
+    assert r.status_code == 422 and "derived from the fuel curve" in r.json()["detail"]
+    r = client.patch("/api/network/_bulk", json={"component_class": "Generator", "names": ["genset"],
+                                                  "updates": {"committable": False}})
+    assert r.status_code == 422 and "Unit commitment" in r.json()["detail"]
+    r = client.patch("/api/network/_bulk", json={"component_class": "Generator", "names": ["genset"],
+                                                  "updates": {"p_nom": 4.0}})
+    assert r.status_code == 200, r.text
+    assert n.generators.at["genset", "stand_by_cost"] == pytest.approx(NO_LOAD * 4.0 * PRICE)
+    assert n.generators.at["genset", "committable"]
+
+
+def test_the_solve_staging_rederives_stale_stored_costs():
+    """H1: a writer that bypasses the derivation (here a direct frame edit) cannot reach the LP stale."""
+    import queue
+    import threading
+
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import run_simulation
+
+    n = _network(curve=True)
+    n.generators.loc["genset", ["marginal_cost", "stand_by_cost"]] = [0.0, 0.0]
+    PyPSAService.set_network(n)
+    status, cond = run_simulation(CFG, n, PyPSAService.get_lock(), threading.Event(), queue.SimpleQueue(),
+                                  state_update=lambda **kw: None)
+    assert status in ("ok", "optimal"), (status, cond)
+    assert n.generators.at["genset", "stand_by_cost"] == pytest.approx(NO_LOAD * PRICE)
+    assert n.objective == pytest.approx(HOURS * (NO_LOAD + SLOPE * LOAD_MW) * PRICE)
+
+
+# ── GK B H2: the fingerprint ───────────────────────────────────────────────────────────────────────────────
+
+def test_the_curve_enters_the_fingerprint_only_when_present(session_ctx, client, install_network):
+    from services.workflow_tools import _network_input_fingerprint
+
+    n = _installed(install_network)
+    ctx = session_ctx(client)
+    fp = lambda: (_network_input_fingerprint(ctx), _network_input_fingerprint(ctx, exact=True))  # noqa: E731
+    before = fp()
+    n.generators["fuel_price"] = np.nan
+    moved = fp()
+    assert moved[0] != before[0] and moved[1] != before[1]
+    n.generators.at[n.generators.index[0], "fuel_price"] = 40.0
+    priced = fp()
+    assert priced[0] != moved[0] and priced[1] != moved[1]      # a fuel_price edit alone moves it
+    n.generators.drop(columns="fuel_price", inplace=True)
+    assert fp() == before                                         # absent: byte-identical to before
+    n.generators.at[n.generators.index[0], "stand_by_cost"] = 3.0
+    assert fp()[1] != before[1]                                   # stand_by_cost is hashed as a PyPSA column
+
+
+# ── GK B H6, H7: the fuel block reads solved values only; weightings; off hours ────────────────────────────
+
+def _opex_of(n, name="genset"):
+    """The generator's statistics opex, weighted like the LP objective (PyPSA's own number)."""
+    op = n.statistics.opex(groupby=False, comps="Generator")
+    return float(op.xs(name, level="name").sum()) if isinstance(op.index, pd.MultiIndex) else float(op[name])
+
+
+def test_a_generator_with_no_solved_values_reads_none():
+    n = _solve(_network(curve=True))
+    n.add("Generator", "late", bus="el", carrier="diesel", p_nom=1.0, committable=True,
+          **{fuel_curve.SLOPE: SLOPE, fuel_curve.NO_LOAD: NO_LOAD, fuel_curve.PRICE: PRICE})
+    n.add("Generator", "late_lp", bus="el", carrier="diesel", p_nom=1.0,
+          **{fuel_curve.SLOPE: SLOPE, fuel_curve.PRICE: PRICE})
+    n.generators_t.p = n.generators_t.p.drop(columns=["late", "late_lp"], errors="ignore")
+    n.generators_t.p_set["late"] = 0.5            # an input, never read as dispatch
+    rows = {r["generator"]: r for r in compute_cost_breakdown(n, CFG)["fuel"]}
+    for name in ("late", "late_lp"):
+        assert rows[name]["fuel_mwh"] is None and rows[name]["fuel_cost_eur"] is None, name
+        assert rows[name]["no_load_fuel_mwh"] is None and rows[name]["no_load_cost_eur"] is None, name
+    # Dispatch solved but no status for a no-load unit: None, not the slope part alone.
+    n.generators_t.status = n.generators_t.status.drop(columns="genset")
+    row = {r["generator"]: r for r in compute_cost_breakdown(n, CFG)["fuel"]}["genset"]
+    assert row["fuel_mwh"] is None
+
+
+def test_uneven_weightings_match_the_hand_calculation_and_the_opex():
+    n = _network(curve=True)
+    weights = pd.Series([1.0, 3.0] * (HOURS // 2), index=n.snapshots)
+    for col in ("objective", "generators", "stores"):
+        n.snapshot_weightings[col] = weights
+    _solve(n)
+    cb = compute_cost_breakdown(n, CFG)
+    row = _row(cb)
+    hand = weights.sum() * (NO_LOAD + SLOPE * LOAD_MW)
+    assert row["fuel_mwh"] == pytest.approx(hand)
+    assert row["fuel_cost_eur"] == pytest.approx(hand * PRICE)
+    assert row["fuel_cost_eur"] == pytest.approx(_opex_of(n))
+    assert cb["opex"] == pytest.approx(row["fuel_cost_eur"])     # the block splits opex out, adds nothing
+
+
+def test_multi_period_scales_by_the_period_years():
+    n = _network(curve=True)
+    snaps = n.snapshots
+    n.set_snapshots(pd.MultiIndex.from_product([[2030, 2040], snaps]))
+    n.investment_periods = [2030, 2040]
+    n.investment_period_weightings.loc[:, "years"] = [10.0, 5.0]
+    n.investment_period_weightings.loc[:, "objective"] = [1.0, 1.0]
+    n.loads_t.p_set = pd.DataFrame(LOAD_MW, index=n.snapshots, columns=["site"])
+    n.optimize(solver_name="highs", multi_investment_periods=True)
+    cb = compute_cost_breakdown(n, CFG)
+    row = _row(cb)
+    hand = (10.0 + 5.0) * HOURS * (NO_LOAD + SLOPE * LOAD_MW)
+    assert row["fuel_mwh"] == pytest.approx(hand)
+    assert row["fuel_cost_eur"] == pytest.approx(cb["opex"])
+
+
+def test_no_load_fuel_counts_only_committed_hours():
+    """H7: p_min_pu > 0 and a load that drops to zero, so the solver itself switches the unit off."""
+    n = _network(curve=True)
+    load = pd.Series(LOAD_MW, index=n.snapshots)
+    load.iloc[:6] = 0.0
+    n.loads_t.p_set = pd.DataFrame({"site": load})
+    _solve(n)
+    on = n.generators_t.status["genset"]
+    assert on.iloc[:6].sum() == 0 and on.iloc[6:].min() == 1
+    row = _row(compute_cost_breakdown(n, CFG))
+    on_h = HOURS - 6
+    assert row["no_load_fuel_mwh"] == pytest.approx(on_h * NO_LOAD)
+    assert row["fuel_mwh"] == pytest.approx(on_h * (NO_LOAD + SLOPE * LOAD_MW))
+    assert row["fuel_cost_eur"] == pytest.approx(_opex_of(n))
+
+
+def test_a_curve_generator_leaves_its_neighbours_costs_alone():
+    n = _network(curve=True)
+    n.add("Generator", "grid", bus="el", carrier="AC", p_nom=1.0, marginal_cost=33.0)
+    fuel_curve.apply(n)
+    assert n.generators.at["grid", "marginal_cost"] == 33.0
+    assert [r["generator"] for r in fuel_curve.fuel_use(n)] == ["genset"]

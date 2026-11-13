@@ -721,7 +721,7 @@
       "key": "fuel_price",
       "group": "variable",
       "label": "Fuel price",
-      "help": "Price per MWh of fuel burnt. Sets the fuel curve's costs: marginal cost = slope × price, stand-by cost = no-load fuel × capacity × price.",
+      "help": "Fuel-burning generators only. Price per MWh of fuel burnt; sets marginal cost = slope × price and stand-by cost = no-load fuel × capacity × price.",
       "unit_display": "EUR/MWh fuel",
       "unit_storage": "EUR/MWh",
       "scale": 1.0,
@@ -730,20 +730,7 @@
       "required": false,
       "key_param": false,
       "derived": false,
-      "reveal_when": {
-       "carrier": [
-        "diesel",
-        "gas",
-        "oil",
-        "OCGT",
-        "CCGT",
-        "coal",
-        "lignite",
-        "biomass",
-        "biogas",
-        "genset"
-       ]
-      },
+      "reveal_when": null,
       "part": null,
       "blank": "clear",
       "technical_name": "fuel_price"
@@ -854,7 +841,7 @@
       "key": "fuel_curve_slope",
       "group": "performance",
       "label": "Fuel curve slope",
-      "help": "Fuel burnt per MWh generated, on top of the no-load fuel (HOMER's fuel curve slope). Needs a fuel price.",
+      "help": "Fuel-burning generators only. Fuel burnt per MWh generated, on top of the no-load fuel (HOMER's fuel curve slope). Needs a fuel price.",
       "unit_display": "MWh fuel/MWh",
       "unit_storage": "MWh/MWh",
       "scale": 1.0,
@@ -863,20 +850,7 @@
       "required": false,
       "key_param": false,
       "derived": false,
-      "reveal_when": {
-       "carrier": [
-        "diesel",
-        "gas",
-        "oil",
-        "OCGT",
-        "CCGT",
-        "coal",
-        "lignite",
-        "biomass",
-        "biogas",
-        "genset"
-       ]
-      },
+      "reveal_when": null,
       "part": null,
       "blank": "clear",
       "technical_name": "fuel_curve_slope"
@@ -885,7 +859,7 @@
       "key": "fuel_curve_no_load",
       "group": "performance",
       "label": "No-load fuel",
-      "help": "Fuel burnt per hour per MW of capacity while the unit is on, at any output (HOMER's fuel curve intercept). Needs Unit commitment and a fixed capacity: a unit that is never switched off burns it every hour.",
+      "help": "Fuel-burning generators only. Fuel burnt per hour per MW of capacity while the unit is on, at any output (HOMER's fuel curve intercept). Needs Unit commitment and a fixed capacity.",
       "unit_display": "MWh fuel/h per MW",
       "unit_storage": "MWh/h/MW",
       "scale": 1.0,
@@ -894,20 +868,7 @@
       "required": false,
       "key_param": false,
       "derived": false,
-      "reveal_when": {
-       "carrier": [
-        "diesel",
-        "gas",
-        "oil",
-        "OCGT",
-        "CCGT",
-        "coal",
-        "lignite",
-        "biomass",
-        "biogas",
-        "genset"
-       ]
-      },
+      "reveal_when": null,
       "part": null,
       "blank": "clear",
       "technical_name": "fuel_curve_no_load"

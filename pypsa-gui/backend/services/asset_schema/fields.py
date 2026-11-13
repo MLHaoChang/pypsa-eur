@@ -84,10 +84,6 @@ def _share(key: str, group: str, label: str, help: str, **kw) -> FieldSpec:
 
 _EXT = {"p_nom_extendable": True}
 _UC = {"committable": True}
-# Generators that burn a fuel: the fuel-curve rows show only for these carriers (homer-parity 02a). The match is
-# exact, as every `reveal_when`; a curve set on another carrier still prices (`services.fuel_curve`).
-FUEL_CARRIERS = ("diesel", "gas", "oil", "OCGT", "CCGT", "coal", "lignite", "biomass", "biogas", "genset")
-_FUEL = {"carrier": FUEL_CARRIERS}
 
 # ── shared rows ───────────────────────────────────────────────────────────────
 
@@ -211,9 +207,9 @@ GENERATOR: tuple[FieldSpec, ...] = (
                      "paid on the whole capacity whatever the dispatch."),
     FieldSpec("marginal_cost", "variable", "Marginal cost", "Variable cost per MWh dispatched: fuel plus variable "
               "O&M. With a fuel curve it is derived: fuel curve slope × fuel price.", "EUR/MWh", "EUR/MWh"),
-    FieldSpec("fuel_price", "variable", "Fuel price", "Price per MWh of fuel burnt. Sets the fuel curve's costs: "
-              "marginal cost = slope × price, stand-by cost = no-load fuel × capacity × price.", "EUR/MWh fuel",
-              "EUR/MWh", reveal_when=_FUEL),
+    FieldSpec("fuel_price", "variable", "Fuel price", "Fuel-burning generators only. Price per MWh of fuel "
+              "burnt; sets marginal cost = slope × price and stand-by cost = no-load fuel × capacity × price.",
+              "EUR/MWh fuel", "EUR/MWh"),
     FieldSpec("curtailment_cost", "variable", "Curtailment cost", "Penalty per MWh of available but unused energy. "
               "Set above zero to discourage spilling wind or solar.", "EUR/MWh", "EUR/MWh"),
     *_uc_cost_rows(shut_down=True, stand_by=False),
@@ -222,13 +218,12 @@ GENERATOR: tuple[FieldSpec, ...] = (
               reveal_when=_UC, derived=True),
     _share("efficiency", "performance", "Efficiency", "Conversion efficiency from primary energy to electricity. "
            "Used for CO₂ accounting (carrier emissions ÷ efficiency)."),
-    FieldSpec("fuel_curve_slope", "performance", "Fuel curve slope", "Fuel burnt per MWh generated, on top of the "
-              "no-load fuel (HOMER's fuel curve slope). Needs a fuel price.", "MWh fuel/MWh", "MWh/MWh",
-              reveal_when=_FUEL),
-    FieldSpec("fuel_curve_no_load", "performance", "No-load fuel", "Fuel burnt per hour per MW of capacity while "
-              "the unit is on, at any output (HOMER's fuel curve intercept). Needs Unit commitment and a fixed "
-              "capacity: a unit that is never switched off burns it every hour.", "MWh fuel/h per MW",
-              "MWh/h/MW", reveal_when=_FUEL),
+    FieldSpec("fuel_curve_slope", "performance", "Fuel curve slope", "Fuel-burning generators only. Fuel burnt per MWh "
+              "generated, on top of the no-load fuel (HOMER's fuel curve slope). Needs a fuel price.",
+              "MWh fuel/MWh", "MWh/MWh"),
+    FieldSpec("fuel_curve_no_load", "performance", "No-load fuel", "Fuel-burning generators only. Fuel burnt per hour per "
+              "MW of capacity while the unit is on, at any output (HOMER's fuel curve intercept). Needs Unit "
+              "commitment and a fixed capacity.", "MWh fuel/h per MW", "MWh/h/MW"),
     _share("p_min_pu", "performance", "Minimum output", "Minimum dispatch as a share of capacity: a must-run floor. "
            "With Unit commitment, the minimum load ratio while the unit is on."),
     _share("p_max_pu", "performance", "Availability", "Maximum dispatch as a share of capacity. For wind and solar, "

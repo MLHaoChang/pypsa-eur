@@ -387,9 +387,9 @@ class GeneratorCreate(BaseModel):
     # Fuel curve (homer-parity 02a): fuel = no_load × p_nom × on + slope × p. `services.fuel_curve` derives
     # marginal_cost (slope × price) and stand_by_cost (no_load × p_nom × price) from them and refuses a curve it
     # cannot price. None = not set; all three None = no curve.
-    fuel_curve_slope: float | None = Field(default=None, allow_inf_nan=False)    # MWh fuel per MWh generated
-    fuel_curve_no_load: float | None = Field(default=None, allow_inf_nan=False)  # MWh fuel per h per MW rated
-    fuel_price: float | None = Field(default=None, allow_inf_nan=False)          # EUR per MWh fuel
+    fuel_curve_slope: Finite | None = None    # MWh fuel per MWh generated
+    fuel_curve_no_load: Finite | None = None  # MWh fuel per h per MW rated
+    fuel_price: Finite | None = None          # EUR per MWh fuel
     # Per-generator annual energy floor / ceiling (MWh). PyPSA enforces
     # `e_sum_min ≤ Σ_t (p_t × weight_t) ≤ e_sum_max` on the dispatch.
     # Default to PyPSA's own sentinels (-inf / +inf) meaning "no bound".

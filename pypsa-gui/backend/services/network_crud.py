@@ -353,16 +353,27 @@ def _apply_investment_parts(n, component_class: str, name: str, parts: dict) -> 
                 discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
 
 
-def _check_fuel_curve(component_class: str, row: dict) -> None:
-    """Refuse a generator fuel curve that cannot be priced (homer-parity 02a), before anything is written."""
-    if component_class == "Generator" and (msg := fuel_curve.check(row)):
+def _fuel_curve_cost_series(n, name: str) -> list[str]:
+    """The curve-derived cost columns this generator also has a time series for."""
+    return [c for c in fuel_curve.DERIVED if name in getattr(n.generators_t, c, pd.DataFrame()).columns]
+
+
+def _check_fuel_curve(component_class: str, row: dict, *, n=None, name: str | None = None,
+                      before: dict | None = None, submitted: dict | None = None) -> str | None:
+    """Refuse a generator fuel curve write `fuel_curve.guard` refuses (homer-parity 02a), before anything is
+    written; else the notice of what a newly set curve replaces (None when nothing)."""
+    if component_class != "Generator":
+        return None
+    series = _fuel_curve_cost_series(n, name) if n is not None and name is not None else []
+    if msg := fuel_curve.guard(row, before=before, submitted=submitted, cost_series=series):
         raise HTTPException(422, msg)
+    return fuel_curve.replace_notice(row, before=before)
 
 
-def _apply_fuel_curve(n, component_class: str, name: str) -> None:
+def _apply_fuel_curve(n, component_class: str, name: str, *, stamp: bool) -> None:
     """Derive a curve generator's marginal_cost and stand_by_cost from its fuel curve (`services.fuel_curve`)."""
     if component_class == "Generator":
-        fuel_curve.apply(n, [name])
+        fuel_curve.apply(n, [name], stamp=stamp)
 
 
 def rederive_scaled_parts(n, component_class: str, name: str) -> None:
@@ -407,7 +418,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     kwargs, parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     _check_investment_parts(component_class, parts, row=kwargs)
-    _check_fuel_curve(component_class, kwargs)
+    notice = _check_fuel_curve(component_class, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name in df.index:
@@ -416,10 +427,11 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
             ensure_carrier(n, kwargs.get("carrier", ""))
         n.add(component_class, name, **kwargs)
         _apply_investment_parts(n, component_class, name, parts)
-        _apply_fuel_curve(n, component_class, name)
+        _apply_fuel_curve(n, component_class, name, stamp=False)
         _normalise_flag_column(n, attr)
-    change_log_service.log("add", component_class, name, f"Added {component_class.lower()} '{name}'")
-    return {"name": name}
+    change_log_service.log("add", component_class, name,
+                           f"Added {component_class.lower()} '{name}'" + (f". {notice}" if notice else ""))
+    return {"name": name, "notice": notice} if notice else {"name": name}
 
 
 def _merge_partial_update(n, attr: str, name: str, submitted: dict) -> dict:
@@ -633,7 +645,8 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         merged, current_parts = split_parts(component_class, merged)
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, row=merged)
-        _check_fuel_curve(component_class, merged)
+        notice = _check_fuel_curve(component_class, merged, n=n, name=name,
+                                   before=df.loc[name].to_dict(), submitted=kwargs)
         if merged.get("name", name) != name:
             # OPEN-ITEMS item 8. Before `ensure_carrier`, which can add a
             # carrier: a refused rename must leave nothing behind.
@@ -677,7 +690,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         n.add(component_class, name, **merged)
         component_identity.keep(n, component_class, name, held_uid)
         _apply_investment_parts(n, component_class, name, parts)
-        _apply_fuel_curve(n, component_class, name)
+        _apply_fuel_curve(n, component_class, name, stamp=True)
         _reattach_component_series(n, attr, name, saved_series)
         # Re-key any saved per-period bounds so the modal data follows the
         # rename instead of stranding under the old key.
@@ -710,8 +723,8 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         _normalise_flag_column(n, attr)
     desc = (f"Renamed {component_class.lower()} '{name}' → '{new_name}'"
             if new_name != name else f"Updated {component_class.lower()} '{name}'")
-    change_log_service.log("update", component_class, new_name, desc)
-    return {"name": new_name}
+    change_log_service.log("update", component_class, new_name, desc + (f". {notice}" if notice else ""))
+    return {"name": new_name, "notice": notice} if notice else {"name": new_name}
 
 
 def _rename_map_route(component_class: str, old: str, new: str) -> None:
