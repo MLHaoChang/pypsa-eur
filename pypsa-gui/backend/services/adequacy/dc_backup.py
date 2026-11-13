@@ -1335,7 +1335,8 @@ def assess(
         g for g in gens if fuel_curve.curve_of(n.generators.loc[g]) is not None
     ]:
         # homer-parity 02a, GK B ruling 3: stated precedence. The backup NPV is off the LP and never summed into opex.
-        cost["fuel_curve_ignored"] = curved  # the machine key (GK B D3); the note below is the words
+        # The machine key (GK B D3); the note below is the words.
+        cost["fuel_curve_ignored"] = curved
         cost["notes"].append(
             f"Fuel curve not used here: fuel is priced from the backup heat rate ({heat_src}); the fuel curve on "
             f"{', '.join(curved)} (slope and no-load fuel) is read only by the solve"
