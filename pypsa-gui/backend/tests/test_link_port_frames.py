@@ -27,15 +27,20 @@ def _link_ports_stay_in_their_test():
 
     defaults = pypsa.Network().components.links.defaults
     saved = defaults.copy()
-    extra = [a for a in defaults.index if (m := re.fullmatch(r"(bus|efficiency|p)(\d+)", a))
-             and int(m.group(2)) >= 2]
+    extra = [
+        a
+        for a in defaults.index
+        if (m := re.fullmatch(r"(bus|efficiency|p)(\d+)", a)) and int(m.group(2)) >= 2
+    ]
     base = set(saved.index) - set(extra)
     defaults.drop(index=extra, inplace=True)
     try:
         yield
     finally:
         defaults.drop(index=[a for a in defaults.index if a not in base], inplace=True)
-        for a in extra:  # PyPSA appends extra ports, so re-appending keeps the original order
+        for a in (
+            extra
+        ):  # PyPSA appends extra ports, so re-appending keeps the original order
             defaults.loc[a] = saved.loc[a]
         assert defaults.index.equals(saved.index)
 
@@ -66,7 +71,12 @@ def test_stale_resident_network_fails_without_the_repair():
 def test_repair_adds_the_missing_link_port_frames_and_the_network_solves():
     n = _stale()
     added = ensure_link_port_frames(n)
-    assert sorted(added) == ["links.bus2", "links.efficiency2", "links_t.efficiency2", "links_t.p2"]
+    assert sorted(added) == [
+        "links.bus2",
+        "links.efficiency2",
+        "links_t.efficiency2",
+        "links_t.p2",
+    ]
     assert n.links.loc["l", "bus2"] == ""
     assert n.links.loc["l", "efficiency2"] == 1.0
     assert n.links_t.p2.index.equals(n.snapshots)
@@ -91,8 +101,14 @@ def test_run_simulation_solves_a_stale_resident_network():
 
     n = _stale()
     PyPSAService.set_network(n)
-    status, cond = run_simulation(SolverConfig(), n, PyPSAService.get_lock(), threading.Event(),
-                                  queue.SimpleQueue(), state_update=lambda **k: None)
+    status, cond = run_simulation(
+        SolverConfig(),
+        n,
+        PyPSAService.get_lock(),
+        threading.Event(),
+        queue.SimpleQueue(),
+        state_update=lambda **k: None,
+    )
     assert status in ("ok", "optimal"), (status, cond)
     assert n.links_t.p0.loc[:, "l"].tolist() == pytest.approx([0.5, 0.5])
 
@@ -104,7 +120,12 @@ def test_every_port_the_table_names_is_repaired_bus3_and_bus4_too():
     other.add("Link", "five", bus0="a", bus1="b", bus2="c", bus3="e", bus4="f", p_nom=1)
     added = ensure_link_port_frames(resident)
     for k in (2, 3, 4):
-        assert {f"links.bus{k}", f"links.efficiency{k}", f"links_t.efficiency{k}", f"links_t.p{k}"} <= set(added)
+        assert {
+            f"links.bus{k}",
+            f"links.efficiency{k}",
+            f"links_t.efficiency{k}",
+            f"links_t.p{k}",
+        } <= set(added)
     defaults = resident.components["Link"].defaults
     for attr in ("bus3", "efficiency3", "bus4", "efficiency4"):
         assert resident.links.loc["l", attr] == defaults.at[attr, "default"]
@@ -120,11 +141,19 @@ def test_the_repair_is_not_an_edit():
 
     n = _stale()
     ctx = ProjectContext(network=n)
-    before = (_network_input_fingerprint(ctx), _network_input_fingerprint(ctx, exact=True),
-              dirty_state.revision(ctx), len(ctx.undo.stack))
+    before = (
+        _network_input_fingerprint(ctx),
+        _network_input_fingerprint(ctx, exact=True),
+        dirty_state.revision(ctx),
+        len(ctx.undo.stack),
+    )
     assert ensure_link_port_frames(n)
-    after = (_network_input_fingerprint(ctx), _network_input_fingerprint(ctx, exact=True),
-             dirty_state.revision(ctx), len(ctx.undo.stack))
+    after = (
+        _network_input_fingerprint(ctx),
+        _network_input_fingerprint(ctx, exact=True),
+        dirty_state.revision(ctx),
+        len(ctx.undo.stack),
+    )
     assert after == before
 
 
@@ -158,16 +187,28 @@ def test_run_simulation_repairs_under_the_projects_lock(monkeypatch):
     monkeypatch.setattr(link_ports, "ensure_link_port_frames", spy)
     n = _stale()
     PyPSAService.set_network(n)
-    status, cond = run_simulation(SolverConfig(), n, lock, threading.Event(), queue.SimpleQueue(),
-                                  state_update=lambda **k: None)
+    status, cond = run_simulation(
+        SolverConfig(),
+        n,
+        lock,
+        threading.Event(),
+        queue.SimpleQueue(),
+        state_update=lambda **k: None,
+    )
     assert status in ("ok", "optimal"), (status, cond)
     assert held and all(held)
 
 
 # ── C1: no solve site can miss the repair ──────────────────────────────────
 
-_SOLVE_CALLS = {"optimize", "pf", "lpf", "create_model", "optimize_security_constrained",
-                "optimize_with_rolling_horizon"}
+_SOLVE_CALLS = {
+    "optimize",
+    "pf",
+    "lpf",
+    "create_model",
+    "optimize_security_constrained",
+    "optimize_with_rolling_horizon",
+}
 
 #: Functions that solve but are reached only through ``run_simulation``, which repairs the
 #: network under its lock before any of them runs (a copy taken there carries the frames).
@@ -191,10 +232,16 @@ def unrepaired_solve_sites(sources) -> list[str]:
             if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             calls = [c for c in ast.walk(fn) if isinstance(c, ast.Call)]
-            repaired = [c.lineno for c in calls
-                        if getattr(c.func, "id", getattr(c.func, "attr", None)) == "ensure_link_port_frames"]
+            repaired = [
+                c.lineno
+                for c in calls
+                if getattr(c.func, "id", getattr(c.func, "attr", None))
+                == "ensure_link_port_frames"
+            ]
             for c in calls:
-                if not (isinstance(c.func, ast.Attribute) and c.func.attr in _SOLVE_CALLS):
+                if not (
+                    isinstance(c.func, ast.Attribute) and c.func.attr in _SOLVE_CALLS
+                ):
                     continue
                 if (rel, fn.name) in _REACHED_THROUGH_RUN_SIMULATION:
                     continue
@@ -232,8 +279,14 @@ def test_the_allow_list_names_functions_that_exist_and_solve():
 
     sources = dict(_app_sources())
     for rel, name in _REACHED_THROUGH_RUN_SIMULATION:
-        fns = [f for f in ast.walk(ast.parse(sources[rel]))
-               if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)) and f.name == name]
+        fns = [
+            f
+            for f in ast.walk(ast.parse(sources[rel]))
+            if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)) and f.name == name
+        ]
         assert fns, (rel, name)
-        assert any(isinstance(c, ast.Call) and getattr(c.func, "attr", None) in _SOLVE_CALLS
-                   for f in fns for c in ast.walk(f)), (rel, name)
+        assert any(
+            isinstance(c, ast.Call) and getattr(c.func, "attr", None) in _SOLVE_CALLS
+            for f in fns
+            for c in ast.walk(f)
+        ), (rel, name)

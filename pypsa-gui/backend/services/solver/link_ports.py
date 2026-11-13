@@ -34,6 +34,8 @@ def ensure_link_port_frames(n) -> list[str]:
     for attr in defaults.index[defaults.varying.astype(bool)]:
         if attr in c.dynamic:
             continue
-        c.dynamic[attr] = pd.DataFrame(index=n.snapshots, columns=c.static.index[:0], dtype=float)
+        c.dynamic[attr] = pd.DataFrame(
+            index=n.snapshots, columns=c.static.index[:0], dtype=float
+        )
         added.append(f"links_t.{attr}")
     return added
