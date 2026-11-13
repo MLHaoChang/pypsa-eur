@@ -907,26 +907,91 @@ def test_the_chat_seam_polled_inside_the_handler_never_serves_the_pre_edit_hash(
     assert _agree() == "stale"
 
 
-def test_a_refused_network_write_still_moves_the_stamp(client, install_network):
+def _a_write_that_mutates_then(monkeypatch, fail):
+    """Patch the generator PUT's handler: it changes the network in place, then fails with `fail`. Records the
+    request's own context and its input generation before the write."""
+    from routers import network as network_router
+
+    seen = {}
+
+    def handler(component, list_name, name, attrs):
+        ctx = PyPSAService.get_active_context()
+        seen["ctx"], seen["before"] = ctx, int(ctx.input_generation or 0)
+        ctx.network.generators.at[name, "marginal_cost"] = 77.0
+        raise fail
+
+    monkeypatch.setattr(network_router, "_update_component", handler)
+    return seen
+
+
+def test_a_refused_network_write_still_moves_the_stamp(
+    client, install_network, monkeypatch
+):
     """A route under /api/network may change the network in place and then fail; the middleware's revision bump
-    is 2xx-only, so on a 4xx/5xx it moves the inputs stamp instead."""
+    is 2xx-only, so on a 4xx/5xx it moves the request's own inputs stamp instead (W2)."""
+    from fastapi import HTTPException
+
     install_network(_net())
-    ctx_box = {}
+    seen = _a_write_that_mutates_then(
+        monkeypatch, HTTPException(409, "refused part-way")
+    )
+    r = client.put(
+        "/api/network/generators/g", json={"name": "g", "bus": "b", "p_nom": 10.0}
+    )
+    assert r.status_code == 409, r.text
+    assert seen["ctx"].network.generators.at["g", "marginal_cost"] == 77.0
+    assert int(seen["ctx"].input_generation or 0) == seen["before"] + 1
 
-    from services import dirty_state
 
-    real = dirty_state.bump_inputs
+def test_a_network_write_that_raises_still_moves_the_stamp(
+    client, install_network, monkeypatch
+):
+    """G1: a write that changes the network and then raises never reaches either status branch; the middleware
+    moves the request's inputs stamp and re-raises."""
+    install_network(_net())
+    seen = _a_write_that_mutates_then(monkeypatch, RuntimeError("part-way"))
+    with pytest.raises(RuntimeError, match="part-way"):
+        client.put(
+            "/api/network/generators/g", json={"name": "g", "bus": "b", "p_nom": 10.0}
+        )
+    assert seen["ctx"].network.generators.at["g", "marginal_cost"] == 77.0
+    assert int(seen["ctx"].input_generation or 0) == seen["before"] + 1
 
-    def spy(ctx=None):
-        ctx_box["ctx"] = ctx or dirty_state._active()
-        return real(ctx)
 
-    import unittest.mock
+def test_a_bundle_import_moves_the_stamp_after_the_user_ts(
+    client, api_project, monkeypatch
+):
+    """G2: `import_bundle` restores and reapplies `user_ts` like a load; a bundle without `network_revision`
+    leaves the revision where it was, so the stamp moves after the reapply."""
+    import io
+    import json
+    import zipfile
 
-    with unittest.mock.patch.object(dirty_state, "bump_inputs", spy):
-        r = client.put("/api/network/generators/no-such-generator", json={"p_nom": 1.0})
-    assert r.status_code >= 400, r.text
-    assert "ctx" in ctx_box
+    name = api_project("pgbundle")
+    raw = zipfile.ZipFile(
+        io.BytesIO(client.get(f"/api/projects/{name}/bundle").content)
+    )
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as z:
+        for item in raw.infolist():
+            data = raw.read(item)
+            if item.filename.endswith("metadata.json"):
+                meta = json.loads(data)
+                meta.pop("network_revision", None)
+                data = json.dumps(meta).encode()
+            z.writestr(item, data)
+    assert any(i.filename.endswith("metadata.json") for i in raw.infolist())
+    bundle = out.getvalue()
+    seen = _poll_in_the_reapply_window(monkeypatch)
+    r = client.post(
+        "/api/projects/import_bundle",
+        files={"file": ("pg.zip", bundle, "application/zip")},
+        params={"name": "pgbundle_imported"},
+    )
+    assert r.status_code in (200, 201), r.text
+    assert seen
+    ctx, stamp = seen[-1]
+    assert runs._stamp(ctx) != stamp
 
 
 def test_the_cache_hashes_once_per_state_for_concurrent_polls(solved, monkeypatch):

@@ -992,21 +992,25 @@ def restore_snapshot(
         _reapply_user_ts_to_network,
         _restore_user_ts,
     )
-    user_ts_path = project_dir / "user_ts.json"
-    if user_ts_path.exists():
-        _restore_user_ts(json.loads(user_ts_path.read_text()))
-    else:
-        _restore_user_ts({})
-    n = PyPSAService.get_network()
-    with PyPSAService.get_lock():
-        _ensure_snapshots_cover_user_ts(n)
-    # The authoritative loaded-project binding was set inside the swap lock above.
-    n.name = name
-    _reapply_user_ts_to_network(n)
-    # PG-04a F1: the restored `user_ts` lands after the results state set the
-    # revision, so a fingerprint a header poll cached in between stands for the
-    # network without them; move the inputs stamp once they are in.
-    dirty_state.bump_inputs()
+    try:
+        user_ts_path = project_dir / "user_ts.json"
+        if user_ts_path.exists():
+            _restore_user_ts(json.loads(user_ts_path.read_text()))
+        else:
+            _restore_user_ts({})
+        n = PyPSAService.get_network()
+        with PyPSAService.get_lock():
+            _ensure_snapshots_cover_user_ts(n)
+        # The authoritative loaded-project binding was set inside the swap lock above.
+        n.name = name
+        _reapply_user_ts_to_network(n)
+    finally:
+        # PG-04a F1: the restored `user_ts` land after the revision moved, so a
+        # fingerprint a header poll cached in between stands for the network
+        # without them; move the inputs stamp once they are in, or the step failed.
+        from services import dirty_state as _dirty
+
+        _dirty.bump_inputs()
 
     snap_meta = _read_snapshot_meta(snap_dir)
     change_log_service.log(
