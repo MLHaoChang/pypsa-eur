@@ -1,0 +1,1 @@
+* Refactor(pypsa-gui): The campus study, library, MILP and grid-code checks, the site-binding uid checks and the assistant task brief read their out-of-date verdict from the provenance graph (provenance-graph slice 06); an input that cannot be read now counts as changed.

@@ -3,7 +3,7 @@
 
 # 11 — H2 hub and ammonia presets
 
-Status: ready-for-agent (blocked by 06, 07; Sonnet; GK B, GK A for linked outputs)
+Status: done (PR: BC 11 presets, h2 hub and ammonia)
 Type: task
 Blocked by: 06, 07
 Gated: yes (GK B; GK A for the linked outputs)

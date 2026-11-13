@@ -92,6 +92,7 @@ import yaml
 from fastapi import HTTPException
 
 from services import project_registry
+from services.provenance_graph import Pin, pin_broken, pin_stale
 from services.gridspine_service import CAPACITY_EXPANSION, kind_of
 
 # Guarded like services/gridspine_service.py, for the same reason: the frozen
@@ -417,7 +418,9 @@ def _dips_out_of_date(project, d: Path, as_run: dict) -> list[str]:
             return []
         _DIPS_INPUTS_CACHE.clear()
         _DIPS_INPUTS_CACHE[key] = now
-    return sorted(u for u in set(as_run) | set(now) if as_run.get(u) != now.get(u))
+    # One pin per unit: a unit gone or new differs from None, so it breaks too.
+    pins = [Pin(u, as_run.get(u), lambda u=u: now.get(u)) for u in set(as_run) | set(now)]
+    return sorted(pin_broken(f"campus_dips:{d}", pins))
 
 
 def _voltage_stability_results(run: Path) -> dict | None:
@@ -712,21 +715,41 @@ def _library_stale(project, d: Path) -> bool:
     now, or that basis, is another one. A run that did not invest kept
     neither, and does not depend on the library. A side file that cannot be
     read now means a rerun would not reproduce the run, so: stale."""
+    return pin_stale(f"campus_library:{d}", _library_pins(project, d))
+
+
+def _library_pins(project, d: Path) -> list[Pin]:
+    """The pins of a run's library: the bytes it used and the basis it was costed on, each against what a run would
+    take now. None when the run did not invest. A side file that cannot be read gives a pin that breaks."""
     used = d / "run" / USED_LIBRARY_FILE
     if not used.is_file():
-        return False
+        return []
+    memo: list = []
+
+    def now():
+        if not memo:
+            memo.append(_engine_library(project, d))
+        return memo[0]
+
     try:
-        text, _overridden, basis = _engine_library(project, d)
+        pins = [Pin("library", used.read_bytes(), lambda: now()[0].encode())]
         kept = d / "run" / COST_BASIS_FILE
-        return (text.encode() != used.read_bytes()
-                or (kept.is_file() and json.loads(kept.read_text()) != basis))
-    except Exception:                                          # noqa: BLE001 - see the docstring
-        return True
+        if kept.is_file():
+            pins.append(Pin("cost_basis", json.loads(kept.read_text()), lambda: now()[2]))
+        return pins
+    except Exception as exc:                                   # noqa: BLE001 - see `_library_stale`
+        reason = str(exc)
+
+        def unreadable():
+            raise OSError(reason)
+
+        return [Pin("library", None, unreadable)]
 
 
 def _grid_code_changed(project, d: Path) -> bool:
     used = _profile_used(d / "run")
-    return used is not None and profile_fingerprint(project, used["profile"]) != used["sha256"]
+    return used is not None and pin_stale(f"campus_grid_code:{d}", [
+        Pin("grid_code", used.get("sha256"), lambda: profile_fingerprint(project, used["profile"]))])
 
 
 def _stale(project, d: Path) -> bool:
@@ -737,9 +760,11 @@ def _stale(project, d: Path) -> bool:
         return False
     m = json.loads(manifest.read_text())
     text = yaml.safe_dump(yaml.safe_load(campus.read_text()), sort_keys=False)
-    return (hashlib.sha256(text.encode()).hexdigest() != m.get("campus_sha256")
-            or _file_digest(nc) != m.get("network_sha256")
-            or _library_stale(project, d))
+    return pin_stale(f"campus_study:{d}", [
+        Pin("campus", m.get("campus_sha256"), lambda: hashlib.sha256(text.encode()).hexdigest()),
+        Pin("network", m.get("network_sha256"), lambda: _file_digest(nc)),
+        *_library_pins(project, d),
+    ])
 
 
 # ── the hub's own system cost ────────────────────────────────────────────────
@@ -1964,16 +1989,17 @@ def _milp_stale(project, d: Path) -> bool:
         return True
     try:
         basis = json.loads((d / MILP_SUBDIR / MILP_BASIS_FILE).read_text())
-        saved = json.loads((d / SETTINGS_FILE).read_text())
-        if saved != basis["settings"]:
-            return True
-        for name, digest in basis["inputs"].items():
+
+        def digest(name):
             path = d / "run" / name
-            if (_file_digest(path) if path.is_file() else None) != digest:
-                return True
+            return _file_digest(path) if path.is_file() else None
+
+        pins = [Pin("settings", basis["settings"], lambda: json.loads((d / SETTINGS_FILE).read_text())),
+                *(Pin(f"run/{name}", recorded, lambda name=name: digest(name))
+                  for name, recorded in basis["inputs"].items())]
     except Exception:                                          # noqa: BLE001 - see the docstring
         return True
-    return False
+    return pin_stale(f"campus_milp:{d}", pins)
 
 
 def _milp_state(project, d: Path) -> dict:

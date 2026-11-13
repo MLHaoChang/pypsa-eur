@@ -149,7 +149,7 @@ OK as well.
 | 03 | "Why this number": the assistant's read tool over `why(node)` | needs-triage, blocked by 02 |
 | 04 | Runs and results freshness | needs-triage, blocked by 02 |
 | 05 | Studies, reports and the investment case | needs-triage, blocked by 04 |
-| 06 | Campus and site-scene checks | needs-triage, blocked by 02 and #1295 |
+| 06 | Campus and site-scene checks | done |
 | 07 | Memory nodes (`recalled_from`) | done |
 | 08 | `commercial.provenance` cells (GK B ruling (b)) | in progress |
 

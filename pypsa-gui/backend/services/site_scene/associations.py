@@ -35,6 +35,7 @@ import uuid
 from typing import Any
 
 from services import component_identity, dirty_state
+from services.provenance_graph import Pin, pin_stale
 from services.site_scene import frames
 from services.site_scene.contract import SceneError, quantity
 
@@ -521,7 +522,8 @@ def _overlaps(outline: list[tuple[float, float]], ring: list) -> bool:
 
 def _stale(n, cls: str, name: str, recorded_uid: Any) -> bool:
     """The key's sites.json binding names an instance the live component of that name is not (D06)."""
-    return isinstance(recorded_uid, str) and component_identity.get(n, cls, name) != recorded_uid
+    return isinstance(recorded_uid, str) and pin_stale(
+        f"site_binding:{cls}:{name}", [Pin("uid", recorded_uid, lambda: component_identity.get(n, cls, name))])
 
 
 def _unbound_text(n, cls: str, name: str) -> str:

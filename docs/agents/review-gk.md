@@ -172,6 +172,12 @@ Pydantic `Field(ge=…)` refuses NaN but accepts inf. Check every unbounded floa
 - A KPI never reads a value the solve did not produce. A component missing from its dispatch frame (added after the solve) reads None, never p_set, 0 or an inference from neighbours. Fixtures model a solved network rather than the KPI guessing (#1424 A1–A5, GK B (51)).
 - An outcome or extra-edit allowance is as narrow as what the write path writes: a cell write owns only its own provenance store entry (#1431 @191e64ed, GK B (51)).
 
+- A gate that reads a product shortfall uses `process_products.shortfalls` with the run's own solve's `last_lost_load`, never `product_role_generators(n, "shortfall")`. Role-only misses a solve-time capture slack and fails open. A flagged entry (name fallback, stale or missing capture) is no evidence (#1429, GK A (24)).
+- A sign<0 component that can inject (p_min_pu<0, static or series) is counted on its injecting side gross, through an aux y ≥ −p scaled by |sign|, in both the LP row and the KPI. A warning alone is fail-open (#1424 R1, G4, GK A (24)).
+- A KPI fallback for a missing dispatch column fails closed (None). It never substitutes p_set or a sum over neighbouring components, since each guessed probe misread either way (#1424 B1–B3, GK A (24)).
+- A test that only bounds a value (`>= target`) does not pin a guard: assert the exact value at binding, or the classification, so a mutant that loosens the guard fails (#1424 G2, GK A (24)).
+- An over-bound refusal for a wildcard lever is tested per instance, and the wildcard is checked against the built template so no never-lever matches (#1429 B1, GK A (24)).
+
 ## Engineering rules
 
 - Grid source impedance derived from an entered S_k'' carries the IEC 60909 voltage factor c (Z = c·Un²/S_k''; S_sc2 = S_k''/c), in every screen: unbalance, the flicker note, the impedance scan.

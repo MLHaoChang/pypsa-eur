@@ -22,7 +22,7 @@ from typing import Any
 
 from services.asset_schema import fields as asset_fields
 from services.asset_schema.schema import CLASS_ATTR
-from services.provenance_graph import money
+from services.provenance_graph import money, pins
 from services.provenance_graph.memory import (
     MemoryRecall,
 )
@@ -134,6 +134,8 @@ def _recorded(edge: Edge) -> Any:
             if isinstance(rec.scaled, dict)
             else {"malformed": repr(rec.scaled)}
         )
+    if isinstance(rec, pins.Pin):
+        return pins.wire(rec)
     return rec
 
 
