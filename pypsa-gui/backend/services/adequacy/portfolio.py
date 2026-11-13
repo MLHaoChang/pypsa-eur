@@ -400,7 +400,7 @@ def _parent(name: str) -> str:
 
 def portfolio_block(inputs, population: dict, *, margin_payload, snapshot_fingerprint,
                     seed, draws, cov_target, baseline, baseline_key,
-                    stop_event=None, **sim_kwargs) -> dict:
+                    stop_event=None, grid_side=frozenset(), **sim_kwargs) -> dict:
     """
     The ``elcc_portfolio`` payload (A5): population, the comparison rows per
     period, and a status that names every refusal. ``margin_payload`` is the
@@ -413,6 +413,13 @@ def portfolio_block(inputs, population: dict, *, margin_payload, snapshot_finger
     ``margin_unavailable`` and still carry period rows — so an ``aborted``
     status would erase a real disclosure, and the panel renders the periods it
     has regardless of it.
+
+    ``grid_side`` (adequacy loops 03, GK A (25) C1) names the assets on the
+    grid side of the import Link(s) the fleet splits at
+    (``link_supply.grid_side_assets``). The margin credits them on its copper
+    plate; the hub-side fleet does not hold them, so a margin row of theirs
+    is left out of the "absent from the snapshot" check and named in
+    ``notes`` instead. Every other absent row is still a mismatch.
     """
     members: list[Member] = list(population.get("members") or [])
     unbuilt = list(population.get("unbuilt") or [])
@@ -476,6 +483,7 @@ def portfolio_block(inputs, population: dict, *, margin_payload, snapshot_finger
         labels = [str(b[0]) for b in inputs.periods]
         activity: list[str] = []
         capacity: list[str] = []
+        grid_rows: set[str] = set()
         for label in labels:
             rows_p = [r for r in rows if str(r.get("period")) == label
                       and str(r.get("kind")) == "generator"]
@@ -507,7 +515,18 @@ def portfolio_block(inputs, population: dict, *, margin_payload, snapshot_finger
             credited = {_parent(r.get("name")) for r in rows_p
                         if float(r.get("capacity_mw") or 0.0) > 0.0}
             for nm in sorted(credited - snapshot_names):
+                if nm in grid_side:
+                    grid_rows.add(nm)
+                    continue
                 activity.append(f"margin row {nm} in {label} is absent from the snapshot")
+        if grid_rows:
+            block["notes"] = [
+                "margin rows on the grid side of the import Link(s), left out "
+                "of the comparison: " + ", ".join(sorted(grid_rows)),
+                "two standards: the margin's derate and peak window are taken "
+                "on the copper-plate group (grid side included), the ELCC "
+                "against the hub-side residual; neither is rebased",
+            ]
         if activity:
             block.update(status="activity_mismatch",
                          reason=("the margin and the engines disagree about who is "

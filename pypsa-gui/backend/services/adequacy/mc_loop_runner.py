@@ -90,7 +90,6 @@ def start_mc(
         MAX_DRAWS,
         MC_WARNING_V1,
         mc_adequacy,
-        snapshot_inputs,
         transition_probs,
     )
 
@@ -138,6 +137,27 @@ def start_mc(
         # EH study keeps it; `edited_since_study` compares it.
         network_revision = dirty_state.revision()
         vre_names = [nm for kind, nm in assets if kind == "vre"]
+        # Adequacy loops 03: the study samples the loops' fleet
+        # (`link_supply`): split at a trusted import Link, the hub side is
+        # the fleet and the demand, the Link a sampled unit; the grid side
+        # drops out instead of being netted as must-take on a copper plate.
+        from services.adequacy.link_supply import (
+            assemble_fleet,
+            fleet_side,
+            grid_side_assets,
+            grid_side_refusal,
+            loop_scope,
+        )
+        try:
+            scope = loop_scope(n)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        side = fleet_side(n, scope)
+        grid_side = grid_side_assets(n, scope)
+        for kind, nm in assets:
+            _why = grid_side_refusal(n, scope, kind, nm)
+            if _why is not None:
+                raise HTTPException(422, _why)
         if want_portfolio:
             # The portfolio's must-take half needs its profiles PRESERVED in
             # the snapshot (`snapshot_inputs` keeps only the names it is
@@ -146,23 +166,27 @@ def start_mc(
                 must_take_generators,
                 series_is_informative,
             )
-            pmp = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
-            for nm in must_take_generators(n):
+            pmp = getattr(getattr(side, "generators_t", None), "p_max_pu", None)
+            for nm in must_take_generators(side):
                 if (nm not in vre_names and pmp is not None
                         and nm in getattr(pmp, "columns", [])
                         and series_is_informative(pmp[nm])):
                     vre_names.append(nm)
         try:
-            inputs = snapshot_inputs(
-                n, vre_assets=vre_names, cfg=solver_state.get("solver_config"))
+            inputs = assemble_fleet(
+                n, scope, side=side, vre_assets=vre_names,
+                cfg=solver_state.get("solver_config"))
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         # Phase 12d: computed HERE, from the network, under the lock — the
         # worker never touches `n` (plan A9), and the must-take half of the
         # disclosure is not in the fleet (shipped-code review, finding 1).
-        activity_block = _activity_summary(n, inputs.periods)
-        # Grid-to-process ticket 08b: the sequential MC samples no Link or
-        # PoC outage, so it cannot say what one costs in tonnes.
+        # Read off the fleet's own network (the hub side when split).
+        activity_block = _activity_summary(side, inputs.periods)
+        # Grid-to-process ticket 08b: the sequential MC samples the trusted
+        # import Links and the credited firm backup (adequacy loops 03); it
+        # samples no process Link and no withheld converter, so it cannot say
+        # what a process outage costs in tonnes.
         from services.solver.process_uc import process_mask
         has_process = bool(len(n.links)) and bool(process_mask(n.links).any())
         if want_portfolio:
@@ -177,7 +201,7 @@ def start_mc(
                 network_fingerprint,
                 portfolio_population,
             )
-            population = portfolio_population(n, inputs)
+            population = portfolio_population(side, inputs)
             snapshot_fp = network_fingerprint(n)
             margin_payload = _copy.deepcopy(solver_state.get("last_reserve_margin"))
 
@@ -269,7 +293,7 @@ def start_mc(
                     inputs, population, margin_payload=margin_payload,
                     snapshot_fingerprint=snapshot_fp, seed=seed, draws=draws,
                     cov_target=cov_target, baseline=metrics, baseline_key=key,
-                    stop_event=stop_event)
+                    stop_event=stop_event, grid_side=grid_side)
             record.update(
                 status="aborted" if stop_event.is_set() else "done",
                 error=None, finished_at=time.time(),
@@ -281,7 +305,7 @@ def start_mc(
                     "engine": "mc",
                     "fidelity": "sequential_mc",
                     **({"process_loss": {"status": "not_established",
-                                         "reason": "no_link_outages_in_sequential_mc"}}
+                                         "reason": "no_process_link_outages_in_sequential_mc"}}
                        if has_process else {}),
                     "metrics": metrics,
                     "elcc": rows,

@@ -122,6 +122,10 @@ class TurnCoordinator:
                 lease_id = uuid.uuid4().hex
                 state.lease_id = lease_id
                 state.active = utterance
+                # A pending correction left without a lease (its turn's
+                # cleanup failed, so nothing drained it) is older than this
+                # utterance; it must never run after it (issue 02, GK B O5').
+                state.pending = None
                 state.seen_ids.add(utterance.utterance_id)
                 return AdmissionDecision(
                     status='admitted',
@@ -153,7 +157,10 @@ class TurnCoordinator:
         """
         with self._lock:
             state = self._state(session_id)
-            if state.lease_id != lease_id or state.generation != generation:
+            # The lease id alone names the turn. A lease a rebind made obsolete
+            # (generation < current) is still released here, so the pending
+            # utterance queued behind it under the new generation can drain.
+            if state.lease_id != lease_id or generation > state.generation:
                 return None
             state.lease_id = None
             state.active = None
@@ -181,8 +188,11 @@ class TurnCoordinator:
         with self._lock:
             state = self._state(session_id)
             state.generation += 1
-            state.lease_id = None
-            state.active = None
+            # A turn running under the old generation keeps its lease until it
+            # ends: it stops projecting results (`project_result` says
+            # 'obsolete'), and a new-generation utterance queues behind it
+            # instead of starting a second turn beside it. The old pending
+            # correction belongs to the old generation, so it goes.
             state.pending = None
             return state.generation
 

@@ -264,6 +264,16 @@ def test_resource_limits_are_413_with_the_numbers(client, geo):
         {"limit": "buildings", "max": 2000, "actual": 2001}
 
 
+def test_a_deeply_nested_json_body_is_invalid_input_not_500(client, geo):
+    body = _adopted(client, geo)
+    nested = b"[" * 600_000
+    r = client.post("/api/projects/geo/sites/campus/scene/proposals", content=nested,
+                    headers={"content-type": "application/json"})
+    assert _kind(r) == "invalid_input" and r.status_code < 500, r.text
+    after = client.get("/api/projects/geo/sites/campus/scene").json()
+    assert after["revision"] == body["revision"]
+
+
 def test_invalid_geometry_is_422(client, geo):
     _adopted(client, geo)
     r = _propose(client, 1, [{**BOX, "height": -1}])

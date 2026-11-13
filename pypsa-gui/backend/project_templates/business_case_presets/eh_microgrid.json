@@ -1,0 +1,88 @@
+{
+  "id": "eh_microgrid",
+  "version": "1",
+  "pack": "generic_defaults@2026-11-10:sha256:e228b001de2d80f1d1e01e8488b271a9de0bc12cb89bac2247a4592b6e0ce67e",
+  "templates": [
+    "eh_microgrid",
+    "eh_microgrid_staged"
+  ],
+  "variants": {
+    "microgrid": {
+      "label": "Microgrid (tariff to served customers)",
+      "lines": [
+        {
+          "name": "Energy tariff, residential",
+          "kind": "revenue",
+          "category": "tariff",
+          "unit": "MWh",
+          "quantity_source": "linked:served_load.residential@1",
+          "escalation": "contract",
+          "note": "Residential load served, in MWh. Unserved load earns no tariff and no value of lost load is booked (resilience is not valued). Price is site-specific, usually a discount to retail."
+        },
+        {
+          "name": "Energy tariff, hospital",
+          "kind": "revenue",
+          "category": "tariff",
+          "unit": "MWh",
+          "quantity_source": "linked:served_load.hospital_load@1",
+          "escalation": "contract",
+          "note": "Hospital load served, in MWh. Unserved load earns no tariff and no value of lost load is booked. Price is site-specific."
+        },
+        {
+          "name": "Plant capex",
+          "kind": "capex",
+          "category": "equipment",
+          "unit": "lump",
+          "escalation": "capex",
+          "note": "Plant capex not in the energy model's asset capex (grid connection, balance of plant, installation): the base of the insurance share. Capex is priced once: do not re-enter the generators or the battery. No sourced default: enter the price and life."
+        },
+        {
+          "name": "Staff",
+          "kind": "opex",
+          "category": "staff",
+          "unit": "unit",
+          "escalation": "opex",
+          "note": "FTE count per year. No sourced default: enter the quantity and the price."
+        },
+        {
+          "name": "Maintenance",
+          "kind": "opex",
+          "category": "maintenance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of the plant capex above per year. The assets' own fixed O&M is already in the energy model's locked rows. No sourced default: enter the share."
+        },
+        {
+          "name": "Insurance",
+          "kind": "opex",
+          "category": "insurance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of the plant capex above per year. No sourced default for a microgrid: enter the share."
+        }
+      ]
+    }
+  },
+  "offered": [
+    {
+      "label": "Availability / EaaS fee",
+      "units": [
+        "unit_month"
+      ],
+      "sources": [
+        "typed"
+      ],
+      "line": {
+        "name": "Availability / EaaS fee",
+        "kind": "revenue",
+        "category": "service_fee",
+        "unit": "unit_month",
+        "quantity_source": "typed",
+        "escalation": "contract",
+        "note": "Off until you add it. Typed: a fee per contracted service-month for a provider that builds, owns and operates. The locked rows from the energy model and this row's help are what stop duplication: do not also bill a tariff on the same energy. The double_count:eaas_fee refusal applies only to an EaaS fee priced in the energy model, not to this typed row."
+      }
+    }
+  ]
+}

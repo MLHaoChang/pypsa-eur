@@ -687,6 +687,7 @@ class _ToolDispatchOutcome:
     tool_call_count: int
     stop_turn: bool = False
     switched_mid_turn: bool = False
+    obsolete: bool = False
 
 
 def _dispatch_tool_uses(
@@ -701,6 +702,7 @@ def _dispatch_tool_uses(
     char_budget: dict[str, int],
     offered_tool_names: set[str | None],
     guided: bool = False,
+    obsolete: Callable[[], bool] = lambda: False,
 ) -> Generator[tuple[str, dict[str, Any]], None, "_ToolDispatchOutcome"]:
     """
     Dispatch one assistant step's tool calls, sequentially.
@@ -755,6 +757,31 @@ def _dispatch_tool_uses(
     # requires each tool_use_id have a matching tool_result, so this keeps
     # the in-memory history valid for a resumed turn — then end the turn.
     for idx, tu in enumerate(tool_uses):
+        if obsolete():
+            # Issue 02: a rebind superseded this live turn. Nothing more runs;
+            # each call left gets its paired error result, as on a switch.
+            for rem in tool_uses[idx:]:
+                yield (
+                    "tool_error",
+                    {
+                        "tool_use_id": rem.get("id"),
+                        "tool_name": rem.get("name"),
+                        **OBSOLETE_GENERATION,
+                    },
+                )
+                tool_results_for_next_turn.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": rem.get("id"),
+                        "is_error": True,
+                        "content": OBSOLETE_GENERATION["error_kind"],
+                    }
+                )
+            return _ToolDispatchOutcome(
+                tool_call_count=tool_call_count,
+                stop_turn=True,
+                obsolete=True,
+            )
         if project_switched():
             switched = True
             for rem in tool_uses[idx:]:
@@ -1062,6 +1089,92 @@ def _build_user_content(
 
 
 # Literal error_kind values so tool-error-kinds.json's AST scan sees them.
+# Issue 02: a live turn whose generation a rebind superseded ends with this.
+OBSOLETE_GENERATION: dict[str, str] = {
+    "error_kind": "obsolete_generation",
+    "message": (
+        "the conversation moved on while this request ran; its answer was "
+        "dropped. Finished steps are kept."
+    ),
+}
+
+
+def _release_admission(
+    session_id: str,
+    lease_id: str | None,
+    generation: int | None,
+    *,
+    promote: bool,
+) -> tuple[Any, str | None]:
+    """Release a turn's admission lease; return the pending correction to
+    drain next (utterance, its new lease), or (None, None).
+
+    Guarded: a coordinator failure is logged, never raised out of the turn's
+    cleanup. A promoted lease with no utterance to run is released again, so
+    admission never hangs on a turn that will not start.
+    """
+    if lease_id is None or generation is None:
+        return None, None
+    from services import utterance_admission as _ua
+
+    try:
+        promoted = _ua._DEFAULT.release_lease(
+            session_id=session_id,
+            lease_id=lease_id,
+            generation=generation,
+            promote=promote,
+        )
+        if (
+            promoted is None
+            or promoted.status != "admitted"
+            or promoted.lease_id is None
+        ):
+            return None, None
+        active = _ua._DEFAULT.active_utterance(session_id)
+        if active is not None:
+            return active, promoted.lease_id
+        _ua._DEFAULT.release_lease(
+            session_id=session_id,
+            lease_id=promoted.lease_id,
+            generation=promoted.generation,
+            promote=False,
+        )
+    except Exception:  # noqa: BLE001 — cleanup must finish
+        logger.exception("chat: admission lease could not be released")
+    return None, None
+
+
+def _end_obsolete() -> Generator[tuple[str, dict[str, Any]], None, None]:
+    yield "error", dict(OBSOLETE_GENERATION)
+    yield "session_done", {"reason": OBSOLETE_GENERATION["error_kind"]}
+
+
+def _generation_reader(session_id: str, lease_id: str | None, generation: int | None):
+    """Issue 02: True once an admitted turn's lease+generation is obsolete.
+
+    A typed turn (no lease) is never obsolete. Fails closed: a reader that
+    raises counts as obsolete (GK B V2).
+    """
+    if lease_id is None or generation is None:
+        return lambda: False
+
+    def obsolete() -> bool:
+        from services import utterance_admission as _ua
+
+        try:
+            return (
+                _ua._DEFAULT.project_result(
+                    session_id=session_id, lease_id=lease_id, generation=generation
+                )
+                != "apply"
+            )
+        except Exception:  # noqa: BLE001 — unreadable generation stops the turn
+            logger.exception("chat: turn generation unreadable; stopping the turn")
+            return True
+
+    return obsolete
+
+
 _ADMISSION_ERRORS: dict[str, dict[str, str]] = {
     "duplicate": {
         "error_kind": "duplicate",
@@ -1541,9 +1654,14 @@ def run_turn(
         from services import live_speech as _live_speech
 
         _speech_answer = _live_speech.capture_for(session, utterance_id)
+        _obsolete = _generation_reader(
+            session.session_id, _admission_lease, _admission_generation
+        )
+        session.turn_obsolete = _obsolete
         body = _run_turn_body(
             session,
             message,
+            obsolete=_obsolete,
             client=client,
             provider=provider,
             message_history=message_history,
@@ -1556,6 +1674,9 @@ def run_turn(
         )
         try:
             for event, payload in body:
+                if event == "token" and _obsolete():
+                    # Issue 02: no text delta of a superseded turn goes out.
+                    continue
                 if session.assurance_turn is not None:
                     payload = session.assurance_turn.project_frame(event, payload)
                     if payload is None:
@@ -1588,84 +1709,71 @@ def run_turn(
             _ended_by = "internal_error"
             raise
     finally:
-        # A plain `for` does not close the body when this generator is closed
-        # (a client disconnect); `yield from` used to. Close it here so its
-        # own `finally` blocks run now, not at garbage collection.
-        if body is not None:
-            body.close()
-        _persist_interrupted_turn(
-            _wal_ctx,
-            session,
-            message,
-            trace,
-            ended_by=_ended_by,
-            usage_at_start=_usage_at_start,
-            attachment_file_ids=attachment_file_ids,
-            display_record=getattr(type(provider), "display_record", True),
-        )
-        # Issue 13 (shadow): close the turn on the event log, one fsync.
-        from harness import eventlog as _eventlog
-
-        _eventlog.turn_end(
-            session,
-            _turn_end_reason(trace, _ended_by),
-            usage_since(dict(session.usage_acc), _usage_at_start),
-        )
-        if _ended_by == "disconnected":
-            # Nobody is watching: no round may start on a stream that is gone.
-            _goals.pause(session, "disconnected", by="harness")
-        _metric_record_duration(time.monotonic() - _t_start)
-        with session._lock:
-            session._turn_in_flight = False
-            session._undo_snapshotted = []
-            if session.assurance_turn is not None and session.assurance_context:
-                approved = session.assurance_turn.approved
-                if (
-                    not approved
-                    or session.assurance_context["anchor"] != approved["answer_id"]
-                ):
-                    session.assurance_context = None
-            session.assurance_turn = None
-            session.shadow_turn = None
-            session.navigation_turn = None
-        if _admission_lease is not None and _admission_generation is not None:
-            from services import utterance_admission as _ua
-
-            # Promote pending into a new lease, then start that follow-up turn
-            # on this same stream (auto-drain). Leaving a promoted lease
-            # without a turn would hang admission.
-            promoted = _ua._DEFAULT.release_lease(
-                session_id=session.session_id,
-                lease_id=_admission_lease,
-                generation=_admission_generation,
-                promote=True,
+        # Issue 02 (GK B O5): the admission lease is released whatever the
+        # steps below do. A step that raises must not leave the lease held
+        # (every later utterance would queue behind it forever), and then no
+        # pending correction is promoted, since no drain turn would start.
+        _cleanup_done = False
+        try:
+            # A plain `for` does not close the body when this generator is closed
+            # (a client disconnect); `yield from` used to. Close it here so its
+            # own `finally` blocks run now, not at garbage collection.
+            if body is not None:
+                body.close()
+            _persist_interrupted_turn(
+                _wal_ctx,
+                session,
+                message,
+                trace,
+                ended_by=_ended_by,
+                usage_at_start=_usage_at_start,
+                attachment_file_ids=attachment_file_ids,
+                display_record=getattr(type(provider), "display_record", True),
             )
-            if (
-                promoted is not None
-                and promoted.status == "admitted"
-                and promoted.lease_id is not None
-            ):
-                active = _ua._DEFAULT.active_utterance(session.session_id)
-                if active is not None:
-                    _drain_utt = active
-                    _drain_lease = promoted.lease_id
-                else:
-                    _ua._DEFAULT.release_lease(
-                        session_id=session.session_id,
-                        lease_id=promoted.lease_id,
-                        generation=promoted.generation,
-                        promote=False,
-                    )
-        # C-3 — the turn's profile must not outlive the turn. A tool invoked
-        # OUTSIDE a turn (a direct call, a test) has no profile to honour and
-        # must take the pre-profile path; leaving a stale value bound would
-        # make that depend on whatever ran in this context before it. Pure
-        # side-effect, so the yielded frame ORDER several tests pin
-        # byte-exactly is unchanged on every exit.
-        from services import chat_tools as _chat_tools  # noqa: PLC0415
+            # Issue 13 (shadow): close the turn on the event log, one fsync.
+            from harness import eventlog as _eventlog
 
-        _chat_tools.set_turn_profile(None)
-        _chat_tools.set_chat_session(None)
+            _eventlog.turn_end(
+                session,
+                _turn_end_reason(trace, _ended_by),
+                usage_since(dict(session.usage_acc), _usage_at_start),
+            )
+            if _ended_by == "disconnected":
+                # Nobody is watching: no round may start on a stream that is gone.
+                _goals.pause(session, "disconnected", by="harness")
+            _metric_record_duration(time.monotonic() - _t_start)
+            with session._lock:
+                session._turn_in_flight = False
+                session._undo_snapshotted = []
+                if session.assurance_turn is not None and session.assurance_context:
+                    approved = session.assurance_turn.approved
+                    if (
+                        not approved
+                        or session.assurance_context["anchor"] != approved["answer_id"]
+                    ):
+                        session.assurance_context = None
+                session.assurance_turn = None
+                session.shadow_turn = None
+                session.navigation_turn = None
+            # C-3 — the turn's profile must not outlive the turn. A tool invoked
+            # OUTSIDE a turn (a direct call, a test) has no profile to honour and
+            # must take the pre-profile path; leaving a stale value bound would
+            # make that depend on whatever ran in this context before it. Pure
+            # side-effect, so the yielded frame ORDER several tests pin
+            # byte-exactly is unchanged on every exit.
+            from services import chat_tools as _chat_tools  # noqa: PLC0415
+
+            _chat_tools.set_turn_profile(None)
+            _chat_tools.set_chat_session(None)
+            _cleanup_done = True
+        finally:
+            session.turn_obsolete = None
+            _drain_utt, _drain_lease = _release_admission(
+                session.session_id,
+                _admission_lease,
+                _admission_generation,
+                promote=_cleanup_done,
+            )
 
     if _drain_utt is not None and _drain_lease is not None:
         yield from run_turn(
@@ -1846,6 +1954,7 @@ def _run_turn_body(
     attachment_file_ids: list[str] | None = None,
     ui_context: dict[str, Any] | None = None,
     typed_by_user: bool = False,
+    obsolete: Callable[[], bool] = lambda: False,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     The run_turn turn loop. Split out from `run_turn` so the in-flight-flag
@@ -2293,6 +2402,10 @@ def _run_turn_body(
         if session.abort_event.is_set():
             yield "session_done", {"reason": "aborted"}
             return
+        if obsolete():
+            # Issue 02: no model call for a superseded live turn.
+            yield from _end_obsolete()
+            return
         if session.assurance_turn is not None and session.assurance_turn.effect_pending:
             yield "session_done", {"reason": "assurance_context_changed"}
             return
@@ -2374,6 +2487,11 @@ def _run_turn_body(
         # blocks we replay — already serialised by the provider. Add the
         # assistant turn to both the outbound array and the session history
         # for the next iteration.
+        if obsolete():
+            # Issue 02: superseded while the model answered. Its text and tool
+            # calls are neither persisted nor run; the usage above still counts.
+            yield from _end_obsolete()
+            return
         assistant_blocks = final_blocks
         if session.shadow_turn is not None and not any(
             b.get("type") == "tool_use" for b in assistant_blocks
@@ -2407,6 +2525,11 @@ def _run_turn_body(
                         session.assurance_turn.review_interpretations(
                             assistant_blocks, provider, session.model, turn_ctx
                         )
+                    if obsolete():
+                        # Issue 02 (GK B O3): superseded during the review (a
+                        # model call); nothing is committed or saved.
+                        yield from _end_obsolete()
+                        return
                     assistant_blocks = session.assurance_turn.commit(
                         assistant_blocks, turn_ctx, truncated=final_truncated
                     )
@@ -2453,6 +2576,11 @@ def _run_turn_body(
         # tool_use blocks are never dropped by the sanitiser, so a turn that
         # is empty here had no tool_use, and `tool_uses` below is therefore
         # empty too — the turn ends without any tool_result being appended.
+        if obsolete():
+            # Issue 02: superseded during the checked-answer review (itself a
+            # model call): nothing is persisted or published.
+            yield from _end_obsolete()
+            return
         assistant_msg = _sanitise_history_message(
             {"role": "assistant", "content": assistant_blocks}
         )
@@ -2710,12 +2838,7 @@ def _run_turn_body(
                 session, tu.get("name"), tu.get("input") or {}
             )
         ]
-        session.turn_redirects = (
-            {}
-            if session.assurance_turn is not None
-            or not edit_routing.preview_available()
-            else edit_routing.redirects(routable, session.turn_single_edit_applied)
-        )
+        session.turn_redirects = edit_routing.turn_redirects(session, routable)
         # LC-47: this response's ordinary writes as one change-set card.
         from harness import change_set
         from harness import mcp_client as _mcp
@@ -2741,6 +2864,7 @@ def _run_turn_body(
             char_budget=tool_result_char_budget,
             offered_tool_names=offered_tool_names,
             guided=_is_guided(ui_context),
+            obsolete=obsolete,
         ))
         set_receipt = change_set.receipt_frame(session)
         session.change_set = None
@@ -2760,6 +2884,8 @@ def _run_turn_body(
                     session.append_history_message(
                         {"role": "user", "content": tool_results_for_next_turn}
                     )
+            if dispatch.obsolete:
+                yield from _end_obsolete()
             return
         switched_mid_turn = dispatch.switched_mid_turn
         messages.append({"role": "user", "content": tool_results_for_next_turn})
@@ -3513,6 +3639,12 @@ def _dispatch_real_tool_call(
 
         def require_current_confirmation():
             restrictions.require_current(restriction, session)
+            # Issue 02 (GK B O4): a rebind while the card waited supersedes
+            # the turn; its approved effect does not run.
+            if callable(session.turn_obsolete) and session.turn_obsolete():
+                from fastapi import HTTPException
+
+                raise HTTPException(409, detail=dict(OBSOLETE_GENERATION))
             if (
                 confirmation_gate.confirmation_revision() != policy_revision
                 or _tool_tier(session, tool_name) != tier
@@ -3937,9 +4069,16 @@ def _dispatch_real_tool_call(
                         "type": "tool_result",
                         "tool_use_id": tool_use_id,
                         "is_error": True,
-                        "content": (
-                            f"tool_timeout. {hold_note}" if hold_note else "tool_timeout"
-                        ),
+                        "content": "tool_timeout"
+                        + (
+                            ". Outcome unknown: it ran longer than "
+                            f"{harness_budget.PER_TOOL_TIMEOUT_SECONDS:g} s and was stopped, "
+                            "and it may have changed the project. Read the project back "
+                            "before any retry."
+                            if timeout_effect
+                            else ""
+                        )
+                        + (f". {hold_note}" if hold_note else ""),
                     }
                 )
                 return
