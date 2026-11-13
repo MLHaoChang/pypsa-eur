@@ -305,7 +305,7 @@ def start_mc(
                     "engine": "mc",
                     "fidelity": "sequential_mc",
                     **({"process_loss": {"status": "not_established",
-                                         "reason": "no_link_outages_in_sequential_mc"}}
+                                         "reason": "no_process_link_outages_in_sequential_mc"}}
                        if has_process else {}),
                     "metrics": metrics,
                     "elcc": rows,

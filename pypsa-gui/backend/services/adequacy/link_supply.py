@@ -105,46 +105,41 @@ def fleet_side(n, scope):
     return _hub_side_copy(n, scope.excluded_buses)
 
 
-def grid_side_refusal(n, scope, kind: str, name: str) -> str | None:
-    """Why an asset asked for by name is not in the hub-side fleet: it sits
-    on the grid side of the import Link(s) ``scope`` splits at. ``None`` when
-    the network is not split or the asset is not on the grid side."""
-    if scope.mode != "hub_side":
-        return None
-    attrs = {
-        "generator": ("generators",),
-        "vre": ("generators",),
-        "storage_unit": ("storage_units", "stores"),
-    }.get(kind, ())
-    ex = set(scope.excluded_buses)
-    for attr in attrs:
-        df = getattr(n, attr, None)
-        if df is None or df.empty or "bus" not in df.columns or name not in df.index:
-            continue
-        if str(df.at[name, "bus"]) in ex:
-            links = ", ".join(sorted(str(x) for x in scope.import_links))
-            return (
-                f"{name} is on the grid side of import Link(s) {links}: the "
-                "study samples the hub side, where the grid reaches the hub "
-                "only through the Link, so the asset is not in the fleet and "
-                "its capacity credit is not priced"
-            )
-    return None
+_KIND_FRAMES = {
+    "generator": ("generators",),
+    "vre": ("generators",),
+    "storage_unit": ("storage_units", "stores"),
+}
 
 
-def grid_side_assets(n, scope) -> frozenset:
-    """The generators, storage units and stores on the grid side of the
-    import Link(s) ``scope`` splits at; empty when it does not split."""
+def grid_side_assets(n, scope, frames=("generators", "storage_units", "stores")):
+    """The assets in ``frames`` on the grid side of the import Link(s)
+    ``scope`` splits at; empty when it does not split."""
     if scope.mode != "hub_side":
         return frozenset()
     ex = set(scope.excluded_buses)
     out: set[str] = set()
-    for attr in ("generators", "storage_units", "stores"):
+    for attr in frames:
         df = getattr(n, attr, None)
         if df is None or df.empty or "bus" not in df.columns:
             continue
         out.update(str(i) for i in df.index if str(df.at[i, "bus"]) in ex)
     return frozenset(out)
+
+
+def grid_side_refusal(n, scope, kind: str, name: str) -> str | None:
+    """Why an asset asked for by name is not in the hub-side fleet: it sits
+    on the grid side of the import Link(s) ``scope`` splits at. ``None`` when
+    the network is not split or the asset is not on the grid side."""
+    if name not in grid_side_assets(n, scope, _KIND_FRAMES.get(kind, ())):
+        return None
+    links = ", ".join(sorted(str(x) for x in scope.import_links))
+    return (
+        f"{name} is on the grid side of import Link(s) {links}: the "
+        "study samples the hub side, where the grid reaches the hub "
+        "only through the Link, so the asset is not in the fleet and "
+        "its capacity credit is not priced"
+    )
 
 
 def sampled_fleet(

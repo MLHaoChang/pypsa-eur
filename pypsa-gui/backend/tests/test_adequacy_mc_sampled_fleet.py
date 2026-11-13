@@ -189,7 +189,11 @@ def test_the_portfolio_population_is_the_hub_side():
     from services.adequacy.portfolio import portfolio_population
 
     n = _net()
-    _, side, inputs = _study_inputs(n, vre=list(must_take_generators(_net())))
+    scope = link_supply.loop_scope(n)
+    side = link_supply.fleet_side(n, scope)
+    inputs = link_supply.assemble_fleet(
+        n, scope, side=side, vre_assets=list(must_take_generators(side))
+    )
     names = {m.name for m in portfolio_population(side, inputs)["members"]}
     assert names == {"hub_pv"}
 
@@ -366,9 +370,9 @@ def test_excluding_the_link_unit_keeps_every_other_units_draws():
 
     _, _, inputs = _study_inputs(_net())
     _, exclude, _, _ = elcc._resolve(inputs, "generator", "link:grid_import")
-    H_ = len(inputs.residual)
-    without = sample_capacity(inputs.units, H_, 64, 11, exclude=exclude)
-    others = sample_capacity(inputs.units[:1], H_, 64, 11)
+    hours = len(inputs.residual)
+    without = sample_capacity(inputs.units, hours, 64, 11, exclude=exclude)
+    others = sample_capacity(inputs.units[:1], hours, 64, 11)
     np.testing.assert_array_equal(without, others)
 
 
@@ -480,3 +484,23 @@ def test_a_supplying_link_without_a_note_is_still_refused_by_name():
     bare = dataclasses.replace(inputs, supply_links=("ghost",), fleet_notes=())
     with pytest.raises(ValueError, match="Link ghost supplies the fleet"):
         elcc._resolve(bare, "generator", "link:ghost")
+
+
+def test_a_credited_firm_backup_is_sampled_and_priced_by_the_study():
+    """AL-1: a fuel cell on an unlimited fuel is a unit of the study's fleet."""
+    n = _net()
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Generator", "gas_supply", bus="gas", p_nom=1000.0)
+    n.add("Link", "fuel_cell", bus0="gas", bus1="hub", p_nom=10.0, efficiency=0.5)
+    _outage(n.links, "fuel_cell", 0.02, 24.0)
+    _, _, inputs = _study_inputs(n)
+    assert [u.name for u in inputs.units] == [
+        "diesel",
+        "link:grid_import",
+        "link:fuel_cell",
+    ]
+    _, exclude, _, nameplate = elcc._resolve(inputs, "generator", "link:fuel_cell")
+    assert exclude == frozenset({2}) and nameplate == pytest.approx(5.0)
+    assert ("generator", "link:fuel_cell") in {
+        (r["kind"], r["name"]) for r in elcc.elcc_candidates(n)
+    }
