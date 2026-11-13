@@ -267,6 +267,9 @@ def test_invalid_inputs_name_the_field(bc):
         _bc(_line(price=None, no_such_field=1)),
     )
     assert d["error_kind"] == "business_case_inputs_invalid" and d["errors"]
+    # The validator's own words, not the route's whole detail.
+    assert d["message"] == d["errors"][0]["msg"]
+    assert any("no_such_field" in e["loc"] for e in d["errors"])
 
 
 # ── the card (D1) ───────────────────────────────────────────────────────────
@@ -472,6 +475,7 @@ def test_a_new_price_without_a_citation_is_not_from_user(bc):
     d = _refused(chat_tools.set_business_case_lines, _digest(), _bc(_line()))
     assert d["error_kind"] == "price_not_from_user" and d["reason"] == "no_citation"
     assert d["line"] == "product" and d["year"] is None
+    assert d["message"].startswith("product price: ")
     assert chat_tools.get_business_case(detail="inputs")["business_case"] is None
 
 
@@ -484,6 +488,7 @@ def test_a_price_by_year_needs_its_own_citation(bc):
         citations=[_cite(tid, "45 USD/t")],
     )
     assert d["error_kind"] == "price_not_from_user" and d["year"] == 2029
+    assert d["message"].startswith("product price 2029: ")
 
 
 @pytest.mark.parametrize(
@@ -823,6 +828,9 @@ def test_a_price_whose_unit_or_money_year_changes_needs_a_new_citation(bc, chang
         price["change"] == "changed"
         and price["price_source"] == f"you wrote '45 USD/{unit}'"
     )
+    # The basis moves the prices only: the unchanged quantity stays off the card.
+    moved = "product · " + ("Unit" if "unit" in change else "Money year")
+    assert set(_rows(card)) == {moved, "product · Price"}
 
 
 def test_duplicate_line_names_are_refused_never_shadowed(bc):
