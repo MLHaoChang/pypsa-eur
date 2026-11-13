@@ -36,6 +36,7 @@ import pathlib
 import uuid
 
 from services import component_identity, dirty_state
+from services.provenance_graph import Pin, pin_broken
 
 
 def _keys(doc: dict) -> set[str]:
@@ -59,7 +60,9 @@ def _resolved_key(n, key: str, bindings: dict) -> str | None:
 
 def stale_keys(n, keys, bindings: dict) -> set[str]:
     """The bound keys whose instance is gone or now has another name: never this key's component."""
-    return {key for key in keys if isinstance(bindings.get(key), str) and _resolved_key(n, key, bindings) != key}
+    pins = [Pin(key, key, lambda key=key: _resolved_key(n, key, bindings))
+            for key in keys if isinstance(bindings.get(key), str)]
+    return pin_broken("site_bindings", pins)
 
 
 def _move(entries: dict, moves: dict[str, str | None]) -> dict:

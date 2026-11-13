@@ -1,0 +1,2491 @@
+{
+ "ac reference": {
+  "derived:Generator/pv/capital_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/pv/overnight_cost"
+     },
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/pv/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/pv/capital_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "derived:Generator/pv/overnight_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ],
+    [
+     "input:Generator/pv/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ],
+    [
+     "derived:Generator/pv/fom_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/pv/fom_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/pv/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/pv/fom_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/pv/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/pv/overnight_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/pv/overnight_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/pv/overnight_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/pv/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "input:Generator/pv/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/pv/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/pv/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/pv/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/pv/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/pv/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/pv/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/pv/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/pv/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "commercial": {
+  "ppa:none/y": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:commercial/ppa:none/y"
+    ]
+   },
+   "wire": null
+  },
+  "ppa:none/y|no config": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:commercial/ppa:none/y"
+    ]
+   }
+  },
+  "ppa:ppa1/price": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "wire": {
+    "compared": [
+     "value",
+     "unit",
+     "currency_year"
+    ],
+    "entry": {
+     "approved_at": "2026-11-10T10:00:00+00:00",
+     "approved_by": "ann",
+     "currency": "EUR",
+     "currency_year": 2030,
+     "source": "pdf:abc p1 'quote'",
+     "unit": "/MWh",
+     "value": 55.0
+    },
+    "state": "fresh",
+    "uncompared": [
+     "source",
+     "currency",
+     "approved_by",
+     "approved_at"
+    ]
+   }
+  },
+  "ppa:ppa1/price|no config": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:commercial/ppa:ppa1/price"
+    ]
+   }
+  },
+  "ppa:ppa1/tenor_years": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "wire": {
+    "compared": [
+     "value",
+     "unit"
+    ],
+    "entry": {
+     "approved_at": "2026-11-10T10:00:00+00:00",
+     "approved_by": "ann",
+     "currency": null,
+     "currency_year": null,
+     "source": "pdf:abc p1 'quote'",
+     "unit": "years",
+     "value": 10
+    },
+    "state": "fresh",
+    "uncompared": [
+     "source",
+     "currency",
+     "currency_year",
+     "approved_by",
+     "approved_at"
+    ]
+   }
+  },
+  "ppa:ppa1/tenor_years|no config": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:commercial/ppa:ppa1/tenor_years"
+    ]
+   }
+  },
+  "tariff:block/periods[day].tier_rates[1]": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "wire": {
+    "compared": [
+     "value",
+     "unit",
+     "tariff_currency"
+    ],
+    "entry": {
+     "approved_at": "2026-11-10T10:00:00+00:00",
+     "approved_by": "ann",
+     "currency": "EUR",
+     "currency_year": null,
+     "source": "pdf:abc p1 'quote'",
+     "tariff_currency": "EUR",
+     "unit": "/kWh",
+     "value": 0.4
+    },
+    "state": "fresh",
+    "uncompared": [
+     "source",
+     "currency",
+     "currency_year",
+     "approved_by",
+     "approved_at"
+    ]
+   }
+  },
+  "tariff:block/periods[day].tier_rates[1]|no config": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:commercial/tariff:block/periods[day].tier_rates[1]"
+    ]
+   }
+  },
+  "tariff:energy/periods[peak].rate": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "wire": {
+    "compared": [
+     "value",
+     "unit",
+     "tariff_currency"
+    ],
+    "entry": {
+     "approved_at": "2026-11-10T10:00:00+00:00",
+     "approved_by": "ann",
+     "currency": "EUR",
+     "currency_year": null,
+     "source": "pdf:abc p1 'quote'",
+     "tariff_currency": "EUR",
+     "unit": "/kWh",
+     "value": 0.2
+    },
+    "state": "fresh",
+    "uncompared": [
+     "source",
+     "currency",
+     "currency_year",
+     "approved_by",
+     "approved_at"
+    ]
+   }
+  },
+  "tariff:energy/periods[peak].rate|no config": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:commercial/tariff:energy/periods[peak].rate"
+    ]
+   }
+  },
+  "tariff:none/x": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:commercial/tariff:none/x"
+    ]
+   },
+   "wire": null
+  },
+  "tariff:none/x|no config": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:commercial/tariff:none/x"
+    ]
+   }
+  },
+  "tariff:stepped/tiers[1].rate": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "wire": {
+    "compared": [
+     "value",
+     "unit",
+     "tariff_currency"
+    ],
+    "entry": {
+     "approved_at": "2026-11-10T10:00:00+00:00",
+     "approved_by": "ann",
+     "currency": "EUR",
+     "currency_year": null,
+     "source": "pdf:abc p1 'quote'",
+     "tariff_currency": "EUR",
+     "unit": "/kW/month",
+     "value": 12.0
+    },
+    "state": "fresh",
+    "uncompared": [
+     "source",
+     "currency",
+     "currency_year",
+     "approved_by",
+     "approved_at"
+    ]
+   }
+  },
+  "tariff:stepped/tiers[1].rate|no config": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:commercial/tariff:stepped/tiers[1].rate"
+    ]
+   }
+  }
+ },
+ "dc reference": {
+  "derived:Generator/pv/capital_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/pv/overnight_cost"
+     },
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/pv/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/pv/capital_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "derived:Generator/pv/overnight_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ],
+    [
+     "input:Generator/pv/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ],
+    [
+     "derived:Generator/pv/fom_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/pv/fom_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/pv/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/pv/fom_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/pv/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/pv/overnight_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/pv/overnight_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/pv/overnight_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/pv/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "input:Generator/pv/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/pv/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/pv/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/pv/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/pv/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/pv/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/pv/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/pv/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/pv/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "fom inherits the overnight annotation at 1.2": {
+  "derived:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/capital_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     "derived_from",
+     "fresh"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "fresh"
+    ],
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     "derived_from",
+     "fresh"
+    ]
+   ]
+  },
+  "derived:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "fresh"
+    ]
+   ]
+  },
+  "derived:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "fresh"
+    ]
+   ]
+  },
+  "input:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "fom inherits the overnight annotation at 1.3": {
+  "derived:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": 1.3,
+      "current_field": "dc_ac_ratio",
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "scale input changed",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/overnight_cost"
+     },
+     {
+      "current": 1.3,
+      "current_field": "dc_ac_ratio",
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "scale input changed",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/capital_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "stale"
+    ],
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": 1.3,
+      "current_field": "dc_ac_ratio",
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "scale input changed",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": 1.3,
+      "current_field": "dc_ac_ratio",
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "scale input changed",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/overnight_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "input:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "in memory, nothing recorded": {
+  "derived:Generator/none/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "derived:Generator/none/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "derived:Generator/none/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "derived:Generator/none/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "derived:Generator/none/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "derived:Generator/none/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "derived:Generator/none/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "derived:Generator/none/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "derived:Generator/none/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/none/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/none/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/none/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/none/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/none/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/none/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/none/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/none/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/none/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "in memory, nothing scaled": {
+  "derived:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "derived:Generator/g/capital_cost",
+     "derived",
+     null,
+     "uncompared"
+    ],
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     "derived_from",
+     "uncompared"
+    ]
+   ]
+  },
+  "derived:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "derived:Generator/g/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "derived:Generator/g/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "derived:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "derived:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "derived:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "link edited": {
+  "derived:Link/fc/capital_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": 0.4,
+      "current_field": "efficiency",
+      "dst": "input:Link/fc/efficiency",
+      "edge": "priced_through",
+      "field": "efficiency",
+      "reason": "scale input changed",
+      "recorded": 0.5,
+      "src": "derived:Link/fc/overnight_cost"
+     },
+     {
+      "current": 0.4,
+      "current_field": "efficiency",
+      "dst": "input:Link/fc/efficiency",
+      "edge": "priced_through",
+      "field": "efficiency",
+      "reason": "scale input changed",
+      "recorded": 0.5,
+      "src": "derived:Link/fc/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Link/fc/capital_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "derived:Link/fc/overnight_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ],
+    [
+     "input:Link/fc/efficiency",
+     "input",
+     "priced_through",
+     "stale"
+    ],
+    [
+     "derived:Link/fc/fom_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Link/fc/fom_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": 0.4,
+      "current_field": "efficiency",
+      "dst": "input:Link/fc/efficiency",
+      "edge": "priced_through",
+      "field": "efficiency",
+      "reason": "scale input changed",
+      "recorded": 0.5,
+      "src": "derived:Link/fc/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Link/fc/fom_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Link/fc/efficiency",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Link/fc/overnight_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": 0.4,
+      "current_field": "efficiency",
+      "dst": "input:Link/fc/efficiency",
+      "edge": "priced_through",
+      "field": "efficiency",
+      "reason": "scale input changed",
+      "recorded": 0.5,
+      "src": "derived:Link/fc/overnight_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Link/fc/overnight_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Link/fc/efficiency",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "input:Link/fc/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Link/fc/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Link/fc/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Link/fc/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Link/fc/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Link/fc/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Link/fc/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Link/fc/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Link/fc/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "link fresh": {
+  "derived:Link/fc/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Link/fc/capital_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "derived:Link/fc/overnight_cost",
+     "derived",
+     "derived_from",
+     "fresh"
+    ],
+    [
+     "input:Link/fc/efficiency",
+     "input",
+     "priced_through",
+     "fresh"
+    ],
+    [
+     "derived:Link/fc/fom_cost",
+     "derived",
+     "derived_from",
+     "fresh"
+    ]
+   ]
+  },
+  "derived:Link/fc/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Link/fc/fom_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "input:Link/fc/efficiency",
+     "input",
+     "priced_through",
+     "fresh"
+    ]
+   ]
+  },
+  "derived:Link/fc/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Link/fc/overnight_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "input:Link/fc/efficiency",
+     "input",
+     "priced_through",
+     "fresh"
+    ]
+   ]
+  },
+  "input:Link/fc/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Link/fc/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Link/fc/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Link/fc/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Link/fc/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Link/fc/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Link/fc/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Link/fc/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Link/fc/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "malformed": {
+  "derived:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/g/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input record malformed",
+      "recorded": null,
+      "src": "derived:Generator/g/overnight_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/capital_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ],
+    [
+     "input:Generator/g/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ],
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     "derived_from",
+     "fresh"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "fresh"
+    ]
+   ]
+  },
+  "derived:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "fresh"
+    ]
+   ]
+  },
+  "derived:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/g/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input record malformed",
+      "recorded": null,
+      "src": "derived:Generator/g/overnight_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/g/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "input:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "other release": {
+  "derived:Generator/pv/capital_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded (the applied reference is from another release)",
+      "recorded": null,
+      "src": "derived:Generator/pv/overnight_cost"
+     },
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded (the applied reference is from another release)",
+      "recorded": null,
+      "src": "derived:Generator/pv/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/pv/capital_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "derived:Generator/pv/overnight_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ],
+    [
+     "input:Generator/pv/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ],
+    [
+     "derived:Generator/pv/fom_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/pv/fom_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded (the applied reference is from another release)",
+      "recorded": null,
+      "src": "derived:Generator/pv/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/pv/fom_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/pv/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/pv/overnight_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/pv/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded (the applied reference is from another release)",
+      "recorded": null,
+      "src": "derived:Generator/pv/overnight_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/pv/overnight_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/pv/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "input:Generator/pv/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/pv/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/pv/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/pv/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/pv/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/pv/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/pv/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/pv/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/pv/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "pack price with no input": {
+  "derived:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/g/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/g/overnight_cost"
+     },
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/g/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/g/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/capital_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ],
+    [
+     "input:Generator/g/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ],
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/g/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/g/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/g/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/g/scale_input",
+      "edge": "priced_through",
+      "field": null,
+      "reason": "scale input not recorded",
+      "recorded": null,
+      "src": "derived:Generator/g/overnight_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/g/scale_input",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "input:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "pv edited": {
+  "derived:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": 1.3,
+      "current_field": "dc_ac_ratio",
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "scale input changed",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/overnight_cost"
+     },
+     {
+      "current": 1.3,
+      "current_field": "dc_ac_ratio",
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "scale input changed",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/capital_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "stale"
+    ],
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": 1.3,
+      "current_field": "dc_ac_ratio",
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "scale input changed",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": 1.3,
+      "current_field": "dc_ac_ratio",
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "scale input changed",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/overnight_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "input:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "pv fresh": {
+  "derived:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/capital_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     "derived_from",
+     "fresh"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "fresh"
+    ],
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     "derived_from",
+     "fresh"
+    ]
+   ]
+  },
+  "derived:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "fresh"
+    ]
+   ]
+  },
+  "derived:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "fresh"
+    ]
+   ]
+  },
+  "input:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "pv typed over": {
+  "derived:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "derived:Generator/g/capital_cost",
+     "derived",
+     null,
+     "uncompared"
+    ],
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     "derived_from",
+     "uncompared"
+    ],
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     "derived_from",
+     "fresh"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "fresh"
+    ]
+   ]
+  },
+  "derived:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "fresh",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     null,
+     "fresh"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "fresh"
+    ]
+   ]
+  },
+  "derived:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "derived:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "derived:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ },
+ "pv unreadable": {
+  "derived:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "cannot be priced now: generator 'g' cannot be priced from 'solar-utility' (capacity_basis output_electric_dc): the row is priced per MW of DC module rating, and Capacity is the AC rating: set the generator's DC/AC ratio first (not declared)",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/overnight_cost"
+     },
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "cannot be priced now: generator 'g' cannot be priced from 'solar-utility' (capacity_basis output_electric_dc): the row is priced per MW of DC module rating, and Capacity is the AC rating: set the generator's DC/AC ratio first (not declared)",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/capital_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "stale"
+    ],
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     "derived_from",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "cannot be priced now: generator 'g' cannot be priced from 'solar-utility' (capacity_basis output_electric_dc): the row is priced per MW of DC module rating, and Capacity is the AC rating: set the generator's DC/AC ratio first (not declared)",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/fom_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/fom_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "derived:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [
+     {
+      "current": null,
+      "current_field": null,
+      "dst": "input:Generator/g/dc_ac_ratio",
+      "edge": "priced_through",
+      "field": "dc_ac_ratio",
+      "reason": "cannot be priced now: generator 'g' cannot be priced from 'solar-utility' (capacity_basis output_electric_dc): the row is priced per MW of DC module rating, and Capacity is the AC rating: set the generator's DC/AC ratio first (not declared)",
+      "recorded": 1.2,
+      "src": "derived:Generator/g/overnight_cost"
+     }
+    ],
+    "state": "stale",
+    "uncompared": []
+   },
+   "walk": [
+    [
+     "derived:Generator/g/overnight_cost",
+     "derived",
+     null,
+     "stale"
+    ],
+    [
+     "input:Generator/g/dc_ac_ratio",
+     "input",
+     "priced_through",
+     "stale"
+    ]
+   ]
+  },
+  "input:Generator/g/capital_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/capital_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/capital_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/fom_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/fom_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/fom_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  },
+  "input:Generator/g/overnight_cost": {
+   "verdict": {
+    "broken": [],
+    "state": "uncompared",
+    "uncompared": [
+     "input:Generator/g/overnight_cost"
+    ]
+   },
+   "walk": [
+    [
+     "input:Generator/g/overnight_cost",
+     "input",
+     null,
+     "uncompared"
+    ]
+   ]
+  }
+ }
+}
