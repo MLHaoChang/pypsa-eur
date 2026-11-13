@@ -62,6 +62,8 @@ SETTINGS_EDITS = frozenset({
     "update_project_settings",
     # LV08 B2a: Library writes (as import_urdb_tariff) and the finance inputs.
     "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
+    # Business case 08b: the business-case lines (a diff card with each price's source).
+    "set_business_case_lines",
     # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
     "import_map_geometry",
     # LV08 B-campus: the campus file, the readiness limits, the study's dispatch, grid-code drafts
@@ -1892,3 +1894,4 @@ from harness import (  # noqa: E402,F401
     edit_card_campus, edit_card_library, edit_card_records, edit_card_reports, edit_card_site)
 from harness import requirements  # noqa: E402,F401 — issue 23: set_requirement's card
 from harness import edit_card_unrecorded  # noqa: E402,F401 — RP-20: confirm_unrecorded_series's card
+from harness import edit_card_business_case  # noqa: E402,F401 — BC 08b: set_business_case_lines's card

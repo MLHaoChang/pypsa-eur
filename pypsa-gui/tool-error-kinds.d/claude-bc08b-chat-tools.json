@@ -1,0 +1,44 @@
+{
+ "kinds": {
+  "business_case_if_match_required": {
+   "surface": "inline",
+   "why": "set_business_case_lines refuses an empty or '*' if_match before anything is read. The assistant reads get_business_case(detail='inputs') and passes its digest."
+  },
+  "business_case_clear_invalid": {
+   "surface": "inline",
+   "why": "set_business_case_lines refuses clear=true with a business_case, or neither. The assistant sends the whole object, or clear=true alone when the user asked to remove every line."
+  },
+  "price_not_from_user": {
+   "surface": "inline",
+   "why": "set_business_case_lines refuses a new or changed price that no citation of the user's own words (a typed turn's quote, an upload cell, a PDF page and quote) verifies through the run intake's reader, or whose cited number differs; `reason` names why. The assistant asks the user for the price, or cites where they gave it; it never supplies one."
+  },
+  "business_case_card_too_large": {
+   "surface": "inline",
+   "why": "set_business_case_lines refuses an edit whose card would show more values than one card holds. The assistant splits the edit into smaller ones."
+  },
+  "business_case_inputs_missing": {
+   "surface": "inline",
+   "why": "run_business_case (POST /api/results/business_case) refuses before any lines are stored. The assistant sets them with set_business_case_lines from the user's figures."
+  },
+  "business_case_inputs_invalid": {
+   "surface": "inline",
+   "why": "set_business_case_lines or run_business_case refuses inputs BusinessCaseConfig does not validate, with the field paths. The assistant fixes the named fields or asks the user."
+  },
+  "business_case_changed": {
+   "surface": "inline",
+   "why": "set_business_case_lines (PUT /api/results/business_case/inputs) refuses a stale if_match (412): the inputs changed since they were read. The assistant reads them again and re-applies the edit."
+  },
+  "investment_case_missing": {
+   "surface": "inline",
+   "why": "run_business_case refuses without a current investment-case report (none, refused, stale, or its key unreadable): `reason` and `changed` say which. The assistant runs, or asks to run, the investment case first."
+  },
+  "business_case_busy": {
+   "surface": "inline",
+   "why": "run_business_case refuses while a solve or another study runs (409 from the study mesh). The assistant waits for it to finish and tries again."
+  },
+  "business_case_request_invalid": {
+   "surface": "inline",
+   "why": "get_business_case refuses a detail other than 'summary' or 'inputs'. The assistant calls it again with one of them."
+  }
+ }
+}

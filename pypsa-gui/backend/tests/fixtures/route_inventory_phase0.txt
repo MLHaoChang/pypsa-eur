@@ -403,6 +403,12 @@ GET     /api/results/asset/{component_class}/{name}/export.xlsx                 
 GET     /api/results/asset_economics                                               -> get_asset_economics_api_results_asset_economics_get
 GET     /api/results/billing                                                       -> get_billing_api_results_billing_get
 POST    /api/results/billing/preview                                               -> preview_billing_api_results_billing_preview_post
+GET     /api/results/business_case                                                 -> get_business_case_api_results_business_case_get
+POST    /api/results/business_case                                                 -> post_business_case_api_results_business_case_post
+POST    /api/results/business_case/abort                                           -> post_business_case_abort_api_results_business_case_abort_post
+GET     /api/results/business_case/inputs                                          -> get_business_case_inputs_api_results_business_case_inputs_get
+PUT     /api/results/business_case/inputs                                          -> put_business_case_inputs_api_results_business_case_inputs_put
+GET     /api/results/business_case/preset                                          -> get_business_case_preset_api_results_business_case_preset_get
 GET     /api/results/carrier_kpis                                                  -> get_carrier_kpis_api_results_carrier_kpis_get
 GET     /api/results/cfe_score                                                     -> get_cfe_score_api_results_cfe_score_get
 GET     /api/results/copt                                                          -> get_copt_api_results_copt_get

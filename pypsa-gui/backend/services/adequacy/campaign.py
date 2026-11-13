@@ -57,6 +57,7 @@ CHARGEABLE = (
     "frontier", "fmea_sweep", "coupling_loop", "margin_loop", "mc", "eh_study",
     "decision_study",
     "investment_case",
+    "business_case",
 )
 
 
@@ -303,7 +304,9 @@ def estimate_solves(n, study: str, **kwargs) -> int:
         # sampled off one snapshot.
         return 0
 
-    if study == "investment_case":
+    if study in ("investment_case", "business_case"):
+        # Business case 08b (GK B (54) D5): the business case values the IC's own
+        # solve, as the IC values the stored solve.
         # IC P4: the finance engine values the stored solve; it runs no LP.
         # Known and free, like `mc` — logged in the campaign, charged nothing.
         return 0

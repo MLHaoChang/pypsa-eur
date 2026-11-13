@@ -19,7 +19,7 @@ _TOOLS = {
     'foreground_simulation': {'run_simulation', 'run_ac_pf_stage'},
     'adequacy_study': {'run_fmea_sweep', 'run_frontier_study', 'run_mc_study',
                        'run_coupling_loop', 'run_margin_loop', 'run_eh_study',
-                       'run_investment_case'},
+                       'run_investment_case', 'run_business_case'},
     'report_job': {'generate_report', 'regenerate_report_section', 'propose_report_mapping'},
 }
 _PREFIXES = {'foreground_simulation': 'fg:', 'adequacy_study': 'ad:', 'report_job': 'rpt:'}
