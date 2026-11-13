@@ -149,7 +149,7 @@ def verify(template_dir: Path) -> None:
         file = e.get("file") if isinstance(e, dict) else None
         if not file or Path(file).name != file:
             raise TemplateSeriesError("template_series_meta_invalid",
-                                      f"series entry {e!r} needs a plain file name")
+                                      f"a series entry in {META} needs a plain file name")
         named.add(file)
         want = e.get("sha256")
         if not isinstance(want, str) or not want:
