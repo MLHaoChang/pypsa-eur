@@ -330,3 +330,21 @@ Eight sessions reached 300k context in 75–120 minutes. The causes were full-si
   - Measured with one-turn Haiku probes (`create_session`, then `get_session` `context_usage.used_tokens` read from outside after the turn; inside its own turn a session reads 0): 82.6k on the base branch, 61.5k with the deny list, 58.1k with the skills hidden too.
   - Before adding a deny entry, grep the steward, coordinator and reviewer procedures for the tool. The coordinator needs `Artifact` (~8k) and the session and trigger tools, and project settings cannot differ by role, so those stay loaded for builders.
   - Lives in: `.claude/settings.json`, live and template copies.
+
+## 13 Nov 2026: coordination retro (owner decision RETRO-1113-1)
+
+- **Role ids reached master hours late.** Three rotations waited on a docs PR that also carried status edits and conflicted; dead ids stayed in `whois.py`'s source, and sessions messaged archived reviewers.
+  - Fix: a role-id change is its own one-file PR, merged in the same sweep; status sweeps go in a separate docs PR.
+  - Lives in: coordinator "Rotation", steps 2 and 4.
+- **A capped pre-push hid a contract failure** (the mapped step was cut; CI found a registry test 1 h 40 min later).
+  - Fix: an uncapped registry step runs when routes or the catalogue change, and a CUT line names the files it skipped.
+  - Lives in: the project's pre-push script (`scripts/coord/prepush.sh` in the home repository; not templated), test `test/test_coord_prepush.py`.
+- **One background ciwait per PR was fragile and wake-heavy** (limit deaths, one restart per PR after a container restart).
+  - Fix: `ciwait.sh --board` watches every board PR in one process, run with Monitor.
+  - Lives in: `scripts/coord/ciwait.sh`, coordinator "Tool hygiene"; test `test/test_coord_ciwait.py`.
+- **Frontier inputs and task stages were hand-built**, and a listed session outranked an open PR.
+  - Fix: `inputs.sh` writes both input files from the board; an open PR beats a listed session in `--stages`; `tasks.py` applies stages and merge notes.
+  - Lives in: `scripts/coord/inputs.sh`, `frontier.py`, `tasks.py`; coordinator "Sweep" (Capacity) and Dashboard.
+- **Session-admin tool results (2–8k tokens each) landed in the coordinator's context.**
+  - Fix: session admin always goes through the Haiku subagent.
+  - Lives in: coordinator "Tool hygiene".
