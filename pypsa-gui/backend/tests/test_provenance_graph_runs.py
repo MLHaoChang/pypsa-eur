@@ -434,7 +434,9 @@ def test_a_bare_context_is_read_with_its_defaults():
     """A context with no solver state, edit counter or lock: read, never raised."""
     import types
 
-    r = runs.read(types.SimpleNamespace(network=_net(), solver_state=None))
+    r = runs.read(
+        types.SimpleNamespace(network=_net(), solver_state=None, network_revision=None)
+    )
     assert r.solved is None and r.revision == 0 and r.study_done is False
     assert r.loadflow_ran is False
 
@@ -532,10 +534,15 @@ def test_loadflow_current_is_the_flow_s_load_flow_word(solved):
     n, ctx = solved
     assert run_lifecycle.loadflow_current(ctx) is False  # no load flow ran
     _loadflow(n, ctx)
-    assert run_lifecycle.loadflow_current(ctx) is True and _answers()["loadflow"] == "fresh"
+    assert (
+        run_lifecycle.loadflow_current(ctx) is True
+        and _answers()["loadflow"] == "fresh"
+    )
     _value_edit(n, ctx)  # the dispatch it read no longer describes the inputs
     assert run_lifecycle.loadflow_current(ctx) is False
-    ctx.network_revision = int(ctx.network_revision or 0) + 1  # the seam's bump, which the flow's cache keys on
+    ctx.network_revision = (
+        int(ctx.network_revision or 0) + 1
+    )  # the seam's bump, which the flow's cache keys on
     assert _answers()["loadflow"] == "stale"
     n.generators_t.p = n.generators_t.p.iloc[:, :0]
     assert run_lifecycle.loadflow_current(ctx) is False
