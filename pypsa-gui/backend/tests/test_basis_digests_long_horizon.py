@@ -127,3 +127,12 @@ def test_the_solver_config_digest_is_unchanged():
     assert ec.basis_digests(saved)["solver_config_sha256"] == ex._digest(
         goal_free_config(cfg)
     )
+
+
+def test_a_change_in_snapshot_weightings_changes_the_weights_digest():
+    saved = _saved(_hours(24))
+    before = ec.basis_digests(saved)
+    saved.network.snapshot_weightings.loc[:, :] = 2.0
+    after = ec.basis_digests(saved)
+    assert after["weights_sha256"] != before["weights_sha256"]
+    assert after["snapshots_sha256"] == before["snapshots_sha256"]
