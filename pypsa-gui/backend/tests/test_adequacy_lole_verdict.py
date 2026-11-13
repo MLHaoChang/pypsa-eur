@@ -47,7 +47,7 @@ def test_settle_draws_is_where_the_upper_bound_reaches_the_goal():
 @pytest.mark.parametrize(
     "lole,ci,why",
     [
-        (1.46, (0.4, 3.0), "beyond the engine cap of 2000 draws"),
+        (1.46, (0.4, 3.0), "beyond the limit of 2000 draws"),
         (2.0, (1.0, 3.0), "the estimate equals the goal"),
         (1.0, (1.0, 1.0), None),  # confident: settled, no draws needed
         (1.5, (1.0, math.nan), "the confidence interval is degenerate"),
@@ -85,6 +85,21 @@ def test_event_hours_is_the_heaviest_draw_when_it_outweighs_a_snapshot():
     assert v["verdict"] == "not_confident"
     assert lole_verdict(lole, (0.08, 2.84), 1.8, 52.14 / 500, 500, CAP)[
         "verdict"] == "pass"
+
+
+def test_a_one_draw_estimate_is_not_a_pass_eh_datacenter_shape():
+    """E2/E7, eh_datacenter as shipped: 1.147 h/yr over 500 draws rests on ONE
+    draw (573.5 weighted h), CI [0, 3.40], heaviest snapshot 52.14 h. One more
+    such draw gives 2.29 > 2.
+    BROKEN VARIANT (bite): w_max alone gives 0.104 h and a false pass."""
+    draws = [0.0] * 499 + [573.5]
+    lole = sum(draws) / 500
+    e = event_hours([52.14] * 168, 500, draws)
+    assert e == pytest.approx(lole)
+    v = lole_verdict(lole, (0.0, 3.3955), 2.0, e, 500, CAP)
+    assert v["verdict"] == "not_confident"
+    assert v["settle_draws"] is None
+    assert v["settle_reason"] == "beyond the limit of 2000 draws"
 
 
 def test_event_hours_keeps_the_snapshot_floor_when_nothing_was_sampled():
@@ -172,17 +187,17 @@ def test_the_not_confident_copy_names_the_settle_and_the_network_left():
     from services.adequacy.lole_verdict import not_confident_copy
     text = not_confident_copy(_nc_mc(), 2.0, "ε = 0.035‱")
     assert text.startswith("Not confident")
-    assert "one more sampled draw as heavy as the heaviest seen (0.73 h)" in text
+    assert "one more sampled draw as heavy as the heaviest seen would put it above" in text
     assert "About 1200 draws would settle it, if the estimate and its range" in text
     assert "not a pass" in text
-    assert "your own plan, not that one" in text
+    assert "the network you have now is your own plan, not that one" in text
 
 
 def test_the_not_confident_copy_says_when_draws_alone_cannot_settle_it():
     from services.adequacy.lole_verdict import not_confident_copy
     text = not_confident_copy(
-        _nc_mc(None, "beyond the engine cap of 2000 draws", None), 2.0, "x")
-    assert "beyond the engine cap of 2000 draws" in text
+        _nc_mc(None, "beyond the limit of 2000 draws", None), 2.0, "x")
+    assert "beyond the limit of 2000 draws" in text
     assert "did not report" in text
 
 

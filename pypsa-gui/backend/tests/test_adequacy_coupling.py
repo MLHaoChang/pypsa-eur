@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import math
 import queue
+import threading
 
 import pandas as pd
 import pypsa
@@ -928,7 +929,7 @@ def test_only_not_confident_iterates_read_not_confident_never_met():
     assert goal["verdict"] == "not_confident"
     # ceil(500 · ((4.0 − 2.9) / (3.0 − 2.9))²) = 60500 > MAX_DRAWS
     assert goal["settle_draws"] is None
-    assert "beyond the engine cap" in goal["settle_reason"]
+    assert "beyond the limit of 2000 draws" in goal["settle_reason"]
 
 
 def test_a_miss_only_run_is_not_relabelled_not_confident():
@@ -938,3 +939,33 @@ def test_a_miss_only_run_is_not_relabelled_not_confident():
     res = _run(fake, target=3.0, eps0=100.0, max_solves=3)
     assert res["status"] != "not_confident"
     assert res["nearest"] is None
+
+
+def test_an_abort_after_a_not_confident_iterate_stays_aborted():
+    """Only an unreachable or spent search becomes not_confident; an abort
+    or a failure keeps its own status.
+    BROKEN VARIANT (bite): drop the status test from the relabel."""
+    stop = threading.Event()
+    fake = Fake([], tail={"hash": "A", "lole": 2.9, "ci": (1.0, 4.0),
+                          "event_h": 0.2})
+
+    def on_iteration(_row):
+        stop.set()
+
+    res = _run(fake, target=3.0, eps0=100.0, max_solves=5,
+               stop_event=stop, on_iteration=on_iteration)
+    assert res["status"] == "aborted"
+    assert res["nearest"] is None and res["final"] is None
+
+
+def test_nearest_is_the_cheapest_not_confident_iterate():
+    """D4: `nearest` is picked like `final`, by cost, the looser ε breaking
+    ties. Here the tighter iterate is the cheaper one.
+    BROKEN VARIANT (bite): ignore cost — the looser, dearer one is picked."""
+    fake = Fake([{"hash": "A", "lole": 2.9, "ci": (1.0, 4.0), "event_h": 0.2,
+                  "cost_eur": 300.0}],
+                tail={"hash": "B", "lole": 2.8, "ci": (1.0, 4.0),
+                      "event_h": 0.3, "cost_eur": 100.0})
+    res = _run(fake, target=3.0, eps0=100.0, max_solves=3)
+    assert res["status"] == "not_confident"
+    assert res["nearest"]["cost_eur"] == 100.0

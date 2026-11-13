@@ -29,9 +29,11 @@ verdict exists (E3).
 
 ``settle_draws`` names what would settle a ``not_confident`` estimate: about
 ``ceil(n · ((ci_hi − lole) / (goal − lole))²)`` draws if the mean and spread
-hold (in user text: "if the estimate and its range stay as they are"), the count at which the interval's upper bound reaches the goal. It is
-``None`` with a reason when that count is above the engine cap, when the
-estimate equals the goal, or when the interval is degenerate.
+hold, the count at which the interval's upper bound reaches the goal (in user
+text: "if the estimate and its range stay as they are"). It is ``None`` with a
+reason when that count is above the engine cap (in user text, "the limit of N
+draws"), when the estimate equals the goal, or when the interval is
+degenerate.
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ def _settle(lole: float, hi: float, target: float, n: int, max_draws: int):
         return None, "the estimate equals the goal"
     need = math.ceil(n * ((hi - lole) / (target - lole)) ** 2)
     if need > max_draws:
-        return None, f"beyond the engine cap of {max_draws} draws"
+        return None, f"beyond the limit of {max_draws} draws"
     return need, None
 
 
@@ -110,9 +112,10 @@ def not_confident_copy(mc: dict, target_h: float, lever: str) -> str:
     goal = mc["goal"]
     hi = mc["lole_ci"][1]
     event = goal.get("event_h")
+    # UX (20): no figure here; on a one-draw estimate it equals the estimate
+    # and reads as a typo.
     event_clause = (
-        f"one more sampled draw as heavy as the heaviest seen "
-        f"({float(event):.3g} h) would put it above"
+        "one more sampled draw as heavy as the heaviest seen would put it above"
         if event is not None else
         "the study did not report how much one more sampled draw is worth")
     settle = settle_text(goal)
@@ -121,9 +124,9 @@ def not_confident_copy(mc: dict, target_h: float, lever: str) -> str:
         f"nearest, at {lever}, estimates {float(mc['lole_hours']):.3g} h, at "
         f"or below the goal, but the top of its 95% range is "
         f"{float(hi):.3g} h and {event_clause}, so it is not a pass. "
-        f"{settle[0].upper()}{settle[1:]}. Your original config has been "
-        "re-solved, so the network you are holding is your own plan, not "
-        "that one.")
+        f"{settle[0].upper()}{settle[1:]}. Your original plan has been "
+        "re-solved, so the network you have now is your own plan, not that "
+        "one.")
 
 
 def goal_fields(nearest, final) -> dict:

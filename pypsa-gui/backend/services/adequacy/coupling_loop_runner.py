@@ -509,7 +509,8 @@ def start_coupling_loop(
             # put the user's own config back (`_restore_closing(False, …)`).
             return not_confident_copy(
                 nearest["mc"], target,
-                f"ε = {format_lever_value(nearest['eps_permyriad'])}‱")
+                "the energy strictness ε = "
+                f"{format_lever_value(nearest['eps_permyriad'])}‱")
         if status == "unreachable":
             # WHICH unreachable? The three-mechanism copy assumes the cap was
             # doing something and the MC disagreed with it. The commonest case
