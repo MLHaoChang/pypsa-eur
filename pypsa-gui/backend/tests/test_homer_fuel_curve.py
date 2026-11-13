@@ -1203,3 +1203,21 @@ def test_fuel_use_scales_no_load_fuel_by_p_nom_and_names_the_carrier():
         NO_LOAD * 1.25 * HOURS + SLOPE * LOAD_MW * HOURS
     )
     assert row["fuel_cost_eur"] == pytest.approx(row["fuel_mwh"] * PRICE)
+
+
+@pytest.mark.parametrize(
+    "scale",
+    [{"auto_objective_scale": True}, {"user_objective_scale": 10.0}],
+    ids=["auto", "user"],
+)
+def test_every_sizing_round_reports_its_cost_in_eur_whatever_the_objective_scale(scale):
+    """GK A A2-1: `cost_eur` is the objective in EUR, with any applied scale reversed (as run_simulation does)."""
+    from services.adequacy.sizing_loop_runner import run_sizing
+
+    from tests.test_sizing_loop_runner import _config, _inputs, _tiny
+
+    base = run_sizing(_tiny(), _config(voll=10_000.0), _inputs())
+    scaled = run_sizing(_tiny(), _config(voll=10_000.0, **scale), _inputs())
+    assert [r["cost_eur"] for r in scaled["rounds"]] == pytest.approx(
+        [r["cost_eur"] for r in base["rounds"]], rel=1e-6
+    )

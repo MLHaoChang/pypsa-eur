@@ -378,6 +378,11 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
         watcher.arm()
         status, condition = n.optimize(solver_name=solver_name, **_prepare(n, cfg, undo), **(solver_options or {}))
         watcher.disarm()
+        # Reverse the objective scale (user or auto) on n.objective and the duals, as run_simulation does: every
+        # round's `cost_eur` is in EUR (GK A A2-1 on #1466; the missing reversal predates it).
+        from services.solver.objective import _rescale_results_for_objective
+
+        _rescale_results_for_objective(n)
         if status != "ok":
             return {"status": status, "condition": condition, "info": info}
         return {"status": status, "condition": condition, "cost_eur": float(n.objective),
