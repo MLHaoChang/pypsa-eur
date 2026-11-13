@@ -34,22 +34,44 @@ CUR = "USD"  # the s2 case's currency
 
 
 def _line(**kw) -> dict:
-    base = dict(name="product", kind="revenue", category="product_sale", unit="t",
-                quantity=10.0, price=45.0, escalation="opex")
+    base = dict(
+        name="product",
+        kind="revenue",
+        category="product_sale",
+        unit="t",
+        quantity=10.0,
+        price=45.0,
+        escalation="opex",
+    )
     base.update(kw)
     return base
 
 
 def _linked(**kw) -> dict:
-    return _line(name="power", unit="MWh", quantity=None, price=None,
-                 quantity_source="linked:dc_it_energy@1", linked_share=0.8,
-                 linked_share_by_year={"2028": 0.9}, **kw)
+    return _line(
+        name="power",
+        unit="MWh",
+        quantity=None,
+        price=None,
+        quantity_source="linked:dc_it_energy@1",
+        linked_share=0.8,
+        linked_share_by_year={"2028": 0.9},
+        **kw,
+    )
 
 
 def _opex(**kw) -> dict:
-    base = dict(name="maint", kind="opex", category="maintenance", unit="MWh", quantity=5.0,
-                price=None, escalation="opex", default_keys={"price": "maint_k"},
-                default_units={"price": f"{CUR}/MWh"})
+    base = dict(
+        name="maint",
+        kind="opex",
+        category="maintenance",
+        unit="MWh",
+        quantity=5.0,
+        price=None,
+        escalation="opex",
+        default_keys={"price": "maint_k"},
+        default_units={"price": f"{CUR}/MWh"},
+    )
     base.update(kw)
     return base
 
@@ -76,7 +98,9 @@ def bc(client, install_network, tmp_path, monkeypatch):
     owner = str(chat_tools.acting_user_id())
 
     def host():
-        return run_intake.Host(name=host_dir.name, dir=host_dir, owner_id=owner, turns=tuple(turns))
+        return run_intake.Host(
+            name=host_dir.name, dir=host_dir, owner_id=owner, turns=tuple(turns)
+        )
 
     monkeypatch.setattr(chat_edit._Host, "get", lambda self: host())
     monkeypatch.setattr(run_intake, "host_for", lambda ctx, o, p: host())
@@ -89,8 +113,13 @@ def bc(client, install_network, tmp_path, monkeypatch):
 
 
 def _say(env, text, *, owner=None, origin="user") -> str:
-    record = {"ts": time.time() + len(env["turns"]), "session_id": "s-1", "user": text,
-              "assistant": [], TURN_AUTHOR_KEY: owner or env["owner"]}
+    record = {
+        "ts": time.time() + len(env["turns"]),
+        "session_id": "s-1",
+        "user": text,
+        "assistant": [],
+        TURN_AUTHOR_KEY: owner or env["owner"],
+    }
     if origin is not None:
         record[run_intake.ORIGIN_KEY] = origin
     env["turns"].append(record)
@@ -109,8 +138,11 @@ def _cite(tid, quote, line="product", unit=f"{CUR}/t", year=None, **kw) -> dict:
 
 
 def _args(business_case, citations=(), if_match=None) -> dict:
-    return {"business_case": business_case, "citations": list(citations),
-            "if_match": if_match if if_match is not None else _digest()}
+    return {
+        "business_case": business_case,
+        "citations": list(citations),
+        "if_match": if_match if if_match is not None else _digest(),
+    }
 
 
 def _refused(fn, *a, **kw) -> dict:
@@ -123,7 +155,9 @@ def _refused(fn, *a, **kw) -> dict:
 
 
 def _store(env, business_case, citations=()) -> dict:
-    return chat_tools.set_business_case_lines(_digest(), business_case, citations=list(citations))
+    return chat_tools.set_business_case_lines(
+        _digest(), business_case, citations=list(citations)
+    )
 
 
 def _rows(card) -> dict:
@@ -137,13 +171,20 @@ def test_the_four_tools_their_tiers_routes_and_no_project_argument():
     tools = {t["name"]: t for t in TOOLS if t["name"] in NAMES}
     assert set(tools) == set(NAMES) and set(NAMES) <= set(chat_tools.DISPATCHERS)
     assert {n: safety_tier_for(n) for n in NAMES} == {
-        "run_business_case": "execution_long_running", "get_business_case": "read",
-        TOOL: "write", "abort_business_case": "destructive"}
+        "run_business_case": "execution_long_running",
+        "get_business_case": "read",
+        TOOL: "write",
+        "abort_business_case": "destructive",
+    }
     for t in tools.values():
-        assert not any("project" in p for p in t["input_schema"].get("properties", {})), t["name"]
+        assert not any(
+            "project" in p for p in t["input_schema"].get("properties", {})
+        ), t["name"]
     assert tools[TOOL]["input_schema"]["required"] == ["if_match"]
     assert "sold share" in tools[TOOL]["description"].lower()
-    assert TOOL_ROUTES["set_business_case_lines"] == [("PUT", "/api/results/business_case/inputs")]
+    assert TOOL_ROUTES["set_business_case_lines"] == [
+        ("PUT", "/api/results/business_case/inputs")
+    ]
     # Q3: the preset stays out of chat.
     assert not any("/preset" in path for n in NAMES for _, path in TOOL_ROUTES[n])
 
@@ -152,7 +193,9 @@ def test_the_runs_are_never_listed_and_bound_context_is_unchanged():
     from services import run_envelope, run_profiles
 
     assert {"run_business_case", "abort_business_case"} <= run_envelope.NEVER_LISTED
-    assert run_profiles.BOUND_CONTEXT_TOOLS & run_envelope.NEVER_LISTED == {"run_eh_study"}
+    assert run_profiles.BOUND_CONTEXT_TOOLS & run_envelope.NEVER_LISTED == {
+        "run_eh_study"
+    }
 
 
 def test_the_card_shows_in_guided_and_expert_and_nothing_approves_it_for_the_user():
@@ -182,7 +225,9 @@ def test_if_match_is_required_and_star_is_refused(bc, tag):
 def test_a_stale_digest_is_business_case_changed_through_the_tool(bc):
     stale = _digest()
     _store(bc, _bc(_line(price=None)))
-    d = _refused(chat_tools.set_business_case_lines, stale, _bc(_line(price=None, quantity=3.0)))
+    d = _refused(
+        chat_tools.set_business_case_lines, stale, _bc(_line(price=None, quantity=3.0))
+    )
     assert d["error_kind"] == "business_case_changed" and d["status"] == 412
 
 
@@ -191,9 +236,13 @@ def test_a_stale_digest_at_the_route_maps_to_business_case_changed(bc, monkeypat
     import routers.results as R
 
     stale = _digest()
-    monkeypatch.setattr(chat_edit, "plan", lambda a: {"new": _bc(_line(price=None)), "tag": stale})
-    R.put_business_case_inputs(R.BusinessCaseIn(business_case=_bc(_line(price=None, quantity=2.0))),
-                               if_match=None)
+    monkeypatch.setattr(
+        chat_edit, "plan", lambda a: {"new": _bc(_line(price=None)), "tag": stale}
+    )
+    R.put_business_case_inputs(
+        R.BusinessCaseIn(business_case=_bc(_line(price=None, quantity=2.0))),
+        if_match=None,
+    )
     d = _refused(chat_tools.set_business_case_lines, stale, _bc(_line(price=None)))
     assert d["error_kind"] == "business_case_changed" and d["status"] == 412
 
@@ -201,13 +250,21 @@ def test_a_stale_digest_at_the_route_maps_to_business_case_changed(bc, monkeypat
 def test_clear_and_business_case_are_exclusive(bc):
     d = _refused(chat_tools.set_business_case_lines, _digest())
     assert d["error_kind"] == "business_case_clear_invalid"
-    d = _refused(chat_tools.set_business_case_lines, _digest(), _bc(_line(price=None)), clear=True)
+    d = _refused(
+        chat_tools.set_business_case_lines,
+        _digest(),
+        _bc(_line(price=None)),
+        clear=True,
+    )
     assert d["error_kind"] == "business_case_clear_invalid"
 
 
 def test_invalid_inputs_name_the_field(bc):
-    d = _refused(chat_tools.set_business_case_lines, _digest(),
-                 _bc(_line(price=None, no_such_field=1)))
+    d = _refused(
+        chat_tools.set_business_case_lines,
+        _digest(),
+        _bc(_line(price=None, no_such_field=1)),
+    )
     assert d["error_kind"] == "business_case_inputs_invalid" and d["errors"]
 
 
@@ -221,8 +278,16 @@ def test_a_first_save_shows_every_value_and_each_price_source(bc):
     rows = _rows(card)
     assert card["kind"] == "settings_edit" and card["complete"] is True
     price = rows["product · Price"]
-    assert (price["old"], price["new"], price["unit"], price["change"]) == (None, 45.0, f"{CUR}/t", "added")
-    assert price["price_source"] == "you wrote '45 USD/t'" and price["source"]["turn_id"] == tid
+    assert (price["old"], price["new"], price["unit"], price["change"]) == (
+        None,
+        45.0,
+        f"{CUR}/t",
+        "added",
+    )
+    assert (
+        price["price_source"] == "you wrote '45 USD/t'"
+        and price["source"]["turn_id"] == tid
+    )
     assert rows["power · Sold share"]["new"] == 0.8
     assert rows["power · Sold share 2028"]["new"] == 0.9
     assert rows["maint · Default key price"]["new"] == "maint_k"
@@ -232,50 +297,84 @@ def test_a_first_save_shows_every_value_and_each_price_source(bc):
     # kw_per_gpu, and capacity_unit's stored default: the card shows what is stored
     assert card["says"] == "business case: 3 lines added, 2 settings changed"
     assert rows["Capacity unit"]["new"] == "MW"
-    assert chat_tools.get_business_case(detail="inputs")["business_case"] is None, "preview writes nothing"
+    assert chat_tools.get_business_case(detail="inputs")["business_case"] is None, (
+        "preview writes nothing"
+    )
 
 
 def test_a_replacement_diffs_old_to_new_and_a_removal_is_never_silent(bc):
     t1 = _say(bc, "Product price is 45 USD/t.")
     _store(bc, _bc(_line(), _linked(), _opex()), [_cite(t1, "45 USD/t")])
     t2 = _say(bc, "Make that 47.5 USD/t from now on.")
-    new = _bc(_line(price=47.5), _opex(quantity=6.0))            # `power` removed
+    new = _bc(_line(price=47.5), _opex(quantity=6.0))  # `power` removed
     card = edit_card.preview(TOOL, _args(new, [_cite(t2, "47.5 USD/t")]))
     rows = _rows(card)
-    assert (rows["product · Price"]["old"], rows["product · Price"]["new"]) == (45.0, 47.5)
+    assert (rows["product · Price"]["old"], rows["product · Price"]["new"]) == (
+        45.0,
+        47.5,
+    )
     assert rows["product · Price"]["change"] == "changed"
-    assert (rows["maint · Quantity"]["old"], rows["maint · Quantity"]["new"]) == (5.0, 6.0)
+    assert (rows["maint · Quantity"]["old"], rows["maint · Quantity"]["new"]) == (
+        5.0,
+        6.0,
+    )
     removed = [r for r in card["rows"] if r["line"] == "power"]
-    assert removed and all(r["change"] == "removed" and r["new"] is None for r in removed)
-    assert {"power · Sold share", "power · Sold share 2028", "power · Quantity source"} <= \
-        {r["label"] for r in removed}
+    assert removed and all(
+        r["change"] == "removed" and r["new"] is None for r in removed
+    )
+    assert {
+        "power · Sold share",
+        "power · Sold share 2028",
+        "power · Quantity source",
+    } <= {r["label"] for r in removed}
     assert card["says"] == "business case: 2 lines changed, 1 line removed"
 
 
 def test_an_unchanged_price_keeps_its_stored_source(bc):
     t1 = _say(bc, "45 USD/t for the product.")
     _store(bc, _bc(_line()), [_cite(t1, "45 USD/t")])
-    card = edit_card.preview(TOOL, _args(_bc(_line(quantity=12.0))))   # no citation needed
+    card = edit_card.preview(
+        TOOL, _args(_bc(_line(quantity=12.0)))
+    )  # no citation needed
     price = _rows(card)["product · Price"]
-    assert (price["change"], price["price_source"], price["old"], price["new"]) == \
-        ("unchanged", "unchanged", 45.0, 45.0)
+    assert (price["change"], price["price_source"], price["old"], price["new"]) == (
+        "unchanged",
+        "unchanged",
+        45.0,
+        45.0,
+    )
 
 
 def test_a_preset_default_price_reads_assumed(bc):
     import routers.results as R
 
-    assumed = {"price": {"key": "maint_k", "value": 3.0, "unit": f"{CUR}/MWh", "source": "pack",
-                         "source_year": 2024, "pack": "pack@1#h"}}
-    R.put_business_case_inputs(R.BusinessCaseIn(business_case=_bc(_opex(price=3.0, assumed=assumed))),
-                               if_match=None)
-    card = edit_card.preview(TOOL, _args(_bc(_opex(price=3.0, assumed=assumed, quantity=9.0))))
+    assumed = {
+        "price": {
+            "key": "maint_k",
+            "value": 3.0,
+            "unit": f"{CUR}/MWh",
+            "source": "pack",
+            "source_year": 2024,
+            "pack": "pack@1#h",
+        }
+    }
+    R.put_business_case_inputs(
+        R.BusinessCaseIn(business_case=_bc(_opex(price=3.0, assumed=assumed))),
+        if_match=None,
+    )
+    card = edit_card.preview(
+        TOOL, _args(_bc(_opex(price=3.0, assumed=assumed, quantity=9.0)))
+    )
     assert _rows(card)["maint · Price"]["price_source"] == "preset default (assumed)"
 
 
 def test_an_oversize_card_is_refused_never_cut(bc):
     lines = [_opex(name=f"o{i}", default_keys={}, default_units={}) for i in range(15)]
     d = _refused(edit_card.preview, TOOL, _args(_bc(*lines)))
-    assert d["error_kind"] == "business_case_card_too_large" and d["rows"] > chat_edit.CARD_ROW_CAP
+    assert (
+        d["error_kind"] == "business_case_card_too_large"
+        and d["rows"] > chat_edit.CARD_ROW_CAP
+    )
 
 
 def test_a_no_op_is_refused(bc):
@@ -304,29 +403,51 @@ def _mut(base, line, **kw):
     return out
 
 
-@pytest.mark.parametrize("value", ["price", "price_by_year", "unit", "linked_share",
-                                   "linked_share_by_year", "default_units", "default_keys",
-                                   "kw_per_gpu"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "price",
+        "price_by_year",
+        "unit",
+        "linked_share",
+        "linked_share_by_year",
+        "default_units",
+        "default_keys",
+        "kw_per_gpu",
+    ],
+)
 def test_each_bound_value_changed_after_the_card_is_edit_preview_stale(bc, value):
     base, cites, tid = _bound_case(bc)
     card = edit_card.preview(TOOL, _args(base, cites))
     digest = card["digest"]
-    edit_card.require_current(TOOL, _args(base, cites, if_match=_digest()), card)   # unchanged: passes
+    edit_card.require_current(
+        TOOL, _args(base, cites, if_match=_digest()), card
+    )  # unchanged: passes
     changed, more = {
         "price": (_mut(base, "product", price=46.0), [_cite(tid, "46 USD/t")]),
-        "price_by_year": (_mut(base, "product", price_by_year={"2029": 48.0}),
-                          [_cite(tid, "48 USD/t", year=2029)]),
+        "price_by_year": (
+            _mut(base, "product", price_by_year={"2029": 48.0}),
+            [_cite(tid, "48 USD/t", year=2029)],
+        ),
         "unit": (_mut(base, "product", unit="kg"), []),
         "linked_share": (_mut(base, "power", linked_share=0.7), []),
-        "linked_share_by_year": (_mut(base, "power", linked_share_by_year={"2028": 0.95}), []),
-        "default_units": (_mut(base, "maint", default_units={"price": f"{CUR}/kWh"}), []),
+        "linked_share_by_year": (
+            _mut(base, "power", linked_share_by_year={"2028": 0.95}),
+            [],
+        ),
+        "default_units": (
+            _mut(base, "maint", default_units={"price": f"{CUR}/kWh"}),
+            [],
+        ),
         "default_keys": (_mut(base, "maint", default_keys={"price": "other_k"}), []),
         "kw_per_gpu": ({**base, "kw_per_gpu": 1.3}, []),
     }[value]
-    if value == "unit":       # the price's unit moves with it; the old quote no longer reads
+    if value == "unit":  # the price's unit moves with it; the old quote no longer reads
         tid2 = _say(bc, "45 USD/kg, and 47 USD/kg in 2029.")  # noqa: F841
-        more = [_cite(tid2, "45 USD/kg", unit=f"{CUR}/kg"),
-                _cite(tid2, "47 USD/kg", unit=f"{CUR}/kg", year=2029)]
+        more = [
+            _cite(tid2, "45 USD/kg", unit=f"{CUR}/kg"),
+            _cite(tid2, "47 USD/kg", unit=f"{CUR}/kg", year=2029),
+        ]
     keep = [c for c in cites if not any(c.get("year") == m.get("year") for m in more)]
     d = _refused(edit_card.require_current, TOOL, _args(changed, keep + more), card)
     assert d["error_kind"] == "edit_preview_stale" and d["status"] == 409
@@ -338,7 +459,9 @@ def test_a_cited_turn_edited_after_the_card_refuses(bc):
     card = edit_card.preview(TOOL, _args(base, cites))
     bc["turns"][-1]["user"] += " (edited)"
     d = _refused(edit_card.require_current, TOOL, _args(base, cites), card)
-    assert d["error_kind"] == "price_not_from_user" and d["reason"] == "turn_not_citable"
+    assert (
+        d["error_kind"] == "price_not_from_user" and d["reason"] == "turn_not_citable"
+    )
 
 
 # ── each citation path and refusal (Q1, D2) ─────────────────────────────────
@@ -353,19 +476,26 @@ def test_a_new_price_without_a_citation_is_not_from_user(bc):
 
 def test_a_price_by_year_needs_its_own_citation(bc):
     tid = _say(bc, "45 USD/t.")
-    d = _refused(chat_tools.set_business_case_lines, _digest(),
-                 _bc(_line(price_by_year={"2029": 47.0})), citations=[_cite(tid, "45 USD/t")])
+    d = _refused(
+        chat_tools.set_business_case_lines,
+        _digest(),
+        _bc(_line(price_by_year={"2029": 47.0})),
+        citations=[_cite(tid, "45 USD/t")],
+    )
     assert d["error_kind"] == "price_not_from_user" and d["year"] == 2029
 
 
-@pytest.mark.parametrize("case, reason", [
-    ("quote_not_in_turn", "quote_not_found"),
-    ("another_author", "turn_not_citable"),
-    ("not_typed", "turn_not_citable"),
-    ("number_differs", "value_differs"),
-    ("no_unit", "unit_missing"),
-    ("value_supplied", "intake_value_supplied"),
-])
+@pytest.mark.parametrize(
+    "case, reason",
+    [
+        ("quote_not_in_turn", "quote_not_found"),
+        ("another_author", "turn_not_citable"),
+        ("not_typed", "turn_not_citable"),
+        ("number_differs", "value_differs"),
+        ("no_unit", "unit_missing"),
+        ("value_supplied", "intake_value_supplied"),
+    ],
+)
 def test_each_citation_refusal(bc, case, reason):
     mine = _say(bc, "We sell it at 45 USD/t.")
     cite = {
@@ -376,7 +506,9 @@ def test_each_citation_refusal(bc, case, reason):
         "no_unit": _cite(_say(bc, "It is 45 per tonne."), "45 per tonne"),
         "value_supplied": _cite(mine, "45 USD/t", value=45.0),
     }[case]
-    d = _refused(chat_tools.set_business_case_lines, _digest(), _bc(_line()), citations=[cite])
+    d = _refused(
+        chat_tools.set_business_case_lines, _digest(), _bc(_line()), citations=[cite]
+    )
     assert d["error_kind"] == "price_not_from_user" and d["reason"] == reason, d
     assert chat_tools.get_business_case(detail="inputs")["business_case"] is None
 
@@ -410,13 +542,20 @@ def test_the_table_path(bc):
     ws.append(["product", 45])
     buf = io.BytesIO()
     wb.save(buf)
-    fid = upload_service.add_upload(bc["dir"].name, buf.getvalue(), "p.xlsx",
-                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                    project_dir=bc["dir"]).file_id
+    fid = upload_service.add_upload(
+        bc["dir"].name,
+        buf.getvalue(),
+        "p.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        project_dir=bc["dir"],
+    ).file_id
     cite = {"line": "product", "upload_id": fid, "sheet": "Prices", "cell": "B2"}
     card = edit_card.preview(TOOL, _args(_bc(_line()), [cite]))
     price = _rows(card)["product · Price"]
-    assert price["source"]["kind"] == "table" and price["price_source"] == "p.xlsx Prices!B2"
+    assert (
+        price["source"]["kind"] == "table"
+        and price["price_source"] == "p.xlsx Prices!B2"
+    )
     bad = {**cite, "cell": "A2"}
     d = _refused(edit_card.preview, TOOL, _args(_bc(_line()), [bad]))
     assert d["error_kind"] == "price_not_from_user"
@@ -426,13 +565,25 @@ def test_the_pdf_path(bc):
     from services import upload_service
     from tests.test_document_values import pdf_bytes
 
-    fid = upload_service.add_upload(bc["dir"].name, pdf_bytes([["Offer: product at 45 USD/t."]]),
-                                    "offer.pdf", "application/pdf", project_dir=bc["dir"]).file_id
-    cite = {"line": "product", "upload_id": fid, "page": 1, "quote": "product at 45 USD/t",
-            "unit": f"{CUR}/t"}
+    fid = upload_service.add_upload(
+        bc["dir"].name,
+        pdf_bytes([["Offer: product at 45 USD/t."]]),
+        "offer.pdf",
+        "application/pdf",
+        project_dir=bc["dir"],
+    ).file_id
+    cite = {
+        "line": "product",
+        "upload_id": fid,
+        "page": 1,
+        "quote": "product at 45 USD/t",
+        "unit": f"{CUR}/t",
+    }
     card = edit_card.preview(TOOL, _args(_bc(_line()), [cite]))
     price = _rows(card)["product · Price"]
-    assert price["source"]["kind"] == "pdf" and price["price_source"].startswith("offer.pdf, page 1")
+    assert price["source"]["kind"] == "pdf" and price["price_source"].startswith(
+        "offer.pdf, page 1"
+    )
     d = _refused(edit_card.preview, TOOL, _args(_bc(_line(price=46.0)), [cite]))
     assert d["error_kind"] == "price_not_from_user" and d["reason"] == "value_differs"
 
@@ -443,8 +594,10 @@ def test_the_pdf_path(bc):
 def test_get_before_anything_is_no_data(bc):
     out = chat_tools.get_business_case()
     assert out["status"] == "no_data" and out["kind"] == "business_case"
-    assert _refused(chat_tools.get_business_case, detail="pnl")["error_kind"] == \
-        "business_case_request_invalid"
+    assert (
+        _refused(chat_tools.get_business_case, detail="pnl")["error_kind"]
+        == "business_case_request_invalid"
+    )
 
 
 def test_inputs_carry_the_digest_and_the_citable_turns(bc):
@@ -456,10 +609,18 @@ def test_inputs_carry_the_digest_and_the_citable_turns(bc):
 
 
 def _report(**kpis) -> dict:
-    return {"inputs_digest": "x", "ic_assumptions_hash": "h", "currency": CUR,
-            "basis": {"id": "project_on_its_own"}, "pnl": {"years": [2027, 2028]},
-            "kpis": kpis or {"project_npv": {"value": 12.5, "status": "ok", "reason": None}},
-            "break_even": {"status": "no_root", "value": None}, "outputs": {}, "flags": []}
+    return {
+        "inputs_digest": "x",
+        "ic_assumptions_hash": "h",
+        "currency": CUR,
+        "basis": {"id": "project_on_its_own"},
+        "pnl": {"years": [2027, 2028]},
+        "kpis": kpis
+        or {"project_npv": {"value": 12.5, "status": "ok", "reason": None}},
+        "break_even": {"status": "no_root", "value": None},
+        "outputs": {},
+        "flags": [],
+    }
 
 
 def test_a_stale_report_reads_stale_with_what_changed_and_no_figures(bc):
@@ -475,15 +636,32 @@ def test_a_stale_report_reads_stale_with_what_changed_and_no_figures(bc):
 def test_a_current_report_keeps_not_established_and_says_what_it_cut(bc, monkeypatch):
     import routers.results as R
 
-    monkeypatch.setattr(R, "_bc_staleness_now", lambda stored, ic_key=None: {
-        "present": True, "stale": False, "changed": [], "reason": None})
-    rep = _report(margin={"value": None, "status": "not_established", "reason": "kw_per_gpu_missing"},
-                  npv={"value": 3.0, "status": "ok", "reason": None})
+    monkeypatch.setattr(
+        R,
+        "_bc_staleness_now",
+        lambda stored, ic_key=None: {
+            "present": True,
+            "stale": False,
+            "changed": [],
+            "reason": None,
+        },
+    )
+    rep = _report(
+        margin={
+            "value": None,
+            "status": "not_established",
+            "reason": "kw_per_gpu_missing",
+        },
+        npv={"value": 3.0, "status": "ok", "reason": None},
+    )
     R._state["business_case_report"] = rep
     out = chat_tools.get_business_case()
     assert out["report"]["stale"] is False
-    assert out["kpis"]["margin"] == {"value": "not established", "status": "not_established",
-                                     "reason": "kw_per_gpu_missing"}
+    assert out["kpis"]["margin"] == {
+        "value": "not established",
+        "status": "not_established",
+        "reason": "kw_per_gpu_missing",
+    }
     assert out["break_even"]["value"] == "not established" and "truncated" not in out
     rep["outputs"] = {f"out{i}": {"state": "ok", "note": "x" * 200} for i in range(40)}
     out = chat_tools.get_business_case()
@@ -527,7 +705,8 @@ def test_abort_without_a_run_is_404(bc):
 
 
 def test_a_campaign_run_solves_nothing_and_charges_zero(
-        client, install_network, monkeypatch, session_state, session_ctx):
+    client, install_network, monkeypatch, session_state, session_ctx
+):
     """D5: the run values the IC's own solve; no LP runs while it does."""
     import linopy
 
@@ -543,7 +722,7 @@ def test_a_campaign_run_solves_nothing_and_charges_zero(
         raise AssertionError("the business case ran an LP")
 
     monkeypatch.setattr(linopy.Model, "solve", no_lp)
-    token = PyPSAService._request_ctx.set(session_ctx(client))   # the client's project
+    token = PyPSAService._request_ctx.set(session_ctx(client))  # the client's project
     campaign.start("bc 08b no solve", 3)
     try:
         out = chat_tools.run_business_case()
@@ -561,28 +740,55 @@ def test_the_job_wiring():
     assert ja.STUDY_TOOL_KEYS["run_business_case"] == "business_case"
     assert job_holds.JOB_KINDS["run_business_case"] == job_holds.INPROC
     assert "run_business_case" in activity_history._TOOLS["adequacy_study"]
-    handle = ja.StudyJob(job_id="ad:x", family="adequacy_study", study_key="business_case",
-                         tool_name="run_business_case", tool_use_id="tu", owner_user_id=None,
-                         project_uuid=None, created_at=0.0)
-    assert ja._study_job_view(handle, {"status": "running"})["monitor"] == "get_business_case"
+    handle = ja.StudyJob(
+        job_id="ad:x",
+        family="adequacy_study",
+        study_key="business_case",
+        tool_name="run_business_case",
+        tool_use_id="tu",
+        owner_user_id=None,
+        project_uuid=None,
+        created_at=0.0,
+    )
+    assert (
+        ja._study_job_view(handle, {"status": "running"})["monitor"]
+        == "get_business_case"
+    )
 
 
-def test_wait_to_done_names_the_business_case_tools(client, seeded_identity, session_ctx):
+def test_wait_to_done_names_the_business_case_tools(
+    client, seeded_identity, session_ctx
+):
     from harness import job_adapters as ja
 
-    assert client.post("/api/projects/Bc08b", params={"force": True, "rebind": True}).status_code == 200
+    assert (
+        client.post(
+            "/api/projects/Bc08b", params={"force": True, "rebind": True}
+        ).status_code
+        == 200
+    )
     ctx = session_ctx(client)
     ja._reset_for_tests()
     owner = str(seeded_identity["user_id"])
     from services.pypsa_service import PyPSAService
 
-    token = PyPSAService._request_ctx.set(ctx)   # the request context the HTTP path binds
+    token = PyPSAService._request_ctx.set(
+        ctx
+    )  # the request context the HTTP path binds
     try:
         with ctx.solver_state_lock:
-            ctx.solver_state["business_case"] = {"status": "running", "started_at": time.time()}
-            job = ja.register_study_job(study_key="business_case", tool_name="run_business_case",
-                                        tool_use_id="tu-bc", owner_user_id=owner,
-                                        project_uuid=ctx.project_uuid, ctx=ctx)
+            ctx.solver_state["business_case"] = {
+                "status": "running",
+                "started_at": time.time(),
+            }
+            job = ja.register_study_job(
+                study_key="business_case",
+                tool_name="run_business_case",
+                tool_use_id="tu-bc",
+                owner_user_id=owner,
+                project_uuid=ctx.project_uuid,
+                ctx=ctx,
+            )
         running = ja.wait_study_job(job, 0, actor_id=owner, stop=threading.Event())
         assert running["job"]["status"] == "running" and running["terminal"] is False
         assert "abort_business_case" in running["note"]
@@ -605,15 +811,28 @@ def test_a_price_whose_unit_or_money_year_changes_needs_a_new_citation(bc, chang
     assert d["error_kind"] == "price_not_from_user" and d["reason"] == "no_citation"
     unit = change.get("unit", "t")
     t2 = _say(bc, f"Yes, 45 USD/{unit}.")
-    card = edit_card.preview(TOOL, _args(_bc(_line(**change)), [_cite(t2, f"45 USD/{unit}",
-                                                                       unit=f"{CUR}/{unit}")]))
+    card = edit_card.preview(
+        TOOL,
+        _args(
+            _bc(_line(**change)), [_cite(t2, f"45 USD/{unit}", unit=f"{CUR}/{unit}")]
+        ),
+    )
     price = _rows(card)["product · Price"]
-    assert price["change"] == "changed" and price["price_source"] == f"you wrote '45 USD/{unit}'"
+    assert (
+        price["change"] == "changed"
+        and price["price_source"] == f"you wrote '45 USD/{unit}'"
+    )
 
 
 def test_duplicate_line_names_are_refused_never_shadowed(bc):
-    d = _refused(edit_card.preview, TOOL, _args(_bc(_line(price=None), _line(price=None, quantity=1.0))))
-    assert d["error_kind"] == "business_case_inputs_invalid" and "product" in d["message"]
+    d = _refused(
+        edit_card.preview,
+        TOOL,
+        _args(_bc(_line(price=None), _line(price=None, quantity=1.0))),
+    )
+    assert (
+        d["error_kind"] == "business_case_inputs_invalid" and "product" in d["message"]
+    )
 
 
 def test_an_envelope_never_admits_the_run_on_a_model_turn():

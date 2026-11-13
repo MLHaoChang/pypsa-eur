@@ -42,5 +42,7 @@ def _says(args: dict, rows: list[dict]) -> str:
     return chat_edit.says(rows)
 
 
-register("set_business_case_lines",
-         Adapter("settings_edit", _preview, _readback, section_id=_SECTION, says=_says))
+register(
+    "set_business_case_lines",
+    Adapter("settings_edit", _preview, _readback, section_id=_SECTION, says=_says),
+)

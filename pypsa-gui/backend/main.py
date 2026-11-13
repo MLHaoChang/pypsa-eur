@@ -261,6 +261,7 @@ _FOREIGN_LOCK_GATE_EXEMPT_EXACT = frozenset({
     # `tests/test_chat_tools_lock_gate_parity.py` now holds the two together.
     "/api/results/eh_study/abort",
     "/api/results/investment_case/abort",  # same `_abort_study` stop event (LV08 B2a)
+    "/api/results/business_case/abort",  # same `_abort_study` stop event (BC 08b)
 })
 #
 # The job-scoped patterns are anchored to the canonical dashed-UUID shape, not

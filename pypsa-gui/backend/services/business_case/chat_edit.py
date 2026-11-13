@@ -42,20 +42,39 @@ _PRICE = "price"
 _PRICE_BY_YEAR = "price_by_year"
 
 _WORDS = {
-    "price": "Price", "price_by_year": "Price", "quantity": "Quantity",
-    "quantity_by_year": "Quantity", "quantity_source": "Quantity source", "unit": "Unit",
-    "kind": "Kind", "category": "Category", "money_year": "Money year",
-    "escalation": "Escalation", "indexation": "Indexation", "start_year": "Start year",
-    "end_year": "End year", "depreciation": "Depreciation", "life_years": "Life (years)",
-    "rate": "Rate", "refresh_years": "Refresh (years)", "note": "Note",
-    "assumed": "Pack default", "default_keys": "Default key", "default_units": "Default unit",
+    "price": "Price",
+    "price_by_year": "Price",
+    "quantity": "Quantity",
+    "quantity_by_year": "Quantity",
+    "quantity_source": "Quantity source",
+    "unit": "Unit",
+    "kind": "Kind",
+    "category": "Category",
+    "money_year": "Money year",
+    "escalation": "Escalation",
+    "indexation": "Indexation",
+    "start_year": "Start year",
+    "end_year": "End year",
+    "depreciation": "Depreciation",
+    "life_years": "Life (years)",
+    "rate": "Rate",
+    "refresh_years": "Refresh (years)",
+    "note": "Note",
+    "assumed": "Pack default",
+    "default_keys": "Default key",
+    "default_units": "Default unit",
     "preset_rule": "Preset rule",
     # A commercial share only, never a volume factor such as lease-up (#1430 F2).
-    "linked_share": "Sold share", "linked_share_by_year": "Sold share",
+    "linked_share": "Sold share",
+    "linked_share_by_year": "Sold share",
     "hint": "Hint",
-    "kw_per_gpu": "kW per GPU", "lhv_kwh_per_kg": "LHV (kWh/kg)", "capacity": "Capacity",
-    "capacity_unit": "Capacity unit", "break_even_line": "Break-even line",
-    "inputs.preset": "Preset", "inputs.receivable_days": "Receivable days",
+    "kw_per_gpu": "kW per GPU",
+    "lhv_kwh_per_kg": "LHV (kWh/kg)",
+    "capacity": "Capacity",
+    "capacity_unit": "Capacity unit",
+    "break_even_line": "Break-even line",
+    "inputs.preset": "Preset",
+    "inputs.receivable_days": "Receivable days",
 }
 
 
@@ -80,10 +99,16 @@ def _leaves(doc, prefix: tuple = ()) -> dict[tuple, Any]:
 
 
 def _equal(a, b) -> bool:
-    if isinstance(a, (int, float)) and isinstance(b, (int, float)) \
-            and not isinstance(a, bool) and not isinstance(b, bool):
+    if (
+        isinstance(a, (int, float))
+        and isinstance(b, (int, float))
+        and not isinstance(a, bool)
+        and not isinstance(b, bool)
+    ):
         return float(a) == float(b)
-    return json.dumps(a, sort_keys=True, default=str) == json.dumps(b, sort_keys=True, default=str)
+    return json.dumps(a, sort_keys=True, default=str) == json.dumps(
+        b, sort_keys=True, default=str
+    )
 
 
 def request(if_match, business_case, clear) -> tuple[dict | None, str]:
@@ -91,15 +116,21 @@ def request(if_match, business_case, clear) -> tuple[dict | None, str]:
     implicit clear: as `chat_tools._finance_request`)."""
     tag = (if_match if isinstance(if_match, str) else "").strip()
     if tag.strip('"').strip() in ("", "*"):
-        _refuse("business_case_if_match_required",
-                "pass the `digest` get_business_case(detail='inputs') returned as if_match; "
-                "'*' is refused")
+        _refuse(
+            "business_case_if_match_required",
+            "pass the `digest` get_business_case(detail='inputs') returned as if_match; "
+            "'*' is refused",
+        )
     if clear and business_case is not None:
-        _refuse("business_case_clear_invalid",
-                "clear=true removes every business-case line: pass no `business_case` with it")
+        _refuse(
+            "business_case_clear_invalid",
+            "clear=true removes every business-case line: pass no `business_case` with it",
+        )
     if not clear and business_case is None:
-        _refuse("business_case_clear_invalid",
-                "pass the whole `business_case` object, or clear=true to remove every line")
+        _refuse(
+            "business_case_clear_invalid",
+            "pass the whole `business_case` object, or clear=true to remove every line",
+        )
     if business_case is not None and not isinstance(business_case, dict):
         _refuse("business_case_inputs_invalid", "`business_case` is an object")
     return (None if clear else business_case), tag
@@ -113,7 +144,9 @@ def _lines(doc: dict | None) -> dict[str, dict]:
 def _rest(doc: dict | None) -> dict:
     """The config without its lines."""
     out = {k: v for k, v in (doc or {}).items() if k != "inputs"}
-    inputs = {k: v for k, v in ((doc or {}).get("inputs") or {}).items() if k != "lines"}
+    inputs = {
+        k: v for k, v in ((doc or {}).get("inputs") or {}).items() if k != "lines"
+    }
     if inputs:
         out["inputs"] = inputs
     return out
@@ -125,7 +158,11 @@ def _is_price(path: tuple) -> bool:
 
 def _label(line: str | None, path: tuple) -> str:
     joined = ".".join(path)
-    head = _WORDS.get(joined) or _WORDS.get(path[0]) or path[0].replace("_", " ").capitalize()
+    head = (
+        _WORDS.get(joined)
+        or _WORDS.get(path[0])
+        or path[0].replace("_", " ").capitalize()
+    )
     tail = [p for p in path[1:]] if joined not in _WORDS else []
     words = " ".join([head, *tail])
     return f"{line} · {words}" if line is not None else words
@@ -152,9 +189,20 @@ def _row(line: str | None, path: tuple, old, new, change: str, unit: str) -> dic
 
     full = (["inputs", "lines", line] if line is not None else []) + list(path)
     label = _label(line, path)
-    return {"component_class": "Settings", "name": NAME, "field": ".".join(full), "label": label,
-            "old": _setting(old), "new": _setting(new), "unit": unit, "role": "typed",
-            "says_name": label, "path": full, "line": line, "change": change}
+    return {
+        "component_class": "Settings",
+        "name": NAME,
+        "field": ".".join(full),
+        "label": label,
+        "old": _setting(old),
+        "new": _setting(new),
+        "unit": unit,
+        "role": "typed",
+        "says_name": label,
+        "path": full,
+        "line": line,
+        "change": change,
+    }
 
 
 def _money(stored_finance) -> tuple[str, int | None]:
@@ -163,8 +211,10 @@ def _money(stored_finance) -> tuple[str, int | None]:
     from models.finance import FinanceInputs
 
     if stored_finance is None:
-        _refuse("finance_inputs_missing",
-                "set the finance inputs first: a price is read in the case's currency")
+        _refuse(
+            "finance_inputs_missing",
+            "set the finance inputs first: a price is read in the case's currency",
+        )
     try:
         fin = FinanceInputs.model_validate(stored_finance)
     except ValidationError as exc:
@@ -175,12 +225,16 @@ def _money(stored_finance) -> tuple[str, int | None]:
 
 def _not_from_user(line: str, year, reason: str, message: str) -> None:
     where = f"{line} price" + (f" {year}" if year is not None else "")
-    _refuse("price_not_from_user",
-            f"{where}: {message} A price comes only from the user: cite their own message "
-            "(turn_id and quote, from get_business_case(detail='inputs').citable_turns), an "
-            "upload's sheet and cell, or a PDF page and quote, with the unit right after the "
-            "number; or ask the user for it.",
-            line=str(line)[:80], year=year, reason=reason)
+    _refuse(
+        "price_not_from_user",
+        f"{where}: {message} A price comes only from the user: cite their own message "
+        "(turn_id and quote, from get_business_case(detail='inputs').citable_turns), an "
+        "upload's sheet and cell, or a PDF page and quote, with the unit right after the "
+        "number; or ask the user for it.",
+        line=str(line)[:80],
+        year=year,
+        reason=reason,
+    )
 
 
 def _citation(citations, line: str, year) -> dict | None:
@@ -210,20 +264,34 @@ class _Host:
         return self._host
 
 
-def _cited(line_name: str, line: dict, year, value, citations, host: _Host,
-           money: tuple[str, int | None]) -> dict:
+def _cited(
+    line_name: str,
+    line: dict,
+    year,
+    value,
+    citations,
+    host: _Host,
+    money: tuple[str, int | None],
+) -> dict:
     """The verified source of one new or changed price, or `price_not_from_user`."""
     from services import run_intake
 
     c = _citation(citations, line_name, year)
     if c is None:
-        _not_from_user(line_name, year, "no_citation", "it is new or changed and cites no source.")
+        _not_from_user(
+            line_name, year, "no_citation", "it is new or changed and cites no source."
+        )
     currency, currency_year = money
     money_year = line.get("money_year") or currency_year
-    field = {"label": f"{line_name} price", "kind": "number", "sources": ["table", "pdf", "text"],
-             "editable": True, "native_type": "float",
-             "unit_storage": _price_unit(line, currency),
-             "money": {"currency": currency, "money_year": money_year}}
+    field = {
+        "label": f"{line_name} price",
+        "kind": "number",
+        "sources": ["table", "pdf", "text"],
+        "editable": True,
+        "native_type": "float",
+        "unit_storage": _price_unit(line, currency),
+        "money": {"currency": currency, "money_year": money_year},
+    }
     cite = {k: v for k, v in c.items() if k not in ("line", "year")}
     cite["param"] = "price"
     try:
@@ -235,8 +303,12 @@ def _cited(line_name: str, line: dict, year, value, citations, host: _Host,
         _not_from_user(line_name, year, str(gap.get("kind")), str(gap.get("message")))
     read = out["rows"][0]
     if not math.isclose(float(read["value"]), float(value), rel_tol=1e-9, abs_tol=0.0):
-        _not_from_user(line_name, year, "value_differs",
-                       f"the cited number reads {read['value']:g}, not {float(value):g}.")
+        _not_from_user(
+            line_name,
+            year,
+            "value_differs",
+            f"the cited number reads {read['value']:g}, not {float(value):g}.",
+        )
     source = {k: v for k, v in read["source"].items() if k != "raw"}
     return {"source": source, "price_source": run_intake.describe_source(read)}
 
@@ -248,15 +320,23 @@ def _price_source_kept(old_line: dict, path: tuple) -> str:
     return "unchanged"
 
 
-def _line_rows(name: str, old: dict | None, new: dict | None, citations, host: _Host,
-               money_reader, currency: str | None) -> list[dict]:
+def _line_rows(
+    name: str,
+    old: dict | None,
+    new: dict | None,
+    citations,
+    host: _Host,
+    money_reader,
+    currency: str | None,
+) -> list[dict]:
     old_l, new_l = _leaves(old), _leaves(new)
     line = new if new is not None else old
     change = "added" if old is None else "removed" if new is None else "changed"
     # A price is read in its line's unit and money year: 45 USD/t is not 45 USD/kg, so a
     # changed unit or money year changes every price of the line (spec review, Q1).
     basis_moved = change == "changed" and any(
-        not _equal(old.get(k), new.get(k)) for k in ("unit", "money_year"))
+        not _equal(old.get(k), new.get(k)) for k in ("unit", "money_year")
+    )
     rows: list[dict] = []
     for path in sorted(set(old_l) | set(new_l), key=lambda p: tuple(map(str, p))):
         o, n = old_l.get(path), new_l.get(path)
@@ -264,9 +344,15 @@ def _line_rows(name: str, old: dict | None, new: dict | None, citations, host: _
         price = _is_price(path)
         differs = differs or (price and basis_moved)
         if not differs and not (price and change == "changed"):
-            continue                      # an unchanged value; a changed line shows its prices
-        row = _row(name, path, o, n, change if differs else "unchanged",
-                   _unit(line, path, currency))
+            continue  # an unchanged value; a changed line shows its prices
+        row = _row(
+            name,
+            path,
+            o,
+            n,
+            change if differs else "unchanged",
+            _unit(line, path, currency),
+        )
         if price:
             if not differs:
                 row["price_source"] = _price_source_kept(old, path)
@@ -328,7 +414,9 @@ def says(rows_: list[dict]) -> str:
             counts["changed"].add(r["line"])
     for name in counts["added"] | counts["removed"]:
         counts["changed"].discard(name)
-    parts = [f"{len(v)} line{'' if len(v) == 1 else 's'} {k}" for k, v in counts.items() if v]
+    parts = [
+        f"{len(v)} line{'' if len(v) == 1 else 's'} {k}" for k, v in counts.items() if v
+    ]
     if settings:
         parts.append(f"{settings} setting{'' if settings == 1 else 's'} changed")
     return "business case: " + (", ".join(parts) or "no change")
@@ -341,41 +429,63 @@ def plan(args: dict) -> dict:
     from routers.simulation import _entity_tag
     from services.business_case.runner import config_digest, config_or_422
 
-    new_raw, tag = request(args.get("if_match"), args.get("business_case"),
-                           bool(args.get("clear")))
+    new_raw, tag = request(
+        args.get("if_match"), args.get("business_case"), bool(args.get("clear"))
+    )
     citations = args.get("citations")
     if citations is not None and not isinstance(citations, list):
-        _refuse("price_not_from_user", "`citations` is a list", reason="invalid_citations")
+        _refuse(
+            "price_not_from_user", "`citations` is a list", reason="invalid_citations"
+        )
     if results._solver_in_flight():
-        _refuse("solver_in_flight", "a solve is running on this project; change the "
-                "business-case inputs after it finishes", 409)
+        _refuse(
+            "solver_in_flight",
+            "a solve is running on this project; change the "
+            "business-case inputs after it finishes",
+            409,
+        )
     new = None
     if new_raw is not None:
         try:
             new = config_or_422(new_raw).model_dump(mode="json")
         except HTTPException as exc:
             d = exc.detail if isinstance(exc.detail, dict) else {}
-            _refuse("business_case_inputs_invalid", str(d.get("message") or exc.detail)[:300],
-                    errors=list(d.get("errors") or [])[:20])
+            _refuse(
+                "business_case_inputs_invalid",
+                str(d.get("message") or exc.detail)[:300],
+                errors=list(d.get("errors") or [])[:20],
+            )
         names = [ln.get("name") for ln in new["inputs"]["lines"]]
         twice = sorted({n for n in names if names.count(n) > 1})
-        if twice:   # the card keys lines by name: a duplicate would hide a line
-            _refuse("business_case_inputs_invalid",
-                    f"each line has its own name; named twice: {', '.join(twice)[:200]}")
+        if twice:  # the card keys lines by name: a duplicate would hide a line
+            _refuse(
+                "business_case_inputs_invalid",
+                f"each line has its own name; named twice: {', '.join(twice)[:200]}",
+            )
     cfg = results._state["solver_config"]
     old = getattr(cfg, "business_case", None)
     if _entity_tag(tag) != config_digest(old):
-        _refuse("business_case_changed", "the business-case inputs changed since they were "
-                "read; read them again (get_business_case detail='inputs') and re-apply", 412)
+        _refuse(
+            "business_case_changed",
+            "the business-case inputs changed since they were "
+            "read; read them again (get_business_case detail='inputs') and re-apply",
+            412,
+        )
     if new is None and old is None:
-        _refuse("empty_edit", "no business-case inputs are stored; there is nothing to clear")
+        _refuse(
+            "empty_edit",
+            "no business-case inputs are stored; there is nothing to clear",
+        )
     out = rows(old, new, citations, getattr(cfg, "finance", None))
     if not out:
         _refuse("empty_edit", "the business-case inputs already have these values")
     if len(out) > CARD_ROW_CAP or len(json.dumps(out, default=str)) > CARD_CHARS:
-        _refuse("business_case_card_too_large",
-                f"this edit changes {len(out)} values, more than one card shows "
-                f"(at most {CARD_ROW_CAP}): split it into smaller edits", rows=len(out))
+        _refuse(
+            "business_case_card_too_large",
+            f"this edit changes {len(out)} values, more than one card shows "
+            f"(at most {CARD_ROW_CAP}): split it into smaller edits",
+            rows=len(out),
+        )
     return {"new": new, "old": old, "tag": tag, "rows": out}
 
 

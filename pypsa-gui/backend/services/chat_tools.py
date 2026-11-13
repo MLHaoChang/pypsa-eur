@@ -10486,6 +10486,7 @@ _LOCK_GATE_EXEMPT_PATHS = frozenset({
     "/api/results/coupling_loop/abort",
     "/api/results/eh_study/abort",
     "/api/results/investment_case/abort",  # as main.py (LV08 B2a)
+    "/api/results/business_case/abort",  # as main.py (BC 08b)
     # Latent today — `validate_network` is tiered `read`, so the tier filter
     # skips it before this set is consulted — but HTTP exempts preflight on
     # purpose, and the per-route parity test found the two sets disagreeing
