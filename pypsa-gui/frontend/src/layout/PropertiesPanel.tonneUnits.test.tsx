@@ -92,10 +92,14 @@ async function mountStore() {
 
 describe('a hydrogen store', () => {
   it('on a tonne bus reads t and drops the MWh-based kg H₂ tail', async () => {
-    units.mockResolvedValue({ component: 'Store', name: 'tank', units: { e_nom: 't', e_nom_max: 't' } })
+    units.mockResolvedValue({ component: 'Store', name: 'tank', units: { e_nom: 't', e_nom_max: 't', e_initial: 't' } })
     await mountStore()
     expect(await screen.findByText(/336 t\b/)).toBeTruthy()
     expect(screen.queryByText(/kg H₂/)).toBeNull()
+    await userEvent.click(await screen.findByRole('button', { name: /edit/i }))
+    expect(await screen.findByText(/Energy capacity \(t\)/)).toBeTruthy()
+    expect(await screen.findByText(/Initial energy \(t\)/)).toBeTruthy()
+    expect(screen.queryByText(/29\.8 kg/)).toBeNull()
   })
 
   it('on an energy bus keeps MWh and the kg H₂ tail', async () => {

@@ -38,7 +38,7 @@ def test_a_store_on_a_tonne_bus_shows_t(n):
     for name in n.stores.index:
         if _size_unit(n, n.stores.at[name, "bus"], stock=True) == "t":
             u = size_units(n, "Store", name)
-            assert u["e_nom"] == "t" and u["e_nom_max"] == "t"
+            assert u["e_nom"] == "t" and u["e_nom_max"] == "t" and u["e_initial"] == "t"
             return
     pytest.skip("no store on a tonne bus")
 

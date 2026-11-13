@@ -685,7 +685,7 @@ _SIZE_BUS = {"Generator": "bus", "StorageUnit": "bus", "Store": "bus", "Load": "
 
 
 def size_units(n, component: str, name: str) -> dict[str, str]:
-    """Per-asset display units for the size fields that differ from the class-level MW / MWh: t/h (t for a
+    """Per-asset display units for the quantity fields (size, initial energy, bounds) that differ from the class-level MW / MWh: t/h (t for a
     stock) on a tonne bus, as `flow_service._size_unit` reads the bus. Empty on an energy bus, an unreadable
     bus or a class with no bus size."""
     from services.flow_service import _size_unit
@@ -696,7 +696,7 @@ def size_units(n, component: str, name: str) -> dict[str, str]:
         return {}
     out: dict[str, str] = {}
     for f in fields_for(component):
-        if f.group != "size" or f.unit_display not in ("MW", "MWh"):
+        if f.unit_display not in ("MW", "MWh"):
             continue
         unit = _size_unit(n, table.at[name, col], stock=f.unit_display == "MWh")
         if unit in ("t", "t/h"):
