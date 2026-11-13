@@ -148,9 +148,11 @@ def elcc_candidates(n, cfg=None) -> list[dict]:
     not re-derived here — it is READ OFF the very structures the run itself
     resolves against:
 
-    * ``kind="generator"`` — the occurrence-bearing units of
-      ``fleet_and_residual``, i.e. ``inputs.units``, which is exactly the list
-      ``_resolve`` scans for a generator name. Nameplate = ``capacity_mw``.
+    * ``kind="generator"`` — the occurrence-bearing units of the sampled
+      fleet (``link_supply.assemble_fleet``), i.e. ``inputs.units``, which is
+      exactly the list ``_resolve`` scans for a generator name. A sampled
+      supplying Link is one of them, as ``link:<name>``. Nameplate =
+      ``capacity_mw``.
     * ``kind="storage_unit"`` — the storage rows ``snapshot_inputs`` built,
       i.e. ``inputs.storage``, the list ``_resolve`` scans by name.
       Nameplate = ``p_nom_mw``.
@@ -173,10 +175,19 @@ def elcc_candidates(n, cfg=None) -> list[dict]:
     PyPSAService lock for the duration (same discipline as ``post_mc``).
     """
     from services.adequacy.copt import must_take_generators
-    from services.adequacy.mc import snapshot_inputs
+    from services.adequacy.link_supply import (
+        assemble_fleet,
+        fleet_side,
+        loop_scope,
+    )
 
-    must_take = must_take_generators(n)
-    inputs = snapshot_inputs(n, vre_assets=must_take, cfg=cfg)
+    # Adequacy loops 03: the fleet `start_mc` samples — the hub side of a
+    # trusted import Link, with the Link (``link:<name>``) as a unit — so a
+    # sampled Link is offered as a generator and a grid-side asset is not.
+    scope = loop_scope(n)
+    side = fleet_side(n, scope)
+    must_take = must_take_generators(side)
+    inputs = assemble_fleet(n, scope, side=side, vre_assets=must_take, cfg=cfg)
 
     # Phase 12c-pre: a profiled unit's nameplate for the bracket is its
     # best hour, max_h(a_{i,h}) — the firm block then dominates the unit
@@ -521,6 +532,37 @@ def elcc_of_removal(inputs, *, nameplate_mw, seed, draws, reduced=None,
     return _row(nameplate=nameplate, baseline=baseline, elcc_mw=hi, period=period)
 
 
+def _refuse_unsampled_link(inputs, name: str) -> None:
+    """A supplying Link the fleet knows but does not sample, refused by name
+    with the fleet's own reason (GK A (25) C2, C3) rather than a bare 404:
+
+    * an import Link taken as a firm block: un-netting it is well defined,
+      but its ELCC would only restate the never-failing assumption;
+    * a firm backup AL-1 withholds, or an import Link not counted: it is not
+      in the sampled fleet, so it has no credit to price.
+    """
+    lk = name[len("link:") :] if name.startswith("link:") else name
+    if lk not in tuple(getattr(inputs, "supply_links", ()) or ()):
+        return
+    notes = [str(x) for x in (getattr(inputs, "fleet_notes", ()) or ())]
+    firm_block = "grid import taken as never failing: "
+    for note in notes:
+        if note.startswith(firm_block) and note.endswith(f" for {lk}"):
+            cause = note[len(firm_block) : -len(f" for {lk}")]
+            raise ValueError(
+                f"{lk} is taken as never failing ({cause}); its credit would "
+                "restate that assumption, so none is priced")
+    for prefix in (f"firm Link {lk}: ", f"import Link {lk}: "):
+        for note in notes:
+            if note.startswith(prefix):
+                raise ValueError(
+                    f"{prefix[:-2]} is not in the sampled fleet "
+                    f"({note[len(prefix):]}), so no credit is priced")
+    raise ValueError(
+        f"Link {lk} supplies the fleet but is not a sampled unit, so no "
+        "credit is priced")
+
+
 def _resolve(inputs, kind: str, name: str):
     """(reduced inputs, exclude, exclude_storage, nameplate) for one asset.
 
@@ -541,6 +583,7 @@ def _resolve(inputs, kind: str, name: str):
         for i, u in enumerate(inputs.units):
             if u.name == name:
                 return inputs, frozenset({i}), frozenset(), unit_nameplate_mw(u)
+        _refuse_unsampled_link(inputs, name)
         raise KeyError(f"no occurrence-bearing generator named {name!r} in the "
                        "sampled fleet")
 
