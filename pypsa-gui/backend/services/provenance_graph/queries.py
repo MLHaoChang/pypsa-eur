@@ -121,7 +121,10 @@ def _check(g: Graph, edge: Edge) -> tuple[State, Broken | None]:
     compare = COMPARATORS.get(edge.kind)
     if compare is None or edge.recorded is None:
         return "uncompared", None
-    if edge.kind == "derived_from" and not isinstance(edge.recorded, pins.Pin):
+    # A pinned edge compares a `Pin`; anything else it recorded compares nothing.
+    if edge.kind in ("derived_from", "computed_in") and not isinstance(
+        edge.recorded, pins.Pin
+    ):
         return "uncompared", None
     broke = compare(g, edge)
     return ("fresh", None) if broke is None else ("stale", broke)
