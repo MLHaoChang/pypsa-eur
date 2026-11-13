@@ -296,7 +296,9 @@ def test_the_guard_sees_an_aliased_solve():
     }
     for src in planted.values():
         assert unrepaired_solve_sites([("x.py", src)]), src
-    repaired = "def f(n):\n    ensure_link_port_frames(n)\n    opt = n.optimize\n    opt()\n"
+    repaired = (
+        "def f(n):\n    ensure_link_port_frames(n)\n    opt = n.optimize\n    opt()\n"
+    )
     assert unrepaired_solve_sites([("x.py", repaired)]) == []
 
 

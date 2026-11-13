@@ -224,6 +224,9 @@ def test_an_over_cap_basis_is_a_typed_422_from_the_sensitivity_tool(
     sweep(base_id, 20)
     monkeypatch.setattr(ec, "MAX_BASIS_BYTES", 16)
     detail = refused(
-        "horizon_too_large_to_compare", 422, "compare_sensitivities", baseline_project_id=base_id
+        "horizon_too_large_to_compare",
+        422,
+        "compare_sensitivities",
+        baseline_project_id=base_id,
     )
     assert detail["message"] == "The run's horizon is too large to compare."
