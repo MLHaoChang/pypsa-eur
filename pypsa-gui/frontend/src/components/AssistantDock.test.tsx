@@ -395,13 +395,15 @@ describe('assistant dock prominence', () => {
     }
   })
 
-  it('reserves no column width while collapsed', () => {
+  it('collapses to a slim rail that holds the launcher, so nothing floats over content (UM08)', () => {
     render(<AssistantDock />)
     const dock = screen.getByTestId('assistant-dock')
     const classes = dock.className.split(/\s+/)
-    expect(classes).toContain('w-0')
-    expect(classes).not.toContain('w-10')
+    expect(classes).toContain('w-10')
+    expect(classes).not.toContain('w-0')
     expect(dock.style.width).toBe('')
+    expect(screen.getByTestId('assistant-dock-rail').contains(screen.getByTestId('companion-live'))).toBe(true)
+    expect(dock.contains(screen.getByTestId('companion-launcher'))).toBe(true)
   })
 
   it('hides the floating companion while the console is open', () => {
