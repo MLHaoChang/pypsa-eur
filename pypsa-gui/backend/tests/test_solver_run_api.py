@@ -186,3 +186,19 @@ def test_voll_capture_scalar_is_snapshot_weighted(client, install_network, sessi
         f"the snapshot weight factor"
     )
     assert lost["lost_load_cost_eur"] == pytest.approx(expected_mwh * 1000.0, rel=1e-9)
+
+
+def test_run_min_renewable_infeasible_card_carries_the_hint(client, install_network, session_state):
+    # homer-parity 05, through the real solve path: a 100% renewable target the
+    # plan cannot reach (gas serves most of the load) is infeasible, and the
+    # failure card the UI reads from /status names the row with its figures.
+    install_network(build_network())
+    sim_router._state["solver_config"] = SolverConfig(voll=0.0, min_renewable_fraction=1.0)
+    s = _run_and_join(client, session_state)
+    assert s["status"] != "completed", f"{s['status']}/{s['condition']}"
+    hints = s["last_failure"].get("constraint_hints")
+    assert hints, s["last_failure"]
+    assert hints[0]["constraint"] == "Minimum renewable fraction"
+    assert hints[0]["setting"] == "offgrid" and "MWh" in hints[0]["text"]
+    st = client.get("/api/simulation/status").json()
+    assert st["failure"]["constraint_hints"] == hints

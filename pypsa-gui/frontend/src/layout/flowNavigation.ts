@@ -232,6 +232,19 @@ export function openProfileStudio(): void {
   withReturn(null, () => useUIStore.getState().setSlidePanel('profiles'))
 }
 
+/** Show Solver settings › Network › Off-grid constraints (homer-parity 05): the
+ *  section's panel in Expert, in place in Guided (never flips the mode). */
+export function openOffGridConstraints(): void {
+  const ui = useUIStore.getState()
+  ui.requestSolverBlock('offgrid')
+  if (ui.uiMode === 'guided') {
+    openFlowTargetInPlace({ section: 'scenarios', panel: 'simparams', component: null,
+      entity: null, field: null })
+    return
+  }
+  withReturn(null, () => openSectionInExpert('scenarios'))
+}
+
 /** Show the N-1 security branch selector (Solver settings › Network): the
  *  section's panel in Expert, in place in Guided (never flips the mode). */
 export function openN1BranchSelector(): void {
