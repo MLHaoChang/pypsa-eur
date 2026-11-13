@@ -8,21 +8,21 @@ const STAGE_WORDS: Record<string, string> = {
   loadflow: 'Checking the grid', screening: 'Screening results', handoff: 'Preparing the handoff',
   // campus electrical study
   prepare: 'Preparing', rank: 'Ranking cases', island_checks: 'Checking island operation',
-  cuts: 'Cutting frequency', size: 'Sizing equipment', harmonic_scan: 'Scanning harmonics',
+  cuts: 'Working out the frequency cuts', size: 'Sizing equipment', harmonic_scan: 'Scanning harmonics',
   voltage_stability: 'Checking voltage stability', dips_restart: 'Checking voltage dips and restarts',
-  invest: 'Planning investment', done: 'Finishing',
+  invest: 'Planning investment', gfm_settings: 'Tuning grid-forming settings', done: 'Finishing',
 }
 
-const STAGE_LINE = /(?:^|\s)(?:gridspine|campus) (\w+) (\d+)\/(\d+)\s*$/
+const STAGE_LINE = /(?:^|\s)(?:gridspine|campus) (\w+)(?: (\d+)\/(\d+))?\s*$/
 
 export function solveProgressLabel(lines: readonly string[]): string {
   for (let i = lines.length - 1; i >= 0; i--) {
     const m = STAGE_LINE.exec(lines[i])
     if (!m) continue
+    const words = STAGE_WORDS[m[1]] ?? 'Working'
     const total = Number(m[3])
-    if (total < 1) continue
-    const step = Math.min(Number(m[2]) + 1, total)
-    return `${STAGE_WORDS[m[1]] ?? 'Working'} · step ${step} of ${total}`
+    if (!(total >= 1)) return words
+    return `${words} · step ${Math.min(Number(m[2]) + 1, total)} of ${total}`
   }
   return 'Solving…'
 }
