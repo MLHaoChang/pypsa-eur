@@ -728,3 +728,10 @@ def test_a_start_receipt_with_no_started_at_starts_no_follower_and_marks_no_job(
     path, followed = _wait(tmp_path, monkeypatch, _record("done"), begun=None)
     assert followed is False and not run_ic._FOLLOWERS and follow == []
     assert "kind" not in json.loads(path.read_text())["steps"][0]["job"]
+
+
+def test_a_job_with_no_started_at_is_never_followed_even_on_a_record_with_none(tmp_path, recovery):
+    path = _task(tmp_path, job=_waiting_job(started_at=None))
+    record = _record("running", started=None)
+    assert run_ic.recover(path, _case_ctx(tmp_path, record), instance=INSTANCE) == 1
+    assert not run_ic._FOLLOWERS and recovery[0][3:5] == ("unknown", "uncertain")
