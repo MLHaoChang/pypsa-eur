@@ -122,7 +122,7 @@ export default function CompanionLauncher({
   return (
     <div
       ref={launcherRef}
-      className="companion-launcher absolute bottom-0 right-6 z-40 flex max-w-[calc(100vw-3rem)] flex-col items-end gap-2"
+      className="companion-launcher flex h-full w-full flex-col items-center justify-end gap-2 pb-2"
       data-testid="companion-launcher"
       data-no-panel-close
       data-presence={presence}
@@ -139,6 +139,10 @@ export default function CompanionLauncher({
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHovered(false)
       }}
     >
+      {/* UM08: the rail is in the dock's own edge, so nothing floats over content.
+          The transient parts (confirmations, live composer, model chip) open
+          to the left of the rail only while they are in use. */}
+      <div className="absolute bottom-2 right-full z-40 mr-2 flex max-w-[calc(100vw-4rem)] flex-col items-end gap-2" data-testid="companion-popover">
       {children}
       {(liveOpen || workState !== 'idle') && (
         <p role="status" aria-atomic="true" data-testid="companion-work-status"
@@ -150,6 +154,12 @@ export default function CompanionLauncher({
         <form
           className="w-72 max-w-full rounded-2xl border border-border bg-bg-2 p-3 shadow-lg"
           data-testid="companion-live-composer"
+          onKeyDown={(e) => {
+            if (e.key !== 'Escape') return
+            e.stopPropagation()
+            onLive()
+            launcherRef.current?.querySelector<HTMLElement>('[data-testid="companion-live"]')?.focus()
+          }}
           onSubmit={(e: FormEvent) => {
             e.preventDefault()
             const text = draft.trim()
@@ -213,6 +223,16 @@ export default function CompanionLauncher({
           (the launcher is described by the voice note); hover, keyboard
           focus or live chat shows them (index.css .companion-extras). */}
       <div className="companion-extras flex flex-col items-end gap-2" data-testid="companion-extras">
+      {modelKeyMissing && (
+      <button
+        type="button"
+        onClick={onProfiles}
+        data-testid="companion-setup"
+        className="max-w-[12rem] rounded-full border border-accent/60 bg-bg-2 px-3 py-1 text-[10px] text-accent shadow-lg"
+      >
+        Set up the assistant
+      </button>
+      )}
       <button
         type="button"
         onClick={onProfiles}
@@ -224,7 +244,18 @@ export default function CompanionLauncher({
         {profileLabel}
       </button>
       </div>
-      <div className="companion-character-wrap" data-lit={lit ? 'true' : 'false'}>
+      {!voiceOn && (
+      <div className="companion-extras companion-voice-note max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted"
+        data-testid="companion-voice-note">
+        <button type="button" disabled aria-describedby={voiceReasonId}
+          className="font-medium text-muted disabled:cursor-not-allowed">
+          Start voice
+        </button>
+        <p id={voiceReasonId}>Continuous voice is not connected. Use reviewed dictation for speech.</p>
+      </div>
+      )}
+      </div>
+      <div className="companion-character-wrap [&_svg]:h-8 [&_svg]:w-8" data-lit={lit ? 'true' : 'false'}>
         <div
           aria-hidden="true"
           data-testid="companion-character"
@@ -242,7 +273,7 @@ export default function CompanionLauncher({
         </div>
       </div>
       <div
-        className="companion-actions flex items-center rounded-full border border-border bg-bg-2 shadow-lg"
+        className="companion-actions flex flex-col items-center rounded-full border border-border bg-bg-2 shadow-lg"
         data-testid="companion-actions"
       >
         <button
@@ -251,22 +282,22 @@ export default function CompanionLauncher({
           data-testid="companion-compose"
           aria-label="Compose a message"
           title="Open the assistant and type"
-          className="px-3 py-2 text-text hover:text-accent"
+          className="px-2 py-2 text-text hover:text-accent"
         >
           <Pencil size={16} />
         </button>
-        <span className="h-4 w-px bg-border" aria-hidden="true" />
+        <span className="h-px w-4 bg-border" aria-hidden="true" />
         <button
           type="button"
           onClick={onSpeak}
           data-testid="companion-speak"
           aria-label="Open reviewed dictation"
           title="Open the assistant and review dictation"
-          className="px-3 py-2 text-text hover:text-accent"
+          className="px-2 py-2 text-text hover:text-accent"
         >
           <Mic size={16} />
         </button>
-        <span className="h-4 w-px bg-border" aria-hidden="true" />
+        <span className="h-px w-4 bg-border" aria-hidden="true" />
         <button
           type="button"
           onClick={onLive}
@@ -274,21 +305,11 @@ export default function CompanionLauncher({
           aria-label={liveOpen ? 'Close chat here' : 'Chat here'}
           aria-pressed={liveOpen}
           title={liveOpen ? 'Close in-page chat. Running work and pending approvals remain.' : 'Type to the assistant on this page.'}
-          className={`px-3 py-2 hover:text-accent ${liveOpen ? 'text-accent' : 'text-text'}`}
+          className={`px-2 py-3 text-[11px] [writing-mode:vertical-rl] hover:text-accent ${liveOpen ? 'text-accent' : 'text-text'}`}
         >
           Chat here
         </button>
       </div>
-      {!voiceOn && (
-      <div className="companion-extras companion-voice-note max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted"
-        data-testid="companion-voice-note">
-        <button type="button" disabled aria-describedby={voiceReasonId}
-          className="font-medium text-muted disabled:cursor-not-allowed">
-          Start voice
-        </button>
-        <p id={voiceReasonId}>Continuous voice is not connected. Use reviewed dictation for speech.</p>
-      </div>
-      )}
     </div>
   )
 }
