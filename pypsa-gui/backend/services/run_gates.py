@@ -1075,6 +1075,8 @@ def _mg_tie(env):
     state = out.get("state")
     if state == "no_island":
         return NoEvidence("no_island", "no bus of the network is in the island")
+    if state == "unit_on_mainland":  # #46: a sidecar error, named; never a pass and never no_tie
+        return NoEvidence("unit_on_mainland", str(out.get("reason") or "a sidecar unit sits on the mainland"))
     if state not in ("open", "closed", "no_tie"):
         return NoEvidence("unreadable", "the island's tie cannot be read")
     return Detailed(state, [str(t) for t in out.get("carrying") or []])
