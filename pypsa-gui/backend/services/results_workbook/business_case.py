@@ -22,12 +22,18 @@ RUN_THE_BUSINESS_CASE = "run the business case (Results, Investment tab)"
 def business_case_text(report: dict | None, state: dict | None) -> str:
     """The About row and the sheet's status line."""
     if not report:
-        return f"{NOT_ESTABLISHED}: no business case has been run; {RUN_THE_BUSINESS_CASE}"
+        return (
+            f"{NOT_ESTABLISHED}: no business case has been run; {RUN_THE_BUSINESS_CASE}"
+        )
     st = state or {}
     if st.get("stale") is not False:
-        changed = ", ".join(st.get("changed") or []) or st.get("reason") or "not readable now"
-        return (f"stale (changed since the run: {changed}): the figures describe an earlier "
-                f"run and are not shown; {RUN_THE_BUSINESS_CASE} again")
+        changed = (
+            ", ".join(st.get("changed") or []) or st.get("reason") or "not readable now"
+        )
+        return (
+            f"stale (changed since the run: {changed}): the figures describe an earlier "
+            f"run and are not shown; {RUN_THE_BUSINESS_CASE} again"
+        )
     return f"current, {report.get('basis', {}).get('label', '')}"
 
 
@@ -37,7 +43,7 @@ def _kpi_cells(k: dict) -> tuple[Any, str]:
     why = k.get("reason") or "not_established"
     if k.get("status") == "n/a":
         return "n/a", why
-    return None, why                                   # `put` writes not_established
+    return None, why  # `put` writes not_established
 
 
 def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> str:
@@ -48,9 +54,12 @@ def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> st
     width(ws, {"A": 34, "B": 22, "C": 22, "D": 40})
     if not report or (state or {}).get("stale") is not False:
         return ws.title
-    rows = [("Basis", report["basis"]["label"]), ("Currency", report.get("currency")),
-            ("Business case hash", report.get("business_case_hash")),
-            ("Investment case key", report.get("ic_assumptions_hash"))]
+    rows = [
+        ("Basis", report["basis"]["label"]),
+        ("Currency", report.get("currency")),
+        ("Business case hash", report.get("business_case_hash")),
+        ("Investment case key", report.get("ic_assumptions_hash")),
+    ]
     r = 3
     for k, v in rows:
         put(ws, r, 1, k)
@@ -69,16 +78,21 @@ def write_business_case_sheet(wb, report: dict | None, state: dict | None) -> st
     r += 2
     heading(ws, r, ["Break-even", "Value", "Status or reason"])
     ok = be.get("status") == "ok"
-    for label, key in (("Revenue line", "line"), ("Price at NPV 0", "price"),
-                       ("Price scale at NPV 0", "price_scale")):
+    for label, key in (
+        ("Revenue line", "line"),
+        ("Price at NPV 0", "price"),
+        ("Price scale at NPV 0", "price_scale"),
+    ):
         r += 1
         put(ws, r, 1, label)
         put(ws, r, 2, be.get(key) if (ok or key == "line") else None)
         put(ws, r, 3, "ok" if ok else (be.get("status") or NOT_ESTABLISHED))
     pnl = report.get("pnl") or {}
     years = pnl.get("years") or []
-    for title, table in (("P&L by year", pnl.get("rows") or {}),
-                         ("Operating ledger by stream", pnl.get("streams") or {})):
+    for title, table in (
+        ("P&L by year", pnl.get("rows") or {}),
+        ("Operating ledger by stream", pnl.get("streams") or {}),
+    ):
         r += 2
         heading(ws, r, [title, *years])
         for name, series in table.items():

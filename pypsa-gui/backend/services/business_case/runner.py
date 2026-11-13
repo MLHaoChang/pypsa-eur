@@ -46,7 +46,14 @@ logger = logging.getLogger(__name__)
 
 STUDY_KEY = "business_case"
 REPORT_KEY = "business_case_report"
-STAGES = ("rebuild_ic_case", "read_outputs", "build", "run_engine", "break_even", "store")
+STAGES = (
+    "rebuild_ic_case",
+    "read_outputs",
+    "build",
+    "run_engine",
+    "break_even",
+    "store",
+)
 #: The business case's basis label (spec §7): `counterfactual=()`, never "versus the site
 #: today", which is the investment case's.
 BASIS = {"id": "project_on_its_own", "label": "the project on its own"}
@@ -81,7 +88,8 @@ class BusinessCaseConfig(BaseModel):
             kinds = {ln.name: ln.kind for ln in self.inputs.lines}
             if kinds.get(self.break_even_line) != "revenue":
                 raise ValueError(
-                    f"break_even_line {self.break_even_line!r} names no revenue line")
+                    f"break_even_line {self.break_even_line!r} names no revenue line"
+                )
         return self
 
 
@@ -101,23 +109,33 @@ def config_or_422(raw: Any) -> BusinessCaseConfig:
         return BusinessCaseConfig.model_validate(raw)
     except ValidationError as exc:
         errs = exc.errors()
-        raise _422("business_case_inputs_invalid", str(errs[0].get("msg")),
-                   errors=[{"loc": [str(p) for p in e.get("loc", ())], "msg": e.get("msg")}
-                           for e in errs[:20]]) from exc
+        raise _422(
+            "business_case_inputs_invalid",
+            str(errs[0].get("msg")),
+            errors=[
+                {"loc": [str(p) for p in e.get("loc", ())], "msg": e.get("msg")}
+                for e in errs[:20]
+            ],
+        ) from exc
 
 
 def inputs_state(raw: dict | None) -> dict:
     """The body of `GET /results/business_case/inputs`. `status`: `not_set`, `ok` or
     `business_case_inputs_invalid` (a stored value the current model refuses is shown,
     never dropped; the run refuses it)."""
-    out: dict[str, Any] = {"business_case": raw, "digest": config_digest(raw),
-                           "status": "not_set" if raw is None else "ok"}
+    out: dict[str, Any] = {
+        "business_case": raw,
+        "digest": config_digest(raw),
+        "status": "not_set" if raw is None else "ok",
+    }
     if raw is not None:
         try:
             BusinessCaseConfig.model_validate(raw)
         except ValidationError as exc:
-            out.update(status="business_case_inputs_invalid",
-                       message=str(exc.errors()[0]["msg"]))
+            out.update(
+                status="business_case_inputs_invalid",
+                message=str(exc.errors()[0]["msg"]),
+            )
     return out
 
 
@@ -125,11 +143,18 @@ def refusal_detail(exc: BusinessCaseRefused) -> dict:
     """A typed refusal's wire form. `default_unit_mismatch` is its own code (C6); every
     other refusal is `business_case_refused` with its kind."""
     if exc.kind == "default_unit_mismatch":
-        return {"code": "default_unit_mismatch", "field": exc.field,
-                "message": f"a cost default's unit is not the unit the line names "
-                           f"({exc.field}); the default was not filled"}
-    return {"code": "business_case_refused", "refusal": exc.kind, "field": exc.field,
-            "message": str(exc)}
+        return {
+            "code": "default_unit_mismatch",
+            "field": exc.field,
+            "message": f"a cost default's unit is not the unit the line names "
+            f"({exc.field}); the default was not filled",
+        }
+    return {
+        "code": "business_case_refused",
+        "refusal": exc.kind,
+        "field": exc.field,
+        "message": str(exc),
+    }
 
 
 def ic_report_key(stored: dict | None) -> tuple[str | None, str | None]:
@@ -137,8 +162,9 @@ def ic_report_key(stored: dict | None) -> tuple[str | None, str | None]:
     refused or partial one."""
     if not stored:
         return None, None
-    prov = (((stored.get("sections") or {}).get("project") or {}).get("payload") or {}) \
-        .get("provenance") or {}
+    prov = (
+        ((stored.get("sections") or {}).get("project") or {}).get("payload") or {}
+    ).get("provenance") or {}
     return stored.get("assumptions_hash"), prov.get("finance_case_hash")
 
 
@@ -171,8 +197,18 @@ def _output_state(v: Any) -> dict:
     return {"status": "ok", "unit": getattr(v, "unit", None)}
 
 
-def report_body(*, bc, result, p, k: dict, be: dict, outputs: dict, raw: dict,
-                ic_hash: str, ic_case_hash: str | None) -> dict:
+def report_body(
+    *,
+    bc,
+    result,
+    p,
+    k: dict,
+    be: dict,
+    outputs: dict,
+    raw: dict,
+    ic_hash: str,
+    ic_case_hash: str | None,
+) -> dict:
     """The stored report: P&L by year by stream, the KPIs (gross and net of
     pass-through), break-even, the locked rows and each linked output's state."""
     return {
@@ -182,10 +218,12 @@ def report_body(*, bc, result, p, k: dict, be: dict, outputs: dict, raw: dict,
         "ic_case_hash": ic_case_hash,
         "currency": result.case.inputs.currency,
         "basis": dict(BASIS),
-        "pnl": {"years": [int(y) for y in p.years],
-                "streams": _jsonable(p.streams),
-                "rows": _jsonable(p.rows),
-                "not_finite": list(p.not_finite)},
+        "pnl": {
+            "years": [int(y) for y in p.years],
+            "streams": _jsonable(p.streams),
+            "rows": _jsonable(p.rows),
+            "not_finite": list(p.not_finite),
+        },
         "kpis": {name: _jsonable(dataclasses.asdict(v)) for name, v in k.items()},
         "break_even": _jsonable(be),
         "locked": [_jsonable(dataclasses.asdict(r)) for r in bc.locked],
@@ -195,8 +233,12 @@ def report_body(*, bc, result, p, k: dict, be: dict, outputs: dict, raw: dict,
     }
 
 
-def staleness(stored: dict | None, *, inputs_raw: dict | None,
-              ic_current: tuple[str | None, str | None]) -> dict:
+def staleness(
+    stored: dict | None,
+    *,
+    inputs_raw: dict | None,
+    ic_current: tuple[str | None, str | None],
+) -> dict:
     """Whether the stored report still describes the current inputs and investment case.
     `ic_current` is (the current IC key, why it is None): None when no current IC report
     exists or its key is not readable now. Either is stale, never silently current."""
@@ -207,12 +249,20 @@ def staleness(stored: dict | None, *, inputs_raw: dict | None,
         changed.append("business_case_inputs")
     cur, why = ic_current
     if cur is None:
-        return {"present": True, "stale": True, "changed": changed,
-                "reason": why or "current_assumptions_not_established"}
+        return {
+            "present": True,
+            "stale": True,
+            "changed": changed,
+            "reason": why or "current_assumptions_not_established",
+        }
     if stored.get("ic_assumptions_hash") != cur:
         changed.append("investment_case")
-    return {"present": True, "stale": bool(changed), "changed": changed,
-            "reason": "inputs_changed" if changed else None}
+    return {
+        "present": True,
+        "stale": bool(changed),
+        "changed": changed,
+        "reason": "inputs_changed" if changed else None,
+    }
 
 
 # ── the study ────────────────────────────────────────────────────────────────
@@ -251,10 +301,19 @@ def start_business_case(
     lock = state_lock if state_lock is not None else nullcontext()
     stop_event = _threading.Event()
     record: dict = {
-        "status": "running", "study": STUDY_KEY, "stage": "queued", "stages_done": [],
-        "stages": list(STAGES), "error": None, "error_code": None, "refusal": None,
-        "ic_assumptions_hash": ic_hash, "started_at": time.time(), "finished_at": None,
-        "thread": None, "stop_event": stop_event,
+        "status": "running",
+        "study": STUDY_KEY,
+        "stage": "queued",
+        "stages_done": [],
+        "stages": list(STAGES),
+        "error": None,
+        "error_code": None,
+        "refusal": None,
+        "ic_assumptions_hash": ic_hash,
+        "started_at": time.time(),
+        "finished_at": None,
+        "thread": None,
+        "stop_event": stop_event,
     }
 
     def progress(stage: str) -> None:
@@ -266,8 +325,11 @@ def start_business_case(
 
     def finish(status: str, **kw) -> None:
         with lock:
-            if status == "done" and record["stage"] in STAGES \
-                    and record["stage"] not in record["stages_done"]:
+            if (
+                status == "done"
+                and record["stage"] in STAGES
+                and record["stage"] not in record["stages_done"]
+            ):
                 record["stages_done"].append(record["stage"])
             record.update(status=status, finished_at=time.time(), **kw)
 
@@ -278,11 +340,16 @@ def start_business_case(
         return False
 
     def refused(code: str, message: str, detail: dict) -> None:
-        if not aborted():           # an aborted run stores nothing
+        if not aborted():  # an aborted run stores nothing
             finish("refused", error=message, error_code=code, refusal=detail)
 
     def worker():
-        from services.finance.business_case import break_even, build_business_case, kpis, pnl
+        from services.finance.business_case import (
+            break_even,
+            build_business_case,
+            kpis,
+            pnl,
+        )
         from services.finance.engine import run_case
 
         try:
@@ -292,9 +359,12 @@ def start_business_case(
                 return
             got = case_hash(case)
             if ic_case_hash is None or got != ic_case_hash:
-                raise RunRefused("investment_case_missing",
-                               "the investment case changed since it was run; run the "
-                               "investment case first", reason="case_hash_differs")
+                raise RunRefused(
+                    "investment_case_missing",
+                    "the investment case changed since it was run; run the "
+                    "investment case first",
+                    reason="case_hash_differs",
+                )
             progress("read_outputs")
             outputs, lost = read_solve(case, cfg)
             if aborted():
@@ -307,20 +377,43 @@ def start_business_case(
             pack = load_pack(case) if load_pack is not None else None
             result = run_case(bc.case, pack)
             p = pnl(result, receivable_days=cfg.inputs.receivable_days)
-            k = kpis(result, p, capacity=cfg.capacity or None, capacity_unit=cfg.capacity_unit)
+            k = kpis(
+                result,
+                p,
+                capacity=cfg.capacity or None,
+                capacity_unit=cfg.capacity_unit,
+            )
             if aborted():
                 return
             progress("break_even")
             if cfg.break_even_line is None:
                 be = {"status": "not_requested", "line": None}
             else:
-                be = {**break_even(case, cfg.inputs, outputs, cfg.break_even_line, pack,
-                                   lost_production=lost), "line": cfg.break_even_line}
+                be = {
+                    **break_even(
+                        case,
+                        cfg.inputs,
+                        outputs,
+                        cfg.break_even_line,
+                        pack,
+                        lost_production=lost,
+                    ),
+                    "line": cfg.break_even_line,
+                }
             if aborted():
                 return
             progress("store")
-            body = report_body(bc=bc, result=result, p=p, k=k, be=be, outputs=outputs,
-                               raw=raw, ic_hash=ic_hash, ic_case_hash=got)
+            body = report_body(
+                bc=bc,
+                result=result,
+                p=p,
+                k=k,
+                be=be,
+                outputs=outputs,
+                raw=raw,
+                ic_hash=ic_hash,
+                ic_case_hash=got,
+            )
             # The stop check, the store and the finish are one step under the state lock,
             # which the abort route reads the record under: an abort seen here stores
             # nothing; one that reads the record after this step sees it finished.
@@ -335,15 +428,19 @@ def start_business_case(
             d = refusal_detail(exc)
             refused(d["code"], d["message"], d)
         except FinanceRefused as exc:
-            refused(exc.code, str(exc), {"code": exc.code, "message": str(exc),
-                                         "detail": exc.detail})
+            refused(
+                exc.code,
+                str(exc),
+                {"code": exc.code, "message": str(exc), "detail": exc.detail},
+            )
         except Exception as exc:  # noqa: BLE001
             logger.exception("business_case worker failed")
             finish("failed", error=str(exc)[:500], error_code="internal_error")
 
     _ctx = _contextvars.copy_context()
-    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
-                          name="finance-business-case")
+    t = _threading.Thread(
+        target=lambda: _ctx.run(worker), daemon=True, name="finance-business-case"
+    )
     record["thread"] = t
     publish_study(STUDY_KEY, record, t)
     return {"status": "running", "study": STUDY_KEY, "ic_assumptions_hash": ic_hash}
@@ -353,6 +450,9 @@ class StaleInvestmentCase(RunRefused):
     """The IC key moved between the route's check and the solve read (C4)."""
 
     def __init__(self, reason: str):
-        super().__init__("investment_case_missing",
-                         "the investment case is out of date (the project changed since it "
-                         "was run); run the investment case first", reason=reason)
+        super().__init__(
+            "investment_case_missing",
+            "the investment case is out of date (the project changed since it "
+            "was run); run the investment case first",
+            reason=reason,
+        )
