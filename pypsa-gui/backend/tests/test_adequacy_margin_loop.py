@@ -872,8 +872,9 @@ def test_a_not_confident_iterate_at_the_ceiling_is_refused_without_another_solve
         assert "still missed" not in row["condition"], row
 
 
+@pytest.mark.parametrize("restore_ok", [True, False])
 def test_a_not_confident_margin_loop_restores_the_base_and_reports_the_nearest(
-        client, install_network, monkeypatch):
+        client, install_network, monkeypatch, restore_ok):
     """★ Adequacy loops 04, F3 (GK A (26)): ``not_confident`` with
     ``restore="final"`` still restores the user's OWN margin (``met`` is the
     only status that keeps a plan), leaves the solver config alone, and the
@@ -892,7 +893,14 @@ def test_a_not_confident_margin_loop_restores_the_base_and_reports_the_nearest(
     def with_event(inputs, **kw):
         return {**plain(inputs, **kw), "event_h": 0.2}
 
+    def restore_fails(cfg, n, lock, stop_event, log_queue, **kw):
+        stubs.restore_cfgs.append(cfg)
+        return "error", "infeasible"
+
     monkeypatch.setattr(mc_mod, "mc_adequacy", with_event)
+    if not restore_ok:
+        import services.solver_service as solver_mod
+        monkeypatch.setattr(solver_mod, "run_simulation", restore_fails)
     _setup(client, install_network, reserve_margin=0.10)
     before = client.get("/api/simulation/solver_config").json()
 
@@ -905,7 +913,7 @@ def test_a_not_confident_margin_loop_restores_the_base_and_reports_the_nearest(
     assert nearest is not None, body
     assert len(stubs.restore_cfgs) == 1, stubs.restore_cfgs
     assert stubs.restore_cfgs[0].reserve_margin == pytest.approx(0.10)
-    assert body["base_restored"] is True, body
+    assert body["base_restored"] is restore_ok, body
     assert client.get("/api/simulation/solver_config").json() == before
     goal = nearest["mc"]["goal"]
     assert goal["event_h"] == pytest.approx(0.2)
@@ -913,7 +921,9 @@ def test_a_not_confident_margin_loop_restores_the_base_and_reports_the_nearest(
         assert body[k] == goal[k], (k, body)
     assert body["verdict"] == not_confident_copy(
         nearest["mc"], 1.0,
-        f"a reserve margin of {nearest['lever_value']:.1%}")
+        f"a reserve margin of {nearest['lever_value']:.1%}",
+        base_restored=restore_ok)
+    assert ("has been re-solved" in body["verdict"]) is restore_ok
 
 
 def test_validation_failed_is_left_alone_when_the_margin_is_not_the_cause(
