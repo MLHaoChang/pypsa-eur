@@ -53,3 +53,8 @@ Owner answered (SH40-FREQ-1, `docs/agents/owner-decisions.md`). Status: ready-fo
 - The GFM settings recommender asked for 4 % / τ_f 0.53 s (single year) and 1.8 % / 0.045 s (staged). One setting for both, 2 % droop and τ_f 0.3 s (equivalent H about 7 s), passes both on their old sizing, and after the re-solve: `eh_microgrid` 0 failing, 0 bridge (10 island hours); staged 0 failing (35 island hours), sizes unchanged (battery 6 + 6.08 / 6.08 / 3.27 MW), NPV inside its 1 % pin.
 - Left: the staged template's 24 bridge hours. In each, one grid-forming battery is empty (e(t−1) = 0) and the screen asks it for its droop share (16–52 Wh) of I4's 25 kW AC-loss step until the cold diesels join at 15 s. The island LP reserves the bridge energy summed over the grid-forming batteries (`services/solver/island.py:829-838`); the screen checks each battery on its own (`gridspine/static/frequency.py:1173`). No sidecar setting reaches it. Question SH40-BRIDGE sent to the coordinator.
 - `mg.island.frequency` stays `warn` (SH40-FREQ-1); `services/run_gates.py` untouched.
+
+### 2026-11-13: owner decision SH40-BRIDGE, and a correction
+
+- Owner (via the coordinator, 17:39Z): SH40-BRIDGE option 2, "Widen: LP per battery": the island LP reserves each grid-forming battery's own bridge share, in this PR, GK A plan first.
+- Correction (this session, before building): with the subsea tie open the LP's islanding step is ΔP⁺ = p_imp − Σ_late X = 0 (`services/solver/island.py:1326-1338`), so its bridge energy B(t) is 0 whether summed or per battery. The screen's bridge step is I4's AC-loss ΔP_AC (25 kW), which the LP does not see, so a per-battery share of B(t) alone leaves the 24 hours failing. Corrected options sent to the coordinator as SH40-BRIDGE-2; waiting on the owner.
