@@ -69,8 +69,9 @@
 # load and no-load losses (2026-11-13, campus-library-gaps 03) are read from
 # [OPTCL-TS], 220/132 kV autotransformers: no public 220/110 kV split was
 # found, and 220/132 kV is the same 245/123-145 kV class as [EI-NVL] R-NR-T-8.
-# The units are taken as autotransformers, the usual build for a 220/110 kV
-# coupling; an autotransformer's losses follow its equivalent winding rating
+# The units are assumed to be autotransformers, the usual build for a
+# 220/110 kV coupling ([EI-NVL] gives no winding type; a two-winding unit
+# carries roughly 2-2.5x these losses); an autotransformer's losses follow its equivalent winding rating
 # S (1 - U_LV/U_HV), 0.50 S at 220/110 kV against 0.40 S at 220/132 kV, so
 # both losses are the source's x1.25. 160 and 200 MVA are the source's rows;
 # 125 MVA is scaled down from the 160 MVA row and 250/315 MVA up from the
@@ -419,8 +420,8 @@ transformers:
     lv_kv: {value: 110.0, source: assumed, note: "[EI-NVL] R-NR-T-8 voltage class 245/123-145 kV"}
     s_mva: {value: 125.0, source: assumed, note: "R10 size between [EI-NVL] R-NR-T-8-1 (120 MVA) and R-NR-T-8-2 (150 MVA)"}
     vk_percent: {value: 12.5, source: assumed, note: "IEC 60076-5:2006 Table 1 gives a minimum for > 100 MVA (12.5 %), not a typical value; producers/campus.py class rule"}
-    vkr_percent: {value: 0.15625, source: assumed, note: "scaled down from [OPTCL-TS] 220/132 kV 160 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): load loss 200 kW at 75 degC, x1.25 for a 220/110 kV autotransformer (equivalent winding rating 0.50 S against 0.40 S), then to 125 MVA at constant kW/MVA -> 195.312 kW"}
-    pfe_kw: {value: 29.3, source: assumed, note: "scaled down from [OPTCL-TS] 220/132 kV 160 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): no-load loss 30 kW, x1.25 for a 220/110 kV autotransformer (equivalent winding rating 0.50 S against 0.40 S), then to 125 MVA at constant kW/MVA -> 29.3 kW"}
+    vkr_percent: {value: 0.15625, source: assumed, note: "scaled down from [OPTCL-TS] 220/132 kV 160 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): load loss 200 kW at 75 degC, autotransformer assumed: [EI-NVL] gives no winding type; OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40), then to 125 MVA at constant kW/MVA -> 195.312 kW; a two-winding unit carries roughly 2-2.5x these losses"}
+    pfe_kw: {value: 29.3, source: assumed, note: "scaled down from [OPTCL-TS] 220/132 kV 160 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): no-load loss 30 kW, autotransformer assumed: [EI-NVL] gives no winding type; OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40), then to 125 MVA at constant kW/MVA -> 29.3 kW; a two-winding unit carries roughly 2-2.5x these losses"}
     i0_percent: {value: 0.1, source: assumed, note: "no public source; producers/campus.py class rule"}
     capex_eur: {value: 3608000, source: literature, note: "[EI-NVL] 245/123-145 kV, log-log interpolation between R-NR-T-8-1 (120 MVA, 33884380 SEK) and R-NR-T-8-2 (150 MVA, 38992520 SEK), exponent 0.629: 34766068 SEK (2022) -> EUR 2025; the rows' scope names a line span (linspann) where the 123-145 kV rows name a cable joint"}
     opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
@@ -430,8 +431,8 @@ transformers:
     lv_kv: {value: 110.0, source: assumed, note: "[EI-NVL] R-NR-T-8 voltage class 245/123-145 kV"}
     s_mva: {value: 160.0, source: assumed, note: "R10 size between [EI-NVL] R-NR-T-8-2 (150 MVA) and R-NR-T-8-3 (200 MVA)"}
     vk_percent: {value: 12.5, source: assumed, note: "IEC 60076-5:2006 Table 1 gives a minimum for > 100 MVA (12.5 %), not a typical value; producers/campus.py class rule"}
-    vkr_percent: {value: 0.15625, source: assumed, note: "[OPTCL-TS] 220/132 kV 160 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): load loss 200 kW at 75 degC, x1.25 for a 220/110 kV autotransformer (equivalent winding rating 0.50 S against 0.40 S) -> 250 kW"}
-    pfe_kw: {value: 37.5, source: assumed, note: "[OPTCL-TS] 220/132 kV 160 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): no-load loss 30 kW, x1.25 for a 220/110 kV autotransformer (equivalent winding rating 0.50 S against 0.40 S) -> 37.5 kW"}
+    vkr_percent: {value: 0.15625, source: assumed, note: "[OPTCL-TS] 220/132 kV 160 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): load loss 200 kW at 75 degC, autotransformer assumed: [EI-NVL] gives no winding type; OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40) -> 250 kW; a two-winding unit carries roughly 2-2.5x these losses"}
+    pfe_kw: {value: 37.5, source: assumed, note: "[OPTCL-TS] 220/132 kV 160 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): no-load loss 30 kW, autotransformer assumed: [EI-NVL] gives no winding type; OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40) -> 37.5 kW; a two-winding unit carries roughly 2-2.5x these losses"}
     i0_percent: {value: 0.1, source: assumed, note: "no public source; producers/campus.py class rule"}
     capex_eur: {value: 4212800, source: literature, note: "[EI-NVL] 245/123-145 kV, log-log interpolation between R-NR-T-8-2 (150 MVA, 38992520 SEK) and R-NR-T-8-3 (200 MVA, 46654733 SEK), exponent 0.624: 40593883 SEK (2022) -> EUR 2025; the rows' scope names a line span (linspann) where the 123-145 kV rows name a cable joint"}
     opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
@@ -441,8 +442,8 @@ transformers:
     lv_kv: {value: 110.0, source: assumed, note: "[EI-NVL] R-NR-T-8-3 voltage class 245/123-145 kV"}
     s_mva: {value: 200.0, source: assumed, note: "[EI-NVL] R-NR-T-8-3 size 200 MVA"}
     vk_percent: {value: 12.5, source: assumed, note: "IEC 60076-5:2006 Table 1 gives a minimum for > 100 MVA (12.5 %), not a typical value; producers/campus.py class rule"}
-    vkr_percent: {value: 0.1625, source: assumed, note: "[OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): load loss 260 kW at 75 degC, x1.25 for a 220/110 kV autotransformer (equivalent winding rating 0.50 S against 0.40 S) -> 325 kW"}
-    pfe_kw: {value: 43.75, source: assumed, note: "[OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): no-load loss 35 kW, x1.25 for a 220/110 kV autotransformer (equivalent winding rating 0.50 S against 0.40 S) -> 43.75 kW"}
+    vkr_percent: {value: 0.1625, source: assumed, note: "[OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): load loss 260 kW at 75 degC, autotransformer assumed: [EI-NVL] gives no winding type; OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40) -> 325 kW; a two-winding unit carries roughly 2-2.5x these losses"}
+    pfe_kw: {value: 43.75, source: assumed, note: "[OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): no-load loss 35 kW, autotransformer assumed: [EI-NVL] gives no winding type; OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40) -> 43.75 kW; a two-winding unit carries roughly 2-2.5x these losses"}
     i0_percent: {value: 0.1, source: assumed, note: "no public source; producers/campus.py class rule"}
     capex_eur: {value: 4841800, source: literature, note: "[EI-NVL] R-NR-T-8-3, 245/123-145 kV 200 MVA, 46654733 SEK (2022) -> EUR 2025; the row's scope names a line span (linspann) where the 123-145 kV rows name a cable joint"}
     opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
@@ -452,8 +453,8 @@ transformers:
     lv_kv: {value: 110.0, source: assumed, note: "[EI-NVL] R-NR-T-8-4 voltage class 245/123-145 kV"}
     s_mva: {value: 250.0, source: assumed, note: "[EI-NVL] R-NR-T-8-4 size 250 MVA"}
     vk_percent: {value: 12.5, source: assumed, note: "IEC 60076-5:2006 Table 1 gives a minimum for > 100 MVA (12.5 %), not a typical value; producers/campus.py class rule"}
-    vkr_percent: {value: 0.1625, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): load loss 260 kW at 75 degC, x1.25 for a 220/110 kV autotransformer (equivalent winding rating 0.50 S against 0.40 S), then to 250 MVA at constant kW/MVA, extrapolated beyond the source's range (160-200 MVA) -> 406.25 kW"}
-    pfe_kw: {value: 54.69, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): no-load loss 35 kW, x1.25 for a 220/110 kV autotransformer (equivalent winding rating 0.50 S against 0.40 S), then to 250 MVA at constant kW/MVA, extrapolated beyond the source's range (160-200 MVA) -> 54.69 kW"}
+    vkr_percent: {value: 0.1625, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): load loss 260 kW at 75 degC, autotransformer assumed: [EI-NVL] gives no winding type; OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40), then to 250 MVA at constant kW/MVA, extrapolated beyond the source's range (160-200 MVA) -> 406.25 kW; a two-winding unit carries roughly 2-2.5x these losses"}
+    pfe_kw: {value: 54.69, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): no-load loss 35 kW, autotransformer assumed: [EI-NVL] gives no winding type; OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40), then to 250 MVA at constant kW/MVA, extrapolated beyond the source's range (160-200 MVA) -> 54.69 kW; a two-winding unit carries roughly 2-2.5x these losses"}
     i0_percent: {value: 0.1, source: assumed, note: "no public source; producers/campus.py class rule"}
     capex_eur: {value: 5371900, source: literature, note: "[EI-NVL] R-NR-T-8-4, 245/123-145 kV 250 MVA, 51762875 SEK (2022) -> EUR 2025; the row's scope names a line span (linspann) where the 123-145 kV rows name a cable joint"}
     opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
@@ -463,8 +464,8 @@ transformers:
     lv_kv: {value: 110.0, source: assumed, note: "[EI-NVL] R-NR-T-8-5 voltage class 245/123-145 kV"}
     s_mva: {value: 315.0, source: assumed, note: "[EI-NVL] R-NR-T-8-5 size 315 MVA"}
     vk_percent: {value: 12.5, source: assumed, note: "IEC 60076-5:2006 Table 1 gives a minimum for > 100 MVA (12.5 %), not a typical value; producers/campus.py class rule"}
-    vkr_percent: {value: 0.1625, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): load loss 260 kW at 75 degC, x1.25 for a 220/110 kV autotransformer (equivalent winding rating 0.50 S against 0.40 S), then to 315 MVA at constant kW/MVA, extrapolated beyond the source's range (160-200 MVA) -> 511.875 kW"}
-    pfe_kw: {value: 68.91, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): no-load loss 35 kW, x1.25 for a 220/110 kV autotransformer (equivalent winding rating 0.50 S against 0.40 S), then to 315 MVA at constant kW/MVA, extrapolated beyond the source's range (160-200 MVA) -> 68.91 kW"}
+    vkr_percent: {value: 0.1625, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): load loss 260 kW at 75 degC, autotransformer assumed: [EI-NVL] gives no winding type; OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40), then to 315 MVA at constant kW/MVA, extrapolated beyond the source's range (160-200 MVA) -> 511.875 kW; a two-winding unit carries roughly 2-2.5x these losses"}
+    pfe_kw: {value: 68.91, source: assumed, note: "scaled from [OPTCL-TS] 220/132 kV 200 MVA autotransformer, maximum permissible loss (a tender cap, not a typical value): no-load loss 35 kW, autotransformer assumed: [EI-NVL] gives no winding type; OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40), then to 315 MVA at constant kW/MVA, extrapolated beyond the source's range (160-200 MVA) -> 68.91 kW; a two-winding unit carries roughly 2-2.5x these losses"}
     i0_percent: {value: 0.1, source: assumed, note: "no public source; producers/campus.py class rule"}
     capex_eur: {value: 5902000, source: literature, note: "[EI-NVL] R-NR-T-8-5, 245/123-145 kV 315 MVA, 56871016 SEK (2022) -> EUR 2025; the row's scope names a line span (linspann) where the 123-145 kV rows name a cable joint"}
     opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}

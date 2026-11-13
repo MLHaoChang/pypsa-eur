@@ -16,7 +16,7 @@
     "library_version": "technology-data v0.14.0",
     "campus_equipment": {
       "path": "gridspine/templates/data/campus_assets.yaml",
-      "sha256": "7e327db456dcb96435433b9c49234d680d97b5c76c7a718314c64891913e0250",
+      "sha256": "aea49a692aa25e2b4afbad9b9393235e287d9f80256f25854390c9acb421f709",
       "entries": 86,
       "currency": "EUR",
       "price_year": 2025,

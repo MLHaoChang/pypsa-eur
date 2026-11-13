@@ -86,7 +86,7 @@ def test_every_entry_carries_every_field_tagged():
 #: sha256 of the shipped library: the defaults pack 2026-11-13 manifest pins the same bytes
 #: (2026-10-23 .. 2026-10-30 pinned the library before the 220/110 kV units, 2026-11-06 .. 2026-11-10
 #: before their sourced losses).
-SHIPPED_SHA256 = "7e327db456dcb96435433b9c49234d680d97b5c76c7a718314c64891913e0250"
+SHIPPED_SHA256 = "aea49a692aa25e2b4afbad9b9393235e287d9f80256f25854390c9acb421f709"
 #: How many cost fields of each kind are cited reference values (tag literature).
 LITERATURE_COUNTS = {
     ("transformers", "capex_eur"): 29,
@@ -755,7 +755,9 @@ def test_the_220_110_kv_losses_are_optcls_220_132_kv_caps_for_an_autotransformer
             note = t[f]["note"]
             assert t[f]["source"] == "assumed" and set(t[f]) == {"value", "source", "note"}, (t["id"], f)
             assert f"[OPTCL-TS] 220/132 kV {ref:g} MVA autotransformer" in note, (t["id"], f)
-            assert "220/110 kV autotransformer" in note and "x1.25" in note, (t["id"], f)
+            assert "autotransformer assumed: [EI-NVL] gives no winding type" in note, (t["id"], f)
+            assert "OPTCL 220/132 scaled x1.25 by co-ratio (0.50/0.40)" in note, (t["id"], f)
+            assert note.endswith("; a two-winding unit carries roughly 2-2.5x these losses"), (t["id"], f)
             assert "maximum permissible" in note and "cap" in note, (t["id"], f)
             assert ("constant kW/MVA" in note) == (s != ref), (t["id"], f)
             assert note.startswith("scaled down from ") == (s < ref), (t["id"], f)
