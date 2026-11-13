@@ -1057,3 +1057,90 @@ def test_a_tou_upload_onto_a_curve_generator_ends_in_the_pre_run_refusal(
     status, cond, log = _run_sim(n, CFG)
     assert (status, cond) == ("error", "validation_failed")
     assert "fuel_curve_invalid" in log and "remove its profile" in log
+
+
+# ── H8: tests that kill the fuel_curve.py mutant survivors ───────────────────────────────────────────────────
+
+
+def test_a_price_is_needed_only_by_a_non_zero_term():
+    assert fuel_curve.check({fuel_curve.SLOPE: 0.0}) is None
+    assert fuel_curve.check({fuel_curve.NO_LOAD: 0.0}) is None
+    for col in (fuel_curve.SLOPE, fuel_curve.NO_LOAD):
+        msg = fuel_curve.check({col: 0.05, "committable": True})
+        assert msg is not None and msg.startswith("Fuel price:"), col
+
+
+def test_same_treats_only_two_unset_values_as_equal():
+    s = fuel_curve._same
+    assert s(None, None) and s(np.nan, None) and s(5.0, 5.0 + 1e-12)
+    assert not s(None, 5.0) and not s(5.0, None)
+    assert not s("x", None) and not s(None, "x")
+
+
+def test_derivation_without_p_nom_and_the_clear_notice_without_marginal_cost():
+    assert fuel_curve.derived_costs(CURVE) == {
+        "marginal_cost": SLOPE * PRICE,
+        "stand_by_cost": 0.0,
+    }
+    assert "marginal cost keeps 0 €/MWh" in fuel_curve.clear_notice({}, before=CURVE)
+    assert fuel_curve.clear_notice(CURVE, before=CURVE) is None
+
+
+def test_a_cost_already_equal_to_the_derived_one_is_not_named_as_replaced():
+    assert fuel_curve.replace_notice({**CURVE, "marginal_cost": SLOPE * PRICE}) is None
+
+
+def test_apply_leaves_other_generators_and_stamps_only_when_asked():
+    from services.asset_schema import provenance
+
+    n = _network(curve=False)
+    n.generators.at["genset", fuel_curve.SLOPE] = np.nan
+    n.add("Generator", "other", bus="el", p_nom=1.0, stand_by_cost=3.0)
+    n.add("Generator", "curve", bus="el", p_nom=2.0, committable=True, **CURVE)
+    assert fuel_curve.apply(n, stamp=False) == ["curve"]
+    assert n.generators.at["other", "stand_by_cost"] == 3.0
+    assert not provenance.get(n, "Generator", "curve")
+    n.generators.at["curve", "p_nom"] = 4.0
+    assert fuel_curve.apply(n) == ["curve"]
+    assert "stand_by_cost" in provenance.get(n, "Generator", "curve")
+
+
+def test_the_wrap_logs_its_refusal():
+    import queue
+
+    n = _network(curve=True)
+    n.generators.at["genset", fuel_curve.PRICE] = np.nan
+    log = queue.SimpleQueue()
+    fuel_curve.wrap_lp(n, None, log)
+    assert log.get_nowait().startswith(
+        "[FUEL CURVE] ERROR: Fuel curve: genset: Fuel price:"
+    )
+    fuel_curve.wrap_lp(n, None, None)  # no queue: nothing to log, nothing raised
+
+
+def test_fuel_use_weights_a_multi_period_run_and_reads_a_non_committable_curve():
+    n = _co2_network(periods=True)
+    n.snapshot_weightings.loc[:, "objective"] = 2.0
+    status, _ = n.optimize(solver_name="highs", multi_investment_periods=True)
+    assert status == "ok"
+    (row,) = fuel_curve.fuel_use(n, {2030: 10.0, 2035: 5.0})
+    # 12 snapshots × weight 2 × (10 + 5) years × 0.3 MW × slope 0.25.
+    assert row["fuel_mwh"] == pytest.approx(12 * 2 * 15 * LOAD_MW * SLOPE)
+    assert row["no_load_fuel_mwh"] == 0.0
+    single = _solve(_network(curve=True, committable=False))
+    assert fuel_curve.fuel_use(single, {2030: 10.0}) == fuel_curve.fuel_use(single)
+
+
+def test_a_curve_with_no_no_load_term_needs_no_solved_status():
+    n = _network(curve=True)
+    n.generators.at["genset", fuel_curve.NO_LOAD] = 0.0
+    fuel_curve.apply(n)
+    _solve(n)
+    n.generators_t.status = n.generators_t.status.drop(
+        columns="genset"
+    )  # e.g. a file saved without it
+    (row,) = fuel_curve.fuel_use(n)
+    assert (
+        row["fuel_mwh"] == pytest.approx(HOURS * LOAD_MW * SLOPE)
+        and row["no_load_fuel_mwh"] == 0.0
+    )
