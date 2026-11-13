@@ -201,8 +201,12 @@ describe('ResultsCard body', () => {
     expect(stale.textContent).toContain('Out of date')
     expect(stale.textContent).toContain(
       'These results are from an earlier study; the network was solved since. Run again to refresh.')
-    // The tiles carry the state too, and the banner offers the way to refresh (UX review N4).
-    expect(screen.getByTestId('hub-results-cost').getAttribute('data-state')).toBe('stale')
+    // One mark per card: the tile dims but carries no second "Out of date" pill; the banner offers the way
+    // to refresh (UX review N4).
+    const tile = screen.getByTestId('hub-results-cost')
+    expect(tile.getAttribute('data-state')).toBe('ready')
+    expect(tile.textContent).not.toContain('Out of date')
+    expect(tile.querySelector('.opacity-60')).not.toBeNull()
     expect(stale.querySelector('button')?.textContent).toBe('Go to Goal and run the study')
   })
 
