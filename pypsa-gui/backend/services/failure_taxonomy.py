@@ -18,7 +18,6 @@ stale failure from a previous run.
 
 Pure + dependency-free → unit-testable in isolation; no PyPSA import.
 """
-
 from __future__ import annotations
 
 # Conditions that mean "the solve succeeded" — never a failure card.
@@ -117,14 +116,8 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
         "representative periods — and re-run.",
     ),
     (
-        (
-            "singular",
-            "numerical",
-            "ill-conditioned",
-            "ill conditioned",
-            "scaling",
-            "matrix is singular",
-        ),
+        ("singular", "numerical", "ill-conditioned", "ill conditioned",
+         "scaling", "matrix is singular"),
         "numerical",
         "Numerical trouble",
         "The solver hit ill-conditioning — coefficients spanning a very wide "
@@ -139,17 +132,9 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
         # CLAUDE.md): "'tuple' object has no attribute 'lower'" (multi-period
         # statistics), "...not in index" (assign_duals on a stale MultiIndex),
         # "'snapshot' is not a valid dimension..." (lost axis name), etc.
-        (
-            "not a valid dimension",
-            "dim_0",
-            "in a buffer",
-            "cannot include dtype",
-            "object has no attribute",
-            "not in index",
-            "'snapshot'",
-            "is not a valid",
-            "reindex",
-        ),
+        ("not a valid dimension", "dim_0", "in a buffer", "cannot include dtype",
+         "object has no attribute", "not in index", "'snapshot'",
+         "is not a valid", "reindex"),
         "setup_error",
         "Model build error",
         "The LP couldn't be constructed — a structural problem (snapshot/index "
@@ -178,7 +163,6 @@ def _constraint_hints() -> list[dict]:
     """The named-constraint hints the infeasibility diagnosis just recorded."""
     try:
         from services.solver.diagnostics import take_constraint_hints
-
         return take_constraint_hints()
     except Exception:
         return []
@@ -226,6 +210,6 @@ def classify_failure(status: str | None, condition: str | None) -> dict | None:
         "category": "solver_error",
         "title": "Solve failed",
         "hint": "The solver returned a non-optimal status. Check the log for "
-        "details — the TRACEBACK and ERROR lines show what went wrong.",
+                "details — the TRACEBACK and ERROR lines show what went wrong.",
         "detail": condition or "",
     }

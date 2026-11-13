@@ -2939,3 +2939,32 @@ def test_hints_never_outlive_the_solve_that_made_them():
         _diagnosed_hints()
         classify_failure(status, condition)
         assert "constraint_hints" not in classify_failure("warning", "infeasible")
+
+
+def test_other_categories_never_carry_the_hint():
+    from services.failure_taxonomy import classify_failure
+
+    _diagnosed_hints()
+    card = classify_failure("warning", "unbounded")
+    assert card["category"] == "unbounded" and "constraint_hints" not in card
+
+
+def test_hints_collect_on_a_fresh_thread_and_are_taken_once():
+    import threading
+
+    from services.solver.diagnostics import add_constraint_hint, take_constraint_hints
+
+    out = {}
+
+    def run():
+        out["empty"] = take_constraint_hints()
+        add_constraint_hint("A", "first", "offgrid")
+        add_constraint_hint("B", "second", "other")
+        out["two"] = take_constraint_hints()
+        out["again"] = take_constraint_hints()
+
+    t = threading.Thread(target=run)
+    t.start()
+    t.join()
+    assert out["empty"] == [] and out["again"] == []
+    assert [h["constraint"] for h in out["two"]] == ["A", "B"]
