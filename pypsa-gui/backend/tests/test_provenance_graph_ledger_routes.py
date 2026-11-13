@@ -6,6 +6,7 @@ reads (GK B G1, G4). Apart from `test_provenance_graph.py` because it runs a stu
 from __future__ import annotations
 
 import json
+import math
 
 import pypsa
 import pytest
@@ -176,11 +177,33 @@ def _rewrite_ratio(path, ratio):
 
 # ── provenance-graph 11: the battery rows walk the fields they compile to ──────
 
+# Written out, not read from `asset_view.LEDGER_FIELDS`, so a dropped or added entry there (or in the walk) fails.
+BATTERY_ROWS = {
+    "battery_inverter_eur_per_kw": [("StorageUnit", "battery", "inv_power_overnight")],
+    "battery_inverter_lifetime_years": [
+        ("StorageUnit", "battery", "inv_power_lifetime")
+    ],
+    "battery_inverter_fom_pct_per_year": [
+        ("StorageUnit", "battery", "inv_power_fom_share")
+    ],
+    "battery_storage_eur_per_kwh": [("StorageUnit", "battery", "inv_energy_overnight")],
+    "battery_storage_lifetime_years": [
+        ("StorageUnit", "battery", "inv_energy_lifetime")
+    ],
+    "battery_round_trip_efficiency": [
+        ("StorageUnit", "battery", "efficiency_store"),
+        ("StorageUnit", "battery", "efficiency_dispatch"),
+    ],
+    # The discount rate is the battery's and the PV's.
+    "discount_rate": [
+        ("StorageUnit", "battery", "discount_rate"),
+        ("Generator", "pv", "discount_rate"),
+    ],
+}
 
-@pytest.fixture(scope="module")
-def battery_pack():
-    """A pack-built site network with the battery and PV, the ledger it was built from, and the grid-only
-    baseline (no battery) from the same ledger."""
+
+def _pack(option):
+    """A pack-built site network for `option` and the seeded ledger it was built from."""
     from services.study import library, packs, questions
     from tests.golden import site_fixture as SF
 
@@ -190,68 +213,59 @@ def battery_pack():
         "tariff": {"tariff_id": "de_industrial_illustrative"},
     }
     ledger = library.seed_ledger(questions.BESS_AT_SITE, intake, defaults)
-
-    def build(option):
-        return packs.build_site_network(intake, ledger, option, library=defaults)
-
-    return build("bess_pv_2h"), ledger, build("none")
+    return packs.build_site_network(intake, ledger, option, library=defaults), ledger
 
 
-def _battery_keys():
-    from services.study import asset_view
-
-    return sorted(
-        {m.key for m in asset_view.LEDGER_FIELDS if m.component == "StorageUnit"}
-    )
-
-
-def test_each_battery_ledger_row_walks_the_fields_it_compiles_to(battery_pack):
-    """Every battery row of `asset_view.LEDGER_FIELDS`, on a network that has the battery: the fields walked are
-    the row's fields on this network, each value is the network column and the pack's conversion of the ledger
-    value, and the verdict is uncompared (a pack default compares nothing; never fresh)."""
+def test_each_battery_ledger_row_walks_the_fields_it_compiles_to():
+    """Every battery row on a network with the battery and PV: exactly the fields the pack wrote from it, each
+    value the network column and the pack's conversion of the ledger value, and the verdict uncompared (a pack
+    default is an input with only its stamp, which compares nothing: never fresh, GK B P1 #1170)."""
     from services.provenance_graph.explain import explain_ledger_row
     from services.study import asset_view
 
-    n, ledger, _ = battery_pack
+    n, ledger = _pack("bess_pv_2h")
     rows = {r.key: r for r in ledger.rows}
-    keys = _battery_keys()
-    assert len(keys) == 7  # the round trip is one row, two fields
-    for key in keys:
-        want = [
-            m
-            for m in asset_view.LEDGER_FIELDS
-            if m.key == key
-            and m.name in getattr(n, n.components[m.component].list_name).index
-        ]
+    assert {
+        m.key for m in asset_view.LEDGER_FIELDS if m.component == "StorageUnit"
+    } == set(BATTERY_ROWS)
+    for key, want in BATTERY_ROWS.items():
         out = explain_ledger_row(n, key)
         assert out["target"] == {"ledger_key": key}
-        assert [f["target"] for f in out["fields"]] == [
-            {"component": m.component, "name": m.name, "field": m.field} for m in want
-        ], key
-        for m, field in zip(want, out["fields"]):
-            column = getattr(n, n.components[m.component].list_name).at[m.name, m.field]
+        assert [
+            (f["target"]["component"], f["target"]["name"], f["target"]["field"])
+            for f in out["fields"]
+        ] == want, key
+        for (component, name, field_name), field in zip(want, out["fields"]):
+            (m,) = [
+                m
+                for m in asset_view.LEDGER_FIELDS
+                if (m.key, m.component, m.name, m.field)
+                == (key, component, name, field_name)
+            ]
+            column = float(
+                getattr(n, n.components[component].list_name).at[name, field_name]
+            )
+            compiled = m.to_store(rows[key].value)
             first = field["steps"][0]
-            assert first["node"] == f"input:{m.component}/{m.name}/{m.field}"
-            assert first["value"] == pytest.approx(column), key
-            assert column == pytest.approx(m.to_store(rows[key].value)), key
+            assert first["node"] == f"input:{component}/{name}/{field_name}"
+            assert first["value"] == column, key
+            if key == "battery_round_trip_efficiency":  # sqrt of the row: not exact
+                assert math.isclose(column, compiled, rel_tol=1e-12), key
+            else:
+                assert column == compiled, key
             assert first["stamp"]["status"] == "default", key
             assert field["outcome"]["state"] == "uncompared", key
         assert out["outcome"]["state"] == "uncompared", key
         assert out["outcome"]["complete"] is True, key
-    # The round trip compiles to both halves; the discount rate to the battery and the PV.
-    assert len(explain_ledger_row(n, "battery_round_trip_efficiency")["fields"]) == 2
-    assert [
-        f["target"]["component"]
-        for f in explain_ledger_row(n, "discount_rate")["fields"]
-    ] == ["StorageUnit", "Generator"]
 
 
-def test_a_battery_row_on_a_network_without_the_battery_refuses(battery_pack):
+def test_a_battery_row_on_a_network_without_the_battery_refuses():
     from services.provenance_graph.explain import TargetUnknown, explain_ledger_row
 
-    _, _, baseline = battery_pack
+    baseline, _ = _pack("none")
     assert "battery" not in baseline.storage_units.index
-    for key in _battery_keys():
+    assert "pv" not in baseline.generators.index
+    for key in BATTERY_ROWS:
         with pytest.raises(TargetUnknown) as exc:
             explain_ledger_row(baseline, key)
         assert exc.value.error_kind == "why_target_unknown"

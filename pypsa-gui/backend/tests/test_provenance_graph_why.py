@@ -562,7 +562,6 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
     )
     assert json.loads(json.dumps(via_tool)) == got
 
-    assert (project_storage_dir(f"{name}-opt-none") / "network.nc").exists()
     for key, option, code in (
         ("no_such_row", "bess_pv_2h", 404),
         ("pv_rooftop_eur_per_kw", "no_such_option", 404),
@@ -571,8 +570,6 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
             "bess_pv_2h",
             404,
         ),  # the PV kind this study's pack did not read
-        # provenance-graph 11: a battery row on the grid-only fork, which has no battery: refused, never a 500
-        ("battery_storage_eur_per_kwh", "none", 404),
     ):
         r = client.get(
             f"/api/projects/{name}/studies/{sid}/ledger/{key}/why",
@@ -581,6 +578,16 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
         assert r.status_code == code, (key, option)
         assert r.json()["detail"]["error_kind"] == "why_target_unknown"
     assert path.read_bytes() == fork_bytes and study_file.read_bytes() == study_bytes
+    # provenance-graph 11: a battery row on the grid-only fork, which the run forked and which has no battery,
+    # is refused by the walk (not for a missing fork), never a 500.
+    assert (project_storage_dir(f"{name}-opt-none") / "network.nc").exists()
+    r = client.get(
+        f"/api/projects/{name}/studies/{sid}/ledger/battery_storage_eur_per_kwh/why",
+        params={"option_id": "none"},
+    )
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"]["error_kind"] == "why_target_unknown"
+    assert "compiles to no recorded field" in r.json()["detail"]["message"]
 
 
 def test_only_input_and_derived_ids_name_an_asset_field():
