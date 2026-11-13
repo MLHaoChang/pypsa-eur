@@ -63,6 +63,7 @@ GET     /api/chat/answers/{answer_id}                                           
 GET     /api/chat/answers/{answer_id}/export                                       -> export_checked_answer_api_chat_answers__answer_id__export_get
 GET     /api/chat/decisions/{decision_id}                                          -> inspect_decision_api_chat_decisions__decision_id__get
 GET     /api/chat/evidence/{evidence_id}                                           -> checked_evidence_api_chat_evidence__evidence_id__get
+GET     /api/chat/evidence/{evidence_id}/why/{metric}                              -> checked_evidence_why_api_chat_evidence__evidence_id__why__metric__get
 GET     /api/chat/export                                                           -> chat_export_api_chat_export_get
 GET     /api/chat/external/pending                                                 -> external_pending_api_chat_external_pending_get
 GET     /api/chat/health                                                           -> chat_health_api_chat_health_get
