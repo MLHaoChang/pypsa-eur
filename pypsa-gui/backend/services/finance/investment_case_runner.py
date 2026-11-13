@@ -343,7 +343,7 @@ def start_investment_case(
     record["thread"] = t
     publish_study(STUDY_KEY, record, t)
     return {"status": "running", "study": STUDY_KEY, "case_id": case_id, "owner": body.owner,
-            "tax_pack_id": fin.tax_pack_id}
+            "tax_pack_id": fin.tax_pack_id, "started_at": record["started_at"]}
 
 
 def public_record(record: dict | None) -> dict | None:

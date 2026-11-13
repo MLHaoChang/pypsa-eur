@@ -73,3 +73,40 @@ def test_a_link_follows_its_input_bus_tonne_to_energy():
 
 def test_a_link_follows_its_input_bus_energy_to_tonne():
     assert size_units(_two_bus_net("MWh", "t"), "Link", "l") == {}
+
+
+# ── The route the drawer calls: GET /api/network/asset_schema/{class}/units/{name} ──
+
+
+def _tonne_generator(n):
+    return _first(n, "generators", "bus", True)
+
+
+def test_the_units_route_answers_t_per_h_for_a_generator_on_a_tonne_bus(
+    client, install_network, n
+):
+    name = _tonne_generator(n)
+    install_network(n)
+    r = client.get(f"/api/network/asset_schema/Generator/units/{name}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["component"] == "Generator" and body["name"] == name
+    assert body["units"]["p_nom"] == "t/h"
+
+
+def test_the_units_route_is_empty_for_an_asset_on_an_energy_bus(
+    client, install_network, n
+):
+    name = _first(n, "links", "bus0", False)
+    install_network(n)
+    r = client.get(f"/api/network/asset_schema/Link/units/{name}")
+    assert r.status_code == 200 and r.json()["units"] == {}
+
+
+def test_the_units_route_refuses_an_unknown_class_and_an_unknown_asset(
+    client, install_network, n
+):
+    install_network(n)
+    assert client.get("/api/network/asset_schema/Nope/units/x").status_code == 400
+    r = client.get("/api/network/asset_schema/Generator/units/no-such-generator")
+    assert r.status_code == 404

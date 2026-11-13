@@ -1759,6 +1759,16 @@ def finish_step(ticket, result=None, error=None, error_kind=None):
                 run_eh.release(path, ticket[2], None, task)  # C4: unfollowed, so its whole reservation
                 step["status"] = "uncertain"
                 message = "The Energy Hub study started, but its record is not followed; inspect it before going on."
+        if task.get("run") and step["tool"] == "run_investment_case":
+            # Study harness 14: a run's investment case is settled from its own record only
+            # (`run_ic.wait`); a receipt that is not that of a started case is a refusal, and a
+            # started one that is not followed is not known to have finished.
+            if error is not None or not isinstance(result, dict) or result.get("status") != "running":
+                step["status"] = "failed"
+                message = f"The investment case did not start: {str(error or result)[:200]}"
+            else:
+                step["status"] = "uncertain"
+                message = "The investment case started, but its record is not followed; inspect it before going on."
         if task.get("run") and error is None and _retryable_read(step["tool"]):
             # A run's read step is done once it returned: what it found (an
             # `ok: false` validation) is the stage gate's to judge, from its

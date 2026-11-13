@@ -238,11 +238,26 @@ def unrepaired_solve_sites(sources) -> list[str]:
                 if getattr(c.func, "id", getattr(c.func, "attr", None))
                 == "ensure_link_port_frames"
             ]
-            for c in calls:
-                if not (
-                    isinstance(c.func, ast.Attribute) and c.func.attr in _SOLVE_CALLS
-                ):
-                    continue
+            # A solve is any reference to a solve method, called or not: ``opt = n.optimize``
+            # then ``opt()`` (or ``getattr(n, "optimize")``) solves without a call on the attribute.
+            refs = [
+                node
+                for node in ast.walk(fn)
+                if (
+                    isinstance(node, ast.Attribute)
+                    and node.attr in _SOLVE_CALLS
+                    # ``pypsa.options.params.optimize`` is a settings namespace, not a solve.
+                    and getattr(node.value, "attr", None) != "params"
+                )
+                or (
+                    isinstance(node, ast.Call)
+                    and getattr(node.func, "id", None) == "getattr"
+                    and len(node.args) >= 2
+                    and isinstance(node.args[1], ast.Constant)
+                    and node.args[1].value in _SOLVE_CALLS
+                )
+            ]
+            for c in refs:
                 if (rel, fn.name) in _REACHED_THROUGH_RUN_SIMULATION:
                     continue
                 if any(line < c.lineno for line in repaired):
@@ -271,6 +286,20 @@ def test_the_guard_sees_a_site_whose_repair_was_removed():
     assert text != sources[rel]
     sources[rel] = text
     assert any(s.startswith(rel) for s in unrepaired_solve_sites(sources.items()))
+
+
+def test_the_guard_sees_an_aliased_solve():
+    """``opt = n.optimize; opt()`` and ``getattr(n, "optimize")`` are solve sites too."""
+    planted = {
+        "alias": "def f(n):\n    opt = n.optimize\n    opt()\n",
+        "getattr": "def f(n):\n    getattr(n, 'optimize')()\n",
+    }
+    for src in planted.values():
+        assert unrepaired_solve_sites([("x.py", src)]), src
+    repaired = (
+        "def f(n):\n    ensure_link_port_frames(n)\n    opt = n.optimize\n    opt()\n"
+    )
+    assert unrepaired_solve_sites([("x.py", repaired)]) == []
 
 
 def test_the_allow_list_names_functions_that_exist_and_solve():

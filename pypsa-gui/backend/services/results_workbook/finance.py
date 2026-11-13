@@ -62,5 +62,10 @@ def write_case_sheets(wb, report, *, project: str | None = None) -> list[str]:
 def investment_sheets(wb, ctx) -> bool:
     if ctx.ic_report is None:
         return False
-    ctx.sheets["investment"] = write_case_sheets(wb, ctx.ic_report, project=ctx.project)
+    from services.results_workbook.business_case import write_business_case_sheet
+
+    titles = write_case_sheets(wb, ctx.ic_report, project=ctx.project)
+    # Business case 08a (C7): beside the case, from the stored report only.
+    titles.append(write_business_case_sheet(wb, ctx.bc_report, ctx.bc_state))
+    ctx.sheets["investment"] = titles
     return True

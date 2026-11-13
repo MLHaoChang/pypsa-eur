@@ -47,7 +47,7 @@ export function OffGridConstraints({ draft, patch, onError }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.min_renewable_fraction])
   return (
-    <section className="border border-border rounded" data-testid="offgrid-constraints">
+    <section id="solver-offgrid-constraints" className="border border-border rounded" data-testid="offgrid-constraints">
       <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
         Off-grid constraints
       </div>

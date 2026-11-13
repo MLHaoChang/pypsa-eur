@@ -1,0 +1,1 @@
+* Feat(coordination): Pre-push runs an uncapped registry contract step when routes or the catalogue change and names the tests a cut-off step skipped; `ciwait.sh --board`, `inputs.sh` and `tasks.py` replace hand-built frontier inputs and per-PR waits; role-id changes land as their own one-file PR.
