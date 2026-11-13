@@ -1224,7 +1224,7 @@ def test_every_sizing_round_reports_its_cost_in_eur_whatever_the_objective_scale
 
 
 def _close(a, b, path="") -> list[str]:
-    """Where ``a`` and ``b`` differ: keys, strings and bools exactly, numbers within solver tolerance."""
+    """Where ``a`` and ``b`` differ, every leaf compared with == (GK B F1: the values are bit-equal to master's)."""
     if isinstance(a, dict) and isinstance(b, dict):
         if set(a) != set(b):
             return [f"{path}: keys {sorted(set(a) ^ set(b))}"]
@@ -1237,14 +1237,6 @@ def _close(a, b, path="") -> list[str]:
             for i, (x, y) in enumerate(zip(a, b))
             for d in _close(x, y, f"{path}[{i}]")
         ]
-    if (
-        isinstance(a, (int, float))
-        and isinstance(b, (int, float))
-        and not isinstance(a, bool)
-    ):
-        return (
-            [] if a == pytest.approx(b, rel=1e-6, abs=1e-6) else [f"{path}: {a} != {b}"]
-        )
     return [] if a == b else [f"{path}: {a!r} != {b!r}"]
 
 
@@ -1270,3 +1262,28 @@ def test_a_no_curve_dc_backup_assessment_matches_master():
         ).read_text()
     )
     assert _close(got, master) == []
+
+
+def test_a_refusal_in_the_full_year_solve_carries_its_kind():
+    """GK B F2: the full-year solve's failure row carries the result's `kind`, as a round's does."""
+    from services.adequacy.sizing_loop import run_sizing_loop
+
+    from tests.test_sizing_loop import _check, _ok
+
+    refused = {
+        "status": "error",
+        "condition": "genset: Fuel price: …",
+        "kind": "fuel_curve_invalid",
+    }
+    out = run_sizing_loop(
+        lambda s: _ok(100.0),
+        lambda r, s: [_check("pst", True)],
+        final_solve=lambda s: refused,
+    )
+    final = out["final"]  # the full-year row is reported as `final`, not as a round
+    assert out["status"] == "failed"
+    assert (final["basis"], final["status"], final["kind"]) == (
+        "full_year",
+        "error",
+        "fuel_curve_invalid",
+    )
