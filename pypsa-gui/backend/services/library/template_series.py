@@ -144,6 +144,9 @@ def verify(template_dir: Path) -> None:
     except (OSError, ValueError, KeyError, TypeError) as exc:
         raise TemplateSeriesError("template_series_meta_invalid",
                                   f"{DIR}/{META} is unreadable: {exc}") from exc
+    if not isinstance(entries, list):
+        raise TemplateSeriesError("template_series_meta_invalid",
+                                  f"{DIR}/{META} needs a list of series")
     named = set()
     for e in entries:
         file = e.get("file") if isinstance(e, dict) else None

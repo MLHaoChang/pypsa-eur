@@ -157,3 +157,51 @@ def test_a_folder_inside_the_series_dir_is_not_a_series_file(tmp_path):
     d = _dir(tmp_path)
     (d / TS.DIR / "notes").mkdir()
     TS.verify(d)
+
+
+@pytest.mark.parametrize("series", [None, 5, "a.csv", {"file": "a.csv"}])
+def test_a_series_that_is_not_a_list_is_a_typed_refusal_not_a_crash(tmp_path, series):
+    d = _dir(tmp_path)
+    (d / TS.DIR / TS.META).write_text(json.dumps({"series": series}))
+    assert _code(d) == "template_series_meta_invalid"
+
+
+def _generated(spoil):
+    """A stand-in for the template module whose generator writes the real series, then
+    bends the directory."""
+
+    def write(out_dir, planning=None):
+        eh_ipp.write_price_series(out_dir, planning)
+        spoil(pathlib.Path(out_dir) / TS.DIR)
+
+    class Mod:
+        PRICE_SERIES = {"tpl": staticmethod(write)}
+
+        @staticmethod
+        def _planned(key, planning):
+            return None
+
+    return Mod
+
+
+def _create_from(mod):
+    return projects._mint_template_series(None, None, "tpl", planned=(mod, None))
+
+
+def test_a_generator_that_leaves_an_extra_file_refuses_the_create_with_a_422():
+    mod = _generated(lambda d: (d / "stray.csv").write_text("timestamp,value\n"))
+    with pytest.raises(HTTPException) as err:
+        _create_from(mod)
+    assert err.value.status_code == 422
+    assert err.value.detail["error_kind"] == "template_series_file_extra"
+
+
+def test_a_generator_that_corrupts_a_series_file_refuses_the_create_with_a_422():
+    def corrupt(d):
+        first = sorted(d.glob("*.csv"))[0]
+        first.write_bytes(first.read_bytes() + b"1,1\n")
+
+    with pytest.raises(HTTPException) as err:
+        _create_from(_generated(corrupt))
+    assert err.value.status_code == 422
+    assert err.value.detail["error_kind"] == "template_series_hash_mismatch"
