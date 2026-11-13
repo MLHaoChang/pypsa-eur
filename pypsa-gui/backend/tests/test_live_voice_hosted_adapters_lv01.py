@@ -916,6 +916,40 @@ def test_deepgram_failed_sender_wins_over_a_chatty_socket():
     assert err.value.kind == "invalid_request"
 
 
+def test_deepgram_recv_raises_an_already_failed_sender_before_waiting():
+    """A sender that failed before `_recv` is not watched; the check up front is
+    what surfaces its error at once instead of after the idle timeout."""
+    adapter, _ = deepgram(FakeSocket([], block=True), idle_timeout_s=30)
+
+    async def go():
+        async def fail():
+            raise lm.LiveMediaError("invalid_request", "bad frame", 422)
+
+        sender = asyncio.ensure_future(fail())
+        await asyncio.wait({sender})
+        return await adapter._recv(FakeSocket([], block=True), None, sender)
+
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(asyncio.wait_for(go(), 2))
+    assert err.value.kind == "invalid_request"
+
+
+def test_deepgram_websocket_logger_is_pinned_to_info():
+    from harness.providers import deepgram_stt
+
+    assert deepgram_stt.WS_LOGGER.level == logging.INFO
+
+
+def test_deepgram_key_reaches_no_record_with_its_own_logger_at_debug(caplog):
+    from harness.providers import deepgram_stt
+
+    caplog.set_level(logging.DEBUG, logger=deepgram_stt.WS_LOGGER.name)
+    test_deepgram_default_connect_over_a_loopback_websocket()
+    ours = [r for r in caplog.records if r.name == deepgram_stt.WS_LOGGER.name]
+    assert any(r.levelno == logging.DEBUG for r in ours)  # the handshake did log
+    assert all(DG_KEY not in r.getMessage() for r in caplog.records)
+
+
 def test_deepgram_cancel_after_the_sender_finished():
     async def go():
         cancel = lm.CancelToken()
@@ -969,7 +1003,12 @@ def _real_adapter():
 
 @pytest.mark.parametrize(
     "status,kind",
-    [(401, "provider_auth"), (429, "provider_limit"), (500, "provider_error")],
+    [
+        (401, "provider_auth"),
+        (403, "provider_auth"),
+        (429, "provider_limit"),
+        (500, "provider_error"),
+    ],
 )
 def test_default_connect_maps_handshake_status(monkeypatch, status, kind):
     from websockets.datastructures import Headers
