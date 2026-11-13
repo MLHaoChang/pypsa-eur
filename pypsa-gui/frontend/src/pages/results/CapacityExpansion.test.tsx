@@ -415,3 +415,25 @@ it('says curtailment cost was not modelled when no generator carries one', async
   expect(within(kpiCard('Curtailment cost')).getByText('Not modelled')).toBeTruthy()
   expect(within(kpiCard('Curtailment cost')).queryByText('—')).toBeNull()
 })
+
+it('reads a failed expansion compute as unavailable, the state the headline strip shows', async () => {
+  // ui-modern 06. Fails if: the annualised figure goes back to
+  // `cost.capex_expansion || totalExpansionCapex`, which turns a null into the
+  // per-asset sum (here €0.00), or storage back to `?? 0`.
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue({
+    ...unavailablePayload(), capex_lifetime: 9_000, capex_expansion_lifetime: 1_000,
+    capex_lifetime_available: true, storage_capex_expansion_lifetime: 0,
+    capex_expansion: null, storage_capex_expansion: null,
+  })
+  vi.mocked(networkApi.getStorageUnits).mockResolvedValue([extendableBattery])
+  renderPage()
+  await screen.findByText('Total new investment per year')
+  for (const label of ['Total new investment per year', 'Storage CAPEX (new)']) {
+    const tile = kpiCard(label)
+    expect(tile.closest('[data-state]')?.getAttribute('data-state')).toBe('unavailable')
+    expect(within(tile).getByText('This figure could not be computed for this solve.')).toBeTruthy()
+    expect(within(tile).queryByText('€0.00')).toBeNull()
+  }
+  // The figures that do not depend on the expansion compute stay.
+  expect(getKpiValueWithin(kpiCard('CAPEX (installed)'), '€8.07 B')).toBeTruthy()
+})

@@ -114,6 +114,10 @@ NOT_MODELLED_LOST_LOAD = (
     "The run had no value of lost load, so unserved energy was not measured."
 )
 NO_COST = "This solve has no cost breakdown."
+#: The breakdown exists but this figure failed to compute (ui-modern 06: the
+#: expansion CAPEX compute raised). The Capacity expansion tab shows the same
+#: sentence (`FIGURE_NOT_COMPUTED` in CapacityExpansion.tsx).
+FIGURE_NOT_COMPUTED = "This figure could not be computed for this solve."
 
 
 def project_kind(template: dict | None) -> str:
@@ -281,8 +285,10 @@ def _checked(ctx, card_id):
 
 
 def _cost(card_id, cost, field, per_year, trend=None):
-    if not cost or cost.get(field) is None:
+    if not cost:
         return _card(card_id, state="unavailable", reason=NO_COST)
+    if cost.get(field) is None:
+        return _card(card_id, state="unavailable", reason=FIGURE_NOT_COMPUTED)
     return _card(
         card_id,
         float(cost[field]),
