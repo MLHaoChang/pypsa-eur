@@ -567,3 +567,80 @@ def test_the_digest_binds_the_template_the_file_is_for():
     assert S._digest(data, "a", {}) != S._digest(data, "b", {})
     assert S._digest(data, "a", {}) != S._digest(data, "a", {"s": "1"})
     assert S._digest(data, "a", {}) != S._digest({"version": 2}, "a", {})
+
+
+# ── the last survivors ───────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        _change("commercial.contracts.ppa_wind.price", 1.0, 2.0, "string"),
+        _change("StorageUnit.bess.inv_power_overnight", 1.0, 2.0, "string"),
+        _change(
+            "commercial.export_price_ref.id", "ipp_da_base", "ipp_da_low", "number"
+        ),
+        _change(
+            "commercial.contracts.ppa_wind.reference_price.id",
+            "ipp_da_base",
+            "ipp_da_low",
+            "number",
+        ),
+    ],
+)
+def test_a_value_kind_that_does_not_fit_the_field_is_refused_whatever_the_values(
+    built, change
+):
+    cfg, network = built
+    assert S.refusal(change, cfg, network) is not None
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ("", "ipp_da_low"),
+        ("ipp_da_base", ""),
+        (5, "ipp_da_low"),
+        ("ipp_da_base", 5),
+        (None, "x"),
+        ("x", None),
+    ],
+)
+def test_a_series_name_is_refused_on_its_own_not_only_through_the_series_lookup(
+    built, old, new
+):
+    cfg, network = built
+    assert S.refusal(
+        _change("commercial.export_price_ref.id", old, new, "string"), cfg, network
+    )
+
+
+@pytest.mark.parametrize("cases", [{"a": 1}, "abc", 5])
+def test_cases_that_are_not_a_list_are_refused_for_that_reason(
+    project, tpl, built, cases
+):
+    (project / "cases.json").write_text(
+        json.dumps({"version": 1, "template": TID, "cases": cases})
+    )
+    with pytest.raises(S.ShippedError, match="non-empty list of cases"):
+        _load(project, tpl, built)
+
+
+def test_changes_that_are_not_a_list_are_refused_for_that_reason(project, tpl, built):
+    (project / "cases.json").write_text(json.dumps(_cases_with(changes="abc")))
+    with pytest.raises(S.ShippedError, match="needs a list of changes"):
+        _load(project, tpl, built)
+
+
+def test_a_pick_that_is_a_bare_string_is_refused_as_not_a_list_of_ids(
+    project, tpl, built
+):
+    with pytest.raises(S.ShippedError, match="Pick cases by id"):
+        S.choose(_load(project, tpl, built), CAP, "low_price")
+
+
+def test_a_contract_with_no_id_is_not_a_contract_to_change(built):
+    cfg, network = built
+    odd = {"commercial": {"contracts": [{"id": ""}, {"id": None}, {"price": 1}]}}
+    change = _change("commercial.contracts..price", 1, 2)
+    assert "contract the template does not have" in S.refusal(change, odd, network)
