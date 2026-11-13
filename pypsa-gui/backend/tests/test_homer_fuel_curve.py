@@ -1221,3 +1221,52 @@ def test_every_sizing_round_reports_its_cost_in_eur_whatever_the_objective_scale
     assert [r["cost_eur"] for r in scaled["rounds"]] == pytest.approx(
         [r["cost_eur"] for r in base["rounds"]], rel=1e-6
     )
+
+
+def _close(a, b, path="") -> list[str]:
+    """Where ``a`` and ``b`` differ: keys, strings and bools exactly, numbers within solver tolerance."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        if set(a) != set(b):
+            return [f"{path}: keys {sorted(set(a) ^ set(b))}"]
+        return [d for k in a for d in _close(a[k], b[k], f"{path}.{k}")]
+    if isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            return [f"{path}: length {len(a)} != {len(b)}"]
+        return [
+            d
+            for i, (x, y) in enumerate(zip(a, b))
+            for d in _close(x, y, f"{path}[{i}]")
+        ]
+    if (
+        isinstance(a, (int, float))
+        and isinstance(b, (int, float))
+        and not isinstance(a, bool)
+    ):
+        return (
+            [] if a == pytest.approx(b, rel=1e-6, abs=1e-6) else [f"{path}: {a} != {b}"]
+        )
+    return [] if a == b else [f"{path}: {a!r} != {b!r}"]
+
+
+@pytest.mark.live_solve
+def test_a_no_curve_dc_backup_assessment_matches_master():
+    """GK B (55): the no-curve `assess` cost block, notes and verdict equal master's (a52e33ef9), captured by running
+    master's dc_backup on this network into the fixture."""
+    import json
+    import pathlib
+
+    out, _ = _dc_assess(_dc_network())
+    got = json.loads(
+        json.dumps(
+            {"cost": out["cost"], "notes": out["notes"], "verdict": out["verdict"]},
+            default=str,
+        )
+    )
+    master = json.loads(
+        (
+            pathlib.Path(__file__).parent
+            / "fixtures"
+            / "homer_02a_dc_backup_no_curve_master.json"
+        ).read_text()
+    )
+    assert _close(got, master) == []
