@@ -51,3 +51,25 @@ def test_an_asset_on_an_energy_bus_keeps_the_class_unit(n):
 def test_a_class_without_a_bus_size_and_an_unknown_name_are_empty(n):
     assert size_units(n, "Line", "x") == {}
     assert size_units(n, "Generator", "nope") == {}
+
+
+def _two_bus_net(unit0, unit1):
+    import pypsa
+
+    n = pypsa.Network()
+    n.add("Bus", "b0", carrier="AC", unit=unit0)
+    n.add("Bus", "b1", carrier="AC", unit=unit1)
+    n.add("Link", "l", bus0="b0", bus1="b1", p_nom=5)
+    return n
+
+
+def test_a_link_follows_its_input_bus_tonne_to_energy():
+    assert size_units(_two_bus_net("t", "MWh"), "Link", "l") == {
+        "p_nom": "t/h",
+        "p_nom_max": "t/h",
+        "p_nom_min": "t/h",
+    }
+
+
+def test_a_link_follows_its_input_bus_energy_to_tonne():
+    assert size_units(_two_bus_net("MWh", "t"), "Link", "l") == {}

@@ -39,7 +39,7 @@ import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 import { useAssetSchema } from '../hooks/useAssetSchema'
 import { useAssetProvenance } from '../hooks/useAssetProvenance'
 import { buildPatch, seedForm } from '../utils/assetForm'
-import { AssetFieldsEdit, assetReadoutItems, fieldHelp, schemaFields } from './properties/AssetFields'
+import { AssetFieldsEdit, assetReadoutItems, fieldHelp, fieldUnit, schemaFields } from './properties/AssetFields'
 import { useSaveAction } from '../components/memory/ParameterMemory'
 import { GuideButton } from '../components/GuidedTour'
 import CarrierPanel from './properties/CarrierPanel'
@@ -260,7 +260,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={gen.name} badge={gen.carrier}
-        meta={`${gen.p_nom?.toFixed(0) ?? '—'} MW${gen.marginal_cost > 0 ? ` · MC ${gen.marginal_cost} €/MWh` : ''}${gen.p_nom_extendable ? ' · extendable' : ''}`}
+        meta={`${gen.p_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'p_nom', 'MW')}${gen.marginal_cost > 0 ? ` · MC ${gen.marginal_cost} €/MWh` : ''}${gen.p_nom_extendable ? ' · extendable' : ''}`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
@@ -437,7 +437,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={su.name} badge={su.carrier}
-        meta={`${su.p_nom?.toFixed(0) ?? '—'} MW · ${su.max_hours}h · η ${((su.efficiency_dispatch ?? 1) * 100).toFixed(0)}%`}
+        meta={`${su.p_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'p_nom', 'MW')} · ${su.max_hours}h · η ${((su.efficiency_dispatch ?? 1) * 100).toFixed(0)}%`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
@@ -586,7 +586,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={store.name} badge={store.carrier}
-        meta={`${store.e_nom?.toFixed(0) ?? '—'} MWh${store.e_nom_extendable ? ' · extendable' : ''}${isH2Store ? ` ≈ ${((store.e_nom ?? 0) / 0.0336).toFixed(0)} kg H₂` : ''}`}
+        meta={`${store.e_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'e_nom', 'MWh')}${store.e_nom_extendable ? ' · extendable' : ''}${isH2Store ? ` ≈ ${((store.e_nom ?? 0) / 0.0336).toFixed(0)} kg H₂` : ''}`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
@@ -750,7 +750,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={load.name} badge={load.carrier}
-        meta={`P = ${load.p_set?.toFixed(1) ?? '—'} MW${load.q_set ? ` · Q = ${load.q_set.toFixed(1)} MVAr` : ''}`}
+        meta={`P = ${load.p_set?.toFixed(1) ?? '—'} ${fieldUnit(schema, 'p_set', 'MW')}${load.q_set ? ` · Q = ${load.q_set.toFixed(1)} MVAr` : ''}`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
@@ -785,7 +785,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
         </div>
         <span className="text-xs text-muted">
           {hasProfile && profileMeta.has_profile
-            ? `Profile loaded · ${profileMeta.rows} pts · peak ${profileMeta.peak?.toFixed(1)} MW`
+            ? `Profile loaded · ${profileMeta.rows} pts · peak ${profileMeta.peak?.toFixed(1)} ${fieldUnit(schema, 'p_set', 'MW')}`
             : 'No profile — static p_set used'}
         </span>
       </div>
@@ -994,7 +994,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={link.name} badge={link.carrier}
-        meta={`${link.p_nom?.toFixed(0) ?? '—'} MW · η ${((link.efficiency ?? 1) * 100).toFixed(0)}% · ${flowLabel}`}
+        meta={`${link.p_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'p_nom', 'MW')} · η ${((link.efficiency ?? 1) * 100).toFixed(0)}% · ${flowLabel}`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
