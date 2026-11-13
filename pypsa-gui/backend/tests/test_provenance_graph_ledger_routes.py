@@ -190,9 +190,10 @@ def battery_pack():
         "tariff": {"tariff_id": "de_industrial_illustrative"},
     }
     ledger = library.seed_ledger(questions.BESS_AT_SITE, intake, defaults)
-    build = lambda option: packs.build_site_network(  # noqa: E731
-        intake, ledger, option, library=defaults
-    )
+
+    def build(option):
+        return packs.build_site_network(intake, ledger, option, library=defaults)
+
     return build("bess_pv_2h"), ledger, build("none")
 
 
@@ -225,13 +226,10 @@ def test_each_battery_ledger_row_walks_the_fields_it_compiles_to(battery_pack):
         out = explain_ledger_row(n, key)
         assert out["target"] == {"ledger_key": key}
         assert [f["target"] for f in out["fields"]] == [
-            {"component": m.component, "name": m.name, "field": m.field}
-            for m in want
+            {"component": m.component, "name": m.name, "field": m.field} for m in want
         ], key
         for m, field in zip(want, out["fields"]):
-            column = getattr(n, n.components[m.component].list_name).at[
-                m.name, m.field
-            ]
+            column = getattr(n, n.components[m.component].list_name).at[m.name, m.field]
             first = field["steps"][0]
             assert first["node"] == f"input:{m.component}/{m.name}/{m.field}"
             assert first["value"] == pytest.approx(column), key
