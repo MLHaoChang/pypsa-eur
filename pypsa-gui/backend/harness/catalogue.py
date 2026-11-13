@@ -5282,6 +5282,37 @@ TOOLS.extend([
        {"project": {"type": "string"}, "study_id": {"type": "string"}},
        ["project", "study_id"]),
 ])
+TOOLS.extend([
+    # homer-parity 03d: the grid-extension break-even distance for one 03a row.
+    _t("get_grid_extension_break_even",
+       "How far could the grid be extended before an off-grid supply architecture is cheaper (HOMER's "
+       "grid-extension break-even)? Reads one stored supply-architecture row of the decision study by "
+       "`architecture_id` (from get_supply_architectures; never type its cost) and derives its off-grid NPC as "
+       "that row's annual cost x the annuity factor at the STUDY's discount rate and horizon: an annualised "
+       "approximation, say so. You supply the grid side: eur_per_km, fixed_eur, grid_supply_npc (the grid's own "
+       "net present cost, no default) and grid_basis {currency, currency_year, discount_rate, horizon_years}, which "
+       "must equal the study's on every field (the refusal lists the field and the expected basis); nothing is "
+       "converted. Returns {status: break_even|offgrid_cheaper_everywhere|grid_cheaper_everywhere|beyond_max_km|"
+       "break_even_not_established, km, offgrid_npc, total_cost_eur_per_year, basis, approximation, message}. A null "
+       "km is not 0. Refusals: basis_mismatch, assumptions_not_set (set the discount rate and horizon first), "
+       "discount_rate_invalid, npc_not_finite, supply_architectures_never_run, supply_architectures_running, "
+       "supply_architectures_stale (compare again), architecture_unknown, architecture_not_solved. "
+       "Writes nothing. Safety: read.",
+       {"project": {"type": "string"},
+        "study_id": {"type": "string"},
+        "architecture_id": {"type": "string", "maxLength": 64},
+        "eur_per_km": {"type": "number", "minimum": 0},
+        "grid_supply_npc": {"type": "number"},
+        "grid_basis": {"type": "object",
+                       "properties": {"currency": {"type": "string", "maxLength": 8},
+                                      "currency_year": {"type": "integer"},
+                                      "discount_rate": {"type": "number"},
+                                      "horizon_years": {"type": "integer", "minimum": 1}},
+                       "required": ["currency", "currency_year", "discount_rate", "horizon_years"]},
+        "fixed_eur": {"type": "number", "minimum": 0},
+        "max_km": {"type": "number", "exclusiveMinimum": 0}},
+       ["project", "study_id", "architecture_id", "eur_per_km", "grid_supply_npc", "grid_basis"]),
+])
 
 TOOL_COUNT: int = len(TOOLS)
 
@@ -5836,6 +5867,8 @@ TOOL_ROUTES: dict[str, list] = {
         ("POST", "/api/projects/{name}/studies/{study_id}/supply-architectures/abort")],
     "get_supply_architectures": [
         ("GET", "/api/projects/{name}/studies/{study_id}/supply-architectures")],
+    "get_grid_extension_break_even": [
+        ("POST", "/api/projects/{name}/studies/{study_id}/grid-extension-break-even")],
     # project settings and scope (5) — LV08 B1
     "get_site_template_form": [("GET", "/api/projects/from_template/eh_site/form")],
     "get_project_flow_scope": [("GET", "/api/projects/{name}/flow/scope")],
