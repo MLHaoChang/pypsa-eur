@@ -901,3 +901,29 @@ def test_a_frozen_site_is_never_rebuilt_from_later_intake_rows(offline, tmp_path
     step = task["steps"][-1]
     assert out == run_actions.SITE_FETCH and step["frozen"] == first
     assert step["result"]["state"] == "fetched" and step["result"]["site"] == SITE
+
+
+# Study harness issue 44: the catalogue offers eh_site@3 to start_task.
+def _start_task_run_args(profile):
+    return {
+        "title": "t",
+        "request_id": "r",
+        "steps": [],
+        "run": {"profile": profile, "mode": "stepwise"},
+    }
+
+
+@pytest.mark.parametrize(
+    ("profile", "passes"),
+    [("eh_site@2", True), ("eh_site@3", True), ("eh_site@1", False), ("eh_site@4", False)],
+)
+def test_start_task_offers_v2_and_v3_only(profile, passes):
+    from harness import catalogue, guards
+
+    tool = next(t for t in catalogue.TOOLS if t["name"] == "start_task")
+    enum = tool["input_schema"]["properties"]["run"]["properties"]["profile"]["enum"]
+    assert enum == ["eh_site@2", "eh_site@3"]
+    assert (profile in enum) is passes
+    refusal = guards.check("start_task", _start_task_run_args(profile), "write")
+    if refusal is not None:  # no schema guard may refuse an offered profile
+        assert not passes, refusal

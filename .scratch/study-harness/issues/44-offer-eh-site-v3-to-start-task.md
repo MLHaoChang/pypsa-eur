@@ -37,3 +37,7 @@ Acceptance:
 ### 2026-11-13: owner decision
 
 Owner answered (SH44-EGRESS-1, `docs/agents/owner-decisions.md`). Status: ready-for-agent.
+
+### 2026-11-13: built
+
+Both `eh_site@2` and `eh_site@3` are offered in `start_task`'s `run.profile` enum; stored `@2` runs keep `@2` (L8). Per SH44-EGRESS-1 the endpoints the operator's environment configures are accepted for chat-started runs, with no new gate; the decision is recorded here and in the PR body.
