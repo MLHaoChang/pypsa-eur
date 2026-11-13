@@ -23,6 +23,7 @@ from services.period_utils import (
     period_years_map,
     years_for_period,
 )
+from services import fuel_curve
 from services.economics import statistics_fom_lookup
 from services.serialization import safe_float as _safe_float
 from services.solver_service import (
@@ -721,6 +722,10 @@ def compute_cost_breakdown(n, cfg):
         # Zero unless the user set curtailment_cost > 0 on at least one
         # renewable generator. Already weighted by snapshot × period years.
         "curtailment_cost": curtailment_cost_total,
+        # Fuel burnt by each generator with a fuel curve (homer-parity 02a, `services.fuel_curve`): no-load
+        # intercept × p_nom × on-hours + slope × energy, weighted like the LP objective. Its cost is already
+        # inside `opex` (PyPSA's marginal and stand-by costs); this splits it out. Empty without a curve.
+        "fuel": fuel_curve.fuel_use(n, period_years),
         # CAPEX going into storage (StorageUnit + Store), expansion only.
         # Useful as a quick "how much of the investment is storage?" KPI.
         "storage_capex_expansion": storage_capex_expansion,

@@ -16,7 +16,7 @@ from typing import Any
 import pandas as pd
 from fastapi import HTTPException
 
-from services import attribute_catalog, change_log_service, vintage_service
+from services import attribute_catalog, change_log_service, fuel_curve, vintage_service
 from services.adequacy.occurrence import BLANK_SPELLINGS as _BLANK_SPELLINGS
 from services.asset_schema.derive import (
     apply_parts,
@@ -353,6 +353,18 @@ def _apply_investment_parts(n, component_class: str, name: str, parts: dict) -> 
                 discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
 
 
+def _check_fuel_curve(component_class: str, row: dict) -> None:
+    """Refuse a generator fuel curve that cannot be priced (homer-parity 02a), before anything is written."""
+    if component_class == "Generator" and (msg := fuel_curve.check(row)):
+        raise HTTPException(422, msg)
+
+
+def _apply_fuel_curve(n, component_class: str, name: str) -> None:
+    """Derive a curve generator's marginal_cost and stand_by_cost from its fuel curve (`services.fuel_curve`)."""
+    if component_class == "Generator":
+        fuel_curve.apply(n, [name])
+
+
 def rederive_scaled_parts(n, component_class: str, name: str) -> None:
     """
     Re-derive a composite asset's cost columns after one of its parts' scales changed outside the edit form
@@ -395,6 +407,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     kwargs, parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     _check_investment_parts(component_class, parts, row=kwargs)
+    _check_fuel_curve(component_class, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name in df.index:
@@ -403,6 +416,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
             ensure_carrier(n, kwargs.get("carrier", ""))
         n.add(component_class, name, **kwargs)
         _apply_investment_parts(n, component_class, name, parts)
+        _apply_fuel_curve(n, component_class, name)
         _normalise_flag_column(n, attr)
     change_log_service.log("add", component_class, name, f"Added {component_class.lower()} '{name}'")
     return {"name": name}
@@ -619,6 +633,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         merged, current_parts = split_parts(component_class, merged)
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, row=merged)
+        _check_fuel_curve(component_class, merged)
         if merged.get("name", name) != name:
             # OPEN-ITEMS item 8. Before `ensure_carrier`, which can add a
             # carrier: a refused rename must leave nothing behind.
@@ -662,6 +677,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         n.add(component_class, name, **merged)
         component_identity.keep(n, component_class, name, held_uid)
         _apply_investment_parts(n, component_class, name, parts)
+        _apply_fuel_curve(n, component_class, name)
         _reattach_component_series(n, attr, name, saved_series)
         # Re-key any saved per-period bounds so the modal data follows the
         # rename instead of stranding under the old key.

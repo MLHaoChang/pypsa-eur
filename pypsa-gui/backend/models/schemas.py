@@ -199,7 +199,10 @@ LINK_LAZY_COLUMNS = frozenset({"eh_process", "criticality_tier", "throughput_uni
                                "ride_through_curve", "restart_time_h", "max_supply_temp_c", "max_pressure_bar"})
 BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value", "lost_production_value", "temperature_c",
                               "pressure_bar"})
-GENERATOR_LAZY_COLUMNS = frozenset({"process_role", "dc_ac_ratio"})
+# The fuel curve (homer-parity 02a, `services.fuel_curve`) is written only when sent: a generator without one
+# keeps no column for it and its own marginal_cost.
+GENERATOR_LAZY_COLUMNS = frozenset({"process_role", "dc_ac_ratio", "fuel_curve_slope", "fuel_curve_no_load",
+                                    "fuel_price"})
 
 
 class LinkCreate(BaseModel):
@@ -377,8 +380,16 @@ class GeneratorCreate(BaseModel):
     ramp_limit_down: float | None = None
     start_up_cost: Finite = 0.0
     shut_down_cost: Finite = 0.0
+    # PyPSA-native: EUR per hour while committed, at any output. A fuel curve's no-load term writes it.
+    stand_by_cost: Finite = 0.0
     min_up_time: int = 0
     min_down_time: int = 0
+    # Fuel curve (homer-parity 02a): fuel = no_load × p_nom × on + slope × p. `services.fuel_curve` derives
+    # marginal_cost (slope × price) and stand_by_cost (no_load × p_nom × price) from them and refuses a curve it
+    # cannot price. None = not set; all three None = no curve.
+    fuel_curve_slope: float | None = Field(default=None, allow_inf_nan=False)    # MWh fuel per MWh generated
+    fuel_curve_no_load: float | None = Field(default=None, allow_inf_nan=False)  # MWh fuel per h per MW rated
+    fuel_price: float | None = Field(default=None, allow_inf_nan=False)          # EUR per MWh fuel
     # Per-generator annual energy floor / ceiling (MWh). PyPSA enforces
     # `e_sum_min ≤ Σ_t (p_t × weight_t) ≤ e_sum_max` on the dispatch.
     # Default to PyPSA's own sentinels (-inf / +inf) meaning "no bound".

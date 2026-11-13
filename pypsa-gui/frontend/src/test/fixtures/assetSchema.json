@@ -703,7 +703,7 @@
       "key": "marginal_cost",
       "group": "variable",
       "label": "Marginal cost",
-      "help": "Variable cost per MWh dispatched: fuel plus variable O&M.",
+      "help": "Variable cost per MWh dispatched: fuel plus variable O&M. With a fuel curve it is derived: fuel curve slope × fuel price.",
       "unit_display": "EUR/MWh",
       "unit_storage": "EUR/MWh",
       "scale": 1.0,
@@ -716,6 +716,37 @@
       "part": null,
       "blank": "zero",
       "technical_name": "marginal_cost"
+     },
+     {
+      "key": "fuel_price",
+      "group": "variable",
+      "label": "Fuel price",
+      "help": "Price per MWh of fuel burnt. Sets the fuel curve's costs: marginal cost = slope × price, stand-by cost = no-load fuel × capacity × price.",
+      "unit_display": "EUR/MWh fuel",
+      "unit_storage": "EUR/MWh",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "carrier": [
+        "diesel",
+        "gas",
+        "oil",
+        "OCGT",
+        "CCGT",
+        "coal",
+        "lignite",
+        "biomass",
+        "biogas",
+        "genset"
+       ]
+      },
+      "part": null,
+      "blank": "clear",
+      "technical_name": "fuel_price"
      },
      {
       "key": "curtailment_cost",
@@ -774,6 +805,26 @@
       "part": null,
       "blank": "zero",
       "technical_name": "shut_down_cost"
+     },
+     {
+      "key": "stand_by_cost",
+      "group": "variable",
+      "label": "Stand-by cost",
+      "help": "Derived: cost per hour while the unit is on, at any output, from the fuel curve (no-load fuel × capacity × fuel price).",
+      "unit_display": "EUR/h",
+      "unit_storage": "EUR/h",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": true,
+      "reveal_when": {
+       "committable": true
+      },
+      "part": null,
+      "blank": "keep",
+      "technical_name": "stand_by_cost"
      }
     ]
    },
@@ -800,10 +851,72 @@
       "technical_name": "efficiency"
      },
      {
+      "key": "fuel_curve_slope",
+      "group": "performance",
+      "label": "Fuel curve slope",
+      "help": "Fuel burnt per MWh generated, on top of the no-load fuel (HOMER's fuel curve slope). Needs a fuel price.",
+      "unit_display": "MWh fuel/MWh",
+      "unit_storage": "MWh/MWh",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "carrier": [
+        "diesel",
+        "gas",
+        "oil",
+        "OCGT",
+        "CCGT",
+        "coal",
+        "lignite",
+        "biomass",
+        "biogas",
+        "genset"
+       ]
+      },
+      "part": null,
+      "blank": "clear",
+      "technical_name": "fuel_curve_slope"
+     },
+     {
+      "key": "fuel_curve_no_load",
+      "group": "performance",
+      "label": "No-load fuel",
+      "help": "Fuel burnt per hour per MW of capacity while the unit is on, at any output (HOMER's fuel curve intercept). Needs Unit commitment and a fixed capacity: a unit that is never switched off burns it every hour.",
+      "unit_display": "MWh fuel/h per MW",
+      "unit_storage": "MWh/h/MW",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "carrier": [
+        "diesel",
+        "gas",
+        "oil",
+        "OCGT",
+        "CCGT",
+        "coal",
+        "lignite",
+        "biomass",
+        "biogas",
+        "genset"
+       ]
+      },
+      "part": null,
+      "blank": "clear",
+      "technical_name": "fuel_curve_no_load"
+     },
+     {
       "key": "p_min_pu",
       "group": "performance",
       "label": "Minimum output",
-      "help": "Minimum dispatch as a share of capacity: a must-run floor.",
+      "help": "Minimum dispatch as a share of capacity: a must-run floor. With Unit commitment, the minimum load ratio while the unit is on.",
       "unit_display": "%",
       "unit_storage": "fraction",
       "scale": 100.0,
