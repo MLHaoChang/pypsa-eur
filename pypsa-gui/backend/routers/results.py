@@ -27,8 +27,8 @@ import threading as _threading
 if TYPE_CHECKING:
     from services.finance.case import CampusSummary
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from db.models import User
 from deps import require_user
 
@@ -2083,6 +2083,12 @@ def _ic_growth_flags() -> tuple[str, ...]:
     project's template metadata marks not set (an example built for entered
     planning years, E1): the case lists them by name (gatekeeper E1
     condition 3). () without a project or metadata."""
+    return _growth_flags_of(_active_template_meta())
+
+
+def _active_template_meta() -> dict | None:
+    """The active project's template metadata (its marker), None without a project,
+    a marker or a readable row."""
     import uuid
 
     from db import session as _db
@@ -2092,14 +2098,14 @@ def _ic_growth_flags() -> tuple[str, ...]:
 
     pid = getattr(PyPSAService.get_active_context(), "project_uuid", None)
     if not pid:
-        return ()
+        return None
     try:
         with _db.SessionLocal() as db:
             row = db.get(Project, uuid.UUID(str(pid)))
             project_dir = project_registry.project_dir(row) if row else None
     except (OSError, ValueError):
-        return ()
-    return _growth_flags_of(read_marker(project_dir) if project_dir is not None else None)
+        return None
+    return read_marker(project_dir) if project_dir is not None else None
 
 
 def _growth_flags_of(meta: dict | None) -> tuple[str, ...]:
@@ -2327,6 +2333,237 @@ def get_investment_case_export():
                  f'attachment; filename="investment_case_{re.sub(r"[^A-Za-z0-9_-]", "_", report.case_id)[:40]}.xlsx"'})
 
 
+# ── business case (business case 08a; spec §7; GK B BC10, 08a C1–C9) ────────
+
+
+class BusinessCaseIn(BaseModel):
+    # Required and closed, like `FinanceIn`: an empty body is a 422, never a clear.
+    model_config = ConfigDict(extra="forbid")
+    business_case: dict[str, Any] | None = Field(...)
+
+
+def _bc_raw() -> dict | None:
+    return getattr(_state["solver_config"], "business_case", None)
+
+
+@results_router.get("/business_case/inputs")
+def get_business_case_inputs():
+    """The stored business-case inputs (`BusinessCaseConfig` JSON) and their `If-Match`
+    digest. `status`: `not_set`, `ok` or `business_case_inputs_invalid`."""
+    from services.business_case.runner import inputs_state
+
+    return inputs_state(_bc_raw())
+
+
+@results_router.put("/business_case/inputs")
+def put_business_case_inputs(body: BusinessCaseIn, if_match: str | None = Header(default=None)):
+    """Set (or clear, with null) the business-case inputs. Validated through
+    `BusinessCaseConfig`, which runs every `BusinessCaseInputs` validator (422 with the
+    field paths, C8); `If-Match` refuses a stale edit (412); 409 while a solve runs.
+    In no solve fingerprint and no investment-case key (C1): the stored business-case
+    report reads stale on its own inputs digest. The network revision is not bumped:
+    nothing but the business case reads these inputs."""
+    from routers.projects import _solver_config_from_dict
+    from routers.simulation import _entity_tag
+    from services.business_case.runner import config_digest, config_or_422, inputs_state
+
+    if _solver_in_flight():
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; change the "
+                                             "business-case inputs after it finishes"})
+    new = None
+    if body.business_case is not None:
+        new = config_or_422(body.business_case).model_dump(mode="json")
+    with PyPSAService.get_solver_state_lock():
+        current = _bc_raw()
+        tag = _entity_tag(if_match)
+        if tag is not None and tag != "*" and tag != config_digest(current):
+            raise HTTPException(412, {"code": "business_case_changed",
+                                      "message": "the business-case inputs changed since they "
+                                                 "were read; reload and re-apply the edit"})
+        merged = dataclasses.asdict(_state["solver_config"])
+        merged["business_case"] = new
+        try:
+            cfg = _solver_config_from_dict(merged)      # the one config reader (C2, #1009)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(422, {"code": "solver_config_invalid",
+                                      "message": str(exc)[:300]}) from exc
+        _state["solver_config"] = cfg
+        return inputs_state(new)
+
+
+@results_router.get("/business_case/preset")
+def get_business_case_preset(variant: str | None = Query(default=None)):
+    """The active project's template preset (spec §6) as business-case inputs, cost
+    defaults filled from the preset's pinned pack and marked assumed. Read-only: the
+    client stores it with the PUT. `variant` omitted lists the variants. A pack row in
+    another unit than the line names is 422 `default_unit_mismatch` with the field,
+    never a filled default (C6)."""
+    from models.business_case import DefaultUnitMismatch
+    from models.finance import FinanceInputs
+    from services.business_case import presets as P
+    from services.business_case.runner import refusal_detail
+
+    template_id = (_active_template_meta() or {}).get("id")
+    if not template_id:
+        raise HTTPException(422, {"code": "template_not_known",
+                                  "message": "this project was not made from a template; add "
+                                             "the business-case lines yourself"})
+    try:
+        offered = P.variants(template_id)
+    except LookupError as exc:
+        raise HTTPException(422, {"code": "preset_not_found", "message": str(exc)}) from exc
+    if variant is None and offered:
+        return {"template_id": template_id, "variants": offered, "business_case": None}
+    raw_fin = getattr(_state["solver_config"], "finance", None)
+    if raw_fin is None:
+        raise HTTPException(422, {"code": "finance_inputs_missing",
+                                  "message": "set the finance inputs first: a preset's cost "
+                                             "defaults are filled in the case's currency"})
+    try:
+        currency = FinanceInputs.model_validate(raw_fin).currency
+    except ValidationError as exc:
+        raise HTTPException(422, {"code": "finance_inputs_invalid",
+                                  "message": str(exc.errors()[0]["msg"])}) from exc
+    try:
+        inputs = P.preset(template_id, variant, currency=currency)
+    except DefaultUnitMismatch as exc:
+        raise HTTPException(422, refusal_detail(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(422, {"code": "preset_not_found", "message": str(exc)}) from exc
+    return {"template_id": template_id, "variants": offered,
+            "business_case": {"inputs": inputs.model_dump(mode="json")}}
+
+
+def _bc_ic_check() -> tuple[str, str | None]:
+    """(IC assumptions hash, IC case hash) of a current stored investment-case report, or
+    409 `investment_case_missing`: no report, a refused one, a stale one or one whose key
+    cannot be read now (C3, through the IC's own staleness reader)."""
+    from services.business_case.runner import ic_report_key
+    from services.finance.investment_case_runner import staleness
+
+    stored = _state.get("investment_case_report")
+    if stored is not None and hasattr(stored, "model_dump"):
+        stored = stored.model_dump(mode="json")
+    a_hash, c_hash = ic_report_key(stored)
+    if a_hash is None or c_hash is None:
+        raise HTTPException(409, {"code": "investment_case_missing", "reason": "no_report",
+                                  "message": "run the investment case first"})
+    current, why = _ic_current_assumptions()
+    st = staleness(stored, current, reason=why)
+    if st["stale"] is not False:
+        raise HTTPException(409, {"code": "investment_case_missing",
+                                  "reason": st.get("reason") or "stale",
+                                  "changed": st.get("changed") or [],
+                                  "message": "the investment case is out of date; run the "
+                                             "investment case first"})
+    return a_hash, c_hash
+
+
+def _bc_read_solve(ic_hash: str):
+    """The worker's solve read (C4): under the network lock, the IC key re-read and
+    refused if it moved since the route's check, then every linked line's series and the
+    lost production from that same live solve."""
+    def read(case, cfg):
+        from services.business_case import linked_outputs as L
+        from services.business_case.runner import StaleInvestmentCase
+
+        commercial = getattr(_state["solver_config"], "commercial", None)
+        try:
+            from models.commercial import CommercialConfig
+            bound = CommercialConfig.model_validate(commercial) if isinstance(commercial, dict) \
+                else None
+        except ValidationError:
+            bound = None
+        lock = PyPSAService.get_lock()
+        if not lock.acquire(timeout=_IC_LOCK_WAIT_S):
+            raise StaleInvestmentCase("network_busy")
+        try:
+            current, why = _ic_current_assumptions()
+            if current is None or current[0] != ic_hash:
+                raise StaleInvestmentCase(why or "inputs_changed")
+            ctx = PyPSAService.get_active_context()
+            n = ctx.network
+            solve = L.bind(ctx)
+            outputs = {ln.name: L.resolve(ln, n, solve, kw_per_gpu=cfg.kw_per_gpu,
+                                          lhv_kwh_per_kg=cfg.lhv_kwh_per_kg)
+                       for ln in cfg.inputs.lines
+                       if (ln.quantity_source or "").startswith("linked:")}
+            lost = L.lost_production(n, solve, case, bound)
+        finally:
+            lock.release()
+        return outputs, lost
+    return read
+
+
+def _bc_load_pack(case):
+    from services.finance.packs.base import load_pack
+
+    tax = case.inputs.tax_pack_id
+    return load_pack(tax, as_of=case.inputs.financial_close) if tax else None
+
+
+@results_router.get("/business_case")
+def get_business_case():
+    """The business-case run: its status (stage, refusal code and field) and the stored
+    report with its staleness (on its own inputs digest and the IC key it ran on). 204
+    when neither a run nor a report exists."""
+    from services.business_case.runner import REPORT_KEY, STUDY_KEY, staleness
+    from services.finance.investment_case_runner import public_record
+
+    record = public_record(_state.get(STUDY_KEY))
+    stored = _state.get(REPORT_KEY)
+    if not record and not stored:
+        return Response(status_code=204)
+    ic_now = (None, None)
+    if stored:
+        current, why = _ic_current_assumptions()
+        ic_now = (current[0] if current else None, why)
+    body = record or {"status": "idle", "study": STUDY_KEY}
+    body["report"] = stored
+    body["staleness"] = staleness(stored, inputs_raw=_bc_raw(), ic_current=ic_now)
+    return body
+
+
+@results_router.post("/business_case/abort")
+def post_business_case_abort():
+    """Ask a running business-case run to stop (at its next stage; stores nothing)."""
+    return _abort_study("business_case", "no business-case run has been recorded in this session")
+
+
+@results_router.post("/business_case")
+def post_business_case():
+    """Start the business-case run on the stored investment case (spec §7). 422 without
+    (valid) inputs; 409 `investment_case_missing` without a current investment-case
+    report ("run the investment case first", C3); 409 while a solve or another study
+    runs, re-checked when the run claims the mesh under the lock (C5)."""
+    from routers.simulation import _state_update
+    from services.business_case.runner import config_or_422, start_business_case
+
+    _refuse_if_mesh_busy("business_case")
+    cfg = _state["solver_config"]
+    raw = getattr(cfg, "business_case", None)
+    if raw is None:
+        raise HTTPException(422, {"code": "business_case_inputs_missing",
+                                  "message": "set the business-case lines first "
+                                             "(PUT /api/results/business_case/inputs)"})
+    bc_cfg = config_or_422(raw)
+    ic_hash, ic_case_hash = _bc_ic_check()
+    n = PyPSAService.get_network()
+    campus = _ic_read_campus(getattr(cfg, "finance", None))
+    return start_business_case(
+        bc_cfg, raw=raw, ic_hash=ic_hash, ic_case_hash=ic_case_hash,
+        rebuild_ic_case=_ic_build_case(n, cfg, owner=None, lost_load=_state.get("last_lost_load"),
+                                       campus=campus, growth_flags=_ic_growth_flags()),
+        case_hash=_ic_case_hash,
+        read_solve=_bc_read_solve(ic_hash),
+        state_update=_state_update,
+        publish_study=_publish_study,
+        load_pack=_bc_load_pack,
+        state_lock=PyPSAService.get_solver_state_lock(),
+    )
+
+
 def _workbook_scenarios(cfg, n, freshness: dict):
     """The open project's sensitivity runs and the acting user's own experiment
     cases for the results workbook (RW-SCEN-1), each read from its own saved
@@ -2545,6 +2782,15 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
 
         current, why = _ic_current_assumptions()
         case_state = staleness(report.model_dump(mode="json"), current, reason=why)
+    # Business case 08a (C7): the stored report and its staleness; never run here.
+    from services.business_case.runner import REPORT_KEY as _BC_KEY
+    from services.business_case.runner import staleness as _bc_staleness
+    bc_report = _state.get(_BC_KEY)
+    bc_state = None
+    if bc_report:
+        bc_cur, bc_why = _ic_current_assumptions()
+        bc_state = _bc_staleness(bc_report, inputs_raw=_bc_raw(),
+                                 ic_current=(bc_cur[0] if bc_cur else None, bc_why))
     # The acting user covers the build too: the views whose routes read a
     # project's files resolve each run's project for this user first.
     previous = chat_tools.acting_user_id()
@@ -2554,6 +2800,7 @@ def get_results_workbook(views: str = "", all_views: bool = Query(False, alias="
         blob = RW.build_results_workbook(RW.WorkbookInputs(
             network=n, cfg=cfg, lost_load=_state.get("last_lost_load"),
             result_df=_result_df, views=included, ic_report=report, case_state=case_state,
+            bc_report=bc_report, bc_state=bc_state,
             project=project, scope=scope, template=template, freshness=freshness,
             stored=stored, run=runs[0] if runs else None, scenarios=scenarios,
             solved_settings=_solved_settings,
