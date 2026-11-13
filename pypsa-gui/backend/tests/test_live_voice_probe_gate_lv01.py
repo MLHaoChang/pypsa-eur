@@ -472,3 +472,56 @@ def test_sanitize_redacts_secrets_from_four_characters():
 )
 def test_sanitize_jwt_rule_needs_every_conjunct(value, redacted):
     assert (hs.sanitize({"n": value}, {}) == {"n": "[redacted]"}) is redacted
+
+
+def test_transport_from_env_needs_the_url_and_the_key_too():
+    assert hs.transport_from_env(env(**{hs.LIVEKIT_URL: None})) is None
+    assert hs.transport_from_env(env(**{hs.LIVEKIT_API_KEY: None})) is None
+
+
+def test_estimate_scales_with_the_window():
+    one, two = hs.estimate_probe_usd(60), hs.estimate_probe_usd(120)
+    assert two["stt"] == pytest.approx(2 * one["stt"])
+    p = hs.PRICES_USD
+    audio_two = 2 * p["openai_tts_audio_minute"]
+    assert two["tts"] == pytest.approx(
+        audio_two + p["openai_tts_input_char"] * hs.PROBE_TTS_CHARS
+    )
+
+
+def test_unset_approval_is_none_not_empty():
+    assert hs.probe_gate({}, today=TODAY).approval is None
+
+
+@pytest.mark.parametrize(
+    "budget,kinds",
+    [
+        ("0", ["budget_invalid"]),
+        (str(hs.PLAN_CEILING_USD), []),  # the ceiling itself is allowed
+        (
+            repr(hs.estimate_probe_usd()["total"]),
+            [],
+        ),  # a budget equal to the estimate fits
+    ],
+)
+def test_budget_boundaries(budget, kinds):
+    assert hs.probe_gate(env(**{hs.PROBE_BUDGET: budget}), today=TODAY).kinds == kinds
+
+
+def test_sanitize_keeps_non_string_keys():
+    assert hs.sanitize({1: "one", "token": "x"}, {}) == {1: "one"}
+
+
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("PRICES_USD", {**hs.PRICES_USD, "deepgram_streaming_minute": 0.02}),
+        ("PRICES_CHECKED", dt.date(2026, 11, 1)),
+        ("PROBE_SECONDS", 30),
+        ("PLAN_CEILING_USD", 0.05),
+    ],
+)
+def test_config_digest_changes_with_prices_and_limits(monkeypatch, name, value):
+    before = hs.config_digest(env())
+    monkeypatch.setattr(hs, name, value)
+    assert hs.config_digest(env()) != before
