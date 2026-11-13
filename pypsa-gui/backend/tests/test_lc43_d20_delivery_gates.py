@@ -221,6 +221,13 @@ def _empty_workbook() -> bytes:
         ("bad.zip", b"PK\x03\x04junk", "csv_bundle"),
         ("bad.xlsx", b"junk", "excel"),
         ("bad.m", b"function x", "matpower"),
+        # Parses its bus, then fails on the branch row: refused, not half-imported.
+        (
+            "half.m",
+            b"mpc.bus = [\n1 3 0 0 0 0 1 1 0 110 1 1.1 0.9;\n];\n"
+            b"mpc.branch = [\n1 9 x;\n];\n",
+            "matpower",
+        ),
     ],
 )
 def test_a_malformed_import_is_refused_and_keeps_the_open_network(
