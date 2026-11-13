@@ -243,7 +243,22 @@ def _capped_words(granted, wanted):
 # goal it was judged against with where each part came from.
 LOOP_FIELDS = ("status", "solves_used", "probe_solves", "restore", "base_restored", "base_restore_status",
                "target_lole_h", "horizon_years", "draws", "basis", "goal_sources", "lever_star", "eps_star", "confident",
-               "started_at", "finished_at", "error", "network_revision")
+               "started_at", "finished_at", "error", "network_revision",
+               # Adequacy loops 04 (D3): the goal verdict's numbers.
+               "event_h", "settle_draws", "settle_reason")
+
+# Adequacy loops 04 (D3, GK A (25)): a loop whose nearest plan sits at or
+# below the goal without confidence, within one sampled shortfall hour of it.
+# Read as not evaluated with words, like the budget cut: never met, never a
+# pass.
+LOOP_NOT_CONFIDENT = "not_confident"
+
+
+def _not_confident_words(loop):
+    from services.adequacy.lole_verdict import settle_text
+    return ("the engine loop's nearest plan estimates LOLE at or below the goal, but not confidently, and one "
+            "sampled shortfall hour at the heaviest snapshot would put it above, so the rule is not evaluated; "
+            f"it never counts as met; {settle_text(loop)}")
 
 
 def converged(record) -> bool:
@@ -294,6 +309,8 @@ def _loop_converged(env, rule):
         wanted = min(wanted, MAX_LOOP_SOLVES)
         if granted < wanted:  # GK B (47) Q4: the cap, not the loop's own budget, ended it
             return NoEvidence(LOOP_BUDGET_SPENT, _capped_words(granted, wanted))
+    if loop.get("status") == LOOP_NOT_CONFIDENT:
+        return NoEvidence(LOOP_NOT_CONFIDENT, _not_confident_words(loop))
     return Looped(converged(loop), {k: loop[k] for k in LOOP_FIELDS if k in loop})
 
 

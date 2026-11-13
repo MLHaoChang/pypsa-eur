@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import math
 
-__all__ = ["event_hours", "lole_verdict"]
+__all__ = ["event_hours", "goal_fields", "lole_verdict", "not_confident_copy", "settle_text"]
 
 
 def event_hours(weights, n_samples) -> float | None:
@@ -84,3 +84,42 @@ def lole_verdict(lole_h, lole_ci, target_h, event_h, n_samples, max_draws) -> di
         lole, hi, target, int(n_samples), int(max_draws)
     )
     return out
+
+
+def settle_text(goal: dict) -> str:
+    """What would settle a ``not_confident`` verdict, in words (D5)."""
+    if goal.get("settle_draws") is not None:
+        return (f"~{int(goal['settle_draws'])} draws if the mean and spread "
+                "hold would settle it")
+    return f"more draws alone will not settle it ({goal.get('settle_reason')})"
+
+
+def not_confident_copy(mc: dict, target_h: float, lever: str) -> str:
+    """A loop's verdict for status ``not_confident``: the nearest iterate's
+    ``mc`` block (with its ``goal``) against the goal. ``lever`` names the
+    iterate's setting, e.g. ``"ε = 0.035‱"``. The loop restores the user's
+    own config on this status (adequacy loops 04, D4)."""
+    goal = mc["goal"]
+    hi = mc["lole_ci"][1]
+    event = goal.get("event_h")
+    event_clause = (
+        f"one sampled shortfall hour at the heaviest snapshot "
+        f"({float(event):.3g} h) would put it above"
+        if event is not None else
+        "the MC did not report what one sampled shortfall hour is worth")
+    return (
+        f"Not confident: no plan was verified against {target_h:g} h. The "
+        f"nearest, at {lever}, estimates {float(mc['lole_hours']):.3g} h, at "
+        f"or below the goal, but its 95% interval reaches {float(hi):.3g} h "
+        f"and {event_clause}, so it is not a pass; "
+        f"{settle_text(goal)}. Your original config has been re-solved, so "
+        "the network you are holding is your own plan, not that one.")
+
+
+def goal_fields(nearest, final) -> dict:
+    """A finished loop record's ``event_h`` / ``settle_draws`` /
+    ``settle_reason``: the nearest iterate's goal verdict when the loop ended
+    not confident, else the final iterate's, else all None."""
+    row = nearest if nearest is not None else final
+    goal = ((row or {}).get("mc") or {}).get("goal") or {}
+    return {k: goal.get(k) for k in ("event_h", "settle_draws", "settle_reason")}

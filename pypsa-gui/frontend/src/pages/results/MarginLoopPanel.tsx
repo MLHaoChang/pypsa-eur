@@ -135,6 +135,8 @@ export function ceilingLabel(fleet: number | null,
 const STATUS_CLASS: Record<string, string> = {
   running: 'bg-panel border border-border text-muted',
   met: 'bg-accent/10 text-accent',
+  // Adequacy loops 04: at or below the goal but not confidently; never met.
+  not_confident: 'bg-warn/10 text-warn',
   unreachable: 'bg-warn/10 text-warn',
   budget_exhausted: 'bg-warn/10 text-warn',
   aborted: 'bg-panel border border-border text-muted',

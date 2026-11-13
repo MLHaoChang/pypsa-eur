@@ -101,3 +101,42 @@ def test_event_h_uses_the_generator_weights_and_the_draws_that_ran():
     n = m["n_samples"]
     assert n < 2000  # stopped early
     assert m["event_h"] == pytest.approx(730.0 / n)
+
+
+# ── the words a not-confident loop ends on (D4/D5) ─────────────────────────
+
+def _nc_mc(settle_draws=1200, reason=None, event_h=0.73):
+    return {"lole_hours": 1.46, "lole_ci": [0.2, 3.5],
+            "goal": {"verdict": "not_confident", "confident": False,
+                     "event_h": event_h, "settle_draws": settle_draws,
+                     "settle_reason": reason}}
+
+
+def test_the_not_confident_copy_names_the_settle_and_the_network_left():
+    from services.adequacy.lole_verdict import not_confident_copy
+    text = not_confident_copy(_nc_mc(), 2.0, "ε = 0.035‱")
+    assert text.startswith("Not confident")
+    assert "one sampled shortfall hour at the heaviest snapshot (0.73 h)" in text
+    assert "~1200 draws if the mean and spread hold" in text
+    assert "not a pass" in text
+    assert "your own plan, not that one" in text
+
+
+def test_the_not_confident_copy_says_when_draws_alone_cannot_settle_it():
+    from services.adequacy.lole_verdict import not_confident_copy
+    text = not_confident_copy(
+        _nc_mc(None, "beyond the engine cap of 2000 draws", None), 2.0, "x")
+    assert "beyond the engine cap of 2000 draws" in text
+    assert "did not report" in text
+
+
+def test_goal_fields_prefer_the_nearest_iterate():
+    from services.adequacy.lole_verdict import goal_fields
+    near = {"mc": _nc_mc()}
+    final = {"mc": {"goal": {"event_h": 0.1, "settle_draws": None,
+                             "settle_reason": None}}}
+    assert goal_fields(near, final) == {"event_h": 0.73, "settle_draws": 1200,
+                                        "settle_reason": None}
+    assert goal_fields(None, final)["event_h"] == 0.1
+    assert goal_fields(None, None) == {"event_h": None, "settle_draws": None,
+                                       "settle_reason": None}

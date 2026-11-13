@@ -32,6 +32,7 @@ import pytest
 
 from services.adequacy.coupling import (
     ENERGY_FLOOR_MWH,
+    LOOP_STATUSES,
     EPS_FLOOR_PERMYRIAD,
     MAX_LOOP_SOLVES,
     run_coupling_loop,
@@ -53,7 +54,8 @@ def _solve_result(**kw) -> dict:
     return base
 
 
-def _metrics(lole: float, *, ci=None, eue=None, n_samples=200) -> dict:
+def _metrics(lole: float, *, ci=None, eue=None, n_samples=200,
+             event_h=None) -> dict:
     """`mc.mc_adequacy`'s dict. The keys the spec's `mc` block does NOT list
     (`converged`, `time_basis`, `resolution_floor_h`, `warning`) are present
     on purpose: the controller must project, not forward."""
@@ -67,6 +69,7 @@ def _metrics(lole: float, *, ci=None, eue=None, n_samples=200) -> dict:
         "eue_ci": (max(0.0, eue - 10.0), eue + 10.0),
         "by_period": {"ALL": {"lole_hours": lole, "eue_mwh": eue}},
         "n_samples": int(n_samples),
+        "event_h": event_h,
         "converged": True,
         "time_basis": "hours_per_horizon",
         "horizon_years": 0.00137,
@@ -121,7 +124,8 @@ class Fake:
         self.eval_hashes.append(h)
         step = self._pending
         return h, _metrics(step["lole"], ci=step.get("ci"),
-                           n_samples=step.get("n_samples", 200))
+                           n_samples=step.get("n_samples", 200),
+                           event_h=step.get("event_h"))
 
     def probing_evaluate(self):
         """The same `evaluate`, carrying the optional cheap plan-hash probe
@@ -544,22 +548,24 @@ def test_a_probe_that_raises_falls_back_to_solving():
 
 # ── ★ the stopping band ───────────────────────────────────────────────────
 
-def test_met_is_the_mean_and_the_interval_only_reports_confidence():
-    """★ Spec §2's band, plan [S11]. `met` is the MEAN against the target;
-    the 95% interval is REPORTED as `confident`, never iterated for — the
-    interval's width is a draws decision, and tightening the cap to buy
-    confidence spends solves on a question more draws answer.
+def test_met_is_lole_verdict_and_the_interval_only_reports_confidence():
+    """★ Spec §2's band, plan [S11], as adequacy loops 04 (GK A (25)) amends
+    it: `met` is `lole_verdict`'s pass. A mean at or below the target whose
+    interval straddles it still passes when one more sampled shortfall hour
+    at the heaviest snapshot (`event_h`) leaves it at or below; `confident`
+    stays a report.
 
     BROKEN VARIANT (bite): require `lole_ci[1] <= target` for `met` — the run
     below keeps tightening past an iterate that already meets the standard.
     """
-    fake = Fake([{"hash": "A", "lole": 2.9, "ci": (1.0, 4.0)}],
+    fake = Fake([{"hash": "A", "lole": 2.9, "ci": (1.0, 4.0), "event_h": 0.1}],
                 tail={"hash": "B", "lole": 1.0, "ci": (0.5, 1.5)})
     res = _run(fake, target=3.0, eps0=100.0)
 
     assert res["status"] == "met"
     assert res["solves_used"] == 1
     assert res["confident"] is False
+    assert res["iterations"][0]["mc"]["goal"]["verdict"] == "pass"
 
     tight = Fake([{"hash": "A", "lole": 2.0, "ci": (1.5, 2.5)}],
                  tail={"hash": "B", "lole": 1.0})
@@ -724,14 +730,15 @@ def test_the_rows_and_the_result_carry_exactly_the_spec_keys():
     fake = Fake([{"hash": "A", "lole": 1.0}], tail={"hash": "A", "lole": 1.0})
     res = _run(fake, target=3.0, eps0=100.0)
 
-    assert set(res) == {"status", "iterations", "final", "confident",
-                        "eps_star", "solves_used"}
+    assert set(res) == {"status", "iterations", "final", "nearest",
+                        "confident", "eps_star", "solves_used"}
     row = res["iterations"][0]
     assert set(row) == {"eps_permyriad", "solve_status", "condition",
                         "cost_eur", "ens_mwh", "cap_mwh", "binding",
                         "plateau", "mc"}
     assert set(row["mc"]) == {"engine", "fidelity", "lole_hours", "lole_ci",
-                              "eue_mwh", "eue_ci", "n_samples", "by_period"}
+                              "eue_mwh", "eue_ci", "n_samples", "event_h",
+                              "by_period", "goal"}
     assert row["mc"]["engine"] == "mc"
     assert row["mc"]["fidelity"] == "sequential_mc"
     assert row["mc"]["by_period"] == {"ALL": {"lole_hours": 1.0,
@@ -865,3 +872,69 @@ def test_the_live_loop_lands_a_met_plan_that_costs_strictly_more():
     # every solve the loop paid for is on the record
     assert len(rows) == res["solves_used"]
     assert all(r["eps_permyriad"] > 0 for r in rows)
+
+
+# ── adequacy loops 04: a not-confident estimate is not a pass ──────────────
+
+def test_a_not_confident_iterate_keeps_the_search_going():
+    """GK A (25): the loop keeps searching on not_confident (not a relabel).
+    lole 2.9 against 3.0 with the interval straddling and one sampled hour
+    worth 0.2 h is not a pass; the next, tighter iterate is.
+
+    BROKEN VARIANT (bite): read the mean alone — stops at one solve."""
+    fake = Fake([{"hash": "A", "lole": 2.9, "ci": (1.0, 4.0), "event_h": 0.2,
+                  "cost_eur": 100.0}],
+                tail={"hash": "B", "lole": 1.0, "ci": (0.5, 1.5), "cost_eur": 200.0})
+    res = _run(fake, target=3.0, eps0=100.0)
+
+    assert res["iterations"][0]["mc"]["goal"]["verdict"] == "not_confident"
+    assert res["status"] == "met"
+    assert res["solves_used"] >= 2
+    assert res["final"]["mc"]["lole_hours"] == 1.0
+    assert res["nearest"] is None
+
+
+def test_the_cheapest_not_confident_iterate_never_beats_a_dearer_pass():
+    """D2: `verified` filters on verdict == pass. A cheaper not-confident
+    iterate at or below the goal is never `final`; the dearer pass is.
+
+    BROKEN VARIANT (bite): verify on `lole_hours <= target` — final would be
+    the cheaper not-confident plan."""
+    fake = Fake([{"hash": "A", "lole": 2.9, "ci": (1.0, 4.0), "event_h": 0.2,
+                  "cost_eur": 100.0},
+                 {"hash": "B", "lole": 1.0, "ci": (0.5, 1.5), "cost_eur": 200.0}],
+                tail={"hash": "B", "lole": 1.0, "ci": (0.5, 1.5), "cost_eur": 200.0})
+    res = _run(fake, target=3.0, eps0=100.0, max_solves=8)
+
+    assert res["status"] == "met"
+    assert res["final"]["cost_eur"] == 200.0
+    assert res["final"]["mc"]["goal"]["verdict"] == "pass"
+
+
+def test_only_not_confident_iterates_read_not_confident_never_met():
+    """D3/D4: with no pass, a held not-confident iterate makes the status
+    "not_confident" — not met, not budget_exhausted — `final` is None and the
+    iterate is reported as `nearest`, with the draws that would settle it."""
+    fake = Fake([], tail={"hash": "A", "lole": 2.9, "ci": (1.0, 4.0),
+                          "event_h": 0.2, "n_samples": 500})
+    res = _run(fake, target=3.0, eps0=100.0, max_solves=3)
+
+    assert res["status"] == "not_confident"
+    assert res["status"] in LOOP_STATUSES
+    assert res["final"] is None
+    assert res["eps_star"] is None
+    assert res["confident"] is False
+    goal = res["nearest"]["mc"]["goal"]
+    assert goal["verdict"] == "not_confident"
+    # ceil(500 · ((4.0 − 2.9) / (3.0 − 2.9))²) = 60500 > MAX_DRAWS
+    assert goal["settle_draws"] is None
+    assert "beyond the engine cap" in goal["settle_reason"]
+
+
+def test_a_miss_only_run_is_not_relabelled_not_confident():
+    """A run whose iterates all miss keeps its old verdict."""
+    fake = Fake([], tail={"hash": "A", "lole": 5.0, "ci": (4.0, 6.0),
+                          "event_h": 0.2})
+    res = _run(fake, target=3.0, eps0=100.0, max_solves=3)
+    assert res["status"] != "not_confident"
+    assert res["nearest"] is None

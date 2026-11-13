@@ -20,6 +20,7 @@ from models.schemas import Finite as _Finite
 from services.adequacy.campaign import unsupported_scope as _unsupported_scope
 from services.adequacy.link_supply import nothing_to_sample, sampled_fleet
 from services.adequacy.coupling import snapshot_hash as _snapshot_hash
+from services.adequacy.lole_verdict import goal_fields, not_confident_copy
 from services.pypsa_service import PyPSAService
 
 logger = logging.getLogger("pypsa_gui.results")
@@ -708,6 +709,7 @@ def start_margin_loop(
         "probe_solves": 0,
         "iterations": [],
         "final": None,
+        "nearest": None,
         "verdict": None,
         "warning": MC_WARNING_V1 + " " + MARGIN_LOOP_WARNING_V1,
         "error": None,
@@ -734,10 +736,11 @@ def start_margin_loop(
         # Did the iterate that just finished sit AT the ceiling and miss? If
         # so no stricter margin exists to try, and `solve_at` refuses the next
         # request outright rather than clamping to the same plan forever.
+        # Adequacy loops 04: a not-confident iterate keeps the search going
+        # like a miss, so at the ceiling it leaves nothing stricter to try.
         mc = row.get("mc") or {}
-        lole = mc.get("lole_hours")
-        if (_last_at_ceiling[0] and lole is not None
-                and float(lole) > target):
+        verdict = (mc.get("goal") or {}).get("verdict")
+        if _last_at_ceiling[0] and verdict in ("miss", "not_confident"):
             _ceiling_missed[0] = True
         with PyPSAService.get_solver_state_lock():
             record["iterations"] = record["iterations"] + [_translate(row)]
@@ -810,7 +813,13 @@ def start_margin_loop(
             "force for every iterate and was never rewritten, so the "
             "certified plan meets BOTH standards.")
 
-    def _verdict_copy(status: str, m_star, rows=None) -> str:
+    def _verdict_copy(status: str, m_star, rows=None, nearest=None) -> str:
+        if status == "not_confident" and nearest is not None:
+            # Adequacy loops 04 (D3/D4): never met, and the closing restore
+            # put the user's own config back (`_restore_closing(False, …)`).
+            return not_confident_copy(
+                nearest["mc"], target,
+                f"a reserve margin of {nearest['lever_value']:.1%}")
         if status == "met" and m_star is not None:
             if restore == "final":
                 return (
@@ -909,6 +918,9 @@ def start_margin_loop(
                     logger.exception("margin loop: unusable eps_star %r",
                                      x_star)
             try:
+                # Only "met" keeps the plan; "not_confident" (adequacy loops
+                # 04, D4) restores the user's own config like every other
+                # status, since its nearest iterate is not the met plan.
                 base_restored = _restore_closing(status == "met", m_star)
             except BaseException:                             # noqa: BLE001
                 logger.exception("margin loop: the restore itself raised")
@@ -919,6 +931,7 @@ def start_margin_loop(
             topology.close()
 
             src_rows = (res or {}).get("iterations")
+            nearest_out = None
             if src_rows is None:
                 rows_out = record["iterations"]
                 final_out = None
@@ -932,6 +945,10 @@ def start_margin_loop(
                 final_out = next(
                     (out for src, out in zip(src_rows, rows_out)
                      if src is final_src), None)
+                nearest_src = (res or {}).get("nearest")
+                nearest_out = next(
+                    (out for src, out in zip(src_rows, rows_out)
+                     if src is nearest_src), None)
 
             warning = MC_WARNING_V1 + " " + MARGIN_LOOP_WARNING_V1
             if any(len((r.get("mc") or {}).get("by_period") or {}) > 1
@@ -946,13 +963,18 @@ def start_margin_loop(
                     status=status,
                     iterations=rows_out,
                     final=final_out,
+                    nearest=nearest_out,
                     confident=bool((res or {}).get("confident")),
+                    # Adequacy loops 04 (D3): the goal verdict's numbers the
+                    # gate reads, from the nearest (not-confident) or final
+                    # iterate.
+                    **goal_fields(nearest_out, final_out),
                     lever_star=m_star,
                     solves_used=int((res or {}).get("solves_used") or 0),
                     resolution_floor_h=eval_state["floor"],
                     base_restored=bool(base_restored),
                     base_restore_status=_restore_word[0],
-                    verdict=_verdict_copy(status, m_star, rows_out),
+                    verdict=_verdict_copy(status, m_star, rows_out, nearest_out),
                     warning=warning,
                     error=err,
                     finished_at=time.time(),

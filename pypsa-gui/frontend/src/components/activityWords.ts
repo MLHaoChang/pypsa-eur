@@ -100,7 +100,7 @@ export const activityModeWord = (m: string): string => ACTIVITY_MODE_WORDS[m] ??
 
 /** Plain words for the source's own end state where it says more than the plain status (met, refused, expired…). */
 export const NATIVE_OUTCOME_WORDS: Record<string, string> = {
-  met: 'Target met', budget_exhausted: 'Budget used up', unreachable: 'Could not be reached', refused: 'Refused',
+  met: 'Target met', not_confident: 'Not confident', budget_exhausted: 'Budget used up', unreachable: 'Could not be reached', refused: 'Refused',
   aborted: 'Stopped', rejected: 'Denied', expired: 'Expired', revoked: 'Withdrawn',
   followed_up: 'Followed up', superseded: 'Replaced',
 }

@@ -1911,3 +1911,20 @@ def test_the_hand_off_run_on_each_template(
     assert passed <= run_profiles.mg_pass_solves(k) == 5
     assert run_envelope.solves_used(envelope) == passed + looped == 6
     assert envelope["budget"]["solves"] == run_profiles.mg_budget(k) == 19
+
+
+def test_a_not_confident_lole_loop_is_not_evaluated_and_never_met(tmp_path):
+    """Adequacy loops 04 (D3, GK A (25)): a loop that ended `not_confident`
+    reads its own not-evaluated state with words, names the draws that would
+    settle it, and never counts as met."""
+    path, lole, granted = _capped_lole(tmp_path)
+    task = json.loads(path.read_text())
+    step = _looped(lole, granted, status="not_confident")
+    step["result"]["loop"].update(event_h=0.73, settle_draws=1200, settle_reason=None)
+    task["steps"].append(step)
+    [result] = run_gates.evaluate([lole], run_gates.Env(task, None, None, None))
+    assert result["verdict"] == "not_evaluated"
+    assert result["facts"][0]["value"] == run_gates.LOOP_NOT_CONFIDENT == "not_confident"
+    assert "never counts as met" in result["reason"]
+    assert "~1200 draws if the mean and spread hold" in result["reason"]
+    assert not run_gates.converged({"status": "not_confident"})
