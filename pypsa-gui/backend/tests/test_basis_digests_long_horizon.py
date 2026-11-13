@@ -7,6 +7,7 @@
 network (77,790 bytes) could never be compared.
 """
 
+# ruff: noqa: F811 -- shared pytest fixtures
 import hashlib
 import json
 from types import SimpleNamespace
@@ -139,7 +140,7 @@ def test_a_change_in_snapshot_weightings_changes_the_weights_digest():
     assert after["snapshots_sha256"] == before["snapshots_sha256"]
 
 
-def test_a_long_horizon_case_compares_with_its_base_end_to_end(baseline):  # noqa: F811
+def test_a_long_horizon_case_compares_with_its_base_end_to_end(baseline):
     """The chat comparison reads both projects' basis digests; past 64 KiB of
     snapshot index it used to answer 422 for the base."""
     from tests.test_sensitivity_comparison import (
@@ -163,3 +164,66 @@ def test_a_long_horizon_case_compares_with_its_base_end_to_end(baseline):  # noq
     assert case["project_id"] == ids["Gas 20"]
     assert "not_comparable" not in case, case.get("not_comparable")
     assert case["values"]["opex_meur"]["delta"] is not None
+
+
+def _deep(depth=100_000):
+    value = []
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
+def test_a_too_deep_basis_is_refused_like_a_plan():
+    """GK B T3: the same caught set, RecursionError included."""
+    for digest in (ec._basis_digest, ex._digest):
+        with pytest.raises(HTTPException) as err:
+            digest(_deep())
+        assert (err.value.status_code, err.value.detail["error_kind"]) == (
+            422,
+            "invalid_experiment",
+        )
+
+
+def test_a_solver_config_past_the_plan_limit_is_still_refused():
+    """GK B T2: the solver config keeps the plan's 64 KiB limit."""
+    saved = _saved(_hours(24))
+    saved.solver_state["solver_config"] = {
+        "solver_options": {"note": "x" * ex.MAX_RECORD_BYTES}
+    }
+    with pytest.raises(HTTPException) as err:
+        ec.basis_digests(saved)
+    assert err.value.status_code == 422
+
+
+def test_an_over_cap_case_reads_unavailable_in_the_experiment_comparison(
+    baseline, monkeypatch
+):
+    """GK B T1: where `_case` catches the refusal, the case is unavailable and
+    nothing is compared."""
+    from tests.test_experiment_comparison import completed_case
+    from tests.test_sensitivity_comparison import tool
+
+    low, _ = completed_case(20, "low")
+    high, _ = completed_case(30, "high")
+    monkeypatch.setattr(ec, "MAX_BASIS_BYTES", 16)
+    report = tool("compare_experiments", experiment_id=high, baseline_experiment_id=low)
+    assert not report["comparable"]
+    assert report["case"]["status"] == "unavailable"
+    assert report["case"]["last_error"] == "experiment_source_unavailable"
+    assert report.get("deltas") in (None, {})
+
+
+def test_an_over_cap_basis_is_a_typed_422_from_the_sensitivity_tool(
+    baseline, monkeypatch
+):
+    """GK B T1: the chat tool answers the typed refusal, never a 500."""
+    from tests.test_sensitivity_comparison import refused, solve, sweep
+
+    _ctx, base_id, _root = baseline
+    solve(base_id)
+    sweep(base_id, 20)
+    monkeypatch.setattr(ec, "MAX_BASIS_BYTES", 16)
+    detail = refused(
+        "invalid_experiment", 422, "compare_sensitivities", baseline_project_id=base_id
+    )
+    assert detail["message"] == "The run's horizon is too large to compare."
