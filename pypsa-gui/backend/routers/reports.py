@@ -598,6 +598,17 @@ def export_report(report_id: str, body: ExportReportBody,
                            "report's latest mapping. Map the template again, then export.",
             })
         plan = meta.mapping_plan
+        if (plan is not None and doc.version < meta.latest_version
+                and templates.read_outline(template).mode != "tagged"):
+            # The meta keeps one mapping plan, the latest version's; none is stored per
+            # version, so an older version would borrow a plan made for a later outline.
+            raise HTTPException(409, {
+                "error_kind": "report_settings_unrecorded",
+                "message": f"The template mapping that applied to version {doc.version} was not "
+                           "kept: the report stores only its latest mapping "
+                           f"(version {meta.latest_version}). Export the latest version, or "
+                           "map the template again.",
+            })
     try:
         data, _mode = templates.render_with_template(
             doc, template, figure_bytes=figure_bytes, plan=plan)
