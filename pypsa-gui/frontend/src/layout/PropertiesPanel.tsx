@@ -39,7 +39,7 @@ import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
 import { useAssetSchema } from '../hooks/useAssetSchema'
 import { useAssetProvenance } from '../hooks/useAssetProvenance'
 import { buildPatch, seedForm } from '../utils/assetForm'
-import { AssetFieldsEdit, assetReadoutItems, fieldHelp, schemaFields } from './properties/AssetFields'
+import { AssetFieldsEdit, assetReadoutItems, fieldHelp, fieldUnit, schemaFields } from './properties/AssetFields'
 import { useSaveAction } from '../components/memory/ParameterMemory'
 import { GuideButton } from '../components/GuidedTour'
 import CarrierPanel from './properties/CarrierPanel'
@@ -147,7 +147,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost; the annualised capital cost is
   // derived (overnight × annuity + fixed O&M) and shown read-only.
-  const { data: schema } = useAssetSchema('Generator')
+  const { data: schema } = useAssetSchema('Generator', gen.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Generator', gen.name)
   const editors = generatorSeriesEditors(profilesRead ? genMeta?.category ?? 'other' : undefined)
@@ -260,7 +260,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={gen.name} badge={gen.carrier}
-        meta={`${gen.p_nom?.toFixed(0) ?? '—'} MW${gen.marginal_cost > 0 ? ` · MC ${gen.marginal_cost} €/MWh` : ''}${gen.p_nom_extendable ? ' · extendable' : ''}`}
+        meta={`${gen.p_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'p_nom', 'MW')}${gen.marginal_cost > 0 ? ` · MC ${gen.marginal_cost} €/MWh` : ''}${gen.p_nom_extendable ? ' · extendable' : ''}`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
@@ -331,7 +331,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
   // A battery is typed as its two overnight parts; capital cost, lifetime and
   // fixed O&M are derived from them and shown read-only.
-  const { data: schema } = useAssetSchema('StorageUnit')
+  const { data: schema } = useAssetSchema('StorageUnit', su.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('StorageUnit', su.name)
   // Same query as the panel's Inflow section: a battery has no inflow editor, so no "Constant inflow" row.
@@ -437,7 +437,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={su.name} badge={su.carrier}
-        meta={`${su.p_nom?.toFixed(0) ?? '—'} MW · ${su.max_hours}h · η ${((su.efficiency_dispatch ?? 1) * 100).toFixed(0)}%`}
+        meta={`${su.p_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'p_nom', 'MW')} · ${su.max_hours}h · η ${((su.efficiency_dispatch ?? 1) * 100).toFixed(0)}%`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
@@ -504,7 +504,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kWh; the annualised capital
   // cost is derived and shown read-only.
-  const { data: schema } = useAssetSchema('Store')
+  const { data: schema } = useAssetSchema('Store', store.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Store', store.name)
   const specs = schemaFields(schema)
@@ -586,7 +586,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={store.name} badge={store.carrier}
-        meta={`${store.e_nom?.toFixed(0) ?? '—'} MWh${store.e_nom_extendable ? ' · extendable' : ''}${isH2Store ? ` ≈ ${((store.e_nom ?? 0) / 0.0336).toFixed(0)} kg H₂` : ''}`}
+        meta={`${store.e_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'e_nom', 'MWh')}${store.e_nom_extendable ? ' · extendable' : ''}${isH2Store && fieldUnit(schema, 'e_nom', 'MWh') === 'MWh' ? ` ≈ ${((store.e_nom ?? 0) / 0.0336).toFixed(0)} kg H₂` : ''}`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
@@ -599,7 +599,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   return (
     <EditShell title={store.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
       <div className="col-span-2 text-[9px] text-muted bg-border/20 rounded px-2 py-1.5 leading-tight">
-        {isH2Store
+        {isH2Store && fieldUnit(schema, 'e_nom', 'MWh') === 'MWh'
           ? <>A <strong>Store</strong> is a pure energy vessel — power throughput is unlimited and bounded only by connected Links (electrolyzers/fuel cells). Set the energy capacity for the tank. 1 MWh ≈ 29.8 kg H₂ (LHV).</>
           : <>A <strong>Store</strong> has no intrinsic power limit — charge/discharge rate is set by connected components. Only the energy capacity constrains storage.</>}
       </div>
@@ -667,7 +667,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   })
 
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
-  const { data: schema } = useAssetSchema('Load')
+  const { data: schema } = useAssetSchema('Load', load.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Load', load.name)
   const series = useSeriesFields(currentProject, 'loads', load.name, { p_set: 'Profile' })
@@ -750,7 +750,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={load.name} badge={load.carrier}
-        meta={`P = ${load.p_set?.toFixed(1) ?? '—'} MW${load.q_set ? ` · Q = ${load.q_set.toFixed(1)} MVAr` : ''}`}
+        meta={`P = ${load.p_set?.toFixed(1) ?? '—'} ${fieldUnit(schema, 'p_set', 'MW')}${load.q_set ? ` · Q = ${load.q_set.toFixed(1)} MVAr` : ''}`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
@@ -785,7 +785,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
         </div>
         <span className="text-xs text-muted">
           {hasProfile && profileMeta.has_profile
-            ? `Profile loaded · ${profileMeta.rows} pts · peak ${profileMeta.peak?.toFixed(1)} MW`
+            ? `Profile loaded · ${profileMeta.rows} pts · peak ${profileMeta.peak?.toFixed(1)} ${fieldUnit(schema, 'p_set', 'MW')}`
             : 'No profile — static p_set used'}
         </span>
       </div>
@@ -867,7 +867,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kW of input; the annualised
   // capital cost is derived and shown read-only.
-  const { data: schema } = useAssetSchema('Link')
+  const { data: schema } = useAssetSchema('Link', link.name)
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Link', link.name)
   const series = useSeriesFields(currentProject, 'links', link.name, {
@@ -994,7 +994,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
     return (
       <CardShell
         title={link.name} badge={link.carrier}
-        meta={`${link.p_nom?.toFixed(0) ?? '—'} MW · η ${((link.efficiency ?? 1) * 100).toFixed(0)}% · ${flowLabel}`}
+        meta={`${link.p_nom?.toFixed(0) ?? '—'} ${fieldUnit(schema, 'p_nom', 'MW')} · η ${((link.efficiency ?? 1) * 100).toFixed(0)}% · ${flowLabel}`}
         onEdit={startEdit}
         onDelete={() => delMut.mutate()}
         delPending={delMut.isPending}
