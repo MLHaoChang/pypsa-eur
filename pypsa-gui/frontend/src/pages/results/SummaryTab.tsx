@@ -12,7 +12,7 @@ import { resultsApi, simulationApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { useResultsFilter } from './filterContext'
-import { fmtCurrency, fmtEnergy } from './shared'
+import { COST_UNAVAILABLE, fmtCurrency, fmtEnergy } from './shared'
 import { kpiFigure, splitValueUnit } from '../../utils/format'
 import {
   capacityRows, costView, emissionsView, reserveMarginVerdict,
@@ -200,9 +200,12 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
               {!inStrip('system_cost') && <Headline value={fmtCurrency(c.total)} sub="total system cost in this solve" />}
               <Line label={COST_WORDS.capital} value={fmtCurrency(c.capital)} />
               <Line label="Operating cost" value={fmtCurrency(c.operating)} />
-              {c.newBuild != null && !inStrip('new_build_capital') && (
+              {/* Horizon only (new build is not split per period). A null on
+                  the horizon is a failed expansion compute: it reads as
+                  unavailable, never a missing line (ui-modern 06). */}
+              {c.period == null && !inStrip('new_build_capital') && (
                 <span title="Annualised capital of capacity this solve built: max(0, optimal − installed) × capital cost, as on the Capacity expansion tab.">
-                  <Line label="of which new build" value={fmtCurrency(c.newBuild)} />
+                  <Line label="of which new build" value={c.newBuild == null ? COST_UNAVAILABLE : fmtCurrency(c.newBuild)} />
                 </span>
               )}
             </>

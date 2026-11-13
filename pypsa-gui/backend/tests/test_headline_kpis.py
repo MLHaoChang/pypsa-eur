@@ -1126,7 +1126,9 @@ def test_the_trend_of_a_solved_multi_period_run_adds_up_with_uneven_periods(
     assert sum(p["value"] for p in points) == pytest.approx(system["value"])
 
 
-def test_a_failed_expansion_compute_is_unavailable_not_a_zero(windy, client, monkeypatch):
+def test_a_failed_expansion_compute_is_unavailable_not_a_zero(
+    windy, client, monkeypatch
+):
     """ui-modern 06: the expansion CAPEX loop raising leaves no figure, never 0.00."""
     from services.results import cost_breakdown as cb
 
@@ -1149,5 +1151,9 @@ def test_a_failed_expansion_compute_is_unavailable_not_a_zero(windy, client, mon
     assert isinstance(cost["capex"], float) and isinstance(cost["total"], float)
     _, by_id, _ = cards(client)
     card = by_id["new_build_capital"]
-    assert (card["state"], card["value"], card["reason"]) == ("unavailable", None, hk.FIGURE_NOT_COMPUTED)
+    assert (card["state"], card["value"], card["reason"]) == (
+        "unavailable",
+        None,
+        hk.FIGURE_NOT_COMPUTED,
+    )
     assert by_id["system_cost"]["state"] != "unavailable"

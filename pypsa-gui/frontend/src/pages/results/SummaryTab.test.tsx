@@ -129,6 +129,15 @@ describe('the Summary tab (M3)', () => {
     expect(onOpen.mock.calls.map(c => c[0])).toEqual(['emissions', 'adequacy', 'capex'])
   })
 
+  it('a failed expansion compute reads as unavailable, not a missing line (ui-modern 06)', async () => {
+    api.getCostBreakdown.mockResolvedValue({ ...COST, capex_expansion: null })
+    renderTab()
+    const cost = await screen.findByTestId('summary-cost')
+    await waitFor(() => expect(cost.textContent).toContain('of which new build'))
+    expect(cost.textContent).toContain('unavailable')
+    expect(cost.textContent).not.toContain('€0')
+  })
+
   it('before any solve it says there is nothing yet', async () => {
     for (const f of [api.getCostBreakdown, api.getEmissions, api.getStatistics, api.getLostLoad]) f.mockResolvedValue(null)
     renderTab()
