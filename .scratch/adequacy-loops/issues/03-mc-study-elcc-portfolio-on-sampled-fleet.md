@@ -3,7 +3,7 @@
 
 # 03 — The MC study, ELCC and the portfolio sample the Link-aware fleet
 
-Status: ready-for-agent
+Status: done
 Model tier: opus
 Size: L
 Blocked by: none (01 done, #1341)
@@ -39,3 +39,4 @@ Two gaps follow:
   - C5 candidates <-> resolve both ways on each EH template; no grid-side candidate; grid-side generator, vre, storage_unit requests are 422s naming the import Link(s).
   - C6 the has_process note names what is sampled (trusted import Links, credited firm backup) and what is not (process Links, withheld converters).
   - C7 before/after per EH template includes ELCC and portfolio outcomes and names every refusal→verdict change; mutants on link_supply, elcc, mc_loop_runner, portfolio, including the excluded_buses tests.
+- 2026-11-13 done: PR #1456 merged (head 378d0af34f67045f807e622a4c66ae8329f1b9c6, GK OK @378d0af3). Hand-off: the MC study, ELCC and the portfolio sample `link_supply`'s fleet (`loop_scope` / `fleet_side` / `assemble_fleet`); grid-side assets and unsampled Links are refused by name; the portfolio leaves grid-side margin rows out by scope (C1). Follow-ups: a test killing the `activity_summary(n)`-for-`side` mutant (a grid-side vintage masked in one period must not appear in the disclosure; GK A, non-blocking); 4 link_supply mutants not run within the cap; the C1 path has fixture evidence only (no shipped template carries a margin payload without a solve). Before/after table: `doc/release-notes.d/claude-adequacy-03-mc-sampled-fleet.md`.
