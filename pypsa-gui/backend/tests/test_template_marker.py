@@ -906,3 +906,135 @@ def test_solve_capture_has_no_direct_read_outside_sidecars():
 
 def test_the_guard_passes_the_helper():
     assert _direct_uses("p = template_marker.source_path(d)") == []
+
+
+# ── UM10-UNDO-1: the edges of the key-scoped restore (mutant survivors) ─────
+
+
+@pytest.fixture
+def active_base(eh_base, monkeypatch):
+    from services import network_lengths
+
+    monkeypatch.setattr(network_lengths, "active_project_dir", lambda: eh_base.dir)
+    return eh_base
+
+
+def test_undo_on_a_template_project_restores_the_rows_and_keeps_the_rest(active_base):
+    from services import growth_placeholders as gp
+
+    snapshot = gp.snapshot_meta()
+    later = {**active_base.meta, "growth_inputs": [], "note": "a later write"}
+    gp._write(gp._own_meta_path(), later)
+    assert gp.restore_meta(snapshot) is None
+    got = json.loads((active_base.dir / tm.MARKER_FILE).read_text())
+    assert got == {**later, "growth_inputs": active_base.meta["growth_inputs"]}
+
+
+def test_an_undo_with_nothing_to_restore_leaves_the_file_untouched(active_base):
+    from services import growth_placeholders as gp
+
+    before = stamp(active_base.dir / tm.MARKER_FILE)
+    assert gp.restore_meta(gp.snapshot_meta()) is None
+    assert stamp(active_base.dir / tm.MARKER_FILE) == before
+
+
+def test_an_undo_on_a_project_without_a_marker_or_a_folder_does_nothing(
+    tmp_path, monkeypatch
+):
+    from services import growth_placeholders as gp
+    from services import network_lengths
+
+    monkeypatch.setattr(network_lengths, "active_project_dir", lambda: tmp_path)
+    assert gp.restore_meta(b"{}") is None
+    assert not (tmp_path / tm.MARKER_FILE).exists()
+    monkeypatch.setattr(network_lengths, "active_project_dir", lambda: None)
+    assert gp.restore_meta(None) is None
+    assert gp.restore_meta(b"{}") is None
+    assert gp._old_marker(None, None) == {}
+
+
+def test_mark_set_without_a_project_writes_nothing(eh_base, monkeypatch):
+    import pandas as pd
+
+    from services import growth_placeholders as gp
+    from services import network_lengths
+
+    monkeypatch.setattr(network_lengths, "active_project_dir", lambda: None)
+    n = eh_base.ctx.network
+    series = pd.Series(10.0, index=n.snapshots)
+    assert gp.mark_set(n, "loads", "p_set", {"L1": series}, {"L1": {None: 1.0}}) == []
+
+
+@pytest.mark.parametrize(
+    "current, old, ledger",
+    [
+        # the current marker has no ledger: the snapshot's placeholder rows come back
+        ({}, {"ledger": [_ph("it_mw", 2030)]}, [_ph("it_mw", 2030)]),
+        # an empty ledger stays an empty ledger
+        ({"ledger": []}, {}, []),
+        # no ledger on either side: none is added
+        ({}, {}, None),
+        # a ledger row that is not an object is kept as it is
+        ({"ledger": ["free text"]}, {}, ["free text"]),
+    ],
+)
+def test_the_ledger_merge_edges(current, old, ledger):
+    from services import growth_placeholders as gp
+
+    merged = gp._with_growth_of(current, old)
+    assert merged.get("ledger") == ledger and ("ledger" in merged) == (
+        ledger is not None
+    )
+
+
+@pytest.mark.parametrize("side", ["current", "snapshot"])
+def test_a_ledger_that_is_not_a_list_is_left_alone(eh_base, active_case, side):
+    """Fail closed (#1390 F2): no merge into or from a ledger that is not a list."""
+    from services import growth_placeholders as gp
+
+    torn = {**eh_base.meta, "ledger": {"item": "x"}}
+    own = write_marker(active_case, torn if side == "current" else eh_base.meta)
+    snapshot = json.dumps(eh_base.meta if side == "current" else torn).encode()
+    before = own.read_bytes()
+    assert gp.restore_meta(snapshot) == "unreadable"
+    assert own.read_bytes() == before
+    assert gp.undo_rows(json.dumps(torn).encode()) is gp.UNREADABLE_ROWS
+
+
+def test_undo_rows_are_the_restored_keys_and_unreadable_compares_unequal(
+    eh_base, active_case
+):
+    from services import growth_placeholders as gp
+
+    meta = {**eh_base.meta, "ledger": [{"item": "a"}, _ph("it_mw", 2030)]}
+    assert gp.undo_rows(json.dumps(meta).encode()) == {
+        "growth_inputs": eh_base.meta["growth_inputs"],
+        "placeholder_ledger": [_ph("it_mw", 2030)],
+    }
+    # no copy of its own: the base's rows; a base without a marker: none
+    assert gp.undo_rows(None)["growth_inputs"] == eh_base.meta["growth_inputs"]
+    (eh_base.dir / tm.MARKER_FILE).unlink()
+    assert gp.undo_rows(None) == {"growth_inputs": None, "placeholder_ledger": []}
+    u = gp.UNREADABLE_ROWS
+    assert not (u == u) and u != u and not (u == {}) and u != {}
+
+
+def test_resolve_base_ends_a_chain_that_loops_back_to_the_case(tmp_path, monkeypatch):
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    write_marker(a, {"id": "eh_datacenter"})
+    monkeypatch.setattr(tm, "_base_dir", lambda here: b if here == a else a)
+    assert tm.resolve_base(a) == tm.Marker(tm.NONE)
+
+
+def test_a_dc_backup_save_while_the_marker_is_busy_is_refused(eh_base, monkeypatch):
+    from project_templates import eh_templates as t
+    from services.adequacy import dc_backup
+
+    real = tm.write_lock
+    monkeypatch.setattr(tm, "write_lock", lambda d, **kw: real(d, timeout=0.1))
+    before = stamp(eh_base.dir / tm.MARKER_FILE)
+    with real(eh_base.dir), pytest.raises(dc_backup.DcBackupError, match="busy"):
+        dc_backup.save_backup(eh_base.dir, t, {"mode": "hybrid"})
+    assert stamp(eh_base.dir / tm.MARKER_FILE) == before
