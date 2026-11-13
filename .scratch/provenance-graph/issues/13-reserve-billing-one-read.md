@@ -1,6 +1,6 @@
 # Reserve billing: read the commitments, the weights and the frame in one bracket
 
-Status: ready-for-agent
+Status: done
 Model tier: sonnet.
 Size: S.
 Blocked by: 04b (#1478, `runs.locked_read` and the callable digest).
@@ -25,3 +25,7 @@ This predates 04b. GK B (54) found it while reviewing #1478.
 - The flags and the order of today's callers are unchanged (04b's W1 table).
 
 ## Comments
+
+### 2026-11-13: built (session_01G7qCunXsNqVXkNbn8y1sai)
+
+`reserve_products.solved_read` returns the frame, the flags and the hours read under the one `runs.locked_read` bracket (the hours only for a fresh frame); `solved()` returns the first two, unchanged. `billing.reserve_lines(read=...)` prices at that read's hours, and `reserve_view` hands its own read to the lines (one bracket per view). Tests in `tests/test_provenance_graph_reserves.py` (PG-13 block): a reweighting right after the bracket, the view's single read, an unreadable read.

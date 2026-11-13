@@ -92,10 +92,15 @@ def reserve_view(
         return None
     floors, strings = RP.project_backup(n) if backup is None else backup
     used = sorted({s for p in products for s in (p.storages or floors)})
-    if solved:
-        frame, flags = RP.solved(n, lambda: RP.inputs_digest(products, floors))
-    else:
-        frame, flags = None, ["reserve_not_solved"]
+    # One read: the lines price this frame at the hours read with it (PG-13).
+    read = (
+        RP.solved_read(n, lambda: RP.inputs_digest(products, floors))
+        if solved
+        else None
+    )
+    frame, flags = (
+        (read.frame, read.flags) if read is not None else (None, ["reserve_not_solved"])
+    )
     soc = n.storage_units_t.get("state_of_charge") if solved else None
     commercial = getattr(cfg, "commercial", None)
     site = (
@@ -103,7 +108,7 @@ def reserve_view(
         if isinstance(commercial, dict)
         else getattr(commercial, "site_party", None)
     ) or "site"
-    lines, _ = reserve_lines(n, cfg, site, backup=(floors, strings))
+    lines, _ = reserve_lines(n, cfg, site, backup=(floors, strings), read=read)
     storages = []
     for s in used:
         here = s in n.storage_units.index
