@@ -61,11 +61,8 @@ def months_between(start: date, end: date) -> int:
     """Calendar months from ``start`` to ``end`` (``end`` ≥ ``start``), a
     partial month rounded up."""
     k = (end.year - start.year) * 12 + end.month - start.month
-    while k > 0 and add_months(start, k - 1) >= end:
-        k -= 1
-    while add_months(start, k) < end:
-        k += 1
-    return k
+    # ``start`` plus k months falls in ``end``'s month; one month fewer falls before it.
+    return k + 1 if add_months(start, k) < end else k
 
 
 def _import_link(n) -> str | None:

@@ -48,6 +48,8 @@ def ttp(s=None, stages=STAGES, stage_reason=None):
     ("2026-01-31", "2026-02-28", 1),     # month-end clamp
     ("2024-01-31", "2024-02-29", 1),
     ("2026-01-31", "2026-03-01", 2),
+    ("2026-12-15", "2027-01-14", 1),     # across a year end
+    ("2026-12-15", "2029-01-16", 26),
 ])
 def test_months_are_calendar_months_rounded_up(a, b, months):
     assert D.months_between(date.fromisoformat(a), date.fromisoformat(b)) == months
@@ -307,3 +309,33 @@ def test_the_dates_feed_no_solve_input(tmp_path, tid):
     T.write_sidecars(tmp_path / "b", tid, load_spec=b)
     for name in (T.SOLVER_FILE, *([T.ISLAND_FILE] if (tmp_path / "a" / T.ISLAND_FILE).exists() else [])):
         assert (tmp_path / "a" / name).read_bytes() == (tmp_path / "b" / name).read_bytes()
+
+
+def test_a_multi_period_import_without_a_schedule():
+    n = T.BUILDERS["eh_datacenter_staged"]()
+    del n.links_t["eh_energization_mw"]
+    assert [s["energized_mw"] for s in D.import_stages(n, {})] == [55.0, 55.0, 55.0]
+    n.links.loc["grid_import", "p_nom_extendable"] = True
+    with pytest.raises(D.StagesUnavailable) as exc:
+        D.import_stages(n, {})
+    assert exc.value.reason == "import_unsized"
+
+
+def test_a_scheduled_import_wins_over_an_unscheduled_one():
+    n = T.BUILDERS["eh_datacenter_staged"]()
+    row = n.links.loc["grid_import"].copy()
+    n.add("Link", "a_spare_feed", **{k: row[k] for k in ("bus0", "bus1")}, p_nom=99.0)
+    n.links.loc["a_spare_feed", "eh_role"] = "grid_import"
+    assert D.import_stages(n, {}) == STAGES
+
+
+def test_only_unset_energisation_rows_mark_a_period():
+    n = T.BUILDERS["eh_datacenter_staged"]()
+    meta = {"growth_inputs": ["not a row", {"kind": "it_mw", "year": 2027, "set": False},
+                              {"kind": "energized_mw", "year": 2030, "set": True},
+                              {"kind": "energized_mw", "year": 2035, "set": False}]}
+    assert [s["set"] for s in D.import_stages(n, meta)] == [True, True, False]
+
+
+def test_no_phases_is_no_serving_stage():
+    assert ttp(spec(phases=[]))["reason"] == "no_serving_stage"
