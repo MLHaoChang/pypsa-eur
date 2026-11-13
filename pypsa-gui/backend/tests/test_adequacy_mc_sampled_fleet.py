@@ -445,3 +445,10 @@ def test_each_grid_side_kind_is_a_422_naming_the_import_link(
     assert detail.startswith(
         f"{name} is on the grid side of import Link(s) grid_import"
     )
+
+
+def test_a_bad_import_rate_is_a_422_at_the_study(client, install_network):
+    install_network(_net(import_data=(1.5, 12.0)))
+    r = _post(client)
+    assert r.status_code == 422, r.text
+    assert "grid_import" in r.json()["detail"]
