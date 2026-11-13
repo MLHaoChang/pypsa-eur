@@ -1092,3 +1092,156 @@ def test_openai_tts_unset_model_or_voice_is_a_typed_refusal(model, voice):
     with pytest.raises(lm.LiveMediaError) as err:
         OpenAiTts(profile, credential=lambda: OA_KEY)
     assert err.value.kind == "not_configured"
+
+
+# ── GK B #1482: killing tests for the deepgram guard survivors ───────────────
+
+from harness.providers import deepgram_stt as dg  # noqa: E402
+
+
+def _no_other_tasks():
+    return [
+        t
+        for t in asyncio.all_tasks()
+        if t is not asyncio.current_task() and not t.done()
+    ]
+
+
+def test_deepgram_frame_and_stream_limits_are_inclusive():
+    frame = b"\x00" * dg.MAX_FRAME_BYTES
+    adapter, socket = deepgram(FakeSocket([]), max_stream_bytes=2 * dg.MAX_FRAME_BYTES)
+    asyncio.run(collect(adapter, [frame, frame]))
+    assert adapter.usage.audio_bytes == 2 * dg.MAX_FRAME_BYTES
+
+
+def test_deepgram_message_and_text_limits_are_inclusive(monkeypatch):
+    text = "x" * dg.MAX_EVENT_CHARS
+    message = result(text, final=True)
+    monkeypatch.setattr(dg, "MAX_MESSAGE_CHARS", len(message))
+    monkeypatch.setattr(dg, "MAX_EVENTS", 1)
+    adapter, _ = deepgram(FakeSocket([message]))
+    events = asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert events[0].text == text
+
+
+def test_deepgram_rejects_valid_json_sent_as_binary():
+    adapter, _ = deepgram(FakeSocket([result("hi", final=True).encode()]))
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert err.value.kind == "malformed_response"
+
+
+@pytest.mark.parametrize("message", ["[1]", "3", '"Results"'])
+def test_deepgram_rejects_non_object_json(message):
+    adapter, _ = deepgram(FakeSocket([message]))
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert err.value.kind == "malformed_response"
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"start": "1"},
+        {"start": True},
+        {"start": -1},
+        {"channel": {"alternatives": [{"transcript": 5}]}},
+    ],
+)
+def test_deepgram_result_field_types(fields):
+    doc = json.loads(result("hi", final=True))
+    doc.update(fields)
+    adapter, _ = deepgram(FakeSocket([json.dumps(doc)]))
+    with pytest.raises(lm.LiveMediaError) as err:
+        asyncio.run(collect(adapter, [b"\x00\x00"]))
+    assert err.value.kind == "malformed_response"
+
+
+@pytest.mark.parametrize(
+    "encoding,rate",
+    [("linear16", None), ("mulaw", 8000)],
+)
+def test_deepgram_counts_seconds_only_for_linear16_with_a_rate(encoding, rate):
+    profile = DeepgramProfile(
+        model="nova-3", languages=frozenset({"en"}), encoding=encoding, sample_rate=rate
+    )
+    connector = Connector(FakeSocket([]))
+    adapter = DeepgramStreamingStt(
+        profile, credential=lambda: DG_KEY, connect=connector
+    )
+    asyncio.run(collect(adapter, [b"\x00" * 100]))
+    assert adapter.usage.audio_bytes == 100 and adapter.usage.audio_seconds_sent == 0
+
+
+def test_deepgram_unset_model_is_a_typed_refusal():
+    with pytest.raises(lm.LiveMediaError) as err:
+        DeepgramStreamingStt(
+            DeepgramProfile(model=None, languages=frozenset({"en"})),
+            credential=lambda: DG_KEY,
+        )
+    assert err.value.kind == "not_configured"
+
+
+def test_deepgram_log_filter_drops_authorization_and_unformattable_records():
+    import logging
+
+    keep = dg._NoAuthorization()
+
+    def record(msg, args=()):
+        return logging.LogRecord("x", logging.DEBUG, __file__, 1, msg, args, None)
+
+    assert keep.filter(record("> Authorization: Token %s", (DG_KEY,))) is False
+    assert keep.filter(record("> Host: api.deepgram.com")) is True
+    assert keep.filter(record("%s %s", (1,))) is False
+
+
+def test_deepgram_sender_honours_cancel_while_the_socket_keeps_talking():
+    import itertools
+
+    class Chatty(FakeSocket):
+        async def recv(self):
+            await asyncio.sleep(0)
+            return result("more", final=False)
+
+    async def go():
+        cancel = lm.CancelToken()
+        adapter, _ = deepgram(Chatty([]))
+        asyncio.get_running_loop().call_later(0.05, cancel.cancel)
+        with pytest.raises(lm.LiveMediaError) as err:
+            await asyncio.wait_for(
+                collect(adapter, itertools.repeat(b"\x00\x00"), cancel=cancel), 2
+            )
+        return err.value.kind
+
+    assert asyncio.run(go()) == "cancelled"
+
+
+def test_deepgram_an_unset_cancel_token_does_not_cancel():
+    class Late(FakeSocket):
+        async def recv(self):
+            await asyncio.sleep(0.05)  # the sender finishes first
+            return self.messages.pop(0) if self.messages else None
+
+    adapter, _ = deepgram(Late([result("hi", final=True)]))
+    events = asyncio.run(collect(adapter, [b"\x00\x00"], cancel=lm.CancelToken()))
+    assert [e.text for e in events] == ["hi"]
+
+
+def test_deepgram_leaves_no_task_behind():
+    async def go():
+        cancel = lm.CancelToken()
+        adapter, _ = deepgram(FakeSocket([result("a", final=False)], block=True))
+        stream = adapter.stream(_slow_frames(), language="en", cancel=cancel)
+        first = await stream.__anext__()
+        await stream.aclose()  # the consumer walks away mid-stream
+        await asyncio.sleep(0)
+        return first.text, _no_other_tasks()
+
+    text, left = asyncio.run(go())
+    assert text == "a" and left == []
+
+
+async def _slow_frames():
+    while True:
+        yield b"\x00\x00"
+        await asyncio.sleep(0.01)
