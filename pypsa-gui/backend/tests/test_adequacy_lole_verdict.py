@@ -67,8 +67,8 @@ def test_a_pass_or_a_miss_carries_no_settle_count():
 
 
 def test_event_hours_is_the_heaviest_weight_over_the_draws_that_ran():
-    assert event_hours([1.0, 365.0, 0.0, 30.0], 500) == pytest.approx(0.73)
-    assert event_hours([0.0, -1.0], 500) is None
+    assert event_hours([1.0, 365.0, 0.0, 30.0], 500, []) == pytest.approx(0.73)
+    assert event_hours([0.0, -1.0], 500, []) is None
     for n in (0, None, -1):
         assert event_hours([3.0], n, [9.0]) is None
 
@@ -76,6 +76,8 @@ def test_event_hours_is_the_heaviest_weight_over_the_draws_that_ran():
 def test_event_hours_is_the_heaviest_draw_when_it_outweighs_a_snapshot():
     """E2, the hub-like case: one sampled outage shorts several snapshots, so
     the heaviest draw (208.6 h) outweighs the heaviest snapshot (52.14 h).
+    The goal is moved to 1.8 h so the case reads not_confident; the shipped
+    hub at 2.0 h stays met (1.46 + 0.417 <= 2), as D7 measured.
     BROKEN VARIANT (bite): w_max alone gives 0.104 h and a pass."""
     draws = [0.0] * 496 + [208.6, 208.6, 208.6, 104.2]
     e = event_hours([52.14] * 168, 500, draws)
@@ -159,7 +161,7 @@ def test_event_h_uses_the_generator_weights_and_the_draws_that_ran(monkeypatch):
     seen = {}
     real = lv.event_hours
 
-    def spy(weights, n_samples, draws=()):
+    def spy(weights, n_samples, draws):
         seen.update(
             weights=np.asarray(weights).copy(),
             n=n_samples,

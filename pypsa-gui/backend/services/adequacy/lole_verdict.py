@@ -49,7 +49,7 @@ __all__ = [
 ]
 
 
-def event_hours(weights, n_samples, draws=()) -> float | None:
+def event_hours(weights, n_samples, draws) -> float | None:
     """One more sampled draw as heavy as the heaviest seen, never less than
     one shortfall hour at the heaviest snapshot: ``max(w_max, d_max) / n``.
     ``draws`` is the per-draw LOLE array the estimate is the mean of.

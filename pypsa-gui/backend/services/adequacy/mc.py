@@ -991,10 +991,10 @@ def mc_adequacy(inputs: MCInputs, *, draws: int = 500, seed=0,
     from services.adequacy.metrics import resolve_time_basis
 
     nyears = float(inputs.nyears)
-    # A horizon of unknown length cannot state a floor; None says so instead of
-    # dividing by zero or printing an infinity into the payload.
     from services.adequacy.lole_verdict import event_hours
 
+    # A horizon of unknown length cannot state a floor; None says so instead of
+    # dividing by zero or printing an infinity into the payload.
     w_pos = inputs.weights[inputs.weights > 0]
     floor = (float(w_pos.min()) / n_total) if (w_pos.size and n_total) else None
 

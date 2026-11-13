@@ -571,7 +571,7 @@ def run_coupling_loop(solve_at, evaluate, *, target_lole_h: float, eps0: float,
         # decision, and tightening the cap to buy confidence spends solves on
         # a question more draws answer (plan §1, the stopping band).
         "confident": bool(final is not None
-                          and final["mc"]["lole_ci"][1] <= target),
+                          and final["mc"]["goal"]["confident"]),
         "eps_star": final["eps_permyriad"] if final is not None else None,
         "solves_used": solves,
     }

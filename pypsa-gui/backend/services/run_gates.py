@@ -256,7 +256,7 @@ LOOP_NOT_CONFIDENT = "not_confident"
 
 def _not_confident_words(loop):
     from services.adequacy.lole_verdict import settle_text
-    return ("the engine loop's nearest plan estimates LOLE at or below the goal, but not confidently, and one "
+    return ("the loop's nearest plan estimates LOLE at or below the goal, but not confidently, and one "
             "more sampled draw as heavy as the heaviest seen would put it above, so the rule is not evaluated; "
             f"it never counts as met; {settle_text(loop)}")
 
