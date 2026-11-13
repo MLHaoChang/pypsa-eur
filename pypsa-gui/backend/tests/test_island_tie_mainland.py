@@ -148,6 +148,8 @@ def test_a_grid_import_link_inside_the_island_is_refused_by_name():
     [
         {"name": "hospital_shed", "carrier": "load_shedding"},
         {"name": "__dsr_hospital_load", "carrier": "AC"},
+        {"name": "__dsr_hospital_store", "carrier": "AC", "component": "Store"},
+        {"name": "__dsr_hospital_su", "carrier": "AC", "component": "StorageUnit"},
     ],
 )
 def test_an_lp_slack_on_an_island_bus_is_not_a_mainland_supply(slack):
@@ -157,7 +159,6 @@ def test_an_lp_slack_on_an_island_bus_is_not_a_mainland_supply(slack):
     n = T.BUILDERS["eh_microgrid"]()
     if slack["carrier"] not in n.carriers.index:
         n.add("Carrier", slack["carrier"])
-    n.add(
-        "Generator", slack["name"], bus="hospital", carrier=slack["carrier"], p_nom=10.0
-    )
+    component = slack.get("component", "Generator")
+    n.add(component, slack["name"], bus="hospital", carrier=slack["carrier"])
     assert S.tie_state(n, island) == _MASTER_TIE_STATES["eh_microgrid"]
