@@ -271,6 +271,8 @@ export default function SolverSettings() {
     if (!blockRequest || !draft) return
     const [want, target] = blockRequest === 'sclopf'
       ? ['network', 'solver-sclopf-panel'] as const
+      : blockRequest === 'offgrid'
+      ? ['network', 'solver-offgrid-constraints'] as const
       : blockRequest === 'goal'
         ? ['network', 'solver-reliability-goal'] as const
         : blockRequest === 'strategy'

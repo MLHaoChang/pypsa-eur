@@ -478,8 +478,10 @@ describe('MarginLoopPanel verdict', () => {
     const v = (await screen.findByTestId('margin-loop-verdict')).textContent ?? ''
     expect(v).toMatch(/\(a\) the added firm capacity is DERATED/)
     expect(v).toMatch(/\(c\) energy-limited resources take a duration haircut/)
-    expect((await screen.findByTestId('margin-loop-status')).textContent)
-      .toMatch(/unreachable/)
+    const chip = await screen.findByTestId('margin-loop-status')
+    // UX (20): plain words on the chip; the engine id stays a data attribute.
+    expect(chip.textContent).toBe('Could not be reached')
+    expect(chip.getAttribute('data-status')).toBe('unreachable')
   })
 
   // ★ Bite: render `lever_star` with the cap's `‱` suffix, or raw.
@@ -809,5 +811,26 @@ describe('MarginLoopPanel — edited since the study (LC-41)', () => {
     } else {
       expect(screen.queryByTestId('margin-loop-edited')).toBeNull()
     }
+  })
+})
+
+
+describe('adequacy loops 04: a not-confident finish', () => {
+  const NOT_CONFIDENT: MarginLoopPayload = {
+    ...UNREACHABLE,
+    status: 'not_confident',
+    verdict: 'Not confident: no plan was confirmed to meet 2 h.',
+  }
+
+  it('says "Not confident" in words with a key, never met, and shows no final plan', async () => {
+    vi.mocked(resultsApi.getMarginLoop).mockResolvedValue(NOT_CONFIDENT)
+    await openPanel()
+    const chip = await screen.findByTestId('margin-loop-status')
+    expect(chip.textContent).toBe('Not confident')
+    expect(chip.className).toMatch(/text-warn/)
+    expect((await screen.findByTestId('margin-loop-not-confident-key')).textContent)
+      .toMatch(/at or below the LOLE goal, but not by enough to call it a pass\./)
+    expect(screen.queryByTestId('margin-loop-confident')).toBeNull()
+    expect(chip.textContent).not.toMatch(/met/i)
   })
 })

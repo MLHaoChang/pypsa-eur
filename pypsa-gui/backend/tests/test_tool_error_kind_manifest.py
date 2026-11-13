@@ -63,6 +63,7 @@ _REFUSE_HELPER_MODULES: tuple[str, ...] = (
 # Modules that import `harness.edit_card._refuse` instead of defining it: scanned the same way.
 _REFUSE_IMPORTING_MODULES: tuple[str, ...] = (
     "harness/edit_card_campus.py",
+    "harness/experiment_comparison.py",
     "harness/edit_card_library.py",
     "harness/edit_card_records.py",
     "harness/edit_card_reports.py",

@@ -118,6 +118,7 @@ function IntakeRows({ intake }: { intake: RunIntake }) {
         </li>
       })}
     </ul>
+    {intake.card.site && <div data-testid="envelope-intake-site">Site: {intake.card.site}</div>}
     {intake.missing.length > 0 && <div data-testid="envelope-intake-missing" className="text-warn">Still missing: {intake.request ?? `${intake.missing.length} inputs`}</div>}
     {defaults.length > 0 && <>
       <div className="text-muted">Not given, so the preset default is used:</div>

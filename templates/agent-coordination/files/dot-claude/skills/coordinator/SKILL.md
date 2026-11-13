@@ -71,8 +71,7 @@ Done when every package is running, queued with a named reason, or merged.
 3. **Merge pass.** Run [Merging](#merging) on every PR the state log lists as pending.
    Done when each one is merged or has a named blocker in the log.
 4. **Capacity.** Count the builders actually building, not landing, held or waiting on a merge chain. The **builder target** is 10 unless the owner sets another. While the count is below it, run `python3 scripts/coord/frontier.py --open-prs <prs> --sessions <sessions>` (inputs below) and open each package that shares no likely files with running work, per [Taking on tasks](#taking-on-tasks). A listed package you hold back gets its blocker in the log.
-   - `<prs>`: one `<pr> <changed path>` line per open PR, from `git diff --name-only origin/{{BASE_BRANCH}}...pr/$n | sed "s/^/$n /"`.
-   - `<sessions>`: the `sessions.py` output, or one issue path per line.
+   - `<prs>` and `<sessions>`: run `scripts/coord/inputs.sh <scratchpad>/board/board.json`, which writes `prs.txt` (each board PR's changed files, from its fetched head) and `sessions-issues.txt` (each session row's `doing`) next to the board. Never rebuild them by hand: a stale `prs.txt` reports a merged PR as an overlap.
    Done when builders ≥ target, the frontier is empty, or every remaining package names its blocker.
 5. **Owner.** Do [Dashboard](#dashboard) if anything changed, then message the owner only with what landed or what needs a decision, times in {{TZ_LABEL}}. State "builders N/target, frontier M". Ask every question as `AskUserQuestion` options, per `AGENTS.md`, and write the same question and options in the turn's final reply text, so a worker restart cannot lose it.
 
@@ -99,11 +98,11 @@ A long context is this session's largest cost. Rotate to a fresh coordinator whe
    - owner decisions not yet in `docs/agents/owner-decisions.md`, in the owner's words;
    - open owner questions;
    - each dashboard's link and its datasets' last `ArtifactData` `if_version`, and the routine's trigger id.
-2. **Create.** `create_session` the new coordinator on this session's model, with a prompt that carries the brief's full text and says: "You are the coordinator for {{REPO}}. Read `.claude/skills/coordinator/SKILL.md`. First, save the brief below as the top of `coordinator-state.md` in your scratchpad, rebuild `board/board.json` from the dashboard's published file, put your own id (`get_session`) in `docs/agents/coordinator.md` through a tiny PR on its session branch, and `send_message` me when the brief is saved."
+2. **Create.** `create_session` the new coordinator on this session's model, with a prompt that carries the brief's full text and says: "You are the coordinator for {{REPO}}. Read `.claude/skills/coordinator/SKILL.md`. First, save the brief below as the top of `coordinator-state.md` in your scratchpad, rebuild `board/board.json` from the dashboard's published file, put your own id (`get_session`) in `docs/agents/coordinator.md` through a PR of its own that changes that one file only (never bundled with status or issue edits), opened and merged in the same sweep: docs-only PRs skip the backend shards, so it lands in minutes while every other session still messages the dead id, and `send_message` me when the brief is saved."
    The new coordinator writes its session branch to `~/.claude-coordinator` (see the top of this skill).
    The new coordinator also runs Artifact `open` on each dashboard in [Dashboard](#dashboard). The app lists only the artifacts a session has published or opened, so without it the owner's panel shows no dashboard after a rotation.
 3. **Hand over the routines.** `update_trigger` each routine (the sweep and the dashboard refresh) with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
-4. **Tell the sessions.** `send_message` the new id to every live session, builders and reviewers included, not only those that send you work. When a reviewer or builder rotates, send its new id to the sessions that send it work.
+4. **Tell the sessions.** `send_message` the new id to every live session, builders and reviewers included, not only those that send you work. A reviewer's rotation is the same one-file `docs/agents/coordinator.md` PR, merged in the same sweep, before its new id is sent. When a reviewer or builder rotates, send its new id to the sessions that send it work. Status sweeps go in a separate docs PR.
 5. **Archive** this session once the new coordinator confirms the brief is saved and the id PR is merged, not before. Until then it stays live and relays anything that reaches it to the new coordinator.
 
 When this coordinator's children would hit the session-chain depth limit, the owner starts the successor at depth 0.
@@ -195,11 +194,12 @@ Routine prompt to apply with `update_trigger` (append to the dashboard routine's
 
 - Read check runs through `premerge.sh`, which prints only the runs that block, never through one-off check-run reads per PR.
 - Start a long command with the tool's own background option. A `&` inside a background command detaches it, and its completion notice never arrives.
-- Session admin runs in a Haiku subagent (Agent tool, `model: haiku`) that returns one line, so the JSON dumps (~2.5k tokens each) stay out of this context:
-  - retire a session: rename it "Done · …", then `archive_session` (direct calls are fine too);
+- Session admin always runs in a Haiku subagent (`archive_session`, `set_session_title`, `list_triggers`, `list_sessions`, `get_session` of another session: each returns 2–8k tokens of JSON) (Agent tool, `model: haiku`) that returns one line, so the dumps stay out of this context:
+  - retire a session: rename it "Done · …", then `archive_session`;
   - `list_sessions`: save it and return the `sessions.py` summary;
   - `get_session` of another session.
-- A PR with no session (the coordinator's own, or one whose driver rotated or is Codex, when only CI and premerge are left): start `scripts/coord/ciwait.sh 118 <pr>` with the Bash tool's `run_in_background` and `timeout` 7200000, one PR per call. It prints READY, FAIL, MACOS or TIMEOUT on the first hit: rerun it after a push. Backend shards take ~60 min; when the wait would pass ~60 min, run premerge directly instead. Sessions drive the CI of their own PRs. Push small mechanical fixes yourself; your own branch's hook blocks force pushes.
+- A PR with no session (the coordinator's own, or one whose driver rotated or is Codex, when only CI and premerge are left): start `scripts/coord/ciwait.sh 118 <pr>` with the Bash tool's `run_in_background` and `timeout` 7200000, one PR per call. It prints READY, FAIL, MACOS or TIMEOUT on the first hit: rerun it after a push.
+  With several such PRs, run one `scripts/coord/ciwait.sh --board <scratchpad>/board/board.json` with the Monitor tool instead: it watches every `prs` row, prints one READY/FAIL/MACOS line per head and keeps watching the rest, so a container restart costs one restart, not one per PR. Backend shards take ~60 min; when the wait would pass ~60 min, run premerge directly instead. Sessions drive the CI of their own PRs. Push small mechanical fixes yourself; your own branch's hook blocks force pushes.
 - A `ci-only <pr> <sha>` hand-off from a session: archive the session, run `ciwait.sh` on the PR, push small mechanical fixes yourself, and open a fresh session from its hand-off note for anything bigger.
 - Remote branch deletion is blocked by the classifier: it is the owner's job.
 - A verdict sent to an archived session id is lost: relay it to the successor.

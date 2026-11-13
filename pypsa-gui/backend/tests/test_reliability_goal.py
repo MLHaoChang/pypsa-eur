@@ -81,8 +81,11 @@ def test_goal_free_config_drops_only_the_inert_fields():
     free = G.goal_free_config(cfg)
     # ...and an opt-in LP field while it is off (homer-parity 01a R1), nothing else.
     assert G.OFF_WHEN_FALSY == {"min_renewable_fraction"}
+    # ...and a config field no solve reads (business case 08a, GK B C1).
+    assert G.NOT_LP_FIELDS == {"business_case"}
     assert free == {k: v for k, v in asdict(cfg).items()
-                    if k not in G.GOAL_FIELDS and k not in G.OFF_WHEN_FALSY}
+                    if k not in G.GOAL_FIELDS and k not in G.OFF_WHEN_FALSY
+                    and k not in G.NOT_LP_FIELDS}
     assert free["ens_cap_permyriad"] == 5.0
     assert G.goal_free_config(asdict(cfg)) == free
 

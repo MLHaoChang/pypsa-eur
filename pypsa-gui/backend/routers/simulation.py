@@ -613,6 +613,16 @@ def update_solver_config(
                 "message": "change the finance inputs through PUT /api/simulation/finance (it "
                            "validates them and checks If-Match); omit the key here"})
         submitted.pop("finance")
+    if "business_case" in submitted:
+        # Business case 08: the inputs are owned by `PUT /api/results/business_case/inputs`
+        # (validation, If-Match), as the finance inputs are by `PUT /finance`.
+        if submitted["business_case"] != getattr(_state["solver_config"], "business_case", None):
+            raise HTTPException(422, {
+                "code": "business_case_via_dedicated_route",
+                "message": "change the business-case inputs through PUT "
+                           "/api/results/business_case/inputs (it validates them and checks "
+                           "If-Match); omit the key here"})
+        submitted.pop("business_case")
     stored_commercial = getattr(_state["solver_config"], "commercial", None)
     rebound = False
     # The FCA stress hours are ranked on the load the LP will solve (E2E 1b):

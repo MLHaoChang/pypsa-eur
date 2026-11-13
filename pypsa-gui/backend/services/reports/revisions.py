@@ -480,6 +480,21 @@ def reaudit(section, facts: list[NumberFact]) -> SectionAudit:
     return number_audit.audit(_audited_texts(section), facts)
 
 
+def verified_facts(base_section) -> list[NumberFact] | None:
+    """The facts `base_section`'s audit verified, or None for an unaudited
+    section (nothing to check an edit against)."""
+    return _facts(base_section) if _audited(base_section) else None
+
+
+def rerun_audit(base_section, edited) -> SectionAudit:
+    """R4: the audit of `edited`, a user's edit of `base_section`. A section
+    the base audited is re-audited against the facts the base verified, so a
+    changed number reads unverified; an unaudited one stays unaudited."""
+    if _audited(base_section):
+        return reaudit(edited, _facts(base_section))
+    return SectionAudit()
+
+
 def _values(token_text: str) -> tuple:
     return tuple(t.value for t in number_audit.extract_numbers(token_text))
 
@@ -650,7 +665,7 @@ def apply_edit(base: ReportDocument, anchor: Anchor, edit: Any) -> ReportDocumen
     )
     edited = section.model_copy(update={"blocks": blocks, "source": "user_edit"})
     if _audited(section):
-        edited = edited.model_copy(update={"audit": reaudit(edited, _facts(section))})
+        edited = edited.model_copy(update={"audit": rerun_audit(section, edited)})
     doc.sections[index] = edited
     return doc
 

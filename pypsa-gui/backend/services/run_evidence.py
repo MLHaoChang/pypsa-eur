@@ -982,6 +982,8 @@ _STUDY_KIND = {
 _WORKER_COMPLETED = frozenset({'completed', 'done', 'met'})
 _WORKER_FAILED = frozenset({
     'failed', 'budget_exhausted', 'refused', 'unreachable',
+    # Adequacy loops 04 (D3): a loop that ended not confident never met.
+    'not_confident',
 })
 _WORKER_INTERRUPTED = frozenset({'aborted', 'interrupted', 'idle'})
 
@@ -1307,6 +1309,12 @@ def publish_study_run(study_key: str, record: dict) -> dict | None:
             if raw == 'unreachable':
                 message = (
                     'The study finished and no plan meets the target (unreachable).'
+                )
+            elif raw == 'not_confident':
+                message = (
+                    'The study finished without a confident plan: the nearest '
+                    'estimate is at or below the target, but one more sampled '
+                    'draw as heavy as the heaviest seen would put it above.'
                 )
             else:
                 message = str(record.get('error') or 'The study failed.')[:500]

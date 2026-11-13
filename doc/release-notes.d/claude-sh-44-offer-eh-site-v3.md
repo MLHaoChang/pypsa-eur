@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant's `start_task` now offers the `eh_site@3` study profile, so a chat-started run can fetch the site's map context from the intake's latitude and longitude. Runs already on `eh_site@2` keep it. The plan-review card says "Site: none named" when a run names no site, instead of listing it as a preset default.

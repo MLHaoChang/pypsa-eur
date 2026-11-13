@@ -99,8 +99,9 @@ def _rows(name: str, unit: str, rows: list[dict], labels: list[str],
     if not rows:
         return None
     frame = pd.DataFrame(rows)
+    # A column with no values at all (all None, so object dtype) stays as empty cells.
     values = values or [c for c in frame.columns if c not in labels
-                        and pd.api.types.is_numeric_dtype(frame[c])]
+                        and (pd.api.types.is_numeric_dtype(frame[c]) or frame[c].isna().all())]
     cols = [c for c in labels if c in frame.columns]
     return Table(name, unit, frame[cols + [c for c in values if c in frame.columns]],
                  labels=len(cols))

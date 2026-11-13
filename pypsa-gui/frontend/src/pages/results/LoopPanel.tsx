@@ -7,6 +7,7 @@ import type {
   CouplingMcBlock, McStatus,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { loopStatusWord, NOT_CONFIDENT_KEY } from '../../components/activityWords'
 import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { hasTarget, NO_GOAL, ReliabilityGoalSummary, ZERO_TARGET } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
@@ -261,6 +262,8 @@ export function restoreSentence(
 const STATUS_CLASS: Record<string, string> = {
   running: 'bg-panel border border-border text-muted',
   met: 'bg-accent/10 text-accent',
+  // Adequacy loops 04: at or below the goal but not confidently; never met.
+  not_confident: 'bg-warn/10 text-warn',
   unreachable: 'bg-warn/10 text-warn',
   budget_exhausted: 'bg-warn/10 text-warn',
   aborted: 'bg-panel border border-border text-muted',
@@ -466,8 +469,9 @@ export function LoopPanel() {
                     + (STATUS_CLASS[payload.status]
                       ?? 'bg-panel border border-border')}
                   data-testid="loop-status"
+                  data-status={payload.status}
                 >
-                  {payload.status}
+                  {loopStatusWord(payload.status)}
                 </span>
                 {/* The target the study was actually RUN against, in the
                     study's own basis — the same conversion the entry field
@@ -526,6 +530,11 @@ export function LoopPanel() {
                       + 'not the plan this verdict is about'}
                 </span>
               </div>
+              {payload.status === 'not_confident' && (
+                <p className="text-[10px] text-warn" data-testid="loop-not-confident-key">
+                  {NOT_CONFIDENT_KEY}
+                </p>
+              )}
               {payload.verdict && (
                 <p className="text-[11px] text-text" data-testid="loop-verdict">
                   {payload.verdict}

@@ -531,7 +531,7 @@ interface UIStore {
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
-  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'strategy' | null
+  solverBlockRequest: 'economic' | 'sclopf' | 'goal' | 'strategy' | 'offgrid' | null
   /** Request-then-scroll to the Grid codes section of the Grid connection part (AS-10). */
   gridCodeScrollRequest: boolean
   requestGridCodeScroll: () => void
@@ -720,7 +720,7 @@ interface UIStore {
   clearResultsWindowRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
-  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'strategy') => void
+  requestSolverBlock: (block: 'economic' | 'sclopf' | 'goal' | 'strategy' | 'offgrid') => void
   clearSolverBlockRequest: () => void
   requestGridReadiness: () => void
   clearGridReadinessRequest: () => void
