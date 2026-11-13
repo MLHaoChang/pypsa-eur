@@ -464,6 +464,11 @@ class SolverConfig:
     # the solver-config PUT keeps it. Nothing at solve time reads it, and it is
     # in no solve fingerprint (a finance edit never makes a dispatch stale).
     finance: dict | None = None
+    # Business case 08: the business-case inputs (`services.business_case.runner.
+    # BusinessCaseConfig` JSON), set ONLY by `PUT /api/results/business_case/inputs`
+    # (If-Match). Never an LP input: `goal_free_config` drops it, so it is in no
+    # solve fingerprint, no config digest and no investment-case key (GK B C1).
+    business_case: dict | None = None
     # AS-03 envelope floors (`EnvelopeFloors` on the API schema). None = no rows.
     envelope_floors: dict | None = None
 

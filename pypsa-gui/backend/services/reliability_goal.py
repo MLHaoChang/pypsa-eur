@@ -25,6 +25,11 @@ from typing import Any
 # also part of the goal but stays in: it is an LP constraint.
 GOAL_FIELDS = frozenset({"target_lole_h", "mc_draws", "site_archetype"})
 
+# Config fields no solve and no investment case reads (business case 08, GK B
+# C1): always left out, so they leave every fingerprint and digest, and every
+# one computed before they existed, unchanged.
+NOT_LP_FIELDS = frozenset({"business_case"})
+
 ARCHETYPES = ("strong_grid", "weak_flexible", "off_grid")
 DEFAULT_ARCHETYPE = "strong_grid"
 # The engine default every MC-based study shares (mc, coupling and margin
@@ -136,7 +141,8 @@ def goal_free_config(cfg: Any) -> dict:
     and digest of the config."""
     d = cfg if isinstance(cfg, dict) else asdict(cfg)
     return {k: v for k, v in d.items()
-            if k not in GOAL_FIELDS and not (k in OFF_WHEN_FALSY and _off(v))}
+            if k not in GOAL_FIELDS and k not in NOT_LP_FIELDS
+            and not (k in OFF_WHEN_FALSY and _off(v))}
 
 
 def _off(v: Any) -> bool:
