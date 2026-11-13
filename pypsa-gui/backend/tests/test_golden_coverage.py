@@ -192,6 +192,8 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     # config (204), covered by tests/test_results_billing.py instead.
     ("routers/results.py", "get_billing"):                     frozenset(),
     ("routers/results.py", "get_cfe_score"):                   frozenset(),
+    # homer-parity 01a: an energy share, not an economics figure.
+    ("routers/results.py", "get_renewable_fraction"):          frozenset(),
     ("routers/results.py", "get_value_flows"):                 frozenset(),   # P3 WP3.4
     # Site commercial UX A1: physical energy (MWh), not an economics figure.
     ("routers/results.py", "get_energy_flows"):                frozenset(),

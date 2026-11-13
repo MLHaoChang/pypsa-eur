@@ -248,10 +248,32 @@ def test_a_write_that_outlives_its_budget_is_never_reported_done(baseline, monke
         d for e, d in frames if e == "tool_result" and d.get("tool_use_id") == "call_0"
     ]
     result = _result(bodies, 0)
-    # The model is told it failed, never that it succeeded. That the text also says the
-    # outcome is unknown is LC-43b (pending row LC-D23.timeout_outcome_text).
+    # The model is told it failed, never that it succeeded, and that the outcome is
+    # unknown and the project is to be read back before a retry (LC-43b).
     assert result["is_error"] is True and "tool_timeout" in result["content"]
+    assert "Outcome unknown" in result["content"]
+    assert "may have changed the project" in result["content"]
+    assert "Read the project back before any retry" in result["content"]
     assert state(baseline[2]) == kept
+
+
+def test_a_read_that_outlives_its_budget_keeps_the_plain_kind(baseline, monkeypatch):
+    release = threading.Event()
+
+    def hang(**kwargs):
+        release.wait(10)
+        return {"rows": []}
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "list_components", hang)
+    monkeypatch.setattr(harness_budget, "PER_TOOL_TIMEOUT_SECONDS", 0.2)
+    try:
+        _frames, bodies = _turn(
+            _session(), [("list_components", {"component_class": "Generator"})]
+        )
+    finally:
+        release.set()
+    result = _result(bodies, 0)
+    assert result["is_error"] is True and result["content"] == "tool_timeout"
 
 
 @pytest.mark.parametrize(

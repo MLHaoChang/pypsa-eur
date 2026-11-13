@@ -76,10 +76,12 @@ export interface CostBreakdown {
   // a component (Line was 95.8% of one user's CAPEX) reads as an answer.
   // `capex_lifetime_available` below is the matching summary flag.
   // The ANNUALISED fields are never null — they come from `n.statistics()`
-  // and owe nothing to the upfront-cost resolve.
+  // and owe nothing to the upfront-cost resolve — except the expansion ones
+  // (`capex_expansion`, `storage_capex_expansion`, per-component
+  // `capex_expansion`): those are null when the expansion compute failed.
   capex: number
   capex_lifetime: number | null
-  capex_expansion: number
+  capex_expansion: number | null
   capex_expansion_lifetime: number | null
   opex: number
   total: number
@@ -93,13 +95,13 @@ export interface CostBreakdown {
   curtailment_cost: number
   // CAPEX-expansion bucket for StorageUnit + Store only — quick "how much
   // of the new investment goes into storage" KPI for the cost overview.
-  storage_capex_expansion: number
+  storage_capex_expansion: number | null
   storage_capex_expansion_lifetime: number | null
   by_component: Array<{
     component: string
     capex: number
     capex_lifetime: number | null
-    capex_expansion: number
+    capex_expansion: number | null
     capex_expansion_lifetime: number | null
     opex: number
     fom?: number
