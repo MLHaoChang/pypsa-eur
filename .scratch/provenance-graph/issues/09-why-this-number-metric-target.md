@@ -1,6 +1,6 @@
 # "Why this number": the calculation-metric target (03b)
 
-Status: in-progress
+Status: done
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 

@@ -458,7 +458,6 @@ def test_a_long_walk_is_cut_and_marked_truncated(captured, monkeypatch):
     )
 
 
-
 def test_a_walk_exactly_at_the_cap_is_complete(captured, monkeypatch):
     ctx, owner, record = captured
     total = _why(owner, record)["outcome"]["steps_total"]
@@ -466,6 +465,7 @@ def test_a_walk_exactly_at_the_cap_is_complete(captured, monkeypatch):
     out = _why(owner, record)
     assert out["outcome"]["truncated"] is False and out["outcome"]["complete"] is True
     assert len(out["steps"]) == total
+
 
 # --- X1/Y8 read-only, X6 route and tool ----------------------------------------------------------------------
 
@@ -572,3 +572,101 @@ def test_the_tool_through_the_harness_dispatch_path(captured):
     )
     # A long answer is spilled to a page; its preview, and the dict, start with the outcome (X5).
     assert text.index("outcome") < text.index("steps") and "uncompared" in text
+
+
+# --- guards the mutant run named (X7) ------------------------------------------------------------------------
+
+
+def test_a_series_is_pinned_as_the_digest_of_its_canonical_form():
+    import hashlib
+
+    for series in ([1.0, 2.0], (1.0, 2.0), {"a": 1}):
+        assert (
+            M.pinned(series)
+            == "sha256:" + hashlib.sha256(records._canonical(series)).hexdigest()
+        )
+
+
+@pytest.mark.parametrize("generators", [["G1"], {}, "G1", None])
+def test_only_a_generator_mapping_offers_its_first_generators_index(generators):
+    assert M._index_paths({"generators": generators}) == [
+        ("index",),
+        ("storage_unit", "index"),
+    ]
+    assert M._index_paths({"generators": {"G1": {}}})[-1] == (
+        "generators",
+        "G1",
+        "index",
+    )
+
+
+def test_a_window_no_held_index_gives_reads_stale(captured, monkeypatch):
+    ctx, owner, record = captured
+    _with_record(monkeypatch, record, window={**record["window"], "snapshots": 999})
+    step = _steps(_why(owner, record))["window"]
+    assert step["state"] == "stale"
+    assert (
+        step["broken"]["reason"]
+        == "cannot be read now: the record's window matches no index it holds"
+    )
+
+
+def test_a_record_holding_nulls_still_answers_or_refuses_typed(captured, monkeypatch):
+    ctx, owner, record = captured
+    with monkeypatch.context() as m:
+        _with_record(m, record, raw=None, validity=None)
+        out = _why(owner, record)
+        assert out["steps"][0]["stamp"]["as_of"] is None
+        assert (
+            _steps(out)["window"]["state"] == "stale"
+        )  # no raw holds the window's index
+        held_now = [s for s in out["steps"] if s["label"].startswith("generators/")]
+        # Every leaf only the current source has is one more pin, read "not recorded" (fails closed).
+        assert held_now and all(
+            s["broken"]["reason"] == "not recorded" for s in held_now
+        )
+    with monkeypatch.context() as m:
+        _with_record(m, record, facts=None)
+        assert _status(lambda: _why(owner, record)) == 404
+
+
+def test_a_signed_out_store_read_refuses_401(captured, monkeypatch):
+    ctx, owner, record = captured
+
+    def revoked(*_a):
+        raise records.AccessRevoked(401, "Authentication required")
+
+    monkeypatch.setattr(records, "load", revoked)
+    assert _status(lambda: _why(owner, record)) == 401
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        # Only the lock's own refusal is "busy"; any other refusal is an unreadable source: stale.
+        (
+            HTTPException(409, {"error_kind": "evidence_unavailable"}),
+            "evidence_unavailable",
+        ),
+        (
+            HTTPException(503, {"error_kind": "assurance_context_changed"}),
+            "assurance_context_changed",
+        ),
+        (HTTPException(500, "store broke"), "store broke"),
+        (RuntimeError(), "RuntimeError"),
+    ],
+)
+def test_a_refused_read_that_is_not_the_busy_lock_reads_stale(
+    captured, monkeypatch, error, reason
+):
+    ctx, owner, record = captured
+
+    def refuse(*_a, **_k):
+        raise error
+
+    monkeypatch.setattr(records, "scoped_read", refuse)
+    out = _why(owner, record)
+    step = _steps(out)["generators/G1/capacity"]
+    assert step["state"] == "stale"
+    assert step["broken"]["reason"] == f"cannot be read now: {reason}"
+    assert out["outcome"]["state"] == "stale"
