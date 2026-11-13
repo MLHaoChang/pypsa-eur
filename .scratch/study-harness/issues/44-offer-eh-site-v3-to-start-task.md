@@ -3,7 +3,7 @@
 
 # 44 — offer eh_site@3 to start_task
 
-Status: ready-for-agent
+Status: done (#1475)
 Size: S
 Blocked by: none
 Gated: GK B
@@ -37,3 +37,11 @@ Acceptance:
 ### 2026-11-13: owner decision
 
 Owner answered (SH44-EGRESS-1, `docs/agents/owner-decisions.md`). Status: ready-for-agent.
+
+### 2026-11-13: built
+
+Both `eh_site@2` and `eh_site@3` are offered in `start_task`'s `run.profile` enum; stored `@2` runs keep `@2` (L8). Per SH44-EGRESS-1 the endpoints the operator's environment configures are accepted for chat-started runs, with no new gate; the decision is recorded here and in the PR body.
+
+### 2026-11-13: GK B (54) plan GO, conditions O1–O7
+
+Offer both `eh_site@2` and `eh_site@3` (L8). O1: the enum is exactly `["eh_site@2","eh_site@3"]`; `guards.check` passes both and refuses `@1`, `@4` and a non-string. O2: `site.lat`/`site.lon` come only from user-typed text; a point the user did not type is never fetched. O3: the plan-review card shows the site point (`run_site.card`), or "none named" with no fetch. O4: tests fetch only through the mock transport. O5: no new gate; `site_context` reads `PYPSAGUI_OVERPASS_URL` (default overpass-api.de) and `PYPSAGUI_TERRAIN_URL` (default the AWS Terrarium tiles), set by the operator's environment. O6: `eh_site@1`/`@2` stay byte-equal. O7: the checks are listed in PR #1475.

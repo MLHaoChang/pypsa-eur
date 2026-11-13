@@ -33,6 +33,8 @@ def _status(native):
         'done': 'completed', 'met': 'completed', 'completed': 'completed',
         'failed': 'failed', 'error': 'failed', 'refused': 'failed',
         'unreachable': 'failed', 'budget_exhausted': 'partial',
+        # Adequacy loops 04 (D3): a loop that ended not confident never met.
+        'not_confident': 'partial',
         'aborted': 'cancelled', 'cancelled': 'cancelled',
         'interrupted': 'needs_review', 'uncertain': 'needs_review',
         'needs_review': 'needs_review', 'running': 'running', 'queued': 'queued',

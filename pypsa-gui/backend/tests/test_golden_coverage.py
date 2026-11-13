@@ -211,6 +211,14 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "post_investment_case_abort"):      frozenset(),
     ("routers/results.py", "get_investment_case_report"):      frozenset(),
     ("routers/results.py", "get_investment_case_export"):      frozenset(),
+    # Business case 08a: its figures are checked by tests/test_business_case_engine.py
+    # (the engine's own tie-outs, BC4/BC5), not a coverage SURFACE.
+    ("routers/results.py", "get_business_case"):                frozenset(),
+    ("routers/results.py", "post_business_case"):               frozenset(),
+    ("routers/results.py", "post_business_case_abort"):         frozenset(),
+    ("routers/results.py", "get_business_case_inputs"):         frozenset(),
+    ("routers/results.py", "put_business_case_inputs"):         frozenset(),
+    ("routers/results.py", "get_business_case_preset"):         frozenset(),
     # Results workbook (RW-01): re-reports cost_breakdown / economics_by_carrier
     # and the stored case report in Excel; it computes no figure of its own.
     ("routers/results.py", "get_results_workbook"):            frozenset(),

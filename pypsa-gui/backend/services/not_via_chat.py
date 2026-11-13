@@ -221,6 +221,25 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
+        'id': 'business_case',
+        'title': 'Business case',
+        'disposition': 'unbuilt',
+        'reason': 'Running the business case and editing its lines is not available from chat yet. Use the Business case view beside the investment case on the Results page.',
+        'page': 'Results (Investment tab)',
+        'panel': None,
+        'keywords': frozenset({
+            'business',
+        }),
+        'routes': frozenset({
+            ('GET', '/api/results/business_case'),
+            ('GET', '/api/results/business_case/inputs'),
+            ('GET', '/api/results/business_case/preset'),
+            ('POST', '/api/results/business_case'),
+            ('POST', '/api/results/business_case/abort'),
+            ('PUT', '/api/results/business_case/inputs'),
+        }),
+    },
+    {
         'id': 'intent_comparison',
         'title': 'Design intent comparison',
         'disposition': 'unbuilt',
@@ -514,6 +533,27 @@ def _asks_about_the_strip(words: set[str]) -> bool:
     return bool(words & _STRIP_NAMES and words & _STRIP_ASKS and not words & _STRIP_ELSEWHERE)
 
 
+# The business case answers only an ask that names it ("business case") with what is
+# done to it. EBITDA, break-even and the workbook are also the investment case's and its
+# tools' (`get_investment_case`, `export_results_workbook`), so a bare `ebitda` or
+# `breakeven` must not steer the model away from them (GK B (54) D3).
+_BUSINESS_CASE_NOUN = frozenset({'case', 'cases'})
+_BUSINESS_CASE_ASKS = frozenset({
+    'run', 'rerun', 'edit', 'set', 'change', 'update', 'add', 'remove', 'line', 'lines',
+    'preset', 'abort', 'stop', 'show', 'read', 'what', 'ebitda', 'breakeven', 'break',
+    'even', 'margin', 'kpi', 'kpis',
+})
+
+
+# "Business as usual" (BAU) is a scenario, not this feature (GK B (54) D3).
+_BUSINESS_AS_USUAL = frozenset({'usual', 'bau'})
+
+
+def _asks_for_the_business_case(words: set[str]) -> bool:
+    return bool('business' in words and words & _BUSINESS_CASE_NOUN
+                and words & _BUSINESS_CASE_ASKS and not words & _BUSINESS_AS_USUAL)
+
+
 def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
     """Keyword hits, ranked by count then declaration order; return public copies.
 
@@ -530,6 +570,8 @@ def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
         if entry['id'] == 'memory_parameter_suggestions' and not _asks_for_a_saved_value(words, goal):
             continue
         if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):
+            continue
+        if entry['id'] == 'business_case' and not _asks_for_the_business_case(words):
             continue
         hits = len(words & entry['keywords'])
         if hits:

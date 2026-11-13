@@ -2873,3 +2873,98 @@ def test_a_port_is_an_input_only_where_its_efficiency_in_time_is_negative(
     assert ("dac" in c["conversion_links"]) is is_input, c
     if is_input:
         assert c["conversion_inputs"]["dac"] == [2]
+
+
+def test_the_infeasible_card_carries_the_named_hint():
+    """homer-parity 05: the diagnosis hands its named-constraint hints to the
+    failure card, with the need/reach figures and the setting that edits the row."""
+    import queue
+
+    from services.failure_taxonomy import classify_failure
+    from services.solver.diagnostics import _diagnose_infeasibility
+
+    _diagnose_infeasibility(
+        _network(pv_max=5.0),
+        SolverConfig(min_renewable_fraction=0.9),
+        queue.SimpleQueue(),
+    )
+    card = classify_failure("warning", "infeasible")
+    assert card["category"] == "infeasible"
+    (hint,) = card["constraint_hints"]
+    assert hint["constraint"] == "Minimum renewable fraction"
+    assert hint["setting"] == "offgrid"
+    assert "216.0 MWh" in hint["text"] and "at most 40.0 MWh" in hint["text"]
+    # Plain words only: no engine row name, no advice sentence (the log keeps both).
+    assert "row " not in hint["text"] and "p_nom_max" not in hint["text"]
+    assert hint["text"].endswith("at most 40.0 MWh.")
+    # Taken once: the next card carries none, and a non-infeasible card never does.
+    assert "constraint_hints" not in classify_failure("warning", "infeasible")
+    assert "constraint_hints" not in classify_failure("warning", "unbounded")
+
+
+def _diagnosed_hints() -> None:
+    import queue
+
+    from services.solver.diagnostics import _diagnose_infeasibility
+
+    _diagnose_infeasibility(
+        _network(pv_max=5.0),
+        SolverConfig(min_renewable_fraction=0.9),
+        queue.SimpleQueue(),
+    )
+
+
+def test_an_infeasible_or_unbounded_card_carries_the_hint():
+    """The diagnosis runs for any condition naming "infeasible", so that card too."""
+    from services.failure_taxonomy import classify_failure
+
+    _diagnosed_hints()
+    card = classify_failure("warning", "infeasible_or_unbounded")
+    assert card["category"] == "infeasible_or_unbounded"
+    assert [h["constraint"] for h in card["constraint_hints"]] == [
+        "Minimum renewable fraction"
+    ]
+
+
+def test_hints_never_outlive_the_solve_that_made_them():
+    """Taken on every classification: a success or another category clears them,
+    so a later undiagnosed infeasible card on the pooled thread shows none."""
+    from services.failure_taxonomy import classify_failure
+
+    for status, condition in (
+        ("ok", "optimal"),
+        ("aborted", "user_aborted"),
+        ("w", "unbounded"),
+    ):
+        _diagnosed_hints()
+        classify_failure(status, condition)
+        assert "constraint_hints" not in classify_failure("warning", "infeasible")
+
+
+def test_other_categories_never_carry_the_hint():
+    from services.failure_taxonomy import classify_failure
+
+    _diagnosed_hints()
+    card = classify_failure("warning", "unbounded")
+    assert card["category"] == "unbounded" and "constraint_hints" not in card
+
+
+def test_hints_collect_on_a_fresh_thread_and_are_taken_once():
+    import threading
+
+    from services.solver.diagnostics import add_constraint_hint, take_constraint_hints
+
+    out = {}
+
+    def run():
+        out["empty"] = take_constraint_hints()
+        add_constraint_hint("A", "first", "offgrid")
+        add_constraint_hint("B", "second", "other")
+        out["two"] = take_constraint_hints()
+        out["again"] = take_constraint_hints()
+
+    t = threading.Thread(target=run)
+    t.start()
+    t.join()
+    assert out["empty"] == [] and out["again"] == []
+    assert [h["constraint"] for h in out["two"]] == ["A", "B"]

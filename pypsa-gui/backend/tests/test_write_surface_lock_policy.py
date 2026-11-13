@@ -319,6 +319,11 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
         "it plans the reference on the ACTIVE project's network, builds the edit card "
         "on a copy, and writes nothing. The write is `/api/network/library_reference/apply`, "
         "behind the foreign-lock gate."),
+    ("POST", "/api/projects/{name}/studies/{study_id}/grid-extension-break-even"): (
+        NOT_PROJECT_DATA,
+        "a POST only to carry a body (the grid-side cost and basis): it reads the study "
+        "and its stored supply-architecture table through the path project's ACL, "
+        "derives a number, and writes nothing (homer-parity 03d)."),
     ("POST", "/api/spectrum/trace"): (NOT_PROJECT_DATA,
         "a POST only to carry the upload (a power trace): it reads the trace in memory, "
         "never stores it, and returns its spectrum and a dry-run smoothing-tier split of "

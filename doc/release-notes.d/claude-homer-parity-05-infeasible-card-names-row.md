@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Issues panel's "No feasible solution" card names the minimum-renewable-fraction row that made the solve infeasible, with the need and reach figures and a link that opens Solver settings › Off-grid constraints.

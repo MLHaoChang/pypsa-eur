@@ -4386,6 +4386,14 @@ def _dispatch_real_tool_call(
                     if run_eh.wait(task_ticket, job_id, session.session_id, active_ctx,
                                    result.get("started_at")):
                         result = {**result, "waiting": True}
+                if task_ticket is not None and tool_name == "run_investment_case":
+                    from harness import run_ic
+
+                    # Study harness 14 (GK B (52) I2): a run's case step settles from the
+                    # case's own record, never from its start receipt, and nothing polls.
+                    if run_ic.wait(task_ticket, job_id, session.session_id, active_ctx,
+                                   result.get("started_at")):
+                        result = {**result, "waiting": True}
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
             logger.exception(
                 "chat: study handoff enrich for %s failed: %s",

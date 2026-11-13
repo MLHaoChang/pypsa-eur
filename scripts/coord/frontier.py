@@ -24,6 +24,10 @@ Inputs, both optional and plain text:
   ``<effort> <NN>`` pairs, one per line, or ``sessions.py`` output whose titles
   say ``<effort> <NN>`` or carry the file stem (``16-heat-pump-cop-...``).
 
+A listed session whose issue also has an open PR is "In review", not "In progress"
+(the PR is the later stage). ``scripts/coord/inputs.sh`` writes both input files
+from the board.
+
 Modes: ``--stages`` prints ``<effort>/<file>`` and a dashboard stage for every
 issue (Done, In review, In progress, Ready, Blocked by NN, Needs triage, Needs
 owner, Won't do); ``--held`` also lists the ready issues that are not on the
@@ -211,10 +215,10 @@ def evaluate(issues, prs, sessions_text):
             it["stage"] = "In review" if it["pending"] else "Done"
         elif kind == "wontfix":
             it["stage"] = "Won't do"
+        elif it["covered_by"]:  # an open PR beats a listed session
+            it["stage"] = "In review"
         elif it["in_session"] or kind == "claimed":
             it["stage"] = "In progress"
-        elif it["covered_by"]:
-            it["stage"] = "In review"
         elif kind == "ready" and open_blockers:
             it["stage"] = "Blocked by " + ", ".join(open_blockers)
         elif kind == "ready":

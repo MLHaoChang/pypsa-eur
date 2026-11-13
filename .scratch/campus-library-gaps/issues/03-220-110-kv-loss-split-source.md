@@ -3,7 +3,7 @@
 
 # The 220/110 kV class-rule losses miss Ecodesign Tier 2 and need a sourced no-load/load-loss split
 
-Status: needs-info
+Status: ready-for-agent
 Type: task
 Blocked by: None
 
@@ -22,3 +22,5 @@ All five units TR_220_110_125/160/200/250/315 reach PEI 99.654 %, below the Tier
 ## Done
 
 A sourced split is merged, or the owner accepts the `assumed` class rule with its Tier 2 miss.
+
+- 2026-11-13 owner decision CLG03-SOURCE-1: source first; if no public P0/Pk source is found, derive the split from Tier 2 and tag it derived. GK A reviews.
