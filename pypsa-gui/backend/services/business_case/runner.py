@@ -83,12 +83,12 @@ class BusinessCaseConfig(BaseModel):
     def _checked(self) -> BusinessCaseConfig:
         for k, v in self.capacity.items():
             if not k or not math.isfinite(v) or v <= 0.0:
-                raise ValueError(f"capacity[{k!r}] must be a finite amount > 0")
+                raise ValueError(f"capacity of {k} must be a finite amount above 0")
         if self.break_even_line is not None:
             kinds = {ln.name: ln.kind for ln in self.inputs.lines}
             if kinds.get(self.break_even_line) != "revenue":
                 raise ValueError(
-                    f"break_even_line {self.break_even_line!r} names no revenue line"
+                    f"break_even_line names no revenue line: {self.break_even_line}"
                 )
         return self
 
