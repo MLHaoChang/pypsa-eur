@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Business-case preset for the mining concentrator (`eh_concentrator_staged`): net concentrate sales on shipped tonnes, process plant cost per tonne milled, freight, staff, maintenance and insurance.

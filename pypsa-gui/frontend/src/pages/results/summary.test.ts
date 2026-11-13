@@ -20,6 +20,11 @@ describe('costView', () => {
   it('reads the selected period, where new build is not split per period', () => {
     expect(costView(COST, '2040')).toEqual({ total: 540, capital: 500, operating: 40, newBuild: null, period: 2040 })
   })
+  it('a failed expansion compute is a null new build on the horizon, not a zero', () => {
+    // ui-modern 06: `capex_expansion` is null when the expansion compute raised.
+    const failed = { ...COST, capex_expansion: null } as unknown as CostBreakdown
+    expect(costView(failed, null)).toMatchObject({ total: 1000, capital: 900, newBuild: null, period: null })
+  })
   it('no breakdown, no view', () => {
     expect(costView(null, null)).toBeNull()
   })

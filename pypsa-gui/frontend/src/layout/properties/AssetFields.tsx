@@ -21,6 +21,11 @@ export function schemaFields(schema: AssetSchema | undefined): AssetFieldSpec[] 
   return schema ? schema.groups.flatMap(g => g.fields) : []
 }
 
+/** A field's display unit, as the drawer shows it (follows the asset's bus), else `fallback`. */
+export function fieldUnit(schema: AssetSchema | undefined, key: string, fallback: string): string {
+  return schemaFields(schema).find(f => f.key === key)?.unit_display || fallback
+}
+
 /** A described field's tooltip (S1d-3: the panels' own rows read it here, not from propertyDocs). */
 export function fieldHelp(schema: AssetSchema | undefined, key: string): string | undefined {
   return schemaFields(schema).find(f => f.key === key)?.help
