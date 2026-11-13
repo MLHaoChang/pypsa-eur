@@ -324,8 +324,6 @@ def locked_read(ctx, fn):
     """`fn()` under `ctx`'s mutation lock, between two reads of its edit counter and network object (as `read`).
     An edit that lands meanwhile is read again once. A second move, or a lock wait past `LOCK_WAIT_S`, returns
     `pins.UNREADABLE`. No context, or one with no lock, has nothing to wait for."""
-    if ctx is None:
-        return fn()
     for _attempt in range(2):
         network, revision = getattr(ctx, "network", None), _revision(ctx)
         lock = getattr(ctx, "mutation_lock", None)

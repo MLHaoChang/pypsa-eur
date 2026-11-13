@@ -243,3 +243,22 @@ def test_another_network_reads_without_the_open_project_lock(active, monkeypatch
         t.start()
         t.join()
     assert got[0][1] == []
+
+
+def test_a_network_swapped_during_the_read_reads_stale(active, monkeypatch):
+    """The bracket compares the network object too: a project swap mid-read is unreadable."""
+    import pypsa
+
+    n, fcr, ctx = active
+    real = RP._solved_read
+
+    def swapping(*a, **k):
+        got = real(*a, **k)
+        ctx.network = pypsa.Network()
+        return got
+
+    monkeypatch.setattr(RP, "_solved_read", swapping)
+    try:
+        assert RP.solved(n, _digest([fcr])) == STALE
+    finally:
+        ctx.network = n
