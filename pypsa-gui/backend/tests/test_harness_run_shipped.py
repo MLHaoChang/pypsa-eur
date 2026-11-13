@@ -460,3 +460,110 @@ def test_a_pick_over_the_cap_refuses(project, tpl, built):
         _kind(lambda: S.choose(shipped, 2, shipped["admissible"][:3]))
         == "shipped_cases_over_budget"
     )
+
+
+# ── what the allow-list refuses whatever the kind of value (mutant survivors) ─
+
+
+@pytest.mark.parametrize("kind", ["number", "string"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "commercial.export_price_ref.hash",
+        "commercial.other.ppa_wind.reference_price.id",
+        "commercial.contracts.ppa_wind.reference_price.version",
+        "commercial.contracts.ppa_wind.x.y",
+        "commercial.other.ppa_wind.price",
+        "commercial.contracts.ppa_wind.price.x",
+        "commercial.contracts.ppa_wind.indexation_pct_per_year",
+    ],
+)
+def test_a_path_that_only_looks_like_an_allowed_one_is_refused_for_either_kind(
+    project, tpl, built, path, kind
+):
+    old, new = (1.0, 2.0) if kind == "number" else ("ipp_da_base", "ipp_da_low")
+    case = _one(project, tpl, built, _change(path, old, new, kind))
+    assert case["status"] == "not_run"
+    assert (
+        "is a string field" not in case["why"]
+        and "is a number field" not in case["why"]
+    )
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [
+        ("commercial.export_price_ref.id", True),
+        ("commercial.import_price_ref.id", True),
+        ("commercial.contracts.ppa_wind.reference_price.id", True),
+        ("commercial.contracts.ppa_wind.price", False),
+        ("commercial.export_price_ref.hash", False),
+        ("commercial.other_ref.id", False),
+        ("commercial.contracts.ppa_wind.reference_price.hash", False),
+        ("commercial.contracts.ppa_wind.other.id", False),
+        ("commercial.contracts.ppa_wind.reference_price", False),
+        ("a.b.c.d.e", False),
+    ],
+)
+def test_which_paths_name_a_price_series(path, expected):
+    assert S._is_ref(path) is expected
+
+
+def test_a_battery_field_the_template_battery_lacks_is_refused(project, tpl, built):
+    cfg, network = built
+    change = _change("StorageUnit.bess.inv_power_overnight", 2.0, 1.0)
+    assert S.refusal(change, cfg, network) is None
+    no_column = network.copy()
+    no_column.storage_units = no_column.storage_units.drop(
+        columns=["inv_power_overnight"]
+    )
+    no_unit = network.copy()
+    no_unit.storage_units = no_unit.storage_units.rename(index={"bess": "other"})
+    for missing in (no_column, no_unit, None):
+        assert "not on the template's battery" in S.refusal(change, cfg, missing)
+
+
+@pytest.mark.parametrize(
+    "cfg",
+    [
+        None,
+        {},
+        {"commercial": None},
+        {"commercial": {"contracts": None}},
+        {"commercial": {"contracts": [None, "x", {"price": 1}, {"id": ""}]}},
+    ],
+)
+def test_a_template_with_no_contract_list_leaves_no_contract_to_change(cfg, built):
+    _, network = built
+    change = _change("commercial.contracts.ppa_wind.price", 1, 2)
+    assert "contract the template does not have" in S.refusal(change, cfg, network)
+
+
+@pytest.mark.parametrize(
+    "old, new",
+    [
+        ("ipp_da_base", 5),
+        (5, "ipp_da_low"),
+        (["x"], "ipp_da_low"),
+        ("ipp_da_base", ["x"]),
+        (None, "ipp_da_low"),
+        ("ipp_da_base", None),
+        ("", "ipp_da_low"),
+        ("ipp_da_base", ""),
+    ],
+)
+def test_a_series_name_must_be_text_on_both_sides(project, tpl, built, old, new):
+    case = _one(
+        project,
+        tpl,
+        built,
+        _change("commercial.export_price_ref.id", old, new, "string"),
+    )
+    assert case["status"] == "not_run"
+
+
+def test_the_digest_binds_the_template_the_file_is_for():
+    data = {"version": 1}
+    assert S._digest(data, "a", {}) != S._digest(data, "b", {})
+    assert S._digest(data, "a", {}) != S._digest(data, "a", {"s": "1"})
+    assert S._digest(data, "a", {}) != S._digest({"version": 2}, "a", {})
