@@ -103,9 +103,7 @@ class OpenAiTts:
         self._max_audio = max_audio_bytes
 
     def __repr__(self) -> str:
-        return (
-            f"OpenAiTts(model={self._profile.model!r}, voice={self._profile.voice!r})"
-        )
+        return f"OpenAiTts(model={self._profile.model!r}, voice={self._profile.voice!r})"  # repr-ok: debug repr that hides the key
 
     def _check_model(self) -> None:
         shutdown = retires_on(self._profile.model)

@@ -89,7 +89,7 @@ class LiveKitConfig:
     agent_name: str = ""  # empty: no worker dispatch (connectivity probe only)
 
     def __repr__(self) -> str:  # the key and secret never reach a log line
-        return f"LiveKitConfig(url={self.url!r}, agent_name={self.agent_name!r})"
+        return f"LiveKitConfig(url={self.url!r}, agent_name={self.agent_name!r})"  # repr-ok: debug repr that hides the secret
 
 
 def _api_base(url: str) -> str:
@@ -131,7 +131,7 @@ class LiveKitTransport:
         self._clock = clock
 
     def __repr__(self) -> str:
-        return f"LiveKitTransport(url={self._config.url!r})"
+        return f"LiveKitTransport(url={self._config.url!r})"  # repr-ok: debug repr that hides the secret
 
     # ── tokens ──────────────────────────────────────────────────────────────
 
