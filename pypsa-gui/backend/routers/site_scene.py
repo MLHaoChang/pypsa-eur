@@ -74,7 +74,7 @@ async def _json_body(request: Request, cap: int) -> Any:
         return None
     try:
         return json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):    # deeply nested `[` under the size cap raises RecursionError
         raise SceneError("invalid_input", "The request is not valid JSON") from None
 
 
