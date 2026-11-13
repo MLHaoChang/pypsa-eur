@@ -458,6 +458,15 @@ def test_a_long_walk_is_cut_and_marked_truncated(captured, monkeypatch):
     )
 
 
+
+def test_a_walk_exactly_at_the_cap_is_complete(captured, monkeypatch):
+    ctx, owner, record = captured
+    total = _why(owner, record)["outcome"]["steps_total"]
+    monkeypatch.setattr(E, "MAX_STEPS", total)
+    out = _why(owner, record)
+    assert out["outcome"]["truncated"] is False and out["outcome"]["complete"] is True
+    assert len(out["steps"]) == total
+
 # --- X1/Y8 read-only, X6 route and tool ----------------------------------------------------------------------
 
 
