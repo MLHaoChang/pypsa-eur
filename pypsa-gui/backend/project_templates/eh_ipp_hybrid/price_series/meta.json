@@ -11,6 +11,7 @@
         "currency_year:2030",
         "region:DE-LU"
       ],
+      "sha256": "d199499b054f78c5e22c2a4ee809229b33e0167ca614481ae9980bc6b7d2717c",
       "source": "illustrative (assumed)",
       "targets": [
         "commercial.export_price_ref",
@@ -31,6 +32,7 @@
         "currency_year:2030",
         "region:DE-LU"
       ],
+      "sha256": "51b985eccbeea94ba9982e0d28d0055de28a102d3cd7c76219cd857b8687eea7",
       "source": "illustrative (assumed)",
       "targets": [],
       "vintage_year": 2030
@@ -46,6 +48,7 @@
         "currency_year:2030",
         "region:DE-LU"
       ],
+      "sha256": "e7808295290774efd62b37945b1152606e1f8e6125e000f39f4e34cb82a6b388",
       "source": "illustrative (assumed)",
       "targets": [],
       "vintage_year": 2030
@@ -62,6 +65,7 @@
         "region:DE-LU"
       ],
       "provider": "SMARD",
+      "sha256": "26105b6a8718cec5c0164da9c320fc17b9b553e6660bd90963bfe9c64453b809",
       "source": "Bundesnetzagentur | SMARD.de (CC BY 4.0)",
       "targets": [],
       "vintage_year": 2024
@@ -78,6 +82,7 @@
         "region:DK1"
       ],
       "provider": "Energinet",
+      "sha256": "41a9c6a6579d91195f78ea3b1df96a65e220cdd78bffce75ce1e75b54b9015e4",
       "source": "Source: Energinet (www.energidataservice.dk) (CC BY 4.0)",
       "targets": [],
       "vintage_year": 2024
