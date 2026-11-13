@@ -7,7 +7,6 @@ added in Task 7. They run with ``PYPSA_GUI_AUTH_ENABLED=true`` and a temp
 (auth-disabled) project tests continue to pass unchanged because the router
 only takes the DB path when auth is enabled AND a user is resolved.
 """
-
 from __future__ import annotations
 
 import contextlib
@@ -35,7 +34,6 @@ pytestmark = pytest.mark.auth_smoke
 
 # ── Environment / session fixtures ───────────────────────────────────────────
 
-
 @pytest.fixture
 def tenancy_env(tmp_path, monkeypatch):
     monkeypatch.setenv("PYPSA_GUI_AUTH_ENABLED", "true")
@@ -48,9 +46,7 @@ def tenancy_env(tmp_path, monkeypatch):
 
 @pytest.fixture
 def session_local(db_engine, monkeypatch, tenancy_env):
-    testing_session_local = sessionmaker(
-        autocommit=False, autoflush=False, bind=db_engine
-    )
+    testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
     monkeypatch.setattr(db_session_module, "SessionLocal", testing_session_local)
     return testing_session_local
 
@@ -61,7 +57,6 @@ def _now() -> datetime:
 
 # ── DB seeding helpers ───────────────────────────────────────────────────────
 
-
 def _create_org(session_local, *, name: str | None = None) -> Organization:
     with session_local() as db:
         org = Organization(name=name or f"Org {uuid.uuid4()}", created_at=_now())
@@ -71,9 +66,7 @@ def _create_org(session_local, *, name: str | None = None) -> Organization:
         return org
 
 
-def _create_user(
-    session_local, *, email: str | None = None, is_super_admin: bool = False
-) -> User:
+def _create_user(session_local, *, email: str | None = None, is_super_admin: bool = False) -> User:
     with session_local() as db:
         user = User(
             email=email or f"{uuid.uuid4()}@example.com",
@@ -122,7 +115,9 @@ def _create_project(
     # `taken=set()` is sound here and only here: `UniqueConstraint(org_id,
     # name)` already makes every project in one org distinctly named, and no
     # two names in this module sanitise alike.
-    relative = storage_path_for(org.id, project_id, name, taken=set(), org_segment=True)
+    relative = storage_path_for(
+        org.id, project_id, name, taken=set(), org_segment=True
+    )
     storage_path = get_settings().projects_root / relative
     if seed_disk:
         _seed_network(storage_path)
@@ -160,9 +155,7 @@ def _assign(session_local, *, project, user, assigned_by) -> None:
 @contextlib.contextmanager
 def _client_for(email: str):
     with TestClient(main.app) as client:
-        resp = client.post(
-            "/api/auth/login", json={"email": email, "password": "secret-pass"}
-        )
+        resp = client.post("/api/auth/login", json={"email": email, "password": "secret-pass"})
         assert resp.status_code == 200, resp.text
         # Step 0a: state-changing routes require the double-submit CSRF
         # token. The login response carries it in the body precisely so a
@@ -172,7 +165,6 @@ def _client_for(email: str):
 
 
 # ── Tests ────────────────────────────────────────────────────────────────────
-
 
 def test_user_b_cannot_list_user_a_project(session_local):
     org_a = _create_org(session_local, name="Org A")
@@ -205,16 +197,12 @@ def test_user_b_cannot_load_or_activate_user_a_project(session_local):
 
     with _client_for("b@example.com") as client_b:
         assert client_b.get(f"/api/projects/{project_a.id}").status_code == 404
-        assert (
-            client_b.post(f"/api/projects/{project_a.id}/activate").status_code == 404
-        )
+        assert client_b.post(f"/api/projects/{project_a.id}/activate").status_code == 404
         assert client_b.get(f"/api/projects/{project_a.id}/bundle").status_code == 404
 
     with _client_for("a@example.com") as client_a:
         assert client_a.get(f"/api/projects/{project_a.id}").status_code == 200
-        assert (
-            client_a.post(f"/api/projects/{project_a.id}/activate").status_code == 200
-        )
+        assert client_a.post(f"/api/projects/{project_a.id}/activate").status_code == 200
 
 
 def test_create_scenario_inherits_tree_access(session_local):
@@ -251,14 +239,8 @@ def test_create_scenario_inherits_tree_access(session_local):
 
         # Member has tree-inherited access to the freshly-created child.
         assert client_member.get(f"/api/projects/{body['id']}").status_code == 200
-        assert (
-            client_member.post(f"/api/projects/{body['id']}/activate").status_code
-            == 200
-        )
-        assert client_member.get(f"/api/projects/{body['id']}/bundle").status_code in (
-            200,
-            404,
-        )
+        assert client_member.post(f"/api/projects/{body['id']}/activate").status_code == 200
+        assert client_member.get(f"/api/projects/{body['id']}/bundle").status_code in (200, 404)
 
     # The child row carries the DB parent pointer.
     with session_local() as db:
@@ -272,7 +254,6 @@ def test_create_scenario_inherits_tree_access(session_local):
 # Category and description were write-once until this route: a mistyped
 # description, or a scenario that turned out to be the baseline, could only be
 # corrected by branching a replacement and deleting the original.
-
 
 def _seed_admin_root(session_local, *, name="Root"):
     org = _create_org(session_local, name="Org")
@@ -400,9 +381,7 @@ def test_patch_mirrors_into_metadata_json_for_bundle_export(session_local):
 
     with session_local() as db:
         child = db.get(Project, uuid.UUID(child_id))
-    meta = json.loads(
-        (project_registry.project_dir(child) / "metadata.json").read_text()
-    )
+    meta = json.loads((project_registry.project_dir(child) / "metadata.json").read_text())
     assert meta["scenario_type"] == "stress"
     assert meta["scenario_description"] == "edited"
 
@@ -415,9 +394,7 @@ def test_patch_refuses_a_project_the_caller_may_not_edit(session_local):
     outsider = _create_user(session_local, email="outsider@example.com")
     _add_membership(session_local, user_id=admin.id, org_id=org.id, role="admin")
     other_org = _create_org(session_local, name="Other")
-    _add_membership(
-        session_local, user_id=outsider.id, org_id=other_org.id, role="admin"
-    )
+    _add_membership(session_local, user_id=outsider.id, org_id=other_org.id, role="admin")
     root = _create_project(session_local, org=org, creator=admin, name="Root")
 
     with _client_for("outsider@example.com") as client:
@@ -448,7 +425,6 @@ def test_an_empty_patch_body_is_a_no_op(session_local):
 # storage dir, so a row created without the category makes the correct value
 # in the restored metadata.json unreachable rather than merely redundant.
 
-
 def test_a_bundle_round_trip_keeps_the_category(session_local):
     import io
     import zipfile
@@ -461,11 +437,7 @@ def test_a_bundle_round_trip_keeps_the_category(session_local):
         # nowhere to mirror to — see the warning it logs for that case.)
         child_id = client.post(
             f"/api/projects/{root.id}/scenarios",
-            json={
-                "name": "Branch",
-                "description": "cold winter",
-                "scenario_type": "stress",
-            },
+            json={"name": "Branch", "description": "cold winter", "scenario_type": "stress"},
         ).json()["id"]
 
         bundle = client.get(f"/api/projects/{child_id}/bundle")
@@ -511,22 +483,15 @@ def test_an_old_bundle_is_split_on_import_not_stored_tagged(session_local, tmp_p
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr("network.nc", (seed / "network.nc").read_bytes())
-        zf.writestr(
-            "metadata.json",
-            json.dumps(
-                {
-                    "name": "OldBundle",
-                    "scenario_description": "[stress] cold winter",
-                }
-            ),
-        )
+        zf.writestr("metadata.json", json.dumps({
+            "name": "OldBundle",
+            "scenario_description": "[stress] cold winter",
+        }))
 
     with _client_for("admin@example.com") as client:
         resp = client.post(
             "/api/projects/import_bundle",
-            files={
-                "file": ("OldBundle.pypsaproj.zip", buf.getvalue(), "application/zip")
-            },
+            files={"file": ("OldBundle.pypsaproj.zip", buf.getvalue(), "application/zip")},
         )
         assert resp.status_code in (200, 201), resp.text
         rows = {r["name"]: r for r in client.get("/api/projects/").json()}
@@ -552,12 +517,9 @@ def test_scenario_child_metadata_parent_name_in_sync(session_local):
 
     # metadata.json on the child's storage dir points at the base NAME.
     import json
-
     with session_local() as db:
         child = db.get(Project, uuid.UUID(child_id))
-    meta = json.loads(
-        (project_registry.project_dir(child) / "metadata.json").read_text()
-    )
+    meta = json.loads((project_registry.project_dir(child) / "metadata.json").read_text())
     assert meta["parent_project"] == "Root"
 
 
@@ -602,9 +564,7 @@ def test_rename_updates_registry(session_local):
     root = _create_project(session_local, org=org, creator=admin, name="OldName")
 
     with _client_for("admin@example.com") as client:
-        resp = client.post(
-            f"/api/projects/{root.id}/rename", json={"new_name": "NewName"}
-        )
+        resp = client.post(f"/api/projects/{root.id}/rename", json={"new_name": "NewName"})
         assert resp.status_code == 200, resp.text
         assert resp.json()["name"] == "NewName"
         assert resp.json()["id"] == str(root.id)
@@ -711,7 +671,9 @@ def test_layout_put_isolation(session_local):
     project_a = _create_project(session_local, org=org_a, creator=user_a, name="Alpha")
 
     with _client_for("b@example.com") as client_b:
-        resp = client_b.put(f"/api/projects/{project_a.id}/layout", json={"nodes": {}})
+        resp = client_b.put(
+            f"/api/projects/{project_a.id}/layout", json={"nodes": {}}
+        )
         assert resp.status_code == 404
 
 
@@ -726,9 +688,7 @@ def test_statistics_isolation(session_local):
 
     # Another org's user cannot read statistics — 404.
     with _client_for("b@example.com") as client_b:
-        assert (
-            client_b.get(f"/api/projects/{project_a.id}/statistics").status_code == 404
-        )
+        assert client_b.get(f"/api/projects/{project_a.id}/statistics").status_code == 404
 
     # Owner gets real statistics from the seeded network (1 bus, 3 snapshots).
     with _client_for("a@example.com") as client_a:
@@ -751,18 +711,12 @@ def test_results_bundle_isolation(session_local):
 
     # Another org's user cannot read the results bundle — 404, not a leak.
     with _client_for("b@example.com") as client_b:
-        assert (
-            client_b.get(f"/api/projects/{project_a.id}/results_bundle").status_code
-            == 404
-        )
+        assert client_b.get(f"/api/projects/{project_a.id}/results_bundle").status_code == 404
 
     # Owner is authorized; the seeded network was never solved so the bundle is
     # empty → 204 (authorization succeeded, there's just no dispatch to return).
     with _client_for("a@example.com") as client_a:
-        assert (
-            client_a.get(f"/api/projects/{project_a.id}/results_bundle").status_code
-            == 204
-        )
+        assert client_a.get(f"/api/projects/{project_a.id}/results_bundle").status_code == 204
 
 
 # ── UUID-shaped names (Task 7 review — must-fix #3) ───────────────────────────
@@ -809,9 +763,7 @@ def test_find_project_uuid_fallback_unit(session_local):
         # A UUID that matches neither an id nor a name → None.
         assert project_registry.find_project(db, db_user, str(uuid.uuid4())) is None
         # The real id resolves directly.
-        assert (
-            project_registry.find_project(db, db_user, str(project.id)).id == project.id
-        )
+        assert project_registry.find_project(db, db_user, str(project.id)).id == project.id
 
 
 # ── Save-As copies uploads from the auth storage path (review — must-fix #2) ──
@@ -931,7 +883,6 @@ def test_enqueue_409s_when_other_user_holds_lock(session_local):
 # runs; what was missing is refusing a non-holder's write while someone else
 # holds the edit lock.
 
-
 def test_upload_post_409s_when_other_user_holds_lock(session_local):
     _org, user_a, user_b, project = _seed_two_user_project(session_local)
 
@@ -1028,10 +979,9 @@ def test_upload_does_not_acquire_the_edit_lock(session_local):
                 "A passive write left a live claim behind."
             )
 
-        assert (
-            client_b.delete(f"/api/projects/{project.id}/uploads/{file_id}").status_code
-            == 200
-        )
+        assert client_b.delete(
+            f"/api/projects/{project.id}/uploads/{file_id}"
+        ).status_code == 200
 
         with session_local() as db:
             assert project_locks.get_lock(db, project.id) is None, (
@@ -1058,7 +1008,6 @@ def test_upload_does_not_acquire_the_edit_lock(session_local):
 # `tests/test_line_lengths.py` (`POST /api/network/buses` with
 # `{"name", "v_nom"}`).
 
-
 def test_network_write_409s_when_active_project_lock_held_by_other(session_local):
     _org, user_a, user_b, project = _seed_two_user_project(session_local)
 
@@ -1077,7 +1026,9 @@ def test_network_write_409s_when_active_project_lock_held_by_other(session_local
         assert r.json().get("code") == "project_locked"
 
         # The holder's own writes against the same shared context still pass.
-        r = client_a.post("/api/network/buses", json={"name": "Legit", "v_nom": 380.0})
+        r = client_a.post(
+            "/api/network/buses", json={"name": "Legit", "v_nom": 380.0}
+        )
         assert r.status_code in (200, 201), r.text
 
 
@@ -1190,12 +1141,9 @@ def test_simulation_write_409s_when_active_project_lock_held_by_other(session_lo
         assert r.json().get("code") == "project_locked"
 
         # The holder is unaffected.
-        assert (
-            client_a.put(
-                "/api/simulation/solver_config", json={"solver": "highs"}
-            ).status_code
-            == 200
-        )
+        assert client_a.put(
+            "/api/simulation/solver_config", json={"solver": "highs"}
+        ).status_code == 200
 
 
 def test_enqueue_of_an_unlocked_project_passes_under_a_foreign_active_lock(
@@ -1270,9 +1218,7 @@ def test_clear_finished_is_not_refused_by_active_project_foreign_lock(session_lo
         assert r.status_code != 409, r.text
 
 
-def test_investment_case_abort_is_not_refused_by_active_project_foreign_lock(
-    session_local,
-):
+def test_investment_case_abort_is_not_refused_by_active_project_foreign_lock(session_local):
     """
     The investment-case abort only sets the study's stop event, like the other
     study aborts. Gated, a foreign lock would trap a running case with no way
@@ -1289,9 +1235,7 @@ def test_investment_case_abort_is_not_refused_by_active_project_foreign_lock(
         assert r.status_code != 409, r.text
 
 
-def test_business_case_abort_is_not_refused_by_active_project_foreign_lock(
-    session_local,
-):
+def test_business_case_abort_is_not_refused_by_active_project_foreign_lock(session_local):
     """
     The business-case abort only sets the study's stop event, like the
     investment-case abort above. Gated, a foreign lock would trap a running
@@ -1328,9 +1272,7 @@ def test_preflight_is_not_refused_by_active_project_foreign_lock(session_local):
 
         r = client_b.post("/api/simulation/preflight")
         if r.status_code == 409:
-            assert r.json().get("detail", {}).get("error_kind") != "project_locked", (
-                r.text
-            )
+            assert r.json().get("detail", {}).get("error_kind") != "project_locked", r.text
         else:
             assert r.status_code != 409
 
@@ -1350,10 +1292,7 @@ def test_foreign_lock_gate_exempt_predicate_is_an_explicit_allowlist(monkeypatch
     # The three real, deliberately-exempt routes.
     assert exempt("/api/simulation/queue") is True
     assert exempt("/api/simulation/queue/clear_finished") is True
-    assert (
-        exempt("/api/simulation/queue/6c1f7e2a-6e6b-4c7e-9c1a-3f2b1a9d4e5f/abort")
-        is True
-    )
+    assert exempt("/api/simulation/queue/6c1f7e2a-6e6b-4c7e-9c1a-3f2b1a9d4e5f/abort") is True
     assert exempt("/api/simulation/preflight") is True
 
     # The queue negatives below pin the job-scoped family, but nothing yet
@@ -1368,17 +1307,13 @@ def test_foreign_lock_gate_exempt_predicate_is_an_explicit_allowlist(monkeypatch
 
     # Hypothetical siblings under the SAME prefix must stay gated by default.
     assert exempt("/api/simulation/queue/purge_all") is False
-    assert (
-        exempt("/api/simulation/queue/6c1f7e2a-6e6b-4c7e-9c1a-3f2b1a9d4e5f/priority")
-        is False
-    )
+    assert exempt("/api/simulation/queue/6c1f7e2a-6e6b-4c7e-9c1a-3f2b1a9d4e5f/priority") is False
 
     # Non-canonical / crafted job-id segments on the abort route must NOT
     # ride the exemption — fail-gated is the safe direction (a stray 409,
     # never an accidental bypass).
     assert exempt("/api/simulation/queue/not-a-uuid/abort") is False
     assert exempt("/api/simulation/queue/../abort") is False
-
 
 # ── N2: requeue writes to a project without checking who holds its lock ────
 #
