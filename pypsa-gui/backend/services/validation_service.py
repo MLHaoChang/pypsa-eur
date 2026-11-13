@@ -2652,11 +2652,9 @@ def _check_fuel_curves(n) -> list[Issue]:
     gens = n.generators
     if gens.empty or not any(c in gens.columns for c in fuel_curve.COLUMNS):
         return []
-    series = {c: getattr(n.generators_t, c, None) for c in fuel_curve.DERIVED}
-    return [Issue("error", "fuel_curve_invalid", "Generator", str(name), f"Fuel curve: {msg}.")
+    return [Issue("error", "fuel_curve_invalid", "Generator", str(name), f"{msg}.")
             for name in gens.index
-            if (msg := fuel_curve.guard(gens.loc[name], cost_series=[c for c, df in series.items()
-                                                                     if df is not None and name in df.columns]))]
+            if (msg := fuel_curve.guard(gens.loc[name], cost_series=fuel_curve.cost_series(n, name)))]
 
 
 def _check_outage_params(n) -> list[Issue]:

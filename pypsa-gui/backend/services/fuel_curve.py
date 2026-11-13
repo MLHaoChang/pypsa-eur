@@ -40,6 +40,9 @@ PRICE = "fuel_price"
 COLUMNS = (SLOPE, NO_LOAD, PRICE)
 #: The PyPSA columns the curve writes.
 DERIVED = ("marginal_cost", "stand_by_cost")
+#: Each column as the Generator form labels it (`services/asset_schema/fields.py`): a refusal opens with it.
+LABELS = {SLOPE: "Fuel curve slope", NO_LOAD: "No-load fuel", PRICE: "Fuel price",
+          "marginal_cost": "Marginal cost", "stand_by_cost": "Stand-by cost"}
 
 
 def _num(v: Any) -> float | None:
@@ -57,6 +60,11 @@ def _is_unset(v: Any) -> bool:
     return v is None or (isinstance(v, float) and math.isnan(v))
 
 
+def _flag(v: Any) -> bool:
+    """A bool column's cell; unset (None, NaN) is False."""
+    return False if _is_unset(v) else bool(v)
+
+
 def curve_of(row: Mapping[str, Any]) -> tuple[float, float, float] | None:
     """``(slope, no_load, price)`` with unset terms as 0, or None when the row sets no curve term."""
     vals = [_num(row.get(k)) for k in COLUMNS]
@@ -71,23 +79,23 @@ def check(row: Mapping[str, Any]) -> str | None:
     for k in COLUMNS:
         v = row.get(k)
         if not _is_unset(v) and _num(v) is None:
-            return f"{k} must be a finite number (got {v!r})"
+            return f"{LABELS[k]}: enter a finite number (got {v!r})"
     curve = curve_of(row)
     if curve is None:
         return None
     slope, no_load, _price = curve
     for k, v in zip(COLUMNS, curve):
         if v < 0:
-            return f"{k} must be zero or more (got {v:g})"
+            return f"{LABELS[k]}: enter zero or more (got {v:g})"
     if (slope > 0 or no_load > 0) and _num(row.get(PRICE)) is None:
-        return "a fuel curve needs a fuel price (EUR per MWh of fuel)"
+        return "Fuel price: enter the price per MWh of fuel, which the fuel curve needs"
     if no_load > 0:
-        if not bool(row.get("committable")):
-            return ("no-load fuel is burnt only while the unit is on: turn on Unit commitment "
-                    "(committable) to use it")
-        if bool(row.get("p_nom_extendable")):
-            return ("no-load fuel is a cost per hour on the rated capacity, which cannot follow an "
-                    "extendable p_nom: fix the capacity or set no-load fuel to 0")
+        if not _flag(row.get("committable")):
+            return ("No-load fuel: turn on Unit commitment, or set it to 0. The fuel is burnt only while the "
+                    "unit is on")
+        if _flag(row.get("p_nom_extendable")):
+            return ("No-load fuel: untick Extendable and set a fixed capacity, or set it to 0. Its cost per "
+                    "hour follows the rated capacity")
     return None
 
 
@@ -95,7 +103,7 @@ def _same(a: Any, b: Any) -> bool:
     fa, fb = _num(a), _num(b)
     if fa is None or fb is None:
         return _is_unset(a) and _is_unset(b)
-    return math.isclose(fa, fb, rel_tol=1e-12, abs_tol=1e-12)
+    return math.isclose(fa, fb, rel_tol=1e-9, abs_tol=1e-9)
 
 
 def guard(after: Mapping[str, Any], *, before: Mapping[str, Any] | None = None,
@@ -110,25 +118,48 @@ def guard(after: Mapping[str, Any], *, before: Mapping[str, Any] | None = None,
     if curve_of(after) is None:
         return None
     if series := [c for c in DERIVED if c in set(cost_series)]:
-        return (f"a fuel curve sets {series[0]}, so the generator's {series[0]} time series would be ignored: "
-                "remove the series or clear the fuel curve")
+        return (f"{LABELS[series[0]]}: remove its profile, or clear the fuel curve. The curve sets this cost, "
+                "so the profile would be ignored")
     if before is not None and curve_of(before) is not None:
         for col in DERIVED:
-            if col in (submitted or {}) and not _same(submitted[col], before.get(col)):
-                return (f"{col} is derived from the fuel curve (fuel price, slope and no-load fuel): edit those, "
-                        "or clear the curve to set it directly")
+            v = (submitted or {}).get(col)
+            # A blank is not an edit: the form may send a read-only row empty.
+            if not _is_unset(v) and not _same(v, before.get(col)):
+                return (f"{LABELS[col]}: set by the fuel curve. Change the fuel price, slope or no-load fuel, "
+                        "or clear the curve to enter it directly")
     return None
 
 
+def cost_series(n, name: str) -> list[str]:
+    """The curve-derived cost columns generator ``name`` also has a time series for."""
+    return [c for c in DERIVED
+            if (df := getattr(n.generators_t, c, None)) is not None and name in df.columns]
+
+
+_UNITS = {"marginal_cost": "€/MWh", "stand_by_cost": "€/h"}
+
+
 def replace_notice(after: Mapping[str, Any], *, before: Mapping[str, Any] | None = None) -> str | None:
-    """What a newly set curve replaces: the non-zero cost columns it overwrites, or None."""
+    """What a newly set curve replaces: the non-zero costs the row carries before the derivation, or None.
+
+    ``after`` is the row as written (the stored values overlaid with what was sent), so a cost sent together with
+    a new curve is the one named.
+    """
     if curve_of(after) is None or (before is not None and curve_of(before) is not None):
         return None
-    old_row = after if before is None else before
     new = derived_costs(after)
-    replaced = [f"{col} {_num(old_row.get(col)):g} with {new[col]:g}" for col in DERIVED
-                if (_num(old_row.get(col)) or 0.0) != 0.0 and not _same(old_row.get(col), new[col])]
+    replaced = [f"the {LABELS[col].lower()} of {_num(after.get(col)):g} {_UNITS[col]} with {new[col]:g} "
+                f"{_UNITS[col]}" for col in DERIVED
+                if (_num(after.get(col)) or 0.0) != 0.0 and not _same(after.get(col), new[col])]
     return f"The fuel curve replaces {' and '.join(replaced)}." if replaced else None
+
+
+def cleared(after: Mapping[str, Any], *, before: Mapping[str, Any] | None) -> dict[str, float]:
+    """The costs a write that clears a curve resets: the stand-by cost, which the form cannot edit and which
+    would otherwise stay a charge per on-hour with no curve behind it. Marginal cost stays (it is editable)."""
+    if before is None or curve_of(before) is None or curve_of(after) is not None:
+        return {}
+    return {"stand_by_cost": 0.0}
 
 
 def derived_costs(row: Mapping[str, Any]) -> dict[str, float]:
@@ -199,7 +230,7 @@ def fuel_use(n, period_years: Mapping[Any, float] | None = None) -> list[dict[st
         rows.append(row)
         if p is None or name not in p.columns:
             continue
-        no_load_on = no_load > 0 and bool(gens.at[name, "committable"])
+        no_load_on = no_load > 0 and _flag(gens.at[name, "committable"])
         if no_load_on and (status is None or name not in status.columns):
             continue
         p_nom = _num(gens.at[name, "p_nom"]) or 0.0

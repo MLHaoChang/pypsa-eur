@@ -353,18 +353,14 @@ def _apply_investment_parts(n, component_class: str, name: str, parts: dict) -> 
                 discount_rate=effective_discount_rate(own_rate, _global_discount_rate()))
 
 
-def _fuel_curve_cost_series(n, name: str) -> list[str]:
-    """The curve-derived cost columns this generator also has a time series for."""
-    return [c for c in fuel_curve.DERIVED if name in getattr(n.generators_t, c, pd.DataFrame()).columns]
-
-
-def _check_fuel_curve(component_class: str, row: dict, *, n=None, name: str | None = None,
-                      before: dict | None = None, submitted: dict | None = None) -> str | None:
+def check_fuel_curve(component_class: str, row: dict, *, n=None, name: str | None = None,
+                     before: dict | None = None, submitted: dict | None = None) -> str | None:
     """Refuse a generator fuel curve write `fuel_curve.guard` refuses (homer-parity 02a), before anything is
-    written; else the notice of what a newly set curve replaces (None when nothing)."""
+    written; else the notice of what a newly set curve replaces (None when nothing). The single and bulk
+    edits share it."""
     if component_class != "Generator":
         return None
-    series = _fuel_curve_cost_series(n, name) if n is not None and name is not None else []
+    series = fuel_curve.cost_series(n, name) if n is not None and name is not None else []
     if msg := fuel_curve.guard(row, before=before, submitted=submitted, cost_series=series):
         raise HTTPException(422, msg)
     return fuel_curve.replace_notice(row, before=before)
@@ -418,7 +414,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     kwargs, parts = split_parts(component_class, kwargs)
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     _check_investment_parts(component_class, parts, row=kwargs)
-    notice = _check_fuel_curve(component_class, kwargs)
+    notice = check_fuel_curve(component_class, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)
         if name in df.index:
@@ -645,8 +641,10 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         merged, current_parts = split_parts(component_class, merged)
         parts = {**current_parts, **submitted_parts}
         _check_investment_parts(component_class, parts, row=merged)
-        notice = _check_fuel_curve(component_class, merged, n=n, name=name,
-                                   before=df.loc[name].to_dict(), submitted=kwargs)
+        stored = df.loc[name].to_dict()
+        notice = check_fuel_curve(component_class, merged, n=n, name=name, before=stored, submitted=kwargs)
+        if component_class == "Generator":
+            merged.update(fuel_curve.cleared(merged, before=stored))
         if merged.get("name", name) != name:
             # OPEN-ITEMS item 8. Before `ensure_carrier`, which can add a
             # carrier: a refused rename must leave nothing behind.

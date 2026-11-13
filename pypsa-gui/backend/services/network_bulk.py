@@ -274,6 +274,7 @@ def apply_bulk_update(body: dict) -> dict:
     exactly one implementation rather than one per shape.
     """
     refuse_edit_during_live_study()  # P27a A1: not routed via _update_component
+    notices: list[str] = []  # homer-parity 02a: what a newly set fuel curve replaces, per generator
     component_class = body.get("component_class", "")
     names = body.get("names", [])
     updates = body.get("updates", {})
@@ -545,16 +546,21 @@ def apply_bulk_update(body: dict) -> dict:
         # before the first write, so a bad one cannot leave a half-applied batch.
         from services.component_names import require_valid_name
 
-        # homer-parity 02a: the generator fuel curve's guard, as on the single edit, before the first write.
+        # homer-parity 02a: the generator fuel curve's guard, as on the single edit, before the first write;
+        # a cleared curve resets its stand-by cost, a new one says what it replaces.
         if component_class == "Generator":
             from services import fuel_curve
-            from services.network_crud import _check_fuel_curve
+            from services.network_crud import check_fuel_curve
 
             for _targets, coerced in pending:
                 for t in _targets:
                     before = df.loc[t].to_dict()
-                    _check_fuel_curve(component_class, {**before, **coerced}, n=n, name=t, before=before,
-                                      submitted=coerced)
+                    after = {**before, **coerced}
+                    if notice := check_fuel_curve(component_class, after, n=n, name=t, before=before,
+                                                  submitted=coerced):
+                        notices.append(f"{t}: {notice}")
+                    if reset := fuel_curve.cleared(after, before=before):
+                        coerced.update(reset)
 
         for _targets, coerced in pending:
             carrier = coerced.get("carrier")
@@ -597,6 +603,9 @@ def apply_bulk_update(body: dict) -> dict:
     change_log_service.log(
         "update", component_class, f"({len(name_strs)} items)", description,
     )
-    return {"updated": len(name_strs), "fields": fields}
+    result = {"updated": len(name_strs), "fields": fields}
+    if notices:
+        result["notices"] = notices
+    return result
 
 

@@ -107,15 +107,16 @@ def test_apply_rederives_after_a_p_nom_edit():
 
 
 @pytest.mark.parametrize("row, msg", [
-    ({fuel_curve.SLOPE: -0.1, fuel_curve.PRICE: 40.0}, "fuel_curve_slope must be zero or more"),
-    ({fuel_curve.NO_LOAD: -0.1, fuel_curve.PRICE: 40.0}, "fuel_curve_no_load must be zero or more"),
-    ({fuel_curve.PRICE: -1.0}, "fuel_price must be zero or more"),
-    ({fuel_curve.SLOPE: 0.25}, "fuel price"),
-    ({fuel_curve.NO_LOAD: 0.05, fuel_curve.PRICE: 40.0}, "Unit commitment"),
+    ({fuel_curve.SLOPE: -0.1, fuel_curve.PRICE: 40.0}, "Fuel curve slope: enter zero or more"),
+    ({fuel_curve.NO_LOAD: -0.1, fuel_curve.PRICE: 40.0}, "No-load fuel: enter zero or more"),
+    ({fuel_curve.PRICE: -1.0}, "Fuel price: enter zero or more"),
+    ({fuel_curve.SLOPE: 0.25}, "Fuel price: enter the price per MWh of fuel"),
+    ({fuel_curve.NO_LOAD: 0.05, fuel_curve.PRICE: 40.0}, "No-load fuel: turn on Unit commitment"),
     ({fuel_curve.NO_LOAD: 0.05, fuel_curve.PRICE: 40.0, "committable": True, "p_nom_extendable": True},
-     "extendable"),
-    ({fuel_curve.SLOPE: "abc", fuel_curve.PRICE: 40.0}, "finite number"),
-    ({fuel_curve.SLOPE: math.inf, fuel_curve.PRICE: 40.0}, "finite number"),
+     "No-load fuel: untick Extendable"),
+    ({fuel_curve.SLOPE: "abc", fuel_curve.PRICE: 40.0}, "Fuel curve slope: enter a finite number"),
+    ({fuel_curve.SLOPE: math.inf, fuel_curve.PRICE: 40.0}, "Fuel curve slope: enter a finite number"),
+    ({fuel_curve.NO_LOAD: 0.05, fuel_curve.PRICE: 40.0, "committable": math.nan}, "turn on Unit commitment"),
 ])
 def test_check_refuses(row, msg):
     assert msg in (fuel_curve.check(row) or "")
@@ -231,7 +232,8 @@ def test_put_refuses_a_direct_edit_of_a_derived_cost_while_a_curve_is_set(client
     assert client.post("/api/network/generators", json=_genset(**CURVE)).status_code == 201
     for col, val in (("marginal_cost", 99.0), ("stand_by_cost", 1.0)):
         r = client.put("/api/network/generators/genset", json=_genset(**CURVE, **{col: val}))
-        assert r.status_code == 422 and f"{col} is derived from the fuel curve" in r.json()["detail"], r.text
+        label = fuel_curve.LABELS[col]
+        assert r.status_code == 422 and r.json()["detail"].startswith(f"{label}: set by the fuel curve"), r.text
     # The card sends its whole form: the stored derived values unchanged are not an edit.
     row = {c: float(n.generators.at["genset", c]) for c in fuel_curve.DERIVED}
     r = client.put("/api/network/generators/genset", json=_genset(**{**CURVE, fuel_curve.PRICE: 50.0}, **row))
@@ -250,11 +252,15 @@ def test_setting_a_curve_says_what_it_replaces(client, install_network):
     _installed(install_network)
     r = client.post("/api/network/generators", json=_genset(**CURVE, marginal_cost=12.0))
     assert r.status_code == 201
-    assert r.json()["notice"] == "The fuel curve replaces marginal_cost 12 with 10."
+    assert r.json()["notice"] == "The fuel curve replaces the marginal cost of 12 €/MWh with 10 €/MWh."
     assert client.post("/api/network/generators", json={**_genset(marginal_cost=3.0), "name": "g2"}).status_code == 201
     r = client.put("/api/network/generators/g2", json={**_genset(**CURVE), "name": "g2"})
-    assert r.json()["notice"] == "The fuel curve replaces marginal_cost 3 with 10."
-    assert any("replaces marginal_cost 3 with 10" in str(e) for e in change_log_service.get_all())
+    assert r.json()["notice"] == "The fuel curve replaces the marginal cost of 3 €/MWh with 10 €/MWh."
+    assert any("marginal cost of 3 €/MWh with 10" in str(e) for e in change_log_service.get_all())
+    # A cost sent with the new curve is the one named: never overwritten unsaid.
+    assert client.post("/api/network/generators", json={**_genset(), "name": "g3"}).status_code == 201
+    r = client.put("/api/network/generators/g3", json={**_genset(**CURVE, marginal_cost=8.0), "name": "g3"})
+    assert r.json()["notice"] == "The fuel curve replaces the marginal cost of 8 €/MWh with 10 €/MWh."
     # Changing an existing curve says nothing: there is nothing of the person's left to replace.
     r = client.put("/api/network/generators/g2", json={**_genset(**{**CURVE, fuel_curve.PRICE: 41.0}),
                                                        "name": "g2"})
@@ -266,13 +272,13 @@ def test_a_curve_and_a_marginal_cost_series_refuse(client, install_network):
     assert client.post("/api/network/generators", json=_genset()).status_code == 201
     n.generators_t.marginal_cost["genset"] = 5.0
     r = client.put("/api/network/generators/genset", json=_genset(**CURVE))
-    assert r.status_code == 422 and "marginal_cost time series" in r.json()["detail"]
+    assert r.status_code == 422 and r.json()["detail"].startswith("Marginal cost: remove its profile")
     m = _network(curve=True)
     m.generators_t.marginal_cost["genset"] = 5.0
     from services.validation_service import _check_fuel_curves
 
     (issue,) = _check_fuel_curves(m)
-    assert "time series" in issue.message
+    assert issue.message.startswith("Marginal cost: remove its profile")
 
 
 def test_a_curve_edit_stamps_the_derived_costs_customised(client, install_network):
@@ -291,10 +297,10 @@ def test_bulk_runs_the_same_guard_and_derivation(client, install_network):
     assert client.post("/api/network/generators", json=_genset(**CURVE)).status_code == 201
     r = client.patch("/api/network/_bulk", json={"component_class": "Generator", "names": ["genset"],
                                                   "updates": {"marginal_cost": 99.0}})
-    assert r.status_code == 422 and "derived from the fuel curve" in r.json()["detail"]
+    assert r.status_code == 422 and r.json()["detail"].startswith("Marginal cost: set by the fuel curve")
     r = client.patch("/api/network/_bulk", json={"component_class": "Generator", "names": ["genset"],
                                                   "updates": {"committable": False}})
-    assert r.status_code == 422 and "Unit commitment" in r.json()["detail"]
+    assert r.status_code == 422 and r.json()["detail"].startswith("No-load fuel: turn on Unit commitment")
     r = client.patch("/api/network/_bulk", json={"component_class": "Generator", "names": ["genset"],
                                                   "updates": {"p_nom": 4.0}})
     assert r.status_code == 200, r.text
@@ -420,3 +426,51 @@ def test_a_curve_generator_leaves_its_neighbours_costs_alone():
     fuel_curve.apply(n)
     assert n.generators.at["grid", "marginal_cost"] == 33.0
     assert [r["generator"] for r in fuel_curve.fuel_use(n)] == ["genset"]
+
+
+# ── review fixes: clearing a curve, blank derived rows, bulk notices ───────────────────────────────────────
+
+def test_clearing_a_curve_resets_the_read_only_stand_by_cost(client, install_network):
+    n = _installed(install_network)
+    assert client.post("/api/network/generators", json=_genset(**CURVE)).status_code == 201
+    assert n.generators.at["genset", "stand_by_cost"] > 0
+    r = client.put("/api/network/generators/genset", json=_genset(**{k: None for k in fuel_curve.COLUMNS}))
+    assert r.status_code == 200, r.text
+    assert n.generators.at["genset", "stand_by_cost"] == 0.0
+    assert n.generators.at["genset", "marginal_cost"] == pytest.approx(SLOPE * PRICE)   # editable: it stays
+
+
+def test_bulk_clearing_resets_stand_by_and_a_new_curve_says_what_it_replaces(client, install_network):
+    n = _installed(install_network)
+    assert client.post("/api/network/generators", json=_genset(marginal_cost=6.0)).status_code == 201
+    # Bulk edits existing columns only, as for every lazy generator column: another curve generator adds them.
+    assert client.post("/api/network/generators", json={**_genset(**CURVE), "name": "g0"}).status_code == 201
+    r = client.patch("/api/network/_bulk", json={"component_class": "Generator", "names": ["genset"],
+                                                  "updates": CURVE})
+    assert r.status_code == 200, r.text
+    assert r.json()["notices"] == ["genset: The fuel curve replaces the marginal cost of 6 €/MWh with 10 €/MWh."]
+    r = client.patch("/api/network/_bulk", json={"component_class": "Generator", "names": ["genset"],
+                                                  "updates": {k: None for k in fuel_curve.COLUMNS}})
+    assert r.status_code == 200, r.text
+    assert "notices" not in r.json()
+    assert n.generators.at["genset", "stand_by_cost"] == 0.0
+
+
+def test_a_blank_derived_row_is_not_an_edit():
+    before = {**CURVE, "committable": True, "p_nom": 1.0, "marginal_cost": 10.0, "stand_by_cost": 2.0}
+    assert fuel_curve.guard(before, before=before, submitted={"stand_by_cost": None,
+                                                              "marginal_cost": math.nan}) is None
+    assert fuel_curve.guard(before, before=before, submitted={"marginal_cost": 10.0 + 1e-12}) is None
+    assert fuel_curve.guard(before, before=before, submitted={"marginal_cost": 10.5}).startswith("Marginal cost:")
+
+
+def test_cleared_and_cost_series():
+    curve = {**CURVE, "p_nom": 1.0}
+    assert fuel_curve.cleared({}, before=curve) == {"stand_by_cost": 0.0}
+    assert fuel_curve.cleared(curve, before=curve) == {}
+    assert fuel_curve.cleared({}, before={}) == {}
+    assert fuel_curve.cleared({}, before=None) == {}
+    n = _network(curve=True)
+    assert fuel_curve.cost_series(n, "genset") == []
+    n.generators_t.stand_by_cost["genset"] = 1.0
+    assert fuel_curve.cost_series(n, "genset") == ["stand_by_cost"]
