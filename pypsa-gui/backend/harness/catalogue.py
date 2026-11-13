@@ -5845,6 +5845,7 @@ TOOL_ROUTES: dict[str, list] = {
     # Library references (3): two reads (the asset's pack from its provenance) and the apply.
     "list_library_references": [("GET", "/api/library/references")],
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
+                              ("GET", "/api/network/asset_schema/{component}/units/{name}"),
                               ("GET", "/api/library/references/{technology}/{year}")],
     "apply_library_reference": [("POST", "/api/network/library_reference/apply")],
     "apply_equipment_mapping": [("POST", "/api/network/equipment_table/apply")],

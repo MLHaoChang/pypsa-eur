@@ -1,0 +1,76 @@
+{
+  "id": "eh_concentrator_staged",
+  "version": "1",
+  "pack": "generic_defaults@2026-11-10:sha256:e228b001de2d80f1d1e01e8488b271a9de0bc12cb89bac2247a4592b6e0ce67e",
+  "templates": [
+    "eh_concentrator_staged"
+  ],
+  "variants": {
+    "concentrate_sales": {
+      "label": "Mining concentrator (concentrate sales, process plant, freight)",
+      "lines": [
+        {
+          "name": "Concentrate sales (net)",
+          "kind": "revenue",
+          "category": "product_sale",
+          "unit": "t",
+          "quantity_source": "linked:shipped.shipments@1",
+          "escalation": "contract",
+          "note": "Concentrate shipped in tonnes (the vessels loaded out of the shed), not the mill's output. Price per tonne is one net figure you type: grade x payable x metal price - treatment and refining charges (TC/RC). Do not deduct freight here: the Freight row below prices it once. The 2026 copper TC/RC benchmark is $0/dmt and 0 cents/lb (S&P Global 2025 settlement, Dec 2024; SMM 2026 benchmark). linked_share is the sold share. A shortfall in shipments lowers this line once: the energy model's lost-production penalty on the concentrate bus is dropped, not charged on top."
+        },
+        {
+          "name": "Process plant cost",
+          "kind": "opex",
+          "category": "consumables",
+          "unit": "t",
+          "note": "Per tonne of ore milled, typed: type the milled tonnes a year the results show, not the concentrate tonnes. This line does not scale with a shipment shortfall: if the mill runs less, lower the quantity yourself. No sourced split, so no default. Reference only, not a default: US$5.58-11.26 per tonne milled in 2025 reports (Project Blue, 'Digging into copper costs', 2024-25; secondary source; USD, not converted). The energy model already prices the plant's electricity, so enter the non-energy part.",
+          "escalation": "opex"
+        },
+        {
+          "name": "Freight",
+          "kind": "opex",
+          "category": "other",
+          "unit": "t",
+          "quantity_source": "linked:shipped.shipments@1",
+          "escalation": "opex",
+          "note": "Per tonne of concentrate shipped (road, rail, port, vessel to the smelter), priced here only: the sales price above is before freight. No sourced default: enter the price."
+        },
+        {
+          "name": "Plant capex",
+          "kind": "capex",
+          "category": "equipment",
+          "unit": "lump",
+          "escalation": "capex",
+          "note": "Plant capex not in the energy model's asset capex (crushing, mills, flotation, shed, buildings): the base of maintenance and insurance. Capex is priced once: do not re-enter the PV, battery or grid assets. No sourced default: enter the price and life."
+        },
+        {
+          "name": "Staff",
+          "kind": "opex",
+          "category": "staff",
+          "unit": "unit",
+          "escalation": "opex",
+          "note": "FTE count per year. No sourced default: enter the quantity and the price."
+        },
+        {
+          "name": "Maintenance",
+          "kind": "opex",
+          "category": "maintenance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of the plant capex above per year. No sourced default for a concentrator: enter the share."
+        },
+        {
+          "name": "Insurance",
+          "kind": "opex",
+          "category": "insurance",
+          "unit": "share",
+          "quantity_source": "share_of:capex",
+          "escalation": "opex",
+          "note": "Share of the plant capex above per year. No sourced default for a concentrator: enter the share."
+        }
+      ]
+    }
+  },
+  "offered": []
+}

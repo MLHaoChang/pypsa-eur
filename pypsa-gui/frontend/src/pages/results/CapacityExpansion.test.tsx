@@ -7,6 +7,7 @@ import { networkApi } from '../../api/network'
 import type { Line, StorageUnit } from '../../api/types'
 import CapacityExpansion from './CapacityExpansion'
 import { getKpiValueWithin } from '../../test/kpi'
+import * as shared from './shared'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -414,4 +415,61 @@ it('says curtailment cost was not modelled when no generator carries one', async
   await screen.findByText('Curtailment cost')
   expect(within(kpiCard('Curtailment cost')).getByText('Not modelled')).toBeTruthy()
   expect(within(kpiCard('Curtailment cost')).queryByText('—')).toBeNull()
+})
+
+it('reads a failed expansion compute as unavailable, the state the headline strip shows', async () => {
+  // ui-modern 06. Fails if: the annualised figure goes back to
+  // `cost.capex_expansion || totalExpansionCapex`, which turns a null into the
+  // per-asset sum (here €0.00), or storage back to `?? 0`.
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue({
+    ...unavailablePayload(), capex_lifetime: 9_000, capex_expansion_lifetime: 1_000,
+    capex_lifetime_available: true, storage_capex_expansion_lifetime: 0,
+    capex_expansion: null, storage_capex_expansion: null,
+  })
+  vi.mocked(networkApi.getStorageUnits).mockResolvedValue([extendableBattery])
+  renderPage()
+  await screen.findByText('Total new investment per year')
+  for (const label of ['Total new investment per year', 'Storage CAPEX (new)']) {
+    const tile = kpiCard(label)
+    expect(tile.closest('[data-state]')?.getAttribute('data-state')).toBe('unavailable')
+    expect(within(tile).getByText('This figure could not be computed for this solve.')).toBeTruthy()
+    expect(within(tile).queryByText('€0.00')).toBeNull()
+  }
+  // The figures that do not depend on the expansion compute stay.
+  expect(getKpiValueWithin(kpiCard('CAPEX (installed)'), '€8.07 B')).toBeTruthy()
+  // The one-step CAPEX in the build-up says why it is not split.
+  expect(screen.getByTestId('waterfall-split-unavailable').textContent)
+    .toMatch(/split into existing and new-build CAPEX is unavailable/)
+  expect(screen.queryByText(/Existing-capacity CAPEX, new-build CAPEX and OPEX stack up/)).toBeNull()
+})
+
+/** The rows the cost build-up exports (`system_cost_waterfall.csv`). */
+async function waterfallRows(): Promise<unknown[][]> {
+  const csv = vi.spyOn(shared, 'downloadCSV').mockImplementation(() => {})
+  await screen.findByText('System cost build-up')
+  for (const button of screen.getAllByRole('button', { name: /CSV/ })) fireEvent.click(button)
+  const call = csv.mock.calls.find(c => c[0] === 'system_cost_waterfall.csv')
+  csv.mockRestore()
+  if (!call) throw new Error('the cost build-up exported nothing')
+  return call[2]
+}
+
+it('builds the cost build-up from one CAPEX step when the split is unavailable (ui-modern 06)', async () => {
+  // GK B W1. Fails if: the build-up goes back to `cost.capex_expansion ?? 0`,
+  // which splits CAPEX into an "Existing CAPEX" equal to all of it and a
+  // silent zero new build.
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue({
+    ...unavailablePayload(), capex_expansion: null, storage_capex_expansion: null,
+  })
+  renderPage()
+  const names = (await waterfallRows()).map(r => r[0])
+  expect(names).toEqual(['CAPEX', 'OPEX', 'Total'])
+})
+
+it('splits the cost build-up into existing and new build when the split was computed', async () => {
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue(unavailablePayload())
+  renderPage()
+  const rows = await waterfallRows()
+  expect(rows.map(r => r[0])).toEqual(['Existing CAPEX', 'New-build CAPEX', 'OPEX', 'Total'])
+  expect(rows[1][1]).toBe(1_000)
 })

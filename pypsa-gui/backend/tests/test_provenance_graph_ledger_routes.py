@@ -6,6 +6,7 @@ reads (GK B G1, G4). Apart from `test_provenance_graph.py` because it runs a stu
 from __future__ import annotations
 
 import json
+import math
 
 import pypsa
 import pytest
@@ -172,3 +173,107 @@ def _rewrite_ratio(path, ratio):
     if path.stat().st_mtime_ns == before:  # a coarse clock: a real save is later
         t = time.time_ns() + 1_000_000
         os.utime(path, ns=(t, t))
+
+
+# ── provenance-graph 11: the battery rows walk the fields they compile to ──────
+
+
+def _times(k):
+    return lambda v: v * k
+
+
+# Written out, not read from `asset_view.LEDGER_FIELDS`, so a dropped or added entry there (or in the walk) fails.
+# Each field with the pack's conversion of the row value (`packs.battery_parts`): kEUR → EUR, % → share, the
+# round trip split sqrt/sqrt.
+BATTERY_ROWS = {
+    "battery_inverter_eur_per_kw": [
+        ("StorageUnit", "battery", "inv_power_overnight", _times(1000.0))
+    ],
+    "battery_inverter_lifetime_years": [
+        ("StorageUnit", "battery", "inv_power_lifetime", _times(1.0))
+    ],
+    "battery_inverter_fom_pct_per_year": [
+        ("StorageUnit", "battery", "inv_power_fom_share", _times(0.01))
+    ],
+    "battery_storage_eur_per_kwh": [
+        ("StorageUnit", "battery", "inv_energy_overnight", _times(1000.0))
+    ],
+    "battery_storage_lifetime_years": [
+        ("StorageUnit", "battery", "inv_energy_lifetime", _times(1.0))
+    ],
+    "battery_round_trip_efficiency": [
+        ("StorageUnit", "battery", "efficiency_store", math.sqrt),
+        ("StorageUnit", "battery", "efficiency_dispatch", math.sqrt),
+    ],
+    # The discount rate is the battery's and the PV's.
+    "discount_rate": [
+        ("StorageUnit", "battery", "discount_rate", _times(1.0)),
+        ("Generator", "pv", "discount_rate", _times(1.0)),
+    ],
+}
+
+
+def _pack(option):
+    """A pack-built site network for `option` and the seeded ledger it was built from."""
+    from services.study import library, packs, questions
+    from tests.golden import site_fixture as SF
+
+    defaults = library.load_defaults()
+    intake = {
+        **SF.site_intake(),
+        "tariff": {"tariff_id": "de_industrial_illustrative"},
+    }
+    ledger = library.seed_ledger(questions.BESS_AT_SITE, intake, defaults)
+    return packs.build_site_network(intake, ledger, option, library=defaults), ledger
+
+
+def test_each_battery_ledger_row_walks_the_fields_it_compiles_to():
+    """Every battery row on a network with the battery and PV: exactly the fields the pack wrote from it, each
+    value the network column and the pack's conversion of the ledger value, and the verdict uncompared (a pack
+    default is an input with only its stamp, which compares nothing: never fresh, GK B P1 #1170)."""
+    from services.provenance_graph.explain import explain_ledger_row
+    from services.study import asset_view
+
+    n, ledger = _pack("bess_pv_2h")
+    rows = {r.key: r for r in ledger.rows}
+    assert {
+        (m.key, m.component, m.name, m.field)
+        for m in asset_view.LEDGER_FIELDS
+        if m.key in BATTERY_ROWS
+    } == {(k, *f[:3]) for k, fields in BATTERY_ROWS.items() for f in fields}
+    for key, want in BATTERY_ROWS.items():
+        out = explain_ledger_row(n, key)
+        assert out["target"] == {"ledger_key": key}
+        assert [
+            (f["target"]["component"], f["target"]["name"], f["target"]["field"])
+            for f in out["fields"]
+        ] == [f[:3] for f in want], key
+        for (component, name, field_name, to_store), field in zip(want, out["fields"]):
+            column = float(
+                getattr(n, n.components[component].list_name).at[name, field_name]
+            )
+            compiled = to_store(rows[key].value)
+            first = field["steps"][0]
+            assert first["node"] == f"input:{component}/{name}/{field_name}"
+            assert first["value"] == column, key
+            if key == "battery_round_trip_efficiency":  # sqrt of the row: not exact
+                assert math.isclose(column, compiled, rel_tol=1e-12), key
+            else:
+                assert column == compiled, key
+            assert first["stamp"]["status"] == "default", key
+            assert field["outcome"]["state"] == "uncompared", key
+        assert out["outcome"]["state"] == "uncompared", key
+        assert out["outcome"]["complete"] is True, key
+
+
+def test_a_battery_row_on_a_network_without_the_battery_refuses():
+    from services.provenance_graph.explain import TargetUnknown, explain_ledger_row
+
+    baseline, _ = _pack("none")
+    assert "battery" not in baseline.storage_units.index
+    assert "pv" not in baseline.generators.index
+    for key in BATTERY_ROWS:
+        with pytest.raises(TargetUnknown) as exc:
+            explain_ledger_row(baseline, key)
+        assert exc.value.error_kind == "why_target_unknown"
+        assert exc.value.status == 404

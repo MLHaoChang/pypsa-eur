@@ -470,17 +470,10 @@ html {
 
 /* Stay inside the relative workbench body, below header/tabs. Scroll long
    answers/decisions locally without covering application header controls. */
-/* Room below the last chart of a Results scroll view, so the floating
-   "Chat here" launcher (about 150 px tall, bottom-right) never covers it
-   (ui-modern audit findings 5 and 8), only while the launcher is on screen.
-   Unlayered, so it wins over p-5. */
-body:has(.companion-launcher) .results-scroll-clear {
-  padding-bottom: 160px;
-}
-
+/* UM08: the launcher sits in the dock's rail (in flow), so it needs no
+   clearance below Results content. */
 .companion-launcher {
   max-height: 100%;
-  overflow-y: auto;
 }
 
 .companion-character-wrap {
