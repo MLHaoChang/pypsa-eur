@@ -4464,7 +4464,8 @@
         "investment-case/1",
         "investment-lcoe/1",
         "copt-screening/1",
-        "grid-readiness/1"
+        "grid-readiness/1",
+        "time-to-power/1"
        ],
        "type": "string"
       },
@@ -6453,6 +6454,18 @@
     "peak_discharging_power",
     "final_state_of_charge"
    ]
+  },
+  "time-to-power/1": {
+   "definitions": {
+    "time_to_power_months": {
+     "formula_id": "dc-time-to-power/1",
+     "label": "Time to power from project start",
+     "unit": "months"
+    }
+   },
+   "metrics": [
+    "time_to_power_months"
+   ]
   }
  },
  "request_scope": {
@@ -6631,7 +6644,8 @@
      "investment-case/1",
      "investment-lcoe/1",
      "copt-screening/1",
-     "grid-readiness/1"
+     "grid-readiness/1",
+     "time-to-power/1"
     ],
     "title": "Profile",
     "type": "string"

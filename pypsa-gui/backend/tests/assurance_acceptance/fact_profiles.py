@@ -49,6 +49,7 @@ from tests.test_result_profiles_assurance import solve
 from tests.test_site_import_assurance import importing  # noqa: F401
 from tests.test_storage_assurance import storage  # noqa: F401
 from tests.test_storage_cost_assurance import BASIS, record_solve
+from tests.test_time_to_power_assurance import staged_dc  # noqa: F401
 from tests.test_workflow_tools import baseline  # noqa: F401
 
 
@@ -184,6 +185,9 @@ DRIVERS = {
     "grid-readiness/1": Driver(
         "hub", lambda value: value[0], _scope("grid-readiness/1", "network")
     ),
+    "time-to-power/1": Driver(
+        "staged_dc", lambda value: value[0], _scope("time-to-power/1", "network")
+    ),
 }
 assert set(DRIVERS) == set(calculations.PROFILES), "every profile needs a driver"
 
@@ -208,6 +212,7 @@ FIXTURES = [
     project,
     classical,
     hub,
+    staged_dc,
 ]
 __all__ = [
     "DRIVERS",
