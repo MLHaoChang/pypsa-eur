@@ -522,3 +522,20 @@ def test_results_current_still_needs_check_answers_guard(solved):
     ctx.solver_state["condition"] = "infeasible"
     got = workflow_tools.solve_freshness()
     assert got == {"inputs_changed_since_solve": False, "results_current": False}
+
+
+def test_loadflow_current_is_the_flow_s_load_flow_word(solved):
+    """`run_lifecycle.loadflow_current` (the chat's re-run check, `project_readiness`) says what the flow's
+    `freshness_by_kind.loadflow` says."""
+    from harness import run_lifecycle
+
+    n, ctx = solved
+    assert run_lifecycle.loadflow_current(ctx) is False  # no load flow ran
+    _loadflow(n, ctx)
+    assert run_lifecycle.loadflow_current(ctx) is True and _answers()["loadflow"] == "fresh"
+    _value_edit(n, ctx)  # the dispatch it read no longer describes the inputs
+    assert run_lifecycle.loadflow_current(ctx) is False
+    ctx.network_revision = int(ctx.network_revision or 0) + 1  # the seam's bump, which the flow's cache keys on
+    assert _answers()["loadflow"] == "stale"
+    n.generators_t.p = n.generators_t.p.iloc[:, :0]
+    assert run_lifecycle.loadflow_current(ctx) is False
