@@ -1,6 +1,6 @@
 # Coordinator
 
-Current coordinator session: `session_01G7qCukjfEjsb7JvQmQqoNW`
+Current coordinator session: `session_01G7qCuiQzXR4FZBb2khMJsk`
 
 Engine gatekeeper A (gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_01G7qCukNbUGUiW3V7dACzGL`
 
