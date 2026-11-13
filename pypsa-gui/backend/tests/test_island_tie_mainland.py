@@ -129,3 +129,7 @@ def test_a_grid_import_link_inside_the_island_is_refused_by_name():
         ["subsea_tie"],
     )
     assert "subsea_tie" in out["reason"] and "diesel_new" in out["reason"]
+    # The island's buses are exactly the Link's two ends: still refused.
+    n.loads.at["hospital_load", "bus"] = "island"
+    assert S.island_buses(n, island) == {"island", "mainland"}
+    assert S.tie_state(n, island)["links"] == ["subsea_tie"]
