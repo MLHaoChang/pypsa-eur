@@ -108,6 +108,7 @@ from routers import (
     snapshots,
     spectrum,
     solve_queue,
+    grid_extension,
     studies,
     uploads,
     vintage,
@@ -1473,6 +1474,12 @@ app.include_router(
 # closes (BC-6); the refusal is the router's own dependency.
 app.include_router(
     studies.router, prefix="/api/projects/{name}/studies",
+    tags=["decision-studies"], dependencies=_projects_router_guard,
+)
+# The grid-extension break-even read (homer-parity 03d): its own router module,
+# same prefix and guard as the studies; writes nothing.
+app.include_router(
+    grid_extension.router, prefix="/api/projects/{name}/studies",
     tags=["decision-studies"], dependencies=_projects_router_guard,
 )
 # The Site 3D native scene (SC-01a): the site anchor and a Site's scene,

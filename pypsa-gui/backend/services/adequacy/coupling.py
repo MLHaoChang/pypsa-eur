@@ -94,6 +94,9 @@ from __future__ import annotations
 import logging
 import math
 
+from services.adequacy.lole_verdict import lole_verdict
+from services.adequacy.mc import MAX_DRAWS
+
 logger = logging.getLogger(__name__)
 
 # Each iterate is a full capacity-expansion solve plus an MC evaluation; the
@@ -112,7 +115,11 @@ NOTHING_TO_SAMPLE = "nothing to sample: no electrical generator carries resolvab
 # `run_coupling_loop` returns, and the runners' "failed" when the controller
 # returned nothing. A record still "running" is not finished. Only "met"
 # meets the target (study harness issue 05: the gate's converged fact).
-LOOP_STATUSES = frozenset({"met", "budget_exhausted", "unreachable", "aborted", "failed"})
+# "not_confident" (adequacy loops 04, GK A (25)): no iterate passed
+# `lole_verdict`, but one sat at or below the goal without confidence and
+# within one more sampled draw of it. It is never met, done or a pass.
+LOOP_STATUSES = frozenset({"met", "not_confident", "budget_exhausted",
+                           "unreachable", "aborted", "failed"})
 
 # A HARD BACKSTOP ONLY. `_wrap_with_ens_cap` reads `permyriad <= 0` as NO
 # TARGET and returns the loosest plan, so a step that reaches 0 would leave the
@@ -187,6 +194,10 @@ def _mc_block(metrics: dict) -> dict:
         "eue_mwh": float(metrics.get("eue_mwh") or 0.0),
         "eue_ci": [float(elo), float(ehi)],
         "n_samples": int(metrics.get("n_samples") or 0),
+        # Adequacy loops 04 (D2, E1): one more sampled draw as heavy as the
+        # heaviest seen, for `lole_verdict`; None when the MC did not report it.
+        "event_h": (None if metrics.get("event_h") is None
+                    else float(metrics["event_h"])),
         "by_period": dict(metrics.get("by_period") or {}),
     }
 
@@ -228,10 +239,11 @@ def run_coupling_loop(solve_at, evaluate, *, target_lole_h: float, eps0: float,
     """
     Drive the cap until the PLAN meets ``target_lole_h`` on the MC's LOLE.
 
-    Returns ``{"status", "iterations", "final", "confident", "eps_star",
-    "solves_used"}`` — the shapes the route serialises verbatim (spec §2).
-    ``status`` is one of ``met`` / ``unreachable`` / ``budget_exhausted`` /
-    ``aborted`` / ``failed``; ``final`` is the CHEAPEST VERIFIED met iterate,
+    Returns ``{"status", "iterations", "final", "nearest", "confident",
+    "eps_star", "solves_used"}`` — the shapes the route serialises verbatim (spec §2).
+    ``status`` is one of ``met`` / ``not_confident`` / ``unreachable`` /
+    ``budget_exhausted`` / ``aborted`` / ``failed``; ``final`` is the CHEAPEST
+    VERIFIED met iterate (``lole_verdict`` pass, adequacy loops 04),
     which is a stronger claim than "the last one": ε → MC-LOLE can genuinely
     RISE as ε tightens (storage-for-thermal substitution under foresight is
     one of the three unreachability mechanisms), so the bracket is a search
@@ -401,9 +413,14 @@ def run_coupling_loop(solve_at, evaluate, *, target_lole_h: float, eps0: float,
                        cost, ens, cap, binding, False, None)
             _emit(row)
             return row, "error", None
+        # Adequacy loops 04 (D2): the ONE LOLE-vs-goal rule. It rides on the
+        # iterate's `mc` block, so every reader of a row reads the same word.
+        mc["goal"] = lole_verdict(mc["lole_hours"], mc["lole_ci"], target,
+                                  mc["event_h"], mc["n_samples"], MAX_DRAWS)
         row = _row(e, status, condition, cost, ens, cap, binding, plateau, mc)
         _emit(row)
-        kind = "met" if mc["lole_hours"] <= target else "miss"
+        kind = {"pass": "met", "miss": "miss",
+                "not_confident": "not_confident"}[mc["goal"]["verdict"]]
         return row, kind, plan_hash
 
     def _aborted() -> bool:
@@ -450,7 +467,10 @@ def run_coupling_loop(solve_at, evaluate, *, target_lole_h: float, eps0: float,
             eps = nxt
             continue
 
-        # a miss
+        # A miss, or a not-confident estimate: the loop keeps searching on
+        # both (GK A (25)), since a tighter cap is what buys a pass. Where a
+        # miss would stop as unreachable, the verdict below turns a held
+        # not-confident iterate into "not_confident".
         miss_eps = eps
         if row["cap_mwh"] is not None and row["cap_mwh"] < ENERGY_FLOOR_MWH:
             # The constrained plan already equals the zero-shed plan.
@@ -513,11 +533,16 @@ def run_coupling_loop(solve_at, evaluate, *, target_lole_h: float, eps0: float,
                 break
             met_eps, met_hash = mid, plan_hash
         else:
+            # a miss or a not-confident estimate: both sit on the loose side
             miss_eps = mid
 
     # ── the verdict ───────────────────────────────────────────────────────
     verified = [r for r in iterations
-                if r["mc"] is not None and r["mc"]["lole_hours"] <= target]
+                if r["mc"] is not None and r["mc"]["goal"]["verdict"] == "pass"]
+    # Adequacy loops 04 (D4): the cheapest not-confident iterate is reported
+    # as `nearest`, never as `final`: it is not the met plan.
+    unsure = [r for r in iterations if r["mc"] is not None
+              and r["mc"]["goal"]["verdict"] == "not_confident"]
     final = min(
         verified,
         key=lambda r: (r["cost_eur"] if r["cost_eur"] is not None
@@ -527,16 +552,26 @@ def run_coupling_loop(solve_at, evaluate, *, target_lole_h: float, eps0: float,
     if verdict is None:
         # See the module docstring, adjudication 2.
         verdict = "met" if final is not None else "budget_exhausted"
+    if final is None and unsure and verdict in ("budget_exhausted", "unreachable"):
+        # A plan at or below the goal exists but more draws, not more
+        # solves, would settle it: neither "unreachable" nor a spent budget.
+        verdict = "not_confident"
+    nearest = min(
+        unsure,
+        key=lambda r: (r["cost_eur"] if r["cost_eur"] is not None
+                       else math.inf, -r["eps_permyriad"]),
+    ) if verdict == "not_confident" else None
 
     return {
         "status": verdict,
         "iterations": iterations,
         "final": final,
+        "nearest": nearest,
         # Reported, never iterated for: the interval's width is a DRAWS
         # decision, and tightening the cap to buy confidence spends solves on
         # a question more draws answer (plan §1, the stopping band).
         "confident": bool(final is not None
-                          and final["mc"]["lole_ci"][1] <= target),
+                          and final["mc"]["goal"]["confident"]),
         "eps_star": final["eps_permyriad"] if final is not None else None,
         "solves_used": solves,
     }

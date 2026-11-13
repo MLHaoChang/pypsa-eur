@@ -226,3 +226,38 @@ def test_a_cap_that_is_not_a_number_is_refused(repo):
     commit(repo, {"docs/note.md": "hi\n"})
     r = prepush(repo, "--plan", env={"PREPUSH_MAPPED_CAP": "10m"})
     assert r.returncode == 2 and "PREPUSH_MAPPED_CAP" in r.stderr
+
+
+def test_registry_contract_runs_when_a_router_changes_and_not_otherwise(repo):
+    commit(repo, {"pypsa-gui/backend/services/costs.py": "x = 1\n"})
+    assert "plan contract registry" not in prepush(repo, "--plan").stdout
+    commit(repo, {"pypsa-gui/backend/routers/results.py": "x = 1\n"})
+    out = prepush(repo, "--plan").stdout
+    assert "plan contract registry:" in out
+    assert "test_the_endpoint_list_covers_every_series_endpoint" in out
+    assert "plan contract registry" in out and out.index("registry") < out.index(
+        "plan mapped"
+    )
+    commit(repo, {"pypsa-gui/backend/harness/catalogue.py": "x = 1\n"})
+    assert "plan contract registry:" in prepush(repo, "--plan").stdout
+
+
+def test_registry_contract_is_not_capped_and_its_failure_fails(repo):
+    commit(repo, {"pypsa-gui/backend/routers/results.py": "x = 1\n"})
+    py = repo / "fakepython"
+    py.write_text(
+        '#!/bin/sh\ncase "$*" in *test_assistant_inventory*) sleep 3; echo F; exit 1;; esac\nexit 0\n'
+    )
+    py.chmod(0o755)
+    r = prepush(repo, env={"PREPUSH_PYTHON": str(py), "PREPUSH_MAPPED_CAP": "1"})
+    assert "FAIL contract: registry" in r.stdout and "CUT contract" not in r.stdout, (
+        r.stdout
+    )
+
+
+def test_a_cut_line_names_the_test_files_it_skipped(repo):
+    for tool in ("tsc", "vitest"):
+        _fake_tool(repo / "pypsa-gui/frontend/node_modules/.bin" / tool, 0)
+    commit(repo, {"pypsa-gui/backend/services/costs.py": "x = 1\n"})
+    r = prepush(repo, env=_slow_python(repo, "..s.  [ 40%]"))
+    assert "not finished: tests/test_costs.py" in r.stdout, r.stdout

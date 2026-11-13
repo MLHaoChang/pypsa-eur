@@ -3,7 +3,7 @@
 
 # 44 — offer eh_site@3 to start_task
 
-Status: ready-for-agent
+Status: done (#1475)
 Size: S
 Blocked by: none
 Gated: GK B

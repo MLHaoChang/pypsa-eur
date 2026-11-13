@@ -29,6 +29,7 @@ BOUND_CONTEXT_TOOLS = frozenset({
     "get_weather_choice", "validate_network", "project_readiness", "diagnose_network", "solve_queue_enqueue",
     "apply_demand_from_excel",  # issue 21c: stage 2's planned write
     "generate_report",  # issue 07: stage 7 (GK B C6)
+    "run_investment_case", "solve_ppa_price",  # study harness 14 (GK B (52) I1): the IPP hybrid's case and PPA price
     "run_eh_study",  # issue 07 B2: the solve stage's EH study, on its frozen args (GK B C1)
     # SC-07 S3 (GK B G7, N7): a 3D site apply step works on the bound project. A
     # profile never lists it: its args come only from a prepare step (N2).
@@ -337,7 +338,10 @@ def scope_for(template: dict | None) -> dict:
     """The run's card scope, read from `flow_scope.preset_for`, not copied."""
     from services import flow_scope
     preset_id, preset = flow_scope.preset_for(template)
-    return {"preset": preset_id, "cards": {card: list(options) for card, options in preset.items()}}
+    skipped = {card.id: f"{card.label} is not part of this template's study."
+               for card in flow_scope.CARDS if not preset.get(card.id)}
+    return {"preset": preset_id, "cards": {card: list(options) for card, options in preset.items()},
+            "skipped": skipped}
 
 
 # The completed weather year eh_site fills a weather gap from.
@@ -882,6 +886,74 @@ def _eh_ammonia_staged() -> dict:
 
 EH_AMMONIA_STAGED = _eh_ammonia_staged()
 
+# Study harness 14 (design §9.3 "eh_ipp_hybrid"; GK B (52) GO, I1-I10):
+# eh_ipp_hybrid@1. Commercial-led: the solve, then the single-owner investment
+# case. The result gate blocks when the peak export passes the export link's
+# rating; the investment case's DSCR and the pre-tax IRR it established warn
+# only (the shipped template carries no debt, so the DSCR is then not
+# evaluated). No EH study, no LOLE loop and no grid, reliability or control
+# stage: the preset turns them off (`scope_for` names each with its reason).
+# The wind and PV plants are forced-size (G5) and the POI and its prices are
+# the user's (§6.0); the envelope names the battery only, up to twice its
+# template cap (`eh_ipp.py`: 50 MW, 2 h). The PPA share is a commercial value
+# no chat edit reaches yet (missing_tools).
+IPP_DSCR_MIN = 1.2  # an assumed lender cover floor for a merchant-exposed project (owner may set)
+IPP_BESS_MAX_MW = 100.0
+IPP_BESS_MAX_HOURS = 4.0
+
+
+def _eh_ipp_hybrid() -> dict:
+    template = "eh_ipp_hybrid"
+    edits = [_h2_edit("StorageUnit", "bess", "p_nom_max", IPP_BESS_MAX_MW),
+             {"tool": "update_component", "target": {"component": "StorageUnit", "name": "bess", "attr": "max_hours"},
+              "bounds": {"min": 1.0, "max": IPP_BESS_MAX_HOURS}}]
+    return {
+        "id": template, "version": 1,
+        "templates": [template],
+        "scope": "flow_scope.preset_for",
+        "params": {"required": [], "ask": []},
+        "inputs": {"required": []},
+        "stages": {
+            "setup": {"actions": [], "rules": [
+                *GENERIC["setup"]["rules"],
+                _rule("set.project.template", "project.template", "eq", template,
+                      basis=f"The profile serves the {template} template only."),
+            ]},
+            "result_gate": {**GENERIC["result_gate"], "rules": [
+                *CORE_RESULT_RULES,
+                {**_rule("ipp.export.limit", "ipp.export.over_limit_mw", "le", 0.0,
+                         basis="The peak export through the point of connection stays within the export "
+                               "link's rating (MW over it; an import never counts)."),
+                 "unit": "MW"},
+                _rule("ipp.ic.min_dscr", "ic.min_dscr", "ge", IPP_DSCR_MIN, severity="warn",
+                      basis=f"The investment case's lowest debt cover over the years with debt service is "
+                            f"at least {IPP_DSCR_MIN}, an assumed floor and not the lender's covenant; "
+                            "with no debt there is no cover to judge."),
+                _rule("ipp.ic.pre_tax_irr", "ic.project_pre_tax_irr", "nonempty", severity="warn",
+                      basis="The investment case established the project's pre-tax IRR."),
+            ]},
+            # GK B (52): the shipped cases run as explore cases in the next slice.
+            "solve": {"actions": [*GENERIC["solve"]["actions"], _call("run_investment_case")],
+                      "rules": GENERIC["solve"]["rules"]},
+            "explore": {"skip": "The shipped cases do not run as explore cases yet."},
+            "report": {"actions": [_native("report")], "rules": REPORT_RULES},
+            "handoff": {"actions": [_native("handoff")], "rules": HANDOFF_RULES},
+        },
+        "tunable": [{"component": "StorageUnit", "attr": "p_nom_max"}, {"component": "StorageUnit", "attr": "max_hours"}],
+        "envelope": {
+            "edits": edits,
+            "runs": [{"tool": "solve_queue_enqueue"}, {"tool": "run_investment_case"}, {"tool": "generate_report"}],
+            # The solve and each L2 round's re-solve (L2_ROUNDS = 2); the case solves no LP.
+            "budget": {"solves": 3, "rounds": 2, "wall_time_h": 8.0},
+        },
+        "kpis": copy.deepcopy(EH_SITE["kpis"]),
+        "chapters": ["sizing", "investment_case"],
+        "missing_tools": ["a chat edit of the PPA share (a commercial value, not a network lever)"],
+    }
+
+
+EH_IPP_HYBRID = _eh_ipp_hybrid()
+
 # Study harness 12c (design §9.3 "eh_microgrid"; GK B (47) G1-G9): eh_microgrid@1
 # and eh_microgrid_staged@1. The solve, the EH study with the off-grid stress
 # (`dtc_stress`, one solve per islanding contingency) and the island check of
@@ -1035,6 +1107,7 @@ PROFILES: dict[str, dict] = {"eh_site@1": EH_SITE, "eh_site@2": EH_SITE_V2, "eh_
                               "eh_datacenter_staged@1": EH_DATACENTER_STAGED,
                               "eh_h2_hub@1": EH_H2_HUB, "eh_h2_hub_staged@1": EH_H2_HUB_STAGED,
                               "eh_ammonia_staged@1": EH_AMMONIA_STAGED,
+                              "eh_ipp_hybrid@1": EH_IPP_HYBRID,
                               "eh_microgrid@1": EH_MICROGRID, "eh_microgrid_staged@1": EH_MICROGRID_STAGED}
 
 
