@@ -1610,12 +1610,9 @@ def passed(results: list[dict]) -> bool:
 
 
 def fingerprint(ctx) -> str | None:
-    """The context's input fingerprint (solver outputs excluded), or None."""
-    from services import workflow_tools
-    try:
-        return workflow_tools._network_input_fingerprint(ctx)
-    except Exception:  # noqa: BLE001 — unreadable inputs are no evidence
-        return None
+    """The context's input fingerprint (solver outputs excluded), or None (`provenance_graph.runs`)."""
+    from services.provenance_graph.runs import input_fingerprint
+    return input_fingerprint(ctx)
 
 
 def _unevaluated(rules, reason):

@@ -161,11 +161,6 @@ def dispatch_status_detail(n: pypsa.Network, *, transient=None) -> dict:
     return {"state": state, "mismatched_classes": mismatched}
 
 
-def has_fresh_dispatch(n: pypsa.Network) -> bool:
-    """Convenience: True when status is exactly 'fresh'."""
-    return dispatch_status(n) == "fresh"
-
-
 # Component class → list of (t_accessor_attr, _t_df_attr) pairs whose dispatch
 # tables should be cleared when the component's topology mutates. Built from
 # the PyPSA conventions: each component has a `<component>_t` accessor holding

@@ -455,20 +455,23 @@ def _exact_frame_json(frame):
 def solve_freshness(ctx=None):
     """LC-12: whether results describe the current inputs, for result reads.
 
-    `results_current` is Check answers' own guard (`calculations.
-    solve_matches_inputs`), so every read agrees on it. `inputs_changed_since_
-    solve` compares both recorded solve fingerprints with the current inputs,
-    None when no solve recorded them: no claim either way."""
+    `inputs_changed_since_solve` is the optimisation's verdict on the
+    provenance graph (`provenance_graph.runs`): True when stale (the inputs
+    changed, the dispatch no longer matches the network, or the current inputs
+    cannot be read: fail closed), False when fresh, None when no solve recorded
+    its inputs: no claim either way. `results_current` is Check answers' own
+    guard (`calculations.solve_matches_inputs`), so every read agrees on it; a
+    stale verdict is never current."""
     from harness.calculations import solve_matches_inputs
+    from services.provenance_graph import runs
     from services.pypsa_service import PyPSAService
     ctx = ctx or PyPSAService.get_active_context()
-    meta = getattr(ctx.network, "meta", None) or {}
-    solved = meta.get("assistant_solve_input_fingerprint")
-    if not solved:
+    read = runs.read(ctx)
+    if read.solved is None:
         return {"inputs_changed_since_solve": None, "results_current": False}
-    changed = (solved != _network_input_fingerprint(ctx)
-               or meta.get("assistant_solve_exact_input_fingerprint") != _network_input_fingerprint(ctx, exact=True))
-    return {"inputs_changed_since_solve": changed, "results_current": solve_matches_inputs(ctx)}
+    changed = runs.results_verdicts(read)["optimisation"].state != "fresh"
+    return {"inputs_changed_since_solve": changed,
+            "results_current": not changed and solve_matches_inputs(ctx)}
 
 
 _EXTRA_PORT = re.compile(r"(bus|efficiency)(\d+)")

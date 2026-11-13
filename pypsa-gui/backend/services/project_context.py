@@ -175,6 +175,9 @@ class ProjectContext:
     # to one network object), persisted in metadata.json. A plain int for the
     # same GIL reason as `results_unsaved`; owned by `services/dirty_state.py`.
     network_revision: int = 0
+    # PG-04a F1: moved by `dirty_state.bump_inputs` (in memory only); the
+    # fingerprint cache's key, beside `network_revision`.
+    input_generation: int = 0
 
     # LRU recency stamp (B9). `time.monotonic()` of the last time this context
     # became active, was activated, was registered, or was returned as a

@@ -252,13 +252,9 @@ def _digest(card: dict) -> str:
 
 
 def _fingerprint() -> str | None:
-    from services import workflow_tools
-    from services.pypsa_service import PyPSAService
-
-    try:
-        return workflow_tools._network_input_fingerprint(PyPSAService.get_active_context())
-    except Exception:  # noqa: BLE001 — a network the fingerprint cannot read binds nothing
-        return None
+    """The active project's input fingerprint, or None: a network it cannot read binds nothing."""
+    from services.provenance_graph.runs import active_input_fingerprint
+    return active_input_fingerprint()
 
 
 def preview(tool_name: str, args: dict, *, with_state: bool = True) -> dict:
@@ -389,11 +385,11 @@ def approved_digest() -> str | None:
 
 
 def _results_stale() -> bool:
-    from services.pypsa_service import PyPSAService
+    """The optimisation's verdict on the provenance graph is stale (`provenance_graph.runs`). Results no solve
+    recorded the inputs of (a loaded network) compared nothing and are not claimed stale, as before."""
+    from services.provenance_graph import runs
 
-    network = PyPSAService.get_network()
-    solved = network.meta.get("assistant_solve_input_fingerprint") if hasattr(network, "meta") else None
-    return bool(solved) and solved != _fingerprint()
+    return runs.results_verdicts(runs.read())["optimisation"].state == "stale"
 
 
 # Tools whose route pushes their own one undo step (not a turn snapshot, so the
