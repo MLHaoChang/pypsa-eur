@@ -141,3 +141,19 @@ def test_the_human_create_path_names_a_changed_file_as_a_422(tmp_path, monkeypat
     with pytest.raises(HTTPException) as err:
         projects._mint_template_series(None, None, "tpl")
     assert err.value.detail["error_kind"] == "template_series_hash_mismatch"
+
+
+def test_an_entry_with_no_file_name_is_a_typed_refusal_not_a_crash(tmp_path):
+    entries = [{"name": "a", "sha256": "00"}]
+    assert _code(_dir(tmp_path, entries=entries)) == "template_series_meta_invalid"
+
+
+def test_a_hash_that_is_not_a_string_is_a_missing_hash(tmp_path):
+    entries = [{"name": "a.csv", "file": "a.csv", "sha256": 123}]
+    assert _code(_dir(tmp_path, entries=entries)) == "template_series_hash_missing"
+
+
+def test_a_folder_inside_the_series_dir_is_not_a_series_file(tmp_path):
+    d = _dir(tmp_path)
+    (d / TS.DIR / "notes").mkdir()
+    TS.verify(d)
