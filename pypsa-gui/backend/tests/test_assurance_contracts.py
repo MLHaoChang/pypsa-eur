@@ -350,6 +350,18 @@ def test_a_new_profile_in_a_returned_enum_is_additive_only_with_its_profile(froz
     elsewhere["evidence_identity"]["scoped_result"]["$defs"]["Slot"]["properties"]["disposition"][
         "enum"].append("brand-new/1")
     assert breaking_changes(frozen, elsewhere) == ["$.evidence_identity.scoped_result changed"]
+    # An id the old contract already listed without a profile (orphaned or
+    # re-added) keeps its difference visible when it becomes a profile (GK B B2).
+    orphan_old = copy.deepcopy(frozen)
+    orphan_old["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"]["properties"]["profile"][
+        "enum"].append("orphan/1")
+    assert breaking_changes(orphan_old, with_profile(frozen, "orphan/1", True)) == [
+        "$.evidence_identity.scoped_result changed"]
+    # Order counts, as on master: existing members reordered still break (GK B B3).
+    reordered = with_profile(frozen, "brand-new/1", True)
+    enum = reordered["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"]["properties"]["profile"]["enum"]
+    enum[:-1] = enum[-2::-1]
+    assert breaking_changes(frozen, reordered) == ["$.evidence_identity.scoped_result changed"]
     # The live snapshot against master's: only the new profile's entries differ (G11).
     assert breaking_changes(frozen, contracts.build()) == []
 
