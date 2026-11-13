@@ -26,7 +26,9 @@ SOLVES = 0  # the case values the solved dispatch; it solves no LP
 _WAKE = threading.Event()  # never set in production; a poll interval (tests set it)
 _FOLLOW_LOCK = threading.Lock()
 _FOLLOWERS: dict[tuple, threading.Thread] = {}
-TIMED_OUT = "The investment case passed its follow deadline; its outcome cannot be verified."
+TIMED_OUT = (
+    "The investment case passed its follow deadline; its outcome cannot be verified."
+)
 
 
 def is_ic_step(step) -> bool:
@@ -41,27 +43,46 @@ def _record(ctx):
         record = ctx.solver_state.get(STUDY)
         if not isinstance(record, dict):
             return None
-        return {k: record.get(k) for k in ("status", "started_at", "error", "error_code", "thread")}
+        return {
+            k: record.get(k)
+            for k in ("status", "started_at", "error", "error_code", "thread")
+        }
 
 
 def outcome(record, started_at):
     """(native status, step status, error) from the step's own record. A
     replaced or missing record is unverifiable, never completed; a refused
     case (its inputs are the user's to fix) and a failed one are failed."""
-    if not isinstance(record, dict) or started_at is None or record.get("started_at") != started_at:
-        return "unknown", "uncertain", "The case's own record is gone or was replaced; it cannot be verified."
+    if (
+        not isinstance(record, dict)
+        or started_at is None
+        or record.get("started_at") != started_at
+    ):
+        return (
+            "unknown",
+            "uncertain",
+            "The case's own record is gone or was replaced; it cannot be verified.",
+        )
     status = record.get("status")
     if status == "done":
         return "done", "completed", None
     if status in ("refused", "failed", "aborted"):
         detail = record.get("error_code") or record.get("error") or ""
-        return status, "failed", f"The investment case ended {status}: {str(detail)[:200]}"
+        return (
+            status,
+            "failed",
+            f"The investment case ended {status}: {str(detail)[:200]}",
+        )
     return "unknown", "uncertain", "The case's outcome cannot be verified."
 
 
 def _alive(record) -> bool:
     worker = record.get("thread")
-    return not (isinstance(worker, threading.Thread) and worker.ident is not None and not worker.is_alive())
+    return not (
+        isinstance(worker, threading.Thread)
+        and worker.ident is not None
+        and not worker.is_alive()
+    )
 
 
 def wait(ticket, job_id, session_id, ctx, begun) -> bool:
@@ -83,9 +104,19 @@ def wait(ticket, job_id, session_id, ctx, begun) -> bool:
 
     def mark(task):
         step = next((s for s in task["steps"] if s["id"] == ticket[1]), None)
-        if step is None or step.get("attempt_id") != ticket[2] or step["status"] != "waiting":
+        if (
+            step is None
+            or step.get("attempt_id") != ticket[2]
+            or step["status"] != "waiting"
+        ):
             return False
-        step["job"].update(kind=STUDY, started_at=begun, call_id=ticket[2], deadline_at=time.time() + MAX_FOLLOW_SECONDS)
+        step["job"].update(
+            kind=STUDY,
+            started_at=begun,
+            call_id=ticket[2],
+            deadline_at=time.time() + MAX_FOLLOW_SECONDS,
+        )
+
     runner._update(path, mark)
     with _FOLLOW_LOCK:
         _start_follower(path, ticket, job_id, ctx, begun)
@@ -95,8 +126,12 @@ def wait(ticket, job_id, session_id, ctx, begun) -> bool:
 def _start_follower(path, ticket, job_id, ctx, begun):
     for key in [k for k, t in _FOLLOWERS.items() if not t.is_alive()]:
         _FOLLOWERS.pop(key, None)
-    thread = threading.Thread(target=_follow, args=(path, ticket, job_id, ctx, begun),
-                              name=f"run-ic-{str(job_id)[-8:]}", daemon=True)
+    thread = threading.Thread(
+        target=_follow,
+        args=(path, ticket, job_id, ctx, begun),
+        name=f"run-ic-{str(job_id)[-8:]}",
+        daemon=True,
+    )
     _FOLLOWERS[tuple(ticket)] = thread
     thread.start()
     return thread
@@ -111,8 +146,13 @@ def _follow(path, ticket, job_id, ctx, begun):
     try:
         deadline = time.monotonic() + MAX_FOLLOW_SECONDS
         record = _record(ctx)
-        while (record is not None and record.get("started_at") == begun and record.get("status") == "running"
-               and _alive(record) and time.monotonic() < deadline):
+        while (
+            record is not None
+            and record.get("started_at") == begun
+            and record.get("status") == "running"
+            and _alive(record)
+            and time.monotonic() < deadline
+        ):
             _WAKE.wait(POLL_SECONDS)
             record = _record(ctx)
         settle(path, ticket, job_id, record, begun)
@@ -126,10 +166,19 @@ def settle(path, ticket, job_id, record, begun):
     from services import assistant_tasks
 
     native, status, error = outcome(record, begun)
-    result = {"study": STUDY, "started_at": begun, "solves": SOLVES} if status == "completed" else None
+    result = (
+        {"study": STUDY, "started_at": begun, "solves": SOLVES}
+        if status == "completed"
+        else None
+    )
     view = assistant_tasks.settle_job(path, ticket, job_id, native, status, result)
     if view is not None and error:
-        runner._update(path, lambda t: next(s for s in t["steps"] if s["id"] == ticket[1]).update(error=error))
+        runner._update(
+            path,
+            lambda t: next(s for s in t["steps"] if s["id"] == ticket[1]).update(
+                error=error
+            ),
+        )
     return view
 
 
@@ -145,9 +194,13 @@ def recover(path, ctx, *, instance, now=None, lapsed_ok=False):
     now = time.time() if now is None else now
     task = runner._read(path) or {}
     lease = (task.get("run") or {}).get("runner") or {}
-    if lease.get("lease_owner") != instance and not (lapsed_ok and lease.get("lease_until", 0) <= now):
+    if lease.get("lease_owner") != instance and not (
+        lapsed_ok and lease.get("lease_until", 0) <= now
+    ):
         return 0
-    mine = ctx is not None and str(getattr(ctx, "project_uuid", "")) == task.get("project_id")
+    mine = ctx is not None and str(getattr(ctx, "project_uuid", "")) == task.get(
+        "project_id"
+    )
     swept = 0
     for step in task.get("steps", []):
         job = step.get("job") or {}
@@ -163,14 +216,28 @@ def recover(path, ctx, *, instance, now=None, lapsed_ok=False):
             late = isinstance(deadline, (int, float)) and now >= deadline
             if not late:
                 record = _record(ctx) if mine else None
-                if (begun is not None and record is not None and record.get("started_at") == begun
-                        and record.get("status") == "running" and _alive(record)):
+                if (
+                    begun is not None
+                    and record is not None
+                    and record.get("started_at") == begun
+                    and record.get("status") == "running"
+                    and _alive(record)
+                ):
                     _start_follower(path, ticket, job_id, ctx, begun)
                     continue
         if late:
-            if assistant_tasks.settle_job(path, ticket, job_id, "timed_out", "uncertain") is not None:
-                runner._update(path, lambda t, sid=step["id"]: next(s for s in t["steps"] if s["id"] == sid).update(
-                    error=TIMED_OUT))
+            if (
+                assistant_tasks.settle_job(
+                    path, ticket, job_id, "timed_out", "uncertain"
+                )
+                is not None
+            ):
+                runner._update(
+                    path,
+                    lambda t, sid=step["id"]: next(
+                        s for s in t["steps"] if s["id"] == sid
+                    ).update(error=TIMED_OUT),
+                )
                 swept += 1
             continue
         if settle(path, ticket, job_id, record, begun) is not None:
