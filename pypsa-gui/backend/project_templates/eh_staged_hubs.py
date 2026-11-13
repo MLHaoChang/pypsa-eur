@@ -790,7 +790,9 @@ def _mg_meta(T, planning=None) -> dict:
                      "built in 2027 / 2030 / 2035, demo pre-tax NPV +43.2 M EUR (+43.9 M EUR when "
                      "the rows held the islanding step alone); re-checked 2026-11-13 with the "
                      "retuned grid-forming settings (study-harness 40): the same sizes, and no "
-                     "island-hour event fails the frequency check", plan)},
+                     "island-hour event (E1, E2, E3, E5) fails the frequency check; its bridge "
+                     "check still fails at 24 hours, where an empty battery is asked for its "
+                     "share of the islanding step", plan)},
             {"item": "existing island", "value": ", ".join(a for a in MG_EXISTING)
                                                  + f": COD {y0}-01-01, overnight cost 0",
              "source": "assumed", "note": "in service at the first period and sunk"},

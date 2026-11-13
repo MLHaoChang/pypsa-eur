@@ -10,7 +10,7 @@ Gated: GK A
 Likely files: pypsa-gui/backend/project_templates/eh_microgrid/island_config.json; pypsa-gui/backend/project_templates/eh_microgrid_staged/; pypsa-gui/backend/services/run_gates.py (mg.island.frequency); pypsa-gui/backend/services/campus_island_*.py
 Type: bug
 Found by: issue 12's fit check (GK A I5)
-Owner decisions: none yet
+Owner decisions: SH40-FREQ-1
 
 ## What was seen
 

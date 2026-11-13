@@ -16,6 +16,7 @@ default ranking:
   sidecar setting reaches that; it is left to the bridge follow-up and is
   not pinned here.
 """
+
 from __future__ import annotations
 
 import json
@@ -42,19 +43,40 @@ def test_every_grid_forming_battery_ships_the_retuned_settings(tid):
     assert (H.MG_GFM_DROOP_PCT, H.MG_GFM_TAU_F_S) == (2.0, 0.3)
 
 
+def test_the_single_year_ledger_states_the_shipped_battery_settings():
+    """``eh_templates`` cannot import the staged module's constants (it is
+    registered into by it), so its ledger text is pinned to them here."""
+    row = next(
+        r
+        for r in T.TEMPLATE_META["eh_microgrid"]["ledger"]
+        if r["item"] == "island unit data"
+    )
+    assert (
+        f"batteries droop {H.MG_GFM_DROOP_PCT:g} %, tau_f {H.MG_GFM_TAU_F_S:g} s"
+        in row["value"]
+    )
+
+
 @pytest.mark.parametrize("tid", MICROGRIDS)
 def test_the_shipped_sidecar_file_is_the_built_one(tid):
     from pathlib import Path
 
     shipped = Path(T.__file__).parent / tid / T.ISLAND_FILE
-    assert json.loads(shipped.read_text()) == json.loads(json.dumps(T.island_config(tid)))
+    assert json.loads(shipped.read_text()) == json.loads(
+        json.dumps(T.island_config(tid))
+    )
 
 
 @pytest.mark.live_solve
 @pytest.mark.slow
 @pytest.mark.parametrize("tid", MICROGRIDS)
-def test_the_template_passes_the_island_frequency_check(tid, user_and_db, reset_backend,  # noqa: F811
-                                                        monkeypatch, tmp_path):
+def test_the_template_passes_the_island_frequency_check(
+    tid,
+    user_and_db,  # noqa: F811
+    reset_backend,
+    monkeypatch,
+    tmp_path,
+):
     n, _cfg, _state = _solve(tid, monkeypatch, tmp_path)
     db, user = user_and_db
     row = project_registry.create_root(db, user, f"SH 40 {tid}")
@@ -64,7 +86,7 @@ def test_the_template_passes_the_island_frequency_check(tid, user_and_db, reset_
     ce.draft(row)
     run = _frequency_check(row)
     summary = json.loads((run / "campus_freq_summary.json").read_text())
-    assert summary["island_hours"]                     # the check judged some hours
+    assert summary["island_hours"]  # the check judged some hours
     assert summary["failing_hours"] == []
     assert summary["planned_infeasible_hours"] == []
     if tid == "eh_microgrid":
