@@ -177,27 +177,38 @@ def _rewrite_ratio(path, ratio):
 
 # ── provenance-graph 11: the battery rows walk the fields they compile to ──────
 
+
+def _times(k):
+    return lambda v: v * k
+
+
 # Written out, not read from `asset_view.LEDGER_FIELDS`, so a dropped or added entry there (or in the walk) fails.
+# Each field with the pack's conversion of the row value (`packs.battery_parts`): kEUR → EUR, % → share, the
+# round trip split sqrt/sqrt.
 BATTERY_ROWS = {
-    "battery_inverter_eur_per_kw": [("StorageUnit", "battery", "inv_power_overnight")],
+    "battery_inverter_eur_per_kw": [
+        ("StorageUnit", "battery", "inv_power_overnight", _times(1000.0))
+    ],
     "battery_inverter_lifetime_years": [
-        ("StorageUnit", "battery", "inv_power_lifetime")
+        ("StorageUnit", "battery", "inv_power_lifetime", _times(1.0))
     ],
     "battery_inverter_fom_pct_per_year": [
-        ("StorageUnit", "battery", "inv_power_fom_share")
+        ("StorageUnit", "battery", "inv_power_fom_share", _times(0.01))
     ],
-    "battery_storage_eur_per_kwh": [("StorageUnit", "battery", "inv_energy_overnight")],
+    "battery_storage_eur_per_kwh": [
+        ("StorageUnit", "battery", "inv_energy_overnight", _times(1000.0))
+    ],
     "battery_storage_lifetime_years": [
-        ("StorageUnit", "battery", "inv_energy_lifetime")
+        ("StorageUnit", "battery", "inv_energy_lifetime", _times(1.0))
     ],
     "battery_round_trip_efficiency": [
-        ("StorageUnit", "battery", "efficiency_store"),
-        ("StorageUnit", "battery", "efficiency_dispatch"),
+        ("StorageUnit", "battery", "efficiency_store", math.sqrt),
+        ("StorageUnit", "battery", "efficiency_dispatch", math.sqrt),
     ],
     # The discount rate is the battery's and the PV's.
     "discount_rate": [
-        ("StorageUnit", "battery", "discount_rate"),
-        ("Generator", "pv", "discount_rate"),
+        ("StorageUnit", "battery", "discount_rate", _times(1.0)),
+        ("Generator", "pv", "discount_rate", _times(1.0)),
     ],
 }
 
@@ -226,26 +237,22 @@ def test_each_battery_ledger_row_walks_the_fields_it_compiles_to():
     n, ledger = _pack("bess_pv_2h")
     rows = {r.key: r for r in ledger.rows}
     assert {
-        m.key for m in asset_view.LEDGER_FIELDS if m.component == "StorageUnit"
-    } == set(BATTERY_ROWS)
+        (m.key, m.component, m.name, m.field)
+        for m in asset_view.LEDGER_FIELDS
+        if m.key in BATTERY_ROWS
+    } == {(k, *f[:3]) for k, fields in BATTERY_ROWS.items() for f in fields}
     for key, want in BATTERY_ROWS.items():
         out = explain_ledger_row(n, key)
         assert out["target"] == {"ledger_key": key}
         assert [
             (f["target"]["component"], f["target"]["name"], f["target"]["field"])
             for f in out["fields"]
-        ] == want, key
-        for (component, name, field_name), field in zip(want, out["fields"]):
-            (m,) = [
-                m
-                for m in asset_view.LEDGER_FIELDS
-                if (m.key, m.component, m.name, m.field)
-                == (key, component, name, field_name)
-            ]
+        ] == [f[:3] for f in want], key
+        for (component, name, field_name, to_store), field in zip(want, out["fields"]):
             column = float(
                 getattr(n, n.components[component].list_name).at[name, field_name]
             )
-            compiled = m.to_store(rows[key].value)
+            compiled = to_store(rows[key].value)
             first = field["steps"][0]
             assert first["node"] == f"input:{component}/{name}/{field_name}"
             assert first["value"] == column, key
