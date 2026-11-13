@@ -173,6 +173,22 @@ class DataCentreLoadSpec(BaseModel):
     #: Power architecture (DC 05). ``pue_at_design`` is the PUE of this
     #: architecture; the default "ac" is assumed when unset and moves nothing.
     architecture: DcArchitecture = "ac"
+    #: DC 27: the project's start, the time-to-power months' origin; None = not stated.
+    project_start: date | None = None
+    #: DC 27: the grid connection's energisation date; when set it is first power.
+    #: Neither date is read by a solve.
+    connection_date: date | None = None
+
+    @model_serializer(mode="wrap")
+    def _omit_unstated_dates(self, handler):
+        """A spec without the DC 27 dates dumps as it did before they existed,
+        so stored specs, sidecars and hashes stay byte-equal (GK A G8)."""
+        data = handler(self)
+        if isinstance(data, dict):
+            for key in ("project_start", "connection_date"):
+                if data.get(key) is None:
+                    data.pop(key, None)
+        return data
 
     @model_validator(mode="after")
     def _shares(self) -> "DataCentreLoadSpec":

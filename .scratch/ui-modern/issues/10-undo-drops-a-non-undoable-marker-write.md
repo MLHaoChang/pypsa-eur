@@ -46,3 +46,7 @@ setting on the undo stack.
 - K4: a marker left as it is (unparseable snapshot, marker or base; unreadable base) says so in the undo's result, not only the log.
 - K5: the base read is tri-state; malformed JSON, a non-object, `[]` and `null` read unreadable, never none.
 - K6: a case copy is removed only when it equals the base's marker after the restore; one holding anything else, a backup included, stays.
+
+### 2026-11-13: owner decision
+
+Owner answered (UM10-UNDO-1, `docs/agents/owner-decisions.md`). Status: ready-for-agent.

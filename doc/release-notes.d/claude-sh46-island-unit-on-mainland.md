@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The island tie check (`mg.tie.open`) refuses by name, as not evaluated, when an island sidecar unit sits on a bus that reads as the mainland's, instead of reading `no_tie` (study harness #46).

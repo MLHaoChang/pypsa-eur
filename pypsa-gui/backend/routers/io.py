@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import pathlib
 import tempfile
 import zipfile
@@ -16,6 +17,8 @@ from sqlalchemy.orm import Session as DBSession
 from services.pypsa_service import PyPSAService
 from services.upload_guard import read_capped, safe_extract
 from starlette.responses import StreamingResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -251,13 +254,62 @@ def export_matpower():
 
 # ── Imports ───────────────────────────────────────────────────────────────────
 
-def _reset_with_ts_clear() -> None:
-    """Reset network and clear any user-uploaded time series."""
+def _replace_with(candidate) -> None:
+    """Swap the parsed ``candidate`` in as the open network and clear any
+    user-uploaded time series. The caller holds ``PyPSAService.get_lock()``."""
     from routers.network import _restore_user_ts
     # The same workspace gets a new network: a COPY of the undo stack keeps the
     # import undoable without touching the outgoing context's own history.
-    PyPSAService.reset_network(carry="copy")
+    PyPSAService.reset_network(carry="copy", network=candidate)
     _restore_user_ts({})
+
+
+def _unreadable(what: str) -> HTTPException:
+    return HTTPException(422, {
+        "error_kind": "import_unreadable",
+        "message": f"The file is not a readable {what} with at least one bus; "
+                   "the open network is unchanged.",
+    })
+
+
+def _parse_candidate(what: str, parse, *, check_names: bool = True):
+    """LC-43c: parse an uploaded file into a NEW network that is not yet open.
+
+    Each import used to reset the open network first and parse into the blank
+    one, so a file that did not parse left the session with no project and
+    without its unsaved edits, and a MATPOWER file with no tables "imported" as
+    an empty network. Parsing into a candidate means a refusal, for whatever
+    reason, leaves the open project exactly as it was; `_replace_with` swaps
+    the candidate in only once it has parsed and passed the name checks.
+    The candidate is no one's network yet, so it is parsed WITHOUT
+    `PyPSAService.get_lock()`: the lock is held for the swap only.
+
+    A route's own refusal (an HTTPException, such as an unsafe zip member or a
+    bad baseMVA) keeps its status and detail; any other parse failure, and a
+    file that parses to no buses at all, is 422 ``import_unreadable``.
+    """
+    import pypsa
+
+    candidate = pypsa.Network()
+    candidate.name = "Untitled Project"
+    try:
+        parse(candidate)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 - any parser failure is one refusal
+        # The catch also covers our own mapping code (the CSV formula unescape,
+        # the workbook rows, the MATPOWER tables): log the traceback so a bug
+        # there is not hidden behind the user's 422 (GK B 53, I2).
+        logger.warning("import of a %s refused as unreadable", what, exc_info=True)
+        raise _unreadable(what) from exc
+    if candidate.buses.empty:
+        # A zip of no PyPSA tables, a workbook of no component sheets or a
+        # MATPOWER file of no `mpc.bus` rows "parses" to an empty network.
+        raise _unreadable(what)
+    _refuse_reserved_buses(candidate)
+    if check_names:
+        _refuse_invalid_names(candidate)
+    return candidate
 
 
 def _unbind_session(db: DBSession, session: SessionRow | None) -> None:
@@ -278,9 +330,8 @@ def _unbind_session(db: DBSession, session: SessionRow | None) -> None:
     the same swap with content, so it needs the same un-pointing — which is
     also exactly what the UI does on its side, `setCurrentProject(null)`.
 
-    Called on SUCCESS only. A refused import (`_refuse_reserved_buses`) raises
-    before this, leaving the session on the project it was on, which is still
-    resident and untouched — the reset landed in the scratch slot, not there.
+    Called on SUCCESS only. A refused import (`_parse_candidate`) raises
+    before the swap, leaving the session on the project it was on, untouched.
     `session` is None in local mode, where there is no pointer to move.
     """
     if session is not None:
@@ -289,23 +340,21 @@ def _unbind_session(db: DBSession, session: SessionRow | None) -> None:
 
 def _refuse_reserved_buses(n) -> None:
     """An imported network may not name a bus `ic:…` (the commercial reference
-    frames' namespace, P2 WP2.2-0): the import is undone and refused."""
+    frames' namespace, P2 WP2.2-0): the import is refused before it is opened."""
     from services.commercial.settlement_inputs import reserved_bus_name
 
     bad = [str(b) for b in n.buses.index if reserved_bus_name(b)]
     if bad:
-        _reset_with_ts_clear()
         raise HTTPException(422, f"bus names starting 'ic:' are reserved: {bad[:5]}")
 
 
 def _refuse_invalid_names(n) -> None:
     """OPEN-ITEMS item 8: an imported network may not bring in a name the
-    create routes would refuse. The import is undone and refused, as above."""
+    create routes would refuse. The import is refused before it is opened, as above."""
     from services.component_names import invalid_names_in_network, refuse_invalid_names
 
     bad = invalid_names_in_network(n)
     if bad:
-        _reset_with_ts_clear()
         refuse_invalid_names(bad)
 
 
@@ -320,13 +369,13 @@ async def import_netcdf(
         f.write(data)
         tmp = pathlib.Path(f.name)
     try:
+        with PyPSAService.get_netcdf_io_lock():
+            n = _parse_candidate(
+                "netCDF network",
+                lambda c: PyPSAService.import_network_from_netcdf(c, tmp),
+            )
         with PyPSAService.get_lock():
-            _reset_with_ts_clear()
-            n = PyPSAService.get_network()
-            with PyPSAService.get_netcdf_io_lock():
-                PyPSAService.import_network_from_netcdf(n, tmp)
-                _refuse_reserved_buses(n)
-                _refuse_invalid_names(n)
+            _replace_with(n)
     finally:
         tmp.unlink(missing_ok=True)
     summary = _build_summary(n)
@@ -345,19 +394,20 @@ async def import_csv(
     session: SessionRow | None = Depends(current_session),
 ):
     import zipfile as _zip
+    from services.adequacy.eh_columns import normalise_eh_columns
     data = await read_capped(file)
     with tempfile.TemporaryDirectory() as tmpdir:
-        with _zip.ZipFile(io.BytesIO(data)) as zf:
-            safe_extract(zf, tmpdir)
-        _map_csv_folder(tmpdir, _unescape_formula)
+
+        def parse(c):
+            with _zip.ZipFile(io.BytesIO(data)) as zf:
+                safe_extract(zf, tmpdir)
+            _map_csv_folder(tmpdir, _unescape_formula)
+            c.import_from_csv_folder(tmpdir)
+
+        n = _parse_candidate("CSV bundle (a .zip of PyPSA CSV tables)", parse)
+        normalise_eh_columns(n)
         with PyPSAService.get_lock():
-            _reset_with_ts_clear()
-            n = PyPSAService.get_network()
-            n.import_from_csv_folder(tmpdir)
-            _refuse_reserved_buses(n)
-            _refuse_invalid_names(n)
-            from services.adequacy.eh_columns import normalise_eh_columns
-            normalise_eh_columns(n)
+            _replace_with(n)
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network_csv.zip",
@@ -375,15 +425,14 @@ async def import_excel(
 ):
     import openpyxl
     data = await read_capped(file)
-    wb = openpyxl.load_workbook(io.BytesIO(data))
     component_map = {
         "buses": "Bus", "generators": "Generator", "lines": "Line",
         "links": "Link", "loads": "Load", "storage_units": "StorageUnit",
         "stores": "Store", "transformers": "Transformer",
     }
-    with PyPSAService.get_lock():
-        _reset_with_ts_clear()
-        n = PyPSAService.get_network()
+
+    def parse(n):
+        wb = openpyxl.load_workbook(io.BytesIO(data))
         if "network" in wb.sheetnames:
             # Native PyPSA exports include network/snapshot/dynamic sheets.
             # Keep their horizon and series; legacy custom component sheets
@@ -408,11 +457,13 @@ async def import_excel(
                             n.add(comp_class, str(name), **{k: v for k, v in row_dict.items() if v is not None})
                         except Exception:
                             pass
-        _refuse_reserved_buses(n)
-        _refuse_invalid_names(n)
-        # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
-        from services.adequacy.eh_columns import normalise_eh_columns
-        normalise_eh_columns(n)
+
+    n = _parse_candidate("Excel workbook", parse)
+    # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
+    from services.adequacy.eh_columns import normalise_eh_columns
+    normalise_eh_columns(n)
+    with PyPSAService.get_lock():
+        _replace_with(n)
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network.xlsx",
@@ -428,13 +479,14 @@ async def import_matpower(
     db: DBSession = Depends(get_db),
     session: SessionRow | None = Depends(current_session),
 ):
-    data = (await read_capped(file)).decode("utf-8")
+    data = await read_capped(file)
+    # No `_refuse_invalid_names`: every MATPOWER name is built from an int.
+    n = _parse_candidate(
+        "MATPOWER case", lambda c: _parse_matpower(c, data.decode("utf-8")),
+        check_names=False,
+    )
     with PyPSAService.get_lock():
-        _reset_with_ts_clear()
-        n = PyPSAService.get_network()
-        _parse_matpower(n, data)
-        _refuse_reserved_buses(n)
-        # No `_refuse_invalid_names`: every MATPOWER name is built from an int.
+        _replace_with(n)
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network.m",

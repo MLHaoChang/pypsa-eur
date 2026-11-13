@@ -689,6 +689,10 @@ def run_simulation(
             # A raise before the restore is released by the outer `finally`.
             from services.workflow_tools import hold_solve_inputs
             release_inputs = hold_solve_inputs(network, lock)
+            # Study harness #42: a resident network misses the Link port frames
+            # another network's multi-port Link added to PyPSA's shared table.
+            from services.solver.link_ports import ensure_link_port_frames
+            ensure_link_port_frames(network)
             phase(
                 f"Loading network state — {len(network.buses)} buses, "
                 f"{len(network.snapshots)} snapshots, mode={config.mode}, solver={config.solver_name}"

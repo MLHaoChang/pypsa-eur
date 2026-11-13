@@ -619,16 +619,19 @@ def _install(client, install_network, n):
     assert client.put("/api/simulation/solver_config", json=body).status_code == 200
 
 
-def test_the_mc_study_refuses_the_h2_hub_on_its_own_generator_only_fleet(
-    client, install_network
-):
-    """mc_loop keeps `snapshot_inputs` (follow-up 03): it refuses the H2 hub
-    and its reason claims nothing about Links (#1318 F1)."""
+def test_the_mc_study_samples_the_h2_hub_on_the_loops_fleet(client, install_network):
+    """Follow-up 03: mc_loop samples `sampled_fleet` too, so the H2 hub's
+    import Link is a unit and the study no longer refuses it."""
     _install(client, install_network, _h2_hub())
     r = client.post("/api/results/mc", json={"draws": 50})
-    assert r.status_code == 422, r.text
-    detail = r.json()["detail"]
-    assert detail.startswith(coupling.NOTHING_TO_SAMPLE) and "Link" not in detail
+    assert r.status_code == 200, r.text
+    import time
+
+    deadline = time.time() + 300.0
+    while client.get("/api/results/mc").json().get("status") == "running":
+        assert time.time() < deadline
+        time.sleep(0.05)
+    assert client.get("/api/results/mc").json()["status"] == "done"
 
 
 @pytest.mark.parametrize(

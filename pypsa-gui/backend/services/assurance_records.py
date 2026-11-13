@@ -1883,6 +1883,7 @@ def capture_scoped(owner, scope):
                 *calculations.investment.PROFILES,
                 calculations.copt_screen.PROFILE,
                 calculations.readiness.PROFILE,
+                calculations.time_to_power.PROFILE,
             )
             else next(iter(raw["generators"].values()))
         )

@@ -791,6 +791,18 @@ def get_asset_schema(component: str) -> dict:
         )
 
 
+@router.get("/asset_schema/{component}/units/{name}")
+def get_asset_units(component: str, name: str) -> dict:
+    """The size fields whose unit follows this asset's bus (t/h, t on a tonne bus); the rest keep the
+    class-level unit from `asset_schema/{component}`."""
+    if component not in CLASS_ATTR:
+        raise HTTPException(400, f"No asset schema for '{component}'.")
+    n = PyPSAService.get_network()
+    if name not in getattr(n, CLASS_ATTR[component]).index:
+        raise HTTPException(404, f"{component} '{name}' not found")
+    return {"component": component, "name": name, "units": asset_fields.size_units(n, component, name)}
+
+
 @router.get("/asset_costs")
 def get_asset_costs() -> dict:
     """Every investable asset's upfront parts and annual costs, for the Economics panel's Asset costs tab
