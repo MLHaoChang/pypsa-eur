@@ -8,6 +8,8 @@ The scenario table names, per scenario, what each consumer answers now and what 
 
 from __future__ import annotations
 
+import pathlib
+
 import pandas as pd
 import pypsa
 import pytest
@@ -724,6 +726,32 @@ def test_a_sidecar_write_reaches_the_cache(solved, monkeypatch, tmp_path, name):
     runs.read(cached=True)
     first = len(calls)
     (tmp_path / name).write_text('{"v": 2}')
+    runs.read(cached=True)
+    assert len(calls) > first
+
+
+def test_a_case_stamp_digests_the_marker_it_reads(solved, monkeypatch, tmp_path):
+    """A sensitivity case reads its base's marker (`template_marker.source_path`), so the stamp digests that file,
+    not the case folder's absent own one: an edit to the base's marker reaches the cache."""
+    from services import template_marker
+
+    _, ctx = solved
+    case_dir, base_dir = tmp_path / "case", tmp_path / "base"
+    case_dir.mkdir()
+    base_dir.mkdir()
+    base_marker = base_dir / template_marker.MARKER_FILE
+    base_marker.write_text('{"v": 1}')
+    monkeypatch.setattr(ctx, "storage_dir", case_dir, raising=False)
+    monkeypatch.setattr(
+        template_marker,
+        "source_path",
+        lambda d: base_marker if pathlib.Path(d) == case_dir else None,
+    )
+    calls = _hashes(monkeypatch)
+    runs.read(cached=True)
+    runs.read(cached=True)
+    first = len(calls)
+    base_marker.write_text('{"v": 2}')
     runs.read(cached=True)
     assert len(calls) > first
 

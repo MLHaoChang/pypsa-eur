@@ -86,6 +86,7 @@ def _stamp(ctx) -> tuple:
     import json
     import pathlib
 
+    from services import template_marker
     from services.reliability_goal import goal_free_config
 
     h = hashlib.sha256()
@@ -97,10 +98,21 @@ def _stamp(ctx) -> tuple:
     except Exception:  # noqa: BLE001 — an unreadable config is its own state
         h.update(b"config unreadable")
     d = getattr(ctx, "storage_dir", None)
-    for name in ("eh_template.json", "island_config.json"):
+    # The template marker is the one the project reads (a sensitivity case
+    # reads its base's), through the helper the marker guard requires.
+    marker = template_marker.source_path(d) if d else None
+    for name, path in (
+        ("template marker", marker),
+        ("island_config.json", pathlib.Path(d, "island_config.json") if d else None),
+    ):
         h.update(name.encode())
         try:
-            h.update(pathlib.Path(d, name).read_bytes() if d else b"no project dir")
+            if not d:
+                h.update(b"no project dir")
+            elif path is None:
+                h.update(b"absent")
+            else:
+                h.update(path.read_bytes())
         except OSError:
             h.update(b"absent")
     return (
