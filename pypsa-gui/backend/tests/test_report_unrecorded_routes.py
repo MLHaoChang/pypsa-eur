@@ -366,11 +366,16 @@ def test_an_older_version_is_not_exported_through_the_latest_mapping(
     n = _unrecorded(project_storage_dir(name), rid)
     assert n == bound_v + 1
     store.update_meta(project_storage_dir(name), rid, mapping_plan={"entries": []})
-    r = client.post(f"/api/projects/{name}/reports/{rid}/export", json={"version": bound_v})
+    r = client.post(
+        f"/api/projects/{name}/reports/{rid}/export", json={"version": bound_v}
+    )
     assert r.status_code == 409, r.text[:300]
     detail = r.json()["detail"]
     assert detail["error_kind"] == "report_settings_unrecorded"
-    assert f"version {bound_v}" in detail["message"] and f"version {n}" in detail["message"]
+    assert (
+        f"version {bound_v}" in detail["message"]
+        and f"version {n}" in detail["message"]
+    )
     assert fake_untagged.rendered == []
     r = client.post(f"/api/projects/{name}/reports/{rid}/export", json={"version": n})
     assert r.status_code == 200, r.text[:300]
