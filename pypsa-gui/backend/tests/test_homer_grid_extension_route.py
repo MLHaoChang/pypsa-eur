@@ -332,3 +332,20 @@ def test_e6_tool_refuses_a_project_that_is_not_the_sessions_own(
         )
     assert e2.value.detail["error_kind"] == "grid_extension_input_invalid"
     assert missing[0] in (403, 404)
+
+
+def test_mutant_gaps_nonfinite_rate_status_bool_cost_and_npc_overflow():
+    with pytest.raises(HTTPException) as e:
+        G.study_assumptions(_study(_ledger(rate=math.nan)))
+    assert _kind(e) == "discount_rate_invalid"
+    with pytest.raises(HTTPException) as e:  # a solved-looking cost on a failed row
+        G.evaluate(_study(), _rec(_row(status="infeasible", cost=5.0)), _body())
+    assert _kind(e) == "architecture_not_solved"
+    with pytest.raises(HTTPException) as e:
+        G.evaluate(_study(), _rec(_row(cost=True)), _body())
+    assert _kind(e) == "architecture_not_solved"
+    with pytest.raises(
+        HTTPException
+    ) as e:  # finite cost, annuity pushes the NPC to inf
+        G.evaluate(_study(), _rec(_row(cost=1.7e308)), _body())
+    assert _kind(e) == "npc_not_finite"
