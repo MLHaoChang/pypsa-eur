@@ -114,7 +114,7 @@ def test_a_basis_just_over_the_cap_is_a_typed_refusal(monkeypatch):
     with pytest.raises(HTTPException) as err:
         ec._basis_digest(["x" * (1024 - len('[""]') + 1)])
     assert err.value.status_code == 422
-    assert err.value.detail["error_kind"] == "invalid_experiment"
+    assert err.value.detail["error_kind"] == "horizon_too_large_to_compare"
 
 
 def test_the_cap_holds_the_largest_realistic_basis():
@@ -224,6 +224,6 @@ def test_an_over_cap_basis_is_a_typed_422_from_the_sensitivity_tool(
     sweep(base_id, 20)
     monkeypatch.setattr(ec, "MAX_BASIS_BYTES", 16)
     detail = refused(
-        "invalid_experiment", 422, "compare_sensitivities", baseline_project_id=base_id
+        "horizon_too_large_to_compare", 422, "compare_sensitivities", baseline_project_id=base_id
     )
     assert detail["message"] == "The run's horizon is too large to compare."
