@@ -62,8 +62,8 @@ SOURCES: dict[str, str] = {
     "ambient": "assumed; temperate (Central European) site, no weather data",
     "rack_kw": "assumed or as entered; carried into the envelope only",
     "project_start": ("assumed (the staged example's financial close) or as entered; the origin "
-                      "of the time-to-power months (DC 27), read by no solve"),
-    "connection_date": ("as entered; first power for the time-to-power months (DC 27), "
+                      "of the time-to-power months, read by no solve"),
+    "connection_date": ("as entered; first power for the time-to-power months, "
                         "read by no solve"),
     "load_split": ("as entered or assumed (75 % critical); the template has one critical "
                    "and one non-critical DC load"),

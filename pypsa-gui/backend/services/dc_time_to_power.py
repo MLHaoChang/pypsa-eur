@@ -89,26 +89,30 @@ def import_stages(n, meta: dict | None) -> list[dict]:
     link = _import_link(n)
     by_period = energization.energized_mw_by_period(n, link)
     unset = _unset_periods(meta)
-    if isinstance(n.snapshots, pd.MultiIndex):
-        if by_period is None and n.links.at[link, "p_nom_extendable"]:
+
+    def energized(period):
+        # A period the schedule leaves without a finite value has no
+        # schedule limit (`services.adequacy.energization`): the link's own
+        # fixed size, never 0; a size the solve chooses is not stated.
+        mw = (by_period or {}).get(period)
+        if mw is not None:
+            return float(mw)
+        if n.links.at[link, "p_nom_extendable"]:
             raise StagesUnavailable("import_unsized", link)
+        return float(n.links.at[link, "p_nom"])
+
+    if isinstance(n.snapshots, pd.MultiIndex):
         years = n.investment_period_weightings["years"]
         out = []
         for p in pd.unique(n.snapshots.get_level_values(0)):
             start = date(int(p), 1, 1)
             months = int(round(float(years.loc[p]) * 12))
-            mw = float(n.links.at[link, "p_nom"]) if by_period is None else by_period.get(str(p), 0.0)
             out.append({"period": str(p), "start": start.isoformat(),
                         "end": add_months(start, months).isoformat(),
-                        "energized_mw": float(mw), "set": str(p) not in unset})
+                        "energized_mw": energized(str(p)), "set": str(p) not in unset})
         return out
     year = pd.DatetimeIndex(n.snapshots)[0].year
-    if by_period is not None:
-        mw = by_period["all"]
-    elif n.links.at[link, "p_nom_extendable"]:
-        raise StagesUnavailable("import_unsized", link)
-    else:
-        mw = float(n.links.at[link, "p_nom"])
+    mw = energized("all")
     return [{"period": "all", "start": date(year, 1, 1).isoformat(),
              "end": date(year + 1, 1, 1).isoformat(), "energized_mw": float(mw), "set": True}]
 

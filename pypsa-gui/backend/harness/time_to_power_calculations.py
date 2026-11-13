@@ -23,7 +23,6 @@ DISCLOSURE = (
     "Grid-delivered power only: on-site generation that could carry the load before energisation is "
     "not counted."
 )
-SPEC_KEYS = ("project_start", "connection_date", "phases")
 
 
 def _spec(meta):

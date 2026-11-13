@@ -212,7 +212,7 @@ def test_two_import_links_with_schedules_are_ambiguous():
     n.links_t["eh_energization_mw"]["grid_import_2"] = n.links_t["eh_energization_mw"]["grid_import"]
     with pytest.raises(D.StagesUnavailable) as exc:
         D.import_stages(n, {})
-    assert exc.value.reason == "import_link_ambiguous"
+    assert (exc.value.reason, exc.value.detail) == ("import_link_ambiguous", "grid_import, grid_import_2")
 
 
 def test_two_unscheduled_import_links_are_ambiguous():
@@ -222,7 +222,7 @@ def test_two_unscheduled_import_links_are_ambiguous():
     n.links.loc["grid_import_2", "eh_role"] = "grid_import"
     with pytest.raises(D.StagesUnavailable) as exc:
         D.import_stages(n, {})
-    assert exc.value.reason == "import_link_ambiguous"
+    assert (exc.value.reason, exc.value.detail) == ("import_link_ambiguous", "grid_import, grid_import_2")
 
 
 def test_the_last_period_ends_at_its_own_years():
@@ -339,3 +339,28 @@ def test_only_unset_energisation_rows_mark_a_period():
 
 def test_no_phases_is_no_serving_stage():
     assert ttp(spec(phases=[]))["reason"] == "no_serving_stage"
+
+
+def test_a_scheduled_import_reads_its_schedule_even_when_the_solve_sizes_it():
+    n = T.BUILDERS["eh_datacenter_staged"]()
+    n.links.loc["grid_import", "p_nom_extendable"] = True
+    assert D.import_stages(n, None) == STAGES
+
+
+def test_a_period_the_schedule_leaves_unlimited_is_the_fixed_size_never_zero():
+    import numpy as np
+
+    n = T.BUILDERS["eh_datacenter_staged"]()
+    frame = n.links_t["eh_energization_mw"]
+    frame.loc[frame.index.get_level_values(0) == 2027, "grid_import"] = np.nan
+    assert [s["energized_mw"] for s in D.import_stages(n, {})] == [55.0, 55.0, 55.0]
+    n.links.loc["grid_import", "p_nom_extendable"] = True
+    with pytest.raises(D.StagesUnavailable) as exc:
+        D.import_stages(n, {})
+    assert exc.value.reason == "import_unsized"
+
+
+def test_a_spec_without_phases_is_no_serving_stage():
+    s = spec()
+    del s["phases"]
+    assert ttp(s)["reason"] == "no_serving_stage"

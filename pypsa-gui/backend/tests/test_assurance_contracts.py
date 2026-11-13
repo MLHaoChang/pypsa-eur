@@ -366,6 +366,14 @@ def test_a_new_profile_in_a_returned_enum_is_additive_only_with_its_profile(froz
     assert breaking_changes(frozen, contracts.build()) == []
 
 
+def test_the_strip_reaches_profile_enums_in_lists_and_leaves_other_properties():
+    strip = contracts._without_enum_members
+    nested = {"anyOf": [{"properties": {"profile": {"enum": ["a/1", "new/1"]}}}]}
+    assert strip(nested, {"new/1"}) == {"anyOf": [{"properties": {"profile": {"enum": ["a/1"]}}}]}
+    plain = {"properties": {"profile": {"type": "string"}, "kind": {"enum": ["new/1"]}}}
+    assert strip(plain, {"new/1"}) == plain
+
+
 def test_a_result_outside_its_shape_is_refused():
     from harness import assurance_shapes
 

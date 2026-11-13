@@ -206,13 +206,11 @@ def breaking_changes(old: dict, new: dict) -> list[str]:
     directions = old.get("directions", {})
     # A new profile is additive (AA-V1-CHANGE-1): a returned shape that embeds
     # the profile enum (the scoped result's RequestScope) gains its id there.
-    added = set(new.get("profiles", {})) - set(old.get("profiles", {}))
+    new = _without_enum_members(new, set(new.get("profiles", {})) - set(old.get("profiles", {})))
     for key, value in old.items():
         where = f"$.{key}"
         if key in _META:
             continue
-        if added and directions.get(key) != "accepts" and key in new:
-            new = {**new, key: _without_enum_members(new[key], added)}
         if key not in new:
             found.append(f"{where} removed")
         elif directions.get(key) != new.get("directions", {}).get(key):

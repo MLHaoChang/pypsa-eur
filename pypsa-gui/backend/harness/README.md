@@ -620,6 +620,12 @@ is checked when it declares the code's rule for its id and its stored value, jud
 rule against its stored limit, gives its verdict; boundary disagreements are withheld, and
 unknown, non-scalar and categorical rows are named. Only the counts are facts; the harness
 writes one line per row.
+`time-to-power/1` (opt-in) recomputes a data-centre project's time to power
+(`services/dc_time_to_power.py`) from its saved network's grid-import stages and its stored
+`dc_load` spec: calendar months from `project_start` to the stated `connection_date`, else
+to the first model period energised above 0 MW while a phase is in service, a partial month
+rounded up. Grid-delivered power only; a staged date is as fine as its period. A missing
+input withholds the fact with its reason, never 0.
 A checked request may add `chart` (or end with "; chart <series>, ..."): `services/checked_charts.py`
 draws only per-snapshot series the request's evidence holds (generator `p`; StorageUnit `p_store`,
 `p_dispatch`, `state_of_charge`; bus `marginal_price`; branch `p0`, `p1`, and `loading` from the branch

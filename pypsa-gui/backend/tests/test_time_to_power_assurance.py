@@ -189,3 +189,12 @@ def test_fact_identity_windows_are_pinned(profile, index, expected):
     from harness import fact_identity
 
     assert fact_identity.window(index, {"profile": profile, "entity_id": "network"}) == expected
+
+
+def test_the_disclosure_says_grid_power_only_and_the_period_resolution():
+    """G4, G3: on-site supply is not counted; a staged date is as fine as its period."""
+    from harness import calculations
+
+    words = calculations.disclosure(SCOPE)
+    assert "Grid-delivered power only" in words and "on-site generation" in words
+    assert "not counted" in words and "up to a period earlier" in words
