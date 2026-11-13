@@ -2710,12 +2710,7 @@ def _run_turn_body(
                 session, tu.get("name"), tu.get("input") or {}
             )
         ]
-        session.turn_redirects = (
-            {}
-            if session.assurance_turn is not None
-            or not edit_routing.preview_available()
-            else edit_routing.redirects(routable, session.turn_single_edit_applied)
-        )
+        session.turn_redirects = edit_routing.turn_redirects(session, routable)
         # LC-47: this response's ordinary writes as one change-set card.
         from harness import change_set
         from harness import mcp_client as _mcp
