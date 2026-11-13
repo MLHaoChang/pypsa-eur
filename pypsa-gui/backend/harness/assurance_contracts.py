@@ -235,11 +235,13 @@ def breaking_changes(old: dict, new: dict) -> list[str]:
     return found
 
 
-def _without_enum_members(value, members: set):
-    """``value`` with ``members`` dropped from every ``enum`` list in it."""
+def _without_enum_members(value, members: set, key: str | None = None):
+    """``value`` with ``members`` dropped from the ``enum`` of every property
+    named ``profile`` in it; every other enum is left as it is."""
     if isinstance(value, dict):
-        return {k: ([m for m in v if m not in members] if k == "enum" and isinstance(v, list)
-                    else _without_enum_members(v, members)) for k, v in value.items()}
+        if key == "profile" and isinstance(value.get("enum"), list):
+            value = {**value, "enum": [m for m in value["enum"] if m not in members]}
+        return {k: _without_enum_members(v, members, k) for k, v in value.items()}
     if isinstance(value, list):
         return [_without_enum_members(v, members) for v in value]
     return value

@@ -335,10 +335,23 @@ def test_a_new_profile_in_a_returned_enum_is_additive_only_with_its_profile(froz
     assert breaking_changes(frozen, with_profile(frozen, "brand-new/1", True)) == []
     assert breaking_changes(frozen, with_profile(frozen, "brand-new/1", False)) == [
         "$.evidence_identity.scoped_result changed"]
-    added = with_profile(frozen, "brand-new/1", True)
-    added["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"]["properties"]["profile"][
+    removed = with_profile(frozen, "brand-new/1", True)
+    removed["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"]["properties"]["profile"][
         "enum"].remove("generator-dispatch/1")
-    assert breaking_changes(frozen, added) == ["$.evidence_identity.scoped_result changed"]
+    assert breaking_changes(frozen, removed) == ["$.evidence_identity.scoped_result changed"]
+    # Another id beside the new profile's, or an existing profile listed twice, still breaks.
+    for extra in ("unregistered/1", "generator-dispatch/1"):
+        doc = with_profile(frozen, "brand-new/1", True)
+        doc["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"]["properties"]["profile"][
+            "enum"].append(extra)
+        assert breaking_changes(frozen, doc) == ["$.evidence_identity.scoped_result changed"]
+    # The new profile's id in an enum that is not the profile enum still breaks.
+    elsewhere = with_profile(frozen, "brand-new/1", True)
+    elsewhere["evidence_identity"]["scoped_result"]["$defs"]["Slot"]["properties"]["disposition"][
+        "enum"].append("brand-new/1")
+    assert breaking_changes(frozen, elsewhere) == ["$.evidence_identity.scoped_result changed"]
+    # The live snapshot against master's: only the new profile's entries differ (G11).
+    assert breaking_changes(frozen, contracts.build()) == []
 
 
 def test_a_result_outside_its_shape_is_refused():

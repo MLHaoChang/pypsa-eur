@@ -147,3 +147,45 @@ def test_an_edited_input_makes_the_checked_evidence_stale(staged_dc, change):
         edit_spec(path, **{change: "2025-05-05"})
     with pytest.raises(HTTPException):
         assurance_records.evidence(assurance_records.actor_id(), record["evidence_id"])
+
+
+def test_the_profile_is_opt_in_and_moves_no_other_profile(monkeypatch):
+    """G12: off unless listed; the default-on profiles are the ones they were."""
+    from harness import calculations, rollout
+
+    monkeypatch.delenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", raising=False)
+    assert R.PROFILE in calculations.OPT_IN_PROFILES
+    assert not rollout.profile_enabled(R.PROFILE)
+    caps = rollout.capabilities()["profiles"]
+    assert not caps[R.PROFILE]["enabled"]
+    on = {p for p, c in caps.items() if c["enabled"]}
+    assert on == set(calculations.PROFILES) - calculations.OPT_IN_PROFILES
+    assert R.PROFILE not in on
+    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", "grid-readiness/1")
+    assert not rollout.profile_enabled(R.PROFILE)
+
+
+def test_a_disabled_profile_emits_no_fact(staged_dc, checked, monkeypatch):
+    ctx, _ = staged_dc
+    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", "grid-readiness/1")
+    scope = {**SCOPE, "project_id": ctx.project_uuid, "retain": False}
+    frames = checked.run(NumericalProvider({"time_to_power_months": 12.0}),
+                         message="What is the time to power?", checked_scope=scope)
+    assert "profile_disabled" in json.dumps(frames)
+    assert "dc-time-to-power/1" not in json.dumps(frames)
+
+
+@pytest.mark.parametrize("profile, index, expected", [
+    ("grid-readiness/1", ["saved scorecard"],
+     {"start": "saved scorecard", "end": "saved scorecard", "snapshots": None,
+      "weight_basis": {"checked_pass": "none", "checked_warn": "none", "checked_fail": "none",
+                       "not_checked": "none"}}),
+    ("time-to-power/1", ["saved project"],
+     {"start": "saved project", "end": "saved project", "snapshots": None,
+      "weight_basis": {"time_to_power_months": "none"}}),
+])
+def test_fact_identity_windows_are_pinned(profile, index, expected):
+    """G11: an existing network-scoped profile's window reads as before the new token."""
+    from harness import fact_identity
+
+    assert fact_identity.window(index, {"profile": profile, "entity_id": "network"}) == expected
