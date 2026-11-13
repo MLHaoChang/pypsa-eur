@@ -210,6 +210,9 @@ def test_two_import_links_with_schedules_are_ambiguous():
     n.add("Link", "grid_import_2", **{k: row[k] for k in ("bus0", "bus1", "p_nom")})
     n.links.loc["grid_import_2", "eh_role"] = "grid_import"
     n.links_t["eh_energization_mw"]["grid_import_2"] = n.links_t["eh_energization_mw"]["grid_import"]
+    # An unscheduled third import is not named: the ambiguity is between the schedules.
+    n.add("Link", "spare_feed", **{k: row[k] for k in ("bus0", "bus1", "p_nom")})
+    n.links.loc["spare_feed", "eh_role"] = "grid_import"
     with pytest.raises(D.StagesUnavailable) as exc:
         D.import_stages(n, {})
     assert (exc.value.reason, exc.value.detail) == ("import_link_ambiguous", "grid_import, grid_import_2")
