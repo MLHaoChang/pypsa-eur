@@ -369,20 +369,17 @@ def runs_graph(r: RunsRead, memory=None):
 
 
 def locked_read(ctx, fn):
-    """`fn()` under `ctx`'s mutation lock, between two reads of its edit counter and network object (as `read`).
-    An edit that lands meanwhile is read again once. A second move, or a lock wait past `LOCK_WAIT_S`, returns
-    `pins.UNREADABLE`. No context, or one with no lock, has nothing to wait for."""
+    """`fn()` between two reads of `ctx`'s edit counter and network object (as `read`), under its mutation lock when
+    the lock is free. It never waits for the lock (GK B F2): a solve holds it for the whole solve. An edit that lands
+    meanwhile is read again once; a second move returns `pins.UNREADABLE`."""
     for _attempt in range(2):
         network, revision = getattr(ctx, "network", None), _revision(ctx)
         lock = getattr(ctx, "mutation_lock", None)
-        if lock is None:
+        got = lock is not None and lock.acquire(blocking=False)
+        try:
             value = fn()
-        elif not lock.acquire(timeout=LOCK_WAIT_S):
-            return pins.UNREADABLE
-        else:
-            try:
-                value = fn()
-            finally:
+        finally:
+            if got:
                 lock.release()
         if getattr(ctx, "network", None) is network and _revision(ctx) == revision:
             return value

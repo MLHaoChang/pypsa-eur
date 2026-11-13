@@ -158,27 +158,40 @@ def active(install_network):
     return n, fcr, ctx
 
 
-def test_a_lock_wait_that_times_out_reads_stale(active, monkeypatch):
+def test_a_held_lock_never_stalls_or_stales_the_read(active, monkeypatch):
+    """GK B F2: another thread holding the mutation lock (a save, a hand-over, a solve) is never waited for and never
+    reads as stale: every acquire is non-blocking and the commitments read as they stand."""
     n, fcr, ctx = active
-    assert RP.solved(n, _digest([fcr]))[1] == []
-    monkeypatch.setattr(runs, "LOCK_WAIT_S", 0.01)
     held, done = threading.Event(), threading.Event()
 
-    def editor():
+    def holder():
         with ctx.mutation_lock:
             held.set()
-            done.wait(5)
+            done.wait(10)
 
-    t = threading.Thread(target=editor)
+    t = threading.Thread(target=holder)
     t.start()
+    real_lock = ctx.mutation_lock
+    waits = []
+
+    class Spy:
+        def acquire(self, blocking=True, timeout=-1):
+            waits.append((blocking, timeout))
+            return real_lock.acquire(blocking, timeout)
+
+        def release(self):
+            real_lock.release()
+
     try:
         assert held.wait(5)
+        ctx.mutation_lock = Spy()
         got = RP.solved(n, _digest([fcr]))
     finally:
+        ctx.mutation_lock = real_lock
         done.set()
         t.join()
-    assert got == STALE
-    assert RP.solved(n, _digest([fcr]))[1] == []
+    assert got[1] == [] and got[0] is not None
+    assert waits == [(False, -1)]
 
 
 def test_an_edit_during_the_read_is_read_again_then_unreadable(active, monkeypatch):
@@ -236,7 +249,6 @@ def test_another_network_reads_without_the_open_project_lock(active, monkeypatch
     m = _site()
     fcr = _product()
     _solve(m, [fcr], FLOORS)
-    monkeypatch.setattr(runs, "LOCK_WAIT_S", 0.01)
     with ctx.mutation_lock:
         got = []
         t = threading.Thread(target=lambda: got.append(RP.solved(m, _digest([fcr]))))
