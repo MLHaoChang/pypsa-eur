@@ -651,13 +651,38 @@ def persist_solution(n) -> bool:
     return True
 
 
-def solved(n, digest: str | None = None) -> tuple[pd.DataFrame | None, list[str]]:
+def solved(n, digest=None) -> tuple[pd.DataFrame | None, list[str]]:
     """The persisted commitments (MW, columns ``<storage>|<product>``), or None + why.
-    ``digest`` (``inputs_digest`` of the current products and floors): a solve
+    ``digest`` (``inputs_digest`` of the current products and floors, or a callable that reads it): a solve
     that read other inputs, or other hours or period weights, is stale, never
     read. A frame that lacks a planned commitment column is no solve: an absent
-    column never reads as 0 MW (GK B L5)."""
+    column never reads as 0 MW (GK B L5). The record, the frame and the current
+    inputs are one read under the network's mutation lock; the inputs and weights
+    compare on the provenance graph (`provenance_graph.runs.reserves_verdict`,
+    PG-04b). A current value that cannot be read, or a read the lock or an edit
+    interrupts, is stale."""
+    from services.provenance_graph import pins, runs
+
+    got = runs.locked_read(_context_of(n), lambda: _solved_read(n, digest))
+    if got is pins.UNREADABLE:
+        return None, ["reserve_not_solved", "reserve_inputs_changed_since_solve"]
+    return got
+
+
+def _context_of(n):
+    """The open project's context when ``n`` is its network (its lock guards ``n``); else None."""
+    from services.pypsa_service import PyPSAService
+
+    try:
+        ctx = PyPSAService.get_active_context()
+    except Exception:  # noqa: BLE001 — no open project: nothing else edits ``n``
+        return None
+    return ctx if getattr(ctx, "network", None) is n else None
+
+
+def _solved_read(n, digest) -> tuple[pd.DataFrame | None, list[str]]:
     from services.commercial.settlement_inputs import axis_hash
+    from services.provenance_graph import pins, runs
 
     meta = (getattr(n, "meta", None) or {}).get(META_KEY)
     frame = (
@@ -667,9 +692,14 @@ def solved(n, digest: str | None = None) -> tuple[pd.DataFrame | None, list[str]
         return None, ["reserve_not_solved"]
     if meta.get("axis_hash") != axis_hash(n.snapshots):
         return None, ["reserve_not_solved"]
-    if digest is not None and meta.get("inputs") != digest:
-        return None, ["reserve_not_solved", "reserve_inputs_changed_since_solve"]
-    if meta.get("weights") != weights_key(n):
+    inputs = None
+    if digest is not None:
+        read = digest if callable(digest) else (lambda: digest)
+        inputs = pins.Pin("reserve inputs", meta.get("inputs"), read)
+    weights = pins.Pin(
+        "hours and period weights", meta.get("weights"), lambda: weights_key(n)
+    )
+    if runs.reserves_verdict(inputs, weights).state != "fresh":
         return None, ["reserve_not_solved", "reserve_inputs_changed_since_solve"]
     planned = meta.get("columns")
     if not planned or not set(planned) <= set(map(str, frame.columns)):
