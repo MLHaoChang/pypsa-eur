@@ -1236,6 +1236,23 @@ async def undo_snapshot_middleware(request: Request, call_next):
             dirty_state.bump_revision(box[0] if box else None)
         except Exception:  # noqa: BLE001 — never fail an applied edit
             logger.exception("could not bump the network revision")
+    elif (
+        is_write
+        and response.status_code >= 400
+        and any(path.startswith(p) for p in _UNDO_PREFIXES)
+    ):
+        # PG-04a F1: a refused write keeps the edit counter, but a route may
+        # have changed the network in place before it failed (the undo pop
+        # below drops the snapshot without restoring it). Move only the
+        # provenance fingerprint's inputs stamp, so a fingerprint cached before
+        # the failure is never served for what the network holds now.
+        try:
+            from services import dirty_state
+            from services.pypsa_service import PyPSAService
+            box = PyPSAService._request_ctx_box.get()
+            dirty_state.bump_inputs(box[0] if box else None)
+        except Exception:  # noqa: BLE001 — never mask the route's own error
+            logger.exception("could not bump the inputs stamp")
 
     # Rollback the snapshot if the mutation was rejected by the server.
     if pushed and response.status_code >= 400:

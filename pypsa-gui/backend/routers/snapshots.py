@@ -1003,6 +1003,10 @@ def restore_snapshot(
     # The authoritative loaded-project binding was set inside the swap lock above.
     n.name = name
     _reapply_user_ts_to_network(n)
+    # PG-04a F1: the restored `user_ts` lands after the results state set the
+    # revision, so a fingerprint a header poll cached in between stands for the
+    # network without them; move the inputs stamp once they are in.
+    dirty_state.bump_inputs()
 
     snap_meta = _read_snapshot_meta(snap_dir)
     change_log_service.log(

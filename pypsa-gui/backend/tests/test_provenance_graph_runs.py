@@ -90,7 +90,12 @@ def _value_edit(n, ctx):
 
 def _sub_precision_edit(n, ctx):
     """F4: an edit below the plain hash's precision: the plain fingerprint is equal, the exact one differs."""
+    fp = workflow_tools._network_input_fingerprint
+    plain, exact = fp(ctx), fp(ctx, exact=True)
     n.generators.at["g", "marginal_cost"] = 50 + 1e-11
+    # The row's premise, pinned: a precision change must not turn it into a plain value edit.
+    assert fp(ctx) == plain
+    assert fp(ctx, exact=True) != exact
 
 
 def _shape_edit(n, ctx):
@@ -779,6 +784,141 @@ def test_a_profile_apply_reaches_the_cache(install_network):
         now=NOW,
     )
     assert runs._stamp(ctx) != stamp
+
+
+def test_a_profile_apply_moves_the_stamp_after_its_write(install_network, monkeypatch):
+    """M4: a poll while `assign_profile` writes (here: once the profiles are on the network) caches at the stamp of
+    that moment; the bump lands after, so the cache never serves that entry. A raising reapply still bumps."""
+    from services.profile_gen import apply
+    from tests.test_profile_gen_load_family import NOW, _gen
+
+    n = pypsa.Network()
+    idx = pd.date_range("2023-01-01", "2023-12-31T23:00", freq="h", name="snapshot")
+    n.set_snapshots(idx)
+    n.add("Bus", "B1")
+    n.add("Load", "L1", bus="B1")
+    install_network(n)
+    ctx = PyPSAService.get_active_context()
+    res = _gen("commercial", {"peak_mw": None, "annual_mwh": 8000.0})
+    seen = []
+    real = apply._reapply_user_ts_to_network
+
+    def polled(*a, **k):
+        out = real(*a, **k)
+        runs.read(cached=True)
+        seen.append(runs._stamp(ctx))
+        return out
+
+    monkeypatch.setattr(apply, "_reapply_user_ts_to_network", polled)
+    kw = dict(component_type="loads", attribute="p_set", now=NOW)
+    apply.assign_profile(ctx, "L1", res.series["L1"], res.meta, **kw)
+    assert seen and runs._stamp(ctx) != seen[-1]
+
+    def raising(*a, **k):
+        raise RuntimeError("part-way")
+
+    monkeypatch.setattr(apply, "_reapply_user_ts_to_network", raising)
+    before = runs._stamp(ctx)
+    with pytest.raises(RuntimeError):
+        apply.assign_profile(ctx, "L1", res.series["L1"], res.meta, **kw)
+    assert runs._stamp(ctx) != before
+
+
+def _poll_in_the_reapply_window(monkeypatch):
+    """Poll once the restored `user_ts` are back on the network: the last moment before the route's bump."""
+    from routers import network as network_router
+
+    seen = []
+    real = network_router._reapply_user_ts_to_network
+
+    def polled(*a, **k):
+        out = real(*a, **k)
+        ctx = PyPSAService.get_active_context()
+        runs.read(cached=True)
+        seen.append((ctx, runs._stamp(ctx)))
+        return out
+
+    monkeypatch.setattr(network_router, "_reapply_user_ts_to_network", polled)
+    return seen
+
+
+def test_a_snapshot_restore_moves_the_stamp_after_the_user_ts(client, api_project, monkeypatch):
+    """F1: `restore_snapshot` sets the revision with the results state, then restores and reapplies `user_ts`. A
+    poll in that window caches the network without them; the stamp moves once they are in."""
+    name = api_project("pgrestore")
+    r = client.post(f"/api/projects/{name}/snapshots", json={"label": "v1"})
+    assert r.status_code in (200, 201), r.text
+    seen = _poll_in_the_reapply_window(monkeypatch)
+    r = client.post(f"/api/projects/{name}/snapshots/{r.json()['id']}/restore")
+    assert r.status_code == 200, r.text
+    assert seen
+    ctx, stamp = seen[-1]
+    assert runs._stamp(ctx) != stamp
+
+
+def test_a_project_load_moves_the_stamp_after_the_user_ts(client, api_project, monkeypatch):
+    """F1: `load_project` has the same order as the restore (results state, then `user_ts`)."""
+    name = api_project("pgload")
+    seen = _poll_in_the_reapply_window(monkeypatch)
+    r = client.get(f"/api/projects/{name}")
+    assert r.status_code == 200, r.text
+    assert seen
+    ctx, stamp = seen[-1]
+    assert runs._stamp(ctx) != stamp
+
+
+def test_the_chat_seam_polled_inside_the_handler_never_serves_the_pre_edit_hash(
+    client, solved, monkeypatch
+):
+    """F1(b) at the seam: drive `_dispatch_real_tool_call` with an editing tool and poll from inside its handler,
+    before the write. The seam's `bump_revision` has landed, so that poll caches the pre-edit hash at the new
+    revision; the input generation must move after the handler (not before it, and not never)."""
+    from harness import loop
+    from services import chat_service, chat_tools
+
+    n, ctx = solved
+    name = "update_component"
+    real = chat_tools.DISPATCHERS[name]
+    polled = []
+
+    def handler(*a, **k):
+        polled.append(_agree())
+        return real(*a, **k)
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, name, handler)
+    chat_service._reset_sessions_for_tests()
+    session = chat_service.ChatSession()
+    args = {"component_class": "Generator", "name": "g", "attrs": {"marginal_cost": 60.0}}
+    for event, data in loop._dispatch_real_tool_call(
+        session, {"id": "tu-1", "name": name, "input": args}, []
+    ):
+        if event == "tool_pending_confirmation":
+            session.record_decision(data["confirmation_token"], "approve")
+    assert polled == ["fresh"]
+    assert n.generators.at["g", "marginal_cost"] == 60.0
+    assert _agree() == "stale"
+
+
+def test_a_refused_network_write_still_moves_the_stamp(client, install_network):
+    """A route under /api/network may change the network in place and then fail; the middleware's revision bump
+    is 2xx-only, so on a 4xx/5xx it moves the inputs stamp instead."""
+    install_network(_net())
+    ctx_box = {}
+
+    from services import dirty_state
+
+    real = dirty_state.bump_inputs
+
+    def spy(ctx=None):
+        ctx_box["ctx"] = ctx or dirty_state._active()
+        return real(ctx)
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(dirty_state, "bump_inputs", spy):
+        r = client.put("/api/network/generators/no-such-generator", json={"p_nom": 1.0})
+    assert r.status_code >= 400, r.text
+    assert "ctx" in ctx_box
 
 
 def test_the_cache_hashes_once_per_state_for_concurrent_polls(solved, monkeypatch):

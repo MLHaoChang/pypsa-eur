@@ -3835,6 +3835,10 @@ def load_project(
     # Re-apply restored profiles to the network's _t tables (aligned to current
     # snapshots) so that simulation picks up the correct time series.
     _reapply_user_ts_to_network(n)
+    # PG-04a F1: the restored `user_ts` lands after the results state set the
+    # revision, so a fingerprint a header poll cached in between stands for the
+    # network without them; move the inputs stamp once they are in.
+    dirty_state.bump_inputs()
     # Register the now-bound active ctx in the resident registry (B8) so a later
     # tab switch back to this project finds it resident and does an INSTANT
     # in-memory pointer swap instead of re-loading from disk. Opening a project
