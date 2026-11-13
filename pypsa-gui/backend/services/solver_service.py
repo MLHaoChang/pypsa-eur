@@ -99,6 +99,10 @@ from services.solver.adequacy import (  # noqa: F401
     _wrap_with_reserve_margin,
     reserve_margin_facts,
 )
+from services.solver.renewable_fraction import (
+    _wrap_with_min_renewable_fraction,
+    target_of as _rf_target_of,
+)
 from services.solver.island import (  # noqa: F401  (re-exported)
     IslandRefusal,
     _wrap_with_island,
@@ -220,6 +224,13 @@ class SolverConfig:
     #   Σ d_g·P_g (extendable) + Σ d_g·p_nom_g (fixed) ≥ (1 + m) · peak_P
     # Bounds live on `SolverConfigSchema` — this dataclass validates nothing.
     reserve_margin: float | None = None
+    # ── Minimum renewable fraction (homer-parity 01a) ─────────────────────
+    # A FRACTION of the electricity used on site (load plus conversion draw);
+    # None/0 = off. One row per period by
+    # `renewable_fraction._wrap_with_min_renewable_fraction`. Bounds live on
+    # `SolverConfigSchema`. Dropped from fingerprints while off
+    # (`reliability_goal.goal_free_config`), so old identities hold.
+    min_renewable_fraction: float | None = None
     # ── Island ride-through (campus island plan 2026-10-07, I2a) ──────────
     # Opt-in per project (owner Q5): the ride-through, bridge and fuel rows of
     # `services/solver/island.py`, read from the project's island_config.json.
@@ -572,6 +583,10 @@ def build_lp_chain(network, config, log_queue):
     # Firm-capacity standard: a per-period planning reserve margin on
     # derated installed capacity. Adds work only when a margin is set.
     extra_fn = _wrap_with_reserve_margin(
+        network, extra_fn, config, log_queue=log_queue)
+    # Minimum renewable fraction (homer-parity 01a): one energy row per
+    # period. Adds work only when a target is set.
+    extra_fn = _wrap_with_min_renewable_fraction(
         network, extra_fn, config, log_queue=log_queue)
     # Island ride-through, bridge and fuel rows (campus island I2a).
     # Opt-in; refused, with the reason, on a path that is not the plain
@@ -1503,6 +1518,9 @@ def run_simulation(
                     "ens_cap_permyriad": getattr(config, "ens_cap_permyriad", None),
                     "reserve_margin_applied": bool(_margin_targets),
                     "reserve_margin": getattr(config, "reserve_margin", None),
+                    # Only when on: an off solve's settings stay byte-identical (01a R1).
+                    **({"min_renewable_fraction": _rf_target}
+                       if (_rf_target := _rf_target_of(config)) is not None else {}),
                 } if status in ("ok", "optimal") else None))
                 _margin_payload = None
                 if not _margin_targets:

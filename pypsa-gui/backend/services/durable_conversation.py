@@ -867,12 +867,14 @@ def rebind_scope(thread_id: str, *, generation: int) -> dict[str, Any]:
         episode_id = thread.get('episode_id')
         sess = None
         if episode_id:
+            # Issue 02: bump first, so a turn woken by the revocation below is
+            # already obsolete when it looks.
+            ua._DEFAULT.bump_generation(session_id=episode_id)
             sess = chat_service.get_session(episode_id)
             if sess is not None:
                 # Issue 18: open cards end as `revoked` on the approval log,
                 # and the waiting turn is released now rather than timing out.
                 sess.revoke_confirmations()
-            ua._DEFAULT.bump_generation(session_id=episode_id)
         _save(path, thread)
         if sess is not None:
             with sess._lock:

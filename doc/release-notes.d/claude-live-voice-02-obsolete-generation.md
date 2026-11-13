@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A live assistant turn that a conversation rebind supersedes now stops: it runs no further tool or model call and publishes no answer (`obsolete_generation`), keeps the tool results it already produced, and a request spoken after the rebind runs once it ends.

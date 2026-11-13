@@ -762,8 +762,10 @@ VARIANTS: list[dict] = [
              B + 'test_lc43_d23_wire_gates.py::test_a_provider_switch_sends_nothing_and_keeps_the_session',
              B + 'test_chat_tool_pairing_invariant.py::test_the_cap_path_pairs_every_tool_use_it_refuses',
              B + 'test_chat_tool_pairing_invariant.py::test_a_stopped_turn_still_records_the_results_it_collected'),
-    _pending('LC-D23.timeout_outcome_text', 'a timed-out write is sent to the model as the bare kind tool_timeout, without saying its outcome is unknown '
-             '(LC-43b, .scratch/live-copilot/issues/43b-timeout-result-hides-unknown-outcome.md)'),
+    _covered('LC-D23.timeout_outcome_text', 'Claude wire only, read from the next request body: a timed-out write or destructive tool reaches the model as tool_timeout plus "Outcome unknown ... may have changed the project. Read the project back before any retry"; a timed-out read keeps the plain kind tool_timeout',
+             'update_component list_components',
+             B + 'test_lc43_d23_wire_gates.py::test_a_write_that_outlives_its_budget_is_never_reported_done',
+             B + 'test_lc43_d23_wire_gates.py::test_a_read_that_outlives_its_budget_keeps_the_plain_kind'),
     _pending('LC-D23.history_repair', 'a stored history with an unpaired tool_use is sent as it is: no repair step is built (the harness only avoids writing one) (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D23.approval_resume', 'a pending approval is not resumed after a restart (it expires or reads unknown_confirmation_token): no resume is built (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
     _pending('LC-D23.profile_recovery', 'after a refused provider switch or a deleted profile, recovery (a new chat, or picking a profile and resending) is not tested (LC-48, .scratch/live-copilot/issues/48-pending-delivery-report-undo-wire-rows.md)'),
