@@ -232,6 +232,15 @@ def test_the_not_confident_copy_says_when_draws_alone_cannot_settle_it():
     assert "did not report" in text
 
 
+def test_the_not_confident_copy_does_not_claim_a_failed_re_solve():
+    from services.adequacy.lole_verdict import not_confident_copy
+
+    text = not_confident_copy(_nc_mc(), 2.0, "x", base_restored=False)
+    assert "re-solved" not in text
+    assert "did not complete" in text
+    assert "your own plan, not that one" not in text
+
+
 def test_goal_fields_prefer_the_nearest_iterate():
     from services.adequacy.lole_verdict import goal_fields
 

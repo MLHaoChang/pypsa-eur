@@ -811,7 +811,7 @@ describe('adequacy loops 04: a not-confident finish', () => {
     expect(chip.textContent).toBe('Not confident')
     expect(chip.className).toMatch(/text-warn/)
     expect((await screen.findByTestId('loop-not-confident-key')).textContent)
-      .toMatch(/at or below the LOLE goal, but not confidently/)
+      .toMatch(/at or below the LOLE goal, but not by enough to call it a pass\./)
     expect(screen.queryByTestId('loop-confident')).toBeNull()
     expect(chip.textContent).not.toMatch(/met/i)
   })

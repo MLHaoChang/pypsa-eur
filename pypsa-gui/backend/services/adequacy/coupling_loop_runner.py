@@ -502,7 +502,8 @@ def start_coupling_loop(
                 "did not restore the plan the verdict is about", word)
         return restore_is_clean(word)
 
-    def _verdict_copy(status: str, eps_star, rows=None, nearest=None) -> str:
+    def _verdict_copy(status: str, eps_star, rows=None, nearest=None,
+                      base_restored: bool = True) -> str:
         _margin_bound = _margin_bound_flag[0]
         if status == "not_confident" and nearest is not None:
             # Adequacy loops 04 (D3/D4): never met, and the closing restore
@@ -510,7 +511,8 @@ def start_coupling_loop(
             return not_confident_copy(
                 nearest["mc"], target,
                 "the energy strictness ε = "
-                f"{format_lever_value(nearest['eps_permyriad'])}‱")
+                f"{format_lever_value(nearest['eps_permyriad'])}‱",
+                base_restored=base_restored)
         if status == "unreachable":
             # WHICH unreachable? The three-mechanism copy assumes the cap was
             # doing something and the MC disagreed with it. The commonest case
@@ -632,7 +634,8 @@ def start_coupling_loop(
                     verdict=_verdict_copy(
                         status, eps_star,
                         (res or {}).get("iterations"),
-                        (res or {}).get("nearest")),
+                        (res or {}).get("nearest"),
+                        base_restored=bool(base_restored)),
                     warning=warning,
                     error=err,
                     finished_at=time.time(),

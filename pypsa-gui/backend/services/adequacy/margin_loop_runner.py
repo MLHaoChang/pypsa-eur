@@ -378,7 +378,9 @@ def start_margin_loop(
                     f"whole fleet tops out at {reach:,.1f} MW")
         return None
 
-    _ceiling_missed = [False]
+    # The at-ceiling iterate's goal verdict ("miss" / "not_confident") once
+    # it failed, else None: the refusal below words itself from it.
+    _ceiling_missed: list = [None]
     _last_at_ceiling = [False]
     # IEEE 39-bus review, F1. The CLAMP below evaluates `m_ceiling` when the
     # controller's step overshoots the fleet ceiling — but the controller
@@ -435,14 +437,18 @@ def start_margin_loop(
         # actually verified.
         if m > m_ceiling:
             if _ceiling_missed[0]:
-                # Already evaluated AT the ceiling and it missed. Nothing
-                # stricter exists to try, so this is a real refusal rather
-                # than another clamp to the same plan.
+                # Already evaluated AT the ceiling and it missed, or was not
+                # confidently met. Nothing stricter exists to try, so this is
+                # a real refusal rather than another clamp to the same plan.
+                outcome = (
+                    "could not be confirmed to meet"
+                    if _ceiling_missed[0] == "not_confident"
+                    else "still missed")
                 out.update(
                     status="error",
                     condition=(
                         f"infeasible: the strictest reachable margin "
-                        f"({m_ceiling:.1%}) was evaluated and still missed the "
+                        f"({m_ceiling:.1%}) was evaluated and {outcome} the "
                         "target — the candidate set, not the search, is the "
                         "limit"))
                 return out
@@ -741,7 +747,7 @@ def start_margin_loop(
         mc = row.get("mc") or {}
         verdict = (mc.get("goal") or {}).get("verdict")
         if _last_at_ceiling[0] and verdict in ("miss", "not_confident"):
-            _ceiling_missed[0] = True
+            _ceiling_missed[0] = verdict
         with PyPSAService.get_solver_state_lock():
             record["iterations"] = record["iterations"] + [_translate(row)]
 
@@ -813,13 +819,15 @@ def start_margin_loop(
             "force for every iterate and was never rewritten, so the "
             "certified plan meets BOTH standards.")
 
-    def _verdict_copy(status: str, m_star, rows=None, nearest=None) -> str:
+    def _verdict_copy(status: str, m_star, rows=None, nearest=None,
+                      base_restored: bool = True) -> str:
         if status == "not_confident" and nearest is not None:
             # Adequacy loops 04 (D3/D4): never met, and the closing restore
             # put the user's own config back (`_restore_closing(False, …)`).
             return not_confident_copy(
                 nearest["mc"], target,
-                f"a reserve margin of {nearest['lever_value']:.1%}")
+                f"a reserve margin of {nearest['lever_value']:.1%}",
+                base_restored=base_restored)
         if status == "met" and m_star is not None:
             if restore == "final":
                 return (
@@ -974,7 +982,8 @@ def start_margin_loop(
                     resolution_floor_h=eval_state["floor"],
                     base_restored=bool(base_restored),
                     base_restore_status=_restore_word[0],
-                    verdict=_verdict_copy(status, m_star, rows_out, nearest_out),
+                    verdict=_verdict_copy(status, m_star, rows_out, nearest_out,
+                                          base_restored=bool(base_restored)),
                     warning=warning,
                     error=err,
                     finished_at=time.time(),

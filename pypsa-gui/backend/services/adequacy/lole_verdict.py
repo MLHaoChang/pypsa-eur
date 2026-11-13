@@ -112,11 +112,15 @@ def settle_text(goal: dict) -> str:
     return f"more draws alone will not settle it ({goal.get('settle_reason')})"
 
 
-def not_confident_copy(mc: dict, target_h: float, lever: str) -> str:
+def not_confident_copy(
+    mc: dict, target_h: float, lever: str, base_restored: bool = True
+) -> str:
     """A loop's verdict for status ``not_confident``: the nearest iterate's
     ``mc`` block (with its ``goal``) against the goal. ``lever`` names the
     iterate's setting, e.g. ``"ε = 0.035‱"``. The loop restores the user's
-    own config on this status (adequacy loops 04, D4)."""
+    own config on this status (adequacy loops 04, D4); ``base_restored``
+    says whether that closing re-solve put it back, and the last sentence
+    says so rather than claiming a re-solve that failed (GK A (26))."""
     goal = mc["goal"]
     hi = mc["lole_ci"][1]
     event = goal.get("event_h")
@@ -133,9 +137,15 @@ def not_confident_copy(mc: dict, target_h: float, lever: str) -> str:
         f"nearest, at {lever}, estimates {float(mc['lole_hours']):.3g} h, at "
         f"or below the goal, but the top of its 95% range is "
         f"{float(hi):.3g} h and {event_clause}, so it is not a pass. "
-        f"{settle[0].upper()}{settle[1:]}. Your original plan has been "
-        "re-solved, so the network you have now is your own plan, not that "
-        "one."
+        f"{settle[0].upper()}{settle[1:]}. "
+        + (
+            "Your original plan has been re-solved, so the network you have "
+            "now is your own plan, not that one."
+            if base_restored
+            else "The closing re-solve of your original plan did not complete, "
+            "so the network you have now may be neither your own plan nor "
+            "that one: re-solve before you use it."
+        )
     )
 
 

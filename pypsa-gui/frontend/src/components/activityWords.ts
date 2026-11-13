@@ -103,9 +103,8 @@ export const loopStatusWord = (status: string): string =>
   NATIVE_OUTCOME_WORDS[status] ?? (spaced(status).charAt(0).toUpperCase() + spaced(status).slice(1))
 
 /** The key under a `not_confident` loop's warn chip (adequacy loops 04): what the colour means, in words. */
-export const NOT_CONFIDENT_KEY = 'Not confident: the estimate is at or below the LOLE goal, but not confidently. '
-  + 'One more sampled draw as heavy as the heaviest seen would put it above, so it is not a pass. '
-  + 'The verdict below says how many draws would settle it.'
+export const NOT_CONFIDENT_KEY =
+  'Not confident: the estimate is at or below the LOLE goal, but not by enough to call it a pass.'
 
 /** Plain words for the source's own end state where it says more than the plain status (met, refused, expired…). */
 export const NATIVE_OUTCOME_WORDS: Record<string, string> = {
