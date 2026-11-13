@@ -915,7 +915,12 @@ def _start_task_run_args(profile):
 
 @pytest.mark.parametrize(
     ("profile", "passes"),
-    [("eh_site@2", True), ("eh_site@3", True), ("eh_site@1", False), ("eh_site@4", False)],
+    [
+        ("eh_site@2", True),
+        ("eh_site@3", True),
+        ("eh_site@1", False),
+        ("eh_site@4", False),
+    ],
 )
 def test_start_task_offers_v2_and_v3_only(profile, passes):
     from harness import catalogue, guards
