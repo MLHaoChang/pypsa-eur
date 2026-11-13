@@ -216,9 +216,7 @@ def time_to_power(
             if s["energized_mw"] > 0:
                 served = s
                 first = max(s_start, cods[0])
-                earliest = _earliest(
-                    stages[i - 1] if i else None, first, s_start, cods[0], start
-                )
+                earliest = _earliest(stages[:i], first, s_start, cods[0], start)
                 break
         if served is None:
             return _not_available("no_serving_stage")
@@ -237,21 +235,24 @@ def time_to_power(
 
 
 def _earliest(
-    previous: dict | None,
+    earlier: list[dict],
     first: date,
     s_start: date,
     first_cod: date,
     project_start: date,
 ) -> date:
     """The earliest first power can be when the served stage gives ``first``:
-    ``first`` itself unless it is the stage's start and the preceding stage
-    was partly energised (its maximum above 0) while load was in service."""
-    if previous is None or first != s_start or previous["max_mw"] <= 0:
+    ``first`` itself unless it is the stage's start and an earlier stage was
+    partly energised (its maximum above 0) while load was in service. Then
+    power may have reached the load from the start of the earliest such stage
+    (or the first COD, or the project start, whichever is later)."""
+    if first != s_start:
         return first
-    p_start, p_end = (
-        date.fromisoformat(previous["start"]),
-        date.fromisoformat(previous["end"]),
-    )
-    if first_cod >= p_end:
-        return first
-    return max(p_start, first_cod, project_start)
+    for stage in earlier:
+        p_start, p_end = (
+            date.fromisoformat(stage["start"]),
+            date.fromisoformat(stage["end"]),
+        )
+        if stage["max_mw"] > 0 and first_cod < p_end:
+            return max(p_start, first_cod, project_start)
+    return first

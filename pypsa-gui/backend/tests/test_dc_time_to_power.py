@@ -530,15 +530,40 @@ def test_a_preceding_period_never_energised_leaves_it_exact():
     assert window(ttp(stages=stages)) == ("2030-01-01", "2030-01-01", 0)
 
 
-def test_only_the_immediately_preceding_period_counts():
+TWO_BEFORE = [
+    stage(2025, "2025-01-01", "2027-01-01", 0.0, max_mw=15.0),
+    stage(2027, "2027-01-01", "2030-01-01", 0.0),
+    *STAGES[1:],
+]
+
+
+def test_any_earlier_partly_energised_period_with_load_counts():
+    # GK A R2: power reached the load in 2025, not only in the period
+    # right before the served one.
+    out = ttp(
+        spec(project_start="2024-01-01", phases=[{"cod": "2025-01-01", "it_mw": 12.0}]),
+        TWO_BEFORE,
+    )
+    assert window(out) == ("2030-01-01", "2025-01-01", 60)
+
+
+def test_the_earliest_partly_energised_period_with_load_starts_the_window():
     stages = [
         stage(2025, "2025-01-01", "2027-01-01", 0.0, max_mw=15.0),
-        stage(2027, "2027-01-01", "2030-01-01", 0.0),
+        stage(2027, "2027-01-01", "2030-01-01", 0.0, max_mw=15.0),
         *STAGES[1:],
     ]
     out = ttp(
         spec(project_start="2024-01-01", phases=[{"cod": "2025-01-01", "it_mw": 12.0}]),
         stages,
+    )
+    assert window(out) == ("2030-01-01", "2025-01-01", 60)
+
+
+def test_an_earlier_partial_period_ended_before_the_first_cod_leaves_it_exact():
+    out = ttp(
+        spec(project_start="2024-01-01", phases=[{"cod": "2028-01-01", "it_mw": 12.0}]),
+        TWO_BEFORE,
     )
     assert window(out) == ("2030-01-01", "2030-01-01", 0)
 
