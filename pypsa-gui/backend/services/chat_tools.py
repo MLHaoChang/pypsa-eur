@@ -3597,12 +3597,10 @@ def _bc_citable_turns() -> list[dict]:
     """The acting user's own last typed turns in this project, each with the
     `turn_id` a price citation names (the run intake's `_typed_text` rule)."""
     from services import run_intake
+    from services.business_case.chat_edit import _Host
 
-    ctx = PyPSAService.get_active_context()
-    with _acting() as (_db, user):
-        owner = str(user.id)
     try:  # an unsaved project, or one the user cannot open: no turn is citable
-        host = run_intake.host_for(ctx, owner, getattr(ctx, "project_uuid", None))
+        host = _Host().get()   # the same host the price citations are read on
     except (run_intake.IntakeError, HTTPException):
         return []
     out = []

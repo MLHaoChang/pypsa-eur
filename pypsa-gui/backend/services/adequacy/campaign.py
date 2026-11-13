@@ -306,7 +306,7 @@ def estimate_solves(n, study: str, **kwargs) -> int:
 
     if study in ("investment_case", "business_case"):
         # Business case 08b (GK B (54) D5): the business case values the IC's own
-        # solve, as the IC values the stored solve.
+        # solve, so it is free too.
         # IC P4: the finance engine values the stored solve; it runs no LP.
         # Known and free, like `mc` — logged in the campaign, charged nothing.
         return 0
