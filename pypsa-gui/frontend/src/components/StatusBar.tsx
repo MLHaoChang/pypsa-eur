@@ -4,7 +4,7 @@ import toast from 'react-hot-toast'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import { useSimulationStore } from '../store/simulationStore'
-import { solveStageLabel } from '../utils/solveStage'
+import { solveProgressLabel } from '../utils/solveProgress'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { formatRelativeTime } from '../utils/projectActions'
@@ -147,8 +147,8 @@ export default function StatusBar() {
       <span className={`flex items-center gap-1 ${color}`}>
         <span className={`inline-block w-1.5 h-1.5 rounded-full bg-current ${status === 'running' ? 'animate-pulse motion-reduce:animate-none' : ''}`} />
         {status.charAt(0).toUpperCase() + status.slice(1)}
-        {status === 'running' && <span role="status" data-testid="solve-stage">· {solveStageLabel(logLines)}</span>}
-        {elapsedStr && <span className="tabular-nums" title="Elapsed solve time">· {elapsedStr}</span>}
+        {status === 'running' && <span role="status" data-testid="solve-stage">· {solveProgressLabel(logLines)}</span>}
+        {elapsedStr && <span className="tabular-nums" aria-hidden="true" title="Elapsed solve time">· {elapsedStr}</span>}
       </span>
       <span className="text-border">|</span>
 
