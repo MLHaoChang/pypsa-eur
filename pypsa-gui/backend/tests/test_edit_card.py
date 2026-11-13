@@ -289,7 +289,12 @@ def test_a_parts_edit_shows_the_native_clear_of_an_imported_overnight_cost(grid)
 
 def test_a_receipt_after_a_solve_reports_results_stale(grid):
     """The solve records its input fingerprint; an edit after it makes the receipt say the results are stale."""
-    PyPSAService.get_network().meta["assistant_solve_input_fingerprint"] = edit_card._fingerprint()
+    from services.provenance_graph import runs
+
+    meta = PyPSAService.get_network().meta
+    meta["assistant_solve_input_fingerprint"] = edit_card._fingerprint()
+    # provenance-graph 04a: both recorded fingerprints, as a solve writes them (`_record_solve_inputs`).
+    meta["assistant_solve_exact_input_fingerprint"] = runs.active_input_fingerprint(exact=True)
     assert edit_card._results_stale() is False
     frames, cards, result = _dispatch(grid, "update_component", {"component_class": "Line", "name": "L1",
                                                                  "attrs": {"s_nom": 400.0}})

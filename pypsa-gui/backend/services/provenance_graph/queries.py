@@ -24,10 +24,11 @@ from services.provenance_graph.types import (
     Walk,
 )
 
-#: The one comparison per edge kind. `computed_in` joins with the runs slice (04).
+#: The one comparison per edge kind. A `computed_in` edge pins what its run recorded (`runs.add_runs`).
 COMPARATORS: dict[str, Callable[[Graph, Edge], Broken | None]] = {
     "priced_through": money.compare_priced_through,
     "derived_from": pins.compare_pin,
+    "computed_in": pins.compare_pin,
     "stamped_with": commercial.compare_stamp,
 }
 

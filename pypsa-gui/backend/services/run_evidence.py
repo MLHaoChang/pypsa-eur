@@ -860,11 +860,9 @@ def start_foreground_run(ctx: Any, *, job_id: str, tool_name: str,
 
 
 def _input_fingerprint(ctx: Any) -> str | None:
-    try:
-        from services.workflow_tools import _network_input_fingerprint
-        return _network_input_fingerprint(ctx)
-    except Exception:  # noqa: BLE001 — unknown beats a wrong fingerprint
-        return None
+    """None when unreadable: unknown beats a wrong fingerprint (`provenance_graph.runs`)."""
+    from services.provenance_graph.runs import input_fingerprint
+    return input_fingerprint(ctx)
 
 
 def _capture_retained(ctx: Any, token: dict) -> tuple[dict[str, dict], str | None, list[str]]:
