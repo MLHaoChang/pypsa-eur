@@ -1025,3 +1025,40 @@ def test_the_receipt_reads_back_a_removed_line_and_a_nested_setting_by_path():
     assert chat_edit.read_cell(row, _bc(_linked())) == 0.8
     assert chat_edit.read_cell(row, _bc(_line())) is None
     assert chat_edit.read_cell({"path": ["a", "b", "c"]}, {"a": {"b": {"c": 5}}}) == 5
+
+
+def test_a_stale_tag_refuses_at_the_preview_with_no_card(bc):
+    """The plan's own digest check, not only the route's If-Match (#1225 P7)."""
+    stale = _digest()
+    _store(bc, _bc(_line(price=None)))
+    stored = chat_tools.get_business_case(detail="inputs")["business_case"]
+    d = _refused(
+        edit_card.preview,
+        TOOL,
+        _args(_bc(_line(price=None, quantity=3.0)), if_match=stale),
+    )
+    assert d["error_kind"] == "business_case_changed" and d["status"] == 412
+    assert "rows" not in d
+    assert chat_tools.get_business_case(detail="inputs")["business_case"] == stored
+
+
+def test_a_running_solve_refuses_the_edit_and_writes_nothing(bc, monkeypatch):
+    import routers.results as R
+
+    monkeypatch.setattr(R, "_solver_in_flight", lambda: True)
+    for call in (
+        lambda: edit_card.preview(TOOL, _args(_bc(_line(price=None)))),
+        lambda: chat_tools.set_business_case_lines(_digest(), _bc(_line(price=None))),
+    ):
+        d = _refused(call)
+        assert d["error_kind"] == "solver_in_flight" and d["status"] == 409
+    monkeypatch.undo()  # the fixture's teardown writes, and is gated by the same check
+    assert chat_tools.get_business_case(detail="inputs")["business_case"] is None
+
+
+def test_citations_that_are_not_a_list_are_invalid_citations(bc):
+    args = {**_args(_bc(_line(price=None))), "citations": {"line": "product"}}
+    d = _refused(edit_card.preview, TOOL, args)
+    assert d["error_kind"] == "price_not_from_user" and d["status"] == 422
+    assert d["reason"] == "invalid_citations"
+    assert chat_tools.get_business_case(detail="inputs")["business_case"] is None
