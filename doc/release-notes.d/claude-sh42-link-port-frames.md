@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A project held in memory no longer fails its next solve with `KeyError: 'efficiency2'` after another project added a Link with a third port (study harness #42); each solve adds the missing Link port frames first.

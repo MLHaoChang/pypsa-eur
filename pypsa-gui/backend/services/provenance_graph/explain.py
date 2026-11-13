@@ -216,11 +216,15 @@ def _pack_price(
         return _not_established("the recorded scale is zero")
     if value is None:
         return _not_established("the priced value is missing or not a finite number")
+    # A tiny recorded scale can overflow the quotient: never an inf pack price (X3).
+    pack = _finite(value / scale)
+    if pack is None:
+        return _not_established("the pack price (value ÷ scale) is not a finite number")
     column = scaled.get("column")
     basis = scaled.get("capacity_basis")
     return {
         "status": "established",
-        "value": value / scale,
+        "value": pack,
         # Per unit of the pack row's capacity basis (DC for a DC-priced PV), as pricing recorded it.
         "unit": unit,
         "capacity_basis": basis if isinstance(basis, str) else None,

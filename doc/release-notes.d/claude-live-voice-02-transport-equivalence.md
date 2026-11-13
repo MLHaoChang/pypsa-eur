@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Tests pin that a spoken (live) request and the same typed request take one assistant path through both Claude and OpenAI: the same tool calls, events, confirmation card and single write. A correction, a repeated utterance or one from before a rebind never repeats the write.

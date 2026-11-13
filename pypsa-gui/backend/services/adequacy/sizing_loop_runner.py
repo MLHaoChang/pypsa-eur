@@ -361,6 +361,9 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
     n, info = reduce_year(base, config) if reduce else (base.copy(), {"snapshots": len(base.snapshots),
                                                                       "of": len(base.snapshots)})
     info["basis"] = "reduced_year" if reduce and info.get("reduced") else "full_year"
+    from services.solver.link_ports import ensure_link_port_frames
+
+    ensure_link_port_frames(n)  # the private copy; study harness #42
     cuts, frozen = state["cuts"], state["frozen"]
     mx = _envelope_max(inp.envelope)
     lp = {k: v for k, v in cuts.items() if k in sc.CUT_COLUMNS}

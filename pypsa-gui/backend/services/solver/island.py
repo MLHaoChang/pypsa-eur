@@ -550,6 +550,9 @@ def solve_uc(network, cfg, island=_UNSET):
 
 
 def _default_solve(n, extra_functionality, **kw):
+    from services.solver.link_ports import ensure_link_port_frames
+
+    ensure_link_port_frames(n)  # the disposable copy; study harness #42
     return n.optimize(solver_name="highs", extra_functionality=extra_functionality, **kw)
 
 

@@ -540,10 +540,16 @@ def compute_cost_breakdown(n, cfg):
                 bucket = by_class.setdefault(comp_class, {"capex": 0.0, "opex": 0.0, "fom": 0.0, "capex_expansion": 0.0})
                 bucket["capex_expansion"] = bucket.get("capex_expansion", 0.0) + comp_sum
     except Exception:
+        # Not a zero: an unknown new-build figure must read "unavailable"
+        # (ui-modern 06). The loop may have filled some buckets before it
+        # raised, so every per-class figure is unknown too, not a partial.
         logger.exception(
             "could not compute expansion CAPEX in /results/cost_breakdown; "
-            "capex_expansion is reported as 0.00",
+            "capex_expansion is reported as unavailable (null)",
         )
+        capex_expansion_total = None
+        for bucket in by_class.values():
+            bucket["capex_expansion"] = None
 
     # Null-propagating totals. One unknown class makes the horizon figure
     # unknown — see `_sum_lifetime`. `capex_lifetime_available` is the summary
@@ -656,7 +662,7 @@ def compute_cost_breakdown(n, cfg):
     # for StorageUnit + Store, plus the lifetime variant. Exposed so the UI
     # can show "how much money goes into storage vs everything else" at a
     # glance without re-summing the per-component list client-side.
-    storage_capex_expansion = float(
+    storage_capex_expansion = None if capex_expansion_total is None else float(
         by_class.get("StorageUnit", {}).get("capex_expansion", 0.0)
         + by_class.get("Store", {}).get("capex_expansion", 0.0)
     )

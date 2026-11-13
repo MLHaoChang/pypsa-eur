@@ -13,7 +13,7 @@ import { nk } from '../../utils/queryKeys'
 import type { Generator, Line as LineT, Link as LinkT, StorageUnit, Store, Transformer } from '../../api/types'
 import { fmtCurrency, fmtPower, fmtEnergy, downloadCSV, KPI, isRenewableCarrier, ChartActions,
   Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
-  COST_UNAVAILABLE, ChartFrame, CHART_HEIGHT, carrierColour, chartFigure } from './shared'
+  COST_UNAVAILABLE, FIGURE_NOT_COMPUTED, ChartFrame, CHART_HEIGHT, carrierColour, chartFigure } from './shared'
 import { useResultsFilter } from './filterContext'
 import { useFilterableTable, TableSearchBox, SortHeader } from './useFilterableTable'
 import { CarrierFilter, useCarrierFilter, bindCarrierFilter } from './CarrierFilter'
@@ -774,13 +774,19 @@ export default function CapacityExpansion() {
     type Row = { name: string; base: number; value: number; abs: number; color: string }
     if (!cost) return [] as Row[]
     const capex = cost.capex ?? 0
-    const expansion = cost.capex_expansion ?? 0
-    const existing = Math.max(capex - expansion, 0)
     const opex = cost.opex ?? 0
     const total = cost.total ?? (capex + opex)
+    // A null `capex_expansion` is a failed expansion compute: the split into
+    // existing and new build is unknown, so CAPEX stays one unsplit step.
+    const expansion = cost.capex_expansion
+    const capexSteps = expansion == null
+      ? [{ name: 'CAPEX', value: capex, color: carrierColour('gas') }]
+      : [
+          { name: 'Existing CAPEX', value: Math.max(capex - expansion, 0), color: carrierColour('gas') },
+          { name: 'New-build CAPEX', value: expansion, color: carrierColour('wind') },
+        ]
     const steps = [
-      { name: 'Existing CAPEX', value: existing, color: carrierColour('gas') },
-      { name: 'New-build CAPEX', value: expansion, color: carrierColour('wind') },
+      ...capexSteps,
       { name: 'OPEX', value: opex, color: carrierColour('load') },
     ]
     let cum = 0
@@ -876,14 +882,19 @@ export default function CapacityExpansion() {
   // must still fall through to the frontend-computed per-asset sum. A NULL is
   // a different thing — the resolve failed, and `totalExpansionCapex` is built
   // from the same unresolved upfront costs, so it cannot stand in.
+  // The annual figure follows the same rule: a null `capex_expansion` is a
+  // failed expansion compute, read as unavailable, the same state the
+  // headline strip's new-build card shows (ui-modern 06).
   const displayExpansionCapex: number | null = costMode === 'lifetime'
     ? (cost.capex_expansion_lifetime == null
         ? null
         : cost.capex_expansion_lifetime || totalExpansionCapex)
-    : (cost.capex_expansion || totalExpansionCapex)
+    : (cost.capex_expansion == null
+        ? null
+        : cost.capex_expansion || totalExpansionCapex)
   const displayStorageCapex: number | null = costMode === 'lifetime'
     ? cost.storage_capex_expansion_lifetime
-    : (cost.storage_capex_expansion ?? 0)
+    : cost.storage_capex_expansion
   // Total system cost is CAPEX + OPEX; an unknown CAPEX makes it unknown too.
   // `null + number` is NaN in JS, which would print "€NaN" — a different kind
   // of confident nonsense, so the null is carried through explicitly.
@@ -987,6 +998,8 @@ export default function CapacityExpansion() {
             // See `displayExpansionCapex` for why the zero-fallback to the
             // frontend-computed per-asset sum survives but a null does not.
             value={fmtCostOrUnavailable(displayExpansionCapex)}
+            {...(costMode !== 'lifetime' && displayExpansionCapex == null
+              ? { state: 'unavailable' as const, reason: FIGURE_NOT_COMPUTED } : {})}
             hint={costMode === 'lifetime'
               ? 'Sum of (Δcapacity × overnight_cost × PV factor) for new capacity built this run. PV factor = (1+r)^-(build_year − reference) per asset. Includes every vintage row for assets with per-period bounds.'
               : 'PyPSA n.statistics.expanded_capex() — capital_cost × Δp_nom for new capacity built this run. Includes every vintage row for assets with per-period bounds.'} />
@@ -1031,7 +1044,9 @@ export default function CapacityExpansion() {
               ? NO_STORAGE
               : noExtendableStorage
                 ? { state: 'not_modelled' as const, reason: 'No storage was allowed to expand in this run.' }
-                : displayStorageCapex === 0 ? { state: 'zero' as const } : {})}
+                : costMode !== 'lifetime' && displayStorageCapex == null
+                  ? { state: 'unavailable' as const, reason: FIGURE_NOT_COMPUTED }
+                  : displayStorageCapex === 0 ? { state: 'zero' as const } : {})}
             hint="CAPEX-expansion across StorageUnit + Store assets only — the storage slice of total new investment. Multi-vintage assets contribute one term per build year." />
         </div>
       </section>
@@ -1060,8 +1075,16 @@ export default function CapacityExpansion() {
           bodyClassName="p-3"
         >
           <p className="text-[11px] text-muted mb-3">
-            Existing-capacity CAPEX, new-build CAPEX and OPEX stack up to the optimised
-            Total annual system cost.{cost && cost.curtailment_cost > 0 && (
+            {cost?.capex_expansion == null ? (
+              <>CAPEX and OPEX stack up to the optimised Total annual system cost.{' '}
+                <span data-testid="waterfall-split-unavailable" className="text-warn">
+                  The split into existing and new-build CAPEX is unavailable: it could not be computed for this solve, so CAPEX is one step.
+                </span>
+              </>
+            ) : (
+              <>Existing-capacity CAPEX, new-build CAPEX and OPEX stack up to the optimised
+              Total annual system cost.</>
+            )}{cost && cost.curtailment_cost > 0 && (
               <> A curtailment penalty of <span className="font-medium text-text">{fmtCurrency(cost.curtailment_cost)}</span>{' '}
               is a separate objective term, not part of Total.</>
             )}

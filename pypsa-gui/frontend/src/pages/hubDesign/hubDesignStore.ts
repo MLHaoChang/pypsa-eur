@@ -41,8 +41,8 @@ interface HubDesignState {
   /** The New-project wizard's "Your own site" card asked the Start card to
    *  open the generic site form (consumed once by the Start card). */
   siteFormRequested: boolean
-  /** The assistant set-up banner was dismissed (this page load; UX review L1). */
-  setupCardDismissed: boolean
+  /** Projects whose assistant set-up banner was dismissed (this page load; the browser copy is `readSetupCardDismissed`; UM08-CHROME-1). */
+  setupCardDismissedFor: string[]
 
   resetFor: (project: string | null, d: HubDesignDefaults) => void
   setStep: (step: HubStep, opts?: { user?: boolean }) => void
@@ -51,7 +51,14 @@ interface HubDesignState {
   setGoalAdvancedRequested: (v: boolean) => void
   setSiteSeed: (seed: { params: SiteParams; entered: string[] } | null) => void
   setSiteFormRequested: (v: boolean) => void
-  dismissSetupCard: () => void
+  dismissSetupCard: (project: string | null) => void
+}
+
+const DISMISSED_KEY = 'pypsa.assistantSetupCardDismissed'
+const dismissedKey = (project: string | null) => `${DISMISSED_KEY}.${project ?? ''}`
+/** The browser's copy of "dismissed for this project"; unreadable storage reads as not dismissed. */
+export function readSetupCardDismissed(project: string | null): boolean {
+  try { return localStorage.getItem(dismissedKey(project)) === '1' } catch { return false }
 }
 
 export const HUB_DESIGN_INITIAL = {
@@ -62,7 +69,7 @@ export const HUB_DESIGN_INITIAL = {
   userMovedRail: false,
   siteSeed: null as { params: SiteParams; entered: string[] } | null,
   siteFormRequested: false,
-  setupCardDismissed: false,
+  setupCardDismissedFor: [] as string[],
 }
 
 export const useHubDesignStore = create<HubDesignState>()((set) => ({
@@ -80,5 +87,11 @@ export const useHubDesignStore = create<HubDesignState>()((set) => ({
   setGoalAdvancedRequested: (goalAdvancedRequested) => set({ goalAdvancedRequested }),
   setSiteSeed: (siteSeed) => set({ siteSeed }),
   setSiteFormRequested: (siteFormRequested) => set({ siteFormRequested }),
-  dismissSetupCard: () => set({ setupCardDismissed: true }),
+  dismissSetupCard: (project) => set((st) => {
+    const key = project ?? ''
+    if (st.setupCardDismissedFor.includes(key)) return st
+    const next = [...st.setupCardDismissedFor, key]
+    try { localStorage.setItem(dismissedKey(project), '1') } catch { /* held for this page load only */ }
+    return { setupCardDismissedFor: next }
+  }),
 }))
