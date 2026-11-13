@@ -908,20 +908,36 @@ def test_the_chat_seam_polled_inside_the_handler_never_serves_the_pre_edit_hash(
 
 
 def _a_write_that_mutates_then(monkeypatch, fail):
-    """Patch the generator PUT's handler: it changes the network in place, then fails with `fail`. Records the
-    request's own context and its input generation before the write."""
+    """Patch the generator PUT's handler: it swaps in another context mid-request (as undo, "New" and import do),
+    changes that context's network in place, then fails with `fail`. The context the request started on (the
+    active one in the middleware) and the one it ended on differ, so a bump of the active context is told apart
+    from a bump of the request's own (W2). Records both, with their input generations before the write."""
     from routers import network as network_router
+    from services.project_context import ProjectContext
 
     seen = {}
 
     def handler(component, list_name, name, attrs):
-        ctx = PyPSAService.get_active_context()
-        seen["ctx"], seen["before"] = ctx, int(ctx.input_generation or 0)
-        ctx.network.generators.at[name, "marginal_cost"] = 77.0
+        started = PyPSAService.get_active_context()
+        ended = ProjectContext(network=_net())
+        PyPSAService._note_request_ctx(ended)
+        seen["started"], seen["started_before"] = (
+            started,
+            int(started.input_generation or 0),
+        )
+        seen["ctx"], seen["before"] = ended, int(ended.input_generation or 0)
+        ended.network.generators.at[name, "marginal_cost"] = 77.0
         raise fail
 
     monkeypatch.setattr(network_router, "_update_component", handler)
     return seen
+
+
+def _only_the_request_s_context_moved(seen):
+    assert seen["ctx"] is not seen["started"]
+    assert seen["ctx"].network.generators.at["g", "marginal_cost"] == 77.0
+    assert int(seen["ctx"].input_generation or 0) == seen["before"] + 1
+    assert int(seen["started"].input_generation or 0) == seen["started_before"]
 
 
 def test_a_refused_network_write_still_moves_the_stamp(
@@ -939,8 +955,7 @@ def test_a_refused_network_write_still_moves_the_stamp(
         "/api/network/generators/g", json={"name": "g", "bus": "b", "p_nom": 10.0}
     )
     assert r.status_code == 409, r.text
-    assert seen["ctx"].network.generators.at["g", "marginal_cost"] == 77.0
-    assert int(seen["ctx"].input_generation or 0) == seen["before"] + 1
+    _only_the_request_s_context_moved(seen)
 
 
 def test_a_network_write_that_raises_still_moves_the_stamp(
@@ -954,8 +969,7 @@ def test_a_network_write_that_raises_still_moves_the_stamp(
         client.put(
             "/api/network/generators/g", json={"name": "g", "bus": "b", "p_nom": 10.0}
         )
-    assert seen["ctx"].network.generators.at["g", "marginal_cost"] == 77.0
-    assert int(seen["ctx"].input_generation or 0) == seen["before"] + 1
+    _only_the_request_s_context_moved(seen)
 
 
 def test_a_bundle_import_moves_the_stamp_after_the_user_ts(
