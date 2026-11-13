@@ -196,7 +196,10 @@ def test_generator_rows_are_unchanged_by_the_shared_helper():
     gen = {f.key: f for f in F.fields_for("Generator")}
     assert gen["start_up_cost"].help == "Cost of one start-up." and not gen["start_up_cost"].derived
     assert gen["shut_down_cost"].reveal_when == {"committable": True}
-    assert "stand_by_cost" not in gen
+    # The shared UC helper still gives a generator no stand-by *input* row (it is called with
+    # stand_by=False). homer-parity 02a adds a stand_by_cost that is derived from the fuel curve
+    # (no-load fuel × capacity × fuel price), not an input the user types.
+    assert gen["stand_by_cost"].derived
 
 
 # ── efficiency2 is required on a process unit's set port ─────────────────────

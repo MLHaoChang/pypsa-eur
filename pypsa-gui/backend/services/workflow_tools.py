@@ -551,6 +551,13 @@ def _network_input_fingerprint(ctx, *, exact=False):
         if present:
             parts.append("envelope-floors/1")
             parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
+    # AS-02, homer-parity 02a: a generator fuel curve's inputs, which the solve staging turns into marginal_cost
+    # and stand_by_cost (both already hashed as PyPSA columns). Appended only when present.
+    from services.fuel_curve import COLUMNS as FUEL_CURVE_COLUMNS
+    present = [c for c in FUEL_CURVE_COLUMNS if c in n.generators.columns]
+    if present:
+        parts.append("fuel-curve/1")
+        parts.append(_exact_frame_json(n.generators[present]) if exact else n.generators[present].to_json())
     # AS-05: the PCS/STATCOM tags and their costs change the LP rows and the
     # objective. Appended only when a Store or Link carries one.
     from services.solver.pcs_statcom import pcs_statcom_tags
