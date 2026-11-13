@@ -3,7 +3,7 @@
 
 # 04 — A not-confident LOLE estimate within one sampled event of the goal is not a pass
 
-Status: ready-for-agent
+Status: done (#1463)
 Model tier: opus
 Size: M
 Blocked by: none; sequence after 03 if both run (shared files)
@@ -49,3 +49,5 @@ Changing the default draw count, or the sampling itself.
   - E5 (D7) rerun before/after with the new event_h. Any flip other than eh_h2_hub pass → not_confident goes to the coordinator before the OK.
 - 2026-11-13 measured under option 1: eh_h2_hub still stays met (heaviest draw 0.417 h; 1.46 + 0.417 = 1.88 ≤ 2). eh_datacenter flips met → not_confident: 1.147 h from one draw, settle_draws null (beyond the 2000-draw cap). That flip is with the owner via the coordinator.
 - 2026-11-13 UX (20) on the loop status chip: plain words instead of the raw id (all loop statuses go through `loopStatusWord`), a visible key in words under a not_confident chip, and plainer settle words in user text ("about N draws would settle it, if the estimate and its range stay as they are"). GK's "if the mean and spread hold" stays in the docstring.
+
+- 2026-11-13 coordinator: done in #1463. Follow-ups: the eh_concentrator_staged coupling loop is unmeasured (>520 s); the margin-loop not_confident path has stub evidence only; eh_study met stays a mean comparison; mutant `coupling_loop_runner.py:637` `(res or {})` survives.
