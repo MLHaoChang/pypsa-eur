@@ -16,6 +16,7 @@ values read from a report); "mixed:<a>+<b>" combines two columns;
 import pandas as pd
 
 from harness import grid_readiness_calculations as readiness
+from harness import time_to_power_calculations as time_to_power
 from harness import investment_calculations as investment
 
 WEIGHT_BASIS: dict[str, str] = {
@@ -104,11 +105,13 @@ WEIGHT_BASIS: dict[str, str] = {
     "checked_warn": "none",
     "checked_fail": "none",
     "not_checked": "none",
+    # time_to_power_calculations.py: months from the stated dates and stages
+    "time_to_power_months": "none",
 }
 
 # Profiles whose captured index is not snapshots: the investment report's
-# years and the saved readiness scorecard.
-NO_SNAPSHOT_INDEX = frozenset({*investment.PROFILES, readiness.PROFILE})
+# years, the saved readiness scorecard and the saved project's time to power.
+NO_SNAPSHOT_INDEX = frozenset({*investment.PROFILES, readiness.PROFILE, time_to_power.PROFILE})
 
 
 def _count(index, start, end):

@@ -204,10 +204,15 @@ def breaking_changes(old: dict, new: dict) -> list[str]:
     """Every place `new` breaks what the frozen document `old` promised."""
     found = []
     directions = old.get("directions", {})
+    # A new profile is additive (AA-V1-CHANGE-1): a returned shape that embeds
+    # the profile enum (the scoped result's RequestScope) gains its id there.
+    added = set(new.get("profiles", {})) - set(old.get("profiles", {}))
     for key, value in old.items():
         where = f"$.{key}"
         if key in _META:
             continue
+        if added and directions.get(key) != "accepts" and key in new:
+            new = {**new, key: _without_enum_members(new[key], added)}
         if key not in new:
             found.append(f"{where} removed")
         elif directions.get(key) != new.get("directions", {}).get(key):
@@ -228,6 +233,16 @@ def breaking_changes(old: dict, new: dict) -> list[str]:
         else:
             found += _returns_breaks(value, new[key], where)
     return found
+
+
+def _without_enum_members(value, members: set):
+    """``value`` with ``members`` dropped from every ``enum`` list in it."""
+    if isinstance(value, dict):
+        return {k: ([m for m in v if m not in members] if k == "enum" and isinstance(v, list)
+                    else _without_enum_members(v, members)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_without_enum_members(v, members) for v in value]
+    return value
 
 
 def _input_hash_matches(document: dict, name: str) -> bool:

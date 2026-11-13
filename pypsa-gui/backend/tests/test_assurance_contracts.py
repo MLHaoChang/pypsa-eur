@@ -319,6 +319,28 @@ def test_a_new_returned_field_breaks_and_a_new_version_is_additive(frozen):
     assert breaking_changes(frozen, added) == []
 
 
+def test_a_new_profile_in_a_returned_enum_is_additive_only_with_its_profile(frozen):
+    """AA-V1-CHANGE-1: a new profile is additive, also where a returned shape
+    embeds the profile enum (the scoped result's RequestScope); any other
+    member added to that enum is a changed returned entry (DC 27)."""
+    def with_profile(doc, profile, register):
+        doc = copy.deepcopy(doc)
+        defs = doc["evidence_identity"]["scoped_result"]["$defs"]
+        defs["RequestScope"]["properties"]["profile"]["enum"].append(profile)
+        doc["request_scope"]["properties"]["profile"]["enum"].append(profile)
+        if register:
+            doc["profiles"][profile] = {"definitions": {}, "metrics": []}
+        return doc
+
+    assert breaking_changes(frozen, with_profile(frozen, "brand-new/1", True)) == []
+    assert breaking_changes(frozen, with_profile(frozen, "brand-new/1", False)) == [
+        "$.evidence_identity.scoped_result changed"]
+    added = with_profile(frozen, "brand-new/1", True)
+    added["evidence_identity"]["scoped_result"]["$defs"]["RequestScope"]["properties"]["profile"][
+        "enum"].remove("generator-dispatch/1")
+    assert breaking_changes(frozen, added) == ["$.evidence_identity.scoped_result changed"]
+
+
 def test_a_result_outside_its_shape_is_refused():
     from harness import assurance_shapes
 

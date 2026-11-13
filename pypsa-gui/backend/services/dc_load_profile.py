@@ -61,6 +61,10 @@ SOURCES: dict[str, str] = {
                      "rows; the PUE stated is this architecture's"),
     "ambient": "assumed; temperate (Central European) site, no weather data",
     "rack_kw": "assumed or as entered; carried into the envelope only",
+    "project_start": ("assumed (the staged example's financial close) or as entered; the origin "
+                      "of the time-to-power months (DC 27), read by no solve"),
+    "connection_date": ("as entered; first power for the time-to-power months (DC 27), "
+                        "read by no solve"),
     "load_split": ("as entered or assumed (75 % critical); the template has one critical "
                    "and one non-critical DC load"),
 }
@@ -223,6 +227,10 @@ def ledger(spec: DataCentreLoadSpec, timezone: str | None) -> list[dict]:
         ("rack density", ", ".join(
             f"{p.cod.year}: {p.rack_kw:g} kW/rack" if p.rack_kw else f"{p.cod.year}: not set"
             for p in spec.phases), "rack_kw"),
+        *([("project start", spec.project_start.isoformat(), "project_start")]
+          if spec.project_start else []),
+        *([("grid connection date", spec.connection_date.isoformat(), "connection_date")]
+          if spec.connection_date else []),
     ]
     return [{"item": item, "value": value, "source": "assumed", "note": SOURCES[key]}
             for item, value, key in rows]
