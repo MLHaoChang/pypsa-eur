@@ -60,3 +60,7 @@ Corrections to my plan (master 837cb6a7): cases.json has 8 cases plus `version`,
 - C8 (S-C): `solve_ppa_price` on the runner's own step only and refused on a model turn (probe `_refusal` with the grant, #1123); `baseline_solve` refuses when the plan keeps an asset; the target comes from the template and shows value, unit and source path on the card (SH-07 B3b); a missing or non-finite target or result is not_evaluated.
 - C9 (Q3=A): `run.ppa_price` binds the run id, the IC record digest and the network revision/fingerprint; `read_kpis` re-checks them, a mismatch or malformed record reads stale/not_evaluated, never falls back to retained_results, never a 500; test an edit after the step.
 Send each slice's PR to GK B (56).
+
+### GK B (56) on the S-B split: A (S-B1 pure module, S-B2 engine/card/budget/judging), plus C10
+- C10 (S-B1): name the source of the cases and series. A project copy of cases.json is editable and S-A verifies only the template dir. S-B1 reads the project's cases.json and, before admission, verifies the template's price series (S-A's `verify`) and takes the hashes the cases reference from that verified meta.json; the PR body says which source is used and the digest binds that exact source.
+- S-B1 tests also cover a malformed cases.json: not a dict, cases not a list, a change with no path, a duplicate id; each refuses with a typed code, never a 500 (#1390 F2).
