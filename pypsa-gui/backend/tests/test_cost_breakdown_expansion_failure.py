@@ -110,3 +110,28 @@ def test_the_workbook_writes_not_established_not_a_zero(network, monkeypatch):
     wb = _wb(_build(network, views=["capex"]))
     ws = next(ws for ws in wb.worksheets if ws.title.startswith("Capacity expansion"))
     assert _key(ws, "Capex of new build", HORIZON) == NOT_ESTABLISHED
+
+
+def _table_cell(ws, table: str, row_label: str, column: str):
+    """The cell under `column` on `row_label`'s row of the table titled `table`."""
+    rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    start = next(
+        i for i, r in enumerate(rows) if r and str(r[0] or "").startswith(table)
+    )
+    header = next(r for r in rows[start + 1 :] if column in r)
+    col = header.index(column)
+    for r in rows[rows.index(header) + 1 :]:
+        if row_label in r:
+            return r[col]
+    raise AssertionError(f"no {row_label!r} row in {table!r}")
+
+
+def test_the_workbook_keeps_the_per_component_column_as_not_established(
+    network, monkeypatch
+):
+    """GK B W2: an all-None column is kept, cell by cell, not dropped."""
+    _fail_mid_loop(monkeypatch)
+    wb = _wb(_build(network, views=["capex"]))
+    ws = next(ws for ws in wb.worksheets if ws.title.startswith("Capacity expansion"))
+    cell = _table_cell(ws, "Cost by component", "Generator", "capex_expansion")
+    assert cell == NOT_ESTABLISHED
