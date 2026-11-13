@@ -24,7 +24,7 @@ direct edit of either is refused, and setting a curve over a non-zero value says
 The DC backup (``services/adequacy/dc_backup.py``) prices its genset fuel off the LP (``backup_cost_delta``) and
 never writes a generator's ``marginal_cost``, so the two never fight over one column. Stated precedence (GK B
 ruling 3): the backup prices fuel from its own heat rate, says so in its cost notes when a genset carries a curve
-(``fuel_curve_ignored``), and its NPV is never summed into the solve's opex.
+("Fuel curve not used here"), and its NPV is never summed into the solve's opex.
 
 A generator with none of the three set keeps its own costs: no curve, no change.
 """

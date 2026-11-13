@@ -769,7 +769,7 @@ def _dc_network():
 
 
 def _curve_note(out):
-    return [x for x in out["cost"]["notes"] if x.startswith("fuel_curve_ignored")]
+    return [x for x in out["cost"]["notes"] if x.startswith("Fuel curve not used here")]
 
 
 @pytest.mark.live_solve
@@ -803,9 +803,9 @@ def test_the_dc_backup_prices_fuel_from_its_heat_rate_not_a_genset_curve():
         assert curved["cost"][key] == plain["cost"][key], key
     (note,) = _curve_note(curved)
     assert note.startswith(
-        "fuel_curve_ignored: fuel is priced from the backup heat rate ("
+        "Fuel curve not used here: fuel is priced from the backup heat rate ("
     )
-    assert "slope and no-load fuel" in note and "is not read here" in note
+    assert "(slope and no-load fuel) is read only by the solve" in note
     assert (
         units[0] in note and not any(u in note for u in units[1:]) and other not in note
     )
@@ -951,7 +951,8 @@ def test_the_sizing_loop_refuses_half_a_curve_and_a_user_cost_series():
         out = run_sizing(n, _config(), _inputs())
         cond = out["rounds"][0]["condition"]
         assert out["rounds"][0]["status"] == "error", out["verdict"]
-        assert cond.startswith("FuelCurveError: genset: "), cond
+        # UX: the condition opens with the generator, never the exception class.
+        assert cond.startswith("genset: ") and "Error" not in cond, cond
 
 
 def test_the_sizing_loop_stages_a_p_nom_changed_outside_the_form():

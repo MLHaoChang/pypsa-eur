@@ -386,7 +386,11 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
         return {"status": "aborted", "condition": "stopped during the solve", "info": info}
     except Exception as exc:                                  # noqa: BLE001 - the controller reads a status
         logger.exception("sizing loop: the solve raised")
-        return {"status": "error", "condition": f"{type(exc).__name__}: {exc}", "info": info}
+        # A fuel curve refusal (homer-parity 02a) reads as its user-facing words; anything else names its type.
+        from services.fuel_curve import FuelCurveError
+
+        cond = str(exc) if isinstance(exc, FuelCurveError) else f"{type(exc).__name__}: {exc}"
+        return {"status": "error", "condition": cond, "info": info}
     finally:
         watcher.disarm()
         watcher.shutdown()
