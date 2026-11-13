@@ -180,7 +180,7 @@ class DeepgramStreamingStt:
         self.usage = StreamUsage()
 
     def __repr__(self) -> str:
-        return f"DeepgramStreamingStt(model={self._profile.model!r})"
+        return f"DeepgramStreamingStt(model={self._profile.model!r})"  # repr-ok: debug repr that hides the key
 
     def _url(self, language: str) -> str:
         params: dict[str, Any] = {
