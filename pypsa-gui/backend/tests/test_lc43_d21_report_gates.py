@@ -45,14 +45,14 @@ import threading
 
 import pytest
 from docx import Document
-from models.report import Table
+from models.report import Bullets, Callout, Paragraph, Table, TableRef
 
 
 from services import chat_tools as T, upload_service
 from services.llm_fake import FakeProvider
 from services.reports import pdf
 from services.reports.docx_writer import DOCX_MIME
-from services.reports.roundtrip import _changed_numbers
+from services.reports.roundtrip import _changed_numbers, _checked, _pair
 from tests.test_chat_report_tools import (
     PROJECT,
     _Holding,
@@ -62,6 +62,7 @@ from tests.test_chat_report_tools import (
     project,  # noqa: F401
 )
 from tests.test_lc06_d21_reports import HEADLINE, SECTIONS, _docx, _generated
+from tests.test_report_roundtrip import _document
 from tests.lc43_gates import refused, state
 from tests.test_workflow_tools import helpers_state  # noqa: F401
 
@@ -288,6 +289,7 @@ def test_text_tables_inserted_above_the_headline_leave_its_edit_withheld(
     assert _headline_of(delivered) is not None
     paragraphs = [p.text for p in delivered.paragraphs]
     assert "Executive summary: 1.00 h/yr (unverified, withheld)" in paragraphs
+    assert "The plan meets 3.2 h/yr." in paragraphs
     assert T.get_report_table(report_id, "headline")["items"] == HEADLINE
 
 
@@ -382,6 +384,115 @@ def _table(columns, *rows) -> Table:
 )
 def test_a_unit_or_duplicate_label_change_is_a_changed_number(original, edited, listed):
     assert _changed_numbers(original, edited) == listed
+
+
+def _section_of(doc, section_id):
+    return next(s for s in doc.sections if s.section_id == section_id)
+
+
+def test_an_unaudited_section_keeps_its_prose_and_withholds_its_tables():
+    """`_checked` on the unaudited executive summary: its prose is never
+    re-audited (no facts), an edited headline keeps the admitted ref with the
+    original's caption, an unpaired table that states a number is withheld
+    whole, and an unpaired table of text only stays."""
+    base = _document()
+    section = _section_of(base, "executive_summary")
+    edited = {
+        "headline_edited_v3": _table(
+            ["Item", "Value"],
+            ["MC LOLE (h/yr)", "not established"],
+            ["Cost at target", "2 €"],
+        ),
+        "executive_summary_table1_v3": _table(["Peak shed", "42 MW"]),
+        "executive_summary_table2_v3": _table(["Reviewer note"], ["see text"]),
+    }
+    blocks = [
+        Paragraph(md="Cost is 5 €."),
+        TableRef(table_id="headline_edited_v3"),
+        TableRef(table_id="executive_summary_table1_v3"),
+        TableRef(table_id="executive_summary_table2_v3"),
+    ]
+
+    kept, audit = _checked(section, blocks, base, edited)
+
+    assert kept[0] == Paragraph(md="Cost is 5 €.")
+    assert kept[1] == TableRef(table_id="headline", caption="Headline results")
+    assert isinstance(kept[2], Callout) and "1 number" in kept[2].text
+    assert isinstance(kept[3], Callout) and "1 number" in kept[3].text
+    assert kept[4] == TableRef(table_id="executive_summary_table2_v3")
+    assert audit.unverified == ["2 €", "42 MW"]
+
+
+def test_a_withheld_table_withholds_only_the_prose_the_audit_cannot_verify():
+    """`_checked` on the audited fmea_top (it verified 100,000 €/yr): beside a
+    withheld table, verified prose and bullets stay; an unverified bullet
+    becomes the placeholder and is listed."""
+    base = _document()
+    section = _section_of(base, "fmea_top")
+    edited = {
+        "fmea_top_edited_v3": _table(
+            ["Rank", "Name", "Criticality"],
+            ["1", "backup", "100,000 €/yr"],
+            ["2", "import", "26,000 €/yr"],
+            ["3", "spare", "not established"],
+        )
+    }
+    blocks = [
+        Paragraph(md="The top mode costs 100,000 €/yr."),
+        Bullets(items=["backup at 100,000 €/yr", "import at 9 €/yr"]),
+        TableRef(table_id="fmea_top_edited_v3", caption="Ranked modes"),
+    ]
+
+    kept, audit = _checked(section, blocks, base, edited)
+
+    assert kept[0] == Paragraph(md="The top mode costs 100,000 €/yr.")
+    assert kept[1] == Bullets(items=["backup at 100,000 €/yr"])
+    assert isinstance(kept[2], Callout) and kept[2].text.startswith("Withheld: 1")
+    assert kept[3] == TableRef(table_id="fmea_top", caption="Ranked modes")
+    assert audit.unverified == ["9 €/yr", "26,000 €/yr"]
+
+
+def _two_table_doc(a: Table, b: Table):
+    base = _document()
+    section = _section_of(base, "executive_summary").model_copy(
+        update={"blocks": [TableRef(table_id="a"), TableRef(table_id="b")]}
+    )
+    tables = {**base.tables, "a": a.model_copy(update={"table_id": "a"})}
+    tables["b"] = b.model_copy(update={"table_id": "b"})
+    return base.model_copy(update={"tables": tables}), section
+
+
+def test_tables_with_equal_content_pair_with_their_own_original():
+    """A tie in content goes to the reader's own pairing, never to the
+    other table."""
+    same = _table(["Item", "Value"], ["Wind", "10 MW"])
+    assert _pair(same, {"a": same, "b": same}, "b") == "b"
+    assert _pair(same, {"a": same, "b": same}, "a") == "a"
+    base, section = _two_table_doc(same, same)
+    edited = {
+        "a_edited_v3": _table(["Item", "Value"], ["Wind", "11 MW"]),
+        "b_edited_v3": _table(["Item", "Value"], ["Wind", "12 MW"]),
+    }
+    blocks = [TableRef(table_id="a_edited_v3"), TableRef(table_id="b_edited_v3")]
+
+    kept, audit = _checked(section, blocks, base, edited)
+
+    refs = [b.table_id for b in kept if isinstance(b, TableRef)]
+    assert refs == ["a", "b"]
+    assert audit.unverified == ["11 MW", "12 MW"]
+
+
+def test_a_table_kept_as_delivered_is_not_paired_again():
+    base, section = _two_table_doc(
+        _table(["Item", "Value"], ["X", "1"]), _table(["Item", "Value"], ["Y", "2"])
+    )
+    edited = {"b_edited_v3": _table(["Item", "Value"], ["X", "5"])}
+    blocks = [TableRef(table_id="a"), TableRef(table_id="b_edited_v3")]
+
+    kept, audit = _checked(section, blocks, base, edited)
+
+    assert [b.table_id for b in kept if isinstance(b, TableRef)] == ["a", "b"]
+    assert audit.unverified == ["X", "5"]
 
 
 @pytest.mark.parametrize("added", ["row", "column"])
