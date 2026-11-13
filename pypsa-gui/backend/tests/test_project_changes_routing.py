@@ -55,6 +55,16 @@ def _call(name, args):
 def _route(session, calls):
     """One model response: the loop's pre-scan, then each call through the dispatcher."""
     session.turn_redirects = edit_routing.redirects(calls, session.turn_single_edit_applied)
+    return _dispatch_calls(session, calls)
+
+
+def _route_with(session, calls):
+    """As `_route`, with the pre-scan the loop itself runs (`turn_redirects`)."""
+    session.turn_redirects = edit_routing.turn_redirects(session, calls)
+    return _dispatch_calls(session, calls)
+
+
+def _dispatch_calls(session, calls):
     frames, collector = [], []
     for tu in calls:
         for event, data in chat_service._dispatch_real_tool_call(session, tu, collector):
@@ -460,3 +470,25 @@ def test_without_an_active_project_a_bulk_edit_keeps_its_card(grid):
     assert any(e == "tool_pending_confirmation" for e, _ in frames), frames
     assert not _redirected(results), results
     assert _s_nom() == (500, 500)
+
+
+# ── Study harness 45: a run stage without the preview keeps its edits ─────
+
+def test_a_run_stage_without_the_preview_does_not_divert_a_second_edit(grid, monkeypatch):
+    monkeypatch.setattr(edit_routing, "preview_available", lambda: True)
+    calls = [_call("update_component", {"component_class": "Line", "name": n, "attrs": {"s_nom": 500}})
+             for n in ("L1", "L2")]
+    grid.stage_tools = frozenset({"update_component"})
+    assert edit_routing.turn_redirects(grid, calls) == {}
+    frames, collector = _route_with(grid, calls)
+    assert _s_nom() == (500, 500)
+    assert not any("use_project_preview" in str(r["content"]) for r in collector)
+
+
+def test_a_chat_turn_and_a_stage_with_the_preview_keep_one_card_routing(grid, monkeypatch):
+    monkeypatch.setattr(edit_routing, "preview_available", lambda: True)
+    calls = [_call("update_component", {"component_class": "Line", "name": n, "attrs": {"s_nom": 500}})
+             for n in ("L1", "L2")]
+    assert set(edit_routing.turn_redirects(grid, calls)) == {c["id"] for c in calls}
+    grid.stage_tools = frozenset({"update_component", "preview_project_changes"})
+    assert set(edit_routing.turn_redirects(grid, calls)) == {c["id"] for c in calls}
