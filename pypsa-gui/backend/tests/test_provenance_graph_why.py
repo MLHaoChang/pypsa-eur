@@ -610,6 +610,16 @@ def test_the_ledger_route_and_the_tool_walk_the_option_fork_and_write_nothing(
         assert r.status_code == code, (key, option)
         assert r.json()["detail"]["error_kind"] == "why_target_unknown"
     assert path.read_bytes() == fork_bytes and study_file.read_bytes() == study_bytes
+    # provenance-graph 11: a battery row on the grid-only fork, which the run forked and which has no battery,
+    # is refused by the walk (not for a missing fork), never a 500.
+    assert (project_storage_dir(f"{name}-opt-none") / "network.nc").exists()
+    r = client.get(
+        f"/api/projects/{name}/studies/{sid}/ledger/battery_storage_eur_per_kwh/why",
+        params={"option_id": "none"},
+    )
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"]["error_kind"] == "why_target_unknown"
+    assert "compiles to no recorded field" in r.json()["detail"]["message"]
 
 
 def test_only_input_and_derived_ids_name_an_asset_field():

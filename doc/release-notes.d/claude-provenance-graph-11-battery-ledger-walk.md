@@ -1,0 +1,1 @@
+* Test(pypsa-gui): Each battery row of the Guided ledger is walked through "why this number" on a pack-built network, checking the asset fields it compiles to, their values and the verdict; a battery row on the grid-only option refuses with `why_target_unknown`.
