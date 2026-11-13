@@ -611,9 +611,13 @@ def dc_load_preset(template_id: str, planning: Planning | None = None) -> dict:
     phases = ([{"cod": f"{y}-01-01", "it_mw": it} for y, it, _pue in DC_PHASES]
               if template_id == "eh_datacenter_staged"
               else [{"cod": f"{_week(planning)[0].year}-01-01", "it_mw": _DC_IT_MW}])
+    # DC 27: the staged example's project starts at its financial close (the
+    # time-to-power origin, `services.dc_time_to_power`); the single-year one states none.
+    start = ({"project_start": _dc_finance(_dc_plan(planning))["financial_close"]}
+             if template_id == "eh_datacenter_staged" else {})
     return {"phases": phases, "utilisation": "ai_training", "pue_at_design": 1.3,
             "pue_temperature_slope_per_k": 0.02, "redundancy": "N+1",
-            "critical_share": 0.75, "curtailable_share": 0.0}
+            "critical_share": 0.75, "curtailable_share": 0.0, **start}
 
 
 def _single_year_phase(spec, planning: Planning | None = None):

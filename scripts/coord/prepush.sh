@@ -19,7 +19,13 @@
 # does not fail the run.
 # Each mapped step has a wall-clock cap (they took 11-30 min and hung once): at
 # the cap it is stopped and prints CUT, which does not fail the run because CI
-# runs those tests; a test failure already in its output still prints FAIL.
+# runs those tests; a test failure already in its output still prints FAIL. A
+# CUT line names the test files it did not finish, so the pusher can run the
+# one that matters by hand.
+# A registry contract step (no cap, ~10 s) runs whenever routers/ or
+# harness/catalogue.py changed: the tests a new route breaks that a cut-off
+# mapped step would hide (results-range endpoint list, route parity, inventory,
+# error-kind manifest).
 # --plan prints the selected steps and files and runs nothing.
 #
 # Env: PREPUSH_PYTHON (backend venv python, default /root/.venv-pypsa-gui/bin/python), PREPUSH_RUFF,
@@ -64,6 +70,7 @@ missing() { # name what: FAIL (or SKIP) because a tool is absent
 failed_re='^[.FEsxX]*[FE][.FEsxX]*( +\[ *[0-9]+%\])?$|(^|[[:space:]])(FAIL|×|✗)[[:space:]]'
 run() { # name cmd... (run in $PWD; log tail on failure); cap=<s> before the call stops cmd at <s> seconds
   local name=$1; shift
+  local files=${cut_files:-}
   if [ "$plan" = 1 ]; then echo "plan $name: $*"; return 0; fi
   local f="$log/${name//[^A-Za-z0-9]/_}.log" t0=$SECONDS rc=0 cap=${cap:-0}
   if [ "$cap" -gt 0 ] && command -v timeout >/dev/null; then
@@ -71,7 +78,7 @@ run() { # name cmd... (run in $PWD; log tail on failure); cap=<s> before the cal
   else cap=0; "$@" >"$f" 2>&1 || rc=$?; fi
   if [ "$rc" = 0 ]; then result "$name" PASS "$((SECONDS - t0))s"
   elif [ "$cap" -gt 0 ] && { [ "$rc" = 124 ] || [ "$rc" = 137 ]; } && ! grep -qE "$failed_re" "$f"; then
-    result "$name" CUT "cut off at ${cap}s with no failure so far; CI covers them, log $f"
+    result "$name" CUT "cut off at ${cap}s with no failure so far; CI covers them, log $f${files:+; not finished: $files}"
   else result "$name" FAIL "$((SECONDS - t0))s, log $f"; tail -n 12 "$f" | sed 's/^/     | /'; fi
 }
 backend_env() { PYTHONPATH="$root:$root/$backend" "$@"; }
@@ -126,6 +133,14 @@ if [ "$plan" != 1 ] && need_node "contract: vitest"; then
   (cd "$frontend" && run "contract: vitest" node_modules/.bin/vitest run $contract_js)
 fi
 
+# --- registry contract: a new route or catalogue entry breaks these (uncapped) ---
+registry_py="tests/test_results_range.py::test_the_endpoint_list_covers_every_series_endpoint tests/test_assistant_route_parity.py tests/test_assistant_inventory.py tests/test_tool_error_kind_manifest.py"
+if grep -qE "^$backend/(routers/|harness/catalogue\.py)" <<<"$changed"; then
+  if [ "$plan" = 1 ]; then echo "plan contract registry: $registry_py"
+  elif need_py "contract: registry"; then
+    (cd "$backend" && cap=0 run "contract: registry" backend_env "$py_bin" -m pytest -q $registry_py); fi
+fi
+
 # --- tests overlap_tests.py maps to the changed files ----------------------
 mapped=$(python3 "$here/overlap_tests.py" "$root" $(grep -vE '^$' <<<"$changed" | tr '\n' ' ') 2>/dev/null || true)
 # changed test files run themselves (overlap_tests maps them to nothing)
@@ -137,12 +152,12 @@ ft=$( { awk -F'\t' '$1=="vitest" && NF==3 {print $3}' <<<"$mapped"; echo "$own_j
 if [ -n "$bt" ]; then
   if [ "$plan" = 1 ]; then echo "plan mapped backend tests: $(tr '\n' ' ' <<<"$bt")"
   elif need_py "mapped backend tests"; then
-    (cd "$backend" && cap=$mapped_cap run "mapped backend tests" env PYTHONPATH="$root:$root/$backend" "$py_bin" -m pytest -q $bt); fi
+    (cd "$backend" && cap=$mapped_cap cut_files=$(tr '\n' ' ' <<<"$bt") run "mapped backend tests" env PYTHONPATH="$root:$root/$backend" "$py_bin" -m pytest -q $bt); fi
 fi
 if [ -n "$ft" ]; then
   if [ "$plan" = 1 ]; then echo "plan mapped frontend tests: $(tr '\n' ' ' <<<"$ft")"
   elif need_node "mapped frontend tests"; then
-    (cd "$frontend" && cap=$mapped_cap run "mapped frontend tests" node_modules/.bin/vitest run $ft); fi
+    (cd "$frontend" && cap=$mapped_cap cut_files=$(tr '\n' ' ' <<<"$ft") run "mapped frontend tests" node_modules/.bin/vitest run $ft); fi
 fi
 
 # --- repr diff guard ----------------------------------------------------------

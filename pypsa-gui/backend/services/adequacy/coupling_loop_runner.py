@@ -19,6 +19,7 @@ from pydantic import BaseModel as _BaseModel
 from models.schemas import Finite as _Finite
 from services.adequacy.link_supply import nothing_to_sample, sampled_fleet
 from services.adequacy.coupling import snapshot_hash as _snapshot_hash
+from services.adequacy.lole_verdict import goal_fields, not_confident_copy
 from services.pypsa_service import PyPSAService
 
 logger = logging.getLogger("pypsa_gui.results")
@@ -407,6 +408,7 @@ def start_coupling_loop(
         "solves_used": 0,
         "iterations": [],
         "final": None,
+        "nearest": None,
         "verdict": None,
         "warning": MC_WARNING_V1 + " " + LOOP_WARNING_V1,
         "error": None,
@@ -500,8 +502,17 @@ def start_coupling_loop(
                 "did not restore the plan the verdict is about", word)
         return restore_is_clean(word)
 
-    def _verdict_copy(status: str, eps_star, rows=None) -> str:
+    def _verdict_copy(status: str, eps_star, rows=None, nearest=None,
+                      base_restored: bool = True) -> str:
         _margin_bound = _margin_bound_flag[0]
+        if status == "not_confident" and nearest is not None:
+            # Adequacy loops 04 (D3/D4): never met, and the closing restore
+            # put the user's own config back (`_restore_closing(False, …)`).
+            return not_confident_copy(
+                nearest["mc"], target,
+                "the energy strictness ε = "
+                f"{format_lever_value(nearest['eps_permyriad'])}‱",
+                base_restored=base_restored)
         if status == "unreachable":
             # WHICH unreachable? The three-mechanism copy assumes the cap was
             # doing something and the MC disagreed with it. The commonest case
@@ -579,6 +590,9 @@ def start_coupling_loop(
             status = (res or {}).get("status") or "failed"
             eps_star = (res or {}).get("eps_star")
             try:
+                # Only "met" keeps the plan; "not_confident" (adequacy loops
+                # 04, D4) restores the user's own config like every other
+                # status, since its nearest iterate is not the met plan.
                 base_restored = _restore_closing(status == "met", eps_star)
             except BaseException:                             # noqa: BLE001
                 logger.exception("coupling loop: the restore itself raised")
@@ -603,7 +617,12 @@ def start_coupling_loop(
                     status=status,
                     iterations=iterations,
                     final=(res or {}).get("final"),
+                    nearest=(res or {}).get("nearest"),
                     confident=bool((res or {}).get("confident")),
+                    # Adequacy loops 04 (D3): the goal verdict's numbers the
+                    # gate reads, from the nearest (not-confident) or final
+                    # iterate.
+                    **goal_fields((res or {}).get("nearest"), (res or {}).get("final")),
                     eps_star=eps_star,
                     solves_used=int((res or {}).get("solves_used") or 0),
                     resolution_floor_h=eval_state["floor"],
@@ -614,7 +633,9 @@ def start_coupling_loop(
                     base_restore_status=_restore_word[0],
                     verdict=_verdict_copy(
                         status, eps_star,
-                        (res or {}).get("iterations")),
+                        (res or {}).get("iterations"),
+                        (res or {}).get("nearest"),
+                        base_restored=bool(base_restored)),
                     warning=warning,
                     error=err,
                     finished_at=time.time(),

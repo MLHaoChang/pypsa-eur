@@ -831,6 +831,9 @@ class SolverConfigSchema(BaseModel):
     # echo is ignored, a change is refused (422 `finance_via_dedicated_route`).
     # A plain dict, compared as stored (the dedicated route validates it).
     finance: dict[str, Any] | None = None
+    # Business case 08: owned by `PUT /api/results/business_case/inputs`; an
+    # unchanged echo is ignored, a change refused (422 `business_case_via_dedicated_route`).
+    business_case: dict[str, Any] | None = None
     # AS-03: the site-wide envelope floors and backup reserve (services/solver/envelope_floors.py).
     # None = no rows. Changes LP input, so it is in every solve fingerprint.
     envelope_floors: EnvelopeFloors | None = None

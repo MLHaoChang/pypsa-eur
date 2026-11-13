@@ -631,6 +631,14 @@ export interface FailureInfo {
   title: string
   hint: string
   detail: string
+  /** Named constraints the infeasibility diagnosis blamed (homer-parity 05);
+   *  `setting` names the Solver-settings block that edits the row. */
+  constraint_hints?: ConstraintHint[]
+}
+export interface ConstraintHint {
+  constraint: string
+  text: string
+  setting: 'offgrid' | string
 }
 export interface SimulationStatus {
   running: boolean; status: string; condition: string | null

@@ -3,7 +3,7 @@
 
 # LC-48 — The pending LC-D20 to LC-D23 gate rows
 
-Status: ready-for-agent
+Status: split into 48a to 48d (no row dropped)
 Type: task
 
 Opened under owner decision LC43-ROWS-1. LC-43 (#1372) covered the five LC-D20 to LC-D23
@@ -47,3 +47,14 @@ refusal), or the owner decides to drop it. Dropping a row is an owner decision (
 ### 2026-11-13: owner decision
 
 Owner answered (LC48-SPLIT-1: split into four tickets by family before building; none dropped, `docs/agents/owner-decisions.md`). Status: ready-for-agent.
+
+### 2026-11-13: split
+
+Split by family, per LC48-SPLIT-1; all nine rows are kept and none dropped. Build each in its ticket:
+
+- [48a](48a-delivery-ttl-row.md): `LC-D20.delivery_ttl`
+- [48b](48b-report-stale-resume-rows.md): `LC-D21.stale_report`, `LC-D21.report_resume`
+- [48c](48c-undo-rebind-viewer-rows.md): `LC-D22.rebind`, `LC-D22.viewer_role`
+- [48d](48d-wire-recovery-rows.md): `LC-D23.history_repair`, `LC-D23.approval_resume`, `LC-D23.profile_recovery`, `LC-D23.goal_switch`
+
+The three defects (43a, 43b, 43c) stay with their own tickets. The manifest rows and the `R3_ISSUE` blockers still point here, which stays as the index.

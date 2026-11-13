@@ -2595,7 +2595,7 @@ def suite_S17():
                 and res.get("study") == "coupling_loop"
                 and "engine" not in res
                 and res.get("status") in ("met", "unreachable",
-                                          "budget_exhausted")
+                                          "budget_exhausted", "not_confident")
                 and isinstance(res.get("verdict"), str) and res["verdict"]
                 and res.get("resolution_floor_h") is not None
                 and "ONE weather realisation" in str(res.get("warning"))
@@ -2623,6 +2623,15 @@ def suite_S17():
         verdict_ok = (("never bound" in v and "outage" in v
                        and MARGIN_LOOP_PANEL_LABEL.lower() in v)
                       if never_bound else bool(v))
+
+    # Adequacy loops 04: `not_confident` keeps no plan. `final` is None and
+    # the evidence is the nearest iterate, whose own goal verdict says so.
+    if (res or {}).get("status") == "not_confident":
+        near_goal = (((res or {}).get("nearest") or {}).get("mc") or {}).get("goal") or {}
+        verdict_ok = verdict_ok and (
+            (res or {}).get("final") is None
+            and near_goal.get("verdict") == "not_confident"
+            and str((res or {}).get("verdict", "")).startswith("Not confident"))
 
     met_ok = True
     if (res or {}).get("status") == "met":
@@ -3079,6 +3088,9 @@ def suite_S19():
     m_star = (mar or {}).get("lever_star")
     fin = (mar or {}).get("final") or {}
     fmc = fin.get("mc") or {}
+    # Adequacy loops 04: a margin loop that ends `not_confident` found no
+    # confirmed plan; it fails this gate and the detail names its nearest.
+    mar_near = ((mar or {}).get("nearest") or {}).get("mc") or {}
     verified = (mar_status != "met") or (
         fmc.get("lole_hours") is not None
         and float(fmc["lole_hours"]) <= target + 1e-9)
@@ -3091,7 +3103,10 @@ def suite_S19():
            f"loop -> {mar_status} at m*={m_star} "
            f"({(mar or {}).get('solves_used')} solves + "
            f"{(mar or {}).get('probe_solves')} probe); final verified="
-           f"{verified}")
+           f"{verified}"
+           + (f"; nearest {mar_near.get('lole_hours')} h, 95% range "
+              f"{mar_near.get('lole_ci')}"
+              if mar_status == "not_confident" else ""))
 
     # ── S19.4 — the payload contract, and the one thing that must never leak:
     # the controller's internal reciprocal. Every number on the wire is a

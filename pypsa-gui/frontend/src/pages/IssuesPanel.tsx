@@ -17,6 +17,7 @@ import { FlowStateDot } from '../components/FlowStateDot'
 import { FLOW_SECTIONS, type FlowSectionId } from '../api/flow'
 import { useProjectFlow } from '../hooks/useProjectFlow'
 import { sectionForComponent, sectionMeta } from '../layout/flowSections'
+import { openOffGridConstraints } from '../layout/flowNavigation'
 import { useTopologyFindings } from './useTopologyFindings'
 import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
 import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
@@ -170,6 +171,18 @@ export default function IssuesPanel() {
                   <Lightbulb size={13} className="text-warn shrink-0 mt-0.5" />
                   <span>{lastFailure.hint}</span>
                 </div>
+                {lastFailure.constraint_hints?.map(h => (
+                  <div key={h.constraint + h.text} data-testid="failure-constraint-hint"
+                    className="mt-1.5 text-[11.5px] text-ink-700 leading-relaxed">
+                    <span className="font-semibold text-text">{h.constraint}</span>: {h.text}
+                    {h.setting === 'offgrid' && (
+                      <button type="button" onClick={openOffGridConstraints}
+                        className="ml-1.5 inline-flex items-center gap-0.5 text-accent hover:underline">
+                        Open Off-grid constraints <ArrowRight size={11} />
+                      </button>
+                    )}
+                  </div>
+                ))}
                 {lastFailure.detail && (
                   <div className="mt-2 text-[10px] font-mono text-muted break-all">
                     solver: {lastFailure.detail}

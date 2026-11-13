@@ -61,6 +61,7 @@ land in; it is stated as a disclosure callout rather than dropped.
 Errors: bytes python-docx cannot open raise ``docx_reader.TemplateReadError``
 (a ``ValueError``), the same class the template routes already map to 400.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -102,8 +103,14 @@ from services.reports.docx_writer import (
 APPENDIX_ID = "numbers_to_check"
 HEADING_MATCH_RATIO = 0.85
 REMOVED_NOTE = "removed from the edited copy; kept from version {version}"
-ADDED_PICTURE_TEXT = ("A picture added in the edited copy has no place in the "
-                      "report model and was not carried over.")
+REMOVED_TABLE_NOTE = (
+    'the table "{name}" was removed or replaced in the edited copy; '
+    "its numbers are not in this version"
+)
+ADDED_PICTURE_TEXT = (
+    "A picture added in the edited copy has no place in the "
+    "report model and was not carried over."
+)
 
 _W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
@@ -112,11 +119,25 @@ def _w(tag: str) -> str:
     return f"{{{_W}}}{tag}"
 
 
-_TAG_P, _TAG_TBL, _TAG_SDT, _TAG_SDT_CONTENT = _w("p"), _w("tbl"), _w("sdt"), _w("sdtContent")
-_TAG_R, _TAG_HYPERLINK, _TAG_RPR, _TAG_PPR = _w("r"), _w("hyperlink"), _w("rPr"), _w("pPr")
+_TAG_P, _TAG_TBL, _TAG_SDT, _TAG_SDT_CONTENT = (
+    _w("p"),
+    _w("tbl"),
+    _w("sdt"),
+    _w("sdtContent"),
+)
+_TAG_R, _TAG_HYPERLINK, _TAG_RPR, _TAG_PPR = (
+    _w("r"),
+    _w("hyperlink"),
+    _w("rPr"),
+    _w("pPr"),
+)
 _TAG_TRPR, _TAG_TR = _w("trPr"), _w("tr")
 _TAG_INS, _TAG_DEL, _TAG_MOVE_TO, _TAG_MOVE_FROM = (
-    _w("ins"), _w("del"), _w("moveTo"), _w("moveFrom"))
+    _w("ins"),
+    _w("del"),
+    _w("moveTo"),
+    _w("moveFrom"),
+)
 _TAG_T, _TAG_TAB, _TAG_BR, _TAG_CR = _w("t"), _w("tab"), _w("br"), _w("cr")
 _TAG_DRAWING, _TAG_PICT = _w("drawing"), _w("pict")
 _TAG_BOOKMARK_START = _w("bookmarkStart")
@@ -128,11 +149,16 @@ _TAG_SECTPR = _w("sectPr")
 _PROPERTY_PARENTS = frozenset({_TAG_RPR, _TAG_PPR})
 
 _NUMBERING_RE = re.compile(
-    r"^\s*(?:(?:\d+|[A-Za-z]|[ivxlcdm]+)(?:[.)]|(?:\.\d+)+\.?)?\s+)+", re.IGNORECASE)
+    r"^\s*(?:(?:\d+|[A-Za-z]|[ivxlcdm]+)(?:[.)]|(?:\.\d+)+\.?)?\s+)+", re.IGNORECASE
+)
 _WS_RE = re.compile(r"\s+")
 _LINK_URL_RUN_RE = re.compile(r"^ \((?P<url>\S+)\)$")
-_MISSING_TABLE_RE = re.compile(r"^Table '(?P<id>[^']+)' is not available in this version")
-_MISSING_FIGURE_RE = re.compile(r"^Figure '(?P<id>[^']+)' was not produced for this version")
+_MISSING_TABLE_RE = re.compile(
+    r"^Table '(?P<id>[^']+)' is not available in this version"
+)
+_MISSING_FIGURE_RE = re.compile(
+    r"^Figure '(?P<id>[^']+)' was not produced for this version"
+)
 GAP_PREFIX = "Gap:"
 NOTE_PREFIX = "Note:"
 NOT_ESTABLISHED_PREFIX = "Not established:"
@@ -205,7 +231,11 @@ def accept_tracked_changes(body) -> int:
                 continue
             if parent.tag == _TAG_TRPR:
                 row = parent.getparent()
-                if row is not None and row.tag == _TAG_TR and row.getparent() is not None:
+                if (
+                    row is not None
+                    and row.tag == _TAG_TR
+                    and row.getparent() is not None
+                ):
                     row.getparent().remove(row)
                     count += 1
                 continue
@@ -245,12 +275,19 @@ def _run_format(run_el) -> tuple[bool, bool, bool, bool]:
 
     fonts = r_pr.find(_w("rFonts"))
     code = fonts is not None and _CODE_FONT in {
-        fonts.get(qn("w:ascii")), fonts.get(qn("w:hAnsi"))}
+        fonts.get(qn("w:ascii")),
+        fonts.get(qn("w:hAnsi")),
+    }
     color = r_pr.find(_w("color"))
     underline = r_pr.find(_w("u"))
-    underlined = underline is not None and (underline.get(qn("w:val")) or "single") != "none"
-    link = (underlined and color is not None
-            and (color.get(qn("w:val")) or "").upper() == str(_LINK_COLOR))
+    underlined = (
+        underline is not None and (underline.get(qn("w:val")) or "single") != "none"
+    )
+    link = (
+        underlined
+        and color is not None
+        and (color.get(qn("w:val")) or "").upper() == str(_LINK_COLOR)
+    )
     return (on("b"), on("i"), code, link)
 
 
@@ -285,8 +322,17 @@ def _spans(p_el, part) -> list[tuple[str, str, str | None]]:
                 if not text:
                     continue
                 bold, italic, code, link = _run_format(child)
-                kind = ("code" if code else "link" if link else "bold" if bold
-                        else "italic" if italic else "text")
+                kind = (
+                    "code"
+                    if code
+                    else "link"
+                    if link
+                    else "bold"
+                    if bold
+                    else "italic"
+                    if italic
+                    else "text"
+                )
                 raw.append((kind, text, None))
             elif tag == _TAG_HYPERLINK:
                 text = "".join(_run_text(r) for r in child.iter(_TAG_R))
@@ -322,8 +368,8 @@ def _spans(p_el, part) -> list[tuple[str, str, str | None]]:
 def _md_span(kind: str, text: str, url: str | None) -> str:
     if kind == "text":
         return text
-    lead = text[:len(text) - len(text.lstrip())]
-    trail = text[len(text.rstrip()):]
+    lead = text[: len(text) - len(text.lstrip())]
+    trail = text[len(text.rstrip()) :]
     core = text.strip()
     if not core:
         return text
@@ -376,15 +422,17 @@ def _bookmark_id(p_el) -> str | None:
     for el in p_el.iter(_TAG_BOOKMARK_START):
         name = el.get(qn("w:name")) or ""
         if name.startswith(BOOKMARK_PREFIX):
-            return name[len(BOOKMARK_PREFIX):]
+            return name[len(BOOKMARK_PREFIX) :]
     return None
 
 
 def _is_category_heading(p_el) -> bool:
     """A category divider the writer puts above its sections (UX review N9): not a section, and
     nothing a reviewer edits."""
-    return any((el.get(qn("w:name")) or "").startswith(CATEGORY_BOOKMARK_PREFIX)
-               for el in p_el.iter(_TAG_BOOKMARK_START))
+    return any(
+        (el.get(qn("w:name")) or "").startswith(CATEGORY_BOOKMARK_PREFIX)
+        for el in p_el.iter(_TAG_BOOKMARK_START)
+    )
 
 
 def _style_name(p_el, doc) -> str:
@@ -423,8 +471,11 @@ def _expand(blocks: list) -> list:
     out: list = []
     for block in blocks:
         if isinstance(block, Paragraph):
-            out.extend(Paragraph(md=c.replace("\n", " ").strip())
-                       for c in block.md.split("\n\n") if c.strip())
+            out.extend(
+                Paragraph(md=c.replace("\n", " ").strip())
+                for c in block.md.split("\n\n")
+                if c.strip()
+            )
         elif isinstance(block, Bullets):
             if block.items:
                 out.append(block)
@@ -465,7 +516,9 @@ def _table_cells(table_el, doc) -> list[list[str]]:
             if id(cell._tc) in seen:  # a merged cell repeats its element
                 continue
             seen.add(id(cell._tc))
-            cells.append(_norm("\n".join(merged_paragraph_text(p) for p in cell.paragraphs)))
+            cells.append(
+                _norm("\n".join(merged_paragraph_text(p) for p in cell.paragraphs))
+            )
         rows.append(cells)
     return rows
 
@@ -476,8 +529,14 @@ def _table_cells(table_el, doc) -> list[list[str]]:
 class _SectionBuilder:
     """Collects the blocks of one section as the walk hands it body children."""
 
-    def __init__(self, section_id: str | None, heading: str, base: Section | None,
-                 document: ReportDocument, next_version: int) -> None:
+    def __init__(
+        self,
+        section_id: str | None,
+        heading: str,
+        base: Section | None,
+        document: ReportDocument,
+        next_version: int,
+    ) -> None:
         self.section_id = section_id
         self.heading = heading
         self.base = base
@@ -490,10 +549,16 @@ class _SectionBuilder:
         self._callouts = [b for b in base_blocks if isinstance(b, Callout)]
         self._fields = [b for b in base_blocks if isinstance(b, Field)]
         self._figure_refs = [b for b in base_blocks if isinstance(b, FigureRef)]
-        self._table_refs = [b for b in base_blocks if isinstance(b, TableRef)
-                            and b.table_id in document.tables]
-        self._missing_table_refs = [b for b in base_blocks if isinstance(b, TableRef)
-                                    and b.table_id not in document.tables]
+        self._table_refs = [
+            b
+            for b in base_blocks
+            if isinstance(b, TableRef) and b.table_id in document.tables
+        ]
+        self._missing_table_refs = [
+            b
+            for b in base_blocks
+            if isinstance(b, TableRef) and b.table_id not in document.tables
+        ]
         self._new_tables = 0
 
     # -- paragraphs --------------------------------------------------------
@@ -524,7 +589,7 @@ class _SectionBuilder:
             self._add_disclosure(text)
             return
         if text.startswith(NOT_ESTABLISHED_PREFIX):
-            body = text[len(NOT_ESTABLISHED_PREFIX):].strip()
+            body = text[len(NOT_ESTABLISHED_PREFIX) :].strip()
             kept = self._take_callout("not_established", body)
             if kept is not None:
                 self._add_block(kept)
@@ -540,28 +605,33 @@ class _SectionBuilder:
     def _add_disclosure(self, text: str) -> None:
         m = _MISSING_TABLE_RE.match(text)
         if m:
-            ref = next((r for r in self._missing_table_refs if r.table_id == m.group("id")),
-                       None)
+            ref = next(
+                (r for r in self._missing_table_refs if r.table_id == m.group("id")),
+                None,
+            )
             if ref is not None:
                 self._missing_table_refs.remove(ref)
             self._add_block(ref or TableRef(table_id=m.group("id")))
             return
         m = _MISSING_FIGURE_RE.match(text)
         if m:
-            ref = next((r for r in self._figure_refs if r.figure_id == m.group("id")), None)
+            ref = next(
+                (r for r in self._figure_refs if r.figure_id == m.group("id")), None
+            )
             if ref is not None:
                 self._figure_refs.remove(ref)
             self._add_block(ref or FigureRef(figure_id=m.group("id")))
             return
         if text.startswith(NOTE_PREFIX):
             if self.base is not None and _norm(self.base.note) == _norm(
-                    text[len(NOTE_PREFIX):]):
+                text[len(NOTE_PREFIX) :]
+            ):
                 return  # rendered from `section.note`
             kept = self._take_callout("disclosure", text)
             self._add_block(kept or Callout(kind="disclosure", text=text))
             return
         if text.startswith(GAP_PREFIX):
-            body = text[len(GAP_PREFIX):].strip()
+            body = text[len(GAP_PREFIX) :].strip()
             kept = self._take_callout("gap", body)
             self._add_block(kept or Callout(kind="gap", text=body))
             return
@@ -571,7 +641,10 @@ class _SectionBuilder:
     def _take_callout(self, kind: str, text: str) -> Callout | None:
         key = _norm(text).rstrip(".")
         for callout in self._callouts:
-            if callout.kind == kind and _norm(_callout_text(callout)).rstrip(".") == key:
+            if (
+                callout.kind == kind
+                and _norm(_callout_text(callout)).rstrip(".") == key
+            ):
                 self._callouts.remove(callout)
                 return callout
         return None
@@ -584,8 +657,9 @@ class _SectionBuilder:
         if not label.endswith(":"):
             return None
         key = label[:-1].strip()
-        base_field = next((f for f in self._fields if f.key.strip().lower() == key.lower()),
-                          None)
+        base_field = next(
+            (f for f in self._fields if f.key.strip().lower() == key.lower()), None
+        )
         if base_field is None:
             return None
         self._fields.remove(base_field)
@@ -608,20 +682,28 @@ class _SectionBuilder:
         original = self.document.tables.get(ref.table_id) if ref is not None else None
         if original is not None:
             expected = [[_norm(c) for c in original.columns]] + [
-                [_norm(c) for c in row] for row in original.rows]
+                [_norm(c) for c in row] for row in original.rows
+            ]
             if cells == expected:
                 self._add_block(ref)
                 return
         if ref is not None:
             table_id = f"{ref.table_id}_edited_v{self.next_version}"
-            caption = ref.caption or (original.caption if original is not None else None)
+            caption = ref.caption or (
+                original.caption if original is not None else None
+            )
         else:
             self._new_tables += 1
             table_id = f"{self.section_id or 'unmatched'}_table{self._new_tables}_v{self.next_version}"
             caption = None
         columns = cells[0] if cells else []
-        table = Table(table_id=table_id, columns=columns, rows=cells[1:],
-                      caption=caption, source_path=None)
+        table = Table(
+            table_id=table_id,
+            columns=columns,
+            rows=cells[1:],
+            caption=caption,
+            source_path=None,
+        )
         edited_tables[table_id] = table
         self._add_block(TableRef(table_id=table_id, caption=caption))
 
@@ -638,8 +720,13 @@ class _SectionBuilder:
             blocks = list(self.base.blocks)
         elif self.base is None:
             changed = bool(blocks)
-        return RoundTripSection(section_id=self.section_id, heading=self.heading,
-                                blocks=blocks, changed=changed, comments=self.comments)
+        return RoundTripSection(
+            section_id=self.section_id,
+            heading=self.heading,
+            blocks=blocks,
+            changed=changed,
+            comments=self.comments,
+        )
 
 
 # ── the walk ─────────────────────────────────────────────────────────────
@@ -657,7 +744,9 @@ def _body_children(body) -> list:
         elif tag == _TAG_SDT:
             content = child.find(_TAG_SDT_CONTENT)
             if content is not None:
-                out.extend(c for c in content.iterchildren() if c.tag in (_TAG_P, _TAG_TBL))
+                out.extend(
+                    c for c in content.iterchildren() if c.tag in (_TAG_P, _TAG_TBL)
+                )
     return out
 
 
@@ -691,8 +780,13 @@ def read_edited_docx(data: bytes, base: ReportDocument) -> RoundTripResult:
 
     def open_section(section_id: str | None, heading: str, level: int) -> None:
         nonlocal current
-        current = _SectionBuilder(section_id, heading, by_id.get(section_id) if section_id
-                                  else None, base, next_version)
+        current = _SectionBuilder(
+            section_id,
+            heading,
+            by_id.get(section_id) if section_id else None,
+            base,
+            next_version,
+        )
         current.heading_level = level
         builders.append(current)
         if section_id is not None:
@@ -716,11 +810,14 @@ def read_edited_docx(data: bytes, base: ReportDocument) -> RoundTripResult:
         text = _norm(merged_paragraph_text(child))
         bookmark = _bookmark_id(child)
         if _is_category_heading(child):
-            current = None                  # the divider ends the open section and opens none
+            current = None  # the divider ends the open section and opens none
             owner.append(None)
             continue
         if bookmark == APPENDIX_ID or (
-                level is not None and level >= 1 and text.lower() == APPENDIX_HEADING.lower()):
+            level is not None
+            and level >= 1
+            and text.lower() == APPENDIX_HEADING.lower()
+        ):
             stop = True
             owner.append(None)
             continue
@@ -729,8 +826,9 @@ def read_edited_docx(data: bytes, base: ReportDocument) -> RoundTripResult:
             owner.append(current)
             continue
         if level is not None and level >= 1 and text:
-            matched = _match_heading(text, {k: v for k, v in candidates.items()
-                                            if k not in opened})
+            matched = _match_heading(
+                text, {k: v for k, v in candidates.items() if k not in opened}
+            )
             if matched is not None:
                 open_section(matched, text, level)
                 owner.append(current)
@@ -757,12 +855,18 @@ def read_edited_docx(data: bytes, base: ReportDocument) -> RoundTripResult:
             target.comments.append(text)
 
     sections = [b.finish() for b in builders]
-    unmatched = [s.heading or _first_text(s)[:80] for s in sections
-                 if s.section_id is None and (s.heading or s.blocks)]
-    return RoundTripResult(sections=sections, unmatched=unmatched,
-                           comments_global=comments_global,
-                           accepted_tracked_changes=accepted,
-                           edited_tables=edited_tables)
+    unmatched = [
+        s.heading or _first_text(s)[:80]
+        for s in sections
+        if s.section_id is None and (s.heading or s.blocks)
+    ]
+    return RoundTripResult(
+        sections=sections,
+        unmatched=unmatched,
+        comments_global=comments_global,
+        accepted_tracked_changes=accepted,
+        edited_tables=edited_tables,
+    )
 
 
 def _first_text(section: RoundTripSection) -> str:
@@ -779,6 +883,257 @@ def _first_text(section: RoundTripSection) -> str:
 # ── the merge ────────────────────────────────────────────────────────────
 
 
+def _cells(table: Table) -> list[list[str]]:
+    return [list(table.columns)] + [list(row) for row in table.rows]
+
+
+def _numeric_cells(table: Table) -> list[str]:
+    """Every cell of `table` that states a number, as written."""
+    from services.reports.revisions import numbers
+
+    return [cell.strip() for row in _cells(table) for cell in row if numbers(cell)]
+
+
+def _changed_numbers(original: Table, edited: Table) -> list[str]:
+    """The cells of `edited` that change what `original` states, each listed
+    whole, unit included (GK B 52 T1-T3, GK B 54 D2-D4).
+
+    Cells are compared one by one, never as one multiset, so two rows that
+    swap values are a change. A cell is paired with the original cell at the
+    same position when the two tables have the same shape, else with the cell
+    under the same row label (first column) and column header; a label that
+    is not unique in either table pairs with nothing. A paired cell is a
+    change when it states a number, with its unit, that its original does not
+    ("3.21 min/yr", "3.2149"), but not for a numerically equal reformat
+    ("3.210", "1,000", a Unicode minus); and when its text changed while its
+    original row or column states a number: a unit edited in a row label, a
+    column header, the corner header or a separate Unit column. An unpaired
+    cell (a new, renamed or duplicated row or column) is a change when it
+    states a number.
+    """
+    from collections import Counter
+
+    from services.reports.revisions import numbers
+
+    old, new = _cells(original), _cells(edited)
+
+    def numeric(grid: list[list[str]], r: int, c: int) -> bool:
+        column = [row[c] for row in grid if c < len(row)]
+        return any(numbers(cell) for cell in grid[r] + column)
+
+    def unique(grid: list[list[str]], key) -> dict[str, int]:
+        seen = Counter(key(i) for i in range(len(grid)))
+        return {key(i): i for i in range(len(grid)) if seen[key(i)] == 1}
+
+    if [len(row) for row in old] == [len(row) for row in new]:
+        rows = {r: r for r in range(len(new))}
+        cols = None
+    else:
+
+        def label(grid):
+            return lambda r: _norm(grid[r][0]) if grid[r] else ""
+
+        old_labels, new_labels = unique(old, label(old)), unique(new, label(new))
+        rows = {
+            r: old_labels.get(label(new)(r)) if label(new)(r) in new_labels else None
+            for r in range(1, len(new))
+        }
+        rows[0] = 0
+        old_heads = unique(old[0], lambda c: _norm(old[0][c]))
+        new_heads = unique(new[0], lambda c: _norm(new[0][c]))
+        cols = {
+            c: old_heads.get(_norm(h)) if _norm(h) in new_heads else None
+            for c, h in enumerate(new[0])
+        }
+    out: list[str] = []
+    for r, row in enumerate(new):
+        for c, cell in enumerate(row):
+            r0 = rows.get(r)
+            c0 = c if cols is None else cols.get(c)
+            if r0 is None or c0 is None or c0 >= len(old[r0]):
+                changed = bool(numbers(cell))
+            else:
+                before = old[r0][c0]
+                changed = bool(numbers(cell) - numbers(before)) or (
+                    not numbers(cell)
+                    and _norm(cell) != _norm(before)
+                    and numeric(old, r0, c0)
+                )
+            if changed:
+                out.append(cell.strip())
+    return out
+
+
+def _pair(
+    edited: Table, originals: dict[str, Table], nominal: str | None
+) -> str | None:
+    """The original `edited` is a copy of, chosen by content, not position
+    (GK B 54 D1: a table inserted above another shifts the Word reader's
+    positional TableRef pairing). The original sharing the most column
+    headers and row labels wins, the reader's own pairing on a tie; none
+    when no header or label is shared."""
+
+    def keys(table: Table) -> set:
+        heads = {("h", _norm(c)) for c in table.columns}
+        return heads | {("r", _norm(row[0])) for row in table.rows if row}
+
+    mine = keys(edited)
+    scored = [
+        (len(mine & keys(t)), tid == nominal, tid) for tid, t in originals.items()
+    ]
+    scored = [entry for entry in scored if entry[0] > 0]
+    return max(scored)[2] if scored else None
+
+
+def _withhold_prose(blocks: list, facts) -> tuple[list, list[str]]:
+    """`blocks` with each paragraph or bullet whose numbers the audit cannot
+    verify against `facts` replaced by the withheld placeholder (V1), as a
+    strict job's section reads (GK B 54 D5), and the numbers so withheld, for
+    the appendix the placeholder points to."""
+    from services.reports import number_audit
+    from services.reports.formatting import withheld_placeholder
+
+    withheld: list[str] = []
+
+    def bad(text: str) -> list[str]:
+        return list(number_audit.audit([text], facts).unverified)
+
+    def placeholder(text: str) -> Callout:
+        found = bad(text)
+        withheld.extend(found)
+        return Callout(kind="gap", text=withheld_placeholder(len(found)))
+
+    out: list = []
+    for block in blocks:
+        if isinstance(block, Paragraph) and bad(block.md):
+            out.append(placeholder(block.md))
+        elif isinstance(block, Bullets):
+            kept = [item for item in block.items if not bad(item)]
+            if kept:
+                out.append(block.model_copy(update={"items": kept}))
+            out.extend(placeholder(item) for item in block.items if bad(item))
+        else:
+            out.append(block)
+    return out, withheld
+
+
+def _checked(
+    section: Section,
+    blocks: list,
+    base: ReportDocument,
+    edited_tables: dict[str, Table],
+) -> tuple[list, SectionAudit]:
+    """LC-43a: the blocks and audit of a section the user edited in Word.
+
+    The audit is re-run against the facts the base verified (R4, as a
+    comment-anchored edit is), so a changed number in the prose reads
+    unverified and is listed under "Numbers to check".
+
+    Each edited table in the section is paired with the section's own table
+    it is a copy of, by content (`_pair`). One that changes what its original
+    states keeps the admitted table, followed by the withheld placeholder,
+    with the changed cells listed "(unverified, withheld)"; an unchanged copy
+    keeps the admitted table. One that pairs with none and states a number
+    is withheld whole (placeholder, numbers listed); a table of text only
+    stays, uncaptioned. An admitted table always carries its original's own
+    caption, never that of its position in the Word file, and admitted tables
+    keep the base's order: a copy of an original the base placed above one
+    already admitted (a swap) is withheld. An original no edited table pairs
+    with is recorded as removed, in a note at the section's end (GK B 55
+    F1, F3). The edited tables are still stored under their own ids. A
+    section with a withheld table is a withheld section, so its prose
+    statements the audit cannot verify are withheld too, never listed as
+    withheld while still standing in the text.
+    """
+    from services.reports.formatting import withheld_placeholder
+    from services.reports.revisions import rerun_audit, verified_facts
+
+    suffix = f"_edited_v{base.version + 1}"
+    own_caption: dict[str, str | None] = {}
+    originals: dict[str, Table] = {}
+    order: dict[str, int] = {}
+    for b in section.blocks:
+        if isinstance(b, TableRef) and b.table_id in base.tables:
+            originals[b.table_id] = base.tables[b.table_id]
+            own_caption[b.table_id] = b.caption or base.tables[b.table_id].caption
+            order.setdefault(b.table_id, len(order))
+    for block in blocks:
+        if isinstance(block, TableRef) and block.table_id not in edited_tables:
+            originals.pop(block.table_id, None)  # kept as delivered
+    kept: list = []
+    withheld: list[str] = []
+
+    def uncaptioned(block: TableRef, edited: Table) -> TableRef:
+        # The Word reader captions a table by its position; one that is no
+        # admitted original's copy keeps no admitted caption (GK B 55 F1).
+        edited_tables[block.table_id] = edited.model_copy(update={"caption": None})
+        return TableRef(table_id=block.table_id)
+
+    def withhold(block: TableRef, edited: Table) -> None:
+        new = _numeric_cells(edited)
+        if new:
+            kept.append(Callout(kind="gap", text=withheld_placeholder(len(new))))
+            withheld.extend(new)
+        else:
+            kept.append(uncaptioned(block, edited))
+
+    last = -1  # the base position of the last table admitted
+    for block in blocks:
+        edited = (
+            edited_tables.get(block.table_id) if isinstance(block, TableRef) else None
+        )
+        if edited is None:
+            if isinstance(block, TableRef):
+                last = max(last, order.get(block.table_id, last))
+            kept.append(block)
+            continue
+        nominal = block.table_id.removesuffix(suffix)
+        tid = _pair(edited, originals, nominal if nominal != block.table_id else None)
+        if tid is None or order[tid] < last:
+            # A copy of no original, or of one the base placed above a table
+            # already admitted (a swap): withheld, never admitted under an
+            # original's caption (GK B 55 F1).
+            withhold(block, edited)
+            continue
+        last = order[tid]
+        original = originals.pop(tid)
+        caption = own_caption.get(tid)
+        new = _changed_numbers(original, edited)
+        if new:
+            kept.extend(
+                [
+                    TableRef(table_id=tid, caption=caption),
+                    Callout(kind="gap", text=withheld_placeholder(len(new))),
+                ]
+            )
+            withheld.extend(new)
+        elif _cells(edited) == _cells(original):
+            kept.append(TableRef(table_id=tid, caption=caption))
+        else:
+            edited_tables[block.table_id] = edited.model_copy(
+                update={"caption": caption}
+            )
+            kept.append(TableRef(table_id=block.table_id, caption=caption))
+    for tid in originals:
+        # An admitted table the edited copy no longer holds (GK B 55 F3).
+        kept.append(
+            Callout(
+                kind="gap",
+                text=REMOVED_TABLE_NOTE.format(name=own_caption.get(tid) or tid),
+            )
+        )
+    facts = verified_facts(section)
+    if withheld and facts is not None:
+        kept, prose = _withhold_prose(kept, facts)
+        withheld = prose + withheld
+    audit = rerun_audit(section, section.model_copy(update={"blocks": kept}))
+    if withheld:
+        audit = audit.model_copy(
+            update={"unverified": list(audit.unverified) + withheld}
+        )
+    return kept, audit
+
+
 def merge_round_trip(base: ReportDocument, result: RoundTripResult) -> ReportDocument:
     """
     The next version of ``base`` with the edited copy folded in: changed
@@ -787,7 +1142,8 @@ def merge_round_trip(base: ReportDocument, result: RoundTripResult) -> ReportDoc
     edited tables added. ``base`` is not mutated.
     """
     by_id: dict[str, RoundTripSection] = {
-        s.section_id: s for s in result.sections if s.section_id is not None}
+        s.section_id: s for s in result.sections if s.section_id is not None
+    }
     sections: list[Section] = []
     for section in base.sections:
         edited = by_id.get(section.section_id)
@@ -799,17 +1155,21 @@ def merge_round_trip(base: ReportDocument, result: RoundTripResult) -> ReportDoc
             continue
         update: dict[str, Any] = {}
         if edited.changed:
-            update.update(blocks=list(edited.blocks), source="user_edit",
-                          audit=SectionAudit())
+            blocks, audit = _checked(
+                section, list(edited.blocks), base, result.edited_tables
+            )
+            update.update(blocks=blocks, source="user_edit", audit=audit)
         if edited.comments:
             update["comments"] = list(edited.comments)
             update["pending_instruction"] = "; ".join(edited.comments)
         sections.append(section.model_copy(update=update) if update else section)
     tables = dict(base.tables)
     tables.update(result.edited_tables)
-    return base.model_copy(update={
-        "version": base.version + 1,
-        "created_at": datetime.now(UTC).isoformat(),
-        "sections": sections,
-        "tables": tables,
-    })
+    return base.model_copy(
+        update={
+            "version": base.version + 1,
+            "created_at": datetime.now(UTC).isoformat(),
+            "sections": sections,
+            "tables": tables,
+        }
+    )
