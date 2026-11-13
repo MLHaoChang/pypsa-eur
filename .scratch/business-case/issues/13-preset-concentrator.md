@@ -3,7 +3,7 @@
 
 # 13 — Mining concentrator preset
 
-Status: in-review (PR pending; Sonnet; GK B, GK A for linked outputs)
+Status: done
 Type: task
 Blocked by: 06, 07
 Gated: yes (GK B; GK A for the linked outputs)
@@ -38,3 +38,7 @@ Choices to review:
 - Process plant cost is typed per t milled. The US$5.6-11.3/t figure sits in the note, not a `hint`, because the preset schema allows hints on revenue rows only; it is sourced to Project Blue [16] (secondary), the TC/RC figure to S&P/SMM [14] (GK B F3). The note says the line does not scale in a shortfall: type the milled t from the results (F2).
 - A typed "Plant capex" lump is the base of both Maintenance and Insurance shares (one maintenance share, so no capex line sits in two maintenance bases). No pack defaults for either share.
 - No offered rows.
+
+### 2026-11-13: done
+
+PR #1462 merged at 624386dc (GK A OK @88727860 carried, GK B OK @b40eb071). Left open: no pack defaults for the maintenance and insurance shares (no sourced figure); no offered rows; the process-plant line does not scale in a shipment shortfall (the note says so).

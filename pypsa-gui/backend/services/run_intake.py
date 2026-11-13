@@ -961,7 +961,9 @@ def card_view(rows: list, profile: dict, template_check, entered=None) -> dict:
         for key in fields:
             name = top(key)
             if (
-                name not in given
+                name
+                != SITE  # the site is not a preset default: the card says "none named" below
+                and name not in given
                 and name not in {d["param"] for d in defaults}
                 and not any(e.split(".")[0] == name for e in entered)
             ):
@@ -972,7 +974,13 @@ def card_view(rows: list, profile: dict, template_check, entered=None) -> dict:
                         "preset_default": True,
                     }
                 )
-    return {"rows": shown, "defaults": defaults}
+    card = {"rows": shown, "defaults": defaults}
+    named = {r["param"] for r in rows if r["status"] != "struck"}
+    if any(top(k) == SITE for k in fields) and not {"site.lat", "site.lon"} & named:
+        card["site"] = (
+            "none named"  # a run on a site-aware profile fetches no map context
+        )
+    return card
 
 
 def digest(rows: list) -> str:

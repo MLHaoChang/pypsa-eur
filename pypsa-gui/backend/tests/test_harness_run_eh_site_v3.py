@@ -17,6 +17,7 @@ import hashlib
 import json
 import pathlib
 import time
+import urllib.parse
 import uuid
 
 import httpx
@@ -71,7 +72,7 @@ def _tile() -> bytes:
     return TILE
 
 
-def overpass(calls=None, status=200, delay=0.0, body=None, tiles=200):
+def overpass(calls=None, status=200, delay=0.0, body=None, tiles=200, posts=None):
     """The offline map services: Overpass answers the fixture (or `body`),
     and every terrain tile answers a flat tile (or the status `tiles`)."""
 
@@ -84,6 +85,8 @@ def overpass(calls=None, status=200, delay=0.0, body=None, tiles=200):
                 if tiles == 200
                 else httpx.Response(tiles)
             )
+        if posts is not None:
+            posts.append(request.content.decode())
         if delay:
             time.sleep(delay)
         return httpx.Response(
@@ -291,6 +294,10 @@ def _start(citations, name, ref="eh_site@3"):
             "intake": {"project_name": name, "citations": citations},
         },
     )
+
+
+def _run_of(site, view):
+    return json.loads(task_path(site[1], view).read_text())["run"]
 
 
 def _intake(view, site):
@@ -901,3 +908,116 @@ def test_a_frozen_site_is_never_rebuilt_from_later_intake_rows(offline, tmp_path
     step = task["steps"][-1]
     assert out == run_actions.SITE_FETCH and step["frozen"] == first
     assert step["result"]["state"] == "fetched" and step["result"]["site"] == SITE
+
+
+# Study harness issue 44: the catalogue offers eh_site@3 to start_task.
+def _start_task_run_args(profile):
+    return {
+        "title": "t",
+        "request_id": "r",
+        "steps": [],
+        "run": {"profile": profile, "mode": "stepwise"},
+    }
+
+
+@pytest.mark.parametrize("profile", ["eh_site@2", "eh_site@3"])
+def test_start_task_offers_v2_and_v3(profile):
+    from harness import catalogue, guards
+
+    tool = next(t for t in catalogue.TOOLS if t["name"] == "start_task")
+    enum = tool["input_schema"]["properties"]["run"]["properties"]["profile"]["enum"]
+    assert enum == ["eh_site@2", "eh_site@3"]
+    assert guards.check("start_task", _start_task_run_args(profile), "write") is None
+
+
+@pytest.mark.parametrize("profile", ["eh_site@1", "eh_site@4", None, 3, ["eh_site@3"]])
+def test_start_task_refuses_every_other_profile(profile):
+    from harness import guards
+
+    refusal = guards.check("start_task", _start_task_run_args(profile), "write")
+    assert refusal is not None and refusal[0] == "required_guard_failed"
+
+
+def test_a_chat_started_v3_run_fetches_only_the_granted_point(
+    site_host, site, offline, tmp_path, monkeypatch
+):
+    posts = []
+    monkeypatch.setattr(run_site, "_TRANSPORT", overpass(offline, posts=posts))
+    base = [*site_host["citations"], site_host["goal"]]
+    view = _start([*base, *site_host["site"]], f"Site {uuid.uuid4().hex[:6]}")
+    intake = _intake(view, site)
+    rows = intake["rows"]
+    point = {r["param"]: r["value"] for r in rows if r["param"].startswith("site.")}
+    assert point == {"site.lat": SITE["lat"], "site.lon": SITE["lon"]}
+    # The plan-review card shows the point before the grant (O3).
+    frozen = run_actions.stage_frozen(_task(rows), run_actions.SITE_KIND)
+    assert run_site.card(frozen)["site"] == "53.43960, 6.83210"
+    view = tasks._intake_view(_run_of(site, view))["card"]
+    assert "site" not in view  # a named site is its own two rows
+    shown = {r["param"]: r["value"] for r in view["rows"]}
+    assert (shown["site.lat"], shown["site.lon"]) == (SITE["lat"], SITE["lon"])
+    assert "site" not in {d["param"] for d in view["defaults"]}
+    out, task = _dispatched(tmp_path, rows)
+    assert out == run_actions.SITE_FETCH
+    assert task["steps"][1]["result"]["site"] == SITE
+    assert any(c == site_context.DEFAULT_OVERPASS_URL for c in offline)
+    # Exactly the granted point's square was asked for: its Overpass query and
+    # its terrain tiles, no other request (a shifted point changes both).
+    bbox = site_context.padded_bbox(run_site.boundary(SITE))
+    assert posts == [
+        urllib.parse.urlencode({"data": site_context.overpass_query(bbox)})
+    ]
+    tiles = {
+        site_context.TERRARIUM_URL.format(z=z, x=x, y=y)
+        for z, x, y in site_context.terrain_tiles_for(bbox)
+    }
+    assert set(offline) == {site_context.DEFAULT_OVERPASS_URL} | tiles
+
+
+def test_a_chat_started_v3_run_without_a_site_reads_none_named(
+    goal_host, site, offline, tmp_path
+):
+    base = [*goal_host["citations"], goal_host["goal"]]
+    view = _start(base, f"Site {uuid.uuid4().hex[:6]}")
+    rows = _intake(view, site)["rows"]
+    frozen = run_actions.stage_frozen(_task(rows), run_actions.SITE_KIND)
+    assert run_site.card(frozen)["site"] == "none named"
+    view = tasks._intake_view(_run_of(site, view))["card"]
+    assert view["site"] == "none named"
+    assert "site" not in {d["param"] for d in view["defaults"]}
+    _, task = _dispatched(tmp_path, rows)
+    assert offline == [] and task["steps"][-1]["result"]["state"] == "not_named"
+
+
+@pytest.mark.parametrize(
+    "lat_quote, lon_quote",
+    [
+        ("10.0000° N", "20.0000° E"),  # coordinates the user never typed
+        ("53.4396° N", "20.0000° E"),  # half of them typed
+    ],
+)
+def test_a_site_the_user_did_not_type_is_never_fetched(
+    site_host, site, offline, tmp_path, lat_quote, lon_quote
+):
+    base = [*site_host["citations"], site_host["goal"]]
+    cites = [
+        {
+            "param": "site.lat",
+            "turn_id": site_host["site"][0]["turn_id"],
+            "quote": lat_quote,
+            "unit": "°",
+        },
+        {
+            "param": "site.lon",
+            "turn_id": site_host["site"][0]["turn_id"],
+            "quote": lon_quote,
+            "unit": "°",
+        },
+    ]
+    view = _start([*base, *cites], f"Site {uuid.uuid4().hex[:6]}")
+    intake = _intake(view, site)
+    assert not [r for r in intake["rows"] if r["param"].startswith("site.")] or (
+        run_intake.site(intake["rows"])[0] is None
+    )
+    _, task = _dispatched(tmp_path, intake["rows"])
+    assert offline == []
