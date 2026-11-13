@@ -101,8 +101,8 @@ def loadflow_current(ctx) -> bool:
     load flow's verdict on the provenance graph (`provenance_graph.runs`)."""
     from services.provenance_graph import runs
     read = runs.read(ctx)
-    return (read.loadflow_ran and read.dispatch != "none"
-            and runs.results_verdicts(read)["loadflow"].state == "fresh")
+    # No load flow ran: no recorded counter, which reads stale. No dispatch: an edit cleared the results.
+    return read.dispatch != "none" and runs.results_verdicts(read)["loadflow"].state == "fresh"
 
 
 def _check_loadflow_rerun() -> dict | None:

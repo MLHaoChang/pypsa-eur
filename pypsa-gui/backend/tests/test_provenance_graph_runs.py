@@ -534,15 +534,14 @@ def test_loadflow_current_is_the_flow_s_load_flow_word(solved):
     n, ctx = solved
     assert run_lifecycle.loadflow_current(ctx) is False  # no load flow ran
     _loadflow(n, ctx)
-    assert (
-        run_lifecycle.loadflow_current(ctx) is True
-        and _answers()["loadflow"] == "fresh"
-    )
+    assert run_lifecycle.loadflow_current(ctx) is True
+    assert _answers()["loadflow"] == "fresh"
+    kept = n.generators_t.p
+    n.generators_t.p = kept.iloc[:, :0]  # the dispatch cleared, nothing else moved
+    assert run_lifecycle.loadflow_current(ctx) is False
+    n.generators_t.p = kept
     _value_edit(n, ctx)  # the dispatch it read no longer describes the inputs
     assert run_lifecycle.loadflow_current(ctx) is False
-    ctx.network_revision = (
-        int(ctx.network_revision or 0) + 1
-    )  # the seam's bump, which the flow's cache keys on
+    # The seam's counter bump, which the flow's cache keys on.
+    ctx.network_revision = int(ctx.network_revision or 0) + 1
     assert _answers()["loadflow"] == "stale"
-    n.generators_t.p = n.generators_t.p.iloc[:, :0]
-    assert run_lifecycle.loadflow_current(ctx) is False
