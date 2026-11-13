@@ -21,7 +21,11 @@ import pytest
 
 from harness.providers import live_media as lm
 from harness.providers.deepgram_stt import DeepgramProfile, DeepgramStreamingStt
-from harness.providers.livekit_media import MAX_API_RESPONSE_BYTES, LiveKitConfig, LiveKitTransport
+from harness.providers.livekit_media import (
+    MAX_API_RESPONSE_BYTES,
+    LiveKitConfig,
+    LiveKitTransport,
+)
 from harness.providers.openai_tts import OpenAiTts, OpenAiTtsProfile
 
 API_KEY = "APIlkTESTKEY"
@@ -1080,3 +1084,11 @@ def test_livekit_none_room_or_identity_is_a_typed_refusal():
         livekit(api).close_session(room=None)
     assert err.value.kind == "invalid_request"
     assert api.calls == []
+
+
+@pytest.mark.parametrize("model,voice", [(None, "alloy"), ("gpt-4o-mini-tts", None)])
+def test_openai_tts_unset_model_or_voice_is_a_typed_refusal(model, voice):
+    profile = OpenAiTtsProfile(model=model, voice=voice, languages=frozenset({"en"}))
+    with pytest.raises(lm.LiveMediaError) as err:
+        OpenAiTts(profile, credential=lambda: OA_KEY)
+    assert err.value.kind == "not_configured"
