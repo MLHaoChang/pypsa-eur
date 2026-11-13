@@ -291,9 +291,15 @@ def _units_on_mainland(n, island) -> dict | None:
     unit_bus = _unit_buses(n, island)
     named = set(island["units"])
     foreign: dict[str, list[str]] = {}
+    from services.adequacy.slack import is_slack_name, slack_generator_mask
+
     for table in _SUPPLY_TABLES:
         df = getattr(n, table)
+        # An LP slack (load shedding, DSR, VoLL) is not a real asset: never a mainland supply (GK A S1).
+        slack = slack_generator_mask(df) if table == "generators" else None
         for name in df.index:
+            if (slack is not None and bool(slack.at[name])) or is_slack_name(name):
+                continue
             bus = str(df.at[name, "bus"])
             if name not in named and bus in unit_bus.values():
                 foreign.setdefault(bus, []).append(str(name))

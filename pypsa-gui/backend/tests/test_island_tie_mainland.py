@@ -141,3 +141,23 @@ def test_a_grid_import_link_inside_the_island_is_refused_by_name():
     n.loads.at["hospital_load", "bus"] = "island"
     assert S.island_buses(n, island) == {"island", "mainland"}
     assert S.tie_state(n, island)["links"] == ["subsea_tie"]
+
+
+@pytest.mark.parametrize(
+    "slack",
+    [
+        {"name": "hospital_shed", "carrier": "load_shedding"},
+        {"name": "__dsr_hospital_load", "carrier": "AC"},
+    ],
+)
+def test_an_lp_slack_on_an_island_bus_is_not_a_mainland_supply(slack):
+    """GK A S1: a load-shedding or DSR slack generator is not a real asset, so it never marks
+    an island bus as the mainland's; the tie reads as on master."""
+    island = _island("eh_microgrid")
+    n = T.BUILDERS["eh_microgrid"]()
+    if slack["carrier"] not in n.carriers.index:
+        n.add("Carrier", slack["carrier"])
+    n.add(
+        "Generator", slack["name"], bus="hospital", carrier=slack["carrier"], p_nom=10.0
+    )
+    assert S.tie_state(n, island) == _MASTER_TIE_STATES["eh_microgrid"]
