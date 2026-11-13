@@ -155,6 +155,15 @@ _RULES: tuple[tuple[tuple[str, ...], str, str, str], ...] = (
 )
 
 
+def _constraint_hints() -> list[dict]:
+    """The named-constraint hints the infeasibility diagnosis just recorded."""
+    try:
+        from services.solver.diagnostics import take_constraint_hints
+        return take_constraint_hints()
+    except Exception:
+        return []
+
+
 def classify_failure(status: str | None, condition: str | None) -> dict | None:
     """
     Classify a finished solve outcome.
@@ -179,12 +188,17 @@ def classify_failure(status: str | None, condition: str | None) -> dict | None:
     haystack = cond_l
     for needles, category, title, hint in _RULES:
         if any(n in haystack for n in needles):
-            return {
+            card = {
                 "category": category,
                 "title": title,
                 "hint": hint,
                 "detail": condition or "",
             }
+            if category == "infeasible":
+                hints = _constraint_hints()
+                if hints:
+                    card["constraint_hints"] = hints
+            return card
 
     # Unknown non-success outcome — generic but still actionable.
     return {

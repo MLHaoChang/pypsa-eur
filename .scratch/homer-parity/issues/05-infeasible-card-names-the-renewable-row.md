@@ -1,6 +1,6 @@
 # 05 — The Issues panel's infeasible card names the minimum-renewable row
 
-Status: needs-triage
+Status: done
 
 Follow-up from homer-parity 01a (#1424), asked for by the UX reviewer.
 

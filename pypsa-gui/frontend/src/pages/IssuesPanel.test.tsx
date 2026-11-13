@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { simulationApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
+import { useSimulationStore } from '../store/simulationStore'
 import type { PreflightResult, Carrier } from '../api/types'
 import IssuesPanel from './IssuesPanel'
 
@@ -216,5 +217,28 @@ describe('IssuesPanel — preflight fetch failure vs. a genuine clean result (AD
     expect(screen.getByTestId('issue-title').textContent).toBe('Connected bus does not exist')
     expect(screen.queryByText('Could not run the validation check')).toBeNull()
     expect(screen.queryByText('All checks passed')).toBeNull()
+  })
+})
+
+describe('IssuesPanel — infeasible card names the constraint (homer-parity 05)', () => {
+  afterEach(() => useSimulationStore.getState().setLastFailure(null))
+
+  it('shows the constraint name, need/reach and a link that opens Off-grid constraints', async () => {
+    vi.mocked(simulationApi.preflight).mockResolvedValue({ ok: true, errors: 0, warnings: 0, issues: [] })
+    vi.mocked(networkApi.getCarriers).mockResolvedValue([])
+    useSimulationStore.getState().setLastFailure({
+      category: 'infeasible', title: 'No feasible solution', hint: 'Generic hint.', detail: 'infeasible',
+      constraint_hints: [{
+        constraint: 'Minimum renewable fraction', setting: 'offgrid',
+        text: 'the target of 100% (row min_renewable_fraction) needs 55,347.1 MWh of renewable electricity served; the renewable generators can produce at most 46,539.8 MWh.',
+      }],
+    })
+    renderPanel()
+    const hint = await screen.findByTestId('failure-constraint-hint')
+    expect(hint.textContent).toContain('Minimum renewable fraction')
+    expect(hint.textContent).toContain('needs 55,347.1 MWh')
+    expect(hint.textContent).toContain('at most 46,539.8 MWh')
+    await userEvent.click(screen.getByRole('button', { name: /Open Off-grid constraints/ }))
+    expect(useUIStore.getState().solverBlockRequest).toBe('offgrid')
   })
 })

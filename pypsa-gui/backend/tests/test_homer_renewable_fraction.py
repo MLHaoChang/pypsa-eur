@@ -2873,3 +2873,25 @@ def test_a_port_is_an_input_only_where_its_efficiency_in_time_is_negative(
     assert ("dac" in c["conversion_links"]) is is_input, c
     if is_input:
         assert c["conversion_inputs"]["dac"] == [2]
+
+
+def test_the_infeasible_card_carries_the_named_hint():
+    """homer-parity 05: the diagnosis hands its named-constraint hints to the
+    failure card, with the need/reach figures and the setting that edits the row."""
+    import queue
+
+    from services.failure_taxonomy import classify_failure
+    from services.solver.diagnostics import _diagnose_infeasibility
+
+    _diagnose_infeasibility(
+        _network(pv_max=5.0), SolverConfig(min_renewable_fraction=0.9), queue.SimpleQueue()
+    )
+    card = classify_failure("warning", "infeasible")
+    assert card["category"] == "infeasible"
+    (hint,) = card["constraint_hints"]
+    assert hint["constraint"] == "Minimum renewable fraction"
+    assert hint["setting"] == "offgrid"
+    assert "216.0 MWh" in hint["text"] and "at most 40.0 MWh" in hint["text"]
+    # Taken once: the next card carries none, and a non-infeasible card never does.
+    assert "constraint_hints" not in classify_failure("warning", "infeasible")
+    assert "constraint_hints" not in classify_failure("warning", "unbounded")

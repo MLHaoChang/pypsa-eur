@@ -24,11 +24,37 @@ Never imports from `solver_service`; `tests/test_solver_facade_surface.py`
 enforces that.
 """
 
+import threading
+
 import pandas as pd
 
 from services import period_utils as _period_utils
 from services.adequacy.slack import DSR_SLACK_CARRIER, is_slack_carrier
 from services.solver.periodized_costs import _annuity
+
+
+# The named-constraint hints of the last diagnosis on this thread (issue
+# homer-parity 05): a list of {constraint, text, setting}. The solve thread
+# diagnoses, then classifies the outcome (`failure_taxonomy.classify_failure`)
+# on the same thread, so the card carries them without a change to the
+# solver_service call. `setting` names the Solver-settings block that edits the
+# row (the UI maps it to a link); 01b's operating-reserve row appends here.
+_CONSTRAINT_HINTS = threading.local()
+
+
+def take_constraint_hints() -> list[dict]:
+    """The hints recorded by the last diagnosis on this thread, then cleared."""
+    hints = getattr(_CONSTRAINT_HINTS, "hints", None) or []
+    _CONSTRAINT_HINTS.hints = []
+    return hints
+
+
+def add_constraint_hint(constraint: str, text: str, setting: str) -> None:
+    """Record one named-constraint hint for the failure card."""
+    hints = getattr(_CONSTRAINT_HINTS, "hints", None)
+    if hints is None:
+        hints = _CONSTRAINT_HINTS.hints = []
+    hints.append({"constraint": constraint, "text": text, "setting": setting})
 
 
 def _diagnose_infeasibility(network, config, log_queue,
@@ -59,6 +85,7 @@ def _diagnose_infeasibility(network, config, log_queue,
             pass
 
     n = network
+    _CONSTRAINT_HINTS.hints = []
     emit("[INFEASIBLE] Diagnosing likely causes (heuristic — the LP solver found "
          "no feasible point):")
     hints = 0
@@ -166,9 +193,12 @@ def _diagnose_infeasibility(network, config, log_queue,
     # 2b) The minimum renewable fraction (homer-parity 01a): its row per
     #     period, what it needs and the most the renewables can produce.
     try:
-        from services.solver.renewable_fraction import infeasibility_lines
+        from services.solver.renewable_fraction import LABEL, infeasibility_lines
         for line in infeasibility_lines(n, config):
             emit(f"[INFEASIBLE]   • {line}")
+            add_constraint_hint(
+                LABEL, line[len(LABEL) + 2:] if line.startswith(f"{LABEL}: ") else line,
+                "offgrid")
             hints += 1
     except Exception:
         pass
