@@ -109,7 +109,7 @@ class OpenAiTts:
         shutdown = retires_on(self._profile.model)
         if shutdown is not None and self._today() >= shutdown:
             raise LiveMediaError(
-                "provider_error",
+                "model_retired",
                 f"The synthesis model was retired on {shutdown.isoformat()}; "
                 "choose a supported model.",
                 503,

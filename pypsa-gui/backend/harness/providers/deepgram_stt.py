@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
@@ -36,6 +37,23 @@ from harness.providers.live_media import (
 )
 
 ENDPOINT = "wss://api.deepgram.com/v1/listen"
+
+
+class _NoAuthorization(logging.Filter):
+    """Drop any record that would print the Authorization header."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            return "authorization" not in record.getMessage().lower()
+        except Exception:  # noqa: BLE001 — an unformattable record is dropped
+            return False
+
+
+# websockets logs every handshake header at DEBUG, the key included. Its own
+# logger is pinned to INFO and filtered, so no level setting reaches the key.
+WS_LOGGER = logging.getLogger(__name__ + ".websocket")
+WS_LOGGER.setLevel(logging.INFO)
+WS_LOGGER.addFilter(_NoAuthorization())
 MAX_STREAM_BYTES = 1800 * 48_000 * 2  # a full 30 min session of 48 kHz mono PCM
 MAX_FRAME_BYTES = 64 * 1024
 MAX_MESSAGE_CHARS = 64 * 1024
@@ -104,6 +122,7 @@ async def default_connect(url: str, headers: dict[str, str]) -> AsyncIterator[So
             additional_headers=headers,
             open_timeout=OPEN_TIMEOUT_S,
             max_size=MAX_MESSAGE_CHARS,
+            logger=WS_LOGGER,
         )
     except InvalidStatus as exc:
         status = exc.response.status_code
@@ -214,9 +233,13 @@ class DeepgramStreamingStt:
             return float(self._profile.sample_rate * 2)
         return None
 
-    async def _send_all(self, ws: Socket, frames: Any) -> None:
+    async def _send_all(
+        self, ws: Socket, frames: Any, cancel: CancelToken | None = None
+    ) -> None:
         rate = self._bytes_per_second()
         async for frame in _aiter(frames):
+            if cancel is not None and cancel.cancelled:
+                raise LiveMediaError("cancelled", "The recognition was cancelled.", 499)
             if not isinstance(frame, (bytes, bytearray)):
                 raise LiveMediaError(
                     "invalid_request", "Audio frames must be bytes.", 422
@@ -361,7 +384,7 @@ class DeepgramStreamingStt:
         self.usage = StreamUsage()
         headers = {"Authorization": f"Token {key}"}
         async with self._connect(self._url(pinned), headers) as ws:
-            sender = asyncio.ensure_future(self._send_all(ws, frames))
+            sender = asyncio.ensure_future(self._send_all(ws, frames, cancel))
             try:
                 while True:
                     raw = await self._recv(ws, cancel, sender)
@@ -379,9 +402,16 @@ class DeepgramStreamingStt:
 
 
 async def _aiter(frames: Any) -> AsyncIterator[Any]:
+    """Frames as an async stream that always yields to the event loop.
+
+    A synchronous source (a list, ``itertools.repeat``) never suspends on its
+    own, so without the ``sleep(0)`` it would starve cancel and idle timeout.
+    """
     if hasattr(frames, "__aiter__"):
         async for frame in frames:
             yield frame
+            await asyncio.sleep(0)
     else:
         for frame in frames:
             yield frame
+            await asyncio.sleep(0)

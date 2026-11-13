@@ -46,6 +46,8 @@ MAX_API_RESPONSE_BYTES = 64 * 1024
 _NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 _ROOM_SERVICE = "/twirp/livekit.RoomService"
 _DISPATCH_SERVICE = "/twirp/livekit.AgentDispatchService"
+# Answers that mean the server made no room.
+_REFUSALS = frozenset({"provider_auth", "provider_limit", "provider_error"})
 
 SyncClientFactory = Callable[[], httpx.Client]
 
@@ -244,17 +246,25 @@ class LiveKitTransport:
             raise LiveMediaError(
                 "invalid_request", "A bridge credential is required.", 422
             )
-        created = self._call(
-            _ROOM_SERVICE,
-            "CreateRoom",
-            {
-                "name": room,
-                "empty_timeout": EMPTY_TIMEOUT_S,
-                "departure_timeout": DEPARTURE_TIMEOUT_S,
-                "max_participants": MAX_PARTICIPANTS,
-            },
-            {"roomCreate": True},
-        )
+        try:
+            created = self._call(
+                _ROOM_SERVICE,
+                "CreateRoom",
+                {
+                    "name": room,
+                    "empty_timeout": EMPTY_TIMEOUT_S,
+                    "departure_timeout": DEPARTURE_TIMEOUT_S,
+                    "max_participants": MAX_PARTICIPANTS,
+                },
+                {"roomCreate": True},
+            )
+        except LiveMediaError as exc:
+            # A timeout, a cut connection or an unreadable answer may still
+            # have made the room: delete it best-effort. A refusal made none.
+            if exc.kind not in _REFUSALS:
+                with contextlib.suppress(Exception):
+                    self.close_session(room=room)
+            raise
         try:
             if created.get("name") not in (None, room):
                 raise LiveMediaError(
