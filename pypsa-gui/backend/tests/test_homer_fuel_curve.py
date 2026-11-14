@@ -800,7 +800,7 @@ def test_the_dc_backup_prices_fuel_from_a_genset_curve():
     assert cost["fuel_curve_priced"] == [units[0]]
     assert cost["fuel_heat_rate_priced"] == units[1:]
     (note,) = _curve_note(curved)
-    assert "MW-weighted with the backup heat rate and fuel price for " in note
+    assert "MW-weighted (p_nom) with the backup heat rate and fuel price for " in note
     assert other not in note and all(u in note for u in units)
     w = {u: float(n.generators.at[u, "p_nom"]) for u in units}
     (heat,) = [i["value"] for i in plain["cost"]["inputs"] if i["key"] == "heat_rate"]

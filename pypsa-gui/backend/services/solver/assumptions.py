@@ -764,16 +764,16 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 # priced on the stand-by term: no_load × p_nom × co2_emissions × price (EUR/h while on). No
                 # efficiency: the no-load term is already MWh of fuel (`services.fuel_curve`); the per-MWh adder
                 # above covers the output-proportional fuel (the slope) only. Transient like that adder.
-                nl_t = pd.Series(
+                no_load_t_co2_per_h = pd.Series(
                     {
                         g: _fuel_curve.no_load_fuel(gens.loc[g]) * float(co2[gens.at[g, "carrier"]])
                         for g in gens.index[gens["carrier"].isin(co2.index)]
                     },
                     dtype=float,
                 )
-                nl_t = nl_t[nl_t > 0]
-                if not nl_t.empty:
-                    nl_idx = list(nl_t.index)
+                no_load_t_co2_per_h = no_load_t_co2_per_h[no_load_t_co2_per_h > 0]
+                if not no_load_t_co2_per_h.empty:
+                    nl_idx = list(no_load_t_co2_per_h.index)
                     # A curve genset never carries a stand-by cost series (`fuel_curve.guard` refuses one before
                     # the LP is built), so its static stand-by cost is the whole of it.
                     if has_per_period_price:
@@ -782,7 +782,9 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         added_sb = [g for g in nl_idx if g not in sb_t.columns]
                         base_sb = n.get_switchable_as_dense("Generator", "stand_by_cost", inds=nl_idx)
                         for g in nl_idx:
-                            n.generators_t.stand_by_cost[g] = base_sb[g] + price_series * float(nl_t[g])
+                            n.generators_t.stand_by_cost[g] = (
+                                base_sb[g] + price_series * float(no_load_t_co2_per_h[g])
+                            )
 
                         def _restore_stand_by_series(saved=saved_sb, added=added_sb):
                             frame = n.generators_t.stand_by_cost
@@ -795,7 +797,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         undo_actions.append(("call", _restore_stand_by_series))
                     else:
                         original_sb = gens.loc[nl_idx, "stand_by_cost"].copy()
-                        gens.loc[nl_idx, "stand_by_cost"] = original_sb + nl_t * cfg.co2_price
+                        gens.loc[nl_idx, "stand_by_cost"] = original_sb + no_load_t_co2_per_h * cfg.co2_price
                         undo_actions.append(("col", "generators", "stand_by_cost", nl_idx, original_sb))
                     phase(
                         f"Applied the CO2 price to the no-load fuel of {len(nl_idx)} curve generator(s) via "

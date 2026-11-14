@@ -791,7 +791,7 @@ def fleet_fuel_curve(
     rule = (
         "the gensets' fuel curves: (slope + no-load fuel) × fuel price at rated output over the run hours"
         + (
-            f"; MW-weighted with the backup heat rate and fuel price for {', '.join(plain)}"
+            f"; MW-weighted (p_nom) with the backup heat rate and fuel price for {', '.join(plain)}"
             if plain
             else ""
         )
