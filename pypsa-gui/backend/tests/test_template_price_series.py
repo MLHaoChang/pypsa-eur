@@ -106,6 +106,17 @@ def test_minting_is_idempotent_on_content(db, seeded_identity, tmp_path):
 TID = "eh_datacenter_staged"
 
 
+def _hash(root):
+    """Add each entry's sha256, as the generator does (study harness 14, I8)."""
+    import hashlib
+
+    meta = root / TS.DIR / TS.META
+    body = json.loads(meta.read_text())
+    for e in body["series"]:
+        e["sha256"] = hashlib.sha256((root / TS.DIR / e["file"]).read_bytes()).hexdigest()
+    meta.write_text(json.dumps(body))
+
+
 def _template(tmp_path, entries):
     import project_templates.eh_templates as T
 
@@ -117,6 +128,7 @@ def _template(tmp_path, entries):
     ts = pd.DatetimeIndex(n.snapshots.get_level_values(-1)).unique()
     cfe = pd.Series(0.4 + 0.2 * np.cos(np.arange(len(ts)) / 24 * 2 * np.pi), index=ts)
     _write(src, entries, {"cfe.csv": cfe})
+    _hash(src)
     return src
 
 

@@ -1523,26 +1523,34 @@ def assign_profile(
         # the read above, so the growth placeholders' prior peaks stay current —
         # the same nesting as the upload path (`_apply_profile_upload`).
         # Overwrite semantics: regeneration replaces the same key.
-        with _user_ts_lock:
-            ctx.user_ts[key] = aligned
-            ctx.user_ts_meta[key] = full_meta
-            if companion is not None:
-                ckey = ("links", "p_min_pu", component)
-                ctx.user_ts[ckey] = companion
-                companion_meta = {k: v for k, v in full_meta.items()
-                                  if k not in ("replaced_series", "target", "meaning")}
-                ctx.user_ts_meta[ckey] = {
-                    **companion_meta, "target": ["links", "p_min_pu"],
-                    "kind": f"{full_meta.get('kind', 'availability')} (reverse bound)",
-                    "companion_of": "p_max_pu",
-                    "meaning": "reverse bound scaled by the same availability"}
-        _reapply_user_ts_to_network(n, store=ctx.user_ts)
-        # A user's profile sets the growth placeholders it covers (E1 follow-up).
-        growth_placeholders.mark_set(n, key[0], key[1], {key[2]: aligned}, prior,
-                                     project_dir=getattr(ctx, "storage_dir", None))
-        # A new profile invalidates solved dispatch exactly like a topology
-        # edit — flip freshness so Results can't serve the old solve.
-        dispatch_cleared = clear_dispatch(n)
+        # PG-04a F1: these routes cross no edit seam (/api/projects), so the
+        # fingerprint cache learns of the write here, after it, even when a
+        # step past the store write raises.
+        try:
+            with _user_ts_lock:
+                ctx.user_ts[key] = aligned
+                ctx.user_ts_meta[key] = full_meta
+                if companion is not None:
+                    ckey = ("links", "p_min_pu", component)
+                    ctx.user_ts[ckey] = companion
+                    companion_meta = {k: v for k, v in full_meta.items()
+                                      if k not in ("replaced_series", "target", "meaning")}
+                    ctx.user_ts_meta[ckey] = {
+                        **companion_meta, "target": ["links", "p_min_pu"],
+                        "kind": f"{full_meta.get('kind', 'availability')} (reverse bound)",
+                        "companion_of": "p_max_pu",
+                        "meaning": "reverse bound scaled by the same availability"}
+            _reapply_user_ts_to_network(n, store=ctx.user_ts)
+            # A user's profile sets the growth placeholders it covers (E1 follow-up).
+            growth_placeholders.mark_set(n, key[0], key[1], {key[2]: aligned}, prior,
+                                         project_dir=getattr(ctx, "storage_dir", None))
+            # A new profile invalidates solved dispatch exactly like a topology
+            # edit — flip freshness so Results can't serve the old solve.
+            dispatch_cleared = clear_dispatch(n)
+        finally:
+            from services import dirty_state
+
+            dirty_state.bump_inputs(ctx)
 
     if family_name == "renewable":
         what = f"generated {meta.get('technology', '?')} profile"

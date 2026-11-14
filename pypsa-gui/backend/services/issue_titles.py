@@ -185,6 +185,9 @@ ISSUE_TITLES: dict[str, str] = {
     "fixed_sizes_source_changed": "Network sizes no longer match the capacity run",
     "fixed_sizes_nameplate_empty": "Sizing off on the nameplate: every extendable asset's nameplate is 0",
     "fixed_sizes_zero_nameplate": "Asset with a nameplate of 0 is not built when sizing is off",
+
+    # Generator fuel curve (homer-parity 02a)
+    "fuel_curve_invalid": "Generator fuel curve cannot be priced",
 }
 
 

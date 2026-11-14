@@ -23,13 +23,21 @@ the electricity used on site (owner decision RENFRAC-ALL-1):
     whose H2 bus feeds a fuel cell) is not counted, or it would count twice.
     A Link that can run negative is a path back by itself, so a counted
     conversion Link never runs negative and its draw is p0 directly.
-  - Ambiguous: a path back AND a sink on a non-electrical bus it reaches
-    (an H2 bus with both an offtake and a fuel cell). A sink is an active
-    Load, or an active non-slack Generator that withdraws (R16: sign < 0, or
-    p_max_pu ≤ 0 throughout with p_min_pu < 0 somewhere). Fail closed: the
-    KPI is None when it draws, with a reason naming the Link(s) as an
-    ambiguous conversion (R15), and the row logs a warning; it is not
-    counted in the row.
+  - Net cluster (homer-parity 06): a path back AND a sink on a non-electrical
+    bus it reaches (an H2 bus with both an offtake and a fuel cell). A sink is
+    an active Load, or an active non-slack Generator that withdraws (R16:
+    sign < 0, or p_max_pu ≤ 0 throughout with p_min_pu < 0 somewhere). The
+    cluster is counted by its net draw: Σ p0·`_net_coef` over every Link
+    between it and electricity (what the electrolysers draw minus what the
+    fuel cell returns), signed and summed per period with the period's
+    weights, in the KPI and the row alike. Only a closed cluster is netted
+    (GK B N1): one with a Store or StorageUnit that can start full (not
+    cyclic, e_initial > 0; per period on a multi-period network) or a Link
+    delivering into it from a non-electrical bus outside it is open, and
+    fails closed like an unattributed path: the KPI is None with a reason
+    when its Links run and the row warns and leaves it out. So is a cluster
+    whose efficiency is NaN (N4). A solved period whose net is negative
+    reads None (N2, defence in depth).
   - Export is not use: elec→elec Links are not conversion, nor is a Link
     into a supply bus or a bus whose carrier names the grid or export.
   - Not guarded (R14j): renewable electricity dumped into a converter whose
@@ -457,13 +465,17 @@ def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
     docstring). Returns ``conversion_links`` (counted as use),
     ``conversion_inputs`` ({link: [k of each electrical input port]}),
     ``storage_links`` (their energy comes back to electricity) and
-    ``ambiguous_links`` (a path back AND a non-electrical sink, a Load or a
-    withdrawing Generator: fail closed)."""
+    ``net_clusters`` (homer-parity 06: a path back AND a non-electrical sink,
+    a Load or a withdrawing Generator). A net cluster is ``{"buses", "links"}``:
+    the non-electrical buses its conversion Links reach (clusters sharing a bus
+    merge) and every active non-source Link between them and electricity, each
+    once; it is counted by its net draw (`_net_coef`)."""
     out: dict[str, Any] = {
         "conversion_links": [],
         "conversion_inputs": {},
         "storage_links": [],
-        "ambiguous_links": [],
+        "net_clusters": [],
+        "open_clusters": [],
     }
     links = n.links
     if not len(links):
@@ -472,6 +484,7 @@ def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
     ports = {l: _ports(n, l) for l in active}
     reversible = {l for l in active if min_p_min_pu(n, l) < 0}
     loads = n.loads
+    clusters: list[set[str]] = []
     sink_buses = (
         {str(loads.at[l, "bus"]) for l in loads.index if _active(loads, l)}
         | {str(n.generators.at[g, "bus"]) for g in _withdrawing_generators(n)}
@@ -501,10 +514,191 @@ def _conversion(n, elec, supply, src_links) -> dict[str, Any]:
             out["conversion_links"].append(l)
             out["conversion_inputs"][l] = e_in
         elif seen & sink_buses:
-            out["ambiguous_links"].append(l)
+            merged = set(seen)
+            for c in [c for c in clusters if c & merged]:
+                clusters.remove(c)
+                merged |= c
+            clusters.append(merged)
         else:
             out["storage_links"].append(l)
+    counted = src_links | set(out["conversion_links"]) | set(out["storage_links"])
+
+    def touches(m, buses) -> bool:
+        return any(b in buses for _k, b in _bus_ports(n, m))
+
+    # A Link touching two clusters joins them (GK B N6), so it is counted in exactly one.
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(clusters)):
+            for j in range(i + 1, len(clusters)):
+                if any(
+                    touches(m, clusters[i]) and touches(m, clusters[j]) for m in active
+                ):
+                    clusters[i] |= clusters.pop(j)
+                    merged = True
+                    break
+            if merged:
+                break
+    for buses in clusters:
+        # A conversion or storage Link touching the cluster is counted as such already, never netted too (N6).
+        bridge = [
+            m
+            for m in active
+            if m not in counted
+            and any(b in elec for _k, b in _bus_ports(n, m))
+            and touches(m, buses)
+        ]
+        cluster = {"buses": sorted(buses), "links": sorted(bridge)}
+        why = _cluster_open(n, buses, elec, active, ports)
+        if why:
+            out["open_clusters"].append({**cluster, "why": why})
+        else:
+            out["net_clusters"].append(cluster)
+    out["net_clusters"].sort(key=lambda c: c["buses"])
+    out["open_clusters"].sort(key=lambda c: c["buses"])
     return out
+
+
+def _starts_full(n, comp: str, name, multi: bool) -> bool:
+    """GK B N1: can this Store/StorageUnit hold energy at the start that the cluster never drew? Not when it
+    starts empty (each period, on a multi-period network) or wraps cyclically (per period when multi-period).
+    A non-cyclic Store that may go below zero (``e_min_pu`` < 0) can, even from empty (GK B F1)."""
+    if comp == "Store":
+        df, init, cyc = n.stores, "e_initial", "e_cyclic"
+    else:
+        df, init, cyc = (
+            n.storage_units,
+            "state_of_charge_initial",
+            "cyclic_state_of_charge",
+        )
+
+    def _get(attr, default):
+        return df.at[name, attr] if attr in df.columns else default
+
+    if bool(_get(f"{cyc}_per_period", False)):
+        return False
+    if bool(_get(cyc, False)) and not multi:
+        return False
+    if (
+        comp == "Store"
+        and (n.get_switchable_as_dense("Store", "e_min_pu")[name] < 0).any()
+    ):
+        return True
+    empty = float(_get(init, 0.0) or 0.0) == 0.0
+    return not (empty and (not multi or bool(_get(f"{init}_per_period", False))))
+
+
+def _cluster_open(n, buses, elec, active, ports) -> str | None:
+    """GK B N1 (and its premise for N5): a net cluster is counted by its net draw only when it is closed, so
+    all it returns is electricity it drew. It is open when a Store or StorageUnit on its buses can start full
+    (or a Store can go below zero) or has an inflow, when a Generator on them can inject (a slack, a renewable,
+    a two-way withdrawer or any other supply; a one-way withdrawing sink is fine), when a Load on them can
+    inject (sign·p_set > 0), or when any Link delivers into one of its buses from a bus that is neither electrical nor the
+    cluster's (a source Link's port, a reformer or a multi-port Link from a fuel bus). Returns why, or None."""
+    multi = isinstance(n.snapshots, pd.MultiIndex)
+    for comp, df in (("Store", n.stores), ("StorageUnit", n.storage_units)):
+        for name in df.index:
+            if (
+                _active(df, name)
+                and str(df.at[name, "bus"]) in buses
+                and _starts_full(n, comp, name, multi)
+            ):
+                return f"{comp} {name} can start with energy the cluster never drew"
+    su = n.storage_units
+    inflow_t = getattr(n.storage_units_t, "inflow", None)
+    for name in su.index:
+        if not (_active(su, name) and str(su.at[name, "bus"]) in buses):
+            continue
+        series = (
+            inflow_t[name]
+            if inflow_t is not None and name in getattr(inflow_t, "columns", [])
+            else None
+        )
+        if float(su.at[name, "inflow"] if "inflow" in su.columns else 0.0) > 0 or (
+            series is not None and (series.fillna(0.0) > 0).any()
+        ):
+            return f"StorageUnit {name} has an inflow"
+    withdraw = _withdrawing_generators(n)
+    sinks = set(withdraw) - set(
+        _two_way_withdrawers(n, withdraw)
+    )  # GK B F1: a two-way one can inject
+    gens = n.generators
+    for g in gens.index:
+        if _active(gens, g) and str(gens.at[g, "bus"]) in buses and g not in sinks:
+            return f"Generator {g} can inject into it"
+    loads = n.loads
+    names = [
+        l for l in loads.index if _active(loads, l) and str(loads.at[l, "bus"]) in buses
+    ]
+    if names:  # GK B F1: a Load injects where sign·p_set > 0 (a negative p_set, PyPSA's sign −1)
+        p_set = n.get_switchable_as_dense("Load", "p_set")[names]
+        sign = (
+            loads["sign"].astype(float)
+            if "sign" in loads.columns
+            else pd.Series(-1.0, index=loads.index)
+        )
+        for l in names:
+            if (float(sign[l]) * p_set[l] > 0).any():
+                return f"Load {l} can inject into it"
+    for m in active:
+        ins, outs = ports[m]
+        delivers_to = list(outs)
+        from_buses = [b for _k, b in ins]
+        if (
+            min_p_min_pu(n, m) < 0
+        ):  # runs backwards too: every port can deliver and feed
+            delivers_to = from_buses = [b for _k, b in _bus_ports(n, m)]
+        if any(b in buses for b in delivers_to) and any(
+            b not in buses and b not in elec for b in from_buses
+        ):
+            return f"Link {m} delivers into it from outside"
+    return None
+
+
+def _bus_ports(n, link) -> list[tuple[int, str]]:
+    """Every set port of a Link, ``[(k, bus)]``."""
+    ins, _outs = _ports(n, link)
+    links = n.links
+    out = list(ins)
+    for c in links.columns:
+        if (
+            c.startswith("bus")
+            and c[3:].isdigit()
+            and int(c[3:]) not in {k for k, _b in ins}
+        ):
+            bus = str(links.at[link, c] or "").strip()
+            if bus:
+                out.append((int(c[3:]), bus))
+    return sorted(out)
+
+
+def _net_coef(n, link: str, elec: set[str], snapshots) -> pd.Series:
+    """MW a net-cluster Link withdraws from electricity per MW of p0 (homer-parity 06): Σ over its electrical
+    ports k of 1 (k = 0) or −efficiencyk(t), PyPSA's own p_k ÷ p0. An electrolyser gives +1, a fuel cell into
+    electricity −η1 (it returns), a reversible Link is signed by its p0."""
+    out = pd.Series(0.0, index=snapshots)
+    for k, b in _bus_ports(n, link):
+        if b in elec:
+            out += 1.0 if k == 0 else -_efficiency(n, link, snapshots, _eff_attr(k))
+    return out
+
+
+def _net_coefs(n, cls, snapshots) -> tuple[dict[str, pd.Series], list[dict]]:
+    """`_net_coef` of every net-cluster Link, and the clusters with a non-finite one (GK B N4): one source for the
+    KPI and the row (N3)."""
+    elec = _electrical_buses(n)
+    coef = {
+        l: _net_coef(n, l, elec, snapshots)
+        for c in cls["net_clusters"]
+        for l in c["links"]
+    }
+    unknown = [
+        c
+        for c in cls["net_clusters"]
+        if any(not np.isfinite(coef[l].to_numpy()).all() for l in c["links"])
+    ]
+    return coef, unknown
 
 
 def _link_outputs(links: pd.DataFrame, link: str) -> list[str]:
@@ -622,7 +816,12 @@ def _has_nan(n, cls, gp, lp, snapshots) -> bool:
         ),
         (n.links_t.p1, cls["source_links"]),
         (lp, cls["loads"]),
-        (n.links_t.p0, cls["source_links"] + cls["conversion_links"]),
+        (
+            n.links_t.p0,
+            cls["source_links"]
+            + cls["conversion_links"]
+            + [l for c in cls["net_clusters"] for l in c["links"]],
+        ),
     ]
     for frame, names in reads:
         cols = [c for c in names if c in getattr(frame, "columns", [])]
@@ -773,22 +972,38 @@ def renewable_fraction(
             + ": it reaches the site through a path the fraction does not count"
         )
         return out
-    ambiguous = [l for l in cls["ambiguous_links"] if (_col(n.links_t.p0, l) > 0).any()]
-    if ambiguous:
-        names = ", ".join(map(str, ambiguous))
-        out["reason"] = (
-            "the electricity drawn by "
-            + names
+    opened = [
+        c
+        for c in cls["open_clusters"]
+        if any((_col(n.links_t.p0, l) != 0).any() for l in c["links"])
+    ]
+    if opened:
+        out["reason"] = "; ".join(
+            "the net draw of "
+            + ", ".join(map(str, c["links"]))
             + " cannot be attributed: "
-            + names
-            + " feeds a bus with both a load and a path back to electricity "
-            "(ambiguous conversion), so it is neither counted as used on site "
-            "nor as stored"
+            + c["why"]
+            + ", so what it returns to electricity may not be electricity it drew"
+            for c in opened
         )
         return out
-
     if _has_nan(n, cls, gp, lp, sns):
         out["reason"] = "the dispatch has missing values (NaN)"
+        return out
+    net_coef, unknown = _net_coefs(n, cls, sns)
+    bad = [
+        l
+        for c in unknown
+        for l in c["links"]
+        if not np.isfinite(net_coef[l].to_numpy()).all()
+    ]
+    if bad:
+        # GK B N4: an unknown efficiency is unknown, never 0.
+        out["reason"] = (
+            "the efficiency of "
+            + ", ".join(map(str, bad))
+            + " is missing or not finite"
+        )
         return out
     nonren = pd.Series(0.0, index=sns)
     for g in cls["nonren_generators"]:
@@ -819,10 +1034,32 @@ def renewable_fraction(
     draw = pd.Series(0.0, index=sns)
     for l in cls["conversion_links"]:
         draw += _col(n.links_t.p0, l).clip(lower=0.0) * _draw_coef(n, cls, l, sns)
+    nets = {
+        i: sum(
+            (_col(n.links_t.p0, l) * net_coef[l] for l in c["links"]),
+            pd.Series(0.0, index=sns),
+        )
+        for i, c in enumerate(cls["net_clusters"])
+    }
+    for net in nets.values():
+        draw += net
     served_t = load + draw - slack - _unserved_mw(n, cls, unserved_t, sns)
 
     w = _weights(n, sns)
     per_of, periods = _periods(sns)
+    for i, net in nets.items():
+        # GK B N2 (defence in depth; N1 rules it out): a closed cluster cannot return more than it drew.
+        for P in periods:
+            mask = _period_mask(per_of, P)
+            wn = (w * net)[mask]
+            if float(wn.sum()) < -1e-6 * float(wn.clip(lower=0.0).sum()) - 1e-9:
+                out["reason"] = (
+                    "the net draw of "
+                    + ", ".join(map(str, cls["net_clusters"][i]["links"]))
+                    + f" is negative in period {P if P is not None else 'all'}: "
+                    "it returned more electricity than it drew"
+                )
+                return out
     years = n.investment_period_weightings["years"] if periods != [None] else None
     tot_served = tot_nonren = tot_draw = 0.0
     for P in periods:
@@ -852,7 +1089,7 @@ def renewable_fraction(
         nonrenewable_mwh=tot_nonren,
         renewable_mwh=tot_served - tot_nonren,
     )
-    if cls["conversion_links"]:
+    if cls["conversion_links"] or cls["net_clusters"]:
         out["note"] = CONVERSION_NOTE
     if tot_served <= 0:
         out["reason"] = NO_SERVED_REASON
@@ -979,11 +1216,13 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
         cls = classify(n)
         built: dict[Any, float] = {}
         setattr(n, _BUILT, {"target": f, "demand": built})
+        # GK B N4: a cluster with an unknown efficiency is not netted; it is refused like an open one (N1).
+        net_coef, unknown = _net_coefs(n, cls, snapshots)
         unseen = (
             cls["unattributed_generators"]
             + cls["unattributed_links"]
             + cls["unattributed_stores"]
-            + cls["ambiguous_links"]
+            + [l for c in cls["open_clusters"] + unknown for l in c["links"]]
         )
         if unseen:
             _safe_log(
@@ -1030,6 +1269,17 @@ def _wrap_with_min_renewable_fraction(network, user_fn, cfg, log_queue=None):
         draw = pd.DataFrame(
             {l: _draw_coef(n, cls, l, snapshots) for l in convs}, index=snapshots
         )
+        # homer-parity 06: a net cluster's Links, signed by `_net_coef` (no clip: the net draw is linear).
+        nets = [
+            l
+            for c in cls["net_clusters"]
+            if c not in unknown
+            for l in c["links"]
+            if lvar is not None and l in lvar.indexes["name"]
+        ]
+        for l in nets:
+            draw[l] = net_coef[l]
+        convs = convs + nets
         pmin_g = n.get_switchable_as_dense("Generator", "p_min_pu", snapshots)
         pmin_l = n.get_switchable_as_dense("Link", "p_min_pu", snapshots)
         g_src = (
@@ -1199,7 +1449,7 @@ def infeasibility_lines(n, cfg) -> list[str]:
         where = "" if P is None else f" in {P}"
         conv = (
             f", plus {_pct(f)} of what the conversion units draw"
-            if cls["conversion_links"]
+            if cls["conversion_links"] or cls["net_clusters"]
             else ""
         )
         lines.append(

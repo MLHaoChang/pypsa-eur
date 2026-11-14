@@ -455,20 +455,23 @@ def _exact_frame_json(frame):
 def solve_freshness(ctx=None):
     """LC-12: whether results describe the current inputs, for result reads.
 
-    `results_current` is Check answers' own guard (`calculations.
-    solve_matches_inputs`), so every read agrees on it. `inputs_changed_since_
-    solve` compares both recorded solve fingerprints with the current inputs,
-    None when no solve recorded them: no claim either way."""
+    `inputs_changed_since_solve` is the optimisation's verdict on the
+    provenance graph (`provenance_graph.runs`): True when stale (the inputs
+    changed, the dispatch no longer matches the network, or the current inputs
+    cannot be read: fail closed), False when fresh, None when no solve recorded
+    its inputs: no claim either way. `results_current` is Check answers' own
+    guard (`calculations.solve_matches_inputs`), so every read agrees on it; a
+    stale verdict is never current."""
     from harness.calculations import solve_matches_inputs
+    from services.provenance_graph import runs
     from services.pypsa_service import PyPSAService
     ctx = ctx or PyPSAService.get_active_context()
-    meta = getattr(ctx.network, "meta", None) or {}
-    solved = meta.get("assistant_solve_input_fingerprint")
-    if not solved:
+    read = runs.read(ctx)
+    if read.solved is None:
         return {"inputs_changed_since_solve": None, "results_current": False}
-    changed = (solved != _network_input_fingerprint(ctx)
-               or meta.get("assistant_solve_exact_input_fingerprint") != _network_input_fingerprint(ctx, exact=True))
-    return {"inputs_changed_since_solve": changed, "results_current": solve_matches_inputs(ctx)}
+    changed = runs.results_verdicts(read)["optimisation"].state != "fresh"
+    return {"inputs_changed_since_solve": changed,
+            "results_current": not changed and solve_matches_inputs(ctx)}
 
 
 _EXTRA_PORT = re.compile(r"(bus|efficiency)(\d+)")
@@ -548,6 +551,13 @@ def _network_input_fingerprint(ctx, *, exact=False):
         if present:
             parts.append("envelope-floors/1")
             parts.append(_exact_frame_json(frame[present]) if exact else frame[present].to_json())
+    # AS-02, homer-parity 02a: a generator fuel curve's inputs, which the solve staging turns into marginal_cost
+    # and stand_by_cost (both already hashed as PyPSA columns). Appended only when present.
+    from services.fuel_curve import COLUMNS as FUEL_CURVE_COLUMNS
+    present = [c for c in FUEL_CURVE_COLUMNS if c in n.generators.columns]
+    if present:
+        parts.append("fuel-curve/1")
+        parts.append(_exact_frame_json(n.generators[present]) if exact else n.generators[present].to_json())
     # AS-05: the PCS/STATCOM tags and their costs change the LP rows and the
     # objective. Appended only when a Store or Link carries one.
     from services.solver.pcs_statcom import pcs_statcom_tags

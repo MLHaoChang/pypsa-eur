@@ -1087,83 +1087,49 @@ def acknowledge_many(project_dir: pathlib.Path, items: list[dict],
 
 # ── Results freshness ───────────────────────────────────────────────────────
 
-def _freshness(n, *, running: bool) -> str:
-    if running:
-        return "running"
+def _verdict_word(verdict) -> str:
+    """A run kind's verdict in the flow's words: an uncompared verdict is its own word, never fresh (#1170)."""
+    return verdict.state if verdict.state in ("fresh", "stale") else "uncompared"
+
+
+def _run_states(*, solving: bool) -> dict[str, str]:
+    """Each run kind's freshness: running and not_run from the run records, the rest from the run's verdict on
+    the provenance graph (`provenance_graph.runs`, slice 04), read once and cached on the edit counter (the header
+    polls this). The load flow's verdict carries the dispatch it read through the graph (W4b, S4)."""
     from services import study_state
-    from services.dispatch_status import dispatch_status
-    from services.pypsa_service import PyPSAService
+    from services.provenance_graph import runs
 
-    try:
-        dispatch = dispatch_status(n)
-    except Exception:                                    # noqa: BLE001
-        dispatch = "none"
-    try:
-        record = PyPSAService.get_solver_state().get("eh_study")
-    except Exception:                                    # noqa: BLE001
-        record = None
-    studied = isinstance(record, dict) and record.get("status") == "done"
-    if dispatch == "stale" or (studied and study_state.edited_since(record) is True):
-        return "stale"
-    if dispatch == "fresh" or studied:
-        return "fresh"
-    return "not_run"
+    read = runs.read(cached=True)
+    verdicts = runs.results_verdicts(read)
+    no_results = read.dispatch == "none"  # an edit cleared them, or nothing ran
+    if study_state.running_study() is not None:
+        study = "running"
+    elif not read.study_done:
+        study = "not_run"
+    else:
+        study = _verdict_word(verdicts["study"])
+    return {
+        "optimisation": "running" if solving else "not_run" if no_results
+        else _verdict_word(verdicts["optimisation"]),
+        "study": study,
+        "loadflow": "running" if solving else "not_run" if no_results or not read.loadflow_ran
+        else _verdict_word(verdicts["loadflow"]),
+    }
 
 
-def _loadflow_freshness(dispatch: str, *, running: bool) -> str:
-    """The load flow's own freshness (W4b, S4): its results exist, the dispatch
-    it read is still fresh, and the network was not edited since it ran (the
-    edit counter it recorded, `ac_pf_network_revision`). A result without a
-    recorded counter (an older save) reads stale, the safe direction."""
+def _freshness(states: dict[str, str], *, running: bool) -> str:
+    """The one `freshness` word: the optimisation's and the study's, the worst first."""
     if running:
         return "running"
-    from services import dirty_state
-    from services.pypsa_service import PyPSAService
-
-    try:
-        state = PyPSAService.get_solver_state()
-    except Exception:                                    # noqa: BLE001
-        state = {}
-    if state.get("ac_pf_results") is None:
-        return "not_run"
-    if dispatch == "none":                               # cleared by an edit, as the solve's
-        return "not_run"
-    captured = state.get("ac_pf_network_revision")
-    if (dispatch != "fresh" or not isinstance(captured, int) or isinstance(captured, bool)
-            or captured != dirty_state.revision()):
-        return "stale"
-    return "fresh"
+    kinds = (states["optimisation"], states["study"])
+    return next((w for w in ("stale", "uncompared", "fresh") if w in kinds), "not_run")
 
 
-def _freshness_by_kind(n, *, solving: bool, has_study: bool) -> dict[str, str | None]:
+def _freshness_by_kind(states: dict[str, str], *, has_study: bool) -> dict[str, str | None]:
     """One freshness per run kind (integration-sensitivities §3, S4), beside
-    the one `freshness` word. The optimisation's is its dispatch; the study's
-    its record (null for a project with no study); the load flow's its own.
+    the one `freshness` word: the study's is null for a project with no study.
     Never feeds `run_ready`."""
-    from services import study_state
-    from services.dispatch_status import dispatch_status
-    from services.pypsa_service import PyPSAService
-
-    try:
-        dispatch = dispatch_status(n)
-    except Exception:                                    # noqa: BLE001
-        dispatch = "none"
-    optimisation = ("running" if solving else "stale" if dispatch == "stale"
-                    else "fresh" if dispatch == "fresh" else "not_run")
-    study = None
-    if has_study:
-        try:
-            record = PyPSAService.get_solver_state().get("eh_study")
-        except Exception:                                # noqa: BLE001
-            record = None
-        if study_state.running_study() is not None:
-            study = "running"
-        elif not (isinstance(record, dict) and record.get("status") == "done"):
-            study = "not_run"
-        else:
-            study = "stale" if study_state.edited_since(record) is True else "fresh"
-    return {"optimisation": optimisation, "study": study,
-            "loadflow": _loadflow_freshness(dispatch, running=solving)}
+    return {**states, "study": states["study"] if has_study else None}
 
 
 def _loadflow_requested(facts) -> bool:
@@ -1282,8 +1248,9 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     # flow; `running` also counts a study, as the one `freshness` word does.
     solving = _solver_in_flight()
     running = solving or study_state.running_study() is not None
-    freshness = _freshness(n, running=running)
-    by_kind = _freshness_by_kind(n, solving=solving, has_study=body is not None)
+    states = _run_states(solving=solving)
+    freshness = _freshness(states, running=running)
+    by_kind = _freshness_by_kind(states, has_study=body is not None)
     loadflow_requested = _loadflow_requested(facts)
 
     run_request = {"optimisation": True, "study": study_requested,

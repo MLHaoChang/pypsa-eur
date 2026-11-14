@@ -195,7 +195,9 @@ def _number_verdict(param, field, unit):
     """`(scale, stored unit, None)` or `(None, None, gap)` for a numeric field."""
     if field["kind"] in ("year", "count"):
         return 1, field.get("unit_storage") or "", None
-    verdict, reason = T._column_verdict(param, field, unit, {})
+    # A cost field may carry its own money basis (business case 08b: a line's price is
+    # in the case's currency and the line's money year); none is `money_basis_missing`.
+    verdict, reason = T._column_verdict(param, field, unit, field.get("money") or {})
     if reason:
         return (
             None,

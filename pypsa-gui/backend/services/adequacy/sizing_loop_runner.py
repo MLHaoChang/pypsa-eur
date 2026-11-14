@@ -313,12 +313,17 @@ def _prepare(n, cfg, undo: list) -> dict:
     """The project solve's pre-LP transforms on the private copy `n`, and the `n.optimize` keywords it would pass.
     Each transform's restore goes on `undo`: the modelling assumptions register their VOLL and DSR slacks in the
     open project's transient rows, and only their restore clears them."""
+    from services import fuel_curve
     from services import solver_service as ss
     from services.adequacy.energization import apply_energization
 
+    # homer-parity 02a (GK B ruling 1, option A): stage the fuel curve costs on the copy, then build the chain
+    # before the transforms, as `run_simulation` does: the chain reads the network as the solve starts, and a CO2
+    # price's cost series is not a user's. Every other wrap reads the network inside its callback.
+    fuel_curve.apply(n, stamp=False)
+    kw = {"extra_functionality": ss.build_lp_chain(n, cfg, None)}
     undo.append(apply_energization(n))
     undo.append(ss._apply_modelling_assumptions(n, cfg, lambda _msg: None)[0])
-    kw = {"extra_functionality": ss.build_lp_chain(n, cfg, None)}
     if getattr(cfg, "transmission_losses", False):
         kw["transmission_losses"] = ss._compute_loss_atol(n)
     return kw
@@ -376,6 +381,11 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
         watcher.arm()
         status, condition = n.optimize(solver_name=solver_name, **_prepare(n, cfg, undo), **(solver_options or {}))
         watcher.disarm()
+        # Reverse the objective scale (user or auto) on n.objective and the duals, as run_simulation does: every
+        # round's `cost_eur` is in EUR (GK A A2-1 on #1466; the missing reversal predates it).
+        from services.solver.objective import _rescale_results_for_objective
+
+        _rescale_results_for_objective(n)
         if status != "ok":
             return {"status": status, "condition": condition, "info": info}
         return {"status": status, "condition": condition, "cost_eur": float(n.objective),
@@ -384,6 +394,11 @@ def solve_once(base, config, inp: SizingInputs, state: dict, *, reduce: bool, so
         return {"status": "aborted", "condition": "stopped during the solve", "info": info}
     except Exception as exc:                                  # noqa: BLE001 - the controller reads a status
         logger.exception("sizing loop: the solve raised")
+        # A fuel curve refusal (homer-parity 02a) reads as its user-facing words; anything else names its type.
+        from services.fuel_curve import FuelCurveError
+
+        if type(exc) is FuelCurveError:
+            return {"status": "error", "condition": str(exc), "kind": "fuel_curve_invalid", "info": info}
         return {"status": "error", "condition": f"{type(exc).__name__}: {exc}", "info": info}
     finally:
         watcher.disarm()

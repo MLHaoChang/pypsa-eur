@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 #: `memory` is built by `memory.py` (slice 07, MEMORY-1).
 NODE_KINDS = ("input", "derived", "run", "surface", "memory")
-#: `computed_in` is built by the runs slice (04); `recalled_from` by `memory.py`.
+#: `computed_in` is built by `runs.py` (slice 04); `recalled_from` by `memory.py`.
 EDGE_KINDS = (
     "derived_from",
     "priced_through",
@@ -22,8 +22,8 @@ EDGE_KINDS = (
     "shown_in",
     "recalled_from",
 )
-RESERVED_NODE_KINDS = ("run",)
-RESERVED_EDGE_KINDS = ("computed_in",)
+RESERVED_NODE_KINDS: tuple[str, ...] = ()
+RESERVED_EDGE_KINDS: tuple[str, ...] = ()
 #: The edges `staleness` and `why` walk, from a value towards what it was made from.
 WALKED = ("derived_from", "priced_through", "computed_in", "recalled_from")
 

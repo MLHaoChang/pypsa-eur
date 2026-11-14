@@ -91,7 +91,9 @@ CARD_ONLY_TOOLS: frozenset[str] = frozenset({"site_scene_apply", "confirm_unreco
 # card, in Guided and Expert. A write-tier tool Expert would run uncarded, so
 # this set also lifts it past the `none` policy, and no auto-approve tier,
 # saved rule, task, brief or run envelope stands in for the card.
-ALWAYS_CARD_TOOLS: frozenset[str] = frozenset({"propose_memory"})
+# Business case 08b (GK B (54) Q1, #1072): a price is only ever the user's own, bound at
+# their card; no policy, task, brief or run envelope applies one.
+ALWAYS_CARD_TOOLS: frozenset[str] = frozenset({"propose_memory", "set_business_case_lines"})
 
 # Per-tier auto-approve policy (#18). A comma-separated list of safety tiers
 # (intersected with DESTRUCTIVE_TIERS — only destructive/execution tiers are

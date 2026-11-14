@@ -38,6 +38,7 @@ from collections.abc import Iterable
 import numpy as np
 
 from models.flex_archetypes import BackupSpec, RedundancyTier
+from services import fuel_curve
 from services.adequacy.site_peak import BACKUP_STRING_PREFIX as STRING_PREFIX
 from services.adequacy.site_peak import BACKUP_SPARE_PREFIX as SPARE_PREFIX
 from datetime import UTC
@@ -97,6 +98,11 @@ class DcBackupError(ValueError):
     def __init__(self, message: str, field: str):
         super().__init__(message)
         self.field = field
+
+
+class DcBackupBusy(Exception):
+    """The project's template marker stayed locked past its bound (another
+    marker write or an undo holds it): nothing was stored; retry."""
 
 
 def _finite(name: str, *values) -> None:
@@ -1330,6 +1336,16 @@ def assess(
         genset_mw_source=fleets["all_genset"]["source"],
     )
     cost["genset_unit_mw"] = unit
+    if curved := [
+        g for g in gens if fuel_curve.curve_of(n.generators.loc[g]) is not None
+    ]:
+        # homer-parity 02a, GK B ruling 3: stated precedence. The backup NPV is off the LP and never summed into opex.
+        # The machine key (GK B D3); the note below is the words.
+        cost["fuel_curve_ignored"] = curved
+        cost["notes"].append(
+            f"Fuel curve not used here: fuel is priced from the backup heat rate ({heat_src}); the fuel curve on "
+            f"{', '.join(curved)} (slope and no-load fuel) is read only by the solve"
+        )
     return {
         "mode": backup.mode,
         "sizing": sizing,
@@ -1407,12 +1423,22 @@ def save_backup(project_dir, tpl, backup: dict) -> dict:
         checked = tpl.dc_load_spec(tid, raw, planning)
     except DcLoadError as exc:
         raise DcBackupError(str(exc), exc.field) from None
-    meta = _meta(project_dir)
-    # Only what was set is stored, so a default reloads as assumed.
-    meta["dc_load"]["spec"]["backup"] = checked.backup.model_dump(
-        mode="json", exclude_unset=True
-    )
-    _write_meta(project_dir, meta)
+    from services.template_marker import write_lock
+
+    try:
+        # Read and write under the marker's lock, so an undo's restore
+        # (growth_placeholders.restore_meta) never writes over it.
+        with write_lock(project_dir):
+            meta = _meta(project_dir)
+            # Only what was set is stored, so a default reloads as assumed.
+            meta["dc_load"]["spec"]["backup"] = checked.backup.model_dump(
+                mode="json", exclude_unset=True
+            )
+            _write_meta(project_dir, meta)
+    except TimeoutError:
+        raise DcBackupBusy(
+            "backup: the project's template metadata is busy; try again"
+        ) from None
     return meta["dc_load"]["spec"]["backup"]
 
 

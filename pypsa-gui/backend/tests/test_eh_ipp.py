@@ -56,6 +56,8 @@ def test_it_is_registered_with_its_sidecars_and_series():
     assert json.loads((TPL_DIR / TID / T.SOLVER_FILE).read_text()) == \
         json.loads(json.dumps(T.solver_config(TID)))
     shipped = json.loads((TPL_DIR / TID / "price_series" / "meta.json").read_text())
+    for entry in shipped["series"]:  # the generator adds each file's hash (study harness 14)
+        assert entry.pop("sha256")
     assert shipped == json.loads(json.dumps(M.series_meta()))
 
 

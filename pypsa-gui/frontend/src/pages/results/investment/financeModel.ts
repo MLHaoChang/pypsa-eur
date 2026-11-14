@@ -632,10 +632,14 @@ export function studyProgress(s: InvestmentCaseStudy | null | undefined): unknow
   return null
 }
 
-/** Stale: the record's own flag or the stored report's staleness block. */
+/** Stale: the stored report's verdict on the provenance graph (PG-05), the one source; any state but
+ *  fresh is stale (an uncompared verdict never reads fresh). A stored report whose block carries no
+ *  verdict is not read as fresh: its own flag stands, and a present report with no flag is stale. */
 export function studyStale(s: InvestmentCaseStudy | null | undefined):
     { stale: boolean; changed: string[]; reason: string | null } {
-  const stale = s?.stale === true || s?.report?.stale === true
+  const block = s?.report
+  const verdict = block?.verdict
+  const stale = verdict ? verdict.state !== 'fresh' : block?.stale === true || block?.present === true
   const rep = s?.report as { reason?: unknown } | undefined
   const reason = stale && typeof rep?.reason === 'string' ? rep.reason : null
   return { stale, changed: stale ? (s?.report?.changed ?? []).filter(x => typeof x === 'string') : [],

@@ -316,6 +316,7 @@ def get_upload_blob(
     meta = upload_service.get_upload_meta(
         project.name, file_id, project_dir=project.directory
     )
+    upload_service.refuse_expired_delivery(meta)
     if meta.kind == "agent_export" or meta.assurance_sha256 is not None:
         import hashlib
         from services.assurance_artifacts import verify_chart

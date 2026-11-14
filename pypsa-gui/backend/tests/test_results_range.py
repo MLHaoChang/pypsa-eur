@@ -412,7 +412,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
     aggregates.update({"/loadflow-view", "/run-view", "/run-evidence.json"})
     # Business case (business-case 08a): the inputs state, the preset variants
     # and the stored case are structured documents, not index/columns/data.
-    aggregates.update({"/business_case", "/business_case/inputs", "/business_case/preset"})
+    aggregates.update({"/business_case", "/business_case/inputs", "/business_case/preset",
+                       "/business_case/options"})
     unclassified = declared - ranged - aggregates
     assert not unclassified, (
         f"unclassified /results endpoints: {sorted(unclassified)} — add each to "

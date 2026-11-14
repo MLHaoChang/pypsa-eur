@@ -24,6 +24,7 @@ import pypsa
 #
 # The carved modules never import back from here — dependencies run one way,
 # and `tests/test_solver_facade_surface.py` enforces both halves of that.
+from services import fuel_curve
 from services.solver.diagnostics import (  # noqa: F401
     _diagnose_infeasibility,
     _emit_core_post_solve_diagnostics,
@@ -568,6 +569,9 @@ def build_lp_chain(network, config, log_queue):
     scale last). `run_simulation` and the AS-06 sizing loop both build their LP from it, so the two cannot
     drift. Raises what `_compile_extra_functionality` raises."""
     extra_fn = _compile_extra_functionality(config.extra_functionality_code)
+    # homer-parity 02a (GK B ruling 1): a fuel curve the LP cannot price refuses every solve path. Read here,
+    # before the transient transforms; raised when the LP is built.
+    extra_fn = fuel_curve.wrap_lp(network, extra_fn, log_queue)
     # Wrap whatever the user wrote (or nothing) with our auto-curtailment-cost
     # callback if any generator carries a non-zero `curtailment_cost`. This
     # mirrors the user's expectation that "set curtailment_cost on a renewable
@@ -860,6 +864,10 @@ def run_simulation(
             # presolve. Cleared in both modes so PF also sees a clean state
             # whenever the user wants to resolve from scratch.
             _clear_dispatch_fix(network, phase)
+            # homer-parity 02a: a generator fuel curve sets its marginal and stand-by costs from the curve and
+            # the current p_nom (pre-flight refused a curve it cannot price). Lasting and idempotent: the form
+            # writes the same values, so this only catches a p_nom edited another way.
+            fuel_curve.apply(network)
             # Issue 30 / SP-1: the lasting normalisations above (transformer
             # types, user series, dynamic indexes, a stale dispatch fix) are
             # done: retake the snapshot as these inputs, which the network

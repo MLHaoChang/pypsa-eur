@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A file the copilot delivers now expires after 7 days. After that its download and the delivery tools refuse it with `delivery_expired`; the file stays on disk, and exporting it again makes a fresh delivery.

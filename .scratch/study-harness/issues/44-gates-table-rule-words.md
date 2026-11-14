@@ -3,7 +3,7 @@
 
 # 44 — The report's gates table prints raw result-gate rule ids
 
-Status: ready-for-agent
+Status: done (#1513)
 Model tier: sonnet
 Size: M
 Blocked by: none

@@ -220,6 +220,8 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-11-07/manifest.json",
     # DC business case 02: the non-energy cost defaults.
     "services/library/defaults_pack/versions/2026-11-10/manifest.json",
+    # Campus-library-gaps 03: the 220/110 kV losses (campus sha256 only).
+    "services/library/defaults_pack/versions/2026-11-13/manifest.json",
     # The shipped common Library items (GS-EU P2d): `common.COMMON_DIR` = the module's
     # sibling `common_items/`; one probe per shipped kind.
     "services/library/common_items/tariff/nl-tennet-2026-hs.json",

@@ -109,4 +109,6 @@ def test_the_docs_stay_compact():
     # 4400 (owner G2P-14-DOCCAP): room for Bus lost_production_value and Generator process_role.
     # 4500 (owner G2P-15-DOCCAP): room for Bus temperature_c and pressure_bar, Link max_supply_temp_c and
     # max_pressure_bar (grid-to-process issue 15, heat and steam levels).
-    assert len(attrs_doc()) < 4500
+    # 4600 (owner HOMER-02A-DOCCAP): room for the Generator fuel curve (fuel_price, fuel_curve_slope,
+    # fuel_curve_no_load) and its derived stand_by_cost (homer-parity 02a).
+    assert len(attrs_doc()) < 4600

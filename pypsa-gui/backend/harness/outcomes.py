@@ -976,6 +976,7 @@ def note_undo() -> dict:
                 "digest": network_digest(_load_netcdf(entry["netcdf"])),
                 "user_ts": entry["user_ts"],
                 "template_meta": entry["template_meta"],
+                "template_rows": growth_placeholders.undo_rows(entry["template_meta"]),
             }
         with PyPSAService.get_lock():
             ctx = PyPSAService.get_active_context()
@@ -1033,6 +1034,7 @@ def read_undo(note: dict | None) -> dict:
             pops, depth = undo_service.pops_and_depth()
             digest = network_digest(ctx.network)
             meta = growth_placeholders.snapshot_meta()
+            rows = growth_placeholders.undo_rows(meta)
             user_ts = _serialize_user_ts()
             end = dirty_state.revision(ctx)
     except Exception:  # noqa: BLE001 - an unreadable network reads uncertain
@@ -1045,8 +1047,16 @@ def read_undo(note: dict | None) -> dict:
         "depth": depth,
         "digest": digest,
         "template_meta": meta,
+        "template_rows": rows,
         "user_ts": user_ts,
     }
+
+
+#: What a completed undo's read-back does not compare (#1170): the template
+#: marker outside the keys an undo restores, which the undo leaves as they are.
+UNDO_NOT_COMPARED = (
+    "template_meta outside growth_inputs and the placeholder ledger rows",
+)
 
 
 def classify_undo(note: dict | None, read: dict | None) -> dict:
@@ -1090,13 +1100,13 @@ def classify_undo(note: dict | None, read: dict | None) -> dict:
     if (
         read.get("digest") != expected["digest"]
         or read.get("user_ts") != expected["user_ts"]
-        or (
-            expected["template_meta"] is not None
-            and read.get("template_meta") != expected["template_meta"]
-        )
+        # Only the marker keys an undo restores are compared (UM10-UNDO-1,
+        # GK B K3): a later write it keeps, such as the DC backup, is not a
+        # miss. Unreadable rows compare unequal.
+        or read.get("template_rows") != expected.get("template_rows")
     ):
         return out("uncertain", "not_restored")
-    return out("completed")
+    return {**out("completed"), "not_compared": list(UNDO_NOT_COMPARED)}
 
 
 # ── Issue 04 S3: network import and export (GK B (26) X4–X8) ───────────────

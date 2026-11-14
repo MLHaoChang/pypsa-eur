@@ -62,6 +62,8 @@ SETTINGS_EDITS = frozenset({
     "update_project_settings",
     # LV08 B2a: Library writes (as import_urdb_tariff) and the finance inputs.
     "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
+    # Business case 08b: the business-case lines (a diff card with each price's source).
+    "set_business_case_lines",
     # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
     "import_map_geometry",
     # LV08 B-campus: the campus file, the readiness limits, the study's dispatch, grid-code drafts
@@ -252,13 +254,9 @@ def _digest(card: dict) -> str:
 
 
 def _fingerprint() -> str | None:
-    from services import workflow_tools
-    from services.pypsa_service import PyPSAService
-
-    try:
-        return workflow_tools._network_input_fingerprint(PyPSAService.get_active_context())
-    except Exception:  # noqa: BLE001 — a network the fingerprint cannot read binds nothing
-        return None
+    """The active project's input fingerprint, or None: a network it cannot read binds nothing."""
+    from services.provenance_graph.runs import active_input_fingerprint
+    return active_input_fingerprint()
 
 
 def preview(tool_name: str, args: dict, *, with_state: bool = True) -> dict:
@@ -389,11 +387,11 @@ def approved_digest() -> str | None:
 
 
 def _results_stale() -> bool:
-    from services.pypsa_service import PyPSAService
+    """The optimisation's verdict on the provenance graph is stale (`provenance_graph.runs`). Results no solve
+    recorded the inputs of (a loaded network) compared nothing and are not claimed stale, as before."""
+    from services.provenance_graph import runs
 
-    network = PyPSAService.get_network()
-    solved = network.meta.get("assistant_solve_input_fingerprint") if hasattr(network, "meta") else None
-    return bool(solved) and solved != _fingerprint()
+    return runs.results_verdicts(runs.read())["optimisation"].state == "stale"
 
 
 # Tools whose route pushes their own one undo step (not a turn snapshot, so the
@@ -1892,3 +1890,4 @@ from harness import (  # noqa: E402,F401
     edit_card_campus, edit_card_library, edit_card_records, edit_card_reports, edit_card_site)
 from harness import requirements  # noqa: E402,F401 — issue 23: set_requirement's card
 from harness import edit_card_unrecorded  # noqa: E402,F401 — RP-20: confirm_unrecorded_series's card
+from harness import edit_card_business_case  # noqa: E402,F401 — BC 08b: set_business_case_lines's card

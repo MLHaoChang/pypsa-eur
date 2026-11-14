@@ -187,6 +187,7 @@ ROUTE_SURFACES = {
     "GET /answers/{answer_id}": "answer_fetch",
     "GET /answers/{answer_id}/export": "answer_export",
     "GET /evidence/{evidence_id}": "tool_result_frames",
+    "GET /evidence/{evidence_id}/why/{metric}": "tool_result_frames",
     "GET /{session_id}/progress": "tool_result_frames",
     "GET /runs/{task_id}/view": "run_monitor",
     "POST /runs/{task_id}/present": "run_monitor",

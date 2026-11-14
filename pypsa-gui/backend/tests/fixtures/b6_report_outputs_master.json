@@ -67,6 +67,7 @@
   "commercial": null,
   "curtailment_cost": 0.0,
   "fom": 714.28571,
+  "fuel": [],
   "opex": 0.0,
   "pcs_statcom_notes": [],
   "storage_capex_expansion": 0.0,

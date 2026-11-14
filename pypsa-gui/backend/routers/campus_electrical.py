@@ -354,6 +354,11 @@ def save_dc_backup(
                                      _eh_templates(), body)
     except dc_backup.DcBackupError as exc:
         raise _dc_backup_error(exc) from exc
+    except dc_backup.DcBackupBusy as exc:
+        # Retryable: another marker write or an undo holds the lock
+        # (UM10-UNDO-1). Nothing was stored.
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "dc_backup_busy", "message": str(exc)}) from exc
 
 
 @router.post("/{name}/dc-backup/assess")

@@ -27,7 +27,7 @@ export const FLOW_STATE_WORDS: Record<FlowSectionState, string> = {
 }
 
 /** Section 10's own vocabulary (`results.freshness`). */
-export type FlowFreshness = 'not_run' | 'running' | 'fresh' | 'stale'
+export type FlowFreshness = 'not_run' | 'running' | 'fresh' | 'stale' | 'uncompared'
 
 export type FlowItemSource =
   | 'validation' | 'eh_study' | 'eh_readiness' | 'commercial' | 'library' | 'template' | 'flow'

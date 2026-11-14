@@ -51,3 +51,12 @@ Master check (`23aa3bc8`): the pieces exist apart; the fuel curve and run-hour w
 
 ### Tests
 `gridspine` UC tests (`tests/gridspine/test_dispatch_producer.py` pattern), new `backend/tests/test_homer_fuel_curve.py`, finance tests beside `test_finance_cashflow.py`; `PropertiesPanel.generatorSchema.test.tsx`; mutants on the changed finance module.
+
+### 02a plan verdict (GK B, 2026-11-13)
+
+GO with conditions. Answers:
+- Q1 (fuel-generator gate): the curve rows show on **every** generator, help "Fuel-burning generators only." GK B: an LP input never hides, and `reveal_when` cannot express "fuel carrier OR a curve is set", so option (b). Validation never depends on the carrier. This replaces the acceptance line "appear only for a fuel generator".
+- Q2: `marginal_cost` is fully derived (slope × fuel price) while a curve is set.
+- Owner HOMER-02A-DOCCAP: the assistant attrs-doc cap rises to 4600 for the three fuel fields.
+
+Conditions met in 02a: H1 one derivation (`services/fuel_curve.py`), staging authoritative, the same guard on the single edit, bulk edit and pre-run check; H2 the curve inputs in `_network_input_fingerprint` only when present; H3 a direct edit of a derived cost refuses, a new curve over a non-zero cost says what it replaces, a curve beside a `marginal_cost` series refuses, derived writes are stamped customised; H4 the DC backup prices fuel off the LP and never writes `marginal_cost`; H5 Finite inputs, one test per refusal; H6 the fuel block reads solved values only (None otherwise), uneven and multi-period weightings; H7 off hours counted out, no-curve results byte-equal to master; H8 mutants in the PR body.

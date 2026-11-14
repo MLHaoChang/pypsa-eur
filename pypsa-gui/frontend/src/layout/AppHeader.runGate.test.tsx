@@ -117,6 +117,44 @@ describe('AppHeader — the Run gate', () => {
     expect(screen.getByTestId('run-stale').title).toBe('Optimisation and load flow results are older than the inputs.')
   })
 
+  it('counts results never checked against the inputs as unchecked, never as current (PG-04b)', async () => {
+    const results = { section: 'results', label: 'Results', state: null, required: false, items: [], summary: null,
+      freshness: 'uncompared', freshness_by_kind: { optimisation: 'uncompared', study: null, loadflow: 'fresh' } }
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(flow({
+      sections: [results], run_request: { optimisation: true, study: false, loadflow: true },
+    }))
+    renderHeader()
+    expect((await screen.findByTestId('run-stale')).textContent).toBe('(1 unchecked)')
+    expect(screen.getByTestId('run-unchecked').textContent).toBe('1 unchecked')
+    expect(screen.getByTestId('run-stale').title).toBe(
+      'Optimisation results came with the project and were not checked against its inputs. Run to check them.')
+  })
+
+  it('shows out of date and unchecked in one count', async () => {
+    const results = { section: 'results', label: 'Results', state: null, required: false, items: [], summary: null,
+      freshness: 'stale', freshness_by_kind: { optimisation: 'uncompared', study: 'stale', loadflow: 'stale' } }
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(flow({
+      sections: [results], run_request: { optimisation: true, study: true, loadflow: true },
+    }))
+    renderHeader()
+    expect((await screen.findByTestId('run-stale')).textContent).toBe('(2 out of date · 1 unchecked)')
+    expect(screen.getByTestId('run-stale').title).toBe(
+      'Study and load flow results are older than the inputs. '
+      + 'Optimisation results came with the project and were not checked against its inputs. Run to check them.')
+  })
+
+  it('does not count an unchecked kind the Run does not request (PG-04b C6)', async () => {
+    const results = { section: 'results', label: 'Results', state: null, required: false, items: [], summary: null,
+      freshness: 'stale', freshness_by_kind: { optimisation: 'stale', study: null, loadflow: 'uncompared' } }
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(flow({
+      sections: [results], run_request: { optimisation: true, study: false, loadflow: false },
+    }))
+    renderHeader()
+    expect((await screen.findByTestId('run-stale')).textContent).toBe('(1 out of date)')
+    expect(screen.queryByTestId('run-unchecked')).toBeNull()
+    expect(screen.getByTestId('run-stale').title).toBe('Optimisation results are older than the inputs.')
+  })
+
   it('shows no count when nothing the Run requests is stale', async () => {
     const results = { section: 'results', label: 'Results', state: null, required: false, items: [], summary: null,
       freshness: 'fresh', freshness_by_kind: { optimisation: 'fresh', study: null, loadflow: 'stale' } }

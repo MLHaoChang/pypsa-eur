@@ -1,6 +1,6 @@
 # Studies, reports and the investment case on the graph
 
-Status: ready-for-agent (blocked by 04; Opus; GK B, UX for UI parts)
+Status: done
 Type: task
 Spec: `.scratch/provenance-graph/spec.md`
 
@@ -38,3 +38,14 @@ A cost node built here that reads a tariff or PPA cell gets a `derived_from` edg
 `input:commercial/<target>:<entity>/<path>` (`provenance_graph.commercial.cell_id`), so the cost reads the cell's
 verdict. Until then a cost whose commercial input has no such edge lists it as `uncompared`, never fresh (ruling (b)
 in issue 01).
+
+### 2026-11-14: GK B (56) plan GO; sliced 05a (backend, GK B) and 05b (client, UX)
+
+Q1: `participants._stale_hub` is in scope for 05a. Q2: `needs_run` goes on the wire.
+
+- V1 (one answer): on every report, study and IC fixture, and on each per-code case, `verdict.state == "stale"` exactly when the existing `stale` bool is True, pinned with a test. A row that moves (fresh today, stale on the graph) is listed in the PR body, `stale` moves with it, and a test pins the change. Nothing moves toward fresh.
+- V2 (compared nothing): a verdict whose pins compared nothing (no recorded hash, the campus key, an unreadable current value) never reads fresh (#1170). `_ic_campus_digest` does not count as a compared pin.
+- V3 (exact pins): the `stale_reasons` order, the IC staleness dict minus `verdict`, and the `_stale_hub` bool are compared with `==` over the existing fixtures. Each pin test goes red under a mutant that drops or reorders one mapped code.
+- V4 (each pin killed): ledger, intake, each fork's `network.nc`, the engine digest, the study_record reasons, every IC assumption part, `group_links` and `fixed_shares` each have their own killing case. That one input breaks exactly that edge.
+- V5 (needs_run): True exactly on edges into a run node, one test per edge kind. The client regex goes only in 05b, after 05a's field is on master.
+- V6 (reads): a raising current-hash read is stale with its reason, never a 500 (#1390 F2). A recorded None never matches a computed None.

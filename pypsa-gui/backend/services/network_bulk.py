@@ -274,6 +274,8 @@ def apply_bulk_update(body: dict) -> dict:
     exactly one implementation rather than one per shape.
     """
     refuse_edit_during_live_study()  # P27a A1: not routed via _update_component
+    notices: list[str] = []  # homer-parity 02a: what a newly set fuel curve replaces, per generator
+    resets: dict[str, dict[str, float]] = {}  # homer-parity 02a: the stand-by reset of each target whose curve is cleared
     component_class = body.get("component_class", "")
     names = body.get("names", [])
     updates = body.get("updates", {})
@@ -545,6 +547,24 @@ def apply_bulk_update(body: dict) -> dict:
         # before the first write, so a bad one cannot leave a half-applied batch.
         from services.component_names import require_valid_name
 
+        # homer-parity 02a: the generator fuel curve's guard, as on the single edit, before the first write;
+        # a cleared curve resets its stand-by cost, a new one says what it replaces.
+        if component_class == "Generator":
+            from services import fuel_curve
+            from services.network_crud import check_fuel_curve
+
+            for _targets, coerced in pending:
+                for t in _targets:
+                    before = df.loc[t].to_dict()
+                    after = {**before, **coerced}
+                    if notice := check_fuel_curve(component_class, after, n=n, name=t, before=before,
+                                                  submitted=coerced):
+                        notices.append(f"{t}: {notice}")
+                    if reset := fuel_curve.cleared(after, before=before):
+                        # Per target (GK B D1): a no-curve generator in the same batch keeps its costs.
+                        notices.append(f"{t}: {fuel_curve.clear_notice(after, before=before)}")
+                        resets[t] = reset
+
         for _targets, coerced in pending:
             carrier = coerced.get("carrier")
             if (component_class != "Carrier" and isinstance(carrier, str) and carrier
@@ -572,6 +592,14 @@ def apply_bulk_update(body: dict) -> dict:
                 changed = [c for c in typed if not _same_value(before[(t, c)], df.at[t, c])]
                 if changed:
                     asset_provenance.mark_customised(n, component_class, t, changed)
+                if reset := resets.get(t):
+                    reset = {c: v for c, v in reset.items() if not _same_value(df.at[t, c], v)}
+                    for col, value in reset.items():
+                        df.at[t, col] = value
+                    if reset:
+                        asset_provenance.mark_customised(n, component_class, t, list(reset))
+            if component_class == "Generator":
+                fuel_curve.apply(n, _targets, stamp=True)
 
     # One audit entry per bulk op (not per component). The row form cannot
     # print every value, so it prints the shape instead.
@@ -584,6 +612,9 @@ def apply_bulk_update(body: dict) -> dict:
     change_log_service.log(
         "update", component_class, f"({len(name_strs)} items)", description,
     )
-    return {"updated": len(name_strs), "fields": fields}
+    result = {"updated": len(name_strs), "fields": fields}
+    if notices:
+        result["notices"] = notices
+    return result
 
 

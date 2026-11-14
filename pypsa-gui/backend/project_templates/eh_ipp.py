@@ -387,6 +387,7 @@ def _write_csv(p: pd.Series, path) -> None:
 
 
 def write_price_series(out_dir, planning=None) -> None:
+    import hashlib
     import json
     import pathlib
 
@@ -397,7 +398,12 @@ def write_price_series(out_dir, planning=None) -> None:
         _write_csv(price_shape(case, year), d / f"{case}.csv")
     for name, spec in OBSERVED.items():
         _write_csv(observed_series(name, year), d / spec["file"])
-    (d / "meta.json").write_text(json.dumps(series_meta(year), indent=2, sort_keys=True) + "\n")
+    meta = series_meta(year)
+    for entry in meta["series"]:
+        # The content hash the harness verifies before it admits a case that names this
+        # series (study harness 14, I8); the one writer, so a file and its hash never differ.
+        entry["sha256"] = hashlib.sha256((d / entry["file"]).read_bytes()).hexdigest()
+    (d / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n")
 
 
 # ── The ledger and the registration ────────────────────────────────────────

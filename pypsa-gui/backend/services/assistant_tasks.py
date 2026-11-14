@@ -261,12 +261,9 @@ def _limit(tool):
 
 
 def _fingerprint():
-    """The project's input fingerprint (solver outputs excluded), or None."""
-    from services import workflow_tools
-    try:
-        return workflow_tools._network_input_fingerprint(PyPSAService.get_active_context())
-    except Exception:  # noqa: BLE001 — no network: freshness is unknown, never claimed stale
-        return None
+    """The project's input fingerprint (solver outputs excluded), or None (`provenance_graph.runs`)."""
+    from services.provenance_graph.runs import active_input_fingerprint
+    return active_input_fingerprint()
 
 
 def _stale(task, current=None):

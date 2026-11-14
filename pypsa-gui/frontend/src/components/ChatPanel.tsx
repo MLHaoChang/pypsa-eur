@@ -234,6 +234,8 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   abort_adequacy_study: 'ask the running study to stop',
   // The finance engine runs in the background (poll get_investment_case).
   run_investment_case: 'start the investment case',
+  // The business case runs in the background too (poll get_business_case).
+  run_business_case: 'start the business case',
   // The decision study (U3): the run and the tornado start in the background
   // (poll get_study_findings); the others answer at once.
   start_decision_study: 'create the decision study',

@@ -189,6 +189,34 @@ def test_undo_puts_the_placeholder_back(client, tmp_projects_dir, bound_ctx):
     assert _ledger(_meta(d), "it_mw", 2038)["source"] == "assumed"
 
 
+def test_undo_keeps_a_dc_backup_saved_after_the_edit(client, tmp_projects_dir, bound_ctx):
+    """UM10-UNDO-1: the undo restores only the growth rows the undone edit
+    wrote; the DC backup setting, saved after it and not on the undo stack,
+    survives."""
+    r = client.post(f"/api/projects/from_template/{DC}", params={"name": "gp_undo_bk"},
+                    json={"planning": DC_SHIFTED, "dc_load": {"phases": [
+                        {"cod": f"{y}-01-01", "it_mw": it}
+                        for y, (_y, it, _pue) in zip((2027, 2030, 2038), T.DC_PHASES)]}})
+    assert r.status_code == 200, r.text
+    d = _dir(bound_ctx, client)
+    s = _series(bound_ctx, client, "links", "eh_energization_mw", "grid_import", 2038)
+    s[:] = 60.0
+    assert _upload(client, "links", "eh_energization_mw", s.to_frame("grid_import"),
+                   period=2038).status_code == 200
+    assert _row(_meta(d), "energized_mw", 2038)["set"] is True
+    r = client.put("/api/campus-electrical/gp_undo_bk/dc-backup",
+                   json={"mode": "hybrid", "autonomy_h": 8.0})
+    assert r.status_code == 200, r.text
+    backup = _meta(d)["dc_load"]["spec"]["backup"]
+    assert backup["mode"] == "hybrid"
+    r = client.post("/api/network/undo")
+    assert r.status_code == 200, r.text
+    meta = _meta(d)
+    assert _row(meta, "energized_mw", 2038)["set"] is False
+    assert _ledger(meta, "energized_mw", 2038)["source"] == "assumed"
+    assert meta["dc_load"]["spec"]["backup"] == backup
+
+
 def test_a_put_of_the_series_sets_every_period_it_covers(client, tmp_projects_dir, bound_ctx):
     """The PUT writes the whole column: every period it carries."""
     _create(client, DC, "gp_put", DC_SHIFTED)

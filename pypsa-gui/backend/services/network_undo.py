@@ -173,9 +173,14 @@ def apply_undo():
     _reapply_user_ts_to_network(n)
     # An undone series edit leaves its growth placeholder as it was (C3).
     with PyPSAService.get_lock():
-        growth_placeholders.restore_meta(result["template_meta"])
+        not_restored = growth_placeholders.restore_meta(result["template_meta"])
     change_log_service.log("undo", "Network", "", "Undone last action")
-    return {"undone": True, "remaining": undo_service.depth()}
+    out = {"undone": True, "remaining": undo_service.depth()}
+    if not_restored:
+        # The network is back but the growth rows are not: never fully done
+        # (GK B K4, UM10-UNDO-1).
+        out["template_meta"] = {"restored": False, "reason": not_restored}
+    return out
 
 
 # Alias for the middleware / facade identity pin.

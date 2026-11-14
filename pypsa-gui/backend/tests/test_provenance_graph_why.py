@@ -445,6 +445,7 @@ def test_the_tool_is_registered_read_only_on_its_get_routes():
     assert catalogue.TOOL_ROUTES["why_this_number"] == [
         ("GET", "/api/network/asset_schema/{component}/provenance/{name}/why/{field}"),
         ("GET", "/api/projects/{name}/studies/{study_id}/ledger/{key}/why"),
+        ("GET", "/api/chat/evidence/{evidence_id}/why/{metric}"),
     ]
     assert not catalogue.tool_edits_network("why_this_number")
     assert "why_this_number" not in chat_tools.UNDO_CAPTURED_TOOLS
