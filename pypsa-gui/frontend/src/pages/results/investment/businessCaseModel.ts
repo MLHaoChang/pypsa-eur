@@ -269,4 +269,7 @@ export const REFUSALS_REASON_WORDS: Record<string, string> = {
   investment_case_missing: 'Run the investment case to check the lines against its years.',
   investment_case_out_of_date: 'The investment case is out of date: run it again to check the lines against its years.',
   business_case_inputs_invalid: 'The stored lines do not read; fix the marked cells and save.',
+  network_busy: 'The model is busy, so the lines were not checked: read the options again.',
+  solve_in_flight: 'A solve is running, so the lines were not checked: read the options again after it.',
+  current_assumptions_not_established: 'The current inputs cannot be read now, so the lines were not checked.',
 }
