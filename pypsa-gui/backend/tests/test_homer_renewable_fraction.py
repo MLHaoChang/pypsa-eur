@@ -1925,7 +1925,6 @@ def test_a_reversible_bridge_link_is_signed_by_its_p0():
 def test_the_row_and_the_kpi_agree_on_a_net_cluster():
     """The row binds at the target, and the KPI of that dispatch reads the target: one net draw on both sides."""
     free = _net_h2(_network())
-    free.add("Generator", "h2 supply", bus="h2", carrier="H2", p_nom=0.0)
     assert _solve(free)[0] == "ok"
     f_free = renewable_fraction(free)["fraction"]
     assert f_free is not None and f_free < 0.6, f_free
