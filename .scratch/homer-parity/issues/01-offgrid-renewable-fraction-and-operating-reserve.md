@@ -3,7 +3,7 @@
 
 # 01 — Off-grid constraints: minimum renewable fraction and operating reserve
 
-Status: done (#1424; 01a only, 01b operating reserve pending)
+Status: in progress (01a done #1424; 01b-1 engine PR pending on claude/homer-01b-reserve, 01b-2 UI next)
 Model: Opus
 Reviewer: GK B (GK A only if the adequacy/IC engine is touched)
 Blocked by: none (40 is independent: it is about island frequency screens, not these constraints)
@@ -76,3 +76,17 @@ UX (no objection to placement), conditions:
 - U6 The chat edit card shows the same label, with a drift test.
 - R13 (GK B, later): fail closed now, count later. A dispatched Link from a fuel stock (a non-renewable Store, no Generator, no electrical inflow) into an electrical bus makes the KPI None with a reason, and the LP row warns. **Follow-up:** count its η·p0 as non-renewable. The same fail-closed rule covers non-renewable Generators that reach the site through an uncounted path (a chain, a multi-port Link, a second Link).
 - 01a evidence (#1424): UX shots and the Playwright scripts that took them are in `.scratch/homer-parity/shots-01a/`: `{light,dark}-{idle,set,out-of-range}.png`, `light-page-context.png`, `guided-light-value-100.png`, `dark-infeasible-log.png`; scripts `shoot.js`, `shoot_guided.js`, `shoot_log.js`, `solve.js`, `peek.js`. The scripts read the dev admin password from disk and hold no credential.
+
+### 01b plan verdicts (2026-11-14, GK B 57)
+GO for 01b-1 with Q1 (a) dispatched PV/wind output, Q2 (a) storage counts, Q3 (a) committable status in the row. Conditions; the PR body maps each to its test:
+- O1 off byte-identical (None and 0): fingerprint, IC digest, last_solve_settings, LP; on enters the fingerprint.
+- O2 binding by slack only (|LHS−RHS| ≤ 1e-6·RHS + floor), same on LP and MILP.
+- O3 dispatchable = active, non-VRE, non-slack, sign>0 Generators (renewable_fraction's classification); committable p_nom·status·p_max_pu − p; extendable p_nom var·p_max_pu − p; slack and withdrawing never headroom.
+- O4 storage r_s ≤ power headroom and ≤ η·SoC/w with the snapshot's own weighting; say which storage counts; a Store battery is "not counted", never a silent 0.
+- O5 one load definition (01a R4) in row, route and infeasible line; PV/wind by the KPI's carrier sets.
+- O6 route from solved frames only; missing column → None; route checks at the trial merge.
+- O7 infeasible line names snapshots only when required > the most headroom the inputs allow.
+- O8 the myopic path chains the wrapper too.
+- O9 per-snapshot mutant, a mutant per O3/O4 term, refusals through one validator; mutants on operating_reserve.py.
+UX placement note goes to UX before 01b-2.
+
