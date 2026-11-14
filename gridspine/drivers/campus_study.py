@@ -173,7 +173,7 @@ from gridspine.ingest.campus import Campus, build_campus
 from gridspine.producers.campus import CampusDraft, campus_hourly, draft_campus, is_solved, period_weightings
 from gridspine.producers.pypsa_nodal import load_solved_network
 from gridspine.ranking.campus import campus_metrics, island_metrics, select_campus_hours
-from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
+from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, TIE_OPEN_TOL_MW, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, held_transformers, size_transformers, solve_cases
 from gridspine.static.campus_reactive import ibr_q_capability, ibr_q_curve, reactive_need, requirement_from, size_compensation
@@ -652,9 +652,9 @@ def psse_campus(run_dir, hours=None) -> list:
 
 #: P_ref of a normally open tie (``pcc.tie_normally_open``): its rating
 #: stands for the connection the grid-connected checks are made at.
-#: The PCC exchange (MW) a normally open tie may show in any hour: the
-#: solver's noise, not power through the tie.
-TIE_OPEN_TOL_MW = 0.01
+#: (``TIE_OPEN_TOL_MW``, the PCC exchange a normally open tie may show in
+#: any hour, lives in ``schema.campus``, shared with the producer's per-hour
+#: tie state.)
 OPEN_TIE_P_REF = "normally open tie: its rating, the campus file p_connection_mw (grid-connected checks)"
 
 
