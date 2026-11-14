@@ -3,14 +3,14 @@
 
 # 40 — The shipped microgrid templates fail the island frequency screen
 
-Status: ready-for-agent
+Status: done (#1486)
 Size: M
 Blocked by: none
 Gated: GK A
 Likely files: pypsa-gui/backend/project_templates/eh_microgrid/island_config.json; pypsa-gui/backend/project_templates/eh_microgrid_staged/; pypsa-gui/backend/services/run_gates.py (mg.island.frequency); pypsa-gui/backend/services/campus_island_*.py
 Type: bug
 Found by: issue 12's fit check (GK A I5)
-Owner decisions: none yet
+Owner decisions: SH40-FREQ-1, SH40-BRIDGE, SH40-BRIDGE-2
 
 ## What was seen
 
@@ -46,3 +46,36 @@ examples pass, and whether the rule then becomes blocking.
 ### 2026-11-13: owner decision
 
 Owner answered (SH40-FREQ-1, `docs/agents/owner-decisions.md`). Status: ready-for-agent.
+
+### 2026-11-13: sidecar retune (session_01G7qCumcFH3omctm4xpif6o)
+
+- Reproduced on master 21d44207 (campus run up to I6, Guided default k = 3): `eh_microgrid` hours 68, 141, 165 fail E2/E3 on the 2 Hz/s transition RoCoF (the battery saturates or is the unit lost); `eh_microgrid_staged` 15 failing hours (E2 24, E3 9, E5 8: RoCoF, the 1 Hz steady deviation, the transition f_max trip) and 24 bridge-failing hours.
+- The GFM settings recommender asked for 4 % / τ_f 0.53 s (single year) and 1.8 % / 0.045 s (staged). One setting for both, 2 % droop and τ_f 0.3 s (equivalent H about 7 s), passes both on their old sizing, and after the re-solve: `eh_microgrid` 0 failing, 0 bridge (10 island hours); staged 0 failing (35 island hours), sizes unchanged (battery 6 + 6.08 / 6.08 / 3.27 MW), NPV inside its 1 % pin.
+- Left: the staged template's 24 bridge hours. In each, one grid-forming battery is empty (e(t−1) = 0) and the screen asks it for its droop share (16–52 Wh) of I4's 25 kW AC-loss step until the cold diesels join at 15 s. The island LP reserves the bridge energy summed over the grid-forming batteries (`services/solver/island.py:829-838`); the screen checks each battery on its own (`gridspine/static/frequency.py:1173`). No sidecar setting reaches it. Question SH40-BRIDGE sent to the coordinator.
+- `mg.island.frequency` stays `warn` (SH40-FREQ-1); `services/run_gates.py` untouched.
+
+### 2026-11-13: owner decision SH40-BRIDGE, and a correction
+
+- Owner (via the coordinator, 17:39Z): SH40-BRIDGE option 2, "Widen: LP per battery": the island LP reserves each grid-forming battery's own bridge share, in this PR, GK A plan first.
+- Correction (this session, before building): with the subsea tie open the LP's islanding step is ΔP⁺ = p_imp − Σ_late X = 0 (`services/solver/island.py:1326-1338`), so its bridge energy B(t) is 0 whether summed or per battery. The screen's bridge step is I4's AC-loss ΔP_AC (25 kW), which the LP does not see, so a per-battery share of B(t) alone leaves the 24 hours failing. Corrected options sent to the coordinator as SH40-BRIDGE-2; waiting on the owner.
+- Measured (asked by GK A 27): on all 35 staged island hours the solved import is 0 (|x| < 2e-15 MW) and E1's 24.9 kW step equals the island's AC network losses (`gridspine/static/island_flow.py:306-310`): carried before and after islanding alike, not an islanding step.
+- Owner (via the coordinator, 2026-11-14 00:02Z): SH40-BRIDGE-2 option 1. In this PR: the screen does not judge E1 or the bridge on hours whose solved tie state is open (read from the run's own result, never a template tag); those hours read "not applicable: tie open", never a pass, named on the card; tests for an open-tie and a closed-tie hour; a template-keyed mutant must die. Plus the per-battery LP bridge row, with a closed-tie test where one battery is empty. GK A plan first; staged sizing unchanged.
+
+### 2026-11-14: GK A (27) plan GO for SH40-BRIDGE-2, conditions P1–P8
+
+One PR (GK A area, under PR-SIZE-1).
+- P1 tie state: rating = solved capacity (p_nom_opt if extendable, else p_nom); a committable Link with solved status 0 is open that hour; every PCC bus counts; PCC not unique or not found → fail closed (closed, judged); "at the PCC" by the producer's PCC definition, never by name. Test an extendable Link with p_nom_opt 0.
+- P2 ok = None readers: every reader of E1/bridge `ok` (failing(), cuts, GFM tuning cases, campus_island_report, run_actions, run_gates, pass counters) maps None explicitly — never failing, never passing, never in a pass total; a test each; list them in the PR body.
+- P3 round trip: tie_open and ok=None through the real persisted files (campus_pcc.csv, frequency CSVs, summary JSON) and the real readers; a missing column reads as closed.
+- P4 nothing judged: every island hour tie-open → E1 and bridge read "not evaluated (tie open on every island hour)"; E2/E3/E5 judged as before; one test.
+- P5 share: every grid-forming battery fixed → exact K_s/ΣK as frequency.py computes it; any extendable → 1 (conservative linear bound); the LP's notes say which; a test each; the fixed case shows LP and screen agree at the share boundary.
+- P6 LP row: usable energy above e_min_pu·e_nom; η = efficiency_dispatch (or the discharge Link's efficiency); t−1 at the first snapshot as the aggregate row; MWh = MW·T_join/3600; mutant dropping the e_min term.
+- P7 stored formats: list every reader and digest of campus_pcc.csv and the summary; show them unaffected or regenerate with a reason.
+- P8 templates: before/after sizes and NPV for both microgrids and any other template with grid-forming storage in an island; regenerate measured notes and shipped files if anything moves; slow test pins tie_open_hours == island_hours on the staged template, the single-year template's own value on it.
+- Rule 7: a new row state is tested at the runner and card level too.
+
+### 2026-11-14: GK A (27) rulings R1, R2 (after the build)
+
+- R1 (replaces P5), accepted: a fixed-p_nom GFM battery s holds η·(e_s(t−1) − e_min) ≥ B(t)·K_s/ΣK_fixed (exact when nothing is extendable, conservative otherwise, linear); an extendable battery gets no per-battery row (share 1 forces a build; K-weighting is bilinear). R1-1: the known LP/screen gap (a built extendable battery empty on a closed-tie hour with B > 0) is still judged and reported by the screen; facts["gfm_bridge_share"] names each extendable GFM battery "aggregate row only"; a test shows the screen's failure reaching the card. R1-2: ΣK_fixed = 0 → no per-battery rows, no division; tested. R1-3: a fixed battery with p_nom 0 → share 0, no NaN; the forced-build mutant (share 1 on the extendable candidate) is killed by the no-forced-build test.
+- R2, accepted as built: when any Link touches the PCC the state comes from those Links (every one at or under TIE_OPEN_TOL_MW, a local converter Link included, else closed); a grid generator at the PCC decides "closed" only when no Link touches it; lines and transformers always close it. R2-1: three template-free tests (grid generator + open tie Link → open; generator, no Link → closed; open tie + a conducting Link → closed); a mutant ignoring the generator rule dies on the second.
+- e_min_pu: a time-varying minimum series is refused or read per snapshot, never ignored; tested.
