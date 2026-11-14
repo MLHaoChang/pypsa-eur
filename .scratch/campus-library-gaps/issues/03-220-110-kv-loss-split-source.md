@@ -3,7 +3,7 @@
 
 # The 220/110 kV class-rule losses miss Ecodesign Tier 2 and need a sourced no-load/load-loss split
 
-Status: ready-for-agent
+Status: done (#1500)
 Type: task
 Blocked by: None
 
