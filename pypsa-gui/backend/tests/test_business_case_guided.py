@@ -797,6 +797,150 @@ def test_a_set_key_that_is_both_a_setting_and_a_line_is_refused(key, value):
     assert e.value.status_code == 422
 
 
+def _set_refused(old, patch) -> str:
+    from fastapi import HTTPException
+
+    from services.business_case.chat_edit import apply_set
+
+    with pytest.raises(HTTPException) as e:
+        apply_set(old, patch)
+    return e.value.detail["error_kind"]
+
+
+def test_set_cells_clear_take_year_maps_and_refuse_other_shapes_typed():
+    from services.business_case.chat_edit import apply_set
+
+    old = {"inputs": {"lines": [{"name": "L", "unit": "t", "price": 1.0}]}}
+    new, claimed = apply_set(old, {"L": {"price": None}})  # null clears a cell
+    assert _lines_of(new)["L"]["price"] is None
+    # No `assumed` on the line: nothing is claimed, and it stores an empty one.
+    assert _lines_of(new)["L"]["assumed"] == {} and claimed == {}
+    new, _c = apply_set(old, {"L": {"price_by_year": {"2030": 2}}})
+    assert _lines_of(new)["L"]["price_by_year"] == {"2030": 2.0}
+    new, _c = apply_set(old, {"break_even_line": None, "kw_per_gpu": None})
+    assert new["break_even_line"] is None and new["kw_per_gpu"] is None
+    new, _c = apply_set(old, {"break_even_line": "L"})
+    assert new["break_even_line"] == "L"
+    for patch in (
+        {"L": {"price_by_year": [1.0]}},
+        {"L": {"price_by_year": {"2030": None}}},
+        {"L": {"price": "1.0"}},  # a text, never a TypeError 500
+        {"L": 5},
+        {"L": ["price"]},
+    ):
+        assert _set_refused(old, patch) == "business_case_set_invalid", patch
+
+
+def _lines_of(doc) -> dict:
+    return {ln["name"]: ln for ln in doc["inputs"]["lines"]}
+
+
+def test_a_set_claims_only_its_defaults_group_in_the_cells_own_unit():
+    from services.business_case.chat_edit import apply_set
+
+    old = {
+        "inputs": {
+            "lines": [
+                {
+                    "name": "Q",
+                    "unit": "t",
+                    "money_year": 2020,
+                    "assumed": {"quantity": {"value": 1.0}},  # no unit: the line's
+                },
+                {"name": "Y", "assumed": {"life_years": {"value": 20}}},  # no unit
+                {"name": "P", "unit": "t", "assumed": {"price": {"value": 1.0}}},
+            ]
+        }
+    }
+    _new, claimed = apply_set(
+        old,
+        {
+            "Q": {"quantity": 5, "life_years": 10},
+            "Y": {"life_years": 25},
+            "P": {"price_by_year": {"2030": 2.0}},
+        },
+    )
+    # Only the overridden group (never life_years, never money_year beside a quantity).
+    assert claimed["Q"] == {("quantity",): "t"}
+    assert claimed["Y"] == {("life_years",): ""}
+    # Each patched year of a price default's group (no money year stored: none).
+    assert claimed["P"] == {("price_by_year", "2030"): ""}
+
+
+def test_citation_matches_its_own_line_year_and_column_only():
+    from services.business_case.chat_edit import _citation
+
+    c = {"line": "L", "year": 2030}
+    assert _citation(["not a citation", c], "L", 2030) is c
+    assert _citation([c], "M", 2030) is None
+    assert _citation([c], "L", None) is None
+    assert _citation([c], "L", 2030, "quantity") is None
+
+
+def test_a_cited_cell_is_read_in_its_columns_type_unit_and_money_year(monkeypatch):
+    from services import run_intake
+    from services.business_case.chat_edit import _cited
+
+    seen = []
+
+    def read(cites, fields, host):
+        seen.append(fields["price"])
+        return {"gaps": [], "rows": [{"value": 2025, "source": {"raw": 1, "a": 2}}]}
+
+    monkeypatch.setattr(run_intake, "read", read)
+    monkeypatch.setattr(run_intake, "describe_source", lambda _r: "said")
+    host = type("H", (), {"get": lambda self: None})()
+    cite = [{"line": "L", "column": "money_year", "turn_id": "t", "quote": "2025"}]
+    got = _cited("L", {}, None, 2025, cite, host, None, column="money_year")
+    assert got == {"source": {"a": 2}, "price_source": "said"}
+    assert seen[-1]["native_type"] == "int" and seen[-1]["kind"] == "year"
+    assert seen[-1]["unit_storage"] == ""  # no unit given: blank, never None
+    line = {"unit": "t", "money_year": 2020}
+    _cited("L", line, None, 2025, [{"line": "L"}], host, ("EUR", 2025))
+    assert seen[-1]["native_type"] == "float" and seen[-1]["unit_storage"] == "EUR/t"
+    assert seen[-1]["money"] == {"currency": "EUR", "money_year": 2020}
+
+
+def test_card_rows_cite_new_and_claimed_cells_and_keep_the_rest(monkeypatch):
+    from services.business_case import chat_edit as CE
+
+    calls = []
+
+    def cited(
+        name, line, year, value, citations, host, money, column="price", unit=None
+    ):
+        calls.append((name, column, value, money, unit))
+        return {"source": {"s": 1}, "price_source": f"cited {column}"}
+
+    monkeypatch.setattr(CE, "_cited", cited)
+    monkeypatch.setattr(CE, "_money", lambda _f: ("EUR", 2025))
+    ln = {"name": "L", "kind": "revenue", "unit": "t", "price": 1.0, "quantity": 2.0}
+    old = {"inputs": {"lines": [{**ln, "life_years": 5}]}}
+    new = {"inputs": {"lines": [{**ln, "quantity": 3.0}]}}
+    # No `claimed`: nothing is claimed; an unchanged value is no row, but an
+    # unchanged price of a changed line is shown with its kept source.
+    out = {r["field"]: r for r in CE.rows(old, new, [], None)}
+    assert set(out) == {
+        "inputs.lines.L.price",
+        "inputs.lines.L.quantity",
+        "inputs.lines.L.life_years",
+    }
+    assert out["inputs.lines.L.price"]["change"] == "unchanged"
+    assert out["inputs.lines.L.price"]["price_source"] == "unchanged" and not calls
+    claimed = {"L": {("price",): "", ("quantity",): "t", ("life_years",): ""}}
+    out = {r["field"]: r for r in CE.rows(old, new, [], None, claimed)}
+    # A claimed price is read in the case's money; a claimed cell in its own unit;
+    # a claimed cell the edit removes asks nothing.
+    assert sorted(calls, key=str) == [
+        ("L", "price", 1.0, ("EUR", 2025), None),
+        ("L", "quantity", 3.0, None, "t"),
+    ]
+    assert out["inputs.lines.L.price"]["price_source"] == "cited price"
+    assert out["inputs.lines.L.quantity"]["value_source"] == "cited quantity"
+    assert out["inputs.lines.L.quantity"]["source"] == {"s": 1}
+    assert "value_source" not in out["inputs.lines.L.life_years"]
+
+
 def test_no_preset_line_carries_a_year_map_or_a_settings_name():
     # GK B N1: a scalar price `set` leaves price_by_year uncited, so no preset may
     # fill one; N2: a `set` key named like a run setting never reaches a line.
