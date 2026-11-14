@@ -1430,6 +1430,11 @@ def _scorecard_reader(name):
             return NoEvidence("screening_only", f"{target} rows need the network operator's own study; "
                                                 "the screening never passes them")
         if target.endswith(":"):
+            # SH 41 (GK A O3): an excluded member leaves the whole family not evaluated, never passed
+            # on the members that stayed.
+            gone = [r for r in card.get("excluded") or [] if str(r["id"]).startswith(target)]
+            if gone:
+                return NoEvidence("excluded", f"excluded: {gone[0]['reason']}")
             rows = [r for r in card.get("rows") or [] if str(r["id"]).startswith(target)]
             if not rows:
                 return NoEvidence("no_rows", f"no scorecard row in family {target!r}")
