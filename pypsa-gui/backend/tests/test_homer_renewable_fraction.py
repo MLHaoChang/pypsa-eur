@@ -1887,12 +1887,24 @@ def test_an_h2_bus_with_an_offtake_and_a_fuel_cell_counts_its_net_draw():
     assert not any("WARNING" in l and "electrolyser" in l for l in log), log
 
 
-def test_a_net_cluster_that_returns_more_than_it_draws_lowers_served():
-    """GK B Q1: the period's net is signed, the same number the row uses."""
+def test_a_net_cluster_is_signed_hour_by_hour_inside_a_period():
+    """GK B Q1 (a): the net is signed per snapshot and summed per period, the same linear number the row uses;
+    hours where the fuel cell returns more than the electrolyser draws lower the period's net."""
+    n = _net_h2(_dispatched())
+    el = pd.Series([4.0] * 12 + [0.0] * 12, index=n.snapshots)
+    fc = pd.Series([0.0] * 12 + [2.0] * 12, index=n.snapshots)
+    n.links_t.p0 = pd.DataFrame({"electrolyser": el, "fuel cell": fc})
+    kpi = renewable_fraction(n)
+    assert kpi["reason"] is None, kpi
+    assert kpi["conversion_mwh"] == pytest.approx(4.0 * 12 - 0.5 * 2.0 * 12)
+
+
+def test_a_net_cluster_that_returns_more_than_it_draws_in_a_period_is_unknown():
+    """GK B N2: a closed cluster cannot return more than it drew (N1), so a solved negative period net is
+    unknown, never a lower served."""
     n = _net_dispatch(_net_h2(_dispatched()), el=1.0, fc=4.0)
     kpi = renewable_fraction(n)
-    assert kpi["conversion_mwh"] == pytest.approx((1.0 - 2.0) * HOURS)
-    assert kpi["served_mwh"] == pytest.approx(LOAD_MW * HOURS - HOURS)
+    assert kpi["fraction"] is None and "negative" in kpi["reason"], kpi
 
 
 def test_a_nan_in_a_net_cluster_link_is_unknown():
@@ -1922,18 +1934,179 @@ def test_a_reversible_bridge_link_is_signed_by_its_p0():
     assert renewable_fraction(n)["conversion_mwh"] == pytest.approx(3.0 * 12 - 1.0 * 12)
 
 
+def _uneven(n):
+    """#1411 B2: uneven snapshot weightings inside one period."""
+    w = pd.Series([1.0, 2.0] * (HOURS // 2), index=n.snapshots)
+    for col in n.snapshot_weightings.columns:
+        n.snapshot_weightings[col] = w
+    return n
+
+
 def test_the_row_and_the_kpi_agree_on_a_net_cluster():
-    """The row binds at the target, and the KPI of that dispatch reads the target: one net draw on both sides."""
-    free = _net_h2(_network())
+    """The row binds at the target, and the KPI of that dispatch reads the target: one net draw on both sides
+    (GK B N3: exactly, on uneven weightings)."""
+    free = _uneven(_net_h2(_network()))
     assert _solve(free)[0] == "ok"
     f_free = renewable_fraction(free)["fraction"]
     assert f_free is not None and f_free < 0.6, f_free
-    n = _net_h2(_network())
+    n = _uneven(_net_h2(_network()))
     status, _, log = _solve(n, min_renewable_fraction=0.6)
     assert status == "ok", log
     c = classify(n)
     assert c["net_clusters"], c
     assert renewable_fraction(n)["fraction"] == pytest.approx(0.6, abs=1e-6)
+
+
+@pytest.mark.parametrize(
+    "stock",
+    [
+        pytest.param(("Store", {"e_nom": 50.0, "e_initial": 50.0}), id="store-e_initial"),
+        pytest.param(
+            ("StorageUnit", {"p_nom": 5.0, "max_hours": 10.0, "state_of_charge_initial": 20.0}),
+            id="storage-unit-soc-initial",
+        ),
+    ],
+)
+def test_a_net_cluster_that_can_start_full_fails_closed(stock):
+    """GK B N1: a stock that starts with energy the cluster never drew could be returned as electricity and
+    netted against the draw (fail open). The cluster is open: KPI None with a reason, the row warns."""
+    comp, kw = stock
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add(comp, "h2 cavern", bus="h2", carrier="H2", **kw)
+    c = classify(n)
+    assert c["net_clusters"] == [] and [o["links"] for o in c["open_clusters"]] == [
+        ["electrolyser", "fuel cell"]
+    ], c
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "h2 cavern" in kpi["reason"], kpi
+    m = _net_h2(_network())
+    m.add(comp, "h2 cavern", bus="h2", carrier="H2", **kw)
+    log = _with_row(m)
+    assert any("WARNING" in l and "electrolyser" in l for l in log), log
+
+
+@pytest.mark.parametrize(
+    "comp, kw",
+    [
+        pytest.param("Store", {"e_nom": 50.0, "e_initial": 50.0, "e_cyclic": True}, id="store-cyclic"),
+        pytest.param(
+            "StorageUnit",
+            {"p_nom": 5.0, "max_hours": 10.0, "state_of_charge_initial": 20.0, "cyclic_state_of_charge": True},
+            id="storage-unit-cyclic",
+        ),
+    ],
+)
+def test_a_cyclic_stock_keeps_the_cluster_closed(comp, kw):
+    n = _net_h2(_dispatched())
+    n.add(comp, "h2 cavern", bus="h2", carrier="H2", **kw)
+    c = classify(n)
+    assert c["open_clusters"] == [] and c["net_clusters"] == CLUSTER, c
+
+
+@pytest.mark.parametrize(
+    "kw, closed",
+    [
+        pytest.param({"e_cyclic": True}, False, id="cyclic-over-the-horizon"),
+        pytest.param({"e_cyclic_per_period": True}, True, id="cyclic-per-period"),
+        pytest.param({"e_initial": 0.0}, False, id="empty-once"),
+        pytest.param({"e_initial": 0.0, "e_initial_per_period": True}, True, id="empty-each-period"),
+    ],
+)
+def test_on_a_multi_period_network_a_stock_must_be_per_period(kw, closed):
+    """GK B N1: per period on a multi-period network, since each period is netted on its own."""
+    n = _net_h2(_network())
+    n.set_investment_periods([2030, 2035])
+    n.stores.loc["h2tank", "e_cyclic_per_period"] = False
+    n.stores.loc["h2tank", "e_initial_per_period"] = False
+    for k, v in kw.items():
+        n.stores.loc["h2tank", k] = v
+    c = classify(n)
+    assert (c["net_clusters"] == CLUSTER) is closed and (c["open_clusters"] == []) is closed, c
+
+
+def test_a_nan_efficiency_in_a_net_cluster_is_unknown_and_the_row_refuses_it():
+    """GK B N4: η_k(t) is read per snapshot; NaN is unknown, never 0."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    eta = pd.Series(0.5, index=n.snapshots)
+    eta.iloc[5] = float("nan")
+    n.links_t.efficiency = pd.DataFrame({"fuel cell": eta})
+    kpi = renewable_fraction(n)
+    assert kpi["fraction"] is None and "efficiency" in kpi["reason"], kpi
+    m = _net_h2(_network())
+    m.links_t.efficiency = pd.DataFrame({"fuel cell": eta.values}, index=m.snapshots)
+    log = _with_row(m)
+    assert any("WARNING" in l and "fuel cell" in l for l in log), log
+
+
+def test_a_time_varying_efficiency_is_read_per_snapshot():
+    n = _net_dispatch(_net_h2(_dispatched()))
+    eta = pd.Series([0.5] * 12 + [0.25] * 12, index=n.snapshots)
+    n.links_t.efficiency = pd.DataFrame({"fuel cell": eta})
+    kpi = renewable_fraction(n)
+    assert kpi["conversion_mwh"] == pytest.approx(4.0 * HOURS - 2.0 * (0.5 * 12 + 0.25 * 12))
+
+
+def test_a_multi_port_link_counts_only_its_electrical_ports():
+    """GK B N4: a 3-port fuel cell with heat on bus2 returns η1 only; a second electrical port adds its η."""
+    n = _net_h2(_dispatched())
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Bus", "ac2", carrier="AC")
+    n.links.loc["fuel cell", "bus2"] = "heat"
+    n.links.loc["fuel cell", "efficiency2"] = 0.3
+    n.add("Link", "chp cell", bus0="h2", bus1="ac", bus2="ac2", p_nom=5.0, efficiency=0.4, efficiency2=0.1)
+    n.links_t.p0 = pd.DataFrame({"electrolyser": 4.0, "fuel cell": 2.0, "chp cell": 1.0}, index=n.snapshots)
+    assert classify(n)["net_clusters"] == [
+        {"buses": ["h2", "heat"], "links": ["chp cell", "electrolyser", "fuel cell"]}
+    ]
+    kpi = renewable_fraction(n)
+    assert kpi["conversion_mwh"] == pytest.approx((4.0 - 0.5 * 2.0 - 0.5 * 1.0) * HOURS), kpi
+
+
+def test_a_source_link_into_a_net_cluster_stays_gross_and_opens_the_cluster():
+    """GK B N5 / Q2 (a): a source Link is counted gross on its electrical side, never netted. If it also
+    delivers into the cluster (a gas CHP with an H2 port), the fuel cell could return that gas-made H2 as
+    electricity, so the cluster is open (N1's premise) and fails closed when it runs."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Carrier", "gas")
+    n.add("Generator", "gas well", bus="gas", carrier="gas", p_nom=50.0)
+    n.add("Link", "chp", bus0="gas", bus1="ac", bus2="h2", p_nom=10.0, efficiency=0.4, efficiency2=0.2)
+    c = classify(n)
+    assert c["source_links"] == ["chp"], c
+    assert c["net_clusters"] == [] and all("chp" not in o["links"] for o in c["open_clusters"]), c
+    assert "chp" in c["open_clusters"][0]["why"], c
+    assert renewable_fraction(n)["fraction"] is None
+
+
+def test_a_source_link_beside_a_net_cluster_is_gross_and_outside_the_net():
+    """GK B N5: a source Link on the site bus that does not deliver into the cluster: gross, net unchanged."""
+    n = _net_dispatch(_net_h2(_dispatched()))
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Carrier", "gas")
+    n.add("Generator", "gas well", bus="gas", carrier="gas", p_nom=50.0)
+    n.add("Link", "gt", bus0="gas", bus1="ac", p_nom=10.0, efficiency=0.4)
+    n.links_t.p0["gt"] = 5.0
+    c = classify(n)
+    assert c["source_links"] == ["gt"] and c["net_clusters"] == CLUSTER, c
+    kpi = renewable_fraction(n)
+    assert kpi["conversion_mwh"] == pytest.approx((4.0 - 1.0) * HOURS)
+    assert kpi["nonrenewable_mwh"] == pytest.approx(90.0 + 0.4 * 5.0 * HOURS)
+
+
+def test_two_h2_buses_joined_by_a_pipe_are_one_cluster_with_each_link_once():
+    """GK B N6: clusters sharing a bus merge; no Link is counted twice."""
+    n = _dispatched()
+    for b in ("h2a", "h2b"):
+        n.add("Bus", b, carrier="H2")
+    n.add("Load", "offtake", bus="h2b", p_set=1.0)
+    n.add("Link", "el a", bus0="ac", bus1="h2a", p_nom=10.0, efficiency=0.7)
+    n.add("Link", "el b", bus0="ac", bus1="h2b", p_nom=10.0, efficiency=0.7)
+    n.add("Link", "pipe", bus0="h2a", bus1="h2b", p_nom=10.0, efficiency=1.0)
+    n.add("Link", "fuel cell", bus0="h2b", bus1="ac", p_nom=5.0, efficiency=0.5)
+    c = classify(n)
+    assert c["net_clusters"] == [{"buses": ["h2a", "h2b"], "links": ["el a", "el b", "fuel cell"]}], c
+    n.links_t.p0 = pd.DataFrame({"el a": 2.0, "el b": 1.0, "pipe": 1.4, "fuel cell": 2.0}, index=n.snapshots)
+    assert renewable_fraction(n)["conversion_mwh"] == pytest.approx((3.0 - 1.0) * HOURS)
 
 
 def _h2_with_negative_offtake(n, *, fuel_cell: bool, **offtake):
