@@ -1139,3 +1139,139 @@ def test_invalid_finance_inputs_are_typed(bc, template, monkeypatch):
     monkeypatch.setattr(R._state["solver_config"], "finance", {"currency": 5})
     d = _refused(preset_apply.plan, _args(variant="gpu_cloud"))
     assert d["error_kind"] == "finance_inputs_invalid" and d["status"] == 422
+
+
+def _ln(**kw) -> dict:
+    return {"name": "L", "kind": "cost", "category": "opex", "unit": "t", **kw}
+
+
+def test_cells_columns_follow_the_quantity_source_and_the_stored_years():
+    def paths(line):
+        return [p for p, _l, _v, _u in preset_apply.cells(line)]
+
+    assert preset_apply._source({}) == "typed"
+    assert "quantity" not in preset_apply.cells(_ln())[0][2]
+    assert paths(_ln(life_years=20)) == ["", "quantity", "price", "life_years"]
+    linked = _ln(quantity_source="linked:it_energy@1", money_year=2026)
+    assert paths(linked) == ["", "price", "money_year"]
+    assert paths(_ln(quantity_source="share_of:capex", money_year=2026)) == [
+        "",
+        "quantity",
+    ]
+
+
+def test_cells_show_a_year_map_only_for_an_empty_scalar_in_the_lines_unit():
+    by = {
+        p: (v, u)
+        for p, _l, v, u in preset_apply.cells(
+            _ln(quantity=2.0, price=3.0, price_by_year={2030: 4.0}, life_years=20)
+        )
+    }
+    assert by["quantity"] == (2.0, "t") and by["price"] == (3.0, "per t")
+    assert by["life_years"] == (20, "years")
+    yearly = {p: v for p, _l, v, _u in preset_apply.cells(_ln(price_by_year={2030: 4}))}
+    assert yearly["price"] == "2030: 4" and yearly["quantity"] == preset_apply.EMPTY
+    no_unit = {p: u for p, _l, _v, u in preset_apply.cells({"name": "L"})}
+    assert no_unit["quantity"] == ""
+
+
+def test_describe_joins_the_line_text_then_each_labelled_cell():
+    assert preset_apply.describe(_ln(quantity=2.0, price=3.0)) == (
+        "cost/opex, per t; quantity 2.0 t; price 3.0 per t"
+    )
+
+
+def test_to_ask_names_only_the_empty_values_the_user_must_give():
+    assert preset_apply.to_ask({}) == [] == preset_apply.to_ask({"inputs": {}})
+    lines = [
+        _ln(name="given", quantity=1.0, price=2.0),
+        _ln(name="yearly", quantity_by_year={2030: 1.0}, price_by_year={2030: 2.0}),
+        _ln(name="linked", unit="GPU_h", quantity_source="linked:it_energy@1", price=1),
+        _ln(name="gpu typed", unit="GPU_h", quantity=1.0, price=1.0),
+    ]
+    assert preset_apply.to_ask({"inputs": {"lines": lines[:2]}}) == []
+    asks = preset_apply.to_ask({"inputs": {"lines": lines[2:3]}})
+    assert asks == [{"setting": "kw_per_gpu", "per": "kW per GPU", "hint": None}]
+    assert preset_apply.to_ask({"inputs": {"lines": lines[3:]}}) == []
+
+
+def test_the_break_even_line_is_never_a_share_of_revenue():
+    share = _ln(name="s", kind="revenue", quantity_source="share_of:capex")
+    assert preset_apply._break_even_line(None, [share]) is None
+
+
+def test_rows_mark_a_kept_name_replaced_and_a_break_even_change():
+    old = {"inputs": {"lines": [_ln(quantity=1.0)]}, "break_even_line": "L"}
+    rows = {r["label"]: r for r in preset_apply._rows(old, old, "p", "s")}
+    assert rows["L"]["change"] == "replaced" and rows["break-even line"]["change"] == (
+        "kept"
+    )
+    new = {"inputs": {"lines": [_ln(name="M")]}, "break_even_line": "M"}
+    rows = {r["label"]: r for r in preset_apply._rows(old, new, "p", "s")}
+    assert rows["M"]["change"] == "added" and rows["L"]["change"] == "removed"
+    assert rows["break-even line"]["change"] == "changed"
+
+
+def test_read_cell_reads_lines_only_under_inputs_lines_and_a_pathless_row_whole():
+    stored = {"inputs": {"lines": [_ln()]}, "x": {"y": {"z": 5}}}
+    assert preset_apply.read_cell({"path": ["x", "y", "z"]}, stored) == 5
+    assert preset_apply.read_cell({"path": ["inputs", "lines"]}, stored) == (
+        edit_card._setting(stored["inputs"]["lines"])
+    )
+    assert preset_apply.read_cell({}, {"a": 1}) == '{"a":1}'
+
+
+def test_says_names_each_changed_line_once_and_otherwise_no_change():
+    assert preset_apply.says([]) == "business-case preset; no line change"
+    rows = [
+        {"change": "added", "line": "a"},
+        {"change": "added", "line": "a"},
+        {"change": "added", "line": None},
+        {"change": "kept", "line": "k"},
+        {"change": "removed", "line": "b"},
+    ]
+    assert preset_apply.says(rows) == "business-case preset; added: a; removed: b"
+
+
+def test_no_template_meta_at_all_is_template_not_known(bc, template, monkeypatch):
+    import routers.results as R
+
+    monkeypatch.setattr(R, "_active_template_meta", lambda: None)
+    d = _refused(preset_apply.plan, _args(variant="gpu_cloud"))
+    assert d["error_kind"] == "template_not_known"
+
+
+@pytest.mark.parametrize("cap", ["rows", "chars"])
+def test_a_card_exactly_at_its_cap_is_allowed(bc, template, monkeypatch, cap):
+    import json
+
+    rows = preset_apply.plan(_args(variant="gpu_cloud"))["rows"]
+    size = len(rows) if cap == "rows" else len(json.dumps(rows, default=str))
+    monkeypatch.setattr(
+        preset_apply, "CARD_ROW_CAP" if cap == "rows" else "CARD_CHARS", size
+    )
+    assert preset_apply.plan(_args(variant="gpu_cloud"))["rows"] == rows
+
+
+@pytest.mark.parametrize(
+    "detail, message, errors",
+    [
+        ({"message": "bad line", "errors": [{"loc": "x"}]}, "bad line", [{"loc": "x"}]),
+        ({"message": "bad line"}, "bad line", []),
+        ("plain text", "plain text", []),
+    ],
+)
+def test_an_invalid_merged_case_passes_its_message_and_errors_on(
+    bc, template, monkeypatch, detail, message, errors
+):
+    from fastapi import HTTPException
+
+    from services.business_case import runner
+
+    def bad(_merged):
+        raise HTTPException(422, detail)
+
+    monkeypatch.setattr(runner, "config_or_422", bad)
+    d = _refused(preset_apply.plan, _args(variant="gpu_cloud"))
+    assert d["error_kind"] == "business_case_inputs_invalid"
+    assert d["message"] == message and d["errors"] == errors
