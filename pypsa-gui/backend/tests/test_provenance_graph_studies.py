@@ -364,7 +364,13 @@ def _stored(hash_, parts):
 
 def _ic_cases():
     for stored_hash in ("H", None):
-        for stored_parts in (PARTS, None, {}, {k: v for k, v in PARTS.items() if v}):
+        for stored_parts in (
+            PARTS,
+            None,
+            {},
+            {k: v for k, v in PARTS.items() if v},
+            {"older_key": "z"},  # the pilot record shape: none of today's keys
+        ):
             for current in (
                 None,
                 ("H", PARTS),
@@ -407,19 +413,17 @@ def test_each_ic_part_breaks_exactly_its_own_edge(part):
     ]
 
 
-def test_a_part_changed_under_an_equal_hash_now_reads_stale():
-    """V1, the one row that moves: a record whose hash still matches but whose recorded part differs (an
-    inconsistent record) read fresh on master; the part's edge breaks now. Nothing moves toward fresh."""
+def test_an_equal_hash_is_fresh_whatever_the_recorded_parts_say():
+    """V1: the hash decides, as on master. Real records hold fewer parts than the hash covers (the pilot's
+    investment case records none of today's keys under an equal hash), so a part never breaks an unchanged hash."""
     from services.finance.investment_case_runner import staleness
 
-    stored, current = _stored("H", PARTS), ("H", {**PARTS, "finance": "f2"})
-    assert _legacy_staleness(stored, current)["stale"] is False
-    got = staleness(stored, current)
-    assert (got["stale"], got["changed"], got["reason"]) == (
-        True,
-        ["finance"],
-        "inputs_changed",
-    )
+    for current in (("H", {**PARTS, "finance": "f2"}), ("H", PARTS)):
+        for parts in (PARTS, {"older_key": "z"}):
+            stored = _stored("H", parts)
+            got = staleness(stored, current)
+            assert got.pop("verdict") == {"state": "fresh", "broken": []}
+            assert got == _legacy_staleness(stored, current)
 
 
 def test_an_ic_key_that_cannot_be_computed_is_stale_never_fresh():
@@ -433,11 +437,27 @@ def test_an_ic_key_that_cannot_be_computed_is_stale_never_fresh():
 
 
 def test_an_unrecorded_ic_hash_never_matches():
+    """V1, the row that moves: a recorded hash None against a current None read fresh on master (None == None); it is
+    stale now (V6). `assumptions_digest` always returns a str, so no real current key is None."""
     from services.finance.investment_case_runner import staleness
 
-    got = staleness(_stored(None, PARTS), (None, PARTS))
+    stored, current = _stored(None, PARTS), (None, PARTS)
+    assert _legacy_staleness(stored, current)["stale"] is False
+    got = staleness(stored, current)
     assert got["stale"] is True
     assert got["verdict"]["broken"][0]["reason"] == "not recorded"
+
+
+def test_an_uncompared_ic_verdict_reads_stale(monkeypatch):
+    """V2: a verdict that compared nothing is never fresh in the IC dict."""
+    from services.finance.investment_case_runner import staleness
+    from services.provenance_graph.types import Verdict
+
+    monkeypatch.setattr(
+        S, "investment_case_verdict", lambda *a, **k: Verdict(S.IC, "uncompared")
+    )
+    got = staleness(_stored("H", PARTS), ("H", PARTS))
+    assert got["stale"] is True and got["verdict"]["state"] == "uncompared"
 
 
 # ── a value-flow hub ─────────────────────────────────────────────────────────
@@ -468,6 +488,15 @@ def test_the_hub_bool_equals_the_legacy_check():
     ):
         hub, vf = _hub(links), _vf(MEMBERS, basis, shares)
         assert _stale_hub(hub, vf) == _legacy_stale_hub(hub, vf), (links, basis, shares)
+
+
+def test_an_uncompared_hub_verdict_reads_stale(monkeypatch):
+    """V2: a hub verdict that compared nothing is never fresh."""
+    from services.commercial.participants import _stale_hub
+    from services.provenance_graph.types import Verdict
+
+    monkeypatch.setattr(S, "hub_verdict", lambda *a, **k: Verdict("hub", "uncompared"))
+    assert _stale_hub(_hub(["l1", "l2"]), _vf(MEMBERS)) is True
 
 
 def test_each_hub_pin_breaks_exactly_its_own_edge():

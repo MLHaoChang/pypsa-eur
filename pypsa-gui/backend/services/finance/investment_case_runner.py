@@ -158,7 +158,7 @@ def staleness(stored: dict | None, current: tuple[str, dict] | None,
     from services.provenance_graph import studies
 
     v = studies.investment_case_verdict(stored_hash, stored_parts, current)
-    stale = v.state == "stale"
+    stale = v.state != "fresh"  # an uncompared verdict never reads fresh (V2)
     out = {"present": True, "stale": stale}
     if current is None:
         out.update(changed=[], reason=reason or "current_assumptions_not_established",

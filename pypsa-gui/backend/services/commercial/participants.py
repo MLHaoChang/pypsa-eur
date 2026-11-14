@@ -678,7 +678,7 @@ def _stale_hub(hub: HubInputs, vf: ValueFlowConfig) -> bool:
     provenance graph (`provenance_graph.studies.hub_verdict`, PG-05)."""
     from services.provenance_graph import studies
 
-    return studies.hub_verdict(hub, vf).state == "stale"
+    return studies.hub_verdict(hub, vf).state != "fresh"  # uncompared is never fresh (V2)
 
 
 def _allocation_sources(shared: list[_Source], inputs: LedgerInputs, vf: ValueFlowConfig,

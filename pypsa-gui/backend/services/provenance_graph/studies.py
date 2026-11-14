@@ -204,10 +204,12 @@ IC_PART = "input:investment_case/"
 def investment_case_verdict(
     stored_hash: Any, stored_parts: Mapping[str, Any], current: tuple[str, dict] | None
 ) -> Verdict:
-    """`results:investment_case` read from `run:investment_case`, which is pinned on the assumptions hash and, when
-    the report recorded its parts, on one input per assumption part (a part it did not record reads as the value
-    None, as `stored_parts.get` did). Every edge is the run's input, so each needs a new run. A current key that
-    cannot be computed is unreadable: stale."""
+    """`results:investment_case` read from `run:investment_case`, which is pinned on the assumptions hash: the hash
+    decides the verdict. Once the hash edge broke, the run is also pinned on one input per assumption part the report
+    recorded parts for (a part it did not record reads as the value None, as `stored_parts.get` did), so the verdict
+    names which inputs changed. Real records often hold fewer parts than the hash covers, so a part never breaks an
+    unchanged hash. Every edge is the run's input, so each needs a new run. A current key that cannot be computed is
+    unreadable: stale."""
     from services.provenance_graph.queries import Builder, staleness
 
     cur_hash, cur_parts = current if current is not None else (pins.UNREADABLE, {})
@@ -218,7 +220,10 @@ def investment_case_verdict(
     _pin(
         b, IC_RUN, IC_HASH, pins.Pin("assumptions_hash", stored_hash, lambda: cur_hash)
     )
-    if stored_parts:  # an unreadable key has no current parts
+    hashed = staleness(b.build(), IC)
+    if (
+        hashed.state == "stale" and stored_parts
+    ):  # an unreadable key has no current parts
         for k in cur_parts:
             # The part as a value: None is a part's legitimate value ("no study applies"), so it is wrapped.
             _pin(
@@ -231,7 +236,8 @@ def investment_case_verdict(
                     lambda k=k: ("value", cur_parts.get(k)),
                 ),
             )
-    return staleness(b.build(), IC)
+        return staleness(b.build(), IC)
+    return hashed
 
 
 # ── a value-flow hub ─────────────────────────────────────────────────────────
