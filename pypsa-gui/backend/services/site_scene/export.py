@@ -173,12 +173,14 @@ def _ring(raw: Any) -> list[tuple[float, float]]:
         raise _Omit("invalid_footprint")
     try:
         return native.check_footprint(ring, "export")
-    except SceneError:
-        raise _Omit("invalid_footprint") from None
+    except SceneError as e:
+        # Over MAX_FOOTPRINT_VERTICES is only too detailed, not invalid (GK F3).
+        reason = "footprint_too_detailed" if e.kind == "resource_limit" else "invalid_footprint"
+        raise _Omit(reason) from None
 
 
 def _positive(v: Any) -> float:
-    if not _finite(v) or v <= 0:
+    if not _finite(v) or not 0 < v <= native.MAX_HEIGHT_M:
         raise _Omit("invalid_height")
     return float(v)
 

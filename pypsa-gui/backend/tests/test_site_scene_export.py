@@ -64,9 +64,8 @@ def read_glb(data: bytes) -> tuple[dict, bytes]:
     jlen, jtype = struct.unpack_from("<I4s", data, 12)
     assert jtype == b"JSON" and jlen % 4 == 0
     raw = data[20 : 20 + jlen]
-    assert raw == raw.rstrip(b" ") + b" " * (len(raw) - len(raw.rstrip(b" "))), (
-        "JSON is padded with spaces"
-    )
+    end = raw.rindex(b"}") + 1
+    assert set(raw[end:]) <= {0x20} and jlen - end < 4, "JSON is padded with spaces only"
     doc = json.loads(raw.decode("utf-8"))
     rest = data[20 + jlen :]
     blen, btype = struct.unpack_from("<I4s", rest, 0)
@@ -74,11 +73,18 @@ def read_glb(data: bytes) -> tuple[dict, bytes]:
     assert len(rest) == 8 + blen
     binary = rest[8:]
     assert doc["buffers"] == [{"byteLength": blen}]
+    covered = bytearray(blen)
     for view in doc["bufferViews"]:
         assert (
             view["byteOffset"] % 4 == 0
             and view["byteOffset"] + view["byteLength"] <= blen
         )
+        covered[view["byteOffset"] : view["byteOffset"] + view["byteLength"]] = (
+            b"\x01" * view["byteLength"]
+        )
+    assert all(b == 0 for b, c in zip(binary, covered) if not c), (
+        "BIN padding is 0x00"
+    )
     for i, acc in enumerate(doc["accessors"]):
         fmt, size = _COMPONENTS[acc["componentType"]]
         view = doc["bufferViews"][acc["bufferView"]]
@@ -340,6 +346,43 @@ def test_concave_l_shaped_building_keeps_its_area_and_volume():
             },
             "invalid_footprint",
         ),
+        # F4: bounded like the native path (0 < h <= MAX_HEIGHT_M).
+        (
+            {
+                "footprint": [[0, 0], [10, 0], [10, 10], [0, 10]],
+                "height_m": native.MAX_HEIGHT_M + 0.001,
+            },
+            "invalid_height",
+        ),
+        # _finite: a bool or a string is not a number.
+        (
+            {"footprint": [[0, 0], [10, 0], [10, 10], [0, 10]], "height_m": True},
+            "invalid_height",
+        ),
+        (
+            {"footprint": [[0, 0], [10, 0], [10, 10], [0, 10]], "height_m": "5"},
+            "invalid_height",
+        ),
+        ({"footprint": [[0, 0], [10, "0"], [10, 10]], "height_m": 5}, "invalid_footprint"),
+        ({"footprint": [[0, 0], [True, 0], [10, 10]], "height_m": 5}, "invalid_footprint"),
+        # Vertex shape: a non-list point, a 3-element point, a non-list footprint.
+        ({"footprint": [[0, 0], "10,0", [10, 10]], "height_m": 5}, "invalid_footprint"),
+        ({"footprint": [[0, 0], [10, 0, 1], [10, 10]], "height_m": 5}, "invalid_footprint"),
+        ({"footprint": {"0": [0, 0]}, "height_m": 5}, "invalid_footprint"),
+        # F3: over MAX_FOOTPRINT_VERTICES is too detailed, not invalid.
+        (
+            {
+                "footprint": [
+                    [
+                        10 * math.cos(2 * math.pi * k / (native.MAX_FOOTPRINT_VERTICES + 1)),
+                        10 * math.sin(2 * math.pi * k / (native.MAX_FOOTPRINT_VERTICES + 1)),
+                    ]
+                    for k in range(native.MAX_FOOTPRINT_VERTICES + 1)
+                ],
+                "height_m": 5,
+            },
+            "footprint_too_detailed",
+        ),
     ],
 )
 def test_unexportable_building_is_a_named_omission(bad, reason):
@@ -520,6 +563,12 @@ def test_byte_limit_both_sides(monkeypatch):
         _limit_kind(lambda: export.bundle(snap, exported_at="2026-01-01T00:00:00Z"))
         == "export_bytes"
     )
+    with pytest.raises(SceneError) as err:
+        export.bundle(snap, exported_at="2026-01-01T00:00:00Z")
+    assert err.value.message == (
+        f"Too large to export: the file would be {native.size_text(size)}, "
+        f"over the {native.size_text(size - 1)} limit"
+    )
 
 
 # ── the committed fixture the frontend's GLTFLoader reads (E2) ──────────────
@@ -641,6 +690,9 @@ def test_export_stays_on_the_generation_it_read(client, geo, monkeypatch):
     assert moved["status"] == 200 and r.status_code == 200, r.text
     manifest, glb, _z = unzip(r.content)
     assert manifest["scene"]["revision"] == 2
+    # F1: the header and the file name name the revision the bytes hold, not the moved pointer.
+    assert r.headers["x-scene-revision"] == "2"
+    assert r.headers["content-disposition"].endswith('-scene-r2.zip"')
     doc, binary = read_glb(glb)
     _node, world, _ = node_mesh(doc, binary, "greenfield:hall")
     assert max(p[1] for p in world) == pytest.approx(8.0), (
@@ -803,3 +855,267 @@ def test_export_verdict_is_a_read_that_needs_buildings():
         blender["available"] is False
         and blender["blocker"]["code"] == "worker_unavailable"
     )
+
+
+# ── GK B F2–F8 and the E12 mutant gaps ───────────────────────────────────────
+
+
+def _feature(fid: str, n_tris: int) -> dict:
+    """A hand-made feature for the writer: `n_tris` triangles over 3 vertices."""
+    return {
+        "id": fid,
+        "kind": "building",
+        "translation": (0.0, 0.0, 0.0),
+        "rotation": None,
+        "positions": [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, -1.0)],
+        "indices": [0, 1, 2] * n_tris,
+        "record": {"source_class": "manual"},
+    }
+
+
+def test_glb_padding_runs_and_is_spaces_and_zeros():
+    # F2: real features always have 4-aligned blobs, so a one-triangle uint16 index
+    # blob (6 bytes) is what makes the BIN padding run; ids of 1–4 chars make the JSON pad run.
+    snap = fixture.reference_snapshot()
+    json_padded = False
+    for fid in ("a", "ab", "abc", "abcd"):
+        glb, _geometry = export._glb(snap, [_feature(fid, 1)], {})
+        doc, binary = read_glb(glb)
+        idx_view = doc["bufferViews"][doc["accessors"][1]["bufferView"]]
+        assert idx_view["byteLength"] == 6 and len(binary) == 36 + 8
+        assert binary[36 + 6 :] == b"\x00\x00"
+        jlen = struct.unpack_from("<I", glb, 12)[0]
+        raw = glb[20 : 20 + jlen]
+        json_padded |= raw.endswith(b" ")
+    assert json_padded, "at least one id length makes the JSON padding run"
+
+
+def test_index_width_switches_to_uint32_only_past_65535_vertices():
+    # 422 is out of reach of real features (<= 2 * 256 vertices); pinned on the writer directly.
+    snap = fixture.reference_snapshot()
+    for n, ctype in ((0x10000, 5123), (0x10001, 5125)):
+        f = {**_feature("big", 1), "positions": [(float(k), 0.0, 0.0) for k in range(n)]}
+        f["indices"] = [0, 1, n - 1]
+        glb, _ = export._glb(snap, [f], {})
+        doc, _binary = read_glb(glb)
+        assert doc["accessors"][1]["componentType"] == ctype
+
+
+def test_building_at_the_height_cap_is_exported():
+    snap = fixture.reference_snapshot()
+    snap["buildings"][0]["height_m"] = native.MAX_HEIGHT_M
+    _glb, manifest = export.build(snap)
+    assert snap["buildings"][0]["id"] in {f["id"] for f in manifest["features"]}
+
+
+@pytest.mark.parametrize(
+    "placement, footprint, reason",
+    [
+        ("30,10", None, "invalid_placement"),
+        ([30.0, 10.0, 0.0], None, "invalid_placement"),
+        ({"x": float("nan"), "y": 10.0, "heading": 0.0}, None, "invalid_placement"),
+        ({"x": 30.0, "y": float("inf"), "heading": 0.0}, None, "invalid_placement"),
+        ({"x": 30.0, "y": 10.0, "heading": float("nan")}, None, "invalid_placement"),
+        ({"x": 30.0, "y": 10.0, "heading": "north"}, None, "invalid_placement"),
+        ({"x": True, "y": 10.0, "heading": 0.0}, None, "invalid_placement"),
+        ({"x": 30.0, "y": 10.0}, None, "invalid_placement"),
+        (None, {"width_m": 0.0, "depth_m": 2.0, "height_m": 2.5}, "invalid_footprint"),
+        (None, {"width_m": 4.0, "depth_m": 0.0, "height_m": 2.5}, "invalid_footprint"),
+        (None, {"width_m": -4.0, "depth_m": 2.0, "height_m": 2.5}, "invalid_footprint"),
+        (None, {"width_m": 4.0, "depth_m": -2.0, "height_m": 2.5}, "invalid_footprint"),
+        (None, {"width_m": float("nan"), "depth_m": 2.0, "height_m": 2.5}, "invalid_footprint"),
+        (None, {"width_m": 4.0, "depth_m": "2", "height_m": 2.5}, "invalid_footprint"),
+        (None, {"width_m": 4.0, "depth_m": 2.0, "height_m": 0.0}, "invalid_height"),
+        (
+            None,
+            {"width_m": 4.0, "depth_m": 2.0, "height_m": native.MAX_HEIGHT_M + 1},
+            "invalid_height",
+        ),
+        (None, ["not", "a", "dict"], "no_footprint"),
+    ],
+)
+def test_unexportable_equipment_is_a_named_omission(placement, footprint, reason):
+    # F5: every equipment guard, each on the otherwise valid pv_roof box.
+    snap = fixture.reference_snapshot()
+    key = "Generator:pv_roof"
+    if placement is not None:
+        snap["site"]["placements"][key] = placement
+    if footprint is not None:
+        snap["asset_footprints"][key] = footprint
+    glb, manifest = export.build(snap)
+    assert {"feature": key, "kind": "equipment", "reason": reason} in manifest[
+        "omissions"
+    ]
+    assert key not in {f["id"] for f in manifest["features"]}
+    assert b"NaN" not in glb and b"Infinity" not in glb
+
+
+def _check_triangulation(ring, n_tris):
+    """Oracle: every triangle strictly counter-clockwise and the areas sum to the ring's."""
+    tris = export._triangulate(ring)
+    assert len(tris) == n_tris
+    areas = [export._cross(ring[a], ring[b], ring[c]) / 2 for a, b, c in tris]
+    assert all(a > 0 for a in areas), "every ear is wound counter-clockwise"
+    assert sum(areas) == pytest.approx(frames.polygon_area(ring), rel=1e-9)
+
+
+def test_ear_clipping_with_a_reflex_first_corner():
+    # F6: the L of the metric oracle, started at its reflex corner (4, 4).
+    _check_triangulation([(4, 4), (4, 10), (0, 10), (0, 0), (10, 0), (10, 4)], 4)
+
+
+def test_ear_clipping_skips_a_collinear_corner():
+    # F6: (5, 0) lies on the bottom edge. Met as the ear tip it is dropped, never cut
+    # into a zero-area sliver; clipped first from elsewhere it is an ordinary corner.
+    _check_triangulation([(5, 0), (10, 0), (10, 10), (0, 10), (0, 0)], 2)
+    _check_triangulation([(0, 0), (5, 0), (10, 0), (10, 10), (0, 10)], 3)
+
+
+def test_ear_clipping_refuses_an_ear_with_a_corner_on_its_edge():
+    # _inside's >= boundary: (2, 2) lies on A–C of the ear at B, so that ear is refused.
+    _check_triangulation([(0, 0), (4, 0), (4, 4), (2, 2), (0, 4)], 3)
+
+
+def test_geometry_sha256_pins_positions_and_indices():
+    # F7: the hash is sha256(position bytes + index bytes) of the feature's own buffers.
+    _glb_bytes, manifest = export.build(fixture.reference_snapshot())
+    doc, binary = read_glb(_glb_bytes)
+    for f in manifest["features"]:
+        prim = doc["meshes"][doc["nodes"][f["node"]]["mesh"]]["primitives"][0]
+        chunks = []
+        for acc in (prim["attributes"]["POSITION"], prim["indices"]):
+            view = doc["bufferViews"][doc["accessors"][acc]["bufferView"]]
+            chunks.append(binary[view["byteOffset"] : view["byteOffset"] + view["byteLength"]])
+        assert f["geometry_sha256"] == hashlib.sha256(b"".join(chunks)).hexdigest()
+    taller = fixture.reference_snapshot()
+    taller["buildings"][0]["height_m"] += 1
+    before = {f["id"]: f["geometry_sha256"] for f in manifest["features"]}
+    after = {f["id"]: f["geometry_sha256"] for f in export.build(taller)[1]["features"]}
+    changed = {k for k in before if before[k] != after[k]}
+    assert changed == {taller["buildings"][0]["id"]}
+
+
+def test_manifest_stats_count_what_was_written():
+    glb, manifest = export.build(fixture.reference_snapshot())
+    stats = manifest["stats"]
+    assert stats["features"] == len(manifest["features"]) > 0
+    assert stats["omitted"] == len(manifest["omissions"]) == 2
+    assert stats["glb_bytes"] == len(glb)
+    doc, binary = read_glb(glb)
+    assert stats["triangles"] == sum(
+        doc["accessors"][m["primitives"][0]["indices"]]["count"] // 3
+        for m in doc["meshes"]
+    )
+
+
+def test_a_non_finite_binding_weight_is_an_integrity_error():
+    # 602: _canonical refuses NaN, so the manifest never holds it.
+    snap = fixture.reference_snapshot()
+    snap["associations"][0]["weight"] = float("nan")
+    with pytest.raises(SceneError) as err:
+        export.build(snap)
+    assert err.value.kind == "integrity_error"
+
+
+def test_missing_or_null_optional_keys_export_as_empty():
+    # The `or {}` / `or []` defaults: a snapshot without the optional parts still exports.
+    snap = fixture.reference_snapshot()
+    building = {**snap["buildings"][0], "source": None}
+    snap.update(
+        buildings=[building],
+        asset_footprints=None,
+        associations=None,
+        groups=None,
+        site={**snap["site"], "origin": None, "placements": None},
+    )
+    glb, manifest = export.build(snap)
+    read_glb(glb)
+    assert [f["id"] for f in manifest["features"]] == [building["id"]]
+    assert manifest["features"][0]["source"] == {"namespace": None, "source_id": None}
+    assert manifest["features"][0]["source_class"] == "unknown"
+    assert manifest["omissions"] == [] and manifest["bindings"] == []
+    assert manifest["groups"] == []
+    assert (manifest["origin"]["lng"], manifest["origin"]["lat"]) == (None, None)
+    for k in ("buildings", "asset_footprints", "associations", "groups"):
+        snap.pop(k)
+    snap["site"].pop("placements")
+    _glb, manifest = export.build(snap)
+    assert manifest["features"] == [] and manifest["stats"]["features"] == 0
+
+
+def test_a_negative_zero_writes_the_same_bytes_as_zero():
+    def glb_at(x):
+        snap = fixture.reference_snapshot()
+        snap["site"]["placements"]["Generator:pv_roof"] = {"x": x, "y": 0.0, "heading": 0.0}
+        return export.build(snap)[0]
+
+    glb = glb_at(-0.0)
+    assert glb == glb_at(0.0)
+    doc, _ = read_glb(glb)
+    node = next(n for n in doc["nodes"] if n["name"] == "Generator:pv_roof")
+    assert all(math.copysign(1.0, c) == 1.0 for c in node["translation"])
+
+
+@pytest.mark.parametrize("extra, status", [(0, 200), (1, 413)])
+def test_export_body_cap_at_exactly_the_cap(client, geo, extra, status):
+    _scene_with_buildings(client, geo)
+    raw = json.dumps(BODY).encode()
+    raw += b" " * (4 * 1024 - len(raw) + extra)
+    r = client.post(URL, content=raw, headers={"content-type": "application/json"})
+    assert r.status_code == status, r.text
+
+
+def test_a_count_limit_is_an_http_413(client, geo, monkeypatch):
+    _scene_with_buildings(client, geo)
+    monkeypatch.setattr(export, "MAX_EXPORT_FEATURES", 0)
+    r = client.post(URL, json=BODY)
+    assert (r.status_code, _kind(r), r.json()["detail"]["limit"]) == (
+        413,
+        "resource_limit",
+        "features",
+    )
+
+
+def test_a_viewer_member_without_the_lock_can_export(client, geo, _auth_db, seeded_identity):
+    # F8: the contract row says viewer; a plain member of the project's org,
+    # assigned to the project and holding no edit lock, gets the download.
+    import uuid
+    from datetime import UTC, datetime
+
+    from fastapi.testclient import TestClient
+
+    import main
+    from db.models import OrgMembership, Project, ProjectMembership, User
+    from services.auth_service import hash_password
+    from tests.conftest import attach_session
+
+    _scene_with_buildings(client, geo)
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        user = User(
+            id=uuid.uuid4(),
+            email=f"viewer-{uuid.uuid4().hex[:6]}@example.com",
+            password_hash=hash_password("irrelevant"),
+            status="active",
+            is_super_admin=False,
+            created_at=datetime.now(tz=UTC),
+        )
+        db.add(user)
+        db.flush()
+        db.add(OrgMembership(id=uuid.uuid4(), user_id=user.id,
+                             org_id=seeded_identity["org_id"], role="member"))
+        project = db.query(Project).filter_by(
+            org_id=seeded_identity["org_id"], name="geo"
+        ).one()
+        db.add(ProjectMembership(project_id=project.id, user_id=user.id,
+                                 assigned_by=project.created_by,
+                                 assigned_at=datetime.now(tz=UTC)))
+        db.commit()
+        uid = user.id
+    with TestClient(main.app) as viewer:
+        attach_session(viewer, session_local, uid)
+        r = viewer.post(URL, json=BODY)
+    assert r.status_code == 200, r.text
+    assert r.headers["x-scene-revision"] == "2"
+    manifest, glb, _z = unzip(r.content)
+    assert [f["id"] for f in manifest["features"]] == ["greenfield:hall"]

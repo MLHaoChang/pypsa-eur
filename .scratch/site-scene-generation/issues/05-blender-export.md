@@ -59,7 +59,7 @@ GK B conditions:
 - E6 axes/sign: world-space corners at heading 30 and 90; north lands at −Z; `frames.enu_to_gltf` signs pinned on one point.
 - E7 limits: counts before build, `MAX_EXPORT_BYTES` after, 4 KiB body cap before parse; just-under/just-over tests, all 413 `resource_limit`.
 - E8 request model: Literal format/media_policy, extra="forbid"; unknown key and non-"none" policy are 422 `invalid_input`.
-- E9 route tables: read-only in the lock policy, viewer in the ACL policy, a chat disposition; policy, golden-coverage, error-kind and parity checks run at the trial merge; new kind in its own `tool-error-kinds.d` fragment.
+- E9 route tables: read-only in the lock policy, viewer in the ACL policy, a chat disposition; policy, golden-coverage, error-kind and parity checks run at the trial merge; new kind in its own `tool-error-kinds.d` fragment. *Amended at build (GK B 58 accepted):* an unadopted site answers 404 `not_found`, like the sibling proposals and apply routes; no `scene_not_enabled` kind is added, so no fragment.
 - E10 privacy: manifest carries no filesystem path, uploaded filename or EXIF; Content-Disposition through `http_filenames` with quotes/non-ASCII tested.
 - E11 writes nothing: project digest unchanged, no temp file left, also when the build raises.
 - E12 mutants on `export.py`, survivors listed; UX OK needed.
