@@ -733,7 +733,7 @@ def _outcome(family: str, status: str | None) -> str | None:
     Fails closed: a status the family does not name (an exited worker, a lost
     origin, a status added later) is `unknown`, never `succeeded`.
     """
-    if status in _LIVE and not _terminal(family, status):
+    if status in _LIVE:  # no family names a live status terminal
         return None
     return _OUTCOMES[family].get(status, 'unknown')
 
@@ -829,7 +829,7 @@ def _native_view(job_id: str, actor_id: str | None) -> dict[str, Any]:
         handle, view_of = _require_report(job_id, actor_id), _report_job_view
     ctx = _active_ctx_for(handle)
     snap = _snapshot_bound_job(job_id, ctx)
-    status = snap.get('status') or 'unknown'
+    status = snap['status']  # `_snapshot_bound_job` always names one
     outcome = _outcome(family, status)
     phase = snap.get('stage') or snap.get('section') or snap.get('kind') or getattr(handle, 'kind', None)
     return _view(
@@ -894,23 +894,11 @@ def _queue_view(job_id: str, actor_id: str | None) -> dict[str, Any]:
 
 def job_status(job_id: str, *, actor_id: str | None) -> dict[str, Any]:
     """The neutral view of any job this actor may see; 404 `job_not_found` otherwise."""
-    if not isinstance(job_id, str) or not job_id:
+    if not isinstance(job_id, str):
         _refuse('job_not_found', 'No job is registered for that id.')
     if _family_of(job_id) == QUEUE_FAMILY:
         return _queue_view(job_id, actor_id)
     return _native_view(job_id, actor_id)
-
-
-def _origin_live(job_id: str, ctx) -> bool:
-    """Whether the handle's own worker still owns its record (not a newer run)."""
-    with _LOCK:
-        binding = _ACTIVITY_BINDINGS.get(job_id)
-    if ctx is None or binding is None or binding[0] != id(ctx):
-        return False
-    _, key, worker, started = binding
-    with ctx.solver_state_lock:
-        record = ctx.solver_state if key is None else ctx.solver_state.get(key)
-        return _same_origin(record, worker, started)
 
 
 def _worker_exited(job_id: str) -> bool:
@@ -971,11 +959,9 @@ def cancel_job(
         return {'cancel': 'origin_lost', 'job': before}
     if before['terminal']:
         return {'cancel': 'already_finished', 'job': before}
+    # `job_status` read the handle's own origin (`_same_origin`): a newer run
+    # that replaced it reads `unknown`, so nothing reaches the abort below.
     queue = before['family'] == QUEUE_FAMILY
-    if not queue:
-        from services.pypsa_service import PyPSAService
-        if not _origin_live(job_id, PyPSAService.get_active_context()):
-            return {'cancel': 'origin_lost', 'job': before}
     try:
         with _as_actor(actor_id):
             if queue:
@@ -993,7 +979,9 @@ def cancel_job(
     deadline = time.monotonic() + max(0.0, bound)
     while True:
         after = job_status(job_id, actor_id=actor_id)
-        stopped = after['outcome'] == 'cancelled' and (queue or _worker_exited(job_id))
+        # A queue job has no bound worker (`_worker_exited` is True): the queue
+        # flips it to `aborted` only once its worker returned.
+        stopped = after['outcome'] == 'cancelled' and _worker_exited(job_id)
         settled = stopped or (after['terminal'] and after['outcome'] != 'cancelled') \
             or after['outcome'] == 'unknown'
         if settled or stop.is_set() or time.monotonic() >= deadline:

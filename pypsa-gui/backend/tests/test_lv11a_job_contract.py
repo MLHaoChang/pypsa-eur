@@ -706,3 +706,235 @@ def test_a_queue_job_that_finished_before_the_abort_reads_finished_first(
     monkeypatch.setattr(chat_tools, "solve_queue_abort", finished_in_between)
     out = ja.cancel_job(job_id, actor_id=chat_tools.acting_user_id(), settle_seconds=1)
     assert out["cancel"] == "finished_first" and out["job"]["outcome"] == "succeeded"
+
+
+# ── GK B A7: mutant pins ──────────────────────────────────────────────────
+
+
+def test_a_study_worker_that_exits_just_after_flipping_is_cancelled_within_the_bound(
+    baseline,
+):
+    """The status reads `aborted` before the worker leaves: the ack waits for the exit."""
+    ctx, *_ = baseline
+    owner = chat_tools.acting_user_id()
+    stop, gone = threading.Event(), threading.Event()
+
+    def run():
+        stop.wait(5)
+        with ctx.solver_state_lock:
+            ctx.solver_state["fmea_sweep"]["status"] = "aborted"
+        time.sleep(0.3)  # the closing restore
+
+    worker = threading.Thread(target=run, daemon=True)
+    with ctx.solver_state_lock:
+        ctx.solver_state["fmea_sweep"] = {
+            "status": "running",
+            "thread": worker,
+            "stop_event": stop,
+            "started_at": time.time(),
+            "stage": "sweep",
+            "iterations": [],
+        }
+    worker.start()
+    job = ja.register_study_job(
+        study_key="fmea_sweep",
+        tool_name="run_fmea_sweep",
+        tool_use_id="tu",
+        owner_user_id=owner,
+        project_uuid=str(ctx.project_uuid),
+    )
+    try:
+        out = ja.cancel_job(job, actor_id=owner, settle_seconds=3)
+        assert out["cancel"] == "cancelled" and not worker.is_alive()
+    finally:
+        stop.set()
+        gone.set()
+        worker.join(2)
+
+
+def test_a_record_with_no_worker_thread_is_verified_by_its_status(baseline):
+    """A foreground record bound by `started_at` alone: the record is the only witness."""
+    ctx, *_ = baseline
+    owner = chat_tools.acting_user_id()
+    with ctx.solver_state_lock:
+        ctx.solver_state.update(
+            status="running",
+            thread=None,
+            stop_event=threading.Event(),
+            started_at=time.time(),
+            kind="lopf",
+        )
+    job = ja.register_foreground_solve(
+        tool_name="run_simulation",
+        tool_use_id="tu",
+        owner_user_id=owner,
+        project_uuid=str(ctx.project_uuid),
+        kind="lopf",
+    )
+    out = ja.cancel_job(job, actor_id=owner, settle_seconds=1)
+    assert out["cancel"] == "cancelled" and out["job"]["status"] == "aborted"
+
+
+def test_a_stopped_cancel_returns_at_once_as_cancel_requested(baseline):
+    ctx, *_ = baseline
+    started = [_start(ctx, "ad", honours_stop=False)]
+    stop = threading.Event()
+    stop.set()
+    try:
+        t0 = time.monotonic()
+        out = ja.cancel_job(
+            started[0][0],
+            actor_id=chat_tools.acting_user_id(),
+            settle_seconds=5,
+            stop=stop,
+        )
+        assert out["cancel"] == "cancel_requested" and time.monotonic() - t0 < 2
+    finally:
+        _stop_all(started)
+
+
+@pytest.mark.parametrize("queue", [False, True])
+def test_an_unexpected_abort_error_is_raised_not_swallowed(
+    baseline, monkeypatch, queue
+):
+    ctx, _project_id, path = baseline
+
+    def boom(*_a):
+        raise HTTPException(500, "solver host gone")
+
+    started = []
+    if queue:
+        job, _ = _queue(ctx, path)
+        monkeypatch.setattr(chat_tools, "solve_queue_abort", boom)
+    else:
+        started.append(_start(ctx, "ad"))
+        job = started[0][0]
+        monkeypatch.setattr(chat_tools, "abort_adequacy_study", boom)
+    try:
+        with pytest.raises(HTTPException) as raised:
+            ja.cancel_job(job, actor_id=chat_tools.acting_user_id(), settle_seconds=0)
+        assert raised.value.status_code == 500
+    finally:
+        _stop_all(started)
+
+
+def test_an_unknown_actor_is_the_acting_refusal_not_a_silent_none(baseline):
+    """`_queue_job` re-raises everything but the ACL's 404 (an unknown user is 401)."""
+    ctx, _project_id, path = baseline
+    job, _ = _queue(ctx, path)
+    with pytest.raises(HTTPException) as refused:
+        ja.job_status(job, actor_id=str(uuid.uuid4()))
+    assert refused.value.status_code == 401
+
+
+def test_a_handle_without_a_project_reads_on_any_project(baseline):
+    """The mismatch guard needs both projects named; a handle minted with none reads."""
+    ctx, *_ = baseline
+    started = [_start(ctx, "ad")]
+    try:
+        ja._STUDIES[started[0][0]].project_uuid = None
+        view = ja.job_status(started[0][0], actor_id=chat_tools.acting_user_id())
+        assert view["status"] == "running" and view["project_id"] is None
+    finally:
+        _stop_all(started)
+
+
+def test_a_context_without_a_project_does_not_refuse(baseline, monkeypatch):
+    ctx, *_ = baseline
+    started = [_start(ctx, "ad")]
+    try:
+        monkeypatch.setattr(ctx, "project_uuid", None)
+        view = ja.job_status(started[0][0], actor_id=chat_tools.acting_user_id())
+        assert view["status"] == "running"
+    finally:
+        _stop_all(started)
+
+
+def test_warnings_carry_the_record_and_the_observer(baseline):
+    from harness import completion_observer
+
+    ctx, *_ = baseline
+    owner = chat_tools.acting_user_id()
+    started = [_start(ctx, "ad")]
+    try:
+        with ctx.solver_state_lock:
+            ctx.solver_state["fmea_sweep"]["warnings"] = ["two contingencies skipped"]
+        completion_observer.note_incomplete(owner, str(ctx.project_uuid))
+        view = ja.job_status(started[0][0], actor_id=owner)
+        assert view["warnings"] == [
+            "two contingencies skipped",
+            "activity_completion_observation_incomplete",
+        ]
+    finally:
+        _stop_all(started)
+
+
+def test_phase_and_finished_at_come_from_the_record(baseline):
+    ctx, *_ = baseline
+    actor = chat_tools.acting_user_id()
+    started = [_start(ctx, family) for family in ("fg", "rpt")]
+    try:
+        fg, rpt = (ja.job_status(s[0], actor_id=actor) for s in started)
+        assert (fg["phase"], rpt["phase"]) == ("lopf", "summary")
+        with ctx.solver_state_lock:
+            ctx.solver_state["report_job"].update(status="done", finished_at=123.0)
+        assert ja.job_status(started[1][0], actor_id=actor)["finished_at"] == 123.0
+    finally:
+        _stop_all(started)
+
+
+def test_finished_at_is_the_first_terminal_read(baseline):
+    ctx, *_ = baseline
+    actor = chat_tools.acting_user_id()
+    started = [_start(ctx, "ad")]
+    try:
+        with ctx.solver_state_lock:
+            ctx.solver_state["fmea_sweep"]["status"] = "done"
+        first = ja.job_status(started[0][0], actor_id=actor)["finished_at"]
+        time.sleep(0.01)
+        with ctx.solver_state_lock:
+            ctx.solver_state["fmea_sweep"]["stage"] = "restored"
+        later = ja.job_status(started[0][0], actor_id=actor)
+        assert later["cursor"] == 2 and later["finished_at"] == first
+    finally:
+        _stop_all(started)
+
+
+@pytest.mark.parametrize("fingerprint", ["abc123", None])
+def test_a_foreground_success_names_the_solve_fingerprint(baseline, fingerprint):
+    ctx, *_ = baseline
+    started = [_start(ctx, "fg")]
+    try:
+        ctx.network.meta.pop("assistant_solve_input_fingerprint", None)
+        if fingerprint:
+            ctx.network.meta["assistant_solve_input_fingerprint"] = fingerprint
+        with ctx.solver_state_lock:
+            ctx.solver_state["status"] = "completed"
+        view = ja.job_status(started[0][0], actor_id=chat_tools.acting_user_id())
+        assert view["result_revision"] == (
+            f"solve:{fingerprint}" if fingerprint else None
+        )
+    finally:
+        _stop_all(started)
+
+
+@pytest.mark.parametrize("record_id,expected", [("rep-2", "rep-2"), (None, "rep-1")])
+def test_a_report_success_names_the_record_report_first(baseline, record_id, expected):
+    ctx, *_ = baseline
+    started = [_start(ctx, "rpt")]
+    try:
+        with ctx.solver_state_lock:
+            ctx.solver_state["report_job"].update(
+                status="done", version=4, report_id=record_id
+            )
+        view = ja.job_status(started[0][0], actor_id=chat_tools.acting_user_id())
+        assert view["result_revision"] == f"report:{expected}@4"
+    finally:
+        _stop_all(started)
+
+
+def test_a_non_string_id_is_not_found(baseline):
+    for job_id in (None, 7):
+        with pytest.raises(HTTPException) as refused:
+            ja.job_status(job_id, actor_id=chat_tools.acting_user_id())
+        assert refused.value.detail["error_kind"] == "job_not_found"
