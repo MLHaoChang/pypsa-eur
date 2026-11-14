@@ -452,3 +452,31 @@ def test_the_tie_state_survives_the_written_pcc_file(tmp_path):
     odd["tie_open"] = ["True", "", None, "yes", "1", "false"]
     odd.to_csv(path, index=False)
     assert validate_pcc(pd.read_csv(path))["tie_open"].tolist() == [True, False, False, False, True, False]
+
+
+def test_a_line_away_from_the_pcc_leaves_the_tie_open():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    n.add("Bus", "mv2", v_nom=20.0)
+    n.add("Line", "campus_cable", bus0="mv", bus1="mv2", x=0.1, r=0.01, s_nom=50.0)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert pcc["tie_open"].all()
+
+
+def test_a_network_that_marks_no_pcc_takes_the_campus_files_pcc():
+    n = _no_flow(_tie(solved_hub(), p_max_pu=0.0))
+    campus = draft_campus(n).spec
+    n.buses["eh_poc"] = False
+    _, pcc = campus_hourly(n, campus)
+    assert pcc["tie_open"].all()
+
+
+def test_a_status_on_a_link_that_is_not_committable_does_not_open_it():
+    n = _no_flow(solved_hub())
+    n.links_t.status = pd.DataFrame({"grid_import": 0.0}, index=n.snapshots)
+    _, pcc = campus_hourly(n, draft_campus(n).spec)
+    assert not pcc["tie_open"].any()
+
+
+def test_the_draft_does_not_call_a_tie_that_can_carry_power_back_normally_open():
+    m = _no_flow(_tie(solved_hub(), p_max_pu=0.0, p_min_pu=-1.0))
+    assert "tie_normally_open" not in draft_campus(m).spec["campus"]["pcc"]
