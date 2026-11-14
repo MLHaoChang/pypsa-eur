@@ -1,6 +1,6 @@
 # A bulk edit of a composite cost part skips re-derivation, so the fingerprint misses the LP change
 
-Status: in-progress (claude/tcu-08-bulk-part-rederive)
+Status: done (#1533)
 Type: bug
 Found in: GK B (58) review of SH-14 S-B2, 2026-11-14 (defect on master, not in the PR).
 Owner area: app backend (GK B reviews).
