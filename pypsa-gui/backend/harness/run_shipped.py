@@ -139,7 +139,10 @@ def check(data, template_id: str) -> list[dict]:
 
 
 def _contract_ids(cfg) -> set[str]:
-    contracts = ((cfg or {}).get("commercial") or {}).get("contracts") or []
+    commercial = (cfg or {}).get("commercial")
+    contracts = commercial.get("contracts") if isinstance(commercial, dict) else None
+    if not isinstance(contracts, list):
+        return set()
     return {c.get("id") for c in contracts if isinstance(c, dict) and c.get("id")}
 
 

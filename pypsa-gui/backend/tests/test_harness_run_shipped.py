@@ -383,6 +383,64 @@ def test_the_digest_binds_the_projects_own_library_refs(project, tpl, built):
     assert with_ref("a" * 64) == a
 
 
+def _digest_with(project, tpl, built, patch):
+    cfg, network = built
+    c = json.loads(json.dumps(cfg))
+    patch(c)
+    return S.load(project, TID, template_dir=tpl, cfg=c, network=network)["digest"]
+
+
+def _named_series(project):
+    """A series name a shipped case names on a contract's reference price."""
+    for case in json.loads((project / "cases.json").read_text())["cases"]:
+        for ch in case["changes"]:
+            if ch["path"].endswith(".reference_price.id"):
+                return ch["path"].split(".")[2], ch["old"]
+    raise AssertionError("no contract reference price in the shipped cases")
+
+
+def test_the_digest_binds_a_contract_reference_price_ref(project, tpl, built):
+    cid, name = _named_series(project)
+
+    def ref(h):
+        def patch(c):
+            for k in c["commercial"]["contracts"]:
+                if k["id"] == cid:
+                    k["reference_price"] = {"id": name, "version": 1, "hash": h}
+
+        return _digest_with(project, tpl, built, patch)
+
+    assert ref("a" * 64) != ref("b" * 64)
+    assert ref("a" * 64) == ref("a" * 64)
+    cfg, _ = built
+    assert ref("a" * 64) != _digest_with(project, tpl, built, lambda c: None)
+
+
+def test_the_digest_binds_the_import_price_ref(project, tpl, built):
+    def ref(h):
+        return _digest_with(
+            project,
+            tpl,
+            built,
+            lambda c: c["commercial"].__setitem__(
+                "import_price_ref", {"id": "ipp_da_base", "version": 1, "hash": h}
+            ),
+        )
+
+    assert ref("a" * 64) != ref("b" * 64)
+
+
+@pytest.mark.parametrize("commercial", ["not a dict", None, 7])
+def test_a_project_config_with_no_commercial_block_still_digests(
+    project, tpl, built, commercial
+):
+    base = _digest_with(project, tpl, built, lambda c: None)
+    got = _digest_with(
+        project, tpl, built, lambda c: c.__setitem__("commercial", commercial)
+    )
+    assert isinstance(got, str) and len(got) == 64 and got != base
+
+
 def _approved(project, tpl, built):
     return _load(project, tpl, built)["digest"]
 
