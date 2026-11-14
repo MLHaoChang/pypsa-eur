@@ -3,7 +3,7 @@
 
 # SC-05 — optional integrated Blender generation and reviewed return
 
-Status: ready-for-human (parked until a Blender/photo engine is chosen; Q-SS-1)
+Status: ready-for-agent (engine chosen Q-SS-2; blockers: 05 and SC-00 B worker evidence)
 Type: task
 Dependencies: SC-04; SC-00 worker/protocol/resource evidence
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -41,3 +41,7 @@ Deliver this slice's in-place explanation, typed proposed action or truthful UI 
 Was: `needs-triage — specification proposed; not implemented`. Owner question Q-SS-1 (see issue 05): the worker needs the SC-00 B worker, protocol and resource evidence, which waits for a supported Blender engine. Blockers when answered: 04 and 05. Opus, reviewers GK B (worker isolation, security) and UX.
 
 2026-11-05, owner answer Q-SS-1 (coordinator card): "Park until an engine is chosen (Recommended)". This issue waits for an engine choice.
+
+### 2026-11-14: engine chosen (Q-SS-2)
+
+2026-11-14, owner answer Q-SS-2 (coordinator card): "option 1 (Recommended)". Engines chosen, see [research-engines.md](../research-engines.md) (#1490): Blender-free GLB+manifest by default (trimesh/pygltflib, MIT); Blender 5.2 LTS only as a separate pinned no-network container for optional `.blend` output; photos via OpenDroneMap/NodeODM, out-of-process and unmodified (AGPL). Change: the worker is one container job running the pinned Blender 5.2 LTS binary with `--background --python-exit-code --factory-startup --offline-mode`, no network, resource caps and a process-group kill for cancel/timeout. Not the `bpy` wheel (exact Python 3.13, GPL linked in-process, no cancel). Never open inbound `.blend` files: Blender has no sandbox, isolation is OS-level. Sandbox and resource numbers come from the SC-00 B measured run.
