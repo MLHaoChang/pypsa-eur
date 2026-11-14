@@ -1,6 +1,6 @@
 # A bulk edit of a composite cost part skips re-derivation, so the fingerprint misses the LP change
 
-Status: ready-for-agent
+Status: done (#1533)
 Type: bug
 Found in: GK B (58) review of SH-14 S-B2, 2026-11-14 (defect on master, not in the PR).
 Owner area: app backend (GK B reviews).
@@ -32,3 +32,18 @@ retained results, sweep case reuse (`workflow_tools.py:676`), the assistant prev
 - Optional backstop: also hash `part_columns()` in the fingerprint.
 
 ## Comments
+
+- 2026-11-14, GK B (58) plan GO with conditions:
+  - T1 validate all, then write all: every target of every batch through `_check_investment_parts` before the first
+    write; a 422 leaves the whole frame byte-equal. Test a two-target bulk where only the second is invalid.
+  - T2 same lock: the re-derive runs inside the write's lock hold; any revision bump or cache-key move after it.
+  - T3 other writers: list every writer of part columns; if any stays raw, add the `part_columns` fingerprint
+    backstop, appended only when present, with a byte-identity pin test (AS-02); else SKIP with the list.
+  - T4 networks already out of sync: the staging also re-derives `fom_cost` and `lifetime`, or argue why a stale
+    derived column can't reach the LP; pin that a row already in agreement gives a bit-identical LP input.
+  - T5 PUT parity: bulk row == PUT row for capital_cost, fom_cost, lifetime, StorageUnit and Line, row form too;
+    a bulk of an unrelated column (p_nom) leaves the derived columns byte-equal.
+  - T6 callers: one test through `chat_tools.bulk_update_components`, one through the sweep child path, each
+    showing the fingerprint moves.
+  - T7 mutants: re-derive removed, validator removed, re-derive once on a shared dict instead of per target each
+    go red.

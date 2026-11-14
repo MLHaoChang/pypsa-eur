@@ -210,8 +210,10 @@ def fill_periodized_cost_defaults(
     """
     undo: list[tuple[str, str, pd.Index, pd.Series]] = []
 
-    # Composite assets (a battery's power and energy parts): re-derive the annual `capital_cost` with the
-    # discount rate in force, BEFORE the horizon scaling below scales it like any typed `capital_cost`.
+    # Composite assets (a battery's power and energy parts): re-derive the annual `capital_cost`, `fom_cost` and
+    # `lifetime` with the discount rate in force, BEFORE the horizon scaling below scales the costs like any typed
+    # ones. A row whose stored columns already agree with its parts is written the same values (TCU 08: a row a
+    # raw writer left stale never reaches the LP).
     # Lazy import: `asset_schema` imports `_annuity` from this module.
     from services.asset_schema.derive import derive_composite, effective_discount_rate, has_parts, part_scales
     from services.asset_schema.schema import CLASS_ATTR, COMPOSITE
@@ -224,15 +226,19 @@ def fill_periodized_cost_defaults(
         if not rows:
             continue
         idx = pd.Index(rows)
-        original = df.loc[idx, "capital_cost"].copy()
+        derived_cols = ("capital_cost", "fom_cost", "lifetime")
+        originals = {col: df.loc[idx, col].copy() for col in derived_cols}
         for name in rows:
             row = df.loc[name]
             rate = effective_discount_rate(row.get("discount_rate"), cfg.discount_rate)
-            df.at[name, "capital_cost"] = derive_composite(
+            derived = derive_composite(
                 comp_class, row, scales=part_scales(comp_class, row), discount_rate=rate,
                 asset_lifetime=row.get("lifetime"),
-            )["capital_cost"]
-        undo.append((CLASS_ATTR[comp_class], "capital_cost", idx, original))
+            )
+            for col in derived_cols:
+                df.at[name, col] = derived[col]
+        for col in derived_cols:
+            undo.append((CLASS_ATTR[comp_class], col, idx, originals[col]))
 
     # FOM and directly typed capital_cost: annual -> per modelled horizon.
     # Separate pass because the loop below skips every class without

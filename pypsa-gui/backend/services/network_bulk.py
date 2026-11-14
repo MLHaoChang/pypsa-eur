@@ -565,6 +565,19 @@ def apply_bulk_update(body: dict) -> dict:
                         notices.append(f"{t}: {fuel_curve.clear_notice(after, before=before)}")
                         resets[t] = reset
 
+        # TCU 08: a composite asset's investment parts, refused as the single edit refuses them (#738), per
+        # target and before the first write, so a 422 leaves every row as it was.
+        from services.asset_schema.schema import COMPOSITE
+
+        if component_class in COMPOSITE:
+            from services.asset_schema.derive import split_parts
+            from services.network_crud import _check_investment_parts
+
+            for _targets, coerced in pending:
+                for t in _targets:
+                    row, parts = split_parts(component_class, {**df.loc[t].to_dict(), **coerced})
+                    _check_investment_parts(component_class, parts, row=row)
+
         for _targets, coerced in pending:
             carrier = coerced.get("carrier")
             if (component_class != "Carrier" and isinstance(carrier, str) and carrier
@@ -600,6 +613,14 @@ def apply_bulk_update(body: dict) -> dict:
                         asset_provenance.mark_customised(n, component_class, t, list(reset))
             if component_class == "Generator":
                 fuel_curve.apply(n, _targets, stamp=True)
+            if component_class in COMPOSITE:
+                # TCU 08: re-derive capital_cost, fom_cost and lifetime from the row's parts as the single edit
+                # does, per target (#1466 D1), so the hashed columns, and the input fingerprint, follow a part,
+                # scale or rate edit. A no-op on a row with no priced part.
+                from services.network_crud import rederive_scaled_parts
+
+                for t in _targets:
+                    rederive_scaled_parts(n, component_class, t)
 
     # One audit entry per bulk op (not per component). The row form cannot
     # print every value, so it prints the shape instead.
