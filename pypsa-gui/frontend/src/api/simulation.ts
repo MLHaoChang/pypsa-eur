@@ -95,6 +95,15 @@ export interface CostBreakdown {
   curtailment_cost: number
   // CAPEX-expansion bucket for StorageUnit + Store only — quick "how much
   // of the new investment goes into storage" KPI for the cost overview.
+  fuel?: Array<{
+    generator: string; carrier: string
+    fuel_mwh: number | null; no_load_fuel_mwh: number | null
+    fuel_cost_eur: number | null; no_load_cost_eur: number | null
+  }>
+  run_hours?: Array<{
+    generator: string; carrier: string; counted_from: 'status' | 'dispatch'
+    hours_run: number | null; om_cost_eur: number | null
+  }>
   storage_capex_expansion: number | null
   storage_capex_expansion_lifetime: number | null
   by_component: Array<{

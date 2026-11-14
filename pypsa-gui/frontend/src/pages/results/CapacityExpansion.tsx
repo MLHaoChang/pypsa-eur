@@ -10,6 +10,7 @@ import { resultsApi, simulationApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
+import FuelRunHours from './FuelRunHours'
 import type { Generator, Line as LineT, Link as LinkT, StorageUnit, Store, Transformer } from '../../api/types'
 import { fmtCurrency, fmtPower, fmtEnergy, downloadCSV, KPI, isRenewableCarrier, ChartActions,
   Seg, CHART_GRID, CHART_AXIS, CHART_TOOLTIP, CHART_LEGEND, yAxisLabel,
@@ -1050,6 +1051,8 @@ export default function CapacityExpansion() {
             hint="CAPEX-expansion across StorageUnit + Store assets only — the storage slice of total new investment. Multi-vintage assets contribute one term per build year." />
         </div>
       </section>
+
+      <FuelRunHours cost={cost} />
 
       {/* ── System-cost waterfall ──────────────────────────────── */}
       {costWaterfall.length > 1 && (

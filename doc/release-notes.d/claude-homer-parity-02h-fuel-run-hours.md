@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Results › Capacity expansion shows a "Fuel & run hours" table (fuel burnt, fuel cost, run hours, run-hour O&M per generator with a fuel curve or run-hour inputs); it is hidden when no generator has one.
