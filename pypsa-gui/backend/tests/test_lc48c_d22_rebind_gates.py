@@ -81,7 +81,11 @@ def test_a_write_after_the_active_project_switched_mid_turn_writes_nothing(
     home_uploads = state(project_dir)["uploads"]
     assert saved_g1_cost(project_dir) == 10.0
     switched = {}
-    args = {"component_class": "Generator", "name": "G1", "attrs": {"marginal_cost": 50}}
+    args = {
+        "component_class": "Generator",
+        "name": "G1",
+        "attrs": {"marginal_cost": 50},
+    }
     provider = _SwitchingFakeClient(
         [
             (
