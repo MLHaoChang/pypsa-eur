@@ -191,6 +191,20 @@ def _diagnose_infeasibility(network, config, log_queue,
     except Exception:
         pass
 
+    # 2a') The operating reserve (homer-parity 01b, GK B O7): snapshots are
+    #      named only when the load share alone exceeds the most headroom.
+    try:
+        from services.solver.operating_reserve import LABEL as _OR_LABEL
+        from services.solver.operating_reserve import infeasibility_lines as _or_lines
+        for line in _or_lines(n, config):
+            emit(f"[INFEASIBLE]   • {line}")
+            body = line[len(_OR_LABEL) + 2:] if line.startswith(f"{_OR_LABEL}: ") else line
+            body = _regex.sub(r" \(row [^)]*\)", "", body.split(". ", 1)[0].rstrip(".") + ".")
+            add_constraint_hint(_OR_LABEL, body, "offgrid")
+            hints += 1
+    except Exception:
+        pass
+
     # 2b) The minimum renewable fraction (homer-parity 01a): its row per
     #     period, what it needs and the most the renewables can produce.
     try:
