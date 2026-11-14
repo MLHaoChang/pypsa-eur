@@ -4647,6 +4647,66 @@ TOOLS: list[dict[str, Any]] = [
         {"detail": {"type": "string", "enum": ["summary", "full"]}},
         [],
     ),
+    # ── Business case (4) — business case 08b (GK B (54) plan GO, D1–D9) ──
+    _t(
+        "run_business_case",
+        "Start the business-case run: the P&L by year, EBITDA, the KPIs (gross and net of "
+        "pass-through) and the break-even, from the stored business-case lines and the "
+        "CURRENT investment case (its own solve). Runs no LP (a campaign logs it at 0 "
+        "solves). Returns {status: 'running', study, ...}; poll get_business_case. "
+        "Refusals: investment_case_missing (run the investment case first, or it is "
+        "stale), business_case_inputs_missing (set the lines first), "
+        "business_case_inputs_invalid, business_case_busy (a solve or a study is "
+        "running). A run refused while it runs names its code and field in "
+        "get_business_case. Safety: execution_long_running.",
+        {},
+        [],
+    ),
+    _t(
+        "get_business_case",
+        "Read the business case. detail='summary' (default): {run: {status, stage, "
+        "error_code, refusal}, report: {present, stale, changed, reason}, kpis, break_even, "
+        "outputs, flags, pnl_years} — an unknown number reads 'not established': NEVER "
+        "report it as 0. A stale report shows no figures and names what changed: call it "
+        "stale. `truncated` lists any section cut to fit. detail='inputs': the stored "
+        "lines {business_case, digest, status, citable_turns} — pass `digest` as "
+        "set_business_case_lines' if_match; `citable_turns` are the user's own messages a "
+        "price may cite. Safety: read.",
+        {"detail": {"type": "string", "enum": ["summary", "inputs"]}},
+        [],
+    ),
+    _t(
+        "set_business_case_lines",
+        "Replace the business-case inputs (revenue, opex and capex lines, kw_per_gpu, "
+        "capacity, break_even_line) with `business_case`, a whole BusinessCaseConfig: read "
+        "it with get_business_case(detail='inputs'), change what the user asked, send the "
+        "whole object back. `if_match` is REQUIRED (that read's `digest`; '*' is refused; "
+        "stale: business_case_changed). NEVER invent a price: each NEW or CHANGED price "
+        "(`price`, or a year of `price_by_year`) needs one entry in `citations` — {line, "
+        "year? (for price_by_year), then where the user gave it: turn_id + quote + unit "
+        "(a citable_turns message, word for word, unit right after the number), or "
+        "upload_id + sheet + cell, or upload_id + page + quote + unit} — never the value "
+        "itself; otherwise price_not_from_user: ask the user. linked_share is the line's "
+        "SOLD share of its linked series, never a lease-up or volume factor. The user "
+        "approves a card showing every line added, changed (old → new) or removed and "
+        "each price's source; an edit too large for one card is refused "
+        "(business_case_card_too_large): split it. clear=true (no business_case) removes "
+        "every line. The preset is the panel's (Results, Investment tab). Safety: write.",
+        {"business_case": {"type": "object"}, "if_match": {"type": "string"},
+         "clear": {"type": "boolean"},
+         "citations": {"type": "array", "maxItems": 60, "items": {"type": "object"}}},
+        ["if_match"],
+    ),
+    _t(
+        "abort_business_case",
+        "Stop a running business-case run at its next stage; it stores nothing. "
+        "IDEMPOTENT and 200 even when the run has already finished; 404 only when no "
+        "business-case run was recorded in this session. Does NOT stop a solve "
+        "(abort_simulation) or the investment case (abort_investment_case). "
+        "Safety: destructive.",
+        {},
+        [],
+    ),
     # ── Decision study (6) — U3: the guided face's question, by chat ─────
     _t(
         "start_decision_study",
@@ -5836,6 +5896,12 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_ppa_price": [("GET", "/api/simulation/finance")],
     "explain_cashflow": [("GET", "/api/results/investment_case"),
                          ("GET", "/api/results/investment_case/report")],
+    # business case (4) — business case 08b; the preset route stays panel-only (Q3)
+    "run_business_case": [("POST", "/api/results/business_case")],
+    "get_business_case": [("GET", "/api/results/business_case"),
+                          ("GET", "/api/results/business_case/inputs")],
+    "set_business_case_lines": [("PUT", "/api/results/business_case/inputs")],
+    "abort_business_case": [("POST", "/api/results/business_case/abort")],
     # decision study (6) — U3: `routers/studies.py`, in process through `_route`.
     "start_decision_study": [("POST", "/api/projects/{name}/studies/")],
     "set_study_parameter": [("PUT", "/api/projects/{name}/studies/{study_id}/ledger")],

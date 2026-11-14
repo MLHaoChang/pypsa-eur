@@ -129,7 +129,7 @@ def test_every_job_tool_has_exactly_one_worker_kind():
     from harness import catalogue
 
     job_tools = {t["name"] for t in catalogue.TOOLS if job_holds.is_job_tool(t["name"])}
-    assert len(job_tools) == 29
+    assert len(job_tools) == 30  # BC 08b: run_business_case (INPROC)
     assert set(job_holds.JOB_KINDS) == job_tools
     assert set(job_holds.JOB_KINDS.values()) == {
         job_holds.INPROC,

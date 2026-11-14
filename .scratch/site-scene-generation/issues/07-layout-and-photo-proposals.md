@@ -3,7 +3,7 @@
 
 # SC-06 — layouts and photo-based campus reconstruction
 
-Status: ready-for-human (layout half done: #1405 merged 2026-11-12, record sc-06-layout/record.md; photo half parked, Q-SS-1)
+Status: ready-for-human (layout half done: #1405 merged 2026-11-12, record sc-06-layout/record.md; photo half ready-for-agent as a prototype, engine chosen Q-SS-2)
 Type: research/prototype then bounded task
 Dependencies: SC-00 N and SC-01 native proposal lifecycle for layout; independently accepted SC-00 P for photo; no Blender prerequisite
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -75,3 +75,7 @@ Plan sent to GK B on master 701328bd9. D05 and D08 were checked closed first. GO
 - **L10.** New reasons ride on existing kinds, and the frontend consumers of 422/413 still read them (#1261).
 - **L11.** Line count at PR open; over about 1,500 non-test lines, split into the backend seam first, then the frontend (PR-SIZE-1).
 - **Mutants on layout.py:** flip, rotation sign, anchor, CRS refusals, the 10 km check, the hole refusal, pixel-in-image. Each killing test is listed in the PR body.
+
+### 2026-11-14: engine chosen (Q-SS-2)
+
+2026-11-14, owner answer Q-SS-2 (coordinator card): "option 1 (Recommended)". Engines chosen, see [research-engines.md](../research-engines.md) (#1490): Blender-free GLB+manifest by default (trimesh/pygltflib, MIT); Blender 5.2 LTS only as a separate pinned no-network container for optional `.blend` output; photos via OpenDroneMap/NodeODM, out-of-process and unmodified (AGPL). Change: the photo half uses OpenDroneMap through NodeODM as a separate unmodified service (AGPL-3.0 kept out-of-process), aerial set first; it needs OBJ-to-GLB conversion and a ground-level suitability check (UNVERIFIED in research-engines.md). COLMAP + OpenMVS is the alternative if a CUDA host appears. Photo capability still needs SC-00 P evidence (V39-46, V55-58).

@@ -65,7 +65,7 @@ def test_the_issue_rows_are_declared():
         'site_scene': ('unbuilt', 'map'),
         'accept_assumed_defaults': ('unbuilt', None),
         'intent_comparison': ('unbuilt', None),
-        'business_case': ('unbuilt', None),     # business case 08a; 08b adds the tools
+        'business_case': ('out of chat', None),  # 08b: only the preset (GK B (54) Q3, D8)
         'dc_backup': ('unbuilt', None),
         'dc_architecture': ('unbuilt', None),
         'dc_operational_gap': ('manual', 'results'), 'results_headline_strip': ('manual', 'results'),
@@ -114,9 +114,9 @@ def test_the_issue_rows_are_declared():
     ('Which KPIs are in the strip', 'results_headline_strip'),
     ('Why is the LCOE KPI not shown in the strip?', 'results_headline_strip'), ('Add a KPI to the strip', 'results_headline_strip'),
     ('Hide the headline strip', 'results_headline_strip'), ('What does the headline strip show?', 'results_headline_strip'),
-    # BC 08a (GK B (54) D3): the feature noun with an ask.
-    ('Run the business case', 'business_case'), ('Edit the business case lines', 'business_case'),
-    ('What is the break-even price in the business case?', 'business_case'),
+    # BC 08b (GK B (54) D8): only the preset is out of chat.
+    ('Apply the business case preset', 'business_case'),
+    ('Fill the business case from the template preset', 'business_case'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -179,6 +179,12 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'What is the business as usual case?', 'Show the business-as-usual case results',
     'change the business as usual case demand', 'Show the BAU business case',
     'Run the business hours report', 'the business case for adding a battery',
+    # BC 08b (GK B (54) D8): the business case's tools answer these, so no refusal.
+    'show the business case for adding a battery', 'Run the business case',
+    'Edit the business case lines', 'What is the break-even price in the business case?',
+    # The guard re-pinned, one part each: BAU only; no case noun; no preset word.
+    'Apply the business as usual case preset', 'Apply the business preset',
+    'Show the business case',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)

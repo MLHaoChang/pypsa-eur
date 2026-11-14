@@ -53,6 +53,7 @@ STUDY_TOOL_KEYS: dict[str, str] = {
     'run_margin_loop': 'margin_loop',
     'run_eh_study': 'eh_study',
     'run_investment_case': 'investment_case',
+    'run_business_case': 'business_case',
 }
 
 Family = Literal[
@@ -475,6 +476,8 @@ def _study_job_view(handle: StudyJob, snap: dict[str, Any]) -> dict[str, Any]:
     monitor = (
         'get_investment_case'
         if handle.study_key == 'investment_case'
+        else 'get_business_case'
+        if handle.study_key == 'business_case'
         else f"get_adequacy_results('{handle.study_key}')"
     )
     return {
@@ -544,6 +547,8 @@ def wait_study_job(
             abort_hint = (
                 'abort the investment case HTTP route'
                 if handle.study_key == 'investment_case'
+                else 'use abort_business_case to stop it'
+                if handle.study_key == 'business_case'
                 else 'use abort_adequacy_study to stop it'
             )
             return {

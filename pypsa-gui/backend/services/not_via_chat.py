@@ -222,21 +222,17 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
     },
     {
         'id': 'business_case',
-        'title': 'Business case',
-        'disposition': 'unbuilt',
-        'reason': 'Running the business case and editing its lines is not available from chat yet. Use the Business case view beside the investment case on the Results page.',
+        'title': 'Business case preset',
+        'disposition': 'out of chat',
+        'reason': 'The preset fills cost defaults from a pack, so it is applied in the panel; chat sets the lines only from your figures. Use the Business case view on the Results page.',
         'page': 'Results (Investment tab)',
         'panel': None,
         'keywords': frozenset({
             'business',
+            'preset',
         }),
         'routes': frozenset({
-            ('GET', '/api/results/business_case'),
-            ('GET', '/api/results/business_case/inputs'),
             ('GET', '/api/results/business_case/preset'),
-            ('POST', '/api/results/business_case'),
-            ('POST', '/api/results/business_case/abort'),
-            ('PUT', '/api/results/business_case/inputs'),
         }),
     },
     {
@@ -533,16 +529,12 @@ def _asks_about_the_strip(words: set[str]) -> bool:
     return bool(words & _STRIP_NAMES and words & _STRIP_ASKS and not words & _STRIP_ELSEWHERE)
 
 
-# The business case answers only an ask that names it ("business case") with what is
-# done to it. EBITDA, break-even and the workbook are also the investment case's and its
-# tools' (`get_investment_case`, `export_results_workbook`), so a bare `ebitda` or
-# `breakeven` must not steer the model away from them (GK B (54) D3).
+# Only the business case's preset is out of chat (GK B (54) Q3, D8): its run, read and
+# lines are tools (`run_business_case`, `get_business_case`, `set_business_case_lines`),
+# so "show the business case for …" must reach them. The entry hits only on "business
+# case" with a preset word.
 _BUSINESS_CASE_NOUN = frozenset({'case', 'cases'})
-_BUSINESS_CASE_ASKS = frozenset({
-    'run', 'rerun', 'edit', 'set', 'change', 'update', 'add', 'remove', 'line', 'lines',
-    'preset', 'abort', 'stop', 'show', 'read', 'what', 'ebitda', 'breakeven', 'break',
-    'even', 'margin', 'kpi', 'kpis',
-})
+_BUSINESS_CASE_ASKS = frozenset({'preset', 'presets', 'template', 'defaults'})
 
 
 # "Business as usual" (BAU) is a scenario, not this feature (GK B (54) D3).
