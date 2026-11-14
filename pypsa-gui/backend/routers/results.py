@@ -2474,7 +2474,13 @@ def get_business_case_options():
     `refusals_reason` without an investment case."""
     from typing import get_args
 
-    from models.business_case import CATEGORIES, Escalation, allowed_units
+    from models.business_case import (
+        CATEGORIES,
+        Escalation,
+        LinkedOutputMissing,
+        UnitNotAllowed,
+        allowed_units,
+    )
     from services.business_case import linked_outputs as L
     from services.business_case import presets as P
     from services.business_case.runner import BusinessCaseConfig, refusal_detail
@@ -2556,9 +2562,41 @@ def get_business_case_options():
     if span is None:
         out["refusals_reason"] = "investment_case_missing"
         return out
-    out["refusals"] = [refusal_detail(r)
-                       for r in inputs.refusals(horizon=span[0], base_year=span[1])]
+    if not _bc_ic_current():
+        # The run needs a current investment case (C3); years from an old one could
+        # place a wrong `outside_horizon`, so nothing is checked against them.
+        out["refusals_reason"] = "investment_case_out_of_date"
+        return out
+    found = list(inputs.refusals(horizon=span[0], base_year=span[1]))
+    # A linked line against the catalogue in hand (GK B O1): its output and its unit.
+    if out["outputs"] is not None:
+        offered = {o["id"]: o["units"] for o in out["outputs"]}
+        for i, ln in enumerate(inputs.lines):
+            if ln.source != "linked":
+                continue
+            oid = ln.quantity_source.split(":", 1)[1].rpartition("@")[0]
+            if oid not in offered:
+                found.append(LinkedOutputMissing(f"lines[{i}].quantity_source"))
+            elif ln.unit not in allowed_units(ln.kind, "linked", offered[oid]):
+                found.append(UnitNotAllowed(f"lines[{i}].unit"))
+    out["refusals"] = [refusal_detail(r) for r in found]
     return out
+
+
+def _bc_ic_current() -> bool:
+    """Whether the stored investment-case report is current, read as `_bc_ic_check`
+    reads it, without refusing."""
+    from services.business_case.runner import ic_report_key
+    from services.finance.investment_case_runner import staleness
+
+    stored = _state.get("investment_case_report")
+    if stored is not None and hasattr(stored, "model_dump"):
+        stored = stored.model_dump(mode="json")
+    a_hash, c_hash = ic_report_key(stored)
+    if a_hash is None or c_hash is None:
+        return False
+    current, why = _ic_current_assumptions()
+    return staleness(stored, current, reason=why)["stale"] is False
 
 
 def _bc_ic_check() -> tuple[str, str | None]:

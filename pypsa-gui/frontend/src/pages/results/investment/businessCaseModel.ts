@@ -260,13 +260,13 @@ export function uniqueName(base: string, names: string[]): string {
 }
 
 export const OUTPUTS_REASON_WORDS: Record<string, string> = {
-  solve_in_flight: 'a solve is running',
-  network_busy: 'the model is busy',
   no_network: 'no model is loaded',
+  no_current_solve: 'the model has no current solve; run the optimisation',
   outputs_not_readable: 'the model outputs cannot be read',
 }
 
 export const REFUSALS_REASON_WORDS: Record<string, string> = {
   investment_case_missing: 'Run the investment case to check the lines against its years.',
+  investment_case_out_of_date: 'The investment case is out of date: run it again to check the lines against its years.',
   business_case_inputs_invalid: 'The stored lines do not read; fix the marked cells and save.',
 }

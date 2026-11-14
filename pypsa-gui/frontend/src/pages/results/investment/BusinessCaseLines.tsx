@@ -19,7 +19,7 @@ import { openPanel } from '../openPanel'
 import { ACTION } from './actionStyle'
 import { NumInput } from './NumInput'
 import {
-  blankLine, edited, hintUnitWords, linkedOutputId, priceUnitWords, unitWords, linkedSource, OUTPUTS_REASON_WORDS,
+  blankLine, edited, hintUnitWords, priceUnitWords, unitWords, linkedSource, OUTPUTS_REASON_WORDS,
   parsePaste, placeRefusals, placeValidation, provenanceDetail, provenanceOf,
   REFUSALS_REASON_WORDS, sourceKind, uniqueName, unitNotAllowed, unitsFor, withKind,
   yearsOf, type Placed,
@@ -75,7 +75,9 @@ function SourceSelect({ line, opts, onChange, invalid, label }: {
         )))}
       </optgroup>
       {!known && <option value={current}>
-        {sourceKind(current) === 'linked' ? `Model output ${linkedOutputId(current)} (not in this model)` : current}
+        {sourceKind(current) !== 'linked' ? current
+          : opts?.outputs == null ? 'From the model (outputs not offered now)'
+          : 'From the model (an output this model does not have)'}
       </option>}
     </select>
   )
@@ -350,7 +352,9 @@ export default function BusinessCaseLines() {
     try {
       const got = await businessCaseApi.getPreset(variant || undefined)
       if (!got.business_case) return
-      setDraft(d => ({ ...(d ?? {}), inputs: got.business_case!.inputs }))
+      // Only the lines and the preset stamp: the case-level receivable days stay.
+      setDraft(d => ({ ...(d ?? {}), inputs: { ...(d?.inputs ?? {}), preset: got.business_case!.inputs.preset,
+                                                lines: got.business_case!.inputs.lines } }))
       setDirty(true); setRejected([]); setOpen(new Set())
       setMessage({ tone: 'ok', text: 'Preset applied. Review the lines, then save.' })
     } catch (e) {

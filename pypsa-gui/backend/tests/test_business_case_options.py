@@ -285,3 +285,57 @@ def test_o1_offered_units_save_and_run_clean_and_others_are_refused_on_the_unit(
         r["field"] for r in body["refusals"] if r["refusal"] == "unit_not_allowed"
     }
     assert refused == expect_refused and expect_refused
+
+
+def test_o1_a_linked_line_is_checked_against_the_catalogue_in_hand(
+    client, install_network, monkeypatch
+):
+    """O1 for linked lines, both directions: a unit its output offers is clean, one it
+    does not is refused on `lines[i].unit`, and an output the model lacks on
+    `lines[i].quantity_source` (the cells the table marks)."""
+    from services.business_case import linked_outputs as L
+
+    _with_ic(client, install_network, monkeypatch)
+    _fresh(monkeypatch)
+    spec = L.OutputSpec("served_product.conc", "Product served on conc", ("t",))
+    monkeypatch.setattr(L, "catalogue", lambda n, solve=None: [spec])
+    v = L.CATALOGUE_VERSION
+    lines = (
+        _line(
+            name="ok",
+            unit="t",
+            quantity=None,
+            quantity_source=f"linked:served_product.conc@{v}",
+        ),
+        _line(
+            name="kg",
+            unit="kg",
+            quantity=None,
+            quantity_source=f"linked:served_product.conc@{v}",
+        ),
+        _line(
+            name="gone",
+            unit="t",
+            quantity=None,
+            quantity_source=f"linked:served_product.nope@{v}",
+        ),
+    )
+    assert _put(client, _bc(*lines)).status_code == 200
+    body = client.get(OPTIONS_URL).json()
+    got = {(r["refusal"], r["field"]) for r in body["refusals"]}
+    assert ("unit_not_allowed", "lines[1].unit") in got
+    assert ("linked_output_missing", "lines[2].quantity_source") in got
+    assert not {f for _, f in got if f.startswith("lines[0].")}
+
+
+def test_refusals_wait_for_a_current_investment_case(
+    client, install_network, monkeypatch
+):
+    import routers.results as R
+
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc(_line(price=None))).status_code == 200
+    monkeypatch.setattr(R, "_bc_ic_current", lambda: False)
+    body = client.get(OPTIONS_URL).json()
+    assert body["refusals"] is None
+    assert body["refusals_reason"] == "investment_case_out_of_date"

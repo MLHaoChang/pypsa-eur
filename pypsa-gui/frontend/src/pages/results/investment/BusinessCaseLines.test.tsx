@@ -165,6 +165,23 @@ describe('preset, add, save', () => {
     expect(body!.inputs.lines.map(l => l.name)).toEqual(['H2 sales', 'Plant'])
     expect(await screen.findByText('Lines saved.')).toBeTruthy()
   })
+  it('a preset replaces the lines only: the receivable days stay', async () => {
+    mount({ inputs: { receivable_days: 45, lines: [] } })
+    api.getPreset.mockResolvedValue({ template_id: 'eh_h2_hub', variants: OPTS.variants,
+      business_case: { inputs: { preset: 'eh_h2_hub.merchant@1', lines: [CAPEX] } } })
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply preset' }))
+    await screen.findByLabelText('Unit, Plant')
+    api.putInputs.mockResolvedValue({ business_case: config(CAPEX), digest: 'd2', status: 'ok' })
+    fireEvent.click(screen.getByRole('button', { name: 'Save the lines' }))
+    await waitFor(() => expect(api.putInputs).toHaveBeenCalled())
+    expect(api.putInputs.mock.calls[0][0]!.inputs).toMatchObject({ receivable_days: 45, preset: 'eh_h2_hub.merchant@1' })
+  })
+  it('a linked line reads in words when the outputs are not offered, never the engine id', async () => {
+    mount(config(H2), { outputs: null, outputs_reason: 'no_current_solve' })
+    const src = await screen.findByLabelText('Quantity from, H2 sales') as HTMLSelectElement
+    expect(src.selectedOptions[0].textContent).toBe('From the model (outputs not offered now)')
+    expect(screen.getByTestId('bc-outputs-reason').textContent).toMatch(/no current solve; run the optimisation/)
+  })
   it('asks before a preset replaces lines', async () => {
     mount(config(CAPEX))
     fireEvent.click(await screen.findByRole('button', { name: 'Apply preset' }))
