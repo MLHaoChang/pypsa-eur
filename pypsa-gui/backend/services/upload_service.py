@@ -303,6 +303,36 @@ def _upload_not_found(name: str, file_id: str) -> HTTPException:
     )
 
 
+# A copilot delivery (an `agent_export` file and its download link) lives 7 days
+# from when it was made or last re-exported (owner decision LC48A-TTL-1). After
+# that the delivery tools and the download refuse it 410 delivery_expired; the
+# file stays on disk, and exporting the same content again makes a fresh one.
+DELIVERY_TTL_SECONDS = 7 * 24 * 3600
+
+
+def refuse_expired_delivery(meta: UploadMeta, *, now: float | None = None) -> None:
+    """Raise 410 `delivery_expired` for an `agent_export` older than the TTL.
+
+    Other kinds (the person's own uploads, templates, round-trip copies) never
+    expire. Nothing is written or deleted.
+    """
+    if meta.kind != "agent_export":
+        return
+    age = (time.time() if now is None else now) - meta.uploaded_at
+    if age > DELIVERY_TTL_SECONDS:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "error_kind": "delivery_expired",
+                "message": (
+                    f"'{meta.filename}' was delivered more than 7 days ago and "
+                    "its download has expired."
+                ),
+                "hint": "export it again for a fresh delivery",
+            },
+        )
+
+
 def _file_id_for(blob_bytes: bytes) -> tuple[str, str]:
     """Return (file_id_short, sha256_full) for `blob_bytes`."""
     h = hashlib.sha256(blob_bytes).hexdigest()
@@ -472,6 +502,11 @@ def add_upload(
                 _atomic_write_meta(meta_path, existing)
             if assurance_sha256 is not None and existing.assurance_sha256 != assurance_sha256:
                 existing = existing.model_copy(update={"assurance_sha256": assurance_sha256})
+                _atomic_write_meta(meta_path, existing)
+            if kind == "agent_export" and existing.kind == "agent_export":
+                # Exporting the same content again is a fresh delivery: its
+                # 7-day clock restarts (LC48A-TTL-1).
+                existing = existing.model_copy(update={"uploaded_at": time.time()})
                 _atomic_write_meta(meta_path, existing)
             _note_upload(existing)
             return existing

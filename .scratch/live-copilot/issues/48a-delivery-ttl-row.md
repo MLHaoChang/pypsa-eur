@@ -26,3 +26,8 @@ The LC-D20 share of LC-48's pending rows. No gate is built for these; each row i
 Each row above is covered by a behavioural fixture written the LC-43 way (a public seam, a hand oracle, the exact refusal kind, and `tests/lc43_gates.py::state` unchanged on every refusal), or the owner decides to drop it. Dropping a row is an owner decision (GK B C1). When the last row is covered, update its manifest row and the `r3-uncovered:LC-D20` blocker in `assistant_control_matrix.py`.
 
 ## Comments
+
+### 2026-11-14: built
+
+Owner decision LC48A-TTL-1 (7 days). `upload_service.refuse_expired_delivery` refuses an `agent_export` older than 7 days with 410 `delivery_expired`. It is called by `get_file_delivery`, `build_delivery` and the blob download. Re-exporting the same content restarts the clock. Covered by `pypsa-gui/backend/tests/test_lc48a_d20_delivery_ttl.py`.
+
