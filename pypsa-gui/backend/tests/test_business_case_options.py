@@ -11,7 +11,14 @@ from typing import get_args
 
 import models.business_case as M
 from tests.conftest import build_network
-from tests.test_business_case_routes import _bc, _line, _put, _with_ic
+from tests.test_business_case_routes import (
+    _bc,
+    _line,
+    _put,
+    _put_fin,
+    _s2_inputs,
+    _with_ic,
+)
 
 OPTIONS_URL = "/api/results/business_case/options"
 H, BASE = (2030, 2040), 2030
@@ -374,6 +381,105 @@ def test_refusals_wait_for_a_current_investment_case(
     _with_ic(client, install_network, monkeypatch)
     assert _put(client, _bc(_line(price=None))).status_code == 200
     monkeypatch.setattr(R, "_bc_ic_current", lambda: False)
+    body = client.get(OPTIONS_URL).json()
+    assert body["refusals"] is None
+    assert body["refusals_reason"] == "investment_case_out_of_date"
+
+
+# ── the stored investment case the refusals read (horizon, currency) ─────────
+
+
+def _ic_payload(stored: dict) -> dict:
+    return stored["sections"]["project"]["payload"]
+
+
+def _store_ic(session_state, client, edit) -> None:
+    """Replace the stored IC report with a deep copy that `edit` changes in place."""
+    import copy
+
+    st = session_state(client)
+    rep = copy.deepcopy(dict(st["investment_case_report"]))
+    edit(rep)
+    st["investment_case_report"] = rep
+
+
+def test_a_stale_investment_case_is_not_checked_against(
+    client, install_network, monkeypatch
+):
+    """The real staleness reader, not a stub: the finance inputs moved after the IC run."""
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc(_line(price=None))).status_code == 200
+    assert client.get(OPTIONS_URL).json()["refusals"] is not None
+    assert _put_fin(client, {**_s2_inputs(), "analysis_years": 3}).status_code == 200
+    body = client.get(OPTIONS_URL).json()
+    assert body["refusals"] is None
+    assert body["refusals_reason"] == "investment_case_out_of_date"
+
+
+@pytest.mark.parametrize("years", [0, -1])
+def test_no_analysis_years_is_no_horizon(
+    client, install_network, monkeypatch, session_state, years
+):
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+    _store_ic(
+        session_state, client, lambda r: _ic_payload(r).update(analysis_years=years)
+    )
+    body = client.get(OPTIONS_URL).json()
+    assert body["horizon"] is None and body["base_year"] is None
+    assert body["refusals"] is None
+    assert body["refusals_reason"] == "investment_case_missing"
+
+
+def test_one_analysis_year_is_a_one_year_horizon(
+    client, install_network, monkeypatch, session_state
+):
+    _with_ic(client, install_network, monkeypatch)
+    pay = _ic_payload(dict(session_state(client)["investment_case_report"]))
+    _store_ic(session_state, client, lambda r: _ic_payload(r).update(analysis_years=1))
+    body = client.get(OPTIONS_URL).json()
+    assert body["horizon"] == [pay["cod_year"], pay["cod_year"]]
+    assert body["base_year"] == pay["base_year"]
+
+
+def test_a_stored_report_model_reads_as_its_json(
+    client, install_network, monkeypatch, session_state
+):
+    """The session may hold the report as a model object: horizon and currency read
+    through its `model_dump`, the same as the stored dict."""
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc(_line(price=None))).status_code == 200
+    as_dict = client.get(OPTIONS_URL).json()
+    st = session_state(client)
+    rep = dict(st["investment_case_report"])
+
+    class Stored:
+        def model_dump(self, mode="python"):
+            assert mode == "json"
+            return rep
+
+    st["investment_case_report"] = Stored()
+    body = client.get(OPTIONS_URL).json()
+    assert body["horizon"] == as_dict["horizon"] is not None
+    assert body["base_year"] == as_dict["base_year"]
+    assert body["refusals"] == as_dict["refusals"] is not None
+    assert body["refusals_reason"] == as_dict["refusals_reason"] is None
+
+
+@pytest.mark.parametrize("drop", ["assumptions_hash", "finance_case_hash"])
+def test_a_report_without_its_key_is_out_of_date(
+    client, install_network, monkeypatch, session_state, drop
+):
+    _with_ic(client, install_network, monkeypatch)
+    assert _put(client, _bc()).status_code == 200
+
+    def edit(r):
+        if drop == "assumptions_hash":
+            r.pop("assumptions_hash")
+        else:
+            _ic_payload(r)["provenance"].pop("finance_case_hash")
+
+    _store_ic(session_state, client, edit)
     body = client.get(OPTIONS_URL).json()
     assert body["refusals"] is None
     assert body["refusals_reason"] == "investment_case_out_of_date"
