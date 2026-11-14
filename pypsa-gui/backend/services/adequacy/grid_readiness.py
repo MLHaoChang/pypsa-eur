@@ -1787,7 +1787,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
         why = {**dict.fromkeys(sk_built, SK_OFF_GRID), **dict.fromkeys(_VS, VS_OFF_GRID)}
         if _tie_open(inp):
             why.update(dict.fromkeys(conn_built, CONN_OFF_GRID))
-        else:
+        elif inp.n is not None:
             for r in rows:
                 if r["id"] in conn_built:
                     r["note"] = f"{r['note']}; {CONN_LABEL_ONLY}" if r.get("note") else CONN_LABEL_ONLY

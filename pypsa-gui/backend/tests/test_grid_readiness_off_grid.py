@@ -220,6 +220,8 @@ def test_off_grid_with_no_saved_network_keeps_the_rows(tmp_path):
     rows = {r["id"]: r for r in out["rows"]}
     assert {"ramp_rate", "oscillation", "energization_peak"} <= set(rows)
     assert G.CONN_OFF_GRID not in {e["reason"] for e in out["excluded"]}
+    # Nothing is known of the connection, so the rows carry no "can import" note either.
+    assert not any(G.CONN_LABEL_ONLY in (r["note"] or "") for r in out["rows"])
 
 
 def test_a_gate_on_ramp_rate_reads_excluded_never_pass_off_grid(tmp_path):
@@ -244,9 +246,13 @@ def test_a_family_with_one_excluded_period_is_never_passed_on_the_rest():
 
     card = {"rows": [{"id": "energization_peak:2030", "verdict": "pass", "assumed": False}],
             "excluded": [{"id": "energization_peak:2035", "requirement": "r", "reason": "why"}]}
-    env = types_ns(cache={"scorecard": card})
+    env = types_ns(cache={"scorecard": card}, ctx=types_ns(network=None))
     fact = run_gates._scorecard_reader(run_gates.SCORECARD + "energization_peak:")(env)
     assert isinstance(fact, run_gates.NoEvidence) and fact.value == "excluded"
+    # A card without an excluded list (an older one) is read on its rows.
+    del card["excluded"]
+    fact = run_gates._scorecard_reader(run_gates.SCORECARD + "energization_peak:")(env)
+    assert not isinstance(fact, run_gates.NoEvidence)
 
 
 def test_a_grid_project_judges_ramp_oscillation_and_peak_against_the_connection(tmp_path):
@@ -279,7 +285,7 @@ def test_a_grid_project_keeps_every_row_in_the_scorecard_order(tmp_path):
     json.dumps(grid)  # the card stays plain JSON
 
 
-@pytest.mark.parametrize("tid", ("eh_datacenter", "eh_datacenter_staged"))
+@pytest.mark.parametrize("tid", ("eh_datacenter", "eh_datacenter_staged", "eh_h2_hub", "eh_h2_hub_staged"))
 def test_a_grid_template_card_is_unchanged_by_the_off_grid_connection_rule(tmp_path, monkeypatch, tid):
     # GK A O4: on a grid-connected template the SH 41 rule never runs, so the whole card is the
     # card without it, byte for byte.
