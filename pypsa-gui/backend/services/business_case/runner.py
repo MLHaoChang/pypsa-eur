@@ -39,7 +39,12 @@ import numpy as np
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from models.business_case import BusinessCaseInputs, BusinessCaseRefused
+from models.business_case import (
+    CATEGORY_STREAM,
+    BusinessCaseInputs,
+    BusinessCaseRefused,
+)
+from services.finance.cashflow import STREAM_CLASS
 from services.finance.investment_case_runner import json_digest
 
 logger = logging.getLogger(__name__)
@@ -197,6 +202,15 @@ def _output_state(v: Any) -> dict:
     return {"status": "ok", "unit": getattr(v, "unit", None)}
 
 
+#: A business-case line stream → "line:<kind>"; any other stream is the IC ledger's
+#: ("energy_model", G2).
+_STREAM_SOURCE: dict[str, str] = {
+    stream: f"line:{kind}"
+    for (kind, _cat), (stream, _cls) in CATEGORY_STREAM.items()
+    if stream is not None
+}
+
+
 def report_body(
     *,
     bc,
@@ -221,6 +235,13 @@ def report_body(
         "pnl": {
             "years": [int(y) for y in p.years],
             "streams": _jsonable(p.streams),
+            # Display keys only (GK B BC 10 F2): each stream's escalation class and where
+            # it comes from, so the view groups without a copy of the maps. Every other
+            # field stays as it was.
+            "stream_class": {s: STREAM_CLASS.get(s) for s in p.streams},
+            "stream_source": {
+                s: _STREAM_SOURCE.get(s, "energy_model") for s in p.streams
+            },
             "rows": _jsonable(p.rows),
             "not_finite": list(p.not_finite),
         },
