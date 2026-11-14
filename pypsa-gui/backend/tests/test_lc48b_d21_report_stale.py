@@ -20,6 +20,8 @@ Hand oracle:
 """
 
 # ruff: noqa: F811 -- shared public harness fixtures
+import logging
+
 import pytest
 from fastapi import HTTPException
 
@@ -153,8 +155,9 @@ def test_a_report_of_a_project_that_is_not_open_is_not_compared(
     assert state(project) == before
 
 
-def test_an_unreadable_evidence_read_refuses_with_its_reason(project, monkeypatch):
-    """GK B F2: a raising read is a stated refusal, never a 500 or an unrelated 404."""
+def test_an_unreadable_evidence_read_refuses_with_its_reason(project, monkeypatch, caplog):
+    """GK B F2: a raising read is a stated refusal, never a 500 or an unrelated 404.
+    GK B F4: the failure is logged as a warning with its traceback."""
     report_id = _generated(monkeypatch)
     before = state(project)
 
@@ -168,7 +171,12 @@ def test_an_unreadable_evidence_read_refuses_with_its_reason(project, monkeypatc
         "_current_evidence",
         lambda _p: (_ for _ in ()).throw(RuntimeError("disk")),
     )
-    assert _reason(lambda: T.export_report_docx(report_id)) == "evidence_unreadable"
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=reports_router.logger.name):
+        assert _reason(lambda: T.export_report_docx(report_id)) == "evidence_unreadable"
+    logged = [r for r in caplog.records if "stale check" in r.getMessage()]
+    assert logged and logged[-1].levelno == logging.WARNING
+    assert logged[-1].exc_info and logged[-1].exc_info[0] is RuntimeError
     assert state(project) == before
 
 

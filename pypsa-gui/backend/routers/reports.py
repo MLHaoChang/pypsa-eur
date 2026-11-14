@@ -579,7 +579,7 @@ def _refuse_stale(project: AuthorizedProject, doc) -> None:
         evidence, _eh_report = _current_evidence(project)
         now = evidence_hash(evidence)
     except Exception as exc:                                # noqa: BLE001 - stated, never a 500
-        logger.info("reports: evidence not read for the stale check: %s", exc)
+        logger.warning("reports: evidence not read for the stale check: %s", exc, exc_info=True)
         raise _stale(doc, "evidence_unreadable",
                      f"The study's evidence could not be read, so version {doc.version} "
                      "cannot be checked against it.") from exc
