@@ -10,11 +10,13 @@ default ranking:
   (before: hours 68, 141 and 165 failed E2 and E3 on the 2 Hz/s transition
   RoCoF);
 - ``eh_microgrid_staged``: 35 island hours, none failing (before: 15, on E2,
-  E3 and E5). Its bridge check still fails at 24 hours: an empty battery is
-  asked for its droop share of the islanding step while the island rows
-  reserve the bridge energy over all grid-forming batteries together. No
-  sidecar setting reaches that; it is left to the bridge follow-up and is
-  not pinned here.
+  E3 and E5). Its bridge check failed at 24 hours on I4's AC-loss step.
+
+SH40-BRIDGE-2 (2026-11-14): both templates' subsea tie is open (p_max_pu 0),
+so the solve imports nothing and there is no islanding step. The check reads
+the run's own tie state (``campus_pcc.csv`` ``tie_open``): on every island
+hour of both templates E1 and the bridge read "not applicable: tie open",
+none failing, and the summary says they were not evaluated.
 """
 
 from __future__ import annotations
@@ -108,5 +110,8 @@ def test_the_template_passes_the_island_frequency_check(
     assert summary["island_hours"]  # the check judged some hours
     assert summary["failing_hours"] == []
     assert summary["planned_infeasible_hours"] == []
-    if tid == "eh_microgrid":
-        assert summary["bridge_failing_hours"] == []
+    # SH40-BRIDGE-2: the subsea tie is open (p_max_pu 0), so there is no
+    # islanding step: E1 and the bridge are not judged, never failing.
+    assert summary["bridge_failing_hours"] == []
+    assert summary["tie_open_hours"] == summary["island_hours"]
+    assert summary["e1_bridge_note"] == "not evaluated (tie open on every island hour)"
