@@ -197,6 +197,32 @@ def _output_state(v: Any) -> dict:
     return {"status": "ok", "unit": getattr(v, "unit", None)}
 
 
+def assumed_defaults(inputs: BusinessCaseInputs) -> list[dict]:
+    """Every value the case takes from a pack rather than the user (spec §7, business
+    case 14): one row per line and column, with its source, year and range, in line
+    order. The report and its workbook sheet list them all; none is an empty list."""
+    out = []
+    for ln in inputs.lines:
+        for col, d in ln.assumed.items():
+            out.append(
+                {
+                    "line": ln.name,
+                    "kind": ln.kind,
+                    "column": col,
+                    "value": d.value,
+                    "unit": d.unit,
+                    "source": d.source,
+                    "source_year": d.source_year,
+                    "currency": d.currency,
+                    "money_year": d.money_year,
+                    "pack": d.pack,
+                    "range_low": d.range_low,
+                    "range_high": d.range_high,
+                }
+            )
+    return out
+
+
 def report_body(
     *,
     bc,
@@ -208,9 +234,11 @@ def report_body(
     raw: dict,
     ic_hash: str,
     ic_case_hash: str | None,
+    inputs: BusinessCaseInputs,
 ) -> dict:
     """The stored report: P&L by year by stream, the KPIs (gross and net of
-    pass-through), break-even, the locked rows and each linked output's state."""
+    pass-through), break-even, the locked rows, each linked output's state and every
+    assumed default the run used."""
     return {
         "business_case_hash": bc.hash,
         "inputs_digest": config_digest(raw),
@@ -229,6 +257,7 @@ def report_body(
         "locked": [_jsonable(dataclasses.asdict(r)) for r in bc.locked],
         "outputs": {name: _output_state(v) for name, v in sorted(outputs.items())},
         "flags": list(result.flags),
+        "assumed": assumed_defaults(inputs),
         "created_at": time.time(),
     }
 
@@ -413,6 +442,7 @@ def start_business_case(
                 raw=raw,
                 ic_hash=ic_hash,
                 ic_case_hash=got,
+                inputs=cfg.inputs,
             )
             # The stop check, the store and the finish are one step under the state lock,
             # which the abort route reads the record under: an abort seen here stores

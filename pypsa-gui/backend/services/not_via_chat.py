@@ -221,21 +221,6 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         }),
     },
     {
-        'id': 'business_case',
-        'title': 'Business case preset',
-        'disposition': 'out of chat',
-        'reason': 'The preset fills cost defaults from a pack, so it is applied in the panel; chat sets the lines only from your figures. Use the Business case view on the Results page.',
-        'page': 'Results (Investment tab)',
-        'panel': None,
-        'keywords': frozenset({
-            'business',
-            'preset',
-        }),
-        'routes': frozenset({
-            ('GET', '/api/results/business_case/preset'),
-        }),
-    },
-    {
         'id': 'business_case_table_options',
         'title': 'Business case line options',
         'disposition': 'unbuilt',
@@ -559,21 +544,10 @@ def _asks_about_the_strip(words: set[str]) -> bool:
     return bool(words & _STRIP_NAMES and words & _STRIP_ASKS and not words & _STRIP_ELSEWHERE)
 
 
-# Only the business case's preset is out of chat (GK B (54) Q3, D8): its run, read and
-# lines are tools (`run_business_case`, `get_business_case`, `set_business_case_lines`),
-# so "show the business case for …" must reach them. The entry hits only on "business
-# case" with a preset word.
+# The business-case line table's options: "business case" plus a units word, never
+# "business as usual" (BAU), which is a scenario (GK B (54) D3).
 _BUSINESS_CASE_NOUN = frozenset({'case', 'cases'})
-_BUSINESS_CASE_ASKS = frozenset({'preset', 'presets', 'template', 'defaults'})
-
-
-# "Business as usual" (BAU) is a scenario, not this feature (GK B (54) D3).
 _BUSINESS_AS_USUAL = frozenset({'usual', 'bau'})
-
-
-def _asks_for_the_business_case(words: set[str]) -> bool:
-    return bool('business' in words and words & _BUSINESS_CASE_NOUN
-                and words & _BUSINESS_CASE_ASKS and not words & _BUSINESS_AS_USUAL)
 
 
 def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
@@ -592,8 +566,6 @@ def matches(words: set[str], limit: int = 2, goal: str = '') -> list[dict]:
         if entry['id'] == 'memory_parameter_suggestions' and not _asks_for_a_saved_value(words, goal):
             continue
         if entry['id'] == 'results_headline_strip' and not _asks_about_the_strip(words):
-            continue
-        if entry['id'] == 'business_case' and not _asks_for_the_business_case(words):
             continue
         if (entry['id'] == 'business_case_table_options'
                 and not ('business' in words and words & _BUSINESS_CASE_NOUN

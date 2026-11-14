@@ -3557,7 +3557,7 @@ assert set(_BC_CODES.values()) <= {d["error_kind"] for d in _BC_ERROR_KINDS}
 _BC_SUMMARY_CHARS = 3500
 _BC_INPUTS_CHARS = 6000
 # Cut first when a summary outgrows the cap; each cut is named in `truncated`.
-_BC_CUT_ORDER = ("outputs", "flags", "break_even", "kpis")
+_BC_CUT_ORDER = ("outputs", "flags", "assumed", "break_even", "kpis")
 _BC_CITABLE_TURNS = 5
 _BC_NO_DATA = ("no business-case run and no stored report: run the investment case, set "
                "the lines with set_business_case_lines, then run_business_case")
@@ -3603,6 +3603,33 @@ def _bc_ne(obj, key: str | None = None):
     if key == "value" or isinstance(obj, float):
         return _ne(obj)
     return obj
+
+
+def _bc_verdict(report: dict, verdict) -> dict:
+    """The verdict as the model reads it: an unknown list of defaults is "not
+    established", never an empty one."""
+    v = _bc_ne(verdict(report))
+    if v.get("rests_on_defaults") is None:
+        v["rests_on_defaults"] = _NE
+    return v
+
+
+def _bc_to_ask() -> list[dict]:
+    """The stored lines' empty values the user must give (business case 14), so the
+    assistant asks them and never invents one; [] when none are stored."""
+    from routers.results import _bc_raw
+    from services.business_case.preset_apply import to_ask
+
+    raw = _bc_raw()
+    return to_ask(raw) if isinstance(raw, dict) else []
+
+
+def _bc_assumed_says(a: dict) -> str:
+    """One assumed default as the report lists it: line, column, value, source, year."""
+    value = a.get("value")
+    shown = f"{value:g}" if isinstance(value, (int, float)) else _ne(value)
+    return (f"{a.get('line')} {a.get('column')}: {shown} {a.get('unit') or ''}".rstrip()
+            + f" (assumed; {a.get('source')}, {a.get('source_year')})")
 
 
 def _bc_citable_turns() -> list[dict]:
@@ -3660,6 +3687,7 @@ def get_business_case(detail: str = "summary") -> dict:
     """The business-case run and its stored report (detail='summary'), or the
     stored inputs with their digest and the citable turns (detail='inputs')."""
     from routers.results import get_business_case as _h
+    from services.business_case.verdict import verdict as bc_verdict
 
     if detail not in ("summary", "inputs"):
         _ic_raise(422, "business_case_request_invalid", "detail is 'summary' or 'inputs'")
@@ -3667,7 +3695,11 @@ def get_business_case(detail: str = "summary") -> dict:
         return _bc_inputs()
     body = _h()
     if getattr(body, "status_code", None) == 204:
-        return _no_data("business_case", _BC_NO_DATA)
+        out = _no_data("business_case", _BC_NO_DATA)
+        asks = _bc_to_ask()
+        if asks:
+            out["to_ask"] = asks
+        return out
     report = body.get("report") or None
     st = body.get("staleness") or {}
     run = {k: body.get(k) for k in ("status", "stage", "stages_done", "error", "error_code",
@@ -3681,7 +3713,12 @@ def get_business_case(detail: str = "summary") -> dict:
                    kpis=_bc_ne(report.get("kpis") or {}),
                    break_even=_bc_ne(report.get("break_even")),
                    outputs=_bc_ne(report.get("outputs") or {}),
-                   flags=list(report.get("flags") or []))
+                   flags=list(report.get("flags") or []),
+                   assumed=([_bc_assumed_says(a) for a in report["assumed"]]
+                            if isinstance(report.get("assumed"), list) else _NE),
+                   assumed_total=(len(report["assumed"])
+                                  if isinstance(report.get("assumed"), list) else _NE),
+                   verdict=_bc_verdict(report, bc_verdict))
         cut = []
         for section in _BC_CUT_ORDER:
             if _json_len(out) <= _BC_SUMMARY_CHARS:
@@ -3696,21 +3733,26 @@ def get_business_case(detail: str = "summary") -> dict:
         out["figures"] = ("not shown: the stored business case is STALE ("
                           + (", ".join(out["report"]["changed"]) or str(st.get("reason")))
                           + " changed since it ran); say so, and run_business_case again")
+    asks = _bc_to_ask()
+    if asks:
+        out["to_ask"] = asks
     out["hint"] = ("an unknown number reads 'not established': NEVER report it as 0; "
                    "the P&L by year is in the results workbook")
     return out
 
 
 def set_business_case_lines(if_match: str, business_case: dict | None = None,
-                            clear: bool = False, citations: list | None = None) -> dict:
+                            clear: bool = False, citations: list | None = None,
+                            set: dict | None = None) -> dict:  # noqa: A002 (the tool's arg)
     """Replace (or, with clear=true, remove) the business-case inputs through
     `PUT /api/results/business_case/inputs`, always with the digest the model
-    read. A new or changed price must cite the user (GK B (54) Q1)."""
+    read. A new or changed price must cite the user (GK B (54) Q1). `set` patches
+    named cells of the stored lines instead (business case 14; GK B (56) Q4)."""
     from routers.results import BusinessCaseIn, put_business_case_inputs as _h
     from services.business_case import chat_edit
 
     plan = chat_edit.plan({"if_match": if_match, "business_case": business_case,
-                           "clear": clear, "citations": citations})
+                           "clear": clear, "citations": citations, "set": set})
     with _bc_errors():
         out = _h(BusinessCaseIn(business_case=plan["new"]), if_match=plan["tag"])
     # The card's receipt carries every value; the stored object is not echoed (it can pass
@@ -3719,6 +3761,38 @@ def set_business_case_lines(if_match: str, business_case: dict | None = None,
     lines = (stored.get("inputs") or {}).get("lines") or []
     return {"status": out.get("status"), "digest": out.get("digest"), "lines": len(lines),
             "hint": "the next edit passes this digest as if_match; run_business_case runs it"}
+
+
+def apply_business_case_preset(if_match: str, variant: str | None = None,
+                               rows: list | None = None) -> dict:
+    """Store the active template's business-case preset (a variant) or the offered rows
+    the user picked, every default filled by the server from the pinned pack (business
+    case 14). Returns what the user must still give (`to_ask`), never a guess."""
+    from routers.results import BusinessCaseIn, put_business_case_inputs as _h
+    from services.business_case import preset_apply
+
+    plan = preset_apply.plan({"if_match": if_match, "variant": variant, "rows": rows})
+    with _bc_errors():
+        out = _h(BusinessCaseIn(business_case=plan["new"]), if_match=plan["tag"])
+    lines = (plan["new"].get("inputs") or {}).get("lines") or []
+    # Compact (a result past the harness's 4000-char cut spills): each default's value,
+    # year and the start of its source; the card showed every source in full.
+    assumed = [f"{ln['name']} {col}: {a['value']:g} {a['unit']} ({a['source_year']}; "
+               f"{_short(a['source'], 70)})" for ln in lines
+               for col, a in (ln.get("assumed") or {}).items()]
+    return {"status": out.get("status"), "digest": out.get("digest"), "lines": len(lines),
+            "preset": plan["new"]["inputs"].get("preset"),
+            "break_even_line": plan["new"].get("break_even_line"),
+            "to_ask": plan["to_ask"], "assumed": assumed, "assumed_total": len(assumed),
+            "hint": ("ask the user for every to_ask value with ask_user (never invent "
+                     "one) and store them with set_business_case_lines, citing the "
+                     "user's words; offer the assumed defaults with their source and "
+                     "year in one Assumptions card")}
+
+
+def _short(text, n: int) -> str:
+    text = str(text)
+    return text if len(text) <= n else text[: n - 1] + "\u2026"
 
 
 def run_business_case() -> dict:
@@ -10246,6 +10320,7 @@ DISPATCHERS: dict[str, Any] = {
     "run_business_case": run_business_case,
     "get_business_case": get_business_case,
     "set_business_case_lines": set_business_case_lines,
+    "apply_business_case_preset": apply_business_case_preset,
     "abort_business_case": abort_business_case,
     # decision study (6) — U3
     "start_decision_study": start_decision_study,
