@@ -251,7 +251,7 @@ def reserve_lines(n, cfg, site_party: str = "site", *,
     if not products:
         return [], []
     floors, _strings = RP.project_backup(n) if backup is None else backup
-    frame, flags = RP.solved(n, RP.inputs_digest(products, floors))
+    frame, flags = RP.solved(n, lambda: RP.inputs_digest(products, floors))
     hours, _period_w = RP.reserve_weights(n)
     h = hours.to_numpy(dtype=float)
     multi = isinstance(n.snapshots, pd.MultiIndex)

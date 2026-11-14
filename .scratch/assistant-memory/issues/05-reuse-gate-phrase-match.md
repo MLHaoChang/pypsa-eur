@@ -3,7 +3,7 @@
 
 # Follow-up: phrase-match the saved-value chat gate
 
-Status: ready-for-agent
+Status: done
 Model tier: sonnet
 Size: S
 Blocked by: none (03 done, #1347 and #1386)

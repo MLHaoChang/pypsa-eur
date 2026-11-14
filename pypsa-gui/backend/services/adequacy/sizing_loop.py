@@ -162,6 +162,14 @@ def _converged_text(not_run) -> str:
     return f"converged (campus checks not run: {", ".join(not_run)})" if not_run else "converged"
 
 
+def _failed(row: dict, result: dict | None, cond: str) -> None:
+    """A failed solve's row: its status and condition, and a refusal's machine key (homer-parity 02a:
+    ``kind`` = ``fuel_curve_invalid``) when the result carries one. Rounds and the full-year solve alike."""
+    row.update(status=(result or {}).get("status"), condition=cond, forward_s=0.0)
+    if kind := (result or {}).get("kind"):
+        row["kind"] = kind
+
+
 def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_after: int = FREEZE_AFTER,
                     cost_tol: float = COST_TOL, capacity_tol: float = CAPACITY_TOL, final_solve=None,
                     stop_event=None, on_iteration=None) -> dict:
@@ -204,7 +212,7 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
         row = {"round": k, "basis": "rounds", "cuts": dict(cuts), "frozen": dict(frozen), "solve_s": solve_s}
         if not _solved(result):
             cond = _why(result)
-            row.update(status=(result or {}).get("status"), condition=cond, forward_s=0.0)
+            _failed(row, result, cond)
             rounds.append(row)
             if on_iteration is not None:
                 on_iteration(row)
@@ -281,7 +289,7 @@ def run_sizing_loop(solve, forward, *, max_rounds: int = MAX_ROUNDS, freeze_afte
            "solve_s": time.perf_counter() - t}
     if not _solved(result):
         cond = _why(result)
-        row.update(status=(result or {}).get("status"), condition=cond, forward_s=0.0)
+        _failed(row, result, cond)
         if stopped():
             return done("aborted", "aborted during the full-year solve", row)
         return done("failed", f"failed: the full-year solve did not reach an optimum ({cond})", row)

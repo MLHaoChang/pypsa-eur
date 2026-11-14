@@ -21,6 +21,7 @@ finishes. Route-layer guards look complete and leave every direct caller open.
 
 See docs/superpowers/specs/2026-08-27-unsaved-results-visibility-design.md.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -79,6 +80,21 @@ def bump_revision(ctx: ProjectContext | None = None) -> int:
     target = ctx or _active()
     target.network_revision = int(target.network_revision or 0) + 1
     return target.network_revision
+
+
+def bump_inputs(ctx: ProjectContext | None = None) -> int:
+    """
+    Record that an input the project's fingerprint hashes may have changed,
+    without crossing an edit seam (PG-04a F1): the chat seam once its handler
+    has returned or raised (its `bump_revision` lands before the write). Only
+    the provenance graph's fingerprint cache keys on this counter
+    (`provenance_graph.runs._stamp`); nothing else reads it, so the edit
+    counter's own contracts (`run_envelope._pickup`, studies, the load flow)
+    are untouched.
+    """
+    target = ctx or _active()
+    target.input_generation = int(getattr(target, "input_generation", 0) or 0) + 1
+    return target.input_generation
 
 
 def revision(ctx: ProjectContext | None = None) -> int:

@@ -1,0 +1,197 @@
+{
+ "cost": {
+  "augmentation_mwh": 71.1241537923732,
+  "currency": "EUR",
+  "delta": 19448822.649450965,
+  "discount_rate": 0.07,
+  "discount_rate_source": "pack discount rate (real, assumed)",
+  "fuel_mwh_th_avoided_per_year": 4878.048780487805,
+  "genset_mw": 40.0,
+  "genset_unit_mw": 10.0,
+  "hybrid_genset_mw": null,
+  "inputs": [
+   {
+    "assumed": false,
+    "key": "genset_mw",
+    "source": "redundant_units on the critical peak (as the strings)",
+    "unit": "MW",
+    "value": 40.0
+   },
+   {
+    "assumed": true,
+    "key": "run_hours_per_year",
+    "source": "assumed: genset test and maintenance run hours a year",
+    "unit": "h/year",
+    "value": 50.0
+   },
+   {
+    "assumed": false,
+    "key": "heat_rate",
+    "source": "1 / gas-genset.investment.efficiency 0.41 (defaults pack generic_defaults 2026-10-26)",
+    "unit": "MWh_th/MWh_e",
+    "value": 2.4390243902439024
+   },
+   {
+    "assumed": true,
+    "key": "fuel_price",
+    "source": "assumed: fuel price per MWh of fuel (the defaults pack has no fuel row)",
+    "unit": "EUR/MWh_th",
+    "value": 45.0
+   },
+   {
+    "assumed": true,
+    "key": "discount_rate",
+    "source": "pack discount rate (real, assumed)",
+    "unit": "real, per year",
+    "value": 0.07
+   },
+   {
+    "assumed": false,
+    "key": "gas-genset.investment.overnight",
+    "source": "defaults pack generic_defaults 2026-10-26",
+    "unit": "",
+    "value": 581394.9
+   },
+   {
+    "assumed": false,
+    "key": "gas-genset.investment.fom_share",
+    "source": "defaults pack generic_defaults 2026-10-26",
+    "unit": "",
+    "value": 0.017795000000000002
+   },
+   {
+    "assumed": false,
+    "key": "gas-genset.investment.lifetime",
+    "source": "defaults pack generic_defaults 2026-10-26",
+    "unit": "",
+    "value": 25.0
+   },
+   {
+    "assumed": false,
+    "key": "battery.power.overnight",
+    "source": "defaults pack generic_defaults 2026-10-26",
+    "unit": "",
+    "value": 213927.9
+   },
+   {
+    "assumed": false,
+    "key": "battery.power.fom_share",
+    "source": "defaults pack generic_defaults 2026-10-26",
+    "unit": "",
+    "value": 0.0033750000000000004
+   },
+   {
+    "assumed": false,
+    "key": "battery.power.lifetime",
+    "source": "defaults pack generic_defaults 2026-10-26",
+    "unit": "",
+    "value": 10.0
+   },
+   {
+    "assumed": false,
+    "key": "battery.energy.overnight",
+    "source": "defaults pack generic_defaults 2026-10-26",
+    "unit": "",
+    "value": 189861.0
+   },
+   {
+    "assumed": false,
+    "key": "battery.energy.fom_share",
+    "source": "defaults pack generic_defaults 2026-10-26",
+    "unit": "",
+    "value": 0.0
+   },
+   {
+    "assumed": false,
+    "key": "battery.energy.lifetime",
+    "source": "defaults pack generic_defaults 2026-10-26",
+    "unit": "",
+    "value": 25.0
+   }
+  ],
+  "lines": [
+   {
+    "leg": "genset",
+    "line": "capex_and_repurchase",
+    "npv": 23255796.0,
+    "unit": "EUR"
+   },
+   {
+    "leg": "genset",
+    "line": "fom",
+    "npv": 4384193.906073181,
+    "unit": "EUR"
+   },
+   {
+    "leg": "genset",
+    "line": "fuel",
+    "npv": 2325515.3221864733,
+    "unit": "EUR"
+   },
+   {
+    "leg": "genset",
+    "line": "residual_value",
+    "npv": -2114467.1617965675,
+    "unit": "EUR"
+   },
+   {
+    "leg": "bess",
+    "line": "power_capex_and_repurchase",
+    "npv": 13228636.089372607,
+    "unit": "EUR"
+   },
+   {
+    "leg": "bess",
+    "line": "power_fom",
+    "npv": 267713.21037589014,
+    "unit": "EUR"
+   },
+   {
+    "leg": "bess",
+    "line": "energy_capex_and_repurchase",
+    "npv": 32795081.99721619,
+    "unit": "EUR"
+   },
+   {
+    "leg": "bess",
+    "line": "energy_fom",
+    "npv": 0.0,
+    "unit": "EUR"
+   },
+   {
+    "leg": "bess",
+    "line": "augmentation",
+    "npv": 7152921.077954084,
+    "unit": "EUR"
+   },
+   {
+    "leg": "bess",
+    "line": "residual_value",
+    "npv": -6144491.659004733,
+    "unit": "EUR"
+   }
+  ],
+  "mode": "bess",
+  "money_year": 2025,
+  "notes": [
+   "real terms in the pack's money year at a real discount rate, no escalation",
+   "horizon end: remaining_life_annuity on every purchase of both legs (finance.replacements.TerminalTerm: base \u00d7 annuity(r, L) \u00d7 annuity_pv_factor(r, remaining))",
+   "genset run hours are charged at full output",
+   "test-cycle charging losses of the strings are not charged",
+   "hybrid keeps the committed genset fleet (its proof's) and adds the strings, against the all-genset fleet",
+   "fade and augmentation are the backup spec's (the pack's degradation rows are blank)"
+  ],
+  "npv_bess": 47299860.715914056,
+  "npv_chosen": 47299860.715914056,
+  "npv_genset": 27851038.06646309,
+  "run_hours_avoided_per_year": 50.0,
+  "run_hours_per_year": 50.0,
+  "source": "defaults pack generic_defaults 2026-10-26",
+  "years": 20
+ },
+ "notes": [
+  "outage_window_soc_is_perfect_foresight: the strings' charge entering the window is the re-dispatch's choice (they hold it outside)",
+  "ride_through_seconds_in_energy_only"
+ ],
+ "verdict": "pass"
+}

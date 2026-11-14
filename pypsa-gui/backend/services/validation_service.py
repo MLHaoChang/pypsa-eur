@@ -2642,6 +2642,21 @@ def _check_profiled_occurrence_units(n) -> list[Issue]:
     return issues
 
 
+def _check_fuel_curves(n) -> list[Issue]:
+    """A generator fuel curve the solve cannot price (`services.fuel_curve.check`, homer-parity 02a).
+
+    The asset form refuses these; a network built or imported another way reaches the run with them, and the
+    staging step would otherwise derive a cost from half a curve."""
+    from services import fuel_curve
+
+    gens = n.generators
+    if gens.empty or not any(c in gens.columns for c in fuel_curve.COLUMNS):
+        return []
+    return [Issue("error", "fuel_curve_invalid", "Generator", str(name), f"{msg}.")
+            for name in gens.index
+            if (msg := fuel_curve.guard(gens.loc[name], cost_series=fuel_curve.cost_series(n, name)))]
+
+
 def _check_outage_params(n) -> list[Issue]:
     """
     Adequacy occurrence attributes (design spec §5.4): warn on implausible
@@ -2692,6 +2707,7 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     issues += _check_carrier_emissions(n)
     # Adequacy occurrence data — warnings only, any mode.
     issues += _check_outage_params(n)
+    issues += _check_fuel_curves(n)
     # Uploaded-profile data quality — warnings only, any mode. Everything this
     # finds passes the LP cleanly and produces a confident, wrong answer, so it
     # belongs at preflight where the user still has a chance to look. Imported

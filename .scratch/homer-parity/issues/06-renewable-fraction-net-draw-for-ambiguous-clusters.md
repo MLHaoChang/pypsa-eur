@@ -1,6 +1,6 @@
 # 06 — Count an ambiguous conversion cluster by its net draw
 
-Status: needs-triage
+Status: ready-for-agent
 
 Follow-up from homer-parity 01a (#1424), GK B ruling 1 and R15.
 

@@ -3099,6 +3099,24 @@ def _publish_hooks(ctx, run_token) -> dict:
     }
 
 
+def _bump_inputs_after(handler, ctx):
+    """The handler, then `dirty_state.bump_inputs(ctx)` however it ends (an
+    orphan past the deadline too): a fingerprint cached between the seam's
+    bump and the write stands for the pre-edit inputs (PG-04a F1(b))."""
+    import functools
+
+    @functools.wraps(handler)
+    def run(*args, **kwargs):
+        try:
+            return handler(*args, **kwargs)
+        finally:
+            from services import dirty_state
+
+            dirty_state.bump_inputs(ctx)
+
+    return run
+
+
 def _dispatch_real_tool_call(
     session: ChatSession,
     tu: dict[str, Any],
@@ -3775,6 +3793,9 @@ def _dispatch_real_tool_call(
                 # Coupled with `run_envelope._pickup` (issue 22): a run's
                 # guarded write expects exactly this one bump before pickup.
                 dirty_state.bump_revision()
+                # PG-04a F1(b): that bump lands before the write; the input
+                # generation moves again once the handler returns or raises.
+                handler = _bump_inputs_after(handler, dirty_state._active())
         # Same seam, same reason: the HTTP middleware's undo snapshot never runs
         # for an in-process call either. After the confirmation gate, so a refused
         # tool costs no snapshot. See `_snapshot_for_turn_undo`.
@@ -4384,6 +4405,14 @@ def _dispatch_real_tool_call(
                     # Study harness 07 B2: a run's EH step settles from its own
                     # study record, never from this start receipt (F2, F3).
                     if run_eh.wait(task_ticket, job_id, session.session_id, active_ctx,
+                                   result.get("started_at")):
+                        result = {**result, "waiting": True}
+                if task_ticket is not None and tool_name == "run_investment_case":
+                    from harness import run_ic
+
+                    # Study harness 14 (GK B (52) I2): a run's case step settles from the
+                    # case's own record, never from its start receipt, and nothing polls.
+                    if run_ic.wait(task_ticket, job_id, session.session_id, active_ctx,
                                    result.get("started_at")):
                         result = {**result, "waiting": True}
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort

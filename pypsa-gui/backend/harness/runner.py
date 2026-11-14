@@ -517,6 +517,8 @@ class Runner:
             # Issue 07 B3a: a waiting EH study lost with the restart settles uncertain, its
             # reservation kept whole; one with a live lease elsewhere is left to its holder.
             swept += run_eh.recover(path, None, instance=self.instance, now=self.clock(), lapsed_ok=True)
+            from harness import run_ic
+            swept += run_ic.recover(path, None, instance=self.instance, now=self.clock(), lapsed_ok=True)
         return swept
 
     # one tick
@@ -694,6 +696,8 @@ class Runner:
                     from harness import run_eh, run_loops
                     run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
                     run_eh.recover(path, ctx, instance=self.instance, now=self.clock())  # issue 07 B3a
+                    from harness import run_ic
+                    run_ic.recover(path, ctx, instance=self.instance, now=self.clock())  # study harness 14
                 from harness import run_report
                 run_report.settle(path, ctx)  # issue 07: the run's report job, once it ended
                 from services import run_actions
@@ -1078,6 +1082,7 @@ class Runner:
         carded, ran, errors = [], [], []
         session._undo_snapshotted = []  # each runner step is its own undo step, as a chat turn is
         session._turn_in_flight = True
+        session.run_step_call = tool_use_id  # the harness's own step (the case tool's admission, SH-14)
         try:
             if decision is None and not take_locks():
                 return
@@ -1112,6 +1117,7 @@ class Runner:
             locks.close()
             session.decision_guard = None
             session.write_guard = None
+            session.run_step_call = None
             session._turn_in_flight = False
             if results:
                 eventlog.message(session, {"role": "user", "content": [results[-1]]})
@@ -1190,6 +1196,8 @@ class Runner:
             from harness import run_eh, run_loops
             run_loops.recover_engines(path, ctx, instance=self.instance, now=self.clock())
             run_eh.recover(path, ctx, instance=self.instance, now=self.clock())  # issue 07 B3a
+            from harness import run_ic
+            run_ic.recover(path, ctx, instance=self.instance, now=self.clock())  # study harness 14
         with tasks._LOCK:
             task = _read(path)
             tasks._reconcile_lost(path, task)

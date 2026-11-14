@@ -3,7 +3,7 @@
 
 # The 220/110 kV class-rule losses miss Ecodesign Tier 2 and need a sourced no-load/load-loss split
 
-Status: needs-info
+Status: ready-for-agent
 Type: task
 Blocked by: None
 
@@ -22,6 +22,9 @@ All five units TR_220_110_125/160/200/250/315 reach PEI 99.654 %, below the Tier
 ## Done
 
 A sourced split is merged, or the owner accepts the `assumed` class rule with its Tier 2 miss.
+
+- 2026-11-13 owner decision CLG03-SOURCE-1: source first; if no public P0/Pk source is found, derive the split from Tier 2 and tag it derived. GK A reviews.
+- 2026-11-14 owner decision CLG03-SOURCE-2: OPTCL as the source, units modelled as autotransformers (option 1).
 
 ## Comments
 
@@ -65,3 +68,5 @@ i0 and vk keep the class rule. Defaults pack 2026-11-13 pins the new library sha
 - C6 The class-rule exemption is keyed on the five ids. A mutant that puts the class rule back on one 220/110 unit must fail the new pins.
 
 Owner questions sent to the coordinator: does 220/132 count as a source, and are the units autotransformers?
+
+**Owner ruling (CLG03-SOURCE-2, 2026-11-14, via the coordinator):** option 1. Use OPTCL and model TR_220_110 as autotransformers: OPTCL x1.25 per GK A C1, 125/250/315 MVA at constant kW/MVA, i0 at the class rule, every value tagged `assumed` with the disclosure notes.
