@@ -1502,15 +1502,21 @@ def _result_df(n, comp, attr, src):
     return getattr(getattr(n, comp), attr)
 
 
+W = 2.0  # a snapshot weighting other than 1
+
+
 def test_the_emission_reports_count_the_no_load_co2_per_committed_hour():
     from services.asset_results.compute import build_ctx, gen_co2_total
     from services.compare.emissions import _compute_emissions_summary
     from services.results.emissions import compute_emissions
 
     n = _no_load_co2_network()
+    n.snapshot_weightings.loc[:, :] = (
+        W  # every report weights the no-load CO2 like the dispatch
+    )
     status, cond, log = _run_sim(n, SolverConfig(co2_price=100.0))
     assert status in ("ok", "optimal"), (cond, log[-800:])
-    on_hours = HOURS - OFF_HOURS
+    on_hours = W * (HOURS - OFF_HOURS)
     output_t = (
         on_hours * LOAD_MW * SLOPE * CO2_T_PER_MWH_TH
     )  # the curve's fuel, not 1 / efficiency (H1)
@@ -1528,6 +1534,7 @@ def test_the_emission_reports_count_the_no_load_co2_per_committed_hour():
     assert gen_co2_total(ctx) == pytest.approx(output_t + no_load_t, rel=1e-9)
     # no no-load term: the reports read the output CO2 only, and no extra key
     n2 = _no_load_co2_network(no_load=0.0)
+    n2.snapshot_weightings.loc[:, :] = W
     _run_sim(n2, SolverConfig())
     (row2,) = [
         r
@@ -1676,3 +1683,61 @@ def test_a_raise_after_the_no_load_co2_transform_restores_the_frames(periods):
         with pytest.raises(_Boom):
             _apply_modelling_assumptions(n, _co2_cfg(periods), phase)
     assert _same_frames(_frames(n), before)
+
+
+def test_the_emission_reports_split_the_no_load_co2_by_period():
+    from services.compare.emissions import _compute_emissions_summary
+    from services.results.emissions import compute_emissions
+
+    n = _no_load_co2_network(periods=True)
+    status, cond, log = _run_sim(n, _co2_cfg(True))
+    assert status in ("ok", "optimal"), (cond, log[-800:])
+    on = n.generators_t.status["genset"].groupby(level=0).sum()
+    out = compute_emissions(n, "lopf", result_df=_result_df)
+    cmp = _compute_emissions_summary(n, [2030, 2035], True, True)
+    for period in (2030, 2035):
+        expect = float(on[period]) * (LOAD_MW * SLOPE + NO_LOAD) * CO2_T_PER_MWH_TH
+        (bucket,) = [b for b in out["by_period"] if int(b["period"]) == period]
+        (row,) = [r for r in bucket["by_generator"] if r["name"] == "genset"]
+        assert row["no_load_tCO2"] == pytest.approx(
+            float(on[period]) * NO_LOAD * CO2_T_PER_MWH_TH, rel=1e-9
+        )
+        assert row["tCO2"] == pytest.approx(expect, rel=1e-9)
+        assert cmp.total_kt.by_period[str(period)] == pytest.approx(
+            expect / 1000.0, rel=1e-9
+        )
+
+
+def test_no_load_fuel_reads_the_committed_curve_and_its_p_nom():
+    row = {**CURVE, "committable": True, "p_nom": 2.0}
+    assert fuel_curve.no_load_fuel(row) == pytest.approx(NO_LOAD * 2.0)
+    assert fuel_curve.no_load_fuel({**row, "committable": False}) == 0.0
+    assert fuel_curve.no_load_fuel({**row, fuel_curve.NO_LOAD: 0.0}) == 0.0
+    assert fuel_curve.no_load_fuel({**row, "p_nom": None}) == 0.0
+    assert fuel_curve.no_load_fuel({"committable": True, "p_nom": 2.0}) == 0.0
+    assert fuel_curve.fuel_per_mwh(row, 2.5) == SLOPE
+    assert fuel_curve.fuel_per_mwh({"p_nom": 2.0}, 2.5) == 2.5
+    n = _no_load_co2_network()
+    assert fuel_curve.no_load_fuel_t(n).empty  # not solved: no status
+    n.generators_t.status = pd.DataFrame({"other": 1.0}, index=n.snapshots)
+    assert fuel_curve.no_load_fuel_t(
+        n
+    ).empty  # a status frame without the genset's column
+
+
+def test_the_co2_cap_check_reads_only_an_emitting_curve_under_a_cap():
+    from types import SimpleNamespace
+
+    assert fuel_curve.co2_caps(SimpleNamespace(global_constraints=pd.DataFrame())) == []
+    no_attr = pd.DataFrame({"type": ["primary_energy"]}, index=["cap"])
+    assert fuel_curve.co2_caps(SimpleNamespace(global_constraints=no_attr)) == []
+    n = _add_cap(_no_load_co2_network())
+    n.add("Generator", "plain", bus="el", carrier="diesel", p_nom=0.1)
+    assert fuel_curve.co2_cap_refusal(n, "plain") is None  # under the cap, but no curve
+    n.generators.at["genset", "carrier"] = (
+        "unlisted"  # a carrier missing from the table
+    )
+    assert fuel_curve.co2_cap_refusal(n, "genset") is None
+    n.generators.at["genset", "carrier"] = "diesel"
+    n.carriers.at["diesel", "co2_emissions"] = float("nan")
+    assert fuel_curve.co2_cap_refusal(n, "genset") is None

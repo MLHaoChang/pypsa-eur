@@ -774,33 +774,29 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                 nl_t = nl_t[nl_t > 0]
                 if not nl_t.empty:
                     nl_idx = list(nl_t.index)
-                    sb_t = n.generators_t.stand_by_cost
+                    # A curve genset never carries a stand-by cost series (`fuel_curve.guard` refuses one before
+                    # the LP is built), so its static stand-by cost is the whole of it.
                     if has_per_period_price:
+                        sb_t = n.generators_t.stand_by_cost
+                        saved_sb = sb_t[[g for g in nl_idx if g in sb_t.columns]].copy()
+                        added_sb = [g for g in nl_idx if g not in sb_t.columns]
                         base_sb = n.get_switchable_as_dense("Generator", "stand_by_cost", inds=nl_idx)
-                        touched = nl_idx
+                        for g in nl_idx:
+                            n.generators_t.stand_by_cost[g] = base_sb[g] + price_series * float(nl_t[g])
+
+                        def _restore_stand_by_series(saved=saved_sb, added=added_sb):
+                            frame = n.generators_t.stand_by_cost
+                            n.generators_t.stand_by_cost = frame.drop(
+                                columns=[g for g in added if g in frame.columns]
+                            )
+                            for g in saved.columns:
+                                n.generators_t.stand_by_cost[g] = saved[g]
+
+                        undo_actions.append(("call", _restore_stand_by_series))
                     else:
                         original_sb = gens.loc[nl_idx, "stand_by_cost"].copy()
                         gens.loc[nl_idx, "stand_by_cost"] = original_sb + nl_t * cfg.co2_price
                         undo_actions.append(("col", "generators", "stand_by_cost", nl_idx, original_sb))
-                        touched = [g for g in nl_idx if g in sb_t.columns]
-                    saved_sb = sb_t[[g for g in touched if g in sb_t.columns]].copy()
-                    added_sb = [g for g in touched if g not in sb_t.columns]
-                    for g in touched:
-                        if has_per_period_price:
-                            n.generators_t.stand_by_cost[g] = base_sb[g] + price_series * float(nl_t[g])
-                        else:
-                            n.generators_t.stand_by_cost[g] = sb_t[g] + float(nl_t[g]) * cfg.co2_price
-
-                    def _restore_stand_by_series(saved=saved_sb, added=added_sb):
-                        frame = n.generators_t.stand_by_cost
-                        n.generators_t.stand_by_cost = frame.drop(
-                            columns=[g for g in added if g in frame.columns]
-                        )
-                        for g in saved.columns:
-                            n.generators_t.stand_by_cost[g] = saved[g]
-
-                    if touched:
-                        undo_actions.append(("call", _restore_stand_by_series))
                     phase(
                         f"Applied the CO2 price to the no-load fuel of {len(nl_idx)} curve generator(s) via "
                         "stand_by_cost."
