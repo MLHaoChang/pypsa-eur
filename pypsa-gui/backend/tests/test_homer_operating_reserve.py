@@ -487,3 +487,349 @@ def test_every_myopic_horizon_builds_the_reserve_rows():
     assert sum(f"(row {ROW}," in l for l in log) == 2, [
         l for l in log if "Operating reserve" in l
     ]
+
+
+# ── mutant killers: the LP coefficients, the result reader, the asset sets ──
+
+
+def _terms(m, con, t, name=None):
+    """{(variable, name): coefficient} of one row of ``con`` (duplicates summed, zeros dropped), its rhs and sign."""
+    c = m.constraints[con]
+    at = {"snapshot": t} | ({} if name is None else {"name": name})
+    lhs = c.lhs.sel(at)
+    out: dict = {}
+    for v, k in zip(lhs.vars.values.ravel(), lhs.coeffs.values.ravel()):
+        if v != -1:
+            var, pos = m.variables.get_label_position(int(v))
+            out[(var, pos.get("name"))] = out.get((var, pos.get("name")), 0.0) + k
+    terms = {key: k for key, k in out.items() if k != 0}
+    return terms, float(c.rhs.sel(at)), str(c.sign.sel(at).item())
+
+
+def _rows(n, shares):
+    q: queue.SimpleQueue = queue.SimpleQueue()
+    n.optimize.create_model()
+    cfg = dict(
+        zip(("reserve_share_load", "reserve_share_pv", "reserve_share_wind"), shares)
+    )
+    _wrap_with_operating_reserve(n, None, SolverConfig(**cfg), q)(n, n.snapshots)
+    out = []
+    while not q.empty():
+        out.append(str(q.get_nowait()))
+    return n.model, out
+
+
+def _mixed_fleet() -> pypsa.Network:
+    """One unit of each kind (fixed, extendable, committable, both), PV, wind and two batteries."""
+    n = _network(committable=False)
+    n.remove("Generator", "diesel")
+    n.add("Carrier", "onwind")
+    n.add("Generator", "wt", bus="ac", carrier="onwind", p_nom=5.0)
+    d = dict(bus="ac", carrier="diesel", marginal_cost=250.0)
+    n.add("Generator", "fix", p_nom=12.0, p_max_pu=0.5, **d)
+    n.add("Generator", "ext", p_nom=5.0, p_nom_extendable=True, p_max_pu=0.8, **d)
+    n.add("Generator", "uc", p_nom=6.0, committable=True, p_max_pu=0.9, **d)
+    n.add(
+        "Generator",
+        "both",
+        p_nom=4.0,
+        p_nom_max=20.0,
+        p_nom_extendable=True,
+        committable=True,
+        p_max_pu=0.7,
+        **d,
+    )
+    s = dict(bus="ac", carrier="battery", max_hours=1.0)
+    n.add(
+        "StorageUnit",
+        "bess",
+        p_nom=10.0,
+        p_max_pu=0.5,
+        efficiency_dispatch=0.9,
+        efficiency_store=0.8,
+        **s,
+    )
+    n.add(
+        "StorageUnit",
+        "flex",
+        p_nom_extendable=True,
+        p_max_pu=0.6,
+        capital_cost=1.0,
+        **s,
+    )
+    n.snapshot_weightings.loc[:, "stores"] = 2.0
+    n.snapshot_weightings.loc[n.snapshots[0], "stores"] = 0.0
+    return n
+
+
+def test_a_mixed_fleet_puts_each_unit_kind_and_pv_and_wind_in_the_row_with_its_own_coefficient():
+    m, _ = _rows(_mixed_fleet(), (0.2, 0.3, 0.4))
+    t = _mixed_fleet().snapshots[NOON]
+    terms, rhs, sign = _terms(m, ROW, t)
+    assert sign == ">=" and rhs == pytest.approx(
+        0.2 * LOAD_MW - 12.0 * 0.5
+    )  # only 'fix' is a constant
+    assert terms == pytest.approx(
+        {
+            ("Generator-p", "pv"): -0.3,
+            ("Generator-p", "wt"): -0.4,
+            ("Generator-p", "fix"): -1.0,
+            ("Generator-p", "ext"): -1.0,
+            ("Generator-p", "uc"): -1.0,
+            ("Generator-p_nom", "ext"): 0.8,
+            ("Generator-status", "uc"): 6.0 * 0.9,
+            ("operating_reserve-Generator-h", "both"): 1.0,
+            (_AUX, "bess"): 1.0,
+            (_AUX, "flex"): 1.0,
+        }
+    )
+    cap, _, _ = _terms(m, "operating_reserve-Generator-h-capacity", t, "both")
+    assert cap[("Generator-p_nom", "both")] == pytest.approx(-0.7)
+
+
+def test_a_battery_row_bounds_its_power_by_p_max_pu_and_its_energy_by_both_efficiencies():
+    m, _ = _rows(_mixed_fleet(), (0.2, 0.0, 0.0))
+    sns = _mixed_fleet().snapshots
+    terms, rhs, sign = _terms(m, f"{_AUX}-power-fixed", sns[NOON], "bess")
+    assert sign == "<=" and rhs == pytest.approx(10.0 * 0.5)
+    assert set(terms) == {
+        (_AUX, "bess"),
+        ("StorageUnit-p_dispatch", "bess"),
+        ("StorageUnit-p_store", "bess"),
+    }
+    terms, rhs, sign = _terms(m, f"{_AUX}-power-ext", sns[NOON], "flex")
+    assert sign == "<=" and rhs == 0.0
+    assert terms[("StorageUnit-p_nom", "flex")] == pytest.approx(-0.6)
+    terms, _, _ = _terms(m, f"{_AUX}-energy", sns[NOON], "bess")
+    assert terms == pytest.approx(
+        {
+            (_AUX, "bess"): 1.0,
+            ("StorageUnit-p_store", "bess"): -(1.0 - 0.9 * 0.8),
+            ("StorageUnit-state_of_charge", "bess"): -0.9 / 2.0,
+        }
+    )
+    # a snapshot of zero stores weighting counts no stored energy (never an infinite coefficient)
+    terms, _, _ = _terms(m, f"{_AUX}-energy", sns[0], "bess")
+    assert ("StorageUnit-state_of_charge", "bess") not in terms
+
+
+def _only_vre(*carriers) -> pypsa.Network:
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.add("Bus", "ac", carrier="AC")
+    n.add("Load", "site", bus="ac", p_set=LOAD_MW)
+    n.add(
+        "Generator",
+        "__voll_ac",
+        bus="ac",
+        carrier="load_shedding",
+        p_nom=100.0,
+        marginal_cost=1e4,
+    )
+    for c in carriers:
+        n.add("Generator", c, bus="ac", carrier=c, p_nom=5.0)
+    return n
+
+
+@pytest.mark.parametrize(
+    "carrier, shares, row",
+    [
+        ("solar", (0.2, 0.0, 0.0), False),  # no PV share: nothing to cover
+        ("solar", (0.0, 0.0, 0.1), False),  # a wind share with no wind
+        ("solar", (0.0, 0.1, 0.0), True),  # a PV share with PV: a row with no holder
+        ("onwind", (0.2, 0.0, 0.0), False),
+        ("onwind", (0.0, 0.1, 0.0), False),
+        ("onwind", (0.0, 0.0, 0.1), True),
+    ],
+)
+def test_a_site_with_no_holder_adds_a_row_only_when_a_share_meets_its_own_output(
+    carrier, shares, row
+):
+    m, log = _rows(_only_vre(carrier), shares)
+    assert (ROW in m.constraints) is row
+    assert any("nothing to hold" in line for line in log) is not row
+
+
+def test_a_committable_extendable_unit_without_p_nom_max_is_named_in_a_warning():
+    n = _mixed_fleet()
+    _, log = _rows(n, (0.2, 0.0, 0.0))
+    assert not any("WARNING" in line for line in log), log
+    n = _mixed_fleet()
+    n.add(
+        "Generator",
+        "open",
+        bus="ac",
+        carrier="diesel",
+        p_nom_extendable=True,
+        committable=True,
+    )
+    _, log = _rows(n, (0.2, 0.0, 0.0))
+    warn = [line for line in log if "WARNING" in line]
+    assert len(warn) == 1 and "open" in warn[0] and "both" not in warn[0], log
+
+
+def _set_frames(n, p, **su):
+    sns = n.snapshots
+    n.generators_t.p = pd.DataFrame(p, index=sns)
+    n.loads_t.p = pd.DataFrame({"site": LOAD_MW}, index=sns)
+    for k, v in su.items():
+        setattr(n.storage_units_t, k, pd.DataFrame(v, index=sns))
+
+
+def test_a_committable_unit_holds_status_times_its_available_capacity_in_the_result():
+    n = _network()
+    n.generators.loc["diesel", "p_max_pu"] = 0.5
+    _set_frames(n, {"pv": 0.0, "diesel": 1.0})
+    n.generators_t.status = pd.DataFrame(
+        {"diesel": [0.0, 1.0] * (HOURS // 2)}, index=n.snapshots
+    )
+    held = [
+        r["held_mw"]
+        for r in operating_reserve_result(n, (0.2, 0.0, 0.0))["per_snapshot"]
+    ]
+    assert held[:2] == pytest.approx([-1.0, 12.0 * 0.5 - 1.0])
+
+
+def test_a_committable_unit_with_no_status_is_unknown():
+    n = _network()
+    _set_frames(n, {"pv": 0.0, "diesel": 1.0})
+    n.generators_t.status = pd.DataFrame(index=n.snapshots)
+    assert "diesel" in operating_reserve_result(n, (0.2, 0.0, 0.0))["reason"]
+
+
+@pytest.mark.parametrize("missing", ["p_dispatch", "p_store", "state_of_charge"])
+def test_a_battery_missing_any_of_its_three_frames_is_unknown(missing):
+    n = _network(committable=False, battery=True)
+    frames = {k: {"bess": 1.0} for k in ("p_dispatch", "p_store", "state_of_charge")}
+    frames[missing] = {}
+    _set_frames(n, {"pv": 0.0, "diesel": 0.0}, **frames)
+    assert "bess" in operating_reserve_result(n, (0.2, 0.0, 0.0))["reason"]
+
+
+def test_a_battery_holds_at_most_its_available_power_and_no_energy_at_a_zero_weight_snapshot():
+    """Power 10·0.5 − 1 = 4 < energy 0.9·9; at w = 0 the energy term is 0."""
+    n = _network(committable=False, battery=True)
+    n.generators.loc["diesel", "p_nom"] = 0.0
+    n.storage_units.loc["bess", "p_max_pu"] = 0.5
+    n.snapshot_weightings.loc[n.snapshots[0], "stores"] = 0.0
+    _set_frames(
+        n,
+        {"pv": 0.0, "diesel": 0.0},
+        p_dispatch={"bess": 1.0},
+        p_store={"bess": 0.0},
+        state_of_charge={"bess": 9.0},
+    )
+    held = [
+        r["held_mw"]
+        for r in operating_reserve_result(n, (0.2, 0.0, 0.0))["per_snapshot"]
+    ]
+    assert held[:2] == pytest.approx([0.0, 4.0])
+
+
+def test_a_fixed_genset_holds_only_its_available_share_in_the_result():
+    n = _network(committable=False)
+    n.generators.loc["diesel", "p_max_pu"] = 0.5
+    _set_frames(n, {"pv": 0.0, "diesel": 1.0})
+    res = operating_reserve_result(n, (0.2, 0.0, 0.0))
+    assert res["per_snapshot"][0]["held_mw"] == pytest.approx(12.0 * 0.5 - 1.0)
+
+
+def test_an_off_share_does_not_need_the_output_it_would_read():
+    n = _network(committable=False)
+    _set_frames(n, {"diesel": 1.0})
+    assert operating_reserve_result(n, (0.2, 0.0, 0.0))["reason"] is None
+
+
+@pytest.mark.parametrize("nan_in", ["pv", "diesel"])
+def test_a_nan_in_the_required_or_the_held_side_is_reported(nan_in):
+    n = _network(committable=False)
+    _set_frames(n, {"pv": 1.0, "diesel": 1.0})
+    n.generators_t.p.iloc[0, n.generators_t.p.columns.get_loc(nan_in)] = np.nan
+    res = operating_reserve_result(n, (0.2, 0.1, 0.0))
+    assert res["reason"] == "the dispatch has missing values (NaN)"
+
+
+_R = 5e-7  # a load at which held = required + tolerance is exact in floating point
+
+
+@pytest.mark.parametrize(
+    "load, held, binds",
+    [
+        (0.0, 0.0, False),  # nothing required never binds
+        (10.0, 10.5, False),  # slack 0.5 MW is far from binding
+        (1000.0, 1000.0005, True),  # within 1e-6·1000 + 1e-6
+        (_R, _R + (1e-6 * _R + 1e-6), True),  # exactly on the tolerance
+    ],
+)
+def test_binding_is_slack_at_most_the_relative_plus_absolute_tolerance(
+    load, held, binds
+):
+    n = _network(committable=False)
+    n.loads.loc["site", "p_set"] = load
+    n.generators.loc["diesel", "p_nom"] = held
+    _set_frames(n, {"pv": 0.0, "diesel": 0.0})
+    r = operating_reserve_result(n, (1.0, 0.0, 0.0))["per_snapshot"][0]
+    assert r["binding"] is binds, r
+
+
+def test_the_infeasible_line_compares_the_load_share_not_the_whole_load():
+    n = _network(committable=False)
+    n.generators.loc["diesel", "p_nom"] = 6.0
+    assert (
+        "may contribute"
+        in infeasibility_lines(n, SolverConfig(reserve_share_load=0.5))[0]
+    )
+
+
+def test_the_infeasible_line_allows_the_absolute_tolerance():
+    n = _only_vre("solar")
+    n.loads.loc["site", "p_set"] = 1e-6
+    assert (
+        "may contribute"
+        in infeasibility_lines(n, SolverConfig(reserve_share_load=1.0))[0]
+    )
+
+
+@pytest.mark.parametrize("short, more", [(3, ""), (4, " and 1 more")])
+def test_the_infeasible_line_shows_three_snapshots_and_counts_the_rest(short, more):
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    n.add("Bus", "ac", carrier="AC")
+    n.add(
+        "Load",
+        "site",
+        bus="ac",
+        p_set=pd.Series([LOAD_MW] * short + [0.0] * (4 - short), index=n.snapshots),
+    )
+    n.add("Generator", "diesel", bus="ac", carrier="diesel", p_nom=5.0)
+    line = infeasibility_lines(n, SolverConfig(reserve_share_load=1.0))[0]
+    assert f"2030-01-01 02:00{more} the reserve needs" in line, line
+
+
+def test_a_generator_of_sign_zero_holds_no_headroom():
+    n = _network()
+    n.add("Generator", "null", bus="ac", carrier="diesel", p_nom=5.0, sign=0.0)
+    assert assets(n)["dispatchable"] == ["diesel"]
+
+
+def test_only_a_store_off_the_electrical_buses_that_feeds_them_is_not_counted():
+    n = _network()
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Store", "tank", bus="heat", e_nom=10.0)
+    assert assets(n)["not_counted"] == []  # no Link at all
+    n.add("Bus", "ac2", carrier="AC")
+    n.add("Bus", "batt", carrier="battery")
+    n.add("Store", "cap", bus="ac", e_nom=1.0)
+    n.add("Store", "cells", bus="batt", e_nom=10.0)
+    n.add("Link", "tie", bus0="ac", bus1="ac2", p_nom=5.0)
+    n.add("Link", "discharger", bus0="batt", bus1="ac", p_nom=5.0)
+    assert assets(n)["not_counted"] == ["cells"]
+
+
+def test_wind_is_a_wind_carrier_that_is_not_also_pv():
+    n = _network()
+    for c in ("biomass", "solar-wind"):
+        n.add("Carrier", c)
+        n.add("Generator", c, bus="ac", carrier=c, p_nom=5.0)
+    sel = assets(n)
+    assert sel["wind"] == [] and "solar-wind" in sel["pv"], sel
